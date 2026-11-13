@@ -114,7 +114,8 @@ points are explicit.
    gh workflow run corpus-replay.yml --ref main -f compare_ref=v<previous>
    ```
 
-   It replays the 110-repository case-study corpus with both binaries on the
+   It replays the case-study corpus (every repository in
+   `docs/design/v0.12/corpus/pins.tsv`) with both binaries on the
    canonical bench host and lists every repository whose findings changed.
    Each difference must be explained by a CHANGELOG entry, and a crash
    blocks the release.

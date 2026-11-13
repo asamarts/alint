@@ -67,3 +67,21 @@ the replay on the canonical bench host with it.
 **Study complete (2026-06-02): all 111 repos.** 110 configs here + `tokio` in
 `examples/`. See [`case_study_log.md`](../case_study_log.md) for the final
 synthesis + ranked backlog.
+
+### v0.23 corpus stratum
+
+The [v0.23 corpus stratum](../../v0.23/corpus-stratum.md) adds configs for i18n
+repositories and JavaScript monorepos, pinned on 2026-11-12. It follows the v0.12
+protocol plus ruling R7 (a tool run over files alint reads is classified by what it
+asserts), so its figures are not comparable with v0.12's. Each repository's record is in
+[`../../v0.23/stratum/`](../../v0.23/stratum/), and the results are in
+[`corpus-stratum-log.md`](../../v0.23/corpus-stratum-log.md).
+
+- **Batch 1:** `forem-forem`, `zulip-zulip`, `element-hq-element-web`,
+  `yarnpkg-berry`, `trpc-trpc`.
+- **Batch 2:** `signalapp-Signal-Desktop`, `immich-app-immich`,
+  `TanStack-query`, `jestjs-jest`, `microsoft-rushstack`.
+- **Batch 3:** `TryGhost-Ghost`, `RocketChat-Rocket.Chat`, `babel-babel`,
+  `strapi-strapi`, `cloudflare-workers-sdk`.
+- **Batch 4:** `mattermost-mattermost`, `nextcloud-server`,
+  `thunderbird-thunderbird-android`, `microsoft-fluentui`, `backstage-backstage`.

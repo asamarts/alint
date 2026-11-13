@@ -1,0 +1,840 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
+#
+# alint v0.23 corpus-stratum config — microsoft/fluentui
+# Pinned @ b4f5c3cca4e95ab5d271657cbf440cc8bf7427f6 (stratum: js-monorepo)
+#
+# Shape: Fluent UI, Microsoft's React (v8, v9), web-components and charting
+# monorepo. Yarn 4.18 (node-modules linker, yarnPath checked in) + Nx 22 with a
+# repo-local plugin (tools/workspace-plugin). 266 Yarn workspaces (apps/*,
+# packages/**, packages/react-components/*/{library,stories}, charts, scripts/*,
+# tools/*), 267 Nx projects, beachball-managed releases. Governance:
+# single-vendor (Microsoft).
+#
+# WHERE THE ENFORCED VALIDATION LIVES
+#   .github/workflows/pr.yml `main` job, "Workspace lint" step:
+#     workspace-plugin:check-graph, `nx sync:check` (export-maps-sync,
+#     bundle-size-fixtures-sync), tsconfig-base-all --verify,
+#     normalize-package-dependencies --verify, verify-peer-dependencies
+#     --tag=vNext; then tsc over just.config.ts, `satisfied` (installed deps),
+#     `nx format:check`, `nx affected -t build test lint type-check test-ssr
+#     test-integration verify-packaging verify-bundle-isolation attw`, and a
+#     clean-tree check. Other pr.yml jobs: react-compiler-analyzer, React 17/18
+#     integration (rit), Cypress/Playwright e2e.
+#   .github/workflows/check-packages.yml: yarn dedupe --check (when yarn.lock
+#     changes), `syncpack list-mismatches` (syncpack.config.js), `beachball
+#     check` (beachball.config.js -> scripts/beachball/base.config.js), each
+#     with a github-script guard that the tool is a root devDependency.
+#   .github/workflows/check-tooling.yml (generator smoke tests), bundle-size
+#     (monosize threshold), pr-vrt (visual regression).
+#   azure-pipelines*.yml + .devops/templates/tools.yml: 1ES release pipelines
+#     (build/test/lint per scope, beachball publish, Node via UseNode 22.x).
+#   .husky/pre-commit -> nano-staged (prettier + eslint on staged files).
+#   Conventions: AGENTS.md (= CLAUDE.md), docs/workflows/contributing.md,
+#     docs/react-v9/contributing/{dev-env,release-cycle}.md,
+#     .github/instructions/copilot.instructions.md, .gitattributes,
+#     load-bearing comments in .yarnrc.yml and .devops/templates/tools.yml.
+#
+# This config expresses the toolchain pins (packageManager exact Yarn 4,
+# yarnPath present and resolving, yarnPath agreeing with packageManager (C:
+# regex read of packageManager), Azure UseNode `<major>.x` + checkLatest, no
+# `corepack enable` in the Azure pipelines), the CI guards that
+# syncpack/beachball are root devDependencies, the committed Yarn patch file
+# (C: regex read of the patch: specifier), the documented tar-fs
+# security resolution (C: range as a regex), beachball's change-file type
+# validation (C: one superset rule per change type) and comment prefix, the
+# verify-peer-dependencies semver-range validity check (C: a regex of
+# node-semver's range grammar), the ESLint rule that asserts file text rather
+# than code (@fluentui/no-tslint-comments), the documented conventions
+# (preview packages stay 0.x, the frozen react-components/unstable exports
+# (C: an anchored regex over src/unstable/index.ts), .yarnrc.yml comments
+# kept, *.api.md LF), more load-bearing comments (AGENTS.md Nx markers, the
+# copilot-setup-steps job name, dependabot's production allow entry), Jest
+# assertions over committed files (react-icons-mdl2 file names, the v8
+# migration guides, the beachball release scopes (C)) and Nx
+# implicitDependencies resolving. Value-add rules (level info, outside the
+# ratio) close the file, including the export-maps-sync entry fields (partial
+# coverage of a B-adapter unit) and the unstable API report digest.
+# Stage C (2026-11-12) integrated the Stage B review: rules marked
+# "(Stage B fluentui-bNN)" are units Stage B found; see each rule's comment.
+# Not expressed (B/D, see the stratum record): syncpack's one version per
+# dependency and normalize-package-dependencies (B-adapter, entry values),
+# orphaned peerDependenciesMeta and unique workspace / Nx project names
+# (B-config), the tsconfig.base.all.json merge and the export map derivation
+# (B-adapter), @fluentui/max-len and @typescript-eslint/ban-ts-comment
+# (B-adapter: eslint-disable comments, which alint cannot read, exempt most of
+# their matches), beachball's change-file requirement and one change file per
+# package per PR (B-adapter, change relation), incompatible-peer-range
+# (B-adapter: semver subset plus entry values), unique migration-guide routes
+# (B-config) and the ComponentMapping links (B-adapter: slug normalize),
+# installs, dedupe, `satisfied`, cypress verify, builds, type checks, TSX
+# snippet parsing, lint, prettier, tests, packaging, bundle size, VRT.
+# Nothing here spawns a process; no custom facts; no git-history kinds.
+
+version: 1
+
+rules:
+  # ══════════════════════════════════════════════════════════════════════════
+  # toolchain-pin
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # A [toolchain-pin] dev-env.md + copilot.instructions.md: "The repo pins a
+  #   specific Yarn 4.x release via the `packageManager` field in package.json
+  #   (the exact version source of truth)"; `yarn -v` should report 4.x.
+  - id: microsoft-fluentui-package-manager-yarn4-exact
+    kind: json_path_matches
+    paths: ["package.json"]
+    path: "$.packageManager"
+    matches: '^yarn@4\.\d+\.\d+(\+sha(1|224|256|512)\.[0-9a-f]+)?$'
+    level: error
+    message: "package.json packageManager must pin one exact Yarn 4 release (yarn@4.X.Y); it is the version source of truth (docs/react-v9/contributing/dev-env.md)."
+
+  # A [toolchain-pin] .yarnrc.yml yarnPath names the checked-in release. Every
+  #   CI job and the Azure tools template (which deliberately skips `corepack
+  #   enable`) runs that file, so a dangling yarnPath fails every `yarn` call.
+  - id: microsoft-fluentui-yarnpath-resolves
+    kind: registry_paths_resolve
+    source: ".yarnrc.yml"
+    extract:
+      yaml: "$.yarnPath"
+    expect: file
+    level: error
+    message: ".yarnrc.yml yarnPath must name a committed Yarn release under .yarn/releases/."
+
+  # A [toolchain-pin] (same unit, fluentui-02) Stage C: registry_paths_resolve
+  #   is silent when the yarnPath key is absent (rules.md: path-resolve rules
+  #   are silent on an absent field), so this rule requires the key and its
+  #   .yarn/releases/*.cjs shape. Together the two rules express the unit.
+  - id: microsoft-fluentui-yarnpath-present
+    kind: yaml_path_matches
+    paths: [".yarnrc.yml"]
+    path: "$.yarnPath"
+    matches: '^\.yarn/releases/yarn-[^/]+\.cjs$'
+    level: error
+    message: ".yarnrc.yml must set yarnPath to the checked-in release under .yarn/releases/ (CI and the Azure pipelines run Yarn only through it)."
+
+  # A [toolchain-pin] (Stage B fluentui-b01) .devops/templates/tools.yml:44-45
+  #   load-bearing comment: "Do NOT run `corepack enable` - it's not needed
+  #   since yarn is checked into the repo, and it causes a network request
+  #   attempting to download yarn, which is not allowed." Every
+  #   azure-pipelines.release*.yml includes tools.yml@self. Only uncommented
+  #   text counts, so the comment itself does not match.
+  - id: microsoft-fluentui-azure-no-corepack-enable
+    kind: file_content_forbidden
+    paths: ["{.devops/**/*.yml,azure-pipelines*.yml}"]
+    pattern: '(?m)^[^#\n]*\bcorepack\s+enable\b'
+    level: error
+    message: "The Azure pipelines must not run `corepack enable`: Yarn is checked in (yarnPath) and the 1ES pipeline forbids the network download corepack makes (.devops/templates/tools.yml)."
+
+  # C [toolchain-pin] dev-env.md: packageManager is the exact version source of
+  #   truth and ".yarnrc.yml configures the repository binary path", so the
+  #   checked-in release yarnPath runs must be that same version. C (batch-2
+  #   ruling): packageManager is read with a regex over package.json, because
+  #   no normalize turns "yarn@4.18.0" and ".yarn/releases/yarn-4.18.0.cjs"
+  #   into the same full version (semver-minor would drop the patch digit).
+  - id: microsoft-fluentui-yarnpath-matches-package-manager
+    kind: cross_file
+    relation: equals
+    source:
+      file: "package.json"
+      extract:
+        regex: '"packageManager":\s*"yarn@(\d+\.\d+\.\d+)'
+    targets:
+      - file: ".yarnrc.yml"
+        extract:
+          regex: '(?m)^yarnPath:\s*\.yarn/releases/yarn-(\d+\.\d+\.\d+)\.cjs\s*$'
+    level: error
+    message: "The Yarn release in .yarnrc.yml yarnPath must be the version package.json packageManager pins."
+
+  # A [toolchain-pin] .devops/templates/tools.yml load-bearing comment: the 1ES
+  #   container only ships some Node versions, so UseNode must ask for
+  #   `<major>.x`, and `checkLatest: true` is required (fast-build needs
+  #   node >=22.18.0 while the container may ship an older 22.x).
+  - id: microsoft-fluentui-azure-usenode-major-x
+    kind: yaml_path_matches
+    paths: [".devops/templates/tools.yml"]
+    path: "$.steps[?(@.task == 'UseNode@1')].inputs.version"
+    matches: '^\d+\.x$'
+    level: error
+    message: "Azure UseNode must request `<major>.x` (only container-shipped versions install; see the comment in .devops/templates/tools.yml)."
+
+  - id: microsoft-fluentui-azure-usenode-check-latest
+    kind: yaml_path_equals
+    paths: [".devops/templates/tools.yml"]
+    path: "$.steps[?(@.task == 'UseNode@1')].inputs.checkLatest"
+    equals: true
+    level: error
+    message: "Azure UseNode needs `checkLatest: true` so the newest <major>.x installs (dependencies such as @microsoft/fast-build need node >=22.18.0)."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # dep-version
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # A [dep-version] check-packages.yml github-script guards: the
+  #   dependency-mismatches and change-files jobs read the tool version from
+  #   the root devDependencies and core.setFailed() when it is not a string.
+  #   Stage C: the pattern accepts any string (the guard's typeof === 'string'
+  #   test); json_path_matches itself fires on a missing key or a non-string.
+  - id: microsoft-fluentui-syncpack-is-root-devdependency
+    kind: json_path_matches
+    paths: ["package.json"]
+    path: "$.devDependencies.syncpack"
+    matches: '^(?s:.*)$'
+    level: error
+    message: "package.json must declare syncpack in devDependencies; check-packages.yml runs `npx syncpack@<that version> list-mismatches`."
+
+  - id: microsoft-fluentui-beachball-is-root-devdependency
+    kind: json_path_matches
+    paths: ["package.json"]
+    path: "$.devDependencies.beachball"
+    matches: '^(?s:.*)$'
+    level: error
+    message: "package.json must declare beachball in devDependencies; check-packages.yml runs `npx beachball@<that version> check`."
+
+  # C [dep-version] `yarn install --immutable` (every CI job) fails when a
+  #   patch: descriptor names a ~/ patch file that is not committed (root
+  #   devDependencies storywright -> .yarn/patches/*.patch). C (batch-2
+  #   ruling): the path is pulled out of the specifier with a regex over the
+  #   manifest text; a JSONPath extract returns the whole descriptor.
+  - id: microsoft-fluentui-yarn-patches-resolve
+    kind: registry_paths_resolve
+    source: "{package.json,apps/*/package.json,packages/*/package.json,packages/react-components/*/package.json,packages/react-components/*/*/package.json,packages/charts/*/package.json,packages/charts/*/*/package.json,scripts/*/package.json,tools/*/package.json,typings/package.json,starter-templates/package.json}"
+    extract:
+      regex: '"patch:[^"#]*#~/([^":&]+)'
+    base: lint_root
+    expect: file
+    level: error
+    message: "A patch: descriptor names a ~/ patch file that does not exist (yarn install --immutable)."
+
+  # C [dep-version] verify-peer-dependencies --tag=vNext, check
+  #   invalid-peer-range (getManifestViolations,
+  #   tools/workspace-plugin/src/generators/verify-peer-dependencies/index.ts:510-529):
+  #   every peerDependencies range is a valid semver range (semver.validRange).
+  #   alint has no semver operator, so this is a regex of node-semver's range
+  #   grammar (range-set / hyphen / simple / partial / qualifier). Stage C:
+  #   the query mirrors the generator's two skips: a private package (no peer
+  #   contract; getSkipReason, index.ts:479-494) and a NON_SEMVER_RANGE
+  #   protocol range (workspace:, portal:, link:, file:, npm:, patch:;
+  #   index.ts:100, :522). It still covers every workspace manifest, because
+  #   the --tag=vNext scope lives in project.json tags, which package.json
+  #   cannot see (scope broadening, value-add). Tuning: a semver-range operator.
+  - id: microsoft-fluentui-peer-ranges-valid-semver
+    kind: json_path_matches
+    paths: "{package.json,apps/*/package.json,packages/*/package.json,packages/react-components/*/package.json,packages/react-components/*/*/package.json,packages/charts/*/package.json,packages/charts/*/*/package.json,scripts/*/package.json,tools/*/package.json,typings/package.json,starter-templates/package.json}"
+    path: "$.peerDependencies[?($.private != true && !match(@, '(workspace|portal|link|file|npm|patch):.*'))]"
+    if_present: true
+    matches: '^\s*(?:v?(?:[xX*]|0|[1-9][0-9]*)(?:\.(?:[xX*]|0|[1-9][0-9]*)(?:\.(?:[xX*]|0|[1-9][0-9]*)(?:-[-0-9A-Za-z]+(?:\.[-0-9A-Za-z]+)*)?(?:\+[-0-9A-Za-z]+(?:\.[-0-9A-Za-z]+)*)?)?)?\s+-\s+v?(?:[xX*]|0|[1-9][0-9]*)(?:\.(?:[xX*]|0|[1-9][0-9]*)(?:\.(?:[xX*]|0|[1-9][0-9]*)(?:-[-0-9A-Za-z]+(?:\.[-0-9A-Za-z]+)*)?(?:\+[-0-9A-Za-z]+(?:\.[-0-9A-Za-z]+)*)?)?)?|(?:(?:[<>]=?|=|~>?|\^)\s*)?v?(?:[xX*]|0|[1-9][0-9]*)(?:\.(?:[xX*]|0|[1-9][0-9]*)(?:\.(?:[xX*]|0|[1-9][0-9]*)(?:-[-0-9A-Za-z]+(?:\.[-0-9A-Za-z]+)*)?(?:\+[-0-9A-Za-z]+(?:\.[-0-9A-Za-z]+)*)?)?)?(?:\s+(?:(?:[<>]=?|=|~>?|\^)\s*)?v?(?:[xX*]|0|[1-9][0-9]*)(?:\.(?:[xX*]|0|[1-9][0-9]*)(?:\.(?:[xX*]|0|[1-9][0-9]*)(?:-[-0-9A-Za-z]+(?:\.[-0-9A-Za-z]+)*)?(?:\+[-0-9A-Za-z]+(?:\.[-0-9A-Za-z]+)*)?)?)?)*)?(?:\s*\|\|\s*(?:v?(?:[xX*]|0|[1-9][0-9]*)(?:\.(?:[xX*]|0|[1-9][0-9]*)(?:\.(?:[xX*]|0|[1-9][0-9]*)(?:-[-0-9A-Za-z]+(?:\.[-0-9A-Za-z]+)*)?(?:\+[-0-9A-Za-z]+(?:\.[-0-9A-Za-z]+)*)?)?)?\s+-\s+v?(?:[xX*]|0|[1-9][0-9]*)(?:\.(?:[xX*]|0|[1-9][0-9]*)(?:\.(?:[xX*]|0|[1-9][0-9]*)(?:-[-0-9A-Za-z]+(?:\.[-0-9A-Za-z]+)*)?(?:\+[-0-9A-Za-z]+(?:\.[-0-9A-Za-z]+)*)?)?)?|(?:(?:[<>]=?|=|~>?|\^)\s*)?v?(?:[xX*]|0|[1-9][0-9]*)(?:\.(?:[xX*]|0|[1-9][0-9]*)(?:\.(?:[xX*]|0|[1-9][0-9]*)(?:-[-0-9A-Za-z]+(?:\.[-0-9A-Za-z]+)*)?(?:\+[-0-9A-Za-z]+(?:\.[-0-9A-Za-z]+)*)?)?)?(?:\s+(?:(?:[<>]=?|=|~>?|\^)\s*)?v?(?:[xX*]|0|[1-9][0-9]*)(?:\.(?:[xX*]|0|[1-9][0-9]*)(?:\.(?:[xX*]|0|[1-9][0-9]*)(?:-[-0-9A-Za-z]+(?:\.[-0-9A-Za-z]+)*)?(?:\+[-0-9A-Za-z]+(?:\.[-0-9A-Za-z]+)*)?)?)?)*)?)*\s*$'
+    level: error
+    message: "A peerDependencies range is not a valid semver range (verify-peer-dependencies invalid-peer-range)."
+
+  # C [dep-version] .github/instructions/dependabot-security-fixes.instructions.md:
+  #   "The following resolutions are maintained for security purposes: tar-fs
+  #   ^2.1.3". The root resolution (2.1.4 at the pin) must stay inside that
+  #   range. alint has no semver operator, so the range is spelled as a regex.
+  #   Known C limitation (Stage B reproduced): the regex accepts only exact,
+  #   ^ and ~ forms, so an in-range spelling such as '>=2.1.3 <3.0.0' fires.
+  - id: microsoft-fluentui-tar-fs-security-resolution
+    kind: json_path_matches
+    paths: ["package.json"]
+    path: "$.resolutions['tar-fs']"
+    matches: '^[\^~]?2\.(1\.([3-9]|[1-9][0-9]+)|([2-9]|[1-9][0-9]+)\.[0-9]+)$'
+    level: error
+    message: "The root tar-fs security resolution must stay within ^2.1.3 (dependabot-security-fixes.instructions.md)."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # other: beachball check (check-packages.yml change-files; also `yarn
+  # check:change`). Change-file validation: `type` (and dependentChangeType,
+  # when present) is a beachball change type, and the type is not disallowed
+  # for the package. The repo default is disallowedChangeTypes ['major']
+  # (scripts/beachball/base.config.js); a package's own
+  # package.json#beachball.disallowedChangeTypes replaces it. C: one superset
+  # rule per change type joins change/*.json packageName to the package
+  # manifests whose list allows that type.
+  # ══════════════════════════════════════════════════════════════════════════
+
+  - id: microsoft-fluentui-change-file-type-valid
+    kind: json_path_matches
+    paths: ["change/*.json"]
+    path: "$.type"
+    matches: '^(none|prerelease|prepatch|patch|preminor|minor|premajor|major)$'
+    level: error
+    message: "A change file's type must be a beachball change type (beachball check)."
+
+  - id: microsoft-fluentui-change-file-dependent-type-valid
+    kind: json_path_matches
+    paths: ["change/*.json"]
+    path: "$.dependentChangeType"
+    if_present: true
+    matches: '^(none|prerelease|prepatch|patch|preminor|minor|premajor|major)$'
+    level: error
+    message: "A change file's dependentChangeType must be a beachball change type (beachball check)."
+
+  # A [other] (Stage B fluentui-b02) docs/react-v9/contributing/dev-workflow.md:95:
+  #   the change description "should follow the semantic commit message
+  #   format, and be prepended by one of the following: `feat:`, `fix:`,
+  #   `chore:`, `docs:`, or `refactor:`" (docs/workflows/contributing.md:41
+  #   shows 'fix(react-button): description'). All 12 change files at the
+  #   pin comply.
+  - id: microsoft-fluentui-change-file-comment-prefix
+    kind: json_path_matches
+    paths: ["change/*.json"]
+    path: "$.comment"
+    matches: '^(feat|fix|chore|docs|refactor)(\([^)]*\))?!?: \S'
+    level: error
+    message: "A change file's comment must start with feat:, fix:, chore:, docs: or refactor: (optionally with a scope), in semantic commit format (dev-workflow.md)."
+
+  - id: microsoft-fluentui-change-type-major-allowed
+    kind: cross_file
+    relation: superset
+    source:
+      files: "{package.json,apps/*/package.json,packages/*/package.json,packages/react-components/*/package.json,packages/react-components/*/*/package.json,packages/charts/*/package.json,packages/charts/*/*/package.json,scripts/*/package.json,tools/*/package.json,typings/package.json,starter-templates/package.json}"
+      extract:
+        json: "$[?(@ == $.name && $.beachball.disallowedChangeTypes && !$.beachball.disallowedChangeTypes[?(@ == 'major')])]"
+    targets:
+      files: "change/*.json"
+      extract:
+        json: "$[?(@ == $.packageName && $.type == 'major')]"
+    allow_missing_target: true
+    level: error
+    message: "A `major` change file names a package that disallows major (repo default ['major'] or its own beachball.disallowedChangeTypes)."
+
+  - id: microsoft-fluentui-change-type-premajor-allowed
+    kind: cross_file
+    relation: superset
+    source:
+      files: "{package.json,apps/*/package.json,packages/*/package.json,packages/react-components/*/package.json,packages/react-components/*/*/package.json,packages/charts/*/package.json,packages/charts/*/*/package.json,scripts/*/package.json,tools/*/package.json,typings/package.json,starter-templates/package.json}"
+      extract:
+        json: "$[?(@ == $.name && !$.beachball.disallowedChangeTypes[?(@ == 'premajor')])]"
+    targets:
+      files: "change/*.json"
+      extract:
+        json: "$[?(@ == $.packageName && $.type == 'premajor')]"
+    allow_missing_target: true
+    level: error
+    message: "A `premajor` change file names a package whose beachball.disallowedChangeTypes forbids premajor."
+
+  - id: microsoft-fluentui-change-type-minor-allowed
+    kind: cross_file
+    relation: superset
+    source:
+      files: "{package.json,apps/*/package.json,packages/*/package.json,packages/react-components/*/package.json,packages/react-components/*/*/package.json,packages/charts/*/package.json,packages/charts/*/*/package.json,scripts/*/package.json,tools/*/package.json,typings/package.json,starter-templates/package.json}"
+      extract:
+        json: "$[?(@ == $.name && !$.beachball.disallowedChangeTypes[?(@ == 'minor')])]"
+    targets:
+      files: "change/*.json"
+      extract:
+        json: "$[?(@ == $.packageName && $.type == 'minor')]"
+    allow_missing_target: true
+    level: error
+    message: "A `minor` change file names a package whose beachball.disallowedChangeTypes forbids minor."
+
+  - id: microsoft-fluentui-change-type-preminor-allowed
+    kind: cross_file
+    relation: superset
+    source:
+      files: "{package.json,apps/*/package.json,packages/*/package.json,packages/react-components/*/package.json,packages/react-components/*/*/package.json,packages/charts/*/package.json,packages/charts/*/*/package.json,scripts/*/package.json,tools/*/package.json,typings/package.json,starter-templates/package.json}"
+      extract:
+        json: "$[?(@ == $.name && !$.beachball.disallowedChangeTypes[?(@ == 'preminor')])]"
+    targets:
+      files: "change/*.json"
+      extract:
+        json: "$[?(@ == $.packageName && $.type == 'preminor')]"
+    allow_missing_target: true
+    level: error
+    message: "A `preminor` change file names a package whose beachball.disallowedChangeTypes forbids preminor."
+
+  - id: microsoft-fluentui-change-type-patch-allowed
+    kind: cross_file
+    relation: superset
+    source:
+      files: "{package.json,apps/*/package.json,packages/*/package.json,packages/react-components/*/package.json,packages/react-components/*/*/package.json,packages/charts/*/package.json,packages/charts/*/*/package.json,scripts/*/package.json,tools/*/package.json,typings/package.json,starter-templates/package.json}"
+      extract:
+        json: "$[?(@ == $.name && !$.beachball.disallowedChangeTypes[?(@ == 'patch')])]"
+    targets:
+      files: "change/*.json"
+      extract:
+        json: "$[?(@ == $.packageName && $.type == 'patch')]"
+    allow_missing_target: true
+    level: error
+    message: "A `patch` change file names a package whose beachball.disallowedChangeTypes forbids patch."
+
+  - id: microsoft-fluentui-change-type-prepatch-allowed
+    kind: cross_file
+    relation: superset
+    source:
+      files: "{package.json,apps/*/package.json,packages/*/package.json,packages/react-components/*/package.json,packages/react-components/*/*/package.json,packages/charts/*/package.json,packages/charts/*/*/package.json,scripts/*/package.json,tools/*/package.json,typings/package.json,starter-templates/package.json}"
+      extract:
+        json: "$[?(@ == $.name && !$.beachball.disallowedChangeTypes[?(@ == 'prepatch')])]"
+    targets:
+      files: "change/*.json"
+      extract:
+        json: "$[?(@ == $.packageName && $.type == 'prepatch')]"
+    allow_missing_target: true
+    level: error
+    message: "A `prepatch` change file names a package whose beachball.disallowedChangeTypes forbids prepatch."
+
+  - id: microsoft-fluentui-change-type-prerelease-allowed
+    kind: cross_file
+    relation: superset
+    source:
+      files: "{package.json,apps/*/package.json,packages/*/package.json,packages/react-components/*/package.json,packages/react-components/*/*/package.json,packages/charts/*/package.json,packages/charts/*/*/package.json,scripts/*/package.json,tools/*/package.json,typings/package.json,starter-templates/package.json}"
+      extract:
+        json: "$[?(@ == $.name && !$.beachball.disallowedChangeTypes[?(@ == 'prerelease')])]"
+    targets:
+      files: "change/*.json"
+      extract:
+        json: "$[?(@ == $.packageName && $.type == 'prerelease')]"
+    allow_missing_target: true
+    level: error
+    message: "A `prerelease` change file names a package whose beachball.disallowedChangeTypes forbids prerelease."
+
+  - id: microsoft-fluentui-change-type-none-allowed
+    kind: cross_file
+    relation: superset
+    source:
+      files: "{package.json,apps/*/package.json,packages/*/package.json,packages/react-components/*/package.json,packages/react-components/*/*/package.json,packages/charts/*/package.json,packages/charts/*/*/package.json,scripts/*/package.json,tools/*/package.json,typings/package.json,starter-templates/package.json}"
+      extract:
+        json: "$[?(@ == $.name && !$.beachball.disallowedChangeTypes[?(@ == 'none')])]"
+    targets:
+      files: "change/*.json"
+      extract:
+        json: "$[?(@ == $.packageName && $.type == 'none')]"
+    allow_missing_target: true
+    level: error
+    message: "A `none` change file names a package whose beachball.disallowedChangeTypes forbids none."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # other: nx sync:check -> export-maps-sync (pr.yml "Workspace lint").
+  # VALUE-ADD (level info, outside the ratio). Stage B removed fluentui-11 as
+  #   an R1 duplicate of fluentui-20 (B-adapter): export-maps-sync checks the
+  #   entry fields and the exports map in one syncProject call
+  #   (export-maps-sync/index.ts:64-70, one outOfSync message). This rule is
+  #   kept only as PARTIAL coverage of fluentui-20: it checks the
+  #   main/module/typings half (buildEntryPointFields,
+  #   export-maps-sync/lib/export-map.ts) and not the exports map derived from
+  #   metadata.exportMap globs over the package's files. The real scope is
+  #   non-private library projects tagged vNext + platform:web in project.json,
+  #   which package.json cannot see, so the rule scopes by content
+  #   (`"type": "module"`, not private) minus the two web-components packages
+  #   and, since Stage C, react-jsx-runtime (tagged platform:any, so the
+  #   generator skips it); that is exactly the 81 in-scope manifests at the
+  #   pin. The CommonJS branch (main lib-commonjs/index.js) has no in-scope
+  #   package at the pin and is not expressed.
+  # ══════════════════════════════════════════════════════════════════════════
+  - id: microsoft-fluentui-export-maps-entry-fields
+    kind: json_path_absent
+    paths:
+      include: ["{packages/*/package.json,packages/react-components/*/package.json,packages/react-components/*/*/package.json,packages/charts/*/package.json,packages/charts/*/*/package.json}"]
+      exclude: ["packages/web-components/package.json", "packages/charts/chart-web-components/package.json", "packages/react-components/react-jsx-runtime/package.json"]
+    path: "$[?($.type == 'module' && $.private != true && ($.main != 'lib-commonjs/index.cjs' || $.module != 'lib/index.js' || $.typings != './dist/index.d.ts'))]"
+    level: info
+    message: "An ESM-first v9 package must keep main lib-commonjs/index.cjs, module lib/index.js and typings ./dist/index.d.ts (nx sync:check, export-maps-sync; partial coverage of the entry-point sync)."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # other: ESLint rule that asserts file text, not code (batch-2 ruling).
+  # A [other] @fluentui/no-tslint-comments (packages/eslint-plugin core config,
+  #   on in every flat config): no `tslint:disable` / `tslint:enable`
+  #   comment in linted sources (`eslint src` per project). The rule's own
+  #   tests quote the directive, so packages/eslint-plugin is excluded.
+  #   Stage C: the rule matches comment.value against /^\s*tslint ?: ?(disable|enable)/
+  #   (packages/eslint-plugin/src/rules/no-tslint-comments.js), so a `///` or
+  #   `/**` comment, whose value starts with `/` or `*`, does not count; the
+  #   pattern now requires the `//` or `/*` not to be preceded by `/`, and a
+  #   line comment's whitespace to stay on its line. Known limit: the regex
+  #   is not token-aware, so the directive inside a string literal would still
+  #   fire (none at the pin outside packages/eslint-plugin).
+  # ══════════════════════════════════════════════════════════════════════════
+  - id: microsoft-fluentui-no-tslint-comments
+    kind: file_content_forbidden
+    paths:
+      include: ["**/src/**/*.{ts,tsx,js,jsx,mjs,cjs,mts,cts}"]
+      exclude: ["packages/eslint-plugin/**"]
+    pattern: '(?:\A|[^/])(?://[^\S\n]*|/\*\s*)tslint ?: ?(?:disable|enable)'
+    level: error
+    message: "tslint:disable/enable comments are unnecessary with ESLint (@fluentui/no-tslint-comments)."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # other: documented conventions (R5)
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # A [other] docs/react-v9/contributing/release-cycle.md: "unstable/preview
+  #   packages follow strict semantic versioning via `0.major.(minor|patch)`".
+  - id: microsoft-fluentui-preview-packages-zero-major
+    kind: json_path_absent
+    paths: "{package.json,apps/*/package.json,packages/*/package.json,packages/react-components/*/package.json,packages/react-components/*/*/package.json,packages/charts/*/package.json,packages/charts/*/*/package.json,scripts/*/package.json,tools/*/package.json,typings/package.json,starter-templates/package.json}"
+    path: "$[?(match($.name, '.*-preview') && !match($.version, '0[.].*'))]"
+    level: error
+    message: "A *-preview package stays on 0.x (0.major.(minor|patch)) until it is released as stable (release-cycle.md)."
+
+  # C [other] (fluentui-14; Stage B reclassified A -> C) The
+  #   react-components/unstable API is frozen. release-cycle.md:26 says "this
+  #   api cannot be changed in any way"; the entry point states the precise
+  #   rule (packages/react-components/react-components/src/unstable/index.ts:4-6):
+  #   adding new API exports is FORBIDDEN except react-virtualizer, and
+  #   modifying any existing export is FORBIDDEN. A digest of the API report
+  #   (Stage A) forbids the allowed react-virtualizer additions, so the C form
+  #   is one anchored regex over index.ts, generated from the file at the pin:
+  #   - the alert, infobutton, tree and drawer export blocks are pinned name
+  #     by name, in order (no addition, removal or rename);
+  #   - the two react-virtualizer blocks keep every existing name in order but
+  #     may gain names anywhere inside them;
+  #   - between blocks only comments and further react-virtualizer export
+  #     statements may appear, and nothing else may be exported.
+  #   Awkward (C): the frozen list lives in the regex, and a reorder or a
+  #   comment inside a frozen block also fires.
+  - id: microsoft-fluentui-react-components-unstable-exports-frozen
+    kind: file_content_matches
+    paths: ["packages/react-components/react-components/src/unstable/index.ts"]
+    pattern: |-
+      \A(?:\s|//[^\n]*|/\*(?s:.*?)\*/)*(?:export[^;]*'@fluentui/react-virtualizer';(?:\s|//[^\n]*|/\*(?s:.*?)\*/)*)*export\s+\{(?:\s|/\*.*?\*/)*Alert,(?:\s|/\*.*?\*/)*alertClassNames,(?:\s|/\*.*?\*/)*renderAlert_unstable,(?:\s|/\*.*?\*/)*useAlertStyles_unstable,(?:\s|/\*.*?\*/)*useAlert_unstable(?:\s|/\*.*?\*/)*,?(?:\s|/\*.*?\*/)*\}\s*from\s+'@fluentui/react\-alert';(?:\s|//[^\n]*|/\*(?s:.*?)\*/)*(?:export[^;]*'@fluentui/react-virtualizer';(?:\s|//[^\n]*|/\*(?s:.*?)\*/)*)*export\s+type\s+\{(?:\s|/\*.*?\*/)*AlertProps,(?:\s|/\*.*?\*/)*AlertSlots,(?:\s|/\*.*?\*/)*AlertState(?:\s|/\*.*?\*/)*,?(?:\s|/\*.*?\*/)*\}\s*from\s+'@fluentui/react\-alert';(?:\s|//[^\n]*|/\*(?s:.*?)\*/)*(?:export[^;]*'@fluentui/react-virtualizer';(?:\s|//[^\n]*|/\*(?s:.*?)\*/)*)*export\s+\{(?:\s|/\*.*?\*/)*InfoButton,(?:\s|/\*.*?\*/)*infoButtonClassNames,(?:\s|/\*.*?\*/)*useInfoButton_unstable,(?:\s|/\*.*?\*/)*useInfoButtonStyles_unstable,(?:\s|/\*.*?\*/)*renderInfoButton_unstable,(?:\s|/\*.*?\*/)*InfoLabel,(?:\s|/\*.*?\*/)*infoLabelClassNames,(?:\s|/\*.*?\*/)*renderInfoLabel_unstable,(?:\s|/\*.*?\*/)*useInfoLabel_unstable,(?:\s|/\*.*?\*/)*useInfoLabelStyles_unstable(?:\s|/\*.*?\*/)*,?(?:\s|/\*.*?\*/)*\}\s*from\s+'@fluentui/react\-infobutton';(?:\s|//[^\n]*|/\*(?s:.*?)\*/)*(?:export[^;]*'@fluentui/react-virtualizer';(?:\s|//[^\n]*|/\*(?s:.*?)\*/)*)*export\s+type\s+\{(?:\s|/\*.*?\*/)*InfoButtonProps,(?:\s|/\*.*?\*/)*InfoButtonSlots,(?:\s|/\*.*?\*/)*InfoButtonState,(?:\s|/\*.*?\*/)*InfoLabelProps,(?:\s|/\*.*?\*/)*InfoLabelSlots,(?:\s|/\*.*?\*/)*InfoLabelState(?:\s|/\*.*?\*/)*,?(?:\s|/\*.*?\*/)*\}\s*from\s+'@fluentui/react\-infobutton';(?:\s|//[^\n]*|/\*(?s:.*?)\*/)*(?:export[^;]*'@fluentui/react-virtualizer';(?:\s|//[^\n]*|/\*(?s:.*?)\*/)*)*export\s+\{[^}]*?\bVirtualizer\b[^}]*?\bvirtualizerClassNames\b[^}]*?\buseVirtualizer_unstable\b[^}]*?\brenderVirtualizer_unstable\b[^}]*?\buseVirtualizerStyles_unstable\b[^}]*?\buseIntersectionObserver\b[^}]*?\buseStaticVirtualizerMeasure\b[^}]*?\buseDynamicVirtualizerMeasure\b[^}]*?\buseResizeObserverRef_unstable\b[^}]*?\bVirtualizerContextProvider\b[^}]*?\buseVirtualizerContext_unstable\b[^}]*?\bVirtualizerScrollView\b[^}]*?\bvirtualizerScrollViewClassNames\b[^}]*?\buseVirtualizerScrollView_unstable\b[^}]*?\brenderVirtualizerScrollView_unstable\b[^}]*?\buseVirtualizerScrollViewStyles_unstable\b[^}]*?\bVirtualizerScrollViewDynamic\b[^}]*?\bvirtualizerScrollViewDynamicClassNames\b[^}]*?\buseVirtualizerScrollViewDynamic_unstable\b[^}]*?\brenderVirtualizerScrollViewDynamic_unstable\b[^}]*?\buseVirtualizerScrollViewDynamicStyles_unstable\b[^}]*?\bscrollToItemDynamic\b[^}]*?\bscrollToItemStatic\b[^}]*\}\s*from\s+'@fluentui/react\-virtualizer';(?:\s|//[^\n]*|/\*(?s:.*?)\*/)*(?:export[^;]*'@fluentui/react-virtualizer';(?:\s|//[^\n]*|/\*(?s:.*?)\*/)*)*export\s+type\s+\{[^}]*?\bVirtualizerProps\b[^}]*?\bVirtualizerState\b[^}]*?\bVirtualizerSlots\b[^}]*?\bVirtualizerChildRenderFunction\b[^}]*?\bVirtualizerScrollViewProps\b[^}]*?\bVirtualizerScrollViewState\b[^}]*?\bVirtualizerScrollViewSlots\b[^}]*?\bVirtualizerContextProps\b[^}]*?\bVirtualizerScrollViewDynamicProps\b[^}]*?\bVirtualizerScrollViewDynamicState\b[^}]*?\bVirtualizerScrollViewDynamicSlots\b[^}]*?\bVirtualizerMeasureDynamicProps\b[^}]*?\bVirtualizerMeasureProps\b[^}]*?\bResizeCallbackWithRef\b[^}]*?\bScrollToInterface\b[^}]*?\bScrollToItemDynamicParams\b[^}]*?\bScrollToItemStaticParams\b[^}]*\}\s*from\s+'@fluentui/react\-virtualizer';(?:\s|//[^\n]*|/\*(?s:.*?)\*/)*(?:export[^;]*'@fluentui/react-virtualizer';(?:\s|//[^\n]*|/\*(?s:.*?)\*/)*)*export\s+\{(?:\s|/\*.*?\*/)*Tree,(?:\s|/\*.*?\*/)*TreeItem,(?:\s|/\*.*?\*/)*FlatTree,(?:\s|/\*.*?\*/)*TreeProvider,(?:\s|/\*.*?\*/)*TreeItemLayout,(?:\s|/\*.*?\*/)*TreeItemProvider,(?:\s|/\*.*?\*/)*TreeItemPersonaLayout,(?:\s|/\*.*?\*/)*useTreeContext_unstable,(?:\s|/\*.*?\*/)*useTreeContextValues_unstable,(?:\s|/\*.*?\*/)*useTreeItemContext_unstable,(?:\s|/\*.*?\*/)*useTreeItemContextValues_unstable,(?:\s|/\*.*?\*/)*useFlatTreeContextValues_unstable,(?:\s|/\*.*?\*/)*useTree_unstable,(?:\s|/\*.*?\*/)*useTreeItem_unstable,(?:\s|/\*.*?\*/)*useTreeItemLayout_unstable,(?:\s|/\*.*?\*/)*useTreeItemPersonaLayout_unstable,(?:\s|/\*.*?\*/)*renderTree_unstable,(?:\s|/\*.*?\*/)*renderTreeItem_unstable,(?:\s|/\*.*?\*/)*renderTreeItemPersonaLayout_unstable,(?:\s|/\*.*?\*/)*renderTreeItemLayout_unstable,(?:\s|/\*.*?\*/)*useTreeStyles_unstable,(?:\s|/\*.*?\*/)*useTreeItemStyles_unstable,(?:\s|/\*.*?\*/)*useTreeItemPersonaLayoutStyles_unstable,(?:\s|/\*.*?\*/)*useTreeItemLayoutStyles_unstable,(?:\s|/\*.*?\*/)*treeItemPersonaLayoutClassNames,(?:\s|/\*.*?\*/)*treeItemLevelToken,(?:\s|/\*.*?\*/)*treeItemLayoutClassNames,(?:\s|/\*.*?\*/)*treeItemClassNames,(?:\s|/\*.*?\*/)*treeClassNames,(?:\s|/\*.*?\*/)*flatTreeClassNames,(?:\s|/\*.*?\*/)*useFlatTree_unstable,(?:\s|/\*.*?\*/)*useHeadlessFlatTree_unstable,(?:\s|/\*.*?\*/)*useFlatTreeStyles_unstable,(?:\s|/\*.*?\*/)*renderFlatTree_unstable,(?:\s|/\*.*?\*/)*flattenTree_unstable(?:\s|/\*.*?\*/)*,?(?:\s|/\*.*?\*/)*\}\s*from\s+'@fluentui/react\-tree';(?:\s|//[^\n]*|/\*(?s:.*?)\*/)*(?:export[^;]*'@fluentui/react-virtualizer';(?:\s|//[^\n]*|/\*(?s:.*?)\*/)*)*export\s+type\s+\{(?:\s|/\*.*?\*/)*TreeState,(?:\s|/\*.*?\*/)*TreeSlots,(?:\s|/\*.*?\*/)*TreeProps,(?:\s|/\*.*?\*/)*TreeOpenChangeEvent,(?:\s|/\*.*?\*/)*TreeOpenChangeData,(?:\s|/\*.*?\*/)*TreeNavigationEvent_unstable,(?:\s|/\*.*?\*/)*TreeNavigationData_unstable,(?:\s|/\*.*?\*/)*TreeItemState,(?:\s|/\*.*?\*/)*TreeItemSlots,(?:\s|/\*.*?\*/)*TreeItemProps,(?:\s|/\*.*?\*/)*TreeItemPersonaLayoutState,(?:\s|/\*.*?\*/)*TreeItemPersonaLayoutSlots,(?:\s|/\*.*?\*/)*TreeItemPersonaLayoutProps,(?:\s|/\*.*?\*/)*TreeItemLayoutState,(?:\s|/\*.*?\*/)*TreeItemLayoutSlots,(?:\s|/\*.*?\*/)*TreeItemLayoutProps,(?:\s|/\*.*?\*/)*TreeContextValue,(?:\s|/\*.*?\*/)*FlatTreeProps,(?:\s|/\*.*?\*/)*FlatTreeSlots,(?:\s|/\*.*?\*/)*FlatTreeState,(?:\s|/\*.*?\*/)*HeadlessFlatTree,(?:\s|/\*.*?\*/)*HeadlessFlatTreeItem,(?:\s|/\*.*?\*/)*HeadlessFlatTreeItemProps,(?:\s|/\*.*?\*/)*HeadlessFlatTreeOptions(?:\s|/\*.*?\*/)*,?(?:\s|/\*.*?\*/)*\}\s*from\s+'@fluentui/react\-tree';(?:\s|//[^\n]*|/\*(?s:.*?)\*/)*(?:export[^;]*'@fluentui/react-virtualizer';(?:\s|//[^\n]*|/\*(?s:.*?)\*/)*)*export\s+\{(?:\s|/\*.*?\*/)*Drawer,(?:\s|/\*.*?\*/)*renderDrawer_unstable,(?:\s|/\*.*?\*/)*useDrawer_unstable,(?:\s|/\*.*?\*/)*OverlayDrawer\ as\ DrawerOverlay,(?:\s|/\*.*?\*/)*overlayDrawerClassNames\ as\ DrawerOverlayClassNames,(?:\s|/\*.*?\*/)*renderOverlayDrawer_unstable\ as\ renderDrawerOverlay_unstable,(?:\s|/\*.*?\*/)*useOverlayDrawerStyles_unstable\ as\ useDrawerOverlayStyles_unstable,(?:\s|/\*.*?\*/)*useOverlayDrawer_unstable\ as\ useDrawerOverlay_unstable,(?:\s|/\*.*?\*/)*InlineDrawer\ as\ DrawerInline,(?:\s|/\*.*?\*/)*inlineDrawerClassNames\ as\ DrawerInlineClassNames,(?:\s|/\*.*?\*/)*renderInlineDrawer_unstable\ as\ renderDrawerInline_unstable,(?:\s|/\*.*?\*/)*useInlineDrawerStyles_unstable\ as\ useDrawerInlineStyles_unstable,(?:\s|/\*.*?\*/)*useInlineDrawer_unstable\ as\ useDrawerInline_unstable,(?:\s|/\*.*?\*/)*OverlayDrawer,(?:\s|/\*.*?\*/)*overlayDrawerClassNames,(?:\s|/\*.*?\*/)*renderOverlayDrawer_unstable,(?:\s|/\*.*?\*/)*useOverlayDrawerStyles_unstable,(?:\s|/\*.*?\*/)*useOverlayDrawer_unstable,(?:\s|/\*.*?\*/)*InlineDrawer,(?:\s|/\*.*?\*/)*inlineDrawerClassNames,(?:\s|/\*.*?\*/)*renderInlineDrawer_unstable,(?:\s|/\*.*?\*/)*useInlineDrawerStyles_unstable,(?:\s|/\*.*?\*/)*useInlineDrawer_unstable,(?:\s|/\*.*?\*/)*DrawerBody,(?:\s|/\*.*?\*/)*drawerBodyClassNames,(?:\s|/\*.*?\*/)*renderDrawerBody_unstable,(?:\s|/\*.*?\*/)*useDrawerBodyStyles_unstable,(?:\s|/\*.*?\*/)*useDrawerBody_unstable,(?:\s|/\*.*?\*/)*DrawerHeader,(?:\s|/\*.*?\*/)*drawerHeaderClassNames,(?:\s|/\*.*?\*/)*renderDrawerHeader_unstable,(?:\s|/\*.*?\*/)*useDrawerHeaderStyles_unstable,(?:\s|/\*.*?\*/)*useDrawerHeader_unstable,(?:\s|/\*.*?\*/)*DrawerHeaderTitle,(?:\s|/\*.*?\*/)*drawerHeaderTitleClassNames,(?:\s|/\*.*?\*/)*renderDrawerHeaderTitle_unstable,(?:\s|/\*.*?\*/)*useDrawerHeaderTitleStyles_unstable,(?:\s|/\*.*?\*/)*useDrawerHeaderTitle_unstable,(?:\s|/\*.*?\*/)*DrawerHeaderNavigation,(?:\s|/\*.*?\*/)*drawerHeaderNavigationClassNames,(?:\s|/\*.*?\*/)*renderDrawerHeaderNavigation_unstable,(?:\s|/\*.*?\*/)*useDrawerHeaderNavigationStyles_unstable,(?:\s|/\*.*?\*/)*useDrawerHeaderNavigation_unstable,(?:\s|/\*.*?\*/)*DrawerFooter,(?:\s|/\*.*?\*/)*drawerFooterClassNames,(?:\s|/\*.*?\*/)*renderDrawerFooter_unstable,(?:\s|/\*.*?\*/)*useDrawerFooterStyles_unstable,(?:\s|/\*.*?\*/)*useDrawerFooter_unstable(?:\s|/\*.*?\*/)*,?(?:\s|/\*.*?\*/)*\}\s*from\s+'@fluentui/react\-drawer';(?:\s|//[^\n]*|/\*(?s:.*?)\*/)*(?:export[^;]*'@fluentui/react-virtualizer';(?:\s|//[^\n]*|/\*(?s:.*?)\*/)*)*export\s+type\s+\{(?:\s|/\*.*?\*/)*DrawerProps,(?:\s|/\*.*?\*/)*DrawerSlots,(?:\s|/\*.*?\*/)*DrawerState,(?:\s|/\*.*?\*/)*OverlayDrawerProps\ as\ DrawerOverlayProps,(?:\s|/\*.*?\*/)*OverlayDrawerSlots\ as\ DrawerOverlaySlots,(?:\s|/\*.*?\*/)*OverlayDrawerState\ as\ DrawerOverlayState,(?:\s|/\*.*?\*/)*InlineDrawerProps\ as\ DrawerInlineProps,(?:\s|/\*.*?\*/)*InlineDrawerSlots\ as\ DrawerInlineSlots,(?:\s|/\*.*?\*/)*InlineDrawerState\ as\ DrawerInlineState,(?:\s|/\*.*?\*/)*OverlayDrawerProps,(?:\s|/\*.*?\*/)*OverlayDrawerSlots,(?:\s|/\*.*?\*/)*OverlayDrawerState,(?:\s|/\*.*?\*/)*InlineDrawerProps,(?:\s|/\*.*?\*/)*InlineDrawerSlots,(?:\s|/\*.*?\*/)*InlineDrawerState,(?:\s|/\*.*?\*/)*DrawerBodySlots,(?:\s|/\*.*?\*/)*DrawerBodyState,(?:\s|/\*.*?\*/)*DrawerHeaderSlots,(?:\s|/\*.*?\*/)*DrawerHeaderState,(?:\s|/\*.*?\*/)*DrawerHeaderTitleSlots,(?:\s|/\*.*?\*/)*DrawerHeaderTitleState,(?:\s|/\*.*?\*/)*DrawerFooterSlots,(?:\s|/\*.*?\*/)*DrawerFooterState,(?:\s|/\*.*?\*/)*DrawerHeaderNavigationProps,(?:\s|/\*.*?\*/)*DrawerHeaderNavigationSlots,(?:\s|/\*.*?\*/)*DrawerHeaderNavigationState(?:\s|/\*.*?\*/)*,?(?:\s|/\*.*?\*/)*\}\s*from\s+'@fluentui/react\-drawer';(?:\s|//[^\n]*|/\*(?s:.*?)\*/)*(?:export[^;]*'@fluentui/react-virtualizer';(?:\s|//[^\n]*|/\*(?s:.*?)\*/)*)*\z
+    level: error
+    message: "The @fluentui/react-components/unstable entry point is frozen: no new exports except from @fluentui/react-virtualizer, and no existing export may change (src/unstable/index.ts, release-cycle.md)."
+
+  # A [other] .yarnrc.yml load-bearing header: "Yarn will delete the comments
+  #   on automatic file updates. Please bring them back!" Each setting keeps
+  #   its explanatory comment.
+  - id: microsoft-fluentui-yarnrc-comments-kept
+    kind: file_content_matches
+    paths: [".yarnrc.yml"]
+    pattern: '(?s)\A# Yarn will delete the comments on automatic file updates\.\n# Please bring them back!\n.*#[^\n]*\nenableScripts:.*#[^\n]*\nnpmMinimalAgeGate:.*#[^\n]*\nnpmPreapprovedPackages:'
+    level: error
+    message: ".yarnrc.yml must keep its comments (Yarn strips them on automatic updates; the header asks to bring them back)."
+
+  # A [other] .gitattributes: "API files should be checked in with
+  #   Unix-style newlines" (`*.api.md text=auto`).
+  #   Known limit (Stage B): .gitattributes:5 is `text=auto` without eol=lf,
+  #   so Git normalizes only the committed blob, while alint reads the working
+  #   tree. On a Linux clone (this pin) the two agree; on a Windows checkout
+  #   with core.autocrlf=true the api.md files are CRLF in the working tree
+  #   and this rule fires although the repository content is LF. alint has no
+  #   index/blob read to close this; reported to the integrator.
+  - id: microsoft-fluentui-api-reports-lf
+    kind: line_endings
+    paths: ["**/*.api.md"]
+    target: lf
+    level: error
+    message: "API report files (*.api.md) are checked in with LF line endings (.gitattributes)."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # other: load-bearing comments (Stage B; same standard as fluentui-04/-15)
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # A [other] (Stage B fluentui-b03) AGENTS.md:1-2 (CLAUDE.md is a symlink to
+  #   it): "Leave the start & end comments to automatically receive updates."
+  #   Nx rewrites the block between the two markers.
+  - id: microsoft-fluentui-agents-md-nx-markers
+    kind: file_content_matches
+    paths: ["AGENTS.md"]
+    pattern: '(?s)<!-- nx configuration start-->.*<!-- nx configuration end-->'
+    level: error
+    message: "AGENTS.md must keep its `<!-- nx configuration start-->` / `<!-- nx configuration end-->` markers so Nx can keep updating the block between them."
+
+  # A [other] (Stage B fluentui-b04) .github/workflows/copilot-setup-steps.yml:8:
+  #   "The job MUST be called `copilot-setup-steps` or it will not be picked
+  #   up by Copilot." The rule fires when no job has that key (any content).
+  - id: microsoft-fluentui-copilot-setup-steps-job-name
+    kind: yaml_path_absent
+    paths: [".github/workflows/copilot-setup-steps.yml"]
+    path: "$[?(!$.jobs['copilot-setup-steps'])]"
+    level: error
+    message: "The Copilot setup workflow's job must be named exactly `copilot-setup-steps`, or Copilot ignores it (comment in the workflow)."
+
+  # A [other] (Stage B fluentui-b05) .github/dependabot.yml:35-41: "Production
+  #   dependencies must stay in `allow` so security updates still apply"
+  #   (also .github/instructions/dependabot-security-fixes.instructions.md).
+  - id: microsoft-fluentui-dependabot-npm-allows-production
+    kind: yaml_path_matches
+    paths: [".github/dependabot.yml"]
+    path: "$.updates[?(@['package-ecosystem'] == 'npm')].allow[?(@['dependency-type'] == 'production')]['dependency-type']"
+    matches: '^production$'
+    level: error
+    message: "The npm entry in .github/dependabot.yml must keep `dependency-type: production` in `allow`, so security updates still apply to production dependencies."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # other: Jest assertions over committed files (R7: classified by their
+  # logic, carved out of fluentui-38). Each runs in pr.yml:78
+  # (`nx affected -t test`) when its project is affected.
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # A [other] (Stage B fluentui-b06) packages/react-icons-mdl2/src/components.test.tsx:9-16:
+  #   for every entry of src/components, path.basename(file, '.tsx') ends
+  #   with 'Icon'. The other three assertions in that test evaluate the
+  #   module and stay D (fluentui-38). 1736 files pass at the pin.
+  - id: microsoft-fluentui-icons-mdl2-component-files-icon-suffix
+    kind: filename_regex
+    paths: ["packages/react-icons-mdl2/src/components/*"]
+    pattern: '.*Icon(?:\.tsx)?'
+    level: error
+    message: "Every file in packages/react-icons-mdl2/src/components must be named <Name>Icon.tsx (components.test.tsx)."
+
+  # apps/public-docsite-v9/src/Concepts/Migration/FromV8/migrationGuides.test.ts
+  # (jest, apps/public-docsite-v9 `test`). Guides = Components/**/*.mdx
+  # (53 at the pin).
+  #
+  # C [other] (Stage B fluentui-b07) :128-150: each guide has exactly one
+  #   <Meta title> (raw text) and, after stripCodeFences (/```[\s\S]*?```/g),
+  #   exactly one top-level heading, an opening '# Title', blank,
+  #   '## Overview', blank, then a non-blank line, and exactly one
+  #   '## Prop Mapping' heading (none in Charts, GroupedList and Theme).
+  #   Awkward (C): seven regex rules. The fence-aware ones skip a fenced block
+  #   as a line starting with ``` up to the next line starting with ```, which
+  #   equals the test's character-level stripping only while ``` never
+  #   appears mid-line (true at the pin: no mid-line ```, every guide has an
+  #   even number of fence lines). "At least one H1" is carried by the
+  #   Overview rule, which needs an H1 line before '## Overview'.
+  - id: microsoft-fluentui-migration-guide-has-meta-title
+    kind: file_content_matches
+    paths: ["apps/public-docsite-v9/src/Concepts/Migration/FromV8/Components/**/*.mdx"]
+    pattern: '<Meta\s+title="[^"]+"\s*/>'
+    level: error
+    message: "A v8 migration guide must have one <Meta title=\"...\" /> (migrationGuides.test.ts)."
+
+  - id: microsoft-fluentui-migration-guide-one-meta-title
+    kind: file_content_forbidden
+    paths: ["apps/public-docsite-v9/src/Concepts/Migration/FromV8/Components/**/*.mdx"]
+    pattern: '(?s)<Meta\s+title="[^"]+"\s*/>.*<Meta\s+title="[^"]+"\s*/>'
+    level: error
+    message: "A v8 migration guide must have exactly one <Meta title=\"...\" /> (migrationGuides.test.ts)."
+
+  - id: microsoft-fluentui-migration-guide-one-h1
+    kind: file_content_forbidden
+    paths: ["apps/public-docsite-v9/src/Concepts/Migration/FromV8/Components/**/*.mdx"]
+    pattern: '\A(?:(?:[^`\n][^\n]*|`[^`\n][^\n]*|``[^`\n][^\n]*|`{1,2})?\n|```[^\n]*\n(?:(?:[^`\n][^\n]*|`[^`\n][^\n]*|``[^`\n][^\n]*|`{1,2})?\n)*```[^\n]*\n)*#[^\S\n]+[^\n]+\n(?:(?:[^`\n][^\n]*|`[^`\n][^\n]*|``[^`\n][^\n]*|`{1,2})?\n|```[^\n]*\n(?:(?:[^`\n][^\n]*|`[^`\n][^\n]*|``[^`\n][^\n]*|`{1,2})?\n)*```[^\n]*\n)*#[^\S\n]+[^\n]'
+    level: error
+    message: "A v8 migration guide must have exactly one top-level heading outside code fences (migrationGuides.test.ts)."
+
+  - id: microsoft-fluentui-migration-guide-overview-opening
+    kind: file_content_matches
+    paths: ["apps/public-docsite-v9/src/Concepts/Migration/FromV8/Components/**/*.mdx"]
+    pattern: '\A(?:(?:[^`\n][^\n]*|`[^`\n][^\n]*|``[^`\n][^\n]*|`{1,2})?\n|```[^\n]*\n(?:(?:[^`\n][^\n]*|`[^`\n][^\n]*|``[^`\n][^\n]*|`{1,2})?\n)*```[^\n]*\n)*#\s+[^\n]+\n\r?\n## Overview\r?\n\r?\n[^\S\n]*(?:[^\s`]|`[^`]|``[^`])'
+    level: error
+    message: "A v8 migration guide must open with '# Title', a blank line, '## Overview', a blank line and a non-empty paragraph (migrationGuides.test.ts)."
+
+  - id: microsoft-fluentui-migration-guide-has-prop-mapping
+    kind: file_content_matches
+    paths:
+      include: ["apps/public-docsite-v9/src/Concepts/Migration/FromV8/Components/**/*.mdx"]
+      exclude: ["apps/public-docsite-v9/src/Concepts/Migration/FromV8/Components/{Charts,GroupedList,Theme}.mdx"]
+    pattern: '\A(?:(?:[^`\n][^\n]*|`[^`\n][^\n]*|``[^`\n][^\n]*|`{1,2})?\n|```[^\n]*\n(?:(?:[^`\n][^\n]*|`[^`\n][^\n]*|``[^`\n][^\n]*|`{1,2})?\n)*```[^\n]*\n)*## Prop Mapping\r?(?:\n|\z)'
+    level: error
+    message: "A v8 migration guide must have a '## Prop Mapping' heading outside code fences (migrationGuides.test.ts; only Charts, GroupedList and Theme have none)."
+
+  - id: microsoft-fluentui-migration-guide-prop-mapping-count
+    kind: file_content_forbidden
+    paths: ["apps/public-docsite-v9/src/Concepts/Migration/FromV8/Components/**/*.mdx"]
+    pattern: '\A(?:(?:[^`\n][^\n]*|`[^`\n][^\n]*|``[^`\n][^\n]*|`{1,2})?\n|```[^\n]*\n(?:(?:[^`\n][^\n]*|`[^`\n][^\n]*|``[^`\n][^\n]*|`{1,2})?\n)*```[^\n]*\n)*## Prop Mapping\r?\n(?:(?:[^`\n][^\n]*|`[^`\n][^\n]*|``[^`\n][^\n]*|`{1,2})?\n|```[^\n]*\n(?:(?:[^`\n][^\n]*|`[^`\n][^\n]*|``[^`\n][^\n]*|`{1,2})?\n)*```[^\n]*\n)*## Prop Mapping\r?(?:\n|\z)'
+    level: error
+    message: "A v8 migration guide must have at most one '## Prop Mapping' heading outside code fences (migrationGuides.test.ts)."
+
+  - id: microsoft-fluentui-migration-guide-no-prop-mapping-listed
+    kind: file_content_forbidden
+    paths: ["apps/public-docsite-v9/src/Concepts/Migration/FromV8/Components/{Charts,GroupedList,Theme}.mdx"]
+    pattern: '\A(?:(?:[^`\n][^\n]*|`[^`\n][^\n]*|``[^`\n][^\n]*|`{1,2})?\n|```[^\n]*\n(?:(?:[^`\n][^\n]*|`[^`\n][^\n]*|``[^`\n][^\n]*|`{1,2})?\n)*```[^\n]*\n)*## Prop Mapping\r?(?:\n|\z)'
+    level: error
+    message: "Charts, GroupedList and Theme migration guides have no '## Prop Mapping' heading (migrationGuides.test.ts guidesWithoutPropMapping)."
+
+  # A [other] (Stage B fluentui-b10) :152-156: ColorMapping.mdx opens its
+  #   body with '# Color Mapping', a blank line, one '---' divider, a blank
+  #   line and then text.
+  - id: microsoft-fluentui-migration-color-mapping-divider
+    kind: file_content_matches
+    paths: ["apps/public-docsite-v9/src/Concepts/Migration/FromV8/ThemeColors/ColorMapping.mdx"]
+    pattern: '(?m)^# Color Mapping\r?\n\r?\n---\r?\n\r?\n\S'
+    level: error
+    message: "ColorMapping.mdx must open with '# Color Mapping', a blank line, one '---' divider, a blank line and text (migrationGuides.test.ts)."
+
+  # A [other] (Stage B fluentui-b11) :158-164: in .storybook/preview.js the
+  #   storySort list after 'from v8' names 'Components' before
+  #   'Component Mapping' (the test reads the file with the same regex).
+  - id: microsoft-fluentui-docsite-storysort-components-first
+    kind: file_content_matches
+    paths: ["apps/public-docsite-v9/.storybook/preview.js"]
+    pattern: "'from v8',\\s*\\[[^\\]]*'Components'[^\\]]*'Component Mapping'"
+    level: error
+    message: "public-docsite-v9 storySort must list 'Components' before 'Component Mapping' under 'from v8' (migrationGuides.test.ts)."
+
+  # A [other] (Stage B fluentui-b12) :14-43, :187-196: the 28 newly added
+  #   guides use inline ```tsx examples: no <Canvas, <Source,
+  #   `import * as Examples` or ./examples/, and at least one ```tsx block.
+  - id: microsoft-fluentui-migration-added-guides-no-example-imports
+    kind: file_content_forbidden
+    paths: ["apps/public-docsite-v9/src/Concepts/Migration/FromV8/Components/{Breadcrumb,Calendar,Callout,CommandBar,DatePicker,DetailsList,Dialog,Dropdown,Focus,Icon,Link,List,MessageBar,Nav,Overflow,Panel,Persona,ProgressBar,Rating,SearchBox,Skeleton,SwatchPicker,Switch,TagPicker,TeachingPopover,Text,TimePicker,Tooltip}.mdx"]
+    pattern: '<Canvas|<Source|import\s+\*\s+as\s+Examples\b|\./examples/'
+    level: error
+    message: "The newly added v8 migration guides use inline ```tsx examples, not <Canvas>, <Source>, `import * as Examples` or ./examples/ (migrationGuides.test.ts)."
+
+  - id: microsoft-fluentui-migration-added-guides-inline-tsx
+    kind: file_content_matches
+    paths: ["apps/public-docsite-v9/src/Concepts/Migration/FromV8/Components/{Breadcrumb,Calendar,Callout,CommandBar,DatePicker,DetailsList,Dialog,Dropdown,Focus,Icon,Link,List,MessageBar,Nav,Overflow,Panel,Persona,ProgressBar,Rating,SearchBox,Skeleton,SwatchPicker,Switch,TagPicker,TeachingPopover,Text,TimePicker,Tooltip}.mdx"]
+    pattern: '(?s)```tsx\s*\r?\n.*?```'
+    level: error
+    message: "Each newly added v8 migration guide must contain at least one inline ```tsx block (migrationGuides.test.ts)."
+
+  # A [other] (Stage B fluentui-b13) :198-210: no guide has an empty code
+  #   block. Mirrors extractCodeBlocks' line state machine exactly: outside a
+  #   block a line /^```[a-z0-9-]*\s*$/i opens one, inside a line /^```\s*$/
+  #   closes it, and a block whose lines are all whitespace is empty. The
+  #   regex walks the file from the start so blocks pair as in the test.
+  - id: microsoft-fluentui-migration-guide-no-empty-fence
+    kind: file_content_forbidden
+    paths: ["apps/public-docsite-v9/src/Concepts/Migration/FromV8/Components/**/*.mdx"]
+    pattern: '\A(?:(?:[^`\n][^\n]*|`[^`\n][^\n]*|``[^`\n][^\n]*|`{1,2}|```[A-Za-z0-9-]*(?:[^A-Za-z0-9\-\s]|[^\S\n]+\S)[^\n]*)?\n|```[A-Za-z0-9-]*[^\S\n]*\n(?:(?:[^`\n][^\n]*|`[^`\n][^\n]*|``[^`\n][^\n]*|`{1,2}|```[^\S\n]*\S[^\n]*)?\n)*```[^\S\n]*\n)*```[A-Za-z0-9-]*[^\S\n]*\n(?:[^\S\n]*\n)*```[^\S\n]*(?:\n|\z)'
+    level: error
+    message: "A v8 migration guide must not contain an empty code block (migrationGuides.test.ts)."
+
+  # C [other] (Stage B fluentui-b15) scripts/beachball/src/config.test.ts:99-196
+  #   (scripts-beachball `test`): release-scope membership. Scopes derive from
+  #   project.json tags and package.json version/private
+  #   (scripts/beachball/src/utils.ts; scripts/monorepo/src/isConvergedPackage.js:
+  #   converged = vNext tag, or major >= 9, or 0.0.0). Awkward (C), eight
+  #   rules, and two approximations:
+  #   - "not converged" and "not a v8 package" are checked from project.json
+  #     tags alone where the predicate also reads the version in package.json
+  #     (stricter: a react-components project tagged v8 without vNext fires
+  #     even at version 9.x);
+  #   - membership needs the named project to exist; a deleted project.json is
+  #     not reported.
+  #   The non-member paths react-button, react-text and react-card are not
+  #   project roots (the projects live in .../library), so those assertions
+  #   are vacuous and have no rule. The shared-config and precommit
+  #   assertions in the same file evaluate code (D, fluentui-38).
+  - id: microsoft-fluentui-beachball-v8-scope-members-tags
+    kind: json_path_absent
+    paths: "packages/{azure-themes,cra-template,date-time-utilities,example-data,fluent2-theme,font-icons-mdl2,foundation-legacy,merge-styles,react,react-date-time,react-docsite-components,react-examples,react-experiments,react-file-type-icons,react-focus,react-hooks,scheme-utilities,set-version,style-utilities,theme-samples,utilities}/project.json"
+    path: "$[?(!$.tags[?(@ == 'v8')] || $.tags[?(@ == 'web-components' || @ == 'vNext')])]"
+    level: error
+    message: "A package the v8 release scope must contain is not tagged v8 or is tagged vNext / web-components (scripts/beachball config.test.ts)."
+
+  - id: microsoft-fluentui-beachball-v8-scope-members-version
+    kind: json_path_matches
+    paths: "packages/{azure-themes,cra-template,date-time-utilities,example-data,fluent2-theme,font-icons-mdl2,foundation-legacy,merge-styles,react,react-date-time,react-docsite-components,react-examples,react-experiments,react-file-type-icons,react-focus,react-hooks,scheme-utilities,set-version,style-utilities,theme-samples,utilities}/package.json"
+    path: "$.version"
+    matches: '^(?:[1-8]\.\d+\.\d+|0\.[1-9]\d*\.\d+|0\.0\.[1-9]\d*)(?:[-+].*)?$'
+    level: error
+    message: "A package the v8 release scope must contain has a converged version (major >= 9 or 0.0.0), which moves it out of the v8 scope (scripts/beachball config.test.ts)."
+
+  - id: microsoft-fluentui-beachball-v8-scope-excludes-react-components
+    kind: json_path_absent
+    paths: "packages/react-components/**/project.json"
+    path: "$[?($.tags[?(@ == 'v8')] && !$.tags[?(@ == 'vNext' || @ == 'web-components')])]"
+    level: error
+    message: "A packages/react-components project tagged v8 without vNext would enter the v8 release scope (scripts/beachball config.test.ts)."
+
+  - id: microsoft-fluentui-beachball-web-components-scope-members
+    kind: json_path_absent
+    paths: "{apps/vr-tests-web-components,packages/web-components}/project.json"
+    path: "$[?(!$.tags[?(@ == 'web-components')])]"
+    level: error
+    message: "apps/vr-tests-web-components and packages/web-components must be tagged web-components (scripts/beachball config.test.ts)."
+
+  - id: microsoft-fluentui-beachball-headless-scope-member
+    kind: json_path_absent
+    paths: "packages/react-components/react-headless-components-preview/library/project.json"
+    path: "$[?(!$.tags[?(@ == 'react-headless')])]"
+    level: error
+    message: "react-headless-components-preview/library must be tagged react-headless (scripts/beachball config.test.ts)."
+
+  - id: microsoft-fluentui-beachball-tools-scope-members
+    kind: json_path_absent
+    paths: "packages/{react-components/babel-preset-storybook-full-source,react-components/eslint-plugin-react-components,react-components/react-conformance-griffel,react-components/react-storybook-addon,react-components/react-storybook-addon-export-to-sandbox,react-conformance}/project.json"
+    path: "$[?(!$.tags[?(@ == 'tools')] || $.tags[?(@ == 'v8')])]"
+    level: error
+    message: "A package the tools release scope must contain is not tagged tools, or is tagged v8 (scripts/beachball config.test.ts)."
+
+  - id: microsoft-fluentui-beachball-headless-tools-scope-members-public
+    kind: json_path_absent
+    paths: "packages/{react-components/react-headless-components-preview/library,react-components/babel-preset-storybook-full-source,react-components/eslint-plugin-react-components,react-components/react-conformance-griffel,react-components/react-storybook-addon,react-components/react-storybook-addon-export-to-sandbox,react-conformance}/package.json"
+    path: "$[?($.private == true)]"
+    level: error
+    message: "A package the headless or tools release scope must contain is private, which drops it from the scope (scripts/beachball config.test.ts)."
+
+  - id: microsoft-fluentui-beachball-scope-non-members
+    kind: json_path_absent
+    paths: "packages/{react,react-components/react-components}/project.json"
+    path: "$.tags[?(@ == 'tools' || @ == 'react-headless')]"
+    level: error
+    message: "packages/react and react-components must stay out of the tools and headless release scopes (scripts/beachball config.test.ts)."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # other: Nx project graph
+  # A [other] (Stage B fluentui-b16, PLAUSIBLE) Every implicitDependencies
+  #   entry that is not a `tag:` or `!` pattern names an existing project
+  #   (Nx builds the project graph on every nx command in pr.yml). Project
+  #   names come from project.json $.name (all 267 projects have one). Not
+  #   verified against the Nx 22 source (node_modules is absent): that Nx
+  #   rejects an implicitDependencies name with no project is Stage B's
+  #   belief. Three non-empty lists at the pin.
+  # ══════════════════════════════════════════════════════════════════════════
+  - id: microsoft-fluentui-nx-implicit-dependencies-resolve
+    kind: cross_file
+    relation: superset
+    source:
+      files: "**/project.json"
+      extract:
+        json: "$.name"
+    targets:
+      files: "**/project.json"
+      extract:
+        json: "$.implicitDependencies[?(!match(@, '(tag:|!).*'))]"
+    allow_missing_target: true
+    level: error
+    message: "An Nx implicitDependencies entry names a project that does not exist."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # VALUE-ADD (not enforced by the repository; outside the coverage ratio)
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # value-add [other] (fluentui-14, demoted by Stage C) The digest of the
+  #   unstable API report, Stage A's form. It matches release-cycle.md:26's
+  #   literal "cannot be changed in any way", but it is stricter than the rule
+  #   src/unstable/index.ts:4-6 states: it also fires on the react-virtualizer
+  #   additions that rule allows and on any cosmetic api-extractor change.
+  #   Kept at level info as an alert; microsoft-fluentui-react-components-unstable-exports-frozen
+  #   carries the unit.
+  - id: microsoft-fluentui-va-react-components-unstable-api-report-digest
+    kind: file_hash
+    paths: "packages/react-components/react-components/etc/react-components.unstable.api.md"
+    sha256: "168aed1d40fe3039f49182d2ed860ba93a1e9ce16a478a4320d55ab5bd4b987a"
+    level: info
+    message: "The @fluentui/react-components/unstable API report changed (release-cycle.md: the unstable API is frozen); check that only react-virtualizer exports were added."
+
+  # value-add [toolchain-pin] Every GitHub Actions setup-node major is one
+  #   the root engines.node range names (^22.0.0 || ^24.0.0). Nothing gates
+  #   this; the unused composite action .github/actions/run-publish-vr-screenshot
+  #   asks for Node 20 and is deliberately left out of the glob.
+  - id: microsoft-fluentui-va-ci-node-within-engines
+    kind: cross_file
+    relation: subset
+    source:
+      files: ".github/workflows/*.yml"
+      extract:
+        yaml: "$.jobs.*.steps[*].with['node-version']"
+    targets:
+      - file: "package.json"
+        extract:
+          regex: '(?:"node":\s*"|\|\|\s*)\^(\d+)\.\d+\.\d+'
+    normalize: semver-major
+    level: info
+    message: "A workflow's setup-node major is not one of the root engines.node majors."
+
+  # value-add [toolchain-pin] The TypeScript floor both ts-minbar apps compile
+  #   against (src/index.ts tsVersion) agrees between the two apps and with
+  #   their READMEs ("compatible back to Typescript X.Y").
+  - id: microsoft-fluentui-va-ts-minbar-floor-agrees
+    kind: cross_file
+    relation: equals
+    source:
+      file: "apps/ts-minbar-test-react-components/src/index.ts"
+      extract:
+        regex: "const tsVersion = '([0-9]+[.][0-9]+)';"
+    targets:
+      - file: "apps/ts-minbar-test-react/src/index.ts"
+        extract:
+          regex: "const tsVersion = '([0-9]+[.][0-9]+)';"
+      - file: "apps/ts-minbar-test-react-components/README.md"
+        extract:
+          regex: 'compatible back to Typescript ([0-9]+[.][0-9]+)'
+      - file: "apps/ts-minbar-test-react/README.md"
+        extract:
+          regex: 'compatible back to Typescript ([0-9]+[.][0-9]+)'
+    level: info
+    message: "The ts-minbar TypeScript floor disagrees between the two apps or their READMEs."

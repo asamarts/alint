@@ -5,7 +5,9 @@
 # and the config file. Resolved through the GitHub API on 2026-10-24; every
 # SHA a config's header names matches its row. tokio-rs/tokio, the
 # calibration repo, has no row: its config is examples/tokio-rs-tokio/ and
-# tracks upstream rather than the pin. Read by `xtask corpus-replay`.
+# tracks upstream rather than the pin. The v0.23 corpus stratum
+# (docs/design/v0.23/corpus-stratum.md) adds its rows, resolved the same way
+# on 2026-11-12. Read by `xtask corpus-replay`.
 #
 # repo	sha	config
 Alamofire/Alamofire	7595cbcf59809f9977c5f6378500de2ad73b7ddb	Alamofire-Alamofire.alint.yml
@@ -19,11 +21,14 @@ astral-sh/ruff	11723aeb5b9bcdbc25240c9bb04908057c862100	astral-sh-ruff.alint.yml
 astral-sh/uv	cfe5277bc4226da3a8cf51ad40b34f6a4e1746e5	astral-sh-uv.alint.yml
 AvaloniaUI/Avalonia	5ad8b75427a73721be3b6ed5c11e6aff0d7bad21	AvaloniaUI-Avalonia.alint.yml
 axios/axios	4306df21e84332fc576e98c2de549347c06bfb76	axios-axios.alint.yml
+babel/babel	2bc74adeadd1d30a56c6dc747e82b1566946e713	babel-babel.alint.yml
+backstage/backstage	bc73976a6de26df49b2bc2eefe689ee5b3ed0af1	backstage-backstage.alint.yml
 bazelbuild/bazel	bda3d1c2b0dd446cfe6918c424deeda2e4efd25f	bazelbuild-bazel.alint.yml
 BurntSushi/ripgrep	4857d6fa67db69a95cd4b6f2adda5d807d4d0119	BurntSushi-ripgrep.alint.yml
 clap-rs/clap	8387c812c4b9726474b8407f81ec97f0acf570ed	clap-rs-clap.alint.yml
 cli/cli	e6fa2faf9e3203c2caaa54dcb1526c5f093fa998	cli-cli.alint.yml
 ClickHouse/ClickHouse	044a9bb554755725bed8f150ae7908709ac081a0	ClickHouse-ClickHouse.alint.yml
+cloudflare/workers-sdk	3cea40b078519222db432b5edf827ddc3e629a2a	cloudflare-workers-sdk.alint.yml
 composer/composer	7b3147f083b120846d16c3dc371e61268e0c129e	composer-composer.alint.yml
 curl/curl	ba600296d2a1d8a4e53a36eb4bd30c1f0d0152cc	curl-curl.alint.yml
 denoland/deno	351d8fbfeec253d3b590f956e32f981adad91ce2	denoland-deno.alint.yml
@@ -34,6 +39,7 @@ dotnet/roslyn	4dad8409c1e4ebf99a53df235df76d86083c2ddc	dotnet-roslyn.alint.yml
 dotnet/runtime	0dfd787f3c16e18e1641d20d8cce1789c9488b00	dotnet-runtime.alint.yml
 duckdb/duckdb	0a8a19486d7177e74df8c886ef78fd4d49fb1f0e	duckdb-duckdb.alint.yml
 elastic/elasticsearch	79aea6d6378fe67b43c124b4589945fe0e94e10a	elastic-elasticsearch.alint.yml
+element-hq/element-web	e84183a6b20027fb9567d789acd0c59588641f27	element-hq-element-web.alint.yml
 elixir-lang/elixir	55da97b9a329638ed5dfdbb1f8e10c9895829655	elixir-lang-elixir.alint.yml
 encode/httpx	b5addb64f0161ff6bfe94c124ef76f6a1fba5254	encode-httpx.alint.yml
 eslint/eslint	f99b47a6799be25321552402a49303bb06a43fe4	eslint-eslint.alint.yml
@@ -44,6 +50,7 @@ facebook/react	557e28fae7cbd4cf2714d556f6d8a3a42f7d8ce2	facebook-react.alint.yml
 fastapi/fastapi	3d2aace42fdfe34077647e47f3ee9688161e2651	fastapi-fastapi.alint.yml
 fastlane/fastlane	c30e449d26dc99fa3841f94f3a2a505a676aedbf	fastlane-fastlane.alint.yml
 flutter/flutter	2fc403d857f0f06791c25bb6c496d584702c3220	flutter-flutter.alint.yml
+forem/forem	75faefce59112dd91df07f84c0b446f51088c911	forem-forem.alint.yml
 gin-gonic/gin	5f4f9643258dc2a65e684b63f12c8d543c936c67	gin-gonic-gin.alint.yml
 git/git	1666c1265231b0bc5f613fbbf3f0a9896cdef76e	git-git.alint.yml
 gohugoio/hugo	b01ecd4cd4377921efe427fed8a16326b85f2ace	gohugoio-hugo.alint.yml
@@ -55,8 +62,10 @@ guzzle/guzzle	3137dc55ae12f19bb3d6d744189947b37d18b954	guzzle-guzzle.alint.yml
 hashicorp/terraform	581ffab924bb71871e34b6198767202799957c36	hashicorp-terraform.alint.yml
 helm/helm	59b57c5c31a009d069f9318c9d3ba8b784f1fe97	helm-helm.alint.yml
 Homebrew/brew	43039a4500e6eca03c829a269d7b14aac08c0a24	Homebrew-brew.alint.yml
+immich-app/immich	7f13ab5e139e68308c67a709fc90d8bebd20ba7d	immich-app-immich.alint.yml
 istio/istio	5112958faa0bec6129a806fc6e4b361b5f11ebe3	istio-istio.alint.yml
 jekyll/jekyll	202df571314ba1d18e9fccd81d12aaad4a703c38	jekyll-jekyll.alint.yml
+jestjs/jest	aa88f7cf0bfc7a3a2efbfcab97914886b22d4454	jestjs-jest.alint.yml
 JetBrains/kotlin	155ca706b548d7d1c7c007d2689400800b0440f1	JetBrains-kotlin.alint.yml
 jgm/pandoc	90384394817b6cfb7776bdfa4d25453e5450d2fb	jgm-pandoc.alint.yml
 junegunn/fzf	7d647c70c286720c225ebb8ab75896e5dbee6af6	junegunn-fzf.alint.yml
@@ -65,10 +74,14 @@ kubernetes/kubernetes	14f9f7e9e565dd83e3fa043fdccabf9075b0cdac	kubernetes-kubern
 laravel/framework	42b494e1ed2bc80511bca064c8a395b776ff1516	laravel-framework.alint.yml
 llvm/llvm-project	d7ee01c0fa3113b0b2d98e77273f794a182bf2dd	llvm-llvm-project.alint.yml
 mastodon/mastodon	facb552c9cdbe8a2ebff0b94ebf2c9e9ec385347	mastodon-mastodon.alint.yml
+mattermost/mattermost	69102aba22607b2fc21a72d1958373563650223d	mattermost-mattermost.alint.yml
+microsoft/fluentui	b4f5c3cca4e95ab5d271657cbf440cc8bf7427f6	microsoft-fluentui.alint.yml
+microsoft/rushstack	a1d41fc46f3fa4951eef79ec0eabd2173db7dd55	microsoft-rushstack.alint.yml
 microsoft/TypeScript	f3d3968058b5ee0f1c78dc1484a287d9f33bf638	microsoft-TypeScript.alint.yml
 microsoft/vscode	07cee71da6523e7dedab6c4ed83a2c41cd5149a6	microsoft-vscode.alint.yml
 neovim/neovim	fb5aad1d07d68b3da38bc7ba5c6a7896b3dfcda5	neovim-neovim.alint.yml
 netty/netty	e067b6e3376afee7629481d46333c3acf7f95943	netty-netty.alint.yml
+nextcloud/server	d04a299b92c744b6a22255f01032fa755208bef0	nextcloud-server.alint.yml
 NixOS/nix	d212b92f1eaa6fa8d2cbfaaebf5dcf613e2cd02c	NixOS-nix.alint.yml
 NixOS/nixpkgs	d9a85a232f55de20407277a09f475ba52d568f24	NixOS-nixpkgs.alint.yml
 nodejs/node	7af433b68e97471a94e665ffde63633d73849ce2	nodejs-node.alint.yml
@@ -94,23 +107,30 @@ pytorch/pytorch	7d2d4404beef557bc5c2e1c8286e600ed30286db	pytorch-pytorch.alint.y
 quarkusio/quarkus	c8c6babb39fbc117f610cdea2f571cd22311ef7e	quarkusio-quarkus.alint.yml
 rails/rails	6c75e6d5663afa4278ee593c2d6c20c1ee396e32	rails-rails.alint.yml
 redis/redis	230c651c8907c88d43c0ba51d29f75e8eb353f66	redis-redis.alint.yml
+RocketChat/Rocket.Chat	fb1d4217d8c56957fe49310308f95b8a2cd6c926	RocketChat-Rocket.Chat.alint.yml
 rubocop/rubocop	43942e260071e869bccc7497bbba82d5d458530e	rubocop-rubocop.alint.yml
 ruby/ruby	ad14452e3bdcf255a217de7f8c64496e3428bb0f	ruby-ruby.alint.yml
 rust-lang/rust	c0bb140a37c81cf59a0b40c21c9413059644e294	rust-lang-rust.alint.yml
 scikit-learn/scikit-learn	65ab405b996c10c22392b3118f26d35ccf8e49a0	scikit-learn-scikit-learn.alint.yml
 serde-rs/serde	fa7da4a93567ed347ad0735c28e439fca688ef26	serde-rs-serde.alint.yml
 signalapp/Signal-Android	ae2477356bbbd9171b0c2e4ba35f7e6d78297fcf	signalapp-Signal-Android.alint.yml
+signalapp/Signal-Desktop	848443afc3fcc74a0e127ba4f4d8554b95da856e	signalapp-Signal-Desktop.alint.yml
 spf13/cobra	ad460ea8f249db69c943a365fb84f3a59042d54e	spf13-cobra.alint.yml
 spring-projects/spring-boot	bcecf922c6ee98d9451f414b4bf2213ed8f47922	spring-projects-spring-boot.alint.yml
 sqlalchemy/sqlalchemy	4fb459aaf05dd9c31ce3ece57c1bbf81ca9855de	sqlalchemy-sqlalchemy.alint.yml
 square/okhttp	0c5a45b1174b8f735cc251eb19faaed87b65d868	square-okhttp.alint.yml
+strapi/strapi	fcc1df0668527c342de7f8cc5acd331434a2d505	strapi-strapi.alint.yml
 sveltejs/svelte	5b8db1be35555fee3b938f9d7eab93f2aee48b7e	sveltejs-svelte.alint.yml
 swiftlang/swift	09dfb9b25be4a2a84e9a7d40b1128dd9cb8e7e55	swiftlang-swift.alint.yml
 symfony/symfony	9f30c2bb7f560974f408b6b1aae8e8da2000b3a8	symfony-symfony.alint.yml
 systemd/systemd	414fc6e3b200eea45ee97eddb79c7496e01db16c	systemd-systemd.alint.yml
+TanStack/query	9b528b5e51844197a6cb795822edc38569f1dff9	TanStack-query.alint.yml
 tensorflow/tensorflow	803e4ccb979128484a6ef6bbe1fcf72332c28853	tensorflow-tensorflow.alint.yml
 Textualize/rich	46cebbb032f920eb096efbaf23cdc6fe9dd541f7	Textualize-rich.alint.yml
+thunderbird/thunderbird-android	ac1f0e85f63c1b600ac443d1fb2d939bffff7de5	thunderbird-thunderbird-android.alint.yml
 tokio-rs/axum	4a72e063b916f39e0698a345a99a755deb8f345b	tokio-rs-axum.alint.yml
+trpc/trpc	8eff9ff0ddf4be4a682bf205fb66b00a26901075	trpc-trpc.alint.yml
+TryGhost/Ghost	ab272fcb6056d23e32b307264eba35ffd27a921b	TryGhost-Ghost.alint.yml
 valkey-io/valkey	c15ecf1dd83cd045fc3538e81df4ae91ab0ff11c	valkey-io-valkey.alint.yml
 vapor/vapor	712b0919a3ba772f7402ccaf07cdb6ca823dd650	vapor-vapor.alint.yml
 vercel/next.js	bc384860d5f0b77a3cab9769ca4b1a0d7f5ce2fe	vercel-next.js.alint.yml
@@ -118,3 +138,5 @@ vercel/turborepo	468a9ddd2e181ea77c77c9c3d1519c628521cc9d	vercel-turborepo.alint
 vim/vim	fd30a736cc4acbefe3a1b05e6051f8df13aa6b2b	vim-vim.alint.yml
 vitejs/vite	f94df87ff03b40b65e29bacdc04cc18c7bccaa4a	vitejs-vite.alint.yml
 withastro/astro	fa7a26410e487e390e89b1302994aaea150b5bdd	withastro-astro.alint.yml
+yarnpkg/berry	f359f65c1f8bb2efb051b3e55edcdc3cb461d159	yarnpkg-berry.alint.yml
+zulip/zulip	39bd5f2f40a647af06b1cc0267cddd34f88ed2e9	zulip-zulip.alint.yml

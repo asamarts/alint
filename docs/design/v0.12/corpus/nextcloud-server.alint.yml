@@ -1,0 +1,802 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
+#
+# alint v0.23 corpus-stratum config: nextcloud/server
+# Pinned @ d04a299b92c744b6a22255f01032fa755208bef0 (stratum: i18n)
+#
+# Shape: PHP 8.3+ server monolith (composer, vendor-dir lib/composer, a
+# 3rdparty/ submodule for vendored deps, vendor-bin/* tool installs) with 34
+# bundled apps under apps/, plus two npm front-ends (build/frontend for Vue 3,
+# build/frontend-legacy for Vue 2) driven from the root package.json, and a
+# committed dist/ bundle that a bot rebuilds after merge. Translations are
+# Transifex-synced l10n catalogs: <app>/l10n/<lang>.json + <lang>.js pairs under
+# core/l10n, lib/l10n and apps/*/l10n (pluralForm + a flat "translations" map).
+#
+# Covers: the repository-state assertions of the bespoke PHP checkers that
+# autocheckers.yml runs (build/translation-checker.php, triple-dot-checker.php,
+# htaccess-checker.php, files-checker.php, psalm-checker.sh, and the static
+# preconditions of autoloaderchecker.sh), the package-lock "resolved/integrity"
+# gate in npm-build.yml, and the REUSE-lint assertions alint can express; plus
+# clearly-marked value-add rules at level info.
+#
+# WHERE THE ENFORCED VALIDATION LIVES
+#   .github/workflows/autocheckers.yml - the bespoke checkers above (php/sh).
+#     Its dorny/paths-filter `src` filter (.github/workflows/**, 3rdparty/**,
+#     **/appinfo/**, **/lib/**, **/templates/**, vendor/**, vendor-bin/**,
+#     composer.json, composer.lock, **.php, build/autoloaderchecker.sh) skips
+#     both jobs on PRs that touch only core/ or apps/ l10n catalogs,
+#     .tx/config or JS/Vue, and Transifex sync pushes are not checked either
+#     (the workflow runs on pull_request only), so the translation and
+#     triple-dot checks can lag until the next PHP-touching PR.
+#   .github/workflows/lint-*.yml, static-code-analysis.yml, rector.yml,
+#     openapi.yml, phpunit*.yml, integration-*.yml, node-test.yml,
+#     npm-build.yml, playwright.yml, performance.yml, codeql.yml - tool runs
+#     (php -l, php-cs-fixer, eslint, stylelint, psalm x5, rector, openapi
+#     generator, phpunit, behat, vitest, playwright): D per R2.
+#   .github/workflows/block-*.yml, fixup.yml, ai-policy.yml,
+#     node-dist-unchanged.yml - PR merge gates on commit messages, the PR diff,
+#     or external state (network). Git-history ones are C (depth-1 clone);
+#     network ones are D.
+#   .github/workflows/reuse.yml - `reuse lint` (R7: each assertion a unit).
+#   NOT ENFORCED: .pre-commit-config.yaml is an opt-in local hook set. No
+#     workflow runs pre-commit and no doc (CONTRIBUTING.md, README.md,
+#     AGENTS.md, the PR template) asks for it, and its end-of-file-fixer hook
+#     is violated by 2669 tracked non-empty text files at the pin (symlinks
+#     skipped; a NUL byte in the first 8 KiB counted as binary; Stage A's
+#     4611 was not reproduced), so none of its hooks
+#     (check-yaml, check-added-large-files, end-of-file-fixer) is a unit
+#     (R5; Stage B removed nextcloud-21 and nextcloud-22). The check-yaml
+#     probe stays below as value-add.
+#
+# WALKER NOTE: the PHP checkers walk the tree with (Recursive)DirectoryIterator,
+# which ignores .gitignore. nextcloud force-adds three gitignored files
+# (.htaccess, .idea/codeStyleSettings.xml{,.license}, core/js/mimetypelist.js),
+# and the default gitignore-respecting walk hides them (the htaccess and
+# files-checker rules would then miss .htaccess and .idea). So this config
+# turns respect_gitignore off (it is a root-only setting; per rule, only
+# file_exists literal paths can override it); on a fresh checkout (CI, the
+# pinned clone) the walked tree then equals the index. Rules whose reference
+# tool skips gitignored files (reuse lint, the AGENTS.md review convention,
+# check-yaml) and that scan `**` exclude the generated and third-party trees
+# .gitignore names (node_modules, vendor-bin vendor dirs, the composer bin
+# and bamarni dirs, data/, build/lib, build/bin, updater/, apps?*/), so a
+# developer checkout after `npm ci` or `composer install` does not widen
+# them. Residual divergence (dev checkout only): non-shipped apps cloned into
+# apps/ and themes/* are ignored through an allowlist (`/apps*/*` plus
+# `!/apps/<app>` lines) that an exclude glob cannot mirror.
+#
+# NOT EXPRESSIBLE TODAY (B, documented only; no rule):
+#   - nextcloud-16 reuse lint "every file has copyright + license info": the
+#     disjunction of an in-file header, a <file>.license sidecar, or a
+#     REUSE.toml [[annotations]] path glob (B-adapter). Two value-add rules
+#     below express its l10n and dist instances.
+#   - nextcloud-18 reuse lint "every SPDX license used has LICENSES/<id>.txt"
+#     (reference) and nextcloud-19 "every LICENSES/ text is used" (set):
+#     B-adapter after Stage B. The IDs come from compound SPDX expressions
+#     ('AGPL-3.0-or-later AND MIT', REUSE.toml's 'CC-BY-SA-3.0 OR
+#     GPL-3.0-or-later') in headers, .license sidecars and REUSE.toml values,
+#     so they need an SPDX-expression extractor that splits them into ids; the
+#     other side is a directory listing of LICENSES/.
+#   - nextcloud-25 ai-policy.yml "no coding-agent Signed-off-by trailer": a
+#     git_commit_message complement pattern bans it (C, as
+#     thunderbird-android-63); the clone is depth 1, so no rule here.
+#   - nextcloud-b02 root package.json `overrides` must not conflict with a
+#     direct dependency (a `$<name>` reference names a direct dependency; a
+#     non-`$` override of a direct dependency equals its spec), else `npm ci`
+#     fails with EOVERRIDE (B-adapter, needs entry-values: a JSONPath filter
+#     cannot compare an override value with the dependency entry another key
+#     selects).
+#
+# Stage C (2026-11-12) applied the Stage B review: guards for a missing
+# .tx/config or psalm.xml and for a stray file under apps/ (units 01, 14); a
+# new rule for nextcloud-b01 (A); nextcloud-06 moved to family other and its
+# root-entry exclusion no longer depends on the package name; nextcloud-07
+# skips the autoload_*.php files that composer dump-autoload regenerates
+# before the grep; nextcloud-20 follows Python's Path.suffix; the `**` rules
+# exclude gitignored trees; nextcloud-21 demoted to value-add.
+
+version: 1
+
+respect_gitignore: false
+
+rules:
+  # ════════════════════════════════════════════════════════════════
+  # LOCALE FAMILY
+  # ════════════════════════════════════════════════════════════════
+
+  # nextcloud-01 (A, locale) build/translation-checker.php:17-28,60-73
+  # Every directory under apps/ except the untranslated `testing` and `viewer`
+  # must have an l10n/ directory AND a Transifex resource section
+  # `[o:nextcloud:p:nextcloud:r:<resource>]` in .tx/config, where <resource>
+  # is the app id except for the four renamed resources in $txConfigAppMap.
+  - id: nextcloud-l10n-app-has-l10n-dir
+    kind: for_each_dir
+    select: ['apps/*', '!apps/testing', '!apps/viewer']
+    require:
+      - kind: dir_exists
+        paths: '{path}/l10n'
+    level: error
+    message: >-
+      App is not correctly configured for translation sync via Transifex (no
+      l10n/ directory) and is not marked as untranslated in
+      build/translation-checker.php.
+
+  - id: nextcloud-l10n-app-in-tx-config
+    kind: for_each_dir
+    select:
+      - 'apps/*'
+      - '!apps/testing'
+      - '!apps/viewer'
+      - '!apps/appstore'
+      - '!apps/dashboard'
+      - '!apps/encryption'
+      - '!apps/settings'
+    require:
+      - kind: file_content_matches
+        paths: '.tx/config'
+        pattern: '\[o:nextcloud:p:nextcloud:r:{basename}\]'
+    level: error
+    message: >-
+      An app is not correctly configured for translation sync: .tx/config has
+      no [o:nextcloud:p:nextcloud:r:<app>] resource section.
+
+  # The four $txConfigAppMap renames, each required only while its app exists.
+  - id: nextcloud-l10n-shipped-with-server-in-tx-config
+    kind: for_each_dir
+    select: ['apps/appstore', 'apps/dashboard']
+    require:
+      - kind: file_content_matches
+        paths: '.tx/config'
+        pattern: '\[o:nextcloud:p:nextcloud:r:{basename}-shipped-with-server\]'
+    level: error
+    message: >-
+      apps/appstore and apps/dashboard sync as <app>-shipped-with-server
+      Transifex resources; the section is missing from .tx/config.
+
+  - id: nextcloud-l10n-encryption-in-tx-config
+    kind: for_each_dir
+    select: 'apps/encryption'
+    require:
+      - kind: file_content_matches
+        paths: '.tx/config'
+        pattern: '\[o:nextcloud:p:nextcloud:r:files_encryption\]'
+    level: error
+    message: 'apps/encryption syncs as the files_encryption Transifex resource; the section is missing from .tx/config.'
+
+  - id: nextcloud-l10n-settings-in-tx-config
+    kind: for_each_dir
+    select: 'apps/settings'
+    require:
+      - kind: file_content_matches
+        paths: '.tx/config'
+        pattern: '\[o:nextcloud:p:nextcloud:r:settings-1\]'
+    level: error
+    message: 'apps/settings syncs as the settings-1 Transifex resource; the section is missing from .tx/config.'
+
+  # nextcloud-01 guard (Stage B): the nested file_content_matches rules above
+  # pass silently when .tx/config is missing, but translation-checker.php:15
+  # then reads false and str_contains(false, ...) at :67 throws a TypeError
+  # under declare(strict_types=1), so the checker fails.
+  - id: nextcloud-l10n-tx-config-exists
+    kind: file_exists
+    paths: '.tx/config'
+    level: error
+    message: '.tx/config (the Transifex resource map) is missing; build/translation-checker.php needs it.'
+
+  # nextcloud-01 and nextcloud-14 guard (Stage B): for_each_dir iterates
+  # directories only, but translation-checker.php:60-70 walks apps/ with
+  # DirectoryIterator and treats every non-dot entry as an app, so a stray
+  # file such as apps/README.md fails it (no <file>/l10n); psalm-checker.sh:8-17
+  # (`for app in apps/*`) also fails on a tracked one (no psalm.xml entry).
+  # apps/ holds only the 34 app directories at the pin.
+  - id: nextcloud-apps-no-stray-files
+    kind: file_absent
+    paths: 'apps/*'
+    level: error
+    message: >-
+      apps/ may hold only app directories: build/translation-checker.php and
+      build/psalm-checker.sh treat every entry as an app.
+
+  # nextcloud-02 (A, locale) build/translation-checker.php:31-56,85-91
+  # A catalog JSON for a language outside $rtlLanguages (ar, fa, he, ps, ug,
+  # ur_PK) must not contain, inside a line (a character before and after), any
+  # of the $rtlCharacters: U+061C, U+0623, U+200E, U+200F, U+202A-U+202E,
+  # U+2066-U+2069, U+206C, U+206D. Same regex as the script's
+  # /^(.+[...].+)$/mu, over core/l10n/*.json and apps/*/l10n/*.json.
+  - id: nextcloud-l10n-no-rtl-chars-in-ltr-catalogs
+    kind: file_content_forbidden
+    paths:
+      include: ['core/l10n/*.json', 'apps/*/l10n/*.json']
+      exclude:
+        - 'apps/testing/**'
+        - 'apps/viewer/**'
+        - '**/l10n/ar.json'
+        - '**/l10n/fa.json'
+        - '**/l10n/he.json'
+        - '**/l10n/ps.json'
+        - '**/l10n/ug.json'
+        - '**/l10n/ur_PK.json'
+    pattern: '(?m)^.+[\x{061C}\x{0623}\x{200E}\x{200F}\x{202A}-\x{202E}\x{2066}-\x{2069}\x{206C}\x{206D}].+$'
+    level: error
+    message: >-
+      Contains RTL-limited characters in the translations of a non-RTL
+      language (build/translation-checker.php).
+
+  # nextcloud-03 (C, locale) build/translation-checker.php:93-98
+  # No '|' anywhere in json_encode($json['translations']) - keys or values;
+  # the trailing "pluralForm" (which uses '||') is exempt. JSONPath cannot test
+  # member names, so this is a line-layout regex: every translation entry sits
+  # on its own indented line and the pluralForm line starts with '}'. Holds
+  # for the Transifex writer's layout only (C).
+  - id: nextcloud-l10n-no-pipe-in-translations
+    kind: file_content_forbidden
+    paths:
+      include: ['core/l10n/*.json', 'apps/*/l10n/*.json']
+      exclude: ['apps/testing/**', 'apps/viewer/**']
+    pattern: '(?m)^[^}\n][^\n]*\|'
+    level: error
+    message: 'Contains a | in the translations (build/translation-checker.php).'
+
+  # nextcloud-04 (A, other) build/triple-dot-checker.php:9-33
+  # In every file under apps/ and core/ except *.map, a t()/n() call whose
+  # second string argument contains '...' is an error: translatable strings
+  # use the ellipsis character. The script greps each line with
+  # /[^A-Za-z][tn]\(['"][^'"]*?['"],( ?)['"][^'"]*?(\.\.\.)[^'"]*?['"]/sU.
+  - id: nextcloud-l10n-ellipsis-not-triple-dot
+    kind: file_content_forbidden
+    paths:
+      include: ['apps/**', 'core/**']
+      exclude: ['**/*.map']
+    pattern: '[^A-Za-z\n][tn]\([''"][^''"\n]*[''"], ?[''"][^''"\n]*\.\.\.[^''"\n]*[''"]'
+    level: error
+    message: >-
+      Use the ellipsis character instead of three dots in translatable
+      strings (build/triple-dot-checker.php).
+
+  # ════════════════════════════════════════════════════════════════
+  # DEP-VERSION FAMILY
+  # ════════════════════════════════════════════════════════════════
+
+  # nextcloud-07 (A, dep-version) build/autoloaderchecker.sh:35-42
+  # The script first regenerates the main autoloader (:35 `composer
+  # dump-autoload`), then greps lib/composer/composer/ recursively for
+  # 'Bamarni\\Composer\\Bin' (:37-42; the escaped form composer writes into
+  # installed.json, installed.php and autoload_*.php). dump-autoload rewrites
+  # every autoload_*.php from the committed installed.json and composer.json
+  # before the grep, so a stale autoload_*.php alone cannot fail the check
+  # (and the classmap diff at :59-82 looks only at autoload_classmap); the
+  # files that survive regeneration, in practice a dev-mode installed.json or
+  # installed.php, are what the grep tests. So the rule skips autoload_*.php.
+  - id: nextcloud-deps-no-composer-bin-plugin-in-autoloader
+    kind: file_content_forbidden
+    paths:
+      include: ['lib/composer/composer/**']
+      exclude: ['lib/composer/composer/autoload_*.php']
+    pattern: 'Bamarni\\\\Composer\\\\Bin'
+    level: error
+    message: >-
+      The main autoloader contains the composer bin plugin; run composer again
+      with --no-dev and commit the result (build/autoloaderchecker.sh).
+
+  # ════════════════════════════════════════════════════════════════
+  # OTHER FAMILY
+  # ════════════════════════════════════════════════════════════════
+
+  # nextcloud-06 (A, other; family moved from dep-version by Stage B: lockfile
+  # hygiene governs no version, range or dependency field, precedent
+  # signal-desktop-41) .github/workflows/npm-build.yml:75-79
+  # "Validate package-lock.json": npm-package-lock-add-resolved fills in any
+  # missing `resolved`/`integrity` and `git diff --exit-code` fails on a
+  # change, i.e. every package entry of the root package-lock.json (except the
+  # root "" entry and `link: true` entries) carries both fields.
+  # JSONPath filters cannot test the "" member name, so the root entry is
+  # excluded as the one whose `name` equals the top-level `name` (npm writes
+  # both from package.json, so renaming the package keeps it excluded; alias
+  # entries carry the aliased package's name). Not verified offline: how the
+  # action treats `inBundle: true` entries (npm records neither field for
+  # them; this rule would flag one; the pin has none) and an empty-string
+  # `resolved` (passes here).
+  - id: nextcloud-deps-lock-entries-resolved
+    kind: json_path_absent
+    paths: 'package-lock.json'
+    path: "$.packages[?(!@.link && @.name != $.name && (!@.resolved || !@.integrity))]"
+    level: error
+    message: >-
+      package-lock.json has a package entry without `resolved`/`integrity`
+      (npm/cli#4460); run npm-package-lock-add-resolved and commit the result.
+
+  # nextcloud-b01 (A, other; Stage B) build/autoloaderchecker.sh:44-57
+  # For every app directory git does not ignore, the script runs
+  # `composer i --no-dev -d ${app}/composer || exit 1` (:53), which fails
+  # without apps/<app>/composer/composer.json; a precondition of the CI step
+  # separate from the autoloader-freshness diff (nextcloud-28, D). Like
+  # nextcloud-14, the rule (respect_gitignore off) would also see a
+  # non-shipped, gitignored app cloned into apps/ in a developer checkout,
+  # which the script skips through `git check-ignore`; on a CI checkout the
+  # two agree. All 34 apps have it at the pin.
+  - id: nextcloud-apps-have-composer-project
+    kind: for_each_dir
+    select: 'apps/*'
+    require:
+      - kind: file_exists
+        paths: '{path}/composer/composer.json'
+    level: error
+    message: >-
+      An app has no composer/composer.json: build/autoloaderchecker.sh runs
+      `composer i --no-dev -d apps/<app>/composer` for every shipped app.
+
+  # nextcloud-11 (A, other) build/htaccess-checker.php:14-20
+  # The committed root .htaccess must not contain the section Nextcloud
+  # appends at runtime ("DO NOT CHANGE ANYTHING ABOVE THIS LINE").
+  - id: nextcloud-htaccess-no-runtime-section
+    kind: file_content_forbidden
+    paths: '.htaccess'
+    pattern: 'DO NOT CHANGE ANYTHING'
+    level: error
+    message: '.htaccess file has invalid changes (build/htaccess-checker.php).'
+
+  # nextcloud-12 (A, other) build/files-checker.php:9-114 ("additional files")
+  # The repository root holds only the release allowlist in $expectedFiles.
+  # The two exclude lists below are a copy of that array (83 names once '.',
+  # '..' and '.git' are dropped; equal to it at the pin) and will drift when
+  # the array changes. The drift-free alternative, a cross_file `registered`
+  # relation over source.files '*' against a regex read of the array, depends
+  # on the array's one-name-per-line layout (a C form), so the copy stays.
+  - id: nextcloud-root-no-unexpected-files
+    kind: file_absent
+    paths:
+      include: ['*']
+      exclude:
+        - '.editorconfig'
+        - '.envrc'
+        - '.git-blame-ignore-revs'
+        - '.gitattributes'
+        - '.gitignore'
+        - '.gitmodules'
+        - '.htaccess'
+        - '.jshintrc'
+        - '.mailmap'
+        - '.nextcloudignore'
+        - '.npmignore'
+        - '.php-cs-fixer.dist.php'
+        - '.pre-commit-config.yaml'
+        - '.tag'
+        - '.user.ini'
+        - 'AGENTS.md'
+        - 'AUTHORS'
+        - 'CHANGELOG.md'
+        - 'CLAUDE.md'
+        - 'CODE_OF_CONDUCT.md'
+        - 'COPYING'
+        - 'COPYING-README'
+        - 'DESIGN.md'
+        - 'Makefile'
+        - 'README.md'
+        - 'REUSE.toml'
+        - 'SECURITY.md'
+        - 'autotest-checkers.sh'
+        - 'autotest-external.sh'
+        - 'autotest.sh'
+        - 'codecov.yml'
+        - 'composer.json'
+        - 'composer.lock'
+        - 'console.php'
+        - 'cron.php'
+        - 'custom.d.ts'
+        - 'eslint.config.js'
+        - 'flake.lock'
+        - 'flake.nix'
+        - 'index.html'
+        - 'index.php'
+        - 'occ'
+        - 'openapi.json'
+        - 'package-lock.json'
+        - 'package.json'
+        - 'playwright.config.ts'
+        - 'psalm-ncu.xml'
+        - 'psalm-ocp.xml'
+        - 'psalm-strict.xml'
+        - 'psalm.xml'
+        - 'public.php'
+        - 'remote.php'
+        - 'robots.txt'
+        - 'status.php'
+        - 'stylelint.config.js'
+        - 'tsconfig.json'
+        - 'version.php'
+        - 'vite.config.ts'
+        - 'vitest.config.ts'
+        - 'window.d.ts'
+        - 'Caddyfile'
+    level: error
+    message: >-
+      Unexpected file at the repository root: add it to $expectedFiles in
+      build/files-checker.php (and inform the release team) or remove it.
+
+  - id: nextcloud-root-no-unexpected-dirs
+    kind: dir_absent
+    paths:
+      include: ['*']
+      exclude:
+        - '.devcontainer'
+        - '.github'
+        - '.idea'
+        - '.oss-scanner'
+        - '.tx'
+        - '__mocks__'
+        - '__tests__'
+        - '3rdparty'
+        - 'LICENSES'
+        - 'apps'
+        - 'build'
+        - 'config'
+        - 'contribute'
+        - 'core'
+        - 'dist'
+        - 'lib'
+        - 'ocs'
+        - 'ocs-provider'
+        - 'resources'
+        - 'tests'
+        - 'themes'
+        - 'vendor-bin'
+    level: error
+    message: >-
+      Unexpected directory at the repository root: add it to $expectedFiles
+      in build/files-checker.php (and inform the release team) or remove it.
+
+  # nextcloud-13 (C, other) build/files-checker.php:107-119 ("missing files")
+  # Every $expectedFiles entry exists at the root. file_exists/dir_exists
+  # `paths:` lists are any-of, so an all-of existence check over ~85 names
+  # needs one rule per name; this reads the script's own array instead, via a
+  # regex that holds for its one-quoted-name-per-line layout (C). '.' and '..'
+  # are skipped by the capture.
+  - id: nextcloud-root-expected-files-present
+    kind: registry_paths_resolve
+    source: 'build/files-checker.php'
+    extract:
+      # '.', '..' and '.git' are skipped: the walker never shows .git.
+      regex: '(?m)^\t''(\.(?:[^''.g][^'']*|g[^''i][^'']*|gi[^''t][^'']*|git[^'']+)|[^''.][^'']*)'',$'
+    base: lint_root
+    expect: any
+    level: error
+    message: >-
+      An entry of $expectedFiles in build/files-checker.php is missing from
+      the repository root.
+
+  # nextcloud-14 (A, other) build/psalm-checker.sh:8-26
+  # Every shipped app (apps/* not ignored by git) is a psalm.xml projectFiles
+  # entry `<directory name="apps/<app>"/>`.
+  - id: nextcloud-psalm-covers-every-app
+    kind: for_each_dir
+    select: 'apps/*'
+    require:
+      - kind: file_content_matches
+        paths: 'psalm.xml'
+        pattern: 'directory name="{path}"'
+    level: error
+    message: >-
+      An app is not set up for linting with psalm: add
+      <directory name="apps/<app>"/> to psalm.xml (build/psalm-checker.sh).
+
+  # nextcloud-14 guard (Stage B): with psalm.xml missing the for_each_dir
+  # above passes silently, but psalm-checker.sh:14 greps psalm.xml for every
+  # app, the grep fails and the script exits 1. The stray-file half of
+  # Stage B's finding is nextcloud-apps-no-stray-files (locale section).
+  - id: nextcloud-psalm-config-exists
+    kind: file_exists
+    paths: 'psalm.xml'
+    level: error
+    message: 'psalm.xml is missing; build/psalm-checker.sh checks every app against it.'
+
+  # nextcloud-17 (C, other) reuse lint (reuse.yml): bad and deprecated
+  # licenses. Every SPDX-License-Identifier tag is a valid, current SPDX
+  # expression. reuse reads a file's .license sidecar INSTEAD of the file when
+  # one exists, and skips REUSE-IgnoreStart/End blocks; alint has neither
+  # rule, so the scope hand-excludes the sidecar-covered dist bundles (whose
+  # minified bodies embed escaped third-party tags) and the one file with an
+  # ignore block (C). Partial: REUSE.toml's `SPDX-License-Identifier = "..."`
+  # TOML values are not tags and are not covered, nor is reuse's bad-license
+  # check on LICENSES/ file stems that are neither SPDX ids nor LicenseRef-*;
+  # a bad id in a dist/*.js.license sidecar is also reported through each
+  # dist/*.map.license symlink to it. reuse lint skips gitignored files, so
+  # the gitignored trees are excluded (WALKER NOTE).
+  - id: nextcloud-reuse-spdx-identifiers-valid
+    kind: spdx_identifier_valid
+    paths:
+      include: ['**']
+      exclude:
+        - '3rdparty/**'
+        - 'dist/*.js'
+        - 'dist/*.mjs'
+        - 'dist/*.map'
+        - 'build/frontend-legacy/WebpackSPDXPlugin.cjs'
+        # gitignored trees (.gitignore)
+        - '**/node_modules/**'
+        - 'vendor-bin/**/vendor/**'
+        - 'lib/composer/bin/**'
+        - 'lib/composer/bamarni/**'
+        - 'data/**'
+        - 'build/lib/**'
+        - 'build/bin/**'
+        - 'updater/**'
+        - 'apps?*/**'
+    level: error
+    message: 'reuse lint: an SPDX-License-Identifier is not a valid, current SPDX expression.'
+
+  # nextcloud-20 (A, other) reuse lint (reuse.yml): licenses without a file
+  # extension. Every license text under LICENSES/ has an extension. reuse
+  # tests Python's Path.suffix, which is empty unless the last '.' sits after
+  # the first character and before the last one, so a dotfile such as
+  # LICENSES/.x.txt has the extension .txt and LICENSES/GPL-3.0 has '.0'.
+  - id: nextcloud-reuse-license-files-have-extension
+    kind: filename_regex
+    paths: 'LICENSES/*'
+    pattern: '^.+\.[^.]+$'
+    level: error
+    message: 'reuse lint: a license file under LICENSES/ has no file extension.'
+
+  # nextcloud-15 (A, other) AGENTS.md "What this agent must never do":
+  # submitted code must not carry malformed or garbled characters such as the
+  # U+FFFD replacement character. A review convention (R5); holds at the pin
+  # outside the generated dist/ bundles (third-party code) and AGENTS.md,
+  # which names the character. Partial: the convention ("malformed or garbled
+  # characters", addressed to coding agents) also covers invalid UTF-8 and
+  # mojibake, which this rule does not test. Submitted text is tracked text,
+  # so the gitignored trees are excluded (WALKER NOTE).
+  - id: nextcloud-no-replacement-character
+    kind: file_content_forbidden
+    paths:
+      include: ['**']
+      exclude:
+        - 'dist/**'
+        - '3rdparty/**'
+        - 'AGENTS.md'
+        # gitignored trees (.gitignore)
+        - '**/node_modules/**'
+        - 'vendor-bin/**/vendor/**'
+        - 'lib/composer/bin/**'
+        - 'lib/composer/bamarni/**'
+        - 'data/**'
+        - 'build/lib/**'
+        - 'build/bin/**'
+        - 'updater/**'
+        - 'apps?*/**'
+    pattern: '\x{FFFD}'
+    level: error
+    message: 'Garbled text: remove the U+FFFD replacement character (AGENTS.md).'
+
+  # nextcloud-21 (pre-commit check-yaml) and nextcloud-22 (pre-commit
+  # check-added-large-files): removed by Stage B as not enforced (see the
+  # header). The check-yaml probe is kept in the VALUE-ADD section below.
+
+  # ════════════════════════════════════════════════════════════════
+  # C UNITS WITHOUT A RULE (git-history kinds; the clone is depth 1)
+  # These are written out for a CI checkout with full history and the base
+  # SHA in ALINT_BASE_SHA. They are commented out because section 2.4 bars
+  # git-history kinds on the depth-1 clone, so R4 cannot confirm them.
+  # ════════════════════════════════════════════════════════════════
+  # nextcloud-23 (C) block-unconventional-commits.yml
+  #   (webiny/action-conventional-commits on every PR commit):
+  # - id: nextcloud-commits-conventional
+  #   kind: git_commit_subject_matches
+  #   since: "{{env.ALINT_BASE_SHA | default('origin/master')}}"
+  #   # type list approximated; the action's own list was not read offline
+  #   matches: '^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)]+\))?!?: .+'
+  #   level: error
+  # nextcloud-24 (C) fixup.yml (skjnldsv/block-fixup-merge-action):
+  # - id: nextcloud-commits-no-fixup
+  #   kind: git_commit_no_fixup
+  #   since: "{{env.ALINT_BASE_SHA | default('origin/master')}}"
+  #   level: error
+  # nextcloud-26 (C) .github/CONTRIBUTING.md / README.md / AGENTS.md: every commit
+  #   carries a DCO Signed-off-by (enforced by the organization's DCO app):
+  # - id: nextcloud-commits-signed-off
+  #   kind: git_commit_signed_off
+  #   since: "{{env.ALINT_BASE_SHA | default('origin/master')}}"
+  #   level: error
+  # nextcloud-27 (C) node-dist-unchanged.yml: a PR may not add, modify or
+  #   rename anything under dist/ (the bot rebuilds it after merge):
+  # - id: nextcloud-dist-unchanged-in-pr
+  #   kind: git_no_denied_paths
+  #   paths: ['dist/**']
+  #   since: "{{env.ALINT_BASE_SHA | default('origin/master')}}"
+  #   level: error
+
+  # ════════════════════════════════════════════════════════════════
+  # VALUE-ADD (NOT in the enforced denominator, R3/R5): level info.
+  # ════════════════════════════════════════════════════════════════
+
+  # value-add (other; was nextcloud-21, removed by Stage B): every YAML file
+  # parses, after .pre-commit-config.yaml:10 check-yaml. Not enforced: the
+  # pre-commit config is opt-in, run by no workflow and asked for by no doc
+  # (R5). Also an approximation: alint's YAML reader drops custom tags and
+  # keeps the last of duplicate keys, where check-yaml (ruamel safe load)
+  # rejects both. check-yaml sees only tracked/staged files, so the
+  # gitignored trees are excluded (WALKER NOTE).
+  - id: nextcloud-yaml-parses
+    kind: yaml_path_absent
+    paths:
+      include: ['**/*.yml', '**/*.yaml']
+      exclude:
+        - '3rdparty/**'
+        # gitignored trees (.gitignore)
+        - '**/node_modules/**'
+        - 'vendor-bin/**/vendor/**'
+        - 'lib/composer/bin/**'
+        - 'lib/composer/bamarni/**'
+        - 'data/**'
+        - 'build/lib/**'
+        - 'build/bin/**'
+        - 'updater/**'
+        - 'apps?*/**'
+    path: "$['__alint_parse_probe__']"
+    level: info
+    message: 'value-add: YAML file does not parse (the opt-in pre-commit check-yaml hook would reject it).'
+
+  # value-add (toolchain-pin): the PHP floor 8.3 is repeated in composer.json
+  # (config.platform.php, require.php), the four psalm configs (phpVersion),
+  # the six vendor-bin platform pins and lib/versioncheck.php; nothing gates
+  # their agreement.
+  - id: nextcloud-valueadd-php-floor-coherent
+    kind: cross_file
+    source:
+      file: 'composer.json'
+      extract: { json: '$.config.platform.php' }
+    targets:
+      - file: 'composer.json'
+        extract: { json: '$.require.php' }
+      - file: 'psalm.xml'
+        extract: { xml: "$.psalm['@phpVersion']" }
+      - file: 'psalm-ocp.xml'
+        extract: { xml: "$.psalm['@phpVersion']" }
+      - file: 'psalm-ncu.xml'
+        extract: { xml: "$.psalm['@phpVersion']" }
+      - file: 'psalm-strict.xml'
+        extract: { xml: "$.psalm['@phpVersion']" }
+      - file: 'lib/versioncheck.php'
+        extract: { regex: 'requires at least PHP (\d+\.\d+)' }
+    relation: equals
+    normalize: semver-minor
+    level: info
+    message: 'value-add: the PHP floor (MAJOR.MINOR) should agree across composer.json, the psalm configs and lib/versioncheck.php.'
+
+  - id: nextcloud-valueadd-vendor-bin-php-platform
+    kind: cross_file
+    source:
+      file: 'composer.json'
+      extract: { json: '$.config.platform.php' }
+    targets:
+      files: 'vendor-bin/*/composer.json'
+      extract: { json: '$.config.platform.php' }
+    relation: equals
+    normalize: semver-minor
+    level: info
+    message: 'value-add: each vendor-bin tool install should pin the same PHP platform (MAJOR.MINOR) as composer.json.'
+
+  # value-add (toolchain-pin): the root and both front-end package.json
+  # declare the same engines; CI installs Node/npm from the root's only.
+  - id: nextcloud-valueadd-node-engines-coherent
+    kind: cross_file
+    source:
+      file: 'package.json'
+      extract: { json: '$.engines.node' }
+    targets:
+      - file: 'build/frontend/package.json'
+        extract: { json: '$.engines.node' }
+      - file: 'build/frontend-legacy/package.json'
+        extract: { json: '$.engines.node' }
+    relation: equals
+    level: info
+    message: 'value-add: build/frontend*/package.json engines.node should equal the root package.json (the one CI reads).'
+
+  - id: nextcloud-valueadd-npm-engines-coherent
+    kind: cross_file
+    source:
+      file: 'package.json'
+      extract: { json: '$.engines.npm' }
+    targets:
+      - file: 'build/frontend/package.json'
+        extract: { json: '$.engines.npm' }
+      - file: 'build/frontend-legacy/package.json'
+        extract: { json: '$.engines.npm' }
+    relation: equals
+    level: info
+    message: 'value-add: build/frontend*/package.json engines.npm should equal the root package.json (the one CI reads).'
+
+  # value-add (other): every bundled app declares the server major from
+  # version.php as both its min- and max-version.
+  - id: nextcloud-valueadd-apps-target-server-major
+    kind: cross_file
+    source:
+      file: 'version.php'
+      extract: { regex: '\$OC_Version = \[(\d+),' }
+    targets:
+      files: 'apps/*/appinfo/info.xml'
+      extract: { xml: "$.info.dependencies.nextcloud['@min-version']" }
+    relation: equals
+    level: info
+    message: 'value-add: a bundled app should require exactly the server major in version.php.'
+
+  - id: nextcloud-valueadd-apps-max-server-major
+    kind: cross_file
+    source:
+      file: 'version.php'
+      extract: { regex: '\$OC_Version = \[(\d+),' }
+    targets:
+      files: 'apps/*/appinfo/info.xml'
+      extract: { xml: "$.info.dependencies.nextcloud['@max-version']" }
+    relation: equals
+    level: info
+    message: 'value-add: a bundled app should cap max-version at the server major in version.php.'
+
+  # value-add (locale): every catalog .json has its .js twin and back; the
+  # Transifex sync writes both and lib/private/L10N reads the .json, the
+  # browser the .js.
+  - id: nextcloud-valueadd-l10n-json-has-js
+    kind: pair
+    primary: '{core,lib,apps/*}/l10n/*.json'
+    partner: '{dir}/{stem}.js'
+    level: info
+    message: 'value-add: a catalog .json should have its .js twin.'
+
+  - id: nextcloud-valueadd-l10n-js-has-json
+    kind: pair
+    primary: '{core,lib,apps/*}/l10n/*.js'
+    partner: '{dir}/{stem}.json'
+    level: info
+    message: 'value-add: a catalog .js should have its .json twin.'
+
+  # value-add (locale): catalogs parse and carry a gettext pluralForm. This
+  # also covers the parse check translation-checker.php intends but masks
+  # (it reads json_last_error() after json_encode(), which resets it).
+  - id: nextcloud-valueadd-l10n-plural-form
+    kind: json_path_matches
+    paths: ['core/l10n/*.json', 'lib/l10n/*.json', 'apps/*/l10n/*.json']
+    path: '$.pluralForm'
+    matches: '^nplurals=[1-6]; ?plural=.+;?$'
+    level: info
+    message: 'value-add: a catalog should parse and declare a gettext pluralForm.'
+
+  # value-add (locale): translation-checker.php skips lib/l10n, which
+  # Transifex also syncs; the same RTL and '|' checks hold there.
+  - id: nextcloud-valueadd-lib-l10n-no-rtl-chars
+    kind: file_content_forbidden
+    paths:
+      include: ['lib/l10n/*.json']
+      exclude: ['**/l10n/ar.json', '**/l10n/fa.json', '**/l10n/he.json', '**/l10n/ps.json', '**/l10n/ug.json', '**/l10n/ur_PK.json']
+    pattern: '(?m)^.+[\x{061C}\x{0623}\x{200E}\x{200F}\x{202A}-\x{202E}\x{2066}-\x{2069}\x{206C}\x{206D}].+$'
+    level: info
+    message: 'value-add: lib/l10n catalog of a non-RTL language contains RTL-limited characters.'
+
+  - id: nextcloud-valueadd-lib-l10n-no-pipe
+    kind: file_content_forbidden
+    paths: 'lib/l10n/*.json'
+    pattern: '(?m)^[^}\n][^\n]*\|'
+    level: info
+    message: 'value-add: lib/l10n catalog contains a | in the translations.'
+
+  # value-add (locale; the l10n instance of the B-adapter REUSE coverage
+  # unit): catalogs carry no header, so every translated app's l10n/ must be
+  # listed in a REUSE.toml annotation or `reuse lint` fails.
+  - id: nextcloud-valueadd-reuse-covers-app-l10n
+    kind: for_each_dir
+    select: 'apps/*/l10n'
+    require:
+      - kind: file_content_matches
+        paths: 'REUSE.toml'
+        pattern: '"{path}/\*\*\.json"'
+    level: info
+    message: 'value-add: an app l10n/ directory is not listed in a REUSE.toml annotation, so reuse lint would fail on its catalogs.'
+
+  # value-add (other; part of the B-adapter REUSE coverage unit): every built
+  # dist bundle carries a generated .license sidecar.
+  - id: nextcloud-valueadd-dist-bundles-have-license-sidecar
+    kind: for_each_file
+    # dist/preview-service-worker.js is covered by a REUSE.toml
+    # [[annotations]] entry instead of a sidecar.
+    select: ['dist/*.js', 'dist/*.mjs', '!dist/preview-service-worker.js']
+    require:
+      - kind: file_exists
+        paths: '{path}.license'
+    level: info
+    message: 'value-add: a dist bundle should have its generated .license sidecar (reuse lint coverage).'

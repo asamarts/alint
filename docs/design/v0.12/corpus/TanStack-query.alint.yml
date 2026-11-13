@@ -1,0 +1,640 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
+#
+# alint v0.23 corpus-stratum config — TanStack/query
+# Pinned @ 9b528b5e51844197a6cb795822edc38569f1dff9 (stratum: js-monorepo; depth-1 clone, 2026-11-12)
+#
+# Shape: TypeScript library monorepo (pnpm 12 workspace with one default
+# `catalog:`, Nx task runner + Nx Cloud agents, Changesets releases). 27
+# packages/* (the @tanstack/*-query adapters, devtools, persisters, eslint
+# plugin, codemods), 19 integrations/*/* (bundler / framework smoke projects)
+# and ~150 private examples/<framework>/*; docs/ is the tanstack.com source.
+#
+# WHERE THE ENFORCED VALIDATION LIVES
+#   pr.yml "Test"   — `pnpm run test:pr` = nx affected over test:sherif,
+#                     test:knip, test:docs, test:eslint, test:oxlint,
+#                     test:lib, test:types, test:build, build.
+#                       test:sherif = `sherif -i typescript -p ./integrations/*
+#                       -p ./examples/*` (root package.json `sherif.ignoreRule`
+#                       turns unordered-dependencies off);
+#                       test:knip   = knip, then knip --strict (knip.ts);
+#                       test:docs   = scripts/verify-links.ts;
+#                       test:build  = publint --strict && attw --pack.
+#   pr.yml "Preview" — build:all, pkg-pr-new preview publish, size-limit.
+#   pr.yml "Version Preview" — external TanStack/config changeset-preview.
+#   autofix.yml     — oxfmt (autofix.ci, fail-fast on pull requests).
+#   zizmor.yml      — zizmor GitHub Actions audits.
+#   release.yml     — changesets/action (`changeset version` / publish).
+#   pnpm itself     — frozen lockfile in CI, workspace:/catalog: resolution,
+#                     engines.pnpm, minimumReleaseAge, trustPolicy, allowBuilds.
+#   CONTRIBUTING.md / AGENTS.md / AI_POLICY.md / PR template — conventions.
+#
+# This config expresses the A and C units of that surface: the toolchain pins
+# (.nvmrc, packageManager), sherif's empty-dependencies / root-private /
+# types-in-dependencies rules, workspace: references, catalog: references
+# (C: a value-shape regex trick), the changeset files and fixed groups naming
+# real packages, publint's manifest-only LOCAL_DEPENDENCY and
+# EXPORTS_VALUE_INVALID rules, the published packages' repository.url (npm
+# provenance), the oxlint test-file naming and preact unicode-bom rules, the
+# eslint svelte/block-lang rule, zizmor's artipacked and unpinned-uses audits
+# and LF line endings; plus clearly marked VALUE-ADD rules (outside the ratio,
+# R3/R5). sherif's one-version-per-dependency and similar-dependency rules,
+# the docs link checker and publint's exports order need new primitives (B);
+# oxfmt, oxlint's code rules, eslint's other rules, knip, vitest, tsc,
+# publint's packed-file checks, attw, size-limit, TypeDoc and the builds are D.
+# Nothing here spawns a process; no custom facts; no git-history kinds.
+
+version: 1
+
+ignore:
+  - "**/node_modules/**"
+
+extends:
+  # VALUE-ADD (not TanStack-enforced as a cross-file check): .nvmrc holds an
+  # exact Node version and no other Node pin disagrees with it. Today .nvmrc is
+  # the only Node pin (no .node-version, .tool-versions, engines.node, Volta or
+  # setup-node literal), so the coherence rules are silent.
+  - alint://bundled/toolchain-pins@v1
+  # VALUE-ADD: one lockfile, at the root. TanStack only gitignores
+  # package-lock.json / yarn.lock; nothing fails on a nested lockfile.
+  - alint://bundled/hygiene/lockfiles@v1
+
+rules:
+  # ════════════════════════════════════════════════════════════════
+  # toolchain-pin
+  # ════════════════════════════════════════════════════════════════
+
+  # tq-01 (A) — Node is pinned in .nvmrc. CONTRIBUTING.md: "please make sure
+  # to use the version mentioned in .nvmrc" (`nvm use`); nx.json lists .nvmrc
+  # in sharedGlobals. CI's Node comes from the external composite action
+  # TanStack/config/.github/setup@e4b48f1 (not in the clone; its use of
+  # node-version-file could not be verified offline).
+  - id: tanstack-query-nvmrc-present
+    kind: file_exists
+    paths: ".nvmrc"
+    level: error
+    message: ".nvmrc pins the Node version contributors (`nvm use`) and CI install."
+
+  - id: tanstack-query-nvmrc-version-spec
+    kind: file_content_matches
+    paths: ".nvmrc"
+    pattern: '\A[ \t]*(?:v?[0-9]+(?:\.(?:[0-9]+|x))?(?:\.(?:[0-9]+|x))?|lts/[*a-z-]+|node|latest|current)[ \t]*\r?\n?\z'
+    level: error
+    message: ".nvmrc must hold one Node version spec that nvm / actions/setup-node can resolve."
+
+  # tq-02 (A) — the root package.json pins pnpm in `packageManager`. What is
+  # gated in the clone: sherif's root-package-manager-field (an error-level
+  # rule, test:sherif in pr.yml) requires the field to be PRESENT. The
+  # exact-version part (<name>@<x.y.z>) rests on corepack, which
+  # CONTRIBUTING.md:45-49 makes optional ("in case of pnpm-related issues"),
+  # and on the external TanStack/config setup action, which could not be read
+  # offline; corepack rejects a range there (from tool knowledge, not checked).
+  - id: tanstack-query-package-manager-pnpm-pinned
+    kind: json_path_matches
+    paths: "package.json"
+    path: "$.packageManager"
+    matches: '^pnpm@[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.+-]+)?$'
+    level: error
+    message: "Root package.json must pin packageManager to pnpm@<x.y.z> (sherif root-package-manager-field; corepack)."
+
+  # tq-03 (B-adapter, not expressed) — pnpm refuses to install when its own
+  # version (packageManager) does not satisfy the root engines.pnpm range
+  # (>=12.18.0). Needs a semver range-satisfaction operator; the value-add
+  # rule tanstack-query-va-package-manager-equals-engines-floor below asserts
+  # the stricter equality the repo happens to keep.
+
+  # ════════════════════════════════════════════════════════════════
+  # dep-version
+  # ════════════════════════════════════════════════════════════════
+
+  # tq-12 (C) — sherif empty-dependencies over the manifests sherif checks
+  # (the root and packages/*; `-p ./integrations/* -p ./examples/*` exclude
+  # the rest): no empty dependency map. The regex is layout-independent (any
+  # whitespace, minified or formatted), but it also matches a nested empty
+  # map such as publishConfig.dependencies {}, which sherif ignores, so the
+  # audit moved the unit to C (none occurs at the pin).
+  - id: tanstack-query-no-empty-dependency-maps
+    kind: file_content_forbidden
+    paths: ["package.json", "packages/*/package.json"]
+    pattern: '"(?:dependencies|devDependencies|peerDependencies|optionalDependencies)"\s*:\s*\{\s*\}'
+    level: error
+    message: "package.json must not declare an empty dependency map (sherif empty-dependencies)."
+
+  # tq-13 (C) — sherif types-in-dependencies: a PRIVATE package keeps
+  # @types/* out of `dependencies`. C: no selector or JSONPath filter can
+  # condition on the same document's `private` field, so one regex encodes
+  # both orders of "private: true" and "@types/* inside the dependencies map"
+  # (Rust regex has no lookaround). The dependencies map holds only string
+  # values, so `[^}]*` stays inside it.
+  - id: tanstack-query-private-no-types-in-dependencies
+    kind: file_content_forbidden
+    paths: ["package.json", "packages/*/package.json"]
+    pattern: '(?s)"private"\s*:\s*true.*"dependencies"\s*:\s*\{[^}]*"@types/|"dependencies"\s*:\s*\{[^}]*"@types/.*"private"\s*:\s*true'
+    level: error
+    message: "A private package must keep @types/* in devDependencies, not dependencies (sherif types-in-dependencies)."
+
+  # tq-14 (A) — every `workspace:` dependency names a project of the pnpm
+  # workspace (pnpm install fails with ERR_PNPM_WORKSPACE_PKG_NOT_FOUND).
+  # At the pin there are 101 workspace: specs (90 workspace:*, 11
+  # workspace:^): 66 in packages/*, 35 in integrations/*/*, none in examples.
+  # The source unions $.name over the root plus the pnpm-workspace.yaml
+  # `packages:` globs (examples/vue/2* is excluded there, hence [!2]*); pnpm
+  # counts the root as a workspace project. Each target is one manifest's set
+  # of dependency names whose spec is a workspace RANGE (workspace:*, ^, ~ or
+  # a semver range). An aliased spec ("bar": "workspace:foo@*") is checked by
+  # the next rule on the aliased name, not on the key; a relative-path spec
+  # (workspace:../foo) resolves by path and is not a name lookup. A
+  # workspace:<semver range> would also need semver satisfaction.
+  - id: tanstack-query-workspace-refs-resolve
+    kind: cross_file
+    source:
+      files: "{package.json,packages/*/package.json,integrations/*/*/package.json,examples/angular/*/package.json,examples/react/*/package.json,examples/preact/*/package.json,examples/lit/*/package.json,examples/solid/*/package.json,examples/svelte/*/package.json,examples/vue/[!2]*/package.json}"
+      extract: { json: "$.name" }
+    targets:
+      files: "{package.json,packages/*/package.json,integrations/*/*/package.json,examples/angular/*/package.json,examples/react/*/package.json,examples/preact/*/package.json,examples/lit/*/package.json,examples/solid/*/package.json,examples/svelte/*/package.json,examples/vue/[!2]*/package.json}"
+      extract: { regex: '"([^"]+)"\s*:\s*"workspace:[*^~<>=0-9][^"@]*"' }
+    relation: superset
+    allow_missing_target: true
+    level: error
+    message: "A workspace: dependency must name a workspace project (pnpm install fails with ERR_PNPM_WORKSPACE_PKG_NOT_FOUND)."
+
+  # tq-14 (A), aliased form: "bar": "workspace:foo@<range>" must name a
+  # workspace project foo (pnpm's alias syntax). None at the pin.
+  - id: tanstack-query-workspace-alias-refs-resolve
+    kind: cross_file
+    source:
+      files: "{package.json,packages/*/package.json,integrations/*/*/package.json,examples/angular/*/package.json,examples/react/*/package.json,examples/preact/*/package.json,examples/lit/*/package.json,examples/solid/*/package.json,examples/svelte/*/package.json,examples/vue/[!2]*/package.json}"
+      extract: { json: "$.name" }
+    targets:
+      files: "{package.json,packages/*/package.json,integrations/*/*/package.json,examples/angular/*/package.json,examples/react/*/package.json,examples/preact/*/package.json,examples/lit/*/package.json,examples/solid/*/package.json,examples/svelte/*/package.json,examples/vue/[!2]*/package.json}"
+      extract: { regex: '"workspace:((?:@[^/"@]+/)?[^/"@]+)@[^"]*"' }
+    relation: superset
+    allow_missing_target: true
+    level: error
+    message: "An aliased workspace: dependency (workspace:<name>@<range>) must name a workspace project (pnpm install fails otherwise)."
+
+  # tq-15 (C; Stage B reclassified from B-config) — every catalog: specifier
+  # names an entry of pnpm-workspace.yaml's default `catalog:` (pnpm install
+  # fails on a missing catalog entry). JSONPath cannot select map keys, so the
+  # catalog's keys are captured by a VALUE-SHAPE regex trick: at the pin the
+  # catalog's values are the only indent-2 values that are unquoted version
+  # specs (overrides values are quoted, allowBuilds / lockfile values are
+  # booleans, trustPolicyExclude is a list). Layout-dependent, hence C: a
+  # quoted catalog value ('^1.0.0') would drop that key and give a false
+  # positive; an unquoted override version would add a false key. Targets
+  # are the workspace manifests' "name": "catalog:" entries (123 at the pin:
+  # 3 in the root, 120 in packages/*); a named catalog (catalog:<name>) is
+  # not covered (none at the pin).
+  - id: tanstack-query-catalog-refs-resolve
+    kind: cross_file
+    source:
+      file: "pnpm-workspace.yaml"
+      extract: { regex: "(?m)^  '?([@a-z0-9][^':\\s]*)'?: [~^]?[0-9][^\\s]*$" }
+    targets:
+      files: "{package.json,packages/*/package.json,integrations/*/*/package.json,examples/angular/*/package.json,examples/react/*/package.json,examples/preact/*/package.json,examples/lit/*/package.json,examples/solid/*/package.json,examples/svelte/*/package.json,examples/vue/[!2]*/package.json}"
+      extract: { regex: '"([^"]+)"\s*:\s*"catalog:(?:default)?"' }
+    relation: superset
+    allow_missing_target: true
+    level: error
+    message: "A catalog: dependency must name an entry of pnpm-workspace.yaml's catalog (pnpm install fails otherwise)."
+
+  # tq-15 (C), overrides leg: a pnpm-workspace.yaml `overrides` value of
+  # 'catalog:' names a catalog entry (2 at the pin: @types/react,
+  # @types/react-dom). Same value-shape source trick as above.
+  - id: tanstack-query-catalog-override-refs-resolve
+    kind: cross_file
+    source:
+      file: "pnpm-workspace.yaml"
+      extract: { regex: "(?m)^  '?([@a-z0-9][^':\\s]*)'?: [~^]?[0-9][^\\s]*$" }
+    targets:
+      - file: "pnpm-workspace.yaml"
+        extract: { regex: "(?m)^  '?([^'\\s:]+)'?: '?catalog:(?:default)?'?[ \\t]*$" }
+    relation: superset
+    allow_missing_target: true
+    level: error
+    message: "A pnpm-workspace.yaml override of 'catalog:' must name an entry of the catalog (pnpm install fails otherwise)."
+
+  # tq-B01 (A; Stage B missed unit) — publint --strict LOCAL_DEPENDENCY: a
+  # package that runs publint declares no file: / link: specifier in
+  # `dependencies` (devDependencies are not checked). publint runs in 24
+  # packages' test:build (`publint --strict && attw --pack`) and in the
+  # tsdown `build` of angular-query-experimental (which has no test:build)
+  # and vue-query-devtools (publint: { strict: true }); query-codemods and
+  # query-test-utils run neither. Rule name and level are from tool knowledge,
+  # not checked offline.
+  - id: tanstack-query-publint-no-local-dependencies
+    kind: json_path_absent
+    paths:
+      include: ["packages/*/package.json"]
+      exclude: ["packages/query-codemods/package.json", "packages/query-test-utils/package.json"]
+    path: "$.dependencies[?match(@, '(file|link):.*')]"
+    level: error
+    message: "A published package must not depend on a file: or link: specifier in dependencies (publint --strict LOCAL_DEPENDENCY)."
+
+  # Not expressed (B): tq-10 sherif multiple-dependency-versions (B-config,
+  # unique-key); tq-11 sherif unsync-similar-dependencies (B-adapter per Stage
+  # B: needs a name -> similar-family transform from sherif's built-in table,
+  # which no adapter emits; vacuous at the pin).
+
+  # ════════════════════════════════════════════════════════════════
+  # other
+  # ════════════════════════════════════════════════════════════════
+
+  # tq-30 (A) — sherif root-package-private-field: the root package.json is
+  # private so it is never published.
+  - id: tanstack-query-root-private
+    kind: json_path_equals
+    paths: "package.json"
+    path: "$.private"
+    equals: true
+    level: error
+    message: "The root package.json must be private (sherif root-package-private-field)."
+
+  # tq-31 (A) — every .changeset/*.md (README.md excepted, as changesets
+  # skips it) is a frontmatter block of `<package>: <bump>` entries that names
+  # only workspace packages, each with a valid bump type. `changeset version`
+  # (release.yml, every push to main; also `pnpm changeset` locally) rejects
+  # a changeset for a package that is not in the workspace. Two rules:
+  #  - the frontmatter rule asserts the file STARTS with a `---` ... `---`
+  #    block (what @changesets/parse requires) whose every line is a
+  #    `'name': major|minor|patch|none` entry (a quoted key, or a plain key
+  #    that does not start with `@`) or blank; the body after it is free text.
+  #    Whether changesets itself rejects an unknown bump word (e.g. `bugfix`)
+  #    at parse time or only later (semver.inc) is not verified offline, so
+  #    the bump enum may be stricter than the tool.
+  #  - the names rule extracts only `name: <bump>` lines, so body prose such
+  #    as `"Note": text` is not read as a package. Because the frontmatter
+  #    rule forces every frontmatter line into that shape, this captures every
+  #    frontmatter entry. The source leaves out the root package.json (name
+  #    "root"): changesets validates against the workspace packages without
+  #    the root (@manypkg/get-packages; from tool knowledge, not checked).
+  - id: tanstack-query-changesets-name-workspace-packages
+    kind: cross_file
+    source:
+      files: "{packages/*/package.json,integrations/*/*/package.json,examples/angular/*/package.json,examples/react/*/package.json,examples/preact/*/package.json,examples/lit/*/package.json,examples/solid/*/package.json,examples/svelte/*/package.json,examples/vue/[!2]*/package.json}"
+      extract: { json: "$.name" }
+    targets:
+      files: ".changeset/*.md"
+      extract: { regex: '(?m)^[ \t]*[''"]?([@A-Za-z0-9][^''"\s:]*)[''"]?[ \t]*:[ \t]*(?:major|minor|patch|none)[ \t]*\r?$' }
+    relation: superset
+    allow_missing_target: true
+    level: error
+    message: "A changeset may only name packages in the workspace (changeset version fails otherwise)."
+
+  - id: tanstack-query-changesets-frontmatter-valid
+    kind: file_content_matches
+    paths:
+      include: [".changeset/*.md"]
+      exclude: [".changeset/README.md"]
+    pattern: '\A\s*---[ \t]*\r?\n(?:[ \t]*(?:''[^''\n]+''|"[^"\n]+"|[A-Za-z0-9][^\s:''"#]*)[ \t]*:[ \t]*(?:major|minor|patch|none)[ \t]*\r?\n|[ \t]*\r?\n)*---[ \t]*(?:\r?\n|\z)'
+    level: error
+    message: "A changeset must start with a --- frontmatter block of `'<package>': major|minor|patch|none` entries."
+
+  # tq-32 (A) — @changesets/config validation (every changesets command,
+  # including release.yml's `changeset version`): each name in a `fixed` or
+  # `linked` group, and each `ignore` entry, matches a workspace package. The
+  # repo lists literal names; a glob entry would need glob matching. As for
+  # tq-31, the source leaves out the root package.json ("root"), which
+  # changesets does not count as a workspace package.
+  - id: tanstack-query-changeset-groups-name-workspace-packages
+    kind: cross_file
+    source:
+      files: "{packages/*/package.json,integrations/*/*/package.json,examples/angular/*/package.json,examples/react/*/package.json,examples/preact/*/package.json,examples/lit/*/package.json,examples/solid/*/package.json,examples/svelte/*/package.json,examples/vue/[!2]*/package.json}"
+      extract: { json: "$.name" }
+    targets:
+      - file: ".changeset/config.json"
+        extract: { json: "$['fixed','linked'][*][*]" }
+      - file: ".changeset/config.json"
+        extract: { json: "$.ignore[*]" }
+    relation: superset
+    allow_missing_target: true
+    level: error
+    message: "Every package named in .changeset/config.json fixed/linked/ignore must exist in the workspace."
+
+  # tq-37 (A) — oxlint `vitest/consistent-test-filename` (oxlint.config.ts
+  # override for **/*.spec.ts*, **/*.test.ts*, **/*.test-d.ts*; default
+  # pattern .*\.test\.[tj]sx?$ within .*\.(test|spec)\.[tj]sx?$), over what
+  # test:oxlint lints: each package's ./src, plus ./tests in svelte-query and
+  # svelte-query-persist-client. A *.spec.ts(x) there is an error.
+  - id: tanstack-query-test-files-not-spec
+    kind: file_absent
+    paths:
+      - "packages/*/src/**/*.spec.{ts,tsx}"
+      - "packages/svelte-query/tests/**/*.spec.{ts,tsx}"
+      - "packages/svelte-query-persist-client/tests/**/*.spec.{ts,tsx}"
+    level: error
+    message: "Test files are named *.test.ts(x), not *.spec.ts(x) (oxlint vitest/consistent-test-filename)."
+
+  # tq-B03 (A; Stage B missed unit) — oxlint `unicode-bom: 'error'` (default
+  # 'never') in oxlint.config.ts's preactConfig, which only the three preact
+  # packages extend; their test:oxlint is `oxlint ./src`. A file-bytes rule,
+  # classified by its logic (R7), like tq-37.
+  - id: tanstack-query-preact-src-no-bom
+    kind: no_bom
+    paths:
+      - "packages/preact-query/src/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}"
+      - "packages/preact-query-devtools/src/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}"
+      - "packages/preact-query-persist-client/src/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}"
+    level: error
+    message: "Preact package sources must not start with a byte-order mark (oxlint unicode-bom, preactConfig)."
+
+  # tq-B04 (A; Stage B missed unit) — eslint `svelte/block-lang` with
+  # { script: ['ts'] } in the three svelte packages' eslint.config.js;
+  # test:eslint lints ./src ./tests (svelte-query-devtools: ./src only).
+  # Every <script> block in a .svelte file declares lang="ts" (block-lang
+  # does not require a script block to exist). Line-based: exact while a
+  # <script ...> open tag stays on one line (all 50 at the pin do); a tag
+  # split across lines would be a false positive. If the integrator treats
+  # eslint-plugin-svelte template rules as R2 linting, this unit is D (tq-48).
+  - id: tanstack-query-svelte-script-lang-ts
+    kind: for_each_match
+    paths:
+      - "packages/svelte-query/{src,tests}/**/*.svelte"
+      - "packages/svelte-query-persist-client/{src,tests}/**/*.svelte"
+      - "packages/svelte-query-devtools/src/**/*.svelte"
+    select: '<script\b'
+    require:
+      matches: ['<script\b[^>]*\slang\s*=\s*(?:"ts"|''ts''|ts(?:[\s/>]|$))']
+    level: error
+    message: "Every <script> block in a Svelte component declares lang=\"ts\" (eslint svelte/block-lang)."
+
+  # tq-B02 (A; Stage B missed unit) — publint --strict EXPORTS_VALUE_INVALID:
+  # every string target inside package.json `exports` starts with "./".
+  # Same publint scope as tq-B01 (25 packages; not query-codemods or
+  # query-test-utils). A bare-string `exports` ("exports": "index.js") is not
+  # covered (none at the pin). Rule semantics are from tool knowledge.
+  - id: tanstack-query-publint-exports-values-relative
+    kind: json_path_absent
+    paths:
+      include: ["packages/*/package.json"]
+      exclude: ["packages/query-codemods/package.json", "packages/query-test-utils/package.json"]
+    path: "$.exports..[?match(@, '[^.].*') || match(@, '[.][^/].*')]"
+    level: error
+    message: "Every exports target must start with ./ (publint --strict EXPORTS_VALUE_INVALID)."
+
+  # VALUE-ADD. tq-B05 (D: the integrator ruled it external state, a check the
+  # npm registry makes at publish time) — npm provenance (.npmrc provenance=true;
+  # release.yml id-token: write + changesets publish) rejects a publish whose
+  # package.json repository.url does not match the publishing repository,
+  # github.com/TanStack/query; publint --strict checks the URL's shape before
+  # merge. Scope: the published (non-private) packages/*; the three private
+  # ones (angular-query-persist-client, query-codemods, query-test-utils) are
+  # never published. Registry behaviour is from tool knowledge.
+  - id: tanstack-query-repository-url-matches-repo
+    kind: json_path_matches
+    paths:
+      include: ["packages/*/package.json"]
+      exclude:
+        - "packages/angular-query-persist-client/package.json"
+        - "packages/query-codemods/package.json"
+        - "packages/query-test-utils/package.json"
+    path: "$.repository.url"
+    matches: '^(?:git\+)?https://github\.com/TanStack/query(?:\.git)?$'
+    level: info
+    message: "A published package's repository.url must name github.com/TanStack/query (npm provenance)."
+
+  # tq-38 (A) — zizmor `artipacked` (zizmor.yml): every actions/checkout step
+  # sets persist-credentials explicitly (false everywhere except release.yml,
+  # where changesets/action pushes and it is `true` on purpose).
+  - id: tanstack-query-gha-checkout-persist-credentials
+    kind: yaml_path_absent
+    paths: ".github/workflows/*.{yml,yaml}"
+    path: "$..steps[?match(@.uses, 'actions/checkout@.*') && !@.with['persist-credentials']]"
+    level: error
+    message: "actions/checkout must set persist-credentials explicitly (zizmor artipacked)."
+
+  # tq-39 (A) — zizmor `unpinned-uses` under its default policy (no zizmor
+  # config file and no inline `zizmor: ignore` in this repo): third-party
+  # actions and reusable workflows must be hash-pinned (a full 40-hex SHA);
+  # actions/*, github/* and dependabot/* may be ref-pinned; local ./ actions
+  # are exempt. The repo's stricter de facto state (everything SHA-pinned by
+  # renovate's helpers:pinGitHubActionDigests) is the value-add rule
+  # tanstack-query-va-gha-all-actions-sha-pinned below. The default policy is
+  # recalled offline, not checked. Known imprecision (Stage B): a
+  # `docker://image` uses value would fire here, while zizmor treats Docker
+  # uses separately; there are none at the pin.
+  - id: tanstack-query-gha-third-party-actions-hash-pinned
+    kind: yaml_path_absent
+    paths: ".github/workflows/*.{yml,yaml}"
+    path: "$..[?@.uses && !match(@.uses, '[.]/.*') && !match(@.uses, '(actions|github|dependabot)/[^@]+@.+') && !match(@.uses, '[^@]+@[0-9a-f]{40}')]"
+    level: error
+    message: "Third-party actions and reusable workflows must be pinned to a full commit SHA (zizmor unpinned-uses)."
+
+  # tq-a01 (C) and tq-a02 (A), split out of tq-40 by the audit -
+  #     .github/workflows/zizmor.yml:20-24 runs zizmor with advanced-security:
+  #     false, so any finding fails the job. Its dangerous-triggers and
+  #     secrets-inherit audits are structural and have no finding at the pin.
+  # tq-a01 dangerous-triggers, mapping form (`on:` with a pull_request_target or
+  # workflow_run key).
+  - id: tanstack-query-gha-no-dangerous-triggers
+    kind: yaml_path_absent
+    paths: ".github/workflows/*.{yml,yaml}"
+    path: "$.on['pull_request_target','workflow_run']"
+    level: error
+    message: "zizmor dangerous-triggers: no pull_request_target / workflow_run trigger."
+  # dangerous-triggers, list form (`on: [push, workflow_run]`).
+  - id: tanstack-query-gha-no-dangerous-triggers-list-form
+    kind: yaml_path_absent
+    paths: ".github/workflows/*.{yml,yaml}"
+    path: "$.on[?@ == 'pull_request_target' || @ == 'workflow_run']"
+    level: error
+    message: "zizmor dangerous-triggers: no pull_request_target / workflow_run trigger."
+  # tq-a02 secrets-inherit: a reusable-workflow call passes secrets explicitly.
+  - id: tanstack-query-gha-no-secrets-inherit
+    kind: yaml_path_absent
+    paths: ".github/workflows/*.{yml,yaml}"
+    path: "$.jobs[?@.secrets == 'inherit']"
+    level: error
+    message: "zizmor secrets-inherit: pass secrets explicitly."
+  # tq-a01 dangerous-triggers, scalar form (`on: workflow_run`), which neither
+  # rule above sees. It matches any top-level value equal to the trigger name
+  # (a `name: workflow_run` would also fire; none at the pin), so tq-a01 is C.
+  - id: tanstack-query-gha-no-dangerous-triggers-scalar-form
+    kind: yaml_path_absent
+    paths: ".github/workflows/*.{yml,yaml}"
+    path: "$[?@ == 'pull_request_target' || @ == 'workflow_run']"
+    level: error
+    message: "zizmor dangerous-triggers: no pull_request_target / workflow_run trigger."
+
+  # tq-41 (A) — `.gitattributes: * text=auto eol=lf` (git normalizes text
+  # files to LF on check-in; .editorconfig end_of_line = lf).
+  - id: tanstack-query-lf-line-endings
+    kind: line_endings
+    target: lf
+    paths:
+      include: ["**/*"]
+      exclude:
+        - "media/**"
+        - "**/*.{png,jpg,jpeg,gif,ico,webp,avif,woff,woff2,ttf,eot,mp4,webm,zip,gz,tgz}"
+    level: error
+    message: "Text files use LF line endings (.gitattributes * text=auto eol=lf)."
+
+  # Not expressed (B): tq-33 a package sits in at most one changesets fixed
+  # group (unique-key); tq-34 .changeset/config.json passes @changesets/config
+  # validation (C since the audit: a schema outside the repository); tq-35 workspace project
+  # names are unique for nx's project graph (unique-key); tq-36 test:docs
+  # (scripts/verify-links.ts) — markdown_links_resolve reports 41 findings at
+  # the pin because the script appends .md to extensionless links and maps
+  # docs/framework/<fw>/examples/<x> to examples/<fw>/<x> (B-adapter: route
+  # mapping); tq-42 docs/config.json registers every hand-written page
+  # (B-adapter: path -> route transform; Stage B notes that
+  # docs/community-resources.md has no `to` route and its section has
+  # children: [], so whether the convention holds at the pin is unverified);
+  # tq-43 publint's exports condition order, `types` before the JS-resolving
+  # conditions / `default` last (B-adapter: key-order operator). publint also
+  # runs inside the tsdown `build` of angular-query-experimental (no
+  # test:build) and vue-query-devtools; angular's "." export puts
+  # @tanstack/custom-condition before `types`, so "types first" is not
+  # literally "first key".
+
+  # C units recorded but not expressed here (git-history kinds; the clone is
+  # depth 1): tq-57 a PR touching a published package's source adds a
+  # .changeset/*.md (changeset_requires_path with when_changed); tq-58 PRs
+  # leave the generated docs/framework/*/reference/** untouched
+  # (pair_changed_together with an unsatisfiable then_changed); tq-59 commit
+  # subjects carry a conventional commit type (git_commit_subject_matches).
+
+  # ════════════════════════════════════════════════════════════════
+  # VALUE-ADD (not enforced by TanStack/query; outside the coverage ratio,
+  # R3/R5)
+  # ════════════════════════════════════════════════════════════════
+
+  # Stricter than tq-03: the packageManager version equals the engines.pnpm
+  # floor (both bumped together today; renovate does not touch either).
+  - id: tanstack-query-va-package-manager-equals-engines-floor
+    kind: cross_file
+    source:
+      file: "package.json"
+      extract: { regex: '"packageManager"\s*:\s*"pnpm@([0-9]+\.[0-9]+\.[0-9]+)' }
+    targets:
+      - file: "package.json"
+        extract: { regex: '"pnpm"\s*:\s*">=\s*([0-9]+\.[0-9]+\.[0-9]+)"' }
+    relation: equals
+    level: info
+    message: "VALUE-ADD: engines.pnpm's floor is the pinned packageManager version."
+
+  # renovate ignores both `node` and `@types/node`, so they are synced by
+  # hand: @types/node (root devDependency and the pnpm override) stays on the
+  # .nvmrc Node major, and the override equals the devDependency.
+  - id: tanstack-query-va-types-node-major-matches-nvmrc
+    kind: cross_file
+    source:
+      file: ".nvmrc"
+      extract: { regex: '\A[ \t]*v?([0-9]+(?:\.[0-9]+)*)' }
+    targets:
+      - file: "package.json"
+        extract: { json: "$.devDependencies['@types/node']" }
+      - file: "pnpm-workspace.yaml"
+        extract: { yaml: "$.overrides['@types/node']" }
+    relation: equals
+    normalize: semver-major
+    level: info
+    message: "VALUE-ADD: @types/node stays on the .nvmrc Node major."
+
+  - id: tanstack-query-va-types-node-override-matches-devdep
+    kind: cross_file
+    source:
+      file: "package.json"
+      extract: { json: "$.devDependencies['@types/node']" }
+    targets:
+      - file: "pnpm-workspace.yaml"
+        extract: { yaml: "$.overrides['@types/node']" }
+    relation: equals
+    level: info
+    message: "VALUE-ADD: the pnpm @types/node override equals the root devDependency."
+
+  # Changesets `fixed` groups release in lockstep, but nothing checks the
+  # state between releases. Group 1 leaves out the private
+  # angular-query-persist-client, which sits at 5.103.2 at the pin.
+  - id: tanstack-query-va-fixed-group-1-lockstep
+    kind: cross_file
+    source:
+      file: "packages/query-core/package.json"
+      extract: { json: "$.version" }
+    targets:
+      files: "packages/{angular-query-experimental,eslint-plugin-query,preact-query,preact-query-devtools,preact-query-persist-client,query-async-storage-persister,query-broadcast-client-experimental,query-devtools,query-persist-client-core,query-sync-storage-persister,react-query,react-query-devtools,react-query-next-experimental,react-query-persist-client,solid-query,solid-query-devtools,solid-query-persist-client,vue-query}/package.json"
+      extract: { json: "$.version" }
+    relation: equals
+    level: info
+    message: "VALUE-ADD: the first changesets fixed group shares one version."
+
+  - id: tanstack-query-va-fixed-group-2-lockstep
+    kind: cross_file
+    source:
+      file: "packages/svelte-query/package.json"
+      extract: { json: "$.version" }
+    targets:
+      files: "packages/{vue-query-devtools,svelte-query-devtools,svelte-query-persist-client}/package.json"
+      extract: { json: "$.version" }
+    relation: equals
+    level: info
+    message: "VALUE-ADD: the second changesets fixed group shares one version."
+
+  # `changeset version` (updateInternalDependencies: patch) rewrites every
+  # workspace example's range on an internal package to ^<new version>; with
+  # linkWorkspacePackages the examples then link the workspace build. Shown
+  # for @tanstack/react-query, the most-used one.
+  - id: tanstack-query-va-examples-track-react-query-version
+    kind: cross_file
+    source:
+      file: "packages/react-query/package.json"
+      extract: { json: "$.version" }
+    targets:
+      files: "{examples/react/*/package.json,examples/preact/*/package.json,examples/solid/*/package.json}"
+      extract: { regex: '"@tanstack/react-query"\s*:\s*"\^([0-9][^"]*)"' }
+    relation: equals
+    allow_missing_target: true
+    level: info
+    message: "VALUE-ADD: examples depend on @tanstack/react-query at ^<the workspace version>."
+
+  # Examples and integrations are private (changeset publish would otherwise
+  # try to publish them).
+  - id: tanstack-query-va-examples-private
+    kind: json_path_equals
+    paths: ["examples/*/*/package.json", "integrations/*/*/package.json"]
+    path: "$.private"
+    equals: true
+    level: info
+    message: "VALUE-ADD: examples and integrations are private workspace projects."
+
+  # sherif's warning-level rules (they print but do not fail test:sherif,
+  # which has no --fail-on-warnings): root-package-dependencies,
+  # non-existant-packages and packages-without-package-json.
+  - id: tanstack-query-va-root-no-prod-dependencies
+    kind: json_path_absent
+    paths: "package.json"
+    path: "$.dependencies"
+    level: info
+    message: "VALUE-ADD: the private root keeps every dependency in devDependencies (sherif root-package-dependencies, a warning)."
+
+  - id: tanstack-query-va-workspace-globs-match-packages
+    kind: registry_paths_resolve
+    source: "pnpm-workspace.yaml"
+    extract: { yaml: "$.packages[*]" }
+    exclude_query: "$.packages[?match(@, '!.*')]"
+    base: lint_root
+    entries_are_globs: true
+    expect: dir
+    must_contain: package.json
+    level: info
+    message: "VALUE-ADD: every pnpm-workspace.yaml packages glob matches package directories with a package.json (sherif warnings)."
+
+  # Renovate (helpers:pinGitHubActionDigests) keeps every action, first-party
+  # included, on a full commit SHA; zizmor's default only requires that of
+  # third-party ones (tq-39).
+  - id: tanstack-query-va-gha-all-actions-sha-pinned
+    kind: pinned_references
+    paths: ".github/workflows/*.{yml,yaml}"
+    format: github_actions
+    level: info
+    message: "VALUE-ADD: every action, actions/* included, is pinned to a full commit SHA."
+
+  # Every eslint-plugin-query rule has its docs page (getDocsUrl links to
+  # tanstack.com/query/latest/docs/eslint/<rule>).
+  - id: tanstack-query-va-eslint-rules-documented
+    kind: for_each_dir
+    select: "packages/eslint-plugin-query/src/rules/*"
+    require:
+      - kind: file_exists
+        paths: "docs/eslint/{basename}.md"
+    level: info
+    message: "VALUE-ADD: every eslint-plugin-query rule has a docs/eslint/<rule>.md page."

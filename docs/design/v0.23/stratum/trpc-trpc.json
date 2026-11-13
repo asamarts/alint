@@ -1,0 +1,1445 @@
+{
+ "repo": "trpc/trpc",
+ "sha": "8eff9ff0ddf4be4a682bf205fb66b00a26901075",
+ "metrics": {
+  "counts": {
+   "A": 9,
+   "B-config": 6,
+   "B-adapter": 14,
+   "B-kernel": 0,
+   "B-delegate": 1,
+   "C": 6,
+   "D": 29
+  },
+  "addressable": 36,
+  "coverage_today": 25,
+  "coverage_with_tuning": 42,
+  "gap": 58,
+  "coverage_after_slice": 36,
+  "coverage_after_slice_with_entry_values": 39
+ },
+ "by_family": {
+  "locale": {
+   "counts": {
+    "A": 0,
+    "B-config": 0,
+    "B-adapter": 0,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 0,
+    "D": 0
+   },
+   "addressable": 0,
+   "coverage_today": null,
+   "coverage_with_tuning": null,
+   "gap": null,
+   "coverage_after_slice": null,
+   "coverage_after_slice_with_entry_values": null
+  },
+  "dep-version": {
+   "counts": {
+    "A": 1,
+    "B-config": 2,
+    "B-adapter": 3,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 2,
+    "D": 2
+   },
+   "addressable": 8,
+   "coverage_today": 12,
+   "coverage_with_tuning": 38,
+   "gap": 62,
+   "coverage_after_slice": 25,
+   "coverage_after_slice_with_entry_values": 38
+  },
+  "toolchain-pin": {
+   "counts": {
+    "A": 2,
+    "B-config": 0,
+    "B-adapter": 1,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 0,
+    "D": 0
+   },
+   "addressable": 3,
+   "coverage_today": 67,
+   "coverage_with_tuning": 67,
+   "gap": 33,
+   "coverage_after_slice": 67,
+   "coverage_after_slice_with_entry_values": 67
+  },
+  "other": {
+   "counts": {
+    "A": 6,
+    "B-config": 4,
+    "B-adapter": 10,
+    "B-kernel": 0,
+    "B-delegate": 1,
+    "C": 4,
+    "D": 27
+   },
+   "addressable": 25,
+   "coverage_today": 24,
+   "coverage_with_tuning": 40,
+   "gap": 60,
+   "coverage_after_slice": 36,
+   "coverage_after_slice_with_entry_values": 36
+  }
+ },
+ "units": [
+  {
+   "id": "trpc-01",
+   "summary": "CI's Node version is pinned in .nvmrc: every setup-node step that installs the project's Node reads node-version-file: .nvmrc, which fails if the file is missing or holds no resolvable version",
+   "evidence": ".github/setup/action.yml:7-9 (setup-node node-version-file '.nvmrc', used by every main.yml/lint.yml job); .github/workflows/release.yml:111,176; .github/workflows/sponsors.yml:53; .nvmrc = 24.22.2",
+   "mechanism": "ci",
+   "family": "toolchain-pin",
+   "bucket": "A",
+   "alint": "file_exists + file_content_matches: trpc-nvmrc-present, trpc-nvmrc-version-spec",
+   "rules": [
+    "trpc-nvmrc-present",
+    "trpc-nvmrc-version-spec"
+   ],
+   "assertion_family": "none",
+   "reason": "Presence and a resolvable version spec are file-state assertions that native kinds express (R4: confirmed against the clone in both directions). The regex accepts what setup-node resolves (numeric x/x.y/x.y.z, x-ranges, lts/*, node/latest/current).",
+   "fire_verified": "Scratch tree copying .nvmrc and the other read files: deleting .nvmrc fired trpc-nvmrc-present; writing 'twenty-four' and '>=24 <25' fired trpc-nvmrc-version-spec; 'lts/*' passed. Passes on the clone (24.22.2).",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-02",
+   "summary": "CI's pnpm version is pinned by the root packageManager field (pnpm@x.y.z): pnpm/action-setup is used without a version input, so it reads packageManager and fails without it",
+   "evidence": ".github/setup/action.yml:6 (pnpm/action-setup@v6, no with.version); release.yml:197,262; subtree.yml:74; sponsors.yml (action-setup step); package.json:9 \"packageManager\": \"pnpm@12.4.1\"",
+   "mechanism": "ci",
+   "family": "toolchain-pin",
+   "bucket": "A",
+   "alint": "json_path_matches: trpc-package-manager-pnpm-pinned",
+   "rules": [
+    "trpc-package-manager-pnpm-pinned",
+    "trpc-pnpm-action-setup-no-version-workflows",
+    "trpc-pnpm-action-setup-no-version-composite"
+   ],
+   "assertion_family": "none",
+   "reason": "A JSONPath value check on package.json expresses it. A missing field is a zero-match violation. Verified on the clone and on broken copies (R4).",
+   "fire_verified": "Scratch copy of package.json: removing packageManager, setting yarn@4.5.0, and setting pnpm@^12 each fired trpc-package-manager-pnpm-pinned. Passes on the clone.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-03",
+   "summary": "The pnpm that CI runs (packageManager's version) must satisfy the root engines.pnpm range (^12.0.0); pnpm install refuses otherwise",
+   "evidence": "package.json:5-9 (engines.pnpm ^12.0.0, packageManager pnpm@12.4.1); enforced by every CI `pnpm install` (.github/setup/action.yml:23). pnpm throws on an engines.pnpm mismatch for a project whatever engine-strict says",
+   "mechanism": "tool-config",
+   "family": "toolchain-pin",
+   "bucket": "B-adapter",
+   "alint": "cross_file relation equals + normalize: semver-major: trpc-package-manager-satisfies-engines-pnpm",
+   "rules": [
+    "trpc-package-manager-satisfies-engines-pnpm"
+   ],
+   "assertion_family": "none",
+   "reason": "Range satisfaction needs a semver operator. normalize: semver-major is exact only for a caret range from N.0.0: Stage B showed a pass with engines ^12.5.0 and pnpm@12.4.1, which pnpm refuses, and a finding with >=11, which pnpm accepts. B-adapter version-compare; the rule stays at level info as an approximation.",
+   "fire_verified": "Scratch package.json: engines.pnpm ^11.0.0 fired; packageManager pnpm@13.0.0 fired. Passes on the clone.",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "C",
+      "toolchain-pin",
+      "none"
+     ],
+     "why": "R4: major equality is not range satisfaction, and I reproduced errors in both directions. With engines.pnpm ^12.5.0 and packageManager pnpm@12.4.1 the rule passes, but pnpm refuses to install. With engines.pnpm >=11 the rule fires, but pnpm accepts. The normalize matches only a caret range starting at N.0.0. Section 2.2 names a semver-range operator as B-adapter, the same gap Stage A cited for trpc-06."
+    },
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "version-compare"
+     }
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "reason"
+     ],
+     "why": "The record text still described the bucket or rule from before Stage B or the integrator changed it."
+    }
+   ],
+   "needs": "version-compare"
+  },
+  {
+   "id": "trpc-05",
+   "summary": "manypkg EXTERNAL_MISMATCH: each external dependency has one version range across all workspace manifests (dependencies/devDependencies/optionalDependencies; non-semver specifiers such as catalog:, npm: and workspace: are ignored)",
+   "evidence": ".github/workflows/lint.yml:38 `pnpm manypkg fix` + :52-54 `git diff --exit-code` in the merge queue (@manypkg/cli 0.25.1, no manypkg config); clone state: every external dep has at most one semver specifier (e.g. typescript ^5.9.2 x34, @types/node ^24.19.2 x29) alongside catalog: refs",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "B-adapter",
+   "alint": "constraint unique-key over workspace manifests' dependency entries (selector: semver-valued specifiers, non-workspace names, non-peer fields)",
+   "rules": [],
+   "assertion_family": "unique-key",
+   "reason": "Needs (key path, value) rows: the relation layer's structured adapters (entry, TOML, XML) are key-only and the extract adapter's values carry no pointer, so no adapter today pairs a dependency or entry name with its value (batch 2 ruling). Once it exists, the assertion is unique-key: dependency name determines the range.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "bucket": "B-adapter",
+      "needs": "entry-values",
+      "assertion_family": "unique-key",
+      "reason": "Needs (key path, value) rows: the relation layer's structured adapters (entry, TOML, XML) are key-only and the extract adapter's values carry no pointer, so no adapter today pairs a dependency or entry name with its value (batch 2 ruling). Once it exists, the assertion is unique-key: dependency name determines the range."
+     }
+    }
+   ],
+   "needs": "entry-values"
+  },
+  {
+   "id": "trpc-06",
+   "summary": "manypkg INTERNAL_MISMATCH: a non-workspace: range on an internal package must include that package's current version",
+   "evidence": "lint.yml:38 + :54; clone: examples/.test/ssg-infinite-serialization/package.json:15-18 use ^11.16.0 for @trpc/* (satisfied by 11.28.0); other internal refs are workspace:* or npm: aliases",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "B-adapter",
+   "alint": "missing: semver range-satisfaction operator joined to the referenced workspace package's version",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Needs semver-range satisfaction (section 2.2 names a semver-range operator as B-adapter) plus a name-to-manifest join.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "version-compare"
+     }
+    }
+   ],
+   "needs": "version-compare"
+  },
+  {
+   "id": "trpc-07",
+   "summary": "manypkg INVALID_DEV_AND_PEER_DEPENDENCY_RELATIONSHIP: every peerDependency is also declared in devDependencies",
+   "evidence": "lint.yml:38 + :54; clone: all 33 peer entries in packages/* and tooling/ui have a devDependencies entry (catalog:, workspace:* or a range)",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "B-config",
+   "alint": "constraint set: keys($.peerDependencies) subset of keys($.devDependencies) per manifest",
+   "rules": [],
+   "assertion_family": "set",
+   "reason": "A within-manifest key-subset relation. JSONPath cannot select keys, and key_parity compares whole files. If manypkg also compares the ranges (not verifiable offline), that clause would further need a semver operator.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-08",
+   "summary": "manypkg MULTIPLE_DEPENDENCY_TYPES: a dependency appears in at most one of dependencies, devDependencies and optionalDependencies",
+   "evidence": "lint.yml:38 + :54; clone: no manifest repeats a key across those fields",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "B-config",
+   "alint": "constraint set: pairwise-disjoint key sets of the dependency fields per manifest",
+   "rules": [],
+   "assertion_family": "unique-key",
+   "reason": "Key rows suffice: a dependency's key path carries its field. (manifest, name) determines the field, a functional dependency, so unique-key (batch 2 ruling aligns trpc-08, jest-24 and rushstack-51).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "assertion_family": "unique-key",
+      "reason": "Key rows suffice: a dependency's key path carries its field. (manifest, name) determines the field, a functional dependency, so unique-key (batch 2 ruling aligns trpc-08, jest-24 and rushstack-51)."
+     }
+    }
+   ]
+  },
+  {
+   "id": "trpc-10",
+   "summary": "Every catalog: / catalog:<name> specifier resolves to an entry for that dependency in the named catalog of pnpm-workspace.yaml",
+   "evidence": "pnpm-workspace.yaml:48 (catalog), :100 (catalogs ts-api, www); every CI `pnpm install` fails on an unresolved catalog entry; tooling/subtree/src/standalone.ts:100-124 standaloneVersion throws 'not in the <catalog> catalog' (subtree.yml:83-88 on PRs touching examples/**)",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "B-adapter",
+   "alint": "constraint reference: (dep name, catalog name) from manifests -> keys of pnpm-workspace.yaml catalog/catalogs.<name>",
+   "rules": [],
+   "assertion_family": "reference",
+   "reason": "Needs (key path, value) rows: the relation layer's structured adapters (entry, TOML, XML) are key-only and the extract adapter's values carry no pointer, so no adapter today pairs a dependency or entry name with its value (batch 2 ruling). The (dependency name, catalog name) pair comes from the manifest entry's key and its catalog: value.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "bucket": "B-adapter",
+      "needs": "entry-values",
+      "assertion_family": "reference",
+      "reason": "Needs (key path, value) rows: the relation layer's structured adapters (entry, TOML, XML) are key-only and the extract adapter's values carry no pointer, so no adapter today pairs a dependency or entry name with its value (batch 2 ruling). The (dependency name, catalog name) pair comes from the manifest entry's key and its catalog: value."
+     }
+    }
+   ],
+   "needs": "entry-values"
+  },
+  {
+   "id": "trpc-11",
+   "summary": "The 10 subtree-synced examples use workspace: only for @shared/ui (inlined) and @trpc/* (rewritten to canary); any other workspace: dependency fails the standalone conversion",
+   "evidence": "tooling/subtree/src/standalone.ts:118-122 (throws '<name>@workspace: only resolves in the monorepo'), :105 (@trpc/* -> canary), :144 (@shared/ui dropped); .github/workflows/subtree.yml:41-53 matrix, :83-88; every package.json under each example is processed (standalone.ts writeStandalone)",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "C",
+   "alint": "for_each_match: trpc-subtree-examples-workspace-protocol",
+   "rules": [
+    "trpc-subtree-examples-workspace-protocol"
+   ],
+   "assertion_family": "none",
+   "reason": "A per-line predicate over the example manifests. It holds for the one-dependency-per-line layout oxfmt writes, not for every layout (batch 2 ruling).",
+   "fire_verified": "Scratch copies of the examples' package.json files: next-minimal-starter next->workspace:*, minimal-react/server +@monotest/trpc workspace:*, .experimental/next-app-dir +@www/api-reference workspace:^, tanstack-start-sse-chat +@shared/uix workspace:* each fired; @trpc/client workspace:* and a non-subtree example (.test/monotest-app) did not. Passes on the clone.",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "A",
+      "dep-version",
+      "none"
+     ],
+     "why": "Its rule reads the dependency key with a per-line regex and relies on oxfmt keeping one dependency per line: a disallowed workspace: entry on the same line as @shared/ui is missed."
+    }
+   ]
+  },
+  {
+   "id": "trpc-12",
+   "summary": "packages/* depend on each other with workspace:* outside peerDependencies, so a release version bump leaves pnpm-lock.yaml unchanged",
+   "evidence": "tooling/release/src/workspace.ts:91-97 doc comment ('Their other dependencies on each other are workspace:*, so pnpm-lock.yaml doesn't change'); release.ts:99-151 checkRelease (frozen-lockfile install after the bump; fails 'Versioning/pnpm install changed files')",
+   "mechanism": "script",
+   "family": "dep-version",
+   "bucket": "C",
+   "alint": "json_path_matches if_present over a union path of the internal names: trpc-internal-deps-workspace-protocol",
+   "rules": [
+    "trpc-internal-deps-workspace-protocol"
+   ],
+   "assertion_family": "none",
+   "reason": "Expressible only by listing the internal @trpc/* names by hand. JSONPath cannot filter keys, and no selector yields 'workspace package names', so a new package needs a config edit. C (awkward). The release's own frozen-lockfile check is D (trpc-61).",
+   "fire_verified": "Scratch packages/client/package.json devDependency @trpc/server workspace:* -> ^11.28.0 fired; the peerDependencies pin 11.28.0 does not. Passes on the clone.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-13",
+   "summary": "No dependency cycle among the public packages through dependencies/optionalDependencies/peerDependencies (release order must publish each package after what it needs)",
+   "evidence": "tooling/release/src/workspace.ts:57-89 publishedVersions throws at :75; it runs on every canary (release.yml build-canary on push to main touching packages/**) and every stable release",
+   "mechanism": "script",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "missing: workspace package-name -> manifest resolver and dependency-key extractor (file_graph acyclic exists but drops bare module names by design)",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "file_graph's acyclic needs path-shaped edges, and package names are a declared non-goal of that kind. A package-graph adapter is needed.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "package-graph"
+     }
+    }
+   ],
+   "needs": "package-graph"
+  },
+  {
+   "id": "trpc-14",
+   "summary": "manypkg INVALID_PACKAGE_NAME: every workspace project's name is a valid npm package name (lowercase, URL-safe, no leading . or _, no ~'!()*, at most 214 chars)",
+   "evidence": "lint.yml:38 + :54 (manypkg depends on validate-npm-package-name 6.0.2 per pnpm-lock.yaml); workspace globs pnpm-workspace.yaml:1-12",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_matches x2: trpc-workspace-package-names-valid, trpc-workspace-package-names-length",
+   "rules": [
+    "trpc-workspace-package-names-valid",
+    "trpc-workspace-package-names-length"
+   ],
+   "assertion_family": "none",
+   "reason": "A name-shape regex plus a length bound over $.name in the 59 workspace manifests (globs mirrored from pnpm-workspace.yaml) expresses validForNewPackages for these names.",
+   "fire_verified": "Also verified (not required for family other): an uppercase name, a leading '_' and a 215-character name each fired on scratch copies; passes on the clone.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-15",
+   "summary": "manypkg UNSORTED_DEPENDENCIES: dependency maps in every workspace manifest are sorted alphabetically",
+   "evidence": "lint.yml:38 + :54; clone: all dependency maps sorted",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "missing: key-order operator for JSON objects (ordered_block sorts lines between markers, not object keys)",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Section 2.2 names an order operator as B-adapter.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "order"
+     }
+    }
+   ],
+   "needs": "order"
+  },
+  {
+   "id": "trpc-16",
+   "summary": "Every skill in .agents/skills/<name> has a .claude/skills/<name> link",
+   "evidence": "AGENTS.md:3 ('One we write also needs a .claude/skills/<name> symlink ... installed ones get their link from npx skills add'); .claude/skills/* are 7 tracked symlinks; .gitignore keeps only .claude/skills",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "for_each_dir + dir_exists: trpc-agent-skill-has-claude-link",
+   "rules": [
+    "trpc-agent-skill-has-claude-link"
+   ],
+   "assertion_family": "none",
+   "reason": "The convention's failure mode (a skill without its link) is expressed and verified. A copied directory in place of a symlink would pass; alint has no 'is a symlink' assertion. Noted.",
+   "fire_verified": "Also verified: removing .claude/skills/tdd and adding .agents/skills/new-skill each fired; passes on the clone.",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "A",
+      "other",
+      "none"
+     ],
+     "why": "R4: AGENTS.md:3 requires a .claude/skills/<name> symlink. dir_exists follows the link, so a copied directory passes and only a missing link fires. alint has only the inverse check (no_symlinks). Expressing the unit needs a symlink or symlink-target predicate, which is the v0.12 Tier-3 candidate symlink_target_equals."
+    },
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "link-type"
+     }
+    }
+   ],
+   "needs": "link-type"
+  },
+  {
+   "id": "trpc-17",
+   "summary": "Each skill is either installed (pinned in skills-lock.json) or written in-repo (a `!.agents/skills/<name>/` entry in .oxfmtrc.json so it is formatted)",
+   "evidence": "AGENTS.md:3; .oxfmtrc.json ignorePatterns '.agents/skills/*/', '!.agents/skills/trpc-conventions/', '!.agents/skills/pr-agent-callout/'; skills-lock.json (5 installed)",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "B-config",
+   "alint": "constraint set: dir listing of .agents/skills/* == union(skills-lock skillPath names, .oxfmtrc negated entries)",
+   "rules": [],
+   "assertion_family": "set",
+   "reason": "Needs a union of two registries (cross_file targets are ANDed), or an either/or per directory. Not expressible today.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-18",
+   "summary": "No .cursor/ folder",
+   "evidence": "AGENTS.md:3 ('Don't add a .cursor/ folder')",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "A",
+   "alint": "dir_absent: trpc-no-cursor-folder",
+   "rules": [
+    "trpc-no-cursor-folder"
+   ],
+   "assertion_family": "none",
+   "reason": "A native existence check.",
+   "fire_verified": "Also verified: creating .cursor/rules/a.mdc fired; passes on the clone.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-19",
+   "summary": "The installed pstack skills stay byte-for-byte as installed (\"Don't edit them\"; pinned in skills-lock.json with computedHash)",
+   "evidence": "AGENTS.md:35; skills-lock.json computedHash per skill; .agents/skills/NOTICE-pstack.md",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "C",
+   "alint": "file_hash x6: trpc-pstack-skill-*-unchanged",
+   "rules": [
+    "trpc-pstack-skill-boundary-unchanged",
+    "trpc-pstack-skill-encode-lessons-unchanged",
+    "trpc-pstack-skill-type-system-unchanged",
+    "trpc-pstack-skill-tdd-unchanged",
+    "trpc-pstack-skill-ts-best-practices-unchanged",
+    "trpc-pstack-skill-ts-best-practices-patterns-unchanged"
+   ],
+   "assertion_family": "none",
+   "reason": "skills-lock.json's computedHash uses the skills CLI's own algorithm: it is not the sha256 of SKILL.md (checked, values differ). The files are therefore pinned by their own digests in the config, duplicating the lock and needing a hand update with it. C (awkward).",
+   "fire_verified": "Also verified: appending to .agents/skills/tdd/SKILL.md fired; passes on the clone.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-20",
+   "summary": "When the pstack skills are updated, NOTICE-pstack.md is updated too: it names the commit every skills-lock.json entry pins and lists exactly the installed skill folders",
+   "evidence": "AGENTS.md:35-37 ('To update, rerun with a new commit and update the notice'); .agents/skills/NOTICE-pstack.md:3-11; skills-lock.json refs bb68f2365e...",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "A",
+   "alint": "cross_file equals + cross_file set_equals: trpc-pstack-notice-commit-matches-lock, trpc-pstack-notice-lists-locked-skills",
+   "rules": [
+    "trpc-pstack-notice-commit-matches-lock",
+    "trpc-pstack-notice-lists-locked-skills"
+   ],
+   "assertion_family": "none",
+   "reason": "The commit and the skill-list coherence are value/set relations alint expresses with regex and JSONPath extracts.",
+   "fire_verified": "Also verified: changing one skills-lock ref fired the commit rule; deleting the '- `tdd/`' line from the notice fired the list rule; passes on the clone.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-21",
+   "summary": "A regression test is named issue-<number>-<slug>.test.ts(x) in packages/tests/server/regression/ (or beside the code's tests, e.g. packages/react-query/test/regression/)",
+   "evidence": ".agents/skills/trpc-conventions/SKILL.md:10; AGENTS.md:20; .oxlintrc.json:109+ filename-case ignore 'issue-\\d+-.*\\.test\\.tsx?$'",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "A",
+   "alint": "filename_regex: trpc-regression-test-naming",
+   "rules": [
+    "trpc-regression-test-naming"
+   ],
+   "assertion_family": "none",
+   "reason": "A native naming check. One pre-convention file (serializable-inference.test.tsx) is not a per-issue regression test and is excluded by name.",
+   "fire_verified": "Also verified: adding regression/myRegression.test.ts fired; passes on the clone.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-22",
+   "summary": "Every published package's README (and the root README) carries the <!-- SPONSORS:LIST:START --> ... <!-- SPONSORS:LIST:END --> markers the sponsors sync writes between",
+   "evidence": "www/build/sponsors-sync.test.ts:713-731 ('gives every published package's README the sponsors markers'), run by main.yml:131 `pnpm --filter www test`; www/build/sponsors-sync.ts:160-185, :203 (scheduled sponsors.yml fails without them)",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "C",
+   "alint": "file_content_matches: trpc-published-readmes-have-sponsor-markers",
+   "rules": [
+    "trpc-published-readmes-have-sponsor-markers"
+   ],
+   "assertion_family": "none",
+   "reason": "'Published' is decided by package.json private != true, which no path selector can read. The one private package (packages/tests) is excluded by name. C (needs a manifest-field selector).",
+   "fire_verified": "Also verified: deleting the END marker from packages/upgrade/README.md and the START marker from README.md each fired; passes on the clone.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-23",
+   "summary": "robots.txt is generated by the www build and must not exist in www/public/ (which would overwrite it)",
+   "evidence": "www/build/vercel-output.test.ts:170-180, run by main.yml:131",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_absent: trpc-www-no-public-robots-txt",
+   "rules": [
+    "trpc-www-no-public-robots-txt"
+   ],
+   "assertion_family": "none",
+   "reason": "A native existence check over a path that test asserts on.",
+   "fire_verified": "Also verified: creating www/public/robots.txt fired; passes on the clone.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-24",
+   "summary": "www/sponsors.json: every entry is a GitHub or Open Collective sponsor and no two share a sponsor key (github/<login>, opencollective/<slug>)",
+   "evidence": "www/src/sponsors.test.ts:135-140 ('is every entry of sponsors.json, each a GitHub or an Open Collective sponsor'); www/src/sponsors.ts:84-91 sponsorKey; run by main.yml:131",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "B-config",
+   "alint": "constraint unique-key over array elements of www/sponsors.json (the source enum part is json_schema_passes today)",
+   "rules": [],
+   "assertion_family": "unique-key",
+   "reason": "Uniqueness of a derived key across array elements inside one JSON file. unique_by is path-keyed only.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-25",
+   "summary": "Every trpc.io/docs link in packages/*/src is the canonical https://trpc.io/docs/<page> form and names an existing v11 docs page and heading",
+   "evidence": "www/build/package-links.test.ts:60-85, run by main.yml:131",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "missing: docs-route resolver (Docusaurus slug frontmatter, firstDoc root, {#id} heading anchors) for URLs extracted from TS sources",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "URL extraction is a regex, but mapping a route to a page (slug: overrides) and to its Docusaurus anchors needs an adapter. markdown_fragments_resolve covers Markdown sources with GitHub-style anchors only.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "route-model"
+     }
+    }
+   ],
+   "needs": "route-model"
+  },
+  {
+   "id": "trpc-26",
+   "summary": "Every v11 docs page (except README.md) has YAML frontmatter with a string title, and any `skill` block matches the schema (name, package, description; type in core/composition/framework/lifecycle; string arrays requires/include/references)",
+   "evidence": "www/build/skills.ts:28-61 schema, :65-97 readPages (fails 'missing frontmatter' / 'invalid frontmatter'); main.yml:71-72 `pnpm validate-skills`",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "missing: Markdown frontmatter adapter (so json_schema_passes / yaml_path_* could read it)",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "alint's structured formats do not include Markdown frontmatter. A regex can only approximate 'has a title', not the schema.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "format-reader"
+     }
+    }
+   ],
+   "needs": "format-reader"
+  },
+  {
+   "id": "trpc-27",
+   "summary": "Skill names are unique across docs pages",
+   "evidence": "www/build/skills.ts:380-381 ('another page has skill <name>'); main.yml:72",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-config",
+   "alint": "constraint unique-key over the skill names extracted by regex from the docs frontmatter",
+   "rules": [],
+   "assertion_family": "unique-key",
+   "reason": "A regex reads each skill name from the frontmatter, as for the C frontmatter units; uniqueness of the extracted values across pages has no kind today, so B-config unique-key (batch 2 ruling).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "format-reader"
+     }
+    },
+    {
+     "by": "audit",
+     "from": [
+      "B-adapter",
+      "other",
+      "none"
+     ],
+     "why": "By the frontmatter regex precedent (strapi-46, backstage-40, -42, -34), the values can be extracted: `^skill:\\n  name:` holds in all 24 skill pages. What is missing is value uniqueness across files, which is a slice family."
+    }
+   ]
+  },
+  {
+   "id": "trpc-28",
+   "summary": "A skill's `package` names a workspace package that has the \"tanstack-intent\" keyword",
+   "evidence": "www/build/skills.ts:384-393 ('no package <p>' / 'needs \"tanstack-intent\" in its package.json keywords'); main.yml:72",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "missing: frontmatter adapter (then a reference into manifests filtered by keyword)",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "The source values live in Markdown frontmatter, which alint cannot read.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "format-reader"
+     }
+    }
+   ],
+   "needs": "format-reader"
+  },
+  {
+   "id": "trpc-29",
+   "summary": "A skill's requires/include/references resolve: required skills are defined, and included or referenced pages and `page#heading` sections exist",
+   "evidence": "www/build/skills.ts:245-272 (lookup: '<slug> isn't a page'; 'no such heading'), :394-401 ('requires <x>, which no page defines'); main.yml:72",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "missing: frontmatter adapter plus a docs-slug/heading resolver",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "References come from frontmatter and resolve against docs slugs and headings.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "format-reader"
+     }
+    }
+   ],
+   "needs": "format-reader"
+  },
+  {
+   "id": "trpc-30",
+   "summary": "TypeScript file names are camelCase (oxlint unicorn/filename-case, with its ignore list and overrides) in the code that `turbo lint` lints",
+   "evidence": ".oxlintrc.json:109-128 (rule + ignore regexes), :185, :264 (off for examples/** and www/**/tooling/ui/**); package lint scripts (`oxlint src` / `oxlint .`); lint.yml:36 + :54",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "filename_case camel: trpc-ts-filenames-camel-case",
+   "rules": [
+    "trpc-ts-filenames-camel-case"
+   ],
+   "assertion_family": "none",
+   "reason": "R7: a check over file names (not code analysis) is classified by its logic, even though oxlint runs it (R2 tension noted). The lint scope and ignore regexes are mirrored as globs. alint's camel does not strip leading underscores as the lint rule does, so underscore-prefixed files (___testHelpers.ts) are excluded. C (needs a leading-underscore relaxation).",
+   "fire_verified": "Also verified: packages/server/src/my_new_file.ts and tooling/release/src/Bad-Name.ts fired; passes on the clone.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-31",
+   "summary": "The skills docs page (skills.md) lists exactly the shipped skills as `@trpc/<pkg>#<name>`",
+   "evidence": "www/build/skills.ts:403-426; main.yml:72",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "missing: frontmatter adapter (then a set_equals of package#name pairs)",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "One side of the set comes from frontmatter (name + package combined), which alint cannot extract.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "format-reader"
+     }
+    }
+   ],
+   "needs": "format-reader"
+  },
+  {
+   "id": "trpc-32",
+   "summary": "Every package with the \"tanstack-intent\" keyword has at least one docs page defining a skill for it",
+   "evidence": "www/build/skills.ts:436-442 ('has the tanstack-intent keyword but no docs page has a skill for it'); main.yml:72",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "missing: frontmatter adapter (then a reverse reference / cardinality >= 1)",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "The target side lives in frontmatter.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "format-reader"
+     }
+    }
+   ],
+   "needs": "format-reader"
+  },
+  {
+   "id": "trpc-40",
+   "summary": "oxlint code rules pass (typescript-eslint presets, react hooks, no-console in packages, custom trpc/no-symbol-dispose and trpc/type-parameter-naming)",
+   "evidence": ".oxlintrc.json; tooling/oxlint-plugin; lint.yml:36 + :54",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "oxlint",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Linting source (R2, R7).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-41",
+   "summary": "Import firewall: adapters must not import @trpc/server or unstable-core-do-not-import; no @trpc/*/src imports; no Testing Library waitFor",
+   "evidence": ".oxlintrc.json:130-152, :216-250 (no-restricted-imports)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "oxlint",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R7 keeps import extraction in D; v0.12 treated the vite eslint firewall the same way.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-42",
+   "summary": "Code, JSON, YAML and Markdown are oxfmt-formatted",
+   "evidence": "lint.yml:40 `pnpm format-fix` + :54 git diff --exit-code; .oxfmtrc.json",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "oxfmt",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Formatting (R2).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-43",
+   "summary": "No unused exports (ts-prune, filtered)",
+   "evidence": "lint.yml:33 `pnpm lint-prune`; package.json lint-prune; .ts-prunerc",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "ts-prune",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Code analysis.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-44",
+   "summary": "Packages build",
+   "evidence": "main.yml:33 `pnpm build`",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tsdown/turbo",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Build execution.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-45",
+   "summary": "Packages and tooling typecheck",
+   "evidence": "main.yml:51 `pnpm typecheck-packages`",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tsc",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Type checking.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-46",
+   "summary": "The www site, samples and shared UI typecheck",
+   "evidence": "main.yml:90 `pnpm typecheck-www`; www/package.json typecheck",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tsc",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Type checking.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-47",
+   "summary": "Docs and blog code samples compile (Twoslash)",
+   "evidence": "main.yml:92 `pnpm --filter www check-twoslash`",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "twoslash",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Compiling code.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-48",
+   "summary": "Unit and integration tests pass (vitest over packages/* and tooling/*, the www behavioural tests, the upgrade codemod snapshot fixtures)",
+   "evidence": "main.yml:109 `pnpm test --coverage`, :130-131 www build+test",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "vitest",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Running tests (R1 collapses them).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-49",
+   "summary": "Committed OpenAPI test fixtures in packages/openapi/test/routers/ are regenerated-fresh after the test run",
+   "evidence": "main.yml:111-121 (git status --porcelain after tests)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "vitest codegen",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Codegen freshness requires running the project's code.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-50",
+   "summary": "Coverage uploads to Codecov, and project coverage may not drop more than 1%",
+   "evidence": "main.yml:123-127 (fail_ci_if_error); codecov.yml status.project threshold 1%",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "codecov",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "External service and runtime coverage.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-51",
+   "summary": "Packed tarballs are sound: manifest targets (exports/main/module/types/bin) are present, bins have shebangs, packed dependency specs have no catalog:/workspace:/link:/file:, and intent packages ship skills",
+   "evidence": "scripts/verify-packed.ts:44-125; main.yml:73",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "verify-packed",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Needs the build and pnpm pack output, not committed files.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-52",
+   "summary": "Packed packages typecheck as a consumer across TypeScript versions and optional-peer scenarios",
+   "evidence": "scripts/verify-packed.ts:127-348; main.yml:73",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tsc in scratch consumers",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Type checking of built output.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-53",
+   "summary": "A monorepo consuming the built declaration files compiles",
+   "evidence": "main.yml:327-336 monotest-build",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "turbo build",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Build execution.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-54",
+   "summary": "CodeQL security analysis",
+   "evidence": ".github/workflows/codeql-analysis.yml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "codeql",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Code analysis.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-55",
+   "summary": "PR title follows Conventional Commits with scopes drawn from package names plus www/example/examples/ci/docs/deps/monorepo",
+   "evidence": ".github/workflows/semantic-pr.yml:34-89",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "shell",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "PR metadata, not repo state (as in the v0.12 vite config).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-56",
+   "summary": "pnpm install in CI: the lockfile is frozen and in sync with manifests and catalogs; dependency build scripts are limited to allowBuilds",
+   "evidence": ".github/setup/action.yml:23 `pnpm install` (frozen in CI); release.yml:201,266 --frozen-lockfile; pnpm-workspace.yaml:21-38 allowBuilds",
+   "mechanism": "tool-config",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "pnpm",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Lockfile freshness and package-manager resolution semantics (R7).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-57",
+   "summary": "Docs content parses for skill generation (Docusaurus syntax problems, snippet/sample expansion)",
+   "evidence": "www/build/skills.ts:117-134 (fromDocusaurus problems, expandSnippets); main.yml:72",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-delegate",
+   "alint": "skills.ts",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "A custom content parser and transformer run as project code.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "D",
+      "other",
+      "none"
+     ],
+     "why": "R7: fromDocusaurus's admonition checks (a known type, not reopened, closed; docusaurus-syntax.ts:303-361) run over Markdown files alint reads. CI runs them over every v11 docs page through content.ts parseSource in the www tests (package-links.test.ts:41, search-ranking.test.ts:21, main.yml:131), not only over skill pages. Validating a Markdown dialect's own syntax is the B-delegate example in section 2.2. Stage A's D reason ('project code') was not applied to tooling/subtree (trpc-11) or to skills.ts (trpc-26..32). The include-resolution half is split out as trpc-B02 (A). The sample-fence half is dormant: the clone has no ```sample fences."
+    }
+   ]
+  },
+  {
+   "id": "trpc-58",
+   "summary": "Generated agent skills pass `intent validate`",
+   "evidence": "package.json validate-skills; main.yml:72",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "@tanstack/intent",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Validates generated, uncommitted output.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-59",
+   "summary": "Subtree examples' @shared/ui imports resolve to exported files, and every npm import of the inlined UI files is a declared dependency",
+   "evidence": "tooling/subtree/src/standalone.ts:395-416, :546-549, :626-636",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "standalone.ts",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Import extraction and resolution (R7).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-60",
+   "summary": "Each subtree example installs and builds standalone, outside the monorepo",
+   "evidence": "subtree.yml:90-129",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "npm/pnpm build",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Build execution.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-61",
+   "summary": "Release: the version bump changes only the manifests, and pnpm accepts the existing lockfile (--frozen-lockfile)",
+   "evidence": "tooling/release/src/release.ts:99-151 checkRelease; release.yml:152",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "tooling/release",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Lockfile acceptance and git tree state (R7). The manifest-shape precondition is trpc-12.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-62",
+   "summary": "Release: typecheck and build regenerate nothing (build-generated package.json exports/files/funding/typescript peer and per-package turbo.json outputs are committed fresh)",
+   "evidence": "release.ts:152-158; scripts/entrypoints.ts (written by tsdown onSuccess)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tooling/release",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Codegen freshness by running the build.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-63",
+   "summary": "Release guards: an admin triggered it, HEAD is on the branch, the branch did not move, npm does not hold a different tarball for the version, and npm serves the versions",
+   "evidence": "release.yml:175-184; release.ts:174-196, 216-249, 300-372",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tooling/release",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Network and GitHub state.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-64",
+   "summary": "Legacy trpc.io URLs and vercel.json redirect sources land on a page (www build on Vercel)",
+   "evidence": "www/package.json build script; www/build/legacy-urls-check.ts; www/vercel.json buildCommand",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "legacy-urls-check.ts",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Needs the built route table.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-65",
+   "summary": "Old docs pages land on their new pages through vercel.json's redirects",
+   "evidence": "www/build/old-redirects.test.ts; main.yml:131",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "vitest",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Exercises the project's redirect-routing code.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-66",
+   "summary": "Every bug fix has a regression test that fails without the fix, named in a 'Regression check:' line in the PR",
+   "evidence": "AGENTS.md:20; .agents/skills/trpc-conventions/SKILL.md:10-15",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "D",
+   "alint": "review",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Test semantics and PR metadata.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-67",
+   "summary": "No behaviour-changing defaults in v11; new defaults go to v12",
+   "evidence": "AGENTS.md:21",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "D",
+   "alint": "review",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Semantic review.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-68",
+   "summary": "TypeScript conventions: internal parameters, properties and options are required; one opts object; await using for cleanup",
+   "evidence": "AGENTS.md:22; .agents/skills/trpc-conventions/SKILL.md (TypeScript section)",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "D",
+   "alint": "review",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Code and type analysis.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-69",
+   "summary": "PR bodies follow the template (under 200 words, one Closes #N per issue, AI model) and carry the agent callout while an agent works",
+   "evidence": "AGENTS.md:23,25; .github/PULL_REQUEST_TEMPLATE.md; .agents/skills/pr-agent-callout/SKILL.md",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "D",
+   "alint": "review",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "PR metadata, not repo state.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "trpc-B01",
+   "summary": "Every workspace: dependency names a project in the workspace (pnpm install fails with ERR_PNPM_WORKSPACE_PKG_NOT_FOUND otherwise)",
+   "evidence": ".github/setup/action.yml:23 `pnpm install` in every main.yml/lint.yml job; release.yml:112,177 and subtree.yml:85 install with --frozen-lockfile; pnpm-workspace.yaml:1-12 lists the members. Clone: 45 workspace:* specifiers across the 59 workspace manifests (24 dependencies, 21 devDependencies), and every one names an existing project (@shared/ui, @monotest/*, @trpc/*, @samples/v11, ...)",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "A",
+   "alint": "cross_file relation: superset. source.files = the 12 pnpm-workspace member globs, extract json $.name (unioned). targets.files = the same globs, extract regex '\"([^\"]+)\"\\s*:\\s*\"workspace:'. allow_missing_target: true. Scratch rule id workspace-refs-resolve; it is not in Stage A's config.",
+   "rules": [
+    "trpc-workspace-refs-resolve"
+   ],
+   "assertion_family": "none",
+   "reason": "R7: a name lookup over files alint reads. Stage A applied the same ruling to catalog: lookups (trpc-10). Unlike trpc-10, the key side is reachable today: a regex over the manifest text yields the dependency key of each workspace: value, and superset with a unioned source gives the set of workspace names. The rule is exact for this repo's workspace:* usage. A workspace:^x range would also need semver satisfaction.",
+   "fire_verified": "On a scratch copy of all 59 workspace manifests the rule passes. Changing @monotest/api to @monotest/apix workspace:* in examples/.test/monotest-app fired, which shows hidden-directory members are covered. Renaming tooling/ui to @shared/uikit fired for every @shared/ui dependent. The rule also passes on the clone.",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "trpc-B02",
+   "summary": "Every `// @include: <name>` line in a Twoslash block of the v11 docs, the v11 home and the blog names a ```twoslash include <name>``` block in the same Markdown file",
+   "evidence": "www/build/docusaurus-syntax.ts:155-170 expandIncludes reports the problem 'no `twoslash include <name>`'. Three CI paths run it: www/build/twoslash-check.ts:93-112 over www/v11/docs, www/v11/home and www/blog (main.yml:92 check-twoslash); www/build/content.ts:213-245 parseSource for every v11 docs page through the www tests (package-links.test.ts:41 and search-ranking.test.ts:21 call docPages; main.yml:131); and skills.ts:121-134 (main.yml:72). Clone: 133 `// @include:` lines, all in www/v11/docs; 15 files under www/v11 and www/blog define include blocks.",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "for_each_file (select www/v11/docs/**/*.md, www/v11/home/**/*.md, www/blog/**/*.md) with a nested cross_file relation: subset. Source {file: '{path}', regex '(?m)^[ \\t>]*// @include: (\\S+)[ \\t]*$'}; target {file: '{path}', regex '(?m)^[ \\t>]*`{3,}twoslash include (\\S+)'}. Scratch rule id twoslash-includes-resolve; it is not in Stage A's config.",
+   "rules": [
+    "trpc-twoslash-includes-resolve"
+   ],
+   "assertion_family": "none",
+   "reason": "R7: twoslash-check and fromDocusaurus run this check over Markdown files alint reads. It holds independently of whether the block compiles (D, trpc-47), which Stage A folded it into. It is an intra-file reference, and today's kinds express it. Caveat: the tools strip HTML comments before checking and the regex does not; the clone has no commented-out includes.",
+   "fire_verified": "Also verified, though family other does not require it. The rule passes on the clone. On a scratch copy of quickstart.md, renaming one reference to trpcx fired, and so did renaming the `server` include block.",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "trpc-B03",
+   "summary": "In the subtree-synced examples, every CSS @source that points into @shared/ui (tooling/ui/src) names concrete files: each brace alternative must exist as a file, with no * wildcard and no directory",
+   "evidence": "tooling/subtree/src/standalone.ts:453-471 fails with '@source ... must list the @shared/ui files the app uses' and '..., not a directory'. subtree.yml:83-88 runs it on PRs that touch examples/** or tooling/ui/**. Clone: 5 @source lines (next-minimal-starter, next-prisma-starter, next-prisma-websockets-starter, .experimental/next-app-dir, tanstack-start-sse-chat), each a brace list of tooling/ui/src/components/*.tsx files.",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "missing: brace expansion of an extracted path reference, with existence checked per alternative",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Checked on the clone and on a scratch copy. registry_paths_resolve with entries_are_globs passed a brace list with a nonexistent alternative, and passed a * wildcard. Without entries_are_globs, the literal brace path never resolves and every line fires. The wildcard ban alone would be a file_content_forbidden regex. Not D: @source is a Tailwind path list, not an import the program uses (R7). If the study rules it an import, it joins trpc-59 in D.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "other"
+     }
+    }
+   ],
+   "needs": "other"
+  },
+  {
+   "id": "trpc-B04",
+   "summary": "A subtree-synced example package that depends on @shared/ui has no src/shared-ui/ directory (shared-ui/ when the package has no src/); the standalone copy reserves it for the inlined UI files",
+   "evidence": "tooling/subtree/src/standalone.ts:384-390 fails with '<target> already exists'; subtree.yml:83-88 runs it. Clone: the 5 @shared/ui dependents all have a src/ directory and none has a shared-ui directory.",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "dir_absent over the hand-listed dependents' src/shared-ui; not in Stage A's config",
+   "rules": [
+    "trpc-subtree-shared-ui-dir-reserved"
+   ],
+   "assertion_family": "none",
+   "reason": "dir_absent expresses it, but 'depends on @shared/ui' is a manifest field that no path selector can read, so the dependents must be listed by hand. Stage A used the same C reasoning for trpc-22. The guard has its own condition and failure message, so it is not folded into trpc-11. It is a low-weight unit.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "trpc-B05",
+   "summary": "Workspace project names are unique across the workspace manifests",
+   "evidence": "Every build, lint and typecheck goes through turbo: package.json scripts build, lint, typecheck-www and monotest-build; main.yml:33,90,130,336; lint.yml:36. turbo.json addresses packages by name (examples-minimal-react#build, www#build). Clone: 59 names, no duplicates.",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "B-config",
+   "alint": "constraint unique-key over the workspace manifests ($.name -> manifest path); unique_by is keyed on paths only",
+   "rules": [],
+   "assertion_family": "unique-key",
+   "reason": "R7: turbo's package-graph check over files alint reads, classified by its logic as one manifest per name. Not verified offline: turbo refusing a workspace with two packages of the same name ('Failed to add workspace ... it already exists at ...') comes from tool knowledge, and turbo's source is not in the clone.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  }
+ ],
+ "removed": [
+  {
+   "id": "trpc-09",
+   "summary": "manypkg ROOT_HAS_PROD_DEPENDENCIES: the private root package.json declares no `dependencies`, only devDependencies",
+   "why": "Not shown to be enforced. Stage A inferred a ROOT_HAS_PROD_DEPENDENCIES check only from the clone passing the merge-queue diff. As far as I recall, manypkg's documented root check is the opposite, ROOT_HAS_DEV_DEPENDENCIES (root dependencies belong in `dependencies`; I could not verify this offline). trpc's root has 35 devDependencies and 0 dependencies, so that check would fail it. cloudflare/workers-sdk on manypkg 0.23.0 keeps its root in dependencies (19 dependencies, 0 devDependencies). The evidence fits 'manypkg 0.25.1 checks no root field' at least as well as Stage A's reading. Move it to value-add or drop it."
+  }
+ ],
+ "rejected_stage_b": {},
+ "value_add": [
+  "alint://bundled/toolchain-pins@v1: .nvmrc holds an exact version; .tool-versions `nodejs` equals .nvmrc. Both are kept by hand: renovate's nvm manager, node-version datasource and pnpm updates are disabled, and nothing checks them.",
+  "alint://bundled/hygiene/lockfiles@v1: only the root pnpm-lock.yaml. trpc only gitignores package-lock.json/yarn.lock.",
+  "alint://bundled/monorepo/pnpm-workspace@v1: pnpm-workspace.yaml declares packages; packages/* have a README and a name.",
+  "trpc-va-lockstep-versions: every packages/* version equals packages/server's. tooling/release writes this; nothing checks it between releases.",
+  "trpc-va-openapi-prerelease-version: @trpc/openapi = the workspace version + '-alpha'.",
+  "trpc-va-internal-peers-pinned: peerDependencies on @trpc/server/client/react-query equal the released version.",
+  "trpc-va-engines-node-major-matches-nvmrc: root and www engines.node share .nvmrc's major. pnpm only warns on an engines.node mismatch because no engine-strict is set, so it is not enforced.",
+  "trpc-va-workflow-node-major-matches-nvmrc: subtree.yml's literal `node-version: 24.x` shares .nvmrc's major.",
+  "trpc-va-server-license-matches-root: packages/server/LICENSE is identical to the root LICENSE.",
+  "trpc-root-no-prod-dependencies (info): kept as value-add after trpc-09 was removed; see `removed`"
+ ],
+ "value_add_rules": [
+  "trpc-root-no-prod-dependencies",
+  "trpc-va-lockstep-versions",
+  "trpc-va-openapi-prerelease-version",
+  "trpc-va-internal-peers-pinned",
+  "trpc-va-engines-node-major-matches-nvmrc",
+  "trpc-va-workflow-node-major-matches-nvmrc",
+  "trpc-va-server-license-matches-root"
+ ],
+ "absent_categories": [
+  "locale / i18n: no locale catalogs, translation files or i18n gate; the docs are English-only",
+  "pre-commit hooks: no husky, lefthook, pre-commit, lint-staged or simple-git-hooks",
+  "non-GitHub CI: no .gitlab-ci, .circleci, azure-pipelines, Jenkinsfile, .buildkite; Vercel builds www externally",
+  "Makefile/justfile/Taskfile: none; tasks are package.json scripts and turbo",
+  "dedicated dep-version tools: no syncpack, sherif, yarn constraints or knip; manypkg runs with no config block (no workspaceProtocol: require, no ignoredRules)",
+  "pnpm catalogMode / engine-strict / .npmrc at the root: none, so catalog use is not mandated and engines.node only warns",
+  "toolchain pins: no .node-version, Volta or Dockerfile; Node via .nvmrc (+ an unenforced .tool-versions), pnpm via packageManager",
+  "per-file license headers / SPDX: none (root MIT LICENSE plus a copy in packages/server)",
+  ".editorconfig / .gitattributes: absent; formatting is entirely oxfmt",
+  "changesets / CHANGELOG gate: none; release notes are generated from PRs at release",
+  "dependency audit or license compliance gate: none (CodeQL only)",
+  "manypkg INCORRECT_REPOSITORY_FIELD: inactive, because the root package.json has no `repository` field"
+ ],
+ "unusual": [
+  "The lint workflow is named 'autofix.ci' for the autofix-ci app. On PRs, the oxlint/manypkg/oxfmt fixes are committed back rather than failing. Only the merge queue (and release commits on main) fail, through `git diff --exit-code`.",
+  "Catalogs plus manypkg: manypkg ignores catalog:/npm:/workspace: specifiers, so EXTERNAL_MISMATCH governs only literal semver ranges. The repo carries a catalog value and a different literal range for the same dependency (catalog next ^16.4.5 vs ^15.5.29 in 13 examples; oxfmt ^0.77.0 vs ^0.75.0; typescript ^7.0.2 / ts-api ^6.0.3 / www 5.9.3 vs a literal ^5.9.2 x34), and nothing checks drift between catalogs and literals.",
+  "Examples depend on @trpc/* through bare `npm:@trpc/<name>` aliases (no version) rather than workspace:. There are also `npm:zod@^3.0.0` and `npm:next-auth@^4.24.15` aliases, and one example pins @trpc/* to ^11.16.0.",
+  "subtree.yml's standalone conversion (tooling/subtree) works as a dependency-version gate for 10 examples published to trpc/examples-<name>: every catalog: must resolve, and workspace: is allowed only for @shared/ui and @trpc/*. It also inlines @shared/ui sources and checks imports against declared dependencies.",
+  "Docs frontmatter (`skill:` blocks in www/v11/docs) drives generated TanStack Intent agent skills, which are not committed (prepack writes them). The generator validates cross-references: unique names, package plus keyword, requires/include/references, and that the skills page lists exactly the shipped skills. Six B-adapter units all hinge on a missing Markdown-frontmatter adapter.",
+  "Agent-skill vendoring: .agents/skills holds both installed and written skills. skills-lock.json pins the installed ones with a CLI-specific computedHash, NOTICE-pstack.md records the pinned commit, every skill has a .claude/skills symlink, and .oxfmtrc.json negation entries decide which skills get formatted. All of this is documented in AGENTS.md.",
+  "tooling/release writes lockstep versions (@trpc/openapi stays an -alpha prerelease), pins internal peerDependencies to the released version, and checks for public-package dependency cycles on every canary. Only at a stable release does it check that the frozen lockfile still applies and that the build changes nothing. The build regenerates package.json exports/files/funding/peer typescript and per-package turbo.json via scripts/entrypoints.ts.",
+  "All e2e jobs (examples, Deno, Bun, legacy Node 20/22) are continue-on-error, so they are advisory and not counted.",
+  "Toolchain: CI takes Node from .nvmrc everywhere except subtree.yml (24.x) and the legacy matrix. pnpm comes from packageManager. engines.pnpm is a hard pnpm check but engines.node only a warning. Examples declare their own packageManager pnpm@10.33.1 and engines >=20 / >=18.15.0 for standalone use.",
+  "vitest.shared.ts builds its @trpc/* aliases from each packages/*/package.json `exports`. That is an implicit requirement that every non-test package declares exports; it is not counted as a unit.",
+  "www/sponsors.json and the README sponsors blocks are bot-maintained by a scheduled workflow, and tests guard the markers and the data's uniqueness.",
+  "The .coderabbit.yaml path instructions flag generated directories for AI review. They are guidance, not a gate."
+ ],
+ "check_result": "`alint validate-config` passed: 63 rules loaded (3 bundles plus 36 repo rules). `alint -c CONFIG check . --compact` on the clone reported 'all rules passed', with zero violations, so no rule needs an explanation. Every A and C rule was also shown to fire on a broken scratch copy, and so was every value-add rule. The scratch tree was removed afterwards, and the clone's `git status --porcelain` is empty.",
+ "stage_b_config_issues": [
+  "Reproduced: validate-config reports 63 rules and check passes on the clone with zero violations. The clone's git status is clean afterwards.",
+  "trpc-nvmrc-version-spec (trpc-01) is stricter than setup-node. It fires on '^24', which setup-node resolves (it accepts semver ranges from node-version-file). Stage A's '>=24 <25' fire test therefore shows a false positive, not the invariant. Relax it to a non-empty single-token spec, or accept ranges. Deletion, an empty file and 'twenty-four' fire correctly.",
+  "trpc-package-manager-pnpm-pinned (trpc-02) covers only the branch where no version is given. pnpm/action-setup also fails ('Multiple versions of pnpm specified') when a step's with.version disagrees with packageManager. Two yaml_path_absent rules, on $.jobs.*.steps[?match(@.uses, '^pnpm/action-setup@.+')].with.version over .github/workflows/*.yml and on $.runs.steps[...] over .github/setup/action.yml, pass on the clone and fired on scratch copies with `version: 11.0.0` added. A cross_file equals against packageManager would be exact. The removal, yarn@ and +sha512 hash cases behave correctly.",
+  "trpc-package-manager-satisfies-engines-pnpm (trpc-03) gets both directions wrong (reproduced): engines.pnpm ^12.5.0 passes and >=11 fires. See reclassify.",
+  "trpc-root-no-prod-dependencies (trpc-09) is presented as an enforced manypkg check, but no such check is established. See remove. Demote it to value-add at level info, or drop it.",
+  "trpc-subtree-examples-workspace-protocol (trpc-11) is line-based. A workspace: entry on the same line as `\"dependencies\": {` is not selected (reproduced on a scratch copy). oxfmt keeps a one-line object that fits in 80 columns, so 'oxfmt keeps one dependency per line' is not guaranteed. The risk is low; the single-line and nested-manifest cases fire as Stage A said.",
+  "trpc-agent-skill-has-claude-link (trpc-16) uses dir_exists, which follows the symlink, so a copied directory passes. See reclassify.",
+  "trpc-published-readmes-have-sponsor-markers (trpc-22) also covers the root README.md. The CI test (www/build/sponsors-sync.test.ts:713-731) checks only packages/*. Only the scheduled, secret-gated sponsors.yml sync (sponsors-sync.ts:203) fails on the root README, and it runs after merge.",
+  "trpc-workspace-package-names-valid (trpc-14) does not cover validate-npm-package-name's core-module and blacklisted names: 'http' and 'node_modules' pass the regex. Coverage itself is right: the globs select exactly the 59 workspace manifests, hidden examples/.test and .experimental members included (checked with a counting rule).",
+  "Record facts: trpc-07 says there are 33 peer entries; the clone has 32 (packages/* 30, tooling/ui 2). trpc-26's evidence omits that CI also decodes every v11 docs page's frontmatter in www/build/content.ts:112-147 (title, section and a numeric order are required; experiment is an enum) through the www tests. It is the same unit with wider evidence.",
+  "Value-add labelling is otherwise accurate. The three bundles and the five trpc-va-* rules are commented VALUE-ADD, and the trpc-va-* rules use level info. The bundles keep their own levels. monorepo/pnpm-workspace's 'members have a name' overlaps an enforced check: tooling/release/src/workspace.ts:28-30 throws '<file> has no name' on every canary."
+ ],
+ "stage_b_summary": "Stage A's record is careful, but it has one unverified A unit, three classifications that do not hold up, and five missed units.\n\n**Removed:** trpc-09. Stage A inferred a manypkg ROOT_HAS_PROD_DEPENDENCIES check from the clone passing. As I recall it, manypkg's documented root check runs the other way (ROOT_HAS_DEV_DEPENDENCIES), which trpc's devDependencies-only root would fail; I could not confirm this offline. The evidence fits 'no root check in 0.25.1' at least as well.\n\n**Reclassified:**\n- trpc-03, C to B-adapter: the semver-major approximation is wrong in both directions (reproduced).\n- trpc-16, A to B-adapter: dir_exists cannot tell the required symlink from a copied directory (R4).\n- trpc-57, D to B-delegate: by R7, the Docusaurus admonition checks run over Markdown files alint reads. CI applies them to every v11 docs page through the www tests, not only to skill pages.\n\n**Missed:**\n- trpc-B01, dep-version, A: workspace: specifiers must name workspace projects. Under the ruling Stage A used for trpc-10, this is a lookup; a cross_file superset expresses it today, and it was fire-verified both ways.\n- trpc-B02, other, A: Twoslash `// @include:` lines must resolve to include blocks in the same file. This is split from the compile check (D); for_each_file plus cross_file subset expresses it, and it was fire-verified.\n- trpc-B03, B-adapter: the subtree @source brace lists must name existing files. registry_paths_resolve with entries_are_globs accepts a nonexistent alternative and a wildcard.\n- trpc-B04, C: the reserved src/shared-ui directory guard in the subtree conversion.\n- trpc-B05, B-config unique-key: workspace names must be unique for turbo. This rests on tool knowledge and was not verified offline.\n\n**Fire tests reproduced on my own scratch copy:**\n- trpc-01 fires as claimed, but also on '^24', which setup-node accepts.\n- trpc-02 fires as claimed. It does not cover action-setup's conflicting-version error; a yaml_path_absent rule that does was verified.\n- trpc-11 fires as claimed, with a narrow false negative on a one-line dependencies object.\n- trpc-12 (C) fires as claimed.\n\nI also confirmed that ordered_block cannot express UNSORTED_DEPENDENCIES: exact end markers either leave a block unclosed or run past it. trpc-15 therefore stays B-adapter.\n\n**Revised counts:** A=10 (01, 02, 11, 14, 18, 20, 21, 23, B01, B02), C=5 (12, 19, 22, 30, B04), B=21 (B-config 7: 05, 07, 08, 10, 17, 24, B05; B-adapter 13: 03, 06, 13, 15, 16, 25-29, 31, 32, B03; B-delegate 1: 57), D=29.\n- coverage_today = 10/36 = 28%\n- coverage_with_tuning = 15/36 = 42%\n- gap = 21/36 = 58%\n\n**Per family:**\n\n| Family | A | C | B | Today | With tuning |\n|---|---|---|---|---|---|\n| toolchain-pin | 2 | 0 | 1 | 2/3 | 2/3 |\n| dep-version | 2 | 1 | 5 | 2/8 | 3/8 |\n| other | 6 | 4 | 15 | 6/25 | 10/25 |\n\nThere are no locale units. After the slice, 05, 24 and B05 (unique-key) would make 13/36 = 36%.\n\n**Unverified leads, not counted:**\n- manypkg INTERNAL_DEV_DEP_NOT_STAR. The clone is consistent with it: all internal devDependencies are workspace:* or npm: aliases.\n- packageManager equal to pnpm-lock.yaml's packageManagerDependencies.pnpm (12.4.1 in both). This is likely D under R7 as lockfile freshness.\n- The www build (docs broken links, parent/section) runs only on Vercel. If that check is not a required gate, trpc-64 is not enforced either. If it is a gate, its docs-content checks are missing units.\n- trpc-12 versus trpc-61 is a possible double count (a precondition and its only detector); I left both as Stage A had them.\n\nScratch dir <scratch>/trpc-trpc-b/ has been removed. Nothing from the repository ran, and no network was used.",
+ "notes": "Counts (D excluded from ratios): A=10 (01,02,09,11,14,16,18,20,21,23), C=5 (03,12,19,22,30), B=16 (B-config 6: 05,07,08,10,17,24; B-adapter 10: 06,13,15,25,26,27,28,29,31,32), D=30 (40-69). coverage_today = 10/31 = 32%; coverage_with_tuning = 15/31 = 48%; gap = 16/31 = 52%. Per family: toolchain-pin A2 C1 B0 (2/3 today, 3/3 with tuning); dep-version A2 C1 B-config4 B-adapter1, plus D2 (56, 61), giving 2/8 today and 3/8 with tuning; other A6 C3 B-config2 B-adapter9 (6/20); locale: none. After the slice (equality/unique-key/cardinality), trpc-05 and trpc-24 (unique-key) would move to A if phase 8 confirms, giving 12/31 = 39%. The remaining B-config units are set (07, 08, 17) and reference (10).\n\nUncertainties, stated honestly:\n(1) The manypkg check list (EXTERNAL_MISMATCH, INTERNAL_MISMATCH, INVALID_DEV_AND_PEER_DEPENDENCY_RELATIONSHIP, MULTIPLE_DEPENDENCY_TYPES, INVALID_PACKAGE_NAME, UNSORTED_DEPENDENCIES, the root-dependencies check, INCORRECT_REPOSITORY_FIELD) comes from manypkg's documented checks. The @manypkg/cli 0.25.1 source was not available offline; its dependency list in pnpm-lock.yaml (validate-npm-package-name, sembear, semver, parse-github-url) is consistent with it. That the root check is ROOT_HAS_PROD_DEPENDENCIES (root deps belong in devDependencies) is inferred: trpc's devDependencies-only root passes the merge-queue diff gate. I could not confirm whether INVALID_DEV_AND_PEER also compares ranges. The clone state matches every check: one literal semver range per external dependency, all maps sorted, no duplicate dependency types, every peer also a devDependency.\n(2) pnpm engine behavior is from my knowledge of pnpm's packageIsInstallable: an engines.pnpm mismatch throws, while an engines.node mismatch only warns without engine-strict. On that basis Node-vs-engines.node is not a unit (it is value-add), and trpc-03 is.\n(3) I took pnpm 12's defaults for frozen-lockfile-in-CI and strictDepBuilds from memory, and folded them into the D unit trpc-56.\n(4) Classifying unicorn/filename-case (trpc-30) by its logic rather than as a linter D unit is a judgement under R7. Stage B may move it to D under R2.\n(5) trpc-12 counts a load-bearing code-comment convention (R5) as distinct from the release's frozen-lockfile D check (trpc-61).\n(6) trpc-16 does not distinguish a symlink from a copied directory.\n(7) SK units 26-29 and 31-32 are counted one per distinct generator assertion (R1: one script's one assertion).\nFile-graph edge sources: 2, neither expressible today: package-name dependency edges for the cycle check (trpc-13), and docs URL-to-page/anchor references from TS sources (trpc-25). The workspace globs in trpc-14 mirror pnpm-workspace.yaml (59 manifests); the nested examples/.experimental/next-app-dir/src/trpc/package.json is not a workspace member and is correctly excluded. No network was used, nothing from the repo ran, and the scratch dir <scratch>/trpc-trpc-a/ has been removed.",
+ "stage_c": {
+  "changes": [
+   {
+    "rule_id": "trpc-nvmrc-version-spec",
+    "unit": "trpc-01",
+    "action": "modified",
+    "detail": "Replaced the strict regex with a verbose (?x) block-scalar regex. It accepts an exact or partial version (24, 24.1.0, v24.1.0, 24.x), semver ranges (^24, ~24.1, >=24 <25, 24 - 25, >=22 || ^24), an optional node/nodejs prefix, and the aliases lts/*, lts/<codename>, lts/-N, node, latest and current. Surrounding blank lines are allowed. Passes on the clone (24.22.2). On a scratch copy of .nvmrc it passed on ^24, >=24 <25, 24, 24.1.0 and lts/*. It fired on an empty file and on 'twenty-four' (an earlier prototype run also fired on whitespace-only, '24 abc' and '24.22.2.1'). Deleting .nvmrc fired trpc-nvmrc-present, and the spec rule stayed silent because there is no file to read. A comment records the approximation: setup-node takes the first single-token line of a multi-line file, while this rule wants exactly one spec."
+   },
+   {
+    "rule_id": "trpc-pnpm-action-setup-no-version-workflows",
+    "unit": "trpc-02",
+    "action": "added",
+    "detail": "yaml_path_absent on .github/workflows/*.yml, path $.jobs.*.steps[?match(@.uses, '^pnpm/action-setup@.+')].with.version (Stage B's form). Passes on the clone. On a scratch copy it fired with `with: version: 11.0.0` added to the subtree.yml action-setup step, and with `version: 12.4.1` added to the sponsors.yml step. It was silent after restoring both. The comment says it is stricter than action-setup for a version equal to packageManager's (Stage B: action-setup fails only on disagreement; a cross_file equals would be exact)."
+   },
+   {
+    "rule_id": "trpc-pnpm-action-setup-no-version-composite",
+    "unit": "trpc-02",
+    "action": "added",
+    "detail": "yaml_path_absent on .github/setup/action.yml, path $.runs.steps[?match(@.uses, '^pnpm/action-setup@.+')].with.version. Passes on the clone. It fired on a scratch copy with `with: version: 11.0.0` added to the composite action's action-setup step, and was silent after the restore."
+   },
+   {
+    "rule_id": "trpc-root-no-prod-dependencies",
+    "unit": "trpc-09",
+    "action": "demoted",
+    "detail": "Moved to the VALUE-ADD section at level info, with a comment that unit trpc-09 was removed because no manypkg root check is established. The message is now prefixed VALUE-ADD and the id is unchanged. Passes on the clone. Adding a root `dependencies` block on a scratch copy produced an info finding."
+   },
+   {
+    "rule_id": "trpc-package-manager-satisfies-engines-pnpm",
+    "unit": "trpc-03",
+    "action": "demoted",
+    "detail": "Moved to the VALUE-ADD section at level info and labelled as a major-band approximation. The comment names the limitation: normalize: semver-major is not range satisfaction and is wrong both ways (^12.5.0 with pnpm@12.4.1 passes; >=11 fires), so the unit needs a semver-range operator. Passes on the clone. engines.pnpm ^11.0.0 on a scratch copy produced an info finding."
+   },
+   {
+    "rule_id": "trpc-agent-skill-has-claude-link",
+    "unit": "trpc-16",
+    "action": "demoted",
+    "detail": "Moved to the VALUE-ADD section at level info and labelled as an approximation. The comment says dir_exists follows the link, so a copied directory passes and only a missing link fires; alint has no symlink predicate, and no_symlinks is the inverse. Only the level and message changed. Passes on the clone. Not re-fire-tested."
+   },
+   {
+    "rule_id": "trpc-workspace-refs-resolve",
+    "unit": "trpc-B01",
+    "action": "added",
+    "detail": "cross_file relation superset. The source unions $.name from a single brace glob that mirrors pnpm-workspace.yaml's 12 member globs (root included). A counting rule confirmed the glob selects exactly the 59 workspace manifests, the same set as a find over the member globs. The targets use the same glob with regex '\"([^\"]+)\"\\s*:\\s*\"workspace:', and allow_missing_target is true. Passes on the clone. On a scratch copy of the 59 manifests it fired on examples/.test/monotest-app with @monotest/api renamed to @monotest/apix workspace:*. Renaming tooling/ui to @shared/uikit fired on all 6 @shared/ui dependents (the 5 examples plus www). Adding \"@trpc/nonexistent\": \"workspace:^\" to www/package.json fired. It was silent after the restore."
+   },
+   {
+    "rule_id": "trpc-twoslash-includes-resolve",
+    "unit": "trpc-B02",
+    "action": "added",
+    "detail": "for_each_file over www/v11/docs/**/*.md, www/v11/home/**/*.md and www/blog/**/*.md, with a nested cross_file relation subset. The source regex '(?m)^[ \\t>]*// @include: (\\S+)[ \\t]*$' and the target regex '(?m)^[ \\t>]*`{3,}twoslash include (\\S+)' both read {path}. Passes on the clone (133 // @include: lines under www/v11). On a scratch copy of the 102 .md files it fired in four cases: renaming one quickstart.md reference to trpcx, renaming the `server` include block to serverx, appending an @include to www/blog/README.md (a file with no include blocks), and appending a blockquoted @include to www/v11/home/step-3.md. It was silent after the restore. The comment says the regexes see the whole file, while the tools strip HTML comments and expand only inside Twoslash fences, and ~~~ fences are not matched."
+   },
+   {
+    "rule_id": "trpc-subtree-shared-ui-dir-reserved",
+    "unit": "trpc-B04",
+    "action": "added",
+    "detail": "dir_absent over the 5 hand-listed @shared/ui dependents' src/shared-ui. Those are examples/.experimental/next-app-dir, next-minimal-starter, next-prisma-starter, next-prisma-websockets-starter and tanstack-start-sse-chat; grep confirms they are the only example manifests depending on @shared/ui, and all have src/. Passes on the clone. On a scratch tree it fired on examples/next-minimal-starter/src/shared-ui/button.tsx and on an empty examples/.experimental/next-app-dir/src/shared-ui. It stayed silent on a non-dependent examples/minimal/src/shared-ui. The C reason is in the comment: dependents are listed by hand."
+   },
+   {
+    "rule_id": "trpc-workspace-package-names-valid",
+    "unit": "trpc-14",
+    "action": "comment",
+    "detail": "Added a gap note: validate-npm-package-name also rejects Node core-module names and its blacklist, and those pass the regex (`http`, `node_modules`), so they are not covered. The rule is unchanged."
+   },
+   {
+    "rule_id": "(header)",
+    "unit": "(config)",
+    "action": "comment",
+    "detail": "Updated the header summary. It drops 'root-deps', adds workspace: resolution, the shared-ui guard and Twoslash include resolution, and says trpc-03/trpc-16 (B-adapter) and trpc-09 (removed) are kept only as VALUE-ADD approximations at level info."
+   }
+  ],
+  "unit_notes": [],
+  "validate_output": "✓ Config valid: 68 rule(s) loaded from docs/design/v0.12/corpus/trpc-trpc.alint.yml",
+  "check_output": "exit 0: \"✓ all rules passed.\" (68 rules, zero findings on the clone). `git -C <clone> status --porcelain` is empty. <scratch>/trpc-trpc-c/ was removed."
+ }
+}

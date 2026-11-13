@@ -1,0 +1,1239 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
+#
+# alint v0.23 corpus-stratum config (stratum: i18n) — mattermost/mattermost
+# Pinned @ 69102aba22607b2fc21a72d1958373563650223d (depth-1 clone, 2026-11-12)
+#
+# Covers: the A and C units of mattermost's enforced surface (catalog shape,
+# blank-translation and key-order checks over the webapp and server locale
+# catalogs, the glossary/style checker, Node/Go/npm pin coherence, the webapp
+# workspace version lockstep, Go and JS/TS license headers, the migration
+# registry and SQL index rule, workflow YAML hygiene, the docs base-URL rule
+# and the E2E status-wiring contract over the e2e workflow YAML), plus
+# clearly-marked value-add rules at level info (outside the ratio, R3/R5).
+#
+# Shape: Go server (server/, two modules in a go.work) + npm-workspace webapp
+# (webapp/: channels + platform/*) + e2e-tests (cypress, playwright) + a
+# Docusaurus docs site + OpenAPI sources (api/). Single vendor (Mattermost).
+# Two locale surfaces, 29 locales each:
+#   webapp/channels/src/i18n/<locale>.json  flat {key: ICU message}, en.json is
+#                                           {key: {defaultMessage, description}}
+#   server/i18n/<locale>.json               [{id, translation}], translation a
+#                                           string or a CLDR plural map (go-i18n)
+# plus a translation glossary (i18n/glossary/*.json) and i18n/style.json.
+#
+# WHERE THE ENFORCED VALIDATION LIVES
+#   i18n-ci-pr.yml -> i18n-ci-template.yml `make i18n-verify-all` (server/Makefile):
+#     mmgotool i18n verify --warn-missing-ids (tools/mmgotool/commands/i18n.go),
+#     go test TestServerPluralTableMatchesGoI18n, webapp check_icu.mjs
+#     --warn-missing-keys (webapp/channels/scripts/{check_icu,icu_rules}.mjs),
+#     node --test i18n/scripts/*.test.mjs, node i18n/scripts/check_glossary.mjs.
+#     Missing and extra keys are WARNINGS on both surfaces (the template says the
+#     catalogs are tens of thousands of entries short of parity), so key parity
+#     is not enforced; non-English edits are only reported (::warning).
+#   webapp-ci.yml — eslint (incl. headers/header-format) + stylelint, tsc,
+#     formatjs i18n-extract:check, lockfile regenerate+diff, jest, build,
+#     external links.
+#   server-ci.yml — buildenv-tag.sh (Node/Go pin coherence), check-generated
+#     (`make generated` + git status), check-style (plugin-checker,
+#     mattermost-govet incl. license + concurrentIndex, golangci-lint, go fix),
+#     vet-api (openApiSync), backport-migration check, Go test shards, build.
+#   e2e-tests-check.yml (eslint incl. header, prettier, tsc, lint-test-docs,
+#     shellcheck), e2e-tests-status-wiring.yml (a 31-test contract over the
+#     e2e workflow YAML), yamllint.yml, api.yml (swagger-cli validate),
+#     docs-ci.yaml (base-url attrs, build, absolute links, egress),
+#     changelog-link-check.yml, tools-ci.yml, codeql.
+#   Conventions: mise.toml / buildenv-tag.sh comments (toolchain pins),
+#     webapp/scripts/update-versions.sh (workspace version lockstep),
+#     server/AGENTS.md (en.json order), migrations README (file naming).
+#
+# Catalogue: Stage A 113 units (mattermost-01..113) — A 33, C 15, B-config 6,
+# B-adapter 16, B-delegate 3, D 40. Stage B (integrated here) adds
+# mattermost-b01..b10, moves 05/14/17 A -> C (blank/type rules over-fire on
+# keys absent from en.json), moves 88 D -> B-adapter (base-revision), and
+# removes 15 as an R1 duplicate of 16 (its rule is kept as value-add, info).
+# Proposed after Stage B: 122 units — A 33, C 19, B-config 7, B-adapter 20,
+# B-delegate 3, D 40 (the integrator decides buckets). Rules below carry their
+# unit id; units with no rule are B or D (see the stratum record). Not
+# expressed, notably:
+# go-i18n loading + ICU parsing (B-delegate), {{.Field}}/ICU argument parity,
+# plural categories against CLDR, glossary term order, doNotTranslate target ==
+# term (B-adapter), duplicate server ids / glossary form ownership / duplicate
+# YAML keys (B-config unique-key), locale-set equalities between file names
+# and the glossary / style / plural table / supportedLocales (B-config set),
+# version ordering of server/public/model's release tables (B-adapter
+# version-compare), the backport-migration check (B-adapter base-revision).
+#
+# Idiom used by several E2E rules: `$[?<failure condition>]` (a "root guard")
+# selects the document's top-level children exactly when a condition built from
+# absolute `$` queries holds, so a *_path_absent rule fires once for the file.
+#
+# Expected `alint check` at the pin: every enforced-unit rule passes; the one
+# finding is the info-level value-add mattermost-va-server-en-descriptions
+# (an empty description at the pin, which is why that convention is not
+# counted as enforced). The value-add mattermost-webapp-i18n-keys-sorted
+# (former unit 15) passes.
+
+version: 1
+
+ignore:
+  - "**/node_modules/**"
+
+rules:
+  # ════════════════════════════════════════════════════════════════
+  # LOCALE family — server catalogs (mmgotool i18n verify)
+  # ════════════════════════════════════════════════════════════════
+
+  # mattermost-01, C — every server catalog parses as JSON (verify runs each
+  #   file through go-i18n's loader and json.Unmarshal into []Item; en.json too).
+  #   alint has no bare "parses" kind and its JSON reader is JSONC-tolerant, so
+  #   a never-matching probe only approximates strict validity: C.
+  - id: mattermost-server-i18n-json-parses
+    kind: json_path_absent
+    paths: ["server/i18n/*.json"]
+    path: "$['__alint_parse_probe__']"
+    level: error
+    message: "server/i18n catalogs must be valid JSON (mmgotool i18n verify)."
+
+  # mattermost-05, C (Stage B: was A) — no empty or whitespace-only translation
+  #   in a non-English server catalog, as a single string or as any plural form
+  #   (verify: "empty translation" and "plural category ... is empty"; both are
+  #   errors even under --warn-missing-ids).
+  #   LIMITATION: mmgotool i18n.go:1021-1026 warns about an id absent from
+  #   en.json and `continue`s before the blank checks (:1033, :1096), so the
+  #   tool never errors on a blank EXTRA id; these rules apply to every entry
+  #   and would. Limiting them to ids present in en.json needs a cross-file key
+  #   join that no native filter has, so the expression over-approximates: C.
+  #   Latent at the pin (26 extra ids per catalog, none blank).
+  - id: mattermost-server-i18n-no-blank-translation
+    kind: json_path_absent
+    paths:
+      include: ["server/i18n/*.json"]
+      exclude: ["server/i18n/en.json"]
+    path: $[?match(@.translation, '\\s*')]
+    level: error
+    message: "A server translation must not be empty or whitespace-only; delete the entry to fall back to English (mmgotool i18n verify)."
+
+  - id: mattermost-server-i18n-no-blank-plural-form
+    kind: json_path_absent
+    paths:
+      include: ["server/i18n/*.json"]
+      exclude: ["server/i18n/en.json"]
+    path: $[*].translation[?match(@, '\\s*')]
+    level: error
+    message: "A plural form of a server translation must not be empty; it renders the raw id (mmgotool i18n verify)."
+
+  # mattermost-11, C — server/AGENTS.md: `make i18n-extract` writes
+  #   server/i18n/en.json "with strings in the required order" (sorted by id,
+  #   Go sort.Strings byte order). ordered_block over the one-`"id":`-per-line
+  #   layout the Go encoder writes: a regex that holds for one layout, hence C.
+  - id: mattermost-server-i18n-en-sorted-by-id
+    kind: ordered_block
+    paths: ["server/i18n/en.json"]
+    select: '^    "id": '
+    comparator: lexical
+    level: error
+    message: "server/i18n/en.json entries must stay sorted by id (run make i18n-extract)."
+
+  # ════════════════════════════════════════════════════════════════
+  # LOCALE family — webapp catalogs (check_icu.mjs)
+  # ════════════════════════════════════════════════════════════════
+
+  # mattermost-12, A — every catalog's file stem is a locale tag
+  #   (check_icu: Intl.getCanonicalLocales(locale) must not throw, "such as
+  #   pt-BR"; an underscore form like en_US is rejected). The regex is the
+  #   Unicode BCP 47 unicode_locale_id grammar (language, script, region,
+  #   variants, extensions, private use).
+  #   Known gap (Stage B, from ECMA-402, not fire-tested): the grammar accepts
+  #   structurally invalid tags that Intl.getCanonicalLocales rejects, namely a
+  #   duplicate variant (de-1996-1996) or a duplicate extension singleton. Rust
+  #   regex has no backreferences, so this is not fixable here. No such file
+  #   at the pin.
+  - id: mattermost-webapp-i18n-filename-locale-tag
+    kind: filename_regex
+    paths: ["webapp/channels/src/i18n/*.json"]
+    stem: true
+    pattern: '^(?:[A-Za-z]{2,3}|[A-Za-z]{5,8})(?:-[A-Za-z]{4})?(?:-(?:[A-Za-z]{2}|[0-9]{3}))?(?:-(?:[A-Za-z0-9]{5,8}|[0-9][A-Za-z0-9]{3}))*(?:-[0-9A-WYa-wy](?:-[A-Za-z0-9]{2,8})+)*(?:-[Xx](?:-[A-Za-z0-9]{1,8})+)?$'
+    level: error
+    message: "A webapp catalog must be named <locale-tag>.json, such as pt-BR.json (check_icu.mjs)."
+
+  # mattermost-13, C — every webapp catalog is valid JSON (check_icu "invalid
+  #   JSON"; en.json "cannot read"). Same JSONC-tolerant probe caveat: C.
+  - id: mattermost-webapp-i18n-json-parses
+    kind: json_path_absent
+    paths: ["webapp/channels/src/i18n/*.json"]
+    path: "$['__alint_parse_probe__']"
+    level: error
+    message: "webapp/channels/src/i18n catalogs must be valid JSON (check_icu.mjs)."
+
+  # mattermost-14, C (Stage B: was A) — a locale catalog is a JSON object whose
+  #   every value is a string (check_icu: "not a JSON object of key -> message",
+  #   "value is not a string"); en.json maps every key to an entry with a string
+  #   defaultMessage (otherwise its source "does not parse"). search(@, '') is
+  #   false only for a non-string, so the negated filter selects non-strings.
+  #   LIMITATION (values-are-strings only): check_icu.mjs:182-186 warns about a
+  #   key absent from en.json and `continue`s before the string check
+  #   (:187-190), so a non-string EXTRA key is only a warning there; this rule
+  #   fires on it. No native filter excludes keys absent from another file, so
+  #   the unit is approximate: C. catalog-is-object and en-default-message-
+  #   strings are exact. Latent at the pin (about 205 extra keys per catalog).
+  - id: mattermost-webapp-i18n-values-are-strings
+    kind: json_path_absent
+    paths:
+      include: ["webapp/channels/src/i18n/*.json"]
+      exclude: ["webapp/channels/src/i18n/en.json"]
+    path: "$[?!search(@, '')]"
+    level: error
+    message: "Every webapp catalog value must be a string (check_icu.mjs)."
+
+  - id: mattermost-webapp-i18n-catalog-is-object
+    kind: json_path_absent
+    paths: ["webapp/channels/src/i18n/*.json"]
+    path: "$[0]"
+    level: error
+    message: "A webapp catalog must be a JSON object, not an array (check_icu.mjs)."
+
+  - id: mattermost-webapp-i18n-en-default-message-strings
+    kind: json_path_absent
+    paths: ["webapp/channels/src/i18n/en.json"]
+    path: "$[?!search(@.defaultMessage, '')]"
+    level: error
+    message: "Every webapp en.json entry needs a string defaultMessage (check_icu.mjs reads it as the source)."
+
+  # mattermost-17, C (Stage B: was A) — no empty or whitespace-only value in a
+  #   locale catalog (check_icu "empty translation"; an error even under
+  #   --warn-missing-keys).
+  #   LIMITATION: check_icu.mjs:182-186 skips a key absent from en.json (a
+  #   warning) before the empty check (:198-201); this rule also fires on a
+  #   blank EXTRA key, and no native filter can exclude it: C. Also untested:
+  #   JS trim() and Rust \s differ on U+FEFF / U+0085.
+  - id: mattermost-webapp-i18n-no-blank-values
+    kind: json_path_absent
+    paths:
+      include: ["webapp/channels/src/i18n/*.json"]
+      exclude: ["webapp/channels/src/i18n/en.json"]
+    path: $[?match(@, '\\s*')]
+    level: error
+    message: "A webapp translation must not be empty or whitespace-only (check_icu.mjs)."
+
+  # ════════════════════════════════════════════════════════════════
+  # LOCALE family — supported-locale registries (server/public/shared/i18n)
+  # ════════════════════════════════════════════════════════════════
+
+  # mattermost-b02, C (Stage B) — TestSupportedLocalesAreInSync, subtest
+  #   "webapp languages map" (server/public/shared/i18n/i18n_test.go:294-297,
+  #   run in the server-ci Go test shards via ./public/...): supportedLocales
+  #   in i18n.go equals the `value: '...'` locales of the `languages` map in
+  #   webapp/channels/src/i18n/i18n.ts (assert.ElementsMatch). Both sides are
+  #   regex reads: the Go side is a one-layout regex over a gofmt'd string
+  #   slice (it matches exactly the 29 supportedLocales lines at the pin), the
+  #   TS side mirrors the test's own regex. set_equals ignores duplicates that
+  #   ElementsMatch counts. Hence C. (Subtests "server/webapp translation
+  #   files" are mattermost-b01, B-config set: the list -> file direction has no
+  #   native form.)
+  - id: mattermost-supported-locales-match-languages-map
+    kind: cross_file
+    relation: set_equals
+    source:
+      file: server/public/shared/i18n/i18n.go
+      extract: { regex: '(?m)^\t"([^"]+)",$' }
+    targets:
+      - file: webapp/channels/src/i18n/i18n.ts
+        extract: { regex: "value: '([^']+)'" }
+    level: error
+    message: "supportedLocales (server/public/shared/i18n/i18n.go) must list exactly the locales of the webapp languages map (TestSupportedLocalesAreInSync)."
+
+  # ════════════════════════════════════════════════════════════════
+  # LOCALE family — glossary and style (i18n/scripts/check_glossary.mjs)
+  # ════════════════════════════════════════════════════════════════
+
+  # mattermost-23, C — every glossary file and i18n/style.json parses as a
+  #   JSON object (check_glossary.mjs load(): "not JSON", "not a JSON object").
+  #   `$[0]` selects nothing in an object and the first element of an array;
+  #   alint's JSON reader is JSONC-tolerant, so "parses" is approximate: C.
+  - id: mattermost-glossary-files-are-objects
+    kind: json_path_absent
+    paths: ["i18n/glossary/*.json", "i18n/style.json"]
+    path: "$[0]"
+    level: error
+    message: "Glossary and style files must be JSON objects (check_glossary.mjs)."
+
+  # mattermost-24, C — glossary en.json entries are objects holding
+  #   definition (non-empty), partOfSpeech and doNotTranslate (boolean), and
+  #   optionally aliases (a non-empty list of non-empty strings) and commonWord
+  #   (only ever true), and nothing else. Required fields and value types are
+  #   JSONPath filters; "nothing else" needs the field NAMES, which JSONPath
+  #   cannot read, so it is a line regex over the canonical 4-space layout of
+  #   entry fields: C.
+  - id: mattermost-glossary-en-required-fields
+    kind: json_path_absent
+    paths: ["i18n/glossary/en.json"]
+    path: $[?!search(@.definition, '\\S') || !@.partOfSpeech || (@.doNotTranslate != true && @.doNotTranslate != false)]
+    level: error
+    message: "Each glossary term needs a non-empty definition, a partOfSpeech and a boolean doNotTranslate (check_glossary.mjs)."
+
+  - id: mattermost-glossary-en-optional-fields
+    kind: json_path_absent
+    paths: ["i18n/glossary/en.json"]
+    path: "$[?(@.commonWord && @.commonWord != true) || (@.aliases && !@.aliases[0])]"
+    level: error
+    message: "commonWord is only ever true, and aliases is a non-empty list (check_glossary.mjs)."
+
+  - id: mattermost-glossary-en-alias-strings
+    kind: json_path_absent
+    paths: ["i18n/glossary/en.json"]
+    path: $.*.aliases[?!search(@, '\\S')]
+    level: error
+    message: "Every glossary alias must be a non-empty string (check_glossary.mjs)."
+
+  - id: mattermost-glossary-en-known-fields
+    kind: for_each_match
+    paths: ["i18n/glossary/en.json"]
+    select: '^    "'
+    require:
+      matches: ['^    "(?:definition|partOfSpeech|doNotTranslate|aliases|commonWord)": ']
+    level: error
+    message: "Glossary en.json entries hold only definition, partOfSpeech, doNotTranslate, aliases and commonWord (check_glossary.mjs)."
+
+  # mattermost-25, A — partOfSpeech is noun, verb, adjective or noun/verb.
+  - id: mattermost-glossary-part-of-speech
+    kind: json_path_matches
+    paths: ["i18n/glossary/en.json"]
+    path: "$.*.partOfSpeech"
+    matches: '^(?:noun|verb|adjective|noun/verb)$'
+    level: error
+    message: "partOfSpeech must be noun, verb, adjective or noun/verb (check_glossary.mjs)."
+
+  # mattermost-26, A — commonWord appears only on a doNotTranslate term.
+  - id: mattermost-glossary-common-word-needs-dnt
+    kind: json_path_absent
+    paths: ["i18n/glossary/en.json"]
+    path: "$[?@.commonWord == true && @.doNotTranslate != true]"
+    level: error
+    message: "commonWord is for doNotTranslate terms only (check_glossary.mjs)."
+
+  # mattermost-29, C — every glossary <locale>.json has exactly en.json's
+  #   terms. key_parity compares LEAF paths, and en.json's leaves (definition,
+  #   ...) differ from a locale's (target, note) by design, so the term set is
+  #   read with a regex over the canonical 2-space top-level key layout and
+  #   compared with set_equals: a regex read of JSON keys, hence C.
+  - id: mattermost-glossary-locale-terms-match-en
+    kind: cross_file
+    relation: set_equals
+    source:
+      file: i18n/glossary/en.json
+      extract: { regex: '(?m)^  "((?:[^"\\]|\\.)*)": \{' }
+    targets:
+      files: "i18n/glossary/{[!e]*,e[!n]*,en?*}.json"
+      extract: { regex: '(?m)^  "((?:[^"\\]|\\.)*)": \{' }
+    level: error
+    message: "A glossary locale file must hold exactly the terms in i18n/glossary/en.json (check_glossary.mjs)."
+
+  # mattermost-31, C — a locale glossary entry holds a non-empty target and
+  #   optionally a non-empty note, and nothing else (closed field set read by a
+  #   line regex over the canonical layout: C).
+  - id: mattermost-glossary-locale-target-present
+    kind: json_path_absent
+    paths:
+      include: ["i18n/glossary/*.json"]
+      exclude: ["i18n/glossary/en.json"]
+    path: $[?!search(@.target, '\\S') || (@.note && !search(@.note, '\\S'))]
+    level: error
+    message: "Each glossary locale entry needs a non-empty target; a note, if present, is non-empty (check_glossary.mjs)."
+
+  - id: mattermost-glossary-locale-known-fields
+    kind: for_each_match
+    paths:
+      include: ["i18n/glossary/*.json"]
+      exclude: ["i18n/glossary/en.json"]
+    select: '^    "'
+    require:
+      matches: ['^    "(?:target|note)": ']
+    level: error
+    message: "Glossary locale entries hold only target and note (check_glossary.mjs)."
+
+  # mattermost-34, C — i18n/style.json entries hold address (formal or
+  #   informal), use and avoid (non-empty lists of non-empty words), and
+  #   optionally matchCase / skipSentenceStart (only ever true), nothing else.
+  - id: mattermost-i18n-style-entry-values
+    kind: json_path_absent
+    paths: ["i18n/style.json"]
+    path: "$[?(@.address != 'formal' && @.address != 'informal') || !@.use[0] || !@.avoid[0] || (@.matchCase && @.matchCase != true) || (@.skipSentenceStart && @.skipSentenceStart != true)]"
+    level: error
+    message: "style.json entries need address formal|informal, non-empty use/avoid lists, and matchCase/skipSentenceStart only as true (check_glossary.mjs)."
+
+  - id: mattermost-i18n-style-words
+    kind: json_path_absent
+    paths: ["i18n/style.json"]
+    path: $.*['use','avoid'][?!search(@, '\\S')]
+    level: error
+    message: "style.json use/avoid entries must be non-empty words (check_glossary.mjs)."
+
+  - id: mattermost-i18n-style-known-fields
+    kind: for_each_match
+    paths: ["i18n/style.json"]
+    select: '^    "'
+    require:
+      matches: ['^    "(?:address|use|avoid|matchCase|skipSentenceStart)": ']
+    level: error
+    message: "style.json entries hold only address, use, avoid, matchCase and skipSentenceStart (check_glossary.mjs)."
+
+  # ════════════════════════════════════════════════════════════════
+  # TOOLCHAIN-PIN family
+  # ════════════════════════════════════════════════════════════════
+
+  # mattermost-38, A — server/build/buildenv-tag.sh (run by every CI job that
+  #   needs the build image): mise.toml's node pin and both buildenv
+  #   Dockerfiles' ARG NODE_VERSION must satisfy .nvmrc ("equal, or more
+  #   specific with a dot"); with a full x.y.z .nvmrc that is equality, and the
+  #   two Dockerfiles must agree with each other (implied).
+  - id: mattermost-node-pin-coherent
+    kind: cross_file
+    source:
+      file: .nvmrc
+      extract: { regex: '\A\s*([0-9][0-9A-Za-z.+-]*)\s*\z' }
+    targets:
+      - file: mise.toml
+        extract: { regex: '(?m)^node\s*=\s*"([^"]+)"' }
+      - file: server/build/Dockerfile.buildenv
+        extract: { regex: '(?m)^ARG NODE_VERSION=(\S+)' }
+      - file: server/build/Dockerfile.buildenv-fips
+        extract: { regex: '(?m)^ARG NODE_VERSION=(\S+)' }
+    relation: equals
+    level: error
+    message: "Node pins must agree: .nvmrc, mise.toml and both server/build/Dockerfile.buildenv* ARG NODE_VERSION (buildenv-tag.sh)."
+
+  # mattermost-39, A — buildenv-tag.sh: each buildenv Dockerfile's FROM image
+  #   tag must satisfy server/.go-version (the FIPS image adds a fourth
+  #   component, 1.26.10.1 for 1.26.10). Capturing the tag's first three
+  #   components expresses "equal, or more specific with a dot" for an x.y.z
+  #   .go-version.
+  - id: mattermost-go-pin-coherent
+    kind: cross_file
+    source:
+      file: server/.go-version
+      extract: { regex: '\A\s*([0-9]+\.[0-9]+\.[0-9]+)\s*\z' }
+    targets:
+      - file: server/build/Dockerfile.buildenv
+        extract: { regex: '(?m)^FROM\s+[^\s:]+:([0-9]+\.[0-9]+\.[0-9]+)(?:[.-][^\s@]*)?(?:@\S+)?\s*$' }
+      - file: server/build/Dockerfile.buildenv-fips
+        extract: { regex: '(?m)^FROM\s+[^\s:]+:([0-9]+\.[0-9]+\.[0-9]+)(?:[.-][^\s@]*)?(?:@\S+)?\s*$' }
+    relation: equals
+    level: error
+    message: "Each buildenv Dockerfile's Go base image must match server/.go-version (buildenv-tag.sh)."
+
+  # mattermost-40, A — webapp/package.json engines.node is the Node CI
+  #   installs from .nvmrc: mise.toml documents that CI, the buildenv images and
+  #   "engines" all agree, and webapp/.npmrc engine-strict=true makes `npm ci`
+  #   fail when they do not.
+  - id: mattermost-webapp-engines-node-matches-nvmrc
+    kind: cross_file
+    source:
+      file: .nvmrc
+      extract: { regex: '\A\s*([0-9][0-9A-Za-z.+-]*)\s*\z' }
+    targets:
+      - file: webapp/package.json
+        extract: { json: "$.engines.node" }
+    relation: equals
+    level: error
+    message: "webapp/package.json engines.node must equal .nvmrc (mise.toml; engine-strict=true)."
+
+  # mattermost-41, C — engines.npm and packageManager name the same npm
+  #   (mise.toml: a Node bump moves "engines"/"packageManager" together). The
+  #   `npm@` prefix is stripped by a regex read of the packageManager value,
+  #   which JSONPath cannot do: C.
+  - id: mattermost-webapp-engines-npm-matches-package-manager
+    kind: cross_file
+    source:
+      file: webapp/package.json
+      extract: { json: "$.engines.npm" }
+    targets:
+      - file: webapp/package.json
+        extract: { regex: '"packageManager"\s*:\s*"npm@([^"]+)"' }
+    relation: equals
+    level: error
+    message: "webapp/package.json packageManager must name the npm in engines.npm."
+
+  # mattermost-b03, A (Stage B) — .cursor/Dockerfile:5-6 "Keep in sync with
+  #   server/.go-version. cloud-agent-install.sh reinstalls if they drift."
+  #   A stated sync requirement that holds at the pin; the reinstall fallback
+  #   hides drift but does not void it (batch-3 ruling). No CI job reads
+  #   .cursor/, and buildenv-tag.sh (mattermost-39) does not look at it.
+  - id: mattermost-cursor-go-pin
+    kind: cross_file
+    source:
+      file: server/.go-version
+      extract: { regex: '\A\s*([0-9][0-9A-Za-z.+-]*)\s*\z' }
+    targets:
+      - file: .cursor/Dockerfile
+        extract: { regex: '(?m)^ARG GO_VERSION=(\S+)' }
+    relation: equals
+    level: error
+    message: "The Cursor cloud-agent image's ARG GO_VERSION must equal server/.go-version (.cursor/Dockerfile)."
+
+  # mattermost-b04, A (Stage B) — .cursor/Dockerfile:7-8 "Image pin on the
+  #   .nvmrc line (currently 24.11)"; .cursor/README.md:12. "On the line" is
+  #   read as the same major.minor, so normalize: semver-minor. Holds at the
+  #   pin (both 24.11.1). Descriptive wording: the weaker of the two .cursor
+  #   units.
+  - id: mattermost-cursor-node-line
+    kind: cross_file
+    source:
+      file: .nvmrc
+      extract: { regex: '\A\s*([0-9][0-9A-Za-z.+-]*)\s*\z' }
+    targets:
+      - file: .cursor/Dockerfile
+        extract: { regex: '(?m)^ARG NODE_VERSION=(\S+)' }
+    relation: equals
+    normalize: semver-minor
+    level: error
+    message: "The Cursor cloud-agent image's ARG NODE_VERSION must be on the .nvmrc release line (same major.minor)."
+
+  # mattermost-b10, A (Stage B) — mise.toml:11-12 "A Node bump moves this
+  #   alongside .nvmrc, both server/build/Dockerfile.buildenv*,
+  #   "engines"/"packageManager" and webapp/package-lock.json." The lockfile's
+  #   root package (packages[""]) carries a copy of engines; it must equal
+  #   .nvmrc (node) and webapp/package.json engines.npm (npm). Convention
+  #   (Stage B could not confirm offline whether npm ci checks the lock's root
+  #   engines). The integrator may fold this into 38/40 under R1.
+  - id: mattermost-webapp-lock-engines-node
+    kind: cross_file
+    source:
+      file: .nvmrc
+      extract: { regex: '\A\s*([0-9][0-9A-Za-z.+-]*)\s*\z' }
+    targets:
+      - file: webapp/package-lock.json
+        extract: { json: "$.packages[''].engines.node" }
+    relation: equals
+    level: error
+    message: "webapp/package-lock.json root engines.node must equal .nvmrc (mise.toml: a Node bump moves the lockfile too)."
+
+  - id: mattermost-webapp-lock-engines-npm
+    kind: cross_file
+    source:
+      file: webapp/package.json
+      extract: { json: "$.engines.npm" }
+    targets:
+      - file: webapp/package-lock.json
+        extract: { json: "$.packages[''].engines.npm" }
+    relation: equals
+    level: error
+    message: "webapp/package-lock.json root engines.npm must equal webapp/package.json engines.npm (mise.toml)."
+
+  # ════════════════════════════════════════════════════════════════
+  # DEP-VERSION family
+  # ════════════════════════════════════════════════════════════════
+
+  # mattermost-46, A — webapp/scripts/update-versions.sh: "These workspaces and
+  #   packages within the monorepo all synchronize their versions with the web
+  #   app and server". Each workspace's version, and every reference to
+  #   @mattermost/client, /shared, /types in their dependency maps, equals the
+  #   monorepo version (server/public/model/version.go, newest first).
+  #   Note (Stage B): the script takes the version as an argument, so anchoring
+  #   on version.go versions[0] is an inference from "with the web app and
+  #   server"; it holds at the pin (12.2.0), but nothing mechanical ties the
+  #   two. The script also rewrites webapp/package-lock.json
+  #   packages[<workspace>].version and their @mattermost/* deps; that half is
+  #   mattermost-webapp-lock-workspace-lockstep below.
+  - id: mattermost-webapp-workspace-versions-lockstep
+    kind: cross_file
+    source:
+      file: server/public/model/version.go
+      extract: { regex: '(?s)var versions = \[\]string\{\s*"([0-9][^"]*)"' }
+    targets:
+      files: "webapp/{channels,platform/client,platform/components,platform/mattermost-redux,platform/shared,platform/types}/package.json"
+      extract: { json: "$.version" }
+    relation: equals
+    level: error
+    message: "Webapp workspace versions must equal the monorepo version (webapp/scripts/update-versions.sh)."
+
+  - id: mattermost-webapp-internal-deps-lockstep
+    kind: cross_file
+    source:
+      file: server/public/model/version.go
+      extract: { regex: '(?s)var versions = \[\]string\{\s*"([0-9][^"]*)"' }
+    targets:
+      files: "webapp/{channels,platform/client,platform/components,platform/mattermost-redux,platform/shared,platform/types}/package.json"
+      extract: { json: "$['dependencies','devDependencies','peerDependencies']['@mattermost/client','@mattermost/shared','@mattermost/types']" }
+    relation: equals
+    allow_missing_target: true
+    level: error
+    message: "Workspace references to @mattermost/client, /shared and /types must pin the monorepo version (webapp/scripts/update-versions.sh)."
+
+  # mattermost-46 (scope extension from Stage B's review): update-versions.sh
+  #   "Then go through the package-lock.json and make those same changes" —
+  #   packages[<workspace>].version and each workspace entry's @mattermost/*
+  #   references in the lockfile carry the same monorepo version.
+  - id: mattermost-webapp-lock-workspace-lockstep
+    kind: cross_file
+    source:
+      file: server/public/model/version.go
+      extract: { regex: '(?s)var versions = \[\]string\{\s*"([0-9][^"]*)"' }
+    targets:
+      - file: webapp/package-lock.json
+        extract: { json: "$.packages['channels','platform/client','platform/components','platform/mattermost-redux','platform/shared','platform/types'].version" }
+      - file: webapp/package-lock.json
+        extract: { json: "$.packages['channels','platform/client','platform/components','platform/mattermost-redux','platform/shared','platform/types']['dependencies','devDependencies','peerDependencies']['@mattermost/client','@mattermost/shared','@mattermost/types']" }
+    relation: equals
+    level: error
+    message: "webapp/package-lock.json workspace versions and their @mattermost/* references must carry the monorepo version (webapp/scripts/update-versions.sh)."
+
+  # ════════════════════════════════════════════════════════════════
+  # OTHER family
+  # ════════════════════════════════════════════════════════════════
+
+  # mattermost-48, A — mattermost-govet -license (server-ci check-style runs
+  #   `make vet`: `go vet -vettool=mattermost-govet -license ... ./...` from
+  #   server/). Scope is what that vet run compiles: the server module only
+  #   (server/public is a separate module that `./...` does not reach, and its
+  #   pluginapi and model files carry no header at the pin), default build tags
+  #   only (server/enterprise/{local,external}_imports.go are
+  #   `//go:build enterprise || sourceavailable` and never vetted), no
+  #   testdata. The first comment group, after an optional separate block of
+  #   //go:build / //go:generate lines, is the two-line header; packages whose
+  #   path contains /enterprise use "See LICENSE.enterprise". A first comment
+  #   line carrying a mockery / MockGen / go-bindata / "automatically
+  #   generated" marker exempts the file (the analyzer's generatedHeaders).
+  - id: mattermost-go-license-header
+    kind: file_header
+    paths:
+      include: ["server/**/*.go"]
+      exclude:
+        - "server/public/**"
+        - "server/enterprise/**"
+        - "**/testdata/**"
+    lines: 8
+    pattern: '\A(?:[^\n]*(?:// Code generated by mockery|// Code generated by MockGen\. DO NOT EDIT\.|by go-bindata DO NOT EDIT\. \(@generated\)|// This file is automatically generated\. Do not modify it manually\.)|(?://go:(?:build|generate)[^\n]*\n)*\n*// Copyright \(c\) 2015-present Mattermost, Inc\. All Rights Reserved\.\n// See LICENSE\.txt for license information\.\n)'
+    level: error
+    message: "Go files start with the Mattermost license header (mattermost-govet -license)."
+
+  - id: mattermost-go-license-header-enterprise
+    kind: file_header
+    paths:
+      include: ["server/enterprise/**/*.go"]
+      exclude:
+        - "server/enterprise/local_imports.go"
+        - "server/enterprise/external_imports.go"
+        - "**/testdata/**"
+    lines: 8
+    pattern: '\A(?:[^\n]*(?:// Code generated by mockery|// Code generated by MockGen\. DO NOT EDIT\.|by go-bindata DO NOT EDIT\. \(@generated\)|// This file is automatically generated\. Do not modify it manually\.)|(?://go:(?:build|generate)[^\n]*\n)*\n*// Copyright \(c\) 2015-present Mattermost, Inc\. All Rights Reserved\.\n// See LICENSE\.enterprise for license information\.\n)'
+    level: error
+    message: "Source-available enterprise Go files reference LICENSE.enterprise (mattermost-govet -license)."
+
+  # mattermost-49, A — eslint headers/header-format (webapp eslint-plugin base
+  #   config, applied to **/*.{js,jsx,mjs,ts,tsx}; reused by the cypress and
+  #   playwright configs): every linted file opens with the two `//` header
+  #   lines and a blank line (trailingNewlines: 2), after an optional shebang.
+  #   Scope is each package's `eslint` target minus its ignores. A file-level
+  #   `/* eslint-disable headers/header-format */` opt-out (third-party code
+  #   such as the Facebook-licensed redux utils) is honoured as eslint does.
+  - id: mattermost-js-license-header
+    kind: file_header
+    paths:
+      include:
+        - "webapp/channels/src/**/*.{js,jsx,mjs,ts,tsx}"
+        - "webapp/channels/eslint.config.mjs"
+        - "webapp/platform/{client,components,shared,types}/src/**/*.{js,jsx,mjs,ts,tsx}"
+        - "webapp/platform/{client,components,shared,types}/eslint.config.mjs"
+        - "webapp/platform/eslint-plugin/**/*.{js,jsx,mjs,ts,tsx}"
+        - "e2e-tests/cypress/**/*.{js,jsx,mjs,ts,tsx}"
+        - "e2e-tests/playwright/**/*.{js,jsx,mjs,ts,tsx}"
+      exclude:
+        - "**/dist/**"
+        - "e2e-tests/cypress/**/logs/**"
+        - "e2e-tests/**/results/**"
+        - "e2e-tests/playwright/**/playwright-report/**"
+        - "e2e-tests/playwright/**/test-results/**"
+        - "e2e-tests/playwright/.mattermost_data/**"
+        - "e2e-tests/playwright/lib/src/containers/assets/webhook/tests/**"
+    lines: 4
+    pattern: '\A(?:#![^\n]*\n)?(?:// Copyright \(c\) 2015-present Mattermost, Inc\. All Rights Reserved\.\n// See LICENSE\.txt for license information\.\n\n|/\* eslint-disable headers/header-format \*/)'
+    level: error
+    message: "JS/TS files start with the Mattermost header and a blank line (eslint headers/header-format)."
+
+  # mattermost-50, A — server/channels/db/migrations/migrations.list is
+  #   `make migrations-extract` output (checked by server-ci check-generated:
+  #   `make generated` then `git status --porcelain`): a fixed header line, then
+  #   `find channels/db/migrations -maxdepth 2 -mindepth 2 | sort`, i.e. exactly
+  #   the depth-2 entries under migrations/, relative to server/, sorted.
+  #   No generator runs: the list is checked against the tree directly
+  #   (forward + orphans), plus order and header.
+  - id: mattermost-migrations-list-matches-tree
+    kind: registry_paths_resolve
+    source: server/channels/db/migrations/migrations.list
+    extract: { lines: { comment: "#" } }
+    base: server
+    orphans:
+      space: "server/channels/db/migrations/*/*"
+    level: error
+    message: "migrations.list must list exactly the migration files on disk (run make migrations-extract)."
+
+  - id: mattermost-migrations-list-sorted
+    kind: ordered_block
+    paths: ["server/channels/db/migrations/migrations.list"]
+    select: '^channels/'
+    comparator: lexical
+    unique: true
+    level: error
+    message: "migrations.list is sorted (run make migrations-extract)."
+
+  - id: mattermost-migrations-list-header
+    kind: file_header
+    paths: ["server/channels/db/migrations/migrations.list"]
+    lines: 1
+    pattern: '\A# Autogenerated file to synchronize migrations sequence in the PR workflow, please do not edit\.\n\z'
+    level: error
+    message: "migrations.list keeps its generated header line (make migrations-extract)."
+
+  # mattermost-51, A — server/channels/db/migrations/README.md: "Migration
+  #   files follow the convention {sequence_number}_{description}.{up|down}.sql
+  #   and live in db/migrations/{driver_name}/" (convention; holds at the pin).
+  - id: mattermost-migration-file-naming
+    kind: filename_regex
+    paths: ["server/channels/db/migrations/postgres/*"]
+    pattern: '^[0-9]+_[^/]+\.(?:up|down)\.sql$'
+    level: error
+    message: "Migration files are named {sequence_number}_{description}.{up|down}.sql (migrations README)."
+
+  # mattermost-52, C — mattermost-govet -concurrentIndex
+  #   (-concurrentIndex.path=./channels/db/migrations/ -minMigration=166): in
+  #   SQL migrations numbered 166 and up, CREATE [UNIQUE] INDEX and DROP INDEX
+  #   must say CONCURRENTLY, unless the statement carries
+  #   `-- concurrentIndex:ignore`. Rust regex has no look-ahead, so the
+  #   non-concurrent forms are spelled out (an index keyword followed by IF, ON
+  #   or a name), and the statement-joining ignore comment cannot be seen: the
+  #   one file that uses it (000217 up, comment at line 20, DROP INDEX at line 22) is excluded by name. Awkward: C.
+  - id: mattermost-migrations-concurrent-index
+    kind: file_content_forbidden
+    paths:
+      include:
+        - "server/channels/db/migrations/**/00016[6-9]_*.sql"
+        - "server/channels/db/migrations/**/0001[7-9][0-9]_*.sql"
+        - "server/channels/db/migrations/**/000[2-9][0-9][0-9]_*.sql"
+        - "server/channels/db/migrations/**/00[1-9][0-9][0-9][0-9]_*.sql"
+      exclude:
+        - "server/channels/db/migrations/postgres/000217_resize_message_columns.up.sql"
+    pattern: '(?i)\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\b|ON\b|[a-z_"][a-z0-9_"]*\s+ON\b)|\bDROP\s+INDEX\s+(?:IF\b|[a-z_"][a-z0-9_".]*\s*(?:;|,|\bCASCADE\b|\bRESTRICT\b))'
+    level: error
+    message: "Use CREATE/DROP INDEX CONCURRENTLY in migrations from 000166 on to avoid blocking DML (mattermost-govet -concurrentIndex)."
+
+  # mattermost-53/54/55, yamllint.yml (`yamllint .github/workflows/` with
+  #   .yamllint: extends default; empty-lines, line-length, trailing-spaces
+  #   disabled). The file-property rules of that run, as alint kinds:
+  #   mattermost-53 (A) new-line-at-end-of-file; mattermost-54 (A) new-lines unix;
+  #   mattermost-55 (C) the document parses (alint's YAML 1.2 reader is not yamllint's,
+  #   so a never-matching probe only approximates "syntax").
+  - id: mattermost-workflows-final-newline
+    kind: final_newline
+    paths: [".github/workflows/*.{yml,yaml}"]
+    level: error
+    message: "Workflow YAML ends with a newline (yamllint new-line-at-end-of-file)."
+
+  # Possible over-strictness (Stage B, UNVERIFIED: yamllint is not installed
+  #   here and nothing was fetched): yamllint's new-lines rule may inspect only
+  #   the first line's terminator, while line_endings flags a CRLF on any line.
+  #   If confirmed, a file with an LF first line and later CRLF lines passes
+  #   yamllint but fails this rule, and a first-line-only form
+  #   (file_content_forbidden '\A[^\n]*\r\n') would be the faithful one. Not
+  #   changed because the behavior could not be confirmed; holds at the pin.
+  - id: mattermost-workflows-lf
+    kind: line_endings
+    paths: [".github/workflows/*.{yml,yaml}"]
+    target: lf
+    level: error
+    message: "Workflow YAML uses LF line endings (yamllint new-lines: unix)."
+
+  - id: mattermost-workflows-yaml-parses
+    kind: yaml_path_absent
+    paths: [".github/workflows/*.{yml,yaml}"]
+    path: "$['__alint_parse_probe__']"
+    level: error
+    message: "Workflow YAML must parse (yamllint syntax)."
+
+  # mattermost-58, C — docs/site/scripts/check-base-url-attrs.mjs (docs-ci
+  #   build, via `prebuild`): no site-absolute URL in a raw href=/src=
+  #   attribute (`href="/x"`, `src={"/x"}`) in docs/{main,develop,api} .md/.mdx,
+  #   except protocol-relative `//host`; generated trees skipped. The checker
+  #   skips fenced code and inline code, which a content regex cannot: C.
+  - id: mattermost-docs-no-site-absolute-attr-urls
+    kind: file_content_forbidden
+    paths:
+      include: ["docs/{main,develop,api}/**/*.{md,mdx}"]
+      exclude: ["docs/main/agents/docs/**", "docs/api/reference/**"]
+    pattern: '\b(?:href|src)=(?:"/(?:[^/"][^"]*)?"|\{"/(?:[^/"][^"]*)?"\}|\{''/(?:[^/''][^'']*)?''\})'
+    level: error
+    message: "Use useBaseUrl() instead of a site-absolute href/src attribute; Docusaurus does not prefix raw attributes (check-base-url-attrs.mjs)."
+
+  # mattermost-b09, C (Stage B) — TestReleaseLifecycles
+  #   (server/public/model/version_lifecycle_test.go:24-25 "the oldest entry
+  #   must be an ESR", :50-54 "every entry has an EOL date"; server-ci test
+  #   shards via ./public/...). Only one-layout regexes over the gofmt'd Go
+  #   composite literal express it (batch-2 ruling): C. The entry-has-eol form
+  #   catches an entry with no EOLDate field, not an explicit zero time.Time.
+  #   (The same test's ordering and floor-coverage subtests are b07/b08,
+  #   B-adapter version-compare.)
+  - id: mattermost-lifecycle-entry-has-eol
+    kind: file_content_forbidden
+    paths: ["server/public/model/version_lifecycle.go"]
+    pattern: '(?m)^\t\{MajorMinor: "[^"]*"(?:, ESR: (?:true|false))?\},?$'
+    level: error
+    message: "Every releaseLifecycles entry needs an EOLDate (TestReleaseLifecycles)."
+
+  - id: mattermost-lifecycle-oldest-is-esr
+    kind: file_content_matches
+    paths: ["server/public/model/version_lifecycle.go"]
+    pattern: '(?m)^\t\{MajorMinor: "[^"]+", EOLDate: eolDate\([^)]*\), ESR: true\},\n\}'
+    level: error
+    message: "The oldest (last) releaseLifecycles entry must be an ESR (TestReleaseLifecycles)."
+
+  # ════════════════════════════════════════════════════════════════
+  # OTHER family — E2E status wiring
+  #   .github/actions/e2e-status-lanes (runtime validation of the lane list)
+  #   and .github/scripts/test_e2e_status_workflows.py, run by
+  #   e2e-tests-status-wiring.yml on every PR touching the e2e workflows. Each
+  #   test method is one unit; the static ones are expressed below. Several
+  #   use the "root guard" idiom: `$[?<failure condition>]` selects the
+  #   document's top-level children exactly when the condition (built from
+  #   absolute $ queries) holds, so yaml_path_absent fires once per file.
+  # ════════════════════════════════════════════════════════════════
+
+  # mattermost-59, A — the lane list is well formed (e2e-status-lanes action:
+  #   a string aggregate_context and a non-empty lanes array, each matching
+  #   ^e2e-test/[a-z0-9/_.-]+$, and no lane equal to the aggregate; also
+  #   test_aggregate_is_not_one_of_its_own_lanes).
+  - id: mattermost-e2e-lanes-aggregate-shape
+    kind: json_path_matches
+    paths: [".github/e2e-status-lanes.json"]
+    path: "$.aggregate_context"
+    matches: '^e2e-test/[a-z0-9/_.-]+$'
+    level: error
+    message: "aggregate_context must be an e2e-test/ context (e2e-status-lanes action)."
+
+  - id: mattermost-e2e-lanes-lane-shape
+    kind: json_path_matches
+    paths: [".github/e2e-status-lanes.json"]
+    path: "$.lanes[*]"
+    matches: '^e2e-test/[a-z0-9/_.-]+$'
+    level: error
+    message: "Every lane must be an e2e-test/ context (e2e-status-lanes action)."
+
+  - id: mattermost-e2e-lanes-nonempty-array-without-aggregate
+    kind: json_path_absent
+    paths: [".github/e2e-status-lanes.json"]
+    path: "$[?!$.lanes[0] || $.lanes[?@ == $.aggregate_context]]"
+    level: error
+    message: "lanes must be a non-empty array that does not contain the aggregate (e2e-status-lanes action)."
+
+  # mattermost-60, A — test_the_aggregate_is_the_triage_context.
+  - id: mattermost-e2e-aggregate-is-triage
+    kind: json_path_equals
+    paths: [".github/e2e-status-lanes.json"]
+    path: "$.aggregate_context"
+    equals: "e2e-test/triage"
+    level: error
+    message: "The aggregate context is e2e-test/triage (test_e2e_status_workflows.py)."
+
+  # mattermost-61, A — test_every_pr_lane_gives_triage_the_model_key.
+  - id: mattermost-e2e-pr-lanes-pass-model-key
+    kind: yaml_path_absent
+    paths: [".github/workflows/e2e-tests-ci.yml"]
+    path: |-
+      $[?!search($.jobs['e2e-playwright-subpath'].uses, '^[.]/[.]github/workflows/e2e-tests-') || $.jobs[?search(@.uses, '^[.]/[.]github/workflows/e2e-tests-') && @.secrets.ANTHROPIC_API_KEY != '${{ secrets.ANTHROPIC_API_KEY }}']]
+    level: error
+    message: "Every PR E2E lane (including e2e-playwright-subpath) passes ANTHROPIC_API_KEY to triage."
+
+  - id: mattermost-e2e-templates-pass-model-key
+    kind: yaml_path_equals
+    paths: [".github/workflows/e2e-tests-{cypress,playwright}-template.yml"]
+    path: "$.jobs['lane-result'].secrets.ANTHROPIC_API_KEY"
+    equals: "${{ secrets.ANTHROPIC_API_KEY }}"
+    level: error
+    message: "The suite template passes ANTHROPIC_API_KEY to the lane result."
+
+  # mattermost-62, A — test_manual_and_automatic_dispatches_share_lane_keys.
+  - id: mattermost-e2e-cypress-lane-key
+    kind: yaml_path_absent
+    paths: [".github/workflows/e2e-tests-cypress.yml"]
+    path: |-
+      $[?!search($.concurrency.group, 'e2e-lane-cypress') || !search($.concurrency.group, 'inputs[.]pr_number') || !search($.concurrency.group, 'inputs[.]server_edition') || search($.concurrency.group, 'github[.]ref') || search($.concurrency.group, 'github[.]sha') || $.concurrency['cancel-in-progress'] != false]
+    level: error
+    message: "The cypress lane key is built from inputs (pr_number, server_edition), never github.ref/sha, and is not cancel-in-progress."
+
+  - id: mattermost-e2e-playwright-lane-key
+    kind: yaml_path_absent
+    paths: [".github/workflows/e2e-tests-playwright.yml"]
+    path: |-
+      $[?!search($.concurrency.group, 'e2e-lane-playwright') || !search($.concurrency.group, 'inputs[.]pr_number') || !search($.concurrency.group, 'inputs[.]server_edition') || search($.concurrency.group, 'github[.]ref') || search($.concurrency.group, 'github[.]sha') || $.concurrency['cancel-in-progress'] != false]
+    level: error
+    message: "The playwright lane key is built from inputs (pr_number, server_edition), never github.ref/sha, and is not cancel-in-progress."
+
+  - id: mattermost-e2e-ci-resolves-commit-sha
+    kind: file_content_matches
+    paths: [".github/workflows/e2e-tests-ci.yml"]
+    pattern: 'commits/\$\{INPUT_COMMIT_SHA\}" --jq'
+    level: error
+    message: "e2e-tests-ci.yml resolves the commit SHA through the commits API."
+
+  - id: mattermost-e2e-ci-no-raw-commit-sha
+    kind: file_content_forbidden
+    paths: [".github/workflows/e2e-tests-ci.yml"]
+    pattern: 'COMMIT_SHA=\$\{INPUT_COMMIT_SHA\}'
+    level: error
+    message: "e2e-tests-ci.yml must not take COMMIT_SHA verbatim from the input."
+
+  # mattermost-64, A — test_all_writers_share_a_sha_mutex_and_keep_queued_publishers.
+  - id: mattermost-e2e-lane-result-publish-lock
+    kind: yaml_path_equals
+    paths: [".github/workflows/e2e-tests-lane-result.yml"]
+    path: "$.jobs['lane-result'].concurrency"
+    equals: { group: "e2e-status-publish-${{ inputs.commit_sha }}", cancel-in-progress: false, queue: max }
+    level: error
+    message: "The lane result holds the SHA-scoped publication lock."
+
+  - id: mattermost-e2e-prepare-run-publish-lock
+    kind: yaml_path_equals
+    paths: [".github/workflows/e2e-tests-{cypress,playwright}-template.yml"]
+    path: "$.jobs['prepare-run'].concurrency"
+    equals: { group: "e2e-status-publish-${{ inputs.commit_sha }}", cancel-in-progress: false, queue: max }
+    level: error
+    message: "prepare-run holds the SHA-scoped publication lock."
+
+  - id: mattermost-e2e-skip-publish-lock
+    kind: yaml_path_equals
+    paths: [".github/workflows/e2e-tests-{cypress,playwright}.yml"]
+    path: "$.jobs.skip.concurrency"
+    equals: { group: "e2e-status-publish-${{ inputs.commit_sha }}", cancel-in-progress: false, queue: max }
+    level: error
+    message: "The skip job holds the SHA-scoped publication lock."
+
+  - id: mattermost-e2e-report-workers-no-lock
+    kind: yaml_path_absent
+    paths: [".github/workflows/e2e-tests-{cypress,playwright}-template.yml"]
+    path: "$[?!$.jobs.report || !$.jobs.workers || $.jobs.report.concurrency || $.jobs.workers.concurrency]"
+    level: error
+    message: "report and workers take no concurrency lock; the lane result owns publication."
+
+  # mattermost-65, A — test_explicit_verifiers_share_the_same_publication_lock.
+  - id: mattermost-e2e-override-status-lock
+    kind: yaml_path_equals
+    paths: [".github/workflows/e2e-tests-override-status.yml"]
+    path: "$.jobs['override-status'].concurrency"
+    equals: { group: "e2e-status-publish-${{ needs.resolve-pr.outputs.head_sha }}", cancel-in-progress: false, queue: max }
+    level: error
+    message: "override-status holds the publication lock for the PR head SHA."
+
+  - id: mattermost-e2e-verified-label-lock
+    kind: yaml_path_equals
+    paths: [".github/workflows/e2e-tests-verified-label.yml"]
+    path: "$.jobs['approve-e2e'].concurrency"
+    equals: { group: "e2e-status-publish-${{ github.event.pull_request.head.sha }}", cancel-in-progress: false, queue: max }
+    level: error
+    message: "approve-e2e holds the publication lock for the PR head SHA."
+
+  - id: mattermost-e2e-override-status-writer
+    kind: yaml_path_absent
+    paths: [".github/workflows/e2e-tests-override-status.yml"]
+    path: |-
+      $[?!$.jobs['override-status'].steps[?search(@.run, '/statuses/[$][{]COMMIT_SHA[}]')] || $.jobs['override-status'].steps[?search(@.run, '/statuses/[$][{]COMMIT_SHA[}]') && (!search(@.run, 'if \\[ "[$]CURRENT_STATE" != "failure" []]; then') || !search(@.run, '-f target_url="[$]CURRENT_URL"'))] || !$.jobs['override-status'].steps[?@.name == 'ci/refresh-verified-summary' && @.with.operation == 'summarize' && search(@.with['composite-identity'], 'needs[.]resolve-pr[.]outputs[.]head_sha')] || $.jobs['override-status'].needs != 'resolve-pr' || !$.jobs['resolve-pr'].permissions || $.jobs['resolve-pr'].permissions.statuses]
+    level: error
+    message: "override-status keeps a failure, keeps the target URL, refreshes the verified summary, and resolve-pr cannot write statuses."
+
+  - id: mattermost-e2e-verified-label-writer
+    kind: yaml_path_absent
+    paths: [".github/workflows/e2e-tests-verified-label.yml"]
+    path: |-
+      $[?!$.jobs['approve-e2e'].steps[?search(@.run, '/statuses/[$][{]COMMIT_SHA[}]')] || $.jobs['approve-e2e'].steps[?search(@.run, '/statuses/[$][{]COMMIT_SHA[}]') && (!search(@.run, 'if \\[ "[$]CURRENT_STATE" != "failure" []]; then') || !search(@.run, '-f target_url="[$]CURRENT_URL"'))] || !$.jobs['approve-e2e'].steps[?@.name == 'ci/refresh-verified-summary' && @.with.operation == 'summarize' && search(@.with['composite-identity'], 'github[.]event[.]pull_request[.]head[.]sha')]]
+    level: error
+    message: "approve-e2e keeps a failure, keeps the target URL and refreshes the verified summary."
+
+  # mattermost-66, A — test_shared_unconditional_writers_are_disabled.
+  - id: mattermost-e2e-template-writers-disabled
+    kind: yaml_path_absent
+    paths: [".github/workflows/e2e-tests-{cypress,playwright}-template.yml"]
+    path: |-
+      $[?!$.jobs['dispatch-begin'].steps[?@.name == 'ci/dispatch-begin' && @.with['post-pending-commit-status'] == 'false'] || !$.jobs.report.steps[?@.name == 'ci/run-summary' && @.with['update-commit-status'] == 'false'] || !$.jobs['prepare-run'].steps[?@.name == 'ci/claim-status' && @.with.state == 'pending']]
+    level: error
+    message: "dispatch-begin posts no pending status, run-summary updates no status, and claim-status claims pending."
+
+  - id: mattermost-e2e-skip-claims
+    kind: yaml_path_equals
+    paths: [".github/workflows/e2e-tests-{cypress,playwright}.yml"]
+    path: "$.jobs.skip.steps[?@.name == 'ci/post-skip-status'].with.operation"
+    equals: claim
+    level: error
+    message: "The skip status is posted as a claim."
+
+  - id: mattermost-e2e-no-raw-status-writes
+    kind: file_content_forbidden
+    paths: [".github/workflows/e2e-tests-{cypress,playwright}.yml", ".github/workflows/e2e-tests-{cypress,playwright}-template.yml", ".github/workflows/e2e-tests-lane-result.yml"]
+    pattern: '/statuses/'
+    level: error
+    message: "Lane workflows never call the statuses API directly."
+
+  # mattermost-67, A — test_cancellation_preserves_diagnostics_without_status_publication.
+  - id: mattermost-e2e-template-cancellation
+    kind: yaml_path_absent
+    paths: [".github/workflows/e2e-tests-{cypress,playwright}-template.yml"]
+    path: |-
+      $[?$.jobs.report.if != 'always()' || !$.jobs.report.steps[?@.name == 'ci/run-summary' && @.if == 'always()'] || !search($.jobs['lane-result'].if, '!cancelled[(][)]') || !search($.jobs['lane-result'].if, "needs[.]workers[.]result != 'cancelled'") || !search($.jobs['lane-result'].if, "needs[.]dispatch-begin[.]result != 'cancelled'") || !$.jobs.workers.steps[?search(@.uses, 'actions/upload-artifact@')] || $.jobs.workers.steps[?search(@.uses, 'actions/upload-artifact@') && @.if != 'always()']]
+    level: error
+    message: "Reports and uploads run always(); the lane result runs unless cancelled."
+
+  - id: mattermost-e2e-lane-result-cancellation
+    kind: yaml_path_absent
+    paths: [".github/workflows/e2e-tests-lane-result.yml"]
+    path: |-
+      $[?!$.jobs['lane-result'].steps[?@.name == 'ci/publish-result'] || !$.jobs['lane-result'].steps[?@.name == 'ci/e2e-triage'] || !$.jobs['lane-result'].steps[?@.name == 'ci/refresh-lane-summary'] || $.jobs['lane-result'].steps[?(@.name == 'ci/publish-result' || @.name == 'ci/e2e-triage' || @.name == 'ci/refresh-lane-summary') && (!search(@.if, '!cancelled[(][)]') || search(@.if, 'always[(][)]'))]]
+    level: error
+    message: "publish-result, e2e-triage and refresh-lane-summary run unless cancelled, never always()."
+
+  # mattermost-68, A — test_lane_result_is_called_last_with_explicit_inputs_and_least_privilege.
+  - id: mattermost-e2e-lane-result-caller-uses
+    kind: yaml_path_equals
+    paths: [".github/workflows/e2e-tests-{cypress,playwright}-template.yml", ".github/workflows/e2e-tests-playwright-rolling-upgrades-template.yml"]
+    path: "$.jobs['lane-result'].uses"
+    equals: "./.github/workflows/e2e-tests-lane-result.yml"
+    level: error
+    message: "The lane-result job calls e2e-tests-lane-result.yml."
+
+  - id: mattermost-e2e-lane-result-caller-needs
+    kind: yaml_path_equals
+    paths: [".github/workflows/e2e-tests-{cypress,playwright}-template.yml", ".github/workflows/e2e-tests-playwright-rolling-upgrades-template.yml"]
+    path: "$.jobs['lane-result'].needs"
+    equals: [prepare-run, dispatch-begin, workers, report]
+    level: error
+    message: "The lane result runs last, after prepare-run, dispatch-begin, workers and report."
+
+  - id: mattermost-e2e-lane-result-permissions
+    kind: yaml_path_equals
+    paths: [".github/workflows/e2e-tests-{cypress,playwright}-template.yml", ".github/workflows/e2e-tests-playwright-rolling-upgrades-template.yml", ".github/workflows/e2e-tests-lane-result.yml"]
+    path: "$.jobs['lane-result'].permissions"
+    equals: { contents: read, statuses: write, pull-requests: read, actions: read }
+    level: error
+    message: "The lane result (caller and called job) gets exactly contents/pull-requests/actions read and statuses write."
+
+  - id: mattermost-e2e-lane-result-caller-inputs
+    kind: yaml_path_absent
+    paths: [".github/workflows/e2e-tests-{cypress,playwright}-template.yml"]
+    path: |-
+      $[?length($.jobs['lane-result'].secrets) != 2 || !$.jobs['lane-result'].secrets.ANTHROPIC_API_KEY || !$.jobs['lane-result'].secrets.REPORT_WEBHOOK_URL || $.jobs['lane-result'].with.execution_success != "${{ needs.prepare-run.result == 'success' && needs.dispatch-begin.result == 'success' && needs.workers.result == 'success' }}" || $.jobs['lane-result'].with.summary_ok != "${{ needs.report.outputs.summary_ok == 'true' }}" || $.jobs['lane-result'].with.description != '${{ needs.report.outputs.commit_status_description }}' || $.jobs['lane-result'].with.report_url != '${{ needs.report.outputs.report_url }}' || $.jobs['lane-result'].with.commit_sha != '${{ inputs.commit_sha }}' || $.jobs['lane-result'].with.context_name != '${{ inputs.context_name }}' || $.jobs['lane-result'].with.webhook_payload != '${{ needs.report.outputs.webhook_payload }}']
+    level: error
+    message: "The lane-result caller passes exactly ANTHROPIC_API_KEY and REPORT_WEBHOOK_URL and the explicit inputs."
+
+  - id: mattermost-e2e-lane-result-workflow-privilege
+    kind: yaml_path_absent
+    paths: [".github/workflows/e2e-tests-lane-result.yml"]
+    path: |-
+      $[?length($.permissions) != 0 || length($.on.workflow_call.secrets) != 2 || !$.on.workflow_call.secrets.ANTHROPIC_API_KEY || !$.on.workflow_call.secrets.REPORT_WEBHOOK_URL]
+    level: error
+    message: "e2e-tests-lane-result.yml grants no workflow permissions and declares exactly two secrets."
+
+  # mattermost-69, A — test_lane_result_does_not_nest_further.
+  - id: mattermost-e2e-lane-result-no-nesting
+    kind: yaml_path_absent
+    paths: [".github/workflows/e2e-tests-lane-result.yml"]
+    path: "$.jobs.*.uses"
+    level: error
+    message: "The lane result calls no further reusable workflow."
+
+  # mattermost-70, A — test_missing_results_are_red_and_success_also_refreshes_summary.
+  - id: mattermost-e2e-lane-result-publish-triage-refresh
+    kind: yaml_path_absent
+    paths: [".github/workflows/e2e-tests-lane-result.yml"]
+    path: |-
+      $[?!$.jobs['lane-result'].steps[?@.name == 'ci/publish-result' && @.with.state == "${{ inputs.summary_ok && 'success' || 'failure' }}" && @.with['verify-reports'] == 'true' && @.with['execution-success'] == '${{ inputs.execution_success }}' && @.with['use-staging'] == "${{ vars.E2E_USE_STAGING_TEST_IO_URL != 'false' }}" && !@.with['tsio-base-url'] && search(@.with.description, 'unavailable or incomplete') && @.with['target-url'] == '${{ inputs.report_url }}'] || !$.jobs['lane-result'].steps[?@.name == 'ci/e2e-triage' && @.with['use-staging'] == "${{ vars.E2E_USE_STAGING_TEST_IO_URL != 'false' }}" && search(@.with.mode, '') && !search(@.with.mode, 'inputs[.]execution_success') && !search(@.with.mode, 'reports-complete') && search(@.with.mode, 'fromJSON[(]inputs[.]composite_identity_json[)][.]gh_run_attempt == github[.]run_attempt') && search(@.with.mode, "[|][|] 'report-only' [}][}]$") && search(@.with.mode, "vars[.]E2E_TRIAGE_MODE [|][|] 'enforce'") && search(@.if, "steps[.]result[.]outputs[.]state != 'success'") && @.with['triage-lanes'] == '${{ steps.lanes.outputs.triage-lanes }}' && @.with['triage-status-context'] == '${{ steps.lanes.outputs.triage-context }}'] || !$.jobs['lane-result'].steps[?@.name == 'ci/refresh-lane-summary' && search(@.if, '') && !search(@.if, 'summary') && @.with['triage-lanes'] == '${{ steps.lanes.outputs.lanes }}']]
+    level: error
+    message: "publish-result verifies reports and fails on missing results; triage enforces on first attempts only; refresh-lane-summary always refreshes."
+
+  - id: mattermost-e2e-cypress-test-root
+    kind: yaml_path_equals
+    paths: [".github/workflows/e2e-tests-cypress-template.yml"]
+    path: "$.jobs['lane-result'].with.test_root"
+    equals: "e2e-tests/cypress"
+    level: error
+    message: "The cypress lane result reads tests from e2e-tests/cypress."
+
+  - id: mattermost-e2e-playwright-test-root
+    kind: yaml_path_equals
+    paths: [".github/workflows/e2e-tests-playwright-template.yml", ".github/workflows/e2e-tests-playwright-rolling-upgrades-template.yml"]
+    path: "$.jobs['lane-result'].with.test_root"
+    equals: "e2e-tests/playwright/specs"
+    level: error
+    message: "The playwright lane results read tests from e2e-tests/playwright/specs."
+
+  # mattermost-73, A — test_report_job_only_summarises (and the same report
+  #   assertions in test_upgrade_lanes_publish_through_the_lane_result).
+  - id: mattermost-e2e-report-only-summarises
+    kind: yaml_path_absent
+    paths: [".github/workflows/e2e-tests-{cypress,playwright}-template.yml", ".github/workflows/e2e-tests-playwright-rolling-upgrades-template.yml"]
+    path: |-
+      $[?length($.jobs.report.outputs) != 4 || !$.jobs.report.outputs.commit_status_description || !$.jobs.report.outputs.webhook_payload || !$.jobs.report.outputs.report_url || !$.jobs.report.outputs.summary_ok || length($.jobs.report.steps) != 2 || $.jobs.report.steps[0].name != 'ci/checkout-repo' || $.jobs.report.steps[1].name != 'ci/run-summary' || $.jobs.report.steps[1].with['update-commit-status'] != 'false' || !$.jobs.report.permissions || $.jobs.report.permissions.statuses]
+    level: error
+    message: "The report job only summarises: two steps, four outputs, no statuses permission, update-commit-status false."
+
+  - id: mattermost-e2e-report-summary-always
+    kind: yaml_path_absent
+    paths: [".github/workflows/e2e-tests-{cypress,playwright}-template.yml"]
+    path: |-
+      $[?$.jobs.report.outputs.summary_ok != "${{ steps.summary.outcome == 'success' }}" || $.jobs.report.steps[1].if != 'always()']
+    level: error
+    message: "summary_ok reflects the summary step's outcome, and the summary runs always()."
+
+  # mattermost-74, A — test_upgrade_lanes_publish_through_the_lane_result
+  #   (beyond the shared caller and report rules above).
+  - id: mattermost-e2e-upgrade-lane-wiring
+    kind: yaml_path_absent
+    paths: [".github/workflows/e2e-tests-playwright-rolling-upgrades-template.yml"]
+    path: |-
+      $[?!$.jobs['prepare-run'].steps[?@.name == 'ci/claim-status' && @.with.operation == 'claim'] || !$.jobs['prepare-run'].steps[?@.name == 'ci/status-lanes' && @.uses == './.e2e-trusted/.github/actions/e2e-status-lanes'] || !$.jobs['dispatch-begin'].steps[?@.name == 'ci/dispatch-begin' && @.with['post-pending-commit-status'] == 'false'] || !search($.jobs['lane-result'].if, '!cancelled[(][)]') || !search($.jobs['lane-result'].if, "needs[.]workers[.]result != 'cancelled'") || length($.jobs['lane-result'].secrets) != 1 || !$.jobs['lane-result'].secrets.REPORT_WEBHOOK_URL || $.jobs['lane-result'].with.execution_success != "${{ needs.prepare-run.result == 'success' && needs.dispatch-begin.result == 'success' && needs.workers.result == 'success' }}" || $.jobs['lane-result'].with.summary_ok != "${{ needs.report.outputs.summary_ok == 'true' }}" || $.jobs['lane-result'].with.history_lane]
+    level: error
+    message: "The upgrade lane claims under the lock, reads the trusted lane list, and publishes through the lane result without a model key."
+
+  - id: mattermost-e2e-upgrade-prepare-run-lock
+    kind: yaml_path_equals
+    paths: [".github/workflows/e2e-tests-playwright-rolling-upgrades-template.yml"]
+    path: "$.jobs['prepare-run'].concurrency"
+    equals: { group: "e2e-status-publish-${{ inputs.commit_sha }}", cancel-in-progress: false, queue: max }
+    level: error
+    message: "The upgrade lane's prepare-run holds the publication lock."
+
+  # mattermost-75, A — test_lane_result_holds_the_lock_for_a_bounded_time.
+  - id: mattermost-e2e-lane-result-timeout
+    kind: yaml_path_equals
+    paths: [".github/workflows/e2e-tests-lane-result.yml"]
+    path: "$.jobs['lane-result']['timeout-minutes']"
+    equals: 45
+    level: error
+    message: "The lane result holds the publication lock for at most 45 minutes."
+
+  # mattermost-72, C — test_webhook_posts_after_the_status_and_triage_as_before:
+  #   the five named steps appear in this order. JSONPath has no position
+  #   operator, so the order is a (?s) text regex over the step names: C.
+  - id: mattermost-e2e-lane-result-step-order
+    kind: file_content_matches
+    paths: [".github/workflows/e2e-tests-lane-result.yml"]
+    pattern: '(?s)name: ci/publish-result\b.*name: ci/e2e-triage\b.*name: ci/refresh-lane-summary\b.*name: ci/publish-webhook\b.*name: ci/assert-results\b'
+    level: error
+    message: "The lane result publishes, triages, refreshes, posts the webhook and asserts, in that order."
+
+  # mattermost-77, C — test_pr_callers_cover_the_expected_lanes: the PR
+  #   callers in e2e-tests-ci.yml are exactly cypress enterprise/fips and
+  #   playwright enterprise/enterprise-subpath/fips. Multiset equality is
+  #   spelled as count() == 5 plus one existence test per expected tuple: C.
+  - id: mattermost-e2e-pr-callers-cover-lanes
+    kind: yaml_path_absent
+    paths: [".github/workflows/e2e-tests-ci.yml"]
+    path: |-
+      $[?count($.jobs[?@.with.report_type == 'PR' && (@.uses == './.github/workflows/e2e-tests-cypress.yml' || @.uses == './.github/workflows/e2e-tests-playwright.yml')]) != 5 || !$.jobs[?@.uses == './.github/workflows/e2e-tests-cypress.yml' && @.with.report_type == 'PR' && (!@.with.server_edition || @.with.server_edition == '' || @.with.server_edition == 'enterprise') && (!@.with.server_deploy || @.with.server_deploy == '')] || !$.jobs[?@.uses == './.github/workflows/e2e-tests-cypress.yml' && @.with.report_type == 'PR' && @.with.server_edition == 'fips' && (!@.with.server_deploy || @.with.server_deploy == '')] || !$.jobs[?@.uses == './.github/workflows/e2e-tests-playwright.yml' && @.with.report_type == 'PR' && (!@.with.server_edition || @.with.server_edition == '' || @.with.server_edition == 'enterprise') && (!@.with.server_deploy || @.with.server_deploy == '')] || !$.jobs[?@.uses == './.github/workflows/e2e-tests-playwright.yml' && @.with.report_type == 'PR' && (!@.with.server_edition || @.with.server_edition == '' || @.with.server_edition == 'enterprise') && @.with.server_deploy == 'subpath'] || !$.jobs[?@.uses == './.github/workflows/e2e-tests-playwright.yml' && @.with.report_type == 'PR' && @.with.server_edition == 'fips' && (!@.with.server_deploy || @.with.server_deploy == '')]]
+    level: error
+    message: "The PR E2E callers are exactly cypress enterprise/fips and playwright enterprise, enterprise subpath and fips."
+
+  # mattermost-79, A — test_each_lane_publishes_the_context_it_is_listed_under.
+  - id: mattermost-e2e-cypress-full-context
+    kind: yaml_path_equals
+    paths: [".github/workflows/e2e-tests-cypress.yml"]
+    path: "$.jobs['cypress-full'].with.context_name"
+    equals: "${{ needs.generate-build-variables.outputs.context_name }}"
+    level: error
+    message: "cypress-full publishes the built context name."
+
+  - id: mattermost-e2e-playwright-full-context
+    kind: yaml_path_equals
+    paths: [".github/workflows/e2e-tests-playwright.yml"]
+    path: "$.jobs['playwright-full'].with.context_name"
+    equals: "${{ needs.generate-build-variables.outputs.context_name }}"
+    level: error
+    message: "playwright-full publishes the built context name."
+
+  - id: mattermost-e2e-skip-status-context
+    kind: yaml_path_equals
+    paths: [".github/workflows/e2e-tests-{cypress,playwright}.yml"]
+    path: "$.jobs.skip.steps[?@.name == 'ci/post-skip-status'].with['status-context']"
+    equals: "${{ needs.generate-build-variables.outputs.context_name }}"
+    level: error
+    message: "The skip status uses the built context name."
+
+  # mattermost-80, A — test_triage_inputs_are_read_from_the_lane_reader.
+  - id: mattermost-e2e-triage-inputs-from-reader
+    kind: yaml_path_absent
+    paths: [".github/workflows/e2e-tests-*.yml"]
+    path: |-
+      $.jobs.*.steps[?(@.with['triage-lanes'] && @.with['triage-lanes'] != null && !search(@.with['triage-lanes'], '^[$][{][{] steps[.]lanes[.]outputs[.]')) || (@.with['triage-status-context'] && @.with['triage-status-context'] != null && !search(@.with['triage-status-context'], '^[$][{][{] steps[.]lanes[.]outputs[.]'))]
+    level: error
+    message: "triage-lanes and triage-status-context come from the lane reader's outputs (steps.lanes.outputs.*)."
+
+  # mattermost-83, A — test_test_code_checkout_stays_on_the_tested_commit.
+  - id: mattermost-e2e-prepare-run-checkout-ref
+    kind: yaml_path_equals
+    paths: [".github/workflows/e2e-tests-{cypress,playwright}-template.yml"]
+    path: "$.jobs['prepare-run'].steps[0].with.ref"
+    equals: "${{ inputs.commit_sha }}"
+    level: error
+    message: "prepare-run's test-code checkout stays on the tested commit."
+
+  - id: mattermost-e2e-skip-checkout-ref
+    kind: yaml_path_equals
+    paths: [".github/workflows/e2e-tests-{cypress,playwright}.yml"]
+    path: "$.jobs.skip.steps[?@.name == 'ci/checkout-repo'].with.ref"
+    equals: "${{ inputs.commit_sha }}"
+    level: error
+    message: "The skip job's checkout stays on the tested commit."
+
+  # ════════════════════════════════════════════════════════════════
+  # VALUE-ADD — not enforced by the repository; outside the ratio (R3/R5).
+  # ════════════════════════════════════════════════════════════════
+
+  # VA1 — server/AGENTS.md asks for every server/i18n/en.json entry to carry a
+  #   description; one entry has an empty one at the pin, so the convention is
+  #   not enforced (R5). EXPECTED FINDING at the pin (1, info):
+  #   app.import.validate_reaction_import_data.emoji_name_invalid.error.
+  - id: mattermost-va-server-en-descriptions
+    kind: json_path_absent
+    paths: ["server/i18n/en.json"]
+    path: $[?!search(@.description, '\\S')]
+    level: info
+    message: "Value-add: every server en.json entry carries a non-empty description (server/AGENTS.md)."
+
+  # VA2 — the Go toolchain pin: server/.go-version (what buildenv-tag.sh
+  #   checks) and the go directive of server/go.mod and server/public/go.mod
+  #   (what most CI jobs install, via go-version-file) agree. Not enforced.
+  - id: mattermost-va-go-mod-matches-go-version
+    kind: cross_file
+    source:
+      file: server/.go-version
+      extract: { regex: '\A\s*([0-9]+\.[0-9]+\.[0-9]+)\s*\z' }
+    targets:
+      - file: server/go.mod
+        extract: { regex: '(?m)^go ([0-9][0-9.]*)\s*$' }
+      - file: server/public/go.mod
+        extract: { regex: '(?m)^go ([0-9][0-9.]*)\s*$' }
+    relation: equals
+    level: info
+    message: "Value-add: the server modules' go directive matches server/.go-version."
+
+  # VA3 — policy declaration (R3): webapp/.npmrc keeps engine-strict=true
+  #   (what makes engines.node / engines.npm binding) and save-exact=true.
+  - id: mattermost-va-webapp-npmrc-policy
+    kind: file_content_matches
+    paths: ["webapp/.npmrc"]
+    pattern: '(?m)^engine-strict\s*=\s*true\s*$'
+    level: info
+    message: "Value-add: webapp/.npmrc keeps engine-strict=true."
+
+  # VA4 — former unit mattermost-15, REMOVED by Stage B as an R1 duplicate of
+  #   mattermost-16 (B-adapter, needs order): check_icu.mjs:159-173 is one comparison,
+  #   text !== JSON.stringify(sorted, null, 2) + '\n', so key order and
+  #   duplicate keys are part of the canonical-form (formatting) unit, not a
+  #   separately enforced behavior. Kept only as a value-add approximation of
+  #   the order half of that check. LIMITATION: ordered_block reads keys with a
+  #   line regex over the one-key-per-line layout (a regex read of JSON keys),
+  #   and says nothing about indent or the trailing newline. Passes at the pin.
+  - id: mattermost-webapp-i18n-keys-sorted
+    kind: ordered_block
+    paths:
+      include: ["webapp/channels/src/i18n/*.json"]
+      exclude: ["webapp/channels/src/i18n/en.json"]
+    select: '^  "'
+    comparator: lexical
+    unique: true
+    level: info
+    message: "Value-add: webapp catalog keys stay in code-point order (part of check_icu.mjs canonical form)."

@@ -1,0 +1,544 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
+#
+# alint corpus-stratum config: RocketChat/Rocket.Chat
+# Pinned @ fb1d4217d8c56957fe49310308f95b8a2cd6c926  (stratum: i18n)
+#
+# Summary: the @rocket.chat/i18n locale linter's file-level tasks (extra keys,
+# `__x__` placeholders, trailing whitespace at EOF, locale-dir shape, JSON object
+# root, no BOM) and the build's base-locale check, the Yarn toolchain pins
+# (volta.node, yarnPath/plugin files, engines.yarn), the workspace:/patch:
+# specifier references, the react-i18next consumers' TypeScript side, the
+# dependabot cooldown kept equal to npmMinimalAgeGate, the /docs link and anchor
+# checker, the CodeQL single version, changeset package names, the npm trusted
+# publishing prerequisites (repository field, release.yml path, id-token), the
+# xmpp-server spec-first doc conventions and the Qase CSV header. Value-add
+# rules (level info) sit at the end.
+#
+# Shape: Yarn 4 (node-modules linker) + Turborepo monorepo, 4 workspace globs
+# (apps/*, packages/*, ee/apps/*, ee/packages/*), Meteor app in apps/meteor,
+# 68 locale files in packages/i18n/src/locales (flat i18next JSON, en = base).
+# Gates: .github/workflows/ci.yml + ci-code-check.yml (i18n check, oxlint,
+# stylelint, ratchet scanners, typecheck), ci-docs-links.yml, the Yarn engines
+# plugin (.yarn/plugins/@yarnpkg/plugin-engines.cjs) and changesets/release-action.
+# Not expressed here (B or D): ICU key order, CLDR plural categories per locale,
+# {{placeholder}} parity per key, duplicate JSON keys, semver-range satisfaction,
+# CSV row semantics, base-revision comparisons, every tool run (lint, typecheck,
+# builds, tests).
+
+version: 1
+
+ignore:
+  - "**/node_modules/**"
+
+rules:
+  # ---------------------------------------------------------------- locale
+
+  # rocketchat-03 (A) packages/i18n/src/scripts/check.mts `wipe-extra-keys`
+  # (run in CI by ci-code-check.yml:120 `yarn workspace @rocket.chat/i18n run
+  # check`): no locale may hold a key that en lacks. Plural objects
+  # ({one, other, ...}) count as one key, as in the task (top-level keys only).
+  - id: rocketchat-i18n-no-extra-keys
+    kind: key_parity
+    reference: packages/i18n/src/locales/en.i18n.json
+    peers: "packages/i18n/src/locales/*.i18n.json"
+    direction: extra
+    plurals: cldr
+    level: error
+    message: "Locale key is not in en.i18n.json (i18n check task wipe-extra-keys)."
+
+  # rocketchat-06 (A) check.mts `replace-2-underscores` (check.mts:304-355): no
+  # translation value (plural forms included) may contain the legacy `__x__`
+  # placeholder; i18next interpolation is `{{x}}`. The task's /__(.*?)__/ does
+  # not cross a JavaScript line terminator (`.` excludes \n, \r, U+2028 and
+  # U+2029), hence the class below.
+  - id: rocketchat-i18n-no-double-underscore-placeholders
+    kind: json_path_absent
+    paths: "packages/i18n/src/locales/*.i18n.json"
+    path: "$..[?search(@, '__[^\\n\\r\\u2028\\u2029]*__')]"
+    level: error
+    message: "Translation uses a __placeholder__; write {{placeholder}} (i18n check task replace-2-underscores)."
+
+  # rocketchat-07 (A) check.mts `trim-eof` (check.mts:357-375):
+  # content.replace(/\s+$/g, '') must not change the file, so no JavaScript
+  # whitespace (the class below is JS \s, BOM included) may end a locale file.
+  # This is why the files carry no final newline despite .editorconfig.
+  - id: rocketchat-i18n-no-trailing-whitespace-at-eof
+    kind: file_content_forbidden
+    paths: "packages/i18n/src/locales/*.i18n.json"
+    pattern: '[\t\n\x0B\f\r \x{A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}\x{FEFF}]\z'
+    level: error
+    message: "Locale file ends in whitespace (i18n check task trim-eof)."
+
+  # rocketchat-11 (C) common.mts readResource: JSON.parse, then throw "Invalid
+  # resource format" unless the root is a plain object. Three rules: a probe
+  # query that never matches (its only failure mode is a parse failure), a
+  # first byte of `{`, and no leading BOM (readContent uses readFile(...,
+  # 'utf8'), which keeps U+FEFF, and JSON.parse rejects it; alint's JSON reader
+  # accepts it). Residual gap: alint's JSON reader tolerates comments and
+  # trailing commas, which JSON.parse rejects.
+  - id: rocketchat-i18n-locale-parses
+    kind: json_path_absent
+    paths: "packages/i18n/src/locales/*.i18n.json"
+    path: "$['__alint_parse_probe__']"
+    level: error
+    message: "Locale file must be valid JSON (common.mts readResource)."
+  - id: rocketchat-i18n-locale-object-root
+    kind: file_content_matches
+    paths: "packages/i18n/src/locales/*.i18n.json"
+    pattern: '\A[ \t\r\n]*\{'
+    level: error
+    message: "Locale file must hold a JSON object at the top level (common.mts readResource)."
+  # Promoted from value-add (Stage B): part of rocketchat-11, because
+  # JSON.parse in readResource throws on a leading BOM.
+  - id: rocketchat-i18n-locale-no-bom
+    kind: file_content_forbidden
+    paths: "packages/i18n/src/locales/*.i18n.json"
+    pattern: '\A\x{FEFF}'
+    level: error
+    message: "Locale file starts with a UTF-8 BOM, which JSON.parse rejects (common.mts readResource)."
+
+  # rocketchat-82 (A) packages/i18n/src/scripts/build.mts:57-58 throws
+  # 'Base resource "en" not found' unless the base locale exists; the build runs
+  # in CI (ci.yml packages-build `yarn build`).
+  - id: rocketchat-i18n-en-base-exists
+    kind: file_exists
+    paths: packages/i18n/src/locales/en.i18n.json
+    level: error
+    message: "The base locale packages/i18n/src/locales/en.i18n.json must exist (build.mts)."
+
+  # rocketchat-12 (A) common.mts getResourceLanguages: readdir() of the locales
+  # directory, each entry mapped to basename(file, '.i18n.json') and read back
+  # as `<lang>.i18n.json`, so any other file there crashes the check and the
+  # build (build.mts).
+  - id: rocketchat-i18n-locales-dir-only-locale-files
+    kind: dir_only_contains
+    select: packages/i18n/src/locales
+    allow: ["*.i18n.json"]
+    level: error
+    message: "packages/i18n/src/locales may hold only <lang>.i18n.json files (common.mts getResourceLanguages)."
+
+  # ---------------------------------------------------------------- toolchain-pin
+
+  # rocketchat-15 (A) ci.yml:123 (release-versions) and
+  # .github/actions/setup-node/action.yml:40 read
+  # `require('./package.json').volta.node` and hand it to actions/setup-node
+  # (and, from ci.yml, to the releases.rocket.chat nodeVersion payload at
+  # :285), so the field must be present. actions/setup-node itself would accept
+  # a range; the exact x.y.z form is Volta's pin format, which
+  # scripts/check-deps.sh also installs from (`volta install node@<pin>`).
+  - id: rocketchat-volta-node-exact
+    kind: json_path_matches
+    paths: package.json
+    path: "$.volta.node"
+    matches: '^[0-9]+\.[0-9]+\.[0-9]+$'
+    level: error
+    message: "package.json volta.node must be an exact x.y.z version (CI reads it for setup-node)."
+
+  # rocketchat-17 (C) .yarn/plugins/@yarnpkg/plugin-engines.cjs runs
+  # semver.satisfies(<running Yarn>, engines.yarn) on every install and script.
+  # The running Yarn is the yarnPath release. engines.yarn is an exact version
+  # at the pin, so equality expresses the check; it would over-fire if
+  # engines.yarn became a range (no semver-range operator).
+  - id: rocketchat-yarnpath-release-matches-engines-yarn
+    kind: cross_file
+    source:
+      file: package.json
+      extract: { json: "$.engines.yarn" }
+    targets:
+      - file: .yarnrc.yml
+        extract: { regex: '(?m)^yarnPath:[ \t]*"?\.yarn/releases/yarn-([0-9][^"\s]*)\.cjs"?[ \t]*$' }
+    relation: equals
+    level: error
+    message: "The yarnPath release must satisfy engines.yarn (plugin-engines)."
+
+  # rocketchat-18 (A) .yarnrc.yml yarnPath and plugins[].path must resolve to
+  # committed files, or every `yarn` invocation fails before it starts.
+  - id: rocketchat-yarnrc-paths-resolve
+    kind: registry_paths_resolve
+    source: .yarnrc.yml
+    extract: { regex: '(?m)^[ \t]*(?:-[ \t]+)?(?:yarnPath|path):[ \t]*"?([^"\s#]+)"?[ \t]*$' }
+    base: lint_root
+    expect: file
+    level: error
+    message: ".yarnrc.yml points at a Yarn release or plugin file that is not committed."
+
+  # ---------------------------------------------------------------- dep-version
+
+  # rocketchat-24 (A) .github/dependabot.yml:9-13: the npm cooldown
+  # "Matches npmMinimalAgeGate in .yarnrc.yml, so Yarn can install the versions
+  # that version updates propose" (keep-in-sync convention).
+  - id: rocketchat-dependabot-cooldown-matches-age-gate
+    kind: cross_file
+    source:
+      file: .yarnrc.yml
+      extract: { regex: '(?m)^npmMinimalAgeGate:\s*"?([0-9]+)d"?\s*$' }
+    targets:
+      - file: .github/dependabot.yml
+        extract: { regex: '(?s)package-ecosystem:[ \t]*npm\b.*?cooldown:[ \t]*\r?\n[ \t]+default-days:[ \t]*([0-9]+)' }
+    relation: equals
+    level: error
+    message: "dependabot npm cooldown.default-days must equal npmMinimalAgeGate in .yarnrc.yml."
+
+  # rocketchat-25 (A) every `workspace:` dependency must name a workspace
+  # package: yarn install fails otherwise, and release-action
+  # fixWorkspaceVersionsBeforePublish throws "Could not find version for
+  # workspace". The source is the union of every workspace's name.
+  - id: rocketchat-workspace-protocol-refs-resolve
+    kind: cross_file
+    source:
+      files: "{package.json,apps/*/package.json,packages/*/package.json,ee/apps/*/package.json,ee/packages/*/package.json}"
+      extract: { json: "$.name" }
+    targets:
+      files: "{package.json,apps/*/package.json,packages/*/package.json,ee/apps/*/package.json,ee/packages/*/package.json}"
+      extract: { regex: '"([^"]+)"\s*:\s*"workspace:' }
+    relation: superset
+    allow_missing_target: true
+    level: error
+    message: "A workspace: dependency names a package that is not a workspace."
+
+  # rocketchat-26 (A) every `patch:` specifier (root resolutions and workspace
+  # dependencies) points at a committed .yarn/patches file; `~/` is the project
+  # root. yarn install fails on a missing patch.
+  - id: rocketchat-yarn-patch-files-exist
+    kind: registry_paths_resolve
+    source: "{package.json,apps/*/package.json,packages/*/package.json,ee/apps/*/package.json,ee/packages/*/package.json}"
+    extract: { regex: '#~/(\.yarn/patches/[^"#]+\.patch)"' }
+    base: lint_root
+    expect: file
+    level: error
+    message: "A patch: specifier references a .yarn/patches file that is not committed."
+
+  # rocketchat-81 (A) docs/typescript-7-migration.md:23-31: a dependency with a
+  # `typescript` peer gets one Yarn virtual instance per TS version, and
+  # react-i18next then loses its singleton (NO_I18NEXT_INSTANCE), so "every
+  # package rendering its components in one tree must sit on the same side of
+  # the boundary. All react-i18next consumers are on TS7 except livechat". A
+  # manifest that depends on react-i18next (any dependency field) must not
+  # declare a typescript range outside 7.x; livechat is the documented
+  # exception. 16 consumers are on ~7.0.2 at the pin.
+  - id: rocketchat-react-i18next-consumers-on-ts7
+    kind: json_path_absent
+    paths:
+      - "{apps,packages,ee/apps,ee/packages}/*/package.json"
+      - "!packages/livechat/package.json"
+    path: "$[?@.typescript && !match(@.typescript, '[~^]?7[.].*') && ($.dependencies['react-i18next'] || $.devDependencies['react-i18next'] || $.peerDependencies['react-i18next'] || $.optionalDependencies['react-i18next'])]"
+    level: error
+    message: "A react-i18next consumer must use the TS7 typescript range (docs/typescript-7-migration.md); only livechat stays on TS5.9."
+
+  # ---------------------------------------------------------------- other
+
+  # rocketchat-28 (Stage A: A; Stage B: C) ci-docs-links.yml:27 `node
+  # scripts/check-docs-links.mjs docs`: every relative link in docs/**/*.md
+  # resolves, with exact case. The script resolves a root-absolute `/x` link
+  # against the repository root, hence the root map. Known gaps: the script
+  # also checks HTML <a href="..."> targets, which markdown_links_resolve does
+  # not read (none exist in docs/ at the pin), and an extensionless
+  # root-absolute route here also accepts `<route>.md` / `<route>/index.md`,
+  # where the script wants the exact path.
+  - id: rocketchat-docs-links-resolve
+    kind: markdown_links_resolve
+    paths: "docs/**/*.md"
+    root: { url_prefix: "/", dir: "." }
+    level: error
+    message: "Broken link in /docs (scripts/check-docs-links.mjs)."
+
+  # rocketchat-29 (Stage A: A; Stage B: C) the same script: every #anchor
+  # matches a heading slug or an <a id="..."> / <a name="..."> in the target
+  # file. Known gap: markdown_fragments_resolve knows heading anchors only, so
+  # a link to an HTML <a id|name> anchor that the script accepts is a false
+  # positive here (reproduced on a scratch copy). No such anchor exists in
+  # docs/ at the pin; the kind has no option for HTML anchors.
+  - id: rocketchat-docs-anchors-resolve
+    kind: markdown_fragments_resolve
+    paths: "docs/**/*.md"
+    root: { url_prefix: "/", dir: "." }
+    level: error
+    message: "Broken #anchor in /docs (scripts/check-docs-links.mjs)."
+
+  # rocketchat-31 (A) .github/dependabot.yml:23-26 "CodeQL steps must all run
+  # the same version, so they have to be bumped together": init, autobuild and
+  # analyze in codeql-analysis.yml pin one SHA.
+  - id: rocketchat-codeql-steps-one-version
+    kind: cross_file
+    source:
+      file: .github/workflows/codeql-analysis.yml
+      extract: { regex: '(?s)\A.*?uses:[ \t]*github/codeql-action/[A-Za-z0-9_-]+@([^\s#]+)' }
+    targets:
+      - file: .github/workflows/codeql-analysis.yml
+        extract: { regex: 'uses:[ \t]*github/codeql-action/[A-Za-z0-9_-]+@([^\s#]+)' }
+    relation: equals
+    level: error
+    message: "Every github/codeql-action step must use the same version."
+
+  # rocketchat-32 (A) `changeset version` (release.yml -> packages/release-action)
+  # rejects a changeset naming a package that is not in the workspace. The
+  # extract takes every quoted frontmatter key whatever its bump word (or
+  # none), so an entry with a misspelled bump type is still checked. The regex
+  # is not frontmatter-scoped: requiring a bare-word value keeps JSON-like
+  # body lines with a quoted value or a trailing comma out (none exist at the
+  # pin). Residual gap: an unquoted key (only the root `rocket.chat` could be
+  # written so) is not read.
+  - id: rocketchat-changeset-packages-are-workspaces
+    kind: cross_file
+    source:
+      files: "{package.json,apps/*/package.json,packages/*/package.json,ee/apps/*/package.json,ee/packages/*/package.json}"
+      extract: { json: "$.name" }
+    targets:
+      files: ".changeset/*.md"
+      extract: { regex: '(?m)^["'']([^"''\r\n]+)["''][ \t]*:[ \t]*[A-Za-z]*[ \t]*\r?$' }
+    relation: superset
+    allow_missing_target: true
+    level: error
+    message: "A changeset names a package that is not a workspace."
+
+  # rocketchat-33 (A) @changesets/cli validates .changeset/config.json on every
+  # command: each `fixed` and `linked` group member and each `ignore` entry
+  # must name a workspace package (linked and ignore are [] at the pin).
+  # Changesets also accepts glob patterns there; `matches:` skips any entry
+  # with glob characters, which this rule cannot expand (left unchecked).
+  - id: rocketchat-changeset-fixed-group-are-workspaces
+    kind: cross_file
+    source:
+      files: "{package.json,apps/*/package.json,packages/*/package.json,ee/apps/*/package.json,ee/packages/*/package.json}"
+      extract: { json: "$.name" }
+    targets:
+      - file: .changeset/config.json
+        extract: { json: "$.fixed[*][*]" }
+        matches: '^[^*?{}\[\]!]+$'
+      - file: .changeset/config.json
+        extract: { json: "$.linked[*][*]" }
+        matches: '^[^*?{}\[\]!]+$'
+      - file: .changeset/config.json
+        extract: { json: "$.ignore[*]" }
+        matches: '^[^*?{}\[\]!]+$'
+    relation: superset
+    level: error
+    message: ".changeset/config.json fixed/linked/ignore names a package that is not a workspace."
+
+  # rocketchat-76 (A) docs/npm-publishing.md:110-123: npm provenance "rejects
+  # the publish (422) when repository.url does not match the repository the
+  # workflow ran in", so every published (non-private) workspace carries the
+  # exact url, org/repo casing included. 29 published manifests at the pin.
+  - id: rocketchat-published-repository-url
+    kind: json_path_absent
+    paths: "{apps,packages,ee/apps,ee/packages}/*/package.json"
+    path: "$[?$.private != true && $.repository.url != 'git+https://github.com/RocketChat/Rocket.Chat.git']"
+    level: error
+    message: "A published package needs repository.url git+https://github.com/RocketChat/Rocket.Chat.git (docs/npm-publishing.md; npm provenance 422)."
+
+  # rocketchat-77 (A) docs/npm-publishing.md:113-119: the required repository
+  # block names the package's own directory (`packages/<name>`).
+  - id: rocketchat-published-repository-directory
+    kind: for_each_file
+    select: "{apps,packages,ee/apps,ee/packages}/*/package.json"
+    require:
+      - kind: json_path_absent
+        paths: "{path}"
+        path: "$[?$.private != true && $.repository.directory != '{dir}']"
+    level: error
+    message: "A published package's repository.directory must be its own directory (docs/npm-publishing.md)."
+
+  # rocketchat-78 (A) docs/npm-publishing.md:70-76: npm validates the trusted
+  # publisher's entry-point workflow filename, so "Renaming or moving
+  # release.yml breaks publishing".
+  - id: rocketchat-release-workflow-path
+    kind: file_exists
+    paths: .github/workflows/release.yml
+    level: error
+    message: "The npm publishing workflow must stay at .github/workflows/release.yml (trusted publishers are bound to it)."
+
+  # rocketchat-79 (A) docs/npm-publishing.md:29-33: the publishing job needs
+  # `permissions: id-token: write` for the OIDC exchange (release.yml:39-41;
+  # npm >= 11.5.1, the other requirement, is B-adapter rocketchat-80).
+  - id: rocketchat-release-job-id-token-write
+    kind: yaml_path_equals
+    paths: .github/workflows/release.yml
+    path: "$.jobs.release.permissions['id-token']"
+    equals: write
+    level: error
+    message: "release.yml jobs.release needs permissions id-token: write (npm trusted publishing)."
+
+  # rocketchat-34 (C, comment only) PR titles, which kodiak squash-merges as the
+  # commit subject (.kodiak.toml merge.message.title), start with a type from
+  # .github/PULL_REQUEST_TEMPLATE.md; a wrong title gets the blocking label
+  # "Invalid PR Title". git_commit_subject_matches expresses it, e.g.
+  #   pattern: '^(feat|refactor|fix|chore|docs|ci|test|i18n|regression)(\([^)]*\))?!?: '
+  # but git-history kinds are out of scope for these depth-1 clones.
+
+  # rocketchat-36 (A) ee/packages/xmpp-server/docs/README.md "The artifacts":
+  # ADRs are named `adr/NNNN-<slug>.md`.
+  - id: rocketchat-xmpp-adr-filename
+    kind: filename_regex
+    paths: "ee/packages/xmpp-server/docs/adr/*.md"
+    pattern: '^[0-9]{4}-[a-z0-9]+(-[a-z0-9]+)*\.md$'
+    level: error
+    message: "xmpp-server ADRs are named NNNN-<slug>.md (docs/README.md)."
+
+  # rocketchat-37 (A) xmpp-server docs/README.md "Statuses": spec frontmatter
+  # `status`, ADR `Status` and intent `Status` use the documented vocabularies.
+  - id: rocketchat-xmpp-spec-status
+    kind: file_content_matches
+    paths: "ee/packages/xmpp-server/docs/specs/*.md"
+    pattern: '\A---\r?\n(?:[^-\n][^\n]*\r?\n)*?status:[ \t]*(?:implemented|partial|planned|draft|not-planned|deprecated)[ \t]*\r?\n'
+    level: error
+    message: "Spec frontmatter needs status: implemented|partial|planned|draft|not-planned|deprecated."
+  - id: rocketchat-xmpp-adr-status
+    kind: file_content_matches
+    paths: "ee/packages/xmpp-server/docs/adr/*.md"
+    pattern: '(?m)^- \*\*Status:\*\* (?:accepted|superseded by [0-9]{4})[ \t]*\r?$'
+    level: error
+    message: "ADR Status is `accepted` or `superseded by NNNN`."
+  - id: rocketchat-xmpp-intent-status
+    kind: file_content_matches
+    paths: ["ee/packages/xmpp-server/docs/intents/*.md", "!ee/packages/xmpp-server/docs/intents/README.md"]
+    pattern: '(?m)\bStatus: (?:draft|accepted|rejected)\.'
+    level: error
+    message: "Intent Status is draft, accepted or rejected."
+
+  # rocketchat-83 (C) xmpp-server docs/README.md:87 ("Update its code list ...
+  # if modules move") and :224-231: each spec's frontmatter `code:` and
+  # `tests:` lists name files or directories that exist. Awkward: entries are
+  # package-relative (src/, tests/) or repo-relative (apps/, packages/, ee/),
+  # so two rules split by prefix, and the regex is not frontmatter-scoped (it
+  # reads entries that start a line or follow `[` or `,`; at the pin it reads
+  # exactly the 131 frontmatter entries of the 15 specs).
+  - id: rocketchat-xmpp-spec-paths-package
+    kind: registry_paths_resolve
+    source: "ee/packages/xmpp-server/docs/specs/*.md"
+    extract: { regex: '(?m)(?:^|[\[,])[ \t]*((?:src|tests)/[^,\]\s]+)' }
+    base: ee/packages/xmpp-server
+    expect: any
+    level: error
+    message: "An xmpp-server spec's code/tests list names a package path that does not exist."
+  - id: rocketchat-xmpp-spec-paths-repo
+    kind: registry_paths_resolve
+    source: "ee/packages/xmpp-server/docs/specs/*.md"
+    extract: { regex: '(?m)(?:^|[\[,])[ \t]*((?:apps|packages|ee)/[^,\]\s]+)' }
+    base: lint_root
+    expect: any
+    level: error
+    message: "An xmpp-server spec's code/tests list names a repository path that does not exist."
+
+  # rocketchat-84 (A) xmpp-server docs/README.md:106 (write specs/<slug>.md
+  # from templates/spec.md): every spec keeps the template's H2 sequence. The
+  # Known-defect test-comment anchors (rocketchat-39) hang off "Known defects".
+  - id: rocketchat-xmpp-spec-sections
+    kind: markdown_required_headings
+    paths: "ee/packages/xmpp-server/docs/specs/*.md"
+    headings:
+      - "*"
+      - "## Summary"
+      - "*"
+      - "## Motivation"
+      - "*"
+      - "## Behaviour"
+      - "*"
+      - "## Design"
+      - "*"
+      - "## Out of scope"
+      - "*"
+      - "## Known defects"
+      - "*"
+      - "## Open questions"
+      - "*"
+      - "## References"
+      - "*"
+    level: error
+    message: "An xmpp-server spec must follow templates/spec.md's section sequence."
+
+  # rocketchat-85 (C, comment only) xmpp-server docs/README.md:276 "updates
+  # compliance.md in the same commit. The matrix is never edited on its own."
+  # pair_changed_together expresses it, e.g.
+  #   if_changed: ee/packages/xmpp-server/docs/compliance.md
+  #   then_changed: "ee/packages/xmpp-server/docs/{specs,intents}/**"
+  # but it needs a base-ref diff, which these depth-1 clones cannot confirm
+  # (git kinds are out of scope here). rocketchat-38 keeps only the mirroring
+  # half (B-adapter).
+
+  # rocketchat-48 (A) docs/features/video-conference-persistent-chat/qa/README.md
+  # "Columns": "Headers must be exact and in this order; Qase matches columns
+  # positionally". The README also says CRLF, but the file is LF at the pin, so
+  # the line ending is left open.
+  - id: rocketchat-qase-csv-header
+    kind: file_content_matches
+    paths: "docs/features/video-conference-persistent-chat/qa/qase-cases.csv"
+    pattern: '\Aid,title,description,preconditions,postconditions,tags,priority,severity,type,behavior,automation,status,is_flaky,layer,steps_type,steps_actions,steps_result,steps_data,milestone_id,milestone,suite_id,suite_parent_id,suite,suite_without_cases,parameters,is_muted\r?\n'
+    level: error
+    message: "qase-cases.csv must start with the exact Qase V1 header row."
+
+  # ================================================================
+  # VALUE-ADD (not enforced by the repository; outside the ratio, R3/R5)
+  # ================================================================
+
+  # value-add: the changesets `fixed` group (meteor, core-typings,
+  # rest-typings) share one version, which the root package.json and
+  # apps/meteor/rocketchat.info (houston updateFiles) also carry. release-action
+  # bumpFileVersions only string-replaces, so drift goes unnoticed.
+  - id: rocketchat-valueadd-release-version-in-sync
+    kind: cross_file
+    source:
+      file: package.json
+      extract: { json: "$.version" }
+    targets:
+      - file: apps/meteor/package.json
+        extract: { json: "$.version" }
+      - file: packages/core-typings/package.json
+        extract: { json: "$.version" }
+      - file: packages/rest-typings/package.json
+        extract: { json: "$.version" }
+      - file: apps/meteor/rocketchat.info
+        extract: { json: "$.version" }
+    relation: equals
+    level: info
+    message: "value-add: release version differs between the root, the fixed group and rocketchat.info."
+
+  # value-add: update-version-durability.yml hard-codes node-version instead
+  # of reading volta.node like every other workflow.
+  - id: rocketchat-valueadd-durability-node-matches-volta
+    kind: cross_file
+    source:
+      file: package.json
+      extract: { json: "$.volta.node" }
+    targets:
+      - file: .github/workflows/update-version-durability.yml
+        extract: { regex: 'node-version:[ \t]*"?([0-9][^"\s#]*)' }
+    relation: equals
+    level: info
+    message: "value-add: update-version-durability.yml node-version should equal volta.node."
+
+  # value-add: the Yarn version is written four times (engines.yarn,
+  # volta.yarn, packageManager, yarnPath); only engines.yarn vs yarnPath is
+  # checked (plugin-engines).
+  - id: rocketchat-valueadd-yarn-pins-agree
+    kind: cross_file
+    source:
+      file: package.json
+      extract: { json: "$.engines.yarn" }
+    targets:
+      - file: package.json
+        extract: { json: "$.volta.yarn" }
+      - file: package.json
+        extract: { regex: '"packageManager":[ \t]*"yarn@([^"+]+)' }
+    relation: equals
+    level: info
+    message: "value-add: volta.yarn and packageManager should equal engines.yarn."
+
+  # value-add: workspaces inherit the root Volta pins.
+  - id: rocketchat-valueadd-workspace-volta-extends
+    kind: json_path_matches
+    paths: "{apps,packages,ee/apps,ee/packages}/*/package.json"
+    path: "$.volta.extends"
+    matches: '^(\.\./){2,3}package\.json$'
+    level: info
+    message: "value-add: workspace package.json should set volta.extends to the root manifest."
+
+  # value-add: locale files keep the 2-space indent the fix mode writes
+  # (JSON.stringify(resource, null, 2)) and .editorconfig declares. (The
+  # former no-BOM value-add rule is enforced and now sits under rocketchat-11
+  # as rocketchat-i18n-locale-no-bom.)
+  - id: rocketchat-valueadd-locale-indent
+    kind: indent_style
+    style: spaces
+    width: 2
+    paths: "packages/i18n/src/locales/*.i18n.json"
+    level: info

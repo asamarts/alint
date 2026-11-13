@@ -1,0 +1,804 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
+#
+# alint v0.23 corpus-stratum config - strapi/strapi
+# Pinned @ fcc1df0668527c342de7f8cc5acd331434a2d505 (stratum: js-monorepo)
+#
+# Shape: Strapi 5 headless CMS. A Yarn 4 (node-modules linker) + Nx monorepo
+# of ~60 workspaces: packages/{core,plugins,providers,utils,cli,generators}/*,
+# examples/*, tests-next/*, scripts/front, .github/actions/*. A Docusaurus
+# contributor-docs site lives in docs/ (its own Yarn project). Admin UI
+# translations are flat react-intl JSON catalogs under
+# packages/**/admin/src/translations/*.json. Governance: single vendor
+# (Strapi Solutions SAS), CLA.
+#
+# WHERE THE ENFORCED VALIDATION LIVES
+#   .github/workflows/checks.yml  check-package-versions (`yarn version:check`
+#       = scripts/check-package-versions.mjs + `syncpack lint` over
+#       .syncpackrc.json), security-lockfile-analysis (lockfile-lint over
+#       yarn.lock), check-pr-status (PR labels / base branch).
+#   .github/workflows/tests.yml   prettier, eslint (per package, incl. the
+#       check-file plugin), oxlint, tsc, builds on Node 22/24/26 + the
+#       check-build-outputs.js guard, the docs_build job (Docusaurus with
+#       onBrokenLinks/onBrokenMarkdownLinks/onInlineTags: throw and the
+#       docs/plugins/workspace-packages frontmatter validator), jest/vitest
+#       unit and front suites (several of which assert repository data:
+#       translation catalogs, package.json exports, e2e spec gating), e2e,
+#       API, CLI, migration and tests-next suites, SonarQube, and the
+#       "Read Playwright version" exact-pin guard.
+#   .github/workflows/commitlint.yml + .husky/commit-msg  commitlint
+#       (.commitlintrc.ts: config-conventional + a custom type-enum).
+#   .husky/pre-commit  lint-staged (eslint --fix + prettier --write).
+#   Every CI job: .github/actions/yarn-nm-install (corepack enable +
+#       `yarn install --immutable`), which also enforces the yarnPath,
+#       catalog: and workspace: references.
+#   Conventions: AGENTS.md (workspace: protocol use, AI-tool link dirs),
+#       docs/AGENTS.md + docs/docs/contributing/07-writing-docs.md (docs
+#       frontmatter, MDX use, images, tags vocabulary, redirects).
+#
+# This config expresses: the workspace version lockstep (C: hand-kept major),
+# the Playwright exact pin, the lockfile resolution-protocol allowlist, the
+# workspace:/catalog: reference lookups and the packages/ workspace-dependency
+# convention (no workspace:, and exact pins for internal deps: C, hand-kept
+# name list), the yarnPath / packageManager pins, the translation-data tests
+# alint can state (native-name coverage (C: TS read by regex), edit-view hint
+# keys, catalogs parse as JSON (C: JSONC-tolerant reader), the CTB
+# private-field description (C: TS read by regex)), the package.json exports
+# `source` existence test, the admin test-folder rule (eslint check-file), the
+# admin filename naming convention (C: inferred, hand-kept exemptions), e2e
+# spec gating (C: mirrored domain list), the docs build's package-group /
+# workspace-pattern / name guards and its onBrokenMarkdownLinks file-link check
+# (C: regex), the docs frontmatter key conventions (C: frontmatter read by
+# regex), the package-page conventions (one page per packages/ workspace, the
+# three headings, plain .md, `package` declared), the MDX-import, image-alt
+# (C: HTML <img> by regex) and absolute-/img/ conventions, the tags.yml entry
+# shape and 35-tag cap, and the AI-tool link dirs not being committed. Three
+# VALUE-ADD rules (level info, outside the ratio) close the file: Yarn and Node
+# pins that agree today by hand.
+# Not expressed (B/D, see the stratum record): syncpack's one exact version
+# per dependency (B-config unique-key), the en.json singular/plural pair test
+# (B-config unique-key), iso-locales unique codes (B-config unique-key),
+# unique workspace names (B-config unique-key), the docs frontmatter value and
+# schema validators (status / review_notes / package / tags / Docusaurus
+# frontmatter schema: B-adapter, no frontmatter reader), Docusaurus route links
+# and redirects vs routes (B-adapter, route model), the tags.yml disjointness
+# convention (B-config), commit messages (C, sketched in comments at the end:
+# git kinds cannot be confirmed on a depth-1 clone), installs, builds, lint,
+# types, tests and the committed action-bundle freshness (D). .editorconfig is
+# not a unit: editorconfig_conforms reports ~2,300 deviations at the pin
+# (prettier, D, is what formats files).
+
+version: 1
+
+# Generated and vendored trees are inputs, not the validated surface.
+# (tests/e2e/data is NOT ignored: scripts/check-package-versions.mjs globs
+# every package.json outside node_modules, test data included.)
+ignore:
+  - "**/node_modules/**"
+  - "**/dist/**"
+
+rules:
+  # ══════════════════════════════════════════════════════════════════════════
+  # dep-version
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # C [dep-version] strapi-01. scripts/check-package-versions.mjs (CI
+  #   check-package-versions -> `yarn version:check`): every package.json the
+  #   script globs (`**/package.json` with glob's default dot:false, so the
+  #   .github/ manifests are out of scope) whose `version` has the SAME MAJOR
+  #   as packages/core/strapi/package.json must equal that version exactly;
+  #   other majors (0.0.0 examples/docs, 0.1.0 test app) are skipped.
+  #   C: alint cannot read the canonical major at run time, so the major is
+  #   hand-kept in `matches: '^5\.'` and must be bumped with the next major
+  #   (until then a 6.x straggler would be missed and a 5.x leftover flagged).
+  #   glob's dot:false skips a manifest under a dot directory at ANY depth, and
+  #   alint's `**` would cross dot directories, so the target glob spells each
+  #   depth with dot-free `[!.]*` segments: exact dot:false parity down to 8
+  #   directory levels (manifests sit at most 5 deep at the pin); the final
+  #   catch-all keeps deeper manifests in scope (a dot directory below level 8
+  #   would be included there, where the script would skip it). The script
+  #   also silently skips an unparsable package.json; alint reports it.
+  - id: strapi-package-versions-aligned
+    kind: cross_file
+    relation: equals
+    source:
+      file: "packages/core/strapi/package.json"
+      extract: { json: "$.version" }
+    targets:
+      files: "{package.json,[!.]*/package.json,[!.]*/[!.]*/package.json,[!.]*/[!.]*/[!.]*/package.json,[!.]*/[!.]*/[!.]*/[!.]*/package.json,[!.]*/[!.]*/[!.]*/[!.]*/[!.]*/package.json,[!.]*/[!.]*/[!.]*/[!.]*/[!.]*/[!.]*/package.json,[!.]*/[!.]*/[!.]*/[!.]*/[!.]*/[!.]*/[!.]*/package.json,[!.]*/[!.]*/[!.]*/[!.]*/[!.]*/[!.]*/[!.]*/[!.]*/package.json,[!.]*/[!.]*/[!.]*/[!.]*/[!.]*/[!.]*/[!.]*/[!.]*/**/package.json}"
+      extract: { json: "$.version" }
+      matches: '^5\.'
+    allow_missing_target: true
+    level: error
+    message: "Every same-major workspace version must equal packages/core/strapi/package.json's version (scripts/check-package-versions.mjs)."
+
+  # A [dep-version] strapi-03. tests.yml `conditions` job, "Read Playwright
+  #   version": root devDependencies['@playwright/test'] must be an exact
+  #   x.y.z (it names the mcr.microsoft.com/playwright:v<version> e2e image).
+  - id: strapi-playwright-exact-pin
+    kind: json_path_matches
+    paths: ["package.json"]
+    path: "$.devDependencies['@playwright/test']"
+    matches: '^[0-9]+\.[0-9]+\.[0-9]+$'
+    level: error
+    message: "@playwright/test must be pinned to an exact x.y.z version (tests.yml 'Read Playwright version')."
+
+  # A [dep-version] strapi-04. checks.yml security-lockfile-analysis ->
+  #   .github/actions/security/lockfile (lockfile-lint --type yarn
+  #   --allowed-hosts yarn --allowed-schemes npm: workspace: patch: https:):
+  #   every yarn.lock entry resolves through an allowed protocol, and an
+  #   https: resolution only from registry.yarnpkg.com. The Berry lockfile is
+  #   YAML; `resolution` is "<ident>@<protocol>:<rest>". UNVERIFIED offline:
+  #   how lockfile-lint (an npm / yarn-classic tool) applies --type yarn and
+  #   the Berry-protocol --allowed-schemes to a v8 lockfile; this rule reads
+  #   the action's flags as a scheme + host allowlist over each resolution.
+  - id: strapi-lockfile-resolution-protocols
+    kind: yaml_path_matches
+    paths: ["yarn.lock"]
+    path: "$.*.resolution"
+    matches: '^(?:@[^/@]+/)?[^@/]+@(?:(?:npm|workspace|patch):|https://registry\.yarnpkg\.com/)'
+    level: error
+    message: "yarn.lock resolutions may only use npm:, workspace:, patch: or https://registry.yarnpkg.com/ (lockfile-lint in checks.yml)."
+
+  # A [dep-version] strapi-05. Every CI job's `yarn install --immutable`
+  #   (yarn-nm-install) fails when a `workspace:` dependency names no
+  #   workspace. The source unions the names of every workspace the root
+  #   `workspaces` globs declare; the target reads the dependency KEY of each
+  #   workspace: value with a regex over the manifest text (trpc-B01 shape).
+  - id: strapi-workspace-refs-resolve
+    kind: cross_file
+    relation: superset
+    source:
+      files: "{package.json,packages/*/package.json,packages/*/*/package.json,examples/*/package.json,examples/plugins/*/package.json,examples/*/src/plugins/*/package.json,.github/actions/*/package.json,tests-next/*/package.json,scripts/*/package.json}"
+      extract: { json: "$.name" }
+    targets:
+      files: "{package.json,packages/*/package.json,packages/*/*/package.json,examples/*/package.json,examples/plugins/*/package.json,examples/*/src/plugins/*/package.json,.github/actions/*/package.json,tests-next/*/package.json,scripts/*/package.json}"
+      extract: { regex: '"([^"]+)"\s*:\s*"workspace:' }
+    allow_missing_target: true
+    level: error
+    message: "A workspace: dependency must name a workspace of this monorepo (yarn install fails otherwise)."
+
+  # C [dep-version] strapi-06. Yarn catalogs: every `catalog:` specifier must
+  #   name an entry of the default `catalog:` in .yarnrc.yml (yarn install
+  #   fails otherwise). C: the catalog's entries are YAML mapping KEYS, read
+  #   with a line regex that relies on the catalog being the only indented
+  #   mapping in .yarnrc.yml, and a named `catalog:<name>` reference (none
+  #   today) would go unchecked. KNOWN FALSE-NEGATIVE PATH (not fixable here):
+  #   the line regex reads every 2-space-indented key, so a same-named key under
+  #   another mapping (e.g. an `npmScopes:` or `packageExtensions:` entry) masks
+  #   a missing catalog entry. Scoping the regex to the `catalog:` block needs
+  #   lookbehind or \G (Rust regex has neither), and the yaml extract cannot
+  #   return mapping keys.
+  - id: strapi-catalog-refs-resolve
+    kind: cross_file
+    relation: superset
+    source:
+      file: ".yarnrc.yml"
+      extract: { regex: "(?m)^[ ]{2}'?([^'\\s:#][^':\\s]*)'?\\s*:" }
+    targets:
+      files: "{package.json,packages/*/package.json,packages/*/*/package.json,examples/*/package.json,examples/plugins/*/package.json,examples/*/src/plugins/*/package.json,.github/actions/*/package.json,tests-next/*/package.json,scripts/*/package.json}"
+      extract: { regex: '"([^"]+)"\s*:\s*"catalog:"' }
+    allow_missing_target: true
+    level: error
+    message: "A catalog: dependency must have an entry in .yarnrc.yml's catalog (yarn install fails otherwise)."
+
+  # A [dep-version] strapi-07. AGENTS.md "Workspace deps": internal packages/
+  #   deps reference each other with pinned semver versions, not workspace:*;
+  #   workspace:* is only for examples/, tests-next/* and some root devDeps.
+  #   Half 1 (no workspace:): every workspace manifest outside the allowlist,
+  #   i.e. packages/, scripts/* and .github/actions/* (the root, examples/ and
+  #   tests-next/ may use it).
+  - id: strapi-packages-no-workspace-protocol
+    kind: json_path_absent
+    paths: ["packages/*/package.json", "packages/*/*/package.json", "scripts/*/package.json", ".github/actions/*/package.json"]
+    path: "$['dependencies','devDependencies','peerDependencies','optionalDependencies'][?search(@, '^workspace:')]"
+    level: error
+    message: "Outside examples/, tests-next/ and the root, workspaces pin internal dependencies to a semver version, never workspace:* (AGENTS.md)."
+  #   Half 2 (pinned exact), C-shaped: a packages/ dependency or devDependency
+  #   on another packages/ workspace is an exact x.y.z (182 such specifiers
+  #   at the pin, all 5.62.0). peerDependencies are left out: all 22 internal
+  #   peer specifiers are `^5.0.0` at the pin, so the "pinned" reading does
+  #   not hold for peers (R5). C: JSONPath cannot select keys by a name set
+  #   read from other files, so the 43 packages/ workspace names are mirrored
+  #   here by hand and go stale when a package is added or renamed.
+  - id: strapi-packages-internal-deps-pinned-exact
+    kind: json_path_matches
+    paths: ["packages/*/package.json", "packages/*/*/package.json"]
+    path: "$['dependencies','devDependencies']['@strapi/admin','@strapi/admin-test-utils','@strapi/cloud-cli',
+      '@strapi/content-manager','@strapi/content-releases','@strapi/content-type-builder','@strapi/core',
+      '@strapi/data-transfer','@strapi/database','@strapi/email','@strapi/generators','@strapi/i18n',
+      '@strapi/logger','@strapi/openapi','@strapi/permissions','@strapi/plugin-cloud','@strapi/plugin-color-picker',
+      '@strapi/plugin-documentation','@strapi/plugin-graphql','@strapi/plugin-sentry',
+      '@strapi/plugin-users-permissions','@strapi/provider-email-amazon-ses','@strapi/provider-email-mailgun',
+      '@strapi/provider-email-nodemailer','@strapi/provider-email-sendgrid','@strapi/provider-email-sendmail',
+      '@strapi/provider-upload-aws-s3','@strapi/provider-upload-cloudinary','@strapi/provider-upload-local',
+      '@strapi/review-workflows','@strapi/strapi','@strapi/types','@strapi/typescript-utils','@strapi/upgrade',
+      '@strapi/upload','@strapi/utils','api-tests','create-strapi','create-strapi-app','eslint-config-custom',
+      'oxlint-config','tsconfig','vitest-config']"
+    matches: '^[0-9]+\.[0-9]+\.[0-9]+$'
+    if_present: true
+    level: error
+    message: "A packages/ dependency on another packages/ workspace is pinned to an exact x.y.z version (AGENTS.md)."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # toolchain-pin
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # A [toolchain-pin] strapi-10. .yarnrc.yml yarnPath pins the Yarn release
+  #   every `yarn` invocation runs; Yarn aborts when the file is missing.
+  - id: strapi-yarnpath-exists
+    kind: registry_paths_resolve
+    source: ".yarnrc.yml"
+    extract: { yaml: "$.yarnPath" }
+    expect: file
+    level: error
+    message: ".yarnrc.yml yarnPath must name a committed Yarn release."
+
+  # A [toolchain-pin] strapi-11. yarn-nm-install runs `corepack enable`
+  #   (enable-corepack defaults to 'true'), so the root packageManager must be
+  #   a Corepack yarn@<semver> spec, or every CI install aborts.
+  - id: strapi-package-manager-yarn-pinned
+    kind: json_path_matches
+    paths: ["package.json"]
+    path: "$.packageManager"
+    matches: '^yarn@[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+sha(?:1|224|256|384|512)\.[0-9a-f]+)?$'
+    if_present: true
+    level: error
+    message: "packageManager must be a Corepack yarn@<x.y.z> spec (corepack enable in yarn-nm-install)."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # locale (admin react-intl catalogs, packages/**/admin/src/translations)
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # C [locale] strapi-20 (Stage B: A -> C). packages/core/admin/admin/src/
+  #   translations/tests/index.test.ts (unit_front): every admin locale JSON
+  #   (by file stem) has a non-empty native name in languageNativeNames.ts.
+  #   C: the TS object literal is read with a regex, not a parser. The regex
+  #   takes an entry at a line start or after `{` / `,` (so two entries on one
+  #   line both count), a bare, '…' or "…" key, and a non-empty '…' or "…"
+  #   value (prettier switches to double quotes for a value holding an
+  #   apostrophe). Still layout-dependent: a template-literal or computed
+  #   value, a spread, or a `,`/`{` followed by `key: '…'` inside a string
+  #   would be misread.
+  - id: strapi-admin-locales-have-native-names
+    kind: cross_file
+    relation: registered
+    register_as: "{stem}"
+    source:
+      files: "packages/core/admin/admin/src/translations/*.json"
+    targets:
+      - file: "packages/core/admin/admin/src/translations/languageNativeNames.ts"
+        extract: { regex: "(?m)(?:^|[{,])\\s*['\"]?([A-Za-z][A-Za-z-]*)['\"]?\\s*:\\s*(?:'[^'\\r\\n]+'|\"[^\"\\r\\n]+\")" }
+    level: error
+    message: "Every admin locale file needs a non-empty entry in languageNativeNames.ts (translations/tests/index.test.ts)."
+
+  # A [locale] strapi-22. packages/core/content-manager/admin/src/translations/
+  #   tests/editViewShortcutHints.test.ts (unit_front): in every
+  #   content-manager locale that defines containers.EditView.saveHint,
+  #   containers.EditView.publishHint is defined and non-empty, and saveHint no
+  #   longer carries the legacy {action} placeholder. `!(length(publishHint) >
+  #   0)` mirrors the test's `publishHint.length > 0`: it also flags a null or
+  #   non-string publishHint (length() yields Nothing), which the test rejects.
+  - id: strapi-cm-edit-view-hints
+    kind: json_path_absent
+    paths: ["packages/core/content-manager/admin/src/translations/*.json"]
+    path: "$[?($['containers.EditView.saveHint'] && (!(length($['containers.EditView.publishHint']) > 0) || search($['containers.EditView.saveHint'], '[{]action[}]')))]"
+    level: error
+    message: "A locale with containers.EditView.saveHint needs a non-empty publishHint and no {action} placeholder in saveHint (editViewShortcutHints.test.ts)."
+
+  # C [locale] strapi-b01. Every admin translation catalog is valid JSON:
+  #   rollup.utils.mjs bundles them with json() + dynamicImportVars (the
+  #   build / build_compat / e2e jobs), the admin loads them with
+  #   `import(`./translations/${locale}.json`)`, and
+  #   editViewShortcutHints.test.ts JSON.parses the content-manager ones.
+  #   A parse-only probe: the query never matches, so the only finding is the
+  #   resource_parse failure on a file that does not parse (275 files at the
+  #   pin). C: alint's JSON reader is JSONC-tolerant, so a trailing comma or a
+  #   // comment, which JSON.parse and rollup json() reject, passes here
+  #   (element-web-08 / zulip-04 precedent).
+  - id: strapi-admin-translations-parse-as-json
+    kind: json_path_absent
+    paths: ["packages/**/admin/src/translations/*.json"]
+    path: "$.__alint_parse_probe_never_present__"
+    level: error
+    message: "An admin translation catalog must be valid JSON (rollup json(), dynamic locale imports)."
+
+  # C [locale] strapi-b02. packages/core/content-type-builder/admin/src/
+  #   components/FormModal/attributes/tests/attributeOptions.test.ts
+  #   (unit_front): en.json's form.attribute.item.privateField.description
+  #   equals the test's PRIVATE_FIELD_DESCRIPTION literal and the
+  #   defaultMessage attributeOptions.ts declares for that id. C: both TS
+  #   files are read with layout-dependent regexes (single-quoted strings, the
+  #   `id: getTrad(...)` line right before `defaultMessage:`).
+  - id: strapi-ctb-private-field-description-aligned
+    kind: cross_file
+    relation: equals
+    source:
+      file: "packages/core/content-type-builder/admin/src/translations/en.json"
+      extract: { json: "$['form.attribute.item.privateField.description']" }
+    targets:
+      - file: "packages/core/content-type-builder/admin/src/components/FormModal/attributes/attributeOptions.ts"
+        extract: { regex: "privateField\\.description'\\),\\s*defaultMessage:\\s*'([^']*)'" }
+      - file: "packages/core/content-type-builder/admin/src/components/FormModal/attributes/tests/attributeOptions.test.ts"
+        extract: { regex: "PRIVATE_FIELD_DESCRIPTION\\s*=\\s*'([^']*)'" }
+    level: error
+    message: "en.json's privateField.description must equal the attributeOptions.ts defaultMessage and the test's literal (attributeOptions.test.ts)."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # other: tests over repository data, lint path rules, docs build guards
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # A [other] strapi-30. packages/core/{upload,admin}/server/src/__tests__/
+  #   package-exports*.test.ts: every exports subpath's `source` condition
+  #   names an existing file (relative to the package root).
+  - id: strapi-exports-source-exists
+    kind: registry_paths_resolve
+    source: "packages/core/{upload,admin}/package.json"
+    extract: { json: "$.exports.*.source" }
+    expect: file
+    level: error
+    message: "Every package.json exports `source` condition must point at an existing file (package-exports tests)."
+
+  # A [other] strapi-32. eslint check-file/folder-match-with-fex in the admin
+  #   .eslintrc.cjs of core/admin, core/upload, core/content-manager and
+  #   core/review-workflows (lint job, --max-warnings=0; lint-staged): a
+  #   *.test.{js,jsx,ts,tsx} file must live under a __tests__/ or tests/ folder.
+  - id: strapi-admin-tests-in-test-folders
+    kind: file_absent
+    paths:
+      include: ["packages/core/{admin,upload,content-manager,review-workflows}/admin/**/*.test.{js,jsx,ts,tsx}"]
+      exclude: ["**/__tests__/**", "**/tests/**"]
+    level: error
+    message: "Admin test files must live in a __tests__/ or tests/ folder (eslint check-file/folder-match-with-fex)."
+
+  # C [other] strapi-35 (Stage B: D -> C). check-file/filename-naming-convention
+  #   from @strapi/eslint-config/front (lint job, --max-warnings=0;
+  #   lint-staged), reached through packages/utils/eslint-config-custom/front
+  #   by the admin .eslintrc.cjs files; review-workflows/admin turns it off.
+  #   INFERRED CONTRACT: the rule's globs and cases live in the unvendored
+  #   @strapi/eslint-config and could not be read offline. Stage B inferred
+  #   ".tsx PascalCase, .ts camelCase, middle extensions ignored" in the admin
+  #   dirs; on the clone that convention fails exactly 40 files and every one
+  #   of them carries an inline `eslint-disable` for this rule (re-verified
+  #   here), so the exemption lists below mirror those inline disables by hand
+  #   (C, trpc-30 / element-web-28 precedent). Not covered: .js/.jsx admin
+  #   files (79; their convention is not inferable) and the check-file/no-index
+  #   half (18 index files carry no disable, so its scope is unknown).
+  - id: strapi-admin-tsx-filenames-pascal-case
+    kind: filename_regex
+    paths:
+      include: ["packages/{core,plugins}/*/admin/**/*.tsx", "packages/core/admin/ee/admin/**/*.tsx"]
+      exclude:
+        - "packages/core/review-workflows/**"
+        - "packages/core/admin/admin/src/core/apis/router.tsx"
+        - "packages/core/admin/admin/src/hooks/tests/useDeviceType.test.tsx"
+        - "packages/core/admin/admin/src/hooks/tests/useElementOnScreen.test.tsx"
+        - "packages/core/admin/admin/src/hooks/tests/useFetchClient.test.tsx"
+        - "packages/core/admin/admin/src/hooks/tests/useInjectReducer.test.tsx"
+        - "packages/core/admin/admin/src/hooks/tests/useMediaQuery.test.tsx"
+        - "packages/core/admin/admin/src/hooks/tests/useQueryParams.test.tsx"
+        - "packages/core/admin/admin/src/pages/Settings/pages/ApiTokens/EditView/apiTokenPermissions.tsx"
+        - "packages/core/admin/admin/src/pages/Settings/pages/Roles/hooks/usePermissionsDataManager.tsx"
+        - "packages/core/admin/admin/src/router.tsx"
+        - "packages/core/admin/admin/tests/utils.tsx"
+        - "packages/core/admin/ee/admin/src/hooks/tests/useAIUsageWarning.test.tsx"
+        - "packages/core/admin/ee/admin/src/hooks/tests/useLicenseLimitNotification.test.tsx"
+        - "packages/core/content-manager/admin/src/history/routes.tsx"
+        - "packages/core/content-manager/admin/src/hooks/tests/useContentManagerInitData.test.tsx"
+        - "packages/core/content-manager/admin/src/hooks/tests/useDocument.test.tsx"
+        - "packages/core/content-manager/admin/src/layout.tsx"
+        - "packages/core/content-manager/admin/src/preview/routes.tsx"
+        - "packages/core/content-manager/admin/src/router.tsx"
+        - "packages/core/content-manager/admin/src/tests/layout.test.tsx"
+        - "packages/core/content-manager/admin/tests/utils.tsx"
+        - "packages/core/content-releases/admin/tests/utils.tsx"
+        - "packages/core/content-type-builder/admin/src/components/ContentTypeBuilderNav/tests/index.test.tsx"
+        - "packages/core/content-type-builder/admin/src/pages/App/index.tsx"
+        - "packages/core/upload/admin/src/hooks/tests/useApiErrorMessage.test.tsx"
+        - "packages/core/upload/admin/src/legacy/hooks/tests/useFolderStructure.test.tsx"
+        - "packages/core/upload/admin/src/legacy/hooks/tests/useRemoveAsset.test.tsx"
+        - "packages/plugins/i18n/admin/src/contentManagerHooks/editView.tsx"
+        - "packages/plugins/i18n/admin/src/contentManagerHooks/listView.tsx"
+        - "packages/plugins/i18n/admin/src/contentManagerHooks/tests/listView.test.tsx"
+        - "packages/plugins/i18n/admin/tests/utils.tsx"
+    pattern: '^[A-Z][A-Za-z0-9]*(\.[A-Za-z0-9-]+)*\.tsx$'
+    level: error
+    message: "An admin .tsx file name is PascalCase (check-file/filename-naming-convention, inferred)."
+  - id: strapi-admin-ts-filenames-camel-case
+    kind: filename_regex
+    paths:
+      include: ["packages/{core,plugins}/*/admin/**/*.ts", "packages/core/admin/ee/admin/**/*.ts"]
+      exclude:
+        - "packages/core/review-workflows/**"
+        - "packages/core/admin/admin/src/core/apis/CustomFields.ts"
+        - "packages/core/admin/admin/src/core/apis/Plugin.ts"
+        - "packages/core/admin/admin/src/core/apis/Widgets.ts"
+        - "packages/core/content-manager/admin/src/content-manager.ts"
+        - "packages/core/content-manager/admin/src/pages/EditView/components/FormInputs/BlocksInput/tests/mock-schema.ts"
+        - "packages/core/content-manager/admin/src/tests/content-manager.test.ts"
+        - "packages/core/content-type-builder/admin/src/components/DataManager/DataManagerContext.ts"
+        - "packages/core/content-type-builder/admin/src/components/FormModalNavigation/FormModalNavigationContext.ts"
+        - "packages/plugins/i18n/admin/src/middlewares/rbac-middleware.ts"
+    pattern: '^[a-z][A-Za-z0-9]*(\.[A-Za-z0-9-]+)*\.ts$'
+    level: error
+    message: "An admin .ts file name is camelCase (check-file/filename-naming-convention, inferred)."
+
+  # C [other] strapi-33. tests/utils/__tests__/e2e-domains.test.ts (vitest,
+  #   unit_back_vitest): every media-library e2e spec is gated on
+  #   E2E_MEDIA_LIBRARY and has no ungated top-level test()/test.describe().
+  #   C: the domain name mirrors MEDIA_LIBRARY_DOMAIN in
+  #   tests/utils/runners/e2e-domains.js by hand.
+  - id: strapi-e2e-media-library-specs-gated
+    kind: file_content_matches
+    paths: ["tests/e2e/tests/media-library/**/*.spec.ts"]
+    pattern: 'describeOnCondition\(process\.env\.E2E_MEDIA_LIBRARY ==='
+    level: error
+    message: "A media-library e2e spec must be gated by describeOnCondition(process.env.E2E_MEDIA_LIBRARY === ...) (e2e-domains.test.ts)."
+  - id: strapi-e2e-media-library-specs-no-ungated-block
+    kind: file_content_forbidden
+    paths: ["tests/e2e/tests/media-library/**/*.spec.ts"]
+    pattern: '(?m)^test(\.describe)?(\.(only|serial|parallel))?\('
+    level: error
+    message: "A media-library e2e spec must not have an ungated top-level test()/test.describe() (e2e-domains.test.ts)."
+
+  # C [other] strapi-34. Same test: every spec of an Enterprise-only domain
+  #   (EE_ONLY_DOMAINS = content-releases, review-workflows) is gated on
+  #   edition === 'EE' and has no ungated top-level block. C: the domain list
+  #   mirrors EE_ONLY_DOMAINS in tests/utils/runners/e2e-domains.js by hand.
+  - id: strapi-e2e-ee-only-specs-gated
+    kind: file_content_matches
+    paths: ["tests/e2e/tests/{content-releases,review-workflows}/**/*.spec.ts"]
+    pattern: "describeOnCondition\\(edition === 'EE'\\)"
+    level: error
+    message: "An Enterprise-only e2e spec must be gated by describeOnCondition(edition === 'EE') (e2e-domains.test.ts)."
+  - id: strapi-e2e-ee-only-specs-no-ungated-block
+    kind: file_content_forbidden
+    paths: ["tests/e2e/tests/{content-releases,review-workflows}/**/*.spec.ts"]
+    pattern: '(?m)^test(\.describe)?(\.(only|serial|parallel))?\('
+    level: error
+    message: "An Enterprise-only e2e spec must not have an ungated top-level test()/test.describe() (e2e-domains.test.ts)."
+
+  # C [other] strapi-40. docs build (docs_build): docs/plugins/workspace-packages
+  #   getPackageGroup throws for a packages/<group>/<name> workspace whose
+  #   group folder is not in PACKAGE_GROUPS (groups.mjs). C: the seven group
+  #   ids (core, plugins, providers, utils, cli, generators and `other`, which
+  #   also names top-level packages such as packages/admin-test-utils) are
+  #   mirrored here by hand.
+  - id: strapi-docs-package-groups-known
+    kind: file_absent
+    paths:
+      include: ["packages/*/*/package.json"]
+      exclude: ["packages/{core,plugins,providers,utils,cli,generators,other}/*/package.json"]
+    level: error
+    message: "A packages/<group>/<name> workspace needs its group in PACKAGE_GROUPS (docs/plugins/workspace-packages/groups.mjs)."
+
+  # A [other] strapi-41. docs build: expandWorkspacePattern throws unless every
+  #   root `workspaces` pattern under packages/ uses only literal and `*`
+  #   segments.
+  - id: strapi-docs-packages-workspace-patterns-simple
+    kind: json_path_matches
+    paths: ["package.json"]
+    path: "$.workspaces[?search(@, '^packages/')]"
+    matches: '^packages(/(\*|[^*?\[\]{}!/]+))+$'
+    level: error
+    message: "Workspace patterns under packages/ may only use literal and `*` segments (docs/plugins/workspace-packages/workspaces.mjs)."
+
+  # A [other] strapi-42. docs build: readWorkspacePackages throws `Missing
+  #   "name"` for a packages/ workspace without a non-empty name.
+  - id: strapi-docs-packages-workspaces-named
+    kind: json_path_matches
+    paths: ["packages/*/package.json", "packages/*/*/package.json"]
+    path: "$.name"
+    matches: '.'
+    level: error
+    message: "Every packages/ workspace needs a non-empty name (docs/plugins/workspace-packages/workspaces.mjs)."
+
+  # C [other] strapi-43. docs build (workspace-packages plugin): `package`
+  #   frontmatter is only allowed on a folder's index page (index.md or
+  #   index.mdx); the writing guide narrows package pages to plain index.md.
+  #   C: alint has no frontmatter reader; the regex reads the frontmatter
+  #   block up to its closing `---` line.
+  - id: strapi-docs-package-frontmatter-only-on-index
+    kind: file_content_forbidden
+    paths:
+      include: ["docs/docs/**/*.{md,mdx}"]
+      exclude: ["docs/docs/**/index.md", "docs/docs/**/index.mdx"]
+    pattern: '\A---\r?\n(?:(?:[^-\r\n][^\r\n]*|-[^-\r\n][^\r\n]*|--[^-\r\n][^\r\n]*)?\r?\n)*package:'
+    level: error
+    message: "Only a package folder's index page may set `package` frontmatter (docs/plugins/workspace-packages)."
+
+  # C [other] strapi-49. 07-writing-docs.md "Package pages": package pages
+  #   are plain .md (the build plugin itself also accepts index.mdx, so this
+  #   is the guide's narrower convention): an .mdx page must not set
+  #   `package` frontmatter. C: frontmatter read by regex, as in strapi-43.
+  - id: strapi-docs-package-pages-are-md
+    kind: file_content_forbidden
+    paths: ["docs/docs/**/*.mdx"]
+    pattern: '\A---\r?\n(?:(?:[^-\r\n][^\r\n]*|-[^-\r\n][^\r\n]*|--[^-\r\n][^\r\n]*)?\r?\n)*package:'
+    level: error
+    message: "Package pages are plain .md; only a package's index.md sets `package` (07-writing-docs.md)."
+
+  # A [other] strapi-51. 07-writing-docs.md "Package pages": each workspace
+  #   package under packages/ has one page at docs/docs/<repo path>/index.md
+  #   (`yarn scaffold:packages` creates it; the docs build only warns when
+  #   one is missing, so this is a review convention that holds at the pin).
+  - id: strapi-docs-every-package-has-a-page
+    kind: pair
+    primary: "packages/{*,*/*}/package.json"
+    partner: "docs/docs/{dir}/index.md"
+    level: error
+    message: "Every packages/ workspace needs a page at docs/docs/<repo path>/index.md (07-writing-docs.md)."
+  #   The package page also declares the package: its `package` frontmatter
+  #   is the workspace's npm name (07-writing-docs.md template and frontmatter
+  #   table; the workspace-packages plugin keys the package header and its
+  #   undocumented-package report on it). Every packages/ workspace name must
+  #   be among the `package` values of the docs pages (43 of 43 at the pin).
+  #   This half reads frontmatter with the same regex as strapi-43 (C-shaped:
+  #   no frontmatter reader); the value is taken quoted or bare.
+  - id: strapi-docs-every-package-is-declared
+    kind: cross_file
+    relation: superset
+    source:
+      files: "docs/docs/packages/**/index.md"
+      extract: { regex: '\A---\r?\n(?:(?:[^-\r\n][^\r\n]*|-[^-\r\n][^\r\n]*|--[^-\r\n][^\r\n]*)?\r?\n)*package:[ \t]*[\x22\x27]?([^\x22\x27\r\n]*[^\x22\x27\s])[\x22\x27]?[ \t]*\r?\n' }
+    targets:
+      files: "{packages/*/package.json,packages/*/*/package.json}"
+      extract: { json: "$.name" }
+    level: error
+    message: "Every packages/ workspace must be named by the `package` frontmatter of its docs page (07-writing-docs.md)."
+
+  # C [other] strapi-58. docs/plugins/workspace-packages/index.ts:85-88: a docs
+  #   page's `package` frontmatter names a workspace under packages/ (the
+  #   workspace names are a superset of the docs package values). C: the
+  #   frontmatter is read by regex (backstage-34 precedent). Pages without
+  #   `package` are skipped.
+  - id: strapi-docs-package-frontmatter-is-workspace
+    kind: cross_file
+    relation: superset
+    source:
+      files: "{packages/*/package.json,packages/*/*/package.json}"
+      extract: { json: "$.name" }
+    targets:
+      files: "docs/docs/**/*.{md,mdx}"
+      extract: { regex: '\A---\r?\n(?:(?:[^-\r\n][^\r\n]*|-[^-\r\n][^\r\n]*|--[^-\r\n][^\r\n]*)?\r?\n)*package:[ \t]*[\x22\x27]?([^\x22\x27\r\n]*[^\x22\x27\s])[\x22\x27]?[ \t]*\r?\n' }
+    allow_missing_target: true
+    level: error
+    message: "Docs `package` frontmatter must name a workspace package under packages/ (docs/plugins/workspace-packages)."
+
+  # A [other] strapi-52. 07-writing-docs.md "Package pages": keep the three
+  #   headings Purpose, Key concepts and Related on every package page. The
+  #   depth-limited glob selects exactly the package index pages (a deeper
+  #   index.md is a package sub-page).
+  - id: strapi-docs-package-page-headings
+    kind: markdown_required_headings
+    paths: ["docs/docs/packages/{*,*/*}/index.md"]
+    headings: ["*", "## Purpose", "*", "## Key concepts", "*", "## Related", "*"]
+    level: error
+    message: "A package page keeps the Purpose, Key concepts and Related headings (07-writing-docs.md)."
+
+  # C [other] strapi-53. docs build, docusaurus.config.ts
+  #   markdown.hooks.onBrokenMarkdownLinks: 'throw': every relative link to a
+  #   .md/.mdx file must resolve to a file. C: markdown_links_resolve also
+  #   checks extensionless route links (Docusaurus resolves those against
+  #   computed or slug routes, onBrokenLinks, B-adapter) and has no extension
+  #   filter, so the file links are read with a regex that is not
+  #   CommonMark-aware (it does not skip code blocks).
+  - id: strapi-docs-markdown-file-links-resolve
+    kind: registry_paths_resolve
+    source: "docs/docs/**/*.{md,mdx}"
+    extract: { regex: '\]\(((?:\.{1,2}/)?[^)\s#:]+\.mdx?)(?:#[^)\s]*)?\)' }
+    expect: file
+    level: error
+    message: "A relative link to a .md/.mdx file must resolve (docusaurus onBrokenMarkdownLinks: throw)."
+
+  # C [other] strapi-44. 07-writing-docs.md "Frontmatter": every page starts
+  #   with frontmatter and `title` is required. C: frontmatter read by regex.
+  - id: strapi-docs-frontmatter-title
+    kind: file_content_matches
+    paths: ["docs/docs/**/*.{md,mdx}"]
+    pattern: '\A---\r?\n(?:(?:[^-\r\n][^\r\n]*|-[^-\r\n][^\r\n]*|--[^-\r\n][^\r\n]*)?\r?\n)*title:'
+    level: error
+    message: "Every docs page starts with frontmatter that sets `title` (07-writing-docs.md)."
+
+  # C [other] strapi-45. 07-writing-docs.md "Where content goes": do not set
+  #   `slug`; only docs/docs/api/ sets it. C: frontmatter read by regex.
+  - id: strapi-docs-no-slug-outside-api
+    kind: file_content_forbidden
+    paths:
+      include: ["docs/docs/**/*.{md,mdx}"]
+      exclude: ["docs/docs/api/**"]
+    pattern: '\A---\r?\n(?:(?:[^-\r\n][^\r\n]*|-[^-\r\n][^\r\n]*|--[^-\r\n][^\r\n]*)?\r?\n)*slug:'
+    level: error
+    message: "Only docs/docs/api/ pages set `slug`; the URL follows the file path (07-writing-docs.md)."
+
+  # C [other] strapi-46. 07-writing-docs.md "Frontmatter": description is one
+  #   or two sentences under 150 characters (llms.txt cuts longer text), so a
+  #   value of 150 or more characters fires. C: frontmatter read by regex. The
+  #   regex counts the characters between the quotes of a '...' or "..."
+  #   value and the whole of a plain one (max 140 at the pin). Not handled: a
+  #   block scalar (`>` / `|`) or a plain value continued on the next line,
+  #   escape sequences (counted as written) and a trailing `# comment`.
+  - id: strapi-docs-description-short
+    kind: file_content_forbidden
+    paths: ["docs/docs/**/*.{md,mdx}"]
+    pattern: '\A---\r?\n(?:(?:[^-\r\n][^\r\n]*|-[^-\r\n][^\r\n]*|--[^-\r\n][^\r\n]*)?\r?\n)*description:[ \t]*(?:[^\x22\x27\s][^\r\n]{149,}|\x27[^\r\n]{150,}\x27|\x22[^\r\n]{150,}\x22)[ \t]*(?:\r?\n|\z)'
+    level: error
+    message: "Keep a docs page description under 150 characters (07-writing-docs.md)."
+
+  # C [other] strapi-56. docs/plugins/workspace-packages/index.ts:64-66: a docs
+  #   page's `status` frontmatter, if set, is stub, draft or needs-review.
+  #   C: a regex read of frontmatter (strapi-46 precedent). Every ^status:
+  #   line is checked, including ones in the body: the two in
+  #   contributing/07-writing-docs.md (lines 68 and 110) are code-block
+  #   examples with valid values. At the pin there are 88 lines: 55 draft,
+  #   24 needs-review and 9 stub.
+  - id: strapi-docs-status-known
+    kind: for_each_match
+    paths: ["docs/docs/**/*.{md,mdx}"]
+    select: '^status:'
+    require:
+      matches:
+        - '^status:[ \t]*(?:stub|draft|needs-review|"(?:stub|draft|needs-review)"|''(?:stub|draft|needs-review)'')[ \t]*\r?$'
+    level: error
+    message: "Docs `status` frontmatter must be stub, draft or needs-review (docs/plugins/workspace-packages)."
+
+  # A [other] strapi-47. 07-writing-docs.md "Markdown or MDX": use .mdx only
+  #   when the page imports a component.
+  - id: strapi-docs-mdx-imports-a-component
+    kind: file_content_matches
+    paths: ["docs/docs/**/*.mdx"]
+    pattern: '(?m)^import '
+    level: error
+    message: "Write .md unless the page imports a component (07-writing-docs.md)."
+
+  # C [other] strapi-48 (Stage B: A -> C). 07-writing-docs.md "Images":
+  #   always write alt text. The docs embed images both as CommonMark images
+  #   (3 at the pin) and as raw HTML / JSX `<img>` tags (13, 7 of them
+  #   multi-line). markdown_images_have_alt covers the CommonMark images in
+  #   .md and .mdx; raw `<img>` is outside its contract, so a second rule
+  #   reads the tags with a regex. C: Rust regex has no lookahead, so "an
+  #   <img> without an alt attribute" is spelled as a tag whose every
+  #   attribute name is not `alt` (a prefix alternation), plus an explicit
+  #   empty alt="" / alt=''. Not CommonMark-aware (an <img> inside a code
+  #   fence counts), and a bare boolean `alt` is not flagged.
+  - id: strapi-docs-images-have-alt
+    kind: markdown_images_have_alt
+    paths: ["docs/docs/**/*.{md,mdx}"]
+    level: error
+    message: "Docs images need alt text (07-writing-docs.md)."
+  - id: strapi-docs-html-images-have-alt
+    kind: file_content_forbidden
+    paths: ["docs/docs/**/*.{md,mdx}"]
+    pattern: '(?i)(?:<img(?:\s+(?:[^\s\x22\x27<>/=a][^\s\x22\x27<>/=]*|a(?:[^\s\x22\x27<>/=l][^\s\x22\x27<>/=]*)?|al(?:[^\s\x22\x27<>/=t][^\s\x22\x27<>/=]*)?|alt[^\s\x22\x27<>/=][^\s\x22\x27<>/=]*)(?:\s*=\s*(?:\x22[^\x22]*\x22|\x27[^\x27]*\x27|\{[^{}]*\}|[^\s\x22\x27<>=`{}]+))?)*\s*/?>|<img\b[^>]*\salt\s*=\s*(?:\x22\x22|\x27\x27))'
+    level: error
+    message: "A docs <img> tag needs non-empty alt text (07-writing-docs.md)."
+
+  # C [other] strapi-54. 07-writing-docs.md "Images": reference an image
+  #   with an absolute /img/... path (served from docs/static/img/). C: no
+  #   lookahead in Rust regex, so "not /img/" is spelled as a prefix
+  #   alternation over Markdown image and HTML <img src> syntax.
+  - id: strapi-docs-images-absolute-img-path
+    kind: file_content_forbidden
+    paths: ["docs/docs/**/*.{md,mdx}"]
+    pattern: '(?:!\[[^\]\n]*\]\(\s*<?|<img\b[^>]*\bsrc=["\x27])(?:[^/\s"\x27<]|/[^i]|/i[^m]|/im[^g]|/img[^/])'
+    level: error
+    message: "Reference docs images with an absolute /img/<area>/... path (07-writing-docs.md)."
+
+  # A [other] strapi-b03. 07-writing-docs.md "Tags": to add a tag, add an
+  #   entry with a `label` and a `description` (docusaurus.config.ts
+  #   `tags: 'tags.yml'`, onInlineTags: 'throw'; docs_build job). Holds at the
+  #   pin (17 of 17 entries).
+  - id: strapi-docs-tags-have-label-and-description
+    kind: yaml_path_absent
+    paths: ["docs/docs/tags.yml"]
+    path: "$[?(!@.label || !@.description)]"
+    level: error
+    message: "Every tags.yml entry needs a label and a description (07-writing-docs.md)."
+
+  # A [other] strapi-61 (Stage B: B-config -> A). docs/docs/tags.yml header:
+  #   "Keep it small (35 tags max)" (17 at the pin). The root filter selects
+  #   every entry once the root mapping has more than 35 members, and nothing
+  #   otherwise.
+  - id: strapi-docs-tags-at-most-35
+    kind: yaml_path_absent
+    paths: ["docs/docs/tags.yml"]
+    path: "$[?length($) > 35]"
+    level: error
+    message: "Keep the docs tag vocabulary at 35 tags or fewer (docs/docs/tags.yml)."
+
+  # A [other] strapi-50. AGENTS.md "Skills directories": .agents/skills,
+  #   .claude/skills and .cursor/skills are local link targets maintained by
+  #   `yarn ai:sync` and gitignored; only .ai/skills/ content is committed.
+  - id: strapi-ai-tool-link-dirs-not-committed
+    kind: git_no_denied_paths
+    denied: [".agents/**", ".claude/**", ".cursor/skills/**"]
+    level: error
+    message: "AI-tool skill link dirs are local-only; commit skills under .ai/skills/ (AGENTS.md)."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # VALUE-ADD (outside the ratio, R3/R5): consistency the repository keeps by
+  # hand today but no gate checks. Level info so they never fail a run.
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # VALUE-ADD [toolchain-pin]: packageManager (read by corepack) and
+  #   .yarnrc.yml yarnPath (read by yarn) name the same Yarn release.
+  - id: strapi-va-packagemanager-matches-yarnpath
+    kind: cross_file
+    relation: equals
+    source:
+      file: ".yarnrc.yml"
+      extract: { regex: 'yarnPath:\s*\S*yarn-([0-9][^/\s]*)\.cjs' }
+    targets:
+      - file: "package.json"
+        extract: { regex: '"packageManager"\s*:\s*"yarn@([0-9][^"+]*)' }
+    level: info
+    message: "package.json packageManager and .yarnrc.yml yarnPath should name the same Yarn version."
+
+  # VALUE-ADD [toolchain-pin]: .nvmrc's major is the engines.node floor.
+  - id: strapi-va-nvmrc-matches-engines-floor
+    kind: cross_file
+    relation: equals
+    source:
+      file: ".nvmrc"
+      extract: { regex: '\Av?([0-9]+)' }
+    targets:
+      - file: "package.json"
+        extract: { regex: '"node"\s*:\s*">=\s*v?([0-9]+)' }
+    level: info
+    message: ".nvmrc's Node major should be the root engines.node floor."
+
+  # VALUE-ADD [toolchain-pin]: every workspace that declares engines.node
+  #   declares the root's range (46 manifests agree at the pin).
+  - id: strapi-va-engines-node-uniform
+    kind: cross_file
+    relation: equals
+    source:
+      file: "package.json"
+      extract: { json: "$.engines.node" }
+    targets:
+      files: "{packages/*/package.json,packages/*/*/package.json,examples/*/package.json,examples/plugins/*/package.json,examples/*/src/plugins/*/package.json,tests-next/*/package.json,scripts/*/package.json}"
+      extract: { json: "$.engines.node" }
+    allow_missing_target: true
+    level: info
+    message: "A workspace's engines.node should equal the root package.json's range."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # C, NOT WRITTEN: commitlint (.github/workflows/commitlint.yml runs
+  # `npx commitlint --from <base> --to <head>` on every PR; .husky/commit-msg
+  # runs it locally). .commitlintrc.ts extends @commitlint/config-conventional
+  # with a custom type-enum, disables body-max-line-length and ignores
+  # "Merge branch '...' into ..." commits. git_commit_message expresses each
+  # assertion, but the clone is depth 1, so R4 cannot confirm them; per the
+  # batch-1 ruling they are C and stay as sketches. Preset severities are from
+  # @commitlint/config-conventional 19.x (not installed in the clone): the
+  # preset's exact rule set (e.g. header-trim) was NOT verified offline; only
+  # the custom type-enum, the disabled body-max-line-length and the
+  # merge-commit ignore were read from .commitlintrc.ts.
+  #
+  # strapi-70 type-enum / type-empty / type-case / subject-empty:
+  # - id: strapi-commit-header-format
+  #   kind: git_commit_message
+  #   since: "{{env.ALINT_BASE_SHA | default('origin/develop')}}"
+  #   pattern: '\A(?:chore|ci|docs|enhancement|feat|fix|release|revert|security|test|future)(?:\([^)\n]*\))?!?: \S'
+  #   level: error
+  # strapi-71 header-max-length 100:
+  # - id: strapi-commit-header-max-100
+  #   kind: git_commit_message
+  #   since: "{{env.ALINT_BASE_SHA | default('origin/develop')}}"
+  #   subject_max_length: 100
+  #   level: error
+  # strapi-72 subject-case never sentence/start/pascal/upper-case (approximated
+  #   as "the subject does not start with an upper-case letter"):
+  # - id: strapi-commit-subject-not-capitalised
+  #   kind: git_commit_message
+  #   since: "{{env.ALINT_BASE_SHA | default('origin/develop')}}"
+  #   pattern: '\A[^:\n]+: [^A-Z]'
+  #   level: error
+  # strapi-73 subject-full-stop never '.':
+  # - id: strapi-commit-subject-no-full-stop
+  #   kind: git_commit_message
+  #   since: "{{env.ALINT_BASE_SHA | default('origin/develop')}}"
+  #   pattern: '\A[^\n]*[^.\n](?:\n|\z)'
+  #   level: error
+  # strapi-74 footer-max-line-length 100: no git_commit_message option reads
+  #   the footer; a (?m) pattern over the whole message would also catch body
+  #   lines, which .commitlintrc.ts exempts, so it is not sketched.

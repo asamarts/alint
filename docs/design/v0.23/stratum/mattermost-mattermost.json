@@ -1,0 +1,2576 @@
+{
+ "repo": "mattermost/mattermost",
+ "sha": "69102aba22607b2fc21a72d1958373563650223d",
+ "metrics": {
+  "counts": {
+   "A": 33,
+   "B-config": 7,
+   "B-adapter": 21,
+   "B-kernel": 0,
+   "B-delegate": 2,
+   "C": 19,
+   "D": 40
+  },
+  "addressable": 82,
+  "coverage_today": 40,
+  "coverage_with_tuning": 63,
+  "gap": 37,
+  "coverage_after_slice": 44,
+  "coverage_after_slice_with_entry_values": 48
+ },
+ "by_family": {
+  "locale": {
+   "counts": {
+    "A": 3,
+    "B-config": 6,
+    "B-adapter": 11,
+    "B-kernel": 0,
+    "B-delegate": 2,
+    "C": 12,
+    "D": 3
+   },
+   "addressable": 34,
+   "coverage_today": 9,
+   "coverage_with_tuning": 44,
+   "gap": 56,
+   "coverage_after_slice": 15,
+   "coverage_after_slice_with_entry_values": 21
+  },
+  "dep-version": {
+   "counts": {
+    "A": 1,
+    "B-config": 0,
+    "B-adapter": 0,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 0,
+    "D": 5
+   },
+   "addressable": 1,
+   "coverage_today": 100,
+   "coverage_with_tuning": 100,
+   "gap": 0,
+   "coverage_after_slice": 100,
+   "coverage_after_slice_with_entry_values": 100
+  },
+  "toolchain-pin": {
+   "counts": {
+    "A": 6,
+    "B-config": 0,
+    "B-adapter": 0,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 1,
+    "D": 1
+   },
+   "addressable": 7,
+   "coverage_today": 86,
+   "coverage_with_tuning": 100,
+   "gap": 0,
+   "coverage_after_slice": 86,
+   "coverage_after_slice_with_entry_values": 86
+  },
+  "other": {
+   "counts": {
+    "A": 23,
+    "B-config": 1,
+    "B-adapter": 10,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 6,
+    "D": 31
+   },
+   "addressable": 40,
+   "coverage_today": 58,
+   "coverage_with_tuning": 72,
+   "gap": 28,
+   "coverage_after_slice": 60,
+   "coverage_after_slice_with_entry_values": 62
+  }
+ },
+ "units": [
+  {
+   "id": "mattermost-01",
+   "summary": "Every server catalog (server/i18n/*.json, en.json included) is valid JSON",
+   "evidence": "tools/mmgotool/commands/i18n.go:974-990 (verifyLocale: go-i18n loader then loadItems), :1156 (en.json through the same loader); server/Makefile:359-361 (i18n-verify), :364-369 (i18n-verify-all); .github/workflows/i18n-ci-template.yml verify job",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "C",
+   "alint": "json_path_absent parse probe - mattermost-server-i18n-json-parses",
+   "rules": [
+    "mattermost-server-i18n-json-parses"
+   ],
+   "assertion_family": "none",
+   "reason": "alint has no bare 'parses' kind. A never-matching JSONPath probe fails on unparseable files, but alint's JSON reader is JSONC-tolerant, so strict-JSON validity is only approximated (precedent: the JSON parse probe is C)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-02",
+   "summary": "Server catalogs load through the go-i18n runtime loader: the file name is exactly one language with a CLDR plural spec, and every translation parses as a text/template",
+   "evidence": "tools/mmgotool/commands/i18n.go:974-985 (bundle.New().ParseTranslationFileBytes), :1002-1005 (no CLDR plural spec), :1156 (en.json)",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "B-delegate",
+   "alint": "needs a go-i18n / Go text/template syntax validator (message-format syntax) plus CLDR locale data",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Validating a message format's own syntax (Go templates) through the runtime loader is B-delegate under the stratum ruling. The locale-name half alone could be approximated with a BCP 47 filename_regex, but the plural-spec existence needs CLDR data",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-03",
+   "summary": "No duplicate id within a server catalog",
+   "evidence": "tools/mmgotool/commands/i18n.go:889-905 (duplicateIDs), :992 (problem: duplicate id; the loader keeps only one)",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "B-config",
+   "alint": "constraint unique-key over $[*].id per file",
+   "rules": [],
+   "assertion_family": "unique-key",
+   "reason": "Uniqueness over extracted values ($[*].id) within one file. JSONPath has no uniqueness operator, and the JSON reader can't help because duplicates are array elements, not object keys",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-04",
+   "summary": "Server catalogs are in the Go encoder's canonical form (2-space indent, no HTML escaping, trailing newline, only id/translation fields)",
+   "evidence": "tools/mmgotool/commands/i18n.go:907-930 (re-encode via JSONMarshal), :996 (not in canonical form), :798-805 (SetEscapeHTML(false))",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Formatting equality with a serializer's output is formatting, and formatting is D (R2/R7; precedent immich-02)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-05",
+   "summary": "No empty or whitespace-only translation in a non-English server catalog, whether a single string or any plural form",
+   "evidence": "tools/mmgotool/commands/i18n.go:1028-1034 (empty translation, an error even under --warn-missing-ids), :1086-1097 (plural category is empty)",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "C",
+   "alint": "json_path_absent x2 - mattermost-server-i18n-no-blank-translation ($[?match(@.translation,'\\s*')]), mattermost-server-i18n-no-blank-plural-form ($[*].translation[?match(@,'\\s*')])",
+   "rules": [
+    "mattermost-server-i18n-no-blank-translation",
+    "mattermost-server-i18n-no-blank-plural-form"
+   ],
+   "assertion_family": "none",
+   "reason": "The JSONPath filters express the check, but they also fire on keys absent from en.json, which the checker only warns about. tools/mmgotool/commands/i18n.go:1021-1026 turns an id absent from en.json into a warning before the blank checks (:1033, :1096), while both rules apply to every entry; the pin has 26 extra ids per server catalog. Scoping a value check to the reference file's keys has no kind, so C (Stage B).",
+   "fire_verified": "Scratch copy held only server/i18n/de.json. Replacing one single-string translation with \"   \" moved mattermost-server-i18n-no-blank-translation from 0 to 1 finding. Setting one plural form to \"\" moved mattermost-server-i18n-no-blank-plural-form from 0 to 1. Both are silent on the clone",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "A",
+      "locale",
+      "none"
+     ],
+     "why": "The rules over-fire on ids that are absent from en.json. tools/mmgotool/commands/i18n.go:1021-1026 turns an extra id into a warning and continues before the blank check (:1033) and the empty-plural check (:1096). Both json_path_absent rules apply to every entry. Reproduced on scratch: a blank single-string translation on an extra id (app.import.validate_reaction_import_data.emoji_name_length.error) fired mattermost-server-i18n-no-blank-translation, and a {one:'', other:'x'} plural on the same extra id fired mattermost-server-i18n-no-blank-plural-form. The pin has 26 extra ids per server catalog. Limiting the rule to ids in en.json needs a cross-file key join, so the expression is approximate: C (strapi-20/-48 precedent: A -> C on a reproduced false positive)."
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "reason"
+     ],
+     "why": "The record text still described the bucket or rule from before Stage B or the integrator changed it."
+    }
+   ]
+  },
+  {
+   "id": "mattermost-06",
+   "summary": "A server translation interpolates exactly the {{.Field}} tokens its en.json source does (no unknown token, none dropped)",
+   "evidence": "tools/mmgotool/commands/i18n.go:1047-1058 (unknown template token / source token missing)",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "B-adapter",
+   "alint": "needs: entry-values (id -> translation rows joined across files) plus a Go-template placeholder extractor; future family equality",
+   "rules": [],
+   "assertion_family": "equality",
+   "reason": "Joins each id to its value across two files and compares extracted placeholders, which is B-adapter per the batch 1/2 rulings",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "placeholder"
+     }
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "assertion_family"
+     ],
+     "why": "The alint field named the family the unit will need (equality) while the record said none."
+    }
+   ],
+   "needs": "placeholder"
+  },
+  {
+   "id": "mattermost-07",
+   "summary": "An id that en.json pluralises must not be a single string in a translation",
+   "evidence": "tools/mmgotool/commands/i18n.go:1062-1069",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "B-adapter",
+   "alint": "needs: entry-values (per-id value shape joined across files); future family equality",
+   "rules": [],
+   "assertion_family": "equality",
+   "reason": "Compares the value type of the same id across files. That needs (key, value) rows: B-adapter",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "entry-values",
+      "assertion_family": "equality"
+     }
+    }
+   ],
+   "needs": "entry-values"
+  },
+  {
+   "id": "mattermost-08",
+   "summary": "Each pluralised server translation defines exactly the CLDR plural categories of its locale (none missing, none unused)",
+   "evidence": "tools/mmgotool/commands/i18n.go:1098-1112 (missing plural category / not used by this locale), :944-960 (pluralCategories from go-i18n)",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "B-adapter",
+   "alint": "needs a CLDR plural-rules adapter (locale -> category set) applied to per-entry plural maps",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "The expected set comes from external CLDR data keyed by the filename locale. That needs a new adapter",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "plural-categories"
+     }
+    }
+   ],
+   "needs": "plural-categories"
+  },
+  {
+   "id": "mattermost-09",
+   "summary": "i18n/scripts/lib/server_plurals.json has exactly one key per non-English server catalog locale",
+   "evidence": "tools/mmgotool/commands/i18n_verify_test.go:474-500 (TestServerPluralTableMatchesGoI18n; table[locale] for every catalog, and every table key has a catalog); server/Makefile:365",
+   "mechanism": "test",
+   "family": "locale",
+   "bucket": "B-config",
+   "alint": "constraint set: keys of server_plurals.json == stems of server/i18n/*.json minus en",
+   "rules": [],
+   "assertion_family": "set",
+   "reason": "Set equality between a JSON document's key paths and filename stems. JSONPath cannot read keys, and a layout regex covers only one direction (registered); the reverse needs stem-to-path mapping",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-10",
+   "summary": "The plural categories listed per locale in server_plurals.json equal go-i18n's CLDR categories",
+   "evidence": "tools/mmgotool/commands/i18n_verify_test.go:491-495 (ElementsMatch with pluralCategories(locale))",
+   "mechanism": "test",
+   "family": "locale",
+   "bucket": "B-adapter",
+   "alint": "needs a CLDR plural-rules adapter",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "The expected values are external CLDR data, so it is B-adapter",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "plural-categories"
+     }
+    }
+   ],
+   "needs": "plural-categories"
+  },
+  {
+   "id": "mattermost-100",
+   "summary": "The API docs build (concatenation plus code-sample extraction via go run)",
+   "evidence": "api/Makefile:10-40; .github/workflows/api.yml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Build: D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-101",
+   "summary": "The docs site type-checks",
+   "evidence": ".github/workflows/docs-ci.yaml:49",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Type checking: D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-102",
+   "summary": "Docs egress checks (unit tests and the built-site egress check)",
+   "evidence": ".github/workflows/docs-ci.yaml:53, :76",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Runs code over the built site: D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-103",
+   "summary": "The docs site builds (sidebars, OpenAPI and plugin docs generated; postbuild video-markup check)",
+   "evidence": ".github/workflows/docs-ci.yaml:57, :70; docs/site/package.json:24",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Build and checks over built HTML: D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-104",
+   "summary": "Docs absolute links resolve against the built site",
+   "evidence": ".github/workflows/docs-ci.yaml:64; docs/site/package.json:20",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Needs build output: D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-105",
+   "summary": "Links added to the changelog resolve to docs pages and anchors (slugs and redirects modelled)",
+   "evidence": ".github/workflows/changelog-link-check.yml:22-34 (changelog_release.py check-links HEAD^1)",
+   "mechanism": "script",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "needs a docs-route resolver (slugs plus redirects) over added lines",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "A docs-route resolver is B-adapter (precedent trpc-25). It also reads only added lines of a diff",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "route-model"
+     }
+    }
+   ],
+   "needs": "route-model"
+  },
+  {
+   "id": "mattermost-106",
+   "summary": "Python unit tests for the changelog and config-change scripts pass",
+   "evidence": ".github/workflows/changelog-scripts-test.yml:16; .github/workflows/config-change-checker.yml:65-67",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Tests: D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-107",
+   "summary": "E2E eslint code rules (cypress, playwright) pass, beyond the header",
+   "evidence": ".github/workflows/e2e-tests-check.yml:53,61; e2e-tests/*/eslint.config.mjs",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Linting source: D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-108",
+   "summary": "Playwright sources are prettier-formatted",
+   "evidence": "e2e-tests/playwright/package.json:13,15",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Formatting: D (precedent immich-02)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-109",
+   "summary": "Playwright sources type-check",
+   "evidence": "e2e-tests/playwright/package.json:15",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Type checking: D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-11",
+   "summary": "server/i18n/en.json entries stay sorted by id (the order make i18n-extract writes)",
+   "evidence": "server/AGENTS.md:5 (\"regenerates the file with strings in the required order\"); tools/mmgotool/commands/i18n.go:331-335 (sort.Strings)",
+   "mechanism": "convention",
+   "family": "locale",
+   "bucket": "C",
+   "alint": "ordered_block lexical, select '^    \"id\": ' - mattermost-server-i18n-en-sorted-by-id",
+   "rules": [
+    "mattermost-server-i18n-en-sorted-by-id"
+   ],
+   "assertion_family": "none",
+   "reason": "Order over array elements is read with a line regex that holds only for the Go encoder's layout. Under batch 2, a regex that holds for one layout only is C",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-110",
+   "summary": "Each playwright test carries the JSDoc @objective, a feature tag and action/verification comments",
+   "evidence": "e2e-tests/playwright/package.json:12 (lint:test-docs -> script/lint-test-docs.js)",
+   "mechanism": "script",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Parses test code structure per test(): code analysis, D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-111",
+   "summary": "E2E CI shell scripts pass shellcheck",
+   "evidence": "e2e-tests/Makefile:49-50; .github/workflows/e2e-tests-check.yml:66",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Linting source: D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-112",
+   "summary": "CodeQL analysis",
+   "evidence": ".github/workflows/codeql-analysis.yml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Code analysis: D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-113",
+   "summary": "The build-server images build and report the expected Go/Node versions",
+   "evidence": ".github/workflows/build-server-image.yml:33, :80",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Docker build plus runtime smoke test: D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-12",
+   "summary": "Every webapp catalog's file stem is a valid locale tag (Intl.getCanonicalLocales must accept it)",
+   "evidence": "webapp/channels/scripts/check_icu.mjs:130-134; webapp/channels/package.json i18n-verify-translations; server/Makefile:367",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "A",
+   "alint": "filename_regex stem:true (BCP 47 unicode_locale_id grammar) - mattermost-webapp-i18n-filename-locale-tag",
+   "rules": [
+    "mattermost-webapp-i18n-filename-locale-tag"
+   ],
+   "assertion_family": "none",
+   "reason": "filename_regex expresses the locale-tag grammar, and it passes on all 29 catalogs",
+   "fire_verified": "Scratch copy held only webapp/channels/src/i18n/pt-BR.json, which passed (0 findings). Renamed to pt_BR.json, the rule moved from 0 to 1 finding. Silent on the clone",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-13",
+   "summary": "Every webapp catalog is valid JSON",
+   "evidence": "webapp/channels/scripts/check_icu.mjs:149-153 (invalid JSON), :101-111 (en.json cannot read)",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "C",
+   "alint": "json_path_absent parse probe - mattermost-webapp-i18n-json-parses",
+   "rules": [
+    "mattermost-webapp-i18n-json-parses"
+   ],
+   "assertion_family": "none",
+   "reason": "Parse validity is approximated by a probe through a JSONC-tolerant reader: C (precedent)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-14",
+   "summary": "A locale catalog is a JSON object whose every value is a string; en.json is an object of entries with a string defaultMessage",
+   "evidence": "webapp/channels/scripts/check_icu.mjs:155-157 (not a JSON object of key -> message), :186-188 (value is not a string), :103-107 and :117-122 (en.json shape; a non-string source does not parse)",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "C",
+   "alint": "json_path_absent x3 - mattermost-webapp-i18n-values-are-strings ($[?!search(@,'')]), mattermost-webapp-i18n-catalog-is-object ($[0]), mattermost-webapp-i18n-en-default-message-strings ($[?!search(@.defaultMessage,'')])",
+   "rules": [
+    "mattermost-webapp-i18n-values-are-strings",
+    "mattermost-webapp-i18n-catalog-is-object",
+    "mattermost-webapp-i18n-en-default-message-strings"
+   ],
+   "assertion_family": "none",
+   "reason": "The JSONPath filters express the check, but they also fire on keys absent from en.json, which the checker only warns about. check_icu.mjs:182-186 skips keys absent from en.json before the string-type check (:187-190), while values-are-strings applies to every key; the pin has about 205 extra keys per webapp catalog. The other two rules are exact. Scoping a value check to the reference file's keys has no kind, so C (Stage B).",
+   "fire_verified": "Scratch copies held only de.json and en.json. Turning one de.json value into {\"one\":\"x\"} fired values-are-strings (0 to 1). Wrapping de.json in [] fired catalog-is-object (0 to 1). Setting one en.json defaultMessage to null fired en-default-message-strings (0 to 1). All silent on the clone",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "A",
+      "locale",
+      "none"
+     ],
+     "why": "mattermost-webapp-i18n-values-are-strings over-fires on keys that are absent from en.json. webapp/channels/scripts/check_icu.mjs:182-186 turns an extra key into a warning and continues before the 'value is not a string' check (:187-190). Reproduced on scratch: setting extra key admin.accessibility.next_page in de.json to {one:'x'} fired the rule. The pin has about 205 extra keys per webapp catalog. The other two rules (catalog-is-object, en-default-message-strings) are exact, but the unit as a whole is approximate: C."
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "reason"
+     ],
+     "why": "The record text still described the bucket or rule from before Stage B or the integrator changed it."
+    }
+   ]
+  },
+  {
+   "id": "mattermost-16",
+   "summary": "Webapp catalogs are exactly JSON.stringify(sorted, null, 2) + newline",
+   "evidence": "webapp/channels/scripts/check_icu.mjs:166-173",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "B-adapter",
+   "alint": "missing: a key-order operator (code-point order over the catalog keys); the 2-space JSON.stringify formatting half alone would be D",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "One byte comparison with the sorted, 2-space JSON.stringify output. Its key-order half needs an order operator (ghost-07 precedent); the formatting half alone would be D.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "locale",
+      "none"
+     ],
+     "why": "Key order is part of the check (check_icu.mjs:159-173 sorts keys in code-point order, then compares bytes with JSON.stringify(..., 2)). ghost-07 has the same shape and is B-adapter `order`; immich-01/02 and element-web-02/03 split order (B-adapter) from formatting (D). mattermost-15 was merged into this unit, so it carries the order half."
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint field was empty."
+    }
+   ],
+   "needs": "order"
+  },
+  {
+   "id": "mattermost-17",
+   "summary": "No empty or whitespace-only translation in a webapp locale catalog",
+   "evidence": "webapp/channels/scripts/check_icu.mjs:190-199 (empty translation; an error even under --warn-missing-keys)",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "C",
+   "alint": "json_path_absent $[?match(@,'\\s*')] - mattermost-webapp-i18n-no-blank-values",
+   "rules": [
+    "mattermost-webapp-i18n-no-blank-values"
+   ],
+   "assertion_family": "none",
+   "reason": "The JSONPath filters express the check, but they also fire on keys absent from en.json, which the checker only warns about. check_icu.mjs:182-186 skips keys absent from en.json before the empty-translation check (:198-201), while the rule applies to every key. Scoping a value check to the reference file's keys has no kind, so C (Stage B).",
+   "fire_verified": "Scratch copy held only webapp/channels/src/i18n/de.json. Setting one value to \" \" moved the rule from 0 to 1 finding. Silent on the clone",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "A",
+      "locale",
+      "none"
+     ],
+     "why": "Same false positive as 05/14: check_icu.mjs:182-186 skips extra keys before the empty-translation check (:198-201). Reproduced on scratch: setting extra key admin.accessibility.next_page to '' fired mattermost-webapp-i18n-no-blank-values, while check_icu would only warn. A minor additional gap, from spec knowledge and untested: JS trim() strips U+FEFF but not U+0085, and Rust \\s is the reverse (the Go side, strings.TrimSpace, matches Rust)."
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "reason"
+     ],
+     "why": "The record text still described the bucket or rule from before Stage B or the integrator changed it."
+    }
+   ]
+  },
+  {
+   "id": "mattermost-18",
+   "summary": "Every webapp message (en.json sources and every translation) parses as ICU MessageFormat with ignoreTag:false and requiresOtherClause:true",
+   "evidence": "webapp/channels/scripts/icu_rules.mjs:23-26 (PARSE_OPTIONS), :222 (does not parse); check_icu.mjs:117-122 (source does not parse)",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "B-delegate",
+   "alint": "needs an ICU MessageFormat syntax validator",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Validating a message format's own syntax is B-delegate (precedent signal-desktop-10)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-19",
+   "summary": "A translation uses exactly the variables and tags of its source (no unknown, none missing)",
+   "evidence": "webapp/channels/scripts/icu_rules.mjs:226-236",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "B-adapter",
+   "alint": "needs: entry-values plus an ICU argument/tag extractor; future family equality",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Per-key placeholder parity across files is B-adapter (ICU extractor + entry values)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "placeholder"
+     }
+    }
+   ],
+   "needs": "placeholder"
+  },
+  {
+   "id": "mattermost-20",
+   "summary": "A translation never demotes an argument's role (e.g. a plural {count} used as a bare {count})",
+   "evidence": "webapp/channels/scripts/icu_rules.mjs:240-254 (argument-role)",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "B-adapter",
+   "alint": "needs an ICU AST adapter and entry-values",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Needs the ICU argument types per key across files: B-adapter",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "icu"
+     }
+    }
+   ],
+   "needs": "icu"
+  },
+  {
+   "id": "mattermost-21",
+   "summary": "No unescaped ASCII apostrophe before < or { in a translation where the source has none",
+   "evidence": "webapp/channels/scripts/icu_rules.mjs:256-262 (apostrophe)",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "B-adapter",
+   "alint": "needs: entry-values (a translation compared with its source)",
+   "rules": [],
+   "assertion_family": "set",
+   "reason": "A per-key condition on the translation that depends on the source value for the same key: a name-to-value join (batch 2 ruling). The keys whose translation has an unescaped apostrophe before < or { must be a subset of the keys whose source has one (set).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "icu"
+     }
+    },
+    {
+     "by": "audit",
+     "from": [
+      "B-adapter",
+      "locale",
+      "none"
+     ],
+     "why": "icu_rules.mjs:68 and :261 apply a plain regex to the raw translation and the source value; no ICU syntax tree is involved. What is missing is (key, value) rows for both files."
+    }
+   ],
+   "needs": "entry-values"
+  },
+  {
+   "id": "mattermost-22",
+   "summary": "webapp/channels/src/i18n/en.json equals what formatjs extracts from the code",
+   "evidence": ".github/workflows/webapp-ci.yml:72-93 (check-i18n); webapp/channels/package.json i18n-extract:check",
+   "mechanism": "ci",
+   "family": "locale",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Catalog freshness requires extracting strings from source code (R7 code analysis): D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-23",
+   "summary": "Every glossary file and i18n/style.json parses as a JSON object",
+   "evidence": "i18n/scripts/check_glossary.mjs:36-55 (load: not JSON / not a JSON object); server/Makefile:369",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "C",
+   "alint": "json_path_absent $[0] - mattermost-glossary-files-are-objects",
+   "rules": [
+    "mattermost-glossary-files-are-objects"
+   ],
+   "assertion_family": "none",
+   "reason": "Object-ness is expressible, but parse validity runs through a JSONC-tolerant reader: C",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-24",
+   "summary": "Glossary en.json entries are objects with only definition/partOfSpeech/doNotTranslate/aliases/commonWord, the first three required, a non-empty definition, a boolean doNotTranslate, commonWord only true, and aliases a non-empty list of non-empty strings",
+   "evidence": "i18n/scripts/check_glossary.mjs:20-21 (EN_FIELDS, EN_REQUIRED), :66-98",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "C",
+   "alint": "json_path_absent x3 + for_each_match - mattermost-glossary-en-required-fields, -en-optional-fields, -en-alias-strings, -en-known-fields",
+   "rules": [
+    "mattermost-glossary-en-required-fields",
+    "mattermost-glossary-en-optional-fields",
+    "mattermost-glossary-en-alias-strings",
+    "mattermost-glossary-en-known-fields"
+   ],
+   "assertion_family": "none",
+   "reason": "Types and required fields are JSONPath filters. The closed field set needs field names, which JSONPath cannot read, so it uses a line regex over the 4-space layout (one layout only): C",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-25",
+   "summary": "Glossary partOfSpeech is one of noun, verb, adjective, noun/verb",
+   "evidence": "i18n/scripts/check_glossary.mjs:22 (PARTS_OF_SPEECH), :85-86",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "A",
+   "alint": "json_path_matches $.*.partOfSpeech - mattermost-glossary-part-of-speech",
+   "rules": [
+    "mattermost-glossary-part-of-speech"
+   ],
+   "assertion_family": "none",
+   "reason": "An enum over values is native, and it passes on 128 terms",
+   "fire_verified": "Scratch copy held only i18n/glossary/en.json. Changing one partOfSpeech from noun to pronoun moved the rule from 0 to 1 finding. Silent on the clone",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-26",
+   "summary": "commonWord appears only on doNotTranslate terms",
+   "evidence": "i18n/scripts/check_glossary.mjs:94-95",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "A",
+   "alint": "json_path_absent $[?@.commonWord == true && @.doNotTranslate != true] - mattermost-glossary-common-word-needs-dnt",
+   "rules": [
+    "mattermost-glossary-common-word-needs-dnt"
+   ],
+   "assertion_family": "none",
+   "reason": "A within-entry field conjunction is a native JSONPath filter",
+   "fire_verified": "Scratch copy held only i18n/glossary/en.json. Adding commonWord:true to a doNotTranslate:false term moved the rule from 0 to 1 finding. Silent on the clone",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-27",
+   "summary": "No glossary form (term or alias) belongs to two terms or is listed twice",
+   "evidence": "i18n/scripts/check_glossary.mjs:99-106",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "B-config",
+   "alint": "constraint unique-key over the union of top-level term keys and $.*.aliases[*]",
+   "rules": [],
+   "assertion_family": "unique-key",
+   "reason": "Uniqueness over key paths plus extracted alias values stays B-config under batch 2",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-28",
+   "summary": "An i18n/glossary/<locale>.json exists for exactly the union of the webapp and server catalog locales",
+   "evidence": "i18n/scripts/check_glossary.mjs:110-125 (missing; no catalog has this locale); i18n/scripts/lib/catalogs.mjs (SURFACES)",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "B-config",
+   "alint": "constraint set over filename stems of three directories",
+   "rules": [],
+   "assertion_family": "set",
+   "reason": "pair can express each forward direction, but 'every glossary file has a catalog in either surface' is set equality against a union: B-config set",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-29",
+   "summary": "Every glossary locale file holds exactly en.json's terms",
+   "evidence": "i18n/scripts/check_glossary.mjs:127-136 (missing / not in en.json)",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "C",
+   "alint": "cross_file set_equals with a regex key read - mattermost-glossary-locale-terms-match-en",
+   "rules": [
+    "mattermost-glossary-locale-terms-match-en"
+   ],
+   "assertion_family": "none",
+   "reason": "key_parity compares leaf paths, and en's leaves (definition...) differ from a locale's (target/note) by design. Top-level keys are therefore read with a regex over the 2-space layout: a regex read of JSON keys is C (batch 2)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-30",
+   "summary": "Glossary locale terms appear in en.json order",
+   "evidence": "i18n/scripts/check_glossary.mjs:137-139 (terms are not in en.json order)",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "B-adapter",
+   "alint": "needs an ordered-sequence equality operator across files",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Order equality between two key sequences: no order operator (precedent immich-01)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "order"
+     }
+    }
+   ],
+   "needs": "order"
+  },
+  {
+   "id": "mattermost-31",
+   "summary": "A glossary locale entry holds only a non-empty target and an optional non-empty note",
+   "evidence": "i18n/scripts/check_glossary.mjs:23 (LOCALE_FIELDS), :140-157",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "C",
+   "alint": "json_path_absent + for_each_match - mattermost-glossary-locale-target-present, -locale-known-fields",
+   "rules": [
+    "mattermost-glossary-locale-target-present",
+    "mattermost-glossary-locale-known-fields"
+   ],
+   "assertion_family": "none",
+   "reason": "The closed field set needs field names, read by a layout regex: C",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-32",
+   "summary": "A doNotTranslate term's target is the term itself",
+   "evidence": "i18n/scripts/check_glossary.mjs:153-154",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "B-adapter",
+   "alint": "needs: entry-values (key name joined to a value, plus en's flag); future family equality",
+   "rules": [],
+   "assertion_family": "equality",
+   "reason": "A value must equal its own key, and the condition comes from another file: B-adapter (batch 2)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "entry-values",
+      "assertion_family": "equality"
+     }
+    }
+   ],
+   "needs": "entry-values"
+  },
+  {
+   "id": "mattermost-33",
+   "summary": "Every i18n/style.json locale has a catalog",
+   "evidence": "i18n/scripts/check_glossary.mjs:162-166 (no catalog has this locale)",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "B-config",
+   "alint": "constraint set: style.json keys subset of catalog filename stems",
+   "rules": [],
+   "assertion_family": "set",
+   "reason": "One-way inclusion between JSON keys and a filename set: B-config set",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-34",
+   "summary": "style.json entries hold address (formal|informal), use and avoid (non-empty word lists), and matchCase / skipSentenceStart only as true, and nothing else",
+   "evidence": "i18n/scripts/check_glossary.mjs:24 (STYLE_FIELDS), :167-187",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "C",
+   "alint": "json_path_absent x2 + for_each_match - mattermost-i18n-style-entry-values, -style-words, -style-known-fields",
+   "rules": [
+    "mattermost-i18n-style-entry-values",
+    "mattermost-i18n-style-words",
+    "mattermost-i18n-style-known-fields"
+   ],
+   "assertion_family": "none",
+   "reason": "Values are JSONPath filters, and the closed field set is a layout regex: C",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-35",
+   "summary": "No word is in both use and avoid of a style entry (case-folded unless matchCase)",
+   "evidence": "i18n/scripts/check_glossary.mjs:189-195",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "B-adapter",
+   "alint": "needs per-entry set disjointness between two fields with conditional case folding",
+   "rules": [],
+   "assertion_family": "set",
+   "reason": "A cross-field set relation inside each entry with a value-dependent normalization has no adapter",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "entry-values",
+      "assertion_family": "set"
+     }
+    }
+   ],
+   "needs": "entry-values"
+  },
+  {
+   "id": "mattermost-36",
+   "summary": "Glossary files and style.json are exactly JSON.stringify(body, null, 2) + newline",
+   "evidence": "i18n/scripts/check_glossary.mjs:52-54",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Formatting: D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-37",
+   "summary": "Translation-pipeline unit tests pass (node --test i18n/scripts/*.test.mjs)",
+   "evidence": "server/Makefile:368",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Runs the repository's code: D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-38",
+   "summary": "Node pins agree: .nvmrc, mise.toml [tools] node, and ARG NODE_VERSION in both server/build/Dockerfile.buildenv*",
+   "evidence": "server/build/buildenv-tag.sh:23-33, :45-53; mise.toml:1-15; run by server-ci/i18n-ci/build-server-image buildenv jobs",
+   "mechanism": "script",
+   "family": "toolchain-pin",
+   "bucket": "A",
+   "alint": "cross_file equals - mattermost-node-pin-coherent",
+   "rules": [
+    "mattermost-node-pin-coherent"
+   ],
+   "assertion_family": "none",
+   "reason": "Exact pins that agree are A (precedent signal-desktop-28). The script accepts 'equal or more specific with a dot'. With the full x.y.z .nvmrc the repo keeps (mise.toml: 'Pinning Node exactly'), that is equality",
+   "fire_verified": "Scratch copies held only .nvmrc, mise.toml and both Dockerfiles, which passed (0). Setting .nvmrc to 24.12.0 gave 3 findings, mise node 24.11.2 gave 1, and the FIPS ARG NODE_VERSION set to 22.11.0 gave 1. Silent on the clone",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-39",
+   "summary": "The Go version in each buildenv Dockerfile's base image tag matches server/.go-version (the FIPS image may add a fourth component)",
+   "evidence": "server/build/buildenv-tag.sh:21-25 (satisfies), :36-43",
+   "mechanism": "script",
+   "family": "toolchain-pin",
+   "bucket": "A",
+   "alint": "cross_file equals with a FROM-tag regex capturing x.y.z - mattermost-go-pin-coherent",
+   "rules": [
+    "mattermost-go-pin-coherent"
+   ],
+   "assertion_family": "none",
+   "reason": "Capturing the tag's first three components expresses the prefix rule for an x.y.z .go-version, and it passes on both images",
+   "fire_verified": "Scratch copies held only server/.go-version and both Dockerfiles. golang:1.26.9 gave 1 finding, a FIPS tag of 1.25.10.1 gave 1, and .go-version 1.26.11 gave 2. Silent on the clone",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-40",
+   "summary": "webapp/package.json engines.node equals the .nvmrc Node pin",
+   "evidence": "mise.toml:1-3 (CI, the buildenv images and webapp/package.json engines all agree), :11-13; webapp/.npmrc:6 (engine-strict=true makes npm ci fail otherwise)",
+   "mechanism": "tool-config",
+   "family": "toolchain-pin",
+   "bucket": "A",
+   "alint": "cross_file equals (.nvmrc regex -> $.engines.node) - mattermost-webapp-engines-node-matches-nvmrc",
+   "rules": [
+    "mattermost-webapp-engines-node-matches-nvmrc"
+   ],
+   "assertion_family": "none",
+   "reason": "Exact pins that agree are A (signal-desktop-28)",
+   "fire_verified": "Scratch copies held only .nvmrc and webapp/package.json. engines.node set to 24.10.0 gave 0 then 1 finding. Silent on the clone",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-41",
+   "summary": "engines.npm and packageManager name the same npm version",
+   "evidence": "mise.toml:5-13 (a Node bump moves engines/packageManager together; 24.11.1 carries npm 11.6.2); webapp/package.json engines.npm, packageManager",
+   "mechanism": "convention",
+   "family": "toolchain-pin",
+   "bucket": "C",
+   "alint": "cross_file equals, regex read of packageManager - mattermost-webapp-engines-npm-matches-package-manager",
+   "rules": [
+    "mattermost-webapp-engines-npm-matches-package-manager"
+   ],
+   "assertion_family": "none",
+   "reason": "Stripping the 'npm@' prefix needs a regex read of a JSON value (batch 2: C). normalize semver-minor would only compare major.minor",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-42",
+   "summary": "The npm bundled with the .nvmrc Node satisfies engines.npm (engine-strict at npm ci)",
+   "evidence": "webapp/.npmrc:6; mise.toml:5-9",
+   "mechanism": "tool-config",
+   "family": "toolchain-pin",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Needs external Node release data (which npm ships with which Node), checked by npm at install: D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-43",
+   "summary": "webapp/package-lock.json is what the pinned npm generates from the manifests",
+   "evidence": ".github/workflows/webapp-ci.yml:40-71 (check-lockfile: regenerate and diff)",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Lockfile freshness needs package-manager resolution (R7): D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-44",
+   "summary": "The other npm projects' lockfiles agree with their manifests (npm ci in e2e cypress/playwright and docs/site)",
+   "evidence": ".github/workflows/e2e-tests-check.yml:50,58; .github/workflows/docs-ci.yaml:45",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Package-manager resolution semantics: D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-45",
+   "summary": "Go modules are tidy (server and server/public go.mod/go.sum)",
+   "evidence": "server/Makefile:469 (generated includes modules-tidy), :530-534; .github/workflows/server-ci.yml:114-122 (git status --porcelain)",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Module resolution by the Go toolchain: D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-46",
+   "summary": "The webapp workspaces (channels, platform/client, components, mattermost-redux, shared, types) carry the monorepo version, and their @mattermost/client, /shared and /types references pin it",
+   "evidence": "webapp/scripts/update-versions.sh:23 (\"These workspaces and packages within the monorepo all synchronize their versions with the web app and server\"); server/public/model/version.go:15 (versions[0] = \"12.2.0\")",
+   "mechanism": "convention",
+   "family": "dep-version",
+   "bucket": "A",
+   "alint": "cross_file equals x2 - mattermost-webapp-workspace-versions-lockstep ($.version), mattermost-webapp-internal-deps-lockstep (dependencies/devDependencies/peerDependencies @mattermost/*)",
+   "rules": [
+    "mattermost-webapp-workspace-versions-lockstep",
+    "mattermost-webapp-internal-deps-lockstep",
+    "mattermost-webapp-lock-workspace-lockstep"
+   ],
+   "assertion_family": "none",
+   "reason": "Internal packages pinned to the workspace version are native cross_file equality from one source value. The documented convention holds at the pin (R5)",
+   "fire_verified": "Scratch copies held only version.go and the 6 workspace package.json files, which passed (0). platform/types version set to 12.1.0 gave 1 finding. A newest version.go entry of 12.3.0 gave 6 and 8 findings. Setting channels' @mattermost/types to ^12.2.0 gave 1. Silent on the clone",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-47",
+   "summary": "patch-package patches apply at install",
+   "evidence": "webapp/package.json postinstall (patch-package)",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Applying patches to installed packages needs package installation: D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-48",
+   "summary": "Server Go files start with the Mattermost license header (LICENSE.enterprise for /enterprise packages), after an optional //go:build/generate block; generated files are exempt",
+   "evidence": "tools/mattermost-govet/license/license.go:36-41, :44-56, :110-160; server/Makefile:979-996 (vet -license ./...); .github/workflows/server-ci.yml:144-158 (check-style)",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_header x2 - mattermost-go-license-header, mattermost-go-license-header-enterprise",
+   "rules": [
+    "mattermost-go-license-header",
+    "mattermost-go-license-header-enterprise"
+   ],
+   "assertion_family": "none",
+   "reason": "A linter rule asserting a file header is classified by its logic (batch 2). file_header with the analyzer's generated-file exemptions and the vet scope (server module, default build tags) passes on the clone",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-49",
+   "summary": "Linted JS/TS files start with the two-line Mattermost header and a blank line",
+   "evidence": "webapp/platform/eslint-plugin/configs/base.js:360; e2e-tests/cypress/eslint.config.mjs:61; e2e-tests/playwright/eslint.config.mjs:56; .github/workflows/webapp-ci.yml:20-39 (check-lint), e2e-tests-check.yml:53,61",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_header - mattermost-js-license-header",
+   "rules": [
+    "mattermost-js-license-header"
+   ],
+   "assertion_family": "none",
+   "reason": "Header logic is A (precedent element-web-18). The optional shebang and the file-level eslint-disable opt-out are expressed in the pattern",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-50",
+   "summary": "migrations.list lists exactly the depth-2 entries under channels/db/migrations, sorted, under its generated header",
+   "evidence": "server/Makefile:1078-1081 (migrations-extract), :469; .github/workflows/server-ci.yml:82-122 (check-generated)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "registry_paths_resolve (orphans) + ordered_block + file_header - mattermost-migrations-list-matches-tree, -list-sorted, -list-header",
+   "rules": [
+    "mattermost-migrations-list-matches-tree",
+    "mattermost-migrations-list-sorted",
+    "mattermost-migrations-list-header"
+   ],
+   "assertion_family": "none",
+   "reason": "A generated registry that must match a folder exactly is expressed by registry_paths_resolve with orphans (precedent yarnpkg-berry-20), plus order and header",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-51",
+   "summary": "Migration files are named {sequence_number}_{description}.{up|down}.sql under db/migrations/{driver}/",
+   "evidence": "server/channels/db/migrations/README.md (File Naming and Structure)",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "A",
+   "alint": "filename_regex - mattermost-migration-file-naming",
+   "rules": [
+    "mattermost-migration-file-naming"
+   ],
+   "assertion_family": "none",
+   "reason": "A documented naming convention that holds for all 480 files",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-52",
+   "summary": "SQL migrations from 000166 on use CREATE/DROP INDEX CONCURRENTLY unless the statement carries -- concurrentIndex:ignore",
+   "evidence": "tools/mattermost-govet/concurrentIndex/concurrentIndex.go:24-31, :110-200; server/Makefile:993-995",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "C",
+   "alint": "file_content_forbidden over numbered-file globs - mattermost-migrations-concurrent-index",
+   "rules": [
+    "mattermost-migrations-concurrent-index"
+   ],
+   "assertion_family": "none",
+   "reason": "The Rust regex has no look-ahead and no statement joining. The non-concurrent forms are spelled out, and the one ignore-comment file (000217) is excluded by name: awkward, C",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-53",
+   "summary": "Workflow YAML files end with a newline",
+   "evidence": ".github/workflows/yamllint.yml (yamllint .github/workflows/); .yamllint (extends default: new-line-at-end-of-file)",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "A",
+   "alint": "final_newline - mattermost-workflows-final-newline",
+   "rules": [
+    "mattermost-workflows-final-newline"
+   ],
+   "assertion_family": "none",
+   "reason": "A file property: native",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-54",
+   "summary": "Workflow YAML files use LF line endings",
+   "evidence": ".yamllint (default new-lines: type unix); .github/workflows/yamllint.yml",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "A",
+   "alint": "line_endings lf - mattermost-workflows-lf",
+   "rules": [
+    "mattermost-workflows-lf"
+   ],
+   "assertion_family": "none",
+   "reason": "A file property: native",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-55",
+   "summary": "Workflow YAML files are syntactically valid YAML",
+   "evidence": ".github/workflows/yamllint.yml; .yamllint",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "C",
+   "alint": "yaml_path_absent parse probe - mattermost-workflows-yaml-parses",
+   "rules": [
+    "mattermost-workflows-yaml-parses"
+   ],
+   "assertion_family": "none",
+   "reason": "alint's YAML 1.2 reader is not yamllint's parser, so a probe approximates syntax validity: C",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-56",
+   "summary": "No duplicate keys in workflow YAML",
+   "evidence": ".yamllint (key-duplicates: enable)",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "B-config",
+   "alint": "constraint unique-key over mapping keys",
+   "rules": [],
+   "assertion_family": "unique-key",
+   "reason": "Duplicate keys resolve last-wins in alint's reader (precedent zulip-28)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-57",
+   "summary": "yamllint formatting rules (indentation, colons, commas, hyphens, brackets, braces, anchors)",
+   "evidence": ".yamllint (extends default)",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Formatting: D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-58",
+   "summary": "Docs MDX content has no site-absolute URL in a raw href/src attribute (protocol-relative // allowed; code fences and inline code skipped)",
+   "evidence": "docs/site/scripts/check-base-url-attrs.mjs:25-40, :65-110; docs/site/package.json:24 (prebuild); .github/workflows/docs-ci.yaml:57",
+   "mechanism": "script",
+   "family": "other",
+   "bucket": "C",
+   "alint": "file_content_forbidden - mattermost-docs-no-site-absolute-attr-urls",
+   "rules": [
+    "mattermost-docs-no-site-absolute-attr-urls"
+   ],
+   "assertion_family": "none",
+   "reason": "The checker is fence- and inline-code-aware, and a content regex is not. The JSX same-quote backreference is approximated: C",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-59",
+   "summary": ".github/e2e-status-lanes.json is well formed: a string aggregate_context and a non-empty lanes array, all matching ^e2e-test/[a-z0-9/_.-]+$, and the aggregate is not a lane",
+   "evidence": ".github/actions/e2e-status-lanes/action.yml:37-56; .github/scripts/test_e2e_status_workflows.py:425-430 (test_aggregate_is_not_one_of_its_own_lanes)",
+   "mechanism": "script",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_matches x2 + json_path_absent - mattermost-e2e-lanes-aggregate-shape, -lane-shape, -nonempty-array-without-aggregate",
+   "rules": [
+    "mattermost-e2e-lanes-aggregate-shape",
+    "mattermost-e2e-lanes-lane-shape",
+    "mattermost-e2e-lanes-nonempty-array-without-aggregate"
+   ],
+   "assertion_family": "none",
+   "reason": "Regex, type and membership tests are native JSONPath (an absolute $ in a filter)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-60",
+   "summary": "The triage aggregate context is e2e-test/triage",
+   "evidence": ".github/scripts/test_e2e_status_workflows.py:404-406",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_equals - mattermost-e2e-aggregate-is-triage",
+   "rules": [
+    "mattermost-e2e-aggregate-is-triage"
+   ],
+   "assertion_family": "none",
+   "reason": "Native equality",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-61",
+   "summary": "Every PR E2E lane, and both suite templates' lane-result call, passes ANTHROPIC_API_KEY to triage",
+   "evidence": ".github/scripts/test_e2e_status_workflows.py:52-64",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "A",
+   "alint": "yaml_path_absent root guard + yaml_path_equals - mattermost-e2e-pr-lanes-pass-model-key, -templates-pass-model-key",
+   "rules": [
+    "mattermost-e2e-pr-lanes-pass-model-key",
+    "mattermost-e2e-templates-pass-model-key"
+   ],
+   "assertion_family": "none",
+   "reason": "Structured queries over workflow YAML express it",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-62",
+   "summary": "Cypress/playwright lane concurrency keys are built from inputs (pr_number, server_edition), never github.ref/sha, are not cancel-in-progress, and e2e-tests-ci resolves the SHA through the commits API",
+   "evidence": ".github/scripts/test_e2e_status_workflows.py:66-80",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "A",
+   "alint": "yaml_path_absent x2 + file_content_matches + file_content_forbidden - mattermost-e2e-cypress-lane-key, -playwright-lane-key, -ci-resolves-commit-sha, -ci-no-raw-commit-sha",
+   "rules": [
+    "mattermost-e2e-cypress-lane-key",
+    "mattermost-e2e-playwright-lane-key",
+    "mattermost-e2e-ci-resolves-commit-sha",
+    "mattermost-e2e-ci-no-raw-commit-sha"
+   ],
+   "assertion_family": "none",
+   "reason": "Substring tests via search() and raw-text checks are native",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-63",
+   "summary": "Lanes of one run never share a lane key (caller inputs named in the callee's concurrency group are unique per suite)",
+   "evidence": ".github/scripts/test_e2e_status_workflows.py:82-97",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "needs: entry-values (input names read from another file's group, joined to each caller's with: values); future family unique-key",
+   "rules": [],
+   "assertion_family": "unique-key",
+   "reason": "The key fields are derived from the callee and joined to each caller's values. That is a name-to-value join: B-adapter (batch 2)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "entry-values",
+      "assertion_family": "unique-key"
+     }
+    }
+   ],
+   "needs": "entry-values"
+  },
+  {
+   "id": "mattermost-64",
+   "summary": "All status writers share the SHA-scoped publication lock (lane-result, prepare-run, skip); report and workers take none",
+   "evidence": ".github/scripts/test_e2e_status_workflows.py:99-108",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "A",
+   "alint": "yaml_path_equals x3 + yaml_path_absent - mattermost-e2e-lane-result-publish-lock, -prepare-run-publish-lock, -skip-publish-lock, -report-workers-no-lock",
+   "rules": [
+    "mattermost-e2e-lane-result-publish-lock",
+    "mattermost-e2e-prepare-run-publish-lock",
+    "mattermost-e2e-skip-publish-lock",
+    "mattermost-e2e-report-workers-no-lock"
+   ],
+   "assertion_family": "none",
+   "reason": "Deep-equality on maps is native",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-65",
+   "summary": "override-status and verified-label hold the publication lock for the PR head SHA, keep failures and target URLs, refresh the verified summary, and resolve-pr cannot write statuses",
+   "evidence": ".github/scripts/test_e2e_status_workflows.py:110-127",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "A",
+   "alint": "yaml_path_equals x2 + yaml_path_absent x2 - mattermost-e2e-override-status-lock, -verified-label-lock, -override-status-writer, -verified-label-writer",
+   "rules": [
+    "mattermost-e2e-override-status-lock",
+    "mattermost-e2e-verified-label-lock",
+    "mattermost-e2e-override-status-writer",
+    "mattermost-e2e-verified-label-writer"
+   ],
+   "assertion_family": "none",
+   "reason": "Native: step lookup by name via filters, substring via search()",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-66",
+   "summary": "Shared unconditional status writers are disabled (no pending post, no summary status, claim-only skip, no /statuses/ calls in lane workflows)",
+   "evidence": ".github/scripts/test_e2e_status_workflows.py:129-141",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "A",
+   "alint": "yaml_path_absent + yaml_path_equals + file_content_forbidden - mattermost-e2e-template-writers-disabled, -skip-claims, -no-raw-status-writes",
+   "rules": [
+    "mattermost-e2e-template-writers-disabled",
+    "mattermost-e2e-skip-claims",
+    "mattermost-e2e-no-raw-status-writes"
+   ],
+   "assertion_family": "none",
+   "reason": "Native",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-67",
+   "summary": "Cancellation keeps diagnostics: report/run-summary/uploads run always(), the lane result runs unless cancelled, and publish/triage/refresh use !cancelled() and never always()",
+   "evidence": ".github/scripts/test_e2e_status_workflows.py:143-162",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "A",
+   "alint": "yaml_path_absent x2 - mattermost-e2e-template-cancellation, -lane-result-cancellation",
+   "rules": [
+    "mattermost-e2e-template-cancellation",
+    "mattermost-e2e-lane-result-cancellation"
+   ],
+   "assertion_family": "none",
+   "reason": "Native filters",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-68",
+   "summary": "The lane result is called last, with explicit inputs, exactly two secrets and least-privilege permissions (caller and called workflow)",
+   "evidence": ".github/scripts/test_e2e_status_workflows.py:164-187",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "A",
+   "alint": "yaml_path_equals x3 + yaml_path_absent x2 - mattermost-e2e-lane-result-caller-uses, -caller-needs, -permissions, -caller-inputs, -workflow-privilege",
+   "rules": [
+    "mattermost-e2e-lane-result-caller-uses",
+    "mattermost-e2e-lane-result-caller-needs",
+    "mattermost-e2e-lane-result-permissions",
+    "mattermost-e2e-lane-result-caller-inputs",
+    "mattermost-e2e-lane-result-workflow-privilege"
+   ],
+   "assertion_family": "none",
+   "reason": "Map and list deep-equality plus length() key-set checks are native",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-69",
+   "summary": "The lane result calls no further reusable workflow",
+   "evidence": ".github/scripts/test_e2e_status_workflows.py:189-193",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "A",
+   "alint": "yaml_path_absent $.jobs.*.uses - mattermost-e2e-lane-result-no-nesting",
+   "rules": [
+    "mattermost-e2e-lane-result-no-nesting"
+   ],
+   "assertion_family": "none",
+   "reason": "Native",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-70",
+   "summary": "Missing results are red, triage enforces only on the first attempt, the summary always refreshes, and test roots are fixed",
+   "evidence": ".github/scripts/test_e2e_status_workflows.py:195-224",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "A",
+   "alint": "yaml_path_absent + yaml_path_equals x2 - mattermost-e2e-lane-result-publish-triage-refresh, -cypress-test-root, -playwright-test-root",
+   "rules": [
+    "mattermost-e2e-lane-result-publish-triage-refresh",
+    "mattermost-e2e-cypress-test-root",
+    "mattermost-e2e-playwright-test-root"
+   ],
+   "assertion_family": "none",
+   "reason": "Native: field equalities and substring and suffix tests on named steps",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-71",
+   "summary": "The result assertion script cannot clear upstream or report failures (truth table run through bash)",
+   "evidence": ".github/scripts/test_e2e_status_workflows.py:226-283",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Executes the step's bash over a truth table: running code, D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-72",
+   "summary": "The lane result publishes, triages, refreshes, posts the webhook and asserts, in that order",
+   "evidence": ".github/scripts/test_e2e_status_workflows.py:285-289",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "C",
+   "alint": "file_content_matches (?s) ordered regex - mattermost-e2e-lane-result-step-order",
+   "rules": [
+    "mattermost-e2e-lane-result-step-order"
+   ],
+   "assertion_family": "none",
+   "reason": "JSONPath has no position operator. Order is read from text with a (?s) regex, which does not rule out a repeated name: C",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-73",
+   "summary": "The report job only summarises: four fixed outputs, steps exactly [ci/checkout-repo, ci/run-summary], always(), no statuses permission, update-commit-status false",
+   "evidence": ".github/scripts/test_e2e_status_workflows.py:291-302, :322-326",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "A",
+   "alint": "yaml_path_absent x2 - mattermost-e2e-report-only-summarises, -report-summary-always",
+   "rules": [
+    "mattermost-e2e-report-only-summarises",
+    "mattermost-e2e-report-summary-always"
+   ],
+   "assertion_family": "none",
+   "reason": "length() plus indexed equality expresses the exact key set and step list",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-74",
+   "summary": "The rolling-upgrade lanes claim under the lock, read the trusted lane list, and publish through the lane result without a model key",
+   "evidence": ".github/scripts/test_e2e_status_workflows.py:304-335",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "A",
+   "alint": "yaml_path_absent + yaml_path_equals (+ shared caller/report rules) - mattermost-e2e-upgrade-lane-wiring, -upgrade-prepare-run-lock",
+   "rules": [
+    "mattermost-e2e-upgrade-lane-wiring",
+    "mattermost-e2e-upgrade-prepare-run-lock"
+   ],
+   "assertion_family": "none",
+   "reason": "Native",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-75",
+   "summary": "The lane result holds the lock for at most 45 minutes",
+   "evidence": ".github/scripts/test_e2e_status_workflows.py:337-339",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "A",
+   "alint": "yaml_path_equals - mattermost-e2e-lane-result-timeout",
+   "rules": [
+    "mattermost-e2e-lane-result-timeout"
+   ],
+   "assertion_family": "none",
+   "reason": "Native",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-76",
+   "summary": "A slow worker fails before its job is cancelled (dispatch-run timeout < job timeout - 5)",
+   "evidence": ".github/scripts/test_e2e_status_workflows.py:341-347",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "needs arithmetic comparison between two extracted values",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "JSONPath compares to constants or other values but has no arithmetic",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "other"
+     }
+    },
+    {
+     "by": "audit",
+     "from": [
+      "B-adapter",
+      "other",
+      "none"
+     ],
+     "why": "The expected bound (job timeout - 5) is computed from another field, which the taxonomy names derived-value."
+    }
+   ],
+   "needs": "derived-value"
+  },
+  {
+   "id": "mattermost-77",
+   "summary": "The PR E2E callers are exactly cypress enterprise/fips and playwright enterprise, enterprise-subpath and fips",
+   "evidence": ".github/scripts/test_e2e_status_workflows.py:370-391",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "C",
+   "alint": "yaml_path_absent root guard with count() == 5 plus 5 existence tests - mattermost-e2e-pr-callers-cover-lanes",
+   "rules": [
+    "mattermost-e2e-pr-callers-cover-lanes"
+   ],
+   "assertion_family": "none",
+   "reason": "Multiset equality over derived tuples is spelled as a count plus existence tests: awkward, C",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-78",
+   "summary": "The PR lanes are exactly the listed lanes, each listed once (contexts derived by running each suite's build step)",
+   "evidence": ".github/scripts/test_e2e_status_workflows.py:349-368, :393-398",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Executes the workflow's bash build step to derive the contexts: D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-79",
+   "summary": "Each lane publishes the context it is listed under (full job and skip status use the built context)",
+   "evidence": ".github/scripts/test_e2e_status_workflows.py:408-416",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "A",
+   "alint": "yaml_path_equals x3 - mattermost-e2e-cypress-full-context, -playwright-full-context, -skip-status-context",
+   "rules": [
+    "mattermost-e2e-cypress-full-context",
+    "mattermost-e2e-playwright-full-context",
+    "mattermost-e2e-skip-status-context"
+   ],
+   "assertion_family": "none",
+   "reason": "Native",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-80",
+   "summary": "Triage inputs (triage-lanes, triage-status-context) always come from steps.lanes.outputs in every e2e workflow",
+   "evidence": ".github/scripts/test_e2e_status_workflows.py:432-443",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "A",
+   "alint": "yaml_path_absent over e2e-tests-*.yml - mattermost-e2e-triage-inputs-from-reader",
+   "rules": [
+    "mattermost-e2e-triage-inputs-from-reader"
+   ],
+   "assertion_family": "none",
+   "reason": "Native",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-81",
+   "summary": "Every lane reader uses the trusted copy, immediately after a sparse checkout of .github at github.sha with an exact with-map",
+   "evidence": ".github/scripts/test_e2e_status_workflows.py:445-462",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "needs a positional/adjacency operator (the step before a matching step)",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Asserts on steps[i-1] relative to a filtered step, and JSONPath has no sibling navigation",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "order"
+     }
+    }
+   ],
+   "needs": "order"
+  },
+  {
+   "id": "mattermost-82",
+   "summary": "No lane reader takes the list from a tested commit or PR head (no local action reference; the preceding checkout's ref is not a forbidden ref)",
+   "evidence": ".github/scripts/test_e2e_status_workflows.py:464-478",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "needs a positional/adjacency operator (the raw-text half is file_content_forbidden)",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "The core assertion is on the preceding step: B-adapter",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "order"
+     }
+    }
+   ],
+   "needs": "order"
+  },
+  {
+   "id": "mattermost-83",
+   "summary": "The test-code checkouts (prepare-run first step, skip ci/checkout-repo) stay on inputs.commit_sha",
+   "evidence": ".github/scripts/test_e2e_status_workflows.py:470-478",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "A",
+   "alint": "yaml_path_equals x2 - mattermost-e2e-prepare-run-checkout-ref, -skip-checkout-ref",
+   "rules": [
+    "mattermost-e2e-prepare-run-checkout-ref",
+    "mattermost-e2e-skip-checkout-ref"
+   ],
+   "assertion_family": "none",
+   "reason": "Native",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-84",
+   "summary": "The lane reader script accepts valid lists and rejects malformed or missing ones (fixture tests)",
+   "evidence": ".github/scripts/test_e2e_status_workflows.py:481-538 (LaneListValidation)",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Runs the composite action's bash against fixtures: D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-85",
+   "summary": "override-status and verified-label writers check exactly the listed lanes",
+   "evidence": ".github/scripts/test_e2e_status_workflows.py:541-586",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Executes the writer scripts with a fake gh: D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-86",
+   "summary": "The lane reader step runs before the writer step that uses its output, and the writer's LANES env reads steps.lanes.outputs.lanes",
+   "evidence": ".github/scripts/test_e2e_status_workflows.py:588-596",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "needs a step-order (index comparison) operator",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "JSONPath cannot compare positions of two filtered elements",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "order"
+     }
+    }
+   ],
+   "needs": "order"
+  },
+  {
+   "id": "mattermost-87",
+   "summary": "Committed generated artifacts are fresh (mocks, store layers, msgp serialization, email templates, mmctl docs, default roles/permissions, default feature flags)",
+   "evidence": "server/Makefile:469; .github/workflows/server-ci.yml:82-122",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Runs generators (some against a live Postgres): D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-88",
+   "summary": "Postgres migrations added on a release branch were not renumbered or renamed relative to master",
+   "evidence": ".github/workflows/server-ci.yml:123-143; server/Makefile:1083-1084 (check-backport-migrations)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Stage B: check-backport-migrations (server/scripts/check_backport_migrations.sh) compares the migration file sets at HEAD, origin/<base> and origin/master. That is content at other revisions (needs: base-revision), the rocketchat-42/-45 and immich-21 precedent, not D. The depth-1 clone limits R4 confirmation, not the bucket.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "D",
+      "other",
+      "none"
+     ],
+     "why": "check-backport-migrations (server/scripts/check_backport_migrations.sh via server/Makefile) compares the migration file sets at HEAD, origin/<base> and origin/master. That is a content comparison against other revisions, which the stratum's needs list names base-revision. Precedent rocketchat-42/-45 and immich-21 classify base-revision comparisons as B-adapter, not D. A depth-1 clone limits R4 confirmation, not the bucket."
+    },
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "base-revision",
+      "reason": "Stage B: check-backport-migrations (server/scripts/check_backport_migrations.sh) compares the migration file sets at HEAD, origin/<base> and origin/master. That is content at other revisions (needs: base-revision), the rocketchat-42/-45 and immich-21 precedent, not D. The depth-1 clone limits R4 confirmation, not the bucket."
+     }
+    }
+   ],
+   "needs": "base-revision"
+  },
+  {
+   "id": "mattermost-89",
+   "summary": "mattermost-govet code analyzers (structuredLogging, mlogFieldNaming, inconsistentReceiverName, emptyStrCmp, tFatal, configtelemetry, errorAssertions, requestCtxNaming, noSelectStar, sortSlices, concurrentIndex over Go strings)",
+   "evidence": "server/Makefile:979-996; tools/mattermost-govet/",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Go AST code analysis: D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-90",
+   "summary": "golangci-lint passes (server, and tools via tools-ci)",
+   "evidence": "server/Makefile:346 (golangci-lint), :503; .github/workflows/tools-ci.yml:21",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Linting source: D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-91",
+   "summary": "go fix -diff reports nothing (check-go-fix)",
+   "evidence": "server/Makefile:503",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Code analysis: D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-92",
+   "summary": "plugin-checker: plugin API methods carry minimum-version comments",
+   "evidence": "server/Makefile:313-314, :503",
+   "mechanism": "script",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Go AST analysis: D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-93",
+   "summary": "vet-api: api4 handlers and the OpenAPI docs stay in sync (openApiSync)",
+   "evidence": "server/Makefile:1014-1020; .github/workflows/server-ci.yml:159",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Code analysis against Go handlers: D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-94",
+   "summary": "Server, mmctl, tools and pluginapi testhelper tests pass, and the server builds",
+   "evidence": ".github/workflows/server-ci.yml:179-334; tools-ci.yml:45; pluginapi-testhelper-ci.yml:31",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Tests and builds: D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-95",
+   "summary": "Webapp eslint code rules (beyond the header) and stylelint pass",
+   "evidence": ".github/workflows/webapp-ci.yml:20-39; webapp/channels/package.json check",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Linting source: D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-96",
+   "summary": "Webapp type-checks (tsc -b)",
+   "evidence": ".github/workflows/webapp-ci.yml:117-136",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Type checking: D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-97",
+   "summary": "Webapp jest suites pass and the webapp builds",
+   "evidence": ".github/workflows/webapp-ci.yml:137-246, :311",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Tests and builds: D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-98",
+   "summary": "External links in the webapp resolve",
+   "evidence": ".github/workflows/webapp-ci.yml:94-116; webapp/package.json check-external-links",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Network: D",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "mattermost-99",
+   "summary": "The assembled OpenAPI v4 spec validates (swagger-cli validate)",
+   "evidence": ".github/workflows/api.yml:32-33; api/Makefile build-v4",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "needs an OpenAPI validator",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "The spec that swagger-cli validates is built by running the repository's scripts, which fetch remote content. Running project code and network access are D under R7.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "B-delegate",
+      "other",
+      "none"
+     ],
+     "why": "The validated spec is assembled by project scripts that fetch remote content (api/Makefile:12,96-100 runs node extract.js; api/playbooks/extract.js:31 fetches from raw.githubusercontent.com). R7 keeps running project code and network access in D."
+    }
+   ]
+  },
+  {
+   "id": "mattermost-b01",
+   "summary": "supportedLocales (server/public/shared/i18n/i18n.go) lists exactly the locales of server/i18n/*.json and of webapp/channels/src/i18n/*.json, by file stem (multiset equality)",
+   "evidence": "server/public/shared/i18n/i18n_test.go:276-292 (TestSupportedLocalesAreInSync, subtests 'server translation files' and 'webapp translation files', assert.ElementsMatch against localeFilesIn at :243); i18n.go:71-73 (supportedLocales, 29 entries); run in server-ci test shards through server/Makefile:155 (TE_PACKAGES includes ./public/...)",
+   "mechanism": "test",
+   "family": "locale",
+   "bucket": "B-config",
+   "alint": "Missing primitive: two-way set equality between a list read from one file and a directory's file stems. Today's cross_file relation: registered (source files {server/i18n,webapp/channels/src/i18n}/*.json, register_as {stem}, target i18n.go regex (?m)^\\t\"([^\"]+)\",$) covers catalog -> list only. resolves takes no path template, so list -> <locale>.json cannot be expressed.",
+   "rules": [],
+   "assertion_family": "set",
+   "reason": "R7: a Go test over files alint reads, classified by its assertion. It has the same shape as immich-20 (a directory listing against a hand-kept list, both directions), which is B-config set. On scratch, the registered half passed, and fired on a new webapp xx.json and on a new server yy.json. Deleting webapp de.json (a supportedLocales entry with no catalog, which the test fails) did not fire, so the reverse half needs the missing primitive. Reading the clone, I found 29 entries and 29 catalogs per surface, with no missing or unlisted locale. Stage A's record has no supportedLocales unit: mattermost-28 (glossary files) and mattermost-09 (server_plurals.json) are different lists.",
+   "fire_verified": "n/a (B-config). The partial registered rule (mmb-catalog-stems-in-supported-locales) passed on the clone and fired on a new catalog in scratch; the reverse half stayed silent, as expected.",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "mattermost-b02",
+   "summary": "supportedLocales equals the set of locale values in the webapp languages map (webapp/channels/src/i18n/i18n.ts)",
+   "evidence": "server/public/shared/i18n/i18n_test.go:294-297 ('webapp languages map' subtest; webappLanguageValues at :261 reads the export const languages block with the regex value: '([^']+)'); i18n.go:71-72 ('It must be kept in sync with ../../../../webapp/channels/src/i18n/i18n.ts'); i18n.ts:21 ('should match the values in server/public/shared/i18n/i18n.go')",
+   "mechanism": "test",
+   "family": "locale",
+   "bucket": "C",
+   "alint": "cross_file relation set_equals, source server/public/shared/i18n/i18n.go regex (?m)^\\t\"([^\"]+)\",$, target webapp/channels/src/i18n/i18n.ts regex value: '([^']+)'. Rule mmb-supported-locales-match-languages-map (Stage B scratch config, removed after verification).",
+   "rules": [
+    "mattermost-supported-locales-match-languages-map"
+   ],
+   "assertion_family": "none",
+   "reason": "This can be expressed today only through regex reads. The i18n.go side is a one-layout regex over a gofmt'd Go string slice (batch-2 ruling: C), and set_equals ignores duplicates that assert.ElementsMatch counts. On scratch, a duplicated \"de\" line in i18n.go passed alint but would fail the test. The TS side mirrors the test's own regex. The rule passed on the clone. On scratch, deleting the \"de\" line from i18n.go fired, and so did changing value 'de' to 'xx' in i18n.ts.",
+   "fire_verified": "n/a (C). Scratch fire and pass results are given in reason.",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "mattermost-b03",
+   "summary": "The Cursor cloud-agent image's Go pin (.cursor/Dockerfile ARG GO_VERSION) equals server/.go-version",
+   "evidence": ".cursor/Dockerfile:5-6 ('# Keep in sync with server/.go-version. cloud-agent-install.sh reinstalls if they drift.' / ARG GO_VERSION=1.26.10); .cursor/README.md:11",
+   "mechanism": "convention",
+   "family": "toolchain-pin",
+   "bucket": "A",
+   "alint": "cross_file equals, source server/.go-version regex \\A\\s*([0-9][0-9A-Za-z.+-]*)\\s*\\z, target .cursor/Dockerfile regex (?m)^ARG GO_VERSION=(\\S+). Rule mmb-cursor-go-pin.",
+   "rules": [
+    "mattermost-cursor-go-pin"
+   ],
+   "assertion_family": "none",
+   "reason": "A stated sync requirement that holds at the pin (R5). The install hook reinstalling Go on drift is a fallback that hides the failure, and such a requirement still counts (batch-3 ruling). No CI job reads .cursor/, and buildenv-tag.sh (mattermost-39) does not look at this file, so no Stage A unit covers it.",
+   "fire_verified": "On a scratch copy, changing ARG GO_VERSION from 1.26.10 to 1.26.9 fired mmb-cursor-go-pin (0 -> 1), and so did setting server/.go-version to 1.26.11 (0 -> 1). It passes on the clone.",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "mattermost-b04",
+   "summary": "The Cursor cloud-agent image's Node pin (.cursor/Dockerfile ARG NODE_VERSION) is on the .nvmrc release line (same major.minor)",
+   "evidence": ".cursor/Dockerfile:7-8 ('# Image pin on the .nvmrc line (currently 24.11). cloud-agent-install.sh uses .nvmrc at bootstrap.' / ARG NODE_VERSION=24.11.1); .cursor/README.md:12 ('Node from .nvmrc (currently 24.11, image pin 24.11.1)')",
+   "mechanism": "convention",
+   "family": "toolchain-pin",
+   "bucket": "A",
+   "alint": "cross_file equals with normalize: semver-minor, source .nvmrc, target .cursor/Dockerfile regex (?m)^ARG NODE_VERSION=(\\S+). Rule mmb-cursor-node-line.",
+   "rules": [
+    "mattermost-cursor-node-line"
+   ],
+   "assertion_family": "none",
+   "reason": "A documented pin relation that holds at the pin (R5, batch-3 fallback ruling). I read 'on the .nvmrc line' as the same major.minor, which normalize: semver-minor expresses natively. If the integrator reads it as exact equality, drop the normalize; both readings pass at the pin, where both files say 24.11.1. The wording is descriptive rather than imperative, so this is the weaker of the two .cursor units.",
+   "fire_verified": "On scratch, changing NODE_VERSION from 24.11.1 to 24.12.0 fired mmb-cursor-node-line (0 -> 1), while 24.11.5 (same line) passed (0). It passes on the clone.",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "mattermost-b05",
+   "summary": "The @formatjs/icu-messageformat-parser that react-intl resolves is exactly the version react-intl declares, so check_icu.mjs parses with react-intl's own parser",
+   "evidence": "webapp/channels/scripts/check_icu.test.js:52-67 (describe 'parser', test 'is the copy react-intl loads'); it runs in the channels jest suite (default testMatch)",
+   "mechanism": "test",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R7: the test resolves react-intl from the installed node_modules and compares the resolved parser's version with the declared dependency, which is package-manager resolution. webapp/package-lock.json has four entries in three versions: hoisted 2.4.0, eslint-plugin-formatjs's nested 3.5.11, and intl-messageformat's and react-intl's nested 2.11.4, where react-intl declares 2.11.4. Choosing the copy react-intl loads requires Node module resolution, so D. Stage A's mattermost-97 ('jest suites pass') absorbs this test only as code testing. It asserts a dependency-version property, so I list it separately for the dep-version family.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "mattermost-b06",
+   "summary": "server/public/model/version.go's versions list is kept newest first, with the most current release at the front",
+   "evidence": "server/public/model/version.go:12-14 ('It should be maintained in chronological order with most current release at the front of the list'), :158 (CurrentVersion = versions[0]); version_lifecycle.go:23 ('releaseLifecycles is newest first, like versions')",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "needs: version-compare. ordered_block offers only ascending lexical, lexical-ci and numeric comparators, so it cannot express descending x.y.z order over a Go string slice.",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "A stated convention, corroborated by the lifecycle table's comment, that holds at the pin: reading the file, all 140 entries are strictly descending by version. The comment says 'chronological', but the file is in version order and that is the reading that holds. Low confidence: the integrator may weigh a source comment below contributor docs.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "version-compare"
+     }
+    }
+   ],
+   "needs": "version-compare"
+  },
+  {
+   "id": "mattermost-b07",
+   "summary": "The release lifecycle table (releaseLifecycles) is strictly newest first by major.minor",
+   "evidence": "server/public/model/version_lifecycle_test.go:43-48 (TestReleaseLifecycles, 'entries are newest first'); version_lifecycle.go:23-27; run in server-ci test shards (server/Makefile:155, ./public/...)",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "needs: version-compare (element order under a major.minor comparator, where 11.11 > 11.9; no kind has a descending version comparator)",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R7: a test over a hand-maintained data table, classified by its assertion, which is version ordering. It holds at the pin: 17 entries, strictly descending (verified by reading). Stage A has only the generic mattermost-94 ('server tests pass', D).",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "version-compare"
+     }
+    }
+   ],
+   "needs": "version-compare"
+  },
+  {
+   "id": "mattermost-b08",
+   "summary": "Every versions release line at or above the oldest lifecycle entry (the floor) has a releaseLifecycles entry",
+   "evidence": "server/public/model/version_lifecycle_test.go:27-41 ('every version at or above the floor has an entry'); version_lifecycle.go:24-25 ('Add an entry when a line is added to versions')",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "needs: version-compare. A regex can capture major.minor from version.go, but limiting the check to lines >= the floor needs a version comparison against a value derived from data (the last table entry). Hard-coding 10.11 would go stale.",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "This is an inclusion check across two Go data tables, gated by a data-derived version threshold. It holds at the pin: no line >= 10.11 lacks an entry (verified by reading).",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "version-compare"
+     }
+    }
+   ],
+   "needs": "version-compare"
+  },
+  {
+   "id": "mattermost-b09",
+   "summary": "Every release lifecycle entry has an EOL date, and the oldest entry is an ESR",
+   "evidence": "server/public/model/version_lifecycle_test.go:24-25 (require floor.ESR: 'the oldest entry must be an ESR'), :50-54 ('every entry has an EOL date')",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "C",
+   "alint": "file_content_forbidden (?m)^\\t\\{MajorMinor: \"[^\"]*\"(?:, ESR: (?:true|false))?\\},?$ as rule mmb-lifecycle-entry-has-eol; file_content_matches (?m)^\\t\\{MajorMinor: \"[^\"]+\", EOLDate: eolDate\\([^)]*\\), ESR: true\\},\\n\\} as rule mmb-lifecycle-oldest-is-esr",
+   "rules": [
+    "mattermost-lifecycle-entry-has-eol",
+    "mattermost-lifecycle-oldest-is-esr"
+   ],
+   "assertion_family": "none",
+   "reason": "Expressible only as one-layout regexes over a gofmt'd Go composite literal (batch-2 ruling: C). Both rules passed on the clone. On scratch, removing 11.9's EOLDate fired the first rule, and removing 10.11's ESR: true fired the second.",
+   "fire_verified": "n/a (C; the scratch results are given in reason)",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "mattermost-b10",
+   "summary": "webapp/package-lock.json's root engines (node, npm) move with the Node pin: they equal .nvmrc and webapp/package.json engines.npm",
+   "evidence": "mise.toml:11-12 ('A Node bump moves this alongside .nvmrc, both server/build/Dockerfile.buildenv*, \"engines\"/\"packageManager\" and webapp/package-lock.json.'); webapp/package-lock.json packages[''].engines = {node: 24.11.1, npm: 11.6.2}",
+   "mechanism": "convention",
+   "family": "toolchain-pin",
+   "bucket": "A",
+   "alint": "cross_file equals x2: .nvmrc against webapp/package-lock.json json $.packages[''].engines.node (rule mmb-lock-engines-node), and webapp/package.json $.engines.npm against the lock's $.packages[''].engines.npm (rule mmb-lock-engines-npm)",
+   "rules": [
+    "mattermost-webapp-lock-engines-node",
+    "mattermost-webapp-lock-engines-npm"
+   ],
+   "assertion_family": "none",
+   "reason": "mise.toml names the lockfile among the pin sites a Node bump must move, and the convention holds at the pin (R5). No Stage A unit reads the lockfile copy: 38 covers .nvmrc, mise.toml and the buildenv files, 40 covers package.json engines.node, and 41 covers engines.npm against packageManager. I could not confirm offline whether npm ci rejects a lockfile whose root engines differ from package.json; I believe it validates only dependency specs. The mechanism is therefore recorded as convention. Under R1 the integrator may fold this into 38/40 as a scope extension instead.",
+   "fire_verified": "On scratch, setting the lock root engines.node to 24.10.0 fired mmb-lock-engines-node (0 -> 1), setting engines.npm to 11.6.0 fired mmb-lock-engines-npm (0 -> 1), and setting .nvmrc to 24.12.0 fired the node rule. Both rules pass on the clone (validate-config: 8 rules valid; check exit 0).",
+   "origin": "B",
+   "changes": []
+  }
+ ],
+ "removed": [
+  {
+   "id": "mattermost-15",
+   "summary": "Webapp locale catalog keys are in code-point (UTF-8 byte) order, with no duplicates",
+   "why": "R1 duplicate of mattermost-16. check_icu.mjs:159-173 is a single check, text !== JSON.stringify(sorted, null, 2) + '\\n', with one error message ('not in canonical form ... keys in code-point order, a 2-space indent and a trailing newline'). Stage A cites :159-173 for 15 and :166-173 for 16, the same comparison. Key order and duplicate keys are part of 16's canonical form, not a separately enforced behavior. Carving 15 out as C gives partial coverage credit for a unit already counted as D. If the integrator keeps the split, record it in notes."
+  }
+ ],
+ "rejected_stage_b": {},
+ "value_add": [
+  "mattermost-va-server-en-descriptions (info): every server/i18n/en.json entry has a non-empty description. This is a server/AGENTS.md:7 convention that is violated at the pin (1 entry), so R5 says it is not enforced. It fires once on the clone",
+  "mattermost-va-go-mod-matches-go-version (info): the go directives of server/go.mod and server/public/go.mod equal server/.go-version. Not enforced: most CI jobs install Go from go-version-file (go.mod), while buildenv-tag.sh checks only .go-version. Passes on the clone",
+  "mattermost-va-webapp-npmrc-policy (info): webapp/.npmrc keeps engine-strict=true, a policy declaration (R3). Passes on the clone",
+  "mattermost-webapp-i18n-keys-sorted (info): kept as value-add after mattermost-15 was removed; see `removed`"
+ ],
+ "value_add_rules": [
+  "mattermost-va-server-en-descriptions",
+  "mattermost-va-go-mod-matches-go-version",
+  "mattermost-va-webapp-npmrc-policy",
+  "mattermost-webapp-i18n-keys-sorted"
+ ],
+ "absent_categories": [
+  "git hooks / pre-commit frameworks: no husky, lefthook, pre-commit or lint-staged",
+  "non-GitHub CI: no GitLab CI, CircleCI, Azure Pipelines, Jenkins, Buildkite or Prow",
+  "dependency-version policy tooling: no syncpack, manypkg, sherif or yarn constraints. .github/dependabot.yml only proposes updates",
+  "toolchain pins in .tool-versions, .node-version, Volta or devEngines: none. Node is pinned in .nvmrc and mise.toml, Go in server/.go-version",
+  "enforced .editorconfig: the file exists but nothing checks it",
+  "SPDX identifiers or REUSE compliance: headers are Mattermost copyright lines instead",
+  "coverage gates: .github/codecov.yml statuses are informational",
+  "locale key parity: present as a check but downgraded to warnings on both surfaces (i18n-ci-template.yml:23-24), so not enforced",
+  "Bazel, Nix, justfile or Taskfile build tasks",
+  "import firewall / layering checks expressed outside code analysis (none beyond eslint/govet rules)",
+  "CODEOWNERS present but not counted (R5: ownership file on its own)"
+ ],
+ "unusual": [
+  "A 31-method Python contract suite (.github/scripts/test_e2e_status_workflows.py, run by e2e-tests-status-wiring.yml) pins the E2E status-publication wiring of about ten workflow files: SHA-scoped publication lock, least-privilege permissions, step order and the trusted lane-list checkout. A composite action also validates .github/e2e-status-lanes.json at runtime. 16 of the 31 methods are expressible as A with yaml_path rules using a 'root guard' idiom ($[?<absolute-$ failure condition>])",
+  "A translation glossary (i18n/glossary: 128 English terms, 28 locale files) and an i18n/style.json formality register (address formal|informal, use/avoid word lists) are validated by check_glossary.mjs. Its locale set must equal the union of webapp and server catalog locales",
+  "go-i18n's CLDR plural table is mirrored into Node (i18n/scripts/lib/server_plurals.json), and a Go test (TestServerPluralTableMatchesGoI18n) keeps the mirror equal to go-i18n",
+  "server/build/buildenv-tag.sh both computes the CI build image tag and enforces Node/Go pin coherence across .nvmrc, mise.toml, server/.go-version and the two buildenv Dockerfiles. mise.toml documents that npm is deliberately not pinned because Node 24.11.1 bundles the npm 11.6.2 that engines requires",
+  "In an i18n-heavy repo the key-parity gate is deliberately downgraded. Missing keys are warnings on both surfaces (each non-English server catalog is 370 ids short of and 26 ids beyond en.json), and non-English catalog edits only produce a ::warning. Blank translations, placeholder parity and plural categories remain hard errors",
+  "mattermost-govet's concurrentIndex analyzer scans SQL migration files, not just Go strings, for non-CONCURRENTLY index DDL from migration 166 on, with a per-statement `-- concurrentIndex:ignore` escape",
+  "The govet license analyzer is scoped by Go build semantics. `go vet ./...` from server/ does not reach the nested server/public module (whose pluginapi/model files carry no header) or build-tagged enterprise files, so a faithful file_header rule has to mirror the vet scope",
+  "docs/site check-base-url-attrs.mjs forbids raw site-absolute href/src attributes in MDX because Docusaurus does not prefix them under the offline /documentation/ baseUrl",
+  "webapp/scripts/update-versions.sh keeps six npm workspaces and their @mattermost/* references in version lockstep with server/public/model/version.go",
+  "migrations.list is a generated registry (header plus sorted find output) checked by check-generated"
+ ],
+ "check_result": "validate-config: 90 rules loaded, valid. `alint -c CONFIG check . --compact` on the clone reports 0 errors and 1 info, exit 0. The info is the value-add rule mattermost-va-server-en-descriptions on server/i18n/en.json. Entry app.import.validate_reaction_import_data.emoji_name_invalid.error has an empty description, so the server/AGENTS.md convention \"every entry carries a description\" does not hold at the pin. That is correct: R5 says it is not enforced, so it sits outside the ratio at level info. Every rule for an enforced unit (A or C) passes. Earlier iterations and how they were resolved:\n(1) The Go license header first fired on 250 files. Fixes:\n  - scoped it to what `go vet ./...` from server/ compiles: the server module only, since server/public is a separate module and its pluginapi/model files carry no header at the pin;\n  - excluded the build-tagged server/enterprise/{local,external}_imports.go (`//go:build enterprise || sourceavailable`, outside the default vet build);\n  - added the analyzer's generated-file exemptions (mockery/MockGen/go-bindata/\"automatically generated\" on the first comment line).\n(2) The JS/TS header fired on 5 files. Fixes: allowed an optional shebang, and honoured the file-level `/* eslint-disable headers/header-format */` opt-out (Facebook-licensed redux utils, a vendored cypress extension), as eslint does.\n(3) Two E2E writer rules fired falsely: `[[]` is a nested class in Rust regex. Replaced with an escaped `\\\\[`.\n(4) concurrentIndex: the only non-concurrent DROP INDEX at or after migration 166 is 000217_resize_message_columns.up.sql. Its `-- concurrentIndex:ignore` comment is at line 20 and the statement at line 22. That file is excluded by name, which is why the unit is C. The clone was confirmed unmodified afterwards: git status --porcelain --ignored is empty and HEAD equals the pin.",
+ "stage_b_config_issues": [
+  "Reproduced Stage A's run: validate-config loads 90 rules as valid, and check on the clone gives 0 errors and 1 info (the value-add rule mattermost-va-server-en-descriptions), exit 0. HEAD is 69102aba22607b2fc21a72d1958373563650223d and the clone is unmodified (git status --porcelain is empty, before and after).",
+  "Reproduced the fire tests on my own scratch copy: each rule went 0 -> 1 or more, and all were 0 on the baseline. Locale: 05 (whitespace single translation 1; empty plural form 1), 12 (pt-BR.json renamed to pt_BR.json, 1), 14 (non-string value 1; catalog wrapped in [] 1; en defaultMessage null 1), 17 (' ' value 1), 25 (partOfSpeech pronoun 1), 26 (commonWord on a doNotTranslate:false term 1). Toolchain-pin: 38 (.nvmrc 24.12.0 gives 3, plus 40 at 1; mise.toml 24.11.2 gives 1; FIPS ARG 22.11.0 gives 1), 39 (golang tag 1.26.9 gives 1; FIPS 1.25.10.1 gives 1; .go-version 1.26.11 gives 2), 40 (engines.node 24.10.0 gives 1). Dep-version: 46 (platform/types version 12.1.0 gives 1/0; version.go newest 12.3.0 gives 6/8; channels @mattermost/types ^12.2.0 gives 0/1). All match Stage A's claims.",
+  "Wrong scope (R4) in 05, 14 and 17: mattermost-server-i18n-no-blank-translation, mattermost-server-i18n-no-blank-plural-form, mattermost-webapp-i18n-values-are-strings and mattermost-webapp-i18n-no-blank-values apply to every key or id. Both checkers only warn on keys or ids absent from en.json and skip the error checks for them (check_icu.mjs:182-186; mmgotool i18n.go:1021-1026). I reproduced five false positives on scratch. The pin has about 205 extra keys per webapp catalog and 26 extra ids per server catalog, so the false positives are latent but plausible. No native filter can exclude keys that are absent from another file, so these are now C (see reclassify).",
+  "mattermost-15 and mattermost-16 are one check (check_icu.mjs:159-173); see remove.",
+  "mattermost-54 (line_endings lf on workflow YAML) may be stricter than its source. As I recall, yamllint's default new-lines (type unix) inspects only the first line's terminator, while alint's line_endings flags any CRLF line. A file with an LF first line and CRLF later would then pass yamllint and fail alint. Unverified: yamllint is not installed here, and I fetched nothing. It holds at the pin either way.",
+  "mattermost-46: webapp/scripts/update-versions.sh takes the version as an argument (monorepo_version) and says the workspaces 'synchronize their versions with the web app and server'. Anchoring both rules on server/public/model/version.go versions[0] is therefore Stage A's inference. It holds at the pin (12.2.0), but nothing mechanical ties the two. The same script also writes webapp/package-lock.json packages[<workspace>].version and its @mattermost/* deps, which the rules do not read. That is natively expressible, for example $.packages['platform/types'].version, and all of these are 12.2.0 at the pin. The gap is minor because npm ci (mattermost-43) also rejects a lock/manifest mismatch.",
+  "mattermost-12: the filename_regex grammar accepts tags that Intl.getCanonicalLocales rejects. Per ECMA-402 structural validity these are duplicate variant subtags (de-1996-1996) and duplicate extension singletons. This is a minor precision gap with no such file at the pin. It comes from the spec and was not fire-tested.",
+  "Evidence drift: units 24, 25, 31 and 34 cite i18n/scripts/check_glossary.mjs:20-24 for EN_FIELDS/EN_REQUIRED, PARTS_OF_SPEECH, LOCALE_FIELDS and STYLE_FIELDS. At the pin those constants are at :24-28, and lines 20-23 are the header comment and imports. The other check_glossary line citations are within a line or two.",
+  "The three value-add rules (va-server-en-descriptions, va-go-mod-matches-go-version, va-webapp-npmrc-policy) are all level info and kept outside the ratio, which is correct. No value-add rule is presented as enforced.",
+  "Stage B scratch rules for the missed A/C units (mmb-*), 8 rules in total: validate-config reported them valid, check on the clone passed with exit 0, and each fired on its scratch break. Their exact YAML is in each missed unit's alint field. The scratch directory has been removed."
+ ],
+ "stage_b_summary": "Stage B for mattermost/mattermost @ 69102aba2 (i18n). Stage A's run reproduces: 90 rules are valid, the check exits 0 with 1 info, and every locale, dep-version and toolchain-pin A unit fires on its scratch break and passes on the clone. Two corrections. (1) The blank-value and string-type rules for both catalog surfaces (05, 14, 17) over-fire on keys or ids that are absent from en.json, where check_icu.mjs and mmgotool only warn. I reproduced 5 false positives, so these move A -> C. (2) mattermost-88 (backport migration check against origin/base and origin/master) is base-revision, so it moves D -> B-adapter. mattermost-15 is removed as the same single canonical-form comparison as mattermost-16. Ten missed units. Locale: TestSupportedLocalesAreInSync keeps supportedLocales in step with both catalog directories (B-config set; registered covers only one direction) and with the webapp languages map (C; a regex read of Go source, and set_equals misses duplicates). Toolchain-pin: the .cursor/Dockerfile GO_VERSION and NODE_VERSION pins (A), and webapp/package-lock.json root engines, which mise.toml names among the Node bump sites (A). All three are fire-verified. Dep-version: check_icu.test.js's 'parser is the copy react-intl loads' (D, node_modules resolution). Other: release-table invariants in server/public/model (versions newest first by convention, B-adapter; TestReleaseLifecycles ordering and floor coverage, both B-adapter version-compare; entries dated and oldest is ESR, C). Revised counts, 122 units: A 33, C 19, B-config 7 (unique-key 3, set 4), B-adapter 20, B-delegate 3, D 40. Overall coverage_today 33/82 = 40% (Stage A 45%), with_tuning 52/82 = 63%, gap 30/82 = 37%. Locale: A 3, C 12, B-config 6, B-adapter 10, B-delegate 2, D 4; today 3/33 = 9%, with tuning 15/33 = 45%. Toolchain-pin: A 6, C 1, D 1 (6/7). Dep-version: A 1, D 5 (1/1). Other: A 23, C 6, B-config 1, B-adapter 10, B-delegate 1, D 30 (23/41). Unverified: yamllint's first-line-only new-lines behavior (unit 54) and whether npm ci checks the lockfile's root engines (b10). The scratch directory is removed, and the clone is confirmed unmodified.",
+ "notes": "Bucket counts (113 units):\n- A 33, C 15, B-config 6 (unique-key 3, set 3), B-adapter 16, B-delegate 3, D 40.\n- Overall: coverage_today 33/73 = 45%, with_tuning 48/73 = 66%, gap 25/73 = 34%.\n- locale (36 units): A 6, C 9, B-config 5, B-adapter 10, B-delegate 2, D 4. coverage_today 6/32 = 19%, with_tuning 15/32 = 47%.\n- toolchain-pin (5): A 3, C 1, D 1.\n- dep-version (5): A 1, D 4.\n- other (67): A 23, C 5, B-config 1, B-adapter 6, B-delegate 1, D 31.\n\nProcess and rulings:\n- The stratum doc changed during the session. I re-read it and applied the batch 2 rulings: name-to-value joins are B-adapter with needs: entry-values; a regex read of JSON keys or a one-layout regex is C; header and name linter rules are classified by their logic.\n- B-adapter units that need entry-values: 06, 07, 19, 21, 32, 63. Their future families (equality / unique-key) are recorded in each unit's alint field. assertion_family is 'none' for them, per the schema.\n\nInferred, not executed:\n- The Go license scope (server module only, default build tags) is inferred from the analyzer source and the Makefile.\n- The evidence for it: the headerless server/public/pluginapi and model files, and the `//go:build enterprise || sourceavailable` tags. I could not confirm `go vet ./...` workspace semantics without running Go.\n\nSimplifications:\n- The pin-coherence rules (38, 39) assert equality. The script accepts 'equal or more specific with a dot'. That is equivalent for the repo's full x.y.z pins but would reject a bare-major .nvmrc.\n- e2e test methods were taken one per unit (R1). In unit 65, the test inspects only the first step whose run mentions /statuses/${COMMIT_SHA}; the rule checks every such step.\n\nExcluded, not units:\n- The PR release-note block required by AGENTS.md:13 and the PR template, because it concerns the PR body, not the repository.\n- i18n-ci check-files and codecov statuses, because they are warnings or informational only.\n- The automation-only workflows (docs-gap, pr-test-analysis, conflicts-babysit, migration-automation, config-change PR-description update and similar).\n- i18n-check, i18n-extract and mmgotool i18n check, because they are not run in CI.\n\nLine numbers:\n- Evidence line numbers for test_e2e_status_workflows.py methods are approximate method spans from reading the file.\n- The Makefile, workflow, checker and analyzer lines were read directly.\n\nVerification and cleanup:\n- R4 fire tests ran on scratch copies holding only the files each rule reads, as described per unit. I also confirmed that the C rules for glossary term sets, key order, closed field sets, migrations.list orphans, concurrentIndex, naming and engines.npm fire when broken.\n- The scratch directory <scratch>/mattermost-mattermost-a/ was removed. The clone was never modified.",
+ "stage_c": {
+  "changes": [
+   {
+    "rule_id": "mattermost-supported-locales-match-languages-map",
+    "unit": "mattermost-b02",
+    "action": "added",
+    "detail": "C. cross_file set_equals: i18n.go regex (?m)^\\t\"([^\"]+)\",$ (exactly the 29 supportedLocales lines, 74-102, at the pin) against i18n.ts regex value: '([^']+)' (29 matches). Passes on the clone. Scratch: deleting the \"de\" line from i18n.go gave 0 -> 1, and changing value 'de' to 'xx' in i18n.ts gave 0 -> 1. Comment records the one-layout regex and that set_equals ignores duplicates."
+   },
+   {
+    "rule_id": "mattermost-cursor-go-pin",
+    "unit": "mattermost-b03",
+    "action": "added",
+    "detail": "A. cross_file equals: server/.go-version against .cursor/Dockerfile (?m)^ARG GO_VERSION=(\\S+). Passes on the clone (both 1.26.10). Scratch with only those 2 files: GO_VERSION 1.26.9 gave 0 -> 1, and .go-version 1.26.11 gave 0 -> 1."
+   },
+   {
+    "rule_id": "mattermost-cursor-node-line",
+    "unit": "mattermost-b04",
+    "action": "added",
+    "detail": "A. cross_file equals with normalize: semver-minor, reading 'on the .nvmrc line (currently 24.11)' as the same major.minor: .nvmrc against .cursor/Dockerfile ARG NODE_VERSION. Passes on the clone. Scratch with only those 2 files: NODE_VERSION 24.12.0 gave 0 -> 1, and .nvmrc 22.11.1 gave 0 -> 1. NODE_VERSION 24.11.5 (same line) stayed at 0, as intended."
+   },
+   {
+    "rule_id": "mattermost-webapp-lock-engines-node",
+    "unit": "mattermost-b10",
+    "action": "added",
+    "detail": "A. cross_file equals: .nvmrc against webapp/package-lock.json $.packages[''].engines.node. Passes on the clone (24.11.1). Scratch with only .nvmrc and the lockfile: lock engines.node 24.10.0 gave 0 -> 1, and .nvmrc 24.12.0 gave 0 -> 1."
+   },
+   {
+    "rule_id": "mattermost-webapp-lock-engines-npm",
+    "unit": "mattermost-b10",
+    "action": "added",
+    "detail": "A. cross_file equals: webapp/package.json $.engines.npm against the lock's $.packages[''].engines.npm. Passes on the clone (11.6.2). Scratch with only package.json and the lockfile: lock engines.npm 11.6.0 gave 0 -> 1, and package.json engines.npm 11.7.0 gave 0 -> 1."
+   },
+   {
+    "rule_id": "mattermost-webapp-lock-workspace-lockstep",
+    "unit": "mattermost-46",
+    "action": "added",
+    "detail": "A, scope extension from Stage B's config issue. webapp/scripts/update-versions.sh also rewrites package-lock.json packages[<workspace>].version and their @mattermost/* deps. Two lockfile targets are anchored on version.go versions[0]. Passes on the clone. Scratch with only version.go and the lockfile: platform/types lock version 12.1.0 gave 0 -> 1; the channels lock dep @mattermost/types set to ^12.2.0 gave 0 -> 1; a newest version.go entry of 12.3.0 gave 0 -> 14 (6 workspace versions plus 8 @mattermost/* references)."
+   },
+   {
+    "rule_id": "mattermost-webapp-workspace-versions-lockstep",
+    "unit": "mattermost-46",
+    "action": "comment",
+    "detail": "Added Stage B's note: anchoring on version.go versions[0] is an inference (the script takes the version as an argument), and it holds at the pin (12.2.0). The rule is unchanged and still passes."
+   },
+   {
+    "rule_id": "mattermost-lifecycle-entry-has-eol",
+    "unit": "mattermost-b09",
+    "action": "added",
+    "detail": "C. file_content_forbidden over server/public/model/version_lifecycle.go, using Stage B's regex for an entry with no EOLDate. Passes on the clone. Scratch: removing 11.9's EOLDate gave 0 -> 1 (version_lifecycle.go:33). Comment notes it does not catch an explicit zero time.Time."
+   },
+   {
+    "rule_id": "mattermost-lifecycle-oldest-is-esr",
+    "unit": "mattermost-b09",
+    "action": "added",
+    "detail": "C. file_content_matches: the last releaseLifecycles entry, followed by the closing }, carries ESR: true. Passes on the clone. Scratch: removing 10.11's ESR: true gave 0 -> 1."
+   },
+   {
+    "rule_id": "mattermost-webapp-i18n-keys-sorted",
+    "unit": "mattermost-15",
+    "action": "demoted",
+    "detail": "Stage B removed unit 15 as an R1 duplicate of mattermost-16 (D): check_icu.mjs:159-173 is one canonical-form comparison. The rule was moved to the VALUE-ADD section as VA4 at level info. Its comment names the limitation: a line-regex read of JSON keys, order half only. It passes on the clone."
+   },
+   {
+    "rule_id": "mattermost-server-i18n-no-blank-translation",
+    "unit": "mattermost-05",
+    "action": "comment",
+    "detail": "A -> C comment added at both 05 rules. mmgotool i18n.go:1021-1026 warns and continues for an id absent from en.json before the blank check, which I confirmed by reading. Reproduced: in a scratch de.json, setting the extra id app.import.validate_reaction_import_data.emoji_name_length.error (absent from en.json) to '  ' fired the rule (0 -> 1), while mmgotool would only warn. No native filter excludes ids absent from another file, so the rule is unchanged at error."
+   },
+   {
+    "rule_id": "mattermost-server-i18n-no-blank-plural-form",
+    "unit": "mattermost-05",
+    "action": "comment",
+    "detail": "Shares the 05 LIMITATION comment: the empty-plural check at i18n.go:1096 is also skipped for extra ids. I did not re-run the plural-form false positive myself; Stage B reproduced it. Unchanged at error."
+   },
+   {
+    "rule_id": "mattermost-webapp-i18n-values-are-strings",
+    "unit": "mattermost-14",
+    "action": "comment",
+    "detail": "A -> C comment added. check_icu.mjs:182-186 continues on an extra key before the string check, which I confirmed by reading. Reproduced: setting de.json extra key admin.accessibility.next_page (absent from en.json) to {\"one\":\"x\"} fired it (0 -> 1). catalog-is-object and en-default-message-strings are noted as exact. All three are unchanged at error."
+   },
+   {
+    "rule_id": "mattermost-webapp-i18n-no-blank-values",
+    "unit": "mattermost-17",
+    "action": "comment",
+    "detail": "A -> C comment added. Reproduced: setting de.json extra key admin.accessibility.next_page to \"\" fired the rule (0 -> 1), while check_icu only warns. The comment also records the untested U+FEFF/U+0085 trim-vs-\\s difference. Unchanged at error."
+   },
+   {
+    "rule_id": "mattermost-workflows-lf",
+    "unit": "mattermost-54",
+    "action": "comment",
+    "detail": "Stage B suggested that yamllint new-lines checks only the first line's terminator. That is unverified: yamllint is not installed on this host and nothing was fetched. The rule is unchanged, and a comment gives the faithful first-line-only form (file_content_forbidden '\\A[^\\n]*\\r\\n') to use if the behaviour is confirmed. It still passes on the clone."
+   },
+   {
+    "rule_id": "mattermost-webapp-i18n-filename-locale-tag",
+    "unit": "mattermost-12",
+    "action": "comment",
+    "detail": "Added Stage B's known gap from ECMA-402, not fire-tested: the grammar accepts duplicate variants and duplicate extension singletons that Intl.getCanonicalLocales rejects. Rust regex has no backreferences, so this cannot be fixed. No such file at the pin, and the rule is unchanged."
+   },
+   {
+    "rule_id": "(header comment)",
+    "unit": "all",
+    "action": "comment",
+    "detail": "Updated the header's catalogue summary for Stage B: b01-b10 added, 05/14/17 A -> C, 88 D -> B-adapter, 15 removed. Stage B's proposed counts are 122 units: A 33, C 19, B-config 7, B-adapter 20, B-delegate 3, D 40 (the integrator decides). Also updated the not-expressed list and the expected check note."
+   },
+   {
+    "rule_id": "(none)",
+    "unit": "mattermost-b01",
+    "action": "not-done",
+    "detail": "B-config set (supportedLocales against both catalog directories, two-way), so no rule was added. Stage B's partial one-way registered rule was not added as value-add."
+   },
+   {
+    "rule_id": "(none)",
+    "unit": "mattermost-88",
+    "action": "not-done",
+    "detail": "Stage B moves it D -> B-adapter (base-revision). It had no rule, so nothing was kept or demoted."
+   },
+   {
+    "rule_id": "(none)",
+    "unit": "mattermost-24/25/31/34",
+    "action": "not-done",
+    "detail": "Evidence drift is confirmed: EN_FIELDS, EN_REQUIRED, PARTS_OF_SPEECH, LOCALE_FIELDS and STYLE_FIELDS are at i18n/scripts/check_glossary.mjs:24-28, not :20-24. This is a fix to the stratum record's evidence; the config comments cite no line numbers there, so the config needed no change."
+   },
+   {
+    "rule_id": "(none)",
+    "unit": "mattermost-b05, b06, b07, b08",
+    "action": "not-done",
+    "detail": "D or B-adapter (version-compare), so no rule per instructions."
+   }
+  ],
+  "unit_notes": [
+   {
+    "id": "mattermost-05",
+    "suggested_bucket": "C",
+    "note": "Stage B's A -> C is confirmed. Both rules apply to every non-en entry, but mmgotool skips ids absent from en.json (a warning) before the blank checks (i18n.go:1021-1026). I reproduced a false positive on an extra id. No native cross-file key join can scope it, so the rules stay at error as a C expression."
+   },
+   {
+    "id": "mattermost-14",
+    "suggested_bucket": "C",
+    "note": "Stage B's A -> C is confirmed. values-are-strings fires on a non-string extra key that check_icu.mjs:182-186 only warns about. I reproduced this. It cannot be fixed natively; the other two rules of the unit are exact."
+   },
+   {
+    "id": "mattermost-17",
+    "suggested_bucket": "C",
+    "note": "Stage B's A -> C is confirmed. no-blank-values fires on a blank extra key that check_icu only warns about. I reproduced this, and it cannot be fixed natively."
+   },
+   {
+    "id": "mattermost-15",
+    "suggested_bucket": "removed (R1 duplicate of mattermost-16, D)",
+    "note": "The rule is kept only as value-add VA4 at level info, outside the ratio."
+   },
+   {
+    "id": "mattermost-54",
+    "suggested_bucket": "A (C if yamllint new-lines is confirmed first-line-only)",
+    "note": "I could not verify Stage B's claim offline, so the rule is unchanged. If yamllint inspects only the first line, line_endings lf is stricter than the source. The faithful form would then be file_content_forbidden '\\A[^\\n]*\\r\\n', or the unit should be C."
+   },
+   {
+    "id": "mattermost-b10",
+    "suggested_bucket": "A",
+    "note": "Added as two rules, mattermost-webapp-lock-engines-node and -npm, both fire-verified. Under R1 the integrator may fold this unit into 38/40 as a scope extension instead of counting a separate unit."
+   },
+   {
+    "id": "mattermost-46",
+    "suggested_bucket": "A",
+    "note": "Bucket unchanged. Scope extended with mattermost-webapp-lock-workspace-lockstep (the lockfile half of update-versions.sh), fire-verified. The anchor on version.go remains an inference that holds at the pin."
+   }
+  ],
+  "validate_output": "✓ Config valid: 98 rule(s) loaded from docs/design/v0.12/corpus/mattermost-mattermost.alint.yml",
+  "check_output": "Exit 0. Output: \"server/i18n/en.json: info: mattermost-va-server-en-descriptions: Value-add: every server en.json entry carries a non-empty description (server/AGENTS.md).\\n1 info.\" This is the expected value-add finding: entry app.import.validate_reaction_import_data.emoji_name_invalid.error has an empty description, so the convention is not enforced (R5). Every enforced-unit rule, all 8 new rules, and the demoted VA4 keys-sorted rule pass. `git -C <clone> status --porcelain` is empty, and HEAD = 69102aba22607b2fc21a72d1958373563650223d. The scratch directory <scratch>/mattermost-mattermost-c/ was removed."
+ }
+}

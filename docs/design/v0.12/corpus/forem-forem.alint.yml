@@ -1,0 +1,695 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
+#
+# alint v0.23 corpus-stratum config: forem/forem
+# Pinned @ 75faefce59112dd91df07f84c0b446f51088c911 (stratum: i18n)
+#
+# Shape: Ruby on Rails 8 monolith (bundler, vendored gems) + esbuild/Preact
+# front-end (Yarn 4 via a committed yarnPath, single root package) + a Rust
+# native extension (gems/forem_native). Rails YAML locales en/fr/pt under
+# config/locales (57 files per locale, many per-directory).
+#
+# Covers: the repository-state assertions forem enforces through rspec
+# examples that read committed files (spec/i18n_spec.rb's i18n-tasks checks,
+# spec/initializers/{assets,framework_defaults,honeybadger}_spec.rb,
+# spec/lib/constants/settings/user_experience_spec.rb, ...), the Ruby and Yarn
+# toolchain pins, and AGENTS.md conventions; plus clearly-marked value-add.
+#
+# WHERE THE ENFORCED VALIDATION LIVES
+#   .github/workflows/ci.yml  - build (assets:precompile) + 30 knapsack rspec
+#     shards. No lint job: rubocop/eslint/prettier/erb-lint are not run in CI,
+#     and .husky/pre-commit is fully commented out, so .lintstagedrc.js is
+#     dead config.
+#   spec/**  - the rspec suite (D) embeds bespoke file-shape validators; this
+#     config expresses the ones alint can (A/C below).
+#   spec/i18n_spec.rb  - i18n-tasks 1.0.15: `missing_keys` (types used, diff,
+#     plural) and `inconsistent_interpolations` are enforced; `unused_keys`
+#     and `non_normalized_paths` are `xit` (disabled), so not enforced.
+#   .github/workflows/forem-native.yml - cargo fmt/clippy/test + committed
+#     precompiled binary smoke test (D).
+#   .buildkite/pipeline.containers.yml - container builds (D), which also
+#     enforce the .ruby-version <-> base-image pin through Bundler.
+#
+# NOT EXPRESSIBLE TODAY (B, documented only; no rule):
+#   - i18n-tasks missing_diff over MERGED per-locale trees: forem places some
+#     keys in different files per locale (errors.messages.* lives in
+#     devise.en.yml but fr.yml; time.formats.devise.* in devise_invitable.en.yml
+#     but pt.yml), so the per-file model, 114 key_parity rules (57 en files x
+#     fr and pt; strip_root, plurals: cldr, date/devise/views ignored), gives
+#     8 false positives at HEAD. Needs parity over merged per-locale trees
+#     (B-config; assertion family cardinality in the reconciled record).
+#   - i18n-tasks missing_plural (per-locale CLDR categories) and
+#     inconsistent_interpolations (%{var} sets per key): B-adapter.
+#   - config/field_test.yml: <=1 active feed_strategy experiment (bounded
+#     count over map entries filtered by key prefix) and variant JSON
+#     references (key-prefix selector + path template): B-config.
+#   - Rails-8 gem floors read from Gemfile.lock (flipper >= 1.4.0,
+#     redis-actionpack >= 5.5.0): B-adapter (semver-range operator).
+#   - spec/liquid_tags/feature_tag_spec.rb: every FeatureTag::ICONS entry
+#     resolves to a non-empty app/assets/images/<icon>.svg (scoped extraction
+#     of a %w[] literal + path template): B-config, reference.
+#   - feature_tag_spec.rb:19: ICONS entries unique (no order-free uniqueness
+#     over an extracted list; ordered_block `unique: true` also forces a sort):
+#     B-config, unique-key. Its slug-format half is a partial rule below.
+#
+# Tooling note found while drafting: key_parity nested under for_each_file
+# fails with "internal error ... key_parity requires the relation read cache",
+# so per-file parity cannot be written as one templated rule.
+
+version: 1
+
+ignore:
+  # Vendored gem archives are third-party payloads, not sources forem
+  # validates. (.yarn/releases stays in the walk: forem-tp-yarnpath-resolves
+  # needs the committed release in the index.)
+  - "vendor/cache/**"
+
+extends:
+  # VALUE-ADD (R3/R5): exact toolchain-pin coherence. forem's Ruby pins
+  # (Gemfile.lock RUBY VERSION, forem-native.yml setup-ruby "3.3.0") agree
+  # with .ruby-version; no Node exact pins exist outside .nvmrc. The enforced
+  # Ruby unit (forem-tp-ruby-base-image) is a repo rule below because the
+  # bundle's Docker rule only scans **/Dockerfile*, and forem's base image
+  # lives in Containerfile (Dockerfile is a symlink to it).
+  - alint://bundled/toolchain-pins@v1
+
+rules:
+  # ════════════════════════════════════════════════════════════════
+  # LOCALE FAMILY
+  # ════════════════════════════════════════════════════════════════
+
+  # forem-05 (C, locale) spec/lib/constants/settings/user_experience_spec.rb
+  # "offers every locale that ships a translation file":
+  # Constants::Settings::UserExperience::SUPPORTED_LOCALES.keys must equal the
+  # DOT-FREE file stems of config/locales/*.yml (the spec rejects any stem
+  # containing "."; devise.en.yml etc. do not count). Two rules:
+  #   1. forem-locales-files-registered-by-stem: every dot-free stem is a
+  #      SUPPORTED_LOCALES key (files -> constant, by stem, any stem shape).
+  #   2. forem-locales-supported-match-files: the column-0 root keys of the
+  #      locale-shaped dot-free files equal the SUPPORTED_LOCALES keys
+  #      (constant -> files). Rails requires a locale file's single root key to
+  #      be its locale, so the root key stands in for the stem here; the
+  #      source is one glob, so it enumerates locale-shaped stems (ll, lll,
+  #      ll-CC, ll_CC) rather than "any dot-free stem". Column-0 (not
+  #      first-line) so a leading comment does not hide the root key.
+  # Both rules read the Ruby hash one entry per line. A one-line
+  # `SUPPORTED_LOCALES = { "en" => ..., "fr" => ... }.freeze` gives false
+  # findings although the spec passes, so the audit moved the unit to C.
+  - id: forem-locales-files-registered-by-stem
+    kind: for_each_file
+    select: ["config/locales/*.yml", "!config/locales/*.*.yml"]
+    require:
+      - kind: file_content_matches
+        paths: "app/lib/constants/settings/user_experience.rb"
+        pattern: '(?m)^[ \t]*"{stem}"[ \t]*=>'
+        message: >-
+          config/locales/{stem}.yml ships a translation file, so "{stem}" must
+          be a SUPPORTED_LOCALES key in
+          app/lib/constants/settings/user_experience.rb.
+    level: error
+  - id: forem-locales-supported-match-files
+    kind: cross_file
+    relation: set_equals
+    source:
+      files: "config/locales/{[a-z][a-z],[a-z][a-z][a-z],[a-z][a-z]-[A-Z][A-Z],[a-z][a-z]_[A-Z][A-Z]}.yml"
+      extract: { regex: '(?m)^([A-Za-z]{2,3}(?:[-_][A-Za-z0-9]+)*):[ \t]*\r?$' }
+    targets:
+      - file: "app/lib/constants/settings/user_experience.rb"
+        extract: { regex: '(?m)^[ \t]*"([A-Za-z]{2,3}(?:[-_][A-Za-z0-9]+)*)"[ \t]*=>' }
+    level: error
+    message: >-
+      SUPPORTED_LOCALES in app/lib/constants/settings/user_experience.rb must
+      list exactly the locales that ship a root config/locales/<locale>.yml.
+
+  # forem-b01 (A, locale) user_experience_spec.rb:16 "includes Portuguese":
+  # SUPPORTED_LOCALES must keep a "pt" key. Independent of forem-05: deleting
+  # the "pt" key together with every pt locale file keeps forem-05 green but
+  # fails this spec.
+  - id: forem-locales-supported-includes-pt
+    kind: file_content_matches
+    paths: "app/lib/constants/settings/user_experience.rb"
+    pattern: '(?s)SUPPORTED_LOCALES = \{[^}]*"pt"[ \t]*=>'
+    level: error
+    message: 'Constants::Settings::UserExperience::SUPPORTED_LOCALES must include "pt".'
+
+  # ════════════════════════════════════════════════════════════════
+  # DEP-VERSION FAMILY
+  # ════════════════════════════════════════════════════════════════
+
+  # forem-06 (A, dep-version) spec/initializers/assets_spec.rb:92
+  # "disables unnecessary postinstall build scripts for cypress, core-js, and
+  # core-js-pure": package.json dependenciesMeta.<pkg>.built must be false.
+  - id: forem-deps-meta-cypress-not-built
+    kind: json_path_equals
+    paths: "package.json"
+    path: "$.dependenciesMeta.cypress.built"
+    equals: false
+    level: error
+    message: "package.json dependenciesMeta.cypress.built must be false (no postinstall build)."
+  - id: forem-deps-meta-core-js-not-built
+    kind: json_path_equals
+    paths: "package.json"
+    path: "$.dependenciesMeta['core-js'].built"
+    equals: false
+    level: error
+    message: "package.json dependenciesMeta.core-js.built must be false (no postinstall build)."
+  - id: forem-deps-meta-core-js-pure-not-built
+    kind: json_path_equals
+    paths: "package.json"
+    path: "$.dependenciesMeta['core-js-pure'].built"
+    equals: false
+    level: error
+    message: "package.json dependenciesMeta.core-js-pure.built must be false (no postinstall build)."
+
+  # forem-b02 (A, dep-version) docs/rust_native_extensions.md:165
+  # "Regenerate psl_data.rs whenever bundle update public_suffix updates
+  # Gemfile.lock": the public_suffix version named in the generated header of
+  # gems/forem_native/crates/forem_core/src/psl_data.rs must equal the locked
+  # public_suffix gem version (the 4-space spec line in Gemfile.lock).
+  - id: forem-deps-psl-data-tracks-public-suffix
+    kind: cross_file
+    relation: equals
+    source:
+      file: "Gemfile.lock"
+      extract: { regex: '(?m)^    public_suffix \(([0-9]+\.[0-9]+\.[0-9]+)\)\r?$' }
+    targets:
+      - file: "gems/forem_native/crates/forem_core/src/psl_data.rs"
+        extract: { regex: '(?m)^//! Auto-generated ASCII rule table from `public_suffix` ([0-9]+\.[0-9]+\.[0-9]+) ' }
+    level: error
+    message: >-
+      gems/forem_native/crates/forem_core/src/psl_data.rs must be regenerated
+      from the public_suffix version locked in Gemfile.lock.
+
+  # ════════════════════════════════════════════════════════════════
+  # TOOLCHAIN-PIN FAMILY
+  # ════════════════════════════════════════════════════════════════
+
+  # forem-10 (A, toolchain-pin) Gemfile line 5 `ruby File.read(".ruby-version")`
+  # makes Bundler refuse any other Ruby. CI's ruby/setup-ruby reads
+  # .ruby-version, so it agrees by construction; the container build
+  # (Buildkite scripts/build_containers.sh) runs `bundle install` inside
+  # FROM ghcr.io/forem/ruby:<v>, so that tag must equal .ruby-version.
+  - id: forem-tp-ruby-base-image
+    kind: cross_file
+    source:
+      file: ".ruby-version"
+      extract: { regex: '\A[ \t]*([0-9]+\.[0-9]+\.[0-9]+)[ \t]*\r?\n?\z' }
+    targets:
+      - file: "Containerfile"
+        extract: { regex: '(?m)^FROM[ \t]+ghcr\.io/forem/ruby:([0-9]+\.[0-9]+\.[0-9]+)(?:@sha256:[0-9a-f]{64})?[ \t]+(?i:as)[ \t]+base[ \t]*$' }
+    level: error
+    message: >-
+      The Containerfile base image ghcr.io/forem/ruby:<version> must carry the
+      Ruby in .ruby-version; the Gemfile's `ruby File.read(".ruby-version")`
+      makes `bundle install` fail in the container otherwise.
+
+  # forem-11 (A, toolchain-pin) spec/initializers/assets_spec.rb:83 "does not
+  # declare a conflicting packageManager or engines.yarn in package.json
+  # alongside .yarnrc.yml yarnPath", plus Yarn's own refusal to run when
+  # yarnPath does not exist (yarn install --immutable in ci.yml).
+  - id: forem-tp-yarnpath-pinned
+    kind: file_content_matches
+    paths: ".yarnrc.yml"
+    pattern: '(?m)^yarnPath: \.yarn/releases/yarn-4\.1\.0\.cjs[ \t]*$'
+    level: error
+    message: ".yarnrc.yml must pin `yarnPath: .yarn/releases/yarn-4.1.0.cjs`."
+  - id: forem-tp-yarnpath-resolves
+    kind: registry_paths_resolve
+    source: ".yarnrc.yml"
+    extract: { yaml: "$.yarnPath" }
+    base: lint_root
+    expect: file
+    level: error
+    message: "The .yarnrc.yml yarnPath release must be committed."
+  - id: forem-tp-no-package-manager-field
+    kind: json_path_absent
+    paths: "package.json"
+    path: "$.packageManager"
+    level: error
+    message: "package.json must not declare packageManager; Yarn is pinned by .yarnrc.yml yarnPath."
+  - id: forem-tp-no-engines-yarn
+    kind: json_path_absent
+    paths: "package.json"
+    path: "$.engines.yarn"
+    level: error
+    message: "package.json must not declare engines.yarn; Yarn is pinned by .yarnrc.yml yarnPath."
+
+  # ════════════════════════════════════════════════════════════════
+  # OTHER FAMILY: rspec examples that assert on committed files
+  # ════════════════════════════════════════════════════════════════
+
+  # forem-12 (A) AGENTS.md "Meta: AI Instruction Synchronization" + README:
+  # AGENTS.md, .cursorrules, .windsurfrules, .github/copilot-instructions.md
+  # must stay identical.
+  - id: forem-ai-instructions-identical
+    kind: cross_file
+    relation: identical
+    source: { file: "AGENTS.md" }
+    targets:
+      - file: ".cursorrules"
+      - file: ".windsurfrules"
+      - file: ".github/copilot-instructions.md"
+    level: error
+    message: "AI instruction files must be byte-identical copies of AGENTS.md."
+
+  # forem-13 (A) assets_spec.rb:13 "configures production.rb to use
+  # :terser_skip_builds as the JS compressor".
+  - id: forem-production-js-compressor
+    kind: file_content_matches
+    paths: "config/environments/production.rb"
+    pattern: 'config\.assets\.js_compressor = :terser_skip_builds'
+    level: error
+
+  # forem-14 (A) assets_spec.rb:101 "does not compile unused application.scss
+  # or leaf stylesheets in manifest.js".
+  - id: forem-assets-no-application-scss
+    kind: file_absent
+    paths: "app/assets/stylesheets/application.scss"
+    level: error
+  - id: forem-assets-manifest-no-stylesheet-dir
+    kind: file_content_forbidden
+    paths: "app/assets/config/manifest.js"
+    pattern: 'link_directory \.\./stylesheets \.css'
+    level: error
+  - id: forem-assets-manifest-links-minimal-css
+    kind: file_content_matches
+    paths: "app/assets/config/manifest.js"
+    pattern: '//= link minimal\.css'
+    level: error
+  - id: forem-assets-manifest-links-views-css
+    kind: file_content_matches
+    paths: "app/assets/config/manifest.js"
+    pattern: '//= link views\.css'
+    level: error
+  - id: forem-assets-manifest-links-crayons-css
+    kind: file_content_matches
+    paths: "app/assets/config/manifest.js"
+    pattern: '//= link crayons\.css'
+    level: error
+  - id: forem-assets-manifest-links-admin-css
+    kind: file_content_matches
+    paths: "app/assets/config/manifest.js"
+    pattern: '//= link admin\.css'
+    level: error
+  - id: forem-assets-manifest-links-ai-chat-css
+    kind: file_content_matches
+    paths: "app/assets/config/manifest.js"
+    pattern: '//= link ai_chat\.css'
+    level: error
+  - id: forem-assets-manifest-links-tags-css
+    kind: file_content_matches
+    paths: "app/assets/config/manifest.js"
+    pattern: '//= link tags\.css'
+    level: error
+  - id: forem-assets-manifest-links-s3-direct-upload-css
+    kind: file_content_matches
+    paths: "app/assets/config/manifest.js"
+    pattern: '//= link s3_direct_upload\.css'
+    level: error
+  - id: forem-assets-manifest-links-setup-mode-css
+    kind: file_content_matches
+    paths: "app/assets/config/manifest.js"
+    pattern: '//= link setup-mode\.css'
+    level: error
+  - id: forem-assets-manifest-links-feedback-messages-css
+    kind: file_content_matches
+    paths: "app/assets/config/manifest.js"
+    pattern: '//= link feedback_messages\.css'
+    level: error
+  - id: forem-assets-manifest-links-themes-dark-css
+    kind: file_content_matches
+    paths: "app/assets/config/manifest.js"
+    pattern: '//= link themes/dark\.css'
+    level: error
+  - id: forem-assets-manifest-links-preact-onboarding-modal-css
+    kind: file_content_matches
+    paths: "app/assets/config/manifest.js"
+    pattern: '//= link preact/onboarding-modal\.css'
+    level: error
+  - id: forem-assets-manifest-links-katex-css
+    kind: file_content_matches
+    paths: "app/assets/config/manifest.js"
+    pattern: '//= link katex\.css'
+    level: error
+
+  # forem-15 (A) assets_spec.rb:124 "does not include a committed bin/bundle
+  # binstub".
+  - id: forem-no-bin-bundle-binstub
+    kind: file_absent
+    paths: "bin/bundle"
+    level: error
+
+  # forem-16 (A) assets_spec.rb:128 "excludes test files from esbuild
+  # entryPoints".
+  - id: forem-esbuild-ignores-tests
+    kind: file_content_matches
+    paths: "esbuild.config.mjs"
+    pattern: 'ignore: \["\*\*/\*\.test\.\*", "\*\*/__tests__/\*\*"\]'
+    level: error
+
+  # forem-17 (A) assets_spec.rb:133 "configures esbuild tree-shaking plugin and
+  # avoids DateRangePicker barrel re-export".
+  - id: forem-esbuild-tree-shake-plugin
+    kind: file_content_matches
+    paths: "esbuild.config.mjs"
+    pattern: 'treeShakePlugin\(\)'
+    level: error
+  - id: forem-form-elements-barrel-no-date-range-picker
+    kind: file_content_forbidden
+    paths: "app/javascript/crayons/formElements/index.js"
+    pattern: 'DateRangePicker'
+    level: error
+
+  # forem-18 (A) assets_spec.rb:141 "keeps base.js lean by loading
+  # honeybadgerClient, commentsPage, and eventSignupButtons on demand".
+  - id: forem-base-js-lean
+    kind: file_content_forbidden
+    paths: "app/assets/javascripts/base.js.erb"
+    pattern: '@honeybadger-io/js/dist/browser/honeybadger\.js|//= require i18n'
+    level: error
+  - id: forem-no-legacy-comments-page-initializer
+    kind: file_absent
+    paths: "app/assets/javascripts/initializers/initializeCommentsPage.js.erb"
+    level: error
+  # Two rules, not one: a file_exists `paths` array means ANY-of.
+  - id: forem-lazy-pack-honeybadger-client-present
+    kind: file_exists
+    paths: "app/javascript/packs/honeybadgerClient.js"
+    level: error
+  - id: forem-lazy-pack-comments-page-present
+    kind: file_exists
+    paths: "app/javascript/packs/commentsPage.js"
+    level: error
+  - id: forem-layout-lazy-script-meta-honeybadger
+    kind: file_content_matches
+    paths: "app/views/layouts/application.html.erb"
+    pattern: 'meta name="honeybadger-script"'
+    level: error
+  - id: forem-layout-lazy-script-meta-comments
+    kind: file_content_matches
+    paths: "app/views/layouts/application.html.erb"
+    pattern: 'meta name="comments-page-script"'
+    level: error
+  - id: forem-layout-lazy-script-meta-event-signup
+    kind: file_content_matches
+    paths: "app/views/layouts/application.html.erb"
+    pattern: 'meta name="event-signup-buttons-script"'
+    level: error
+
+  # forem-19 (C) spec/initializers/honeybadger_spec.rb:100 "gates the
+  # honeybadger-script meta tag and data-honeybadger-key attributes on
+  # HONEYBADGER_JS_API_KEY": EXACTLY two guards in application.html.erb (an
+  # at-least-2 regex plus a no-3rd regex: the exact count is the awkward part),
+  # one in admin.html.erb, and the body-dataset check in base.js.erb.
+  - id: forem-honeybadger-guard-app-layout-at-least-2
+    kind: file_content_matches
+    paths: "app/views/layouts/application.html.erb"
+    pattern: '(?s)if ApplicationConfig\["HONEYBADGER_JS_API_KEY"\]\.present\?.*if ApplicationConfig\["HONEYBADGER_JS_API_KEY"\]\.present\?'
+    level: error
+  - id: forem-honeybadger-guard-app-layout-at-most-2
+    kind: file_content_forbidden
+    paths: "app/views/layouts/application.html.erb"
+    pattern: '(?s)if ApplicationConfig\["HONEYBADGER_JS_API_KEY"\]\.present\?.*if ApplicationConfig\["HONEYBADGER_JS_API_KEY"\]\.present\?.*if ApplicationConfig\["HONEYBADGER_JS_API_KEY"\]\.present\?'
+    level: error
+  - id: forem-honeybadger-guard-admin-layout
+    kind: file_content_matches
+    paths: "app/views/layouts/admin.html.erb"
+    pattern: 'if ApplicationConfig\["HONEYBADGER_JS_API_KEY"\]\.present\?'
+    level: error
+  - id: forem-honeybadger-base-js-dataset-check
+    kind: file_content_matches
+    paths: "app/assets/javascripts/base.js.erb"
+    pattern: 'if \(document\.body && document\.body\.dataset && document\.body\.dataset\.honeybadgerKey\)'
+    level: error
+
+  # forem-b03 (C) spec/models/ab_experiment_spec.rb:7-15,
+  #   app/models/ab_experiment.rb:18-20: CURRENT_FEED_STRATEGY_EXPERIMENT is
+  #   the first experiments key that starts with feed_strategy and has no
+  #   winner, and the spec needs it to exist.
+  #   C: layout-dependent (forem-19 precedent):
+  #   - A winner is an entry-level `    winner:` line, whatever its value, so
+  #     `winner: ~` / `null` / `false` count as a winner here but not in Ruby.
+  #   - Flow-style entries are not recognised.
+  - id: forem-feed-strategy-experiment-active
+    kind: file_content_matches
+    paths: config/field_test.yml
+    pattern: '(?m:^)  feed_strategy[^\s:#]*:[ \t]*(?:#[^\n]*)?(?:\n(?:    (?:[^w\n]|w[^i\n]|wi[^n\n]|win[^n\n]|winn[^e\n]|winne[^r\n]|winner[^:\n])[^\n]*|    (?:w|wi|win|winn|winne|winner)|[ \t]*|[ \t]*#[^\n]*))*(?:\n  [^ \n#]|\n[^ \n#]|\n?\z)'
+    level: error
+    message: "config/field_test.yml needs an active feed_strategy* experiment (one without a winner): AbExperiment::CURRENT_FEED_STRATEGY_EXPERIMENT is the first such key (ab_experiment_spec.rb)."
+
+  # forem-22 (C) spec/models/ab_experiment_spec.rb:18-26: at most one
+  #   feed_strategy* experiment has no winner. Forbids two active entries
+  #   (same entry regex as forem-b03, twice). The first alternative after
+  #   the first entry covers the case where its terminator already used the
+  #   "f" of the next key. C: same layout limits as forem-b03.
+  - id: forem-feed-strategy-experiment-at-most-one-active
+    kind: file_content_forbidden
+    paths: config/field_test.yml
+    pattern: '(?m:^)  feed_strategy[^\s:#]*:[ \t]*(?:#[^\n]*)?(?:\n(?:    (?:[^w\n]|w[^i\n]|wi[^n\n]|win[^n\n]|winn[^e\n]|winne[^r\n]|winner[^:\n])[^\n]*|    (?:w|wi|win|winn|winne|winner)|[ \t]*|[ \t]*#[^\n]*))*(?:\n  [^ \n#]|\n[^ \n#]|\n?\z)(?:eed_strategy[^\s:#]*:[ \t]*(?:#[^\n]*)?|(?s:.*?)\n  feed_strategy[^\s:#]*:[ \t]*(?:#[^\n]*)?)(?:\n(?:    (?:[^w\n]|w[^i\n]|wi[^n\n]|win[^n\n]|winn[^e\n]|winne[^r\n]|winner[^:\n])[^\n]*|    (?:w|wi|win|winn|winne|winner)|[ \t]*|[ \t]*#[^\n]*))*(?:\n  [^ \n#]|\n[^ \n#]|\n?\z)'
+    level: error
+    message: "config/field_test.yml allows at most one active feed_strategy* experiment; give the previous one a winner (ab_experiment_spec.rb)."
+
+  # forem-20 (A) framework_defaults_spec.rb:127,158: the obsolete
+  # new_framework_defaults_7_2.rb / _8_0.rb initializers stay removed.
+  - id: forem-no-obsolete-framework-defaults
+    kind: file_absent
+    paths:
+      - "config/initializers/new_framework_defaults_7_2.rb"
+      - "config/initializers/new_framework_defaults_8_0.rb"
+    level: error
+
+  # forem-21 (A) framework_defaults_spec.rb:257 "has the
+  # new_framework_defaults_8_1.rb initializer file present".
+  - id: forem-framework-defaults-8-1-present
+    kind: file_exists
+    paths: "config/initializers/new_framework_defaults_8_1.rb"
+    level: error
+
+  # forem-b07 (A) AGENTS.md:94, docs/rust_native_extensions.md:71,
+  # gems/forem_native/README.md:44: precompiled forem_native binaries are
+  # committed for all three documented platforms. forem-native.yml's
+  # FOREM_NATIVE_SKIP_BUILD load test backstops only x86_64-linux and
+  # arm64-darwin. Three rules, not one: a file_exists `paths` array is ANY-of.
+  - id: forem-native-binary-x86-64-linux
+    kind: file_exists
+    paths: "gems/forem_native/lib/forem_native/x86_64-linux/forem_native.so"
+    level: error
+  - id: forem-native-binary-arm64-darwin
+    kind: file_exists
+    paths: "gems/forem_native/lib/forem_native/arm64-darwin/forem_native.bundle"
+    level: error
+  - id: forem-native-binary-x86-64-darwin
+    kind: file_exists
+    paths: "gems/forem_native/lib/forem_native/x86_64-darwin/forem_native.bundle"
+    level: error
+
+  # forem-23 (A) spec/requests/search/feed_content_simple_spec.rb:6 reads
+  # app/serializers/homepage/article_serializer.rb and greps it.
+  - id: forem-homepage-serializer-title-finalized-for-feed
+    kind: file_content_matches
+    paths: "app/serializers/homepage/article_serializer.rb"
+    pattern: 'title_finalized_for_feed'
+    level: error
+  - id: forem-homepage-serializer-title-for-metadata
+    kind: file_content_matches
+    paths: "app/serializers/homepage/article_serializer.rb"
+    pattern: 'title_for_metadata'
+    level: error
+  - id: forem-homepage-serializer-status-conditional
+    kind: file_content_matches
+    paths: "app/serializers/homepage/article_serializer.rb"
+    pattern: 'article\.type_of == "status"'
+    level: error
+  - id: forem-homepage-serializer-no-title-finalized-attribute
+    kind: file_content_forbidden
+    paths: "app/serializers/homepage/article_serializer.rb"
+    pattern: 'attributes\(\s*:title_finalized'
+    level: error
+
+  # forem-b05 (A) feed_content_simple_spec.rb:18 "includes type_of in the
+  # ATTRIBUTES list": Homepage::ArticlesQuery::ATTRIBUTES (a %i[] literal)
+  # must contain :type_of. The regex is scoped to the literal's brackets.
+  - id: forem-homepage-query-attributes-type-of
+    kind: file_content_matches
+    paths: "app/queries/homepage/articles_query.rb"
+    pattern: '(?s)ATTRIBUTES = %i\[[^\]]*\btype_of\b[^\]]*\]'
+    level: error
+    message: "Homepage::ArticlesQuery::ATTRIBUTES must include :type_of."
+
+  # forem-24 (A) spec/liquid_tags/feature_tag_spec.rb:183 "documents the
+  # supported icons from the single source of truth".
+  - id: forem-editor-help-references-feature-icons
+    kind: file_content_matches
+    paths: "app/views/pages/_editor_liquid_help.en.html.erb"
+    pattern: 'FeatureTag::ICONS'
+    level: error
+
+  # forem-26 (C) feature_tag_spec.rb:187 "only demonstrates icons that
+  # actually render": every icon="..." used in a {% feature %} example in the
+  # editor help must be in FeatureTag::ICONS. Awkward: the target regex scrapes
+  # the one-word-per-line `%w[...]` literal but cannot be scoped to that block,
+  # so it also captures the bare `end` and `super` lines of feature_tag.rb
+  # (slightly lenient). Wants block-scoped / list-literal extraction.
+  - id: forem-documented-feature-icons-in-icons
+    kind: cross_file
+    relation: subset
+    source:
+      file: "app/views/pages/_editor_liquid_help.en.html.erb"
+      extract: { regex: '\{%\s*feature\b[^%]*icon="([a-z0-9-]+)"' }
+    targets:
+      - file: "app/liquid_tags/feature_tag.rb"
+        extract: { regex: '(?m)^    ([a-z0-9-]+)$' }
+    level: error
+    message: "Editor-help {% feature %} examples may only use icons listed in FeatureTag::ICONS."
+  # forem-26 (C), the spec's other half: `expect(documented).not_to
+  # be_empty`. The subset rule above passes vacuously when no example is left,
+  # so the help must keep at least one {% feature ... icon="<slug>" %} example
+  # (the spec's own scan regex).
+  - id: forem-documented-feature-icons-nonempty
+    kind: file_content_matches
+    paths: "app/views/pages/_editor_liquid_help.en.html.erb"
+    pattern: '\{%\s*feature\b[^%]*icon="[a-z0-9-]+"'
+    level: error
+    message: 'The editor help must demonstrate at least one {% feature ... icon="<slug>" %} example.'
+
+  # forem-49 (C) feature_tag_spec.rb:33 "resolves every legacy alias to a
+  # supported icon": LEGACY_ICON_ALIASES values must be in ICONS. Same
+  # awkwardness as forem-26 (target scrape cannot be scoped to the %w[]
+  # block, so `end`/`super` lines are also accepted).
+  - id: forem-legacy-icon-aliases-in-icons
+    kind: cross_file
+    relation: subset
+    source:
+      file: "app/liquid_tags/feature_tag.rb"
+      extract: { regex: '(?m)^[ \t]*"[a-z0-9-]+"[ \t]*=>[ \t]*"([^"]*)"' }
+    targets:
+      - file: "app/liquid_tags/feature_tag.rb"
+        extract: { regex: '(?m)^    ([a-z0-9-]+)$' }
+    level: error
+    message: "Every FeatureTag::LEGACY_ICON_ALIASES value must name an icon in FeatureTag::ICONS."
+
+  # Partial of forem-48 (B-config, unique-key; NOT counted as A):
+  # feature_tag_spec.rb:19 "contains only unique, slug-formatted names". The
+  # slug half is expressible: no character outside [a-z0-9-] and whitespace
+  # inside the ICONS %w[] literal. The uniqueness half is not: ordered_block
+  # `unique: true` would also impose a sort order the spec does not check.
+  - id: forem-feature-icons-slug-formatted
+    kind: file_content_forbidden
+    paths: "app/liquid_tags/feature_tag.rb"
+    pattern: 'ICONS = %w\[[a-z0-9\s-]*[^a-z0-9\s\]-]'
+    level: error
+    message: "FeatureTag::ICONS entries must match ICON_NAME_REGEXP (/\\A[a-z0-9-]+\\z/)."
+
+  # forem-27 (A) AGENTS.md "Modern Configuration: Prefer `include
+  # Sidekiq::Job` over `Sidekiq::Worker`" (upheld: 0 includes at HEAD).
+  - id: forem-sidekiq-job-not-worker
+    kind: file_content_forbidden
+    paths: ["app/**/*.rb", "lib/**/*.rb"]
+    pattern: 'include[ \t]+Sidekiq::Worker\b'
+    level: error
+
+  # forem-b04 (C) spec/lib/sidekiq/boot_memory_trimmer_spec.rb:15 "only lists
+  # directories that exist in the app": every
+  # Sidekiq::BootMemoryTrimmer::WEB_ONLY_EAGER_LOAD_EXCLUSIONS entry is an
+  # existing directory. Awkward: the %w[] literal is scraped by its 6-space
+  # indentation, not scoped to the block, so a future bare 6-space line in
+  # lib/sidekiq/boot_memory_trimmer.rb (e.g. a nested `end`) would false-fire.
+  # Wants block-scoped extraction.
+  - id: forem-sidekiq-eager-load-exclusions-exist
+    kind: registry_paths_resolve
+    source: "lib/sidekiq/boot_memory_trimmer.rb"
+    extract: { regex: '(?m)^      ([A-Za-z0-9_][A-Za-z0-9_./-]*)$' }
+    base: lint_root
+    expect: dir
+    level: error
+    message: "Every WEB_ONLY_EAGER_LOAD_EXCLUSIONS entry must be an existing directory."
+
+  # forem-28 (A) config/field_test.yml review checklist (load-bearing header
+  # comment): a feed experiment is named `feed_strategy_starting_CCYYMMDD`.
+  - id: forem-field-test-feed-experiment-naming
+    kind: for_each_match
+    paths: "config/field_test.yml"
+    select: '^  feed_strategy'
+    require:
+      matches:
+        - '^  feed_strategy_starting_[0-9]{8}:[ \t]*$'
+    level: error
+
+  # ════════════════════════════════════════════════════════════════
+  # VALUE-ADD (NOT in the enforced denominator, R3/R5)
+  # ════════════════════════════════════════════════════════════════
+
+  # Node major in the base image matches .nvmrc (no gate checks this; Yarn 4
+  # does not enforce package.json engines).
+  - id: forem-va-node-major-base-image
+    kind: cross_file
+    source:
+      file: ".nvmrc"
+      extract: { regex: '\A[ \t]*v?([0-9]+)\.' }
+    targets:
+      - file: "Containerfile.base"
+        extract: { regex: '(?m)^ARG NODE_MAJOR=([0-9]+)[ \t]*$' }
+    level: warning
+    message: "Containerfile.base NODE_MAJOR should match the .nvmrc major."
+
+  # engines.node lower bound tracks .nvmrc exactly (22.23.4 in both).
+  - id: forem-va-engines-node-floor-is-nvmrc
+    kind: cross_file
+    source:
+      file: ".nvmrc"
+      extract: { regex: '\A[ \t]*v?([0-9]+\.[0-9]+\.[0-9]+)' }
+    targets:
+      - file: "package.json"
+        extract: { regex: '(?m)"node":[ \t]*">=[ \t]*([0-9]+\.[0-9]+\.[0-9]+)' }
+    relation: equals
+    level: warning
+    message: "package.json engines.node should start at the .nvmrc version."
+
+  # Containerfile installs the Bundler that Gemfile.lock was BUNDLED WITH.
+  - id: forem-va-bundler-version
+    kind: cross_file
+    source:
+      file: "Gemfile.lock"
+      extract: { regex: '(?m)^BUNDLED WITH\r?\n[ \t]+([0-9]+\.[0-9]+\.[0-9]+)' }
+    targets:
+      - file: "Containerfile"
+        extract: { regex: '(?m)BUNDLER_VERSION=([0-9]+\.[0-9]+\.[0-9]+)' }
+    level: warning
+    message: "Containerfile BUNDLER_VERSION should equal Gemfile.lock BUNDLED WITH."
+
+  # The two Buildkite trigger scripts duplicate the container-path regex.
+  - id: forem-va-container-paths-regex-in-sync
+    kind: cross_file
+    source:
+      file: "scripts/build_containers.sh"
+      extract: { regex: "(?m)^CONTAINER_BUILD_PATHS_REGEX='([^']+)'" }
+    targets:
+      - file: "scripts/create_buildkite_pr_build.sh"
+        extract: { regex: "(?m)^CONTAINER_BUILD_PATHS_REGEX='([^']+)'" }
+    level: warning
+    message: "CONTAINER_BUILD_PATHS_REGEX must be identical in both Buildkite trigger scripts."
+
+  # Every English locale file has fr and pt siblings (bin/create_missing_locales
+  # convention). Not a gate: i18n-tasks compares merged trees.
+  - id: forem-va-locale-dir-siblings
+    kind: pair
+    primary: "config/locales/**/en.yml"
+    partner: "{dir}/fr.yml"
+    level: info
+  - id: forem-va-locale-dir-siblings-pt
+    kind: pair
+    primary: "config/locales/**/en.yml"
+    partner: "{dir}/pt.yml"
+    level: info
+
+  # Every concrete CODEOWNERS path resolves. EXPECTED FINDING at the pin:
+  # `podman-compose.yml` is listed but absent (the compose file is
+  # container-compose.yml). GitHub ignores dead CODEOWNERS entries, so no gate
+  # catches it.
+  - id: forem-va-codeowners-paths-resolve
+    kind: registry_paths_resolve
+    source: ".github/CODEOWNERS"
+    extract: { regex: '(?m)^([^#*\s][^\s*]*)[ \t]+@' }
+    base: lint_root
+    expect: any
+    level: info
+    message: "A CODEOWNERS entry names a path that does not exist."

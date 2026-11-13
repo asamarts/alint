@@ -1,0 +1,869 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
+#
+# alint v0.23 corpus-stratum config — cloudflare/workers-sdk
+# Pinned @ 3cea40b078519222db432b5edf827ddc3e629a2a (stratum: js-monorepo)
+#
+# Shape: TypeScript monorepo (pnpm 10 workspace with one default `catalog:`,
+# Turborepo), 161 workspace projects plus the root: 38 packages/* (wrangler, miniflare, C3,
+# the Vite and Vitest plugins, shared libraries, deployable workers),
+# 76 fixtures/* (private test fixtures), the vite-plugin playground and its 45
+# members, and tools/ (CI tooling). Changesets drive releases; Codeowners Plus gates review.
+#
+# WHERE THE ENFORCED VALIDATION LIVES
+#   test-and-check.yml "Checks" — tools/deployments/validate-changesets.ts, then
+#     `pnpm run check`, which chains the bespoke repo-state validators:
+#       check:fixtures          validate-fixtures.ts
+#       check:private-packages  validate-private-packages.ts
+#       check:package-deps      validate-package-dependencies.ts (after a build)
+#       check:catalog           validate-catalog-usage.ts
+#       check:pinned-deps       validate-pinned-dependencies.ts
+#       check:compat-date       update-default-compat-date.ts check
+#       check:deployments       deploy-non-npm-packages.ts check
+#       check:workflows         validate-action-pinning.ts
+#       lint-turbo.mjs
+#     and then turbo check:lint (oxlint), check:type (tsc), check:format
+#     (oxfmt), type:tests (tsc).
+#   test-and-check.yml test partitions, the E2E workflows, vite playgrounds,
+#     c3-e2e, other-node: tests (D). tools/test/__tests__ also asserts CI-config
+#     invariants (one of them static, expressed below).
+#   validate-pr-description.yml — PR body checkboxes and changeset presence.
+#   pnpm install --frozen-lockfile (install-dependencies composite action):
+#     packageManager / engines / workspace: and catalog: references / patches.
+#   Conventions: AGENTS.md (+ package AGENTS.md), CONTRIBUTING.md,
+#     .changeset/README.md, REVIEW.md, CODEOWNERS.md, .github/workflows/README.md,
+#     .github/VOUCHED.td header, .gitattributes.
+#
+# This config expresses the A and C units of the record: the fixture,
+# private-scope, deploy-script and npmPrerelease manifest checks; the
+# dependency pinning and deps.ts allowlist guard; workspace: and patch
+# references; catalog: references (C: catalog keys read by a line regex);
+# the default compat date vs the workerd pin (C: split per date component); the action-pinning and workflow conventions; lint-turbo's two
+# per-file checks; the changeset checks; the packageManager pin; the
+# documented conventions; and three CI tests that assert committed repo
+# state (Stage B units wsdk-b01..b03, classified by their logic under R7).
+# Rules marked VALUE-ADD are alint utility the repo
+# does not enforce (level info, outside the coverage ratio). Nothing here
+# spawns a process; no custom facts; no git-history kinds; no bundles extended.
+
+version: 1
+
+rules:
+  # ═══════════════════════════════════════════════════════════════════════
+  # check:fixtures — tools/deployments/validate-fixtures.ts
+  # Every fixtures/<dir>/package.json (dirs without one are skipped) must be
+  # private, carry no version, and be named @fixture/*. (A parse failure is
+  # the guard clause of the same script; alint reports it as an analysis
+  # failure on each rule.)
+  # ═══════════════════════════════════════════════════════════════════════
+
+  # wsdk-01 (A)
+  - id: wsdk-fixture-is-private
+    kind: json_path_equals
+    paths: ["fixtures/*/package.json"]
+    path: "$.private"
+    equals: true
+    level: error
+    message: 'Fixture package.json must set "private": true (validate-fixtures.ts).'
+
+  # wsdk-02 (A)
+  - id: wsdk-fixture-has-no-version
+    kind: json_path_absent
+    paths: ["fixtures/*/package.json"]
+    path: "$.version"
+    level: error
+    message: 'Fixture package.json must not declare a "version" (validate-fixtures.ts).'
+
+  # wsdk-03 (A)
+  - id: wsdk-fixture-name-scope
+    kind: json_path_matches
+    paths: ["fixtures/*/package.json"]
+    path: "$.name"
+    matches: '^@fixture/'
+    level: error
+    message: 'Fixture package names must start with "@fixture/" (validate-fixtures.ts).'
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # check:private-packages — validate-private-packages.ts
+  # wsdk-04 (A): every private package.json found by tinyglobby
+  # "**/package.json" (dot paths skipped by default) outside node_modules,
+  # fixtures, C3 templates, the vite playground and vendor/ is named
+  # @cloudflare/*. The root package.json is included, as in the script.
+  # ═══════════════════════════════════════════════════════════════════════
+  - id: wsdk-private-packages-cloudflare-scope
+    kind: json_path_absent
+    paths:
+      include: ["**/package.json"]
+      exclude:
+        - "**/node_modules/**"
+        - "fixtures/**"
+        - "packages/create-cloudflare/templates/**"
+        - "packages/vite-plugin-cloudflare/playground/**"
+        - "vendor/**"
+        - "**/.*/**"
+    path: "$[?$.private == true && !match($.name, '@cloudflare/.*')]"
+    level: error
+    message: 'A private package must be named "@cloudflare/..." (validate-private-packages.ts).'
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # check:package-deps — validate-package-dependencies.ts
+  # wsdk-05 (A, dep-version): a public packages/* package with any
+  # non-workspace `dependencies` entry must have scripts/deps.ts exporting
+  # EXTERNAL_DEPENDENCIES. Expressed by its contrapositive: a package dir
+  # without scripts/deps.ts has only workspace: dependencies (or is
+  # private); and each deps.ts declares the export.
+  # wsdk-06/07 (non-workspace deps listed in the allowlist / no stale
+  # allowlist entries) are B-adapter: 06 needs (key, value) rows of
+  # `dependencies` (keys whose value is not workspace:), and both need the
+  # string elements of one TS array literal (deps.ts also declares
+  # IGNORED_DIST_IMPORTS in the same shape), which no extractor scopes.
+  # wsdk-08 (dist imports declared) is D: it needs a build and esbuild.
+  #
+  # check:catalog — validate-catalog-usage.ts. wsdk-09 (B-adapter): a
+  # dependency whose name is a catalog key must use catalog:/workspace:/npm:
+  # (workerd exempt). Needs value-filtered dependency key rows and a
+  # disjointness relation; neither exists. Not written here.
+  # ═══════════════════════════════════════════════════════════════════════
+  - id: wsdk-external-deps-need-deps-ts
+    kind: for_each_dir
+    select: "packages/*"
+    when_iter: 'iter.has_file("package.json") and not iter.has_file("scripts/deps.ts")'
+    require:
+      - kind: json_path_absent
+        paths: "{path}/package.json"
+        path: "$.dependencies[?$.private != true && !match(@, 'workspace:.*')]"
+        message: >-
+          A published package with non-workspace dependencies needs
+          scripts/deps.ts with an EXTERNAL_DEPENDENCIES export
+          (validate-package-dependencies.ts).
+    level: error
+
+  # Known over-reach (Stage B, reproduced): this checks EVERY
+  # packages/*/scripts/deps.ts, but the script only reads deps.ts for a
+  # public package with at least one non-workspace dependency (:181 returns
+  # early otherwise). A private package, or a public one with only workspace:
+  # deps, whose deps.ts lacks the export fires here and passes the script.
+  # Neither case exists at the pin. Not narrowable today: the antecedent is
+  # package.json content and the consequent deps.ts content, nested rules
+  # have no disjunction, when_iter has no content predicates, and a
+  # scope_filter manifest `source:` is not templated by for_each_dir
+  # ("{path}/package.json" is read literally; probed, analysis failure).
+  - id: wsdk-deps-ts-exports-external-dependencies
+    kind: file_content_matches
+    paths: ["packages/*/scripts/deps.ts"]
+    pattern: '(?m)^export const EXTERNAL_DEPENDENCIES\b[^=]*=\s*\['
+    level: error
+    message: "scripts/deps.ts must export an EXTERNAL_DEPENDENCIES array (validate-package-dependencies.ts)."
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # check:pinned-deps — validate-pinned-dependencies.ts
+  # ═══════════════════════════════════════════════════════════════════════
+
+  # wsdk-10 (A, dep-version): every pnpm catalog entry is an exact
+  # MAJOR.MINOR.PATCH[-pre][+build] version, except @cloudflare/workers-types
+  # (CATALOG_PIN_EXCEPTIONS). JSONPath has no key selector, so the exception
+  # is written as "not equal to the value held under that key" — identical
+  # unless another entry carries the very same range string. That hole is
+  # closed by the companion rule below (Stage B): when the exception's value
+  # is not itself exact, no other entry may share it.
+  - id: wsdk-catalog-entries-pinned
+    kind: yaml_path_absent
+    paths: ["pnpm-workspace.yaml"]
+    path: "$.catalog[?@ != $.catalog['@cloudflare/workers-types'] && !match(@, '[0-9]+[.][0-9]+[.][0-9]+(-[0-9A-Za-z.-]+)?([+][0-9A-Za-z.-]+)?')]"
+    level: error
+    message: >-
+      Catalog entries in pnpm-workspace.yaml must be exact versions (not
+      ranges); the only exception is @cloudflare/workers-types
+      (validate-pinned-dependencies.ts).
+
+  # wsdk-10 companion: count(entries equal to the exception's value) > 1
+  # while that value is a range means some other catalog entry carries the
+  # same range and slipped past the by-value exception above.
+  - id: wsdk-catalog-pin-exception-not-shared
+    kind: yaml_path_absent
+    paths: ["pnpm-workspace.yaml"]
+    path: "$[?count($.catalog[?@ == $.catalog['@cloudflare/workers-types']]) > 1 && !match($.catalog['@cloudflare/workers-types'], '[0-9]+[.][0-9]+[.][0-9]+(-[0-9A-Za-z.-]+)?([+][0-9A-Za-z.-]+)?')]"
+    level: error
+    message: >-
+      A catalog entry other than @cloudflare/workers-types uses the same range
+      as that exception; catalog entries must be exact versions
+      (validate-pinned-dependencies.ts).
+
+  # wsdk-11 (A, dep-version): in every public packages/* manifest, each
+  # `dependencies` / `optionalDependencies` value is an exact version or a
+  # workspace:/catalog:/npm:/link:/file: specifier.
+  - id: wsdk-published-dependencies-pinned
+    kind: json_path_absent
+    paths: ["packages/*/package.json"]
+    path: "$.dependencies[?$.private != true && !match(@, '[0-9]+[.][0-9]+[.][0-9]+(-[0-9A-Za-z.-]+)?([+][0-9A-Za-z.-]+)?') && !match(@, '(workspace|catalog|npm|link|file):.*')]"
+    level: error
+    message: >-
+      Non-bundled dependencies of a published package must be pinned to an
+      exact version or use workspace:/catalog: (validate-pinned-dependencies.ts).
+
+  - id: wsdk-published-optional-dependencies-pinned
+    kind: json_path_absent
+    paths: ["packages/*/package.json"]
+    path: "$.optionalDependencies[?$.private != true && !match(@, '[0-9]+[.][0-9]+[.][0-9]+(-[0-9A-Za-z.-]+)?([+][0-9A-Za-z.-]+)?') && !match(@, '(workspace|catalog|npm|link|file):.*')]"
+    level: error
+    message: >-
+      optionalDependencies of a published package must be pinned to an exact
+      version or use workspace:/catalog: (validate-pinned-dependencies.ts).
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # check:compat-date — update-default-compat-date.ts check
+  # wsdk-12 (C, dep-version): DEFAULT_COMPAT_DATE ("YYYY-MM-DD") must equal
+  # the release date encoded in the catalog's workerd pin ("1.YYYYMMDD.n").
+  # A capture group is contiguous and `normalize:` has no digit-only
+  # transform, so the one equality is split into year/month/day rules.
+  # (The installed-workerd == catalog check, wsdk-13, reads node_modules: D.)
+  # ═══════════════════════════════════════════════════════════════════════
+  - id: wsdk-compat-date-year-matches-workerd
+    kind: cross_file
+    source:
+      file: pnpm-workspace.yaml
+      extract: { regex: '(?m)^[ \t]+workerd:[ \t]*"1\.([0-9]{4})[0-9]{4}\.[0-9]+"' }
+    targets:
+      - file: packages/workers-utils/src/default-compat-date.ts
+        extract: { regex: 'DEFAULT_COMPAT_DATE: CompatDate = "([0-9]{4})-[0-9]{2}-[0-9]{2}"' }
+    relation: equals
+    level: error
+    message: "DEFAULT_COMPAT_DATE year differs from the pinned workerd release (run `pnpm update:compat-date`)."
+
+  - id: wsdk-compat-date-month-matches-workerd
+    kind: cross_file
+    source:
+      file: pnpm-workspace.yaml
+      extract: { regex: '(?m)^[ \t]+workerd:[ \t]*"1\.[0-9]{4}([0-9]{2})[0-9]{2}\.[0-9]+"' }
+    targets:
+      - file: packages/workers-utils/src/default-compat-date.ts
+        extract: { regex: 'DEFAULT_COMPAT_DATE: CompatDate = "[0-9]{4}-([0-9]{2})-[0-9]{2}"' }
+    relation: equals
+    level: error
+    message: "DEFAULT_COMPAT_DATE month differs from the pinned workerd release (run `pnpm update:compat-date`)."
+
+  - id: wsdk-compat-date-day-matches-workerd
+    kind: cross_file
+    source:
+      file: pnpm-workspace.yaml
+      extract: { regex: '(?m)^[ \t]+workerd:[ \t]*"1\.[0-9]{6}([0-9]{2})\.[0-9]+"' }
+    targets:
+      - file: packages/workers-utils/src/default-compat-date.ts
+        extract: { regex: 'DEFAULT_COMPAT_DATE: CompatDate = "[0-9]{4}-[0-9]{2}-([0-9]{2})"' }
+    relation: equals
+    level: error
+    message: "DEFAULT_COMPAT_DATE day differs from the pinned workerd release (run `pnpm update:compat-date`)."
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # check:deployments — deploy-non-npm-packages.ts check
+  # wsdk-14 (A): a packages/* manifest with "workers-sdk": { "deploy": true }
+  # must define scripts.deploy. The filter selects the workers-sdk object
+  # when it deploys and the root has no scripts.deploy.
+  # ═══════════════════════════════════════════════════════════════════════
+  - id: wsdk-deployable-package-has-deploy-script
+    kind: json_path_absent
+    paths: ["packages/*/package.json"]
+    path: "$[?@.deploy == true && !$.scripts.deploy]"
+    level: error
+    message: 'A package with "workers-sdk": { "deploy": true } must have a "deploy" script (deploy-non-npm-packages.ts).'
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # check:workflows — tools/github-workflow-helpers/validate-action-pinning.ts
+  # wsdk-15 (A): every `uses:` line in .github/workflows/*.y{a,}ml and
+  # .github/actions/*/action.y{a,}ml is local (./, ../), first-party
+  # (actions/*), or pinned to a full 40-hex commit SHA. Same line regex as
+  # the script (USES_RE), so the same lines are checked.
+  # ═══════════════════════════════════════════════════════════════════════
+  - id: wsdk-third-party-actions-pinned-to-sha
+    kind: for_each_match
+    paths:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+      - ".github/actions/*/action.yml"
+      - ".github/actions/*/action.yaml"
+    select: '^\s*-?\s*uses:\s*(.+)$'
+    require:
+      matches:
+        - '^\s*-?\s*uses:\s*(?:\./|\.\./|actions/|[^@\s]+@[0-9a-f]{40}(?:\s|$))'
+    level: error
+    message: "Third-party GitHub Actions must be pinned to a full commit SHA (validate-action-pinning.ts)."
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # lint-turbo.mjs (node lint-turbo.mjs in `pnpm check`)
+  # ═══════════════════════════════════════════════════════════════════════
+
+  # wsdk-16 (A): vite-plugin playground members have no "build" script
+  # (they use "build:default").
+  - id: wsdk-playground-no-build-script
+    kind: json_path_absent
+    paths: ["packages/vite-plugin-cloudflare/playground/*/package.json"]
+    path: "$.scripts.build"
+    level: error
+    message: 'Vite plugin playground packages must not have a "build" script; use "build:default" (lint-turbo.mjs).'
+
+  # wsdk-18 (A): a workspace package with vitest.config.ts or
+  # vitest.config.mts has a "test:ci" script. Members per pnpm-workspace.yaml
+  # (the root package is filtered out by lint-turbo).
+  - id: wsdk-vitest-package-has-test-ci
+    kind: for_each_dir
+    select:
+      - "packages/*"
+      - "packages/vite-plugin-cloudflare/playground"
+      - "packages/vite-plugin-cloudflare/playground/*"
+      - "fixtures/*"
+      - "tools"
+    when_iter: 'iter.has_file("package.json") and (iter.has_file("vitest.config.ts") or iter.has_file("vitest.config.mts"))'
+    require:
+      - kind: json_path_matches
+        paths: "{path}/package.json"
+        path: "$.scripts['test:ci']"
+        matches: '\S'
+        message: 'A package with a vitest config must have a "test:ci" script (lint-turbo.mjs).'
+    level: error
+
+  # wsdk-17 is B-config (`set`, per Stage B: the dirs with a build script are
+  # a subset of the dirs whose turbo.json has non-empty tasks.build.outputs,
+  # a one-way inclusion between two named sets keyed by the same dir path).
+  # "A package with a build script has a turbo.json whose
+  # tasks.build.outputs is non-empty" joins two files. Only
+  # its guard (the turbo.json exists) is per-file expressible; kept as a
+  # PARTIAL approximation at info, outside the ratio.
+  - id: wsdk-build-script-has-turbo-json-partial
+    kind: for_each_dir
+    select:
+      - "packages/*"
+      - "packages/vite-plugin-cloudflare/playground"
+      - "packages/vite-plugin-cloudflare/playground/*"
+      - "fixtures/*"
+      - "tools"
+    when_iter: 'iter.has_file("package.json") and not iter.has_file("turbo.json")'
+    require:
+      - kind: json_path_absent
+        paths: "{path}/package.json"
+        path: "$.scripts.build"
+        message: "PARTIAL (B-config unit wsdk-17): a package with a build script needs a turbo.json declaring build outputs."
+    level: info
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # validate-changesets.ts (test-and-check.yml "Check the changesets" and
+  # changesets.yml before release). Changeset files: .changeset/*.md other
+  # than README.md.
+  # ═══════════════════════════════════════════════════════════════════════
+
+  # wsdk-19 (A): every package a changeset names is a releasable package
+  # under packages/* — public, or private with a deploy script. The source
+  # filter selects the manifest's own `name` value iff that condition holds.
+  - id: wsdk-changeset-packages-known
+    kind: cross_file
+    source:
+      files: "packages/*/package.json"
+      extract: { json: "$[?@ == $.name && ($.private != true || $.scripts.deploy)]" }
+    targets:
+      # Every .changeset/*.md except README.md (a target glob has no exclude).
+      files: ".changeset/{[!R]*,R[!E]*,RE[!A]*,REA[!D]*,READ[!M]*,READM[!E]*,README?*}.md"
+      extract: { regex: '(?m)^["'']?([^"''\s:]+)["'']?[ \t]*:[ \t]*(?:major|minor|patch|none)[ \t]*\r?$' }
+    relation: superset
+    allow_missing_target: true
+    level: error
+    message: "A changeset names an unknown package: it must be a public packages/* package or a private one with a deploy script (validate-changesets.ts)."
+
+  # wsdk-20 (A): a changeset may bump a package by `major` only if it is
+  # private, has workers-sdk.npmPrerelease, or is @cloudflare/vitest-plugin
+  # (the script's hard-coded one-off).
+  - id: wsdk-changeset-no-major-for-public-packages
+    kind: cross_file
+    source:
+      files: "packages/*/package.json"
+      extract: { json: "$[?@ == $.name && ($.private == true || $['workers-sdk'].npmPrerelease || $.name == '@cloudflare/vitest-plugin')]" }
+    targets:
+      # Every .changeset/*.md except README.md (a target glob has no exclude).
+      files: ".changeset/{[!R]*,R[!E]*,RE[!A]*,REA[!D]*,READ[!M]*,READM[!E]*,README?*}.md"
+      extract: { regex: '(?m)^["'']?([^"''\s:]+)["'']?[ \t]*:[ \t]*major[ \t]*\r?$' }
+    relation: superset
+    allow_missing_target: true
+    level: error
+    message: "Major version bumps are not allowed for this package (validate-changesets.ts; .changeset/README.md forbids wrangler majors)."
+
+  # wsdk-21 (A): each changeset parses (front matter fenced by ---) and every
+  # release type is major / minor / patch / none.
+  - id: wsdk-changeset-frontmatter-valid
+    kind: file_content_matches
+    paths:
+      include: [".changeset/*.md"]
+      exclude: [".changeset/README.md"]
+    pattern: '\A---\r?\n(?:[ \t]*["'']?[^"''\s:]+["'']?[ \t]*:[ \t]*(?:major|minor|patch|none)[ \t]*\r?\n)*---\r?\n'
+    level: error
+    message: "Changeset front matter must list `\"package\": major|minor|patch|none` entries between --- fences (validate-changesets.ts)."
+
+  # wsdk-22 (A): workers-sdk.npmPrerelease, when present, is an object whose
+  # tag is a string matching ^[A-Za-z][0-9A-Za-z-]*$ other than "latest" and
+  # whose numbered is a boolean (validate-changesets.ts, changeset-version.ts).
+  - id: wsdk-npm-prerelease-config-valid
+    kind: json_path_absent
+    paths: ["packages/*/package.json"]
+    path: "$[?@.npmPrerelease && (!match(@.npmPrerelease.tag, '[A-Za-z][0-9A-Za-z-]*') || @.npmPrerelease.tag == 'latest' || (@.npmPrerelease.numbered != true && @.npmPrerelease.numbered != false))]"
+    level: error
+    message: 'Invalid "workers-sdk".npmPrerelease: tag must match ^[A-Za-z][0-9A-Za-z-]*$ and not be "latest"; numbered must be a boolean.'
+
+  # wsdk-25 (C) — "the PR adds a .changeset/ file unless labelled
+  # ci:no-changeset-required" (validate-pr-description.ts). changeset_requires_path
+  # expresses the diff half, but it is a git-history kind (depth-1 clone,
+  # section 2.4), and the label bypass is GitHub state. Not written here.
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # Changeset authoring conventions (.changeset/README.md, REVIEW.md)
+  # ═══════════════════════════════════════════════════════════════════════
+
+  # wsdk-65 (C): no h1/h2/h3 headings in changeset content. The regex is
+  # fence-blind: a `# comment` line inside a fenced shell block would fire.
+  - id: wsdk-changeset-no-h1-h3
+    kind: file_content_forbidden
+    paths:
+      include: [".changeset/*.md"]
+      exclude: [".changeset/README.md"]
+    pattern: '(?m)^#{1,3}[ \t]'
+    level: warning
+    message: "Changeset content must not use h1-h3 headings; use h4 (####) or smaller (.changeset/README.md)."
+
+  # wsdk-66 (A): changeset titles carry no conventional-commit type prefix.
+  - id: wsdk-changeset-title-no-type-prefix
+    kind: file_content_forbidden
+    paths:
+      include: [".changeset/*.md"]
+      exclude: [".changeset/README.md"]
+    pattern: '\A---\r?\n(?:[^\n]*\n)*?---\r?\n\s*(?:feat|fix|chore|docs|refactor|perf|test|build|ci|style|revert)(?:\([^)\n]*\))?!?:\s'
+    level: warning
+    message: "Do not prefix changeset titles with a type such as fix: or feat: (REVIEW.md)."
+
+  # wsdk-67 (C): Wrangler config examples use wrangler.json(c), not
+  # wrangler.toml. Proxy: no ```toml fence, which also catches non-Wrangler
+  # TOML (no way to tell the two apart).
+  - id: wsdk-changeset-no-toml-examples
+    kind: file_content_forbidden
+    paths:
+      include: [".changeset/*.md"]
+      exclude: [".changeset/README.md"]
+    pattern: '(?m)^[ \t]*```[ \t]*toml\b'
+    level: warning
+    message: "Show Wrangler configuration examples as wrangler.json (JSONC), not wrangler.toml (.changeset/README.md)."
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # pnpm install --frozen-lockfile (install-dependencies composite action)
+  # ═══════════════════════════════════════════════════════════════════════
+
+  # wsdk-54 (A, toolchain-pin): CI's pnpm comes from the root packageManager
+  # (pnpm/action-setup runs with no `version` input), so it must be an exact
+  # pnpm pin. tools/test turbo-cache-inputs.test.ts also copies it.
+  - id: wsdk-package-manager-exact-pnpm
+    kind: json_path_matches
+    paths: ["package.json"]
+    path: "$.packageManager"
+    matches: '^pnpm@[0-9]+\.[0-9]+\.[0-9]+(\+sha(256|512)\.[0-9a-f]+)?$'
+    level: error
+    message: "Root packageManager must pin an exact pnpm version (pnpm/action-setup reads it)."
+
+  # wsdk-73 (A, dep-version): every workspace: dependency names a workspace
+  # project (ERR_PNPM_WORKSPACE_PKG_NOT_FOUND otherwise). Source unions the
+  # names of the members pnpm-workspace.yaml declares plus the root; each
+  # target is one member's set of keys whose value starts with workspace:.
+  # Limitation (Stage B, also wsdk-74): the member globs are copied from
+  # pnpm-workspace.yaml `packages:` because a cross_file glob cannot be read
+  # from a file. A member glob added there makes a workspace: ref to a
+  # package in the new dir fire until these globs are updated.
+  - id: wsdk-workspace-refs-resolve
+    kind: cross_file
+    source:
+      files: "{package.json,packages/*/package.json,packages/vite-plugin-cloudflare/playground/package.json,packages/vite-plugin-cloudflare/playground/*/package.json,fixtures/*/package.json,tools/package.json}"
+      extract: { json: "$.name" }
+    targets:
+      files: "{package.json,packages/*/package.json,packages/vite-plugin-cloudflare/playground/package.json,packages/vite-plugin-cloudflare/playground/*/package.json,fixtures/*/package.json,tools/package.json}"
+      extract: { regex: '"([^"]+)"\s*:\s*"workspace:' }
+    relation: superset
+    allow_missing_target: true
+    level: error
+    message: "A workspace: dependency must name a workspace project (pnpm install fails with ERR_PNPM_WORKSPACE_PKG_NOT_FOUND)."
+
+  # wsdk-74 (C, dep-version): every catalog: dependency names an entry of the
+  # default catalog (ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_SPEC otherwise).
+  # Awkward: no extractor emits map KEYS, so the catalog's names are read by
+  # a line regex over pnpm-workspace.yaml: EVERY two-space-indented mapping
+  # key, whatever its value (quoted, unquoted, any range form). Stage B
+  # showed the earlier value-gated regex ('"[\^~]?[0-9]') dropped an entry
+  # whose value was unquoted or a >= range and so false-fired on every
+  # manifest using it; this one does not. It over-captures the keys of
+  # allowBuilds, overrides, peerDependencyRules and patchedDependencies,
+  # which can only hide a miss (a catalog: ref to e.g. "sharp"), never fire.
+  # Targets: each member manifest's `"name": "catalog:..."` keys, plus the
+  # catalog:default reference in pnpm-workspace.yaml's own overrides
+  # ("@types/node>undici-types": "catalog:default"), whose catalog entry is
+  # the selector's last segment (after the final `>`, minus any @range).
+  # Member globs are hard-coded (see wsdk-73).
+  - id: wsdk-catalog-refs-resolve
+    kind: cross_file
+    source:
+      file: pnpm-workspace.yaml
+      extract: { regex: '(?m)^  ["'']?([^"''\s:#-][^"''\s:]*)["'']?[ \t]*:' }
+    targets:
+      files: "{package.json,packages/*/package.json,packages/vite-plugin-cloudflare/playground/package.json,packages/vite-plugin-cloudflare/playground/*/package.json,fixtures/*/package.json,tools/package.json,pnpm-workspace.yaml}"
+      extract: { regex: '["'']?(?:[^"''\s:>]+>)*((?:@[^"''\s@/>:]+/)?[^"''\s@>:]+)(?:@[^"''\s:]*)?["'']?[ \t]*:[ \t]*["'']?catalog:' }
+    relation: superset
+    allow_missing_target: true
+    level: error
+    message: "A catalog: dependency must name an entry of the pnpm-workspace.yaml catalog (pnpm install fails otherwise)."
+
+  # wsdk-72 (A): every patchedDependencies entry names an existing patch file
+  # (pnpm install fails on a missing patch).
+  - id: wsdk-patched-dependencies-exist
+    kind: registry_paths_resolve
+    source: pnpm-workspace.yaml
+    extract: { yaml: "$.patchedDependencies.*" }
+    expect: file
+    level: error
+    message: "pnpm-workspace.yaml patchedDependencies must point at an existing patch file."
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # Static half of tools/test/__tests__/c3-ci-gates.test.ts
+  # wsdk-45 (A): from the `frameworks-e2e:` job onward, c3-e2e.yml contains
+  # "needs: frameworks-e2e-shards", "if: always()" and a `run: |` script.
+  # (Executing that script per shard result is wsdk-44, D.)
+  # ═══════════════════════════════════════════════════════════════════════
+  - id: wsdk-c3-frameworks-gate-needs-shards
+    kind: file_content_matches
+    paths: [".github/workflows/c3-e2e.yml"]
+    pattern: '(?s)\n  frameworks-e2e:.*needs: frameworks-e2e-shards'
+    level: error
+    message: "The C3 frameworks gate job must depend on frameworks-e2e-shards (tools/test/__tests__/c3-ci-gates.test.ts)."
+
+  - id: wsdk-c3-frameworks-gate-always
+    kind: file_content_matches
+    paths: [".github/workflows/c3-e2e.yml"]
+    pattern: '(?s)\n  frameworks-e2e:.*if: always\(\)'
+    level: error
+    message: "The C3 frameworks gate job must run if: always() (tools/test/__tests__/c3-ci-gates.test.ts)."
+
+  - id: wsdk-c3-frameworks-gate-runs-check
+    kind: file_content_matches
+    paths: [".github/workflows/c3-e2e.yml"]
+    pattern: '(?s)\n  frameworks-e2e:.*\n {8}run: \|\n {10}\S'
+    level: error
+    message: "The C3 framework gate must execute a result check (tools/test/__tests__/c3-ci-gates.test.ts)."
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # CI tests that assert committed repository state (Stage B, R7: a test
+  # that reads committed files is classified by its logic). Run on every PR:
+  # test-and-check.yml "Run tests (tools only)" (@cloudflare/tools, :206) and
+  # "Run tests (packages)" (test:ci over ./packages/*, :219).
+  # Not written (no rule possible today):
+  #   wsdk-b04 (B-kernel) publish-packages.test.ts "the real workspace":
+  #     computeTiers(findPublishablePackages()) inline snapshot and tier
+  #     ordering; needs a package-name graph (wsdk-51's adapter gap) and a
+  #     topological-layering kernel. (The same test also runs computeTiers'
+  #     cycle check on every PR, which is wsdk-51's per-PR evidence.)
+  #   wsdk-b05 (B-adapter) oxfmt sortPackageJson: package.json key order;
+  #     no JSON key-order operator with a canonical order.
+  #   wsdk-b06 (B-adapter) oxlint workers-sdk/require-description-when-
+  #     disabling: a reason after `--` on every lint-disable comment; needs a
+  #     JS/TS comment-token extractor (a raw-text regex fails R4 on strings
+  #     and multi-line block comments).
+  # ═══════════════════════════════════════════════════════════════════════
+
+  # wsdk-b01 (A): no @default JSDoc tag in workers-utils' environment.ts
+  # starts its value with a backtick (packages/workers-utils/tests/config/
+  # configSchema.test.ts tests /@default\s+`/ per line; `[^\S\n]` keeps the
+  # match on one line, as the per-line split does).
+  - id: wsdk-environment-default-not-escaped
+    kind: file_content_forbidden
+    paths: ["packages/workers-utils/src/config/environment.ts"]
+    pattern: '@default[^\S\n]+`'
+    level: error
+    message: "@default values in src/config/environment.ts must not be escaped with backticks, or the config schema does not generate (configSchema.test.ts)."
+
+  # wsdk-b02 (A): the releasable set findPackages() computes (packages/*
+  # that are public or have a deploy script) equals the names hard-coded in
+  # tools/deployments/__tests__/validate-changesets.test.ts:23-58. Source is
+  # wsdk-19's selector; target is the test's 4-tab-indented string lines
+  # (all 34 of them sit in that list at the pin). Same JSONPath `== true`
+  # vs JS truthiness caveat as wsdk-19.
+  - id: wsdk-releasable-packages-match-test-list
+    kind: cross_file
+    source:
+      files: "packages/*/package.json"
+      extract: { json: "$[?@ == $.name && ($.private != true || $.scripts.deploy)]" }
+    targets:
+      files: "tools/deployments/__tests__/validate-changesets.test.ts"
+      extract: { regex: '(?m)^\t{4}"([^"]+)",$' }
+    relation: set_equals
+    level: error
+    message: "The releasable packages (public, or private with a deploy script) differ from the list in validate-changesets.test.ts; update the test when adding, publishing or deploying a package."
+
+  # wsdk-b03 (A, borderline instance-level per Stage B): getPublicPackages()
+  # run against the real repo must include wrangler, miniflare,
+  # create-cloudflare and @cloudflare/autoconfig and exclude
+  # @cloudflare/workers-shared (validate-package-dependencies.test.ts:713-737).
+  # Checked per package dir; the test matches by name.
+  - id: wsdk-known-packages-stay-public
+    kind: json_path_absent
+    paths:
+      - "packages/wrangler/package.json"
+      - "packages/miniflare/package.json"
+      - "packages/create-cloudflare/package.json"
+      - "packages/autoconfig/package.json"
+    path: "$[?$.private == true]"
+    level: error
+    message: "wrangler, miniflare, create-cloudflare and @cloudflare/autoconfig must stay public (validate-package-dependencies.test.ts)."
+
+  - id: wsdk-workers-shared-stays-private
+    kind: json_path_equals
+    paths: ["packages/workers-shared/package.json"]
+    path: "$.private"
+    equals: true
+    level: error
+    message: "@cloudflare/workers-shared must stay private (validate-package-dependencies.test.ts)."
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # Code ownership conventions (CODEOWNERS.md, CODEOWNERS header comment)
+  # ═══════════════════════════════════════════════════════════════════════
+
+  # wsdk-58 (A): the native CODEOWNERS holds exactly `* @workers-devprod`.
+  - id: wsdk-codeowners-single-bot-rule
+    kind: for_each_match
+    paths: ["CODEOWNERS"]
+    select: '^[^#\s]'
+    require:
+      matches: ['^\* @workers-devprod[ \t]*$']
+    level: error
+    message: "Do not add rules to CODEOWNERS; all ownership logic lives in .codeowners (CODEOWNERS.md)."
+
+  - id: wsdk-codeowners-has-bot-rule
+    kind: file_content_matches
+    paths: ["CODEOWNERS"]
+    pattern: '(?m)^\* @workers-devprod[ \t]*$'
+    level: error
+    message: "CODEOWNERS must keep `* @workers-devprod` so branch protection gates on the bot's approval (CODEOWNERS.md)."
+
+  # wsdk-59 (A): AND rules for packages/*-shared use `*/**`, not `**`, so
+  # root-level release files (CHANGELOG.md, package.json) stay wrangler-only.
+  - id: wsdk-codeowners-shared-packages-star-slash
+    kind: file_content_forbidden
+    paths: [".codeowners"]
+    pattern: '(?m)^&[ \t]+packages/[^/\s]*-shared/\*\*'
+    level: error
+    message: "For packages/*-shared use `*/**` instead of `**` in AND rules (CODEOWNERS.md)."
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # Workflow conventions (.github/workflows/README.md, "Security auditing")
+  # ═══════════════════════════════════════════════════════════════════════
+
+  # wsdk-60 (A): privileged triggers carry a targeted zizmor ignore with a reason.
+  - id: wsdk-privileged-triggers-documented
+    kind: for_each_match
+    paths: [".github/workflows/*.yml", ".github/workflows/*.yaml"]
+    select: '^\s*(?:pull_request_target|workflow_run)\s*:'
+    require:
+      matches: ['#\s*zizmor:\s*ignore\[dangerous-triggers\]\s+\S']
+    level: error
+    message: "A pull_request_target / workflow_run trigger needs a targeted `# zizmor: ignore[dangerous-triggers] <reason>` (.github/workflows/README.md)."
+
+  # wsdk-61 (A): actions/checkout v6 or newer (credentials under $RUNNER_TEMP).
+  - id: wsdk-checkout-v6-or-newer
+    kind: for_each_match
+    paths:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+      - ".github/actions/*/action.yml"
+      - ".github/actions/*/action.yaml"
+    select: 'uses:\s*actions/checkout@'
+    require:
+      matches: ['actions/checkout@(?:v(?:[6-9]|[1-9][0-9]+)\b|[0-9a-f]{40}\s+#\s*v(?:[6-9]|[1-9][0-9]+)\b)']
+    level: error
+    message: "Use actions/checkout v6 or newer (.github/workflows/README.md)."
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # .github/VOUCHED.td ("one GitHub username per line, without the @ prefix,
+  # sorted alphabetically"; a leading - denounces)
+  # ═══════════════════════════════════════════════════════════════════════
+
+  # wsdk-63 (A)
+  - id: wsdk-vouched-sorted
+    kind: ordered_block
+    paths: [".github/VOUCHED.td"]
+    select: '^[^#]'
+    comparator: lexical-ci
+    level: warning
+    message: "Keep .github/VOUCHED.td sorted alphabetically."
+
+  # wsdk-64 (A)
+  - id: wsdk-vouched-one-username-per-line
+    kind: for_each_match
+    paths: [".github/VOUCHED.td"]
+    select: '^[^#\s]'
+    require:
+      matches: ['^-?[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$']
+    level: warning
+    message: "One GitHub username per line, without the @ prefix (.github/VOUCHED.td)."
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # AGENTS.md conventions
+  # ═══════════════════════════════════════════════════════════════════════
+
+  # wsdk-68 (A): test-file suffix per package (package AGENTS.md files).
+  - id: wsdk-miniflare-tests-are-spec
+    kind: file_absent
+    paths: ["packages/miniflare/test/**/*.test.ts"]
+    level: warning
+    message: "Miniflare test files use .spec.ts, not .test.ts (packages/miniflare/AGENTS.md)."
+
+  - id: wsdk-vite-plugin-unit-tests-are-spec
+    kind: file_absent
+    paths: ["packages/vite-plugin-cloudflare/**/__tests__/**/*.test.ts"]
+    level: warning
+    message: "vite-plugin unit tests in __tests__/ use .spec.ts (packages/vite-plugin-cloudflare/AGENTS.md)."
+
+  - id: wsdk-vite-plugin-e2e-tests-are-test
+    kind: file_absent
+    paths: ["packages/vite-plugin-cloudflare/e2e/**/*.spec.ts"]
+    level: warning
+    message: "vite-plugin E2E tests use .test.ts (packages/vite-plugin-cloudflare/AGENTS.md)."
+
+  - id: wsdk-wrangler-tests-are-test
+    kind: file_absent
+    paths: ["packages/wrangler/src/**/*.spec.ts", "packages/wrangler/e2e/**/*.spec.ts"]
+    level: warning
+    message: "Wrangler test files use .test.ts, not .spec.ts (packages/wrangler/AGENTS.md)."
+
+  - id: wsdk-vitest-plugin-tests-are-test
+    kind: file_absent
+    paths: ["packages/vitest-plugin/**/*.spec.ts"]
+    level: warning
+    message: "vitest-plugin tests use .test.ts naming (packages/vitest-plugin/AGENTS.md)."
+
+  # wsdk-69 (A): every fixtures/vitest-plugin-examples/<example>/ has a
+  # tsconfig.json (root AGENTS.md; tsc-all.mjs type-checks each one).
+  - id: wsdk-vitest-plugin-examples-have-tsconfig
+    kind: for_each_dir
+    select: "fixtures/vitest-plugin-examples/*"
+    require:
+      - kind: file_exists
+        paths: "{path}/tsconfig.json"
+        message: "New examples under fixtures/vitest-plugin-examples/ need a tsconfig.json (AGENTS.md)."
+    level: warning
+
+  # wsdk-70 (A): text files use LF (.gitattributes `* text=auto eol=lf`,
+  # .editorconfig end_of_line = lf).
+  - id: wsdk-text-files-lf
+    kind: line_endings
+    target: lf
+    paths:
+      include: ["**/*.{ts,tsx,mts,cts,js,mjs,cjs,jsx,json,jsonc,md,yml,yaml,toml,html,css,sh,txt,patch,td}"]
+      exclude: ["**/node_modules/**"]
+    level: warning
+    message: "Text files must use LF line endings (.gitattributes eol=lf)."
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # VALUE-ADD (not enforced by the repository; outside the coverage ratio)
+  # ═══════════════════════════════════════════════════════════════════════
+
+  # VALUE-ADD (toolchain-pin): Volta's pnpm pin agrees with packageManager.
+  - id: wsdk-va-volta-pnpm-matches-package-manager
+    kind: cross_file
+    source:
+      file: package.json
+      extract: { regex: '"packageManager":\s*"pnpm@([0-9]+\.[0-9]+\.[0-9]+)' }
+    targets:
+      - file: package.json
+        extract: { json: "$.volta.pnpm" }
+    relation: equals
+    level: info
+    message: "VALUE-ADD: root volta.pnpm differs from packageManager."
+
+  # VALUE-ADD (toolchain-pin): c3-e2e's default pnpm matrix entries use the
+  # monorepo's pinned pnpm (the workflow's comments call it "the monorepo's
+  # pinned pnpm 10.33.0"); a drift is not detected by any step.
+  - id: wsdk-va-c3-default-pnpm-matches-package-manager
+    kind: cross_file
+    source:
+      file: package.json
+      extract: { regex: '"packageManager":\s*"pnpm@([0-9]+\.[0-9]+\.[0-9]+)' }
+    targets:
+      - file: .github/workflows/c3-e2e.yml
+        extract: { yaml: "$..[?@.label == 'pnpm'].version" }
+    relation: equals
+    level: info
+    message: "VALUE-ADD: c3-e2e's default pnpm matrix version differs from packageManager."
+
+  # VALUE-ADD (toolchain-pin): Wrangler's runtime Node floor (bin shim and
+  # banner) agrees with its engines.node.
+  - id: wsdk-va-wrangler-min-node-matches-engines
+    kind: cross_file
+    source:
+      file: packages/wrangler/package.json
+      extract: { regex: '"node":\s*">=([0-9]+\.[0-9]+\.[0-9]+)"' }
+    targets:
+      - file: packages/wrangler/bin/wrangler.js
+        extract: { regex: 'const MIN_NODE_VERSION = "([0-9.]+)"' }
+      - file: packages/wrangler/src/wrangler-banner.ts
+        extract: { regex: 'const MIN_NODE_VERSION = "([0-9.]+)"' }
+    relation: equals
+    level: info
+    message: "VALUE-ADD: Wrangler's MIN_NODE_VERSION differs from engines.node."
+
+  # VALUE-ADD (toolchain-pin): quick-edit's Node major (.nvmrc, .node-version)
+  # agrees with the Node that changesets.yml switches to for non-npm deploys
+  # (setup.sh refuses any major but 22 at run time; this catches it early).
+  - id: wsdk-va-quick-edit-node-major-coherent
+    kind: cross_file
+    source:
+      file: packages/quick-edit/.nvmrc
+      extract: { regex: '\A[ \t]*v?([0-9]+)' }
+    targets:
+      - file: packages/quick-edit/.node-version
+        extract: { regex: '\A[ \t]*v?([0-9]+)' }
+      - file: .github/workflows/changesets.yml
+        extract: { yaml: "$.jobs.release.steps[?match(@.name, 'Switch to Node.*')].with['node-version']" }
+    relation: equals
+    normalize: [semver-major]
+    level: info
+    message: "VALUE-ADD: quick-edit's Node major differs across .nvmrc, .node-version and the changesets.yml deploy step."
+
+  # VALUE-ADD (dep-version): workerd and @cloudflare/workers-types are kept
+  # in lock-step by one Dependabot group; their catalog pins share a date.
+  - id: wsdk-va-workerd-workers-types-same-date
+    kind: cross_file
+    source:
+      file: pnpm-workspace.yaml
+      extract: { regex: '(?m)^[ \t]+workerd:[ \t]*"1\.([0-9]{8})\.[0-9]+"' }
+    targets:
+      - file: pnpm-workspace.yaml
+        extract: { regex: '(?m)^[ \t]+"@cloudflare/workers-types":[ \t]*"\^?[0-9]+\.([0-9]{8})\.[0-9]+"' }
+    relation: equals
+    level: info
+    message: "VALUE-ADD: the workerd and @cloudflare/workers-types catalog pins are from different release dates."
+
+  # VALUE-ADD: every workflow / composite-action reference is immutable,
+  # including first-party actions/* (which validate-action-pinning.ts
+  # exempts; they are all SHA-pinned at the pin anyway).
+  - id: wsdk-va-all-action-refs-pinned
+    kind: pinned_references
+    paths:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+      - ".github/actions/*/action.yml"
+      - ".github/actions/*/action.yaml"
+    level: info
+    message: "VALUE-ADD: pin every action reference, first-party included, to a full commit SHA."
+
+  # VALUE-ADD (dep-version): only pnpm's lockfile is committed (AGENTS.md
+  # "Use pnpm, not npm or yarn").
+  - id: wsdk-va-only-pnpm-lockfile
+    kind: file_absent
+    paths: ["**/package-lock.json", "**/yarn.lock", "**/bun.lock", "**/bun.lockb", "**/npm-shrinkwrap.json"]
+    level: info
+    message: "VALUE-ADD: use pnpm; do not commit npm/yarn/bun lockfiles."
+
+  # VALUE-ADD: the Codeowners Plus settings CODEOWNERS.md documents.
+  - id: wsdk-va-codeowners-plus-settings
+    kind: toml_path_equals
+    paths: ["codeowners.toml"]
+    path: "$.enforcement.approval"
+    equals: true
+    level: info
+    message: "VALUE-ADD: codeowners.toml enforcement.approval must stay true (CODEOWNERS.md)."

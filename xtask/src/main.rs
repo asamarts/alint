@@ -32,8 +32,8 @@
 //! - `gen-model`          — regenerate the code-derived `LikeC4` model fragments
 //!   (the rule-kind taxonomy, ...) for the architecture diagrams; `--check`
 //!   gates drift.
-//! - `corpus-replay`      — run `alint check` over the 110-repository v0.12
-//!   corpus at its pinned commits, optionally diffing two binaries' reports.
+//! - `corpus-replay`      — run `alint check` over the case-study corpus at its
+//!   pinned commits, optionally diffing two binaries' reports.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -338,8 +338,8 @@ enum Commands {
         #[arg(long)]
         check: bool,
     },
-    /// Run `alint check` over the v0.12 case-study corpus (110 repositories at
-    /// the commits in `docs/design/v0.12/corpus/pins.tsv`), with spawning rules
+    /// Run `alint check` over the case-study corpus (every repository at its
+    /// commit in `docs/design/v0.12/corpus/pins.tsv`), with spawning rules
     /// removed. `--compare` diffs a second binary's reports and fails on any
     /// difference. Fetches into `--cache` on first use (network).
     CorpusReplay(corpus_replay::Args),

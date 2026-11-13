@@ -1,0 +1,1644 @@
+{
+ "repo": "signalapp/Signal-Desktop",
+ "sha": "848443afc3fcc74a0e127ba4f4d8554b95da856e",
+ "metrics": {
+  "counts": {
+   "A": 12,
+   "B-config": 0,
+   "B-adapter": 2,
+   "B-kernel": 0,
+   "B-delegate": 1,
+   "C": 13,
+   "D": 46
+  },
+  "addressable": 28,
+  "coverage_today": 43,
+  "coverage_with_tuning": 89,
+  "gap": 11,
+  "coverage_after_slice": 43,
+  "coverage_after_slice_with_entry_values": 43
+ },
+ "by_family": {
+  "locale": {
+   "counts": {
+    "A": 2,
+    "B-config": 0,
+    "B-adapter": 1,
+    "B-kernel": 0,
+    "B-delegate": 1,
+    "C": 9,
+    "D": 2
+   },
+   "addressable": 13,
+   "coverage_today": 15,
+   "coverage_with_tuning": 85,
+   "gap": 15,
+   "coverage_after_slice": 15,
+   "coverage_after_slice_with_entry_values": 15
+  },
+  "dep-version": {
+   "counts": {
+    "A": 1,
+    "B-config": 0,
+    "B-adapter": 1,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 1,
+    "D": 10
+   },
+   "addressable": 3,
+   "coverage_today": 33,
+   "coverage_with_tuning": 67,
+   "gap": 33,
+   "coverage_after_slice": 33,
+   "coverage_after_slice_with_entry_values": 33
+  },
+  "toolchain-pin": {
+   "counts": {
+    "A": 1,
+    "B-config": 0,
+    "B-adapter": 0,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 0,
+    "D": 1
+   },
+   "addressable": 1,
+   "coverage_today": 100,
+   "coverage_with_tuning": 100,
+   "gap": 0,
+   "coverage_after_slice": 100,
+   "coverage_after_slice_with_entry_values": 100
+  },
+  "other": {
+   "counts": {
+    "A": 8,
+    "B-config": 0,
+    "B-adapter": 0,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 3,
+    "D": 33
+   },
+   "addressable": 11,
+   "coverage_today": 73,
+   "coverage_with_tuning": 100,
+   "gap": 0,
+   "coverage_after_slice": 73,
+   "coverage_after_slice_with_entry_values": 73
+  }
+ },
+ "units": [
+  {
+   "id": "signal-desktop-01",
+   "summary": "ICU message IDs in _locales/en/messages.json start with \"icu:\" (intl-linter icuPrefix; the smartling key is skipped)",
+   "evidence": "build/intl-linter/linter.node.ts:129 (en only), :143 (skips smartling); build/intl-linter/rules/icuPrefix.std.ts; ci.yml:90 `pnpm run lint-intl`",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "C",
+   "alint": "for_each_match (select '^  \"', require '^  \"(?:icu:[^\"]*|smartling)\":') - signal-desktop-intl-icu-prefix",
+   "rules": [
+    "signal-desktop-intl-icu-prefix"
+   ],
+   "assertion_family": "none",
+   "reason": "No kind asserts a pattern over JSON key names. The per-line regex depends on the prettier-enforced two-space top-level layout (element-web precedent for key-name regexes = C). json_schema_passes would need an in-repo schema, and corpus configs create none.",
+   "fire_verified": "n/a (C); still fired on a scratch en catalog with an un-prefixed key (line 12476) and passes on the clone",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-02",
+   "summary": "No legacy $variable$ placeholders in en ICU strings (intl-linter noLegacyVariables; Smartling placeholder_format_custom)",
+   "evidence": "build/intl-linter/rules/noLegacyVariables.std.ts (regex /(\\$.+?\\$)/ on literal elements); .smartling.yml; ci.yml:90",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "C",
+   "alint": "json_path_absent '$[?search(@.messageformat, \"\\\\$[^${}]+\\\\$\")]' - signal-desktop-intl-no-legacy-variables",
+   "rules": [
+    "signal-desktop-intl-no-legacy-variables"
+   ],
+   "assertion_family": "none",
+   "reason": "Expressible today with a JSONPath search() filter over each entry's messageformat. The linter checks only ICU literal nodes, so the whole-string regex approximates the AST and ignores apostrophe quoting.",
+   "fire_verified": "n/a (C); fired on a scratch en entry with $name$, passes on the clone",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-03",
+   "summary": "No {plural} offset in en strings (intl-linter noOffset; unsupported by Smartling)",
+   "evidence": "build/intl-linter/rules/noOffset.std.ts; ci.yml:90",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "C",
+   "alint": "json_path_absent search(@.messageformat, ',\\s*plural\\s*,\\s*offset\\s*:') - signal-desktop-intl-no-offset",
+   "rules": [
+    "signal-desktop-intl-no-offset"
+   ],
+   "assertion_family": "none",
+   "reason": "A regex approximation of the ICU AST check (it ignores quoting; an explicit offset:0 diverges)",
+   "fire_verified": "n/a (C); fired on scratch, passes on clone",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-04",
+   "summary": "No {selectordinal} in en strings (intl-linter noOrdinal)",
+   "evidence": "build/intl-linter/rules/noOrdinal.std.ts; ci.yml:90",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "C",
+   "alint": "json_path_absent search(... selectordinal ...) - signal-desktop-intl-no-ordinal",
+   "rules": [
+    "signal-desktop-intl-no-ordinal"
+   ],
+   "assertion_family": "none",
+   "reason": "Regex approximation of the ICU AST argument type",
+   "fire_verified": "n/a (C); fired on scratch, passes on clone",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-05",
+   "summary": "At most one {plural} per en message (intl-linter onePlural)",
+   "evidence": "build/intl-linter/rules/onePlural.std.ts; ci.yml:90",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "C",
+   "alint": "json_path_absent search(... plural ... plural ...) - signal-desktop-intl-one-plural",
+   "rules": [
+    "signal-desktop-intl-one-plural"
+   ],
+   "assertion_family": "none",
+   "reason": "Counting plural arguments is approximated by a two-occurrence regex over the raw string, which is not ICU-aware.",
+   "fire_verified": "n/a (C); fired on scratch, passes on clone",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-06",
+   "summary": "Emoji in en strings must be wrapped in an <emojify> tag (intl-linter wrapEmoji)",
+   "evidence": "build/intl-linter/rules/wrapEmoji.std.ts; ci.yml:90",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "B-adapter",
+   "alint": "missing: ICU message-format extractor (tag/literal nodes) plus emoji classification",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Needs the ICU AST (whether a literal is inside a tag element). Per the batch-1 ruling, value assertions over entries need (key, value) rows plus an ICU extractor.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "icu"
+     }
+    }
+   ],
+   "needs": "icu"
+  },
+  {
+   "id": "signal-desktop-07",
+   "summary": "No nested plural/select inside a plural/select (intl-linter noNestedChoice)",
+   "evidence": "build/intl-linter/rules/noNestedChoice.std.ts; ci.yml:90",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "C",
+   "alint": "json_path_absent with a search() regex: signal-desktop-intl-no-nested-choice",
+   "rules": [
+    "signal-desktop-intl-no-nested-choice"
+   ],
+   "assertion_family": "none",
+   "reason": "A regex over each messageformat finds a choice argument opened inside an option of another, following braces two levels deep. It ignores ICU apostrophe quoting, like signal-desktop-08's rule, so C.",
+   "fire_verified": "Audit: passes on the clone; fires on '{count, plural, one {# member} other {{g, select, male {he} other {they}} # members}}'; passes when the select is a sibling argument.",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "icu"
+     }
+    },
+    {
+     "by": "audit",
+     "from": [
+      "B-adapter",
+      "locale",
+      "none"
+     ],
+     "why": "The one-level-brace regex idiom that put signal-desktop-08 in C also expresses noNestedChoice: the new rule signal-desktop-intl-no-nested-choice passes on the clone and fires on a select nested in a plural option."
+    }
+   ]
+  },
+  {
+   "id": "signal-desktop-08",
+   "summary": "A plural or selectordinal argument has at least two options (intl-linter noOneChoice; select is not checked)",
+   "evidence": "build/intl-linter/rules/noOneChoice.std.ts; ci.yml:90",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "C",
+   "alint": "json_path_absent with a search() regex over each messageformat: signal-desktop-intl-no-one-choice",
+   "rules": [
+    "signal-desktop-intl-no-one-choice"
+   ],
+   "assertion_family": "none",
+   "reason": "A regex over each messageformat finds a plural or selectordinal argument with exactly one option, following braces one level deep. It ignores ICU apostrophe quoting, so it is C (Stage B).",
+   "fire_verified": "Audit: passes on the clone; fires when GroupListItem__message-default keeps only its other option; passes with =1 and other.",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "B-adapter",
+      "locale",
+      "none"
+     ],
+     "why": "Stage A counted onePlural (05) as C because json_path_absent with a search() regex approximates it. noOneChoice yields to the same idiom. I checked it on the clone: path $[?search(@.messageformat, \"\\\\{\\\\s*[^{}\\\\s,]+\\\\s*,\\\\s*plural\\\\s*,\\\\s*(?:offset\\\\s*:\\\\s*[0-9]+\\\\s*)?=?[A-Za-z0-9_]+\\\\s*\\\\{(?:[^{}]|\\\\{[^{}]*\\\\})*\\\\}\\\\s*\\\\}\")] passes on the clone and fired on a scratch entry '{count, plural, other {# new {thing} items}}'. Like 02-05 it ignores ICU quoting, and it allows one level of nested braces, which noNestedChoice keeps sufficient. The summary also needs a correction: the rule checks only {plural} and {selectordinal} (enterPlural), not select."
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "alint",
+      "fire_verified",
+      "reason",
+      "summary"
+     ],
+     "why": "The record text still described the bucket or rule from before Stage B or the integrator changed it."
+    }
+   ]
+  },
+  {
+   "id": "signal-desktop-09",
+   "summary": "Plural options use # rather than an explicit number in their literal text (intl-linter pluralPound: 'Use # instead of an explicit number')",
+   "evidence": "build/intl-linter/rules/pluralPound.std.ts; ci.yml:90",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "C",
+   "alint": "json_path_absent with a search() regex: signal-desktop-intl-plural-pound",
+   "rules": [
+    "signal-desktop-intl-plural-pound"
+   ],
+   "assertion_family": "none",
+   "reason": "A regex walks the options of one plural argument and finds a stand-alone number in an option's literal text. It ignores ICU quoting, as signal-desktop-08's rule does, so C.",
+   "fire_verified": "Audit: passes on the clone; fires on 'one {1 # member}' and on 'other {Show 2 of # members}'; passes on an '=1' selector.",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "icu"
+     }
+    },
+    {
+     "by": "audit",
+     "from": [
+      "B-adapter",
+      "locale",
+      "none"
+     ],
+     "why": "The summary described the wrong rule. pluralPound.std.ts reports an explicit number standing alone in literal text directly inside a plural option. A regex of signal-desktop-08's quality expresses it."
+    }
+   ]
+  },
+  {
+   "id": "signal-desktop-10",
+   "summary": "Every en message parses as ICU MessageFormat with requiresOtherClause (intl-linter parse step)",
+   "evidence": "build/intl-linter/linter.node.ts:170 (parse(..., { requiresOtherClause: true })); ci.yml:90",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "B-delegate",
+   "alint": "delegate: ICU MessageFormat syntax validator (plugin/command)",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Validating a message format's own syntax is the corpus-stratum section 2.2 B-delegate example",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-11",
+   "summary": "Every _locales/<locale> entry holds a messages.json (generate-compact-locales reads one for each readdir entry)",
+   "evidence": "scripts/generate-compact-locales.mjs:61-70 (readdir(_locales) then join(locale,'messages.json')); package.json:23 generate:phase-1 build:compact-locales; ci.yml:70 `pnpm run generate`",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "A",
+   "alint": "dir_contains select _locales/* require [messages.json] - signal-desktop-locale-dir-has-messages",
+   "rules": [
+    "signal-desktop-locale-dir-has-messages",
+    "signal-desktop-locale-no-stray-files"
+   ],
+   "assertion_family": "none",
+   "reason": "dir_contains expresses it directly; alint check confirms it in both directions (R4)",
+   "fire_verified": "Scratch copy of _locales with an added _locales/xx-YY/ directory lacking messages.json: alint check fired signal-desktop-locale-dir-has-messages on xx-YY. On the clone the rule passes (exit 0).",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-12",
+   "summary": "Locale catalogs are well-formed JSON (generate-compact-locales JSON.parse of every _locales catalog; the sticker-creator vite build imports its own catalogs)",
+   "evidence": "scripts/generate-compact-locales.mjs:34,70 (JSON.parse); scripts/generate-icu-types.mjs:10 (imports en); ci.yml:70 generate; ci.yml:370 sticker-creator build (src/assets/locales/*/messages.json)",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "C",
+   "alint": "json_path_absent \"$['__alint_parse_probe__']\" parse probe - signal-desktop-locale-json-parses",
+   "rules": [
+    "signal-desktop-locale-json-parses"
+   ],
+   "assertion_family": "none",
+   "reason": "Same parse-probe idiom as element-web (C): alint's JSON reader is more tolerant than JSON.parse, so the probe only approximates strict validity",
+   "fire_verified": "n/a (C); a truncated scratch de catalog produced a resource_parse failure, and the clone passes",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-13",
+   "summary": "Every i18n key used in code exists in en/messages.json (generated ICU types + tsc)",
+   "evidence": "scripts/generate-icu-types.mjs (types from _locales/en/messages.json); ci.yml:120 `pnpm run check:types`",
+   "mechanism": "ci",
+   "family": "locale",
+   "bucket": "D",
+   "alint": "tsc",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R7: extracting the keys a program uses is code analysis (type checking)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-14",
+   "summary": "Never hard-code user-facing strings; pull them from messages.json",
+   "evidence": "CONTRIBUTING.md:267 (jsx-no-literals is off in .oxlintrc.json)",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R7: finding UI string literals in source needs code analysis",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "locale",
+      "none"
+     ],
+     "why": "It checks translatable strings in source or layout files, not locale files. Section 2.3's locale family covers locale files; zulip's equivalent source checks (zulip-06, zulip-cc-59, -61, -67 to -69) are `other`."
+    }
+   ]
+  },
+  {
+   "id": "signal-desktop-15",
+   "summary": "Contributors edit only _locales/en/messages.json; other locales come from Smartling and translation PRs are refused",
+   "evidence": "CONTRIBUTING.md:266-269; .github/PULL_REQUEST_TEMPLATE.md:17 checkbox",
+   "mechanism": "convention",
+   "family": "locale",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "A PR-scope/review policy over a diff and its author, not a repository-state invariant. No alint kind constrains which paths a change touches.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-16",
+   "summary": "Root package.json dependency specs are pinned (semver.valid, workspace:*, npm:<name>@<semver>, or https:...#ref)",
+   "evidence": "danger/rules/enforcePackageJsonPinnedDeps.mjs:14-58; danger/rules.mjs; ci.yml:489-513 danger job (pull requests) `pnpm run danger:ci`",
+   "mechanism": "script",
+   "family": "dep-version",
+   "bucket": "A",
+   "alint": "json_path_matches $['dependencies','devDependencies','peerDependencies','optionalDependencies'].* with a semver|workspace:*|npm:..@semver|https:..#.. regex, if_present - signal-desktop-root-deps-pinned",
+   "rules": [
+    "signal-desktop-root-deps-pinned"
+   ],
+   "assertion_family": "none",
+   "reason": "One structured-query rule expresses the per-value allowed-spec predicate; the semver.valid grammar is spelled as a regex. R4 confirmed in both directions.",
+   "fire_verified": "Scratch copy of package.json with \"zod\": \"4.6.6\" changed to \"^4.6.6\": the rule fired (re-run on the final config with if_present). An earlier iteration also fired on an npm:...@~6.0.2 alias. On the clone the rule passes (exit 0).",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-17",
+   "summary": "All tailwindcss/@tailwindcss/* versions in package.json and pnpm-lock.yaml packages equal devDependencies.tailwindcss",
+   "evidence": "danger/rules/enforceTailwindDepsMatch.mjs:19-66 (YAML.loadAll over both lockfile documents); ci.yml:513",
+   "mechanism": "script",
+   "family": "dep-version",
+   "bucket": "C",
+   "alint": "cross_file equals: source package.json $.devDependencies.tailwindcss; targets package.json regex and pnpm-lock.yaml text regex - signal-desktop-tailwind-versions-match",
+   "rules": [
+    "signal-desktop-tailwind-versions-match"
+   ],
+   "assertion_family": "none",
+   "reason": "pnpm-lock.yaml has two YAML documents, which alint's YAML extract rejects, so the lockfile side is a layout-dependent text regex. That makes it expressible but awkward: it wants multi-document YAML support (C).",
+   "fire_verified": "n/a (C); still fired on scratch for @tailwindcss/vite drift in package.json, '@tailwindcss/oxide@4.2.9' and tailwindcss@4.2.9 in the lockfile, and the clone passes",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-18",
+   "summary": "Every package marked deprecated in the lockfile is allow-listed by exact version in pnpm-workspace.yaml allowedDeprecatedVersions",
+   "evidence": ".pnpmfile.mjs noDeprecatedPackages (afterAllResolved hook; satisfies() = exact versions joined by ||); pnpm-workspace.yaml:165; .github/actions/setup/action.yml:48 pnpm install",
+   "mechanism": "tool-config",
+   "family": "dep-version",
+   "bucket": "B-adapter",
+   "alint": "missing: pnpm-lock adapter emitting (name, version, deprecated) rows from multi-document YAML and name@version(peers) keys, plus an alternatives-list match",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Set inclusion of deprecated (name, version) rows in an allowlist map. It needs a lockfile adapter (multi-document YAML, key splitting), which neither the relation layer nor any kind has.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "format-reader"
+     }
+    }
+   ],
+   "needs": "format-reader"
+  },
+  {
+   "id": "signal-desktop-19",
+   "summary": "pnpm-lock.yaml is up to date with the manifests (install --frozen-lockfile)",
+   "evidence": ".github/actions/setup/action.yml:48,62,78",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "pnpm",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R7: lockfile freshness is package-manager resolution semantics",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-20",
+   "summary": "Lockfile is deduplicated (pnpm dedupe --check)",
+   "evidence": "ci.yml:50",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "pnpm",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R7: resolution semantics",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-21",
+   "summary": "Dependencies must be published at least 3 days before they are resolved (minimumReleaseAge 4320, strict)",
+   "evidence": "pnpm-workspace.yaml:15-18",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "D",
+   "alint": "pnpm",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R7: needs registry publish times (network)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "dep-version",
+      "none"
+     ],
+     "why": "Release age is not a dependency version, range, protocol or field (the batch 3 ruling's reason), so a pure release-age gate is `other`, as the release-age agreement units are."
+    }
+   ]
+  },
+  {
+   "id": "signal-desktop-22",
+   "summary": "No trust-level downgrade for resolved packages (trustPolicy no-downgrade)",
+   "evidence": "pnpm-workspace.yaml:43-44",
+   "mechanism": "tool-config",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "pnpm",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R7: registry provenance metadata (network)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-23",
+   "summary": "Transitive dependencies may not come from exotic sources (blockExoticSubdeps)",
+   "evidence": "pnpm-workspace.yaml:2",
+   "mechanism": "tool-config",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "pnpm",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R7: applied during resolution by the package manager",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-24",
+   "summary": "Peer dependency requirements must be satisfied (strictPeerDependencies)",
+   "evidence": "pnpm-workspace.yaml:149",
+   "mechanism": "tool-config",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "pnpm",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R7: semantic resolution of peer ranges",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-25",
+   "summary": "No known-vulnerable dependencies (audit-deps check; fails only when the base is main)",
+   "evidence": "ci.yml:36-42 node .github/scripts/audit-deps/check.mjs",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "audit-deps",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R7: advisory database (network)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-26",
+   "summary": "Registry signatures of installed packages verify (pnpm audit signatures)",
+   "evidence": "ci.yml:46",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "pnpm",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R7: network/external state",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-27",
+   "summary": "Every bare-package import is declared in the nearest package.json (oxlint signal-desktop/no-extraneous-dependencies)",
+   "evidence": ".oxlintrc.json:56; .oxlint/rules/noExtraneousDependencies.mjs (findPackageJSON, deps/dev/peer/optional/bundled, isBuiltin skip); ci.yml:124 oxlint:ci",
+   "mechanism": "tool-config",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "missing: import extraction (code analysis under R7)",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R7 keeps extracting the imports a program uses in D (trpc-41, signal-desktop-38/39/46).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "B-adapter",
+      "dep-version",
+      "none"
+     ],
+     "why": "no-extraneous-dependencies extracts bare import specifiers from source and checks them against the nearest package.json. That is the element-web-12 precedent (knip unlisted dependencies: 'R7: needs import extraction from source (code analysis)', D). Stage A itself flagged that R7 names import extraction as code analysis."
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "alint",
+      "reason"
+     ],
+     "why": "The record text still described the bucket or rule from before Stage B or the integrator changed it."
+    }
+   ]
+  },
+  {
+   "id": "signal-desktop-28",
+   "summary": "The Node version agrees across .nvmrc and package.json engines.node, devEngines.runtime.version and volta.node",
+   "evidence": ".nvmrc (24.22.1); package.json:370-377,666-668; CONTRIBUTING.md:55 (.nvmrc is the current version); reproducible-builds.yml:100 reads .nvmrc; .github/actions/setup/action.yml:32 pnpm/setup with no node-version input",
+   "mechanism": "convention",
+   "family": "toolchain-pin",
+   "bucket": "A",
+   "alint": "cross_file equals: source .nvmrc regex; targets package.json $.engines.node, $.devEngines.runtime.version, $.volta.node - signal-desktop-node-pin-coherent",
+   "rules": [
+    "signal-desktop-node-pin-coherent"
+   ],
+   "assertion_family": "none",
+   "reason": "All four root pins hold the same value at the pin; CONTRIBUTING and reproducible-builds treat .nvmrc as authoritative while CI provisions Node from devEngines. No tool compares them, so this is a convention honoured at the pin (R3/R5). cross_file expresses it, and R4 is confirmed in both directions. The danger/ subproject (24.17.0) and packages/mock-server (.nvmrc 24.11.1) are separate projects and are outside the convention.",
+   "fire_verified": "On scratch copies, each of these fired signal-desktop-node-pin-coherent: engines.node drift, devEngines.runtime.version drift, .nvmrc drift, volta.node changed to 24.21.0, and volta.node removed (\"target query matched nothing\"). A scratch copy identical to the clone files passed, and the clone passes (exit 0).",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-29",
+   "summary": "pnpm runs at devEngines.packageManager 11.24.0, recorded in the lockfile's packageManagerDependencies",
+   "evidence": "package.json:378-381; pnpm-lock.yaml document 1 packageManagerDependencies pnpm 11.24.0; .github/actions/setup/action.yml:32,48; reproducible-builds.yml:106 reads it",
+   "mechanism": "tool-config",
+   "family": "toolchain-pin",
+   "bucket": "D",
+   "alint": "pnpm",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Package-manager self-management and env-lockfile freshness (R7). A value-add rule states the equality.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-30",
+   "summary": "License header: line 1 `Copyright YYYY Signal Messenger, LLC`, line 2 contains `SPDX-License-Identifier: AGPL-3.0-only` (lines 2 and 3 for .sh)",
+   "evidence": "ts/util/lint/license_comments.node.ts:181-238 (regexes at :194, :227); package.json:65; ci.yml:74",
+   "mechanism": "script",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_header lines 2 + file_header lines 3 (sh) - signal-desktop-license-comments, signal-desktop-license-comments-sh",
+   "rules": [
+    "signal-desktop-license-comments",
+    "signal-desktop-license-comments-sh"
+   ],
+   "assertion_family": "none",
+   "reason": "Header regexes over git-tracked files with the script's extension and ignore lists. A read-only emulation agreed on 3,372 in-scope files with 0 failures.",
+   "fire_verified": "n/a (other family; fired on scratch .github/workflows/x.yml, .smartling.yml and build.sh)",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-31",
+   "summary": "The copyright line must not carry an end year (YYYY-YYYY)",
+   "evidence": "ts/util/lint/license_comments.node.ts:220-224; ci.yml:74",
+   "mechanism": "script",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden '\\A[^\\n]*[0-9]{4}-[0-9]{4}' (+ sh variant) - signal-desktop-license-no-end-year, signal-desktop-license-no-end-year-sh",
+   "rules": [
+    "signal-desktop-license-no-end-year",
+    "signal-desktop-license-no-end-year-sh"
+   ],
+   "assertion_family": "none",
+   "reason": "A distinct assertion of the same script (its own failure message), anchored to the header line",
+   "fire_verified": "n/a (other family; fired on scratch ts/util/endyear.std.ts)",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-32",
+   "summary": "JS/TS files open with exactly `// Copyright YYYY Signal Messenger, LLC` and `// SPDX-License-Identifier: AGPL-3.0-only` line comments",
+   "evidence": ".oxlintrc.json:46; .oxlint/rules/enforceLicenseComments.mjs; off for mock-server via the override near .oxlintrc.json:2040-2061; ci.yml:124",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_header lines 3 - signal-desktop-oxlint-license-comments",
+   "rules": [
+    "signal-desktop-oxlint-license-comments"
+   ],
+   "assertion_family": "none",
+   "reason": "File-header assertion inside a custom lint rule, counted A per the element-web oxlint copyright-header precedent. Emulation: 3,146 files, 0 bad.",
+   "fire_verified": "n/a (other family; fired on a scratch file with a block-comment header)",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-33",
+   "summary": "JS/TS file names carry an environment suffix .{std,node,dom,preload,main}[.stories|.test|.visual.test|.bench]",
+   "evidence": ".oxlintrc.json:42; .oxlint/rules/enforceFileSuffix.mjs:289-323 (missingFileSuffixMustBeOneOf); off-list .oxlintrc.json:1963-1991",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "A",
+   "alint": "filename_regex - signal-desktop-file-suffix-naming",
+   "rules": [
+    "signal-desktop-file-suffix-naming"
+   ],
+   "assertion_family": "none",
+   "reason": "Filename convention with the repository's own off-list as excludes. Emulation: 2,977 files, 0 bad.",
+   "fire_verified": "n/a (other family; fired on scratch ts/util/nosuffix.ts)",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-34",
+   "summary": "A file's suffix matches what it imports and references (e.g. .std must not use window or electron; imports of suffixed modules must be compatible)",
+   "evidence": ".oxlint/rules/enforceFileSuffix.mjs:303-327 (wrongFileSuffix, invalidImportForSuffix, electron import checks via getReferenceType)",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "D",
+   "alint": "oxlint",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2/R7: global-reference and import-specifier AST analysis",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-35",
+   "summary": "JS/TS files have no byte-order mark (eslint/unicode-bom, default never)",
+   "evidence": ".oxlintrc.json:952; ignorePatterns .oxlintrc.json:1598-1603; ci.yml:124",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "A",
+   "alint": "no_bom - signal-desktop-js-no-bom",
+   "rules": [
+    "signal-desktop-js-no-bom"
+   ],
+   "assertion_family": "none",
+   "reason": "A byte-level file property expressed directly; carved out of the oxlint run like the header rule",
+   "fire_verified": "n/a (other family; fired on scratch ts/util2/bom.std.ts; the excluded sticker-creator/src/skip.ts did not fire)",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-36",
+   "summary": "First-party JS/TS uses none of the lint-deps questionable patterns (eval(, innerHTML, outerHTML, document.write, findDOMNode, dangerouslySetInnerHTML, ...)",
+   "evidence": "ts/util/lint/linter.node.ts; ts/util/lint/rules.json (12 rules); exceptions.json (all 45 entries are node_modules paths); package.json:63; ci.yml:86",
+   "mechanism": "script",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden - signal-desktop-lint-deps-first-party",
+   "rules": [
+    "signal-desktop-lint-deps-first-party"
+   ],
+   "assertion_family": "none",
+   "reason": "Regex ban over files. Because there are no first-party exceptions, any hit fails. Emulation: 2,116 first-party files, 0 hits.",
+   "fire_verified": "n/a (other family; fired on a scratch innerHTML use)",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-37",
+   "summary": "node_modules code matches the lint-deps patterns only at recorded exceptions, and stale exceptions are reported",
+   "evidence": "ts/util/lint/linter.node.ts:374-425 (exceptions, unused-exception handling); exceptions.json",
+   "mechanism": "script",
+   "family": "other",
+   "bucket": "D",
+   "alint": "lint-deps",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Scans installed third-party code (node_modules), which needs the install (R7 external state)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-38",
+   "summary": "Import zones: ts/util and ts/types must not import ts/components or ts/axo *.dom.*; scripts and codemods must not import ts, nor ts them",
+   "evidence": ".oxlintrc.json:61+ signal-desktop/no-restricted-paths; .oxlint/rules/noRestrictedPaths.mjs; 11 inline oxlint-disable-next-line suppressions in 7 files",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "D",
+   "alint": "file_graph forbidden_edges, relative_to_file, with a regex alternative that consumes suppressed lines - signal-desktop-restricted-import-zones",
+   "rules": [
+    "signal-desktop-restricted-import-zones"
+   ],
+   "assertion_family": "none",
+   "reason": "R7 keeps extracting the imports a program uses in D (trpc-41 precedent). The rule stays in the config at level info, as a demoted approximation.",
+   "fire_verified": "n/a (C; fired on scratch scripts/s.mjs -> ts and ts/util -> ts/components)",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "C",
+      "other",
+      "none"
+     ],
+     "why": "signal-desktop/no-restricted-paths is an AST import-zone firewall. R7 puts import extraction in D, as the trpc-41 precedent did. The workaround needed to emulate inline oxlint-disable suppressions in the extract regex also shows this is linter semantics, not a file invariant."
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "reason"
+     ],
+     "why": "Stage B moved the unit to D but left the reason arguing for A or C."
+    }
+   ]
+  },
+  {
+   "id": "signal-desktop-39",
+   "summary": ".github/scripts may import only node: builtins and files in their own folder",
+   "evidence": ".oxlintrc.json:1606-1620 override eslint/no-restricted-imports group [\"*\",\"!node:*\",\"!node:*/*\",\"!./*\"]",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "D",
+   "alint": "import_gate js forbid (complement regex) - signal-desktop-github-scripts-node-builtins-only",
+   "rules": [
+    "signal-desktop-github-scripts-node-builtins-only"
+   ],
+   "assertion_family": "none",
+   "reason": "R7 keeps extracting the imports a program uses in D (trpc-41 precedent). The rule stays in the config at level info, as a demoted approximation.",
+   "fire_verified": "n/a (other family; fired on zod, ../utils.mjs and ./sub/v.mjs; allowed ./ok.mjs and node:fs)",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "A",
+      "other",
+      "none"
+     ],
+     "why": "An oxlint eslint/no-restricted-imports pattern over import specifiers. R7 keeps 'extracting the ... imports a program uses' in D. The batch-1 precedent trpc-41 (an oxlint no-restricted-imports firewall) is D, 'v0.12 treated the vite eslint firewall the same way', and so are yarnpkg-berry-34 and zulip-62. That import_gate can express it does not change the R7 classification."
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "reason"
+     ],
+     "why": "Stage B moved the unit to D but left the reason arguing for A or C."
+    }
+   ]
+  },
+  {
+   "id": "signal-desktop-40",
+   "summary": "Every package.json (excluding dot-directories) is either private: true with no publishConfig, or has the exact publishConfig {access public, registry npmjs, provenance false} and no private",
+   "evidence": "danger/rules/enforcePackageJsonPublishConfig.mjs:5-30 (fastGlob dot:false, zod discriminatedUnion/strictObject); ci.yml:513",
+   "mechanism": "script",
+   "family": "other",
+   "bucket": "C",
+   "alint": "json_path_equals x2 (if_present) + file_content_matches + file_content_forbidden - signal-desktop-pkg-*",
+   "rules": [
+    "signal-desktop-pkg-publish-config-exact",
+    "signal-desktop-pkg-private-true-only",
+    "signal-desktop-pkg-private-or-publish-config",
+    "signal-desktop-pkg-not-both-private-and-publish"
+   ],
+   "assertion_family": "none",
+   "reason": "A schema union with no inline-schema kind. It is split into four rules, two of them text regexes for exactly-one-of key presence (C).",
+   "fire_verified": "n/a (C; fired one-of on scratch packages/foo, both-present on root, and wrong provenance on packages/bar; the .oxlint fixture was excluded)",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-41",
+   "summary": "Every pnpm-lock.yaml package resolution carries an integrity hash",
+   "evidence": "danger/rules/enforcePnpmLockfileDepsIntegrity.mjs:19-22; ci.yml:513",
+   "mechanism": "script",
+   "family": "other",
+   "bucket": "C",
+   "alint": "for_each_match select '^\\s+resolution:' require '\\bintegrity:' - signal-desktop-lockfile-integrity",
+   "rules": [
+    "signal-desktop-lockfile-integrity"
+   ],
+   "assertion_family": "none",
+   "reason": "The lockfile has two YAML documents, so a structured YAML query cannot be used. A per-line text check depends on pnpm's inline-map layout (C).",
+   "fire_verified": "n/a (C; fired on a scratch tarball-only resolution)",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-42",
+   "summary": "Every patchedDependencies entry in pnpm-workspace.yaml names an existing patch file",
+   "evidence": "pnpm-workspace.yaml:101; .github/actions/setup/action.yml:48 pnpm install --frozen-lockfile",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "A",
+   "alint": "registry_paths_resolve yaml $.patchedDependencies.* expect file - signal-desktop-patched-dependencies-exist",
+   "rules": [
+    "signal-desktop-patched-dependencies-exist"
+   ],
+   "assertion_family": "none",
+   "reason": "Manifest-declared path existence is a native kind",
+   "fire_verified": "n/a (other family; fired on a scratch entry pointing at a missing patch)",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-43",
+   "summary": "Every declared patch is applied (allowUnusedPatches: false)",
+   "evidence": "pnpm-workspace.yaml:100",
+   "mechanism": "tool-config",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "pnpm",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R7: needs resolution (whether the patched name@version is in the graph)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "other",
+      "none"
+     ],
+     "why": "Patch declarations are dependency fields (mattermost-47)."
+    }
+   ]
+  },
+  {
+   "id": "signal-desktop-44",
+   "summary": "Only allow-listed dependencies may run install scripts (strictDepBuilds + allowBuilds)",
+   "evidence": "pnpm-workspace.yaml:122-123",
+   "mechanism": "tool-config",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "pnpm",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R7: install-time package-manager behaviour",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "other",
+      "none"
+     ],
+     "why": "immich-16 has the identical allowBuilds and strictDepBuilds settings and is dep-version; so are tq-18, ghost-37, wsdk-42 and trpc-56."
+    }
+   ]
+  },
+  {
+   "id": "signal-desktop-45",
+   "summary": "The rest of the oxlint run: built-in rules plus the custom AST rules (no-focused-tests, no-disabled-tests, enforce-tw, enforce-class-name-has-styles, enforce-array-buffer, no-for-in, no-then, no-restricted-globals __dirname, no-irregular-whitespace, unicorn/no-empty-file, ...)",
+   "evidence": ".oxlintrc.json; .oxlint/rules/*.mjs; ci.yml:124 `pnpm run oxlint:ci`",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "oxlint",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2: linter over source ASTs. Units 32, 33, 35, 38, 39 and 46 are carved out as file/import-shaped.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-46",
+   "summary": "Do not import expect/should/Should from chai; use assert (type imports allowed)",
+   "evidence": ".oxlintrc.json:928-940 eslint/no-restricted-imports paths; one suppression at ts/test-node/util/uploads/tusProtocol_test.node.ts:3",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "D",
+   "alint": "file_content_forbidden regex over import/export-from chai statements, with the one suppressed file excluded - signal-desktop-no-chai-expect-should",
+   "rules": [
+    "signal-desktop-no-chai-expect-should"
+   ],
+   "assertion_family": "none",
+   "reason": "R7 keeps extracting the imports a program uses in D (trpc-41 precedent). The rule stays in the config at level info, as a demoted approximation.",
+   "fire_verified": "n/a (C); on scratch it fired on `import { assert, expect }`, multi-line `import chai, { should }` and `export { Should } from`, and did not fire on `import { type expect as E2 }`, `import type { expect }` or `import { expectType }`. The clone passes.",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "C",
+      "other",
+      "none"
+     ],
+     "why": "eslint/no-restricted-imports importNames with allowTypeImports is a ban on named import specifiers, which is AST import extraction (R7, trpc-41). The regex only approximates specifier parsing and type-import semantics."
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "reason"
+     ],
+     "why": "Stage B moved the unit to D but left the reason arguing for A or C."
+    }
+   ]
+  },
+  {
+   "id": "signal-desktop-47",
+   "summary": "The .pnpmfile.mjs hook's own unit tests pass",
+   "evidence": "ci.yml:33 `node --test .pnpmfile.mjs`",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "node --test",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2: test runner",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-48",
+   "summary": "TypeScript type-check passes",
+   "evidence": "ci.yml:120 check:types (tsc --noEmit)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tsc",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2: type checker",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-49",
+   "summary": "Prettier formatting (ts/js/json/html/scss/md/yml, including _locales)",
+   "evidence": "ci.yml:78; package.json:66",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "prettier",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2: formatter",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-50",
+   "summary": "Stylelint over **/*.scss",
+   "evidence": "ci.yml:82; package.json:68",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "stylelint",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2: linter",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-51",
+   "summary": "knip: no unused files, exports or dependencies (all mode)",
+   "evidence": "ci.yml:94; knip.js",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "knip",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R7: needs the module graph from source imports",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-52",
+   "summary": "knip --production: no unused production code or dependencies",
+   "evidence": "ci.yml:98; knip.js (PROD_ONLY tags)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "knip",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R7: module-graph analysis",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-53",
+   "summary": "Code generation succeeds (protobuf, emoji data, rolldown, icu-types, compact locales, styles, policy files)",
+   "evidence": "ci.yml:70; package.json:21-23",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "build",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2/R7: runs the project's build",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-54",
+   "summary": "No unused icons in the compiled CSS/SCSS",
+   "evidence": "ci.yml:128 check:unused-icons (scripts/check-unused-icons.mjs)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "script",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Needs compiled CSS and SCSS #{$icon} interpolation resolution (build output)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-55",
+   "summary": "No unused style classes (PurgeCSS over the built styles)",
+   "evidence": "ci.yml:132 check:unused-styles:check",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "purgecss",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Needs build output plus source class-name extraction",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-56",
+   "summary": "DATABASE_SCHEMA.md matches the generated SQL schema",
+   "evidence": "ci.yml:116 build:db-schema --check; package.json:94",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "script",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Codegen freshness by running project code (R2)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-57",
+   "summary": "ACKNOWLEDGMENTS.md is up to date with dependency licenses",
+   "evidence": "ci.yml:100-105 build:acknowledgments + git diff --exit-code",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "script",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Reads node_modules license files (install state)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-58",
+   "summary": "Node unit tests pass (macOS, Linux, Windows)",
+   "evidence": "ci.yml:158,223,309 test-node",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "electron-mocha",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-59",
+   "summary": "Electron tests pass",
+   "evidence": "ci.yml:161,263,333 test-electron",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "test-electron",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-60",
+   "summary": "Release build and release smoke test pass per OS",
+   "evidence": "ci.yml:152-185,217-273,303-342 (build:release, test-release)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "electron-builder",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2: build execution",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-61",
+   "summary": "Storybook builds and its tests pass",
+   "evidence": "ci.yml:518-540",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "storybook",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-62",
+   "summary": "axo component tests pass",
+   "evidence": "ci.yml:545-563 test:axo",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "vitest",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-63",
+   "summary": "axo visual regression tests pass",
+   "evidence": "ci.yml:573-593 test:axo:visual",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "vitest",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-64",
+   "summary": "Built binaries respect the minimum OS version",
+   "evidence": "ci.yml:462-486 scripts/check-min-os-version.mjs",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "script",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Inspects build artifacts",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-65",
+   "summary": "sticker-creator builds",
+   "evidence": "ci.yml:370",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "vite",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-66",
+   "summary": "sticker-creator type-checks",
+   "evidence": "ci.yml:374",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tsc",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-67",
+   "summary": "sticker-creator prettier check",
+   "evidence": "ci.yml:378",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "prettier",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-68",
+   "summary": "sticker-creator eslint",
+   "evidence": "ci.yml:382",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "eslint",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-69",
+   "summary": "The deb rebuilt reproducibly with the .nvmrc Node and lockfile pnpm has the released sha512",
+   "evidence": ".github/workflows/reproducible-builds.yml:66-152; reproducible-build-scheduler.yml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "build",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Build execution plus a downloaded artifact (network)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-b01",
+   "summary": "_locales/en/messages.json must hold the strings gen-policy-files embeds in the Linux polkit policies. For each of the 3 policies, the description key needs a non-empty string messageformat and the message key needs a string messageformat.",
+   "evidence": "scripts/gen-policy-files.mjs:22-53 (template list naming 6 icu: keys), :55-65 (assert 'Must have english string for key ...'); package.json:23 (generate:phase-1 runs build:policy-files), :104; .github/workflows/ci.yml:67-70 (lint job `pnpm run generate`), :219-220 (linux job)",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "A",
+   "alint": "json_path_matches x6 on _locales/en/messages.json, path $['<key>'].messageformat, matches '[\\s\\S]' for the 3 description keys and '^[\\s\\S]*$' for the 3 message keys. Suggested ids: signal-desktop-policy-strings-*",
+   "rules": [
+    "signal-desktop-policy-strings-enable-backups-description",
+    "signal-desktop-policy-strings-enable-backups-message",
+    "signal-desktop-policy-strings-plaintext-export-description",
+    "signal-desktop-policy-strings-plaintext-export-message",
+    "signal-desktop-policy-strings-view-aep-description",
+    "signal-desktop-policy-strings-view-aep-message"
+   ],
+   "assertion_family": "none",
+   "reason": "An explicit assert in a generator that CI runs: build code names catalog keys, and the catalog must contain them. Contributors edit the en catalog, so deleting or renaming one of these strings breaks `pnpm run generate`. A native kind expresses each key. Stage A counted the weaker, implicit precondition in generate-compact-locales as unit 11 but missed this explicit one.",
+   "fire_verified": "On a scratch copy of _locales with icu:PlaintextExport--OSPrompt--message--Linux deleted and the first description emptied, the 6 rules fired twice: 'produced no match' and 'does not match regex'. All 6 pass on the clone (exit 0).",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-b02",
+   "summary": "package.json version is semver X.Y.Z or X.Y.Z-{beta|alpha|staging|axolotl|adhoc}.N, with a numeric prepatch and no build metadata on a prod version",
+   "evidence": "scripts/utils/parseVersion.mjs:27-61 (assert 'Invalid version', 'Expected channel ... to have prepatch number', 'Unexpected channel', 'Unexpected build info in \"prod\" version'); scripts/prepare_beta_build.mjs:16 (calls parseVersion unconditionally); package.json:35; ci.yml:216-217 (linux job, every push and PR), :302-303 (windows), :151-152 (macOS, main only)",
+   "mechanism": "script",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_matches package.json $.version, matches '^\\s*v?(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-(?:beta|alpha|staging|axolotl|adhoc)\\.(?:0|[1-9][0-9]*)(?:\\.[0-9A-Za-z-]+)*(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?)?\\s*$'",
+   "rules": [
+    "signal-desktop-app-version-format"
+   ],
+   "assertion_family": "none",
+   "reason": "A CI script asserts the format of a value in a file alint reads, so R7 classifies it by its logic. The 'prepare beta build' step runs in CI, and parseVersion throws on any other shape before the channel check. It is the app's own version, not a dependency version, so the family is other.",
+   "fire_verified": "n/a (other family). Checked anyway: fired on 8.38.0-nightly.1, 8.38.0-beta and 8.38.0+build5; passes on the clone (8.38.0-alpha.1).",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-b03",
+   "summary": "On a beta version, package.json name, productName, build.appId, build.linux.desktop.entry.StartupWMClass, desktopName and build.linux.executableName must hold the production values before prepare-beta-build rewrites them",
+   "evidence": "scripts/prepare_beta_build.mjs:16-19 (exits unless the channel is beta), :25-50 (expected values), :59-73 (checkValue throws '<path> was X; expected Y'); ci.yml:152, :217, :303",
+   "mechanism": "script",
+   "family": "other",
+   "bucket": "C",
+   "alint": "json_path_equals x6 on package.json ($.name signal-desktop, $.productName Signal, $.build.appId org.whispersystems.signal-desktop, $.build.linux.desktop.entry.StartupWMClass signal, $.desktopName signal.desktop, $.build.linux.executableName signal-desktop)",
+   "rules": [
+    "signal-desktop-beta-prep-name",
+    "signal-desktop-beta-prep-product-name",
+    "signal-desktop-beta-prep-app-id",
+    "signal-desktop-beta-prep-startup-wm-class",
+    "signal-desktop-beta-prep-desktop-name",
+    "signal-desktop-beta-prep-executable-name"
+   ],
+   "assertion_family": "none",
+   "reason": "The gate is real but conditional: it runs only on beta-version builds, so it is dormant at the alpha pin and is enforced on the X.Y.x release branches CI runs on. alint has no way to condition on the version channel (custom facts are excluded), so it asserts the values unconditionally. That is stronger than the gate but holds at the pin, which makes it expressible but awkward (C). The integrator may reject this unit as a dormant guard.",
+   "fire_verified": "n/a (C). Checked anyway: the 6 rules pass on the clone and fired on a scratch package.json with productName 'Signal Beta'.",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-b04",
+   "summary": "After a full axo visual run, no committed reference screenshot is orphaned; OrphanedScreenshotsReporter fails the run",
+   "evidence": "ts/axo/_test-setup/orphaned-screenshots.node.mts:129-210 (process.exitCode = 1 on orphans); vitest.config.mts:92-96 (reporter registered), :150 (resolveScreenshotPath); ci.yml:592-593 (axo-visual job `pnpm run test:axo:visual`)",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "vitest reporter",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "A distinct assertion from 'visual tests pass' (unit 63), per R1. It needs the test run's set of used screenshots, as the element-web-32 precedent (stale screenshot baselines) found: D.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "signal-desktop-b05",
+   "summary": "Windows binaries import only allow-listed DLLs (check-min-os-version windowsDllImportCheck)",
+   "evidence": "scripts/check-min-os-version.mjs:114-160 (ALLOWED_DLLS), :188-266 ('contains disallowed dll imports'), :367; ci.yml:462-487 (check-min-os-version matrix includes windows-latest-8-cores)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "script",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Unit 64 covers the minimum-OS checks (macOS minos and glibc). The Windows step asserts something else, an import allowlist over PE import tables, so R1 makes it a separate behavior. It inspects build artifacts: D.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  }
+ ],
+ "removed": [],
+ "rejected_stage_b": {},
+ "value_add": [
+  "signal-desktop-va-locale-key-parity (key_parity, en reference vs _locales/*/messages.json, ignore smartling.** and *.description, direction both): parity holds at the pin, but Smartling generates the catalogs and nothing gates them. Fired on scratch.",
+  "signal-desktop-va-available-locales-registered (cross_file registered): every _locales/<locale> is listed in build/available-locales.json, which only the manual `get-strings` regenerates. Fired on scratch.",
+  "signal-desktop-va-pnpm-pin-lockfile (cross_file equals): package.json devEngines.packageManager.version equals the pnpm specifier in pnpm-lock.yaml document 1 packageManagerDependencies, which reproducible-builds.yml:106 reads. The repository relies on pnpm itself for this (unit 29, D). Fired on scratch."
+ ],
+ "value_add_rules": [
+  "signal-desktop-va-locale-key-parity",
+  "signal-desktop-va-available-locales-registered",
+  "signal-desktop-va-pnpm-pin-lockfile"
+ ],
+ "absent_categories": [
+  "No git hooks: no husky, lefthook, .pre-commit-config.yaml, lint-staged or simple-git-hooks, and no committed hooks/ directory",
+  "No CODEOWNERS and no .editorconfig (.gitattributes only marks patches/* -text)",
+  "No .tool-versions or .node-version. Node is pinned in .nvmrc, engines, devEngines and volta; there is no separate CI node-version input",
+  "No Makefile, justfile, Taskfile, nox/tox, Bazel, Gradle, CMake or Nix; tasks are npm scripts only",
+  "No CI outside GitHub Actions (no GitLab, CircleCI, Azure, Jenkins or Buildkite)",
+  "No workspace version-consistency tool (syncpack, manypkg, sherif, yarn constraints) and no pnpm catalogs",
+  "No translation-coverage gate (i18n-tasks or similar); non-en catalogs are never linted",
+  "No link checker or docs-build gate",
+  "No SBOM or checksum manifests beyond lockfile integrity hashes",
+  "Dependabot config (.github/dependabot.yml) exists but is not a check; no renovate"
+ ],
+ "unusual": [
+  "intl-linter lints only _locales/en/messages.json: the 67 other catalogs are Smartling output with no gate, although key parity happens to hold (en minus the 'smartling' key)",
+  "noLegacyVariables exists because .smartling.yml's placeholder_format_custom is (\\$.+?\\$)",
+  "pnpm-lock.yaml is a two-document YAML stream (the env lockfile with packageManagerDependencies, then the main lockfile); Danger uses YAML.loadAll, and alint's YAML reader rejects it",
+  "license_comments.node.ts lists dotfile names (.eslintrc etc.) as extensions, but takes the extension from the full path, so those entries are dead code",
+  "The lint-deps exclusion regex has unescaped dots (e.g. ^ts/textsecure/[^./]+.ts); globs approximate it",
+  "All 45 lint-deps exceptions are node_modules paths, so first-party code has zero tolerance",
+  ".pnpmfile.mjs restrictDuplicateDependencies is wired into afterAllResolved with an empty pattern list, so it is a no-op",
+  "danger/ is a separate pnpm project pinned to Node 24.17.0 while the root is on 24.22.1; packages/mock-server has its own .nvmrc (24.11.1), pnpm@10.18.1 and its own .github workflows, which are inactive here",
+  "packages/types declares engines.node >=24.22.1, a floor equal to the root pin; nothing checks it",
+  "The en catalog has a 'descrption' typo key that has propagated to every locale",
+  "sticker-creator has its own Smartling catalog tree (src/assets/locales/*/messages.json, 68 locales), loaded by vite dynamic import and excluded from eslint/prettier",
+  "check:unused-icons --fix contains a self-deleting easter egg",
+  "test-lint-intl and the .oxlint rule tests (*.test.mjs) are not run in CI",
+  "Many CI jobs run only in signalapp/Signal-Desktop-Private: mock-tests, benchmark, auto-merge-ready, commits.yml (commit-title (#N) check), icu-book, notes, release-notes, backport, publish-packages (changesets)",
+  "The 11 no-restricted-paths violations are suppressed inline, which the alint config has to emulate",
+  "One chai expect import is suppressed inline (tusProtocol_test.node.ts)",
+  ".oxlintrc.json records adoption debt inline: rules set to off with '// DECIDEME (errors: N)', e.g. max-lines 404, no-use-before-define 2397, no-undefined 4148",
+  "package.json has a $schema pointing to a local package.schema.json that only $refs remote schemas; it is an editor hint, not a gate",
+  "audit-deps fails only when the PR base is main, so backports get report-only",
+  "The setup action delegates Node provisioning to pnpm/setup v3 with no node-version input, so CI Node comes from package.json devEngines rather than .nvmrc"
+ ],
+ "check_result": "validate-config: \"Config valid: 30 rule(s) loaded\". `alint -c CONFIG check . --compact` on the clone: \"all rules passed.\", exit 0, 0 violations, including the 3 info-level value-add rules. No violation is expected, because every A/C rule mirrors a gate that is green at the pin (or a convention honoured there). Earlier iterations fired on the clone in two places, both fixed. (1) file_graph flagged the 11 imports the repository suppresses inline with `oxlint-disable-next-line signal-desktop/no-restricted-paths`; an extract-regex alternative now consumes those lines. (2) The chai named-import ban would flag its one suppressed file, which is excluded by path. The clone was left unmodified (git status clean).",
+ "stage_b_config_issues": [
+  "Unit 36 (signal-desktop-lint-deps-first-party) scope is too narrow (R4). The exclude 'ts/textsecure/*.ts' replaces lint-deps' regex '^ts/textsecure/[^./]+.ts', which has an unescaped dot and no end anchor and matches only 3 files: ContactsParser.preload.ts, messageReceiverEvents.std.ts and syncRequests.preload.ts. The other 21 direct ts/textsecure/*.ts files, such as WebAPI.preload.ts and MessageReceiver.preload.ts, are scanned by lint-deps but skipped by alint. Comparing scopes: lint-deps (fast-glob, dot:false, its excludedFilesRegexp) scans 2,116 first-party files, while the alint rule covers 2,095, and the difference is exactly those 21. Stage A's '2,116 files' emulation therefore did not validate the rule's own scope. Reproduced: adding `el.innerHTML = ...` to a scratch ts/textsecure/WebAPI.preload.ts did NOT fire the Stage A rule. With the exclude replaced by the 3 regex-matched files, the rule fired there and still passes on the clone (none of the 25 files contains a banned pattern).",
+  "Unit 11 (signal-desktop-locale-dir-has-messages) covers only directories, but generate-compact-locales readdir()s _locales and joins '<entry>/messages.json' for every entry, so a plain file directly under _locales (e.g. _locales/README.md) also breaks `pnpm run generate`. Reproduced: a scratch _locales/README.md passes the Stage A config. Fix: add `kind: file_absent, paths: \"_locales/*\"`. It passes on the clone and fired on the scratch README.md.",
+  "Unit 17 (signal-desktop-tailwind-versions-match): Danger checks package.json `dependencies` AND `devDependencies` for both `tailwindcss` and `@tailwindcss/*`, but the package.json target regex extracts only '\"@tailwindcss/...\"' keys. Reproduced: adding \"tailwindcss\": \"4.2.0\" under dependencies passes the Stage A rule. Fix: target regex '\"(?:tailwindcss|@tailwindcss/[^\"]+)\"\\s*:\\s*\"([^\"]+)\"'. It passes on the clone and fired on the scratch. The lockfile side fired correctly on an '@tailwindcss/oxide@4.2.9' packages key.",
+  "Units 38, 39 and 46 move to D under R7 (trpc-41 precedent). Their rules (signal-desktop-restricted-import-zones, signal-desktop-github-scripts-node-builtins-only, signal-desktop-no-chai-expect-should) should be demoted to info-level value-add or dropped, so they are not presented as expressing enforced A/C units. If any is kept, note that the chai rule excludes sticker-creator/**, although sticker-creator/.eslintrc.cjs:172-185 bans the same chai named imports and the CI sticker-creator job runs that eslint (ci.yml:380-382). Its scope is therefore too narrow.",
+  "Units 30 and 31 (license rules): ts/windows/main/tsx.preload.js is tracked but gitignored, because the .gitignore negation still names the old file 'ts/windows/main/tsx.js'. alint's walker (respect_gitignore) therefore never sees it, while license_comments.node.ts iterates `git ls-files` and checks it. Otherwise the scopes match exactly: 3,368 script vs 3,367 alint non-.sh files, and 4 vs 4 .sh files. The file passes today; this is a small scope gap.",
+  "Unit 03's rule fires on an explicit `offset:0`, which noOffset allows (element.offset !== 0). Unit 02's rule misses some strings the linter flags, because its character class excludes { and }. Both were reproduced on scratch and are acceptable C approximations already noted by Stage A.",
+  "Record correction for unit 02: placeholder_format_custom '(\\$.+?\\$)' lives in the 'smartling' block of _locales/en/messages.json (lines 2-4), not in .smartling.yml. .smartling.yml holds only account_id and project_id."
+ ],
+ "stage_b_summary": "I re-ran the config: validate-config loads 30 rules, and `check . --compact` passes on the clone (exit 0). I reproduced the R4 fire tests for every A unit in the locale, dep-version and toolchain-pin families on my own scratch copy:\n- **Unit 11** fires on a locale directory without messages.json.\n- **Unit 16** fires on ^4.6.6, on a github: spec and on workspace:^.\n- **Unit 28** fires on drift in .nvmrc, engines.node (including a >= range), devEngines.runtime.version and volta.node.\n- **Unit 42** fires on 18 unresolved patches.\n\nEach passes on the clone. The checks that matter most are below.\n\n**Missed units (5).**\n- **b01 (locale, A):** gen-policy-files.mjs asserts that the en catalog holds the 6 polkit-policy keys, and CI runs it in `pnpm run generate`. I fire-verified it.\n- **b02 (other, A):** parseVersion, run unconditionally by prepare-beta-build in the linux and windows jobs, enforces the package.json version format.\n- **b03 (other, C):** prepare-beta-build's production-identity check is dormant at the alpha pin, and alint cannot mirror the channel condition. The integrator may reject this one.\n- **b04 and b05 (D):** the orphaned axo screenshot reporter, and the Windows DLL import allowlist split out of unit 64 per R1.\n\n**Reclassifications.**\n- **To D:** units 38, 39 and 46 (oxlint import firewalls and named-import bans) and 27 (no-extraneous-dependencies). R7 puts import extraction in D, and batch 1 did the same (trpc-41, element-web-12, yarnpkg-berry-34, zulip-62).\n- **Unit 08 to C:** it is expressible with the same json_path_absent search() idiom Stage A used for 05. I verified it on the clone and on a scratch break.\n\n**Record corrections.**\n- **Unit 09's summary and reason are wrong.** pluralPound flags whitespace-delimited explicit numbers in literals directly inside a plural option ('Use # instead of an explicit number'). It does not correlate the argument name. Its bucket stays B-adapter.\n- **Unit 02's evidence:** the placeholder format is in the en catalog's smartling block, not .smartling.yml.\n\n**Config defects, each reproduced.**\n- **Unit 36:** its scope misses 21 ts/textsecure files that lint-deps scans.\n- **Unit 11:** it misses stray files directly under _locales.\n- **Unit 17:** it misses tailwindcss under `dependencies`.\n\n**Removals:** none. Every Stage A unit has a real mechanism, although unit 18 runs only on resolving (non-frozen) installs.\n\n**Revised counts:** 74 units: A 12, C 11, B-adapter 4, B-delegate 1, B-config 0, D 46.\n- **Overall:** coverage_today 12/28 = 43%, coverage_with_tuning 23/28 = 82%, gap 5/28 = 18%.\n- **locale (16):** A2 C7 B-adapter3 B-delegate1 D3.\n- **dep-version (12):** A1 C1 B-adapter1 D9.\n- **toolchain-pin (2):** A1 D1.\n- **other (44):** A8 C3 D33.\n\n**Considered but not added as units.**\n- generate-emoji-data.mjs runs input-sanity asserts over the vendored scripts/emoji-datasource/emoji-datasource.json: known categories, has_img_apple matching KNOWN_MISSING_APPLE_IMG, and complete skin tones. I treated them as codegen guards inside unit 53.\n- unicorn/prefer-node-protocol, import/extensions, import/no-absolute-path and unicorn/no-empty-file stay inside D unit 45, consistent with R7.\n\nThe clone was left unmodified (git status clean). Nothing from the repository was executed. The scratch directory <scratch>/signalapp-Signal-Desktop-b was removed.",
+ "notes": "Counts: 69 units. A=11 (11, 16, 28, 30, 31, 32, 33, 35, 36, 39, 42); C=11 (01-05, 12, 17, 38, 40, 41, 46); B-adapter=6 (06-09, 18, 27); B-delegate=1 (10); B-config=0; D=40. coverage_today = 11/29 = 38%; coverage_with_tuning = 22/29 = 76%; gap = 7/29 = 24%.\n\nPer family:\n- locale: A1 C6 B-adapter4 B-delegate1 D3.\n- dep-version: A1 C1 B-adapter2 D8.\n- toolchain-pin: A1 D1.\n- other: A8 C4 D28.\n\nNo B-config unit: the flagship parity and one-version policies are not gated in this repository. Locale parity holds but is value-add.\n\nR4 fire tests were run on scratch copies under <scratch>/signalapp-Signal-Desktop-a, now removed. Each locale, dep-version and toolchain-pin A unit (11, 16, 28) fired on a break and passes on the clone; C and other-family rules were also fire-tested.\n\nUncertainties, not verified offline:\n- pnpm/setup v3 Node provisioning from devEngines; unit 28 is therefore classed as a convention.\n- Whether pnpm 11 calls afterAllResolved under --frozen-lockfile (unit 18).\n- How pnpm enforces the devEngines.packageManager / env-lockfile equality (unit 29).\n- commits.yml commit-title semantics: the job is private-only and post-push and files an issue, so it is excluded as a post-merge notification step per the batch-1 ruling.\n- Scope approximations: whether oxlint lints dot-directories (units 32 and 35 scopes); the lint-deps exclude regex as globs; the license script's git ls-files scope as globs (an emulation agreed: 3,372 files, 0 failures).\n- Judgement calls Stage B should re-examine:\n  - Units 02-05 are C rather than B-adapter, because json_path_absent with search() expresses them today while ignoring ICU quoting.\n  - Unit 27 is B-adapter rather than D: R7 names import extraction as code analysis, but alint already extracts JS imports.\n  - Oxlint carve-outs: header, filename, BOM and import-specifier rules are counted separately (A/C), following the element-web header precedent; the remaining AST rules are one D unit (45).\n  - Unit 15 (en-only edits) is D as a PR-scope policy.\n\nExcluded as not enforced in this repository: the private-only CI jobs, check-upgradeable-deps (manual script), restrictDuplicateDependencies (empty list), and the danger/ and mock-server Node pins (they disagree with root, so there is no cross-project convention).\n\nCommands were run only with the alint binary and read-only python3 -I emulations, all under scratch. Nothing from the repository was executed. Key line numbers were re-read in this session; the 11-suppressions/7-files count and the emulation counts come from earlier in this session.",
+ "stage_c": {
+  "changes": [
+   {
+    "rule_id": "signal-desktop-lint-deps-first-party",
+    "unit": "signal-desktop-36",
+    "action": "modified",
+    "detail": "Replaced the exclude 'ts/textsecure/*.ts' with the three files that lint-deps' '^ts/textsecure/[^./]+.ts' actually matches on this tree: ContactsParser.preload.ts, messageReceiverEvents.std.ts and syncRequests.preload.ts. I found these by running grep -P over git ls-files. A probe using the rule's paths with a match-everything pattern gives a scope of 2,116 files, identical (diff) to an emulation of the script's fast-glob walk minus all 270 excludedFilesRegexp entries. Fires: scratch ts/textsecure/WebAPI.preload.ts with `el.innerHTML = ...` fires under the new config; the Stage A config did not fire. The same line in the excluded ContactsParser.preload.ts does not fire. The clone passes."
+   },
+   {
+    "rule_id": "signal-desktop-locale-no-stray-files",
+    "unit": "signal-desktop-11",
+    "action": "added",
+    "detail": "file_absent paths '_locales/*', because generate-compact-locales readdir()s _locales and reads <entry>/messages.json for every entry. Fires on scratch _locales/README.md and on _locales/.DS_Store. The existing dir_contains rule still fires on a scratch _locales/xx-YY/ without messages.json. The clone passes."
+   },
+   {
+    "rule_id": "signal-desktop-tailwind-versions-match",
+    "unit": "signal-desktop-17",
+    "action": "modified",
+    "detail": "The package.json target regex is now '\"(?:tailwindcss|@tailwindcss/[^\"]+)\"\\s*:\\s*\"([^\"]+)\"', so tailwindcss under dependencies is read too. Fires on scratch \"tailwindcss\": \"4.2.0\" added under dependencies. It does not fire when the added entry has the same 4.3.0. The clone passes."
+   },
+   {
+    "rule_id": "(top-level) respect_gitignore: false",
+    "unit": "signal-desktop-30, signal-desktop-31",
+    "action": "modified",
+    "detail": "Set respect_gitignore: false at the top level so the walker sees ts/windows/main/tsx.preload.js, which is tracked but gitignored by `ts/**/*.js`. On the clone the walk then differs from the default walk by exactly 2 tracked-but-ignored files: that one and stylesheets/webrtc_internals.css (git ls-files -ci gives the same 2). .git is not walked. Scope check: the license rule now covers 3,368 non-.sh files and 4 .sh files, and the non-.sh set is identical (diff) to an emulation of license_comments.node.ts over git ls-files. Fires: on scratch, a broken line-1 header in tsx.preload.js fires signal-desktop-license-comments, and a 2020-2026 year fires signal-desktop-license-no-end-year; the Stage A config fired neither. The clone passes."
+   },
+   {
+    "rule_id": "signal-desktop-oxlint-license-comments, signal-desktop-file-suffix-naming, signal-desktop-js-no-bom",
+    "unit": "signal-desktop-32, signal-desktop-33, signal-desktop-35",
+    "action": "modified",
+    "detail": "Added an exclude for ts/windows/main/tsx.preload.js so these rules keep oxlint's gitignore-respecting scope after the global switch. Indirect evidence that oxlint honours .gitignore: its ignorePatterns list no build outputs, yet it runs after generate in CI. On scratch a BOM-prefixed ts/util/nosuffix.ts with a block-comment header fires all three. The clone passes."
+   },
+   {
+    "rule_id": "signal-desktop-intl-no-offset",
+    "unit": "signal-desktop-03",
+    "action": "modified",
+    "detail": "The regex is now ',\\s*(?:plural|selectordinal)\\s*,\\s*offset\\s*:\\s*[-+]?0*[1-9]', because noOffset reports element.offset !== 0 on enterPlural, which covers both plural and selectordinal. On scratch it no longer fires on offset:0, and it fires on offset:1, 'offset: 2' and a selectordinal with offset:2. The clone passes."
+   },
+   {
+    "rule_id": "signal-desktop-intl-no-legacy-variables",
+    "unit": "signal-desktop-02",
+    "action": "modified",
+    "detail": "The regex is now \\$(?:[^{}\\n\\r]|'[{}<>#][^'\\n\\r]*')+\\$, which allows $ inside and spans ICU-quoted sections. A comment records the evidence correction (the placeholder_format_custom is in the en catalog's smartling block, not .smartling.yml) and the remaining limits: it crosses # and tag literal boundaries, and it ignores '' inside quotes. On scratch it fires on 'Hello $name$ there', 'Pay $$$ now' (missed before) and \"a $'{'x$ b\" (missed before). It passes on '$5 or {amount} dollars and $6' and on per-branch '{count, plural, one {$a} other {$b}}'. The clone passes."
+   },
+   {
+    "rule_id": "signal-desktop-intl-no-one-choice",
+    "unit": "signal-desktop-08",
+    "action": "added",
+    "detail": "Stage B moved this unit to C. Added Stage B's json_path_absent search() rule, extended to selectordinal and signed offsets, because noOneChoice runs on enterPlural. On scratch it fires on '{count, plural, other {# new {thing} items}}' and '{n, selectordinal, other {#th}}'. It passes on two-option plurals, '{count, plural, =1 {one} other {{name} and # more}}' and '{n, select, other {x}}'. The clone passes."
+   },
+   {
+    "rule_id": "signal-desktop-policy-strings-{enable-backups,plaintext-export,view-aep}-{description,message}",
+    "unit": "signal-desktop-b01",
+    "action": "added",
+    "detail": "Six json_path_matches rules on _locales/en/messages.json, one per key named in scripts/gen-policy-files.mjs:22-53 (I checked the keys in the clone): description keys match '[\\s\\S]' (a non-empty string) and message keys match '^[\\s\\S]*$' (any string). R4 on scratch: deleting a key fires its rule (plaintext-export-message, view-aep-description). An empty description fires (enable-backups-description, plaintext-export-description), and so does a null description. A numeric message fires view-aep-message, and a messageformat-less entry fires enable-backups-message. An empty message string does not fire, matching the script, and a description of just a newline does not fire. All six pass on the clone."
+   },
+   {
+    "rule_id": "signal-desktop-app-version-format",
+    "unit": "signal-desktop-b02",
+    "action": "added",
+    "detail": "json_path_matches package.json $.version, mirroring scripts/utils/parseVersion.mjs: semver.parse after trim, with an optional v; the first prerelease identifier must be beta|alpha|staging|axolotl|adhoc followed by a numeric prepatch; a prod version may carry no build metadata. R4 on scratch fires on 8.38.0-nightly.1, 8.38.0-beta, 8.38.0+build5, 8.38.0-beta.01, 8.38, 08.38.0, 8.38.0-beta-x.1 and 8.38.0-beta.a. It passes on 8.38.0, 8.38.0-beta.3, 8.38.0-staging.0.foo, v8.38.0-adhoc.1+abc.2 and 8.38.0-axolotl.12. The clone (8.38.0-alpha.1) passes."
+   },
+   {
+    "rule_id": "signal-desktop-beta-prep-{name,product-name,app-id,startup-wm-class,desktop-name,executable-name}",
+    "unit": "signal-desktop-b03",
+    "action": "added",
+    "detail": "Six json_path_equals rules asserting the production identity values from scripts/prepare_beta_build.mjs:25-50 unconditionally (I checked the paths in package.json). A comment explains that the gate is dormant unless the channel is beta. On scratch each rule fires on its beta value (for example productName 'Signal Beta' and appId '...-beta'), and the desktop-name rule also fires when desktopName is removed. All six pass on the clone."
+   },
+   {
+    "rule_id": "signal-desktop-restricted-import-zones",
+    "unit": "signal-desktop-38",
+    "action": "demoted",
+    "detail": "Stage B moved this unit to D (R7, trpc-41). Moved it to the VALUE-ADD section at level info with a comment naming the limitations: only relative specifiers in a content regex resolve, and the inline suppressions are emulated in the regex. The ID is kept. The clone passes."
+   },
+   {
+    "rule_id": "signal-desktop-github-scripts-node-builtins-only",
+    "unit": "signal-desktop-39",
+    "action": "demoted",
+    "detail": "Stage B moved this unit to D (R7, trpc-41, yarnpkg-berry-34, zulip-62). It is now VALUE-ADD at level info with a limitation comment. The ID is kept. The clone passes."
+   },
+   {
+    "rule_id": "signal-desktop-no-chai-expect-should",
+    "unit": "signal-desktop-46",
+    "action": "demoted",
+    "detail": "Stage B moved this unit to D (R7). It is now VALUE-ADD at level info with a limitation comment (regex instead of specifier parsing; the one suppression is a path exclude). Following Stage B's scope note, the sticker-creator/** exclude is replaced by sticker-creator's .eslintignore entries, because sticker-creator/.eslintrc.cjs:172-185 bans the same chai names. On scratch it fires on sticker-creator/src/x.ts and not on the ignored sticker-creator/src/assets/y.ts. The ID is kept. The clone passes."
+   },
+   {
+    "rule_id": "(none)",
+    "unit": "signal-desktop-27",
+    "action": "not-done",
+    "detail": "Stage B moved this unit to D. Stage A wrote no rule for it, so there is nothing to demote."
+   },
+   {
+    "rule_id": "(none)",
+    "unit": "signal-desktop-b04, signal-desktop-b05",
+    "action": "not-done",
+    "detail": "Both are D missed units (orphaned axo screenshots, Windows DLL allowlist), so no rule is added."
+   }
+  ],
+  "unit_notes": [
+   {
+    "id": "signal-desktop-08",
+    "suggested_bucket": "C",
+    "note": "This applies Stage B's reclassification from B-adapter. The rule signal-desktop-intl-no-one-choice now expresses it as a regex approximation. It covers plural and selectordinal (noOneChoice uses enterPlural, not select), passes on the clone and fired on scratch one-option plural and selectordinal entries."
+   },
+   {
+    "id": "signal-desktop-38",
+    "suggested_bucket": "D",
+    "note": "Stage B reclassified it under R7 (trpc-41). Its rule is kept as an info-level VALUE-ADD approximation with the same ID."
+   },
+   {
+    "id": "signal-desktop-39",
+    "suggested_bucket": "D",
+    "note": "Stage B reclassified it under R7 (trpc-41, yarnpkg-berry-34, zulip-62). Its import_gate rule is kept as an info-level VALUE-ADD with the same ID."
+   },
+   {
+    "id": "signal-desktop-46",
+    "suggested_bucket": "D",
+    "note": "Stage B reclassified it under R7. Its rule is kept as an info-level VALUE-ADD with the same ID, and its scope now also covers sticker-creator's eslint ban."
+   },
+   {
+    "id": "signal-desktop-27",
+    "suggested_bucket": "D",
+    "note": "Stage B reclassified it (element-web-12 precedent). It never had a rule, so the config is unaffected."
+   },
+   {
+    "id": "signal-desktop-b03",
+    "suggested_bucket": "C",
+    "note": "Six error-level rules were added as Stage B suggested. The gate is dormant at the alpha pin and runs only for beta versions. If the integrator rejects b03 as a dormant guard, demote the six signal-desktop-beta-prep-* rules to info VALUE-ADD; they pass on the clone either way."
+   }
+  ],
+  "validate_output": "✓ Config valid: 45 rule(s) loaded from docs/design/v0.12/corpus/signalapp-Signal-Desktop.alint.yml",
+  "check_output": "exit 0: \"✓ all rules passed.\" (`alint -c CONFIG check . --compact` on the clone; 45 rules: 39 error and 6 info value-add, 0 violations). `git status --porcelain` on the clone is empty. The scratch directory <scratch>/signalapp-Signal-Desktop-c was removed. Fire tests used copies of _locales, package.json, pnpm-lock.yaml, .gitignore and three ts files under that scratch directory, plus files I created there. The only program run against the clone was the alint binary, besides read-only git ls-files/check-ignore/status and grep. Python3 -I was used only to edit scratch JSON copies."
+ }
+}

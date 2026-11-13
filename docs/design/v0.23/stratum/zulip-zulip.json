@@ -1,0 +1,3607 @@
+{
+ "repo": "zulip/zulip",
+ "sha": "39bd5f2f40a647af06b1cc0267cddd34f88ed2e9",
+ "metrics": {
+  "counts": {
+   "A": 111,
+   "B-config": 2,
+   "B-adapter": 3,
+   "B-kernel": 0,
+   "B-delegate": 4,
+   "C": 12,
+   "D": 58
+  },
+  "addressable": 132,
+  "coverage_today": 84,
+  "coverage_with_tuning": 93,
+  "gap": 7,
+  "coverage_after_slice": 86,
+  "coverage_after_slice_with_entry_values": 86
+ },
+ "by_family": {
+  "locale": {
+   "counts": {
+    "A": 2,
+    "B-config": 0,
+    "B-adapter": 2,
+    "B-kernel": 0,
+    "B-delegate": 1,
+    "C": 2,
+    "D": 0
+   },
+   "addressable": 7,
+   "coverage_today": 29,
+   "coverage_with_tuning": 57,
+   "gap": 43,
+   "coverage_after_slice": 29,
+   "coverage_after_slice_with_entry_values": 29
+  },
+  "dep-version": {
+   "counts": {
+    "A": 1,
+    "B-config": 0,
+    "B-adapter": 0,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 1,
+    "D": 3
+   },
+   "addressable": 2,
+   "coverage_today": 50,
+   "coverage_with_tuning": 100,
+   "gap": 0,
+   "coverage_after_slice": 50,
+   "coverage_after_slice_with_entry_values": 50
+  },
+  "toolchain-pin": {
+   "counts": {
+    "A": 1,
+    "B-config": 0,
+    "B-adapter": 0,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 0,
+    "D": 2
+   },
+   "addressable": 1,
+   "coverage_today": 100,
+   "coverage_with_tuning": 100,
+   "gap": 0,
+   "coverage_after_slice": 100,
+   "coverage_after_slice_with_entry_values": 100
+  },
+  "other": {
+   "counts": {
+    "A": 107,
+    "B-config": 2,
+    "B-adapter": 1,
+    "B-kernel": 0,
+    "B-delegate": 3,
+    "C": 9,
+    "D": 53
+   },
+   "addressable": 122,
+   "coverage_today": 88,
+   "coverage_with_tuning": 95,
+   "gap": 5,
+   "coverage_after_slice": 89,
+   "coverage_after_slice_with_entry_values": 89
+  }
+ },
+ "units": [
+  {
+   "id": "zulip-01",
+   "summary": "Every locale/<x>/LC_MESSAGES/django.po compiles with msgfmt (valid gettext syntax)",
+   "evidence": "zerver/management/commands/compilemessages.py:12,20,30-31 (subclasses Django compilemessages, which runs msgfmt); tools/lib/provision_inner.py:374-375 (provision, every CI job); tools/i18n/sync-translations:74",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "B-delegate",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Checking a message format's own syntax is the section 2.2 B-delegate example; alint has no gettext .po reader",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-02",
+   "summary": "msgstr placeholders agree with msgid on python-format entries (msgfmt --check-format)",
+   "evidence": "Django compilemessages passes --check-format to msgfmt (external package source, not in the clone); invoked via compilemessages.py:30-31 and tools/lib/provision_inner.py:374-375",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "B-adapter",
+   "alint": "gettext .po adapter plus a printf/python-format placeholder extractor",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Placeholder agreement needs a .po adapter and a placeholder extractor (section 2.2 B-adapter example)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "placeholder"
+     }
+    }
+   ],
+   "needs": "placeholder"
+  },
+  {
+   "id": "zulip-03",
+   "summary": "Every locale with LC_MESSAGES/django.po has a sibling translations.json",
+   "evidence": "zerver/management/commands/compilemessages.py:65-66,147-155 (get_translation_percentage opens both files per locale)",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "A",
+   "alint": "pair: zulip-locale-po-has-translations-json",
+   "rules": [
+    "zulip-locale-po-has-translations-json"
+   ],
+   "assertion_family": "none",
+   "reason": "pair with a {dir}/../translations.json partner expresses it; check passes on the clone (R4)",
+   "fire_verified": "Scratch copy of locale/de and locale/fr (django.po + translations.json) passes; deleting locale/fr/translations.json fires on locale/fr/LC_MESSAGES/django.po; passes on the clone",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-04",
+   "summary": "locale/<x>/translations.json parses as JSON",
+   "evidence": "zerver/management/commands/compilemessages.py:154-155 (orjson.loads)",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "C",
+   "alint": "json_path_absent (never-matching probe): zulip-locale-translations-json-parses",
+   "rules": [
+    "zulip-locale-translations-json-parses",
+    "zulip-locale-translations-json-object-root"
+   ],
+   "assertion_family": "none",
+   "reason": "The object-root half is expressed (Stage C). alint's JSON parse tolerates trailing commas and comments, which orjson rejects, so the parse half is relaxed; the same gap keeps element-web-08 in C (integrator).",
+   "fire_verified": "Truncating a scratch copy of locale/de/translations.json to 200 bytes gives a resource_parse analysis failure with exit 1 (also confirmed with a one-rule config); clean copy and clone pass",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "bucket": "C",
+      "reason": "The object-root half is expressed (Stage C). alint's JSON parse tolerates trailing commas and comments, which orjson rejects, so the parse half is relaxed; the same gap keeps element-web-08 in C (integrator)."
+     }
+    }
+   ]
+  },
+  {
+   "id": "zulip-05",
+   "summary": "Every locale .po and .json file is Unicode NFC-normalized",
+   "evidence": "tools/i18n/sync-translations:49-60 (\"Non-NFC translations exist!\")",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "B-adapter",
+   "alint": "Unicode normalization-form predicate over file content",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Maintainer-run gate (counted under R5); alint has no normalization operator",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "normalization"
+     }
+    }
+   ],
+   "needs": "normalization"
+  },
+  {
+   "id": "zulip-06",
+   "summary": "Frontend translatable strings contain no Handlebars {{ }} interpolation",
+   "evidence": "tools/check-frontend-i18n:18-19,51; .github/workflows/zulip-ci.yml:161-167",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: tools/check-frontend-i18n after makemessages",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Needs makemessages string extraction from source (code analysis, R7)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "D",
+      "locale",
+      "none"
+     ],
+     "why": "Same reasoning as zulip-08: check-frontend-i18n inspects source strings extracted from code, not locale files. Tagging it locale inflates the locale family's D count."
+    }
+   ]
+  },
+  {
+   "id": "zulip-07",
+   "summary": "Each django.po carries a 'Language-Team: Name <...>' header (compilemessages derives unknown locales' names from it)",
+   "evidence": "zerver/management/commands/compilemessages.py:68-73",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "C",
+   "alint": "file_content_matches: zulip-locale-po-language-team",
+   "rules": [
+    "zulip-locale-po-language-team"
+   ],
+   "assertion_family": "none",
+   "reason": "The real condition applies only to locale codes missing from Django's LANG_INFO (external package data); asserting the header for every locale over-approximates and holds at the pin",
+   "fire_verified": "Optional for C: deleting the Language-Team line in a scratch copy of locale/de/LC_MESSAGES/django.po fires; clone passes",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-08",
+   "summary": "User-facing strings use sentence case (check-capitalization)",
+   "evidence": "tools/check-capitalization:41-46,79; .github/workflows/zulip-ci.yml:164-166",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: tools/check-capitalization",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Operates on strings extracted from code and templates by makemessages (R7 extraction)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "D",
+      "locale",
+      "none"
+     ],
+     "why": "Sentence case on source strings extracted by makemessages is none of the locale family's scope (key parity, placeholder or plural agreement, locale-file format, catalog freshness). Stage A tags the parallel i18n-markup rules (zulip-cc-13, cc-33, cc-56 and cc-66 to cc-69) as other, so this should match."
+    }
+   ]
+  },
+  {
+   "id": "zulip-09",
+   "summary": "The word 'realm' never appears in user-facing strings",
+   "evidence": "tools/lib/capitalization.py:246-247,307-312",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: tools/check-capitalization BANNED_WORDS",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Same extracted-string input as zulip-08 (R7 extraction)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "D",
+      "locale",
+      "none"
+     ],
+     "why": "Same reasoning as zulip-08: a banned word in extracted source strings is not a locale-file property."
+    }
+   ]
+  },
+  {
+   "id": "zulip-10",
+   "summary": "pnpm-lock.yaml matches the manifests (pnpm install --frozen-lockfile)",
+   "evidence": "scripts/lib/node_cache.py:35 (run by provision in CI)",
+   "mechanism": "script",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "tool: pnpm",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Package-manager resolution (R7)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-11",
+   "summary": "pnpm-lock.yaml has no dedupable duplicates (pnpm dedupe --check)",
+   "evidence": ".github/workflows/zulip-ci.yml:180-182",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "tool: pnpm dedupe",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Resolution semantics (R7 names dedupe --check as D)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-12",
+   "summary": "uv.lock is fresh for pyproject.toml (uv lock --check; uv sync --frozen)",
+   "evidence": ".github/workflows/zulip-ci.yml:206; tools/lib/provision.py:447",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "tool: uv",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Lockfile freshness is resolution (R7)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-13",
+   "summary": "tusd version and per-arch sha256 are identical in puppet/zulip/manifests/common.pp and tools/setup/install-tusd",
+   "evidence": "puppet/zulip/manifests/common.pp:81 ('Keep in sync with tools/setup/install-tusd'); tools/setup/install-tusd:4",
+   "mechanism": "convention",
+   "family": "dep-version",
+   "bucket": "A",
+   "alint": "cross_file x3: zulip-tusd-version-sync, zulip-tusd-sha256-amd64-sync, zulip-tusd-sha256-arm64-sync",
+   "rules": [
+    "zulip-tusd-version-sync",
+    "zulip-tusd-sha256-amd64-sync",
+    "zulip-tusd-sha256-arm64-sync"
+   ],
+   "assertion_family": "none",
+   "reason": "Load-bearing keep-in-sync comment (R5); cross_file equals expresses it and passes on the clone",
+   "fire_verified": "Scratch copies of both files pass; version=2.9.2 in install-tusd fires the version rule, an altered amd64 sha in install-tusd fires the amd64 rule, an altered aarch64 sha in common.pp fires the arm64 rule; clone passes",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-14",
+   "summary": "Dependencies must be at least one day old (pnpm minimumReleaseAge 1440, uv exclude-newer '24 hours')",
+   "evidence": "pnpm-workspace.yaml:4; pyproject.toml:350",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: pnpm / uv resolution",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Enforced by the resolvers against registry publish times (external state); keeping the declarations is value-add (R3)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "dep-version",
+      "none"
+     ],
+     "why": "Release age is not a dependency version, range, protocol or field (the batch 3 ruling's reason), so a pure release-age gate is `other`, as the release-age agreement units are."
+    }
+   ]
+  },
+  {
+   "id": "zulip-15",
+   "summary": "PROVISION_VERSION is bumped when dependencies or provisioning inputs change",
+   "evidence": "version.py:38-51",
+   "mechanism": "convention",
+   "family": "dep-version",
+   "bucket": "C",
+   "alint": "pair_changed_together (if_changed pyproject.toml, uv.lock, package.json, pnpm-lock.yaml or tools/setup/**, then_changed version.py); not used, because the clone is depth 1",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "A change-set rule that a git kind expresses, with 'needs a re-provision' narrowed to a path list. C by the batch-1 ruling: R4 cannot confirm it on a depth-1 clone.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "D",
+      "dep-version",
+      "none"
+     ],
+     "why": "pair_changed_together can approximate it: if pyproject.toml, uv.lock, package.json, pnpm-lock.yaml or tools/setup/** changed, version.py must change. The approximation needs the judgment 'requires re-provision' narrowed to a path list, hence C, not D. It is documented as a rule in docs/subsystems/dependencies.md:55 ('PROVISION_VERSION must be manually updated...')."
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "alint",
+      "reason"
+     ],
+     "why": "The alint field was empty and the reason did not name the git kind behind C (rushstack-27, tq-57 and backstage-36 are the same shape)."
+    }
+   ]
+  },
+  {
+   "id": "zulip-16",
+   "summary": "Provision installs Node 24.22.1 and verifies node --version equals the pin",
+   "evidence": "scripts/lib/install-node:4,19-24,40",
+   "mechanism": "script",
+   "family": "toolchain-pin",
+   "bucket": "D",
+   "alint": "tool: scripts/lib/install-node",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Checks the installed binary (environment state); there is no second in-repo Node pin to compare (no .nvmrc, engines or Volta)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-17",
+   "summary": "Provision installs uv 0.13.4 (sha256-pinned) and verifies uv --version",
+   "evidence": "scripts/lib/install-uv:4-24",
+   "mechanism": "script",
+   "family": "toolchain-pin",
+   "bucket": "D",
+   "alint": "tool: scripts/lib/install-uv",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Environment/binary check; the unenforced .readthedocs.yaml duplicate is covered by a value-add rule",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-18",
+   "summary": "pnpm runs from Corepack at the packageManager pin (pnpm@12.16.1+sha512)",
+   "evidence": "package.json:3; scripts/lib/node_cache.py:32-33",
+   "mechanism": "tool-config",
+   "family": "toolchain-pin",
+   "bucket": "A",
+   "alint": "json_path_matches: zulip-package-manager-pnpm-pinned",
+   "rules": [
+    "zulip-package-manager-pnpm-pinned"
+   ],
+   "assertion_family": "none",
+   "reason": "The pin's form is file content Corepack reads: pnpm@<x.y.z> with an optional integrity hash. Fetching that pnpm is environment state and stays outside the unit.",
+   "fire_verified": "Audit: passes on the clone; fires on pnpm@latest and on a yarn pin.",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "toolchain-pin",
+      "none"
+     ],
+     "why": "Seven repositories count a valid exact packageManager pin as A (strapi-11, babel-23, tq-02, trpc-02, wsdk-54, ghost-25, fluentui-01). node_cache.py runs corepack pnpm install, which needs that spec; only fetching the version is environment state."
+    }
+   ]
+  },
+  {
+   "id": "zulip-19",
+   "summary": "tools/lint and the test runners refuse to run in an unprovisioned or stale-provisioned environment",
+   "evidence": "tools/lint:36 (assert_provisioning_status_ok); version.py:51",
+   "mechanism": "script",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Environment state",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-20",
+   "summary": "Every mode-100755 file starts with #! (non-scripts are not executable)",
+   "evidence": "tools/ci/check-executables:3-8; .github/workflows/zulip-ci.yml:217",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "executable_has_shebang: zulip-executables-have-shebang",
+   "rules": [
+    "zulip-executables-have-shebang"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct kind; passes on the clone",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-21",
+   "summary": ".mailmap entries are sorted case-insensitively",
+   "evidence": "tools/lint:212-214",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "ordered_block lexical-ci: zulip-mailmap-sorted",
+   "rules": [
+    "zulip-mailmap-sorted"
+   ],
+   "assertion_family": "none",
+   "reason": "ordered_block lexical-ci folds to lowercase, while tools/lint's sort -cf folds to uppercase; they agree at the pin but differ for [ \\ ] ^ _ ` against letters. A fold option would make it exact (integrator, from Stage B and C).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "bucket": "C",
+      "reason": "ordered_block lexical-ci folds to lowercase, while tools/lint's sort -cf folds to uppercase; they agree at the pin but differ for [ \\ ] ^ _ ` against letters. A fold option would make it exact (integrator, from Stage B and C)."
+     }
+    }
+   ]
+  },
+  {
+   "id": "zulip-22",
+   "summary": "docs/THIRDPARTY declares the known DEP-5 1.0 Format header",
+   "evidence": "tools/check-thirdparty:51-55",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_header: zulip-thirdparty-dep5-format",
+   "rules": [
+    "zulip-thirdparty-dep5-format"
+   ],
+   "assertion_family": "none",
+   "reason": "First-line pattern; passes on the clone",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-23",
+   "summary": "Every docs/THIRDPARTY Files: glob matches a tracked file",
+   "evidence": "tools/check-thirdparty:40-47,63-67",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "registry_paths_resolve x3: zulip-thirdparty-files-token1/2/3",
+   "rules": [
+    "zulip-thirdparty-files-token1",
+    "zulip-thirdparty-files-token2",
+    "zulip-thirdparty-files-token3"
+   ],
+   "assertion_family": "none",
+   "reason": "Expressible but awkward: one rule per token position of a space-separated Files field; DEP-5 '*' crosses '/' and alint's does not; the script's injected fake path for generated static/generated/ has to be a hand-unrolled no-lookahead prefix exclusion",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-24",
+   "summary": "Every one-line License: name in docs/THIRDPARTY has a standalone License paragraph carrying its text",
+   "evidence": "tools/check-thirdparty:57-71",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "cross_file subset: zulip-thirdparty-licenses-defined",
+   "rules": [
+    "zulip-thirdparty-licenses-defined"
+   ],
+   "assertion_family": "none",
+   "reason": "Set membership between two extractions of the same file; passes on the clone",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-25",
+   "summary": "docs/THIRDPARTY round-trips python-debian's canonical dump byte for byte",
+   "evidence": "tools/check-thirdparty:73-85",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: python-debian Copyright.dump",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Formatter-style canonicalization (R2)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-26",
+   "summary": "No unreplaced ZF- feature-level placeholder in api_docs/*.md or zerver/openapi/zulip.yaml",
+   "evidence": "tools/check-feature-level-updated:20-29; .github/workflows/api-docs-update-check.yml:28-46",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-api-docs-no-zf-placeholder",
+   "rules": [
+    "zulip-api-docs-no-zf-placeholder"
+   ],
+   "assertion_family": "none",
+   "reason": "Substring ban over a fixed file set; passes on the clone",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-27",
+   "summary": "api_docs/unmerged.d fragments carry no **Feature level** heading",
+   "evidence": ".claude/rules/api-changelog.md:17; docs/documentation/api.md:352-353",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-unmerged-changelog-no-feature-level-heading",
+   "rules": [
+    "zulip-unmerged-changelog-no-feature-level-heading"
+   ],
+   "assertion_family": "none",
+   "reason": "Documented convention (R5); vacuous at the pin (no fragments) but the rule passes",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-28",
+   "summary": "Every linted *.yaml parses (single-document files)",
+   "evidence": "tools/lint:110-111; tools/check-openapi.ts:29",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-config",
+   "alint": "yaml_path_absent probe: zulip-yaml-parses",
+   "rules": [
+    "zulip-yaml-parses"
+   ],
+   "assertion_family": "unique-key",
+   "reason": "The YAML Composer in tools/check-openapi.ts reports duplicate mapping keys; alint's YAML parse keeps the last one. The duplicate-aware entry adapter emits a row per key, so no duplicate (file, key path) is a unique-key constraint. The syntax half is covered by zulip-yaml-parses (integrator, from Stage B and C).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "bucket": "B-config",
+      "assertion_family": "unique-key",
+      "reason": "The YAML Composer in tools/check-openapi.ts reports duplicate mapping keys; alint's YAML parse keeps the last one. The duplicate-aware entry adapter emits a row per key, so no duplicate (file, key path) is a unique-key constraint. The syntax half is covered by zulip-yaml-parses (integrator, from Stage B and C)."
+     }
+    }
+   ]
+  },
+  {
+   "id": "zulip-29",
+   "summary": "OpenAPI: $ref has no sibling keys",
+   "evidence": "tools/check-openapi.ts:59",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "yaml_path_absent: zulip-openapi-ref-no-siblings",
+   "rules": [
+    "zulip-openapi-ref-no-siblings"
+   ],
+   "assertion_family": "none",
+   "reason": "RFC 9535 filter with length(); passes on the clone",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-30",
+   "summary": "OpenAPI: nullable never sits beside allOf/anyOf/oneOf",
+   "evidence": "tools/check-openapi.ts:70",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "yaml_path_absent: zulip-openapi-nullable-not-beside-combinator",
+   "rules": [
+    "zulip-openapi-nullable-not-beside-combinator"
+   ],
+   "assertion_family": "none",
+   "reason": "JSONPath filter; passes on the clone",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-31",
+   "summary": "OpenAPI: at most one inline (non-$ref) allOf subschema",
+   "evidence": "tools/check-openapi.ts:90",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "yaml_path_absent: zulip-openapi-allof-one-inline",
+   "rules": [
+    "zulip-openapi-allof-one-inline"
+   ],
+   "assertion_family": "none",
+   "reason": "RFC 9535 count() filter; passes on the clone",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-32",
+   "summary": "OpenAPI description strings are prettier-formatted Markdown",
+   "evidence": "tools/check-openapi.ts:104",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: prettier",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Formatter (R2)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-33",
+   "summary": "zulip.yaml is a valid OpenAPI document (SwaggerParser.validate)",
+   "evidence": "tools/check-openapi.ts:175",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-delegate",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Spec-format validation including $ref resolution; json_schema_passes would need an OpenAPI meta-schema inside the read-only lint root and still not cover the validator's semantics",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-34",
+   "summary": "OpenAPI examples validate against their schemas",
+   "evidence": "tools/check-openapi.ts:183",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-delegate",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Per-example schema validation with ref resolution inside one document; plugin territory",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-35",
+   "summary": "exports.fixtures keys in web/tests/lib/events.cjs stay sorted",
+   "evidence": "tools/check-schemas:103,119; .github/workflows/zulip-ci.yml:154-158",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "ordered_block: zulip-events-fixtures-sorted",
+   "rules": [
+    "zulip-events-fixtures-sorted"
+   ],
+   "assertion_family": "none",
+   "reason": "Marker-delimited sorted block; passes on the clone",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-36",
+   "summary": "Each node event fixture passes the Python event_schema checker",
+   "evidence": "tools/check-schemas:84-91,117-121",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Runs project Python (event_schema checkers)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-38",
+   "summary": "EXEMPT_FILES in tools/test-js-with-node stays sorted",
+   "evidence": "tools/test-js-with-node:37-45",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "A",
+   "alint": "ordered_block: zulip-node-exempt-files-sorted",
+   "rules": [
+    "zulip-node-exempt-files-sorted"
+   ],
+   "assertion_family": "none",
+   "reason": "Sorted block; passes on the clone",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-39",
+   "summary": "Every EXEMPT_FILES entry still exists",
+   "evidence": "tools/test-js-with-node:511-512",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "C",
+   "alint": "registry_paths_resolve: zulip-node-exempt-files-exist",
+   "rules": [
+    "zulip-node-exempt-files-exist"
+   ],
+   "assertion_family": "none",
+   "reason": "registry_paths_resolve cannot narrow the scope to tools/test-js-with-node's non-recursive globs; the extract regex captures an out-of-glob entry with its closing quote so it never resolves. Exact on the tested cases but a capture trick (integrator, from Stage C).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "bucket": "C",
+      "reason": "registry_paths_resolve cannot narrow the scope to tools/test-js-with-node's non-recursive globs; the extract regex captures an out-of-glob entry with its closing quote so it never resolves. Exact on the tested cases but a capture trick (integrator, from Stage C)."
+     }
+    }
+   ]
+  },
+  {
+   "id": "zulip-40",
+   "summary": "Node unit tests pass",
+   "evidence": ".github/workflows/zulip-ci.yml:141-146",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: tools/test-js-with-node",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Runs code (R2)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-41",
+   "summary": "Non-exempt frontend files are 100% covered by node tests",
+   "evidence": "tools/test-js-with-node:513",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Coverage requires running tests",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-42",
+   "summary": "Backend test suite passes (with webhooks and transaction tests)",
+   "evidence": ".github/workflows/zulip-ci.yml:190-193",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: tools/test-backend",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Runs code (R2)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-43",
+   "summary": "No new migration with a meaningless NNNN_auto_ name (allowlist excepted)",
+   "evidence": "tools/test-migrations:7-27; .github/workflows/zulip-ci.yml:214",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_absent: zulip-migrations-no-auto-names",
+   "rules": [
+    "zulip-migrations-no-auto-names"
+   ],
+   "assertion_family": "none",
+   "reason": "File-name ban with the same allowlist; passes on the clone",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-44",
+   "summary": "Migrations are consistent with models (makemigrations --check)",
+   "evidence": "tools/test-migrations:29",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: manage.py makemigrations",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Runs Django model introspection",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-45",
+   "summary": "Each custom_check rule matches its bad_lines and none of its good_lines",
+   "evidence": "tools/tests/test_zulint_custom_rules.py:47-66",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Executes the regex rules against sample lines (a test of tool config, runs Python)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-46",
+   "summary": "Every path named in a custom_check exclude / exclude_line exists",
+   "evidence": "tools/tests/test_zulint_custom_rules.py:23-38; tools/test-tools:23-32; .github/workflows/zulip-ci.yml:116-119",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "C",
+   "alint": "registry_paths_resolve: zulip-custom-check-paths-exist",
+   "rules": [
+    "zulip-custom-check-paths-exist"
+   ],
+   "assertion_family": "none",
+   "reason": "Paths sit in Python set/tuple literals, so a regex harvests every quoted repo-rooted string (a superset); awkward but works",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-46b",
+   "summary": "An extensionless custom_check include_only entry ends with '/'",
+   "evidence": "tools/tests/test_zulint_custom_rules.py:40-45",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-custom-check-include-only-trailing-slash",
+   "rules": [
+    "zulip-custom-check-include-only-trailing-slash"
+   ],
+   "assertion_family": "none",
+   "reason": "Regex over the set literal (entries may span lines); passes on the clone and fired in scratch on both a multi-line and an inline set",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-47",
+   "summary": "Zulip Cloud Standard price is equal in pricing_model.html and slack-alternative.html",
+   "evidence": "templates/corporate/pricing_model.html:80; templates/corporate/slack-alternative.html:298",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "A",
+   "alint": "cross_file: zulip-cloud-standard-price-sync",
+   "rules": [
+    "zulip-cloud-standard-price-sync"
+   ],
+   "assertion_family": "none",
+   "reason": "Load-bearing keep-in-sync comment (R5); passes on the clone",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-48",
+   "summary": "DEFAULT_DROPDOWN_HEIGHT equals the dropdown max-height in zulip.css",
+   "evidence": "web/src/dropdown_widget.ts:22; web/styles/zulip.css:2330",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "A",
+   "alint": "cross_file: zulip-dropdown-height-sync",
+   "rules": [
+    "zulip-dropdown-height-sync"
+   ],
+   "assertion_family": "none",
+   "reason": "Load-bearing keep-in-sync comment (R5); passes on the clone",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-49",
+   "summary": "Keep-in-sync comments whose counterpart is code or prose behavior (about 40 more, e.g. linkifier boundaries, compose/echo, 5xx pages, event types)",
+   "evidence": "web/src/linkifiers.ts:24; web/src/compose.ts:169; web/src/echo.ts:270; web/html/5xx.html:25; web/src/server_event_types.ts:8; scripts/lib/zulip_tools.py:68 (45 keep-in-sync/sync-with comment lines in total)",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Semantic equivalence of code or prose, not a value (code analysis); counted as one behavior (R1)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-50",
+   "summary": "tools/ unit tests pass (test-tools)",
+   "evidence": "tools/test-tools:23-32; .github/workflows/zulip-ci.yml:116-119",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: unittest",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Runs code (R2)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-51",
+   "summary": "Backend files outside not_yet_fully_covered are 100% covered",
+   "evidence": "tools/test-backend:48,149-151,497-511",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Coverage requires running tests",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-52",
+   "summary": "Templates have no duplicate element ids",
+   "evidence": "tools/lint:103-108; tools/check-templates:56-100",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-config",
+   "alint": "constraint unique-key over the id attributes extracted by regex from the templates, minus IGNORE_IDS",
+   "rules": [],
+   "assertion_family": "unique-key",
+   "reason": "The tool extracts ids with a regex, which alint can do; uniqueness of extracted values across files has no kind today, so B-config unique-key (batch 2 ruling, fluentui-b08 precedent).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "other",
+      "none"
+     ],
+     "why": "tools/check-templates:56-100 and tools/lib/html_branches.py:28-47,76-98 pull ids out with a regex and require uniqueness across templates, with an IGNORE_IDS exception list. Uniqueness over extracted values is B-config (batch 2 ruling; fluentui-b08)."
+    }
+   ]
+  },
+  {
+   "id": "zulip-53",
+   "summary": "HTML and Handlebars templates tokenize cleanly (balanced tags)",
+   "evidence": "tools/check-templates:47,109",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-delegate",
+   "alint": "tool: tools/check-templates",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Balanced-tag validity of HTML and Handlebars templates needs a template parser; that is a delegated validator for a format alint does not read (zulip-33 precedent).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "other",
+      "none"
+     ],
+     "why": "Template syntax validity is a parser for a format alint does not read, as OpenAPI validity is for zulip-33."
+    }
+   ]
+  },
+  {
+   "id": "zulip-54",
+   "summary": "Template indentation matches the pretty-printer",
+   "evidence": "tools/check-templates:19,105,115",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: validate_indent_html",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Formatter (R2)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-55",
+   "summary": "Commit title matches '^(.+: )?[A-Z].+\\.$' (area: Capitalized sentence ending with a period)",
+   "evidence": ".gitlint:6-7; docs/contributing/commit-discipline.md; tools/commit-msg:3-14",
+   "mechanism": "hook",
+   "family": "other",
+   "bucket": "C",
+   "alint": "(git_commit_subject_matches would express it; not used, depth-1 clone)",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Commit history is external state on a depth-1 clone and section 2.4 bars git-history kinds; gitlint is skipped in CI (zulip-ci.yml:152,188) and hooks are local",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "D",
+      "other",
+      "none"
+     ],
+     "why": "Expressible today with git_commit_subject_matches, matches '^(.+: )?[A-Z].+\\.$' (RE2-compatible). The v0.12 corpus counted the same shape as A (pnpm-conventional-commits via git_commit_message), so D ('deliberate non-goal') is wrong. R4 cannot be confirmed because section 2.4 bars git kinds on depth-1 clones, so C is the honest bucket. The mechanism is really convention: tools/commit-msg always exits 0 (it only warns), and gitlint is skipped in CI."
+    }
+   ]
+  },
+  {
+   "id": "zulip-56",
+   "summary": "Commit title is at most 72 characters",
+   "evidence": ".gitlint:9-10",
+   "mechanism": "hook",
+   "family": "other",
+   "bucket": "C",
+   "alint": "(git_commit_message would express it; not used)",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "As zulip-55",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "D",
+      "other",
+      "none"
+     ],
+     "why": "git_commit_message subject_max_length: 72 expresses .gitlint [title-max-length] exactly. It is not a non-goal; the bucket is C only because of the section 2.4 git-kind bar. Same reasoning as zulip-55."
+    }
+   ]
+  },
+  {
+   "id": "zulip-57",
+   "summary": "Commit body lines are at most 76 characters",
+   "evidence": ".gitlint:12-13",
+   "mechanism": "hook",
+   "family": "other",
+   "bucket": "C",
+   "alint": "(git_commit_message would express it; not used)",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "As zulip-55",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "D",
+      "other",
+      "none"
+     ],
+     "why": ".gitlint [body-max-line-length] 76 is expressible with a git_commit_message pattern of the form \\A[^\\n]*(?:\\n[^\\n]{0,76})*\\n?\\z. That is awkward but possible, so C, not D."
+    }
+   ]
+  },
+  {
+   "id": "zulip-58",
+   "summary": "Commit title uses the imperative mood",
+   "evidence": "tools/lib/gitlint_rules.py:74-80",
+   "mechanism": "hook",
+   "family": "other",
+   "bucket": "C",
+   "alint": "git_commit_subject_matches with two complement regexes generated from TENSE_DATA (no rule: depth-1 clone)",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "A word list checked against the first word of the commit title, after an area prefix. Two complement regexes generated from the list express it; a commit kind on a depth-1 clone cannot be confirmed (batch 1 ruling), so C with no rule.",
+   "fire_verified": "Audit: the two regexes agreed with gitlint's logic on 176,050 generated titles; end to end on a scratch repository, 'compose: Added ...' and 'Fixes ...' fired and 'compose: Add ...' passed.",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "other",
+      "none"
+     ],
+     "why": "zulip-55, -56, -57 and -59 are C, and the imperative-mood check is a fixed list of 177 words against the title's first word (tools/lib/gitlint_rules.py:8-104), not NLP."
+    }
+   ]
+  },
+  {
+   "id": "zulip-59",
+   "summary": "gitlint default commit hygiene (no WIP title, no trailing whitespace or tabs, blank second line) minus the three ignored rules",
+   "evidence": ".gitlint:1-2",
+   "mechanism": "hook",
+   "family": "other",
+   "bucket": "C",
+   "alint": "(git_commit_message would express most of it; not used)",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "As zulip-55",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "D",
+      "other",
+      "none"
+     ],
+     "why": "Stage A's own alint field says git_commit_message 'would express most of it'. Expressible-but-awkward (several regexes, and section 2.4 bars git kinds) is the definition of C, not D."
+    }
+   ]
+  },
+  {
+   "id": "zulip-61",
+   "summary": "stylelint passes on CSS",
+   "evidence": "tools/lint:76-81",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: stylelint",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Linter (R2)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-62",
+   "summary": "eslint passes with zero warnings (incl. restricted imports such as zod -> zod/mini)",
+   "evidence": "tools/lint:83-88; eslint.config.js:107",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: eslint",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Linter (R2)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-63",
+   "summary": "puppet parser validate passes",
+   "evidence": "tools/lint:90-95",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: puppet",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Parser/linter (R2)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-64",
+   "summary": "puppet-lint passes with warnings as failures",
+   "evidence": "tools/lint:96-101; tools/linter_lib/exclude.py",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: puppet-lint",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Linter (R2)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-65",
+   "summary": "shellcheck passes",
+   "evidence": "tools/lint:117-122",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: shellcheck",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Linter (R2)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-66",
+   "summary": "shfmt formatting",
+   "evidence": "tools/lint:123-128",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: shfmt",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Formatter (R2)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-67",
+   "summary": "mypy type check passes",
+   "evidence": "tools/lint:136; .github/workflows/zulip-ci.yml:195-201",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: mypy",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Type checker (R2)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-68",
+   "summary": "ruff check passes",
+   "evidence": "tools/lint:148-153",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: ruff",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Linter (R2)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-69",
+   "summary": "TypeScript compiles (tsc)",
+   "evidence": "tools/lint:155-160",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: tsc",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Type checker (R2)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-70",
+   "summary": "prettier --check formatting",
+   "evidence": "tools/lint:167-172",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: prettier",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Formatter (R2)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-71",
+   "summary": "ruff format formatting",
+   "evidence": "tools/lint:188-193",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: ruff format",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Formatter (R2)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-72",
+   "summary": "semgrep-py AST rules pass",
+   "evidence": "tools/lint:204-210; tools/semgrep-py.yml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: semgrep",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "AST code analysis (R2)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-73",
+   "summary": "remark --frail passes on Markdown/MDX",
+   "evidence": "tools/lint:222-228",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: remark",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Linter (R2)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-74",
+   "summary": "codespell passes",
+   "evidence": ".github/workflows/zulip-ci.yml:121-124",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: codespell",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Linter (R2)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-75",
+   "summary": "astro check passes for starlight_help",
+   "evidence": ".github/workflows/zulip-ci.yml:169-172",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: astro",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Type checker/build (R2)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-76",
+   "summary": "Puppeteer end-to-end tests pass",
+   "evidence": ".github/workflows/zulip-ci.yml:174-178",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: puppeteer",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Runs code",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-77",
+   "summary": "API documentation examples run (test-api)",
+   "evidence": ".github/workflows/zulip-ci.yml:139",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: tools/test-api",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Runs code",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-78",
+   "summary": "Documentation builds and its HTML/links validate (test-documentation, vnu)",
+   "evidence": ".github/workflows/zulip-ci.yml:137; tools/test-documentation:80-82",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: sphinx + vnu",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Build and HTML validator (R2)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-79",
+   "summary": "Help center builds and passes its documentation tests",
+   "evidence": ".github/workflows/zulip-ci.yml:135,138",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: build-help-center / test-help-documentation",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Build (R2)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-80",
+   "summary": "Read the Docs Sphinx build fails on any warning",
+   "evidence": ".readthedocs.yaml:18-20",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: sphinx",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Build (R2); external service",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-81",
+   "summary": "CodeQL analysis",
+   "evidence": ".github/workflows/codeql-analysis.yml:35-42",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: codeql",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Code analysis (R2)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-82",
+   "summary": "zizmor's other GitHub Actions security audits (artipacked is zulip-a01, unpinned-uses zulip-a02)",
+   "evidence": ".github/workflows/zizmor.yml:23",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: zizmor",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Linter (R2)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "audit",
+     "fields": [
+      "summary"
+     ],
+     "why": "zulip-a01 and zulip-a02 were split out of it."
+    }
+   ]
+  },
+  {
+   "id": "zulip-83",
+   "summary": "Codecov project status (threshold 50%)",
+   "evidence": ".codecov.yml (coverage.status.project)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "External service over coverage data",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-84",
+   "summary": "Production release tarball builds",
+   "evidence": ".github/workflows/production-suite.yml:103-104",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: tools/ci/production-build",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Build",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-86",
+   "summary": "Production webpack bundles are ES2022 (es-check)",
+   "evidence": "tools/ci/production-build:52",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: es-check",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Checks build output",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-87",
+   "summary": "Production install and verify pass on each supported OS",
+   "evidence": ".github/workflows/production-suite.yml:209-229",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Runs the installer",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-88",
+   "summary": "Upgrades from each supported major version succeed",
+   "evidence": ".github/workflows/production-suite.yml:262-280",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Runs the upgrade",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-89",
+   "summary": "SVGs are optimized (optimize-svg --check)",
+   "evidence": ".github/workflows/zulip-ci.yml:215",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tool: svgo",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Formatter (R2)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-90",
+   "summary": "Every integration has a generated bot avatar (--check-missing)",
+   "evidence": ".github/workflows/zulip-ci.yml:216",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Needs the Python integrations registry (running code)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-91",
+   "summary": "check-database-compatibility runs without static/generated",
+   "evidence": ".github/workflows/zulip-ci.yml:219-224",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Runs code against a database",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-92",
+   "summary": "Tests and provision leave no untracked files",
+   "evidence": ".github/workflows/zulip-ci.yml:226-235",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Depends on running the suite",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-93",
+   "summary": "Development database builds",
+   "evidence": ".github/workflows/zulip-ci.yml:256-257",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Runs code",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-a01",
+   "summary": "zizmor artipacked: every actions/checkout step sets persist-credentials explicitly",
+   "evidence": ".github/workflows/zizmor.yml (zizmor-action defaults, no config file; the only inline ignores are ignore[cache-poisoning]); all 7 checkout steps set persist-credentials",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "yaml_path_absent: zulip-gha-checkout-persist-credentials",
+   "rules": [
+    "zulip-gha-checkout-persist-credentials"
+   ],
+   "assertion_family": "none",
+   "reason": "R7: a structural workflow check, as tq-38.",
+   "fire_verified": "Audit: passes on the clone; removing persist-credentials from codeql-analysis.yml fired.",
+   "origin": "audit",
+   "changes": [
+    {
+     "by": "audit",
+     "why": "Split out of a D tool run under R7 (audit): the check is structural, over files alint reads, and other repositories already count the same check as its own unit. element-web-27/28, tq-38/39 and immich-30/31 count the same two audits."
+    }
+   ]
+  },
+  {
+   "id": "zulip-a02",
+   "summary": "zizmor unpinned-uses (default policy): third-party actions and reusable workflows are pinned to a full commit SHA",
+   "evidence": ".github/workflows/zizmor.yml; every uses: is SHA-pinned at the pin",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "yaml_path_absent with match() filters: zulip-gha-third-party-actions-hash-pinned",
+   "rules": [
+    "zulip-gha-third-party-actions-hash-pinned"
+   ],
+   "assertion_family": "none",
+   "reason": "R7: zizmor's default unpinned-uses policy (a hash pin for third-party actions, a ref pin allowed for actions/*, github/* and dependabot/*), as tq-39.",
+   "fire_verified": "Audit: passes on the clone; codecov/codecov-action@v7 in zulip-ci.yml fired.",
+   "origin": "audit",
+   "changes": [
+    {
+     "by": "audit",
+     "why": "Split out of a D tool run under R7 (audit): the check is structural, over files alint reads, and other repositories already count the same check as its own unit. element-web-27/28, tq-38/39 and immich-30/31 count the same two audits."
+    }
+   ]
+  },
+  {
+   "id": "zulip-b01",
+   "summary": "No locale/<x>/LC_MESSAGES/django.po starts with a UTF-8 BOM",
+   "evidence": "Django compilemessages has_bom() check sets has_errors and ends in CommandError (external Django source, not in the clone); invoked through zerver/management/commands/compilemessages.py:30-31 and tools/lib/provision_inner.py:374-375. GNU msgfmt 1.0 also rejects a BOM-prefixed .po ('1:2: syntax error', exit 1), probed on a hand-written scratch .po, not a corpus file.",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "A",
+   "alint": "no_bom over locale/*/LC_MESSAGES/django.po (rule id zulip-locale-po-no-bom in my scratch config; not in Stage A's config)",
+   "rules": [
+    "zulip-locale-po-no-bom"
+   ],
+   "assertion_family": "none",
+   "reason": "An encoding check on the locale files, with its own error message in Django and separate from zulip-01's gettext-syntax delegate (R1: a separate behavior). The no_bom kind expresses it exactly.",
+   "fire_verified": "Prefixing a scratch copy of locale/de/LC_MESSAGES/django.po with EF BB BF made no_bom fire. The clean scratch copy and the clone both pass (rc=0).",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "zulip-b03",
+   "summary": "MAX_IDX is equal in zerver/lib/validator.py, web/src/poll_data.ts and web/src/todo_data.ts",
+   "evidence": "zerver/lib/validator.py:481-482 ('# This should match MAX_IDX in our client widgets.' / MAX_IDX = 1000); web/src/poll_data.ts:78 and web/src/todo_data.ts:9 (const MAX_IDX = 1000;)",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "A",
+   "alint": "cross_file (equals) with a regex extract from validator.py and two targets (rule id zulip-max-idx-sync)",
+   "rules": [
+    "zulip-max-idx-sync"
+   ],
+   "assertion_family": "none",
+   "reason": "A literal keep-in-sync value (R5: conventions count). Stage A folded it into zulip-49 as a 'code or prose' sync, but it is the same shape as zulip-47 and zulip-48, which Stage A put in A.",
+   "fire_verified": "n/a (family other). Checked anyway: the rule passes on the clone, and MAX_IDX 999 in a scratch poll_data.ts fired.",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "zulip-b04",
+   "summary": "The client-side upload resize dimensions in web/src/upload_widget.ts equal the server-side thumbnail constants",
+   "evidence": "zerver/lib/thumbnail.py:20-21,28-29 (DEFAULT_AVATAR_SIZE=100, MEDIUM_AVATAR_SIZE=500, MAX_REALM_LOGO_WIDTH=1000, MAX_REALM_LOGO_HEIGHT=100) with the 'kept in sync with the client-side resizing code' comments at :213-214 and :233-234; web/src/upload_widget.ts:209-226 (the comment pointing back, then the user_avatar 500/500, realm_icon 100/100 and logo 100/1000 opts)",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "A",
+   "alint": "4 cross_file rules with regex extracts: zulip-avatar-resize-sync, zulip-realm-icon-resize-sync, zulip-logo-resize-width-sync, zulip-logo-resize-height-sync (the realm_icon maxWidth can be added as a second target)",
+   "rules": [
+    "zulip-avatar-resize-sync",
+    "zulip-realm-icon-resize-sync",
+    "zulip-logo-resize-width-sync",
+    "zulip-logo-resize-height-sync"
+   ],
+   "assertion_family": "none",
+   "reason": "A two-way keep-in-sync comment over literal integers (R5). Stage A put it in zulip-49 (D), but the values are plain numbers, not code behavior.",
+   "fire_verified": "n/a (family other). Checked anyway: all four rules pass on the clone, and each fired on a scratch copy (avatar 400 and maxWidth 640, icon 64, logo width 800, logo height 120).",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "zulip-b05",
+   "summary": "Every entry in tools/release-tarball-exclude.txt names an existing path",
+   "evidence": "tools/build-release-tarball:46-48 runs `rm -r --interactive=never \"$OUTPUT_DIR/$prefix/$i\"` for each line under `set -eu`, so a missing entry fails the build. It runs from tools/ci/production-build:25 in .github/workflows/production-suite.yml (push, and PRs whose paths include tools/**).",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "registry_paths_resolve with source tools/release-tarball-exclude.txt, base lint_root and extract lines (rule id zulip-release-tarball-exclude-paths-exist)",
+   "rules": [
+    "zulip-release-tarball-exclude-paths-exist"
+   ],
+   "assertion_family": "none",
+   "reason": "A manifest-to-path existence check, the same shape as zulip-39 and zulip-46. Caveat: the script would also fail if an entry sat under an entry removed earlier, which alint does not model. That case does not occur at the pin.",
+   "fire_verified": "n/a (family other). Checked anyway: the rule passes on the clone, and removing zproject/test_settings.py from a scratch tree fired it.",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "zulip-b06",
+   "summary": "The API_FEATURE_LEVEL in version.py is documented as an exact '**Feature level N**' line in api_docs/changelog.md",
+   "evidence": "tools/release:96-100 (`grep -q -F -x \"**Feature level $feature_level**\" api_docs/changelog.md || fail ...`)",
+   "mechanism": "script",
+   "family": "other",
+   "bucket": "A",
+   "alint": "cross_file relation subset: version.py regex (?m)^API_FEATURE_LEVEL = (\\d+)$ into api_docs/changelog.md regex (?m)^\\*\\*Feature level (\\d+)\\*\\*$ (rule id zulip-feature-level-documented)",
+   "rules": [
+    "zulip-feature-level-documented"
+   ],
+   "assertion_family": "none",
+   "reason": "A maintainer release gate that holds continuously on main. Stage A expresses nearly the same assertion as value-add (zulip-va-feature-level-sync), but it is enforced, so it belongs in the ratio. The enforced form is membership (subset), not equality with the newest heading. The other assertion on that line (the release commit changed API_FEATURE_LEVEL) is git history and goes to zulip-b07.",
+   "fire_verified": "n/a (family other). Checked anyway: the rule passes on the clone, and API_FEATURE_LEVEL 517 in a scratch version.py fired it.",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "zulip-b07",
+   "summary": "Release-time consistency checks: version.py ZULIP_VERSION, LATEST_RELEASE_VERSION and LATEST_MAJOR_VERSION equal the release argument, the changelog has a '### Zulip Server $version' section dated today in America/Los_Angeles, the release commit message is 'Release Zulip Server $version.', and the release commit bumps API_FEATURE_LEVEL",
+   "evidence": "tools/release:50-53 (commit message), :70-77 (changelog section and date), :83-93 (version.py values), :96-97 (git diff-tree -G API_FEATURE_LEVEL)",
+   "mechanism": "script",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Each assertion compares the tree with a command-line argument, the wall clock or the release commit itself (git history). None of these is repository state at an arbitrary pin.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "zulip-b08",
+   "summary": "Coverage converse: a file listed as not yet fully covered (not_yet_fully_covered in test-backend, EXEMPT_FILES in test-js-with-node) must not reach 100% coverage, so the list shrinks as coverage improves",
+   "evidence": "tools/test-backend (the not_yet_fully_covered converse check); tools/test-js-with-node enforce_proper_coverage() (exempt files at 100% fail). Both run in CI (.github/workflows/zulip-ci.yml:146, :193).",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Needs coverage data from running the test suites (R2/R7: running code). Distinct from zulip-41 and zulip-51, which assert the forward direction.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "zulip-b09",
+   "summary": "Every Django/Jinja template is rendered by at least one backend test",
+   "evidence": "tools/test-backend (templates_not_rendered: an error when templates have no tests); runs in .github/workflows/zulip-ci.yml:193",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Needs instrumentation from running the backend tests (R2).",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "zulip-b10",
+   "summary": "Provision downloads shellcheck, shfmt and tusd, verifies each against its sha256 pin, and checks the installed version",
+   "evidence": "tools/setup/install-shfmt:4-32 (version=3.14.1, per-arch sha256, sha256sum -c, check_version); tools/setup/install-shellcheck (version=0.11.0); tools/lib/provision.py:437-442",
+   "mechanism": "script",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Network download and running the installed binary (R7: network or external state). The in-repo half, the cross-file tusd pin, is Stage A's zulip-13. This unit covers the download verification for the lint tools, which are not toolchains.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-01",
+   "summary": "zerver library code has no shebang line",
+   "evidence": "tools/linter_lib/custom_check.py:45-49; tools/lint:231-242; .github/workflows/zulip-ci.yml:148-152,184-188",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-zerver-no-shebang",
+   "rules": [
+    "zulip-cc-zerver-no-shebang"
+   ],
+   "assertion_family": "none",
+   "reason": "zulint regex rule; \\A is file start",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-02",
+   "summary": "Shebangs use /usr/bin/env (or /bin/sh)",
+   "evidence": "tools/linter_lib/custom_check.py:53-57",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_matches: zulip-cc-shebang-env, zulip-cc-shebang-env-bash",
+   "rules": [
+    "zulip-cc-shebang-env",
+    "zulip-cc-shebang-env-bash"
+   ],
+   "assertion_family": "none",
+   "reason": "Negative lookahead recast as a start-of-file alternation",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-03",
+   "summary": "Env shebangs name python3, not python",
+   "evidence": "tools/linter_lib/custom_check.py:58-61",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-shebang-python3, -bash",
+   "rules": [
+    "zulip-cc-shebang-python3",
+    "zulip-cc-shebang-python3-bash"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-04",
+   "summary": "Bash shebangs carry no -x/-e switches",
+   "evidence": "tools/linter_lib/custom_check.py:514-518",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-bash-shebang-flags",
+   "rules": [
+    "zulip-cc-bash-shebang-flags"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-05",
+   "summary": "No trailing whitespace (Markdown may end a line with exactly two spaces)",
+   "evidence": "tools/linter_lib/custom_check.py:65-69,99-107",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "no_trailing_whitespace: zulip-cc-trailing-whitespace, -py; file_content_forbidden: zulip-cc-trailing-whitespace-md",
+   "rules": [
+    "zulip-cc-trailing-whitespace",
+    "zulip-cc-trailing-whitespace-py",
+    "zulip-cc-trailing-whitespace-md"
+   ],
+   "assertion_family": "none",
+   "reason": "Kind plus an unrolled-lookbehind regex for Markdown",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-06",
+   "summary": "Files end with a newline",
+   "evidence": "tools/linter_lib/custom_check.py:70-73",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "final_newline: zulip-cc-final-newline, -py",
+   "rules": [
+    "zulip-cc-final-newline",
+    "zulip-cc-final-newline-py"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct kind",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-07",
+   "summary": "Link ReadTheDocs over HTTPS",
+   "evidence": "tools/linter_lib/custom_check.py:77-80",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-rtd-https, -py",
+   "rules": [
+    "zulip-cc-rtd-https",
+    "zulip-cc-rtd-https-py"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-08",
+   "summary": "No tab characters (webhook JSON fixtures exempt)",
+   "evidence": "tools/linter_lib/custom_check.py:81-84,841-845",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-no-tabs, -py",
+   "rules": [
+    "zulip-cc-no-tabs",
+    "zulip-cc-no-tabs-py"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-09",
+   "summary": "'web app' is two words",
+   "evidence": "tools/linter_lib/custom_check.py:85-88",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-web-app-two-words, -py",
+   "rules": [
+    "zulip-cc-web-app-two-words",
+    "zulip-cc-web-app-two-words-py"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-10",
+   "summary": "At most one space after a comma in templates and Markdown",
+   "evidence": "tools/linter_lib/custom_check.py:90-98",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-comma-whitespace",
+   "rules": [
+    "zulip-cc-comma-whitespace"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-11",
+   "summary": "Say topic, not subject (JS, Python, templates)",
+   "evidence": "tools/linter_lib/custom_check.py:11-42,120-136,245-269,564-581",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "for_each_match: zulip-cc-no-subject-js, -py, -py-exempt, -templates",
+   "rules": [
+    "zulip-cc-no-subject-js",
+    "zulip-cc-no-subject-py",
+    "zulip-cc-no-subject-py-exempt",
+    "zulip-cc-no-subject-templates"
+   ],
+   "assertion_family": "none",
+   "reason": "exclude_pattern -> require.matches; exclude_line -> exempt companion",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-12",
+   "summary": "No msgid variable names; use message_id",
+   "evidence": "tools/linter_lib/custom_check.py:137-140,270-274",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-no-msgid-js, -py",
+   "rules": [
+    "zulip-cc-no-msgid-js",
+    "zulip-cc-no-msgid-py"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-13",
+   "summary": "Do not concatenate i18n strings",
+   "evidence": "tools/linter_lib/custom_check.py:141-145",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-no-i18n-concat",
+   "rules": [
+    "zulip-cc-no-i18n-concat"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-14",
+   "summary": "No jQuery .html() with unsanitized content",
+   "evidence": "tools/linter_lib/custom_check.py:146-157",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "for_each_match: zulip-cc-jquery-html-xss",
+   "rules": [
+    "zulip-cc-jquery-html-xss"
+   ],
+   "assertion_family": "none",
+   "reason": "exclude_pattern -> require.matches",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-15",
+   "summary": "No relative json/ URLs in frontend code",
+   "evidence": "tools/linter_lib/custom_check.py:158-161",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-no-relative-json-url",
+   "rules": [
+    "zulip-cc-no-relative-json-url"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-16",
+   "summary": "Strings passed to .text() are wrapped in $t()",
+   "evidence": "tools/linter_lib/custom_check.py:162-169",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-text-needs-t",
+   "rules": [
+    "zulip-cc-text-needs-t"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-17",
+   "summary": "ui_report.success takes a $t_html() string, not a literal",
+   "evidence": "tools/linter_lib/custom_check.py:170-174",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-report-success-literal",
+   "rules": [
+    "zulip-cc-report-success-literal"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-18",
+   "summary": "ui_report.error takes a $t_html() string, not a literal",
+   "evidence": "tools/linter_lib/custom_check.py:175-181",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-report-error-literal",
+   "rules": [
+    "zulip-cc-report-error-literal"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-19",
+   "summary": "ui_report.client_error takes a $t_html() string, not a literal",
+   "evidence": "tools/linter_lib/custom_check.py:182-188",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-report-client-error-literal",
+   "rules": [
+    "zulip-cc-report-client-error-literal"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-20",
+   "summary": "Use $(f), not $(document).ready(f)",
+   "evidence": "tools/linter_lib/custom_check.py:189-194",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-no-document-ready",
+   "rules": [
+    "zulip-cc-no-document-ready"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-21",
+   "summary": "AJAX goes through the channel module",
+   "evidence": "tools/linter_lib/custom_check.py:195-209",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-use-channel-module",
+   "rules": [
+    "zulip-cc-use-channel-module"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-22",
+   "summary": "No style= attributes (JS and templates)",
+   "evidence": "tools/linter_lib/custom_check.py:210-221,714-752",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "for_each_match: zulip-cc-no-style-attr-js, -templates",
+   "rules": [
+    "zulip-cc-no-style-attr-js",
+    "zulip-cc-no-style-attr-templates"
+   ],
+   "assertion_family": "none",
+   "reason": "exclude_pattern -> require.matches",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-23",
+   "summary": "web/tests use assert.ok, not assert()",
+   "evidence": "tools/linter_lib/custom_check.py:222-228",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-assert-ok",
+   "rules": [
+    "zulip-cc-assert-ok"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-24",
+   "summary": "Never use Tippy allowHTML or data-tippy-allowHTML",
+   "evidence": "tools/linter_lib/custom_check.py:229-232,753-759",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-no-tippy-allowhtml-js, -templates",
+   "rules": [
+    "zulip-cc-no-tippy-allowhtml-js",
+    "zulip-cc-no-tippy-allowhtml-templates"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-25",
+   "summary": "web/tests never call rewire_* directly",
+   "evidence": "tools/linter_lib/custom_check.py:233-237",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-no-direct-rewire",
+   "rules": [
+    "zulip-cc-no-direct-rewire"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-26",
+   "summary": "@login_required is unsupported; use @zulip_login_required",
+   "evidence": "tools/linter_lib/custom_check.py:275-280",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-no-login-required",
+   "rules": [
+    "zulip-cc-no-login-required"
+   ],
+   "assertion_family": "none",
+   "reason": "Vacuous lookahead dropped",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-27",
+   "summary": "user_profile.save() passes update_fields",
+   "evidence": "tools/linter_lib/custom_check.py:281-297",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden + for_each_match: zulip-cc-user-profile-save-update-fields, -exempt",
+   "rules": [
+    "zulip-cc-user-profile-save-update-fields",
+    "zulip-cc-user-profile-save-update-fields-exempt"
+   ],
+   "assertion_family": "none",
+   "reason": "exclude_line -> exempt companion",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-28",
+   "summary": "No self: Any annotations",
+   "evidence": "tools/linter_lib/custom_check.py:298-303",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-no-self-any",
+   "rules": [
+    "zulip-cc-no-self-any"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-29",
+   "summary": "Use assert_length, not assertEqual(len(...))",
+   "evidence": "tools/linter_lib/custom_check.py:304-313",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden + for_each_match: zulip-cc-assert-length-equal, -exempt",
+   "rules": [
+    "zulip-cc-assert-length-equal",
+    "zulip-cc-assert-length-equal-exempt"
+   ],
+   "assertion_family": "none",
+   "reason": "exclude_line -> exempt companion",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-30",
+   "summary": "Use assert_length/assertGreater, not assertTrue(len(...))",
+   "evidence": "tools/linter_lib/custom_check.py:314-323",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-assert-length-true",
+   "rules": [
+    "zulip-cc-assert-length-true"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-31",
+   "summary": "type: ignore carries an error code and an explanation",
+   "evidence": "tools/linter_lib/custom_check.py:324-334",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "for_each_match: zulip-cc-type-ignore-explained",
+   "rules": [
+    "zulip-cc-type-ignore-explained"
+   ],
+   "assertion_family": "none",
+   "reason": "Negative lookahead -> select + require",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-32",
+   "summary": "Scripts under scripts/ do not use sudo (Python and Bash)",
+   "evidence": "tools/linter_lib/custom_check.py:335-345,519-526",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden + for_each_match: zulip-cc-scripts-no-sudo-py, -py-exempt, -bash",
+   "rules": [
+    "zulip-cc-scripts-no-sudo-py",
+    "zulip-cc-scripts-no-sudo-py-exempt",
+    "zulip-cc-scripts-no-sudo-bash"
+   ],
+   "assertion_family": "none",
+   "reason": "Extensionless python scripts listed explicitly; exclude_line -> exempt companion",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-33",
+   "summary": "Test strings are not tagged for translation",
+   "evidence": "tools/linter_lib/custom_check.py:346-353",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-tests-no-translation",
+   "rules": [
+    "zulip-cc-tests-no-translation"
+   ],
+   "assertion_family": "none",
+   "reason": "include_only substring -> glob",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-34",
+   "summary": "user_id, not userid",
+   "evidence": "tools/linter_lib/custom_check.py:354-359",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-no-userid",
+   "rules": [
+    "zulip-cc-no-userid"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-35",
+   "summary": "JsonableError takes a literal string inside _()",
+   "evidence": "tools/linter_lib/custom_check.py:360-370",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-jsonable-error-literal",
+   "rules": [
+    "zulip-cc-jsonable-error-literal"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-36",
+   "summary": "Do not call self.client.<verb> directly",
+   "evidence": "tools/linter_lib/custom_check.py:371-376",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-no-self-client",
+   "rules": [
+    "zulip-cc-no-self-client"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-37",
+   "summary": "Fetch Message objects with access_message()",
+   "evidence": "tools/linter_lib/custom_check.py:377-386",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-use-access-message",
+   "rules": [
+    "zulip-cc-use-access-message"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-38",
+   "summary": "Fetch streams with access_stream_by_*() in views and actions",
+   "evidence": "tools/linter_lib/custom_check.py:387-396",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-use-access-stream-views, -actions",
+   "rules": [
+    "zulip-cc-use-access-stream-views",
+    "zulip-cc-use-access-stream-actions"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-39",
+   "summary": "No 'from os.path' imports",
+   "evidence": "tools/linter_lib/custom_check.py:397-400",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-no-from-os-path",
+   "rules": [
+    "zulip-cc-no-from-os-path"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-40",
+   "summary": "import os, not import os.path",
+   "evidence": "tools/linter_lib/custom_check.py:401-404",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-no-import-os-path",
+   "rules": [
+    "zulip-cc-no-import-os-path"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-41",
+   "summary": "Use id, not pk",
+   "evidence": "tools/linter_lib/custom_check.py:405-411",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "for_each_match: zulip-cc-id-not-pk",
+   "rules": [
+    "zulip-cc-id-not-pk"
+   ],
+   "assertion_family": "none",
+   "reason": "exclude_pattern -> require.matches",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-42",
+   "summary": "No comment-style function type annotations",
+   "evidence": "tools/linter_lib/custom_check.py:412-415",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-no-comment-function-type",
+   "rules": [
+    "zulip-cc-no-comment-function-type"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-43",
+   "summary": "No comment-style variable type annotations",
+   "evidence": "tools/linter_lib/custom_check.py:416-421",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "for_each_match: zulip-cc-no-comment-variable-type",
+   "rules": [
+    "zulip-cc-no-comment-variable-type"
+   ],
+   "assertion_family": "none",
+   "reason": "Negative lookahead -> select + require",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-44",
+   "summary": "Model fields with null=True are annotated Optional",
+   "evidence": "tools/linter_lib/custom_check.py:422-436",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "for_each_match: zulip-cc-model-null-optional",
+   "rules": [
+    "zulip-cc-model-null-optional"
+   ],
+   "assertion_family": "none",
+   "reason": "Negative lookahead -> select + require",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-45",
+   "summary": "Optional model fields have null=True",
+   "evidence": "tools/linter_lib/custom_check.py:437-452",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "for_each_match: zulip-cc-model-optional-null",
+   "rules": [
+    "zulip-cc-model-optional-null"
+   ],
+   "assertion_family": "none",
+   "reason": "exclude_pattern -> require.matches",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-46",
+   "summary": "Management commands raise CommandError instead of exit(n)",
+   "evidence": "tools/linter_lib/custom_check.py:453-458",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-management-no-exit",
+   "rules": [
+    "zulip-cc-management-no-exit"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-47",
+   "summary": "Change roles with do_change_user_role, not by setting is_realm_admin/is_guest",
+   "evidence": "tools/linter_lib/custom_check.py:459-474",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-no-direct-role-attr",
+   "rules": [
+    "zulip-cc-no-direct-role-attr"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-48",
+   "summary": "Mock assertions carry the assert_ prefix",
+   "evidence": "tools/linter_lib/custom_check.py:475-478",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-mock-assert-prefix",
+   "rules": [
+    "zulip-cc-mock-assert-prefix"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-49",
+   "summary": "transaction.atomic states durable=True or savepoint=False",
+   "evidence": "tools/linter_lib/custom_check.py:479-505",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden + for_each_match: zulip-cc-atomic-explicit-savepoint, -exempt",
+   "rules": [
+    "zulip-cc-atomic-explicit-savepoint",
+    "zulip-cc-atomic-explicit-savepoint-exempt"
+   ],
+   "assertion_family": "none",
+   "reason": "exclude_line -> exempt companion",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-50",
+   "summary": "Spell JavaScript",
+   "evidence": "tools/linter_lib/custom_check.py:540-544",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-prose-javascript",
+   "rules": [
+    "zulip-cc-prose-javascript"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-51",
+   "summary": "Spell GitHub",
+   "evidence": "tools/linter_lib/custom_check.py:545-548",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-prose-github",
+   "rules": [
+    "zulip-cc-prose-github"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-52",
+   "summary": "Spell Organization with a z",
+   "evidence": "tools/linter_lib/custom_check.py:549-552",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-prose-organization",
+   "rules": [
+    "zulip-cc-prose-organization"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-53",
+   "summary": "Admonitions use '!!! warn', not '!!! warning'",
+   "evidence": "tools/linter_lib/custom_check.py:553",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-prose-warn-admonition",
+   "rules": [
+    "zulip-cc-prose-warn-admonition"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-54",
+   "summary": "Capitalize Terms of Service",
+   "evidence": "tools/linter_lib/custom_check.py:554",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-prose-terms-of-service",
+   "rules": [
+    "zulip-cc-prose-terms-of-service"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-55",
+   "summary": "Botserver, not botserver or bot server",
+   "evidence": "tools/linter_lib/custom_check.py:555-558",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-prose-botserver",
+   "rules": [
+    "zulip-cc-prose-botserver"
+   ],
+   "assertion_family": "none",
+   "reason": "Lookahead unrolled",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-56",
+   "summary": "placeholder values are translatable",
+   "evidence": "tools/linter_lib/custom_check.py:582-603,622-632",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "for_each_match + file_content_forbidden: zulip-cc-placeholder-translatable-dq, -dq-exempt, -sq",
+   "rules": [
+    "zulip-cc-placeholder-translatable-dq",
+    "zulip-cc-placeholder-translatable-dq-exempt",
+    "zulip-cc-placeholder-translatable-sq"
+   ],
+   "assertion_family": "none",
+   "reason": "Lookahead -> select + require; exclude_line -> exempt companion",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-57",
+   "summary": "HTML attribute values are quoted (no ={ outside URL templates)",
+   "evidence": "tools/linter_lib/custom_check.py:604-615",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "for_each_match: zulip-cc-attr-quoting",
+   "rules": [
+    "zulip-cc-attr-quoting"
+   ],
+   "assertion_family": "none",
+   "reason": "exclude_pattern -> require.matches",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-58",
+   "summary": "No misplaced quote before }} in translation tags",
+   "evidence": "tools/linter_lib/custom_check.py:616-621",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-translation-tag-quoting",
+   "rules": [
+    "zulip-cc-translation-tag-quoting"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-59",
+   "summary": "aria-label values are translatable",
+   "evidence": "tools/linter_lib/custom_check.py:633-648",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-aria-label-translatable",
+   "rules": [
+    "zulip-cc-aria-label-translatable"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-60",
+   "summary": "No scripts loaded from CDNs",
+   "evidence": "tools/linter_lib/custom_check.py:649-656",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-no-cdn-scripts",
+   "rules": [
+    "zulip-cc-no-cdn-scripts"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-61",
+   "summary": "title values are translatable",
+   "evidence": "tools/linter_lib/custom_check.py:657-673",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-title-translatable-sq, -dq",
+   "rules": [
+    "zulip-cc-title-translatable-sq",
+    "zulip-cc-title-translatable-dq"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-62",
+   "summary": "alt values are translated or empty",
+   "evidence": "tools/linter_lib/custom_check.py:674-692",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden + for_each_match: zulip-cc-alt-translatable, -exempt",
+   "rules": [
+    "zulip-cc-alt-translatable",
+    "zulip-cc-alt-translatable-exempt"
+   ],
+   "assertion_family": "none",
+   "reason": "exclude_line -> exempt companion",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-63",
+   "summary": "Help-center links start with /help/",
+   "evidence": "tools/linter_lib/custom_check.py:693-698",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-help-link-absolute",
+   "rules": [
+    "zulip-cc-help-link-absolute"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-64",
+   "summary": "No inline event handler attributes",
+   "evidence": "tools/linter_lib/custom_check.py:699-713",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-no-inline-handlers",
+   "rules": [
+    "zulip-cc-no-inline-handlers"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-65",
+   "summary": "No inline <script> in Handlebars templates",
+   "evidence": "tools/linter_lib/custom_check.py:767-769",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-hbs-no-script",
+   "rules": [
+    "zulip-cc-hbs-no-script"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-66",
+   "summary": "No space before t in {{t ...}}",
+   "evidence": "tools/linter_lib/custom_check.py:770-773",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-hbs-t-no-space-before",
+   "rules": [
+    "zulip-cc-hbs-t-no-space-before"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-67",
+   "summary": "Sentence punctuation goes inside the translatable string (Handlebars and Jinja)",
+   "evidence": "tools/linter_lib/custom_check.py:774-785,814-821",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-period-inside-translation-hbs, -jinja",
+   "rules": [
+    "zulip-cc-period-inside-translation-hbs",
+    "zulip-cc-period-inside-translation-jinja"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex (the Jinja form's parentheses are a regex group)",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-68",
+   "summary": "No leading spaces in translatable strings",
+   "evidence": "tools/linter_lib/custom_check.py:786-789",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-hbs-t-no-leading-space",
+   "rules": [
+    "zulip-cc-hbs-t-no-leading-space"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-69",
+   "summary": "No trailing spaces in translatable strings",
+   "evidence": "tools/linter_lib/custom_check.py:790-797",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-hbs-t-no-trailing-space",
+   "rules": [
+    "zulip-cc-hbs-t-no-trailing-space"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-70",
+   "summary": "No double-quoted {{t inside a double-quoted attribute",
+   "evidence": "tools/linter_lib/custom_check.py:798-801",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-hbs-t-attr-quoting",
+   "rules": [
+    "zulip-cc-hbs-t-attr-quoting"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-71",
+   "summary": "No href=\"#\" on click-handler elements in Handlebars",
+   "evidence": "tools/linter_lib/custom_check.py:802-806",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-hbs-no-href-hash",
+   "rules": [
+    "zulip-cc-hbs-no-href-hash"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-72",
+   "summary": "Production Jinja templates do not import dev- entry points",
+   "evidence": "tools/linter_lib/custom_check.py:822-826",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-jinja-no-dev-entrypoint",
+   "rules": [
+    "zulip-cc-jinja-no-dev-entrypoint"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-73",
+   "summary": "A space after : in JSON (webhook and test fixtures exempt)",
+   "evidence": "tools/linter_lib/custom_check.py:846-850",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-json-space-after-colon",
+   "rules": [
+    "zulip-cc-json-space-after-colon"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-74",
+   "summary": "A space after # in Markdown headings",
+   "evidence": "tools/linter_lib/custom_check.py:108-113",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-md-heading-space",
+   "rules": [
+    "zulip-cc-md-heading-space"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-75",
+   "summary": "Linkified Markdown URLs use <url>, not [url](url)",
+   "evidence": "tools/linter_lib/custom_check.py:859-862",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "capture-inequality operator (for_each_match require.equal has no negated form) or backreference support",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "The rule bans link text equal to its URL via a named backreference; RE2 has none and alint's equal can only require equality",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "other"
+     }
+    }
+   ],
+   "needs": "other"
+  },
+  {
+   "id": "zulip-cc-76",
+   "summary": "docs/ links to other docs relatively, not via readthedocs latest URLs",
+   "evidence": "tools/linter_lib/custom_check.py:863-880",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden + for_each_match: zulip-cc-docs-relative-links, -exempt",
+   "rules": [
+    "zulip-cc-docs-relative-links",
+    "zulip-cc-docs-relative-links-exempt"
+   ],
+   "assertion_family": "none",
+   "reason": "exclude_line -> exempt companion",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-77",
+   "summary": "Quote su zulip -c arguments",
+   "evidence": "tools/linter_lib/custom_check.py:881-885",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-docs-su-quoting",
+   "rules": [
+    "zulip-cc-docs-su-quoting"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-78",
+   "summary": "README/CONTRIBUTING use absolute links (GitHub-served)",
+   "evidence": "tools/linter_lib/custom_check.py:886-891",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "for_each_match: zulip-cc-github-docs-absolute-links",
+   "rules": [
+    "zulip-cc-github-docs-absolute-links"
+   ],
+   "assertion_family": "none",
+   "reason": "exclude_pattern -> require.matches",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-79",
+   "summary": "Docs do not link to source line numbers",
+   "evidence": "tools/linter_lib/custom_check.py:892-896",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-docs-no-line-links",
+   "rules": [
+    "zulip-cc-docs-no-line-links"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-80",
+   "summary": "A comma after e.g.",
+   "evidence": "tools/linter_lib/custom_check.py:897-900",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-md-eg-comma",
+   "rules": [
+    "zulip-cc-md-eg-comma"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-81",
+   "summary": "A space after sentence ends in help-center MDX",
+   "evidence": "tools/linter_lib/custom_check.py:907-912",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "for_each_match: zulip-cc-help-sentence-space",
+   "rules": [
+    "zulip-cc-help-sentence-space"
+   ],
+   "assertion_family": "none",
+   "reason": "exclude_pattern -> require.matches",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-82",
+   "summary": "Help-center MDX says organization, not realm",
+   "evidence": "tools/linter_lib/custom_check.py:913-923",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "for_each_match: zulip-cc-help-no-realm",
+   "rules": [
+    "zulip-cc-help-no-realm"
+   ],
+   "assertion_family": "none",
+   "reason": "exclude_pattern -> require.matches",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-83",
+   "summary": "Puppet layering: only profiles include profile classes or zulip::base / kandra::base",
+   "evidence": "tools/linter_lib/custom_check.py:931-947",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-puppet-layering-zulip, -kandra",
+   "rules": [
+    "zulip-cc-puppet-layering-zulip",
+    "zulip-cc-puppet-layering-kandra"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-84",
+   "summary": "Lowercase true/false/null in OpenAPI YAML",
+   "evidence": "tools/linter_lib/custom_check.py:955-959",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-openapi-lowercase-literals",
+   "rules": [
+    "zulip-cc-openapi-lowercase-literals"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-85",
+   "summary": "System icons have no fill",
+   "evidence": "tools/linter_lib/custom_check.py:971-985",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-icons-no-fill-attr, -fill-style",
+   "rules": [
+    "zulip-cc-icons-no-fill-attr",
+    "zulip-cc-icons-no-fill-style"
+   ],
+   "assertion_family": "none",
+   "reason": "Quote backreference unrolled into two alternatives",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-86",
+   "summary": "System icons have no fill-rule",
+   "evidence": "tools/linter_lib/custom_check.py:986-995",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-icons-no-fill-rule",
+   "rules": [
+    "zulip-cc-icons-no-fill-rule"
+   ],
+   "assertion_family": "none",
+   "reason": "Quote backreference unrolled",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-87",
+   "summary": "System icons have no stroke",
+   "evidence": "tools/linter_lib/custom_check.py:996-1005",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-icons-no-stroke",
+   "rules": [
+    "zulip-cc-icons-no-stroke"
+   ],
+   "assertion_family": "none",
+   "reason": "Quote backreference unrolled",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "zulip-cc-88",
+   "summary": "System icons have no class",
+   "evidence": "tools/linter_lib/custom_check.py:1006-1010",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: zulip-cc-icons-no-class",
+   "rules": [
+    "zulip-cc-icons-no-class"
+   ],
+   "assertion_family": "none",
+   "reason": "Direct regex",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  }
+ ],
+ "removed": [
+  {
+   "id": "zulip-60",
+   "summary": "A change set that touches the API also updates api_docs/changelog.md",
+   "why": "integrator: not a validation: a control-flow guard for the post-merge notification job (api-docs-update-check.yml:53-68)"
+  },
+  {
+   "id": "zulip-85",
+   "summary": "Release tarball contains no zerver/tests (release-tarball-exclude applied)",
+   "why": "The check is dead code. tools/build-release-tarball:53 runs `tar -tf \"$TARBALL\" | grep -q -e ^zerver/tests`, but the archive is built with --prefix=$prefix/ (:30, :43), so every entry starts with 'zulip-server-<version>/' and the pattern can never match. The exclusion actually enforced is the rm -r loop at :46-48, now captured as zulip-b05."
+  }
+ ],
+ "rejected_stage_b": {
+  "zulip-60": "tools/github-changes-contain-file runs only on push to main and only decides whether the notify job continues; it gates a notification, not a change"
+ },
+ "value_add": [
+  "zulip-va-uv-version-sync (toolchain-pin): the uv version in scripts/lib/install-uv equals the asdf install/global uv version in .readthedocs.yaml; nothing checks this today",
+  "zulip-va-python-floor-sync (toolchain-pin): requires-python's 3.x floor equals black target-version, ruff target-version and the .readthedocs.yaml build Python",
+  "zulip-va-feature-level-sync (other): API_FEATURE_LEVEL in version.py equals the newest **Feature level N** heading in api_docs/changelog.md",
+  "zulip-va-pnpm-minimum-release-age (dep-version): pnpm-workspace.yaml keeps minimumReleaseAge: 1440",
+  "zulip-va-uv-exclude-newer (dep-version): pyproject.toml keeps [tool.uv] exclude-newer = \"24 hours\"",
+  "extends alint://bundled/toolchain-pins@v1 (inert at the pin: no .nvmrc/.node-version/.tool-versions/.python-version root authority)"
+ ],
+ "value_add_rules": [
+  "zulip-va-uv-version-sync",
+  "zulip-va-python-floor-sync",
+  "zulip-va-pnpm-minimum-release-age",
+  "zulip-va-uv-exclude-newer"
+ ],
+ "absent_categories": [
+  "No .nvmrc, .node-version, .tool-versions, .python-version, package.json engines or Volta pin: Node, uv and Python are pinned only inside provision scripts, so there is no in-repo cross-file toolchain-pin gate",
+  "No Dependabot or Renovate config",
+  "No CODEOWNERS file",
+  "No husky, lefthook or pre-commit framework; only tools/pre-commit and tools/commit-msg, both warn-only",
+  "No i18n-tasks, syncpack, manypkg, sherif or yarn constraints",
+  "No locale key-parity gate: the source catalog (locale/en) is generated by makemessages and gitignored, and translations come from Weblate",
+  "No ICU or plural-form checks beyond msgfmt --check-format",
+  "Only one pnpm workspace member (starlight_help) and no catalogs, so no cross-manifest dependency-version policy",
+  "No per-file license headers; licensing is the single DEP-5 docs/THIRDPARTY file",
+  "No Makefile, justfile or Taskfile",
+  "No CI outside GitHub Actions (no Buildkite, CircleCI, Azure Pipelines, GitLab CI or Jenkins)",
+  "No commit-signing or DCO gate; gitlint is skipped in CI as flaky"
+ ],
+ "unusual": [
+  "About 100 hand-written zulint regex rules (tools/linter_lib/custom_check.py) make up most of the addressable surface. They are meta-tested by tools/tests/test_zulint_custom_rules.py:23-66: bad_lines must match, good_lines must not, exclude and exclude_line paths must exist, and extensionless include_only entries must end with '/'. The linter configuration has its own tests.",
+  "zulint is a git dependency (pyproject.toml:373, uv.lock:7069-7071) and is not in the clone, so its matching model had to be inferred from CI passing. Each pattern runs over the whole file, with \\A as the file start. Symlinks are dropped, and any path containing custom_check.py is skipped.",
+  "Agent-facing rules duplicate contributor conventions: AGENTS.md, .claude/rules/api-changelog.md and .claude/skills (with evals). For example, the ban on a **Feature level** heading in unmerged changelog fragments is stated in .claude/rules/api-changelog.md:17.",
+  "The API feature-level workflow uses ZF-<hex> placeholder fragments in api_docs/unmerged.d. tools/merge-api-changelogs merges them. A separate workflow fails if a ZF- placeholder survives (api-docs-update-check.yml), and another fails if the API changed without a changelog entry.",
+  "Translations come from Weblate. Unicode NFC normalization of locale files is enforced only by the maintainer script tools/i18n/sync-translations:49-60, not in CI.",
+  "docs/THIRDPARTY is a DEP-5 file validated by python-debian: format header, Files globs against git ls-files, license text presence, and a byte-for-byte canonical dump round-trip. The checker injects a fake path so the generated emoji tree resolves (tools/check-thirdparty:45-47).",
+  "A Puppet layering firewall (only profiles may include zulip::profile, kandra::profile or the base classes) is enforced by regex rather than by a Puppet tool.",
+  "check-executables reads file modes from git ls-tree rather than the filesystem (tools/ci/check-executables:3).",
+  "The supply-chain release-age policy is set on both resolvers: pnpm minimumReleaseAge 1440 and uv exclude-newer \"24 hours\".",
+  "gitlint is configured with a custom imperative-mood rule but is skipped in CI as \"flaky\" (zulip-ci.yml:152,188). Both local hooks swallow failures, so commit discipline rests on docs and review.",
+  "About 45 keep-in-sync comments. Three tie literal values (tusd pin, Cloud price, dropdown height) and are expressible as cross_file. The rest tie code or prose behavior.",
+  ".sonarcloud.properties is present, but SonarCloud is an external app, not a CI gate in the repository."
+ ],
+ "check_result": "Final state: validate-config reports \"Config valid: 171 rule(s) loaded\". 147 rules are defined in the file and the rest come from the extended toolchain-pins@v1 bundle, which is inert. `alint -c CONFIG check . --compact` on the clone prints \"all rules passed.\" and exits 0. Afterwards git status on the clone is empty and HEAD is still 39bd5f2f40a647af06b1cc0267cddd34f88ed2e9.\n\nViolations seen during iteration, and how each was resolved:\n\n(1) zulip-thirdparty-files-token1 flagged static/generated/emoji/images/emoji/unicode/*. That tree is generated, and check-thirdparty injects a fake path so the glob resolves. Excluded with a no-lookahead \"not static/generated/\" prefix regex.\n\n(2) zulip-yaml-parses reported an analysis failure on the multi-document pnpm-lock.yaml. check-openapi.ts returns early when a file has more than one document, so the file was excluded.\n\n(3) The first custom_check run gave 24 errors:\n- 19 were in tools/linter_lib/custom_check.py itself. zulint skips any path containing \"custom_check.py\", so that path is now excluded from every custom_check rule.\n- 4 were shebang-rule hits on #! lines inside Python strings (zerver/openapi/markdown_extension.py:69 and :79, tools/droplets/create.py:138 and :160). CI passes on these, so zulint's \\A must mean the file start. The shebang rules were rewritten as start-of-file patterns.\n- 1 was zulip-cc-docs-relative-links on docs/contributing/reporting-security-vulnerabilities.md, a symlink to SECURITY.md. zulint drops symlinks.\n\n(4) A global `ignore:` of the 13 tracked symlinks broke zulip-thirdparty-files-token1 (docs/code-of-conduct.md) and zulip-custom-check-paths-exist, because those rules must see symlinked paths. It was replaced with per-rule excludes of the 8 symlinked .md/.json files on the 20 custom_check rules that select those types. scripts/start-server was removed from the extensionless-python list.\n\nEach fix reflects the repository's own gate semantics. No real violation was suppressed.\n\nNon-vacuity was also checked in scratch. All 115 custom_check rules, including the 9 exempt companions, fired on a scratch tree of known-bad lines (mostly custom_check.py's own bad_lines). The exempt companions passed their allowed lines and fired on other lines in the same files.\n\nR4 was confirmed in both directions for all locale and dep-version A units, for the C unit zulip-07, and for the five value-add rules.",
+ "stage_b_config_issues": [
+  "Value-add mislabelled: zulip-va-feature-level-sync is enforced by tools/release:96-100 (grep -F -x '**Feature level N**' api_docs/changelog.md), so it belongs in the ratio (zulip-b06). The enforced relation is membership (cross_file subset), not equality with the first heading, and it should be level: error.",
+  "zulip-04 (zulip-locale-translations-json-parses) does not express its unit. compilemessages.py:147-160 calls orjson.loads(...).values(), which needs a top-level JSON object. On a scratch copy, a top-level array [\"a\",\"b\"] in de/translations.json PASSES the rule. Add an object-root assertion (for example a json_path type or shape check) alongside the parse check. Truncated JSON does fire (resource_parse analysis failure, rc=1).",
+  "zulip-28 does not express the duplicate-key part of its unit. tools/check-openapi.ts parses with the yaml Composer, whose doc.errors include duplicate keys (uniqueKeys defaults to true). alint's YAML parse accepted a scratch file with a duplicate mapping key, while correctly rejecting syntax errors and multi-document files.",
+  "zulip-21: the fold direction is mismatched. tools/lint runs `LC_ALL=C.UTF-8 sort -cf`, which folds to UPPERCASE, while alint lexical-ci folds to lowercase. On scratch input, lines 'aax' then 'a_x' fire in alint but pass sort -cf, and the reverse order passes alint but fails sort. The two disagree for '[', '\\\\', ']', '^', '_' and '`' against letters. The rule passes at the pin, but it is not the same assertion.",
+  "zulip-39 (EXEMPT_FILES entries exist) checks only existence. tools/test-js-with-node:511 computes EXEMPT_FILES - all_js_files, where all_js_files is the non-recursive globs web/src/*.js|*.ts, web/src/billing/*.js, web/tests/*.cjs and web/tests/lib/*.cjs. An exempt entry that exists outside those globs (for example a nested web/src/a/b.ts) would fail CI but pass the rule. The scope should be narrowed to those globs.",
+  "zulip-49 over-collapses. At least two of its 'keep in sync' pairs are literal values, not code or prose: MAX_IDX (validator.py:481-482 against poll_data.ts:78 and todo_data.ts:9) and the upload resize dimensions (thumbnail.py:20-29,213-214,233-234 against upload_widget.ts:209-226). They are A (zulip-b03, zulip-b04), and the header's 'three keep in sync value conventions' undercounts. The remaining items checked (500.html/5xx.html prose, zulip_tools.py:68 against provision_inner.py:390, the message_edit buffers, realms.py '600') are correctly D or stale.",
+  "zulip-02 wording: the .po files carry both python-brace-format and python-format flags (locale/de: 306 python-brace-format, 183 python-format), and msgfmt --check-format checks both. The summary 'python-format entries' understates the placeholder families a future extractor must handle.",
+  "zulip-26 (no ZF- placeholder) is a property of main only. check-feature-level-updated runs on push to main (api-docs-update-check.yml:3-7), and in-flight PR branches legitimately carry ZF-xxxxxx placeholders until merge. The rule is correct at the pin, but adopted as a PR gate it would false-positive. Note it in the rule comment.",
+  "I checked absent_categories: 'No ICU or plural-form checks beyond msgfmt --check-format' is CORRECT. GNU msgfmt (gettext-tools 1.0) run on hand-written scratch .po files with --check-format alone exits 0 on both too few and too many msgstr[n] for nplurals=2. Only -c (header checks) reports the 'nplurals = 2... but some messages have only one plural form' error, and Django compilemessages passes only --check-format. So no plural-count unit is enforced.",
+  "Reproduced: validate-config gives '171 rule(s) loaded', and check against the clone passes (rc=0). The locale and dep-version A fire tests were reproduced on scratch copies. zulip-03 fires when fr/translations.json is removed. zulip-04 fires on truncated JSON (see the array gap above). zulip-07 fires when the Language-Team line is dropped. zulip-13 fires on tusd version 2.9.2, an altered install-tusd amd64 sha, an altered common.pp tusd aarch64 sha, and a deleted tusd amd64 line, and correctly does NOT fire when the unrelated golang aarch64 sha changes. There are no toolchain-pin A units; the bundled toolchain-pins@v1 extend is inert, as Stage A states.",
+  "OpenAPI rules zulip-29, zulip-30 and zulip-31 each fired on crafted scratch YAML. The zulip-35 select covers all 147 events.cjs fixture keys. final_newline matches zulint's [^\\n]\\Z (it does not flag '\\n\\n' or empty files)."
+ ],
+ "stage_b_summary": "Stage B for zulip/zulip at 39bd5f2f40a647af06b1cc0267cddd34f88ed2e9.\n\nStage A's config is valid (171 rules) and passes on the clone. Every locale and dep-version A fire test reproduces (zulip-03, -04, -07, -13). Stage A's custom_check enumeration matches custom_check.py, and the clone stayed clean at the pin.\n\n**Missed units: 9 (6 net in the ratio)**\n- Five A units:\n  - b01: no BOM in django.po (locale, no_bom). Enforced by Django compilemessages has_bom, and msgfmt also rejects a BOM.\n  - b03: MAX_IDX server/client sync.\n  - b04: upload resize dimensions equal the thumbnail.py constants (4 cross_file rules).\n  - b05: every release-tarball-exclude.txt entry exists (registry_paths_resolve). build-release-tarball's rm -r under set -eu enforces it in production-suite.\n  - b06: API_FEATURE_LEVEL is documented in the API changelog, enforced by tools/release:96-100. It promotes Stage A's value-add feature-level rule.\n  - All five pass on the clone and fired on broken scratch copies.\n- Four D units:\n  - b07: the release-time version, date and commit checks.\n  - b08: coverage-converse lists.\n  - b09: every template rendered by a test.\n  - b10: sha256/version verification of the lint tool downloads.\n- I dropped a candidate plural-count unit after probing msgfmt. --check-format alone does not check nplurals; only -c does, and Django passes only --check-format. So Stage A's absent-category claim is correct.\n\n**Reclassifications: 9**\n- Six D to C: zulip-55, -56, -57, -59, -60 and -15.\n  - git_commit_subject_matches, git_commit_message and pair_changed_together express them. The v0.12 corpus counted the same shape as A (pnpm). They are barred only by section 2.4's depth-1 git-kind rule.\n  - zulip-60 may be a notifier guard rather than a gate.\n- Three family changes, locale to other: zulip-06, -08 and -09. They are source-string checks, consistent with how Stage A tags the cc i18n-markup rules.\n\n**Removal: 1**\n- zulip-85: the tarball's zerver/tests grep can never match because of the archive prefix, so the check is dead. Its real exclusion is now b05.\n\n**Config issues**\n- zulip-04 accepts a top-level JSON array, but compilemessages calls .values().\n- zulip-28 accepts duplicate YAML keys, which the yaml Composer reports as errors.\n- zulip-21's lexical-ci folds to lowercase while sort -f folds to uppercase, so the two disagree on [\\]^_` against letters.\n- zulip-39 checks existence only, not membership in the non-recursive globs.\n- zulip-49 over-collapses two literal value syncs (b03 and b04).\n\n**Net effect**\n- +5 A (4 other, 1 locale), +4 D, 6 D to C, and -1 D (the removal).\n- Locale-family D falls by 3 through the family moves.",
+ "notes": "COUNTS (181 units; id zulip-37 is unused because a planned \"OpenAPI vs Python event schema\" unit turned out not to be in tools/check-schemas run(). It is covered by the backend suite, zulip-42.)\n\n- Buckets: A 107, C 3, B 6 (B-delegate 3: zulip-01, 33, 34; B-adapter 3: zulip-02, 05, cc-75; B-config 0, so no assertion families are requested), D 65.\n- Overall: coverage_today = 107/116 = 92.2%; coverage_with_tuning = 110/116 = 94.8%; gap = 6/116 = 5.2%.\n\nPer family:\n\n| Family | A | C | B | D | Today | With tuning |\n|---|---|---|---|---|---|---|\n| locale | 2 | 1 | 3 | 3 | 2/6 = 33.3% | 3/6 = 50% |\n| dep-version | 1 | 0 | 0 | 5 | 1/1 | 1/1 |\n| toolchain-pin | 0 | 0 | 0 | 3 | n/a | n/a |\n| other | 104 | 2 | 3 | 54 | 104/109 = 95.4% | 106/109 = 97.2% |\n\nThe \"after the slice\" figure is unchanged, since there are no B-config units.\n\nFLAG FOR THE PARENT: commit-message and diff units are bucketed D (zulip-55 to 59 gitlint; zulip-60 github-changes-contain-file; zulip-15 PROVISION_VERSION bump). The reasons are that commit and diff history is external state on depth-1 clones and section 2.4 bars git-history kinds. git_commit_subject_matches or git_commit_message would express 55, 56, 57 and most of 59, and pair_changed_together would express 60. The v0.12 pnpm config counted conventional commits as A. If the integrator prefers that precedent, re-bucket 55, 56, 57 and 59 (and possibly 60) to A or C. They could not be confirmed against these clones.\n\nZULINT SEMANTICS ARE INFERRED: zulint is not vendored and there is no network access. The header comment in custom_check.py:3-9 gives the exclude, exclude_line and include_only semantics. The rest was inferred from CI passing on the pinned tree:\n- whole-file matching where \\A is the file start;\n- symlinks dropped;\n- custom_check.py self-skip.\n\nTranslation approximations:\n- include_only substrings become `**/<x>/**` globs.\n- exclude prefixes become `<x>/**`.\n- exclude_line becomes a companion \"-exempt\" rule that accepts any listed line in any listed file (a slight relaxation).\n- Lookaheads become select+require. Lines with several occurrences can differ, for example the placeholder rule and the type-comment rule.\n- Extensionless python-shebang scripts (83 at the pin) are listed explicitly, because alint cannot select files by shebang. New scripts need adding.\n- The custom_check rules that ask for translatable source strings (cc-13, 15-19, 33, 35, 56, 59, 61, 62, 66-70) are tagged \"other\". Section 2.3's locale family covers locale files, not source markup.\n- check-frontend-i18n and check-capitalization are tagged locale because they check extracted catalog strings.\n\nOTHER NOTES:\n- zulip-02 cites Django's own compilemessages, which passes --check-format to msgfmt. That is from knowledge of the Django source; it is not in the clone.\n- zulip-04 fires as a resource_parse analysis failure (exit 1), not as a policy violation.\n- zulip-07 is C because the true condition depends on Django's LANG_INFO.\n- zulip-27 passes vacuously at the pin (no unmerged.d fragments).\n- zulint may also report unmatched exclude_line entries. This could not be verified offline, so it was not catalogued.\n- No spawning, custom-fact or git-history kinds are used.\n- The scratch directory <scratch>/zulip-zulip-a has been removed. Only CONFIG remains.",
+ "stage_c": {
+  "changes": [
+   {
+    "rule_id": "zulip-locale-po-no-bom",
+    "unit": "zulip-b01",
+    "action": "added",
+    "detail": "no_bom over locale/*/LC_MESSAGES/django.po, level error, comment cites compilemessages.py:30-31 and provision_inner.py:374-375. Passes on the clone (rc=0). In scratch (de and fr django.po copied), the clean copy passes; prefixing de with EF BB BF fires (rc=1), and so does prefixing it with FF FE (UTF-16LE BOM)."
+   },
+   {
+    "rule_id": "zulip-max-idx-sync",
+    "unit": "zulip-b03",
+    "action": "added",
+    "detail": "cross_file equals: validator.py (?m)^MAX_IDX = (\\d+)$ against poll_data.ts and todo_data.ts (?m)^const MAX_IDX = (\\d+);$. Passes on the clone. In scratch the clean copy passes. It fires on poll_data MAX_IDX 999 (1 finding) and on validator.py MAX_IDX 2000 (2 findings, one per target). Renaming todo_data's const also fires: 'no literal value to compare (the target query matched nothing)'."
+   },
+   {
+    "rule_id": "zulip-avatar-resize-sync, zulip-realm-icon-resize-sync, zulip-logo-resize-width-sync, zulip-logo-resize-height-sync",
+    "unit": "zulip-b04",
+    "action": "added",
+    "detail": "Four cross_file equals rules. Sources are thumbnail.py MEDIUM_AVATAR_SIZE, DEFAULT_AVATAR_SIZE, MAX_REALM_LOGO_WIDTH and MAX_REALM_LOGO_HEIGHT. Targets are the user_avatar, realm_icon and else-branch resizing_dimension_opts literals in upload_widget.ts; avatar and icon check both maxHeight and maxWidth, and [^}]*? keeps key order irrelevant. All four pass on the clone and on a clean scratch copy. Scratch fires, each only on the intended rule(s): user_avatar maxHeight 400 fires avatar. user_avatar maxWidth 640 with the keys swapped fires avatar. realm_icon maxWidth 64 fires icon. Logo 120x800 fires the width and height rules. Server DEFAULT_AVATAR_SIZE 128 fires icon (2 findings)."
+   },
+   {
+    "rule_id": "zulip-release-tarball-exclude-paths-exist",
+    "unit": "zulip-b05",
+    "action": "added",
+    "detail": "registry_paths_resolve on tools/release-tarball-exclude.txt, base lint_root, extract lines with comment \"\". The script's `read -r` loop has no comment syntax, so every non-blank line counts. Passes on the clone. Scratch tree: the exclude file plus empty placeholders for its 14 entries, each the same kind (file or dir) as in the clone. That tree passes. It fires on removing zproject/test_settings.py, on removing the templates/corporate dir, and on appending a '# comment' line, which the script would also try to rm. Comment cites build-release-tarball:47-49, the actual loop lines; the record says 46-48."
+   },
+   {
+    "rule_id": "zulip-feature-level-documented",
+    "unit": "zulip-b06",
+    "action": "added",
+    "detail": "cross_file relation subset, level error, commented as enforced by tools/release:96-100. It checks version.py (?m)^API_FEATURE_LEVEL = (\\d+)$ against api_docs/changelog.md (?m)^\\*\\*Feature level (\\d+)\\*\\*$, matching grep -F -x. Passes on the clone (516). In scratch the clean copy passes. It fires on API_FEATURE_LEVEL 517, and on the 516 line changed to '**Feature level 516** (draft)', which is no longer an exact line. It passes for API_FEATURE_LEVEL 400, which confirms membership rather than newest-heading equality."
+   },
+   {
+    "rule_id": "zulip-va-feature-level-sync",
+    "unit": "zulip-b06",
+    "action": "modified",
+    "detail": "Removed the value-add rule, replaced by zulip-feature-level-documented. The header now says four VALUE-ADD rules and lists the release-tarball and feature-level gates."
+   },
+   {
+    "rule_id": "zulip-locale-translations-json-object-root",
+    "unit": "zulip-04",
+    "action": "added",
+    "detail": "Companion to the parse probe: file_content_matches '\\A[ \\t\\r\\n]*\\{' on locale/*/translations.json, so a document that parses and starts with { has an object root. It uses only clone files; no schema exists in the clone (no tracked JSON contains \"type\": \"object\"), and JSONPath cannot tell [] from {} or select a scalar root. Passes on the clone (all 55 files start with {). Scratch results: [\"a\",\"b\"] fires the new rule while the parse probe still passes, reproducing Stage B. [] with leading whitespace fires, and so does \"abc\". {} with leading whitespace passes both rules. Truncated JSON passes object-root, but the parse probe fires with a resource_parse analysis failure. The comment also records the JSONC gap I verified (see unit_notes)."
+   },
+   {
+    "rule_id": "zulip-node-exempt-files-exist",
+    "unit": "zulip-39",
+    "action": "modified",
+    "detail": "Narrowed inside registry_paths_resolve via the extract regex: (?m)^        \"((?:web/src/[^/\".*][^/\"*]*\\.(?:js|ts)|web/src/billing/...\\.js|web/tests/...\\.cjs|web/tests/lib/...\\.cjs)|[^\"\\n]*\")\"?, . An entry in one of the five non-recursive glob shapes is captured bare and must exist (expect: file). Any other entry is captured with its closing quote, so it can never resolve and is reported. The custom message was dropped so the finding names the entry, e.g. entry \"web/src/a/b.ts\\\"\" does not resolve. Passes on the clone. The scratch tree (the script plus 285 empty placeholder files) passes. It fires on 6 cases: nested existing web/src/a/b.ts, existing web/src/foo.tsx, existing web/src/billing/x.ts, existing static/js/x.js, a missing in-glob entry, and a deleted listed file. It passes on an existing in-glob web/tests/lib/zz_helper.cjs. Removing the first, middle and last entries' files gave exactly 3 findings, so all 285 entries are extracted."
+   },
+   {
+    "rule_id": "zulip-mailmap-sorted",
+    "unit": "zulip-21",
+    "action": "comment",
+    "detail": "Bucket comment changed A to C, explaining that sort -f folds to uppercase and lexical-ci to lowercase, so they disagree for [ \\ ] ^ _ ` against letters. Rule unchanged. Passes on the clone and on a scratch copy, and fires when the first two entries are swapped. On the same scratch input, 'aax' then 'a_x' fires alint while GNU `LC_ALL=C.UTF-8 sort -cf` exits 0; the reverse order passes alint while sort -cf reports disorder (exit 1)."
+   },
+   {
+    "rule_id": "zulip-yaml-parses",
+    "unit": "zulip-28",
+    "action": "comment",
+    "detail": "Bucket comment changed A to B-config unique-key, explaining that the probe catches syntax errors but not duplicate mapping keys, which the yaml Composer reports. Rule unchanged; passes on the clone. Checked on scratch: a duplicate-key YAML passes (rc=0) and an unclosed flow sequence fires a resource_parse analysis failure (rc=1)."
+   },
+   {
+    "rule_id": "zulip-api-docs-no-zf-placeholder",
+    "unit": "zulip-26",
+    "action": "comment",
+    "detail": "Comment now says the rule holds on main only. The workflow runs on push to main (api-docs-update-check.yml:3-7), and PR branches carry ZF- placeholders (docs/documentation/api.md:351-367) until merge-api-changelogs replaces them at merge, so as a PR gate it would false-positive. Rule unchanged."
+   },
+   {
+    "rule_id": "(header)",
+    "unit": "zulip-60",
+    "action": "comment",
+    "detail": "Nothing in the config modelled or claimed zulip-60. The header's api-docs-update-check line now adds that the check runs on push to main only, and that the notify job's github-changes-contain-file step only decides whether a post-merge notification is sent, gates nothing, and has no rule."
+   },
+   {
+    "rule_id": "zulip-va-uv-version-sync, zulip-va-python-floor-sync, zulip-va-pnpm-minimum-release-age, zulip-va-uv-exclude-newer",
+    "unit": "value-add",
+    "action": "modified",
+    "detail": "Level changed from warning to info to meet the ground rule (VALUE-ADD at level info), and the section header now says 'Kept at info level'. No other change."
+   }
+  ],
+  "unit_notes": [
+   {
+    "id": "zulip-21",
+    "suggested_bucket": "C",
+    "note": "Directive 5: lexical-ci folds to lowercase and sort -cf to uppercase. Verified both directions on scratch input against GNU sort. Same verdict at the pin, different assertion. The record JSON still shows A."
+   },
+   {
+    "id": "zulip-28",
+    "suggested_bucket": "B-config",
+    "note": "Directive 5: assertion family unique-key. alint's YAML parse silently keeps the last duplicate key, which I verified on scratch, while check-openapi.ts's Composer reports duplicates as doc.errors. The rule still covers the syntax-error half. The record JSON still shows A."
+   },
+   {
+    "id": "zulip-04",
+    "suggested_bucket": "C",
+    "note": "Directive 3 was met: the object-root assertion was added from clone files only, as a text rule. It fires on a top-level array, an empty array and a scalar, and passes on the clone. My C suggestion rests only on a separate gap I verified. alint's JSON parse is JSONC-tolerant, so a translations.json with a trailing comma or a // comment passes both rules on scratch (rc=0), while orjson.loads in compilemessages rejects it. No strict-JSON option exists, so the parse half is a relaxation of the enforced check. If the integrator treats that as immaterial, A stands."
+   },
+   {
+    "id": "zulip-39",
+    "suggested_bucket": "A",
+    "note": "Directive 4 was met inside registry_paths_resolve. No option narrows the scope, so the extract regex does it: an out-of-glob entry is captured with its closing quote, so it can never resolve. The finding shows the entry with a trailing quote. It is exact on all tested cases, but it relies on that capture trick. Flagged in case the integrator counts the trick as awkward, which would make the unit C."
+   }
+  ],
+  "validate_output": "✓ Config valid: 179 rule(s) loaded from docs/design/v0.12/corpus/zulip-zulip.alint.yml",
+  "check_output": "exit 0: \"✓ all rules passed.\" (alint -c docs/design/v0.12/corpus/zulip-zulip.alint.yml check . --compact, run in the clone). Afterwards `git status --porcelain` on the clone is empty, HEAD is 39bd5f2f40a647af06b1cc0267cddd34f88ed2e9, and <scratch>/zulip-zulip-c/ has been removed. The config uses no spawning kinds, git-history kinds or custom facts."
+ }
+}

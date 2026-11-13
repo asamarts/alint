@@ -1,0 +1,1256 @@
+{
+ "repo": "nextcloud/server",
+ "sha": "d04a299b92c744b6a22255f01032fa755208bef0",
+ "metrics": {
+  "counts": {
+   "A": 11,
+   "B-config": 0,
+   "B-adapter": 4,
+   "B-kernel": 0,
+   "B-delegate": 0,
+   "C": 8,
+   "D": 30
+  },
+  "addressable": 23,
+  "coverage_today": 48,
+  "coverage_with_tuning": 83,
+  "gap": 17,
+  "coverage_after_slice": 48,
+  "coverage_after_slice_with_entry_values": 52
+ },
+ "by_family": {
+  "locale": {
+   "counts": {
+    "A": 2,
+    "B-config": 0,
+    "B-adapter": 0,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 1,
+    "D": 1
+   },
+   "addressable": 3,
+   "coverage_today": 67,
+   "coverage_with_tuning": 100,
+   "gap": 0,
+   "coverage_after_slice": 67,
+   "coverage_after_slice_with_entry_values": 67
+  },
+  "dep-version": {
+   "counts": {
+    "A": 1,
+    "B-config": 0,
+    "B-adapter": 1,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 0,
+    "D": 2
+   },
+   "addressable": 2,
+   "coverage_today": 50,
+   "coverage_with_tuning": 50,
+   "gap": 50,
+   "coverage_after_slice": 50,
+   "coverage_after_slice_with_entry_values": 100
+  },
+  "toolchain-pin": {
+   "counts": {
+    "A": 0,
+    "B-config": 0,
+    "B-adapter": 0,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 0,
+    "D": 1
+   },
+   "addressable": 0,
+   "coverage_today": null,
+   "coverage_with_tuning": null,
+   "gap": null,
+   "coverage_after_slice": null,
+   "coverage_after_slice_with_entry_values": null
+  },
+  "other": {
+   "counts": {
+    "A": 8,
+    "B-config": 0,
+    "B-adapter": 3,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 7,
+    "D": 26
+   },
+   "addressable": 18,
+   "coverage_today": 44,
+   "coverage_with_tuning": 83,
+   "gap": 17,
+   "coverage_after_slice": 44,
+   "coverage_after_slice_with_entry_values": 44
+  }
+ },
+ "units": [
+  {
+   "id": "nextcloud-01",
+   "summary": "Every app under apps/ (except testing and viewer) has an l10n/ directory and a Transifex resource in .tx/config named after it (with the four renames appstore/dashboard -> <app>-shipped-with-server, encryption -> files_encryption, settings -> settings-1)",
+   "evidence": "build/translation-checker.php:17-28 ($untranslatedApps, $txConfigAppMap), :60-73 (l10n dir + .tx/config resource check); run by .github/workflows/autocheckers.yml",
+   "mechanism": "ci",
+   "family": "locale",
+   "bucket": "A",
+   "alint": "for_each_dir + dir_exists / file_content_matches: nextcloud-l10n-app-has-l10n-dir, nextcloud-l10n-app-in-tx-config, nextcloud-l10n-shipped-with-server-in-tx-config, nextcloud-l10n-encryption-in-tx-config, nextcloud-l10n-settings-in-tx-config",
+   "rules": [
+    "nextcloud-l10n-app-has-l10n-dir",
+    "nextcloud-l10n-app-in-tx-config",
+    "nextcloud-l10n-shipped-with-server-in-tx-config",
+    "nextcloud-l10n-encryption-in-tx-config",
+    "nextcloud-l10n-settings-in-tx-config",
+    "nextcloud-l10n-tx-config-exists",
+    "nextcloud-apps-no-stray-files"
+   ],
+   "assertion_family": "none",
+   "reason": "R7: a check over files alint reads (directory structure and .tx/config); for_each_dir with {basename} templating expresses it, the renames as separate select groups. One script assertion (R1) collapsed over all apps.",
+   "fire_verified": "Scratch tree (copied .tx/config, several apps' l10n, core/l10n): fired on an app with its l10n/ removed, on a removed tx resource for an ordinary app, on each renamed resource (appstore/dashboard -shipped-with-server, files_encryption, settings-1) removed, and on a new app with no tx entry; apps/testing without l10n stayed silent. Clean scratch baseline and the clone pass.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-02",
+   "summary": "No catalog of a non-RTL language (core/l10n, apps/*/l10n) contains RTL-limited characters (U+061C, U+0623, LRM/RLM, bidi embeddings/isolates, U+206C/D)",
+   "evidence": "build/translation-checker.php:31-56 ($rtlCharacters, $rtlLanguages ar, fa, he, ps, ug, ur_PK), :85-91 (preg_match over json_encode'd catalog)",
+   "mechanism": "ci",
+   "family": "locale",
+   "bucket": "A",
+   "alint": "file_content_forbidden: nextcloud-l10n-no-rtl-chars-in-ltr-catalogs",
+   "rules": [
+    "nextcloud-l10n-no-rtl-chars-in-ltr-catalogs"
+   ],
+   "assertion_family": "none",
+   "reason": "R7: a content property of locale files alint reads; a forbidden-character regex with RTL-language exclusions matches the script's logic.",
+   "fire_verified": "Scratch: fired on U+200F inserted in core/l10n/de.json and on U+0623 in a fr.json value; silent for the same characters in ar.json (exempt RTL language). Clone passes (the only hit is the out-of-scope lib/l10n/vi.json, reported by the separate value-add rule).",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-03",
+   "summary": "No translation in a catalog contains a '|' character (outside the pluralForm line)",
+   "evidence": "build/translation-checker.php:93-98 (strpos($content, '|') on the catalog after removing the pluralForm entry)",
+   "mechanism": "ci",
+   "family": "locale",
+   "bucket": "C",
+   "alint": "file_content_forbidden: nextcloud-l10n-no-pipe-in-translations",
+   "rules": [
+    "nextcloud-l10n-no-pipe-in-translations"
+   ],
+   "assertion_family": "none",
+   "reason": "Batch-2 ruling: a regex that holds for one layout only is C. The script strips the pluralForm key structurally; the alint regex relies on the catalogs' line layout (pluralForm on the line starting with '}') to skip the '||' in plural expressions.",
+   "fire_verified": "n/a (C); still shown on scratch: fired on '|' in a translation value, silent on the pluralForm '||'; clone passes.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-04",
+   "summary": "Translatable strings in t()/n() calls use the ellipsis character, never three dots",
+   "evidence": "build/triple-dot-checker.php:9-33 (recursive over apps/ and core/, skipping .map; regex at :23); run by .github/workflows/autocheckers.yml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: nextcloud-l10n-ellipsis-not-triple-dot",
+   "rules": [
+    "nextcloud-l10n-ellipsis-not-triple-dot"
+   ],
+   "assertion_family": "none",
+   "reason": "R7: a line regex over source files alint reads, not code analysis (the script itself is a per-line regex); same scope and exclusion.",
+   "fire_verified": "Scratch: fired on t('files', 'Loading...') in a .js file and on $l->n('...', '... items...') in a .php file; silent for the same text in a .map file. Clone passes.",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "A",
+      "locale",
+      "none"
+     ],
+     "why": "It checks translatable strings in source or layout files, not locale files. Section 2.3's locale family covers locale files; zulip's equivalent source checks (zulip-06, zulip-cc-59, -61, -67 to -69) are `other`."
+    }
+   ]
+  },
+  {
+   "id": "nextcloud-05",
+   "summary": "Translations are contributed only through Transifex, not by editing l10n catalogs in PRs",
+   "evidence": ".github/CONTRIBUTING.md \"Translations\" section",
+   "mechanism": "convention",
+   "family": "locale",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "A process rule enforced by review and the external Transifex sync bot; consistent with batch records element-web-07, immich-09, signal-desktop-15 (translation-platform-only conventions are D).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-06",
+   "summary": "Every package in the root package-lock.json (other than the root and links) carries resolved and integrity fields",
+   "evidence": ".github/workflows/npm-build.yml:75-79 (npm-package-lock-add-resolved@1.1.4 then git diff --exit-code)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_absent: nextcloud-deps-lock-entries-resolved",
+   "rules": [
+    "nextcloud-deps-lock-entries-resolved"
+   ],
+   "assertion_family": "none",
+   "reason": "R7: the action rewrites the lockfile only where an entry lacks resolved/integrity; the diff gate thus asserts a static property of a file alint reads. A JSONPath filter expresses it.",
+   "fire_verified": "Scratch copy of package-lock.json: fired with resolved removed from one entry and with integrity removed from another; silent when a link entry lacks both. Clone passes (1218 entries, only the root \"\" lacks them).",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "A",
+      "dep-version",
+      "none"
+     ],
+     "why": "The bucket stays A. The fire tests reproduced: removing resolved or integrity from an entry fires, a link entry missing both is silent, and the clone passes with 1218 entries, of which only the root \"\" lacks both fields. The family should be other. The precedent is signal-desktop-41 ('every pnpm-lock.yaml package resolution carries an integrity hash' is tagged other). The section 2.3 dep-version items do not list lockfile hygiene, and this check governs no version, range or dependency field."
+    }
+   ]
+  },
+  {
+   "id": "nextcloud-07",
+   "summary": "The committed composer autoloader in lib/composer/composer has no reference to the composer-bin plugin (Bamarni\\Composer\\Bin)",
+   "evidence": "build/autoloaderchecker.sh:35-42 (composer dump-autoload, then grep for Bamarni\\Composer\\Bin in lib/composer/composer)",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "A",
+   "alint": "file_content_forbidden: nextcloud-deps-no-composer-bin-plugin-in-autoloader",
+   "rules": [
+    "nextcloud-deps-no-composer-bin-plugin-in-autoloader"
+   ],
+   "assertion_family": "none",
+   "reason": "R7: dump-autoload regenerates from the committed installed.json/composer.json; the grep's assertion is static content of committed files alint reads. The regeneration itself is unit 28 (D).",
+   "fire_verified": "Scratch copy of lib/composer/composer: an injected Bamarni\\\\Composer\\\\Bin reference in installed.json fires; autoload_*.php is excluded, since dump-autoload regenerates it before the grep. The clone passes.",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "audit",
+     "fields": [
+      "evidence",
+      "fire_verified"
+     ],
+     "why": "The evidence cited lines past the end of the script, and fire_verified described a file the rule now excludes."
+    }
+   ]
+  },
+  {
+   "id": "nextcloud-08",
+   "summary": "package-lock.json files (root, build/frontend, build/frontend-legacy) are in sync with their package.json (npm ci succeeds)",
+   "evidence": ".github/workflows/npm-build.yml:86 and node-test.yml:84 (npm ci); package.json:20 postinstall build/demi.sh ci",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "npm ci",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R7: lockfile freshness needs package-manager resolution semantics.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-09",
+   "summary": "The 3rdparty submodule points at the head of the matching nextcloud/3rdparty branch",
+   "evidence": ".github/workflows/block-outdated-3rdparty.yml:67 (git ls-remote against the 3rdparty repository)",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "git ls-remote",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Network/external state (R7 D list).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-10",
+   "summary": "The autoloader check runs with composer >= 2.9.2",
+   "evidence": "build/autoloaderchecker.sh:59-68 (downloads composer), :71-79 (version guard)",
+   "mechanism": "script",
+   "family": "toolchain-pin",
+   "bucket": "D",
+   "alint": "autoloaderchecker.sh",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Asserts the version of a binary fetched from the network at run time, not a committed pin alint could read.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-11",
+   "summary": "The committed root .htaccess does not contain the section Nextcloud appends at runtime ('DO NOT CHANGE ANYTHING ABOVE THIS LINE')",
+   "evidence": "build/htaccess-checker.php:14-20; run by .github/workflows/autocheckers.yml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: nextcloud-htaccess-no-runtime-section (with top-level respect_gitignore: false, since .htaccess is tracked but gitignored)",
+   "rules": [
+    "nextcloud-htaccess-no-runtime-section"
+   ],
+   "assertion_family": "none",
+   "reason": "A content check on a single file.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-12",
+   "summary": "The repository root holds no file or directory outside the release allowlist $expectedFiles",
+   "evidence": "build/files-checker.php:9-98 ($expectedFiles), :101-114 (DirectoryIterator, additional files); run by .github/workflows/autocheckers.yml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_absent + dir_absent with exclude allowlists: nextcloud-root-no-unexpected-files, nextcloud-root-no-unexpected-dirs",
+   "rules": [
+    "nextcloud-root-no-unexpected-files",
+    "nextcloud-root-no-unexpected-dirs"
+   ],
+   "assertion_family": "none",
+   "reason": "A structure invariant; root-level '*' glob with allowlist excludes. respect_gitignore: false mirrors DirectoryIterator seeing tracked-but-ignored files.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-13",
+   "summary": "Every entry of $expectedFiles exists at the repository root",
+   "evidence": "build/files-checker.php:107-119 (missing files)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "registry_paths_resolve: nextcloud-root-expected-files-present",
+   "rules": [
+    "nextcloud-root-expected-files-present"
+   ],
+   "assertion_family": "none",
+   "reason": "file_exists/dir_exists path lists are any-of, so an all-of check over ~85 names needs one rule per name; the config reads the script's own array with a regex that holds for its one-quoted-name-per-line layout (batch-2: a regex for one layout only is C), skipping '.', '..', '.git' which the walker never shows.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-14",
+   "summary": "Every app under apps/ is listed as a projectFiles directory in psalm.xml",
+   "evidence": "build/psalm-checker.sh:6-30; run by .github/workflows/autocheckers.yml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "for_each_dir + file_content_matches: nextcloud-psalm-covers-every-app",
+   "rules": [
+    "nextcloud-psalm-covers-every-app",
+    "nextcloud-psalm-config-exists"
+   ],
+   "assertion_family": "none",
+   "reason": "A reference from directory names into a config file; for_each_dir with {path} templating.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-15",
+   "summary": "Submitted text carries no U+FFFD replacement (garbled) characters",
+   "evidence": "AGENTS.md (\"What this agent must never do\")",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden: nextcloud-no-replacement-character",
+   "rules": [
+    "nextcloud-no-replacement-character"
+   ],
+   "assertion_family": "none",
+   "reason": "A file-content property convention that holds at the pin outside generated dist/ bundles, 3rdparty and AGENTS.md itself (R5 satisfied).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-16",
+   "summary": "Every file is covered by REUSE licensing information (an SPDX header, a .license sidecar, or a REUSE.toml annotation)",
+   "evidence": ".github/workflows/reuse.yml:27 (fsfe/reuse-action, reuse lint); REUSE.toml (59 annotations); dist/*.license sidecars",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "needs a REUSE coverage adapter: per-file disjunction of header, sidecar and REUSE.toml glob annotations (TOML glob precedence)",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "The REUSE.toml annotation-glob resolution and sidecar precedence are not expressible by the reuse bundle or kinds today; value-add rules cover two slices (app l10n listed in REUSE.toml, dist sidecars).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "other"
+     }
+    }
+   ],
+   "needs": "other"
+  },
+  {
+   "id": "nextcloud-17",
+   "summary": "Every SPDX-License-Identifier is a valid, non-deprecated SPDX expression",
+   "evidence": ".github/workflows/reuse.yml:27 (reuse lint: bad and deprecated licenses)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "spdx_identifier_valid: nextcloud-reuse-spdx-identifiers-valid",
+   "rules": [
+    "nextcloud-reuse-spdx-identifiers-valid"
+   ],
+   "assertion_family": "none",
+   "reason": "Expressible, but alint lacks REUSE sidecar precedence and REUSE-IgnoreStart/End handling, so the scope hand-excludes dist bundles and WebpackSPDXPlugin.cjs (a bundle relaxation -> C).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-18",
+   "summary": "Every license identifier used in the repository has its text at LICENSES/<id>.txt (reuse: missing licenses)",
+   "evidence": ".github/workflows/reuse.yml:27 (reuse lint)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "constraint over extracted SPDX ids -> LICENSES/ file names",
+   "rules": [],
+   "assertion_family": "reference",
+   "reason": "Each extracted identifier must name an existing file; a reference join between an extracted value set and a path set.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "B-config",
+      "other",
+      "reference"
+     ],
+     "why": "Needs an SPDX license-expression extractor, not just constraint configuration. Compound expressions exist at the pin. Headers include 'AGPL-3.0-or-later AND MIT', 'AGPL-3.0-only AND BSD-3-Clause' and 'AGPL-3.0-only AND (AGPL-3.0-or-later OR AGPL-3.0-only)'. REUSE.toml has 'AGPL-3.0-only OR AGPL-3.0-or-later' three times and 'CC-BY-SA-3.0 OR GPL-3.0-or-later' at line 328. Extracting the whole expression would demand files like LICENSES/'A AND B'.txt. The ids also come from .license sidecars and REUSE.toml values. The other side is a directory listing of LICENSES/, and cross_file targets extract only file content. This is the 'extractor for ICU or printf placeholders' shape. The unit keeps `reference` once the extractor exists (batch-2 convention)."
+    },
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "other"
+     }
+    }
+   ],
+   "needs": "other"
+  },
+  {
+   "id": "nextcloud-19",
+   "summary": "Every license text in LICENSES/ is used by some file (reuse: unused licenses)",
+   "evidence": ".github/workflows/reuse.yml:27 (reuse lint)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "constraint: LICENSES/ stems included in the set of used SPDX ids",
+   "rules": [],
+   "assertion_family": "set",
+   "reason": "One-way inclusion between two named sets.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "B-config",
+      "other",
+      "set"
+     ],
+     "why": "Same gap as nextcloud-18. Example: LICENSES/CC-BY-SA-3.0.txt is used only inside the REUSE.toml expression 'CC-BY-SA-3.0 OR GPL-3.0-or-later' (REUSE.toml:328, its only non-LICENSES occurrence). Without an SPDX-expression splitter, that license would be reported unused. The unit keeps `set` once the extractor exists."
+    },
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "other"
+     }
+    }
+   ],
+   "needs": "other"
+  },
+  {
+   "id": "nextcloud-20",
+   "summary": "Every license file under LICENSES/ has a file extension",
+   "evidence": ".github/workflows/reuse.yml:27 (reuse lint: licenses without file extension)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "filename_regex: nextcloud-reuse-license-files-have-extension",
+   "rules": [
+    "nextcloud-reuse-license-files-have-extension"
+   ],
+   "assertion_family": "none",
+   "reason": "A file-name property.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-23",
+   "summary": "Every PR commit subject follows Conventional Commits",
+   "evidence": ".github/workflows/block-unconventional-commits.yml:34 (webiny/action-conventional-commits); AGENTS.md; .github/CONTRIBUTING.md",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "git_commit_subject_matches: nextcloud-commits-conventional (commented out in config)",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Batch-1 ruling: a commit-message check a git kind expresses is C (depth-1 clone; R4 cannot confirm).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-24",
+   "summary": "No fixup!/squash! commits in a PR",
+   "evidence": ".github/workflows/fixup.yml:34 (block-fixup-merge-action)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "git_commit_no_fixup: nextcloud-commits-no-fixup (commented out in config)",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Batch-1 ruling: git-kind commit check is C.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-25",
+   "summary": "No commit carries a coding-agent Signed-off-by trailer",
+   "evidence": ".github/workflows/ai-policy.yml:88-94 (trailer detection), :156-181 (fail step); AGENTS.md",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "git_commit_message with a generated RE2 complement of the workflow's two grep patterns (about 9,600 characters), since: the PR base; not in the config, because the clone is depth 1",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "git_commit_message can only assert a match, so the ban needs an RE2 complement of the trailer patterns. The audit generated one and compared it with the workflow's grep patterns over 4,560 generated commits, with no mismatch. Expressible but awkward, so C (thunderbird-android-63 precedent); the clone is depth 1, so the corpus config has no rule.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "other"
+     }
+    },
+    {
+     "by": "audit",
+     "from": [
+      "B-adapter",
+      "other",
+      "none"
+     ],
+     "why": "thunderbird-android-63 bans a trailer the same way and is C: the commit kinds assert a match, so the ban is an RE2 complement pattern. The two reasons contradicted each other."
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "alint",
+      "reason"
+     ],
+     "why": "The audit generated the complement pattern and tested it, but left it out of the config."
+    }
+   ]
+  },
+  {
+   "id": "nextcloud-26",
+   "summary": "Every commit carries a DCO Signed-off-by",
+   "evidence": ".github/CONTRIBUTING.md (DCO); README.md:54; AGENTS.md",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "C",
+   "alint": "git_commit_signed_off: nextcloud-commits-signed-off (commented out in config)",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Git-kind commit check (batch-1 ruling C); enforced through the organization's DCO check, not a workflow in the repo.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-27",
+   "summary": "A PR does not add, modify or rename files under dist/ (the bot rebuilds it after merge)",
+   "evidence": ".github/workflows/node-dist-unchanged.yml:21,28",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "git_no_denied_paths with since: nextcloud-dist-unchanged-in-pr (commented out in config)",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Expressible by a git-history kind that the depth-1 clone cannot confirm (C, consistent with the commit-check ruling).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-28",
+   "summary": "Composer autoloaders (main and each app's) are fresh relative to the code",
+   "evidence": "build/autoloaderchecker.sh:95-133 (per-app composer i --no-dev + dump-autoload, autoload_classmap diff)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "composer dump-autoload + git diff",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Codegen freshness by running the package manager (R7 D).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-29",
+   "summary": "Each app's openapi.json is regenerated fresh (unless the app has .noopenapi)",
+   "evidence": "build/openapi-checker.sh:8; .github/workflows/openapi.yml:48",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "openapi-extractor",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Code analysis + codegen freshness (D).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-30",
+   "summary": "PHP syntax lints on PHP 8.3 and 8.5",
+   "evidence": ".github/workflows/lint-php.yml; .pre-commit-config.yaml:15 (php-lint, collapsed)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "php -l",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2: language tool.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-31",
+   "summary": "PHP code style passes php-cs-fixer",
+   "evidence": ".github/workflows/lint-php-cs.yml; .pre-commit-config.yaml:16 (collapsed)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "php-cs-fixer",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2: formatter.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-32",
+   "summary": "ESLint passes over the root and both build/frontend* projects (with suppression baselines)",
+   "evidence": ".github/workflows/lint-eslint.yml; eslint.config.js",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "eslint",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2: linter.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-33",
+   "summary": "Stylelint passes",
+   "evidence": ".github/workflows/lint-stylelint.yml; stylelint.config.js",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "stylelint",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2: linter.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-34",
+   "summary": "Front-end unit tests (vitest) pass",
+   "evidence": ".github/workflows/node-test.yml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "vitest",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2: test runner.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-35",
+   "summary": "The front-end build succeeds",
+   "evidence": ".github/workflows/npm-build.yml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "npm run build",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Runs the build (D).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-36",
+   "summary": "Psalm main analysis passes with no new issues against the baseline (baseline kept current)",
+   "evidence": ".github/workflows/static-code-analysis.yml:77",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "psalm",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2: type checker.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-37",
+   "summary": "Psalm taint analysis reports zero findings",
+   "evidence": ".github/workflows/static-code-analysis.yml:111-115",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "psalm --taint-analysis",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2: code analysis.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-38",
+   "summary": "Psalm OCP analysis (public API, @since checks) passes",
+   "evidence": ".github/workflows/static-code-analysis.yml:158; psalm-ocp.xml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "psalm:ocp",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2: code analysis.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-39",
+   "summary": "Psalm NCU analysis passes",
+   "evidence": ".github/workflows/static-code-analysis.yml:191; psalm-ncu.xml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "psalm:ncu",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2: code analysis.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-40",
+   "summary": "Psalm strict analysis passes",
+   "evidence": ".github/workflows/static-code-analysis.yml:219; psalm-strict.xml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "psalm:strict",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2: code analysis.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-41",
+   "summary": "Rector reports no pending refactors",
+   "evidence": ".github/workflows/rector.yml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "rector --dry-run",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2: code analysis.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-42",
+   "summary": "PHPUnit suites pass across databases, caches, object stores, external storage, 32-bit and kvstore",
+   "evidence": ".github/workflows/phpunit*.yml, object-storage.yml, files-external.yml, storage.yml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "phpunit",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2: tests.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-43",
+   "summary": "Behat integration tests pass",
+   "evidence": ".github/workflows/integration-sqlite.yml, integration-s3-primary.yml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "behat",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2: tests.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-44",
+   "summary": "CalDAV/CardDAV integration tests pass",
+   "evidence": ".github/workflows/integration-dav.yml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "caldavtester",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2: tests.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-45",
+   "summary": "WebDAV litmus tests pass",
+   "evidence": ".github/workflows/integration-litmus.yml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "litmus",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2: tests.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-46",
+   "summary": "Playwright end-to-end tests pass",
+   "evidence": ".github/workflows/playwright.yml; playwright.config.ts",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "playwright",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2: tests.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-47",
+   "summary": "Performance test does not regress beyond its threshold",
+   "evidence": ".github/workflows/performance.yml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "performance action",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Runs the application (D).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-48",
+   "summary": "CodeQL analysis passes",
+   "evidence": ".github/workflows/codeql.yml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "codeql",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2: code analysis.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-49",
+   "summary": "Merges into end-of-life branches are blocked",
+   "evidence": ".github/workflows/block-merge-eol.yml:47 (fetches a remote JSON of supported versions)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "curl",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Network/external state (D).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-50",
+   "summary": "Merges are blocked during a release freeze (base branch version.php at an RC)",
+   "evidence": ".github/workflows/block-merge-freeze.yml:57 (curl of the base branch version.php, RC grep)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "curl + grep",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Reads another branch's state over the network at PR time (D).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-51",
+   "summary": "Agent-assisted commits carry an Assisted-by trailer",
+   "evidence": "AGENTS.md; .github/workflows/ai-policy.yml (detection and labeling)",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Whether a commit was agent-assisted is not observable from the repository; unverifiable by any static check.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-52",
+   "summary": "Code changes come with tests",
+   "evidence": ".github/CONTRIBUTING.md; AGENTS.md; .github/pull_request_template.md",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Review judgment about code (D).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-53",
+   "summary": "Review conventions for code: comments describe code, reuse helpers, permission checks first, wire features into every context, focused PRs",
+   "evidence": "AGENTS.md (review conventions sections)",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Code-semantics review conventions (D), collapsed per R1.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-b01",
+   "summary": "Every shipped app under apps/ has a composer autoloader project, apps/<app>/composer/composer.json. autoloaderchecker.sh runs `composer i --no-dev -d apps/<app>/composer || exit 1` for every app directory that git does not ignore, and composer exits 1 when composer.json is missing.",
+   "evidence": "build/autoloaderchecker.sh:44-57 (line 53: `$COMPOSER_COMMAND i --no-dev -d ${app}/composer || exit 1`); run by .github/workflows/autocheckers.yml:67-68 (autoloader job, summarized at :123)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "for_each_dir select 'apps/*' require file_exists '{path}/composer/composer.json' (suggested id nextcloud-apps-have-composer-project)",
+   "rules": [
+    "nextcloud-apps-have-composer-project"
+   ],
+   "assertion_family": "none",
+   "reason": "A structural precondition that fails the CI step on its own, separate from the autoloader-freshness diff (unit 28, D). Earlier batches counted crash preconditions of a CI step as A units: signal-desktop-11 (every _locales entry holds messages.json), rocketchat-12 and rocketchat-82. Under R7 it is a property of files alint reads. All 34 apps have composer.json, composer.lock and autoload.php at the pin.",
+   "fire_verified": "n/a (family other). Still tested on a scratch copy: removing apps/dav/composer/composer.json fired the rule on apps/dav. The unmodified scratch copy and the clone pass.",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "nextcloud-b02",
+   "summary": "Root package.json overrides must not conflict with a direct dependency. An override of a direct dependency must use the `$<name>` reference or the identical spec, and every `$<name>` reference must name a direct dependency. Otherwise npm ci fails with EOVERRIDE.",
+   "evidence": "package.json:41-43 (`\"overrides\": {\"@nextcloud/files\": \"$@nextcloud/files\"}`, where @nextcloud/files is a direct dependency at ^4.1.1); npm ci runs at .github/workflows/npm-build.yml:86, node-test.yml:84, lint-eslint.yml:82 and lint-stylelint.yml:78. The npm overrides rule comes from npm's package.json documentation; npm/arborist source was not available offline.",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "B-adapter",
+   "alint": "needs: entry-values. It joins (override key, value) rows to (dependency name, spec) rows. The eventual assertion family is reference (a `$` reference resolves to a direct dependency) plus equality (a non-`$` override of a direct dependency equals its spec).",
+   "rules": [],
+   "assertion_family": "equality",
+   "reason": "R7: npm makes this static check over package.json when it loads the root manifest. It is not resolution semantics, so it is classified like the workspace:/catalog:/patch: reference units of earlier batches (jest-B01, jest-B03, tq-15, trpc-10). Batch-2 ruling: an assertion that joins a name to its value is B-adapter. A JSONPath filter cannot compare an override value with the dependency entry another key selects. Confidence: plausible. The exact EOVERRIDE conditions are recalled from npm documentation, not read from source. build/frontend-legacy's overrides are nested objects keyed by direct dependencies (@vitejs/plugin-vue2, @vueuse/integrations) and do not set those packages' own versions.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "entry-values",
+      "assertion_family": "equality"
+     }
+    }
+   ],
+   "needs": "entry-values"
+  }
+ ],
+ "removed": [
+  {
+   "id": "nextcloud-21",
+   "summary": "Every YAML file parses",
+   "why": "Not enforced. .pre-commit-config.yaml is an opt-in local hook set. No workflow runs pre-commit, and no doc mentions installing it (.github/CONTRIBUTING.md, README.md, AGENTS.md, contribute/HowToApplyALicense.md, the PR template). The same config's end-of-file-fixer hook is violated by 2669 tracked non-binary, non-empty files at the pin, including hand-edited ones: .editorconfig, 13 .sh, 6 .php and 2 .md. So neither contributors nor pre-commit.ci (which runs --all-files) apply these hooks. Stage A already excluded end-of-file-fixer for this reason (R5), and the reason applies equally to its sibling hooks in the same unused config. The rule can stay as value-add."
+  },
+  {
+   "id": "nextcloud-22",
+   "summary": "No added file exceeds 500 KB",
+   "why": "Not enforced, for the same reason as nextcloud-21: check-added-large-files is a hook in the same opt-in pre-commit config, which neither CI nor the documentation runs or requires. If the integrator keeps it, B-adapter (needs an added-only filter) is the right bucket."
+  }
+ ],
+ "rejected_stage_b": {},
+ "value_add": [
+  "nextcloud-valueadd-php-floor-coherent (toolchain-pin): composer.json config.platform.php equals require.php, psalm*.xml @phpVersion (x4) and lib/versioncheck.php's floor at MAJOR.MINOR; passes at pin",
+  "nextcloud-valueadd-vendor-bin-php-platform (toolchain-pin): every vendor-bin/*/composer.json config.platform.php agrees with the root at MAJOR.MINOR; passes",
+  "nextcloud-valueadd-node-engines-coherent / nextcloud-valueadd-npm-engines-coherent (toolchain-pin): build/frontend*/package.json engines.node/npm equal the root (the one CI reads); pass",
+  "nextcloud-valueadd-apps-target-server-major / nextcloud-valueadd-apps-max-server-major (other): apps/*/appinfo/info.xml min-version and max-version equal the server major from version.php; pass",
+  "nextcloud-valueadd-l10n-json-has-js / nextcloud-valueadd-l10n-js-has-json (locale): every catalog .json has its .js twin and back in core, lib and apps l10n; pass",
+  "nextcloud-valueadd-l10n-plural-form (locale): every catalog parses and declares a gettext pluralForm (covers the parse check translation-checker.php intends but masks); passes",
+  "nextcloud-valueadd-lib-l10n-no-rtl-chars (locale): extends unit 02 to lib/l10n, which the checker skips; FIRES at pin on lib/l10n/vi.json:34 (two U+200E LEFT-TO-RIGHT MARKs around 'Mẫu')",
+  "nextcloud-valueadd-lib-l10n-no-pipe (locale): extends unit 03 to lib/l10n; passes",
+  "nextcloud-valueadd-reuse-covers-app-l10n (locale; slice of B-adapter unit 16): every apps/*/l10n is listed in a REUSE.toml annotation; passes",
+  "nextcloud-valueadd-dist-bundles-have-license-sidecar (other; slice of unit 16): every dist/*.js and dist/*.mjs (except preview-service-worker.js, covered by REUSE.toml) has a .license sidecar; passes",
+  "nextcloud-yaml-parses (info): kept as value-add after nextcloud-21 was removed; see `removed`"
+ ],
+ "value_add_rules": [
+  "nextcloud-yaml-parses",
+  "nextcloud-valueadd-php-floor-coherent",
+  "nextcloud-valueadd-vendor-bin-php-platform",
+  "nextcloud-valueadd-node-engines-coherent",
+  "nextcloud-valueadd-npm-engines-coherent",
+  "nextcloud-valueadd-apps-target-server-major",
+  "nextcloud-valueadd-apps-max-server-major",
+  "nextcloud-valueadd-l10n-json-has-js",
+  "nextcloud-valueadd-l10n-js-has-json",
+  "nextcloud-valueadd-l10n-plural-form",
+  "nextcloud-valueadd-lib-l10n-no-rtl-chars",
+  "nextcloud-valueadd-lib-l10n-no-pipe",
+  "nextcloud-valueadd-reuse-covers-app-l10n",
+  "nextcloud-valueadd-dist-bundles-have-license-sidecar"
+ ],
+ "absent_categories": [
+  "No locale key-parity, placeholder or plural-agreement gate: Transifex delivers partial catalogs and nothing checks keys across languages",
+  "No l10n .json/.js twin or catalog freshness gate (both written by the Transifex sync bot)",
+  "No toolchain-pin file or gate: no .nvmrc, .node-version, .tool-versions, packageManager or Volta; CI derives Node/npm from root package.json engines (parse-package-engines-action), so they agree by construction",
+  "No dependency-version consistency gate across the three package.json files or the vendor-bin composer.json files (no syncpack/manypkg/sherif/yarn constraints); no npm workspaces",
+  "No lockfile presence/uniqueness rule",
+  "No .editorconfig enforcement (end-of-file-fixer in pre-commit is violated by 4611 files at the pin, so it is not enforced per R5)",
+  "No markdown link or docs-build gate",
+  "No husky/lefthook/lint-staged hooks (only an optional .pre-commit-config.yaml)",
+  "No file-graph/import-layering gate beyond psalm",
+  "Makefile holds dev helpers only, no checks; CODEOWNERS present but not a gate on its own"
+ ],
+ "unusual": [
+  "translation-checker.php's JSON-validity check is masked: it reads json_last_error() after json_encode(), which resets the error, so an unparseable catalog passes (not counted as an enforced unit; covered by value-add plural-form rule)",
+  "translation-checker.php has a debug-only en_GB check (no U+2019 in en_GB) that CI never enables (no --debug), so it is not enforced",
+  "lib/l10n is outside translation-checker.php's scope although Transifex syncs it; lib/l10n/vi.json:34 carries two U+200E marks that the checker would reject elsewhere",
+  "Walker semantics differ between checkers: files-checker/htaccess-checker use DirectoryIterator (see tracked-but-gitignored .htaccess, .idea/codeStyleSettings.xml, core/js/mimetypelist.js) while psalm-checker/openapi-checker skip git-ignored app dirs via git check-ignore; the config sets respect_gitignore: false",
+  "files-checker.php's $expectedFiles lists CLAUDE.md and AGENTS.md twice and requires .git itself",
+  "Two parallel npm projects (Vue 2 build/frontend-legacy and Vue 3 build/frontend) driven by build/demi.sh, without npm workspaces; each repeats the root engines",
+  "dist/ is committed, rebuilt by a bot after merge (update-node-dist.yml), PRs may not touch it (node-dist-unchanged.yml), and each bundle gets a generated .license sidecar (WebpackSPDXPlugin, REUSE-IgnoreStart/End inside the plugin)",
+  "ai-policy.yml detects coding-agent trailers, labels PRs and fails on an agent Signed-off-by; AGENTS.md requires an Assisted-by trailer instead",
+  "openapi-checker.sh opt-out per app via a .noopenapi marker file",
+  "autoloaderchecker.sh downloads composer from the network and guards its version (>= 2.9.2) before regenerating autoloaders",
+  "psalm-checker.sh refuses to run unless dist/ exists",
+  "block-merge-freeze.yml reads the base branch's version.php over the network to detect an RC freeze",
+  "flake.nix derives the PHP version from lib/versioncheck.php",
+  "tests/lib/L10N/FactoryTest.php depends on specific real catalogs (core/l10n/de.json, ru.json, lib/l10n/ru.json, apps/settings/l10n/de.json, apps/files/l10n/de.json)",
+  "The PHP floor 8.3 is repeated in about 12 places (composer.json x2, four psalm configs, vendor-bin platform pins, lib/versioncheck.php) with no agreement gate",
+  "REUSE.toml lists each translated app's l10n globs explicitly, so a new translated app needs a REUSE.toml edit or reuse lint fails"
+ ],
+ "check_result": "alint validate-config: valid, 32 rules loaded. alint check . on the clone: exit 0, one finding, info level: lib/l10n/vi.json:34 nextcloud-valueadd-lib-l10n-no-rtl-chars. That catalog line holds two U+200E LEFT-TO-RIGHT MARKs around the Vietnamese value for \"Templates\". The finding is real. translation-checker.php scans only core/l10n and apps/*/l10n, so lib/l10n is outside what the repo enforces, and the rule is value-add (outside the ratio). All enforced A and C rules pass on the clone. Three earlier violations were resolved during drafting. (1) spdx_identifier_valid reported 212 hits in sidecar-covered minified dist bundles and 2 in the REUSE-Ignore block of WebpackSPDXPlugin.cjs. reuse skips both, so they are excluded and unit 17 is classified C. (2) registry_paths_resolve flagged '.git', which the walker never shows, so the regex skips it. (3) .htaccess was invisible because it is gitignored but tracked, so the config sets respect_gitignore: false.",
+ "stage_b_config_issues": [
+  "Unit 01 (R4 gap): the nested file_content_matches rules pass silently when .tx/config is missing. Deleting .tx/config on scratch left all five nextcloud-l10n-*-tx-config rules passing. translation-checker.php fails in that case: file_get_contents returns false and str_contains(false, ...) raises a TypeError under declare(strict_types=1). Fix: add `file_exists: .tx/config`.",
+  "Unit 14 (R4 gap): deleting psalm.xml leaves nextcloud-psalm-covers-every-app passing, but psalm-checker.sh's grep fails. Fix: add `file_exists: psalm.xml`.",
+  "Units 01 and 14 (fidelity): for_each_dir iterates directories only. A stray file such as apps/README.md passes alint (shown on scratch). translation-checker.php fails on it because DirectoryIterator treats every entry as an app without l10n; so do psalm-checker.sh (`for app in apps/*`) and openapi-checker.sh (generate-spec on the file). Fix: add `file_absent: apps/*`. Tested: it fires on the stray file and passes on the clone.",
+  "Global `respect_gitignore: false` is needed only for units 11, 12 and 13, but it widens the `**` scopes of units 15, 17 and 21 to ignored trees. Shown on scratch: files under node_modules/ and build/frontend/node_modules/ made nextcloud-yaml-parses, nextcloud-no-replacement-character and nextcloud-reuse-spdx-identifiers-valid fire. reuse lint skips ignored files, so after any `npm ci` the rules diverge from the repository's tools. The clone passes only because it has no ignored files. Exclude **/node_modules/**, or turn gitignore off per rule.",
+  "Wrong evidence line numbers: build/autoloaderchecker.sh has 82 lines, but units 07 (:86-93), 10 (:59-68, :71-79) and 28 (:95-133), and the config comment for nextcloud-07, cite lines past the end of the file. The correct lines: composer download :8-17, version guard :20-28, main dump-autoload :35, Bamarni grep :37-42, per-app loop :44-57, classmap diff :59-82.",
+  "Unit 07 fire test: Stage A injected Bamarni into autoload_psr4.php. The real script runs `composer dump-autoload` first, which regenerates that file from installed.json, so CI would pass that injection. The realistic break is a dev install committed into lib/composer/composer/installed.json. I reproduced that and the rule fires. The rule is stricter than the script for a stale autoload_* file whose installed.json lacks the plugin.",
+  "Unit 06: the rule excludes the root entry by `@.name != 'nextcloud'`, a value stand-in because JSONPath filters cannot test the \"\" member name. Renaming the root package fired the rule on scratch, a false positive. An entry with inBundle: true and no resolved/integrity fires, although npm records neither field for bundled packages; npm-package-lock-add-resolved's handling of such entries could not be checked offline, and the pin has none. `\"resolved\": \"\"` passes.",
+  "Unit 17 is partial, which is consistent with C. It does not cover reuse's bad-license check on LICENSES/ file stems that are neither SPDX ids nor LicenseRef-*. It also skips REUSE.toml `SPDX-License-Identifier = \"...\"` values, which Stage A notes. dist/*.map.license symlinks double-report a bad id in a sidecar.",
+  "Unit 20: the regex `^[^.]+.*\\.[A-Za-z0-9]+$` fires on a dotfile such as LICENSES/.x.txt, which reuse would accept because it checks the suffix. This is an edge case.",
+  "Unit 15 covers only the example U+FFFD. The AGENTS.md convention is 'malformed or garbled characters', which also includes invalid UTF-8 and mojibake. The convention is addressed to coding agents, not human contributors.",
+  "Unit 12 copies $expectedFiles into the config, and the copy will drift. cross_file `relation: registered` with source.files '*', register_as '{basename}' and a regex target over build/files-checker.php reads the real array. It passes on the clone and fired on a new root file and a new root directory on scratch, but its regex depends on the array's layout.",
+  "Enforcement note: autocheckers.yml's paths filter (src: workflows, 3rdparty, **/appinfo, **/lib, **/templates, vendor-bin, composer.*, **.php) skips the translation and triple-dot checkers on PRs that change only l10n, .tx/config or JS/Vue. Transifex pushes are not checked either, so enforcement lags until the next PHP PR.",
+  "I could not reproduce Stage A's count of '4611 files' violating end-of-file-fixer: I count 2669 tracked non-binary, non-empty files that do not end in exactly one newline. The conclusion is unchanged."
+ ],
+ "stage_b_summary": "Mostly confirmed: Stage A missed two units, and I recommend removing two, reclassifying three and fixing four rules. validate-config loads 32 rules. `alint check` on the clone exits 0 with one finding, at info level: the value-add rule on lib/l10n/vi.json:34. On my own scratch copy I re-ran the fire tests for every A unit in the locale and dep-version families. Unit 01 fired on 6 breaks (l10n directory removed, the files, settings-1, dashboard-shipped-with-server and files_encryption resources each removed, a new app without a resource). Unit 02 fired on U+200F, U+0623 and U+206D in de/fr catalogs and stayed silent for ar.json, a character at line start and .js twins. Unit 04 fired on .js, .php n(), .vue and CRLF files and stayed silent for .map files and a call at line start. Unit 06 fired with resolved or integrity removed and stayed silent for a link entry. Unit 07 fired with the plugin in installed.json. I also sanity-checked units 03, 11, 12, 13, 14, 17 and 20. All broken copies fired as expected, and the clone passes. There is no toolchain-pin A unit, and I found no missed toolchain-pin gate: no .nvmrc, .tool-versions, .npmrc engine-strict or devEngines; CI reads root engines; PHP versions are hard-coded per workflow.\n\nMissed units: (b01, A, other) every shipped app has composer/composer.json, because autoloaderchecker.sh's `composer i --no-dev -d apps/<app>/composer || exit 1` fails otherwise; the earlier batches counted such preconditions (signal-desktop-11). (b02, B-adapter, dep-version, needs entry-values) npm's overrides rule on the root package.json's `$@nextcloud/files`, enforced by npm ci; plausible, from npm docs.\n\nReclassify: unit 06's family to other (precedent signal-desktop-41). Units 18 and 19 from B-config to B-adapter: compound SPDX expressions exist at the pin, so they need an SPDX-expression extractor, and the LICENSES/ side is a directory listing.\n\nRemove: units 21 and 22. The opt-in pre-commit config is not run in CI or mentioned in any doc, and its end-of-file-fixer hook is violated by 2669 tracked files.\n\nConfig problems: units 01 and 14 pass silently when .tx/config or psalm.xml is deleted, and they miss a stray file under apps/. The global respect_gitignore: false makes the rules for units 15, 17 and 21 scan node_modules. The autoloaderchecker.sh line citations for units 07, 10 and 28 point past the end of the 82-line file. Unit 07's fire test broke a file that composer regenerates, so CI would not have caught it. Unit 06 excludes the root entry by the root package's name, which gives a false positive if the package is renamed.\n\nWith these changes there are 53 units: A=11, C=7, B-config=0, B-adapter=5, D=30. That makes coverage_today 11/23, about 48% (from 43%); coverage_with_tuning 18/23, about 78%; gap 5/23, about 22%. The after-slice figure is unchanged because no B-config unit is left. By family: locale 3A/1C/1D; dep-version 1A/1B-adapter/2D; toolchain-pin 1D. I did not verify offline the source of npm-package-lock-add-resolved, npm/arborist or patch-package. A patch-package check (build/frontend-legacy/patches must target an installed package) was considered and not added: it is part of the D unit 08 (npm ci), and there is one patch at the pin.",
+ "notes": "Counts: 53 units, A=10 (01, 02, 04, 06, 07, 11, 12, 14, 15, 20), C=8 (03, 13, 17, 21, 23, 24, 26, 27), B-config=2 (18 reference, 19 set), B-adapter=3 (16, 22, 25), B-kernel=0, B-delegate=0, D=30. coverage_today=10/23 (about 43%), coverage_with_tuning=18/23 (about 78%), gap=5/23 (about 22%). Neither B-config unit uses equality, unique-key or cardinality, so the after-slice figure is unchanged. Per family: locale 3A/1C/0B/1D; dep-version 2A/0B/2D; toolchain-pin 1D only (no addressable toolchain-pin unit); other is the rest. R4 fire tests for every A unit in locale and dep-version ran on scratch copies under <scratch>/nextcloud-server-a; each fired when broken and passed on the clean copy and on the clone. Extra sanity fires on a second scratch tree also confirmed the htaccess, unexpected root file and directory, expected-present, psalm, bad SPDX id, license without extension, broken YAML and U+FFFD rules. The scratch directory has been removed. Caveats: (a) npm-package-lock-add-resolved@1.1.4's source was not read offline, so unit 06 treating a missing integrity like a missing resolved is inferred from its purpose and not verified. (b) In the commented-out nextcloud-23 rule, the conventional-commit type list is an approximation; webiny/action-conventional-commits' own list was not read. (c) psalm-checker.sh skips git-ignored app dirs, but the alint rule (with respect_gitignore: false) would also see untracked, ignored apps in a developer checkout. On a CI checkout the two are identical. (d) The DCO sign-off (unit 26) is enforced by the organization's DCO app, outside the repo, and is recorded from docs only. (e) Units 23, 24, 26 and 27 are git-history C rules left commented out in the config, because the clone is depth 1. (f) Not counted as units: the masked JSON-parse check, the debug-only en_GB check, end-of-file-fixer (violated by 4611 files, R5), pre-commit php-lint and php-cs-fixer (collapsed into 30 and 31), npm-build.yml's commented-out recompile check, PR-template checklist items, and the PHP floor, engines and app-version coherence (value-add only). No spawning kinds, custom facts or active git-history kinds are used. The clone was not modified (git status clean).",
+ "stage_c": {
+  "changes": [
+   {
+    "rule_id": "nextcloud-l10n-tx-config-exists",
+    "unit": "nextcloud-01",
+    "action": "added",
+    "detail": "file_exists .tx/config. Closes Stage B's R4 gap: when .tx/config is missing, translation-checker.php:15 reads false and str_contains at :67 throws a TypeError. Reproduced the gap: with .tx/config deleted on scratch, nextcloud-l10n-app-in-tx-config still reports 0 findings. Fire test: the new rule fires (1 finding, <repo>) with .tx/config deleted, is silent on the clean scratch copy, and passes on the clone."
+   },
+   {
+    "rule_id": "nextcloud-apps-no-stray-files",
+    "unit": "nextcloud-01 (also nextcloud-14)",
+    "action": "added",
+    "detail": "file_absent apps/*. translation-checker.php:60-70 walks apps/ with DirectoryIterator and treats every entry as an app. psalm-checker.sh:8-17 does the same with `for app in apps/*` for a tracked file. Reproduced the gap: nextcloud-l10n-app-has-l10n-dir stays silent with apps/README.md added. Fire test: fires on apps/README.md and on apps/.DS_Store, silent on the clean scratch copy. apps/ holds only the 34 app directories at the pin, so the clone passes."
+   },
+   {
+    "rule_id": "nextcloud-psalm-config-exists",
+    "unit": "nextcloud-14",
+    "action": "added",
+    "detail": "file_exists psalm.xml. Without psalm.xml the grep at psalm-checker.sh:14 fails for every app. Fire test: fires with psalm.xml deleted on scratch, silent on the clean copy, passes on the clone."
+   },
+   {
+    "rule_id": "nextcloud-apps-have-composer-project",
+    "unit": "nextcloud-b01",
+    "action": "added",
+    "detail": "Stage B's missed unit (A, other): for_each_dir over apps/* requiring file_exists {path}/composer/composer.json. Checked in the clone that all 34 app dirs have composer/composer.json, and that autoloaderchecker.sh:53 runs `composer i --no-dev -d ${app}/composer || exit 1` for every non-ignored directory. Fire test: fires on apps/dav after removing its composer/composer.json, fires on a new apps/newapp with no composer dir, silent on the clean copy, passes on the clone. Comment notes the same dev-checkout caveat as unit 14: the script skips gitignored apps, the rule does not."
+   },
+   {
+    "rule_id": "nextcloud-deps-lock-entries-resolved",
+    "unit": "nextcloud-06",
+    "action": "modified",
+    "detail": "Moved to family other (Stage B; precedent signal-desktop-41). Root exclusion changed from `@.name != 'nextcloud'` to `@.name != $.name`, which no longer depends on the package name. Verified that $.name is evaluated: changing only packages[\"\"].name makes the rule fire. Fire test on a scratch copy of package-lock.json: renaming the package in both places is now silent (it was a false positive), dropping resolved fires, dropping integrity fires, dropping resolved from an alias entry fires, and a link entry missing both is silent. The clean copy and the clone pass. Comment records two things not verified offline: how the action treats inBundle entries, and an empty-string resolved."
+   },
+   {
+    "rule_id": "nextcloud-deps-no-composer-bin-plugin-in-autoloader",
+    "unit": "nextcloud-07",
+    "action": "modified",
+    "detail": "Evidence corrected to build/autoloaderchecker.sh:35-42 (dump-autoload :35, Bamarni grep :37-42); the file has 82 lines. Scope now excludes lib/composer/composer/autoload_*.php, because dump-autoload rewrites those files before the grep, so CI would pass a stale one (the classmap diff at :59-82 looks only at autoload_classmap). Fire test on a scratch copy of lib/composer/composer: fires on a dev-mode installed.json carrying the bamarni plugin's Bamarni\\\\Composer\\\\Bin psr-4 entry, fires on Bamarni injected into installed.php, and is now silent on Bamarni injected only into autoload_psr4.php (matching CI). The clean copy and the clone pass. Unit records 10 and 28 also cite out-of-range lines. The correct ones are composer download :8-17, version guard :20-28, per-app loop :44-57 and classmap diff :59-82. Those are Stage A unit records, not config, so they are not edited here."
+   },
+   {
+    "rule_id": "nextcloud-reuse-license-files-have-extension",
+    "unit": "nextcloud-20",
+    "action": "modified",
+    "detail": "Regex changed from ^[^.]+.*\\.[A-Za-z0-9]+$ to ^.+\\.[^.]+$, which follows Python's Path.suffix. The suffix is non-empty only when the last '.' comes after the first character and before the last one. Fire test on a scratch copy of LICENSES/: fires on LICENSES/MIT, LICENSES/MIT. and LICENSES/.MIT. It is silent on LICENSES/.x.txt (Stage B's false positive, fixed) and on LICENSES/GPL-3.0, whose suffix is '.0'. The clean copy and the clone pass."
+   },
+   {
+    "rule_id": "nextcloud-no-replacement-character",
+    "unit": "nextcloud-15",
+    "action": "modified",
+    "detail": "Scope now excludes the gitignored trees: **/node_modules/**, vendor-bin/**/vendor/**, lib/composer/bin/**, lib/composer/bamarni/**, data/**, build/lib/**, build/bin/**, updater/** and apps?*/**. This fixes Stage B's respect_gitignore widening. Comment notes the rule covers only U+FFFD, not invalid UTF-8 or mojibake. Fire test: fires on U+FFFD appended to lib/public/IUser.php and to apps/dav/composer/composer.json, which shows apps?*/** does not exclude apps/. It is silent on U+FFFD under node_modules/, build/frontend/node_modules/, vendor-bin/cs-fixer/vendor/, apps-extra/ and data/. The clean copy and the clone pass."
+   },
+   {
+    "rule_id": "nextcloud-reuse-spdx-identifiers-valid",
+    "unit": "nextcloud-17",
+    "action": "modified",
+    "detail": "C. Same gitignored-tree excludes as unit 15. The comment now lists the partial coverage: REUSE.toml TOML values are not checked; LICENSES/ stems that are neither SPDX ids nor LicenseRef-* are not checked; and a bad id in a sidecar is reported again through each dist/*.map.license symlink. Passes on the clone. Fires on 'AGPL-3.0-onlyy' in lib/public/IUser.php and on a deprecated GPL-2.0 in build/frontend/src/a.js. Silent on a bad id under node_modules/ and apps-extra/."
+   },
+   {
+    "rule_id": "nextcloud-yaml-parses",
+    "unit": "nextcloud-21",
+    "action": "demoted",
+    "detail": "Stage B removed the unit: the opt-in pre-commit config is run by no workflow and asked for by no doc (grep of *.md and *.yml found no reference). The rule keeps its id, moves to the VALUE-ADD section at level info, and its comment names both limitations: not enforced, and alint's reader is more lenient than check-yaml. It also gets the gitignored-tree excludes. Passes on the clone. Fires (resource_parse analysis failure) on a broken .github/workflows/reuse.yml. Silent on a broken YAML under node_modules/."
+   },
+   {
+    "rule_id": "(header comment)",
+    "unit": "nextcloud-22",
+    "action": "comment",
+    "detail": "Stage B removed the unit (same opt-in pre-commit config). It had no rule. The header moves it out of NOT EXPRESSIBLE into a NOT ENFORCED note covering all three pre-commit hooks. The end-of-file-fixer count is corrected to 2669: I recounted it myself, matching Stage B, and Stage A's 4611 was not reproduced."
+   },
+   {
+    "rule_id": "(header comment)",
+    "unit": "nextcloud-18, nextcloud-19",
+    "action": "comment",
+    "detail": "Header now records both units as B-adapter (were B-config). They need an SPDX-expression extractor, because compound expressions such as 'AGPL-3.0-or-later AND MIT' and REUSE.toml's 'CC-BY-SA-3.0 OR GPL-3.0-or-later' must be split into ids. They keep reference and set as their assertion families. There is no rule for either."
+   },
+   {
+    "rule_id": "(header comment)",
+    "unit": "nextcloud-b02",
+    "action": "comment",
+    "detail": "Stage B's missed unit (B-adapter, dep-version, needs entry-values: npm overrides vs direct dependency, EOVERRIDE). It is recorded in the header's NOT EXPRESSIBLE list. No rule was added, because it is B-adapter."
+   },
+   {
+    "rule_id": "nextcloud-root-no-unexpected-files / nextcloud-root-no-unexpected-dirs",
+    "unit": "nextcloud-12",
+    "action": "comment",
+    "detail": "Not a reproduced defect, so the rules are unchanged. Verified that the two exclude lists equal $expectedFiles at the pin: 83 names on each side once '.', '..' and '.git' are dropped, with no difference either way. The comment names the drift risk and why the drift-free registered-relation form was not used: its regex depends on the array's layout, which makes it C."
+   },
+   {
+    "rule_id": "(header comment)",
+    "unit": "nextcloud-01, nextcloud-02, nextcloud-04 (enforcement note)",
+    "action": "comment",
+    "detail": "Header records autocheckers.yml's dorny/paths-filter `src` filter, verified at lines 23-38. Both jobs are skipped on PRs that touch only core/ or apps/ l10n catalogs, .tx/config or JS/Vue. The workflow runs on pull_request only, so pushes are not checked. Enforcement therefore lags; no bucket change."
+   }
+  ],
+  "unit_notes": [
+   {
+    "id": "nextcloud-b01",
+    "suggested_bucket": "A",
+    "note": "New unit from Stage B (family other). It is now expressed by nextcloud-apps-have-composer-project, confirmed both ways (passes on the clone, fires on scratch). The A count goes from 10 to 11."
+   },
+   {
+    "id": "nextcloud-b02",
+    "suggested_bucket": "B-adapter",
+    "note": "New unit from Stage B (family dep-version, needs entry-values, eventual assertion families reference + equality). Stage B rated it plausible: the EOVERRIDE conditions come from npm documentation, and neither Stage B nor I verified them against npm/arborist source. No rule."
+   },
+   {
+    "id": "nextcloud-06",
+    "suggested_bucket": "A",
+    "note": "Bucket unchanged. The family moves from dep-version to other per Stage B (precedent signal-desktop-41). Dep-version then has 1 A unit (07), plus b02 as B-adapter."
+   },
+   {
+    "id": "nextcloud-18",
+    "suggested_bucket": "B-adapter",
+    "note": "Per Stage B, was B-config (reference). Needs an SPDX-expression extractor; compound expressions are present at the pin. No rule existed before or after."
+   },
+   {
+    "id": "nextcloud-19",
+    "suggested_bucket": "B-adapter",
+    "note": "Per Stage B, was B-config (set). Same SPDX-expression extractor gap as 18. No rule existed before or after."
+   },
+   {
+    "id": "nextcloud-21",
+    "suggested_bucket": "remove (not enforced; value-add)",
+    "note": "Per Stage B, the opt-in .pre-commit-config.yaml is run by no workflow and referenced by no doc (my grep of *.md and *.yml found nothing). Its end-of-file-fixer hook is violated by 2669 tracked text files (I recounted). The rule nextcloud-yaml-parses is kept as value-add at level info. C count goes from 8 to 7."
+   },
+   {
+    "id": "nextcloud-22",
+    "suggested_bucket": "remove (not enforced)",
+    "note": "Per Stage B, it comes from the same opt-in pre-commit config. It had no rule. If the integrator keeps it, B-adapter is the right bucket (needs an added-only diff filter)."
+   },
+   {
+    "id": "nextcloud-15",
+    "suggested_bucket": "A",
+    "note": "Bucket unchanged; the gitignore fix was made inside the clone (per-rule excludes). Residual gap on developer checkouts only: non-shipped apps cloned into apps/ and themes/* are gitignored through an allowlist that exclude globs cannot mirror. On a CI checkout and on the clone the rule matches its reference. The rule tests only U+FFFD, a subset of the 'malformed or garbled characters' convention; Stage B flagged this but did not reclassify."
+   }
+  ],
+  "validate_output": "✓ Config valid: 36 rule(s) loaded from docs/design/v0.12/corpus/nextcloud-server.alint.yml",
+  "check_output": "exit 0. One finding, at info level: `lib/l10n/vi.json:34:1: info: nextcloud-valueadd-lib-l10n-no-rtl-chars: value-add: lib/l10n catalog of a non-RTL language contains RTL-limited characters.` followed by `1 info.` The finding is expected and real: two U+200E marks in a catalog that translation-checker.php does not scan, reported by a value-add rule. Every A and C rule passes. `git -C <clone> status --porcelain` is empty. The scratch directory <scratch>/nextcloud-server-c was removed."
+ }
+}

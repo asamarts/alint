@@ -1,0 +1,543 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
+#
+# alint v0.23 corpus-stratum config (stratum: i18n) -- immich-app/immich
+# Pinned @ 7f13ab5e139e68308c67a709fc90d8bebd20ba7d (depth-1 clone, 2026-11-12)
+#
+# Covers: the i18n/*.json gates (strict-JSON well-formedness the web loaders and
+# the mobile codegen rely on; the web i18n.spec loader-per-file filename shape, a
+# valid BCP 47 tag with `_` separators; en.json keys that generate_keys.dart can
+# emit as Dart identifiers), the Rust toolchain pin kept in sync across
+# rust-toolchain.toml and two mise.toml files, four cross-file "keep in sync /
+# must match" conventions (ML OCR preload resolution, AssetPlaybackStyle enum,
+# ffigen asset id, background-worker Dart entry point), the native release-profile
+# unwinding rule, the zizmor-evidenced workflow hardening (persist-credentials,
+# explicit job permissions, SHA pinning, justified dangerous triggers), and the
+# files->ORDER half of the server migration manifest. Value-add rules (outside
+# the ratio, R3/R5) sit at the end, including the depth-limited key-order
+# approximation of the Test i18n prettier-plugin-sort-json gate (immich-01,
+# B-adapter: no JSON key-order operator).
+#
+# Shape: pnpm 12 workspace (server NestJS, web SvelteKit, e2e, docs Docusaurus,
+# packages/{cli,sdk,plugin-sdk,plugin-core,scripts,e2e-auth-server}, .github) plus
+# a Flutter app (mobile/), a Rust core (native/) and a Python ML service
+# (machine-learning/, uv). Tools are pinned and tasks run through mise (mise.toml
+# per sub-project, mise.lock). Translations: 89 nested ICU-JSON catalogs in
+# i18n/ (en.json is the source; every other file is written by Weblate). Two
+# nesting levels at the pin (top-level keys plus admin/errors/interval/
+# media_chrome/past_durations objects).
+#
+# WHERE THE ENFORCED VALIDATION LIVES
+#   test.yml          pre-job path filters, then per area: Test i18n (pnpm format:fix
+#                     over i18n/ then tj-actions/verify-changed-files), native fmt/
+#                     clippy/test, server/web/cli/e2e/scripts ci-unit (prettier,
+#                     eslint, tsc, svelte-check, vitest), web/server medium tests,
+#                     e2e (API/CLI/web/maintenance), mobile codegen + flutter test,
+#                     ML ci-unit (uv sync --locked, ruff, mypy, pytest) + GPU e2e,
+#                     .github prettier, ShellCheck, OpenAPI Clients freshness, SQL
+#                     Schema Checks (migrations generate empty, schema:reset, SQL
+#                     snapshots fresh).
+#   static_analysis.yml  mobile codegen (incl. generate_keys.dart from en.json),
+#                     dart analyze --fatal-infos, dcm analyze (banned tr()/plural()),
+#                     dcm check-unused-code, dart format.
+#   migration-order.yml  sql-tools migrations verify-order (ORDER vs folder,
+#                     append-only from the PR base; release line vs main).
+#   check-openapi.yml oasdiff breaking-change gate; mobile backward-compat patches.
+#   weblate-lock.yml / auto-close.yml  non-en locale edits only via Weblate.
+#   org-zizmor.yml / org-pr-require-conventional-commit.yml  org reusable
+#                     workflows at immich-app/devtools@main (config not in repo).
+#   pr-label-validation.yml, auto-close.yml (PR template), codeql, docs-build
+#                     (prettier + docusaurus onBrokenLinks: throw), docker/cli/
+#                     mobile builds.
+#   Conventions: AGENTS.md (root + server/web/mobile/native/machine-learning/e2e),
+#                     CONTRIBUTING.md, docs/docs/developer/*.md, "keep in sync"
+#                     load-bearing comments.
+#
+# Expected `alint check` at the pin: exit 0. Every enforced-unit rule passes. The
+# only findings are 271 info-level ones from the value-add rule
+# immich-i18n-no-stale-keys (five keys removed from en.json still sit in 53-56
+# Weblate-written catalogs; nothing in the repo enforces their removal).
+#
+# Stage C (2026-11-12) applied the Stage B review: immich-01's three ordered_block
+# rules demoted to value-add info (unit reclassified B-adapter); immich-03 strict
+# rule also catches end-of-line comments; immich-04 tightened to the BCP 47 shape
+# Intl.DisplayNames accepts; immich-32 also matches flow/scalar `on:` triggers;
+# new rules for immich-49 (C) and immich-50 (A).
+
+version: 1
+
+ignore:
+  - "**/node_modules/**"
+
+rules:
+  # ════════════════════════════════════════════════════════════════
+  # LOCALE family
+  # ════════════════════════════════════════════════════════════════
+
+  # immich-01 (B-adapter after Stage B; was C) i18n key order: the three
+  #   ordered_block approximations now sit in the VALUE-ADD section at level info
+  #   (they cover only two nesting levels; see there).
+
+  # immich-03 (C) every locale file is strict JSON: prettier must parse it (Test
+  #   i18n), the web imports each one (#i18n/*.json, i18n.spec.ts loaders; vite
+  #   JSON.parse), and the mobile codegen decodes them (easy_localization:generate
+  #   -S ../i18n, generate_keys.dart json.decode of en.json). alint has no bare
+  #   "parses" kind and its JSON reader tolerates comments and trailing commas, so a
+  #   never-present key probe catches structural breakage (an unparseable file is
+  #   a resource_parse analysis failure, not a rule violation) and a second rule
+  #   bans the JSONC extensions: a trailing comma before `}`/`]`, and a `//` or
+  #   `/*` outside a string anywhere on a line (the line is scanned as non-quote,
+  #   non-slash characters and whole "..." strings, so URLs inside values do not
+  #   match; JSON strings cannot span lines). Awkward, hence C.
+  - id: immich-i18n-json-parses
+    kind: json_path_absent
+    paths: ["i18n/*.json"]
+    path: "$['__alint_parse_probe__']"
+    level: error
+    message: "i18n catalogs must be well-formed JSON (prettier, the web loaders and the mobile codegen parse every file)."
+
+  - id: immich-i18n-json-strict
+    kind: file_content_forbidden
+    paths: ["i18n/*.json"]
+    pattern: '(?m),[ \t]*\r?\n[ \t]*[}\]]|^(?:[^"\n/]|"(?:[^"\\\n]|\\.)*")*(?://|/\*)'
+    level: error
+    message: "i18n catalogs must be strict JSON: no trailing commas or comments (JSON.parse / dart json.decode reject them)."
+
+  # immich-04 (A) web/src/lib/i18n.spec.ts "<file> should have a loader": the web
+  #   derives one loader per i18n/*.json from the regex /\/(\w+)\.json$/
+  #   (web/src/lib/utils/i18n.ts fileCodes), so a catalog whose basename is not
+  #   ASCII-word characters + ".json" gets no loader and the test fails
+  #   (i18n/package.json is skipped by the test). The same module then builds
+  #   `langs` at load time with `new Intl.DisplayNames([code])` on the stem with
+  #   `_` turned into `-` (convertBCP47), which throws a RangeError for a
+  #   structurally invalid BCP 47 tag and fails the whole spec. So the stem must be
+  #   a Unicode BCP 47 tag with `_` separators: language (2-3 or 5-8 letters),
+  #   optional 4-letter script, optional region (2 letters or 3 digits), optional
+  #   variants. Extension and private-use subtags are not admitted (none in use;
+  #   stricter than Intl there). JS \w is ASCII-only, hence the explicit classes.
+  - id: immich-i18n-filename-has-web-loader
+    kind: filename_regex
+    paths:
+      include: ["i18n/*.json"]
+      exclude: ["i18n/package.json"]
+    pattern: '(?:[A-Za-z]{2,3}|[A-Za-z]{5,8})(?:_[A-Za-z]{4})?(?:_(?:[A-Za-z]{2}|[0-9]{3}))?(?:_(?:[A-Za-z0-9]{5,8}|[0-9][A-Za-z0-9]{3}))*\.json'
+    level: error
+    message: "i18n catalog names must be <BCP 47 tag with _ separators>.json so the web derives a loader for them and Intl.DisplayNames accepts the code (web/src/lib/i18n.spec.ts)."
+
+  # immich-49 (C) mobile/bin/generate_keys.dart turns every en.json key, at every
+  #   depth, into a Dart getter / method / field name (_escapeName only handles
+  #   reserved words and a leading digit) and quotes the dotted key path in
+  #   `_t('<key>')`. A key with `-`, `.`, a space, a quote, `$` or non-ASCII breaks
+  #   the generated translations.g.dart, which static_analysis.yml (codegen, then
+  #   dart analyze) and the mobile unit-test job (codegen, then flutter test)
+  #   compile. alint cannot assert JSON key names structurally, so this rides on
+  #   prettier's one-key-per-line layout: every `"key":` line must use only
+  #   [A-Za-z0-9_]. Layout-dependent, hence C.
+  - id: immich-i18n-en-keys-dart-identifiers
+    kind: for_each_match
+    paths: ["i18n/en.json"]
+    select: '^\s*"(?:[^"\\]|\\.)*"\s*:'
+    require:
+      matches: ['^\s*"[A-Za-z0-9_]+"\s*:']
+    level: error
+    message: "en.json keys must use only [A-Za-z0-9_]: mobile/bin/generate_keys.dart emits each key as a Dart identifier."
+
+  # ════════════════════════════════════════════════════════════════
+  # TOOLCHAIN-PIN family
+  # ════════════════════════════════════════════════════════════════
+
+  # immich-10 (A, convention tier) the Rust toolchain is pinned three times:
+  #   native/crates/native_core_ffi/rust-toolchain.toml [toolchain].channel
+  #   ("Keep the channel in sync with the rust entries in native/mise.toml and
+  #   mobile/mise.toml"), native/mise.toml [tools].rust ("keep in sync with
+  #   crates/native_core_ffi/rust-toolchain.toml") and mobile/mise.toml
+  #   [tools].rust; native/AGENTS.md repeats it. No CI step compares them.
+  #   (The bundled toolchain-pins@v1 only anchors on a root rust-toolchain.toml.)
+  - id: immich-rust-toolchain-pins-coherent
+    kind: cross_file
+    source:
+      file: native/crates/native_core_ffi/rust-toolchain.toml
+      extract: { toml: "$.toolchain.channel" }
+    targets:
+      - file: native/mise.toml
+        extract: { toml: "$.tools.rust.version" }
+      - file: mobile/mise.toml
+        extract: { toml: "$.tools.rust.version" }
+    relation: equals
+    level: error
+    message: "The Rust toolchain must match across native_core_ffi/rust-toolchain.toml, native/mise.toml and mobile/mise.toml (keep-in-sync comments, native/AGENTS.md)."
+
+  # ════════════════════════════════════════════════════════════════
+  # OTHER family
+  # ════════════════════════════════════════════════════════════════
+
+  # immich-20 (B-config, set; PARTIAL expression) migration-order.yml
+  #   `sql-tools migrations verify-order`: the committed ORDER manifest must list
+  #   exactly the migrations in server/src/schema/migrations (`sync-order` writes
+  #   it; docs/docs/developer/database-migrations.md, server/AGENTS.md). This rule
+  #   expresses the files->ORDER half (every migration file's stem is an ORDER
+  #   line). The ORDER->files half (each line names an existing <line>.ts) is not
+  #   expressible: registry_paths_resolve cannot append the .ts suffix, so the unit
+  #   stays B-config (set equality between a filename set and manifest lines).
+  #   Stage B reproduced both halves on scratch: a new migration missing from
+  #   ORDER fires; a ghost ORDER line does not. The missing half has the shape of
+  #   a reference check (line -> existing <line>.ts); no kind expresses it here.
+  - id: immich-migrations-registered-in-order
+    kind: cross_file
+    relation: registered
+    source:
+      files: "server/src/schema/migrations/*.ts"
+    register_as: "{stem}"
+    targets:
+      - file: server/src/schema/migrations/ORDER
+        extract: { lines: {} }
+    level: error
+    message: "Every migration must be listed in server/src/schema/migrations/ORDER (run `mise //server:migrations sync-order`)."
+
+  # immich-24 (A, convention tier) machine-learning/immich_ml/config.py:
+  #   `max_resolution: int = 736  # must match the server's OCR setting, or the
+  #   preloaded model will not be used`; docs/docs/install/environment-variables.md
+  #   documents the same default for MACHINE_LEARNING_PRELOAD__OCR__MAX_RESOLUTION
+  #   ("must match the server's OCR resolution"). The server default is
+  #   server/src/dtos/config.dto.ts machineLearning.ocr.maxResolution.
+  - id: immich-ml-ocr-preload-resolution-matches-server
+    kind: cross_file
+    source:
+      file: server/src/dtos/config.dto.ts
+      extract: { regex: '(?s)\bocr:\s*\{[^}]*?\bmaxResolution:\s*([0-9]+)' }
+    targets:
+      - file: machine-learning/immich_ml/config.py
+        extract: { regex: '(?m)^\s*max_resolution:\s*int\s*=\s*([0-9]+)' }
+      - file: docs/docs/install/environment-variables.md
+        extract: { regex: '(?m)^\|\s*`MACHINE_LEARNING_PRELOAD__OCR__MAX_RESOLUTION`[^\n]*\|\s*`([0-9]+)`\s*\|' }
+    relation: equals
+    level: error
+    message: "The ML OCR preload max_resolution default (and its documented default) must match the server's OCR maxResolution default."
+
+  # immich-25 (A, convention tier) mobile/lib/domain/models/asset/base_asset.model.dart:
+  #   "do not change! keep in sync with PlatformAssetPlaybackStyle" -- the Dart
+  #   enum and the pigeon enum (mobile/pigeon/native_sync_api.dart) must list the
+  #   same members in the same order (the platform side sends the index).
+  - id: immich-mobile-playback-style-enum-in-sync
+    kind: cross_file
+    source:
+      file: mobile/pigeon/native_sync_api.dart
+      extract: { regex: 'enum\s+PlatformAssetPlaybackStyle\s*\{([^}]*)\}' }
+    targets:
+      - file: mobile/lib/domain/models/asset/base_asset.model.dart
+        extract: { regex: 'enum\s+AssetPlaybackStyle\s*\{([^}]*)\}' }
+    relation: equals
+    normalize: trim
+    level: error
+    message: "AssetPlaybackStyle must list the same members, in the same order, as pigeon's PlatformAssetPlaybackStyle."
+
+  # immich-26 (A, convention tier) native/native_core/ffigen.yaml: "The asset id must
+  #   match assetName in hook/build.dart." (asset-id is the package: URI of the
+  #   build hook's RustBuilder assetName).
+  - id: immich-native-ffigen-asset-id-matches-hook
+    kind: cross_file
+    source:
+      file: native/native_core/hook/build.dart
+      extract: { regex: "assetName:\\s*'([^']+)'" }
+    targets:
+      - file: native/native_core/ffigen.yaml
+        extract: { regex: "(?m)^\\s*asset-id:\\s*'package:native_core/([^']+)'" }
+    relation: equals
+    level: error
+    message: "ffigen.yaml ffi-native asset-id must be package:native_core/<assetName from hook/build.dart>."
+
+  # immich-27 (A, convention tier) mobile/lib/domain/services/
+  #   background_worker.service.dart:358-359: "If renaming or moving this to a
+  #   different library, make sure to update the entry points and URI in native
+  #   workers as well." The Kotlin and Swift background workers name
+  #   the Dart library URI and the entry-point function; the library must exist and
+  #   define that function. Two rules: the package: URIs resolve under mobile/lib,
+  #   and each worker's entry-point name is a top-level async function of the
+  #   library.
+  - id: immich-mobile-bg-worker-library-exists
+    kind: registry_paths_resolve
+    source: "mobile/{android/app/src/main/kotlin/app/alextran/immich/background/BackgroundWorker.kt,ios/Runner/Background/BackgroundWorker.swift}"
+    extract: { regex: '"package:immich_mobile/([^"]+\.dart)"' }
+    base: mobile/lib
+    expect: file
+    level: error
+    message: "The Dart library URI a native background worker launches must exist under mobile/lib."
+
+  - id: immich-mobile-bg-worker-entrypoint-android
+    kind: cross_file
+    relation: subset
+    source:
+      file: mobile/android/app/src/main/kotlin/app/alextran/immich/background/BackgroundWorker.kt
+      extract: { regex: '"package:immich_mobile/[^"]+",\s*"([A-Za-z_][A-Za-z0-9_]*)"' }
+    targets:
+      - file: mobile/lib/domain/services/background_worker.service.dart
+        extract: { regex: "(?m)^@pragma\\('vm:entry-point'\\)\\s*\\n\\s*Future<void>\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\(" }
+    level: error
+    message: "The Android background worker's Dart entry point must be a @pragma('vm:entry-point') function in background_worker.service.dart."
+
+  - id: immich-mobile-bg-worker-entrypoint-ios
+    kind: cross_file
+    relation: subset
+    source:
+      file: mobile/ios/Runner/Background/BackgroundWorker.swift
+      extract: { regex: 'withEntrypoint:\s*"([A-Za-z_][A-Za-z0-9_]*)"' }
+    targets:
+      - file: mobile/lib/domain/services/background_worker.service.dart
+        extract: { regex: "(?m)^@pragma\\('vm:entry-point'\\)\\s*\\n\\s*Future<void>\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\(" }
+    level: error
+    message: "The iOS background worker's Dart entry point must be a @pragma('vm:entry-point') function in background_worker.service.dart."
+
+  # immich-28 (A, convention tier) native/AGENTS.md: "The release profile keeps
+  #   unwinding because the FFI boundary relies on catch_unwind; do not set
+  #   panic = \"abort\"." (also the comment above [profile.release] in
+  #   native/Cargo.toml).
+  - id: immich-native-release-profile-unwinds
+    kind: toml_path_matches
+    paths: native/Cargo.toml
+    path: "$.profile.release.panic"
+    matches: '^unwind$'
+    if_present: true
+    level: error
+    message: "native/Cargo.toml [profile.release] must keep unwinding (catch_unwind at the FFI boundary); never panic = \"abort\"."
+
+  # immich-29 (C) mobile/AGENTS.md: "Top-level lib/pages, lib/widgets, lib/services,
+  #   lib/repositories, lib/entities are legacy; do not add to them." Expressible
+  #   only with grandfathering: this file_absent plus an `alint baseline` of the
+  #   170 files there at the pin, so only NEW files fire. The read-only corpus
+  #   setup cannot carry a per-repo baseline file, so the rule ships disabled.
+  #   Stage C: not fixable inside the standalone corpus config (a baseline file
+  #   would live outside the read-only clone), so R4 cannot confirm the C; it
+  #   rests on the untested baseline workflow.
+  - id: immich-mobile-no-new-legacy-files
+    kind: file_absent
+    paths: "mobile/lib/{pages,widgets,services,repositories,entities}/**"
+    level: off
+    message: "Do not add files to the legacy mobile/lib/{pages,widgets,services,repositories,entities} trees (mobile/AGENTS.md); new code goes under lib/domain, lib/infrastructure, lib/presentation, lib/data."
+
+  # immich-30 (A) zizmor `artipacked` (org-zizmor.yml; every one of the 44 live
+  #   checkouts sets persist-credentials explicitly: 40 `false`, and 4 `true` in
+  #   the jobs that push: backport.yml, draft-release.yml, fix-format.yml,
+  #   prepare-release.yml).
+  - id: immich-gha-checkout-persist-credentials
+    kind: yaml_path_absent
+    paths: [".github/workflows/*.{yml,yaml}"]
+    path: "$..steps[?match(@.uses, 'actions/checkout@.*') && !@.with['persist-credentials']]"
+    level: error
+    message: "actions/checkout must set persist-credentials explicitly (false unless the job pushes) -- zizmor artipacked."
+
+  # immich-50 (A) zizmor `excessive-permissions` (org-zizmor.yml): every job runs
+  #   with an explicitly declared GITHUB_TOKEN scope, from a workflow-level
+  #   `permissions:` block or its own, and never write-all. At the pin 24 of the 27
+  #   workflows set top-level `permissions: {}`; docs-deploy.yml and the two org-*
+  #   files have no top-level block but declare permissions on every job. Same gate
+  #   assumption as immich-30 (whether the zizmor SARIF upload blocks merges is
+  #   unverified). The structural half only; zizmor's per-scope over-grant analysis
+  #   stays with immich-33 (D).
+  - id: immich-gha-job-permissions-explicit
+    kind: yaml_path_absent
+    paths: [".github/workflows/*.{yml,yaml}"]
+    path: "$.jobs[?(!@.permissions && !$.permissions) || @.permissions == 'write-all' || $.permissions == 'write-all']"
+    level: error
+    message: "Every workflow job needs an explicit permissions block (workflow-level or job-level), never write-all -- zizmor excessive-permissions."
+
+  # immich-31 (C) zizmor `unpinned-uses`: every external action / reusable workflow
+  #   is pinned to a full commit SHA. The two org-* workflows call
+  #   immich-app/devtools reusable workflows at @main (the org's own zizmor config,
+  #   not in this repo, evidently permits that); alint has no per-owner policy, so
+  #   those two files are excluded wholesale (awkward, hence C).
+  - id: immich-gha-actions-pinned
+    kind: pinned_references
+    paths:
+      include: [".github/workflows/*.{yml,yaml}"]
+      exclude:
+        - .github/workflows/org-pr-require-conventional-commit.yml
+        - .github/workflows/org-zizmor.yml
+    format: github_actions
+    level: error
+    message: "External actions and reusable workflows must be pinned to a full commit SHA (zizmor unpinned-uses)."
+
+  # immich-32 (C) zizmor `dangerous-triggers`: a pull_request_target / workflow_run
+  #   trigger is only accepted with an inline `# zizmor: ignore[dangerous-triggers]`
+  #   justification (6 workflows carry one). A line regex over the YAML trigger,
+  #   not a structured check of `on:`: it selects a block-style trigger key or
+  #   sequence item (`pull_request_target:`, `- workflow_run`, or a multi-line
+  #   flow item ending in `,`/`]`) and a one-line `on:` carrying the trigger
+  #   (`on: [push, pull_request_target]`, `on: workflow_run`, `on: {...}`), and
+  #   wants the ignore comment on that line (where zizmor's finding span sits).
+  #   Text pairing over YAML, hence C.
+  - id: immich-gha-dangerous-triggers-justified
+    kind: for_each_match
+    paths: [".github/workflows/*.{yml,yaml}"]
+    select: '^\s*(?:-\s*)?(?:pull_request_target|workflow_run)\s*(?::|#|,|\]|$)|^\s*["'']?on["'']?\s*:[^#\n]*\b(?:pull_request_target|workflow_run)\b'
+    require:
+      matches: ['#\s*zizmor:\s*ignore\[dangerous-triggers\]']
+    level: error
+    message: "pull_request_target / workflow_run triggers need an inline `# zizmor: ignore[dangerous-triggers]` justification."
+
+  # immich-a01 (A, split out of immich-38's CLI ESLint run by the audit) - packages/cli/eslint.config.mjs
+  #     loads eslintPluginUnicorn.configs.recommended and does not turn off
+  #     unicorn/filename-case (default: kebabCase); packages/cli/mise.toml:12-14,40-49
+  #     ci-unit runs `eslint "src/**/*.ts" --max-warnings 0`. The part before the
+  #     first dot is kebab-case; later dot segments (.spec, .d) are allowed.
+  - id: immich-cli-filename-kebab-case
+    kind: filename_regex
+    paths: "packages/cli/src/**/*.ts"
+    pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*(?:\.[A-Za-z0-9-]+)*\.ts$'
+    level: error
+    message: "packages/cli source file names are kebab-case (unicorn/filename-case, recommended)."
+
+  # ════════════════════════════════════════════════════════════════
+  # VALUE-ADD (NOT in the enforced denominator, rulings R3/R5). These assert
+  # invariants immich keeps (mostly via automation) but no gate checks.
+  # ════════════════════════════════════════════════════════════════
+
+  # Value-add (locale) approximation of immich-01 (B-adapter after Stage B; was C).
+  #   Test i18n: `pnpm format:fix` = `prettier --write i18n` with the root
+  #   .prettierrc (prettier-plugin-sort-json, jsonRecursiveSort: true, every key
+  #   "lexical"), then the job fails if any i18n/** file changed. The order half
+  #   of that gate is "every object's keys sorted lexically, recursively", which
+  #   needs a JSON key-order operator alint lacks (stratum doc 2.1 R7 example).
+  #   These three rules ride on prettier's one-key-per-line, 2-space layout: the
+  #   trimmed key lines compare like the keys (keys are ASCII and `"` sorts below
+  #   every key char); top-level key lines, then nested 4-space key lines
+  #   segmented by `},` (start-only mode re-opens a block at every `},`; the
+  #   end-only rule covers the first object). LIMITATION: two nesting levels only.
+  #   An unsorted depth-3 object (6-space keys) passes all three, and a 4-space
+  #   `},` closing a depth-3 object would split a depth-2 block (reproduced on a
+  #   scratch copy). The catalogs have two levels at the pin, so they pass. Kept at
+  #   info as an approximation, not as an expression of the gate.
+  - id: immich-i18n-keys-sorted-top-level
+    kind: ordered_block
+    paths: ["i18n/*.json"]
+    select: '^  "'
+    comparator: lexical
+    level: info
+    message: "i18n catalog keys must stay in lexical order (Test i18n: prettier-plugin-sort-json). Run `mise //:i18n:format-fix`."
+
+  - id: immich-i18n-keys-sorted-first-nested
+    kind: ordered_block
+    paths: ["i18n/*.json"]
+    end: "},"
+    select: '^    "'
+    comparator: lexical
+    level: info
+    message: "Keys inside a nested i18n object must stay in lexical order (Test i18n: jsonRecursiveSort). Run `mise //:i18n:format-fix`."
+
+  - id: immich-i18n-keys-sorted-later-nested
+    kind: ordered_block
+    paths: ["i18n/*.json"]
+    start: "},"
+    select: '^    "'
+    comparator: lexical
+    level: info
+    message: "Keys inside a nested i18n object must stay in lexical order (Test i18n: jsonRecursiveSort). Run `mise //:i18n:format-fix`."
+
+  # Value-add (locale): translations carry no keys that en.json lacks. Weblate
+  # drops removed source keys, but nothing in CI checks it.
+  - id: immich-i18n-no-stale-keys
+    kind: key_parity
+    reference: i18n/en.json
+    peers: "i18n/*.json"
+    direction: extra
+    level: info
+    message: "A translation has a key that i18n/en.json no longer defines."
+
+  # Value-add (toolchain-pin): Node is pinned twice -- .nvmrc (read by the e2e
+  # jobs' actions/setup-node node-version-file) and mise.toml [tools].node (every
+  # other CI job, via use-mise). A drift would make e2e run a different Node.
+  # The bundled toolchain-pins@v1 compares .nvmrc with .node-version /
+  # .tool-versions / engines / Dockerfiles / setup-node, not mise.toml.
+  - id: immich-node-pin-mise-matches-nvmrc
+    kind: cross_file
+    source:
+      file: .nvmrc
+      extract: { regex: '\A\s*v?([0-9]+\.[0-9]+\.[0-9]+)\s*\z' }
+    targets:
+      - file: mise.toml
+        extract: { toml: "$.tools.node" }
+    relation: equals
+    level: info
+    message: "mise.toml [tools].node differs from .nvmrc (CI e2e jobs use .nvmrc, the rest use mise)."
+
+  # Value-add (toolchain-pin): the pnpm pin agrees between mise.toml and every
+  # packageManager field (root, packages/scripts, packages/e2e-auth-server,
+  # packages/plugin-sdk); pnpm/action-setup reads the root one.
+  - id: immich-pnpm-pin-coherent
+    kind: cross_file
+    source:
+      file: mise.toml
+      extract: { toml: "$.tools.pnpm" }
+    targets:
+      files: "{package.json,packages/*/package.json}"
+      extract: { regex: '"packageManager"\s*:\s*"pnpm@([^"+]+)' }
+    relation: equals
+    allow_missing_target: true
+    level: info
+    message: "packageManager pnpm version differs from mise.toml [tools].pnpm."
+
+  # Value-add (toolchain-pin): the CLI image's Node major matches .nvmrc. At the
+  # pin the patch level lags (node:26.12.1 vs 26.13.0), so only the major is
+  # compared; the exact form (toolchain-pins@v1 toolchain-node-dockerfiles-coherent)
+  # would fire on packages/cli/Dockerfile.
+  - id: immich-cli-docker-node-major
+    kind: cross_file
+    source:
+      file: .nvmrc
+      extract: { regex: '\A\s*v?([0-9]+\.[0-9]+\.[0-9]+)\s*\z' }
+    targets:
+      - file: packages/cli/Dockerfile
+        extract: { regex: '(?m)^FROM\s+node:([0-9]+\.[0-9]+\.[0-9]+)[-@]' }
+    relation: equals
+    normalize: semver-major
+    level: info
+    message: "packages/cli/Dockerfile Node major differs from .nvmrc."
+
+  # Value-add (dep-version, workspace protocol): internal packages are consumed
+  # with workspace:* everywhere; nothing gates it (a semver range would silently
+  # resolve @immich/sdk from npm).
+  - id: immich-internal-deps-workspace-protocol
+    kind: json_path_matches
+    paths:
+      include: ["package.json", "server/package.json", "web/package.json", "e2e/package.json", "docs/package.json", "packages/*/package.json"]
+    path: "$['dependencies','devDependencies','peerDependencies']['@immich/sdk','@immich/cli','@immich/plugin-sdk','@immich/plugin-core']"
+    matches: '^workspace:'
+    if_present: true
+    level: info
+    message: "Internal workspace packages must be depended on with the workspace: protocol."
+
+  # Value-add (other): release lockstep. packages/scripts release.ts pumps one
+  # version into root/web/cli/sdk/e2e/server package.json, mobile/pubspec.yaml and
+  # the Fastfile; no gate checks they agree between releases.
+  - id: immich-release-versions-lockstep
+    kind: cross_file
+    source:
+      file: package.json
+      extract: { json: "$.version" }
+    targets:
+      - file: web/package.json
+        extract: { json: "$.version" }
+      - file: packages/cli/package.json
+        extract: { json: "$.version" }
+      - file: packages/sdk/package.json
+        extract: { json: "$.version" }
+      - file: e2e/package.json
+        extract: { json: "$.version" }
+      - file: server/package.json
+        extract: { json: "$.version" }
+      - file: mobile/pubspec.yaml
+        extract: { regex: '(?m)^version:\s*([^+\s]+)\+[0-9]+\s*$' }
+      - file: mobile/android/fastlane/Fastfile
+        extract: { regex: '"android\.injected\.version\.name"\s*=>\s*"([^"]+)"' }
+    relation: equals
+    level: info
+    message: "Release version differs from the root package.json (packages/scripts release.ts bumps these together)."
+
+  # Value-add (other): mobile/AGENTS.md "a preview per component in
+  # lib/src/previews/". Holds for the top-level components only: the eleven
+  # components/settings/* widgets have no preview, so the convention as written is
+  # not enforced (R5) and the rule is scoped to the top level.
+  - id: immich-mobile-ui-component-has-preview
+    kind: pair
+    primary: "mobile/packages/ui/lib/src/components/*.dart"
+    partner: "mobile/packages/ui/lib/src/previews/{basename}"
+    level: info
+    message: "Every immich_ui component should have a widget preview in lib/src/previews/."

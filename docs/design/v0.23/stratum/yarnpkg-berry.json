@@ -1,0 +1,966 @@
+{
+ "repo": "yarnpkg/berry",
+ "sha": "f359f65c1f8bb2efb051b3e55edcdc3cb461d159",
+ "metrics": {
+  "counts": {
+   "A": 13,
+   "B-config": 1,
+   "B-adapter": 2,
+   "B-kernel": 0,
+   "B-delegate": 0,
+   "C": 6,
+   "D": 21
+  },
+  "addressable": 22,
+  "coverage_today": 59,
+  "coverage_with_tuning": 86,
+  "gap": 14,
+  "coverage_after_slice": 59,
+  "coverage_after_slice_with_entry_values": 64
+ },
+ "by_family": {
+  "locale": {
+   "counts": {
+    "A": 0,
+    "B-config": 0,
+    "B-adapter": 0,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 0,
+    "D": 0
+   },
+   "addressable": 0,
+   "coverage_today": null,
+   "coverage_with_tuning": null,
+   "gap": null,
+   "coverage_after_slice": null,
+   "coverage_after_slice_with_entry_values": null
+  },
+  "dep-version": {
+   "counts": {
+    "A": 2,
+    "B-config": 0,
+    "B-adapter": 1,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 1,
+    "D": 4
+   },
+   "addressable": 4,
+   "coverage_today": 50,
+   "coverage_with_tuning": 75,
+   "gap": 25,
+   "coverage_after_slice": 50,
+   "coverage_after_slice_with_entry_values": 75
+  },
+  "toolchain-pin": {
+   "counts": {
+    "A": 2,
+    "B-config": 0,
+    "B-adapter": 0,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 0,
+    "D": 1
+   },
+   "addressable": 2,
+   "coverage_today": 100,
+   "coverage_with_tuning": 100,
+   "gap": 0,
+   "coverage_after_slice": 100,
+   "coverage_after_slice_with_entry_values": 100
+  },
+  "other": {
+   "counts": {
+    "A": 9,
+    "B-config": 1,
+    "B-adapter": 1,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 5,
+    "D": 16
+   },
+   "addressable": 16,
+   "coverage_today": 56,
+   "coverage_with_tuning": 88,
+   "gap": 12,
+   "coverage_after_slice": 56,
+   "coverage_after_slice_with_entry_values": 56
+  }
+ },
+ "units": [
+  {
+   "id": "yarnpkg-berry-01",
+   "summary": "Every workspace except the root and packages/docusaurus uses one range per dependency across non-peer dependency fields. Dev dependencies on workspace idents are exempt.",
+   "evidence": "yarn.config.cjs:22-43 (enforceConsistentDependenciesAcrossTheProject, called at :209); CI .github/workflows/integration-workflow.yml:142-147 'Check for unmet constraints'; packages/docusaurus/docs/advanced/04-technical/contributing.mdx:93",
+   "mechanism": "tool-config",
+   "family": "dep-version",
+   "bucket": "B-adapter",
+   "alint": "constraint over a dependency-entries relation (workspace, field, dependency key, range), filtered by workspace path, field and is-workspace; functional_dependency dependency -> range",
+   "rules": [],
+   "assertion_family": "unique-key",
+   "reason": "Needs (key path, value) rows: the relation layer's structured adapters (entry, TOML, XML) are key-only and the extract adapter's values carry no pointer, so no adapter today pairs a dependency or entry name with its value (batch 2 ruling). Once it exists, the assertion is unique-key: dependency name determines the range.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "bucket": "B-adapter",
+      "needs": "entry-values",
+      "assertion_family": "unique-key",
+      "reason": "Needs (key path, value) rows: the relation layer's structured adapters (entry, TOML, XML) are key-only and the extract adapter's values carry no pointer, so no adapter today pairs a dependency or entry name with its value (batch 2 ruling). Once it exists, the assertion is unique-key: dependency name determines the range."
+     }
+    }
+   ],
+   "needs": "entry-values"
+  },
+  {
+   "id": "yarnpkg-berry-02",
+   "summary": "A dependency on any workspace (dependencies, devDependencies, peerDependencies) uses the workspace:^ range.",
+   "evidence": "yarn.config.cjs:50-57 (enforceWorkspaceDependenciesWhenPossible, :210); CI integration-workflow.yml:142; contributing.mdx:95",
+   "mechanism": "tool-config",
+   "family": "dep-version",
+   "bucket": "C",
+   "alint": "json_path_equals (union selector over the dependency fields x 46 hand-listed workspace names, equals 'workspace:^', if_present) - yarnpkg-berry-workspace-deps-use-workspace-protocol",
+   "rules": [
+    "yarnpkg-berry-workspace-deps-use-workspace-protocol"
+   ],
+   "assertion_family": "none",
+   "reason": "Expressible and confirmed against the clone. The constraint derives the workspace set from the project, but JSONPath cannot read object keys, so the 46 workspace names are listed by hand and the list drifts when a workspace is added. That tuning cost makes it C. A list-free form would be a B-config reference over a key extractor.",
+   "fire_verified": "n/a (C). Also fired on a scratch copy: yarnpkg-cli dependency @yarnpkg/core '^4.9.2' gave 1 finding, and plugin-nm peer @yarnpkg/cli '^4.0.0' gave 1. Passes on the clone.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-03",
+   "summary": "Banned dependencies: no workspace depends on inquirer (use enquirer) or lodash (use es-toolkit) in any dependency field.",
+   "evidence": "yarn.config.cjs:64-68 forbidDependency, called at :211-212; CI integration-workflow.yml:142",
+   "mechanism": "tool-config",
+   "family": "dep-version",
+   "bucket": "A",
+   "alint": "json_path_absent - yarnpkg-berry-banned-dependencies",
+   "rules": [
+    "yarnpkg-berry-banned-dependencies"
+   ],
+   "assertion_family": "none",
+   "reason": "R7: a banned-dependency check over manifests alint reads. One json_path_absent with a union selector expresses it exactly. R1: the two forbidDependency calls are instances of one banned list.",
+   "fire_verified": "Scratch tree copied package.json and packages/*/package.json, with relative paths kept. Each mutation gave exactly 1 finding: lodash added to packages/yarnpkg-core dependencies; inquirer added to root devDependencies; inquirer added to plugin-dlx peerDependencies. The clone gives 0 findings.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-04",
+   "summary": "A workspace with a non-peer dependency on typescript must also depend on tslib, in any field.",
+   "evidence": "yarn.config.cjs:133-163 enforceDependencyRelationship, called at :213; CI integration-workflow.yml:142",
+   "mechanism": "tool-config",
+   "family": "dep-version",
+   "bucket": "A",
+   "alint": "json_path_absent with an RFC 9535 filter that uses absolute queries ($.devDependencies.typescript && !$.dependencies.tslib ...) - yarnpkg-berry-typescript-requires-tslib",
+   "rules": [
+    "yarnpkg-berry-typescript-requires-tslib"
+   ],
+   "assertion_family": "none",
+   "reason": "This is an implication within one manifest. Absolute queries inside the filter test the whole document, and peer-only typescript is skipped as the constraint does. Confirmed against the clone in both directions.",
+   "fire_verified": "On the scratch copy of the manifests: removing tslib from packages/yarnpkg-doctor (which has typescript in dependencies) gave 1 finding. typescript in plugin-git devDependencies without tslib gave 1 finding. Negative controls gave 0: typescript only in peerDependencies, and tslib moved to peerDependencies. The clone gives 0 findings.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-05",
+   "summary": "The workspace or the project provides every peer dependency of each resolved dependency (webpack and packages/gatsby are exempt).",
+   "evidence": "yarn.config.cjs:165-205 enforcePeerDependencyPresence (:216); CI integration-workflow.yml:142",
+   "mechanism": "tool-config",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "It reads dependency.resolution.peerDependencies, which is the resolved package's metadata. That is package-manager resolution semantics, so it stays D under R7.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-06",
+   "summary": "A fresh install changes neither yarn.lock, .pnp.* nor the cache (yarn install --immutable --immutable-cache).",
+   "evidence": "integration-workflow.yml:35-38; .yarnrc.yml immutablePatterns: .pnp.*",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "yarn install --immutable",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Lockfile and install-state freshness need resolution. The R7 D list names this case.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-07",
+   "summary": "The lockfile has no dependency resolution that could be deduplicated (yarn dedupe --check).",
+   "evidence": "integration-workflow.yml:156-161",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "yarn dedupe --check",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R7 names it as D: package-manager resolution semantics.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-08",
+   "summary": "Every workspace's engines.node equals the Node floor set in yarn.config.cjs (>=18.12.0).",
+   "evidence": "yarn.config.cjs:217-229 (enforceFieldsOnAllWorkspaces, engines.node at :224); CI integration-workflow.yml:142",
+   "mechanism": "tool-config",
+   "family": "toolchain-pin",
+   "bucket": "A",
+   "alint": "cross_file equals: source is a regex over yarn.config.cjs, targets are {package.json,packages/*/package.json} $.engines.node - yarnpkg-berry-workspace-engines-node",
+   "rules": [
+    "yarnpkg-berry-workspace-engines-node"
+   ],
+   "assertion_family": "none",
+   "reason": "Engines agreement across all manifests, read from the constraint's own literal. It is a distinct assertion from the license and repository fields set in the same call.",
+   "fire_verified": "Scratch copy of yarn.config.cjs and all workspace manifests. Member plugin-nm engines '>=20.0.0' gave 1 finding. Root '>=18.0.0' gave 1. engines removed from plugin-git gave 1 (no value). Bumping only the constraint literal to '>=20.0.0' gave 46 (every workspace). The clone gives 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-09",
+   "summary": "The ECMAScript-level sites are updated together and agree: tsconfig.json target, @yarnpkg/eslint-config globals.esNNNN, and the builder plugin scaffold's tsconfig target (all ES2021 today).",
+   "evidence": "yarn.config.cjs:219-223 (comment: when changing engines.node 'update the following files as needed'); tsconfig.json:4; packages/eslint-config/index.js:23; packages/yarnpkg-builder/sources/commands/new/plugin.ts:100",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "A",
+   "alint": "cross_file equals (regex extracts the 4-digit ES year from the three files) - yarnpkg-berry-es-target-sites-agree",
+   "rules": [
+    "yarnpkg-berry-es-target-sites-agree"
+   ],
+   "assertion_family": "none",
+   "reason": "R5 counts a load-bearing review comment. Agreement across the named sites is pure cross-file value equality. The node.green choice of which level is a separate unit (yarnpkg-berry-10).",
+   "fire_verified": "Scratch copy of the three files. tsconfig target ES2022 gave 2 findings (both targets). eslint-config globals.es2022 gave 1. Builder scaffold ES2020 gave 1. The clone gives 0.",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "A",
+      "toolchain-pin",
+      "none"
+     ],
+     "why": "The unit asserts that three ECMAScript-target sites agree with each other: tsconfig target, eslint-config globals.esNNNN and the builder scaffold target. None of them is a Node, package-manager or language-toolchain version pin (engines, .nvmrc, packageManager, Volta, CI), which is what the stratum's toolchain-pin family covers. Their tie to engines.node runs through the node.green lookup, which is unit 10 (D, and it can stay toolchain-pin). Keeping 09 in toolchain-pin inflates that family's A count from 2 to 3 with a check the Phase 3 toolchain-pin policy would not contain. I hold this at moderate confidence and leave it to the parent."
+    }
+   ]
+  },
+  {
+   "id": "yarnpkg-berry-10",
+   "summary": "The chosen ES level is the one node.green reports as fully supported by the engines.node floor.",
+   "evidence": "yarn.config.cjs:219-223 (\"check https://node.green/ for which ECMAScript version is fully supported\")",
+   "mechanism": "convention",
+   "family": "toolchain-pin",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "It needs an external compatibility table (node.green) and a human judgment: the sites pin ES2021 although Node 18 supports more. That is external state, and the repository holds no machine mapping.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-11",
+   "summary": "CI tests on the minimum supported Node. The acceptance matrix rows and the LTS-major filter use the engines.node major (18).",
+   "evidence": "integration-workflow.yml:228 (map(select(. >= 18)), comment 'LTS major versions that we support'), :253-261 (comment 'the minimum Node version we support', {node: 18, ...} rows); package.json engines.node",
+   "mechanism": "convention",
+   "family": "toolchain-pin",
+   "bucket": "A",
+   "alint": "cross_file equals with normalize: semver-major; source is root package.json $.engines.node, targets are regexes over integration-workflow.yml - yarnpkg-berry-ci-min-node-matches-engines",
+   "rules": [
+    "yarnpkg-berry-ci-min-node-matches-engines"
+   ],
+   "assertion_family": "none",
+   "reason": "Load-bearing workflow comments (R5) tie the CI minimum Node to the supported floor. semver-major reconciles '>=18.12.0' with '18'.",
+   "fire_verified": "Scratch copy of package.json and integration-workflow.yml. One matrix row 18->20 gave 1 finding. The LTS filter '>= 20' gave 1. Root engines '>=20.10.0' gave 7 (6 matrix rows and the filter). The clone gives 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-12",
+   "summary": "Every @yarnpkg/plugin-* workspace that is not in the CLI's standard bundle has an update-local script.",
+   "evidence": "yarn.config.cjs:85-104 enforceUpdateLocalScripts (:214); packages/yarnpkg-cli/package.json @yarnpkg/builder.bundles.standard; contributing.mdx:97",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "A",
+   "alint": "cross_file subset: the source unions packages/*/package.json names that lack update-local (JSONPath filter with search()), the target is bundles.standard[*] - yarnpkg-berry-unbundled-plugins-have-update-local",
+   "rules": [
+    "yarnpkg-berry-unbundled-plugins-have-update-local"
+   ],
+   "assertion_family": "none",
+   "reason": "Expressed exactly as a set relation: plugins lacking the script must be a subset of the bundled list.",
+   "fire_verified": "n/a (family other). Fired anyway: removing @yarnpkg/plugin-jsr from bundles.standard gave 1 finding. With update-local added to plugin-jsr it gave 0. The clone gives 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-13",
+   "summary": "Every non-private named workspace except @yarnpkg/pnp, @yarnpkg/eslint-config and @yarnpkg/libui sets scripts.prepack='run build:compile \"$(pwd)\"' and scripts.postpack='rm -rf lib'.",
+   "evidence": "yarn.config.cjs:106-131 enforcePrepackScripts (:215); contributing.mdx:97",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_absent with a whole-document filter - yarnpkg-berry-prepack-postpack-scripts",
+   "rules": [
+    "yarnpkg-berry-prepack-postpack-scripts"
+   ],
+   "assertion_family": "none",
+   "reason": "The exemption list is the constraint's own literal, not a derived set. The filter mirrors private, name and exemption logic exactly.",
+   "fire_verified": "n/a (family other). Fired anyway: a wrong postpack in plugin-git gave 1 finding, and a missing prepack in yarnpkg-shell gave 1. Exempt @yarnpkg/pnp and private vscode-zipfs gave 0. The clone gives 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-14",
+   "summary": "Every workspace declares license BSD-2-Clause.",
+   "evidence": "yarn.config.cjs:218 (enforceFieldsOnAllWorkspaces)",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "A",
+   "alint": "cross_file equals: source regex over yarn.config.cjs, targets $.license of every manifest - yarnpkg-berry-workspace-license",
+   "rules": [
+    "yarnpkg-berry-workspace-license"
+   ],
+   "assertion_family": "none",
+   "reason": "A plain field equality across manifests.",
+   "fire_verified": "n/a (family other). Fired anyway: license MIT on yarnpkg-nm gave 1 finding. The clone gives 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-15",
+   "summary": "Every workspace's repository field is {type: git, url: git+https://github.com/yarnpkg/berry.git, directory: <workspace cwd>}.",
+   "evidence": "yarn.config.cjs:225-227; contributing.mdx:99 ('Workspaces must point our repository through the repository field')",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "A",
+   "alint": "for_each_dir packages/* (when_iter has_file package.json) with templated json_path_equals ({path}) - yarnpkg-berry-workspace-repository-field; plus json_path_absent filter for the root (directory '.') - yarnpkg-berry-root-repository-field",
+   "rules": [
+    "yarnpkg-berry-workspace-repository-field",
+    "yarnpkg-berry-root-repository-field"
+   ],
+   "assertion_family": "none",
+   "reason": "Path-derived equality is expressible through for_each_dir templating inside equals.",
+   "fire_verified": "n/a (family other). Fired anyway: a wrong directory, a wrong url and type svn each gave 1 finding. The root directory '' and a missing root repository each gave 1. An extra repository key gave 0. The clone gives 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-16",
+   "summary": "yarn version check: every versioned workspace modified since the PR's merge-base has a release strategy (release or decline) in the PR's single .yarn/versions file. Files matching changesetIgnorePatterns do not count.",
+   "evidence": "integration-workflow.yml:128-133; packages/plugin-version/sources/commands/version/check.tsx:379-389; packages/plugin-version/sources/versionUtils.ts:175-211 (incl. the one-version-file guard at :193-194), :296-311; .yarnrc.yml changesetIgnorePatterns; contributing.mdx:103-105",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "missing: a change relation adapter (merge-base diff -> changed workspace rows, minus ignore globs) joined to version-file decisions",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "It needs the PR change set mapped to workspaces. pair_changed_together and changeset_requires_path are path-level and cannot read which workspace the version file names. general-linter.md 5.3 says a first-class change relation is needed. The guard 'at most one version file per branch' is the same step's guard clause and is folded in, as in the tokio ruling.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "base-revision"
+     }
+    }
+   ],
+   "needs": "base-revision"
+  },
+  {
+   "id": "yarnpkg-berry-17",
+   "summary": "yarn version check: every versioned workspace with a hard dependency on a workspace the version file bumps must itself have a release or decline decision.",
+   "evidence": "check.tsx:391-400; versionUtils.ts:313-360 (getUndecidedDependentWorkspaces, Manifest.hardDependencies)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-config",
+   "alint": "constraint joining manifest dependency entries with a version file's releases and declined rows: each (workspace -> bumped workspace) edge must reference a decision row in the same file",
+   "rules": [],
+   "assertion_family": "reference",
+   "reason": "Evaluated per version file, it is a static join over files alint parses (JSON manifests, YAML version files). Each version file is one PR's decision set, so git is not needed. alint has no join or implication over keys today.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-18",
+   "summary": "Deferred version files are well formed. Every released or declined ident names an existing versioned workspace, and every strategy is a valid decision (decline, major, minor, patch, pre*) or a strict semver.",
+   "evidence": "versionUtils.ts:36-51 (validateReleaseDecision), :93-110 (resolveVersionFiles: 'Expected a release definition file to only reference existing workspaces'), :217-229 (getWorkspaceByIdent); scripts/release/01-release-tags.sh:33 (yarn version apply --all at release); integration-workflow.yml:128",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "yaml_path_matches $.releases.* - yarnpkg-berry-version-file-strategies-valid; cross_file superset (versioned workspace names vs a line regex over version-file keys and list items) - yarnpkg-berry-version-file-idents-exist",
+   "rules": [
+    "yarnpkg-berry-version-file-strategies-valid",
+    "yarnpkg-berry-version-file-idents-exist"
+   ],
+   "assertion_family": "none",
+   "reason": "It is enforced in two places: the PR check for that PR's file, and `version apply --all` over every file at release. Mapping keys are read with a line regex because JSONPath cannot select keys. Yarn always writes this layout (stringifySyml).",
+   "fire_verified": "n/a (family other). Fired anyway: strategy 'patchy' gave 1 finding and '4.10.0-rc.1' gave 0. An unknown declined ident gave 1, an unknown release key gave 1, and an unversioned @yarnpkg/docusaurus release gave 1. The clone gives 0.",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "A",
+      "other",
+      "none"
+     ],
+     "why": "The ident-existence half reads YAML mapping keys with a line regex over the text, because JSONPath cannot select keys. Stage A's own 'unusual' note names this as the same gap that made units 02 and 19 C, so treat it consistently. The regex also does not express the check faithfully (R4). Yarn parses version files with js-yaml (parseSyml -> parseViaJsYaml), so flow style is valid. In scratch, `releases: {\"@yarnpkg/nope\": patch}` and `declined: [\"@yarnpkg/nope\"]` gave 0 findings, though yarn rejects both (getWorkspaceByIdent at PR time; resolveVersionFiles at release for releases). The rule also over-flags: `declined: - \"@yarnpkg/docusaurus\"` gave 1 finding, but yarn's openVersionFile only requires that a declined ident exists, not that it is versioned. The strategies half (yaml_path_matches) is A-quality, apart from a leading-zero prerelease edge case (see config_issues)."
+    }
+   ]
+  },
+  {
+   "id": "yarnpkg-berry-19",
+   "summary": "Releasing a default (standard-bundle) plugin also bumps @yarnpkg/cli in the same version file.",
+   "evidence": "contributing.mdx:120 ('If you modify one of the default plugins ... you will also need to bump @yarnpkg/cli')",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "C",
+   "alint": "yaml_path_absent with a filter over a hand-listed copy of bundles.standard - yarnpkg-berry-default-plugin-release-bumps-cli",
+   "rules": [
+    "yarnpkg-berry-default-plugin-release-bumps-cli"
+   ],
+   "assertion_family": "none",
+   "reason": "Expressible and confirmed, but the 25-plugin list is copied by hand from packages/yarnpkg-cli/package.json, because alint has no implication across files. That makes it C.",
+   "fire_verified": "n/a (C). Fired anyway: removing cli from b3c4e21f.yml gave 1 finding, and cli set to decline gave 1. A core-only release (5c7a2e91.yml) gave 0. The clone gives 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-20",
+   "summary": "The README's generated e2e status list is fresh: it names exactly the .github/workflows/e2e-*.yml files, sorted, one badge-and-link line each.",
+   "evidence": "integration-workflow.yml:163-168 (node ./scripts/generate-e2e-status-list.mjs && git diff --exit-code); scripts/generate-e2e-status-list.mjs; README.md:136-162",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "registry_paths_resolve (base .github/workflows + orphans space) - yarnpkg-berry-readme-e2e-list-matches-workflows; ordered_block - yarnpkg-berry-readme-e2e-list-sorted; for_each_match (equal captures) - yarnpkg-berry-readme-e2e-list-line-shape",
+   "rules": [
+    "yarnpkg-berry-readme-e2e-list-matches-workflows",
+    "yarnpkg-berry-readme-e2e-list-sorted",
+    "yarnpkg-berry-readme-e2e-list-line-shape"
+   ],
+   "assertion_family": "none",
+   "reason": "The generator is a directory listing turned into a sorted list. alint expresses its whole output contract natively (set equality, order, line shape) without running it.",
+   "fire_verified": "n/a (family other). Fired anyway: dropping a line gave 1 finding (an orphan), adding e2e-bun-workflow.yml gave 1, and deleting a listed workflow gave 1. Swapping two lines gave 1 (unsorted), and a mismatched link target gave 1. The clone gives 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-21",
+   "summary": "sortMap in @yarnpkg/pnp stays in sync with @yarnpkg/core miscUtils.sortMap.",
+   "evidence": "packages/yarnpkg-pnp/sources/generateSerializedState.ts:4-5 ('Keep this function is sync with its implementation in: @yarnpkg/core/sources/miscUtils.ts'); the two 29-line bodies are byte-identical",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "A",
+   "alint": "cross_file equals with a regex extraction of the function body - yarnpkg-berry-sortmap-copy-in-sync",
+   "rules": [
+    "yarnpkg-berry-sortmap-copy-in-sync"
+   ],
+   "assertion_family": "none",
+   "reason": "A load-bearing comment (R5) asks for textual sync, and the copy is identical today.",
+   "fire_verified": "n/a (family other). Fired anyway: an edited body in the pnp copy gave 1 finding. The clone gives 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-22",
+   "summary": "The dynamicRequire copies in @yarnpkg/pnpify and @yarnpkg/sdks stay synced with miscUtils.ts.",
+   "evidence": "packages/yarnpkg-pnpify/sources/dynamicRequire.ts:3 and packages/yarnpkg-sdks/sources/dynamicRequire.ts:3 ('copied from miscUtils.ts - make sure your changes are synced there'); packages/yarnpkg-core/sources/miscUtils.ts:338-368",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "The original has drifted textually (realRequire, dynamicRequireNode), so the sync the comment asks for is semantic code equivalence, which is code analysis. The two copies are byte-identical, and the config holds them that way as value-add only.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-23",
+   "summary": "The website's configuration schemas (static/configuration/manifest.json, yarnrc.json) are valid draft 2019-09 JSON Schemas.",
+   "evidence": "packages/docusaurus/tests/schema.test.ts:1-23 (ajv meta-validation, runs in yarn test:unit at integration-workflow.yml:300)",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "C",
+   "alint": "missing: a meta-schema mode for json_schema_passes that validates a document as a JSON Schema of its declared draft using bundled metaschemas",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R7: a data-file assertion. json_schema_passes needs the 2019-09 meta-schema and its vocabulary files inside the repository. Probed in scratch: a $ref to the draft URI fails offline with 'Retrieving external resources is not supported', and the repository has no unzipped meta-schema.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "B-adapter",
+      "other",
+      "none"
+     ],
+     "why": "Stage A's probe was wrong. json_schema_passes resolves the bundled draft 2019-09 meta-schema offline when the shim schema declares it as both `$schema` and `$ref`: {\"$schema\":\"https://json-schema.org/draft/2019-09/schema\",\"$ref\":\"https://json-schema.org/draft/2019-09/schema\"}. I tested this on the clone, with the shim outside the root and `allow_out_of_root: true`. Both manifest.json and yarnrc.json pass. Mutations fire: type=42 gave 1, required as a string gave 1, minLength -1 gave 1. The error Stage A saw appears only when the shim has no `$schema` (default-draft registry) or uses the `#`-suffixed URI. No new adapter is needed. What makes it awkward is that the repo has no shim file, so the config needs an out-of-root shim plus allow_out_of_root, or an inline-schema or meta-schema preset. That is tuning, so C."
+    }
+   ]
+  },
+  {
+   "id": "yarnpkg-berry-24",
+   "summary": "Files follow .editorconfig: trim trailing whitespace (not *.md or *.patch), insert a final newline (not *.patch), and indent with spaces, indent_size 2.",
+   "evidence": ".editorconfig:1-21",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "C",
+   "alint": "no_trailing_whitespace + final_newline + indent_style (spaces, no width) - yarnpkg-berry-editorconfig-*",
+   "rules": [
+    "yarnpkg-berry-editorconfig-trim-trailing-whitespace",
+    "yarnpkg-berry-editorconfig-final-newline",
+    "yarnpkg-berry-editorconfig-indent-spaces"
+   ],
+   "assertion_family": "none",
+   "reason": "The natural kind, editorconfig_conforms, reports 94 findings on the clone. 93 are JSDoc ' * ' continuation lines that are not a multiple of indent_size, which no editor or eslint rule rewrites. The other is a significant trailing space inside a test template literal. The tuned three-rule form, plus one excluded file, passes. A block-comment alignment relaxation is the tuning.",
+   "fire_verified": "n/a (C). Fired anyway: trailing whitespace in miscUtils.ts gave 1 finding and in README.md gave 0. A missing final newline gave 1, and tab indentation gave 1.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-25",
+   "summary": "Text files use LF line endings.",
+   "evidence": ".gitattributes:1-3 ('* text=auto eol=lf')",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "A",
+   "alint": "line_endings lf - yarnpkg-berry-text-files-lf",
+   "rules": [
+    "yarnpkg-berry-text-files-lf"
+   ],
+   "assertion_family": "none",
+   "reason": "Git enforces LF on check-in, and alint asserts it directly.",
+   "fire_verified": "n/a (family other). Fired anyway: a CRLF tsconfig.json gave 1 finding. The clone gives 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-26",
+   "summary": "No gitignored build or release artifacts are committed: packages/*/lib, packages/*/bundles, libui inline-built .js/.d.ts, hook.raw.js, /artifacts, /dist, package.tgz.",
+   "evidence": ".gitignore:18-40 ('never kept', 'meant to be local-only', 'we don't commit them', 'must not be checked-in')",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "C",
+   "alint": "git_no_denied_paths with the workspace directories brace-enumerated - yarnpkg-berry-no-committed-build-artifacts",
+   "rules": [
+    "yarnpkg-berry-no-committed-build-artifacts"
+   ],
+   "assertion_family": "none",
+   "reason": "file_absent and dir_absent walk with .gitignore, so they never see a force-added artifact (probed). git_no_denied_paths globs let '*' cross '/', and packages/*/lib/** gave 14 false positives (docusaurus/src/lib, fixtures, libzip/artifacts/lib). Listing the 47 directories by hand is the tuning.",
+   "fire_verified": "n/a (C). Fired anyway: force-added packages/yarnpkg-core/lib/index.js, a libui .d.ts, and package.tgz at root and nested each gave 1 finding. A force-added packages/docusaurus/src/lib file gave 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-27",
+   "summary": "Files changed under .yarn/cache match their remote sources (--check-cache).",
+   "evidence": "integration-workflow.yml:40-49",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "yarn install --check-cache",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "It needs network or external state.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "other",
+      "none"
+     ],
+     "why": "Cache integrity is dep-version in babel-21 and yarnpkg-berry-06."
+    }
+   ]
+  },
+  {
+   "id": "yarnpkg-berry-28",
+   "summary": "plugin-compat patch files match fresh generator output.",
+   "evidence": "integration-workflow.yml:51-66 (gen-*-patch.sh/.js then git diff)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "It runs the project's generators and builds.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-29",
+   "summary": "libzip artifacts match a fresh build.",
+   "evidence": "integration-workflow.yml:68-78 (packages/yarnpkg-libzip/artifacts/build.sh)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "It needs a build (emscripten).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-30",
+   "summary": "PnP hook (hook.js, esm-loader/built-loader.js) matches a fresh build.",
+   "evidence": "integration-workflow.yml:80-90",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "It needs a build.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-31",
+   "summary": "Zip worker (yarnpkg-core/sources/worker-zip/index.js) matches a fresh build.",
+   "evidence": "integration-workflow.yml:92-102",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "It needs a build.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-32",
+   "summary": "packages/yarnpkg-cli/sources/pluginCommands.ts matches the generator.",
+   "evidence": "integration-workflow.yml:104-114; scripts/gen-plugin-commands.js (requires each plugin and reads clipanion definitions)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "The generator runs project code to enumerate command paths.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-33",
+   "summary": "PEG grammars (yarnpkg-parsers/sources/grammars/*.js) match a fresh build.",
+   "evidence": "integration-workflow.yml:116-126",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "It runs the parser generator.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-34",
+   "summary": "ESLint passes with --max-warnings 0: @yarnpkg/eslint-config style rules plus the repo's restricted properties, globals and imports and the typeLike naming convention.",
+   "evidence": "integration-workflow.yml:135-140; package.json scripts.test:lint; eslint.config.mjs; packages/eslint-config/",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2 still applies to linters (code analysis).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-35",
+   "summary": "TypeScript type check passes (tsc -p .).",
+   "evidence": "integration-workflow.yml:149-154; package.json scripts.typecheck:all",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Type checking is D under R2.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-36",
+   "summary": "Unit and integration test suites pass across the OS, Node-version and shard matrix, including big-endian s390x on master (nightly Node advisory).",
+   "evidence": "integration-workflow.yml:244-345 (acceptance, big-endian, test-results); jest.config.js",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Test execution. R1 collapses the matrix into one unit.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-37",
+   "summary": "Ecosystem e2e workflows (25 e2e-*.yml) install and run third-party toolchains under Yarn.",
+   "evidence": ".github/workflows/e2e-*-workflow.yml (25 files), scripts/e2e-setup-ci.sh",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Execution and network. R1 collapses the 25 workflows into one unit.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-38",
+   "summary": "plugin-compat patches apply to the supported upstream package versions (test:plugin-compat).",
+   "evidence": ".github/workflows/plugin-compat-workflow.yml; packages/plugin-compat/tests/patches.test.ts",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Test execution with network resolution.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-39",
+   "summary": "The CLI bundle and plugins build (minified and not), as does the vscode-zipfs package.",
+   "evidence": "integration-workflow.yml:171-210",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Build execution.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-40",
+   "summary": "The documentation website builds (Netlify deploy preview).",
+   "evidence": "packages/docusaurus/netlify.toml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Build execution on an external CI.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-41",
+   "summary": "Release scripts refuse to run on a dirty working tree.",
+   "evidence": "scripts/release/00-release.sh:8, 01-release-tags.sh:8, 02-release-builds.sh:8, 03-release-npm.sh:8",
+   "mechanism": "script",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "It checks git working-tree state at release time, not committed content.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-42",
+   "summary": "Each workspace being released packs successfully (yarn workspace <ident> pack --dry-run).",
+   "evidence": "scripts/release/01-release-tags.sh:61",
+   "mechanism": "script",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Build execution (prepack).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "yarnpkg-berry-44",
+   "summary": "The file-descriptor routing constants stay synced between @yarnpkg/fslib MountFS and the PnP ESM loader's fspatch. MOUNT_MASK (0xff000000) must equal ZIP_MASK, and MountFS's default magicByte (0x2a), which ZipOpenFS inherits, must equal ZIP_MAGIC's high byte (0x2a000000).",
+   "evidence": "packages/yarnpkg-fslib/sources/MountFS.ts:12-19 (\"Those values must be synced with packages/yarnpkg-pnp/sources/esm-loader/fspatch.ts\", MOUNT_MASK at :19, magicByte = 0x2a default at :83); packages/yarnpkg-pnp/sources/esm-loader/fspatch.ts:57-59 (the reciprocal comment, which still names the removed fslib ZipOpenFS.ts; ZIP_MASK and ZIP_MAGIC); packages/yarnpkg-libzip/sources/ZipOpenFS.ts:106-111 (super() without a magicByte, so the default applies)",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "A",
+   "alint": "cross_file equals x2 with regex extraction: 'const MOUNT_MASK\\s*=\\s*(0x[0-9a-fA-F]+);' vs 'const ZIP_MASK\\s*=\\s*(0x[0-9a-fA-F]+);', and 'magicByte = 0x([0-9a-fA-F]{2}),' vs 'const ZIP_MAGIC\\s*=\\s*0x([0-9a-fA-F]{2})000000;'. Proposed ids yarnpkg-berry-fd-mask-synced and yarnpkg-berry-fd-magic-synced. They are not in Stage A's config; I verified them in scratch.",
+   "rules": [
+    "yarnpkg-berry-fd-mask-synced",
+    "yarnpkg-berry-fd-magic-synced"
+   ],
+   "assertion_family": "none",
+   "reason": "This is a load-bearing sync comment under R5, the same treatment Stage A gave sortMap (unit 21). Stage A's search missed it. The two constants are one convention under R1. Both ends are literal values that alint extracts with a regex, so it is A.",
+   "fire_verified": "n/a (family other). Fired anyway in a scratch git repo holding only the two files at their real paths: ZIP_MASK set to 0x7f000000 gave 1 finding (fd-mask-synced), and magicByte set to 0x2b gave 1 finding (fd-magic-synced). The clone and the unmodified scratch copy give 0. validate-config passes.",
+   "origin": "B",
+   "changes": []
+  }
+ ],
+ "removed": [
+  {
+   "id": "yarnpkg-berry-43",
+   "summary": "Changes to checked-in bin artifacts, workflows and CODEOWNERS need a code-owner review.",
+   "why": "The clone cannot show enforcement, and Stage A admits as much. A CODEOWNERS file by itself only requests reviews. It becomes a gate only if branch protection enables 'Require review from Code Owners', and that cannot be observed. Unlike a CI check, there is no failing status to point to. Keep it as an unusual or absent-gate note rather than a D unit. Coverage is unaffected because it is D."
+  }
+ ],
+ "rejected_stage_b": {},
+ "value_add": [
+  "yarnpkg-berry-valueadd-dynamic-require-copies-identical (cross_file identical): keeps packages/yarnpkg-pnpify/sources/dynamicRequire.ts and packages/yarnpkg-sdks/sources/dynamicRequire.ts byte-identical. It backs the D sync convention of unit 22; the repo does not gate it. It fires on an edited copy and passes on the clone.",
+  "Bundles were probed (oss-baseline, node, monorepo, monorepo/yarn-workspace, hygiene/lockfiles, tooling/editorconfig, toolchain-pins, ci/github-actions) and deliberately not extended, since the repo enforces none of their findings. They reported 56 gha-pin-actions-to-sha, 30 gha-workflow-contents-read, 10 monorepo-packages-have-readme, 9 yarn-workspace-member-has-readme, 2 monorepo-packages-have-package-json (packages/berry-cli, packages/esbuild-plugin-pnp), and 1 each of oss-security-policy-non-empty, oss-no-trailing-whitespace, oss-dependency-update-tool and node-engine-or-nvmrc."
+ ],
+ "value_add_rules": [
+  "yarnpkg-berry-valueadd-dynamic-require-copies-identical"
+ ],
+ "absent_categories": [
+  "locale: no locale or translation files and no i18n tooling (the locale family is empty for this repo)",
+  "hooks: no husky, lefthook, pre-commit, lint-staged or committed git hooks (e2e-husky-workflow tests husky support and is not a repo hook)",
+  "other CI systems: no GitLab CI, CircleCI, Azure Pipelines, Jenkins or Buildkite (GitHub Actions plus a Netlify deploy preview only)",
+  "task runners: no Makefile, justfile or Taskfile",
+  "toolchain pin files: no .nvmrc, .node-version, .tool-versions or Volta; the toolchain-pins bundle is silent. Node policy lives in engines.node, yarn.config.cjs and CI matrices",
+  "dependency-policy tools: no syncpack, manypkg or sherif config (yarn constraints plays that role); no renovate or dependabot",
+  "catalogs: .yarnrc.yml has a single catalog entry (typescript) with no catalog-use gate; catalog use is only incidental to the one-range constraint",
+  "license headers / SPDX in sources: none (licence is the per-manifest field set by constraints)",
+  "commit-message convention gate: none",
+  "import layering / module boundaries: none beyond eslint no-restricted-imports (D)",
+  "file-graph: no cycle, orphan or layering gate; 1 registry-to-members edge (README e2e list <-> .github/workflows/e2e-*.yml, edge source a content regex)"
+ ],
+ "unusual": [
+  "The repository dogfoods its own policy engine. yarn.config.cjs is run by the yarn under test, executed from sources through scripts/run-yarn.js (yarnPath). Its nine constraint calls give ten units.",
+  "Deferred versioning. .yarn/versions/<hash>.yml records per-PR release and decline decisions, `yarn version check` diffs against the merge-base, and `yarn version apply --all` consumes every file at release. This yields a static, alint-checkable integrity unit and two change-set and join units (B).",
+  "Doc drift. contributing.mdx:89-97 says constraints live in constraints.pro and mentions `inline_compile`, but constraints.pro is now a deprecation stub pointing to yarn.config.cjs.",
+  "packages/berry-cli (bin/berry.js only, a release copy for Yarn 1 `policies set-version`) and packages/esbuild-plugin-pnp (README only) have no package.json. They are not workspaces, and monorepo@v1 flags them.",
+  "Stale references to a removed workspace, packages/gatsby: the tsconfig.json exclude list and the yarn.config.cjs peer-dependency exemption.",
+  "Root packageManager pins yarn@4.2.1+sha256 while yarnPath runs the sources (CLI 4.18.1). No gate ties them.",
+  "Generated and compressed artifacts are committed and marked binary/linguist-generated in .gitattributes (hook.js, built-loader.js, worker-zip/index.js, libzipSync/Async.js), along with the CLI binary packages/yarnpkg-cli/bin/yarn.js. Six CI codegen-freshness steps guard them, plus CODEOWNERS.",
+  "Copy-sync source comments: the sortMap copy is byte-identical, while the dynamicRequire copies have drifted textually from miscUtils.ts.",
+  "A comment-only coupling: the engines.node floor drives the ES level in three files through a manual node.green lookup. The esbuild target in packages/yarnpkg-builder derives from engines.node in code.",
+  "alint finding: git_no_denied_paths globs let '*' cross '/', while paths: globs do not (packages/*/lib/** matched packages/docusaurus/src/lib and fixture lib/ dirs). file_absent and dir_absent cannot see a force-added gitignored file.",
+  "alint finding: editorconfig_conforms with indent_size=2 flags JSDoc ' * ' continuation lines (93 here). It wants a block-comment alignment relaxation.",
+  "alint finding: json_schema_passes cannot meta-validate a schema offline. A $ref to https://json-schema.org/draft/2019-09/schema fails because external retrieval is not supported, and there is no built-in metaschema mode.",
+  "alint finding: the node@v1 rule node-engine-or-nvmrc checks only .nvmrc, .node-version and .tool-versions. It fires here although every manifest declares engines.node, so its id promises more than it checks.",
+  "JSONPath idioms that made several constraints expressible natively: absolute queries inside filters ($[?(... && !$.dependencies.tslib)]) for whole-manifest implications, `@ == $.name && search(@, ...)` to extract a name conditionally, and union selectors over dependency fields. JSONPath still cannot select object keys, which caused the C units 02 and 19 and the regex workaround in unit 18."
+ ],
+ "check_result": "Final config: validate-config reports 24 rules valid, and `alint -c CONFIG check . --compact` on the clone reports 'all rules passed' (0 violations). Earlier drafts, explained and fixed. (1) editorconfig_conforms gave 94 info findings: 93 JSDoc continuation lines plus a significant trailing space in a test template literal at packages/yarnpkg-libzip/tests/ZipParsers.test.ts:21. It was replaced by tuned rules (unit 24, C), with that file excluded and a comment. (2) A git_no_denied_paths draft gave 14 false positives because '*' crosses '/'. Workspace directories are now enumerated (unit 26, C). (3) A json_schema_passes draft for the docs schema test could not resolve the 2019-09 meta-schema offline, so it was removed and the unit classed B-adapter. The clone was left unmodified (git status clean).",
+ "stage_b_config_issues": [
+  "alint bug, contrary to its docs and affecting unit 26's rationale. `git_tracked_only: true` on file_absent and dir_absent does NOT catch a force-added gitignored file under the default `respect_gitignore: true`. docs/rules.md:61 says it closes 'the gap where a git add -f'd file slips past the walker's gitignore filter'. docs/site/concepts/targeting/the-walker-and-git.md:103 tabulates 'Gitignored but force-added: fires', and its 'In practice' example (dir_absent **/target + git_tracked_only) promises a finding. I reproduced that exact example (`git add -f target/debug/build.log`) and got 0 findings. A berry-shaped scratch tree gave the same result: file_absent with git_tracked_only over packages/*/lib/**, libui *.d.ts and **/package.tgz force-added gave 0. With top-level `respect_gitignore: false` (or --no-gitignore) the same rule fires (3 findings), and on the clone it passes with no false positives, because paths: globs keep '*' within one segment. Unit 26 stays C, but the tuning is this bug fix. After it, file_absent + git_tracked_only + `packages/*/lib/**` expresses the unit with no directory list. alint v0.22.1 (e80750e911a7).",
+  "Unit 26 rationale correction. 'file_absent and dir_absent never see a force-added artifact' is true only because of the bug above. alint has a documented option for exactly this case. I confirmed the git_no_denied_paths '*'-crosses-'/' claim: `packages/*/lib/**` gave 14 hits on the clone (pkg-tests-fixtures resolve-1.9.0/lib, libzip/artifacts/lib).",
+  "Unit 23 / alint usability. A json_schema_passes meta-schema shim fails with 'Resource ... is not present in a registry ... Retrieving external resources is not supported once the registry is populated' if it lacks `$schema` or uses the `#`-suffixed draft URI. With `$schema` 2019-09 plus `$ref` 2019-09 it works offline. Stage A's 'unusual' line 'json_schema_passes cannot meta-validate a schema offline ... no built-in metaschema mode' is therefore wrong as stated. The real gap is that there is no inline `schema:` and no meta preset, so a repo without a shim file needs allow_out_of_root.",
+  "yarnpkg-berry-version-file-idents-exist (unit 18). The line regex misses flow-style YAML: `releases: {...}` and `declined: [...]` gave 0 findings for an unknown ident. It also over-flags an existing-but-unversioned workspace in `declined:` (1 finding where yarn accepts it). The source uses $.version, but yarn checks version only for non-decline releases at release time.",
+  "yarnpkg-berry-version-file-strategies-valid (unit 18). The prerelease part of the regex `(-[0-9A-Za-z-]+...)` accepts numeric identifiers with leading zeros. `4.10.0-01` gave 0 findings, but node-semver strict `valid()` (validateReleaseDecision) rejects it with 'Invalid strategy'. The fix is to forbid a leading zero in purely numeric prerelease identifiers.",
+  "yarnpkg-berry-default-plugin-release-bumps-cli (unit 19) is narrower than the stated convention. contributing.mdx:120 triggers on 'If you modify one of the default plugins'. The rule triggers only on a version file that releases a standard plugin, so a modified plugin whose release was declined is not caught. A faithful form needs the change relation, as unit 16 does. Note it in the record. C still holds for what the rule expresses.",
+  "Hand-listed names in units 02 (46 workspace names), 19 (25 standard-bundle plugins) and 26 (47 package directories) go stale silently. A new workspace, plugin or package directory is simply not covered, and nothing fires. I verified that the lists match the clone today: the 46 names equal root plus packages/*/package.json names, and the 25 equal bundles.standard. This is the C cost, but the record should say the failure mode is a false negative.",
+  "yarnpkg-berry-ci-min-node-matches-engines (unit 11), scope note only. It covers the 6 `{node: 18, ...}` matrix rows and `select(. >= 18)`, but not `env.node-version: '18.x'` in integration-workflow.yml:17 (chore and build jobs), release-branch, release-candidate, release-rerun and sherlock. No comment ties those to the minimum, so this is not a defect. In scratch, bumping env.node-version to '20.x' gave 0 findings, as expected.",
+  "The config does not carry the missed unit 44 (MountFS/fspatch fd constants). Add the two cross_file rules given in the missed entry.",
+  "Reproduced, no issue. validate-config reports 24 rules valid, and check on the clone reports all rules passed: 0 violations, 0 analysis failures. In a scratch git repo with the manifests, yarn.config.cjs, tsconfig, eslint-config index.js, builder plugin.ts and integration-workflow.yml at their relative paths, every dep-version and toolchain-pin A rule fires as claimed. Unit 03: lodash in core deps 1, inquirer in root devDeps 1, inquirer in a peer 1, lodash.merge 0. Unit 04: doctor without tslib 1, typescript in plugin-git devDeps without tslib 1, typescript in optionalDependencies 1, root without tslib 1, typescript only as a peer 0, tslib only as a peer 0. Unit 08: plugin-nm >=20 1, root >=18.0.0 1, engines removed 1, constraint literal >=20 gives 46, and a renamed constraint key (regex no longer matches) gives 1. Unit 09: tsconfig ES2022 2, eslint es2022 1, scaffold ES2020 1. Unit 11: one matrix row 1, LTS filter 1, root >=20.10.0 gives 7, all min rows deleted 1. Spot checks of 02, 12, 13 and 15 also fired, with the expected negative controls at 0."
+ ],
+ "stage_b_summary": "I reviewed Stage A's yarnpkg/berry record at f359f65c1f8bb2efb051b3e55edcdc3cb461d159 and it holds up well overall. Most of its claims reproduce, and I found one missed unit, three reclassifications, one removal, and one alint bug.\n\n**Missed unit (1, A):**\n- **What it is.** MountFS.ts:17 says \"Those values must be synced with .../esm-loader/fspatch.ts\", and fspatch.ts:57 says the same back. Two values must agree:\n  - MOUNT_MASK must equal ZIP_MASK.\n  - MountFS's default magicByte 0x2a must equal ZIP_MAGIC's high byte.\n- **Why it counts.** It is a load-bearing comment under R5, like sortMap (unit 21), and Stage A's search missed it.\n- **Verified.** Two cross_file equals rules pass on the clone and each fires once on a broken scratch copy.\n\n**Reclassifications:**\n- **Unit 18, A to C.** It reads YAML keys with a line regex, the same JSONPath key gap Stage A used to make 02 and 19 C.\n  - It misses flow-style version files, which yarn accepts: 0 findings for an unknown ident.\n  - It wrongly flags an unversioned workspace in `declined:`.\n- **Unit 23, B-adapter to C.** Stage A said alint cannot meta-validate offline; that is wrong.\n  - json_schema_passes validates both docs schemas against the bundled draft 2019-09 meta-schema on the clone, given a shim schema that sets `$schema` and `$ref` to the 2019-09 URI. It fires on invalid schemas.\n  - The only awkward part is the shim: the repo has none, so it must live outside the root with allow_out_of_root.\n- **Unit 09, family toolchain-pin to other (moderate confidence).** Three ES-target sites agreeing with each other is not a Node or package-manager pin.\n\n**Removal:**\n- **Unit 43 (CODEOWNERS, D).** Enforcement cannot be verified from the clone. It only matters if branch protection requires code-owner review.\n\n**Config and alint findings:**\n- **alint bug.** `git_tracked_only: true` does not catch force-added gitignored files under the default respect_gitignore. The documentation's own target/ example gives 0 findings. Unit 26 stays C, but fixing this bug would make it expressible without listing directories.\n- **Strategies regex too loose.** It accepts `4.10.0-01`, which node-semver rejects.\n- **Unit 19's rule is narrower than the convention.** It checks releases, but the guide says \"modify\".\n- **Hand lists in 02, 19 and 26 go stale silently.** A new workspace, plugin or directory is simply not covered.\n- **Unit 11's rule does not cover `env.node-version: '18.x'`.** Nothing states that value is the minimum, so this is a note, not a defect.\n\n**Confirmed:**\n- validate-config reports 24 rules and check passes on the clone with 0 findings.\n- I reproduced every dep-version and toolchain-pin A fire test (units 03, 04, 08, 09, 11), with negative controls.\n- The other spot checks (02, 12, 13, 15) and Stage A's claims also held:\n  - the editorconfig count of 94;\n  - git_no_denied_paths matching across '/' (14 hits);\n  - unit 01 holding statically on the clone;\n  - unit 17 passing a static check of all 8 version files;\n  - the locale family being empty;\n  - no hooks, task runners, other CI systems or pin files.\n- No other dep-version or toolchain-pin unit was missed. Nothing ties the remaining Node sites to engines.node: packageManager, the CI env values, Netlify's NODE_VERSION, and the prepare action's 25.6 default.\n\n**Revised counts** (my changes, removing 43): A 13, C 6, B 3 (B-config 2: unique-key 01 and reference 17; B-adapter 1: unit 16), D 21.\n- Coverage today is 13/22 = 59.1%, with tuning 19/22 = 86.4%, gap 3/22 = 13.6%. After the slice moves 01 to A, coverage is 14/22 = 63.6%.\n- dep-version is unchanged: A2, C1, B1, D3.\n- toolchain-pin is A2 and D1 if 09 moves, otherwise A3 and D1.\n\nI removed the scratch directory, and the clone is unmodified (git status clean).",
+ "notes": "The pin was verified with git log in the clone (f359f65c1f8bb2efb051b3e55edcdc3cb461d159, committed 2026-11-11).\n\nCounts (Stage A): A=13, C=4, B=4 (B-config 2: unique-key, reference; B-adapter 2), D=22; 43 units in total.\n- coverage_today = 13/21 = 61.9%; coverage_with_tuning = 17/21 = 81.0%; gap = 4/21 = 19.0%.\n- dep-version: A2 C1 B1 D3. Today 2/4 = 50%, with tuning 75%. After the slice, unit 01 (unique-key) moves to A, giving 3/4.\n- toolchain-pin: A3 D1, so 3/3 = 100% of the addressable part.\n- other: A8 C3 B3 D18; 8/14 = 57% today.\n- locale: none.\n- Overall after the slice (unit 01 to A): 14/21 = 66.7%. Unit 17 (reference) is outside the slice.\n\nUnit-count forks for Stage B:\n- forbidDependency x2 (inquirer, lodash) is counted as one banned-list unit (R1 instances).\n- enforceFieldsOnAllWorkspaces is split into three units: license, engines.node and repository. They are different assertions, and engines.node belongs to toolchain-pin.\n- Per-call counting would instead give forbid=2 and fields=1. The constraint total stays 10, but A would be 12.\n- Version-file integrity (unit 18) is counted separately from the changed-workspace check (unit 16). It is enforced independently at release by `version apply --all`. Folding it in as a guard clause would give A=12.\n- The ES-level comment is split into site agreement (A) and the node.green choice (D).\n- Unit 11 rests on load-bearing workflow comments ('minimum Node version we support'). Under a CI-gated-only denominator it would drop.\n- Units 09, 11, 19, 21, 22 and 24 are review conventions, which R5 counts.\n\nR4: every A unit in dep-version (03, 04) and toolchain-pin (08, 09, 11) was fired on a scratch copy of only the files the rule reads, keeping relative paths, in a scratch git repo. Each also passes on the clone. Negative controls were included. The other-family rules and the C rules were also fired.\n\nThe scratch directory <scratch>/yarnpkg-berry-a was removed. Only CONFIG remains under out/.\n\nNothing from the repository was run. I read files with cat, grep, sed and read-only `git ls-files`/`git log`, and ran small JSON-reading helper scripts of my own (python3 -I) over the clone's manifests and on scratch copies. The only program run against the clone itself was the alint binary, apart from those read-only reads. No network was used.\n\nNot verified: whether GitHub branch protection requires code-owner review (unit 43), and whether the Netlify deploy preview (unit 40) is a required check.\n\nThe config uses no spawning kinds, custom facts or git-history kinds. git_no_denied_paths reads only the index (no since:), which works at depth 1.",
+ "stage_c": {
+  "changes": [
+   {
+    "rule_id": "yarnpkg-berry-fd-mask-synced",
+    "unit": "yarnpkg-berry-44",
+    "action": "added",
+    "detail": "cross_file equals, normalize: lower. Source: the MOUNT_MASK regex over packages/yarnpkg-fslib/sources/MountFS.ts. Target: the ZIP_MASK regex over packages/yarnpkg-pnp/sources/esm-loader/fspatch.ts. Level warning, with a comment naming the A [other] unit. Passes on the clone. Tested on a scratch copy holding only the two files at their relative paths: the unmodified copy gives 0. ZIP_MASK 0x7f000000 gives 1 finding, and MOUNT_MASK 0xfe000000 gives 1. Negative control: uppercase 0xFF000000 in fspatch gives 0, because of normalize: lower."
+   },
+   {
+    "rule_id": "yarnpkg-berry-fd-magic-synced",
+    "unit": "yarnpkg-berry-44",
+    "action": "added",
+    "detail": "cross_file equals, normalize: lower. Source: 'magicByte\\s*=\\s*0x([0-9a-fA-F]{2}),' over MountFS.ts, which holds the default 0x2a. Target: 'const ZIP_MAGIC\\s*=\\s*0x([0-9a-fA-F]{2})000000;' over fspatch.ts. Passes on the clone. Scratch copy: unmodified gives 0. magicByte 0x2b gives 1 finding, and ZIP_MAGIC 0x2b000000 gives 1. Uppercase 0x2A000000 gives 0. A decimal 'magicByte = 42' gives 1 'canonical value not found' finding, so an unrecognised spelling fails loudly instead of passing. The config comment says so."
+   },
+   {
+    "rule_id": "yarnpkg-berry-version-file-strategies-valid",
+    "unit": "yarnpkg-berry-18",
+    "action": "modified",
+    "detail": "The prerelease identifiers now copy node-semver 7.8.5's PRERELEASEIDENTIFIER, (0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*), which I read from the cached .yarn/cache semver zip (internal/re.js). A purely numeric identifier can no longer have a leading zero. The comment now says C [other] (unit 18). Passes on the clone. Scratch copy of .yarn/versions/43f2c259.yml with the @yarnpkg/cli strategy changed. New rule: 4.10.0-01 gives 1 finding, 4.10.0-rc.01 gives 1, 4.10.0-00 gives 1, patchy gives 1. These give 0: 4.10.0-rc.1, 4.10.0-0, 4.10.0-0a, 4.10.0-alpha.0.1, 4.10.0-rc.1+build.01, v4.10.0, 4.10.0. The old regex gave 0 for 4.10.0-01, -rc.01 and -00, which confirms the defect."
+   },
+   {
+    "rule_id": "yarnpkg-berry-version-file-idents-exist",
+    "unit": "yarnpkg-berry-18",
+    "action": "comment",
+    "detail": "The comment now says C [other] and records two faults. A flow-style releases: {...} or declined: [...] that names an unknown ident is missed. An existing but unversioned workspace under declined: is over-flagged. I re-checked on a scratch copy of root and packages/*/package.json plus one version file. Unmodified gives 0. A block-style unknown declined ident gives 1. Flow-style unknown idents give 0 (the documented miss). A declined @yarnpkg/docusaurus, which has no version field, gives 1 (the documented over-flag). The rule itself is unchanged and passes on the clone."
+   },
+   {
+    "rule_id": "yarnpkg-berry-default-plugin-release-bumps-cli",
+    "unit": "yarnpkg-berry-19",
+    "action": "comment",
+    "detail": "The comment now cites contributing.mdx:120, which I checked. It records that the rule is narrower than the guide: a modified default plugin whose release is declined is not caught, and catching it needs unit 16's change relation. It also records that the hand list of 25 plugins goes stale as a silent false negative. I checked the list against bundles.standard today: 25 entries, equal. The rule is unchanged and passes on the clone. Scratch: plugin-nm released with cli removed gives 1 finding. plugin-nm declined with no cli bump gives 0, the documented narrowness."
+   },
+   {
+    "rule_id": "yarnpkg-berry-workspace-deps-use-workspace-protocol",
+    "unit": "yarnpkg-berry-02",
+    "action": "comment",
+    "detail": "Added a note that the hand list of 46 workspace names goes stale as a silent false negative: a new workspace is not covered and nothing fires. I checked that the 46 listed names equal the names in root and packages/*/package.json on the clone. The rule is unchanged and passes on the clone."
+   },
+   {
+    "rule_id": "yarnpkg-berry-no-committed-build-artifacts",
+    "unit": "yarnpkg-berry-26",
+    "action": "comment",
+    "detail": "Added a note that the hand list of 47 package directories goes stale as a silent false negative: a new package directory's artifacts are not covered. I checked that the 47 listed directories equal packages/*/ on the clone. The rule is unchanged and passes on the clone."
+   },
+   {
+    "rule_id": "(none: comment block)",
+    "unit": "yarnpkg-berry-23",
+    "action": "comment",
+    "detail": "Added a 'C [other] (unit 23, no rule)' comment block, and corrected the header's 'Not expressed' line, which had said 'no offline meta-schema'. The block says json_schema_passes can meta-validate offline only through a shim schema that sets both $schema and $ref to the 2019-09 URI. The repo has no such file, so the shim would have to live outside the root, and the corpus config carries no rule. The comment says this rests on Stage B's probe, which I did not re-run."
+   },
+   {
+    "rule_id": "yarnpkg-berry-es-target-sites-agree",
+    "unit": "yarnpkg-berry-09",
+    "action": "comment",
+    "detail": "Not one of the directives. I changed the comment's family label from [toolchain-pin] to [other] and reworded the header to match, so the config agrees with the reconciled record, which lists unit 09 as family 'other'. The bucket stays A and the rule is unchanged."
+   },
+   {
+    "rule_id": "(none)",
+    "unit": "yarnpkg-berry-43",
+    "action": "not-done",
+    "detail": "As directed, no rule was added for unit 43 (removed: CODEOWNERS enforcement cannot be observed from the clone)."
+   }
+  ],
+  "unit_notes": [],
+  "validate_output": "✓ Config valid: 26 rule(s) loaded from docs/design/v0.12/corpus/yarnpkg-berry.alint.yml",
+  "check_output": "exit 0: '✓ all rules passed.' (0 findings on the clone). git -C <clone> status --porcelain is empty. Scratch dir <scratch>/yarnpkg-berry-c removed."
+ }
+}

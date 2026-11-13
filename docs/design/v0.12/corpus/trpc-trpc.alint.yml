@@ -1,0 +1,560 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
+#
+# alint v0.23 corpus-stratum config — trpc/trpc
+# Pinned @ 8eff9ff0ddf4be4a682bf205fb66b00a26901075 (stratum: js-monorepo)
+#
+# Shape: TypeScript library monorepo (pnpm 12 workspace with a default
+# `catalog:` plus named `ts-api` / `www` catalogs, Turborepo), ~59 workspace
+# projects: packages/* (the @trpc/* libraries), ~40 examples (10 of them
+# subtree-synced to trpc/examples-<name>), www (the docs site), tooling/*.
+#
+# WHERE THE ENFORCED VALIDATION LIVES
+#   lint.yml (autofix.ci)  — oxlint via `turbo lint`, `manypkg fix`, oxfmt,
+#                            ts-prune; on PRs autofix-ci commits the fixes,
+#                            in the merge queue `git diff --exit-code` fails.
+#   main.yml               — build, typecheck, vitest (+ www tests), openapi
+#                            fixture freshness, verify-packed + skills
+#                            generation from docs frontmatter, twoslash.
+#   subtree.yml            — makes 10 examples standalone (catalog: and
+#                            workspace: guards) and builds them.
+#   release.yml            — tooling/release (lockstep versions, cycle check,
+#                            frozen-lockfile + build-is-clean checks).
+#   .github/setup + pnpm   — Node from .nvmrc, pnpm from packageManager, and
+#                            pnpm install's engines / catalog / lockfile checks.
+#   AGENTS.md + skills     — agent-skill layout conventions, regression-test
+#                            naming.
+#
+# This config expresses the A and C units (manypkg's package-name check,
+# the toolchain pins CI derives its Node/pnpm from, workspace: references
+# resolving, the subtree workspace-protocol and shared-ui guards, the
+# agent-skill conventions, Twoslash include resolution, two www repo-state
+# tests, filename casing) plus clearly marked value-add rules. Rules for
+# units the record does not count as A or C (trpc-03, trpc-16: B-adapter;
+# trpc-09: removed) are kept only as VALUE-ADD approximations at level info.
+# Nothing here spawns a process; no custom facts; no git-history kinds.
+
+version: 1
+
+extends:
+  # VALUE-ADD (not trpc-enforced): exact Node pin in .nvmrc and
+  # .tool-versions `nodejs` agreeing with it. trpc keeps both by hand
+  # (renovate's nvm manager and node-version datasource are disabled) and
+  # nothing checks that they agree.
+  - alint://bundled/toolchain-pins@v1
+  # VALUE-ADD: one lockfile, at the root. trpc only gitignores
+  # package-lock.json / yarn.lock; subtree.yml creates the examples'
+  # standalone lockfiles in CI without committing them.
+  - alint://bundled/hygiene/lockfiles@v1
+  # VALUE-ADD: pnpm-workspace.yaml declares packages; packages/* members
+  # have a README and a name.
+  - alint://bundled/monorepo/pnpm-workspace@v1
+
+rules:
+  # ════════════════════════════════════════════════════════════════
+  # toolchain-pin
+  # ════════════════════════════════════════════════════════════════
+
+  # trpc-01 (A) — CI's Node comes from .nvmrc: .github/setup/action.yml,
+  # release.yml (x2) and sponsors.yml run actions/setup-node with
+  # `node-version-file: .nvmrc`, which fails when the file is missing or
+  # holds no version spec setup-node can resolve.
+  - id: trpc-nvmrc-present
+    kind: file_exists
+    paths: ".nvmrc"
+    level: error
+    message: ".nvmrc pins the Node version every CI job installs (node-version-file: .nvmrc)."
+
+  # trpc-01 (A), continued — accepts what setup-node resolves from the
+  # file: an exact or partial version (24, 24.1.0, v24.1.0, 24.x), a semver
+  # range (^24, ~24.1, >=24 <25, 24 - 25, >=22 || ^24), an optional
+  # `node `/`nodejs ` prefix, and the aliases lts/* | lts/<codename> |
+  # lts/-N | node | latest | current. A deleted file (trpc-nvmrc-present), an empty file, a
+  # non-version word and trailing junk fire. Approximation: setup-node takes
+  # the first single-token line of a multi-line file; this rule wants exactly
+  # one spec (blank lines aside). Verbose regex: whitespace is insignificant,
+  # so a literal space is written \x20.
+  - id: trpc-nvmrc-version-spec
+    kind: file_content_matches
+    paths: ".nvmrc"
+    pattern: |-
+      (?x)
+      \A\s*
+      (?:
+          (?:node(?:js)?[\x20\t]+)?
+          (?:(?:\^|~>?|[<>]=?|=)[\x20\t]*)? v? (?:[0-9]+|[xX*]) (?:\.(?:[0-9]+|[xX*])){0,2} (?:-[0-9A-Za-z.]+)?
+          (?:
+              (?: [\x20\t]*\|\|[\x20\t]* | [\x20\t]+-[\x20\t]+ | [\x20\t]+ )
+              (?:(?:\^|~>?|[<>]=?|=)[\x20\t]*)? v? (?:[0-9]+|[xX*]) (?:\.(?:[0-9]+|[xX*])){0,2} (?:-[0-9A-Za-z.]+)?
+          )*
+        | lts/(?:\*|-[0-9]+|[a-z]+)
+        | node | latest | current
+      )
+      \s*\z
+    level: error
+    message: ".nvmrc must hold one Node version spec that actions/setup-node can resolve."
+
+  # trpc-02 (A) — CI's pnpm comes from the root `packageManager`:
+  # pnpm/action-setup@v6 is used with no `version:` input everywhere, so it
+  # reads `packageManager` and fails without a pnpm@<version> there.
+  - id: trpc-package-manager-pnpm-pinned
+    kind: json_path_matches
+    paths: "package.json"
+    path: "$.packageManager"
+    matches: '^pnpm@[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.+-]+)?$'
+    level: error
+    message: "Root package.json must pin packageManager to pnpm@<x.y.z>; pnpm/action-setup reads it."
+
+  # trpc-02 (A), continued — pnpm/action-setup also fails ("Multiple
+  # versions of pnpm specified") when a step's `with.version` disagrees
+  # with packageManager. These rules forbid `version:` on any action-setup
+  # step, which is stricter than the tool for a version equal to
+  # packageManager's (a cross_file equals would be exact). Two rules: the
+  # workflows' jobs.*.steps, and the composite action's runs.steps
+  # (.github/setup/action.yml, used by main.yml and lint.yml).
+  - id: trpc-pnpm-action-setup-no-version-workflows
+    kind: yaml_path_absent
+    paths: ".github/workflows/*.yml"
+    path: "$.jobs.*.steps[?match(@.uses, '^pnpm/action-setup@.+')].with.version"
+    level: error
+    message: "pnpm/action-setup must take pnpm from packageManager; a `with: version:` beside it fails the step."
+
+  - id: trpc-pnpm-action-setup-no-version-composite
+    kind: yaml_path_absent
+    paths: ".github/setup/action.yml"
+    path: "$.runs.steps[?match(@.uses, '^pnpm/action-setup@.+')].with.version"
+    level: error
+    message: "pnpm/action-setup must take pnpm from packageManager; a `with: version:` beside it fails the step."
+
+  # ════════════════════════════════════════════════════════════════
+  # dep-version
+  # ════════════════════════════════════════════════════════════════
+
+  # trpc-B01 (A) — every `workspace:` dependency names a project in the
+  # workspace; pnpm install (every CI job via .github/setup, and the
+  # --frozen-lockfile installs in release.yml / subtree.yml) fails with
+  # ERR_PNPM_WORKSPACE_PKG_NOT_FOUND otherwise. The source unions $.name of
+  # the 59 workspace manifests (the brace glob mirrors pnpm-workspace.yaml's
+  # `packages:` plus the root); each target is one manifest's set of keys
+  # whose value starts with `workspace:`. Exact for this repo's workspace:*
+  # use; a `workspace:^x` range would also need semver satisfaction, and an
+  # aliased `"x": "workspace:@scope/y@*"` would be checked by its key.
+  - id: trpc-workspace-refs-resolve
+    kind: cross_file
+    source:
+      files: "{package.json,packages/*/package.json,examples/*/package.json,examples/.*/*/package.json,examples/minimal/*/package.json,examples/minimal-react/*/package.json,examples/minimal-per-procedure-errors/*/package.json,examples/minimal-content-types/*/package.json,www/package.json,www/api-reference/package.json,www/samples/*/package.json,tooling/*/package.json}"
+      extract: { json: "$.name" }
+    targets:
+      files: "{package.json,packages/*/package.json,examples/*/package.json,examples/.*/*/package.json,examples/minimal/*/package.json,examples/minimal-react/*/package.json,examples/minimal-per-procedure-errors/*/package.json,examples/minimal-content-types/*/package.json,www/package.json,www/api-reference/package.json,www/samples/*/package.json,tooling/*/package.json}"
+      extract: { regex: '"([^"]+)"\s*:\s*"workspace:' }
+    relation: superset
+    allow_missing_target: true
+    level: error
+    message: "A workspace: dependency must name a workspace project (pnpm install fails with ERR_PNPM_WORKSPACE_PKG_NOT_FOUND)."
+
+  # trpc-11 (C) — tooling/subtree `standaloneVersion` throws
+  # "<name>@workspace:… only resolves in the monorepo" for any workspace:
+  # dependency of a subtree-synced example (subtree.yml matrix) except
+  # @shared/ui (inlined) and @trpc/* (rewritten to `canary`). Every
+  # package.json under those 10 examples is processed. One dependency per
+  # line holds because oxfmt formats package.json; the rule depends on that
+  # layout, so the audit moved the unit to C.
+  - id: trpc-subtree-examples-workspace-protocol
+    kind: for_each_match
+    paths:
+      include:
+        - "examples/.experimental/next-app-dir/**/package.json"
+        - "examples/minimal-react/**/package.json"
+        - "examples/minimal/**/package.json"
+        - "examples/next-big-router/**/package.json"
+        - "examples/next-formdata/**/package.json"
+        - "examples/next-minimal-starter/**/package.json"
+        - "examples/next-prisma-starter/**/package.json"
+        - "examples/next-prisma-todomvc/**/package.json"
+        - "examples/next-prisma-websockets-starter/**/package.json"
+        - "examples/tanstack-start-sse-chat/**/package.json"
+      exclude:
+        - "**/node_modules/**"
+        - "**/.next/**"
+        - "**/dist/**"
+    select: '^\s*"[^"]+"\s*:\s*"workspace:'
+    require:
+      matches: ['^\s*"(?:@shared/ui|@trpc/[^"]+)"\s*:']
+    level: error
+    message: "A subtree-synced example may use workspace: only for @shared/ui and @trpc/*; nothing else resolves outside the monorepo."
+
+  # trpc-12 (C) — packages/* depend on each other with `workspace:*` outside
+  # peerDependencies (tooling/release workspace.ts + release.ts: "Their other
+  # dependencies on each other are workspace:*, so pnpm-lock.yaml doesn't
+  # change"; the stable release's frozen-lockfile check fails otherwise).
+  # C: the internal package names are listed by hand, since no selector
+  # yields "the workspace's own package names" and JSONPath cannot filter keys.
+  - id: trpc-internal-deps-workspace-protocol
+    kind: json_path_matches
+    paths: "packages/*/package.json"
+    path: "$['dependencies','devDependencies','optionalDependencies']['@trpc/client','@trpc/next','@trpc/openapi','@trpc/react-query','@trpc/server','@trpc/tanstack-react-query','@trpc/tests','@trpc/upgrade']"
+    matches: '^workspace:\*$'
+    if_present: true
+    level: error
+    message: "packages/* depend on each other with workspace:* (peerDependencies excepted), so a release bump leaves pnpm-lock.yaml unchanged."
+
+  # ════════════════════════════════════════════════════════════════
+  # other
+  # ════════════════════════════════════════════════════════════════
+
+  # trpc-14 (A) — manypkg INVALID_PACKAGE_NAME over every workspace project
+  # (pnpm-workspace.yaml `packages:` globs mirrored): validate-npm-package-name
+  # rules for new packages (lowercase, URL-safe, no leading . or _, no
+  # ~'!()*, at most 214 characters). Gap: validate-npm-package-name also
+  # rejects Node core-module names and its blacklist; those pass the regex
+  # (`http` and `node_modules` both match it), so they are not covered.
+  - id: trpc-workspace-package-names-valid
+    kind: json_path_matches
+    paths: &workspace_manifests
+      - "package.json"
+      - "packages/*/package.json"
+      - "examples/*/package.json"
+      - "examples/.*/*/package.json"
+      - "examples/minimal/*/package.json"
+      - "examples/minimal-react/*/package.json"
+      - "examples/minimal-per-procedure-errors/*/package.json"
+      - "examples/minimal-content-types/*/package.json"
+      - "www/package.json"
+      - "www/api-reference/package.json"
+      - "www/samples/*/package.json"
+      - "tooling/*/package.json"
+    path: "$.name"
+    matches: '^(?:@[a-z0-9-][a-z0-9._-]*/)?[a-z0-9-][a-z0-9._-]*$'
+    level: error
+    message: "Workspace package names must be valid npm names (manypkg INVALID_PACKAGE_NAME)."
+
+  - id: trpc-workspace-package-names-length
+    kind: json_path_matches
+    paths: *workspace_manifests
+    path: "$.name"
+    matches: '^.{1,214}$'
+    level: error
+    message: "npm package names are at most 214 characters (manypkg INVALID_PACKAGE_NAME)."
+
+  # trpc-18 (A) — AGENTS.md: "Don't add a .cursor/ folder."
+  - id: trpc-no-cursor-folder
+    kind: dir_absent
+    paths: ".cursor"
+    level: error
+    message: "Don't add a .cursor/ folder (AGENTS.md); skills live in .agents/skills/."
+
+  # trpc-19 (C) — AGENTS.md: the pstack skills are "installed unchanged ...
+  # and pinned in skills-lock.json ... Don't edit them." skills-lock.json's
+  # computedHash uses the skills CLI's own algorithm (it is not the sha256
+  # of SKILL.md), so the files are pinned here by their own digests: the
+  # digests duplicate the lock and must be updated with it (hence C).
+  - id: trpc-pstack-skill-boundary-unchanged
+    kind: file_hash
+    paths: ".agents/skills/principle-boundary-discipline/SKILL.md"
+    sha256: "62ac2862c2caa22dd14531f51c9c6bb445ceb198ca98a687e25b4d47c1f10a28"
+    level: error
+    message: "Installed pstack skills stay unchanged (AGENTS.md); rerun `npx skills add` to update."
+  - id: trpc-pstack-skill-encode-lessons-unchanged
+    kind: file_hash
+    paths: ".agents/skills/principle-encode-lessons-in-structure/SKILL.md"
+    sha256: "228963799189f481827d6f28065f278bc2008ffa37030b1234cbd5814d36b9e9"
+    level: error
+    message: "Installed pstack skills stay unchanged (AGENTS.md); rerun `npx skills add` to update."
+  - id: trpc-pstack-skill-type-system-unchanged
+    kind: file_hash
+    paths: ".agents/skills/principle-type-system-discipline/SKILL.md"
+    sha256: "5cdaf79785e3c12b2592b9469ee8c272143eb86ab7a18d8382197cea5fd30106"
+    level: error
+    message: "Installed pstack skills stay unchanged (AGENTS.md); rerun `npx skills add` to update."
+  - id: trpc-pstack-skill-tdd-unchanged
+    kind: file_hash
+    paths: ".agents/skills/tdd/SKILL.md"
+    sha256: "eeb868e2dfebee528d730a67d7b17498fac4bb85dec2e38bc5c5176aca4d5d2f"
+    level: error
+    message: "Installed pstack skills stay unchanged (AGENTS.md); rerun `npx skills add` to update."
+  - id: trpc-pstack-skill-ts-best-practices-unchanged
+    kind: file_hash
+    paths: ".agents/skills/typescript-best-practices/SKILL.md"
+    sha256: "ec1dac086d3708e5940d45d250c30a37dd953b4e3cb2ca0692f5851d7a039e27"
+    level: error
+    message: "Installed pstack skills stay unchanged (AGENTS.md); rerun `npx skills add` to update."
+  - id: trpc-pstack-skill-ts-best-practices-patterns-unchanged
+    kind: file_hash
+    paths: ".agents/skills/typescript-best-practices/references/patterns.md"
+    sha256: "12e70c9419a8b3f5d6a1ab80e272c1f00a43ac0b3bbf72d68199033570e5de77"
+    level: error
+    message: "Installed pstack skills stay unchanged (AGENTS.md); rerun `npx skills add` to update."
+
+  # trpc-20 (A) — AGENTS.md: "To update, rerun with a new commit and update
+  # the notice". NOTICE-pstack.md must name the commit every skills-lock.json
+  # entry is pinned to, and list exactly the installed skill folders.
+  - id: trpc-pstack-notice-commit-matches-lock
+    kind: cross_file
+    source:
+      file: ".agents/skills/NOTICE-pstack.md"
+      extract: { regex: 'cursor/plugins/tree/([0-9a-f]{40})/pstack' }
+    targets:
+      - file: "skills-lock.json"
+        extract: { json: "$.skills.*.ref" }
+    relation: equals
+    level: error
+    message: "NOTICE-pstack.md must name the pstack commit skills-lock.json pins (AGENTS.md: update the notice)."
+
+  - id: trpc-pstack-notice-lists-locked-skills
+    kind: cross_file
+    source:
+      file: "skills-lock.json"
+      extract: { regex: '"skillPath":\s*"pstack/skills/([^/"]+)/SKILL\.md"' }
+    targets:
+      - file: ".agents/skills/NOTICE-pstack.md"
+        extract: { regex: '(?m)^- `([^`/]+)/`$' }
+    relation: set_equals
+    level: error
+    message: "NOTICE-pstack.md must list exactly the skills skills-lock.json pins."
+
+  # trpc-21 (A) — trpc-conventions skill: a regression test goes in
+  # packages/tests/server/regression/issue-<number>-<slug>.test.ts (or beside
+  # the code's tests, e.g. packages/react-query/test/regression/). One file
+  # in the server dir predates the convention and is not a per-issue
+  # regression test; it is excluded by name.
+  - id: trpc-regression-test-naming
+    kind: filename_regex
+    paths:
+      include:
+        - "packages/tests/server/regression/*"
+        - "packages/*/test/regression/*"
+      exclude:
+        - "packages/tests/server/regression/serializable-inference.test.tsx"
+    pattern: '^issue-[0-9]+-[A-Za-z0-9.-]+\.test\.tsx?$'
+    level: warning
+    message: "Regression tests are named issue-<number>-<slug>.test.ts(x) (trpc-conventions skill)."
+
+  # trpc-22 (C) — www/build/sponsors-sync.test.ts "gives every published
+  # package's README the sponsors markers" (CI: `pnpm --filter www test`);
+  # the scheduled sponsors.yml sync also fails on a README without them,
+  # the root README included. C: "published" means package.json has no
+  # `private: true`, which no path selector can read, so the one private
+  # package (packages/tests) is excluded by name.
+  - id: trpc-published-readmes-have-sponsor-markers
+    kind: file_content_matches
+    paths:
+      include: ["README.md", "packages/*/README.md"]
+      exclude: ["packages/tests/README.md"]
+    pattern: '(?s)<!-- SPONSORS:LIST:START -->.*<!-- SPONSORS:LIST:END -->'
+    level: error
+    message: "A published package's README needs the SPONSORS:LIST:START/END markers the sponsors sync writes between."
+
+  # trpc-23 (A) — www/build/vercel-output.test.ts: robots.txt "is out of
+  # public/, which would overwrite it" (the build writes it).
+  - id: trpc-www-no-public-robots-txt
+    kind: file_absent
+    paths: "www/public/robots.txt"
+    level: error
+    message: "robots.txt is generated by the www build; a www/public/robots.txt would overwrite it."
+
+  # trpc-B02 (A) — a `// @include: <name>` line in a Twoslash block must
+  # name a ```twoslash include <name>``` block in the same Markdown file:
+  # docusaurus-syntax.ts expandIncludes reports "no `twoslash include
+  # <name>`" through twoslash-check.ts (main.yml `check-twoslash`, over
+  # www/v11/docs, www/v11/home and www/blog .md files), the www tests'
+  # content.ts parseSource and skills.ts. Per file, the referenced names
+  # must be a subset of the defined names. Approximation: the regexes see
+  # the whole file, while the tools strip HTML comments first and expand
+  # only inside Twoslash fences (the clone has no commented-out or
+  # out-of-fence include lines), and ~~~ fences are not matched.
+  - id: trpc-twoslash-includes-resolve
+    kind: for_each_file
+    select: ["www/v11/docs/**/*.md", "www/v11/home/**/*.md", "www/blog/**/*.md"]
+    require:
+      - kind: cross_file
+        source:
+          file: "{path}"
+          extract: { regex: '(?m)^[ \t>]*// @include: (\S+)[ \t]*$' }
+        targets:
+          - file: "{path}"
+            extract: { regex: '(?m)^[ \t>]*`{3,}twoslash include (\S+)' }
+        relation: subset
+    level: error
+    message: "Every Twoslash `// @include: <name>` needs a ```twoslash include <name>``` block in the same file."
+
+  # trpc-B04 (C) — tooling/subtree inlineSharedUi fails "<target> already
+  # exists" when a subtree-synced example that depends on @shared/ui
+  # already has src/shared-ui/ (shared-ui/ when it has no src/; all five
+  # dependents have src/). C: "depends on @shared/ui" is a manifest field no
+  # path selector reads, so the five dependents are listed by hand and a
+  # new dependent needs a config edit.
+  - id: trpc-subtree-shared-ui-dir-reserved
+    kind: dir_absent
+    paths:
+      - "examples/.experimental/next-app-dir/src/shared-ui"
+      - "examples/next-minimal-starter/src/shared-ui"
+      - "examples/next-prisma-starter/src/shared-ui"
+      - "examples/next-prisma-websockets-starter/src/shared-ui"
+      - "examples/tanstack-start-sse-chat/src/shared-ui"
+    level: error
+    message: "src/shared-ui/ is reserved for the @shared/ui files subtree.yml's standalone copy inlines."
+
+  # trpc-30 (C) — oxlint `unicorn/filename-case` {case: camelCase} over the
+  # TypeScript files `turbo lint` actually lints (packages' `oxlint src`,
+  # packages/tests and tooling/{oxlint-plugin,release,subtree} `oxlint .`),
+  # with the rule's `ignore` regexes ported to globs and its overrides
+  # (examples/**, www/**, tooling/ui/** off; .tsx ignored). C: the lint rule
+  # strips leading underscores before the case check and alint's
+  # filename_case does not, so underscore-prefixed files are excluded.
+  - id: trpc-ts-filenames-camel-case
+    kind: filename_case
+    case: camel
+    paths:
+      include:
+        - "packages/{client,next,openapi,react-query,server,tanstack-react-query}/src/**/*.{ts,mts,cts}"
+        - "packages/tests/**/*.{ts,mts,cts}"
+        - "tooling/{oxlint-plugin,release,subtree}/**/*.{ts,mts,cts}"
+      exclude:
+        - "**/*{TRPC,RPC,HTTP,JSON,URL,script,unstable,next-app-dir,@trpc}*"
+        - "**/*.d.ts"
+        - "**/issue-*-*.test.ts"
+        - "**/_*"
+        - "**/vendor/**"
+        - "**/generated/**"
+        - "**/routeTree.gen.ts"
+    level: error
+    message: "TypeScript file names are camelCase (oxlint unicorn/filename-case)."
+
+  # ════════════════════════════════════════════════════════════════
+  # VALUE-ADD (not enforced by trpc; outside the coverage ratio, R3/R5)
+  # ════════════════════════════════════════════════════════════════
+
+  # trpc-03 (B-adapter) — VALUE-ADD approximation; it does not enforce the
+  # unit. pnpm refuses to install when the running pnpm (packageManager's
+  # version) does not satisfy the root engines.pnpm range (^12.0.0). This
+  # rule only compares MAJOR bands (normalize: semver-major), which is not
+  # semver range satisfaction and is wrong both ways: engines.pnpm ^12.5.0
+  # with pnpm@12.4.1 passes here though pnpm refuses it, and >=11 fires
+  # though pnpm accepts it. The unit needs a semver-range operator.
+  - id: trpc-package-manager-satisfies-engines-pnpm
+    kind: cross_file
+    source:
+      file: package.json
+      extract: { json: "$.packageManager" }
+    targets:
+      - file: package.json
+        extract: { json: "$.engines.pnpm" }
+    relation: equals
+    normalize: semver-major
+    level: info
+    message: "VALUE-ADD (major-band approximation): packageManager's pnpm major should match engines.pnpm's."
+
+  # trpc-09 (removed from the record) — VALUE-ADD, not enforced: no manypkg
+  # check that keeps the root's dependencies out of `dependencies` is
+  # established (manypkg's documented root check, as the reviewer recalls
+  # it, runs the other way; not verifiable offline). The root currently has
+  # only devDependencies, and this keeps it that way.
+  - id: trpc-root-no-prod-dependencies
+    kind: json_path_absent
+    paths: "package.json"
+    path: "$.dependencies"
+    level: info
+    message: "VALUE-ADD: the private root package.json keeps its dependencies in devDependencies."
+
+  # trpc-16 (B-adapter) — VALUE-ADD approximation; it does not enforce the
+  # unit. AGENTS.md: "One we write also needs a .claude/skills/<name>
+  # symlink ... installed ones get their link from `npx skills add`".
+  # dir_exists follows the link, so a copied directory in place of the
+  # symlink passes; only a missing link fires. The unit needs a symlink /
+  # symlink-target predicate, which alint lacks (no_symlinks is the inverse).
+  - id: trpc-agent-skill-has-claude-link
+    kind: for_each_dir
+    select: ".agents/skills/*"
+    require:
+      - kind: dir_exists
+        paths: ".claude/skills/{basename}"
+    level: info
+    message: "VALUE-ADD (approximation): every .agents/skills/<name> should have a .claude/skills/<name> link (AGENTS.md)."
+
+  # tooling/release writes one version into every packages/* manifest
+  # (@trpc/openapi gets `-alpha`) and pins their peer dependencies on each
+  # other to it, but nothing checks the state between releases.
+  - id: trpc-va-lockstep-versions
+    kind: cross_file
+    source:
+      file: "packages/server/package.json"
+      extract: { json: "$.version" }
+    targets:
+      files: "packages/{client,next,react-query,tanstack-react-query,tests,upgrade}/package.json"
+      extract: { json: "$.version" }
+    relation: equals
+    level: info
+    message: "VALUE-ADD: packages/* release in lockstep at one version."
+
+  - id: trpc-va-openapi-prerelease-version
+    kind: cross_file
+    source:
+      file: "packages/server/package.json"
+      extract: { json: "$.version" }
+    targets:
+      - file: "packages/openapi/package.json"
+        extract: { regex: '"version":\s*"([0-9]+\.[0-9]+\.[0-9]+)-alpha"' }
+    relation: equals
+    level: info
+    message: "VALUE-ADD: @trpc/openapi carries the workspace version with an -alpha suffix."
+
+  - id: trpc-va-internal-peers-pinned
+    kind: cross_file
+    source:
+      file: "packages/server/package.json"
+      extract: { json: "$.version" }
+    targets:
+      files: "packages/*/package.json"
+      extract: { json: "$.peerDependencies['@trpc/server','@trpc/client','@trpc/react-query']" }
+    relation: equals
+    allow_missing_target: true
+    level: info
+    message: "VALUE-ADD: packages/* pin their peer dependencies on each other to the released version."
+
+  # pnpm only WARNS when the running Node misses a project's engines.node
+  # (no engine-strict in this repo), so this is not enforced. The root's
+  # ^24.0.0 and www's ^24.11.0 (Vercel picks its Node from it) share
+  # .nvmrc's major; the examples' `>=20` / `>=18.15.0` floors are left out
+  # (a MAJOR comparison cannot express `>=`).
+  - id: trpc-va-engines-node-major-matches-nvmrc
+    kind: cross_file
+    source:
+      file: ".nvmrc"
+      extract: { regex: '\A[ \t]*v?([0-9]+(?:\.[0-9]+)*)' }
+    targets:
+      - file: "package.json"
+        extract: { json: "$.engines.node" }
+      - file: "www/package.json"
+        extract: { json: "$.engines.node" }
+    relation: equals
+    normalize: semver-major
+    level: info
+    message: "VALUE-ADD: engines.node (root, www) shares .nvmrc's Node major."
+
+  # Workflows that set a literal Node version instead of reading .nvmrc
+  # (subtree.yml: `24.x`) should stay on .nvmrc's major; matrix
+  # expressions such as `${{ matrix.node-start }}` are skipped as non-literal.
+  - id: trpc-va-workflow-node-major-matches-nvmrc
+    kind: cross_file
+    source:
+      file: ".nvmrc"
+      extract: { regex: '\A[ \t]*v?([0-9]+(?:\.[0-9]+)*)' }
+    targets:
+      files: ".github/workflows/subtree.yml"
+      extract:
+        yaml: "$.jobs.*.steps[?match(@.uses, '^actions/setup-node@.+')].with['node-version']"
+    relation: equals
+    normalize: semver-major
+    allow_missing_target: true
+    level: info
+    message: "VALUE-ADD: a literal setup-node version in a workflow shares .nvmrc's Node major."
+
+  # packages/server ships a copy of the root MIT LICENSE.
+  - id: trpc-va-server-license-matches-root
+    kind: cross_file
+    source:
+      file: "LICENSE"
+    targets:
+      - file: "packages/server/LICENSE"
+    relation: identical
+    level: info
+    message: "VALUE-ADD: packages/server/LICENSE is a copy of the root LICENSE."

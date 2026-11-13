@@ -1,0 +1,1300 @@
+{
+ "repo": "jestjs/jest",
+ "sha": "aa88f7cf0bfc7a3a2efbfcab97914886b22d4454",
+ "metrics": {
+  "counts": {
+   "A": 21,
+   "B-config": 3,
+   "B-adapter": 3,
+   "B-kernel": 0,
+   "B-delegate": 0,
+   "C": 5,
+   "D": 23
+  },
+  "addressable": 32,
+  "coverage_today": 66,
+  "coverage_with_tuning": 81,
+  "gap": 19,
+  "coverage_after_slice": 72,
+  "coverage_after_slice_with_entry_values": 75
+ },
+ "by_family": {
+  "locale": {
+   "counts": {
+    "A": 0,
+    "B-config": 0,
+    "B-adapter": 0,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 0,
+    "D": 0
+   },
+   "addressable": 0,
+   "coverage_today": null,
+   "coverage_with_tuning": null,
+   "gap": null,
+   "coverage_after_slice": null,
+   "coverage_after_slice_with_entry_values": null
+  },
+  "dep-version": {
+   "counts": {
+    "A": 4,
+    "B-config": 1,
+    "B-adapter": 1,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 1,
+    "D": 5
+   },
+   "addressable": 7,
+   "coverage_today": 57,
+   "coverage_with_tuning": 71,
+   "gap": 29,
+   "coverage_after_slice": 71,
+   "coverage_after_slice_with_entry_values": 86
+  },
+  "toolchain-pin": {
+   "counts": {
+    "A": 2,
+    "B-config": 0,
+    "B-adapter": 0,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 0,
+    "D": 0
+   },
+   "addressable": 2,
+   "coverage_today": 100,
+   "coverage_with_tuning": 100,
+   "gap": 0,
+   "coverage_after_slice": 100,
+   "coverage_after_slice_with_entry_values": 100
+  },
+  "other": {
+   "counts": {
+    "A": 15,
+    "B-config": 2,
+    "B-adapter": 2,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 4,
+    "D": 18
+   },
+   "addressable": 23,
+   "coverage_today": 65,
+   "coverage_with_tuning": 83,
+   "gap": 17,
+   "coverage_after_slice": 70,
+   "coverage_after_slice_with_entry_values": 70
+  }
+ },
+ "units": [
+  {
+   "id": "jest-01",
+   "summary": "yarn constraint 3: public workspaces have license MIT; private workspaces have no license field",
+   "evidence": "yarn.config.cjs:57 (constraint 3); run by .github/workflows/nodejs.yml:90-91 `yarn constraints` (static-checks job)",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "A",
+   "alint": "for_each_dir over packages/*, examples/*, website with json_path_absent filters; rules jestjs-jest-workspace-license-public, jestjs-jest-workspace-license-private",
+   "rules": [
+    "jestjs-jest-workspace-license-public",
+    "jestjs-jest-workspace-license-private"
+   ],
+   "assertion_family": "none",
+   "reason": "R7: one yarn.config.cjs rule is one unit, classified by what it asserts. A per-manifest field-value check that JSONPath filters express. Passes on the clone (R4).",
+   "fire_verified": "n/a (family other); sanity-fired anyway: a public manifest with license changed and a private manifest given a license each fired on a scratch copy",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-02",
+   "summary": "yarn constraint 4: public workspaces have repository {type: git, url: https://github.com/jestjs/jest.git, directory: <workspace path>}; private workspaces have none",
+   "evidence": "yarn.config.cjs:66 (constraint 4); nodejs.yml:90-91",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "A",
+   "alint": "for_each_dir + json_path_absent using a {path} template inside the RFC 9535 filter; rules jestjs-jest-workspace-repository-public, jestjs-jest-workspace-repository-private",
+   "rules": [
+    "jestjs-jest-workspace-repository-public",
+    "jestjs-jest-workspace-repository-public-root",
+    "jestjs-jest-workspace-repository-private"
+   ],
+   "assertion_family": "none",
+   "reason": "R7. A per-manifest field check that depends on the manifest's own directory, which for_each_dir's {path} token supplies. Passes on the clone.",
+   "fire_verified": "n/a (family other); sanity-fired: wrong repository.directory on a public package and a repository field on a private package each fired",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-03",
+   "summary": "yarn constraint 5: public workspaces have publishConfig.access public; private workspaces have no publishConfig",
+   "evidence": "yarn.config.cjs:80 (constraint 5); nodejs.yml:90-91",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "A",
+   "alint": "for_each_dir + json_path_absent; rules jestjs-jest-workspace-publish-config-public, jestjs-jest-workspace-publish-config-private",
+   "rules": [
+    "jestjs-jest-workspace-publish-config-public",
+    "jestjs-jest-workspace-publish-config-private"
+   ],
+   "assertion_family": "none",
+   "reason": "R7. A per-manifest field check. Passes on the clone.",
+   "fire_verified": "n/a (family other); sanity-fired: public publishConfig removed and private publishConfig added each fired",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-04",
+   "summary": "yarn constraint 6: every public workspace declares engines.node equal to the project-wide range literal in yarn.config.cjs",
+   "evidence": "yarn.config.cjs:89 (constraint 6, literal range in the constraint body); nodejs.yml:90-91",
+   "mechanism": "tool-config",
+   "family": "toolchain-pin",
+   "bucket": "A",
+   "alint": "cross_file (regex extract of the range from yarn.config.cjs -> json extract $.engines[?(@ == $.engines.node && $.private != true)] over every workspace manifest, allow_missing_target) jestjs-jest-workspace-engines-node-public, plus for_each_dir presence rule jestjs-jest-workspace-engines-node-present",
+   "rules": [
+    "jestjs-jest-workspace-engines-node-public",
+    "jestjs-jest-workspace-engines-node-present"
+   ],
+   "assertion_family": "none",
+   "reason": "R7. An equality between a value in a config file and a field in each public manifest, with private manifests exempt. cross_file with a filtered JSONPath target expresses it. Passes on the clone.",
+   "fire_verified": "Scratch copies of the clone: (a) a public package's engines.node edited -> fired; (b) a private workspace's engines.node edited -> correctly did not fire; (c) the range literal in yarn.config.cjs edited -> fired on every public workspace; (d) engines removed from a public package -> the presence rule fired. Every rule passed on the unmodified copy and on the clone.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-05",
+   "summary": "yarn constraint 7: main and types fields, when present, start with ./",
+   "evidence": "yarn.config.cjs:99 (constraint 7); nodejs.yml:90-91",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "A",
+   "alint": "for_each_dir + json_path_matches $['main','types'] ^\\./ if_present; rule jestjs-jest-workspace-main-types-dot-slash",
+   "rules": [
+    "jestjs-jest-workspace-main-types-dot-slash"
+   ],
+   "assertion_family": "none",
+   "reason": "R7. A per-manifest value pattern. Passes on the clone.",
+   "fire_verified": "n/a (family other); sanity-fired: main without ./ fired",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-06",
+   "summary": "Every packages/* manifest has an engines field and its engines.node equals the root package.json engines.node (private packages included)",
+   "evidence": "scripts/buildUtils.mjs:50-56 (getPackages asserts), called by scripts/build.mjs and scripts/buildTs.mjs; run by nodejs.yml:75 (build:ts) and :77 (build:js)",
+   "mechanism": "script",
+   "family": "toolchain-pin",
+   "bucket": "A",
+   "alint": "cross_file root package.json $.engines.node -> packages/*/package.json $.engines.node (equals); rule jestjs-jest-package-engines-match-root",
+   "rules": [
+    "jestjs-jest-package-engines-match-root"
+   ],
+   "assertion_family": "none",
+   "reason": "A different assertion from jest-04: its source of truth is the root manifest, not yarn.config.cjs, and it covers private packages and packages/* only (R1 keeps them apart). cross_file equality expresses it. Passes on the clone (all 55 packages match).",
+   "fire_verified": "Scratch copies: (a) packages/test-utils (private) engines.node changed -> fired; (b) root package.json engines.node changed -> fired on every package; (c) engines removed from a package -> fired. Passed on the unmodified copy and on the clone.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-07",
+   "summary": "Package entry-point shape: a package with types has main ./build/index.js and types ./build/index.d.ts; one without types has main ./index.js (folds buildTs's types == main with .js replaced by .d.ts)",
+   "evidence": "scripts/buildUtils.mjs:101-117; scripts/buildTs.mjs:38-42",
+   "mechanism": "script",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_absent with a conditional RFC 9535 filter over packages/*/package.json; rule jestjs-jest-package-main-types-canonical",
+   "rules": [
+    "jestjs-jest-package-main-types-canonical"
+   ],
+   "assertion_family": "none",
+   "reason": "R1 folds the buildTs main/types agreement into the stricter buildUtils canonical-value check. Literal values under a conditional filter. Passes on the clone.",
+   "fire_verified": "n/a (family other); sanity-fired: a TS package's main changed to ./build/main.js fired",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-08",
+   "summary": "Every bin entry in a package manifest points to an existing file relative to the package",
+   "evidence": "scripts/buildUtils.mjs:119-128",
+   "mechanism": "script",
+   "family": "other",
+   "bucket": "A",
+   "alint": "registry_paths_resolve over packages/*/package.json for object bins ($.bin.*) and string bins; rules jestjs-jest-package-bin-exists-object, jestjs-jest-package-bin-exists-string",
+   "rules": [
+    "jestjs-jest-package-bin-exists-object",
+    "jestjs-jest-package-bin-exists-string"
+   ],
+   "assertion_family": "none",
+   "reason": "A reference from manifest values to paths relative to the manifest's directory, which is what registry_paths_resolve does. Passes on the clone.",
+   "fire_verified": "n/a (family other); sanity-fired: object and string bin paths renamed each fired",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-09",
+   "summary": "Every package with a tsconfig.json declares a types field",
+   "evidence": "scripts/buildTs.mjs:36 (assert.ok(pkg.types)); nodejs.yml:75",
+   "mechanism": "script",
+   "family": "other",
+   "bucket": "A",
+   "alint": "for_each_dir packages/* when the package has tsconfig.json -> json_path_matches $.types; rule jestjs-jest-ts-package-declares-types",
+   "rules": [
+    "jestjs-jest-ts-package-declares-types"
+   ],
+   "assertion_family": "none",
+   "reason": "A per-directory conditional field check. Passes on the clone.",
+   "fire_verified": "n/a (family other); sanity-fired: types removed from a TS package fired",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-10",
+   "summary": "@jest/test-utils may never be a production dependency of any package (dev dependency only)",
+   "evidence": "scripts/buildTs.mjs:99-110 (throws 'must be declared as dev dependency'); nodejs.yml:75",
+   "mechanism": "script",
+   "family": "dep-version",
+   "bucket": "A",
+   "alint": "json_path_absent $.dependencies['@jest/test-utils'] over packages/*/package.json; rule jestjs-jest-test-utils-dev-dependency-only",
+   "rules": [
+    "jestjs-jest-test-utils-dev-dependency-only"
+   ],
+   "assertion_family": "none",
+   "reason": "A banned dependency field ('allowed and banned dependency fields' is in the dep-version family). Per-manifest absence check. Passes on the clone.",
+   "fire_verified": "Scratch copy: @jest/test-utils added to a package's dependencies -> fired; the unmodified copy and the clone pass.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-11",
+   "summary": "Every source file not on the ignore lists starts with the Meta MIT copyright header (empty files exempt)",
+   "evidence": "scripts/checkCopyrightHeaders.mjs:18-145 (GENERIC_IGNORED_EXTENSIONS :18, GENERIC_IGNORED_PATTERNS :77, CUSTOM_IGNORED_PATTERNS :98, header :121, needsCopyrightHeader :127); nodejs.yml:89 `yarn check-copyright-headers`",
+   "mechanism": "script",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_matches with a whole-file \\A alternation (empty file | header), excludes copied from the script's lists plus binary extensions; rule jestjs-jest-copyright-header",
+   "rules": [
+    "jestjs-jest-copyright-header"
+   ],
+   "assertion_family": "none",
+   "reason": "A per-file content check over a file set alint can reproduce from the script's lists. Passes on the clone, matching my simulation of the script (0 failures).",
+   "fire_verified": "n/a (family other); sanity-fired: a header removed from a .ts file fired; a blank file correctly did not fire",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-12",
+   "summary": "CHANGELOG.md PR links are well formed: [#N](https://github.com/jestjs/jest/pull/N) with matching numbers, org jestjs and type pull",
+   "evidence": "scripts/checkChangelog.mjs:11 (link regex) and its checks; .github/workflows/check-changelog.yml:33-35 `yarn check-changelog`",
+   "mechanism": "script",
+   "family": "other",
+   "bucket": "A",
+   "alint": "for_each_match on CHANGELOG.md with named groups, equal [a,b] and two forbid patterns; rule jestjs-jest-changelog-pr-links",
+   "rules": [
+    "jestjs-jest-changelog-pr-links"
+   ],
+   "assertion_family": "none",
+   "reason": "R1: one script with one link-format check (number equality, org, type) gives one unit. Regex captures plus an equality between groups express it. Passes on the clone.",
+   "fire_verified": "n/a (family other); sanity-fired: a mismatched number, a wrong org (two variants), a type of issues, and a second link on one line each fired",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-13",
+   "summary": "The root @types/node is pinned to Node 18: the devDependency range is ^18.14 and the resolutions entry is 18.x (the one exception to constraint 1)",
+   "evidence": "package.json:26 (devDependencies @types/node ^18.14), package.json:209-213 (resolutions @types/node 18.x); yarn.config.cjs EXCEPTIONS (:29); .github/copilot-instructions.md:214",
+   "mechanism": "tool-config",
+   "family": "dep-version",
+   "bucket": "A",
+   "alint": "json_path_matches and json_path_equals on package.json; rules jestjs-jest-root-types-node-18, jestjs-jest-root-types-node-resolution-18",
+   "rules": [
+    "jestjs-jest-root-types-node-18",
+    "jestjs-jest-root-types-node-resolution-18"
+   ],
+   "assertion_family": "none",
+   "reason": "An allowed range for one dependency, held by the resolutions field and documented as a project rule. Literal value checks. Passes on the clone.",
+   "fire_verified": "Scratch copies: devDependencies @types/node set to ^20 -> fired; resolutions set to 20.x -> fired; the unmodified copy and the clone pass.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-14",
+   "summary": "The npm age gate written into verify-old-ts's temporary project matches the repository's .yarnrc.yml npmMinimalAgeGate",
+   "evidence": "scripts/verifyOldTs.mjs:60-65 (comment 'the age gate has to match ours' and the hard-coded 'npmMinimalAgeGate: 3d'); .yarnrc.yml:13",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "A",
+   "alint": "cross_file yaml $.npmMinimalAgeGate -> regex in scripts/verifyOldTs.mjs; rule jestjs-jest-verify-old-ts-age-gate-matches-yarnrc",
+   "rules": [
+    "jestjs-jest-verify-old-ts-age-gate-matches-yarnrc"
+   ],
+   "assertion_family": "none",
+   "reason": "A resolution-policy value kept in sync by hand, with the invariant stated in the script. A YAML value equals a regex capture. Holds at the pin.",
+   "fire_verified": "Scratch copies: .yarnrc.yml npmMinimalAgeGate changed to 7d -> fired; the literal in verifyOldTs.mjs changed -> fired; the unmodified copy and the clone pass.",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "A",
+      "dep-version",
+      "none"
+     ],
+     "why": "Keeping verifyOldTs.mjs's npmMinimalAgeGate equal to .yarnrc.yml's syncs a release-age policy value. Section 2.3 defines dep-version as one range per dependency, workspace-protocol and catalog use, allowed and banned ranges and fields, and internal packages at the workspace version. A minimum-age gate is none of these. The bucket stays A. I reproduced the fire tests: .yarnrc.yml set to 7d fired, the script literal set to 1d fired, the literal line removed fired, and the clone passes."
+    }
+   ]
+  },
+  {
+   "id": "jest-15",
+   "summary": "packages/expect-utils/src/jasmineUtils.ts keeps its Pivotal Labs MIT license header intact (exempt from the Meta header)",
+   "evidence": "packages/expect/CLAUDE.md:20; scripts/checkCopyrightHeaders.mjs:101 (exemption)",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_starts_with; rule jestjs-jest-jasmine-utils-license-header",
+   "rules": [
+    "jestjs-jest-jasmine-utils-license-header"
+   ],
+   "assertion_family": "none",
+   "reason": "A documented, load-bearing convention that holds at the pin. A fixed prefix check.",
+   "fire_verified": "n/a (family other); sanity-fired: the header line edited fired",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-16",
+   "summary": "jest-runtime internals tests mirror production files 1:1 (each internals/__tests__/X.test.ts has an internals/X.ts)",
+   "evidence": "packages/jest-runtime/CLAUDE.md:69",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_graph derive_target + no_dangling; rule jestjs-jest-runtime-internals-tests-mirror-sources",
+   "rules": [
+    "jestjs-jest-runtime-internals-tests-mirror-sources"
+   ],
+   "assertion_family": "none",
+   "reason": "A documented convention that holds at the pin. A derived path must exist.",
+   "fire_verified": "n/a (family other); sanity-fired: an orphan test file fired",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-17",
+   "summary": "The external-matcher trap marker name in expect (packages/expect/src/index.ts:376) matches the string jest-snapshot searches for (packages/jest-snapshot/src/utils.ts:48)",
+   "evidence": "packages/jest-snapshot/CLAUDE.md:58 ('must stay in sync'); packages/expect/src/index.ts:376; packages/jest-snapshot/src/utils.ts:48",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "A",
+   "alint": "cross_file regex extract -> regex extract (equals); rule jestjs-jest-external-matcher-trap-in-sync",
+   "rules": [
+    "jestjs-jest-external-matcher-trap-in-sync"
+   ],
+   "assertion_family": "none",
+   "reason": "A documented cross-file sync invariant (snapshot stack tests exercise it indirectly). Two regex captures must be equal. Holds at the pin.",
+   "fire_verified": "n/a (family other); sanity-fired: the marker renamed in expect fired with a mismatch message",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-18",
+   "summary": "Every doc id referenced by website/sidebars.json and each versioned_sidebars file exists as a doc (front-matter id) in docs/ or the matching versioned_docs/version-X",
+   "evidence": "website/sidebars.json, website/versioned_sidebars/*; the Docusaurus build fails on unknown sidebar doc ids; netlify.toml:6 and :24 (production and deploy-preview builds)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "cross_file superset (docs front-matter ids vs sidebar JSON leaves), for_each_dir for versioned docs; rules jestjs-jest-sidebar-ids-exist, jestjs-jest-versioned-sidebar-ids-exist",
+   "rules": [
+    "jestjs-jest-sidebar-ids-exist",
+    "jestjs-jest-versioned-sidebar-ids-exist",
+    "jestjs-jest-navbar-doc-ids-exist",
+    "jestjs-jest-versioned-navbar-doc-ids-exist"
+   ],
+   "assertion_family": "none",
+   "reason": "R7: a build-time integrity check over files alint reads, extracted from the Docusaurus build. A set inclusion between two extractions. Passes on the clone.",
+   "fire_verified": "n/a (family other); sanity-fired: an unknown id in sidebars.json (doc and api sections) and in a versioned sidebar each fired",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-19",
+   "summary": ".gitattributes `* text=auto eol=lf`: text files use LF line endings",
+   "evidence": ".gitattributes:1",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "A",
+   "alint": "line_endings lf; rule jestjs-jest-text-files-lf",
+   "rules": [
+    "jestjs-jest-text-files-lf"
+   ],
+   "assertion_family": "none",
+   "reason": "Git normalizes on commit. The tree is LF at the pin.",
+   "fire_verified": "n/a (family other); sanity-fired: a CRLF file fired",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-20",
+   "summary": "Every __tests__ directory in the 19 packages named by typecheck:tests has a tsconfig.json that extends tsconfig.test.json (tsc -b over those directories)",
+   "evidence": "package.json:130 (typecheck:tests brace list); nodejs.yml:81",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "for_each_dir over a hand-copied 19-package brace list /**/__tests__ -> file_exists + json_path_matches extends; rule jestjs-jest-typechecked-tests-have-tsconfig",
+   "rules": [
+    "jestjs-jest-typechecked-tests-have-tsconfig"
+   ],
+   "assertion_family": "none",
+   "reason": "R7: the structural precondition of the tsc run (each directory must be a project) is extracted; the type check itself is D. C because the package list has to be copied by hand from the script, and it drifts when the script changes.",
+   "fire_verified": "n/a (family other); sanity-fired: a removed tsconfig and a wrong extends each fired",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-21",
+   "summary": "Every blog post's author key is defined in website/blog/authors.yml",
+   "evidence": "website/blog/authors.yml; the Docusaurus blog plugin fails the build on an unknown author key; netlify.toml:6, :24",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "cross_file regex extracts of the first and last authors in the front matter vs authors.yml keys; rules jestjs-jest-blog-authors-defined-first, jestjs-jest-blog-authors-defined-last",
+   "rules": [
+    "jestjs-jest-blog-authors-defined-first",
+    "jestjs-jest-blog-authors-defined-last"
+   ],
+   "assertion_family": "none",
+   "reason": "R7 build integrity check. C because front-matter author lists are extracted by regex, which covers only the first and last entry, so a middle author in a list of three or more is not checked.",
+   "fire_verified": "n/a (family other); sanity-fired: an unknown single author, the first list entry and the last list entry each fired",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-22",
+   "summary": ".editorconfig: 2-space indentation, trimmed trailing whitespace, final newline",
+   "evidence": ".editorconfig; CONTRIBUTING.md:201",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "C",
+   "alint": "indent_style, no_trailing_whitespace, final_newline with per-file excludes; rules jestjs-jest-editorconfig-indent-spaces, jestjs-jest-editorconfig-trim-trailing-whitespace, jestjs-jest-editorconfig-final-newline",
+   "rules": [
+    "jestjs-jest-editorconfig-indent-spaces",
+    "jestjs-jest-editorconfig-trim-trailing-whitespace",
+    "jestjs-jest-editorconfig-final-newline"
+   ],
+   "assertion_family": "none",
+   "reason": "editorconfig_conforms reports 2297 violations on JSDoc ` * ` continuation lines, which are not indentation errors. The split kinds with excludes (vendored .yarn, three fixture files) are a tuning, so C.",
+   "fire_verified": "n/a (family other); sanity-fired: a tab indent, trailing whitespace and a missing final newline each fired",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-23",
+   "summary": "yarn constraint 1: one version range per dependency across all workspaces (except @types/node)",
+   "evidence": "yarn.config.cjs:25-39; nodejs.yml:90-91",
+   "mechanism": "tool-config",
+   "family": "dep-version",
+   "bucket": "B-adapter",
+   "alint": "constraint over the workspace-manifest dependency entries grouped by dependency name, one range per name, with an exemption",
+   "rules": [],
+   "assertion_family": "unique-key",
+   "reason": "Needs (key path, value) rows: the relation layer's structured adapters (entry, TOML, XML) are key-only and the extract adapter's values carry no pointer, so no adapter today pairs a dependency or entry name with its value (batch 2 ruling). Once it exists, the assertion is unique-key: dependency name determines the range.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "bucket": "B-adapter",
+      "needs": "entry-values",
+      "assertion_family": "unique-key",
+      "reason": "Needs (key path, value) rows: the relation layer's structured adapters (entry, TOML, XML) are key-only and the extract adapter's values carry no pointer, so no adapter today pairs a dependency or entry name with its value (batch 2 ruling). Once it exists, the assertion is unique-key: dependency name determines the range."
+     }
+    }
+   ],
+   "needs": "entry-values"
+  },
+  {
+   "id": "jest-24",
+   "summary": "yarn constraint 2: no dependency appears in both dependencies and devDependencies of the same workspace",
+   "evidence": "yarn.config.cjs:41-55; nodejs.yml:90-91",
+   "mechanism": "tool-config",
+   "family": "dep-version",
+   "bucket": "B-config",
+   "alint": "constraint: per (manifest, dependency name) at most one dependency field",
+   "rules": [],
+   "assertion_family": "unique-key",
+   "reason": "R7. RFC 9535 has no access to object keys, so no JSONPath filter can intersect the two key sets. Expressed as a functional dependency, (manifest, name) to field.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-25",
+   "summary": "Every package's exports field has the exact derived shape ('.' from main/types, './package.json', plus type-only and extra entries) computed from its other fields",
+   "evidence": "scripts/buildUtils.mjs:58-99",
+   "mechanism": "script",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "needs a value-transform operator (main to the exports '.' object, .js to .d.ts) and a closed-key-set equality on objects",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "The expected value is computed from other fields with string transforms and a branch for the type-only package list. No adapter or operator derives it.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "derived-value"
+     }
+    }
+   ],
+   "needs": "derived-value"
+  },
+  {
+   "id": "jest-26",
+   "summary": "A TS package's tsconfig.json references equal the sorted paths of its internal TS workspace dependencies (scripts/buildTs.mjs:73-79).",
+   "evidence": "scripts/buildTs.mjs:20-31 (workspace name-to-location map), :45-97 (deepStrictEqual of references)",
+   "mechanism": "script",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "needs a package-name to workspace-path mapping adapter and an ordered-sequence equality operator",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "The order matters (deepStrictEqual on arrays), and names have to be mapped to relative paths. No order operator or name-to-path adapter exists (section 2.2 lists the order operator as B-adapter).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "B-adapter",
+      "dep-version",
+      "none"
+     ],
+     "why": "The unit asserts that tsconfig project references mirror internal workspace dependencies. That is a dependency-graph mirror with no version, range or field policy in it, so it belongs in other, like batch-1 trpc-13 (the dependency-cycle check, other). The bucket stays B-adapter. Correct the summary: buildTs.mjs:73-79 maps the dependency names to paths and calls .sort(), so references must equal the SORTED list, not 'dependencies then devDependencies' order. The check is also skipped when that list is empty, and it excludes jest-circus, jest-jasmine2, jest-config's @jest/test-sequencer and babel-jest, and @jest/test-utils."
+    },
+    {
+     "by": "integrator",
+     "fields": {
+      "summary": "A TS package's tsconfig.json references equal the sorted paths of its internal TS workspace dependencies (scripts/buildTs.mjs:73-79).",
+      "needs": "order"
+     }
+    },
+    {
+     "by": "audit",
+     "from": [
+      "B-adapter",
+      "other",
+      "none"
+     ],
+     "why": "Mapping package names to workspace paths (scripts/buildTs.mjs:20-31) comes before the ordered comparison, so package-graph is the capability it lacks most directly."
+    }
+   ],
+   "needs": "package-graph"
+  },
+  {
+   "id": "jest-27",
+   "summary": "A package declares @jest/test-utils as a dev dependency if and only if some __tests__/tsconfig.json in it references test-utils",
+   "evidence": "scripts/buildTs.mjs:111-153",
+   "mechanism": "script",
+   "family": "dep-version",
+   "bucket": "C",
+   "alint": "constraint: set of packages with the test-utils devDependency equals set of packages (path_capture of package dir) whose __tests__ tsconfig references test-utils",
+   "rules": [
+    "jestjs-jest-test-utils-dev-dependency-iff-referenced",
+    "jestjs-jest-test-utils-dev-dependency-needs-tests-tsconfig"
+   ],
+   "assertion_family": "none",
+   "reason": "Expressible with for_each_dir plus cross_file set_equals (Stage B, Stage C), but the devDependency side is a regex read of a JSON key restricted to the flat devDependencies object, which is layout-dependent (batch 2 ruling: a regex read of a JSON key is C).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "B-config",
+      "dep-version",
+      "set"
+     ],
+     "why": "Today's kinds express it, so the B-config set label does not hold. Two rules do it. (1) for_each_dir over packages/* with when_iter 'iter.has_file(\"tsconfig.json\") and iter.has_file(\"package.json\") and iter.has_file(\"**/__tests__/tsconfig.json\")', requiring cross_file relation set_equals. Its source.files is '{path}/**/__tests__/tsconfig.json' with extract regex '\"path\":\\s*\"[^\"]*(test-utils)\"' (a unioned set, empty when nothing references test-utils). Its target file is '{path}/package.json' with extract regex '\"@jest/(test-utils)\":\\s*\"'. (2) for_each_dir with the same filter but 'not iter.has_file(\"**/__tests__/tsconfig.json\")', requiring json_path_absent $.devDependencies['@jest/test-utils']. Fire-verified on a scratch copy; both rules pass on the copy and on the read-only clone. These breaks fired: devDependency removed from jest-core (whose tsconfigs reference test-utils); jest-core's tsconfig references removed (devDependency kept); devDependency added to jest-mock (no reference); a reference added to jest-mock's __tests__ tsconfig (no devDependency); devDependency added to jest-types (no __tests__ tsconfig), caught by rule 2. Caveat: the package.json regex matches the key in any dependency field, not only devDependencies. jest-10 bans the dependencies field, and peerDependencies and optionalDependencies never carry it. The regex form matches batch-1 trpc-B01, which was A. An integrator who counts regex reads of JSON keys as a tuning should use C."
+    },
+    {
+     "by": "integrator",
+     "fields": {
+      "bucket": "C",
+      "reason": "Expressible with for_each_dir plus cross_file set_equals (Stage B, Stage C), but the devDependency side is a regex read of a JSON key restricted to the flat devDependencies object, which is layout-dependent (batch 2 ruling: a regex read of a JSON key is C)."
+     }
+    }
+   ]
+  },
+  {
+   "id": "jest-28",
+   "summary": "Every version in website/versions.json has a website/versioned_docs/version-X directory (and a versioned sidebar)",
+   "evidence": "website/versions.json; the Docusaurus docs plugin fails the build on a listed version without its folder; netlify.toml:6, :24",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-config",
+   "alint": "constraint: each JSON array value, with a version- prefix, references an existing directory",
+   "rules": [],
+   "assertion_family": "reference",
+   "reason": "R7 build integrity check. registry_paths_resolve resolves values as paths but cannot add the version- prefix. A reference relation with a templated target expresses it.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-29",
+   "summary": "ESLint passes (repository config, custom .eslintplugin rules, import/no-extraneous-dependencies, markdown code blocks)",
+   "evidence": "package.json:114; eslint.config.mjs; .eslintplugin/index.mjs; nodejs.yml:85",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "eslint",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2/R7: code analysis of source.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-30",
+   "summary": "Prettier formatting check on non-JS files",
+   "evidence": "package.json:115-117; nodejs.yml:87 `yarn lint:prettier:ci`",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "prettier",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2: formatter.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-31",
+   "summary": "Type checks: typecheck:examples and typecheck:tests (tsc)",
+   "evidence": "package.json:128-130; nodejs.yml:79, :81",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tsc",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2: type checker (the directory-layout precondition is extracted as jest-20).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-32",
+   "summary": "build:js and build:ts succeed (webpack/babel build, tsc -b emit)",
+   "evidence": "package.json:99-100; nodejs.yml:75, :77",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "node scripts/build.mjs, scripts/buildTs.mjs",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R7: running the build (the manifest assertions those scripts make are extracted as jest-06 to jest-10 and jest-25 to jest-27).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-33",
+   "summary": "Built .d.ts files contain no type reference directives other than node, and a package whose .d.ts references node depends on @types/node '*'",
+   "evidence": "scripts/buildTs.mjs:180-245",
+   "mechanism": "script",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "node scripts/buildTs.mjs",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R7: inspects build output (build/**/*.d.ts), which does not exist in the tree, so the build must run.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-34",
+   "summary": "bundle:ts (API Extractor bundles type definitions)",
+   "evidence": "package.json:101; scripts/bundleTs.mjs",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "api-extractor",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R7: build and type analysis.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-35",
+   "summary": "verify-pnp: Jest works under a Yarn PnP install",
+   "evidence": "package.json:132; scripts/verifyPnP.mjs; nodejs.yml:83",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "node scripts/verifyPnP.mjs",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R7: package-manager install and running the code.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-36",
+   "summary": "verify-old-ts: published types compile with the oldest supported TypeScript",
+   "evidence": "package.json:131; scripts/verifyOldTs.mjs; nodejs.yml ts-compatibility job",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "node scripts/verifyOldTs.mjs",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R7: installs and type checks a temporary project (the age-gate sync inside the script is extracted as jest-14).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "toolchain-pin",
+      "none"
+     ],
+     "why": "A compile under the oldest supported TypeScript is a type check, not versions agreeing across files (section 2.3); tq-51 and trpc-52, the same check, are other."
+    }
+   ]
+  },
+  {
+   "id": "jest-37",
+   "summary": "Type-level tests and TS-aware checks: lint-ts-files, test-ts, test-types (tstyche), test-with-type-info",
+   "evidence": "package.json:118, :123, :124; nodejs.yml:55 and the ts-compatibility job",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "eslint (type info), jest, tstyche",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2: linters, type checkers and test runners.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-38",
+   "summary": "Test suite passes across the OS by Node matrix (shards, coverage, node-env, jasmine2 runner, leak detection, ESM vm-modules, watchman; nightly runs folded in)",
+   "evidence": ".github/workflows/test.yml, test-nightly.yml, nightly.yml, nodejs.yml test jobs",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "jest",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R2: test runner.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-39",
+   "summary": "yarn --immutable: the lockfile is up to date with the manifests",
+   "evidence": "nodejs.yml:73; check-changelog.yml:32",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "yarn",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R7: lockfile freshness needs package-manager resolution.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-40",
+   "summary": "yarn dedupe --check: no duplicate resolvable package versions in the lockfile",
+   "evidence": "nodejs.yml:92-93",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "yarn",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R7: package-manager resolution semantics (named as D in the ruling).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-41",
+   "summary": "A labelled PR carries a changelog entry that names its own PR number",
+   "evidence": "check-changelog.yml:36-40 `yarn check-changelog $PR_NUMBER`; require-changelog.yml:27 (labeling via GitHub API)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "node scripts/checkChangelog.mjs, scripts/requireChangelog.mjs",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R7: needs external state (PR number, labels, changed files from the GitHub API).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-42",
+   "summary": "Netlify website build succeeds (Docusaurus production and deploy previews)",
+   "evidence": "netlify.toml:6, :24; website/package.json",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "docusaurus build",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R7: running the build (its file-level integrity checks are extracted as jest-18, jest-21 and jest-28).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-43",
+   "summary": "Contributor License Agreement signed (CLA bot)",
+   "evidence": "CONTRIBUTING.md:147-149",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "external CLA bot",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Network and external state.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-44",
+   "summary": "Documentation conventions that need judgment or semantics: copy relevant doc changes into versioned_docs, the jest-config option checklist, agent docs kept accurate ('trust the code, fix this file'), expect type tests in the right place",
+   "evidence": "CONTRIBUTING.md:145; .github/copilot-instructions.md:240; per-package CLAUDE.md files",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "D",
+   "alint": "human review",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Needs semantic judgment of whether content is relevant or accurate, with no mechanical invariant in the files.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "jest-B01",
+   "summary": "Every workspace: dependency or resolution in a workspace manifest names an existing workspace (the 53 internal names, 297 workspace:* specifiers, including the root resolutions path keys such as @testing-library/react-native/jest-matcher-utils)",
+   "evidence": "`yarn --immutable` in every CI job (nodejs.yml:45,73,144,169,211,244; test.yml:32,62; check-changelog.yml:32; prepare-cache.yml:31). The committed .yarn/releases/yarn-4.18.0.cjs contains the getWorkspaceByDescriptor/getWorkspaceByIdent throw `Workspace not found (...)`. Root workspaces: package.json:136-140",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "A",
+   "alint": "cross_file relation superset; source.files '{package.json,packages/*/package.json,website/package.json,examples/*/package.json}' extract json $.name (unioned); targets.files is the same glob with extract regex '\"(?:(?:@[^\"/]+/)?[^\"/@]+/)*((?:@[^\"/]+/)?[^\"/@]+)\"\\s*:\\s*\"workspace:'; allow_missing_target: true. Suggested id jestjs-jest-workspace-refs-resolve. It is not in Stage A's config.",
+   "rules": [
+    "jestjs-jest-workspace-refs-resolve"
+   ],
+   "assertion_family": "none",
+   "reason": "R7, following batch-1 trpc-B01 (A, dep-version). Yarn's name lookup runs over manifests alint reads. Stage A folded it into jest-39 (lockfile freshness, D), but the lookup can fail by itself when a package is renamed, and today's kinds express it. The regex takes the last name segment of a resolution path key, so the root's @testing-library/... resolutions are covered.",
+   "fire_verified": "Probe config on a scratch copy of the clone: it passes on the copy and on the read-only clone. Each break fired: packages/jest-cli dependency jest-util renamed to jest-utilx; packages/jest-mock name changed to jest-mocks (fired for package.json and every dependent); the resolution key @testing-library/react-native/pretty-format changed to .../pretty-formatz; the scoped root devDependency @jest/globals changed to @jest/globalz.",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "jest-B02",
+   "summary": "Workspace names are unique across the workspace manifests (root, packages/*, website, examples/*)",
+   "evidence": "`yarn --immutable` in every CI job. The committed .yarn/releases/yarn-4.18.0.cjs throws `Duplicate workspace name ${ident}: ${cwd} conflicts with ${cwd}` when a project is loaded. At the pin there are 71 workspace manifests and no duplicate names (checked by reading them).",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-config",
+   "alint": "constraint unique-key over the workspace manifests ($.name -> manifest path). unique_by keys on path templates only, and cross_file has no uniqueness relation.",
+   "rules": [],
+   "assertion_family": "unique-key",
+   "reason": "R7, following batch-1 trpc-B05 (B-config unique-key, other): one manifest per name across a group. Unlike trpc-B05, the error text is confirmed offline in the committed Yarn bundle.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "jest-B03",
+   "summary": "Every patch: resolution in a workspace manifest names a committed patch file (.yarn/patches/*.patch)",
+   "evidence": "package.json:212 and :218-221 (@types/mdx, lru-cache x3 and ts-node patch: resolutions in the ~/ and ./ forms); .yarn/patches holds the three files. `yarn --immutable` in every CI job fails to resolve a patch: descriptor whose file is missing.",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "A",
+   "alint": "registry_paths_resolve x2: jestjs-jest-yarn-patches-resolve-root-relative (~/ from the project root), jestjs-jest-yarn-patches-resolve-manifest-relative (other paths from the manifest)",
+   "rules": [
+    "jestjs-jest-yarn-patches-resolve-root-relative",
+    "jestjs-jest-yarn-patches-resolve-manifest-relative"
+   ],
+   "assertion_family": "none",
+   "reason": "R7: a protocol reference in manifests that must resolve to a file alint reads, as trpc-B01 (workspace:) and trpc-10 (catalog:). Yarn resolves ~/ from the project root and other paths from the manifest, so two rules with different bases express it.",
+   "fire_verified": "Probe on a scratch copy: it passes on the copy and on the clone. It fired when .yarn/patches/ts-node-npm-10.9.1-6c268be7f4.patch was deleted (./ form) and when the @types/mdx patch was renamed (~/ form).",
+   "origin": "B",
+   "changes": [
+    {
+     "by": "audit",
+     "fields": [
+      "alint",
+      "reason"
+     ],
+     "why": "Stage C split the rule by base, so the caveat about ~/ is outdated."
+    }
+   ]
+  },
+  {
+   "id": "jest-B04",
+   "summary": "normalizeIcons in @jest/test-utils keeps its Windows-to-POSIX icon mapping (failed ×→✕, success √→✓) in sync with jest-util's ICONS",
+   "evidence": "packages/test-utils/src/normalizeIcons.ts:13 ('Make sure to keep in sync with `jest-util/src/specialChars`'), :15-16; packages/jest-util/src/specialChars.ts:12,14",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "C",
+   "alint": "two cross_file set_equals rules. (1) The Windows codes: specialChars regex \"isWindows \\? '(\\\\u[0-9A-Fa-f]{4})' : '\\\\u[0-9A-Fa-f]{4}'\" vs normalizeIcons regex \"new RegExp\\('(\\\\u[0-9A-Fa-f]{4})', 'gu'\\)\". (2) The POSIX codes: specialChars \"isWindows \\? '\\\\u[0-9A-Fa-f]{4}' : '(\\\\u[0-9A-Fa-f]{4})'\" vs normalizeIcons \"'gu'\\), '(\\\\u[0-9A-Fa-f]{4})'\\)\".",
+   "rules": [
+    "jestjs-jest-normalize-icons-windows-codes-in-sync",
+    "jestjs-jest-normalize-icons-posix-codes-in-sync"
+   ],
+   "assertion_family": "none",
+   "reason": "A load-bearing comment (R5), of the same kind as jest-17, which Stage A counted as A. It holds at the pin. C, not A: a capture group must be one contiguous substring, so the (windows, posix) pairing cannot be compared. Two set rules catch any code changed on one side only, but miss a swapped pairing.",
+   "fire_verified": "n/a (family other). Sanity-fired on a scratch copy: changing the Windows success code in specialChars.ts fired rule 1, and changing the POSIX failed code fired rule 2. Both pass on the clone.",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "jest-B05",
+   "summary": "No memory leaks: jest-mock, jest-diff, jest-source-map and pretty-format tests pass under --detectLeaks",
+   "evidence": "package.json:122 test-leak; nodejs.yml:129-148 test-leak job",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "jest --detectLeaks",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R1 calibration: leak detection is a behavior separate from 'tests pass', as tokio's valgrind and miri are. Stage A folded it into jest-38. R2: D.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "jest-B06",
+   "summary": "Type-level tests of the public API pass (tstyche over packages/*/__typetests__, TypeScript >=5.4 <6.0)",
+   "evidence": "package.json:124 test-types; tstyche.json; nodejs.yml:50-51 (ts-compatibility)",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tstyche",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "R1: type-level assertions are a separate behavior from type-aware ESLint (lint-ts-files) and from the TS-config integration tests that jest-37 lumps them with. R2: D.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "jest-B07",
+   "summary": "A docs change is copied into each older versioned_docs copy where it is still relevant",
+   "evidence": "CONTRIBUTING.md:145",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "D",
+   "alint": "human review",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Split out of jest-44 under R1: it can pass or fail independently of the other conventions jest-44 lumps. Whether a change is relevant needs judgment.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "jest-B08",
+   "summary": "Adding a config option touches every site: type, ValidConfig, Defaults, normalize, the global/project split, Descriptions, Deprecated and docs",
+   "evidence": "packages/jest-config/CLAUDE.md:15-27",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "D",
+   "alint": "human review",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Split out of jest-44 under R1. The sites are TS source tables (code analysis). The mechanical subset does not hold at the pin: 32 of the 106 ValidConfig initialOptions keys have no `### ` heading in docs/Configuration.md, and 53 have no Descriptions.ts entry (measured), so R5 also rules out an A form.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "jest-B09",
+   "summary": "Type tests for expect matchers live in packages/jest-types/__typetests__/expect/, not in packages/expect/__typetests__/",
+   "evidence": ".github/copilot-instructions.md:36",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "D",
+   "alint": "human review",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Split out of jest-44 under R1. Deciding whether a type test is about a matcher signature or about an internal expect concern needs semantic judgment.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "jest-B10",
+   "summary": "A change adds no new peer-dependency warnings at install; the existing ones are accepted",
+   "evidence": ".github/copilot-instructions.md:224 ('Peer-dep warnings: existing ones are expected, but new ones are not — resolve before merging')",
+   "mechanism": "convention",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "yarn install output, reviewed by hand",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "A documented review rule about dependency declarations. Checking it needs the package manager's peer-dependency resolution (R7 D).",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "jest-B11",
+   "summary": "Source-code conventions from the agent instructions: an *Options constructor bag for classes with more than three dependencies, one readonly field per dependency, no abbreviated names, comments only for a non-obvious why, narrowing with isError instead of a cast, typed jest.fn mocks",
+   "evidence": ".github/copilot-instructions.md:92-137; CONTRIBUTING.md:208 ('Avd abbr wrds')",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "D",
+   "alint": "human review",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "Code analysis and judgment over source (R2/R7). Recorded so the D count is honest. Strictly, R1 would split this cluster into about five D units. That does not change any coverage figure.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  }
+ ],
+ "removed": [],
+ "rejected_stage_b": {},
+ "value_add": [
+  "jestjs-jest-va-package-manager-matches-yarn-path: packageManager yarn@4.18.0 agrees with .yarnrc.yml yarnPath .yarn/releases/yarn-4.18.0.cjs (semver-minor) (toolchain-pin)",
+  "jestjs-jest-va-node-floor-coherent: the Node floor in engines.node agrees, by major version, with @tsconfig/nodeNN in tsconfig.json and tsconfig.typetest.json and with the first Node of the test.yml and nodejs.yml vm-modules matrices (toolchain-pin)",
+  "jestjs-jest-va-agent-doc-engines-in-sync: .github/copilot-instructions.md 'Node engines' text matches root engines.node (toolchain-pin)",
+  "jestjs-jest-va-package-versions-match-lerna: package versions share lerna.json's major version (semver-major, because lerna fixed mode leaves 30.5.0, 30.5.1 and 30.5.2 in the tree) (dep-version)",
+  "jestjs-jest-va-workspace-protocol-star: internal dependencies use workspace:* (dep-version)",
+  "jestjs-jest-va-renovate-age-matches-yarnrc: renovate.json minimumReleaseAge '3 days' agrees with .yarnrc.yml npmMinimalAgeGate 3d (dep-version)",
+  "jestjs-jest-va-crowdin-locales-enabled-on-site: every crowdin.yaml language mapping is a locale enabled in website/i18n.mjs (locale)",
+  "jestjs-jest-va-site-locales-mapped-in-crowdin: every non-en site locale is mapped in crowdin.yaml (locale)",
+  "jestjs-jest-va-crowdin-download-languages: crowdin.yaml mapped languages set_equals the --language flags of the crowdin:download script (locale)",
+  "jestjs-jest-va-actions-pinned: GitHub Actions are pinned to full commit SHAs (pinned_references); every action is SHA-pinned but nothing checks it"
+ ],
+ "value_add_rules": [
+  "jestjs-jest-va-package-manager-matches-yarn-path",
+  "jestjs-jest-va-node-floor-coherent",
+  "jestjs-jest-va-agent-doc-engines-in-sync",
+  "jestjs-jest-va-package-versions-match-lerna",
+  "jestjs-jest-va-workspace-protocol-star",
+  "jestjs-jest-va-renovate-age-matches-yarnrc",
+  "jestjs-jest-va-crowdin-locales-enabled-on-site",
+  "jestjs-jest-va-site-locales-mapped-in-crowdin",
+  "jestjs-jest-va-crowdin-download-languages",
+  "jestjs-jest-va-actions-pinned"
+ ],
+ "absent_categories": [
+  "committed locale files and locale gates: translations are gitignored (/website/i18n/*) and fetched from Crowdin only in the Netlify production build",
+  ".nvmrc, .node-version, .tool-versions, Volta pins",
+  "git hooks (husky, lefthook, pre-commit, lint-staged, simple-git-hooks)",
+  "CODEOWNERS",
+  "codegen freshness diffs (no generate-then-git-diff step)",
+  "SPDX headers and per-package LICENSE files (0 of 55 packages)",
+  "Yarn or pnpm catalogs",
+  "CI systems other than GitHub Actions and Netlify",
+  "an import-layering or architecture firewall outside eslint",
+  "a commit-message or PR-title lint",
+  "changesets, beachball or a version-plan gate (lerna fixed mode, no check)"
+ ],
+ "unusual": [
+  "Several manifest invariants are not in a lint step. getPackages() in scripts/buildUtils.mjs and scripts/buildTs.mjs assert them as side effects of the build: engines equal to root, canonical main/types, the exact exports shape, bin existence, tsconfig references equal to internal dependencies, and the @jest/test-utils rules. They are only gated because build:js and build:ts run in CI.",
+  "Load-bearing conventions live in agent-instruction files: .github/copilot-instructions.md (imported by CLAUDE.md), 14 per-package CLAUDE.md files, and a .claude/settings.json deny list for agents. Examples are the matcher-trap sync, the Jasmine license header and the runtime internals 1:1 mirror.",
+  "checkCopyrightHeaders.mjs says its ignore list 'must be in sync with internal Facebook tools'. Three CUSTOM_IGNORED_PATTERNS entries name files that no longer exist (the haste-map watchers common.js, NodeWatcher.js and RecrawlWarning.js).",
+  "The typecheck:tests script hard-codes a 19-package brace list. jest-pattern and jest-snapshot-utils have __tests__ directories with no tsconfig, outside the list, so the convention of appending new packages is not enforced.",
+  "netlify.toml carries a stale YARN_VERSION 3.6.4 and NODE_VERSION 20, while the repository runs Yarn 4.18.0 via yarnPath and engines allow Node 18.",
+  "Locale lists are hand-synced in three places: website/i18n.mjs, crowdin.yaml (zh-CN mapped to zh-Hans) and the crowdin:download --language flags. No check covers them, and the translations themselves are never committed.",
+  "lerna.json is fixed mode at 30.5.2, yet the tree holds three package versions (35 at 30.5.2, 12 at 30.5.1, 8 at 30.5.0) because only changed packages are bumped.",
+  "The checkChangelog.mjs link regex leaves the dot in github.com unescaped.",
+  "CONTRIBUTING requires alphabetically ordered changelog entries and a fixed section format, but CHANGELOG.md violates both historically, so they are not counted (R5).",
+  "One tracked file sits under a gitignored node_modules path (e2e/retain-all-files/node_modules/retainAllFiles.test.js), and alint's walker does not see it.",
+  "The repository has two symlinks: e2e/transform-linked-modules/ignored/symlink.js and packages/jest-resolve/src/__mocks__/bar/node_modules/foo.",
+  "Every GitHub Action is pinned to a commit SHA, but no check enforces the pinning.",
+  "Two age gates guard dependency resolution: npmMinimalAgeGate 3d in .yarnrc.yml and Renovate minimumReleaseAge, and verifyOldTs.mjs copies the gate into its temporary project.",
+  "codecov is configured with require_ci_to_pass false (advisory only)."
+ ],
+ "check_result": "`alint validate-config` reports 42 rules loaded: 32 for the A and C units, 10 value-add rules at level info. `alint check` on the clone passes all 42 rules: 0 violations, 0 analysis failures, exit 0. Earlier drafts did fail, and I fixed each case: binary files reported as 'not valid UTF-8' by file_content_matches (fixed with a binary-extension exclude); 20 lerna-version mismatches from fixed-mode partial bumps (value-add only, relaxed to semver-major); 2297 editorconfig_conforms hits on JSDoc continuation lines (replaced by separate indent, trailing-whitespace and final-newline rules with documented excludes, counted as C). git status on the clone is clean.",
+ "stage_b_config_issues": [
+  "Reproduced: `alint validate-config` loads 42 rules, and `alint check` on the clone passes with exit 0. Fire tests for every A unit in toolchain-pin and dep-version reproduced on my own scratch copy. jest-04: a public package's engines.node edit, the yarn.config.cjs literal edit, and engines removed (presence rule) each fired; a private test-utils edit fired only jest-06, as designed. jest-06: the root engines edit and the test-utils edit fired. jest-10: fired on jest-mock, and correctly stayed silent on babel-preset-jest, which has no tsconfig and which buildTs skips. jest-13: both the ^20 devDependency and the 20.x resolution fired. jest-14: fired three ways. No Stage A fire claim failed.",
+  "jest-18 rule scope gap: docusaurus.config.mjs navbar items `type: 'doc', docId: 'getting-started'` and `docId: 'api'` are also doc-id references that Docusaurus resolves per docs version. Renaming docId 'api' to 'apix' passed the config on a scratch copy. Add a cross_file superset (docs front-matter ids vs regex \"docId: '([^']+)'\" over website/docusaurus.config.mjs), and its versioned twin under for_each_dir. A second fidelity gap: the source reads only front-matter `id:`, so a new doc without `id:` (Docusaurus derives the id from the file name) would be a false positive. Every doc has `id:` at the pin.",
+  "jest-18, jest-21, jest-28 and jest-42 rest on the Netlify deploy preview being a merge gate, and that is unverified. nodejs.yml has a `merge_group:` trigger, which suggests a merge queue, and Netlify does not build merge-queue refs, so it is probably not a required check. The same inference applies to check-changelog.yml (jest-12), which also lacks merge_group. This needs an integrator decision. If the Netlify checks are advisory, jest-18, -21 and -28 leave the ratio (R5). Batch-1 precedent is mixed: yarnpkg-berry-40 kept the Netlify docs build as D only, while trpc-B02 extracted a docs-tool check.",
+  "jest-28's summary says '(and a versioned sidebar)', but nothing verifies that Docusaurus requires the sidebar. The config itself treats a missing versioned sidebar as allowed (allow_missing_target: true in jestjs-jest-versioned-sidebar-ids-exist). Drop that clause from the summary.",
+  "jest-24 (no dependency in both dependencies and devDependencies) is tagged unique-key. Batch-1 trpc-08, the same assertion as manypkg MULTIPLE_DEPENDENCY_TYPES, is committed as `set`. The integrator must align them. I keep unique-key: section 2.2 says a functional dependency counts as unique-key, and (manifest, name) -> field is one, which the key-only entry adapter can supply, since key paths carry the field. Under that reading trpc-08 should move.",
+  "jest-23 is tagged B-config unique-key, which is consistent with the committed yarnpkg-berry-01 and trpc-05. But batch 1 also ruled that a value per key needs (key, value) rows the key-only entry adapter cannot emit (B-adapter). One range per dependency reads the value. Stage A raised this tension correctly; the integrator should resolve it for all three repositories at once.",
+  "The config comment above the buildTs.mjs block says the @jest/test-utils biconditional is 'B-config set: no rules'. It is expressible (see the jest-27 reclassification). Add the two rules.",
+  "jestjs-jest-workspace-repository-public (jest-02) iterates only packages/*, examples/* and website. The root package.json is not covered, unlike the license, publishConfig and engines public rules, which include it. This is harmless while the root is private, but the scope is inconsistent with the other constraint rules.",
+  "jest-11 cannot see e2e/retain-all-files/node_modules/retainAllFiles.test.js. It is tracked, gitignored, and in the script's `git ls-files` set. It is the known walker defect class: alint sees 88 of the 89 tracked */node_modules/* files. Binary skipping is by extension list, not by content as isBinaryFileSync does it.",
+  "Record hygiene: the jest-10 alint field says 'over packages/*/package.json', but the config is for_each_dir limited to packages with a tsconfig.json. That matches buildTs's packagesWithTs, so the config is right and the record text is wrong. The notes contradict themselves on counts ('22 A ... plus nothing else', then 19; 'dep-version 10 ... makes 11').",
+  "Borderline, for the integrator: the value-add rule jestjs-jest-va-agent-doc-engines-in-sync checks a fact the repository's own doc rule covers. .github/copilot-instructions.md:240 says 'Trust the code over this file. When something contradicts what you see, fix this file as part of your change.' Stage A counted other agent-doc conventions under R5 (jest-15, -16, -17). If this generic doc-accuracy convention is counted too, the Node engines range quoted at line 3 is an A toolchain-pin unit, like calibration M1, and jest-44's 'agent docs kept accurate' clause should be split.",
+  "Netlify is not the only external surface: pkg-pr-new.yml runs on every push and PR (yarn build plus a networked publish). It adds no static unit, but Stage A's where-to-look scan does not mention it."
+ ],
+ "stage_b_summary": "Stage A's record is careful and its config is sound. I reproduced validate-config (42 rules) and a clean check on the clone. Every claimed fire test for the toolchain-pin and dep-version A units (jest-04, -06, -10, -13, -14) also fired on my own scratch copy, and I found no R4 failures among the A rules. Stage A's main misses come from treating `yarn --immutable` only as lockfile freshness. Batch 1 has precedents for Yarn's manifest-level integrity checks, and two strings are confirmed in the committed .yarn/releases/yarn-4.18.0.cjs. jest-B01 (every workspace: specifier names a workspace) is A, dep-version, and fire-verified. jest-B02 (unique workspace names, 'Duplicate workspace name') is B-config unique-key. jest-B03 (patch: resolutions name committed .yarn/patches files) is A and fire-verified, with lower confidence: the integrator may treat it as an install precondition. Stage A also missed a load-bearing 'keep in sync' comment, normalizeIcons.ts against jest-util specialChars (C, pairing not expressible). It under-counted D under R1: leak detection and tstyche were folded into lumped units, jest-44 lumps four independent conventions, and the peer-dependency-warning rule and the code-pattern conventions were missing (all D, so coverage is unaffected). One B-config unit is really expressible today. jest-27, the @jest/test-utils devDependency-iff-tsconfig-reference biconditional, is expressed by for_each_dir plus cross_file set_equals over regex captures plus a companion json_path_absent. It passes on the clone and fired in all five break directions, so it moves to A. Family fixes: jest-14 (age-gate sync) and jest-26 (tsconfig references mirror) go to other. jest-26's summary misstates its order: buildTs sorts the list. Main config issues: jest-18 does not cover the navbar docId references (verified gap). The Netlify-derived units (jest-18, -21, -28, -42) depend on unverified gating, and the merge_group trigger hints that Netlify is not required. jest-24 conflicts with committed trpc-08 on unique-key versus set. jest-02's public rule skips the root. Revised tally if accepted: 55 units, A 22, B-config 4, B-adapter 2, C 4, D 23. That gives coverage_today 22/32 ≈ 69% (Stage A had 19/28 ≈ 68%), with tuning 81% and gap 19%. dep-version becomes 12 units: A 5 (jest-10, -13, -27, -B01, -B03), B-config 2, D 5, so 71% today. toolchain-pin is unchanged: 2 A and 1 D. locale stays 0 enforced; I confirmed translations are gitignored and only the non-gating production build touches Crowdin. The clone is untouched, and <scratch>/jestjs-jest-b has been removed.",
+ "notes": "Counts: 44 units. 22 A (jest-01 to jest-19 plus nothing else), 3 C (jest-20 to jest-22), 4 B-config (jest-23 and jest-24 unique-key, jest-27 set, jest-28 reference), 2 B-adapter (jest-25, jest-26), 16 D (jest-29 to jest-44). Correction to the line above: A is jest-01 to jest-19, which is 19 units, so the split is A 19, C 3, B-config 4, B-adapter 2, D 16. By family: dep-version 10 (A: jest-10, -13, -14; B-config: jest-23, -24, -27; B-adapter: jest-26; D: jest-33, -35, -39, -40 makes 11. Exact list: jest-10, 13, 14, 23, 24, 26, 27, 33, 35, 39, 40 = 11); toolchain-pin 3 (A: jest-04, jest-06; D: jest-36); locale 0; other is the rest (30). Caveats: (1) Netlify deploy-preview requiredness cannot be checked from a depth-1 clone (branch protection is not visible), so jest-18, -21, -28 and -42 count as gated under R7 on the assumption that a failing Netlify build blocks merges. Stage B may want to downgrade them. (2) jest-23 follows the stratum's syncpack example (unique-key B-config), even though the entry adapter is key-only. Reading a range per dependency needs (key, value) rows from the dependencies object, so the B-adapter ruling could apply instead; flagged for integration. (3) jest-12 counts the org, type and number checks of one regex as one unit (R1). (4) jest-07 folds buildTs's types == main.replace('.js', '.d.ts') into the stricter buildUtils canonical-value assertion (R1). (5) jest-14, -15, -16 and -17 are conventions documented in scripts or agent files that hold at the pin, not CI checks. (6) jest-11's alint rule excludes binary extensions the script never encounters as text; my simulation of the script found 0 failures (49 blank files skipped), matching alint. (7) One tracked-but-gitignored file is not seen by alint's walker (stratum defect class). (8) Not counted under R5: changelog alphabetical order and section format (violated at the pin), 'append new package to typecheck:tests' (violated), codecov (advisory), lerna uniform versions (not checked), the nightly issue notification. (9) The fire tests ran on scratch copies under <scratch>/jestjs-jest-a/, which is now deleted; for every A unit in toolchain-pin and dep-version, all rules passed on the unmodified copy and the targeted rule fired after the break. No corpus code was run; only the alint binary at target/release/alint.",
+ "stage_c": {
+  "changes": [
+   {
+    "rule_id": "jestjs-jest-workspace-refs-resolve",
+    "unit": "jest-B01",
+    "action": "added",
+    "detail": "Stage B's form: cross_file superset. Source is the union of $.name over the 71 workspace manifests (root, packages/*, website, examples/*). The target regex captures the key of every entry whose value starts with workspace:, using the last package name of a resolution path key. Passes on the clone and on the scratch base. Fired on 4 breaks: jest-cli dependency jest-util renamed to jest-utilx; packages/jest-mock name changed to jest-mocks (fired for the root and every dependent manifest); root resolution key @testing-library/react-native/pretty-format changed to pretty-formatz; root devDependency @jest/globals changed to @jest/globalz."
+   },
+   {
+    "rule_id": "jestjs-jest-yarn-patches-resolve-root-relative",
+    "unit": "jest-B03",
+    "action": "added",
+    "detail": "Stage B's registry_paths_resolve, split by base to remove its ~/ caveat. This rule covers the ~/ form with base: lint_root, since Yarn resolves ~/ from the project root. Passes on the clone. Fired when .yarn/patches/@types-mdx-npm-2.0.14-ebb2ecb0d6.patch was renamed. Control: a ~/ patch added to packages/jest-cli/package.json that points at an existing root patch passed, as it should."
+   },
+   {
+    "rule_id": "jestjs-jest-yarn-patches-resolve-manifest-relative",
+    "unit": "jest-B03",
+    "action": "added",
+    "detail": "Covers the ./ and bare-relative forms, resolved from the declaring manifest's directory (the default registry_dir). The capture stops at a :: suffix. Passes on the clone. Fired when .yarn/patches/ts-node-npm-10.9.1-6c268be7f4.patch was deleted (root ./ form), and on a packages/jest-cli ./ patch whose file is missing under that package. Control: the same descriptor passed once the file existed under packages/jest-cli/.yarn/patches."
+   },
+   {
+    "rule_id": "jestjs-jest-test-utils-dev-dependency-iff-referenced",
+    "unit": "jest-27",
+    "action": "added",
+    "detail": "Stage B's form. for_each_dir packages/* with when_iter (tsconfig.json, package.json, **/__tests__/tsconfig.json) runs cross_file set_equals: the union of '\"path\": \"...test-utils\"' captures across {path}/**/__tests__/tsconfig.json against {path}/package.json. Tightened Stage B's target regex to stay inside the flat devDependencies object ('\"devDependencies\":\\s*\\{[^}]*\"@jest/(test-utils)\"\\s*:'), which closes the 'key in any dependency field' caveat. At the pin, 18 packages have both the devDependency and a reference, 25 have neither, and 11 have no __tests__ tsconfig; all pass on the clone. Fired on 5 breaks: devDependency removed from jest-core; both jest-core test-utils references removed with the devDependency kept; devDependency added to jest-mock; reference added to jest-mock's __tests__ tsconfig; devDependency moved to dependencies in jest-core. Control: removing only one of jest-core's two references passed."
+   },
+   {
+    "rule_id": "jestjs-jest-test-utils-dev-dependency-needs-tests-tsconfig",
+    "unit": "jest-27",
+    "action": "added",
+    "detail": "Companion for TS packages with no **/__tests__/tsconfig.json: json_path_absent $.devDependencies['@jest/test-utils']. Passes on the clone. Fired when the devDependency was added to packages/jest-types, which has no __tests__ tsconfig."
+   },
+   {
+    "rule_id": "jestjs-jest-workspace-repository-public-root",
+    "unit": "jest-02",
+    "action": "added",
+    "detail": "Fixes Stage B's scope issue: the public repository rule skipped the root. Root-only json_path_absent with repository.directory '.' (Yarn's cwd for the root workspace). Passes on the clone, where the root is private. Fired when private was removed from the root with no repository. Control: a public root with {git, https://github.com/jestjs/jest.git, '.'} passed."
+   },
+   {
+    "rule_id": "jestjs-jest-navbar-doc-ids-exist",
+    "unit": "jest-18",
+    "action": "added",
+    "detail": "Fixes Stage B's verified gap: navbar `type: 'doc'` docIds in website/docusaurus.config.mjs (getting-started, api) were not checked. cross_file superset of docs/*.md front-matter ids over a docId regex. Passes on the clone. Fired when docId 'api' was changed to 'apix'. The rule comment records that it is conservative (Docusaurus falls back to the latest version; not verified offline) and that the front-matter-only id gap cannot be fixed (no extract reads a file name into a source set)."
+   },
+   {
+    "rule_id": "jestjs-jest-versioned-navbar-doc-ids-exist",
+    "unit": "jest-18",
+    "action": "added",
+    "detail": "Stage B's versioned twin: for_each_dir website/versioned_docs/version-* runs a superset of that version's ids over the navbar docIds. All 4 versions declare getting-started and api; passes on the clone. Fired for all 4 versions when docId was changed to 'apix'. Stricter than the build: removing id api from version-29.7 alone also fired, which Docusaurus may tolerate. This is documented in the comment."
+   },
+   {
+    "rule_id": "jestjs-jest-normalize-icons-windows-codes-in-sync",
+    "unit": "jest-B04",
+    "action": "added",
+    "detail": "C. cross_file set_equals with normalize: lower: the Windows codes of `isWindows ? '<win>' : '<posix>'` in packages/jest-util/src/specialChars.ts against the `new RegExp('<code>', 'gu')` codes in packages/test-utils/src/normalizeIcons.ts. Passes on the clone. Fired when the Windows success code in specialChars.ts was changed (√ to ∛). A hex-case-only change correctly passed."
+   },
+   {
+    "rule_id": "jestjs-jest-normalize-icons-posix-codes-in-sync",
+    "unit": "jest-B04",
+    "action": "added",
+    "detail": "C. The POSIX-side twin. Passes on the clone. Fired when the POSIX failed code was changed (✕ to ✖). The comment records why this is C: the (windows, posix) pairing cannot be compared, so a swapped pairing is missed."
+   },
+   {
+    "rule_id": "jestjs-jest-copyright-header",
+    "unit": "jest-11",
+    "action": "comment",
+    "detail": "Not fixable in config: the script walks git ls-files, which includes the tracked-but-gitignored e2e/retain-all-files/node_modules/retainAllFiles.test.js, and alint's walker does not see it (known walker defect class: 88 of 89). Binary files are skipped by extension, not by content. Both are recorded in the rule comment. Rule unchanged; passes."
+   },
+   {
+    "rule_id": "jestjs-jest-changelog-pr-links",
+    "unit": "jest-12",
+    "action": "comment",
+    "detail": "Added a gating-unverified note: check-changelog.yml runs on pull_request only, with no merge_group trigger, while nodejs.yml has one. Required-check status is not visible from the clone. Rule unchanged."
+   },
+   {
+    "rule_id": "jestjs-jest-sidebar-ids-exist",
+    "unit": "jest-18",
+    "action": "comment",
+    "detail": "Added a gating-unverified note to the website section header, covering jest-18, jest-21 and the jest-28 text: branch protection is not visible, and nodejs.yml's merge_group trigger suggests a merge queue, whose refs Netlify does not build, so the deploy preview may be advisory. This needs an integrator decision. Rules unchanged."
+   },
+   {
+    "rule_id": "jestjs-jest-verify-old-ts-age-gate-matches-yarnrc",
+    "unit": "jest-14",
+    "action": "comment",
+    "detail": "Family tag annotated '[dep-version; Stage B proposes other]'. The family is left to the integrator. Rule and bucket A unchanged; Stage B reproduced its fire tests."
+   },
+   {
+    "rule_id": "jestjs-jest-va-agent-doc-engines-in-sync",
+    "unit": "value-add",
+    "action": "comment",
+    "detail": "Stage B called this borderline: promote it only if the integrator counts copilot-instructions.md:240's generic doc-accuracy rule as a convention. Stage B did not show it enforced, so it stays at info and the comment records the condition."
+   },
+   {
+    "rule_id": "(config header + buildTs section comments)",
+    "unit": "jest-27, jest-B02",
+    "action": "modified",
+    "detail": "The header 'not expressed' list and the buildTs section comment no longer call the test-utils biconditional 'B-config set: no rules'. Added a new section header for the yarn --immutable manifest lookups, which records jest-B02 (unique workspace names) as B-config unique-key with no rule."
+   },
+   {
+    "rule_id": "(none)",
+    "unit": "jest-23, jest-24, jest-26, jest-28, jest-10, jest-44, jest-37/38",
+    "action": "not-done",
+    "detail": "These are record or classification items with no config defect, left to the integrator. jest-23 needs a unique-key vs B-adapter (value per key) decision. jest-24 is unique-key here but set in committed trpc-08. jest-26: Stage B proposes family other, and the summary should say references must equal the SORTED list. jest-28: drop '(and a versioned sidebar)' from the summary. jest-10's record alint field should say for_each_dir over packages with a tsconfig.json (the config is already right). Stage A's notes contradict themselves on counts. The D splits (B05 leak detection and B06 tstyche out of jest-37/38; B07-B09 out of jest-44; B10 and B11) need no rules. pkg-pr-new.yml adds no static unit."
+   }
+  ],
+  "unit_notes": [
+   {
+    "id": "jest-27",
+    "suggested_bucket": "A",
+    "note": "Moved from B-config set to A as Stage B proposed. Two rules were added, and R4 holds both ways (passes on the clone, fired on 6 distinct breaks across both rules). Caveat: the devDependency side is a regex read of a JSON key, restricted to the flat devDependencies object. If the integrator counts regex reads of JSON keys as a tuning, use C."
+   },
+   {
+    "id": "jest-B01",
+    "suggested_bucket": "A",
+    "note": "New unit (dep-version): every workspace: specifier or resolution names an existing workspace. Rule jestjs-jest-workspace-refs-resolve passes on the clone and fired on 4 breaks. A descriptor-qualified resolution key (name@range/...) is not captured; none uses workspace: at the pin."
+   },
+   {
+    "id": "jest-B03",
+    "suggested_bucket": "A",
+    "note": "New unit (dep-version): patch: descriptors name existing patch files. Two rules split by base (~/ from the project root, ./ from the manifest), which removes Stage B's ~/ caveat. Both pass on the clone and fired on their breaks. The integrator may still treat this as an install precondition rather than a rule, as Stage B flagged."
+   },
+   {
+    "id": "jest-B04",
+    "suggested_bucket": "C",
+    "note": "New unit (other): normalizeIcons.ts must stay in sync with jest-util specialChars. Two set_equals rules (warning) pass on the clone and each fired on a one-sided code change. C because the (windows, posix) pairing cannot be compared, so a swapped pairing is missed."
+   },
+   {
+    "id": "jest-B02",
+    "suggested_bucket": "B-config",
+    "note": "Unique workspace names (unique-key, other). No rule: unique_by keys on path templates only, and cross_file has no uniqueness relation."
+   },
+   {
+    "id": "jest-18",
+    "suggested_bucket": "A",
+    "note": "Stays A. The navbar docId half was added (2 rules), which closes Stage B's verified gap. The versioned twin is stricter than Docusaurus's fallback to the latest version (recalled, not verified offline; no node_modules in the clone). The front-matter-only id read cannot be fixed with current extracts (holds at the pin). If the integrator rules the Netlify deploy preview advisory (merge_group hint), jest-18, jest-21 and jest-28 leave the ratio under R5. jest-42 stays D either way."
+   },
+   {
+    "id": "jest-12",
+    "suggested_bucket": "A",
+    "note": "Unchanged, but check-changelog.yml has no merge_group trigger, so its required-check status is unverified (same question as Netlify). Integrator decision."
+   },
+   {
+    "id": "jest-14",
+    "suggested_bucket": "A",
+    "note": "Bucket unchanged. Stage B moves the family from dep-version to other (a release-age gate is none of section 2.3's dep-version shapes). That would leave toolchain-pin unchanged and dep-version with A = jest-10, -13, -27, -B01, -B03."
+   }
+  ],
+  "validate_output": "✓ Config valid: 52 rule(s) loaded from docs/design/v0.12/corpus/jestjs-jest.alint.yml",
+  "check_output": "exit 0. `alint -c docs/design/v0.12/corpus/jestjs-jest.alint.yml check . --compact` on the clone printed '✓ all rules passed.' for all 52 rules (Stage A's 42 plus 10 added), with 0 findings. `git -C <clone> status --porcelain` is empty. The scratch directory <scratch>/jestjs-jest-c was removed."
+ }
+}

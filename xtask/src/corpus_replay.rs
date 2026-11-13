@@ -1,8 +1,9 @@
-//! `corpus-replay` — run `alint check` over the v0.12 case-study corpus at its
+//! `corpus-replay` — run `alint check` over the case-study corpus at its
 //! pinned commits, and optionally diff two binaries' reports.
 //!
-//! The corpus is 110 real repositories, each with the config a v0.12 analyst
-//! wrote for it (`docs/design/v0.12/corpus/`), pinned by full commit SHA in
+//! The corpus is real repositories (the v0.12 study's 110 and the v0.23 corpus
+//! stratum's), each with the config an analyst wrote for it
+//! (`docs/design/v0.12/corpus/`), pinned by full commit SHA in
 //! `pins.tsv`. Each repository is fetched once, at depth 1, into the cache and
 //! reused by later runs. `--compare` runs a second binary over the same trees
 //! and reports every repository whose JSON report (proposed edits included) or
@@ -1172,7 +1173,18 @@ mod tests {
     fn committed_pins_parse_and_name_existing_configs() {
         let root = crate::workspace_root().unwrap();
         let pins = parse_pins(&std::fs::read_to_string(root.join(PINS)).unwrap()).unwrap();
-        assert_eq!(pins.len(), 110);
+        let configs = std::fs::read_dir(root.join("docs/design/v0.12/corpus"))
+            .unwrap()
+            .filter(|entry| {
+                entry
+                    .as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(".alint.yml")
+            })
+            .count();
+        assert_eq!(pins.len(), configs, "a corpus config has no pin row");
         for pin in &pins {
             assert!(
                 root.join("docs/design/v0.12/corpus")
@@ -1203,6 +1215,238 @@ mod tests {
                 "{repo} is not pinned"
             );
         }
+    }
+
+    const STRATUM_BUCKETS: [&str; 7] = [
+        "A",
+        "B-config",
+        "B-adapter",
+        "B-kernel",
+        "B-delegate",
+        "C",
+        "D",
+    ];
+    const STRATUM_SLICE: [&str; 3] = ["equality", "unique-key", "cardinality"];
+
+    const STRATUM_FAMILIES: [&str; 4] = ["locale", "dep-version", "toolchain-pin", "other"];
+
+    /// Checks that a stratum unit's classification takes only the frame's
+    /// values (its section 2.2) and that its fields agree with its bucket.
+    fn check_stratum_unit_classification(unit: &Json) {
+        const ASSERTIONS: [&str; 8] = [
+            "none",
+            "equality",
+            "unique-key",
+            "cardinality",
+            "reference",
+            "set",
+            "group",
+            "bounded-count",
+        ];
+        const NEEDS: [&str; 15] = [
+            "entry-values",
+            "version-compare",
+            "order",
+            "placeholder",
+            "plural-categories",
+            "icu",
+            "format-reader",
+            "base-revision",
+            "route-model",
+            "package-graph",
+            "link-type",
+            "derived-value",
+            "normalization",
+            "key-predicate",
+            "other",
+        ];
+        // Who added the unit: Stage A, Stage B, the integrator or the audit.
+        const ORIGINS: [&str; 4] = ["A", "B", "integrator", "audit"];
+        let id = unit["id"].as_str().unwrap();
+        let bucket = unit["bucket"].as_str().unwrap();
+        let assertion = unit["assertion_family"].as_str().unwrap();
+        assert!(STRATUM_BUCKETS.contains(&bucket), "{id}: bucket {bucket}");
+        assert!(
+            STRATUM_FAMILIES.contains(&unit["family"].as_str().unwrap()),
+            "{id}: family"
+        );
+        assert!(ASSERTIONS.contains(&assertion), "{id}: {assertion}");
+        if !bucket.starts_with("B-") {
+            assert_eq!(assertion, "none", "{id}: only a B unit names a family");
+        }
+        if bucket == "B-config" {
+            assert_ne!(assertion, "none", "{id}: B-config without a family");
+        }
+        match unit.get("needs") {
+            Some(need) => assert!(
+                bucket == "B-adapter" && NEEDS.contains(&need.as_str().unwrap()),
+                "{id}: needs {need} on {bucket}"
+            ),
+            None => assert_ne!(bucket, "B-adapter", "{id}: B-adapter without needs"),
+        }
+        if unit["needs"] == "entry-values" {
+            assert_ne!(assertion, "none", "{id}: entry values without a family");
+        }
+        assert!(
+            ORIGINS.contains(&unit["origin"].as_str().unwrap()),
+            "{id}: origin"
+        );
+    }
+
+    /// The v0.23 corpus stratum's records (`docs/design/v0.23/stratum/`) agree
+    /// with `pins.tsv`, with their configs and with their own metrics. Every A
+    /// unit names the config rules that express it, and every config rule
+    /// belongs to a unit or to the record's value-add rules.
+    #[test]
+    fn committed_stratum_records_match_pins_configs_and_metrics() {
+        let root = crate::workspace_root().unwrap();
+        let pins = parse_pins(&std::fs::read_to_string(root.join(PINS)).unwrap()).unwrap();
+        let mut records = 0;
+        for entry in std::fs::read_dir(root.join("docs/design/v0.23/stratum")).unwrap() {
+            let path = entry.unwrap().path();
+            let record: Json =
+                serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            let repo = record["repo"].as_str().unwrap();
+            let pin = pins
+                .iter()
+                .find(|pin| pin.repo == repo)
+                .unwrap_or_else(|| panic!("{repo} is not pinned"));
+            assert_eq!(record["sha"], pin.sha.as_str(), "{repo}: commit differs");
+            assert_eq!(
+                path.file_name().unwrap().to_string_lossy(),
+                pin.config.replace(".alint.yml", ".json"),
+                "{repo}: the record's file name"
+            );
+            let config: Yaml = yaml_serde::from_str(
+                &std::fs::read_to_string(root.join("docs/design/v0.12/corpus").join(&pin.config))
+                    .unwrap(),
+            )
+            .unwrap();
+            let rule_ids: Vec<&str> = config["rules"]
+                .as_sequence()
+                .unwrap()
+                .iter()
+                .map(|rule| rule["id"].as_str().unwrap())
+                .collect();
+            let mut claimed = std::collections::BTreeSet::new();
+            for rule in record["value_add_rules"].as_array().unwrap() {
+                let rule = rule.as_str().unwrap();
+                assert!(rule_ids.contains(&rule), "{repo}: no rule {rule}");
+                claimed.insert(rule);
+            }
+            let units = record["units"].as_array().unwrap();
+            let mut ids = std::collections::BTreeSet::new();
+            for unit in units {
+                let id = unit["id"].as_str().unwrap();
+                assert!(ids.insert(id), "{repo}: {id} is listed twice");
+                check_stratum_unit_classification(unit);
+                let rules = unit["rules"].as_array().unwrap();
+                for rule in rules {
+                    let rule = rule.as_str().unwrap();
+                    assert!(rule_ids.contains(&rule), "{id}: no rule {rule}");
+                    claimed.insert(rule);
+                }
+                if unit["bucket"] == "A" {
+                    assert!(!rules.is_empty(), "{id}: an A unit names no rule");
+                }
+                // A rule the unit's `alint` text names is one of its rules or a
+                // value-add rule, so the text and the mapping cannot drift apart.
+                let text = unit["alint"].as_str().unwrap_or_default();
+                for rule in rule_ids.iter().filter(|rule| names_rule(text, rule)) {
+                    assert!(
+                        rules.iter().any(|listed| listed == *rule)
+                            || record["value_add_rules"]
+                                .as_array()
+                                .unwrap()
+                                .iter()
+                                .any(|listed| listed == *rule),
+                        "{id}: its alint text names {rule}, which it does not list"
+                    );
+                }
+            }
+            for rule in &rule_ids {
+                assert!(claimed.contains(rule), "{repo}: {rule} belongs to no unit");
+            }
+            assert_eq!(record["metrics"], stratum_metrics(units.iter()), "{repo}");
+            for family in STRATUM_FAMILIES {
+                assert_eq!(
+                    record["by_family"][family],
+                    stratum_metrics(units.iter().filter(|unit| unit["family"] == family)),
+                    "{repo}: {family}"
+                );
+            }
+            records += 1;
+        }
+        assert_eq!(records, 20);
+    }
+
+    /// Whether `text` names the rule `id` as a whole token, so that
+    /// `x-token1` does not match inside `x-token10`.
+    fn names_rule(text: &str, id: &str) -> bool {
+        let id_char = |c: char| c.is_ascii_alphanumeric() || c == '-';
+        text.match_indices(id).any(|(at, _)| {
+            !text[..at].chars().next_back().is_some_and(id_char)
+                && !text[at + id.len()..].chars().next().is_some_and(id_char)
+        })
+    }
+
+    #[test]
+    fn names_rule_matches_whole_ids_only() {
+        assert!(names_rule("kind: x-token1, then", "x-token1"));
+        assert!(names_rule("x-token1", "x-token1"));
+        assert!(!names_rule("x-token10", "x-token1"));
+        assert!(!names_rule("pre-x-token1", "x-token1"));
+        assert!(names_rule("x-token10 and x-token1.", "x-token1"));
+    }
+
+    /// A stratum record's `metrics` (section 2.2 of the stratum frame):
+    /// percentages of A + B + C, rounded half to even as the records were
+    /// written.
+    fn stratum_metrics<'a>(units: impl Iterator<Item = &'a Json>) -> Json {
+        let units: Vec<&Json> = units.collect();
+        let count = |bucket: &str| units.iter().filter(|unit| unit["bucket"] == bucket).count();
+        let in_slice = |unit: &&&Json| {
+            STRATUM_SLICE.contains(&unit["assertion_family"].as_str().unwrap_or_default())
+        };
+        let a = count("A");
+        let b: usize = STRATUM_BUCKETS[1..5]
+            .iter()
+            .map(|bucket| count(bucket))
+            .sum();
+        let addressable = a + b + count("C");
+        let after = a + units
+            .iter()
+            .filter(|unit| unit["bucket"] == "B-config")
+            .filter(in_slice)
+            .count();
+        let values = after
+            + units
+                .iter()
+                .filter(|unit| unit["bucket"] == "B-adapter" && unit["needs"] == "entry-values")
+                .filter(in_slice)
+                .count();
+        let percent = |n: usize| {
+            if addressable == 0 {
+                return Json::Null;
+            }
+            let (quotient, remainder) = (100 * n / addressable, 100 * n % addressable);
+            let up =
+                2 * remainder > addressable || (2 * remainder == addressable && quotient % 2 == 1);
+            Json::from(quotient + usize::from(up))
+        };
+        let counts: serde_json::Map<String, Json> = STRATUM_BUCKETS
+            .iter()
+            .map(|bucket| ((*bucket).to_owned(), Json::from(count(bucket))))
+            .collect();
+        serde_json::json!({
+            "counts": counts,
+            "addressable": addressable,
+            "coverage_today": percent(a),
+            "coverage_with_tuning": percent(a + count("C")),
+            "gap": percent(b),
+            "coverage_after_slice": percent(after),
+            "coverage_after_slice_with_entry_values": percent(values),
+        })
     }
 
     #[test]

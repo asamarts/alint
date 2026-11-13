@@ -1,0 +1,1162 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
+#
+# alint v0.23 corpus-stratum config — backstage/backstage
+# Pinned @ bc73976a6de26df49b2bc2eefe689ee5b3ed0af1 (stratum: js-monorepo)
+#
+# Shape: Yarn 4 (Berry) workspace, 239 workspace packages under packages/*
+# and plugins/*, each carrying a `backstage.role` (12 roles) that the repo's
+# own scripts use to police dependency direction, peer ranges and catalog
+# metadata. Changesets for releases; a Docusaurus microsite plus mkdocs.
+#
+# WHERE THE ENFORCED VALIDATION LIVES
+#   ci.yml "verify" job      — repo scripts and CLI checks over files alint
+#                              reads: verify-local-dependencies.js (workspace:^
+#                              ranges + 6 role rules), `lint:peer-deps`
+#                              (repo-tools peer-deps), `fix --check`
+#                              (cli-module-maintenance repo fix --publish),
+#                              generate-catalog-info --ci, verify-changesets.js,
+#                              verify-plugin-directory.js, verify-skills.js,
+#                              verify-links.js, `pm verify-patches`, openapi
+#                              lint (Spectral + one custom rule) / validate;
+#                              plus tool runs (D): dedupe check, tsc,
+#                              api-reports, type-deps, builds, config:check.
+#   ci.yml "typos"/"test"    — typos, prettier, ESLint (incl. the notice
+#                              copyright header), tests, verify-release.js.
+#   verify_*.yml             — e2e (create-app's Node prerequisite check),
+#                              accessibility, chromatic, docs quality (Vale),
+#                              microsite build, codeql/fossa/scorecard.
+#   .husky + lint-staged     — eslint/prettier, check-docs-quality,
+#                              generate-catalog-info, sort-package-json.
+#   load-bearing comments    — createApp.ts "Keep in sync with engines.node",
+#                              renovate.json5 "@types/node ... pinned to match
+#                              the Node versions we support", the six
+#                              "*-noop.yml" NOTE comments.
+#   docs                     — CONTRIBUTING.md (changesets, DCO),
+#                              REVIEWING.md (0.x bump table), beps/README.md,
+#                              docs/architecture-decisions/index.md.
+#
+# This config expresses the A and C units of the Stage A record and the
+# Stage B missed units b01-b04 and b06, plus clearly marked VALUE-ADD rules
+# (level info). Units with no rule here: B-adapter 20 (typesVersions from
+# exports), 30 (catalog name slug), 32 (CODEOWNERS owner), 35 (0.x no major
+# bump), 50 (doc-ID routes), 54 (links to directories), 70 (package.json
+# key order), 74 (CI Node satisfies the engines floor), b05 (Docusaurus
+# sidebar doc ids) and b07 (issue-form common fields); B-config 25
+# (pluginPackages group), 26 (pluginPackage reference) and 69 (unique
+# workspace names); C 36 (changeset coverage) and 71 (DCO), git kinds left
+# out because the clone is depth 1; and the D units (tool runs, builds,
+# tests, lockfile semantics, external services).
+#
+# The hand-listed package-name sets for role rules 1-4 were generated from
+# the workspace manifests at the pin, and they drift when a package is
+# added. That tuning is why those units are C. Nothing here spawns a
+# process; there are no custom facts and no git-history kinds.
+#
+# Stage C applied Stage B's review:
+#   - Relabelled A -> C: 15, 46, 49, 53, 55 (rules kept, limits noted).
+#   - Demoted to info: the backstage-52 rule (an R1 duplicate of 45).
+#   - Fixed scope: 14, 17, 48, 65.
+#   - Promoted the openapi-router value-add rule to b01.
+#   - Added b02, b03, b04 and b06 (b06 is a partial rule).
+
+version: 1
+
+rules:
+  # ════════════════════════════════════════════════════════════════
+  # dep-version
+  # ════════════════════════════════════════════════════════════════
+
+  # backstage-01 (A) — repo-tools peer-deps: a non-standalone package (role
+  # not cli/frontend/backend) that references react, react-dom or
+  # @types/react in any dependency field declares all three as
+  # peerDependencies (they form one peer group).
+  - id: backstage-react-peer-group-declared
+    kind: json_path_absent
+    paths: ["{packages,plugins}/*/package.json"]
+    path: "$[?(!($.backstage.role == 'cli' || $.backstage.role == 'frontend' || $.backstage.role == 'backend') && $['dependencies','devDependencies','peerDependencies']['react','react-dom','@types/react'] && !($.peerDependencies.react && $.peerDependencies['react-dom'] && $.peerDependencies['@types/react']))]"
+    level: error
+    message: "A package that uses react, react-dom or @types/react must declare all three as peerDependencies (yarn lint:peer-deps)."
+
+  # backstage-02 (A) — peer-deps: @types/react is marked optional in
+  # peerDependenciesMeta; react and react-dom are not.
+  - id: backstage-react-peer-optional-marking
+    kind: json_path_absent
+    paths: ["{packages,plugins}/*/package.json"]
+    path: "$[?(!($.backstage.role == 'cli' || $.backstage.role == 'frontend' || $.backstage.role == 'backend') && (($.peerDependencies['@types/react'] && $.peerDependenciesMeta['@types/react'].optional != true) || ($.peerDependencies.react && $.peerDependenciesMeta.react.optional == true) || ($.peerDependencies['react-dom'] && $.peerDependenciesMeta['react-dom'].optional == true)))]"
+    level: error
+    message: "peerDependenciesMeta must mark @types/react (only) as optional (yarn lint:peer-deps)."
+
+  # backstage-03 (A) — peer-deps: each React peer is also a devDependency.
+  - id: backstage-react-peer-also-dev
+    kind: json_path_absent
+    paths: ["{packages,plugins}/*/package.json"]
+    path: "$[?(!($.backstage.role == 'cli' || $.backstage.role == 'frontend' || $.backstage.role == 'backend') && (($.peerDependencies.react && !$.devDependencies.react) || ($.peerDependencies['react-dom'] && !$.devDependencies['react-dom']) || ($.peerDependencies['@types/react'] && !$.devDependencies['@types/react'])))]"
+    level: error
+    message: "A React peer dependency must also be listed in devDependencies (yarn lint:peer-deps)."
+
+  # backstage-04 (A) — peer-deps: a React peer is never also a runtime
+  # dependency.
+  - id: backstage-react-peer-not-runtime
+    kind: json_path_absent
+    paths: ["{packages,plugins}/*/package.json"]
+    path: "$[?(!($.backstage.role == 'cli' || $.backstage.role == 'frontend' || $.backstage.role == 'backend') && (($.peerDependencies.react && $.dependencies.react) || ($.peerDependencies['react-dom'] && $.dependencies['react-dom']) || ($.peerDependencies['@types/react'] && $.dependencies['@types/react'])))]"
+    level: error
+    message: "A React peer dependency must not also be a runtime dependency (yarn lint:peer-deps)."
+
+  # backstage-05 (A) — peer-deps: the local devDependency ranges are the
+  # desired ones (react/react-dom ^18.0.2, @types/react ^18.0.0).
+  - id: backstage-react-dev-ranges
+    kind: json_path_absent
+    paths: ["{packages,plugins}/*/package.json"]
+    path: "$[?(!($.backstage.role == 'cli' || $.backstage.role == 'frontend' || $.backstage.role == 'backend') && (($.peerDependencies.react && $.devDependencies.react != '^18.0.2') || ($.peerDependencies['react-dom'] && $.devDependencies['react-dom'] != '^18.0.2') || ($.peerDependencies['@types/react'] && $.devDependencies['@types/react'] != '^18.0.0')))]"
+    level: error
+    message: "devDependencies must pin react/react-dom to ^18.0.2 and @types/react to ^18.0.0 (yarn lint:peer-deps)."
+
+  # backstage-06 (A) — peer-deps: the peer ranges are '^17.0.0 || ^18.0.0',
+  # or '^18.0.0' for the three React-18-only packages.
+  - id: backstage-react-peer-ranges
+    kind: json_path_absent
+    paths: ["{packages,plugins}/*/package.json"]
+    path: "$[?(!($.backstage.role == 'cli' || $.backstage.role == 'frontend' || $.backstage.role == 'backend') && ((!($.name == '@backstage/frontend-adapter-react-router-v7' || $.name == '@backstage/frontend-adapter-tanstack-router' || $.name == '@backstage/ui') && (($.peerDependencies.react && $.peerDependencies.react != '^17.0.0 || ^18.0.0') || ($.peerDependencies['react-dom'] && $.peerDependencies['react-dom'] != '^17.0.0 || ^18.0.0') || ($.peerDependencies['@types/react'] && $.peerDependencies['@types/react'] != '^17.0.0 || ^18.0.0'))) || (($.name == '@backstage/frontend-adapter-react-router-v7' || $.name == '@backstage/frontend-adapter-tanstack-router' || $.name == '@backstage/ui') && (($.peerDependencies.react && $.peerDependencies.react != '^18.0.0') || ($.peerDependencies['react-dom'] && $.peerDependencies['react-dom'] != '^18.0.0') || ($.peerDependencies['@types/react'] && $.peerDependencies['@types/react'] != '^18.0.0')))))]"
+    level: error
+    message: "React peer ranges must be '^17.0.0 || ^18.0.0' ('^18.0.0' for the React-18-only packages) (yarn lint:peer-deps)."
+
+  # backstage-07 (C) — verify-local-dependencies.js: every dependency on a
+  # workspace package (all four dependency fields) uses `workspace:^`
+  # ('' and link: are skipped). JSONPath cannot read object keys, so the
+  # workspace names are a hand-kept regex alternation over the raw JSON.
+  - id: backstage-local-deps-workspace-caret
+    kind: file_content_forbidden
+    paths: ["{packages,plugins}/*/package.json"]
+    pattern: '"(?:@backstage/[^"]+|@internal/[^"]+|@techdocs/cli|example-app|example-app-legacy|example-backend|e2e-test|app-example-plugin|techdocs-cli-embedded-app|yarn-plugin-backstage)":\s*"(?:[^wl"]|l[^i]|w[^o]|workspace:(?:[^^]|\^[^"]))'
+    level: error
+    message: "Local workspace dependencies must use the 'workspace:^' range (scripts/verify-local-dependencies.js)."
+
+  # backstage-08 (C) — role rule 1: a frontend-plugin / web-library package
+  # has no runtime dependency on a backend-plugin / node-library /
+  # backend-plugin-module package. Target names hand-listed (128) from the
+  # manifests at the pin.
+  - id: backstage-role-frontend-no-backend-deps
+    kind: json_path_absent
+    paths: ["{packages,plugins}/*/package.json"]
+    path: "$[?(($.backstage.role == 'frontend-plugin' || $.backstage.role == 'web-library') && $.dependencies['@backstage/backend-app-api','@backstage/backend-defaults','@backstage/backend-dev-utils','@backstage/backend-dynamic-feature-service','@backstage/backend-openapi-utils','@backstage/backend-plugin-api','@backstage/backend-test-utils','@backstage/cli-common','@backstage/cli-node','@backstage/config-loader','@backstage/connections-node','@backstage/e2e-test-utils','@backstage/integration-aws-node','@backstage/plugin-app-backend','@backstage/plugin-app-node','@backstage/plugin-auth-backend','@backstage/plugin-auth-backend-module-atlassian-provider','@backstage/plugin-auth-backend-module-auth0-provider','@backstage/plugin-auth-backend-module-aws-alb-provider','@backstage/plugin-auth-backend-module-azure-easyauth-provider','@backstage/plugin-auth-backend-module-bitbucket-provider','@backstage/plugin-auth-backend-module-bitbucket-server-provider','@backstage/plugin-auth-backend-module-cloudflare-access-provider','@backstage/plugin-auth-backend-module-gcp-iap-provider','@backstage/plugin-auth-backend-module-github-provider','@backstage/plugin-auth-backend-module-gitlab-provider','@backstage/plugin-auth-backend-module-google-provider','@backstage/plugin-auth-backend-module-guest-provider','@backstage/plugin-auth-backend-module-microsoft-provider','@backstage/plugin-auth-backend-module-oauth2-provider','@backstage/plugin-auth-backend-module-oauth2-proxy-provider','@backstage/plugin-auth-backend-module-oidc-provider','@backstage/plugin-auth-backend-module-okta-provider','@backstage/plugin-auth-backend-module-onelogin-provider','@backstage/plugin-auth-backend-module-openshift-provider','@backstage/plugin-auth-backend-module-pinniped-provider','@backstage/plugin-auth-backend-module-vmware-cloud-provider','@backstage/plugin-auth-node','@backstage/plugin-catalog-backend','@backstage/plugin-catalog-backend-module-ai-model','@backstage/plugin-catalog-backend-module-aws','@backstage/plugin-catalog-backend-module-azure','@backstage/plugin-catalog-backend-module-backstage-openapi','@backstage/plugin-catalog-backend-module-bitbucket-cloud','@backstage/plugin-catalog-backend-module-bitbucket-server','@backstage/plugin-catalog-backend-module-gcp','@backstage/plugin-catalog-backend-module-gerrit','@backstage/plugin-catalog-backend-module-gitea','@backstage/plugin-catalog-backend-module-github','@backstage/plugin-catalog-backend-module-github-org','@backstage/plugin-catalog-backend-module-gitlab','@backstage/plugin-catalog-backend-module-gitlab-org','@backstage/plugin-catalog-backend-module-incremental-ingestion','@backstage/plugin-catalog-backend-module-ldap','@backstage/plugin-catalog-backend-module-logs','@backstage/plugin-catalog-backend-module-msgraph','@backstage/plugin-catalog-backend-module-msgraph-incremental','@backstage/plugin-catalog-backend-module-openapi','@backstage/plugin-catalog-backend-module-puppetdb','@backstage/plugin-catalog-backend-module-scaffolder-entity-model','@backstage/plugin-catalog-backend-module-unprocessed','@backstage/plugin-catalog-node','@backstage/plugin-connections-example-backend','@backstage/plugin-connections-example-backend-module-gitlab','@backstage/plugin-devtools-backend','@backstage/plugin-events-backend','@backstage/plugin-events-backend-module-aws-sqs','@backstage/plugin-events-backend-module-azure','@backstage/plugin-events-backend-module-bitbucket-cloud','@backstage/plugin-events-backend-module-bitbucket-server','@backstage/plugin-events-backend-module-gerrit','@backstage/plugin-events-backend-module-github','@backstage/plugin-events-backend-module-gitlab','@backstage/plugin-events-backend-module-google-pubsub','@backstage/plugin-events-backend-module-kafka','@backstage/plugin-events-backend-test-utils','@backstage/plugin-events-node','@backstage/plugin-gateway-backend','@backstage/plugin-kubernetes-backend','@backstage/plugin-kubernetes-node','@backstage/plugin-mcp-actions-backend','@backstage/plugin-notifications-backend','@backstage/plugin-notifications-backend-module-email','@backstage/plugin-notifications-backend-module-slack','@backstage/plugin-notifications-node','@backstage/plugin-permission-backend','@backstage/plugin-permission-backend-module-allow-all-policy','@backstage/plugin-permission-node','@backstage/plugin-proxy-backend','@backstage/plugin-proxy-node','@backstage/plugin-scaffolder-backend','@backstage/plugin-scaffolder-backend-module-azure','@backstage/plugin-scaffolder-backend-module-bitbucket-cloud','@backstage/plugin-scaffolder-backend-module-bitbucket-server','@backstage/plugin-scaffolder-backend-module-confluence-to-markdown','@backstage/plugin-scaffolder-backend-module-cookiecutter','@backstage/plugin-scaffolder-backend-module-gcp','@backstage/plugin-scaffolder-backend-module-gerrit','@backstage/plugin-scaffolder-backend-module-gitea','@backstage/plugin-scaffolder-backend-module-github','@backstage/plugin-scaffolder-backend-module-gitlab','@backstage/plugin-scaffolder-backend-module-notifications','@backstage/plugin-scaffolder-backend-module-rails','@backstage/plugin-scaffolder-backend-module-sentry','@backstage/plugin-scaffolder-backend-module-workspace-database','@backstage/plugin-scaffolder-backend-module-yeoman','@backstage/plugin-scaffolder-node','@backstage/plugin-scaffolder-node-test-utils','@backstage/plugin-search-backend','@backstage/plugin-search-backend-module-catalog','@backstage/plugin-search-backend-module-elasticsearch','@backstage/plugin-search-backend-module-explore','@backstage/plugin-search-backend-module-pg','@backstage/plugin-search-backend-module-stack-overflow-collator','@backstage/plugin-search-backend-module-techdocs','@backstage/plugin-search-backend-node','@backstage/plugin-signals-backend','@backstage/plugin-signals-node','@backstage/plugin-techdocs-backend','@backstage/plugin-techdocs-backend-module-zensical','@backstage/plugin-techdocs-node','@backstage/plugin-user-settings-backend','@internal/backend','@internal/cli','@internal/plugin-todo-list-backend','@internal/secrets-node','@internal/techdocs-zensical','yarn-plugin-backstage'])]"
+    level: error
+    message: "A frontend package must not depend on a backend-role package (verify-local-dependencies.js role rule 1)."
+
+  # backstage-09 (C) — role rule 2: backend-plugin / node-library /
+  # backend-plugin-module packages have no runtime dependency on a
+  # frontend-plugin / web-library package (58 names hand-listed).
+  - id: backstage-role-backend-no-frontend-deps
+    kind: json_path_absent
+    paths: ["{packages,plugins}/*/package.json"]
+    path: "$[?(($.backstage.role == 'backend-plugin' || $.backstage.role == 'node-library' || $.backstage.role == 'backend-plugin-module') && $.dependencies['@backstage/app-defaults','@backstage/core-app-api','@backstage/core-compat-api','@backstage/core-components','@backstage/core-plugin-api','@backstage/dev-utils','@backstage/frontend-adapter-react-router-v6','@backstage/frontend-adapter-react-router-v7','@backstage/frontend-adapter-tanstack-router','@backstage/frontend-app-api','@backstage/frontend-defaults','@backstage/frontend-dev-utils','@backstage/frontend-dynamic-feature-loader','@backstage/frontend-plugin-api','@backstage/frontend-test-utils','@backstage/integration-react','@backstage/plugin-api-docs','@backstage/plugin-app','@backstage/plugin-app-react','@backstage/plugin-app-visualizer','@backstage/plugin-auth','@backstage/plugin-auth-react','@backstage/plugin-catalog','@backstage/plugin-catalog-graph','@backstage/plugin-catalog-import','@backstage/plugin-catalog-react','@backstage/plugin-catalog-unprocessed-entities','@backstage/plugin-config-schema','@backstage/plugin-devtools','@backstage/plugin-devtools-react','@backstage/plugin-home','@backstage/plugin-home-react','@backstage/plugin-kubernetes','@backstage/plugin-kubernetes-cluster','@backstage/plugin-kubernetes-react','@backstage/plugin-mui-to-bui','@backstage/plugin-notifications','@backstage/plugin-org','@backstage/plugin-org-react','@backstage/plugin-permission-react','@backstage/plugin-scaffolder','@backstage/plugin-scaffolder-react','@backstage/plugin-search','@backstage/plugin-search-react','@backstage/plugin-signals','@backstage/plugin-signals-react','@backstage/plugin-techdocs','@backstage/plugin-techdocs-addons-test-utils','@backstage/plugin-techdocs-react','@backstage/plugin-user-settings','@backstage/test-utils','@backstage/theme','@backstage/ui','@backstage/version-bridge','@internal/frontend','@internal/plugin-todo-list','@internal/scaffolder','app-example-plugin'])]"
+    level: error
+    message: "A backend package must not depend on a frontend-role package (verify-local-dependencies.js role rule 2)."
+
+  # backstage-10 (C) — role rule 3: a common-library package has no runtime
+  # dependency on a non-polymorphic (frontend or backend) package (186 names
+  # hand-listed).
+  - id: backstage-role-common-no-platform-deps
+    kind: json_path_absent
+    paths: ["{packages,plugins}/*/package.json"]
+    path: "$[?($.backstage.role == 'common-library' && $.dependencies['@backstage/app-defaults','@backstage/backend-app-api','@backstage/backend-defaults','@backstage/backend-dev-utils','@backstage/backend-dynamic-feature-service','@backstage/backend-openapi-utils','@backstage/backend-plugin-api','@backstage/backend-test-utils','@backstage/cli-common','@backstage/cli-node','@backstage/config-loader','@backstage/connections-node','@backstage/core-app-api','@backstage/core-compat-api','@backstage/core-components','@backstage/core-plugin-api','@backstage/dev-utils','@backstage/e2e-test-utils','@backstage/frontend-adapter-react-router-v6','@backstage/frontend-adapter-react-router-v7','@backstage/frontend-adapter-tanstack-router','@backstage/frontend-app-api','@backstage/frontend-defaults','@backstage/frontend-dev-utils','@backstage/frontend-dynamic-feature-loader','@backstage/frontend-plugin-api','@backstage/frontend-test-utils','@backstage/integration-aws-node','@backstage/integration-react','@backstage/plugin-api-docs','@backstage/plugin-app','@backstage/plugin-app-backend','@backstage/plugin-app-node','@backstage/plugin-app-react','@backstage/plugin-app-visualizer','@backstage/plugin-auth','@backstage/plugin-auth-backend','@backstage/plugin-auth-backend-module-atlassian-provider','@backstage/plugin-auth-backend-module-auth0-provider','@backstage/plugin-auth-backend-module-aws-alb-provider','@backstage/plugin-auth-backend-module-azure-easyauth-provider','@backstage/plugin-auth-backend-module-bitbucket-provider','@backstage/plugin-auth-backend-module-bitbucket-server-provider','@backstage/plugin-auth-backend-module-cloudflare-access-provider','@backstage/plugin-auth-backend-module-gcp-iap-provider','@backstage/plugin-auth-backend-module-github-provider','@backstage/plugin-auth-backend-module-gitlab-provider','@backstage/plugin-auth-backend-module-google-provider','@backstage/plugin-auth-backend-module-guest-provider','@backstage/plugin-auth-backend-module-microsoft-provider','@backstage/plugin-auth-backend-module-oauth2-provider','@backstage/plugin-auth-backend-module-oauth2-proxy-provider','@backstage/plugin-auth-backend-module-oidc-provider','@backstage/plugin-auth-backend-module-okta-provider','@backstage/plugin-auth-backend-module-onelogin-provider','@backstage/plugin-auth-backend-module-openshift-provider','@backstage/plugin-auth-backend-module-pinniped-provider','@backstage/plugin-auth-backend-module-vmware-cloud-provider','@backstage/plugin-auth-node','@backstage/plugin-auth-react','@backstage/plugin-catalog','@backstage/plugin-catalog-backend','@backstage/plugin-catalog-backend-module-ai-model','@backstage/plugin-catalog-backend-module-aws','@backstage/plugin-catalog-backend-module-azure','@backstage/plugin-catalog-backend-module-backstage-openapi','@backstage/plugin-catalog-backend-module-bitbucket-cloud','@backstage/plugin-catalog-backend-module-bitbucket-server','@backstage/plugin-catalog-backend-module-gcp','@backstage/plugin-catalog-backend-module-gerrit','@backstage/plugin-catalog-backend-module-gitea','@backstage/plugin-catalog-backend-module-github','@backstage/plugin-catalog-backend-module-github-org','@backstage/plugin-catalog-backend-module-gitlab','@backstage/plugin-catalog-backend-module-gitlab-org','@backstage/plugin-catalog-backend-module-incremental-ingestion','@backstage/plugin-catalog-backend-module-ldap','@backstage/plugin-catalog-backend-module-logs','@backstage/plugin-catalog-backend-module-msgraph','@backstage/plugin-catalog-backend-module-msgraph-incremental','@backstage/plugin-catalog-backend-module-openapi','@backstage/plugin-catalog-backend-module-puppetdb','@backstage/plugin-catalog-backend-module-scaffolder-entity-model','@backstage/plugin-catalog-backend-module-unprocessed','@backstage/plugin-catalog-graph','@backstage/plugin-catalog-import','@backstage/plugin-catalog-node','@backstage/plugin-catalog-react','@backstage/plugin-catalog-unprocessed-entities','@backstage/plugin-config-schema','@backstage/plugin-connections-example-backend','@backstage/plugin-connections-example-backend-module-gitlab','@backstage/plugin-devtools','@backstage/plugin-devtools-backend','@backstage/plugin-devtools-react','@backstage/plugin-events-backend','@backstage/plugin-events-backend-module-aws-sqs','@backstage/plugin-events-backend-module-azure','@backstage/plugin-events-backend-module-bitbucket-cloud','@backstage/plugin-events-backend-module-bitbucket-server','@backstage/plugin-events-backend-module-gerrit','@backstage/plugin-events-backend-module-github','@backstage/plugin-events-backend-module-gitlab','@backstage/plugin-events-backend-module-google-pubsub','@backstage/plugin-events-backend-module-kafka','@backstage/plugin-events-backend-test-utils','@backstage/plugin-events-node','@backstage/plugin-gateway-backend','@backstage/plugin-home','@backstage/plugin-home-react','@backstage/plugin-kubernetes','@backstage/plugin-kubernetes-backend','@backstage/plugin-kubernetes-cluster','@backstage/plugin-kubernetes-node','@backstage/plugin-kubernetes-react','@backstage/plugin-mcp-actions-backend','@backstage/plugin-mui-to-bui','@backstage/plugin-notifications','@backstage/plugin-notifications-backend','@backstage/plugin-notifications-backend-module-email','@backstage/plugin-notifications-backend-module-slack','@backstage/plugin-notifications-node','@backstage/plugin-org','@backstage/plugin-org-react','@backstage/plugin-permission-backend','@backstage/plugin-permission-backend-module-allow-all-policy','@backstage/plugin-permission-node','@backstage/plugin-permission-react','@backstage/plugin-proxy-backend','@backstage/plugin-proxy-node','@backstage/plugin-scaffolder','@backstage/plugin-scaffolder-backend','@backstage/plugin-scaffolder-backend-module-azure','@backstage/plugin-scaffolder-backend-module-bitbucket-cloud','@backstage/plugin-scaffolder-backend-module-bitbucket-server','@backstage/plugin-scaffolder-backend-module-confluence-to-markdown','@backstage/plugin-scaffolder-backend-module-cookiecutter','@backstage/plugin-scaffolder-backend-module-gcp','@backstage/plugin-scaffolder-backend-module-gerrit','@backstage/plugin-scaffolder-backend-module-gitea','@backstage/plugin-scaffolder-backend-module-github','@backstage/plugin-scaffolder-backend-module-gitlab','@backstage/plugin-scaffolder-backend-module-notifications','@backstage/plugin-scaffolder-backend-module-rails','@backstage/plugin-scaffolder-backend-module-sentry','@backstage/plugin-scaffolder-backend-module-workspace-database','@backstage/plugin-scaffolder-backend-module-yeoman','@backstage/plugin-scaffolder-node','@backstage/plugin-scaffolder-node-test-utils','@backstage/plugin-scaffolder-react','@backstage/plugin-search','@backstage/plugin-search-backend','@backstage/plugin-search-backend-module-catalog','@backstage/plugin-search-backend-module-elasticsearch','@backstage/plugin-search-backend-module-explore','@backstage/plugin-search-backend-module-pg','@backstage/plugin-search-backend-module-stack-overflow-collator','@backstage/plugin-search-backend-module-techdocs','@backstage/plugin-search-backend-node','@backstage/plugin-search-react','@backstage/plugin-signals','@backstage/plugin-signals-backend','@backstage/plugin-signals-node','@backstage/plugin-signals-react','@backstage/plugin-techdocs','@backstage/plugin-techdocs-addons-test-utils','@backstage/plugin-techdocs-backend','@backstage/plugin-techdocs-backend-module-zensical','@backstage/plugin-techdocs-node','@backstage/plugin-techdocs-react','@backstage/plugin-user-settings','@backstage/plugin-user-settings-backend','@backstage/test-utils','@backstage/theme','@backstage/ui','@backstage/version-bridge','@internal/backend','@internal/cli','@internal/frontend','@internal/plugin-todo-list','@internal/plugin-todo-list-backend','@internal/scaffolder','@internal/secrets-node','@internal/techdocs-zensical','app-example-plugin','yarn-plugin-backstage'])]"
+    level: error
+    message: "A common-library package must not depend on a frontend- or backend-role package (verify-local-dependencies.js role rule 3)."
+
+  # backstage-11 (C) — role rule 4: frontend-plugin / web-library packages
+  # (except six exempt sources) have no runtime dependency on another
+  # frontend-plugin package (23 names hand-listed).
+  - id: backstage-role-no-plugin-to-plugin-deps
+    kind: json_path_absent
+    paths: ["{packages,plugins}/*/package.json"]
+    path: "$[?(($.backstage.role == 'frontend-plugin' || $.backstage.role == 'web-library') && !($.name == '@backstage/frontend-defaults' || $.name == '@backstage/frontend-app-api' || $.name == '@backstage/frontend-dev-utils' || $.name == '@backstage/frontend-test-utils' || $.name == '@backstage/plugin-api-docs' || $.name == '@backstage/plugin-techdocs-addons-test-utils') && $.dependencies['@backstage/plugin-api-docs','@backstage/plugin-app','@backstage/plugin-app-visualizer','@backstage/plugin-auth','@backstage/plugin-catalog','@backstage/plugin-catalog-graph','@backstage/plugin-catalog-import','@backstage/plugin-catalog-unprocessed-entities','@backstage/plugin-config-schema','@backstage/plugin-devtools','@backstage/plugin-home','@backstage/plugin-kubernetes','@backstage/plugin-kubernetes-cluster','@backstage/plugin-mui-to-bui','@backstage/plugin-notifications','@backstage/plugin-org','@backstage/plugin-scaffolder','@backstage/plugin-search','@backstage/plugin-signals','@backstage/plugin-techdocs','@backstage/plugin-user-settings','@internal/plugin-todo-list','app-example-plugin'])]"
+    level: error
+    message: "A frontend package must not depend on another frontend-plugin package (verify-local-dependencies.js role rule 4)."
+
+  # backstage-12 (A) — role rule 5: frontend-plugin / web-library packages
+  # (except the 11 listed in the script) have no runtime dependency on
+  # @backstage/core-app-api or @backstage/frontend-app-api.
+  - id: backstage-role-frontend-no-app-api-deps
+    kind: json_path_absent
+    paths: ["{packages,plugins}/*/package.json"]
+    path: "$[?(($.backstage.role == 'frontend-plugin' || $.backstage.role == 'web-library') && !($.name == '@backstage/app-defaults' || $.name == '@backstage/core-compat-api' || $.name == '@backstage/dev-utils' || $.name == '@backstage/frontend-defaults' || $.name == '@backstage/frontend-dynamic-feature-loader' || $.name == '@backstage/frontend-app-api' || $.name == '@backstage/frontend-test-utils' || $.name == '@backstage/test-utils' || $.name == '@backstage/plugin-home' || $.name == '@backstage/plugin-techdocs-addons-test-utils' || $.name == '@backstage/plugin-user-settings') && $.dependencies['@backstage/core-app-api','@backstage/frontend-app-api'])]"
+    level: error
+    message: "Plugin packages must not have a runtime dependency on core-app-api / frontend-app-api; move it to devDependencies (verify-local-dependencies.js role rule 5)."
+
+  # backstage-13 (A) — role rule 6: backend-plugin / node-library packages
+  # (except four) have no runtime dependency on @backstage/backend-app-api.
+  - id: backstage-role-backend-no-backend-app-api-deps
+    kind: json_path_absent
+    paths: ["{packages,plugins}/*/package.json"]
+    path: "$[?(($.backstage.role == 'backend-plugin' || $.backstage.role == 'node-library') && !($.name == '@backstage/backend-common' || $.name == '@backstage/backend-defaults' || $.name == '@backstage/backend-test-utils' || $.name == '@backstage/backend-dynamic-feature-service') && $.dependencies['@backstage/backend-app-api'])]"
+    level: error
+    message: "Backend plugin packages must not have a runtime dependency on backend-app-api (verify-local-dependencies.js role rule 6)."
+
+  # backstage-b02 (A; Stage B missed unit) — packages/create-app/src/lib/
+  # tasks.test.ts ('should include required Yarn resolutions in the %s
+  # template', run by the CI unit tests) asserts that the default-app and
+  # legacy-app templates' package.json resolves @yarnpkg/core to 4.9.1. The
+  # .hbs manifests are valid JSON (the Handlebars tags sit inside strings),
+  # and the test reads only that committed value.
+  - id: backstage-create-app-template-yarnpkg-core-pin
+    kind: json_path_equals
+    paths:
+      - "packages/create-app/templates/default-app/package.json.hbs"
+      - "packages/create-app/templates/legacy-app/package.json.hbs"
+    path: "$.resolutions['@yarnpkg/core']"
+    equals: "4.9.1"
+    level: error
+    message: "create-app templates must resolve @yarnpkg/core to 4.9.1 (packages/create-app/src/lib/tasks.test.ts)."
+
+  # backstage-b03 (C; Stage B missed unit) — packages/cli-module-new/src/lib/
+  # version.test.ts: every @backstage package that a template under
+  # packages/cli-module-new/templates names in `{{versionQuery '<pkg>'}}`
+  # (no version hint) is a key of packageVersions in src/lib/version.ts.
+  # The registry is a TypeScript object literal, read by a regex that holds
+  # for its one-entry-per-line layout only (C). The template side uses the
+  # test's own regex.
+  - id: backstage-cli-new-versionquery-registered
+    kind: cross_file
+    relation: superset
+    source:
+      file: packages/cli-module-new/src/lib/version.ts
+      extract: { regex: "(?m)^  '(@backstage/[^']+)':" }
+    targets:
+      files: "packages/cli-module-new/templates/**/*.hbs"
+      extract: { regex: "\\{\\{\\s*versionQuery\\s+'(@backstage/[^']+)'\\s*\\}\\}" }
+    allow_missing_target: true
+    level: error
+    message: "A cli-module-new template uses versionQuery for a package missing from packageVersions in src/lib/version.ts (version.test.ts)."
+
+  # ════════════════════════════════════════════════════════════════
+  # toolchain-pin
+  # ════════════════════════════════════════════════════════════════
+
+  # backstage-14 (A) — Yarn runs from the committed release named by
+  # .yarnrc.yml `yarnPath` (every CI `yarn` call fails without it).
+  - id: backstage-yarnpath-resolves
+    kind: registry_paths_resolve
+    source: .yarnrc.yml
+    extract: { yaml: "$.yarnPath" }
+    base: lint_root
+    expect: file
+    level: error
+    message: ".yarnrc.yml yarnPath must name a committed Yarn release."
+  # Stage C (Stage B config issue): the same unit covers the create-app
+  # templates. Each template's .yarnrc.yml.hbs names a Yarn release that is
+  # committed beside it (templates/<app>/.yarn/releases/), and the
+  # create-app e2e (unit 85) installs the generated app with it. Resolved
+  # from the template directory, like yarnPath from the project root.
+  - id: backstage-create-app-template-yarnpath-resolves
+    kind: for_each_dir
+    select: "packages/create-app/templates/*"
+    when_iter: 'iter.has_file(".yarnrc.yml.hbs")'
+    require:
+      - kind: registry_paths_resolve
+        source: "{path}/.yarnrc.yml.hbs"
+        extract: { yaml: "$.yarnPath" }
+        base: "{path}"
+        expect: file
+    level: error
+    message: "A create-app template's .yarnrc.yml.hbs yarnPath must name a Yarn release committed in that template."
+
+  # backstage-15 (C; Stage B reclassified from A) — renovate.json5 keeps
+  # @types/node "pinned to match the Node versions we support": its major
+  # equals the lowest supported Node major in the root engines.node.
+  # Layout-dependent: semver-major of engines.node reads the FIRST listed
+  # alternative, so it equals the lowest major only while the range lists
+  # the lowest line first. Reordering to '^26.13.0 || ^24.15.0' (same
+  # supported set) gives a false positive on every @types/node user, and
+  # the equivalent '>=24.15.0 <25 || >=26.13.0' spelling is not checked
+  # correctly (Stage B reproduced both). The real semantics, the minimum
+  # major of a semver range, need version-compare.
+  - id: backstage-types-node-major-matches-engines
+    kind: cross_file
+    relation: equals
+    source:
+      file: package.json
+      extract: { json: "$.engines.node" }
+    targets:
+      files: "{package.json,packages/*/package.json,plugins/*/package.json}"
+      extract: { json: "$['dependencies','devDependencies']['@types/node']" }
+    normalize: semver-major
+    allow_missing_target: true
+    level: error
+    message: "@types/node must stay on the lowest supported Node major (root engines.node); renovate.json5 keeps it pinned."
+
+  # backstage-16 (C) — createApp.ts "Keep in sync with the engines.node
+  # field in the root package.json": the create-app templates' engines.node
+  # equals the root's, and each per-line minimum in MINIMUM_NODE_VERSIONS is
+  # a minimum in the root range. The two-line regexes hold for this layout
+  # only (C).
+  - id: backstage-node-engines-templates-match-root
+    kind: cross_file
+    relation: equals
+    source:
+      file: package.json
+      extract: { json: "$.engines.node" }
+    targets:
+      files: "packages/create-app/templates/*/package.json.hbs"
+      extract: { regex: '"node": "([^"]+)"' }
+    level: error
+    message: "create-app templates must declare the same engines.node as the root package.json."
+  - id: backstage-node-minimum-first-line
+    kind: cross_file
+    relation: subset
+    source:
+      file: package.json
+      extract: { regex: '"node": "\^(\d+\.\d+\.\d+)' }
+    targets:
+      - file: packages/create-app/src/createApp.ts
+        extract: { regex: "'(\\d+\\.\\d+\\.\\d+)'" }
+    level: error
+    message: "createApp.ts MINIMUM_NODE_VERSIONS must contain each engines.node minimum."
+  - id: backstage-node-minimum-second-line
+    kind: cross_file
+    relation: subset
+    source:
+      file: package.json
+      extract: { regex: '"node": "\^[^"|]+ \|\| \^(\d+\.\d+\.\d+)"' }
+    targets:
+      - file: packages/create-app/src/createApp.ts
+        extract: { regex: "'(\\d+\\.\\d+\\.\\d+)'" }
+    level: error
+    message: "createApp.ts MINIMUM_NODE_VERSIONS must contain each engines.node minimum."
+
+  # backstage-17 (C) — versioning-policy.md: CI tests the supported Node
+  # releases. The node-version matrices name exactly the majors of
+  # MINIMUM_NODE_VERSIONS (tied to engines.node by backstage-16).
+  # Stage C (Stage B config issue): verify_windows.yml, verify_e2e-techdocs.yml
+  # and deploy_packages.yml's build job carry the same [24.x, 26.x] matrix
+  # and are covered too. deploy_packages.yml's release job ([24.x], one
+  # publish run) and deploy_docker-image.yml ([24.x]) are single-Node
+  # deploys, not test matrices, so they stay out.
+  - id: backstage-ci-node-matrix-matches-supported
+    kind: cross_file
+    relation: set_equals
+    source:
+      file: packages/create-app/src/createApp.ts
+      extract: { regex: "'(\\d+\\.\\d+\\.\\d+)'" }
+    targets:
+      - file: .github/workflows/ci.yml
+        extract: { yaml: "$.jobs.*.strategy.matrix['node-version'][*]" }
+      - file: .github/workflows/ci-noop.yml
+        extract: { yaml: "$.jobs.*.strategy.matrix['node-version'][*]" }
+      - file: .github/workflows/verify_e2e-linux.yml
+        extract: { yaml: "$.jobs.*.strategy.matrix['node-version'][*]" }
+      - file: .github/workflows/verify_e2e-linux-noop.yml
+        extract: { yaml: "$.jobs.*.strategy.matrix['node-version'][*]" }
+      - file: .github/workflows/verify_e2e-windows.yml
+        extract: { yaml: "$.jobs.*.strategy.matrix['node-version'][*]" }
+      - file: .github/workflows/verify_e2e-windows-noop.yml
+        extract: { yaml: "$.jobs.*.strategy.matrix['node-version'][*]" }
+      - file: .github/workflows/verify_windows.yml
+        extract: { yaml: "$.jobs.*.strategy.matrix['node-version'][*]" }
+      - file: .github/workflows/verify_e2e-techdocs.yml
+        extract: { yaml: "$.jobs.*.strategy.matrix['node-version'][*]" }
+      - file: .github/workflows/deploy_packages.yml
+        extract: { yaml: "$.jobs.build.strategy.matrix['node-version'][*]" }
+    normalize: semver-major
+    level: error
+    message: "CI node-version matrices must test exactly the supported Node majors."
+
+  # ════════════════════════════════════════════════════════════════
+  # other — `yarn fix --check` (repo fix --publish)
+  # ════════════════════════════════════════════════════════════════
+
+  # backstage-18 (A) — every `backstage` field names a known role
+  # (PackageRoles.getRoleFromPackage throws otherwise).
+  - id: backstage-role-is-known
+    kind: json_path_absent
+    paths: ["{packages,plugins}/*/package.json"]
+    path: "$[?($.backstage && !($.backstage.role == 'frontend' || $.backstage.role == 'backend' || $.backstage.role == 'cli' || $.backstage.role == 'cli-module' || $.backstage.role == 'web-library' || $.backstage.role == 'node-library' || $.backstage.role == 'common-library' || $.backstage.role == 'frontend-plugin' || $.backstage.role == 'frontend-plugin-module' || $.backstage.role == 'frontend-dynamic-container' || $.backstage.role == 'backend-plugin' || $.backstage.role == 'backend-plugin-module'))]"
+    level: error
+    message: "backstage.role must be one of the known package roles."
+
+  # backstage-19 (A) — fixPackageExports: an `exports` field is an object
+  # that exposes './package.json'.
+  - id: backstage-exports-expose-package-json
+    kind: json_path_absent
+    paths: ["{packages,plugins}/*/package.json"]
+    path: "$[?($.exports && !$.exports['./package.json'])]"
+    level: error
+    message: "exports must be an object with a './package.json' entry (yarn fix)."
+
+  # backstage-21 (A) — fixPackageExports: once a package has `exports`,
+  # its publishConfig carries no legacy main/module/browser/types entries
+  # (packages without `exports` keep them; the fixer returns early).
+  - id: backstage-publishconfig-no-legacy-entry-fields
+    kind: json_path_absent
+    paths: ["{packages,plugins}/*/package.json"]
+    path: "$[?($.exports && $.publishConfig['main','module','browser','types'])]"
+    level: error
+    message: "publishConfig must not set main/module/browser/types (yarn fix)."
+
+  # backstage-22 (A) — fixSideEffects: web and common, non-bundled roles
+  # declare `sideEffects`.
+  - id: backstage-side-effects-declared
+    kind: json_path_absent
+    paths: ["{packages,plugins}/*/package.json"]
+    path: "$[?(($.backstage.role == 'web-library' || $.backstage.role == 'common-library' || $.backstage.role == 'frontend-plugin' || $.backstage.role == 'frontend-plugin-module') && !$.sideEffects)]"
+    level: error
+    message: "Web and common packages must declare sideEffects (yarn fix)."
+
+  # backstage-23 (A) — repository field fixer: every package has an object
+  # `repository`; when its type/url are the root's, `directory` is the
+  # package's own path.
+  - id: backstage-repository-directory
+    kind: for_each_dir
+    select: ["packages/*", "plugins/*"]
+    when_iter: 'iter.has_file("package.json")'
+    require:
+      - kind: json_path_absent
+        paths: "{path}/package.json"
+        path: "$[?(!$.repository || match($.repository, '(?s).*') || ($.repository.type == 'git' && $.repository.url == 'https://github.com/backstage/backstage' && $.repository.directory != '{path}'))]"
+    level: error
+    message: "package.json repository must be {type, url, directory: <package path>} (yarn fix)."
+
+  # backstage-24 (A) — fixPluginId: plugin and plugin-module roles set
+  # backstage.pluginId; library roles whose name matches the plugin naming
+  # pattern set it too; when present it is a string or null.
+  - id: backstage-plugin-id-declared
+    kind: json_path_absent
+    paths: ["{packages,plugins}/*/package.json"]
+    path: "$[?(($.backstage.pluginId && $.backstage.pluginId != null && !match($.backstage.pluginId, '(?s).*')) || (!$.backstage.pluginId && (($.backstage.role == 'frontend-plugin' || $.backstage.role == 'frontend-plugin-module' || $.backstage.role == 'backend-plugin' || $.backstage.role == 'backend-plugin-module') || ($.backstage.role == 'common-library' && search($.name, 'plugin-.*-common$')) || ($.backstage.role == 'web-library' && search($.name, 'plugin-.*-(react|test-utils)')) || ($.backstage.role == 'node-library' && search($.name, 'plugin-.*-(node|backend)')))))]"
+    level: error
+    message: "backstage.pluginId must be set (string or null) where repo fix --publish requires it."
+
+  # backstage-27 (A) — fixPeerModules: backstage.peerModules only on
+  # backend-plugin / frontend-plugin packages, as an array of non-empty
+  # strings.
+  - id: backstage-peer-modules-valid
+    kind: json_path_absent
+    paths: ["{packages,plugins}/*/package.json"]
+    path: "$[?($.backstage.peerModules && (($.backstage.role != 'backend-plugin' && $.backstage.role != 'frontend-plugin') || (!$.backstage.peerModules[0] && length($.backstage.peerModules) != 0) || $.backstage.peerModules[?(!match(@, '(?s).+'))]))]"
+    level: error
+    message: "backstage.peerModules is only for plugin packages and must be an array of package names (yarn fix)."
+
+  # ════════════════════════════════════════════════════════════════
+  # other — generate-catalog-info --ci
+  # ════════════════════════════════════════════════════════════════
+
+  # backstage-28 (C) — every package with a `backstage` field has a
+  # catalog-info.yaml. Which packages carry the field is content, not a
+  # path, so the single package without it is excluded by hand.
+  - id: backstage-catalog-info-exists
+    kind: for_each_dir
+    select: ["packages/*", "plugins/*", "!packages/eslint-plugin"]
+    when_iter: 'iter.has_file("package.json")'
+    require:
+      - kind: file_exists
+        paths: "{path}/catalog-info.yaml"
+    level: error
+    message: "Every Backstage package needs a catalog-info.yaml (generate-catalog-info --ci)."
+
+  # backstage-29 (A) — catalog-info.yaml metadata.title equals the
+  # package name.
+  - id: backstage-catalog-info-title
+    kind: for_each_dir
+    select: ["packages/*", "plugins/*"]
+    when_iter: 'iter.has_file("catalog-info.yaml")'
+    require:
+      - kind: cross_file
+        relation: equals
+        source:
+          file: "{path}/package.json"
+          extract: { json: "$.name" }
+        targets:
+          - file: "{path}/catalog-info.yaml"
+            extract: { yaml: "$.metadata.title" }
+    level: error
+    message: "catalog-info.yaml metadata.title must equal the package name (generate-catalog-info --ci)."
+
+  # backstage-31 (C) — catalog-info.yaml spec.type is `backstage-<role>`.
+  # No transform can add the prefix, so the target is read by a regex that
+  # assumes the generated layout.
+  - id: backstage-catalog-info-type
+    kind: for_each_dir
+    select: ["packages/*", "plugins/*"]
+    when_iter: 'iter.has_file("catalog-info.yaml")'
+    require:
+      - kind: cross_file
+        relation: equals
+        source:
+          file: "{path}/package.json"
+          extract: { json: "$.backstage.role" }
+        targets:
+          - file: "{path}/catalog-info.yaml"
+            extract: { regex: '(?m)^  type: backstage-(\S+)$' }
+    level: error
+    message: "catalog-info.yaml spec.type must be backstage-<role> (generate-catalog-info --ci)."
+
+  # ════════════════════════════════════════════════════════════════
+  # other — changesets
+  # ════════════════════════════════════════════════════════════════
+
+  # backstage-33 (C) — verify-changesets.js: no changeset releases one of
+  # the five private example/test packages. Frontmatter is read by regex.
+  - id: backstage-changesets-no-private-packages
+    kind: file_content_forbidden
+    paths:
+      include: [".changeset/*.md"]
+      exclude: [".changeset/README.md"]
+    pattern: "(?m)^['\"]?(?:example-app|example-backend|e2e-test|storybook|techdocs-cli-embedded-app)['\"]?\\s*:"
+    level: error
+    message: "Changesets must not release private packages (scripts/verify-changesets.js)."
+
+  # backstage-34 (C) — `changeset version` (sync_version-packages.yml, on
+  # every master push) rejects a changeset naming an unknown package or an
+  # invalid bump. Frontmatter keys are read by regex.
+  - id: backstage-changesets-name-workspace-packages
+    kind: cross_file
+    relation: superset
+    source:
+      files: "{packages,plugins}/*/package.json"
+      extract: { json: "$.name" }
+    targets:
+      files: ".changeset/*.md"
+      extract: { regex: "(?m)^'([^']+)': (?:patch|minor|major)$" }
+    allow_missing_target: true
+    level: error
+    message: "Changesets may only name workspace packages (changeset version)."
+  - id: backstage-changesets-valid-bump
+    kind: for_each_match
+    paths:
+      include: [".changeset/*.md"]
+      exclude: [".changeset/README.md"]
+    select: "^'[^']+':"
+    require:
+      matches: ["^'[^']+': (?:patch|minor|major)$"]
+    level: error
+    message: "A changeset entry's bump must be patch, minor or major."
+
+  # ════════════════════════════════════════════════════════════════
+  # other — microsite plugin directory (verify-plugin-directory.js)
+  # ════════════════════════════════════════════════════════════════
+
+  # backstage-37 (A) — every file in microsite/data/plugins has '.yaml' in
+  # its name (case-insensitive).
+  - id: backstage-plugin-directory-yaml-extension
+    kind: filename_regex
+    paths: "microsite/data/plugins/*"
+    pattern: '(?i).*\.yaml.*'
+    level: error
+    message: "microsite/data/plugins entries must be .yaml files (scripts/verify-plugin-directory.js)."
+
+  # backstage-38 (C) — each entry satisfies the zod schema. Hand-copied
+  # into structured-query rules (no inline schema; a schema file would live
+  # outside the repository).
+  - id: backstage-plugin-directory-required-strings
+    kind: yaml_path_absent
+    paths: "microsite/data/plugins/*.yaml"
+    path: "$[?(!match($.title, '(?s).*') || !match($.author, '(?s).*') || !match($.category, '(?s).*') || !match($.description, '(?s).*') || !match($.npmPackageName, '(?s).*') || ($.iconUrl && !match($.iconUrl, '(?s).*')))]"
+    level: error
+    message: "Plugin directory entries need string title/author/category/description/npmPackageName (verify-plugin-directory.js)."
+  - id: backstage-plugin-directory-urls
+    kind: yaml_path_absent
+    paths: "microsite/data/plugins/*.yaml"
+    path: "$[?(!match($.authorUrl, '[a-zA-Z][a-zA-Z0-9+.-]*:[^ ]+') || !match($.documentation, '[a-zA-Z][a-zA-Z0-9+.-]*:[^ ]+'))]"
+    level: error
+    message: "authorUrl and documentation must be URLs (verify-plugin-directory.js)."
+  - id: backstage-plugin-directory-status-and-dates
+    kind: yaml_path_absent
+    paths: "microsite/data/plugins/*.yaml"
+    path: "$[?(!($.status == 'active' || $.status == 'inactive' || $.status == 'archived') || !$.addedDate || ($.order && !($.order >= 0 || $.order < 0)))]"
+    level: error
+    message: "status must be active/inactive/archived, addedDate set, order a number (verify-plugin-directory.js)."
+
+  # ════════════════════════════════════════════════════════════════
+  # other — agent skills (verify-skills.js)
+  # ════════════════════════════════════════════════════════════════
+
+  # backstage-39 (A) — every .agents/skills/<dir> has a SKILL.md.
+  - id: backstage-skills-have-skill-md
+    kind: for_each_dir
+    select: ".agents/skills/*"
+    require:
+      - kind: file_exists
+        paths: "{path}/SKILL.md"
+    level: error
+    message: "Every agent skill directory needs a SKILL.md (scripts/verify-skills.js)."
+
+  # backstage-40 (C) — SKILL.md frontmatter `name` equals the directory and
+  # `description` is non-empty (frontmatter read by regex).
+  - id: backstage-skills-frontmatter-name
+    kind: for_each_dir
+    select: ".agents/skills/*"
+    require:
+      - kind: file_content_matches
+        paths: "{path}/SKILL.md"
+        pattern: "\\A---\\r?\\n(?:[^\\n]*\\n)*?name: '?{basename}'?\\r?\\n"
+      - kind: file_content_matches
+        paths: "{path}/SKILL.md"
+        pattern: "\\A---\\r?\\n(?:[^\\n]*\\n)*?description: *\\S"
+    level: error
+    message: "SKILL.md must declare name '<directory>' and a description (scripts/verify-skills.js)."
+
+  # backstage-41 (A) — every index.json skill names an existing skill
+  # directory.
+  - id: backstage-skills-index-names-resolve
+    kind: registry_paths_resolve
+    source: .agents/skills/index.json
+    extract: { json: "$.skills[*].name" }
+    expect: dir
+    level: error
+    message: "index.json lists a skill that does not exist (scripts/verify-skills.js)."
+
+  # backstage-42 (C) — index.json description equals SKILL.md's
+  # (frontmatter read by regex; single-line descriptions only).
+  - id: backstage-skills-index-description
+    kind: for_each_dir
+    select: ".agents/skills/*"
+    require:
+      - kind: cross_file
+        relation: equals
+        source:
+          file: "{path}/SKILL.md"
+          extract: { regex: "\\A---\\r?\\n(?:[^\\n]*\\n)*?description: *([^\\r\\n]*?) *\\r?\\n" }
+        targets:
+          - file: .agents/skills/index.json
+            extract: { json: "$.skills[?(@.name == '{basename}')].description" }
+        allow_missing_target: true
+    level: error
+    message: "index.json description must match SKILL.md (scripts/verify-skills.js)."
+
+  # backstage-43 (C) — index.json `files` lists exactly the skill
+  # directory's files. The script checks only skills that index.json
+  # publishes; which ones those are is content, so the two unpublished
+  # skill directories at the pin are excluded by hand.
+  - id: backstage-skills-index-files
+    kind: for_each_dir
+    select: [".agents/skills/*", "!.agents/skills/backstage-release-notes", "!.agents/skills/catalog-db-performance"]
+    require:
+      - kind: registry_paths_resolve
+        source: .agents/skills/index.json
+        extract: { json: "$.skills[?(@.name == '{basename}')].files[*]" }
+        base: "{path}"
+        expect: file
+        orphans: { space: "{path}/**/*.*" }
+    level: error
+    message: "index.json files must match the skill directory (scripts/verify-skills.js)."
+
+  # backstage-44 (A) — docs/ai/well-known-skills.md lists exactly the
+  # published (index.json) skills.
+  - id: backstage-skills-documented
+    kind: cross_file
+    relation: set_equals
+    source:
+      file: docs/ai/well-known-skills.md
+      extract: { regex: "(?m)^- `([^`]+)`:" }
+    targets:
+      - file: .agents/skills/index.json
+        extract: { json: "$.skills[*].name" }
+    level: error
+    message: "docs/ai/well-known-skills.md must list exactly the published skills (scripts/verify-skills.js)."
+
+  # ════════════════════════════════════════════════════════════════
+  # other — Markdown links (verify-links.js, every *.md in the repo)
+  # ════════════════════════════════════════════════════════════════
+  # backstage-45 (C) — 'missing': every live link in a Markdown file
+  # resolves to a file or directory (root-absolute links from the repo
+  # root). alint's CommonMark scanner is stricter than the script's regex:
+  # it also checks reference labels and parenthesised destinations, which
+  # fire on two files the script never flags (excluded by hand), and it
+  # does not model the microsite/static fallback. Hence C.
+  - id: backstage-md-links-resolve
+    kind: markdown_links_resolve
+    paths:
+      include: ["**/*.md"]
+      exclude:
+        - "contrib/docs/tutorials/aws-alb-aad-oidc-auth.md"
+        - "plugins/catalog-graph/README-alpha.md"
+    root: { url_prefix: "/", dir: "." }
+    level: error
+    message: "Markdown link target does not exist (scripts/verify-links.js)."
+
+  # backstage-46 (C; Stage B reclassified from A) — 'bad-anchor': link
+  # fragments name a heading anchor (-1/-2 suffixes for duplicates). The
+  # kind generates GitHub-style slugs, but verify-links.js headingToSlug
+  # drops [*_] and [^\w\s-] in its own way. Stage B reproduced both
+  # directions: '#myheading' -> '## my_heading' fires here but passes the
+  # script, and './a.md#my_heading' passes here but fails the script.
+  # Passes at the pin. Matching the script needs a slug-style option.
+  - id: backstage-md-fragments-resolve
+    kind: markdown_fragments_resolve
+    paths: "**/*.md"
+    level: error
+    message: "Markdown link fragment names no heading in its target (scripts/verify-links.js)."
+
+  # backstage-47 (C) — 'out-of-docs': a relative link from docs/ stays
+  # inside docs/. The "everything outside docs/" target set is hand-listed
+  # as the other top-level directories plus root files.
+  - id: backstage-docs-relative-links-stay-in-docs
+    kind: file_graph
+    nodes: "docs/**/*.md"
+    edges:
+      from_content:
+        extract: { regex: '\]\((\.[^)#?\s]*)' }
+        resolve: relative_to_file
+    require:
+      forbidden_edges:
+        - from: "docs/**"
+          to: "{packages,plugins,microsite,beps,contrib,scripts,workspaces,docs-ui,.github,.changeset,.agents,.yarn,.storybook,.patches,.husky,.devcontainer,.lighthouseci,.claude}/**"
+        - from: "docs/**"
+          to: "*"
+    level: error
+    message: "Links in docs/ must use absolute GitHub URLs for targets outside docs/ (scripts/verify-links.js)."
+
+  # backstage-48 (A) — 'out-of-changeset': changesets use absolute
+  # http(s) URLs only (no relative or root-absolute links).
+  # Stage C (Stage B config issue): `relative: forbid` alone skipped
+  # root-absolute links such as /package.json, which the script also
+  # rejects. The `root` map sends every root-absolute route to a directory
+  # that does not exist, so each one is reported as unresolvable. The
+  # directory name is deliberately fictitious; do not create it.
+  # Remaining edge differences from the script's regex: it skips any URL
+  # that contains `[a-z]+:` anywhere and flags protocol-relative //host
+  # links, which alint skips.
+  - id: backstage-changeset-links-absolute
+    kind: markdown_links_resolve
+    paths:
+      include: [".changeset/*.md"]
+    relative: forbid
+    root: { url_prefix: "/", dir: ".changeset/__root-absolute-links-are-forbidden__" }
+    level: error
+    message: "Links in changesets must use absolute URLs (scripts/verify-links.js)."
+
+  # backstage-49 (C; Stage B reclassified from A) — 'not-relative': links
+  # inside docs/ never start with /docs/. The pattern reads raw text, but
+  # verify-links.js runs stripCodeBlocks first, so a ](/docs/x) inside a
+  # ``` fenced block fires here and passes the script (Stage B reproduced
+  # this). Passes at the pin. An exact form needs a code-block-aware
+  # Markdown scope.
+  - id: backstage-docs-links-not-root-absolute
+    kind: file_content_forbidden
+    paths: "docs/**/*.md"
+    pattern: '\]\(/docs/'
+    level: error
+    message: "Links within docs/ must be relative (scripts/verify-links.js)."
+
+  # backstage-54 (C) scripts/verify-links.js:308-320 'directory-link': a
+  #   relative link from docs/*.md never names a directory. C: the links come
+  #   from a regex, not a CommonMark scan, and fenced code blocks are not
+  #   skipped (verify-links strips them first). A link to a missing path is
+  #   also reported here, which overlaps backstage-45. At the pin, 1578
+  #   links are checked.
+  - id: backstage-docs-relative-links-not-directories
+    kind: registry_paths_resolve
+    source: "docs/**/*.md"
+    extract:
+      regex: '\]\(((?:\.\.?/|[A-Za-z0-9_])[^)\s#:]*)(?:#[^)\s]*)?\)'
+    expect: file
+    level: error
+    message: "A relative link in docs/ must name a file, not a directory (scripts/verify-links.js 'directory-link')."
+
+  # backstage-51 (C) — 'github': docs/ and microsite/ never link to
+  # github.com/backstage/backstage/(tree|blob)/master/docs/, except to a
+  # release changelog. Line-level approximation of the per-link check; the
+  # changelog-exists half of the exception is not modelled.
+  - id: backstage-docs-no-github-master-docs-links
+    kind: for_each_match
+    paths:
+      include: ["docs/**/*.md", "microsite/**/*.md"]
+      exclude: ["**/node_modules/**"]
+    select: '\]\(https://github\.com/backstage/backstage/(?:tree|blob)/master/docs/'
+    require:
+      matches: ['\]\(https://github\.com/backstage/backstage/(?:tree|blob)/master/docs/releases/[^)\s]+-changelog\.md\)']
+    level: error
+    message: "Link to docs pages relatively, not via GitHub master URLs (scripts/verify-links.js)."
+
+  # NOT A SEPARATE UNIT (Stage B removed backstage-52 under R1). This is
+  # the GitHub master-URL input form of verify-links 'missing' (backstage-
+  # 45): the script strips github.com/backstage/backstage/(tree|blob)/master
+  # and sends the rest through the same existence check as a relative
+  # link. Kept at info so it is not counted twice. It still catches a
+  # master link to a missing path, which markdown_links_resolve skips as an
+  # external URL. Raw text, so it does not skip fenced code blocks.
+  - id: backstage-github-master-links-resolve
+    kind: file_graph
+    nodes: "**/*.md"
+    edges:
+      from_content:
+        extract: { regex: '\]\(https://github\.com/backstage/backstage/(?:tree|blob)/master/([^)#?\s]+)' }
+        resolve: relative_to_repo_root
+    require: no_dangling
+    level: info
+    message: "GitHub master link points at a path that does not exist (scripts/verify-links.js)."
+
+  # backstage-53 (C; Stage B reclassified from A) — 'multi-line': link text
+  # never spans lines. This is the script's own regex, but the script
+  # applies it after stripCodeBlocks and this rule reads raw text, so a
+  # multi-line [text\n](x) inside a ``` fenced block fires here only
+  # (Stage B reproduced this). Passes at the pin. An exact form needs a
+  # code-block-aware Markdown scope.
+  - id: backstage-md-no-multiline-link-text
+    kind: file_content_forbidden
+    paths: "**/*.md"
+    pattern: '\[[^\]\n]+?\n[^\]\n]*?(?:\n[^\]\n]*?)?\]\('
+    level: error
+    message: "Markdown link text must not span multiple lines (scripts/verify-links.js)."
+
+  # backstage-55 (C; Stage B reclassified from A, reproduced in Stage C)
+  # — 'invisible-chars': no zero-width or other invisible character inside
+  # a link destination. This rule reads raw text. verify-links.js's
+  # verifyFile runs stripCodeBlocks (/^```[^\n]*\n[\s\S]*?^```/gm) before
+  # it extracts links, so the script never sees a link inside a ``` block.
+  # Stage C reproduced the false positive on a scratch copy:
+  # [x](https://exa<U+200B>mple.com) inside a fenced block fires this rule.
+  # Passes at the pin. An exact form needs a code-block-aware Markdown scope.
+  - id: backstage-md-no-invisible-chars-in-links
+    kind: file_content_forbidden
+    paths: "**/*.md"
+    pattern: '\]\([^)\n]*[\x{200B}-\x{200F}\x{FEFF}\x{00AD}\x{2060}\x{2028}\x{2029}]'
+    level: error
+    message: "Link URL contains an invisible Unicode character (scripts/verify-links.js)."
+
+  # backstage-b04 (A; Stage B missed unit) — verify_microsite.yml runs
+  # `mkdocs build --strict --config-file mkdocs-ci.yml`. mkdocs-ci.yml
+  # INHERITs mkdocs.yml and replaces `nav`. It lowers only
+  # validation.links.not_found, so validation.nav.not_found keeps its
+  # warn default, and --strict turns a nav entry naming a missing doc into
+  # a build failure. The nav leaves resolve against docs_dir, which is the
+  # mkdocs default `docs` because mkdocs.yml does not set it. Entries with
+  # a URL scheme are external links in mkdocs and are left out (the match
+  # excludes values that contain ':').
+  - id: backstage-mkdocs-ci-nav-resolves
+    kind: registry_paths_resolve
+    source: mkdocs-ci.yml
+    extract: { yaml: "$.nav..[?match(@, '[^:]+')]" }
+    base: docs
+    expect: file
+    level: error
+    message: "mkdocs-ci.yml nav names a file that does not exist under docs/ (mkdocs build --strict)."
+
+  # ════════════════════════════════════════════════════════════════
+  # other — Yarn patches (backstage-cli pm verify-patches)
+  # ════════════════════════════════════════════════════════════════
+
+  # backstage-58 (A) — every patch file a manifest references exists:
+  # `~/` paths from the project root, `./` paths from the manifest.
+  - id: backstage-yarn-patches-exist-root-relative
+    kind: file_graph
+    nodes: "{package.json,packages/*/package.json,plugins/*/package.json,.yarn/patches/**}"
+    edges:
+      from_content:
+        extract: { regex: '#~/([^"!]+)"' }
+        resolve: relative_to_repo_root
+    require: no_dangling
+    level: error
+    message: "A patch: reference names a missing patch file (pm verify-patches)."
+  - id: backstage-yarn-patches-exist-file-relative
+    kind: file_graph
+    nodes: "{package.json,packages/*/package.json,plugins/*/package.json,.yarn/patches/**}"
+    edges:
+      from_content:
+        extract: { regex: '#(\.\.?/[^"!]+)"' }
+        resolve: relative_to_file
+    require: no_dangling
+    level: error
+    message: "A patch: reference names a missing patch file (pm verify-patches)."
+
+  # backstage-59 (A) — no file under .yarn/patches is left unreferenced by
+  # the workspace manifests.
+  - id: backstage-yarn-patches-no-orphans
+    kind: file_graph
+    nodes: "{package.json,packages/*/package.json,plugins/*/package.json,.yarn/patches/**}"
+    edges:
+      from_content:
+        extract: { regex: '#(?:~/|\./)?([^"!]*\.yarn/patches/[^"!]+)"' }
+        resolve: relative_to_repo_root
+    require:
+      no_orphans:
+        roots: ["package.json", "packages/*/package.json", "plugins/*/package.json"]
+    level: error
+    message: "A file in .yarn/patches is not referenced by any manifest (pm verify-patches)."
+
+  # ════════════════════════════════════════════════════════════════
+  # other — OpenAPI specs (repo schema openapi lint, custom Spectral rule)
+  # ════════════════════════════════════════════════════════════════
+
+  # backstage-62 (A) — custom rule allow-reserved-in-query-params: every
+  # query parameter sets allowReserved: true (Spectral resolves $refs, so
+  # component parameters are checked as well).
+  # Stage C (Stage B config issue, not reproduced): Spectral's `given` is
+  # $.paths..parameters[?(@.in == "query")] after $ref resolution, so it
+  # sees inline path parameters plus the component parameters that paths
+  # REFERENCE. alint does not resolve $refs, so this rule checks every
+  # component parameter instead. An UNREFERENCED component query parameter
+  # without allowReserved would fire here but not in Spectral. A paths-only
+  # query would miss the referenced ones instead, so the broader query is
+  # the closer approximation. At the pin, every component parameter in the
+  # six specs is referenced, checked by a scan of
+  # '#/components/parameters/<name>' references.
+  - id: backstage-openapi-query-allow-reserved
+    kind: yaml_path_absent
+    paths: "{packages,plugins}/*/src/schema/openapi.yaml"
+    path: "$['paths','components']..[?(@.in == 'query' && @.allowReserved != true)]"
+    level: error
+    message: "Query parameters must set allowReserved: true (openapi lint rule allow-reserved-in-query-params)."
+
+  # backstage-b01 (A; Stage B missed unit, promoted from the former
+  # backstage-valueadd-openapi-generated-router) — `repo schema openapi
+  # validate` (ci.yml verify job) throws "No `src/schema/openapi/generated/
+  # router.ts` file found." for a package whose src/schema/openapi.yaml has
+  # neither the generated router nor the deprecated
+  # src/schema/openapi.generated.ts (packages/repo-tools/src/commands/repo/
+  # schema/openapi/validate.ts, paths in lib/openapi/constants.ts). The
+  # deep-equality half of the command is backstage-64 (B-adapter, format-reader).
+  - id: backstage-openapi-generated-router-exists
+    kind: for_each_file
+    select: "{packages,plugins}/*/src/schema/openapi.yaml"
+    require:
+      - kind: file_exists
+        paths: ["{dir}/openapi/generated/router.ts", "{dir}/openapi.generated.ts"]
+    level: error
+    message: "An OpenAPI spec needs its generated src/schema/openapi/generated/router.ts (repo schema openapi validate)."
+
+  # backstage-b06 (B-delegate since the audit, as zulip-33; PARTIAL) — validate.ts's
+  # loadAndValidateOpenApiYaml runs swagger-parser Parser.validate, which
+  # checks the OpenAPI meta-schema and resolves $refs, before the
+  # deep-equal step. The repository ships no OpenAPI meta-schema, and a
+  # corpus config cannot carry one, so json_schema_passes cannot express
+  # the check. This rule asserts only the meta-schema's top-level
+  # requirements: `openapi` is a 3.0.x/3.1.x version string, info.title and
+  # info.version are strings, and paths, components or webhooks is present.
+  # Nested-schema validity and $ref resolution are not covered.
+  - id: backstage-openapi-spec-valid
+    kind: yaml_path_absent
+    paths: "{packages,plugins}/*/src/schema/openapi.yaml"
+    path: "$[?(!match($.openapi, '3[.][01][.][0-9]+(-.+)?') || !match($.info.title, '(?s).*') || !match($.info.version, '(?s).*') || !($.paths || $.components || $.webhooks))]"
+    level: error
+    message: "OpenAPI spec is missing its required top-level fields (swagger-parser validate in repo schema openapi validate)."
+
+  # ════════════════════════════════════════════════════════════════
+  # other — ESLint notice/notice (copyright header)
+  # ════════════════════════════════════════════════════════════════
+
+  # backstage-65 (A) — every linted JS/TS source carries the Apache
+  # "Copyright <year> The Backstage Authors" header in its first lines.
+  # Stage C (Stage B config issue): the pattern is now the whole of
+  # scripts/templates/copyright-header.txt, all 15 lines, with <%= YEAR %>
+  # as \d{4}, the YEAR regex in eslint-plugin-notice. Before, it held only
+  # the first three lines. It is unanchored, like notice's regex test over
+  # the start of the file, so a shebang or eslint directive above the
+  # header is allowed.
+  - id: backstage-copyright-header
+    kind: file_header
+    paths:
+      include:
+        - "{packages,plugins}/**/*.{js,jsx,ts,tsx,mjs,cjs}"
+      exclude:
+        - "**/node_modules/**"
+        - "**/dist/**"
+        - "**/dist-types/**"
+        - "**/storybook-static/**"
+        - "**/coverage/**"
+        - "**/build/**"
+        - "**/public/**"
+        - "**/templates/**"
+        - "**/sample-templates/**"
+        - "**/.eslintrc.*"
+        - "packages/cli/asset-types/asset-types.js"
+    lines: 30
+    pattern: '/\*\n \* Copyright \d{4} The Backstage Authors\n \*\n \* Licensed under the Apache License, Version 2\.0 \(the "License"\);\n \* you may not use this file except in compliance with the License\.\n \* You may obtain a copy of the License at\n \*\n \*     http://www\.apache\.org/licenses/LICENSE-2\.0\n \*\n \* Unless required by applicable law or agreed to in writing, software\n \* distributed under the License is distributed on an "AS IS" BASIS,\n \* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied\.\n \* See the License for the specific language governing permissions and\n \* limitations under the License\.\n \*/'
+    level: error
+    message: "Source files need the Apache copyright header (ESLint notice/notice, scripts/templates/copyright-header.txt)."
+
+  # ════════════════════════════════════════════════════════════════
+  # other — workflow noop twins, BEPs, ADRs
+  # ════════════════════════════════════════════════════════════════
+  # backstage-66 (C) — the "NOTE: If you change these you must update
+  # *-noop.yml as well" comments: each noop twin triggers on exactly the
+  # complement of its workflow's path filter, so the required checks always
+  # report. Five pairs swap paths <-> paths-ignore with one list (exact
+  # set_equals). ci.yml encodes the complement with negated globs, read by
+  # a regex that holds for this layout only (C). The seventh pair
+  # (verify_microsite_accessibility) has drifted at the pin; see VALUE-ADD.
+  - id: backstage-noop-e2e-linux
+    kind: cross_file
+    relation: set_equals
+    source:
+      file: .github/workflows/verify_e2e-linux.yml
+      extract: { yaml: "$.on.pull_request['paths-ignore'][*]" }
+    targets:
+      - file: .github/workflows/verify_e2e-linux-noop.yml
+        extract: { yaml: "$.on.pull_request.paths[*]" }
+    level: error
+    message: "verify_e2e-linux-noop.yml must trigger on exactly the paths verify_e2e-linux.yml ignores."
+  - id: backstage-noop-e2e-windows
+    kind: cross_file
+    relation: set_equals
+    source:
+      file: .github/workflows/verify_e2e-windows.yml
+      extract: { yaml: "$.on.pull_request.paths[*]" }
+    targets:
+      - file: .github/workflows/verify_e2e-windows-noop.yml
+        extract: { yaml: "$.on.pull_request['paths-ignore'][*]" }
+    level: error
+    message: "verify_e2e-windows-noop.yml must ignore exactly the paths verify_e2e-windows.yml triggers on."
+  - id: backstage-noop-accessibility
+    kind: cross_file
+    relation: set_equals
+    source:
+      file: .github/workflows/verify_accessibility.yml
+      extract: { yaml: "$.on.pull_request.paths[*]" }
+    targets:
+      - file: .github/workflows/verify_accessibility-noop.yml
+        extract: { yaml: "$.on.pull_request['paths-ignore'][*]" }
+    level: error
+    message: "verify_accessibility-noop.yml must ignore exactly the paths verify_accessibility.yml triggers on."
+  - id: backstage-noop-chromatic
+    kind: cross_file
+    relation: set_equals
+    source:
+      file: .github/workflows/verify_chromatic.yml
+      extract: { yaml: "$.on.pull_request.paths[*]" }
+    targets:
+      - file: .github/workflows/verify_chromatic-noop.yml
+        extract: { yaml: "$.on.pull_request['paths-ignore'][*]" }
+    level: error
+    message: "verify_chromatic-noop.yml must ignore exactly the paths verify_chromatic.yml triggers on."
+  - id: backstage-noop-microsite
+    kind: cross_file
+    relation: set_equals
+    source:
+      file: .github/workflows/verify_microsite.yml
+      extract: { yaml: "$.on.pull_request.paths[*]" }
+    targets:
+      - file: .github/workflows/verify_microsite-noop.yml
+        extract: { yaml: "$.on.pull_request['paths-ignore'][*]" }
+    level: error
+    message: "verify_microsite-noop.yml must ignore exactly the paths verify_microsite.yml triggers on."
+  - id: backstage-noop-ci-negations
+    kind: cross_file
+    relation: set_equals
+    source:
+      file: .github/workflows/ci.yml
+      extract: { regex: "(?m)^      - '!([^']+)'$" }
+    targets:
+      - file: .github/workflows/ci-noop.yml
+        extract: { yaml: "$.on.pull_request.paths[*]" }
+        matches: '^[^!]'
+    level: error
+    message: "ci-noop.yml must trigger on exactly the paths ci.yml excludes."
+  - id: backstage-noop-ci-reincludes
+    kind: cross_file
+    relation: set_equals
+    source:
+      file: .github/workflows/ci-noop.yml
+      extract: { regex: "(?m)^      - '!([^']+)'$" }
+    targets:
+      - file: .github/workflows/ci.yml
+        extract: { yaml: "$.on.pull_request.paths[*]" }
+        matches: '^[^!*]'
+    level: error
+    message: "ci.yml must re-include exactly the paths ci-noop.yml excludes."
+
+  # backstage-68 (C) — docs/architecture-decisions/index.md: every ADR is
+  # registered in microsite/sidebars.ts (by its frontmatter id). Frontmatter
+  # and the TypeScript sidebar are both read by regex. The mkdocs.yml half
+  # of the same instruction has drifted at the pin; see VALUE-ADD.
+  - id: backstage-adrs-in-sidebar
+    kind: cross_file
+    relation: superset
+    source:
+      file: microsite/sidebars.ts
+      extract: { regex: "'architecture-decisions/(adrs-adr\\d+)'" }
+    targets:
+      files: "docs/architecture-decisions/adr[0-9][0-9][0-9]-*.md"
+      extract: { regex: "(?m)^id: (adrs-adr(?:0[0-9][1-9]|0[1-9][0-9]|[1-9][0-9][0-9]))$" }
+    allow_missing_target: true
+    level: error
+    message: "Register every ADR in microsite/sidebars.ts (docs/architecture-decisions/index.md)."
+
+  # backstage-67 (A) — beps/README.md: each BEP lives in
+  # beps/NNNN-short-descriptive-title with a README.md.
+  - id: backstage-bep-directory-naming
+    kind: for_each_dir
+    select: ["beps/*", "!beps/NNNN-template"]
+    require:
+      - kind: file_exists
+        paths: "{path}/README.md"
+    level: error
+    message: "Each BEP directory needs a README.md (beps/README.md)."
+  - id: backstage-bep-directory-name
+    kind: dir_absent
+    paths:
+      include: ["beps/*"]
+      exclude: ["beps/[0-9][0-9][0-9][0-9]-*", "beps/NNNN-template"]
+    level: error
+    message: "BEP directories are named beps/NNNN-short-descriptive-title (beps/README.md)."
+
+  # ════════════════════════════════════════════════════════════════
+  # VALUE-ADD (not in the enforced denominator, R3/R5)
+  # ════════════════════════════════════════════════════════════════
+
+  # The seventh noop pair has drifted: verify_microsite_accessibility.yml
+  # triggers on all of microsite/**, while its noop twin ignores only some
+  # microsite subdirectories, so both run for e.g. microsite/package.json.
+  # The NOTE comment's convention is violated at the pin (R5): info only.
+  - id: backstage-valueadd-noop-microsite-accessibility
+    kind: cross_file
+    relation: set_equals
+    source:
+      file: .github/workflows/verify_microsite_accessibility.yml
+      extract: { yaml: "$.on.pull_request.paths[*]" }
+    targets:
+      - file: .github/workflows/verify_microsite_accessibility-noop.yml
+        extract: { yaml: "$.on.pull_request['paths-ignore'][*]" }
+    level: info
+    message: "verify_microsite_accessibility-noop.yml has drifted from verify_microsite_accessibility.yml's paths."
+
+  # The mkdocs.yml half of the ADR registration instruction: adr015 is not
+  # in the mkdocs nav at the pin, so it is not enforced (R5). Info only.
+  - id: backstage-valueadd-adrs-in-mkdocs
+    kind: cross_file
+    relation: superset
+    source:
+      file: mkdocs.yml
+      extract: { regex: "'architecture-decisions/(adr\\d+)-[^']+\\.md'" }
+    targets:
+      files: "docs/architecture-decisions/adr[0-9][0-9][0-9]-*.md"
+      extract: { regex: "(?m)^id: adrs-(adr(?:0[0-9][1-9]|0[1-9][0-9]|[1-9][0-9][0-9]))$" }
+    allow_missing_target: true
+    level: info
+    message: "Register every ADR in mkdocs.yml (docs/architecture-decisions/index.md)."
+
+  # packageManager and .yarnrc.yml yarnPath name the same Yarn release.
+  # Corepack defers to yarnPath, so a mismatch is silent today.
+  - id: backstage-valueadd-package-manager-matches-yarnpath
+    kind: cross_file
+    relation: equals
+    source:
+      file: package.json
+      extract: { regex: '"packageManager": "yarn@([^"]+)"' }
+    targets:
+      - file: .yarnrc.yml
+        extract: { regex: 'yarnPath: \.yarn/releases/yarn-([0-9][^/]*)\.cjs' }
+    level: info
+    message: "packageManager and yarnPath should name the same Yarn version."
+
+  # (The former backstage-valueadd-openapi-generated-router was promoted to
+  # backstage-openapi-generated-router-exists, unit backstage-b01, at level
+  # error. It now also accepts the legacy src/schema/openapi.generated.ts
+  # layout.)
+
+  # .patches/README.md: patch-release entries are named pr-<number>.txt
+  # (sync_patch-release.yml silently skips other names).
+  - id: backstage-valueadd-patch-release-file-names
+    kind: filename_regex
+    paths: ".patches/*.txt"
+    pattern: 'pr-[0-9]+\.txt'
+    level: info
+    message: "Patch-release entries must be named pr-<number>.txt (.patches/README.md)."
+
+  # The root package.json stays private (never published).
+  - id: backstage-valueadd-root-private
+    kind: json_path_equals
+    paths: "package.json"
+    path: "$.private"
+    equals: true
+    level: info
+    message: "The monorepo root package.json must stay private."

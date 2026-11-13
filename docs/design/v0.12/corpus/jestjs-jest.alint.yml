@@ -1,0 +1,903 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
+#
+# alint v0.23 corpus-stratum config — jestjs/jest
+# Pinned @ aa88f7cf0bfc7a3a2efbfcab97914886b22d4454 (stratum: js-monorepo)
+#
+# Shape: Jest itself — a Yarn 4 (node-modules linker) TypeScript monorepo of 55
+# packages under packages/* plus the private root `@jest/monorepo`, a Docusaurus
+# site workspace (website/) and 15 private example workspaces (examples/*),
+# published with lerna-lite in fixed mode. Governance: OpenJS Foundation.
+#
+# WHERE THE ENFORCED VALIDATION LIVES
+#   .github/workflows/nodejs.yml `static-checks` — build:ts, build:js,
+#     typecheck:examples, typecheck:tests, verify-pnp, eslint, prettier --check,
+#     CHECK-COPYRIGHT-HEADERS (scripts/checkCopyrightHeaders.mjs), YARN
+#     CONSTRAINTS (yarn.config.cjs, seven rules) and yarn dedupe --check; plus
+#     ts-compatibility, the sharded test matrix (test.yml), leak, vm-modules,
+#     watchman and coverage jobs.
+#   scripts/buildUtils.mjs getPackages() — asserts run by every build:js /
+#     build:ts / lint-ts-files: engines.node equals the root, main/types are
+#     canonical, `exports` has the derived shape, bin paths exist.
+#   scripts/buildTs.mjs — every TS package declares `types`, tsconfig
+#     `references` mirror the internal dependencies, @jest/test-utils is a
+#     dev-only dependency referenced from a __tests__ tsconfig.
+#   check-changelog.yml + require-changelog.yml — scripts/checkChangelog.mjs
+#     (PR-link shape in both changelogs; the PR's own entry when labelled).
+#   Conventions: CONTRIBUTING.md, .github/copilot-instructions.md (CLAUDE.md),
+#     per-package CLAUDE.md files, load-bearing comments (yarn.config.cjs,
+#     scripts/verifyOldTs.mjs), .editorconfig, .gitattributes.
+#
+# This config expresses the yarn constraints alint can state (license,
+# repository, publishConfig, engines.node, ./-prefixed main/types), the
+# getPackages()/buildTs.mjs manifest assertions (engines = root, canonical
+# main/types, bin paths, `types` on TS packages, @jest/test-utils dev-only and
+# devDependency <-> __tests__ tsconfig reference), the manifest-level lookups
+# `yarn --immutable` makes (workspace: names and patch: files resolve), the
+# copyright-header and changelog-link checks, the toolchain and age-gate
+# conventions, the icon-mapping sync comment, the typecheck:tests tsconfig
+# layout, the website sidebar / navbar / blog-author integrity the Netlify
+# site build enforces, and the editor/git text conventions. Not expressed
+# (B/D, see the stratum log): one range per dependency, no dependency in both
+# dependencies and devDependencies and unique workspace names (B-config
+# unique-key), the derived `exports` shape and the sorted tsconfig
+# `references` (B-adapter), versions.json -> versioned_docs (B-config
+# reference), installs, dedupe, builds, type checks, lint, prettier, tests.
+# Nothing here spawns a process; no custom facts; no git-history kinds.
+
+version: 1
+
+rules:
+  # ══════════════════════════════════════════════════════════════════════════
+  # yarn.config.cjs constraints (nodejs.yml static-checks: "Check for unmet
+  # constraints"). Yarn workspaces = the root package.json, packages/*,
+  # website and examples/* (root `workspaces`). Each constraint rule is one
+  # unit (R7). Rule 1 (one range per dependency) and rule 2 (no dependency in
+  # both dependencies and devDependencies) are B-config unique-key: no rule.
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # A [other] constraint 3: a public workspace has license MIT; a private one
+  #   has no license field (workspace.unset('license')).
+  - id: jestjs-jest-workspace-license-public
+    kind: json_path_absent
+    paths: ["package.json", "packages/*/package.json", "website/package.json", "examples/*/package.json"]
+    path: "$[?($.private != true && $.license != 'MIT')]"
+    level: error
+    message: "A public workspace must declare license MIT (yarn.config.cjs constraint 3)."
+
+  - id: jestjs-jest-workspace-license-private
+    kind: json_path_absent
+    paths: ["package.json", "packages/*/package.json", "website/package.json", "examples/*/package.json"]
+    path: "$[?($.private == true && $.license)]"
+    level: error
+    message: "A private workspace must not declare a license field (yarn.config.cjs constraint 3)."
+
+  # A [other] constraint 4: a public workspace's repository is
+  #   {type: git, url: https://github.com/jestjs/jest.git, directory: <cwd>};
+  #   a private workspace has no repository field. {path} is the workspace
+  #   cwd that the constraint writes into repository.directory.
+  - id: jestjs-jest-workspace-repository-public
+    kind: for_each_dir
+    select: ["packages/*", "examples/*", "website"]
+    when_iter: 'iter.has_file("package.json")'
+    require:
+      - kind: json_path_absent
+        paths: "{path}/package.json"
+        path: "$[?($.private != true && ($.repository.type != 'git' || $.repository.url != 'https://github.com/jestjs/jest.git' || $.repository.directory != '{path}'))]"
+    level: error
+    message: "A public workspace's repository must be {type: git, url: https://github.com/jestjs/jest.git, directory: <workspace path>} (yarn.config.cjs constraint 4)."
+
+  # The root workspace, whose Yarn cwd is `.` (for_each_dir's {path} has no
+  #   root form, so it gets its own rule; private at the pin, so it passes).
+  - id: jestjs-jest-workspace-repository-public-root
+    kind: json_path_absent
+    paths: ["package.json"]
+    path: "$[?($.private != true && ($.repository.type != 'git' || $.repository.url != 'https://github.com/jestjs/jest.git' || $.repository.directory != '.'))]"
+    level: error
+    message: "A public root workspace's repository must be {type: git, url: https://github.com/jestjs/jest.git, directory: .} (yarn.config.cjs constraint 4)."
+
+  - id: jestjs-jest-workspace-repository-private
+    kind: json_path_absent
+    paths: ["package.json", "packages/*/package.json", "website/package.json", "examples/*/package.json"]
+    path: "$[?($.private == true && $.repository)]"
+    level: error
+    message: "A private workspace must not declare a repository field (yarn.config.cjs constraint 4)."
+
+  # A [other] constraint 5: a public workspace sets publishConfig.access to
+  #   public; a private workspace has no publishConfig at all.
+  - id: jestjs-jest-workspace-publish-config-public
+    kind: json_path_absent
+    paths: ["package.json", "packages/*/package.json", "website/package.json", "examples/*/package.json"]
+    path: "$[?($.private != true && $.publishConfig.access != 'public')]"
+    level: error
+    message: "A public workspace must set publishConfig.access to public (yarn.config.cjs constraint 5)."
+
+  - id: jestjs-jest-workspace-publish-config-private
+    kind: json_path_absent
+    paths: ["package.json", "packages/*/package.json", "website/package.json", "examples/*/package.json"]
+    path: "$[?($.private == true && $.publishConfig)]"
+    level: error
+    message: "A private workspace must not declare publishConfig (yarn.config.cjs constraint 5)."
+
+  # A [toolchain-pin] constraint 6: every public workspace's engines.node is
+  #   the literal yarn.config.cjs sets. The value is read from the constraint
+  #   file itself; the extract keeps only public manifests' engines.node
+  #   (private ones are free under this constraint), and the companion rule
+  #   makes a public workspace without engines.node fire.
+  - id: jestjs-jest-workspace-engines-node-public
+    kind: cross_file
+    relation: equals
+    source:
+      file: "yarn.config.cjs"
+      extract:
+        regex: "\\['engines', 'node'\\],\\s*'([^']+)'"
+    targets:
+      files: "{package.json,packages/*/package.json,website/package.json,examples/*/package.json}"
+      extract:
+        json: "$.engines[?(@ == $.engines.node && $.private != true)]"
+    allow_missing_target: true
+    level: error
+    message: "A public workspace's engines.node must equal the range yarn.config.cjs sets (constraint 6)."
+
+  - id: jestjs-jest-workspace-engines-node-present
+    kind: json_path_absent
+    paths: ["package.json", "packages/*/package.json", "website/package.json", "examples/*/package.json"]
+    path: "$[?($.private != true && !$.engines.node)]"
+    level: error
+    message: "A public workspace must declare engines.node (yarn.config.cjs constraint 6)."
+
+  # A [other] constraint 7: a string main / types field starts with ./
+  - id: jestjs-jest-workspace-main-types-dot-slash
+    kind: json_path_matches
+    paths: ["package.json", "packages/*/package.json", "website/package.json", "examples/*/package.json"]
+    path: "$['main','types']"
+    matches: '^\./'
+    if_present: true
+    level: error
+    message: "main and types must start with ./ (yarn.config.cjs constraint 7)."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # scripts/buildUtils.mjs getPackages(): asserted for every packages/* dir
+  # with a package.json by every build:js / build:ts / lint-ts-files run
+  # (static-checks, ts-compatibility, every test job). The `exports`
+  # deep-equality (derived from main/types/bin) is B-adapter: no rule.
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # A [toolchain-pin] "Engine requirement in <pkg> should match root": every
+  #   packages/* manifest (private ones included) has engines.node equal to
+  #   the root package.json's.
+  - id: jestjs-jest-package-engines-match-root
+    kind: cross_file
+    relation: equals
+    source:
+      file: "package.json"
+      extract:
+        json: "$.engines.node"
+    targets:
+      files: "packages/*/package.json"
+      extract:
+        json: "$.engines.node"
+    level: error
+    message: "packages/*/package.json engines.node must match the root package.json (scripts/buildUtils.mjs)."
+
+  # A [other] a typed package has main ./build/index.js and types
+  #   ./build/index.d.ts; an untyped one has main ./index.js. (buildTs.mjs's
+  #   "types === main with .d.ts" assertion runs after this and can never fail
+  #   on its own, so it is folded into this unit.)
+  - id: jestjs-jest-package-main-types-canonical
+    kind: json_path_absent
+    paths: ["packages/*/package.json"]
+    path: "$[?(($.types && ($.main != './build/index.js' || $.types != './build/index.d.ts')) || (!$.types && $.main != './index.js'))]"
+    level: error
+    message: "A typed package needs main ./build/index.js + types ./build/index.d.ts; an untyped one main ./index.js (scripts/buildUtils.mjs)."
+
+  # A [other] every bin entry points at an existing file (relative to the
+  #   package). read-pkg normalizes a string `bin` into an object, so both
+  #   manifest forms are checked.
+  - id: jestjs-jest-package-bin-exists-object
+    kind: registry_paths_resolve
+    source: "packages/*/package.json"
+    extract:
+      json: "$.bin.*"
+    expect: file
+    level: error
+    message: "A bin entry in package.json points at a file that does not exist (scripts/buildUtils.mjs)."
+
+  - id: jestjs-jest-package-bin-exists-string
+    kind: registry_paths_resolve
+    source: "packages/*/package.json"
+    extract:
+      json: "$[?(@ == $.bin && match(@, '.*'))]"
+    expect: file
+    level: error
+    message: "The bin path in package.json points at a file that does not exist (scripts/buildUtils.mjs)."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # scripts/buildTs.mjs (build:ts in static-checks and ts-compatibility), over
+  # the packages that have a tsconfig.json. The tsconfig `references` check
+  # (sorted list of internal dependency paths) is B-adapter: no rule.
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # A [other] "Package <name> is missing `types` field".
+  - id: jestjs-jest-ts-package-declares-types
+    kind: for_each_dir
+    select: "packages/*"
+    when_iter: 'iter.has_file("tsconfig.json") and iter.has_file("package.json")'
+    require:
+      - kind: json_path_matches
+        paths: "{path}/package.json"
+        path: "$.types"
+        matches: ".+"
+    level: error
+    message: "A package with a tsconfig.json must declare `types` (scripts/buildTs.mjs)."
+
+  # A [dep-version] "declares '@jest/test-utils' as dependency, but it must be
+  #   declared as dev dependency".
+  - id: jestjs-jest-test-utils-dev-dependency-only
+    kind: for_each_dir
+    select: "packages/*"
+    when_iter: 'iter.has_file("tsconfig.json") and iter.has_file("package.json")'
+    require:
+      - kind: json_path_absent
+        paths: "{path}/package.json"
+        path: "$.dependencies['@jest/test-utils']"
+    level: error
+    message: "@jest/test-utils may only be a devDependency (scripts/buildTs.mjs)."
+
+  # A [dep-version] (jest-27; Stage A had B-config set, Stage B showed today's
+  #   kinds express it) buildTs.mjs:111-153: a package declares
+  #   @jest/test-utils as a devDependency if and only if some
+  #   **/__tests__/tsconfig.json in it has a reference whose path ends with
+  #   test-utils ("declares ... but it is not referenced" / "does not
+  #   declare ... but it is referenced"). Rule 1 compares, per package with
+  #   __tests__ tsconfigs, the union of their test-utils reference captures
+  #   with the devDependency capture (set_equals, both {} or both
+  #   {"test-utils"}); the package.json regex stays inside the flat
+  #   devDependencies object, so a key in another dependency field does not
+  #   count. Rule 2 covers packages with no __tests__ tsconfig, where the
+  #   devDependency alone is the violation.
+  - id: jestjs-jest-test-utils-dev-dependency-iff-referenced
+    kind: for_each_dir
+    select: "packages/*"
+    when_iter: 'iter.has_file("tsconfig.json") and iter.has_file("package.json") and iter.has_file("**/__tests__/tsconfig.json")'
+    require:
+      - kind: cross_file
+        relation: set_equals
+        source:
+          files: "{path}/**/__tests__/tsconfig.json"
+          extract:
+            regex: '"path":\s*"[^"]*(test-utils)"'
+        targets:
+          - file: "{path}/package.json"
+            extract:
+              regex: '"devDependencies":\s*\{[^}]*"@jest/(test-utils)"\s*:'
+    level: error
+    message: "A package declares @jest/test-utils as a devDependency if and only if one of its __tests__/tsconfig.json files references test-utils (scripts/buildTs.mjs)."
+
+  - id: jestjs-jest-test-utils-dev-dependency-needs-tests-tsconfig
+    kind: for_each_dir
+    select: "packages/*"
+    when_iter: 'iter.has_file("tsconfig.json") and iter.has_file("package.json") and not iter.has_file("**/__tests__/tsconfig.json")'
+    require:
+      - kind: json_path_absent
+        paths: "{path}/package.json"
+        path: "$.devDependencies['@jest/test-utils']"
+    level: error
+    message: "A package with no __tests__/tsconfig.json must not declare @jest/test-utils as a devDependency: nothing references it (scripts/buildTs.mjs)."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Manifest-level lookups of `yarn --immutable` (every CI job installs with
+  # it; the lockfile-freshness part is D). The committed
+  # .yarn/releases/yarn-4.18.0.cjs throws "Workspace not found" for a
+  # workspace: descriptor naming no workspace, and resolving a patch:
+  # descriptor reads its patch file. Unique workspace names ("Duplicate
+  # workspace name") are B-config unique-key: no rule.
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # A [dep-version] (jest-B01) every workspace: dependency or resolution names
+  #   an existing workspace. The target regex captures the key of each entry
+  #   whose value starts with workspace:, and for a resolution path key such
+  #   as @testing-library/react-native/pretty-format its last package name.
+  #   A descriptor-qualified resolution key (name@range/...) is not captured;
+  #   none uses workspace: at the pin.
+  - id: jestjs-jest-workspace-refs-resolve
+    kind: cross_file
+    relation: superset
+    source:
+      files: "{package.json,packages/*/package.json,website/package.json,examples/*/package.json}"
+      extract:
+        json: "$.name"
+    targets:
+      files: "{package.json,packages/*/package.json,website/package.json,examples/*/package.json}"
+      extract:
+        regex: '"(?:(?:@[^"/]+/)?[^"/@]+/)*((?:@[^"/]+/)?[^"/@]+)"\s*:\s*"workspace:'
+    allow_missing_target: true
+    level: error
+    message: "A workspace: dependency or resolution names a package that no workspace manifest declares (yarn install: Workspace not found)."
+
+  # A [dep-version] (jest-B03) every patch: descriptor in a workspace manifest
+  #   names a patch file that exists. Yarn resolves a ~/ patch path from the
+  #   project root and any other relative path from the declaring manifest,
+  #   so the two forms are two rules with different bases. A `::` suffix
+  #   (lockfile-style parameters) is cut off; a multi-patch `&` list and a
+  #   builtin<...> patch are not handled (neither occurs in a manifest at the
+  #   pin, where only the root declares patches).
+  - id: jestjs-jest-yarn-patches-resolve-root-relative
+    kind: registry_paths_resolve
+    source: "{package.json,packages/*/package.json,website/package.json,examples/*/package.json}"
+    extract:
+      regex: '"patch:[^"#]*#~/([^":&]+)'
+    base: lint_root
+    expect: file
+    level: error
+    message: "A patch: descriptor names a ~/ patch file that does not exist (yarn install)."
+
+  - id: jestjs-jest-yarn-patches-resolve-manifest-relative
+    kind: registry_paths_resolve
+    source: "{package.json,packages/*/package.json,website/package.json,examples/*/package.json}"
+    extract:
+      regex: '"patch:[^"#]*#(?:\./)?([^~"/][^":&]*)'
+    expect: file
+    level: error
+    message: "A patch: descriptor names a patch file that does not exist relative to its manifest (yarn install)."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Other CI gates over files alint reads
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # A [other] scripts/checkCopyrightHeaders.mjs (static-checks "check
+  #   copyright headers"): every tracked file with an extension that is not
+  #   on the script's ignore lists, not binary and not blank contains the Meta
+  #   MIT header. The excludes mirror GENERIC_IGNORED_EXTENSIONS,
+  #   GENERIC_IGNORED_PATTERNS and CUSTOM_IGNORED_PATTERNS; the last exclude
+  #   stands in for isBinaryFileSync (alint's file_content_matches has no
+  #   binary skip; png/gif/ico/wasm are the binary types tracked at the pin,
+  #   and a new binary type fails loudly rather than silently). The `\A\s*\z`
+  #   alternative mirrors the script's skip of whitespace-only files.
+  #   Not fixable in config: the script walks `git ls-files`, which includes
+  #   e2e/retain-all-files/node_modules/retainAllFiles.test.js (tracked but
+  #   gitignored); alint's walker honours .gitignore and does not see it
+  #   (known walker defect class: 88 of the 89 tracked */node_modules/* files
+  #   are seen). Binary files are skipped by extension, not by content as
+  #   isBinaryFileSync does.
+  - id: jestjs-jest-copyright-header
+    kind: file_content_matches
+    paths:
+      include: ["**/*.*"]
+      exclude:
+        - "**/*.{lock,patch,diff,exe,bin,cfg,config,conf,html,md,markdown,opam,osm,descr,rst,json,key,ini,plist,snap,svg,txt,xcodeproj,xcscheme,xml,yaml,yml,textile,tsv,csv,pem,csr,der,crt,cert,cer,p7b,iml,org,podspec,modulemap,pch,lproj,xcworkspace,storyboard,tvml,xib,pbxproj,xcworkspacedata,xccheckout,xcsettings,strings,ipynb,htm,toml,pro}"
+        - "**/.*"
+        - "**/.*/**"
+        - "**/third{_,-,., }party/**"
+        - "node{_,-,., }modules/**"
+        - "**/gradlew.bat"
+        - "**/gradlew"
+        - "**/gradle/wrapper/**"
+        - "**/*idea/**"
+        - "**/__init__.py"
+        - "Setup.hs"
+        - "{readme,README,Readme}.*"
+        - "**/Cargo.toml"
+        - "Cartfile*"
+        - "MANIFEST.in"
+        - "**/*.{example,map}"
+        - "examples/**"
+        - "packages/expect-utils/src/jasmineUtils.ts"
+        - "packages/jest-diff/src/cleanupSemantic.ts"
+        - "packages/jest-haste-map/src/watchers/common.js"
+        - "packages/jest-haste-map/src/watchers/NodeWatcher.js"
+        - "packages/jest-haste-map/src/watchers/RecrawlWarning.js"
+        - "benchmarks/test-file-overhead/prepare.sh"
+        - "**/*.{png,gif,ico,wasm,jpg,jpeg,webp,woff,woff2,ttf,eot,otf}"
+    pattern: '\A\s*\z| \* Copyright \(c\) Meta Platforms, Inc\. and affiliates\.\n \*\n \* This source code is licensed under the MIT license found in the\n \* LICENSE file in the root directory of this source tree\.'
+    level: error
+    message: "Missing the Meta copyright header (scripts/checkCopyrightHeaders.mjs)."
+
+  # A [other] scripts/checkChangelog.mjs (check-changelog.yml): in CHANGELOG.md
+  #   and CHANGELOG_PRE_v30.md every `[#N](https://github.com/ORG/jest/TYPE/M)`
+  #   link has ORG jestjs, TYPE pull and N == M. The select mirrors the
+  #   script's regex (unescaped `github.com` included); the two forbid
+  #   patterns are "an org other than jestjs" and "a type other than pull".
+  #   (The labelled "entry for this PR in ## main" mode needs the PR number:
+  #   D, no rule.) Gating unverified: check-changelog.yml runs on
+  #   pull_request only, with no merge_group trigger, while nodejs.yml has
+  #   one; whether it is a required check is not visible from the clone.
+  - id: jestjs-jest-changelog-pr-links
+    kind: for_each_match
+    paths: ["CHANGELOG.md", "CHANGELOG_PRE_v30.md"]
+    select: '\[#(?P<a>\d+)\]\(https://github.com/[^/]+/jest/[^/]+/(?P<b>\d+)\)'
+    require:
+      equal: [a, b]
+      forbid:
+        - '\[#\d+\]\(https://github.com/(?:[^/j][^/]*|j(?:[^/e][^/]*)?|je(?:[^/s][^/]*)?|jes(?:[^/t][^/]*)?|jest(?:[^/j][^/]*)?|jestj(?:[^/s][^/]*)?|jestjs[^/]+)/jest/[^/]+/\d+\)'
+        - '\[#\d+\]\(https://github.com/[^/]+/jest/(?:[^/p][^/]*|p(?:[^/u][^/]*)?|pu(?:[^/l][^/]*)?|pul(?:[^/l][^/]*)?|pull[^/]+)/\d+\)'
+    level: error
+    message: "Changelog PR links must be [#N](https://github.com/jestjs/jest/pull/N) (scripts/checkChangelog.mjs)."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Documented conventions and load-bearing comments
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # A [dep-version] yarn.config.cjs EXCEPTIONS ("root needs to stay on 18.x")
+  #   and copilot-instructions.md ("@types/node, pinned to 18.x via
+  #   resolutions"): the root keeps @types/node on 18.x in devDependencies and
+  #   in the forcing resolution.
+  - id: jestjs-jest-root-types-node-18
+    kind: json_path_matches
+    paths: ["package.json"]
+    path: "$.devDependencies['@types/node']"
+    matches: '^[\^~]?18(\.[0-9x*]+)*$'
+    level: warning
+    message: "The root's @types/node devDependency must stay on 18.x (yarn.config.cjs EXCEPTIONS comment)."
+
+  - id: jestjs-jest-root-types-node-resolution-18
+    kind: json_path_equals
+    paths: ["package.json"]
+    path: "$.resolutions['@types/node']"
+    equals: "18.x"
+    level: warning
+    message: "The @types/node resolution must stay 18.x (copilot-instructions.md, yarn.config.cjs)."
+
+  # A [dep-version; Stage B proposes other: a release-age policy is none of
+  #   section 2.3's dep-version shapes] scripts/verifyOldTs.mjs (verify-old-ts
+  #   in ts-compatibility): "the age gate has to match ours or this project
+  #   resolves versions we never would" — the throwaway project's
+  #   npmMinimalAgeGate must equal .yarnrc.yml's.
+  - id: jestjs-jest-verify-old-ts-age-gate-matches-yarnrc
+    kind: cross_file
+    relation: equals
+    source:
+      file: ".yarnrc.yml"
+      extract:
+        yaml: "$.npmMinimalAgeGate"
+    targets:
+      - file: "scripts/verifyOldTs.mjs"
+        extract:
+          regex: "'npmMinimalAgeGate: ([^']+)'"
+    level: warning
+    message: "verifyOldTs.mjs's npmMinimalAgeGate must match .yarnrc.yml (comment in scripts/verifyOldTs.mjs)."
+
+  # C [other] copilot-instructions.md: "Each __tests__/ directory under
+  #   packages covered by `yarn typecheck:tests` has its own tsconfig.json
+  #   extending tsconfig.test.json" (tsc -b over the script's glob fails on a
+  #   directory without one). C: the 19 packages are copied by hand from the
+  #   typecheck:tests brace list in package.json; a package added to that
+  #   script and not here goes unchecked silently.
+  - id: jestjs-jest-typechecked-tests-have-tsconfig
+    kind: for_each_dir
+    select: "packages/{babel-jest,babel-plugin-jest-hoist,create-jest,diff-sequences,expect,expect-utils,jest-circus,jest-cli,jest-config,jest-console,jest-haste-map,jest-runtime,jest-snapshot,jest-source-map,jest-util,jest-validate,jest-watcher,jest-worker,pretty-format}/**/__tests__"
+    require:
+      - kind: file_exists
+        paths: "{path}/tsconfig.json"
+      - kind: json_path_matches
+        paths: "{path}/tsconfig.json"
+        path: "$.extends"
+        matches: '(^|/)tsconfig\.test\.json$'
+    level: error
+    message: "A __tests__ directory covered by typecheck:tests needs a tsconfig.json extending tsconfig.test.json (copilot-instructions.md)."
+
+  # A [other] packages/expect/CLAUDE.md: "jasmineUtils.ts is vendored — keep
+  #   the header ... The license header at the top must stay intact."
+  - id: jestjs-jest-jasmine-utils-license-header
+    kind: file_starts_with
+    paths: ["packages/expect-utils/src/jasmineUtils.ts"]
+    prefix: "/*\nCopyright (c) 2008-2016 Pivotal Labs\n\nPermission is hereby granted, free of charge, to any person obtaining\n"
+    level: warning
+    message: "jasmineUtils.ts is vendored from Jasmine: keep its Pivotal Labs MIT header at the top (packages/expect/CLAUDE.md)."
+
+  # A [other] packages/jest-runtime/CLAUDE.md: "internals/__tests__/ test files
+  #   mirror production files 1:1": each internals test file has the
+  #   production file it is named after.
+  - id: jestjs-jest-runtime-internals-tests-mirror-sources
+    kind: file_graph
+    nodes: "packages/jest-runtime/src/internals/__tests__/*.test.ts"
+    edges:
+      derive_target:
+        from: '^packages/jest-runtime/src/internals/__tests__/(.+)\.test\.ts$'
+        to: "packages/jest-runtime/src/internals/$1.ts"
+    require: no_dangling
+    level: warning
+    message: "A jest-runtime internals test must mirror a production file of the same name (packages/jest-runtime/CLAUDE.md)."
+
+  # A [other] packages/jest-snapshot/CLAUDE.md: the external-matcher marker
+  #   "is hard-coded — must stay in sync with packages/expect/src/index.ts".
+  - id: jestjs-jest-external-matcher-trap-in-sync
+    kind: cross_file
+    relation: equals
+    source:
+      file: "packages/expect/src/index.ts"
+      extract:
+        regex: '\(function (__\w+_TRAP\w*__)\(\)'
+    targets:
+      - file: "packages/jest-snapshot/src/utils.ts"
+        extract:
+          regex: "includes\\('(__\\w+_TRAP\\w*__)'\\)"
+    level: warning
+    message: "jest-snapshot's matcher-trap marker must equal the function name expect's dispatcher uses (packages/jest-snapshot/CLAUDE.md)."
+
+  # C [other] (jest-B04) packages/test-utils/src/normalizeIcons.ts: "Make sure
+  #   to keep in sync with `jest-util/src/specialChars`": its Windows-to-POSIX
+  #   replacements (× -> ✕ failed, √ -> ✓ success) mirror
+  #   the `isWindows ? '<win>' : '<posix>'` pairs of ICONS. C: a capture group
+  #   is one contiguous substring and the text between the two codes differs
+  #   in the two files, so the (windows, posix) pairing cannot be compared.
+  #   One set rule per side catches a code changed on one side only and
+  #   misses a swapped pairing. `normalize: lower` absorbs hex-digit case.
+  - id: jestjs-jest-normalize-icons-windows-codes-in-sync
+    kind: cross_file
+    relation: set_equals
+    normalize: lower
+    source:
+      file: "packages/jest-util/src/specialChars.ts"
+      extract:
+        regex: "isWindows \\? '(\\\\u[0-9A-Fa-f]{4})' : '\\\\u[0-9A-Fa-f]{4}'"
+    targets:
+      - file: "packages/test-utils/src/normalizeIcons.ts"
+        extract:
+          regex: "new RegExp\\('(\\\\u[0-9A-Fa-f]{4})', 'gu'\\)"
+    level: warning
+    message: "normalizeIcons.ts must replace exactly the Windows icon codes of jest-util's ICONS (comment in normalizeIcons.ts)."
+
+  - id: jestjs-jest-normalize-icons-posix-codes-in-sync
+    kind: cross_file
+    relation: set_equals
+    normalize: lower
+    source:
+      file: "packages/jest-util/src/specialChars.ts"
+      extract:
+        regex: "isWindows \\? '\\\\u[0-9A-Fa-f]{4}' : '(\\\\u[0-9A-Fa-f]{4})'"
+    targets:
+      - file: "packages/test-utils/src/normalizeIcons.ts"
+        extract:
+          regex: "'gu'\\), '(\\\\u[0-9A-Fa-f]{4})'\\)"
+    level: warning
+    message: "normalizeIcons.ts must map to exactly the POSIX icon codes of jest-util's ICONS (comment in normalizeIcons.ts)."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Website build (Netlify deploy previews: netlify.toml [context.deploy-preview]
+  # runs `docusaurus build -l en`, every docs version). Docusaurus fails the
+  # build on these data-file integrity errors; under R7 each is classified by
+  # what it asserts. versions.json -> versioned_docs/version-<v> is B-config
+  # reference (entries need a path template): no rule.
+  # Gating unverified: these rules assume a failing Netlify deploy preview
+  # blocks merges. Branch protection is not visible from the clone, and
+  # nodejs.yml's merge_group trigger suggests a merge queue, whose refs
+  # Netlify does not build, so the preview may be advisory (integrator call).
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # A [other] every doc id a sidebar lists is declared by a doc's front matter
+  #   (`id:`), for the current docs and for each versioned docs set.
+  - id: jestjs-jest-sidebar-ids-exist
+    kind: cross_file
+    relation: superset
+    source:
+      files: "docs/*.md"
+      extract:
+        regex: '(?m)^id: (\S+)$'
+    targets:
+      - file: "website/sidebars.json"
+        extract:
+          json: "$..[?match(@, '.+')]"
+    level: error
+    message: "A sidebar entry names a doc id that no docs/*.md declares (Docusaurus build)."
+
+  - id: jestjs-jest-versioned-sidebar-ids-exist
+    kind: for_each_dir
+    select: "website/versioned_docs/version-*"
+    require:
+      - kind: cross_file
+        relation: superset
+        source:
+          files: "{path}/*.md"
+          extract:
+            regex: '(?m)^id: (\S+)$'
+        targets:
+          - file: "website/versioned_sidebars/{basename}-sidebars.json"
+            extract:
+              json: "$..[?match(@, '.+')]"
+        allow_missing_target: true
+    level: error
+    message: "A versioned sidebar names a doc id that its versioned docs do not declare (Docusaurus build)."
+
+  # A [other] (jest-18, navbar half) the `type: 'doc'` navbar items in
+  #   website/docusaurus.config.mjs (docId 'getting-started', 'api') name doc
+  #   ids too. Conservative: these rules require every docs set (current and
+  #   each versioned_docs/version-*) to declare each docId, which holds at
+  #   the pin. Docusaurus resolves a navbar docId against the page's own
+  #   version and the latest version (versions.json[0]), so dropping the id
+  #   from an older version only would fire here while the build may pass
+  #   (that fallback is recalled, not verified offline: no node_modules).
+  #   Shared fidelity gap with the sidebar rules: ids are read from front
+  #   matter `id:` only; a doc without `id:` (id derived from its file name)
+  #   would be a false positive. Every doc has `id:` at the pin, and no
+  #   extract can read a file name into a cross_file source set.
+  - id: jestjs-jest-navbar-doc-ids-exist
+    kind: cross_file
+    relation: superset
+    source:
+      files: "docs/*.md"
+      extract:
+        regex: '(?m)^id: (\S+)$'
+    targets:
+      - file: "website/docusaurus.config.mjs"
+        extract:
+          regex: "docId:\\s*['\"]([^'\"]+)['\"]"
+    level: error
+    message: "A navbar doc item names a doc id that no docs/*.md declares (Docusaurus build)."
+
+  - id: jestjs-jest-versioned-navbar-doc-ids-exist
+    kind: for_each_dir
+    select: "website/versioned_docs/version-*"
+    require:
+      - kind: cross_file
+        relation: superset
+        source:
+          files: "{path}/*.md"
+          extract:
+            regex: '(?m)^id: (\S+)$'
+        targets:
+          - file: "website/docusaurus.config.mjs"
+            extract:
+              regex: "docId:\\s*['\"]([^'\"]+)['\"]"
+    level: error
+    message: "A navbar doc item names a doc id that a versioned docs set does not declare (Docusaurus build)."
+
+  # C [other] every blog post's front-matter `authors` key is defined in
+  #   website/blog/authors.yml. C: authors is a scalar or a flow list inside
+  #   Markdown front matter, which no structured extract reads, so two regex
+  #   rules take the first and the last list element; a middle element of a
+  #   3+ author list is not checked.
+  - id: jestjs-jest-blog-authors-defined-first
+    kind: cross_file
+    relation: superset
+    source:
+      file: "website/blog/authors.yml"
+      extract:
+        regex: '(?m)^([A-Za-z0-9_-]+):\s*$'
+    targets:
+      files: "website/blog/*.md"
+      extract:
+        regex: '(?m)^authors:\s*\[?\s*([A-Za-z0-9_-]+)'
+    allow_missing_target: true
+    level: error
+    message: "A blog post names an author key missing from website/blog/authors.yml (Docusaurus build)."
+
+  - id: jestjs-jest-blog-authors-defined-last
+    kind: cross_file
+    relation: superset
+    source:
+      file: "website/blog/authors.yml"
+      extract:
+        regex: '(?m)^([A-Za-z0-9_-]+):\s*$'
+    targets:
+      files: "website/blog/*.md"
+      extract:
+        regex: '(?m)^authors:\s*\[[^\]\n]*,\s*([A-Za-z0-9_-]+)\s*\]'
+    allow_missing_target: true
+    level: error
+    message: "A blog post names an author key missing from website/blog/authors.yml (Docusaurus build)."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Editor and git text conventions
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # A [other] .gitattributes `* text=auto eol=lf`: git normalizes text files
+  #   to LF on check-in.
+  - id: jestjs-jest-text-files-lf
+    kind: line_endings
+    target: lf
+    paths:
+      include: ["**/*"]
+      exclude: ["**/*.{png,gif,ico,wasm,jpg,jpeg,webp,woff,woff2,ttf,eot,otf}"]
+    level: info
+
+  # C [other] .editorconfig (root = true): [*] indent_style=space,
+  #   indent_size=2, end_of_line=lf, charset=utf-8, trim_trailing_whitespace,
+  #   insert_final_newline; [*.{md,snap}] keeps trailing whitespace. Editor-
+  #   and review-enforced (CONTRIBUTING "2 spaces for indentation (no
+  #   tabs)"). editorconfig_conforms reports 2297 JSDoc ` * ` continuation
+  #   lines (one space, not a multiple of indent_size) that prettier keeps,
+  #   so the convention is expressed in tuned form (C: wants a block-comment
+  #   alignment relaxation): space indentation without a width, trailing
+  #   whitespace, final newline. Excluded: binary and SVG assets, the vendored
+  #   yarn release and patches, generated / BOM / significant-whitespace test
+  #   fixtures.
+  - id: jestjs-jest-editorconfig-indent-spaces
+    kind: indent_style
+    style: spaces
+    paths:
+      include: ["**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts,json,yml,yaml,css,md}"]
+      exclude:
+        - ".yarn/**"
+    level: info
+
+  - id: jestjs-jest-editorconfig-trim-trailing-whitespace
+    kind: no_trailing_whitespace
+    paths:
+      include: ["**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts,json,yml,yaml,css}"]
+      exclude:
+        - ".yarn/**"
+        # A YAML folded scalar's blank-line indentation inside the lock message.
+        - ".github/workflows/lock.yml"
+        # A significant trailing space inside a template literal.
+        - "e2e/__tests__/failureDetailsProperty.test.ts"
+    level: info
+
+  - id: jestjs-jest-editorconfig-final-newline
+    kind: final_newline
+    paths:
+      include: ["**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts,json,yml,yaml,css,md}"]
+      exclude:
+        - ".yarn/**"
+        # Compiler output whose inline source map encodes its exact columns
+        # (.gitignore / .prettierignore keep it byte-exact).
+        - "e2e/source-map-not-transformed/lib/boom.js"
+    level: info
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # VALUE-ADD (not jest-enforced; outside the coverage ratio, R3/R5).
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # VALUE-ADD [toolchain-pin] packageManager (corepack, CONTRIBUTING "run
+  #   corepack enable") and .yarnrc.yml yarnPath name the same Yarn release.
+  #   `yarn set version` writes both; nothing checks them afterwards
+  #   (netlify.toml's YARN_VERSION = "3.6.4" shows such pins do drift).
+  - id: jestjs-jest-va-package-manager-matches-yarn-path
+    kind: cross_file
+    relation: equals
+    source:
+      file: "package.json"
+      extract:
+        json: "$.packageManager"
+    targets:
+      - file: ".yarnrc.yml"
+        extract:
+          regex: '(?m)^yarnPath: \.yarn/releases/(yarn-[0-9][^/\s]*)\.cjs$'
+    normalize: semver-minor
+    level: info
+    message: "VALUE-ADD: packageManager and .yarnrc.yml yarnPath should name the same Yarn release."
+
+  # VALUE-ADD [toolchain-pin] the Node floor agrees across engines.node (major
+  #   of its first range), the @tsconfig/nodeNN base both tsconfigs extend,
+  #   and the lowest Node in the CI test matrices.
+  - id: jestjs-jest-va-node-floor-coherent
+    kind: cross_file
+    relation: equals
+    normalize: semver-major
+    source:
+      file: "package.json"
+      extract:
+        json: "$.engines.node"
+    targets:
+      - file: "tsconfig.json"
+        extract:
+          regex: '"extends": "@tsconfig/node(\d+)/tsconfig\.json"'
+      - file: "tsconfig.typetest.json"
+        extract:
+          regex: '"extends": "@tsconfig/node(\d+)/tsconfig\.json"'
+      - file: ".github/workflows/test.yml"
+        extract:
+          yaml: "$.jobs.test.strategy.matrix['node-version'][0]"
+      - file: ".github/workflows/nodejs.yml"
+        extract:
+          yaml: "$.jobs['test-runtime-vm-modules'].strategy.matrix['node-version'][0]"
+    level: info
+    message: "VALUE-ADD: the Node floor (engines.node, @tsconfig/nodeNN, lowest CI matrix Node) should agree."
+
+  # VALUE-ADD [toolchain-pin] copilot-instructions.md quotes the engines range
+  #   ("Trust the code over this file ... fix this file as part of your
+  #   change"); keep the quoted range equal to the root's. Borderline (Stage
+  #   B): if the integrator counts that generic doc-accuracy rule (line 240)
+  #   as a convention, as jest-15/16/17 are, this becomes an A toolchain-pin
+  #   unit and should be promoted; left at info until then.
+  - id: jestjs-jest-va-agent-doc-engines-in-sync
+    kind: cross_file
+    relation: equals
+    source:
+      file: "package.json"
+      extract:
+        json: "$.engines.node"
+    targets:
+      - file: ".github/copilot-instructions.md"
+        extract:
+          regex: 'Node engines `([^`]+)`'
+    level: info
+    message: "VALUE-ADD: copilot-instructions.md should quote the root engines.node range."
+
+  # VALUE-ADD [dep-version] lerna-lite fixed mode: lerna publish bumps only the
+  #   changed packages to lerna.json's version (35 are at 30.5.2, 12 at 30.5.1,
+  #   8 at 30.5.0 at the pin), so the invariant that holds between releases
+  #   is the shared MAJOR; nothing checks it.
+  - id: jestjs-jest-va-package-versions-match-lerna
+    kind: cross_file
+    relation: equals
+    normalize: semver-major
+    source:
+      file: "lerna.json"
+      extract:
+        json: "$.version"
+    targets:
+      files: "packages/*/package.json"
+      extract:
+        json: "$.version"
+    level: info
+    message: "VALUE-ADD: every packages/* version should share lerna.json's major version."
+
+  # VALUE-ADD [dep-version] internal dependencies use the one workspace range
+  #   `workspace:*` (never workspace:^ / workspace:~ / a path).
+  - id: jestjs-jest-va-workspace-protocol-star
+    kind: json_path_absent
+    paths: ["package.json", "packages/*/package.json", "website/package.json", "examples/*/package.json"]
+    path: "$['dependencies','devDependencies','optionalDependencies','resolutions'][?(search(@, '^workspace:') && @ != 'workspace:*')]"
+    level: info
+    message: "VALUE-ADD: workspace dependencies should use workspace:*."
+
+  # VALUE-ADD [dep-version] Renovate's minimumReleaseAge and Yarn's
+  #   npmMinimalAgeGate express one supply-chain age policy (3 days).
+  - id: jestjs-jest-va-renovate-age-matches-yarnrc
+    kind: cross_file
+    relation: equals
+    source:
+      file: ".yarnrc.yml"
+      extract:
+        regex: '(?m)^npmMinimalAgeGate: (\d+)d$'
+    targets:
+      - file: ".github/renovate.json"
+        extract:
+          regex: '"minimumReleaseAge": "(\d+) days?"'
+    level: info
+    message: "VALUE-ADD: Renovate's minimumReleaseAge should equal .yarnrc.yml's npmMinimalAgeGate."
+
+  # VALUE-ADD [locale] the website's locale list (website/i18n.mjs), the
+  #   Crowdin language mapping (crowdin.yaml) and the crowdin:download
+  #   --language flags (package.json) are kept in step by hand. Translations
+  #   are not committed (/website/i18n/* is gitignored; Netlify downloads
+  #   them), so there is no locale-file gate to express.
+  - id: jestjs-jest-va-crowdin-locales-enabled-on-site
+    kind: cross_file
+    relation: subset
+    source:
+      file: "crowdin.yaml"
+      extract:
+        yaml: "$.languages_mapping.locale.*"
+    targets:
+      - file: "website/i18n.mjs"
+        extract:
+          regex: "(?m)^  '([A-Za-z]+(?:-[A-Za-z]+)?)',$"
+    level: info
+    message: "VALUE-ADD: every Crowdin-mapped locale should be enabled in website/i18n.mjs."
+
+  - id: jestjs-jest-va-site-locales-mapped-in-crowdin
+    kind: cross_file
+    relation: subset
+    source:
+      file: "website/i18n.mjs"
+      extract:
+        # Every enabled locale except the source locale `en`.
+        regex: "(?m)^  '((?:[a-df-z][a-z]|e[a-mo-z])(?:-[A-Za-z]+)?)',$"
+    targets:
+      - file: "crowdin.yaml"
+        extract:
+          yaml: "$.languages_mapping.locale.*"
+    level: info
+    message: "VALUE-ADD: every non-English locale in website/i18n.mjs should have a crowdin.yaml mapping."
+
+  - id: jestjs-jest-va-crowdin-download-languages
+    kind: cross_file
+    relation: set_equals
+    source:
+      file: "crowdin.yaml"
+      extract:
+        regex: "(?m)^    '([A-Za-z-]+)': '"
+    targets:
+      - file: "package.json"
+        extract:
+          regex: '--language ([A-Za-z-]+)'
+    level: info
+    message: "VALUE-ADD: crowdin:download's --language list should equal crowdin.yaml's mapped languages."
+
+  # VALUE-ADD [other] every workflow pins its actions to a full commit SHA (all
+  #   do at the pin; nothing checks it).
+  - id: jestjs-jest-va-actions-pinned
+    kind: pinned_references
+    paths: [".github/workflows/*.yml"]
+    level: info
