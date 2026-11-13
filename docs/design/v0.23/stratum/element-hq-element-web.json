@@ -926,7 +926,7 @@
    "mechanism": "convention",
    "family": "other",
    "bucket": "A",
-   "alint": "cross_file relation equals: element-web-app-versions-lockstep. It is already in the config, but labelled value-add at level info",
+   "alint": "cross_file relation equals: element-web-app-versions-lockstep",
    "rules": [
     "element-web-app-versions-lockstep"
    ],
@@ -934,7 +934,15 @@
    "reason": "R5: a documented invariant, stated twice in contributor docs and maintained by the release automation. It is stronger evidence than unit 14 (a Renovate group with no stated invariant), so it belongs in the denominator, not in value-add",
    "fire_verified": "Other family, so not required. It was still run: passes on the clone; setting apps/desktop/package.json to 1.12.33 on a scratch copy fired 1 error",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text still described the rule as value-add at level info; the configuration labels it element-web-48 (A) at level error."
+    }
+   ]
   },
   {
    "id": "element-web-49",

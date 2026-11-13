@@ -814,7 +814,8 @@ B-config unit (rushstack-b14).
 - **mattermost-06's audit change** now records the classification it replaced (`from`), as the
   other 81 audit moves do.
 - **Partial rules** on tq-B05 and wsdk-17 were called value-add; they are partial rules at level
-  `info`.
+  `info`. element-web-48's `alint` text still called its rule value-add at level `info`; the rule
+  runs at level `error`.
 
 ### Configurations and prose
 
