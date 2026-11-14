@@ -797,3 +797,104 @@ fn fix_context_new_defaults_and_setters() {
     assert!(ctx.compose.is_some() && ctx.stage_ops.is_some());
     assert!(ctx.process_environment.is_some());
 }
+
+/// A trace sink that keeps nothing, for checking that a context holds one.
+#[derive(Debug)]
+struct DiscardTrace;
+
+impl crate::trace::TraceSink for DiscardTrace {
+    fn record_kind(&self, _stage: crate::trace::TraceStage) {}
+
+    fn record_extraction(&self, _observation: crate::trace::TraceExtractionObservation) {}
+
+    fn preview_limit(&self) -> Option<usize> {
+        None
+    }
+
+    fn evidence_sensitivity(&self, _producer_sensitive: bool) -> crate::trace::TraceSensitivity {
+        crate::trace::TraceSensitivity::Unknown
+    }
+
+    fn paths_are_sensitive(&self) -> bool {
+        false
+    }
+
+    fn record_preview(&self, _row: Result<crate::trace::TracePreviewRow>) {}
+}
+
+#[test]
+fn every_context_setter_sets_its_field() {
+    let root = Path::new("/repo");
+    let index = empty_index();
+    let registry = crate::RuleRegistry::new();
+    let facts = FactValues::default();
+    let vars = HashMap::from([("org".to_string(), "acme".to_string())]);
+    let tracked = std::collections::HashSet::from([PathBuf::from("a.rs")]);
+    let blame = crate::git::BlameCache::new(root.to_path_buf());
+    let analysis_time = crate::AnalysisTimeResolution::available(
+        crate::AnalysisTime::from_unix_seconds(86_400).unwrap(),
+        crate::AnalysisTimeSource::Explicit,
+    );
+    let environment = BTreeMap::from([("PATH".to_string(), "/bin".to_string())]);
+    let trace = DiscardTrace;
+
+    let bare = Context::new(root, &index);
+    assert_eq!(bare.root, root);
+    assert!(std::ptr::eq(bare.index, &raw const index));
+    assert!(bare.registry.is_none() && bare.facts.is_none() && bare.vars.is_none());
+    assert!(bare.git_tracked.is_none() && bare.git_blame.is_none());
+    assert!(bare.analysis_time.is_none() && bare.process_environment.is_none());
+    assert!(bare.trace.is_none());
+
+    let ctx = bare
+        .with_registry(Some(&registry))
+        .with_facts(Some(&facts))
+        .with_vars(Some(&vars))
+        .with_git_tracked(Some(&tracked))
+        .with_git_blame(Some(&blame))
+        .with_analysis_time(Some(&analysis_time))
+        .with_process_environment(Some(&environment))
+        .with_trace(Some(&trace));
+    assert!(std::ptr::eq(ctx.registry.unwrap(), &raw const registry));
+    assert!(std::ptr::eq(ctx.facts.unwrap(), &raw const facts));
+    assert!(std::ptr::eq(ctx.vars.unwrap(), &raw const vars));
+    assert!(std::ptr::eq(ctx.git_tracked.unwrap(), &raw const tracked));
+    assert!(std::ptr::eq(ctx.git_blame.unwrap(), &raw const blame));
+    assert!(std::ptr::eq(
+        ctx.analysis_time.unwrap(),
+        &raw const analysis_time
+    ));
+    assert!(std::ptr::eq(
+        ctx.process_environment.unwrap(),
+        &raw const environment
+    ));
+    assert!(ctx.trace.is_some());
+
+    // A copy keeps every part but the one changed.
+    let untraced = ctx.clone().with_trace(None);
+    assert!(untraced.trace.is_none());
+    assert!(std::ptr::eq(
+        untraced.registry.unwrap(),
+        &raw const registry
+    ));
+    assert!(std::ptr::eq(
+        untraced.process_environment.unwrap(),
+        &raw const environment
+    ));
+}
+
+#[test]
+fn every_new_violation_setter_sets_its_field() {
+    let plain = Violation::new("m");
+    assert!(!plain.sensitive && !plain.path_sensitive && !plain.is_fixable);
+    let set = plain
+        .with_sensitive(true)
+        .with_path_sensitive(true)
+        .with_is_fixable(true);
+    assert!(set.sensitive && set.path_sensitive && set.is_fixable);
+    let cleared = set
+        .with_sensitive(false)
+        .with_path_sensitive(false)
+        .with_is_fixable(false);
+    assert!(!cleared.sensitive && !cleared.path_sensitive && !cleared.is_fixable);
+}

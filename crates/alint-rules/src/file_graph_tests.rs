@@ -96,18 +96,7 @@ fn acyclic(nodes: &str, regex: &str, resolve: Resolve) -> FileGraphRule {
 }
 
 fn eval(r: &FileGraphRule, root: &Path, idx: &FileIndex) -> Vec<Violation> {
-    let ctx = Context {
-        root,
-        index: idx,
-        registry: None,
-        facts: None,
-        vars: None,
-        git_tracked: None,
-        git_blame: None,
-        analysis_time: None,
-        process_environment: None,
-        trace: None,
-    };
+    let ctx = Context::new(root, idx);
     r.evaluate(&ctx).expect("evaluate ok")
 }
 

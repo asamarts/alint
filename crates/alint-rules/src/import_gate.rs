@@ -404,18 +404,7 @@ mod tests {
             is_dir: false,
             size: 1,
         }]);
-        let ctx = Context {
-            root: Path::new("/"),
-            index: &idx,
-            registry: None,
-            facts: None,
-            vars: None,
-            git_tracked: None,
-            git_blame: None,
-            analysis_time: None,
-            process_environment: None,
-            trace: None,
-        };
+        let ctx = Context::new(Path::new("/"), &idx);
         r.evaluate_file(&ctx, Path::new(path), src.as_bytes())
             .unwrap()
     }

@@ -267,6 +267,27 @@ impl Violation {
         }
     }
 
+    /// Sets [`Self::sensitive`].
+    #[must_use]
+    pub fn with_sensitive(mut self, sensitive: bool) -> Self {
+        self.sensitive = sensitive;
+        self
+    }
+
+    /// Sets [`Self::path_sensitive`].
+    #[must_use]
+    pub fn with_path_sensitive(mut self, path_sensitive: bool) -> Self {
+        self.path_sensitive = path_sensitive;
+        self
+    }
+
+    /// Sets [`Self::is_fixable`].
+    #[must_use]
+    pub fn with_is_fixable(mut self, is_fixable: bool) -> Self {
+        self.is_fixable = is_fixable;
+        self
+    }
+
     /// Mark this finding as not auto-fixable. See [`Violation::not_fixable`].
     #[must_use]
     pub fn with_not_fixable(mut self) -> Self {
@@ -720,7 +741,10 @@ pub(crate) fn locator_path(path: Option<&Path>, hidden: bool) -> String {
 ///   actually asks for the value.
 /// - `trace` — optional selected-rule diagnostic sink. Ordinary check/fix/LSP
 ///   contexts always carry `None`.
-#[derive(Debug)]
+///
+/// Built with [`Context::new`] and the `with_*` setters; the fields stay
+/// readable. A copy with one part changed is `ctx.clone().with_trace(None)`.
+#[derive(Debug, Clone)]
 pub struct Context<'a> {
     pub root: &'a Path,
     pub index: &'a FileIndex,
@@ -736,6 +760,92 @@ pub struct Context<'a> {
     pub process_environment: Option<&'a std::collections::BTreeMap<String, String>>,
     #[doc(hidden)]
     pub trace: Option<&'a dyn crate::trace::TraceSink>,
+}
+
+impl<'a> Context<'a> {
+    /// A context for the tree at `root` indexed by `index`, with no registry,
+    /// facts, variables, git data, analysis time or trace, and the inherited
+    /// process environment.
+    #[must_use]
+    pub fn new(root: &'a Path, index: &'a FileIndex) -> Self {
+        Self {
+            root,
+            index,
+            registry: None,
+            facts: None,
+            vars: None,
+            git_tracked: None,
+            git_blame: None,
+            analysis_time: None,
+            process_environment: None,
+            trace: None,
+        }
+    }
+
+    /// Sets [`Self::registry`].
+    #[must_use]
+    pub fn with_registry(mut self, registry: Option<&'a RuleRegistry>) -> Self {
+        self.registry = registry;
+        self
+    }
+
+    /// Sets [`Self::facts`].
+    #[must_use]
+    pub fn with_facts(mut self, facts: Option<&'a FactValues>) -> Self {
+        self.facts = facts;
+        self
+    }
+
+    /// Sets [`Self::vars`].
+    #[must_use]
+    pub fn with_vars(mut self, vars: Option<&'a HashMap<String, String>>) -> Self {
+        self.vars = vars;
+        self
+    }
+
+    /// Sets [`Self::git_tracked`].
+    #[must_use]
+    pub fn with_git_tracked(
+        mut self,
+        git_tracked: Option<&'a std::collections::HashSet<std::path::PathBuf>>,
+    ) -> Self {
+        self.git_tracked = git_tracked;
+        self
+    }
+
+    /// Sets [`Self::git_blame`].
+    #[must_use]
+    pub fn with_git_blame(mut self, git_blame: Option<&'a crate::git::BlameCache>) -> Self {
+        self.git_blame = git_blame;
+        self
+    }
+
+    /// Sets [`Self::analysis_time`].
+    #[must_use]
+    pub fn with_analysis_time(
+        mut self,
+        analysis_time: Option<&'a crate::AnalysisTimeResolution>,
+    ) -> Self {
+        self.analysis_time = analysis_time;
+        self
+    }
+
+    /// Sets [`Self::process_environment`].
+    #[must_use]
+    pub fn with_process_environment(
+        mut self,
+        process_environment: Option<&'a std::collections::BTreeMap<String, String>>,
+    ) -> Self {
+        self.process_environment = process_environment;
+        self
+    }
+
+    /// Sets [`Self::trace`].
+    #[must_use]
+    pub fn with_trace(mut self, trace: Option<&'a dyn crate::trace::TraceSink>) -> Self {
+        self.trace = trace;
+        self
+    }
 }
 
 impl Context<'_> {

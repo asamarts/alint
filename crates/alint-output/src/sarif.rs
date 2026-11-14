@@ -689,8 +689,7 @@ struct SarifRegion {
 mod tests {
     use super::*;
     use alint_core::{
-        EditRegion, FindingDisposition, ProposedEdit, RelatedLocation, Report, RuleResult,
-        SourceRange, Violation,
+        EditRegion, ProposedEdit, RelatedLocation, Report, RuleResult, SourceRange, Violation,
     };
     use serde_json::Value;
     use std::path::{Path, PathBuf};
@@ -974,23 +973,11 @@ mod tests {
                 rule_id: "r".into(),
                 level: Level::Error,
                 policy_url: None,
-                violations: vec![Violation {
-                    path: Some(Path::new("src/lib.rs").into()),
-                    message: "m".into(),
-                    line: Some(7),
-                    column: Some(3),
-                    range: None,
-                    related_locations: Vec::new(),
-                    related_locations_omitted: 0,
-                    disposition: FindingDisposition::default(),
-                    baseline_key: None,
-                    fix_key: None,
-                    sensitive: false,
-                    is_fixable: false,
-                    not_fixable: false,
-                    proposed_edits: Vec::new(),
-                    path_sensitive: false,
-                }],
+                violations: vec![
+                    Violation::new("m")
+                        .with_path(Path::new("src/lib.rs"))
+                        .with_location(7, 3),
+                ],
                 notes: Vec::new(),
                 is_fixable: false,
                 analysis_failures: Vec::new(),

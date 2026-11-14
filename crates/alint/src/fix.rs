@@ -107,10 +107,9 @@ pub(super) fn cmd_fix(
     }
     let mut extra_ignores = loaded.extra_ignores;
     exclude_baseline_from_walk(&mut extra_ignores, &root, effective_baseline.as_deref());
-    let walk_opts = WalkOptions {
-        respect_gitignore: effective_gitignore,
-        extra_ignores,
-    };
+    let walk_opts = WalkOptions::default()
+        .with_respect_gitignore(effective_gitignore)
+        .with_extra_ignores(extra_ignores);
 
     let index = walk(&root, &walk_opts).context("walking repository")?;
     // `--unsafe-fixes` raises the applied tier to Unsafe; the default is Safe.

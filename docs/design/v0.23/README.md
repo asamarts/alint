@@ -377,3 +377,12 @@ decided then.
   - cargo-mutants over the phase showed that `alint test` ran a spawning rule nested in
     `require:` without the spawn capability, since v0.20.0; #515 fixes it.
   - Next: phase 4.2, constructors and setters for the five structs.
+- 2026-11-14: phase 4.2 (#517).
+  - `Context`, `RuleSpec`, `NestedRuleSpec` and `WalkOptions` have a constructor for their
+    required parts and a `with_*` setter for each other field, as `FixContext` and `Config` do,
+    and `Violation` gains the three setters it lacked. `Context` is `Clone`.
+  - The workspace builds the five through them. A build with the five marked
+    `#[non_exhaustive]` found every struct literal outside `alint-core`: 77 sites in
+    `alint-rules`, `alint-output`, `alint`, `alint-lsp`, `alint-dsl`, `alint-testkit` and
+    `alint-e2e`, most of them in tests.
+  - Next: phase 4.3, `#[non_exhaustive]` on the five.

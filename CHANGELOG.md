@@ -19,6 +19,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and `alint fix` were not affected: a configuration's own rules may spawn by design, and the
   trust gate already refuses spawning rules, nested ones included, from `extends:`.
 
+### Added
+
+- **Constructors and setters for the structs v0.23 seals** (library API, ADR-0032 decision 3,
+  ADR-0038). Code outside `alint-core` can build each of these without a struct literal, ahead
+  of their becoming `#[non_exhaustive]`:
+  - `Context::new(root, index)`, with `with_registry`, `with_facts`, `with_vars`,
+    `with_git_tracked`, `with_git_blame`, `with_analysis_time`, `with_process_environment` and
+    `with_trace`. `Context` is now `Clone`, so a copy with one part changed is
+    `ctx.clone().with_trace(None)`.
+  - `RuleSpec::new(id, kind, level)` and `NestedRuleSpec::new(kind)`, with a `with_*` setter
+    for each other field.
+  - `WalkOptions::default()`, with `with_respect_gitignore` and `with_extra_ignores`.
+  - `Violation::with_sensitive`, `with_path_sensitive` and `with_is_fixable`, beside the
+    existing `Violation::new` and its setters.
+
 ### Removed
 
 - **A baseline no longer matches the fingerprint v0.21 wrote for a hidden-path finding**

@@ -178,6 +178,33 @@ rules:
     assert_eq!(document["result"]["status"], "satisfied");
 }
 
+/// The trace walks the tree as `check` does: a gitignored file is out of scope
+/// unless the configuration says `respect_gitignore: false` or the command line
+/// says `--no-gitignore`.
+#[test]
+fn trace_walk_follows_the_gitignore_settings() {
+    for (setting, flag, expected) in [
+        ("", None, "satisfied"),
+        ("respect_gitignore: false\n", None, "violated"),
+        ("", Some("--no-gitignore"), "violated"),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        write(
+            root.path().join(".alint.yml"),
+            format!(
+                "version: 1\n{setting}rules:\n  - id: no-text\n    kind: file_absent\n    \
+                 paths: \"*.txt\"\n    level: error\n"
+            ),
+        );
+        write(root.path().join(".gitignore"), "ignored.txt\n");
+        write(root.path().join("ignored.txt"), "x\n");
+        let mut args = vec!["explain", "no-text", "--trace", "--format", "json"];
+        args.extend(flag);
+        let document = json(&run(root.path(), &args));
+        assert_eq!(document["result"]["status"], expected, "{setting} {flag:?}");
+    }
+}
+
 #[test]
 fn trace_reports_fixability_without_applying_the_fix() {
     let root = tempfile::tempdir().unwrap();

@@ -298,18 +298,7 @@ mod tests {
         // `0xFF` must not abandon the scan — a hidden ZWSP after it is still
         // flagged. evaluate_file decodes lossily rather than strictly.
         let idx = alint_core::FileIndex::from_entries(Vec::new());
-        let ctx = Context {
-            root: Path::new("/r"),
-            index: &idx,
-            registry: None,
-            facts: None,
-            vars: None,
-            git_tracked: None,
-            git_blame: None,
-            analysis_time: None,
-            process_environment: None,
-            trace: None,
-        };
+        let ctx = Context::new(Path::new("/r"), &idx);
         let mut bytes = vec![0xFFu8];
         bytes.extend_from_slice("a\u{200B}b".as_bytes());
         let vs = rule()
@@ -333,18 +322,7 @@ mod binary_evasion_tests {
         // make the rule skip the file. The finding is reported but not marked
         // auto-fixable, since the strip fixer refuses binary content.
         let idx = alint_core::FileIndex::from_entries(Vec::new());
-        let ctx = Context {
-            root: Path::new("/r"),
-            index: &idx,
-            registry: None,
-            facts: None,
-            vars: None,
-            git_tracked: None,
-            git_blame: None,
-            analysis_time: None,
-            process_environment: None,
-            trace: None,
-        };
+        let ctx = Context::new(Path::new("/r"), &idx);
         let rule = NoZeroWidthCharsRule {
             id: "no-zw".to_string(),
             level: Level::Error,
@@ -382,18 +360,7 @@ mod binary_evasion_tests {
 
     fn eval(bytes: &[u8]) -> Vec<Violation> {
         let idx = alint_core::FileIndex::from_entries(Vec::new());
-        let ctx = Context {
-            root: Path::new("/r"),
-            index: &idx,
-            registry: None,
-            facts: None,
-            vars: None,
-            git_tracked: None,
-            git_blame: None,
-            analysis_time: None,
-            process_environment: None,
-            trace: None,
-        };
+        let ctx = Context::new(Path::new("/r"), &idx);
         rule().evaluate_file(&ctx, Path::new("f"), bytes).unwrap()
     }
 

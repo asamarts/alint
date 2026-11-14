@@ -218,18 +218,7 @@ mod tests {
             ("src/bar.h", false),
         ]);
         let reg = registry();
-        let ctx = Context {
-            root: Path::new("/"),
-            index: &idx,
-            registry: Some(&reg),
-            facts: None,
-            vars: None,
-            git_tracked: None,
-            git_blame: None,
-            analysis_time: None,
-            process_environment: None,
-            trace: None,
-        };
+        let ctx = Context::new(Path::new("/"), &idx).with_registry(Some(&reg));
         let v = r.evaluate(&ctx).unwrap();
         assert!(v.is_empty(), "unexpected: {v:?}");
     }
@@ -260,18 +249,7 @@ mod tests {
             ("src/baz.c", false), // no baz.h
         ]);
         let reg = registry();
-        let ctx = Context {
-            root: Path::new("/"),
-            index: &idx,
-            registry: Some(&reg),
-            facts: None,
-            vars: None,
-            git_tracked: None,
-            git_blame: None,
-            analysis_time: None,
-            process_environment: None,
-            trace: None,
-        };
+        let ctx = Context::new(Path::new("/"), &idx).with_registry(Some(&reg));
         let v = r.evaluate(&ctx).unwrap();
         assert_eq!(v.len(), 2);
         assert!(v.iter().all(|v| v.message == "add the matching header"));

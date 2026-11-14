@@ -489,18 +489,7 @@ fn evaluate_for_each_inner<const TRACE: bool>(
     // Child kinds may have their own trace protocol (for example structured
     // extraction). The parent owns this selected-rule trace and records one
     // bounded aggregate `nested` stage, so child stages must not enter it.
-    let child_context = TRACE.then_some(Context {
-        root: ctx.root,
-        index: ctx.index,
-        registry: ctx.registry,
-        facts: ctx.facts,
-        vars: ctx.vars,
-        git_tracked: ctx.git_tracked,
-        git_blame: ctx.git_blame,
-        analysis_time: ctx.analysis_time,
-        process_environment: ctx.process_environment,
-        trace: None,
-    });
+    let child_context = TRACE.then(|| ctx.clone().with_trace(None));
     let nested_ctx = child_context.as_ref().unwrap_or(ctx);
 
     let entries: Box<dyn Iterator<Item = _>> = match mode {
@@ -1101,18 +1090,7 @@ mod tests {
     fn eval_with(rule: &ForEachDirRule, files: &[(&str, bool)]) -> Vec<Violation> {
         let idx = index(files);
         let reg = registry();
-        let ctx = Context {
-            root: Path::new("/"),
-            index: &idx,
-            registry: Some(&reg),
-            facts: None,
-            vars: None,
-            git_tracked: None,
-            git_blame: None,
-            analysis_time: None,
-            process_environment: None,
-            trace: None,
-        };
+        let ctx = Context::new(Path::new("/"), &idx).with_registry(Some(&reg));
         rule.evaluate(&ctx).unwrap()
     }
 
@@ -1214,18 +1192,7 @@ mod tests {
         .unwrap();
         let r = rule("pkgs/*", vec![nested]);
         let reg = registry();
-        let ctx = Context {
-            root: tmp.path(),
-            index: &idx,
-            registry: Some(&reg),
-            facts: None,
-            vars: None,
-            git_tracked: None,
-            git_blame: None,
-            analysis_time: None,
-            process_environment: None,
-            trace: None,
-        };
+        let ctx = Context::new(tmp.path(), &idx).with_registry(Some(&reg));
         let v = r.evaluate(&ctx).unwrap();
         assert_eq!(v.len(), 1, "the wrong value must be reported: {v:?}");
     }
@@ -1429,18 +1396,11 @@ mod tests {
         let analysis_time = alint_core::AnalysisTimeResolution::Unavailable(
             alint_core::AnalysisTimeUnavailable::HeadUnavailable,
         );
-        let ctx = Context {
-            root: Path::new("/"),
-            index: &idx,
-            registry: Some(&registry),
-            facts: Some(&facts),
-            vars: Some(&vars),
-            git_tracked: None,
-            git_blame: None,
-            analysis_time: Some(&analysis_time),
-            process_environment: None,
-            trace: None,
-        };
+        let ctx = Context::new(Path::new("/"), &idx)
+            .with_registry(Some(&registry))
+            .with_facts(Some(&facts))
+            .with_vars(Some(&vars))
+            .with_analysis_time(Some(&analysis_time));
         let raw = rule.evaluate(&ctx).unwrap();
         let result = alint_core::RuleResult::new("t".into(), Level::Warning, None, raw, false);
         assert!(result.violations.is_empty(), "{result:?}");

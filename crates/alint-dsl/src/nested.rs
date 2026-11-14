@@ -90,10 +90,9 @@ pub(crate) fn discover_nested(
     running_version: RunningVersion,
     environment: &dyn crate::EnvironmentProvider,
 ) -> Result<NestedRules> {
-    let walk_opts = alint_core::WalkOptions {
-        respect_gitignore: root.respect_gitignore.unwrap_or(true),
-        extra_ignores: root.ignore.clone(),
-    };
+    let walk_opts = alint_core::WalkOptions::default()
+        .with_respect_gitignore(root.respect_gitignore.unwrap_or(true))
+        .with_extra_ignores(root.ignore.clone());
     let index = alint_core::walk(root_dir, &walk_opts)?;
 
     // First pass: collect existing rule ids from the root so we

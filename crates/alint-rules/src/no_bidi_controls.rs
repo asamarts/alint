@@ -325,18 +325,7 @@ mod tests {
         // a trivial bypass of a CVE-2021-42574 defense. evaluate_file must decode
         // lossily and still flag the RLO after the bad byte.
         let idx = alint_core::FileIndex::from_entries(Vec::new());
-        let ctx = Context {
-            root: Path::new("/r"),
-            index: &idx,
-            registry: None,
-            facts: None,
-            vars: None,
-            git_tracked: None,
-            git_blame: None,
-            analysis_time: None,
-            process_environment: None,
-            trace: None,
-        };
+        let ctx = Context::new(Path::new("/r"), &idx);
         let mut bytes = vec![0xFFu8]; // invalid UTF-8 lead byte
         bytes.extend_from_slice("code\u{202E}evil".as_bytes());
         let vs = rule()
@@ -361,18 +350,7 @@ mod binary_evasion_tests {
         // scans every in-scope file; the finding on a binary-looking file is
         // reported but marked not-auto-fixable (the strip fixer refuses binary).
         let idx = alint_core::FileIndex::from_entries(Vec::new());
-        let ctx = Context {
-            root: Path::new("/r"),
-            index: &idx,
-            registry: None,
-            facts: None,
-            vars: None,
-            git_tracked: None,
-            git_blame: None,
-            analysis_time: None,
-            process_environment: None,
-            trace: None,
-        };
+        let ctx = Context::new(Path::new("/r"), &idx);
         let rule = NoBidiControlsRule {
             id: "no-bidi".to_string(),
             level: Level::Error,
@@ -410,18 +388,7 @@ mod binary_evasion_tests {
 
     fn eval(bytes: &[u8]) -> Vec<Violation> {
         let idx = alint_core::FileIndex::from_entries(Vec::new());
-        let ctx = Context {
-            root: Path::new("/r"),
-            index: &idx,
-            registry: None,
-            facts: None,
-            vars: None,
-            git_tracked: None,
-            git_blame: None,
-            analysis_time: None,
-            process_environment: None,
-            trace: None,
-        };
+        let ctx = Context::new(Path::new("/r"), &idx);
         rule().evaluate_file(&ctx, Path::new("f"), bytes).unwrap()
     }
 

@@ -97,7 +97,7 @@ fn escape_body(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alint_core::{FindingDisposition, Report, RuleResult, Violation};
+    use alint_core::{Report, RuleResult, Violation};
     use std::path::Path;
 
     fn render(report: &Report) -> String {
@@ -168,23 +168,11 @@ mod tests {
                 rule_id: "at-loc".into(),
                 level: Level::Error,
                 policy_url: None,
-                violations: vec![Violation {
-                    path: Some(Path::new("src/lib.rs").into()),
-                    message: "bad".into(),
-                    line: Some(12),
-                    column: Some(4),
-                    range: None,
-                    related_locations: Vec::new(),
-                    related_locations_omitted: 0,
-                    disposition: FindingDisposition::default(),
-                    baseline_key: None,
-                    fix_key: None,
-                    sensitive: false,
-                    is_fixable: false,
-                    not_fixable: false,
-                    proposed_edits: Vec::new(),
-                    path_sensitive: false,
-                }],
+                violations: vec![
+                    Violation::new("bad")
+                        .with_path(Path::new("src/lib.rs"))
+                        .with_location(12, 4),
+                ],
                 notes: Vec::new(),
                 is_fixable: false,
                 analysis_failures: Vec::new(),

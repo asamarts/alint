@@ -198,10 +198,9 @@ pub(super) fn cmd_check(
     // Keep alint's own baseline artifact out of the walk (see the helper).
     let mut extra_ignores = loaded.extra_ignores;
     exclude_baseline_from_walk(&mut extra_ignores, &root, effective_baseline.as_deref());
-    let walk_opts = WalkOptions {
-        respect_gitignore: effective_gitignore,
-        extra_ignores,
-    };
+    let walk_opts = WalkOptions::default()
+        .with_respect_gitignore(effective_gitignore)
+        .with_extra_ignores(extra_ignores);
 
     let index = walk(&root, &walk_opts).context("walking repository")?;
     tracing::debug!(files = index.entries.len(), "walk complete");
@@ -504,14 +503,13 @@ pub(super) fn cmd_baseline(
     }
     let mut extra_ignores = loaded.extra_ignores;
     exclude_baseline_from_walk(&mut extra_ignores, &root, Some(&out_path));
-    let walk_opts = WalkOptions {
-        respect_gitignore: if cli.no_gitignore {
+    let walk_opts = WalkOptions::default()
+        .with_respect_gitignore(if cli.no_gitignore {
             false
         } else {
             loaded.respect_gitignore
-        },
-        extra_ignores,
-    };
+        })
+        .with_extra_ignores(extra_ignores);
     let index = walk(&root, &walk_opts).context("walking repository")?;
     let report = engine.run(&root, &index).context("running rules")?;
     if report.total_analysis_failures() > 0 {

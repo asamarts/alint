@@ -51,10 +51,9 @@ fn build_engine(
         .with_facts(config.facts.clone())
         .with_vars(config.vars.clone())
         .with_fix_size_limit(config.fix_size_limit);
-    let walk_opts = WalkOptions {
-        respect_gitignore: config.respect_gitignore,
-        extra_ignores: config.ignore.clone(),
-    };
+    let walk_opts = WalkOptions::default()
+        .with_respect_gitignore(config.respect_gitignore)
+        .with_extra_ignores(config.ignore.clone());
     (engine, walk_opts)
 }
 

@@ -359,18 +359,7 @@ mod tests {
 
     fn eval(r: &CommandIdempotentRule, root: &Path) -> Vec<Violation> {
         let idx = alint_core::FileIndex::from_entries(Vec::new());
-        let ctx = Context {
-            root,
-            index: &idx,
-            registry: None,
-            facts: None,
-            vars: None,
-            git_tracked: None,
-            git_blame: None,
-            analysis_time: None,
-            process_environment: None,
-            trace: None,
-        };
+        let ctx = Context::new(root, &idx);
         r.evaluate(&ctx).unwrap()
     }
 

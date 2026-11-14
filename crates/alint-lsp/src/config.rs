@@ -331,10 +331,9 @@ fn build_session_for_config(
         extra_ignores.push(pattern);
     }
 
-    let walk_opts = WalkOptions {
-        respect_gitignore: config.respect_gitignore,
-        extra_ignores,
-    };
+    let walk_opts = WalkOptions::default()
+        .with_respect_gitignore(config.respect_gitignore)
+        .with_extra_ignores(extra_ignores);
     let index = walk(&effective_root, &walk_opts)
         .map_err(|e| redact(format!("walking repository: {e}")))?;
 

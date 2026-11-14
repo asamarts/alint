@@ -679,18 +679,8 @@ mod tests {
 
     fn eval_keys(yaml: &str, text: &str) -> Vec<Violation> {
         let rule = build(&spec_for(yaml)).unwrap();
-        let ctx = Context {
-            root: Path::new("/"),
-            index: &alint_core::FileIndex::from_entries(Vec::new()),
-            registry: None,
-            facts: None,
-            vars: None,
-            git_tracked: None,
-            git_blame: None,
-            analysis_time: None,
-            process_environment: None,
-            trace: None,
-        };
+        let index = alint_core::FileIndex::from_entries(Vec::new());
+        let ctx = Context::new(Path::new("/"), &index);
         rule.as_per_file()
             .unwrap()
             .evaluate_file(&ctx, Path::new("f.txt"), text.as_bytes())
@@ -844,18 +834,8 @@ mod tests {
         let flag = eval_keys(FIX_YAML, text);
         assert_eq!(flag.len(), 1, "{flag:?}");
         let out = reindent_pure_tabs(text, 4).unwrap();
-        let ctx = Context {
-            root: Path::new("/"),
-            index: &alint_core::FileIndex::from_entries(Vec::new()),
-            registry: None,
-            facts: None,
-            vars: None,
-            git_tracked: None,
-            git_blame: None,
-            analysis_time: None,
-            process_environment: None,
-            trace: None,
-        };
+        let index = alint_core::FileIndex::from_entries(Vec::new());
+        let ctx = Context::new(Path::new("/"), &index);
         let after = rule
             .as_per_file()
             .unwrap()

@@ -242,18 +242,7 @@ mod tests {
         let r = rule(r"\bTODO\b", 30, None);
         let idx = index(&["src/main.rs"]);
         let analysis_time = analysis_time();
-        let ctx = Context {
-            root: Path::new("/"),
-            index: &idx,
-            registry: None,
-            facts: None,
-            vars: None,
-            git_tracked: None,
-            git_blame: None,
-            analysis_time: Some(&analysis_time),
-            process_environment: None,
-            trace: None,
-        };
+        let ctx = Context::new(Path::new("/"), &idx).with_analysis_time(Some(&analysis_time));
         let v = r.evaluate(&ctx).unwrap();
         assert!(v.is_empty(), "expected silent no-op, got {v:?}");
     }
@@ -267,18 +256,9 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let cache = BlameCache::new(tmp.path().to_path_buf());
         let analysis_time = analysis_time();
-        let ctx = Context {
-            root: tmp.path(),
-            index: &idx,
-            registry: None,
-            facts: None,
-            vars: None,
-            git_tracked: None,
-            git_blame: Some(&cache),
-            analysis_time: Some(&analysis_time),
-            process_environment: None,
-            trace: None,
-        };
+        let ctx = Context::new(tmp.path(), &idx)
+            .with_git_blame(Some(&cache))
+            .with_analysis_time(Some(&analysis_time));
         let v = r.evaluate(&ctx).unwrap();
         assert!(v.is_empty());
     }
@@ -380,18 +360,9 @@ level: warning
         let tmp = tempfile::tempdir().unwrap();
         let cache = BlameCache::new(tmp.path().to_path_buf());
         let analysis_time = analysis_time();
-        let ctx = Context {
-            root: tmp.path(),
-            index: &idx,
-            registry: None,
-            facts: None,
-            vars: None,
-            git_tracked: None,
-            git_blame: Some(&cache),
-            analysis_time: Some(&analysis_time),
-            process_environment: None,
-            trace: None,
-        };
+        let ctx = Context::new(tmp.path(), &idx)
+            .with_git_blame(Some(&cache))
+            .with_analysis_time(Some(&analysis_time));
         let v = r.evaluate(&ctx).unwrap();
         assert!(v.is_empty(), "no blame data → no violations: {v:?}");
     }

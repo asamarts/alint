@@ -350,10 +350,7 @@ impl GeneratedFileFreshRule {
         }
         // New in-scope files the generator created (register them so
         // the restorer deletes them, then flag them).
-        let walk_opts = WalkOptions {
-            respect_gitignore: true,
-            extra_ignores: Vec::new(),
-        };
+        let walk_opts = WalkOptions::default();
         match walk(ctx.root, &walk_opts) {
             Ok(after_index) => {
                 for entry in after_index.files() {
@@ -714,26 +711,8 @@ mod tests {
     fn eval_in(r: &GeneratedFileFreshRule, root: &Path) -> Vec<Violation> {
         // A fresh on-disk walk so the index reflects current files
         // (the mutating mode snapshots from the index).
-        let idx = walk(
-            root,
-            &WalkOptions {
-                respect_gitignore: true,
-                extra_ignores: Vec::new(),
-            },
-        )
-        .unwrap();
-        let ctx = Context {
-            root,
-            index: &idx,
-            registry: None,
-            facts: None,
-            vars: None,
-            git_tracked: None,
-            git_blame: None,
-            analysis_time: None,
-            process_environment: None,
-            trace: None,
-        };
+        let idx = walk(root, &WalkOptions::default()).unwrap();
+        let ctx = Context::new(root, &idx);
         r.evaluate(&ctx).unwrap()
     }
 

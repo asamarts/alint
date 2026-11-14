@@ -266,7 +266,7 @@ fn hex_digest(hasher: Sha256) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alint_core::{FindingDisposition, Report, RuleResult, Violation};
+    use alint_core::{Report, RuleResult, Violation};
     use serde_json::Value;
     use std::path::{Path, PathBuf};
 
@@ -310,23 +310,11 @@ mod tests {
             results: vec![rule(
                 "no-todo",
                 Level::Error,
-                vec![Violation {
-                    path: Some(Path::new("src/lib.rs").into()),
-                    message: "TODO marker found".into(),
-                    line: Some(12),
-                    column: Some(4),
-                    range: None,
-                    related_locations: Vec::new(),
-                    related_locations_omitted: 0,
-                    disposition: FindingDisposition::default(),
-                    baseline_key: None,
-                    fix_key: None,
-                    sensitive: false,
-                    is_fixable: false,
-                    not_fixable: false,
-                    proposed_edits: Vec::new(),
-                    path_sensitive: false,
-                }],
+                vec![
+                    Violation::new("TODO marker found")
+                        .with_path(Path::new("src/lib.rs"))
+                        .with_location(12, 4),
+                ],
             )],
         };
         let arr = parse(&render(&report));
@@ -407,22 +395,10 @@ mod tests {
             results: vec![rule(
                 "r",
                 Level::Error,
-                vec![Violation {
-                    path: Some(Path::new("a.rs").into()),
-                    message: "x".into(),
-                    line: Some(0),
-                    column: None,
-                    range: None,
-                    related_locations: Vec::new(),
-                    related_locations_omitted: 0,
-                    disposition: FindingDisposition::default(),
-                    baseline_key: None,
-                    fix_key: None,
-                    sensitive: false,
-                    is_fixable: false,
-                    not_fixable: false,
-                    proposed_edits: Vec::new(),
-                    path_sensitive: false,
+                vec![{
+                    let mut value = Violation::new("x").with_path(Path::new("a.rs"));
+                    value.line = Some(0);
+                    value
                 }],
             )],
         };
@@ -436,22 +412,10 @@ mod tests {
             results: vec![rule(
                 "r",
                 Level::Error,
-                vec![Violation {
-                    path: Some(Path::new("a.rs").into()),
-                    message: "msg".into(),
-                    line: Some(7),
-                    column: None,
-                    range: None,
-                    related_locations: Vec::new(),
-                    related_locations_omitted: 0,
-                    disposition: FindingDisposition::default(),
-                    baseline_key: None,
-                    fix_key: None,
-                    sensitive: false,
-                    is_fixable: false,
-                    not_fixable: false,
-                    proposed_edits: Vec::new(),
-                    path_sensitive: false,
+                vec![{
+                    let mut value = Violation::new("msg").with_path(Path::new("a.rs"));
+                    value.line = Some(7);
+                    value
                 }],
             )],
         };
@@ -474,22 +438,10 @@ mod tests {
             results: vec![rule(
                 "r",
                 Level::Error,
-                vec![Violation {
-                    path: Some(Path::new("a.rs").into()),
-                    message: "same-msg".into(),
-                    line: Some(line),
-                    column: None,
-                    range: None,
-                    related_locations: Vec::new(),
-                    related_locations_omitted: 0,
-                    disposition: FindingDisposition::default(),
-                    baseline_key: None,
-                    fix_key: None,
-                    sensitive: false,
-                    is_fixable: false,
-                    not_fixable: false,
-                    proposed_edits: Vec::new(),
-                    path_sensitive: false,
+                vec![{
+                    let mut value = Violation::new("same-msg").with_path(Path::new("a.rs"));
+                    value.line = Some(line);
+                    value
                 }],
             )],
         };
@@ -504,22 +456,10 @@ mod tests {
         // (e.g. a generic-message per-line rule firing on two lines) must NOT
         // collide — the Code Climate spec requires per-report uniqueness, and
         // a collision makes GitLab drop the duplicate.
-        let mk_v = |line: usize| Violation {
-            range: None,
-            related_locations: Vec::new(),
-            related_locations_omitted: 0,
-            path: Some(Path::new("a.rs").into()),
-            message: "forbidden pattern".into(),
-            line: Some(line),
-            column: None,
-            disposition: FindingDisposition::default(),
-            baseline_key: None,
-            fix_key: None,
-            sensitive: false,
-            is_fixable: false,
-            not_fixable: false,
-            proposed_edits: Vec::new(),
-            path_sensitive: false,
+        let mk_v = |line: usize| {
+            let mut value = Violation::new("forbidden pattern").with_path(Path::new("a.rs"));
+            value.line = Some(line);
+            value
         };
         let report = Report {
             results: vec![rule("no-pat", Level::Error, vec![mk_v(3), mk_v(9)])],
@@ -541,22 +481,10 @@ mod tests {
         // issues must be UNIQUE — while the FIRST keeps the raw canonical so it
         // still correlates with SARIF/baseline. (Regression: the unified path
         // used to emit the canonical verbatim, dropping the 2nd in GitLab.)
-        let mk_v = |line: usize| Violation {
-            range: None,
-            related_locations: Vec::new(),
-            related_locations_omitted: 0,
-            path: Some(Path::new("notes.txt").into()),
-            message: "same message".into(),
-            line: Some(line),
-            column: None,
-            disposition: FindingDisposition::default(),
-            baseline_key: None,
-            fix_key: None,
-            sensitive: false,
-            is_fixable: false,
-            not_fixable: false,
-            proposed_edits: Vec::new(),
-            path_sensitive: false,
+        let mk_v = |line: usize| {
+            let mut value = Violation::new("same message").with_path(Path::new("notes.txt"));
+            value.line = Some(line);
+            value
         };
         let report = Report {
             results: vec![rule("r", Level::Error, vec![mk_v(1), mk_v(2)])],
@@ -633,22 +561,13 @@ mod tests {
             results: vec![rule(
                 "r/special",
                 Level::Error,
-                vec![Violation {
-                    path: Some(std::path::Path::new(r#"a"b\c.rs"#).into()),
-                    message: r#"contains "quotes" and \backslashes\ and newline\nliteral"#.into(),
-                    line: Some(1),
-                    column: None,
-                    range: None,
-                    related_locations: Vec::new(),
-                    related_locations_omitted: 0,
-                    disposition: FindingDisposition::default(),
-                    baseline_key: None,
-                    fix_key: None,
-                    sensitive: false,
-                    is_fixable: false,
-                    not_fixable: false,
-                    proposed_edits: Vec::new(),
-                    path_sensitive: false,
+                vec![{
+                    let mut value = Violation::new(
+                        r#"contains "quotes" and \backslashes\ and newline\nliteral"#,
+                    )
+                    .with_path(std::path::Path::new(r#"a"b\c.rs"#));
+                    value.line = Some(1);
+                    value
                 }],
             )],
         };

@@ -277,18 +277,7 @@ mod tests {
 
     fn eval(rule: &PairRule, files: &[&str]) -> Vec<Violation> {
         let index = idx(files);
-        let ctx = Context {
-            root: Path::new("/"),
-            index: &index,
-            registry: None,
-            facts: None,
-            vars: None,
-            git_tracked: None,
-            git_blame: None,
-            analysis_time: None,
-            process_environment: None,
-            trace: None,
-        };
+        let ctx = Context::new(Path::new("/"), &index);
         rule.evaluate(&ctx).unwrap()
     }
 
