@@ -697,7 +697,7 @@ pub(super) fn generate_bundled_ruleset_pages(
 
         let yaml_text =
             fs::read_to_string(&entry).with_context(|| format!("reading {}", entry.display()))?;
-        let yaml: ayaml::Value = ayaml::compat::from_str(&yaml_text)
+        let yaml: ayaml::Value = alint_core::yaml::from_str(&yaml_text)
             .with_context(|| format!("parsing {}", entry.display()))?;
 
         // Repo-relative path for the source link, always forward-

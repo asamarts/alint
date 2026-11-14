@@ -110,8 +110,8 @@ jsonc-parser = { version = "0.34.0", features = ["cst"] }
 # Span-capable YAML AST for the Phase-2 structured `set_value` fixer (alint-core
 # `structured_fix::yaml_`): `saphyr::MarkedYaml` is a spanned node tree, so a YAML
 # scalar edit is a span-splice (like JSON). The check side parses YAML via
-# `yaml_serde`/libyaml-rs, which exposes no spans, so this is the fix side's
-# spanned view. MIT OR Apache-2.0 (same as the workspace). PINNED because the
+# ayaml's compat layer, whose 0.1 releases have no spanned node tree, so this is
+# the fix side's spanned view. MIT OR Apache-2.0 (same as the workspace). PINNED because the
 # pre-1.0 `Marker.index` remains a CHAR offset (despite byte-oriented rustdoc);
 # `yaml_` converts it to bytes and the multibyte resolver test guards that contract.
 # `default-features = false` drops `encoding` (`load_from_read` only; we load `&str`).

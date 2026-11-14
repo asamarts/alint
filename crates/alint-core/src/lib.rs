@@ -44,6 +44,7 @@ pub mod template;
 pub mod trace;
 mod walker;
 pub mod when;
+pub mod yaml;
 pub mod yaml_depth;
 
 pub use analysis_time::{

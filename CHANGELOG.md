@@ -44,6 +44,32 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   "missing or ignored". A `registry_paths_resolve` entry of the other kind now says so ("resolves
   to a file, not a directory"), and `php@v1`'s Composer rules say an entry must exist and not be
   ignored. Their baseline keys are unchanged.
+- **alint parses YAML with ayaml 0.1.2, a pure-Rust parser, in place of `yaml_serde` and
+  `libyaml-rs`** (#510, ADR-0035). Configurations, `extends:` sources, the `yaml_path_*` rules,
+  `json_schema_passes` on YAML, front matter and `alint test` packages all read through it.
+  Documents decode to the same values, and the size and depth limits are those of 0.22 (32 MiB,
+  128 levels). What differs:
+  - a plain scalar may contain U+0085 (next line), U+2028 (line separator) or U+2029 (paragraph
+    separator), which YAML 1.2 reads as content; libyaml read them as line breaks and rejected
+    the document;
+  - a block scalar whose header sits at the indentation of the `-` or `?` it belongs to, as in
+    `-` followed by `|2` on the next line at the same column, is rejected, where libyaml
+    accepted it;
+  - several parse errors are worded differently, in a `resource_parse` analysis failure and in a
+    configuration error. A stream of more than one document reports "more than one document in
+    stream at line 2 column 1" where 0.22 said "deserializing from YAML containing more than one
+    document is not supported", and an option of the wrong type names its field ("`pattern`:
+    invalid type").
+
+  Source spans and structured YAML fixes still use saphyr. Before v0.23.0 ships, differential
+  fuzzing against `yaml_serde` (#482) and a depth guard re-derived from ayaml's tokens (#483)
+  qualify the parser (ADR-0035).
+- **Breaking (library API):** `RuleSpec::extra`, `NestedRuleSpec::extra` and `RuleEntry::extra()`
+  in `alint-core` hold an `ayaml::Mapping`, and `alint_core::Error::Yaml`,
+  `alint_testkit::Error::Yaml`, `alint_testkit::PolicyTestParseError::Yaml`,
+  `TreeSpec::from_yaml` and `TreeSpec::to_yaml` carry an `ayaml::Error`, in place of the
+  `yaml_serde` types. `alint_core::yaml::from_str` decodes a document under the limits alint
+  uses.
 
 ### Fixed
 
@@ -71,6 +97,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   template whose empty rendering was invalid now loads, such as `reference:
   "i18n/{parent_name}.json"`, `command_idempotent`'s `workdir: "{dir}/.."` or `json_path_equals`'s
   `path: "$.{dir}"`, and a load error quotes the template as written (`{dir}/[{stem}`) (#504).
+- **`fix --dry-run` agrees with `fix` on a create the file system spells differently.** Where
+  the file system ignores case, creating `Docs/x.txt` beside an existing `docs/` writes
+  `docs/x.txt`, which the walk reports under that spelling, so the rule that asked for
+  `Docs/x.txt` still fails and `fix` says so. The dry run reported the create as applied; it now
+  says the path exists under another spelling.
 - `alint test` redacts a runner error's paths correctly when the test package and the temporary
   directory overlap. It replaced the temporary directory first, so a package under `TMPDIR`
   reported `<temporary-directory>` with the rest of its path instead of `<policy-test-package>`,

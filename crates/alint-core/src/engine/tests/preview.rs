@@ -350,6 +350,41 @@ fn dry_run_predicts_each_create_the_real_fix_finds_unresolved() {
     assert_eq!(outcomes(false), expected, "real fix");
 }
 
+/// Where the file system ignores case, a create of `Docs/x.txt` under an
+/// existing `docs/` lands as `docs/x.txt`, which the walk reports under that
+/// spelling, so the rule never sees `Docs/x.txt`. The dry run says what the
+/// real fix finds; elsewhere the create makes `Docs/` and resolves.
+#[test]
+fn dry_run_judges_a_create_by_the_spelling_it_lands_under() {
+    let probe = tempfile::tempdir().unwrap();
+    std::fs::create_dir(probe.path().join("probe")).unwrap();
+    let ignores_case = probe.path().join("PROBE").exists();
+    let applied = |dry_run: bool| -> bool {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = &tmp.path().join("root");
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        let rules = vec![create_rule(
+            "cased",
+            "Docs/x.txt",
+            "Docs/x.txt",
+            b"x",
+            false,
+        )];
+        let opts = crate::WalkOptions {
+            respect_gitignore: true,
+            extra_ignores: Vec::new(),
+        };
+        let index = crate::walk(root, &opts).unwrap();
+        let report = Engine::new(rules, RuleRegistry::new())
+            .fix(root, &index, &opts, dry_run, Applicability::Safe)
+            .unwrap();
+        assert_eq!(report.results[0].items.len(), 1, "{report:?}");
+        matches!(report.results[0].items[0].status, FixStatus::Applied(_))
+    };
+    assert_eq!(applied(false), !ignores_case, "real fix");
+    assert_eq!(applied(true), !ignores_case, "dry run");
+}
+
 #[test]
 fn dry_run_takes_the_first_of_two_creates_of_one_ignore_file() {
     // The real `fix` skips a create whose file is already there, so the first
@@ -932,7 +967,7 @@ fn a_path_selection_read_from_the_environment_is_sensitive() {
     }
     let entry = |kind: &str, field: Option<&str>| {
         let mut spec: crate::RuleSpec =
-            ayaml::compat::from_str(&format!("id: r\nkind: {kind}\nlevel: error\n")).unwrap();
+            crate::yaml::from_str(&format!("id: r\nkind: {kind}\nlevel: error\n")).unwrap();
         spec.set_sensitive_fields(field.map(str::to_string).into_iter().collect());
         RuleEntry::new(stub("r", "**/*.txt")).with_spec(std::sync::Arc::new(spec))
     };

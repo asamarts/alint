@@ -27,7 +27,7 @@ fn run_git(root: &Path, args: &[&str]) {
 /// without that ref.
 fn bad_range_failure(root: &Path, since: &str) -> String {
     let spec: Arc<alint_core::RuleSpec> = Arc::new(
-        ayaml::compat::from_str(&format!(
+        alint_core::yaml::from_str(&format!(
             "id: message\nkind: git_commit_message\nrequires_body: true\nsince: '{since}'\n\
              level: error\n"
         ))

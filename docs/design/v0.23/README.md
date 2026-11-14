@@ -1,11 +1,13 @@
 # v0.23: selectors, a first constraint slice, and the YAML groundwork
 
-Status: proposed (2026-11-12).
+Status: accepted (2026-11-12, ADR-0032); in progress, phases 0 to 3 merged.
 Decisions: [ADR-0032](../../adr/0032-v023-owner-decisions.md) (the owner decisions and the scope);
 [ADR-0033](../../adr/0033-v023-slice-after-the-corpus-stratum.md) (the slice after the corpus
 stratum, and the #503 fix);
 [ADR-0034](../../adr/0034-v2-version-boundary-and-phase-3-design.md)
-(the `version: 2` boundary and the Phase 3 design).
+(the `version: 2` boundary and the Phase 3 design);
+[ADR-0035](../../adr/0035-keep-the-early-ayaml-cutover.md) (keeping the early ayaml
+cutover, and qualifying it before the release).
 
 v0.23 starts Phase 3 of [`general-linter.md`](../general-linter.md) (section 11.6), which v0.22.0
 unblocked by meeting all three gates of Phase 2 (section 11.1, "v0.22 gate results"). Phase 3 is
@@ -70,9 +72,11 @@ Also in v0.23:
 9. **`Violation`, `Context`, `RuleSpec`, `NestedRuleSpec` and `WalkOptions` are sealed** with
    constructors and setters (ADR-0032 decision 3). This completes the v1.0 roadmap item.
 10. **Differential YAML parser fuzzing (#482).**
-11. **If ayaml 0.1.2 meets the criteria before the feature freeze,** the `yaml_depth` guard is
-    re-derived (#483) and alint cuts over (#481). Otherwise both move to the next minor release
-    (ADR-0032 decision 2).
+11. **The ayaml cutover is qualified before the release** (ADR-0035). #510 moved `main` to ayaml
+    0.1.2 ahead of #482 and #483. Before v0.23.0, the #482 harness compares ayaml with
+    `yaml_serde` and the `yaml_depth` guard is re-derived from ayaml's tokens (#483); #481 closes
+    with the release. A difference the owner does not approve holds the release or reverts #510.
+    This replaces ADR-0032 decision 2's "cut over only if ayaml qualifies before the freeze".
 12. **`git_tracked_only: true` sees tracked files that an ignore file excludes (#503,** ADR-0033
     decision 3). Up to v0.22 the walker pruned such a file before the git-tracked index was built,
     so the documented case (a force-added file, or one committed before its ignore line) was never
@@ -116,7 +120,8 @@ Out of scope:
   - two `alint-dsl` functions;
   - four `alint-testkit` items.
 
-  alint parses YAML with `yaml_serde` 0.10.7.
+  alint parses YAML with ayaml 0.1.2 since #510, through `alint_core::yaml`. saphyr and
+  saphyr-parser still give source spans and structured fixes.
 - **Open structs.**
   - `Violation`, `Context`, `RuleSpec`, `NestedRuleSpec` and `WalkOptions` are struct literals
     outside `alint-core`.
@@ -179,8 +184,9 @@ it must respect:
 
 ### 3.2 The fuzzing harness (#482)
 
-- **What it compares.** It runs `yaml_serde` and the ayaml candidate through the entry points alint
-  uses: Serde typed decoding, `Value` parsing and the event stream.
+- **What it compares.** It runs `yaml_serde` and ayaml through the entry points alint uses:
+  Serde typed decoding, `Value` parsing and the event stream. Since #510 `yaml_serde` is the
+  oracle only, a dependency of the harness and of no published crate (ADR-0035).
 - **Inputs.** Generated token soup, alint's committed YAML, and mutations of that YAML.
 - **Results.** Each input is classified into the five classes #482 lists. Documented deviations are
   an explicit allowlist, and any other difference fails.
@@ -205,7 +211,7 @@ next. Phases 1, 4 and 5 do not depend on the design and can run alongside phases
 | 6 | The version dispatch, named selectors and relations, per-source namespaces with `extends:` aliases, value-bearing entry rows, the equality join, the draft v2 schema, and `validate-config`, `list`, `explain` and `export-agents-md` for v2 | v2 only |
 | 7 | The `constraint` kind: equality, unique/key and set, report-only | v2 only |
 | 8 | The three conformance policies with `alint test` cases, and the section 12.1 measurements | v2 only |
-| 9 | If ayaml 0.1.2 qualifies: #483, then #481. Otherwise a status-log entry that moves them | yes (parser) |
+| 9 | Qualify the cutover that #510 made: #483, and the #482 harness's verdict with an approved allowlist. Otherwise the owner holds the release or reverts #510 (ADR-0035) | yes (parser) |
 | 10 | Documentation, the CHANGELOG (re-run `alint baseline`; the library migration; the `git_tracked_only` change), facts, and the release check | no |
 
 The #503 fix (item 12) is its own pull request, with `add -f` e2e scenarios for `file_absent`,
@@ -254,9 +260,10 @@ decided then.
 - **The API break's reach.** Sealing `Violation` and `Context` touches every rule's tests and the
   out-of-tree users of `alint-core`. Phase 4 converts the workspace mechanically, adds
   constructors before any literal is removed, and keeps the change apart from behavior changes.
-- **ayaml timing.** If ayaml 0.1.2 is released just before the freeze, re-qualification (with the
-  #482 harness) may not finish. The freeze date then decides, and #483 and #481 move rather than
-  delay the release.
+- **ayaml qualification.** `main` runs ayaml since #510, before the harness that qualifies it.
+  If #482 and #483 are not done by the freeze, or find a difference the owner does not approve,
+  the release waits or #510 is reverted (ADR-0035). The corpus replay of every pull request
+  compares against v0.22.1, so a difference on real repositories shows up before then.
 
 ## 7. Status log
 
@@ -314,3 +321,20 @@ decided then.
     `extends:` alias, and v0.23 adds an inner equality join with one side unique on the key.
   - Phase 6 grows by the version dispatch, the per-source namespaces and the join. If it cannot
     carry the join before the feature freeze, this log records the move (ADR-0034 consequences).
+- 2026-11-14: #510 moved `main` from `yaml_serde` to ayaml 0.1.2, ahead of #482 and #483, so
+  item 11's condition did not hold. The owner kept it and moved the qualification before the
+  release ([ADR-0035](../../adr/0035-keep-the-early-ayaml-cutover.md)).
+- 2026-11-14: an audit of #510 to #512 (#513) fixed:
+  - **a regression from #510:** ayaml's default caps on events, collection entries, anchors and
+    alias uses refused valid files that v0.22 reads (a 9 MB file failed with "events limit
+    exceeded"). Every ayaml decode now goes through `alint_core::yaml`, which lifts those caps
+    and keeps the input, depth and alias-expansion limits; a dogfood rule keeps other files from
+    calling ayaml's decoders;
+  - **from #511:** a nested rule's load error turned text that looked like a rendered placeholder
+    (`json_path_equals`, `pkg_dir_layout`) back into a token; only whole rendered values of the
+    spec's own templates are restored now;
+  - **older:** where the file system ignores case, `fix --dry-run` said a create resolved its rule
+    when the path existed under another spelling, which the real fix reports as unresolved;
+  - **CI:** the Windows and e2e `cargo test --workspace` runs stopped at the first failing test
+    binary; they run every binary, and a dogfood rule keeps `--no-fail-fast` in CI;
+  - the parser's observable differences from v0.22 are in the CHANGELOG.

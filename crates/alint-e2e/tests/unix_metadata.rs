@@ -91,7 +91,7 @@ fn tempdir() -> tempfile::TempDir {
 }
 
 fn tree_from(yaml: &str) -> TreeSpec {
-    ayaml::compat::from_str(yaml).unwrap()
+    alint_core::yaml::from_str(yaml).unwrap()
 }
 
 fn violation_count(report: &Report, rule_id: &str) -> usize {

@@ -110,7 +110,7 @@ fn scan_bundled_messages(
         } else if path.extension().and_then(|s| s.to_str()) == Some("yml") {
             let text = std::fs::read_to_string(&path).expect("read bundled ruleset");
             let value: ayaml::Value =
-                ayaml::compat::from_str(&text).expect("parse bundled ruleset");
+                alint_core::yaml::from_str(&text).expect("parse bundled ruleset");
             scan_message_fields(root, &path, &value, None, offenders);
         }
     }
@@ -155,7 +155,7 @@ fn scan_message_fields(
 
 #[test]
 fn bundled_message_scan_reaches_nested_rules() {
-    let value: ayaml::Value = ayaml::compat::from_str(
+    let value: ayaml::Value = alint_core::yaml::from_str(
         "rules:\n  - id: parent\n    require:\n      - kind: file_exists\n        message: \"nested \\u2014 offender\"\n",
     )
     .unwrap();

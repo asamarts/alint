@@ -861,7 +861,7 @@ mod tests {
     }
 
     fn parsed_spec(fields: &str) -> RuleSpec {
-        ayaml::compat::from_str(&format!("id: t\nkind: test_kind\nlevel: error\n{fields}")).unwrap()
+        crate::yaml::from_str(&format!("id: t\nkind: test_kind\nlevel: error\n{fields}")).unwrap()
     }
 
     #[derive(Debug)]
@@ -939,7 +939,7 @@ mod tests {
         registry.register("structural", &TEST_META, structural_nested_builder);
         registry.register("quoting", &TEST_META, quoting_nested_builder);
         let validate = |kind: &str, secret: bool| {
-            let mut spec: RuleSpec = ayaml::compat::from_str(&format!(
+            let mut spec: RuleSpec = crate::yaml::from_str(&format!(
                 "id: t\nkind: {kind}\nlevel: error\npattern: canary\n"
             ))
             .unwrap();
@@ -1201,7 +1201,7 @@ mod tests {
     /// an instantiation does not depend on the token values.
     #[test]
     fn nested_instantiation_field_set_is_token_independent() {
-        let nested: crate::config::NestedRuleSpec = ayaml::compat::from_str(
+        let nested: crate::config::NestedRuleSpec = crate::yaml::from_str(
             "kind: file_exists\npaths: \"{path}/README.md\"\nmessage: \"{dir} needs a README\"\n\
              root_only: false\nscope_filter:\n  has_ancestor: Cargo.toml\n",
         )

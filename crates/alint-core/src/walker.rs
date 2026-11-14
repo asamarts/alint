@@ -896,6 +896,27 @@ pub(crate) fn without_ignore_files(opts: &WalkOptions) -> WalkOptions {
 #[derive(Default)]
 struct Listings(HashMap<PathBuf, HashSet<std::ffi::OsString>>);
 
+/// Whether each component of `rel` (root-relative) that exists is spelled as
+/// its directory lists it. A filesystem that ignores case resolves `Docs/x.md`
+/// where the disk has `docs/`, but the walk reports the disk's spelling and the
+/// tracked view counts only a path spelled as listed, so a fix that creates
+/// `Docs/x.md` there does not give a rule `Docs/x.md`. The components that do
+/// not exist yet, which the fix creates, are spelled as written.
+pub(crate) fn existing_prefix_spelled_as_listed(root: &Path, rel: &Path) -> bool {
+    let mut listings = Listings::default();
+    let mut prefix = PathBuf::new();
+    for component in rel.components() {
+        prefix.push(component);
+        if std::fs::symlink_metadata(root.join(&prefix)).is_err() {
+            return true;
+        }
+        if !listings.spelled_as_listed(root, &prefix) {
+            return false;
+        }
+    }
+    true
+}
+
 impl Listings {
     /// Whether the directory holding `rel` (root-relative) lists its name
     /// exactly as `rel` spells it.

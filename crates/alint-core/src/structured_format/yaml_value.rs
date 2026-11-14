@@ -4,7 +4,7 @@
 use serde_json::Value;
 
 /// Parse YAML into the family's `serde_json::Value` tree, with two YAML-specific
-/// adaptations a plain `yaml_serde -> serde_json::Value` deserialize lacks:
+/// adaptations a plain YAML `-> serde_json::Value` deserialize lacks:
 ///
 /// - **Merge keys** (YAML 1.1 `<<: *base` / `<<: [*a, *b]`) are APPLIED: the
 ///   merged mapping's keys join the enclosing mapping, explicit keys win, and in
@@ -24,11 +24,11 @@ use serde_json::Value;
 /// `serde_json::Value`'s own visitor, keys are read as strings the same way, and a
 /// duplicate key keeps its last value -- which a test pins on untagged documents.
 pub(super) fn yaml_to_value(text: &str) -> std::result::Result<Value, String> {
-    ayaml::compat::from_str_seed(text, YamlJson { src: text }).map_err(|e| e.to_string())
+    crate::yaml::from_str_seed(text, YamlJson { src: text }).map_err(|e| e.to_string())
 }
 
 /// The [`yaml_to_value`] seed / visitor: builds a `serde_json::Value`, applying
-/// merge keys and stripping custom tags (which `yaml_serde` surfaces as an
+/// merge keys and stripping custom tags (which the parser surfaces as an
 /// enum: variant = tag, newtype payload = the tagged node). Carries the source
 /// text so a key can tell a PLAIN `<<` (a merge key) from a quoted `"<<"` / `'<<'`
 /// (an ordinary string key, per YAML 1.1: the merge type is resolved only from
@@ -69,9 +69,10 @@ impl<'de> serde::de::Visitor<'de> for YamlKey<'_> {
     fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         f.write_str("a string key")
     }
-    /// `yaml_serde` lends a scalar straight out of the source text whenever its
-    /// value equals its source span -- always for a single-line plain scalar, and
-    /// for a quoted one minus its quotes. So a borrowed `<<` NOT preceded by a
+    /// The parser (ayaml's compat layer, as `yaml_serde` before it) lends a
+    /// scalar straight out of the source text whenever its value equals its
+    /// source span -- always for a single-line plain scalar, and for a quoted
+    /// one minus its quotes. So a borrowed `<<` NOT preceded by a
     /// quote is the plain merge key; anything else (quoted, escaped, block
     /// scalar -- the owned-string paths below) is an ordinary `"<<"` key.
     fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Key, E> {
@@ -296,7 +297,7 @@ mod tests {
     fn yaml_conversion_matches_the_plain_serde_path_on_untagged_documents() {
         // The tag/merge-aware conversion must not change anything else: on
         // documents without tags or merge keys it equals a plain
-        // `yaml_serde -> serde_json::Value` deserialize, value for value.
+        // YAML `-> serde_json::Value` deserialize, value for value.
         let docs = [
             "a: 1\nb: -2\nc: 1.5\nd: 18446744073709551615\ne: .inf\nf: .nan\ng: ~\nh: true\n",
             "a: 'q'\nb: \"x\\ty\"\nc: yes\nd: 0x1F\ne: 2002-12-14\nf: 1e3\n",
@@ -309,8 +310,7 @@ mod tests {
             "s: |\n  multi\n  line\nf: >-\n  folded\n  text\n",
         ];
         for doc in docs {
-            let plain =
-                ayaml::compat::from_str::<serde_json::Value>(doc).map_err(|e| e.to_string());
+            let plain = crate::yaml::from_str::<serde_json::Value>(doc).map_err(|e| e.to_string());
             assert_eq!(Format::Yaml.parse(doc), plain, "diverged on {doc:?}");
         }
     }

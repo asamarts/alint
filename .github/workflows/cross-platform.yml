@@ -4,7 +4,7 @@ name: Cross-Platform
 # GitHub-hosted runners so platform-specific regressions surface independently
 # of the primary Linux lane (ci.yml).
 #
-# This intentionally runs only `cargo test --workspace --locked`
+# This intentionally runs only `cargo test --workspace --locked --no-fail-fast`
 # (plus the npm install end-to-end test) without the heavier
 # dogfood/bench/audit lanes — the goal is to
 # catch path-handling, line-ending, and pty-related drift, not to
@@ -80,4 +80,4 @@ jobs:
           restore-keys: ${{ matrix.os }}-cargo-
 
       - name: cargo test
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --locked --no-fail-fast

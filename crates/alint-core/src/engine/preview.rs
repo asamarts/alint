@@ -272,7 +272,12 @@ impl Engine {
                 )
             });
         }
-        if skips.skips(target, is_dir) {
+        if !crate::walker::existing_prefix_spelled_as_listed(root, target) {
+            Some(format!(
+                "{shown} exists on disk under another spelling (a filesystem that ignores \
+                 case), so the walk would report that spelling and the rule would never see it"
+            ))
+        } else if skips.skips(target, is_dir) {
             Some(format!(
                 "{shown} is excluded from the walk (an ignore file, `ignore:`, or a symlink \
                  the walk does not enter), so the rule would never see it"

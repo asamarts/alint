@@ -251,28 +251,65 @@ pub fn same_iteration_path(a: &str, b: &str) -> bool {
     spelled_out(a) == spelled_out(b)
 }
 
-/// `text` with every value [`PathTokens::placeholder`] renders turned back
-/// into the token it stands for (`_stem_` into `{stem}`), for an error
-/// message from a preparation build. The two are equally wide, so a column a
-/// message points at still lines up.
+/// `text`, an error message from a preparation build, with each value that
+/// [`PathTokens::placeholder`] rendered from one of `templates` turned back
+/// into that template (`"_dir_/[_stem_"` into `"{dir}/[{stem}"`). Only a whole
+/// rendered value is replaced, as written or as `{:?}` escapes it, and only
+/// where it does not run on into a word character, so text that merely
+/// contains a placeholder's spelling stays as it is: a kind such as
+/// `json_path_equals`, a rule id such as `pkg_dir_layout`, or a literal name.
+/// A value and its template are equally wide, so a column a message points at
+/// still lines up.
 #[must_use]
-pub fn unrender_placeholders(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut rest = text;
-    while let Some(at) = rest.find('_') {
-        out.push_str(&rest[..at]);
-        rest = &rest[at..];
-        if let Some(name) = placeholder_name(rest) {
-            out.push('{');
-            out.push_str(name);
-            out.push('}');
-            rest = &rest[name.len() + 2..];
-        } else {
-            out.push('_');
-            rest = &rest[1..];
-        }
+pub fn unrender_placeholders<'t>(
+    text: &str,
+    templates: impl IntoIterator<Item = &'t str>,
+) -> String {
+    fn debug_escaped(s: &str) -> String {
+        let quoted = format!("{s:?}");
+        quoted[1..quoted.len() - 1].to_string()
     }
-    out.push_str(rest);
+    let tokens = PathTokens::placeholder();
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    for template in templates {
+        if TokenSet::of(template) == TokenSet::NONE {
+            continue;
+        }
+        let rendered = render_path(template, &tokens);
+        if rendered == template {
+            continue;
+        }
+        let escaped = debug_escaped(&rendered);
+        if escaped != rendered {
+            pairs.push((escaped, debug_escaped(template)));
+        }
+        pairs.push((rendered, template.to_string()));
+    }
+    // Longest first, so a whole value wins over a shorter one inside it.
+    pairs.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then_with(|| a.cmp(b)));
+    pairs.dedup();
+    let is_word = |c: char| c.is_alphanumeric() || c == '_';
+    let mut out = String::with_capacity(text.len());
+    let mut at = 0;
+    'scan: while at < text.len() {
+        let rest = &text[at..];
+        let before = text[..at].chars().next_back();
+        for (rendered, template) in &pairs {
+            let Some(after) = rest.strip_prefix(rendered.as_str()) else {
+                continue;
+            };
+            let joins_before = rendered.starts_with(is_word) && before.is_some_and(is_word);
+            let joins_after = rendered.ends_with(is_word) && after.starts_with(is_word);
+            if !joins_before && !joins_after {
+                out.push_str(template);
+                at += rendered.len();
+                continue 'scan;
+            }
+        }
+        let ch = rest.chars().next().unwrap_or_default();
+        out.push(ch);
+        at += ch.len_utf8();
+    }
     out
 }
 
@@ -779,7 +816,7 @@ mod tests {
             assert_eq!(value.len(), template.len(), "{name}");
             assert_ne!(TokenSet::of(&template), TokenSet::NONE, "{name}");
             assert!(has_placeholder(&value), "{name}");
-            assert_eq!(unrender_placeholders(&value), template);
+            assert_eq!(unrender_placeholders(&value, [template.as_str()]), template);
             assert_eq!(
                 first_placeholder(&render_path(&format!("a/{template}.json"), &tokens)),
                 Some(2),
@@ -828,19 +865,48 @@ mod tests {
         assert!(!has_placeholder("_stem_.json"), "closed on drop");
     }
 
-    /// Error messages show the template the configuration wrote.
+    /// Error messages show the template the configuration wrote, and only
+    /// where a value rendered from one of the spec's templates stands.
     #[test]
     fn unrendering_restores_the_tokens() {
         assert_eq!(
-            unrender_placeholders("invalid glob \"_dir_/[_stem_\""),
+            unrender_placeholders("invalid glob \"_dir_/[_stem_\"", ["{dir}/[{stem}"]),
             "invalid glob \"{dir}/[{stem}\""
         );
+        // `{:?}` escapes a value's backslash; the template's is escaped alike.
         assert_eq!(
-            unrender_placeholders("_parent_name__basename_x_path_y_"),
+            unrender_placeholders(r#"pattern "\\d_stem_(""#, [r"\d{stem}("]),
+            r#"pattern "\\d{stem}(""#
+        );
+        assert_eq!(
+            unrender_placeholders(
+                "_parent_name__basename_x_path_y_",
+                ["{parent_name}{basename}x{path}y_"]
+            ),
             "{parent_name}{basename}x{path}y_"
         );
-        assert_eq!(unrender_placeholders("a_b _ __"), "a_b _ __");
-        assert_eq!(unrender_placeholders(""), "");
+        // A template whose value is not in the text, or that has no token,
+        // changes nothing.
+        assert_eq!(
+            unrender_placeholders("a_b _ __", ["{stem}", "plain"]),
+            "a_b _ __"
+        );
+        assert_eq!(unrender_placeholders("", ["{stem}"]), "");
+        assert_eq!(unrender_placeholders("_stem_", [] as [&str; 0]), "_stem_");
+    }
+
+    /// A kind, a rule id or a literal name that contains a placeholder's
+    /// spelling is not a rendered value, even when a template renders that
+    /// spelling on its own.
+    #[test]
+    fn unrendering_leaves_lookalike_text_alone() {
+        let message = "nested rule #0 (`json_path_equals`): rule \"pkg_dir_layout.require[0]\": \
+                       invalid JSONPath \"$[[\" in _path_/src_dir_x and \"_path_\"";
+        assert_eq!(
+            unrender_placeholders(message, ["{path}", "{dir}", "$[["]),
+            "nested rule #0 (`json_path_equals`): rule \"pkg_dir_layout.require[0]\": \
+             invalid JSONPath \"$[[\" in {path}/src_dir_x and \"{path}\""
+        );
     }
 
     #[test]
@@ -1123,7 +1189,7 @@ mod tests {
     }
 
     fn yaml(s: &str) -> ayaml::Mapping {
-        ayaml::compat::from_str(s).unwrap()
+        crate::yaml::from_str(s).unwrap()
     }
 
     fn get<'a>(m: &'a ayaml::Mapping, path: &[&str]) -> &'a ayaml::Value {

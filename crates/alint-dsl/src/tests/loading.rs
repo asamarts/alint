@@ -65,7 +65,7 @@ rules:
     vars:
       dir: packages
 ";
-    let cfg: RawConfig = ayaml::compat::from_str(yaml).unwrap();
+    let cfg: RawConfig = alint_core::yaml::from_str(yaml).unwrap();
     let final_cfg = cfg.finalize(Some(test_catalog())).unwrap();
     assert_eq!(final_cfg.rules.len(), 1);
     let r = &final_cfg.rules[0];
@@ -94,7 +94,7 @@ rules:
     id: apps-have-readme
     vars: { dir: apps }
 ";
-    let cfg: RawConfig = ayaml::compat::from_str(yaml).unwrap();
+    let cfg: RawConfig = alint_core::yaml::from_str(yaml).unwrap();
     let final_cfg = cfg.finalize(Some(test_catalog())).unwrap();
     let ids: Vec<&str> = final_cfg.rules.iter().map(|r| r.id.as_str()).collect();
     assert_eq!(
@@ -123,7 +123,7 @@ rules:
     level: error
     vars: { dir: services }
 ";
-    let cfg: RawConfig = ayaml::compat::from_str(yaml).unwrap();
+    let cfg: RawConfig = alint_core::yaml::from_str(yaml).unwrap();
     let final_cfg = cfg.finalize(Some(test_catalog())).unwrap();
     assert_eq!(final_cfg.rules[0].level, alint_core::Level::Error);
 }
@@ -143,7 +143,7 @@ rules:
   - extends_template: contains-template
     id: packages-have-readmes
 ";
-    let raw: RawConfig = ayaml::compat::from_str(yaml).unwrap();
+    let raw: RawConfig = alint_core::yaml::from_str(yaml).unwrap();
     let error = raw.finalize(Some(test_catalog())).unwrap_err().to_string();
     assert!(
         error.contains("`paths` is not supported by `dir_contains`"),
@@ -201,7 +201,7 @@ rules:
   - extends_template: nested-template
     id: packages-have-readmes
 ";
-    let raw: RawConfig = ayaml::compat::from_str(yaml).unwrap();
+    let raw: RawConfig = alint_core::yaml::from_str(yaml).unwrap();
     let error = raw.finalize(Some(test_catalog())).unwrap_err().to_string();
     assert!(error.contains("nested rule #0 (`dir_contains`)"), "{error}");
     assert!(error.contains("`paths` is not supported"), "{error}");
@@ -216,7 +216,7 @@ fn nested_rule_rejects_synthesized_parent_fields() {
              select: packages/*\n    require:\n      - kind: file_exists\n        \
              paths: \"{{path}}/README.md\"\n        {field}\n    level: error\n"
         );
-        let raw: RawConfig = ayaml::compat::from_str(&yaml).unwrap();
+        let raw: RawConfig = alint_core::yaml::from_str(&yaml).unwrap();
         let error = raw.finalize(Some(test_catalog())).unwrap_err().to_string();
         assert!(
             error.contains("not supported on a nested rule"),
@@ -283,7 +283,7 @@ rules:
     expect_matches: false
     level: error
 ";
-    let raw: RawConfig = ayaml::compat::from_str(yaml).unwrap();
+    let raw: RawConfig = alint_core::yaml::from_str(yaml).unwrap();
     let error = raw.finalize(Some(test_catalog())).unwrap_err().to_string();
     assert!(
         error.contains("`expect_matches` is not supported by `file_exists`"),
@@ -302,7 +302,7 @@ rules:
     fix: null
     level: error
 ";
-    let raw: RawConfig = ayaml::compat::from_str(yaml).unwrap();
+    let raw: RawConfig = alint_core::yaml::from_str(yaml).unwrap();
     let error = raw.finalize(Some(test_catalog())).unwrap_err().to_string();
     assert!(
         error.contains("`fix` is not supported by `command_idempotent`"),
@@ -321,7 +321,7 @@ rules:
     fix: null
     level: error
 ";
-    let raw: RawConfig = ayaml::compat::from_str(yaml).unwrap();
+    let raw: RawConfig = alint_core::yaml::from_str(yaml).unwrap();
     let error = raw.finalize(Some(test_catalog())).unwrap_err().to_string();
     assert!(
         error.contains("`fix` for `file_exists` must select exactly one operation"),
@@ -342,7 +342,7 @@ fn configured_null_scope_filter_is_rejected_for_supported_kinds() {
              \x20   level: error\n\
              \x20   {options}\n"
         );
-        let raw: RawConfig = ayaml::compat::from_str(&yaml).unwrap();
+        let raw: RawConfig = alint_core::yaml::from_str(&yaml).unwrap();
         let error = raw.finalize(Some(test_catalog())).unwrap_err().to_string();
         assert!(
             error.contains("`scope_filter` must be a mapping with at least one predicate"),
@@ -362,7 +362,7 @@ rules:
     scope_filter: null
     level: error
 ";
-    let raw: RawConfig = ayaml::compat::from_str(yaml).unwrap();
+    let raw: RawConfig = alint_core::yaml::from_str(yaml).unwrap();
     let error = raw.finalize(Some(test_catalog())).unwrap_err().to_string();
     assert!(
         error.contains("`scope_filter` is not supported by `file_exists`"),
@@ -382,7 +382,7 @@ rules:
   - extends_template: typo-template
     id: my-rule
 ";
-    let cfg: RawConfig = ayaml::compat::from_str(yaml).unwrap();
+    let cfg: RawConfig = alint_core::yaml::from_str(yaml).unwrap();
     let err = cfg.finalize(Some(test_catalog())).unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("typo-template"));
@@ -405,7 +405,7 @@ rules:
   - extends_template: outer
     id: my-rule
 ";
-    let cfg: RawConfig = ayaml::compat::from_str(yaml).unwrap();
+    let cfg: RawConfig = alint_core::yaml::from_str(yaml).unwrap();
     let err = cfg.finalize(Some(test_catalog())).unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("leaf-only"));
@@ -431,7 +431,7 @@ rules:
     id: my-rule
     vars: { dir: pkg }
 ";
-    let cfg: RawConfig = ayaml::compat::from_str(yaml).unwrap();
+    let cfg: RawConfig = alint_core::yaml::from_str(yaml).unwrap();
     let final_cfg = cfg.finalize(Some(test_catalog())).unwrap();
     let r = &final_cfg.rules[0];
     let paths = r.paths.as_ref().unwrap();
@@ -571,8 +571,8 @@ fn extended_config_allow_out_of_root_does_not_lift_confinement_before_reject() {
 fn deeply_nested_flow_config_is_rejected_before_libyaml_parses_it() {
     // W2 wiring regression: a config whose YAML nests flow collections far too
     // deep must be rejected by the pre-parse `flow_depth_within_limit` guard
-    // BEFORE it reaches yaml_serde/libyaml-rs (which is super-linear on flow
-    // nesting and would hang the run). The `yaml_depth` unit tests only cover
+    // BEFORE it reaches the parser (libyaml-rs, alint's parser until v0.23, was
+    // super-linear on flow nesting and hung the run). The `yaml_depth` unit tests only cover
     // the scanner in isolation; this pins that the config loader actually calls
     // it, so a deleted guard here would fail rather than silently reopen the DoS.
     let tmp = tempfile::tempdir().unwrap();

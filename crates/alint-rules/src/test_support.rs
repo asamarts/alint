@@ -19,7 +19,7 @@ use alint_core::{Context, FileEntry, FileIndex, RuleSpec};
 /// errors with a clear message - tests are expected to feed
 /// it well-formed input.
 pub fn spec_yaml(yaml: &str) -> RuleSpec {
-    ayaml::compat::from_str(yaml)
+    alint_core::yaml::from_str(yaml)
         .unwrap_or_else(|e| panic!("invalid spec yaml: {e}\n=== input ===\n{yaml}"))
 }
 

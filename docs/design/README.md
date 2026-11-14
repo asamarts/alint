@@ -49,3 +49,4 @@ in `docs/adr/` is missing from this table.
 | [0032](../adr/0032-v023-owner-decisions.md) | v0.23 owner decisions: a first Phase 3 slice, the YAML groundwork, one API break, and plugins after | accepted |
 | [0033](../adr/0033-v023-slice-after-the-corpus-stratum.md) | v0.23 slice after the corpus stratum: set instead of cardinality, entry values, and the #503 fix | accepted |
 | [0034](../adr/0034-v2-version-boundary-and-phase-3-design.md) | The `version: 2` boundary and the Phase 3 design decisions | accepted |
+| [0035](../adr/0035-keep-the-early-ayaml-cutover.md) | Keep the early ayaml cutover and qualify it before v0.23.0 | accepted |

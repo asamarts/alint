@@ -163,7 +163,7 @@ fn a_nested_rule_infers_a_templated_name_s_format_per_iteration() {
 #[test]
 fn a_rule_with_a_pending_format_does_not_evaluate() {
     let nested: alint_core::NestedRuleSpec =
-        ayaml::compat::from_str("kind: key_parity\nreference: '{path}'\npeers: '{dir}/*'\n")
+        alint_core::yaml::from_str("kind: key_parity\nreference: '{path}'\npeers: '{dir}/*'\n")
             .unwrap();
     let spec = nested.instantiate(
         "p",

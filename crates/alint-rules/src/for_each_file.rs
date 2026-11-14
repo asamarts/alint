@@ -195,7 +195,7 @@ mod tests {
     #[test]
     fn passes_when_every_file_has_required_sibling() {
         let require: Vec<NestedRuleSpec> = vec![
-            ayaml::compat::from_str("kind: file_exists\npaths: \"{dir}/{stem}.h\"\n").unwrap(),
+            alint_core::yaml::from_str("kind: file_exists\npaths: \"{dir}/{stem}.h\"\n").unwrap(),
         ];
         let require = compile_nested_require(
             &crate::test_support::spec_yaml("id: t\nkind: for_each_dir\nlevel: error\n"),
@@ -237,7 +237,7 @@ mod tests {
     #[test]
     fn violates_per_missing_sibling() {
         let require: Vec<NestedRuleSpec> = vec![
-            ayaml::compat::from_str("kind: file_exists\npaths: \"{dir}/{stem}.h\"\n").unwrap(),
+            alint_core::yaml::from_str("kind: file_exists\npaths: \"{dir}/{stem}.h\"\n").unwrap(),
         ];
         let require = compile_nested_require(
             &crate::test_support::spec_yaml("id: t\nkind: for_each_dir\nlevel: error\n"),
