@@ -130,9 +130,10 @@ recommendation, on 2026-11-13 and 2026-11-14.
 - **The trust review of named objects is local-only.** Remote v2 sources need their own review
   before any release accepts them.
 - **Some documents change with this record:**
-  - the v0.23 plan (scope item 2, the phase 3 row and the status log);
-  - general-linter section 13.2 (Q1, Q2, Q6, Q12 and Q15 decided) and 13.3 (the invariant 2
-    amendment recorded);
+  - the v0.23 plan (scope items 2, 3 and 6, section 3's trust bullet, the phase 3 and phase 6
+    rows, and the status log);
+  - general-linter section 13.2 (Q1, Q2, Q6, Q12 and Q15 decided), 13.3 (the invariant 2
+    amendment recorded), and pointers to the design in sections 7.3, 7.4 and 7.8;
   - the constitution's invariant 2.
 
 ## Considered Options

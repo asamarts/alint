@@ -956,6 +956,10 @@ The exact syntax requires a dedicated design pass. The semantic requirements are
 important than these names: row binding, typed values, cardinality, provenance, limits, and
 fail-loudly parse behavior.
 
+The v0.23 design pass is [`v0.23/selectors-and-constraints.md`](v0.23/selectors-and-constraints.md)
+section 5 (ADR-0034 decision 5). Its locale policy needs keys only, as `key_parity` does; the
+`value` field above serves policies that compare values.
+
 ### 7.4 The generic constraint kind
 
 The companion gap analysis proposes a `constraint` kind. With named relations, it can remain
@@ -989,6 +993,9 @@ rules:
       message: "translation key sets differ between locales"
     level: error
 ```
+
+The v0.23 design spells `functional_dependency` as `unique` with `determines:`, and `sets_equal`
+as `set` ([`v0.23/selectors-and-constraints.md`](v0.23/selectors-and-constraints.md) section 6).
 
 The first public release should be **check-only** and should cover the integrity-constraint
 core: unique keys, references, scalar equality, set relations, cardinality, and grouping.
@@ -1075,15 +1082,16 @@ A new DSL surface touches more than the parser. Each of these needs an answer in
 design document except the source-version and `requires` contract, which is accepted for Phase 1b
 in [`v0.20/config-requirements.md`](v0.20/config-requirements.md):
 
-- **Version mixing across `extends:`.** The loader currently drops an extended file's `version:`
-  without checking it. v0.20 validates and records every complete source before merge. A v1
-  source may extend only v1 sources; a future v2 source may extend v1 or v2, never the reverse at
-  any recursive edge. Complete extended sources must state `version`; `.alint.d` fragments may
-  inherit the root's version. The v1-compatible `requires: { alint: "0.20.0" }` field is a
-  source-local minimum stable release, not a SemVer range, and cannot grant capabilities.
-- **JSON Schema and editors.** Configs point editors at `schemas/v1/config.json` on `main`. A v2
-  surface ships `schemas/v2/config.json`; the v1 schema is frozen, and the published `$id`
-  stops pointing at a moving branch.
+- **Version mixing across `extends:`.** Before v0.20 the loader dropped an extended file's
+  `version:` without checking it; v0.20 validates and records every complete source before
+  merge. A v1 source may extend only v1 sources; a future v2 source may extend v1 or v2, never
+  the reverse at any recursive edge. Complete extended sources must state `version`; `.alint.d`
+  fragments may inherit the root's version. The v1-compatible `requires: { alint: "0.20.0" }`
+  field is a source-local minimum stable release, not a SemVer range, and cannot grant
+  capabilities.
+- **JSON Schema and editors.** The v1 schema's `$id`, its examples and `ARCHITECTURE.md` point
+  at `schemas/v1/config.json` on `main`. A v2 surface ships `schemas/v2/config.json`; the v1
+  schema is frozen, and the published `$id` stops pointing at a moving branch.
 - **Commands.** `validate-config` validates both versions; `init` and `suggest` keep emitting v1
   until v2 is stable; `list`, `explain`, and `export-agents-md` render named selectors and
   relations, under the ADR-0012 completeness gates.
@@ -1095,6 +1103,12 @@ in [`v0.20/config-requirements.md`](v0.20/config-requirements.md):
   `version: 1`" and a frozen `alint-core` API, while Phase 2 reshapes public `alint-core` types.
   Decision DEC-9 orders the two: `version: 2` ships before v1.0, so v1.0 follows Phase 3 and
   freezes both versions, the reshaped `alint-core` API, and plugin contract 1.0 together.
+
+The Phase 3 answers are [`v0.23/selectors-and-constraints.md`](v0.23/selectors-and-constraints.md)
+sections 3 and 11, recorded by ADR-0034 decisions 1 and 9. They differ from this list in two
+places. The v1 schema keeps its `$id` and gains new v1 kinds until v1.0 instead of freezing now,
+and only the draft v2 schema's `$id` names a release. `constraint` is one kind with one rule page
+and a section per family, not a page per operator.
 
 ## 8. Diagnostics, exceptions, and remediation
 

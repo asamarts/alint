@@ -479,23 +479,24 @@ v1 cannot express (merged trees, one range per dependency) and for the measureme
 
 ## 13. Corrections to the records
 
-Phase 6 corrects these where they live; accepted ADRs are not edited.
-- `general-linter.md` section 7.8 says the loader drops an extended source's `version:` unchecked
-  (stale since v0.20), that editors point at `schemas/v1` on `main` (only its `$id`, examples and
-  `ARCHITECTURE.md` do), and that `validate-config` validates both versions (no schema validation
-  runs at load).
+The plan and `general-linter.md` are corrected with this document. Accepted ADRs are not edited,
+so this list is the correction of ADR-0033's wording.
+- `general-linter.md` section 7.8 said the loader drops an extended source's `version:` unchecked
+  (stale since v0.20) and that editors point at `schemas/v1` on `main` (only its `$id`, examples
+  and `ARCHITECTURE.md` do). Section 7.8 now points at this document's answers.
 - Section 7.4 names operators `functional_dependency` and `sets_equal`; the slice spells them
-  `unique` with `determines:` and `set`.
+  `unique` with `determines:` and `set`. Section 7.4 now says so.
 - Plan item 3 and ADR-0033 say "the `entry` adapter" emits TOML values; TOML rows come from
-  `TomlRowsAdapter`.
-- Plan section 2 sizes the relation layer at "about 3,600 lines" (3,573 without `adapters/`, 4,724
-  with them), and calls toolchain-pins "41 rules, mostly `cross_file`" (24 rules, 18 of them
+  `TomlRowsAdapter`. Plan item 3 now says so.
+- Plan section 2 sized the relation layer at "about 3,600 lines" (3,573 without `adapters/`, 4,724
+  with them), and called toolchain-pins "41 rules, mostly `cross_file`" (24 rules, 18 of them
   `cross_file`, plus 17 facts).
 - Section 12.1 and plan section 5 say the ADR-0012 gates cover SARIF and the language server; they
   cover the JSON and human formats, and SARIF and LSP related locations are unit-tested only.
-  Phase 7 adds `constraint` findings to the gates and a SARIF case.
+  Phase 7 adds `constraint` findings to the gates and a SARIF case, and plan section 5 now names
+  that work.
 - Section 7.3's locale relation emits values; `key_parity` quotes keys only, and the slice's
-  locale policy needs keys only.
+  locale policy needs keys only. Section 7.3 now says so.
 
 ## 14. Out of scope
 
