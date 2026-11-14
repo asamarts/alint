@@ -327,8 +327,8 @@ rules:
     level: error
     message: "the GitHub Action is a composite action (install + run, no Docker image)"
 
-  # Cross-file: derive paths from a manifest and assert they resolve on disk —
-  # the class of check that catches a members list drifting from the tree.
+  # Cross-file: derive paths from a manifest and assert they resolve in the
+  # walked tree: the class of check that catches a members list drifting from the tree.
   - id: workspace-members-resolve
     kind: registry_paths_resolve
     source: Cargo.toml

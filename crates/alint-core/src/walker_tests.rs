@@ -1372,7 +1372,7 @@ fn would_walk_skip_stops_at_a_symlink_the_walk_does_not_enter() {
         extra_ignores: Vec::new(),
     };
     let index = walk(&root, &opts).unwrap();
-    for (rel, skipped) in [
+    let cases = [
         ("loop/a.txt", true),
         ("loop", true),
         ("real/deep/up/a.txt", true),
@@ -1382,9 +1382,11 @@ fn would_walk_skip_stops_at_a_symlink_the_walk_does_not_enter() {
         ("alias/a.txt", false),
         ("alias/deep/b.txt", false),
         ("real/a.txt", false),
+        ("real/deep/b.txt", false),
         // Not there yet: nothing on the way is a symlink.
         ("new/dir/x.txt", false),
-    ] {
+    ];
+    for (rel, skipped) in cases {
         let predicted = would_walk_skip(&root, &opts, Path::new(rel), false, &[]);
         assert_eq!(predicted, skipped, "{rel}");
         if root.join(rel).exists() {
@@ -1393,6 +1395,14 @@ fn would_walk_skip_stops_at_a_symlink_the_walk_does_not_enter() {
                 !index.contains_path(Path::new(rel)),
                 "walk, {rel}"
             );
+        }
+    }
+    // One `WalkSkips` for every path, in either order: a directory's cached
+    // reach serves every path below it.
+    for order in [cases.to_vec(), cases.iter().rev().copied().collect()] {
+        let skips = WalkSkips::new(&root, &opts, &[]);
+        for (rel, skipped) in order {
+            assert_eq!(skips.skips(Path::new(rel), false), skipped, "shared, {rel}");
         }
     }
 }
@@ -1717,6 +1727,74 @@ fn tracked_entries_ignore_files_hid_returns_only_what_an_ignore_file_hid() {
     assert!(tracked_entries_ignore_files_hid(root, &no_ignore_files, &tracked).is_empty());
     let built = FileIndex::from_entries(index.entries.clone());
     assert!(tracked_entries_ignore_files_hid(root, &built, &tracked).is_empty());
+}
+
+/// A directory above a tracked path comes back even when the path is deleted
+/// or the config's `ignore:` excludes it, as the walk lists a directory whose
+/// tracked files are gone; a directory `ignore:` excludes stays out with
+/// everything below it (#503's audit).
+#[test]
+fn tracked_entries_ignore_files_hid_returns_the_directories_above_a_tracked_path() {
+    let tmp = td();
+    let root = tmp.path();
+    touch(root, ".gitignore", b"ign/\n");
+    touch(root, "ign/x/untracked.txt", b"u\n");
+    touch(root, "ign/y/a.class", b"c\n");
+    touch(root, "ign/skip/z/a.txt", b"c\n");
+    let tracked: HashSet<PathBuf> = [
+        "ign/x/deleted.class",
+        "ign/y/a.class",
+        "ign/skip/z/a.txt",
+        "ign/missing/a.txt",
+    ]
+    .into_iter()
+    .map(PathBuf::from)
+    .collect();
+    let opts = WalkOptions {
+        respect_gitignore: true,
+        extra_ignores: vec!["*.class".to_string(), "ign/skip".to_string()],
+    };
+    let index = walk(root, &opts).unwrap();
+    let hidden = FileIndex::from_entries(tracked_entries_ignore_files_hid(root, &index, &tracked));
+    assert_eq!(paths(&hidden), ["ign", "ign/x", "ign/y"]);
+}
+
+/// Only a plain relative path counts: an absolute one (or, on Windows, one
+/// with a drive prefix such as `C:x`) would join outside the root.
+#[test]
+fn tracked_entries_ignore_files_hid_skips_a_path_that_is_not_plain_relative() {
+    let outside = td();
+    touch(outside.path(), "secret.txt", b"s\n");
+    let tmp = td();
+    let root = tmp.path();
+    touch(root, ".gitignore", b"*.txt\n");
+    touch(root, "a.txt", b"a\n");
+    let tracked: HashSet<PathBuf> = [
+        PathBuf::from("a.txt"),
+        PathBuf::from("./a.txt"),
+        outside.path().join("secret.txt"),
+    ]
+    .into_iter()
+    .collect();
+    let index = walk(root, &WalkOptions::default()).unwrap();
+    let hidden = FileIndex::from_entries(tracked_entries_ignore_files_hid(root, &index, &tracked));
+    assert_eq!(paths(&hidden), ["a.txt"]);
+}
+
+/// A name counts only as the directory listing spells it: on a
+/// case-insensitive file system `Docs/x` resolves for `docs/x`, but the walk
+/// lists `docs/x`, and `ignore:` patterns match that spelling.
+#[test]
+fn a_name_counts_only_as_its_directory_lists_it() {
+    let tmp = td();
+    let root = tmp.path();
+    touch(root, "docs/x.txt", b"x\n");
+    let mut listings = Listings::default();
+    assert!(listings.spelled_as_listed(root, Path::new("docs")));
+    assert!(listings.spelled_as_listed(root, Path::new("docs/x.txt")));
+    assert!(!listings.spelled_as_listed(root, Path::new("Docs")));
+    assert!(!listings.spelled_as_listed(root, Path::new("docs/X.txt")));
+    assert!(!listings.spelled_as_listed(root, Path::new("missing/x.txt")));
 }
 
 /// A tracked symlink in an ignored directory that leads out of the root stays

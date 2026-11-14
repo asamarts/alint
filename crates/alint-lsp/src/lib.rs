@@ -474,51 +474,18 @@ impl Backend {
         let is_current = |state: &State| state.versions.get(&uri).copied() == Some(version);
         let _publish_guard = self.reeval_publish.lock().await;
 
-        match outcome {
-            Ok(Ok(per_file)) => {
-                let diagnostics = {
-                    let mut state = self.state.lock();
-                    if !is_current(&state) {
-                        return;
-                    }
-                    // Keep cross-file findings from the last full run;
-                    // replace the per-file ones with the fresh results.
-                    let mut merged: Vec<Finding> = state
-                        .diagnostics
-                        .get(&uri)
-                        .map(|prev| prev.iter().filter(|f| !f.per_file).cloned().collect())
-                        .unwrap_or_default();
-                    merged.extend(per_file);
-                    let diags: Vec<Diagnostic> = merged
-                        .iter()
-                        .map(|finding| {
-                            finding_to_diagnostic(finding, state.related_information_supported)
-                        })
-                        .collect();
-                    state.diagnostics.insert(uri.clone(), merged);
-                    diags
-                };
-                self.client
-                    .publish_diagnostics(uri, diagnostics, Some(version))
-                    .await;
-            }
-            Ok(Err(Error::FileNotInIndex { .. })) => {
-                // Excluded from linting (or not yet walked) — clear.
-                {
-                    let mut state = self.state.lock();
-                    if !is_current(&state) {
-                        return;
-                    }
-                    state.diagnostics.remove(&uri);
-                }
-                self.client
-                    .publish_diagnostics(uri, Vec::new(), Some(version))
-                    .await;
-            }
+        let per_file = match outcome {
+            Ok(Ok(per_file)) => per_file,
+            // Excluded from the walk, or not walked yet: no per-file rule
+            // applies, but a finding from the last full run still does. A
+            // `git_tracked_only` rule reports a tracked file that an ignore
+            // file hides (#503).
+            Ok(Err(Error::FileNotInIndex { .. })) => Vec::new(),
             Ok(Err(err)) => {
                 self.client
                     .log_message(MessageType::WARNING, format!("alint: {err}"))
                     .await;
+                return;
             }
             Err(join_err) => {
                 self.client
@@ -527,8 +494,36 @@ impl Backend {
                         format!("alint: re-eval panicked: {join_err}"),
                     )
                     .await;
+                return;
             }
-        }
+        };
+        let diagnostics = {
+            let mut state = self.state.lock();
+            if !is_current(&state) {
+                return;
+            }
+            // Keep cross-file findings from the last full run; replace the
+            // per-file ones with the fresh results.
+            let mut merged: Vec<Finding> = state
+                .diagnostics
+                .get(&uri)
+                .map(|prev| prev.iter().filter(|f| !f.per_file).cloned().collect())
+                .unwrap_or_default();
+            merged.extend(per_file);
+            let diags: Vec<Diagnostic> = merged
+                .iter()
+                .map(|finding| finding_to_diagnostic(finding, state.related_information_supported))
+                .collect();
+            if merged.is_empty() {
+                state.diagnostics.remove(&uri);
+            } else {
+                state.diagnostics.insert(uri.clone(), merged);
+            }
+            diags
+        };
+        self.client
+            .publish_diagnostics(uri, diagnostics, Some(version))
+            .await;
     }
 
     /// The governing session, cached findings, and buffer for `uri` —

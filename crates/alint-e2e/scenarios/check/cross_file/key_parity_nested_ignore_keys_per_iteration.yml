@@ -1,0 +1,37 @@
+test_version: 1
+name: a nested key_parity parses ignore_keys for each iteration's key model
+tags: [check, key_parity, for_each_file, cross_file, nested, json, dotenv]
+
+# `b..c` is a valid flat key and an invalid tree path. With the format
+# pending at load, it loads; the dotenv iteration ignores the key, and the JSON
+# iteration is a nested_rule_build failure.
+
+given:
+  tree:
+    web:
+      en.json: '{"a": 1}'
+      fr.json: '{"a": 1}'
+    api:
+      .env.example: "A=1\nb..c=2\n"
+      .env.local: "A=1\n"
+  config: |
+    version: 1
+    rules:
+      - id: key-parity
+        kind: for_each_file
+        select: ["web/en.json", "api/.env.example"]
+        level: error
+        require:
+          - kind: key_parity
+            reference: "{path}"
+            peers: "{dir}/{stem}.local"
+            allow_missing_peers: true
+            ignore_keys: ["b..c"]
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations: []
+    analysis_failures:
+      - {rule: key-parity, kind: nested_rule_build, path: web/en.json, message: {regex: "`ignore_keys` pattern \"b\\.\\.c\""}}

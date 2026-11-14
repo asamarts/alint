@@ -160,10 +160,10 @@ impl Engine {
     /// directories (`tracked_entries_ignore_files_hid`): a force-added file
     /// is tracked whatever `.gitignore` says (#503, ADR-0033 decision 3).
     ///
-    /// Build cost: O(N) per mode (one `HashSet` lookup or one
-    /// `dir_has_tracked_files` walk per entry), plus one lookup per tracked
-    /// path and a `stat` for each one the walk left out. Amortised across
-    /// however many rules opt into each mode.
+    /// Build cost: O(N) per mode (one `HashSet` lookup per entry, after one
+    /// pass over the tracked paths for the directories above them), plus one
+    /// lookup per tracked path and a `stat` for each one the walk left out.
+    /// Amortised across however many rules opt into each mode.
     pub(super) fn build_git_tracked_indexes(
         &self,
         root: &Path,
@@ -203,18 +203,20 @@ impl Engine {
         };
 
         let hidden = crate::walker::tracked_entries_ignore_files_hid(root, full, tracked);
-        // The walked entries and the hidden ones, merged in path order as the
-        // walk sorts its own.
+        // The walked entries and the hidden ones, each sorted by path, merged
+        // in that order as the walk sorts its own.
         let tracked_index = |keep: &dyn Fn(&FileEntry) -> bool| {
-            let mut entries: Vec<FileEntry> = full
-                .entries
-                .iter()
-                .chain(&hidden)
-                .filter(|e| keep(e))
-                .cloned()
-                .collect();
-            if !hidden.is_empty() {
-                entries.sort_unstable_by(|a, b| a.path.cmp(&b.path));
+            let mut walked = full.entries.iter().filter(|e| keep(e)).peekable();
+            let mut extra = hidden.iter().filter(|e| keep(e)).peekable();
+            let mut entries = Vec::new();
+            loop {
+                let next = match (walked.peek(), extra.peek()) {
+                    (Some(a), Some(b)) if b.path < a.path => extra.next(),
+                    (Some(_), _) => walked.next(),
+                    (None, _) => extra.next(),
+                };
+                let Some(entry) = next else { break };
+                entries.push(entry.clone());
             }
             let index = FileIndex::from_entries(entries);
             full.share_relation_caches(&index);
@@ -225,9 +227,14 @@ impl Engine {
             .then(|| tracked_index(&|e: &FileEntry| !e.is_dir && tracked.contains(&*e.path)));
 
         let dir_aware = any_dir_aware.then(|| {
+            // Each path with a tracked path at or below it, as
+            // `git::dir_has_tracked_files` defines it: one lookup per
+            // directory instead of a scan of every tracked path.
+            let tracked_dirs: std::collections::HashSet<&Path> =
+                tracked.iter().flat_map(|path| path.ancestors()).collect();
             tracked_index(&|e: &FileEntry| {
                 if e.is_dir {
-                    crate::git::dir_has_tracked_files(&e.path, tracked)
+                    tracked_dirs.contains(&*e.path)
                 } else {
                     tracked.contains(&*e.path)
                 }

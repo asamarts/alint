@@ -29,7 +29,8 @@ pub use adapter::{Adapter, AdapterError, AdapterNote, AdapterOutput, check_row_c
 pub use adapters::{
     AndroidStringsAdapter, EntryRowsAdapter, ExtractAdapter, ResxAdapter, TomlRowsAdapter,
 };
-pub use cache::{DecodeCache, ReadCache};
+pub(crate) use cache::in_iteration_scope;
+pub use cache::{DecodeCache, IterationScope, ReadCache};
 pub use contract::{AnalyzeError, ContractAdapter, ContractAnalyzer, InternalContractAdapter};
 pub use limits::{LimitConfigError, LimitExceeded, LimitKind, Limits, RunBudget};
 pub use path::RelPath;

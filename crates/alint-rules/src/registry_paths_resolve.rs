@@ -1,7 +1,7 @@
 //! `registry_paths_resolve` — a manifest file enumerates
-//! path-like entries; each must resolve to an on-disk artefact.
-//! Optional reverse "orphan" check: on-disk artefacts in a
-//! declared space that no entry references.
+//! path-like entries; each must resolve to a path in the walked tree.
+//! Optional reverse "orphan" check: walked paths in a declared
+//! space that no entry references.
 //!
 //! Cross-file: reads one manifest and resolves its entries
 //! against the engine `FileIndex` (O(1) per entry via the lazy
@@ -43,14 +43,14 @@ enum Expect {
     Dir,
 }
 
-/// Enable the reverse-completeness check: on-disk artefacts under the `space`
-/// glob that no entry references. Findings use the rule's top-level `level`;
+/// Enable the reverse-completeness check: paths in the walked tree under the
+/// `space` glob that no entry references. Findings use the rule's top-level `level`;
 /// omit `orphans` to disable the reverse check.
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 #[schemars(rename = "RegistryOrphansSpec")]
 #[serde(deny_unknown_fields)]
 struct OrphansSpec {
-    /// Glob of on-disk artefacts that should each be referenced.
+    /// Glob of walked paths that should each be referenced.
     space: String,
 }
 
@@ -412,7 +412,7 @@ impl RegistryPathsResolveRule {
         extract_values(extract, text)
     }
 
-    /// Reverse-completeness: on-disk artefacts under `orphans.space`
+    /// Reverse-completeness: walked paths under `orphans.space`
     /// that no (post-expansion) entry covered.
     fn check_orphans(
         &self,
@@ -513,8 +513,14 @@ impl RegistryPathsResolveRule {
         match self.expect {
             Expect::File => {
                 if !is_file {
+                    // `dir_set` is empty for this kind: a path that is not a
+                    // file but is indexed is a directory.
                     return Some(Reason::reworded(
-                        "does not resolve to a file (missing or ignored)",
+                        if ctx.index.contains_path(path) {
+                            "resolves to a directory, not a file"
+                        } else {
+                            "does not resolve to a file (missing or ignored)"
+                        },
                         "does not resolve to a file on disk",
                     ));
                 }
@@ -522,7 +528,11 @@ impl RegistryPathsResolveRule {
             Expect::Dir => {
                 if !is_dir {
                     return Some(Reason::reworded(
-                        "does not resolve to a directory (missing or ignored)",
+                        if is_file {
+                            "resolves to a file, not a directory"
+                        } else {
+                            "does not resolve to a directory (missing or ignored)"
+                        },
                         "does not resolve to a directory on disk",
                     ));
                 }
@@ -539,9 +549,12 @@ impl RegistryPathsResolveRule {
         if let Some(mc) = &self.must_contain {
             // Only meaningful when the entry is a directory.
             if is_dir && !ctx.index.contains_file(&path.join(mc)) {
-                return Some(Reason::new(format!(
-                    "resolves to a directory missing `{mc}`"
-                )));
+                return Some(Reason {
+                    shown: Cow::Owned(format!(
+                        "resolves to a directory without `{mc}` (missing or ignored)"
+                    )),
+                    key: Cow::Owned(format!("resolves to a directory missing `{mc}`")),
+                });
             }
         }
         None
@@ -991,6 +1004,51 @@ mod tests {
         assert_eq!(
             findings[0].baseline_key.as_deref(),
             Some("entry\0MANIFEST\0src/b.rs\0matched no path on disk")
+        );
+
+        // An entry of the other kind says so; its key is the 0.22 one.
+        std::fs::write(dir.path().join("MANIFEST"), "src/lib.rs\nsrc\n").unwrap();
+        let idx = index(&["MANIFEST", "src/lib.rs"], &["src"]);
+        for (expect, entry, shown, key) in [
+            (
+                Expect::Dir,
+                "src/lib.rs",
+                "resolves to a file, not a directory",
+                "does not resolve to a directory on disk",
+            ),
+            (
+                Expect::File,
+                "src",
+                "resolves to a directory, not a file",
+                "does not resolve to a file on disk",
+            ),
+        ] {
+            let mut options = opts("MANIFEST", Extract::Lines(LinesOpts::default()));
+            options.expect = expect;
+            let findings = eval(&rule(options), dir.path(), &idx);
+            assert_eq!(findings.len(), 1, "{findings:?}");
+            assert_eq!(
+                findings[0].message,
+                format!("MANIFEST: entry \"{entry}\" {shown}")
+            );
+            assert_eq!(
+                findings[0].baseline_key.as_deref(),
+                Some(format!("entry\0MANIFEST\0{entry}\0{key}").as_str())
+            );
+        }
+        std::fs::write(dir.path().join("MANIFEST"), "src\n").unwrap();
+        let mut options = opts("MANIFEST", Extract::Lines(LinesOpts::default()));
+        options.must_contain = Some("Cargo.toml".to_string());
+        let findings = eval(&rule(options), dir.path(), &idx);
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(
+            findings[0].message,
+            "MANIFEST: entry \"src\" resolves to a directory without `Cargo.toml` (missing or \
+             ignored)"
+        );
+        assert_eq!(
+            findings[0].baseline_key.as_deref(),
+            Some("entry\0MANIFEST\0src\0resolves to a directory missing `Cargo.toml`")
         );
     }
 

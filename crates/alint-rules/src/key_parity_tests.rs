@@ -34,6 +34,38 @@ fn evaluates_without_the_run_caches() {
     assert!(index.read_cache().is_none(), "the run caches stay off");
 }
 
+/// A nested `key_parity` reads through caches of its own in each iteration,
+/// even when a top-level relation rule turned the run's caches on, so nothing
+/// an iteration reads outlives it or counts against the run's row budget.
+#[test]
+fn a_nested_rule_leaves_the_run_caches_alone() {
+    let (tmp, index) = tempdir_with_files(&[
+        ("a/en.json", br#"{"k":1}"#),
+        ("a/fr.json", br#"{"k":1}"#),
+        ("b/en.json", br#"{"k":1,"x":2}"#),
+        ("b/fr.json", br#"{"k":1}"#),
+    ]);
+    index.enable_relation_caches();
+    let registry = crate::builtin_registry();
+    let rule = registry
+        .build(&spec_yaml(
+            "id: p\nkind: for_each_file\nselect: '*/en.json'\nlevel: error\n\
+             require:\n  - kind: key_parity\n    reference: '{path}'\n    peers: '{dir}/fr.json'\n",
+        ))
+        .unwrap();
+    let mut context = ctx(tmp.path(), &index);
+    context.registry = Some(&registry);
+    let findings = rule.evaluate(&context).expect("rule evaluates");
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert_eq!(findings[0].path.as_deref(), Some(Path::new("b/fr.json")));
+    assert_eq!(index.read_cache().unwrap().reads(), 0, "no run-cache read");
+    assert_eq!(
+        index.decode_cache().unwrap().decodes(),
+        0,
+        "no run-cache decode"
+    );
+}
+
 /// Build a `for_each_file` around one nested `key_parity` as loading a
 /// configuration does: the parent, then its `require:` block from the
 /// placeholder tokens. `options` are the nested rule's lines.
@@ -58,6 +90,16 @@ fn a_nested_rule_infers_a_templated_name_s_format_per_iteration() {
         "reference: '{dir}/en.{ext}'\npeers: '{dir}/*.{ext}'",
         "reference: '{dir}/{basename}'\npeers: '{dir}/fr.json'",
         "reference: '{path}'\npeers: '{dir}/*'\nstrip_root: true\nignore_keys: ['a.b']",
+        // A token can make the name `.env.local` or give it its extension.
+        "reference: '{dir}/{stem}.local'\npeers: '{dir}/*.local'",
+        "reference: '{dir}/en{ext}'\npeers: '{dir}/*'",
+        // A pattern valid only for the flat model waits for the iteration.
+        "reference: '{path}'\npeers: '{dir}/*'\nignore_keys: ['b..c']",
+        // A literal peer's model stands in for the pending format.
+        "reference: '{path}'\npeers: '{dir}/fr.json'\nstrip_root: true",
+        "reference: '{path}'\npeers: '{dir}/.env'\nignore_keys: ['b..c']",
+        // A different file than the reference in every iteration.
+        "reference: '{path}'\npeers: '{dir}/{stem}.fr.json'",
         // These rendered empty from the old `_` placeholder.
         "reference: 'i18n/{parent_name}.json'\npeers: 'i18n/*.json'",
         "reference: '{dir}/en.json'\npeers: '{parent_name}/en.json'",
@@ -67,7 +109,32 @@ fn a_nested_rule_infers_a_templated_name_s_format_per_iteration() {
     for (options, error) in [
         (
             "reference: '{dir}/README'\npeers: '{dir}/*'",
-            NO_REFERENCE_FORMAT,
+            "cannot infer the key format of `reference` \"{dir}/README\"",
+        ),
+        // The extension is literal: the same in every iteration.
+        (
+            "reference: '{dir}/strings-{stem}.xml'\npeers: '{dir}/*'",
+            "cannot infer the key format of `reference` \"{dir}/strings-{stem}.xml\"",
+        ),
+        (
+            "reference: '{path}'\npeers: '{dir}/{basename}'",
+            "must select at least one file other than the reference",
+        ),
+        (
+            "reference: '{dir}/{basename}'\npeers: '{path}'",
+            "must select at least one file other than the reference",
+        ),
+        (
+            "reference: '{path}'\npeers: '{dir}/.env'\nstrip_root: true",
+            "`strip_root` applies only to JSON, YAML, and TOML files, not dotenv",
+        ),
+        (
+            "reference: '{path}'\npeers: '{dir}/fr.json'\nignore_keys: ['b..c']",
+            "`ignore_keys` pattern \"b..c\"",
+        ),
+        (
+            "reference: '{path}'\npeers: '{dir}/fr-{stem}.properties'\nstrip_root: true",
+            "not properties",
         ),
         (
             "reference: '{dir}/en.json'\npeers: '{dir}/fr'",
@@ -104,12 +171,45 @@ fn a_rule_with_a_pending_format_does_not_evaluate() {
         Level::Error,
         &alint_core::template::PathTokens::placeholder(),
     );
-    let rule = build(&spec).expect("a templated name waits for the iteration");
+    let rule = {
+        let _preparing = alint_core::template::Preparation::enter();
+        build(&spec).expect("a templated name waits for the iteration")
+    };
     let (tmp, index) = tempdir_with_files(&[("en.json", b"{}")]);
     let error = rule
         .evaluate(&ctx(tmp.path(), &index))
         .expect_err("no format to read the reference with");
-    assert!(error.to_string().contains(NO_REFERENCE_FORMAT), "{error}");
+    assert!(
+        error.to_string().contains("cannot infer the key format"),
+        "{error}"
+    );
+}
+
+/// Outside a preparation build, a name that looks like a placeholder is a
+/// real name: a top-level rule that writes one gets the load error 0.22 gave.
+#[test]
+fn a_top_level_name_like_a_placeholder_is_not_pending() {
+    for (yaml, error) in [
+        (
+            "reference: lit/_path_\npeers: lit/fr.json",
+            "cannot infer the key format of `reference` \"lit/_path_\"",
+        ),
+        (
+            "reference: lit/en.json\npeers: lit/x._ext_",
+            "cannot infer the key format of the literal `peers` path",
+        ),
+        (
+            "reference: _path_\npeers: _dir_/_basename_",
+            "cannot infer the key format",
+        ),
+    ] {
+        let message = build(&spec_yaml(&format!(
+            "id: t\nkind: key_parity\n{yaml}\nlevel: error\n"
+        )))
+        .expect_err(yaml)
+        .to_string();
+        assert!(message.contains(error), "{yaml}: {message}");
+    }
 }
 
 #[test]

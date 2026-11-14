@@ -677,7 +677,10 @@ rules:
 
 Option D asks a stricter question, "is it committed?", which is usually
 what a pin check means. Outside a git repository the rule reports an
-analysis failure.
+analysis failure. It also still honours the config's `ignore:`, where
+option A's literal-path check does not: under `ignore: ["gen/**"]`, a
+tracked `gen/c.log` passes with `respect_gitignore: false` and stays
+missing with `git_tracked_only: true` alone.
 
 **Right (option C — shell out for the existence check):**
 ```yaml
@@ -1073,9 +1076,9 @@ Before merging a PR that adds or modifies an `.alint.yml`:
       match must equal X". For "any element of array contains X", use
       `file_content_matches` (or wait for `*_path_contains`).
 - [ ] No `file_exists` rule references a tracked-but-gitignored file
-      without either `respect_gitignore: false` (workspace-level) or
-      a `command:` shellout. `git_tracked_only: true` does not help
-      — the walker pre-filters.
+      without `respect_gitignore: false`, `git_tracked_only: true`
+      (v0.23+) or a `command:` shellout. Before v0.23,
+      `git_tracked_only: true` did not help: the walker pre-filtered.
 - [ ] `root_only: true` is only set when every entry in `paths:` is a
       single-segment literal at the repo root (no `dir/file` literals).
 
@@ -1110,8 +1113,9 @@ catch:
   "any element matches" to "every element must match", firing on every
   element that doesn't.
 - **#18** — a tracked-but-`.gitignore`'d file is invisible to the
-  walker by default; `file_exists` reports "no match" silently, and
-  `git_tracked_only: true` doesn't help because the walker pre-filters.
+  walker by default; `file_exists` reports "no match" silently. Before
+  v0.23, `git_tracked_only: true` didn't help either, because the
+  walker pre-filtered.
 - **#19** — `file_exists` with `root_only: true` silently no-matches
   every multi-component literal in `paths:`; the user sees a generic
   "file does not exist" error, not the configuration mistake.

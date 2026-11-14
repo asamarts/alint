@@ -1779,8 +1779,8 @@ the owner decisions are
 - **`version: 2` is experimental** in v0.23: opt-in, with a draft schema, and it may change before
   it is declared stable. `version: 1` configurations are unchanged apart from the fix below.
 - **A `git_tracked_only` fix (#503).** A rule with `git_tracked_only: true` sees a file that git
-  tracks but an ignore file excludes, as documented, so a configuration that uses it can gain
-  findings.
+  tracks but an ignore file excludes, as documented, so a configuration that uses it can gain or
+  lose findings.
 - **One library API break.** YAML parser types leave the public API of `alint-core`,
   `alint-dsl` and `alint-testkit` (#484), and `Violation`, `Context`, `RuleSpec`,
   `NestedRuleSpec` and `WalkOptions` become `#[non_exhaustive]` with constructors.

@@ -521,10 +521,10 @@
     },
     "RegistryOrphansSpec": {
       "additionalProperties": false,
-      "description": "Enable the reverse-completeness check: on-disk artefacts under the `space` glob that no entry references. Findings use the rule's top-level `level`; omit `orphans` to disable the reverse check.",
+      "description": "Enable the reverse-completeness check: paths in the walked tree under the `space` glob that no entry references. Findings use the rule's top-level `level`; omit `orphans` to disable the reverse check.",
       "properties": {
         "space": {
-          "description": "Glob of on-disk artefacts that should each be referenced.",
+          "description": "Glob of walked paths that should each be referenced.",
           "type": "string"
         }
       },
@@ -2490,7 +2490,7 @@
       "properties": {
         "git_tracked_only": {
           "default": false,
-          "description": "Restrict matches to directories that contain at least one git-tracked file. Repository unavailability is an analysis failure when enabled. Default `false`.",
+          "description": "Restrict matches to directories that contain at least one git-tracked file, including one that only an ignore file hides from the walk. Repository unavailability is an analysis failure when enabled. Default `false`.",
           "type": "boolean"
         },
         "kind": {
@@ -2613,7 +2613,7 @@
         },
         "git_tracked_only": {
           "default": false,
-          "description": "Restrict matches to directories that contain at least one git-tracked file. Repository unavailability is an analysis failure when enabled. Default `false`.",
+          "description": "Restrict matches to directories that contain at least one git-tracked file, including one that only an ignore file hides from the walk. Repository unavailability is an analysis failure when enabled. Default `false`.",
           "type": "boolean"
         },
         "kind": {
@@ -3007,7 +3007,7 @@
         },
         "git_tracked_only": {
           "default": false,
-          "description": "Restrict matches to files tracked in git's index: entries present in the walked tree but not in `git ls-files` are skipped. Repository unavailability is an analysis failure when enabled. Default `false`.",
+          "description": "Restrict matches to files tracked in git's index: entries present in the walked tree but not in `git ls-files` are skipped, and a tracked file that only an ignore file hides from the walk is seen. Repository unavailability is an analysis failure when enabled. Default `false`.",
           "type": "boolean"
         },
         "kind": {
@@ -3170,7 +3170,7 @@
         },
         "git_tracked_only": {
           "default": false,
-          "description": "Restrict matches to files tracked in git's index: entries present in the walked tree but not in `git ls-files` are skipped. Repository unavailability is an analysis failure when enabled. Default `false`.",
+          "description": "Restrict matches to files tracked in git's index: entries present in the walked tree but not in `git ls-files` are skipped, and a tracked file that only an ignore file hides from the walk is seen. Repository unavailability is an analysis failure when enabled. Default `false`.",
           "type": "boolean"
         },
         "kind": {
@@ -6634,7 +6634,7 @@
       "type": "object"
     },
     "rule_registry_paths_resolve": {
-      "description": "A manifest enumerates path entries; each must resolve to an on-disk artefact. `extract` selects how the entry list is pulled (structured-query toml/json/yaml/xml/dotenv/properties/ini/hcl, a line list, or regex capture group 1). Optional `orphans` adds the reverse check: on-disk artefacts under `space` that no entry references. Non-literal entries (interpolation / antiquotation) are skipped, not failed.",
+      "description": "A manifest enumerates path entries; each must resolve to a path in the walked tree, so an entry that an ignore file or `ignore:` excludes does not resolve. `extract` selects how the entry list is pulled (structured-query toml/json/yaml/xml/dotenv/properties/ini/hcl, a line list, or regex capture group 1). Optional `orphans` adds the reverse check: walked paths under `space` that no entry references. Non-literal entries (interpolation / antiquotation) are skipped, not failed.",
       "not": {
         "anyOf": [
           {

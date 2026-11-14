@@ -3,6 +3,7 @@
 //! outside any repository) cannot hide the tree from every rule, and a bad one
 //! there cannot stop the run.
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -117,4 +118,94 @@ fn a_bad_ignore_file_above_the_root_does_not_stop_the_run() {
     let output = check(&tree);
     assert_eq!(output.status.code(), Some(1), "{output:?}");
     assert_eq!(failing_rules(&output), ["no-env"]);
+}
+
+/// `git` in `dir`, with git's global and system config empty.
+fn git(dir: &Path, args: &[&str]) {
+    let config = tempfile::NamedTempFile::new().unwrap();
+    let status = Command::new("git")
+        .args([
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+        ])
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", config.path())
+        .env("GIT_CONFIG_SYSTEM", config.path())
+        .status()
+        .expect("run git");
+    assert!(status.success(), "git {args:?} failed");
+}
+
+/// A `git_tracked_only` `dir_absent` reports a directory whose tracked files
+/// were deleted from the worktree whether or not an ignore file lists it: git
+/// still tracks a path below it, and the tracked view lists the directories
+/// above every tracked path (#503's audit).
+#[test]
+fn a_directory_whose_tracked_file_was_deleted_is_tracked_whether_or_not_it_is_ignored() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path();
+    write(repo, ".gitignore", "ign/\n");
+    write(repo, "plain/x/a.class", "c");
+    write(repo, "ign/x/a.class", "c");
+    git(repo, &["init", "-q"]);
+    git(repo, &["add", ".gitignore", "plain"]);
+    git(repo, &["add", "-f", "ign"]);
+    git(repo, &["commit", "-qm", "base"]);
+    let mut config = String::from("version: 1\nrules:\n");
+    for dir in ["plain", "plain/x", "ign", "ign/x"] {
+        std::fs::remove_file(repo.join(dir).join("a.class")).ok();
+        write!(
+            config,
+            "  - id: {id}\n    kind: dir_absent\n    paths: {dir}\n    git_tracked_only: true\n    \
+             level: error\n",
+            id = dir.replace('/', "-")
+        )
+        .unwrap();
+    }
+    for dir in ["plain/x", "ign/x"] {
+        write(repo, &format!("{dir}/untracked.txt"), "u");
+    }
+    write(repo, ".alint.yml", &config);
+    let output = check(repo);
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert_eq!(failing_rules(&output), ["plain", "plain-x", "ign", "ign-x"]);
+}
+
+/// The tracked view keeps the walk's path order when it adds what an ignore
+/// file hid, so a rule reports a hidden directory where it sorts among the
+/// walked ones, not after them.
+#[test]
+fn a_tracked_view_lists_hidden_paths_in_path_order() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path();
+    write(repo, ".gitignore", "a/\n");
+    write(repo, "a/build/x.o", "o");
+    write(repo, "z/build/y.o", "o");
+    write(
+        repo,
+        ".alint.yml",
+        "version: 1\nrules:\n  - id: no-build\n    kind: dir_absent\n    paths: \"**/build\"\n    \
+         git_tracked_only: true\n    level: error\n",
+    );
+    git(repo, &["init", "-q"]);
+    git(repo, &["add", ".gitignore", ".alint.yml", "z"]);
+    git(repo, &["add", "-f", "a"]);
+    git(repo, &["commit", "-qm", "base"]);
+    let output = check(repo);
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    // Reports use the OS separator.
+    let paths: Vec<String> = report["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|result| result["violations"].as_array().unwrap())
+        .map(|violation| violation["path"].as_str().unwrap().replace('\\', "/"))
+        .collect();
+    assert_eq!(paths, ["a/build", "z/build"]);
 }

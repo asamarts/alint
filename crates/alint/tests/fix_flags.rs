@@ -827,24 +827,40 @@ fn git(dir: &Path, args: &[&str]) {
 fn dry_run_agrees_with_fix_for_a_git_tracked_only_rule() {
     // A `git_tracked_only` rule sees only tracked files: a created file is
     // untracked and never resolves it, unless git still tracks the path (a
-    // tracked file deleted from the worktree).
+    // tracked file deleted from the worktree), even one an ignore file lists
+    // (#503's audit). The config's `ignore:` still hides one.
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     git(root, &["init", "-q"]);
     std::fs::write(root.join("gone.txt"), "x\n").unwrap();
-    git(root, &["add", "gone.txt"]);
+    std::fs::write(root.join(".gitignore"), ".bazelversion\n").unwrap();
+    std::fs::write(root.join(".bazelversion"), "x\n").unwrap();
+    std::fs::write(root.join("vendored.txt"), "x\n").unwrap();
+    git(root, &["add", "gone.txt", ".gitignore", "vendored.txt"]);
+    git(root, &["add", "-f", ".bazelversion"]);
     git(root, &["commit", "-qm", "base"]);
-    std::fs::remove_file(root.join("gone.txt")).unwrap();
+    for gone in ["gone.txt", ".bazelversion", "vendored.txt"] {
+        std::fs::remove_file(root.join(gone)).unwrap();
+    }
     std::fs::write(
         root.join(".alint.yml"),
-        "version: 1\nrules:\n\
+        "version: 1\nignore: [vendored.txt]\nrules:\n\
          - {id: new, kind: file_exists, paths: new.txt, level: error, \
          git_tracked_only: true, fix: {file_create: {content: \"x\\n\"}}}\n\
          - {id: gone, kind: file_exists, paths: gone.txt, level: error, \
-         git_tracked_only: true, fix: {file_create: {content: \"x\\n\"}}}\n",
+         git_tracked_only: true, fix: {file_create: {content: \"x\\n\"}}}\n\
+         - {id: ignored, kind: file_exists, paths: \"*.bazelversion\", level: error, \
+         git_tracked_only: true, fix: {file_create: {path: .bazelversion, content: \"x\\n\"}}}\n\
+         - {id: excluded, kind: file_exists, paths: \"vendored.*\", level: error, \
+         git_tracked_only: true, fix: {file_create: {path: vendored.txt, content: \"x\\n\"}}}\n",
     )
     .unwrap();
-    let expected = outcomes(&[("new", "unresolved"), ("gone", "applied")]);
+    let expected = outcomes(&[
+        ("new", "unresolved"),
+        ("gone", "applied"),
+        ("ignored", "applied"),
+        ("excluded", "unresolved"),
+    ]);
     let [dry, real] = dry_and_real(root, &[]);
     assert_eq!(dry, (expected.clone(), Some(1)), "dry run");
     assert_eq!(real, (expected, Some(1)), "real fix");

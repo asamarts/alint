@@ -60,11 +60,15 @@ Also in v0.23:
 11. **If ayaml 0.1.2 meets the criteria before the feature freeze,** the `yaml_depth` guard is
     re-derived (#483) and alint cuts over (#481). Otherwise both move to the next minor release
     (ADR-0032 decision 2).
-12. **`git_tracked_only: true` sees every tracked file on disk, ignored or not (#503,** ADR-0033
-    decision 3). Today the walker prunes a tracked file that an ignore file excludes before the
-    git-tracked index is built, so the documented case (a force-added file, or one committed before
-    its ignore line) is never seen. A v1 configuration that uses `git_tracked_only` can gain
-    findings; this is the one exception to section 3's "v1 is unchanged".
+12. **`git_tracked_only: true` sees tracked files that an ignore file excludes (#503,** ADR-0033
+    decision 3). Up to v0.22 the walker pruned such a file before the git-tracked index was built,
+    so the documented case (a force-added file, or one committed before its ignore line) was never
+    seen. The config's `ignore:` and the walker's other exclusions still apply. A v1 configuration
+    that uses `git_tracked_only` can gain findings (`file_absent`, `dir_absent`) or lose them
+    (`file_exists`, `dir_exists`). The kinds that check that a path resolves say "missing or
+    ignored" where they said "on disk", and the bundled `java@v1` and `php@v1` rules that these
+    changes touch reword their messages to match. This is the one exception to section 3's "v1 is
+    unchanged". Done in #509.
 
 Out of scope:
 - **v0.24 or later:** the remaining assertion families (reference, cardinality, group, bounded
@@ -121,7 +125,8 @@ it must respect:
 
   Item 7 does not change what alint writes, only which old baseline entries it matches. Item 12 is
   the one exception (ADR-0033 decision 3): a configuration that uses `git_tracked_only` can gain
-  findings, the CHANGELOG lists the change, and every difference in the replay must come from it.
+  or lose findings, three kinds and six bundled rules reword a message, the CHANGELOG lists the
+  change, and every difference in the replay must come from it.
 - **The version boundary of ADR-0022 holds.** A v2 source may extend v1 sources, never the
   reverse, at any recursive edge.
 - **Trust is no weaker than v1** (section 7.1 rules 9, 11 and 12):
@@ -189,7 +194,8 @@ next. Phases 1, 4 and 5 do not depend on the design and can run alongside phases
 | 10 | Documentation, the CHANGELOG (re-run `alint baseline`; the library migration; the `git_tracked_only` change), facts, and the release check | no |
 
 The #503 fix (item 12) is its own pull request, with `add -f` e2e scenarios for `file_absent`,
-`dir_absent`, `file_exists` and `dir_exists`, and does not depend on the design.
+`dir_absent`, `file_exists` and `dir_exists`, and does not depend on the design. It merged as #509
+on 2026-11-13.
 
 The feature freeze is the point at which phases 1 to 8 and the #503 fix are merged. Phase 9 is
 decided then.
@@ -261,3 +267,23 @@ decided then.
   the one exception to "v1 is unchanged". The stratum's rulings stand. Projected under the
   amended slice, with entry values: `locale` 35%, `dep-version` 61%, `toolchain-pin` 63%, pooled
   58%.
+- 2026-11-13: the stratum's three defects are fixed, in v0.23 only (the owner's decision), with
+  no public API change. #507 (#502): a nested rule that needs the relation caches builds them
+  itself. #508 (#504): a nested `key_parity` loads with a templated `reference:` and settles the
+  format, `strip_root` and `ignore_keys` per iteration. #509 (#503, item 12): the git-tracked
+  views add the tracked paths that only an ignore file hid.
+- 2026-11-13: an audit of #506 to #509 hardened the three fixes:
+  - a nested rule leaves the run caches alone;
+  - nested rules of every kind are prepared with placeholders that their options accept (the
+    `_stem_` form), and an error shows the template;
+  - the directories above a hidden tracked path are tracked;
+  - `fix --dry-run` and the language server agree with `check`;
+  - the symlink check costs about 6,000 syscalls on a 20,000-file tree, where it cost 1.26
+    million.
+
+  Corpus replays against v0.22.1, of #509 and of this audit (124 repositories replayed each),
+  differ in two, gradle/gradle and quarkusio/quarkus, and only in the reworded
+  `java-no-tracked-build` message; the reported paths are the same. Both repositories have Java
+  packages named `build`, which that rule reports, so its advice to untrack now applies only to a
+  directory that holds build output. The four repositories the replays skip fail to load under
+  both versions.

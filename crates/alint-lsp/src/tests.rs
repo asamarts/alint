@@ -490,6 +490,54 @@ fn eval_buffer_lints_the_editor_text_not_the_file_on_disk() {
     assert!(matches!(error, alint_core::Error::FileNotInIndex { .. }));
 }
 
+/// Editing a file the walk left out keeps the last full run's findings on it:
+/// a `git_tracked_only` rule reports a tracked file that an ignore file hides,
+/// and a keystroke must not clear that (#503's audit). Per-file findings go.
+#[tokio::test]
+async fn editing_an_unindexed_file_keeps_its_full_run_findings() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().to_path_buf();
+    std::fs::write(root.join(".env"), "A=1\n").unwrap();
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\nignore: [\".env\"]\nrules:\n  - id: no-env\n    kind: file_absent\n    \
+         paths: .env\n    level: error\n",
+    )
+    .unwrap();
+    let session = build_session(&root).unwrap().unwrap();
+    let (service, _socket) = LspService::new(test_backend);
+    let backend = service.inner();
+    let uri = Url::from_file_path(root.join(".env")).unwrap();
+    let full_run = Finding {
+        per_file: false,
+        rule_id: "no-env".to_string(),
+        ..finding(None)
+    };
+    {
+        let mut st = backend.state.lock();
+        install_session(&mut st, &root, &uri, session);
+        st.open.insert(uri.clone());
+        st.versions.insert(uri.clone(), 2);
+        st.diagnostics
+            .insert(uri.clone(), vec![full_run.clone(), finding(None)]);
+    }
+    backend.reeval_file(uri.clone(), "A=2\n".into(), 2).await;
+    let kept: Vec<String> = backend.state.lock().diagnostics[&uri]
+        .iter()
+        .map(|finding| finding.rule_id.clone())
+        .collect();
+    assert_eq!(kept, ["no-env"]);
+
+    // With nothing from the full run, the file has no diagnostics left.
+    backend
+        .state
+        .lock()
+        .diagnostics
+        .insert(uri.clone(), vec![finding(None)]);
+    backend.reeval_file(uri.clone(), "A=3\n".into(), 2).await;
+    assert!(!backend.state.lock().diagnostics.contains_key(&uri));
+}
+
 #[test]
 fn a_run_error_leaves_out_a_top_level_value_read_from_the_environment() {
     // Cargo sets `CARGO_PKG_NAME` for the test process, so the config reads a

@@ -93,8 +93,8 @@ rules:
     expect: file
     level: warning
     message: >-
-      PHP: every composer.json `autoload.files` entry must exist on
-      disk (Composer fatals at autoload time otherwise).
+      PHP: every composer.json `autoload.files` entry must exist and
+      not be ignored (Composer fatals at autoload time otherwise).
     policy_url: "https://getcomposer.org/doc/04-schema.md#files"
 
   - id: php-composer-autoload-dev-files-resolve
@@ -108,7 +108,7 @@ rules:
     level: info
     message: >-
       PHP: every composer.json `autoload-dev.files` entry should
-      exist on disk (it is require()'d under --dev).
+      exist and not be ignored (it is require()'d under --dev).
     policy_url: "https://getcomposer.org/doc/04-schema.md#files"
 
   - id: php-composer-bin-resolve
@@ -122,8 +122,8 @@ rules:
     expect: file
     level: warning
     message: >-
-      PHP: every composer.json `bin` entry must exist on disk
-      (Composer symlinks it as a vendor binary).
+      PHP: every composer.json `bin` entry must exist and not be
+      ignored (Composer symlinks it as a vendor binary).
     policy_url: "https://getcomposer.org/doc/articles/vendor-binaries.md"
 
   # --- build-output hygiene (PHP-specific, ecosystem-gated) -------

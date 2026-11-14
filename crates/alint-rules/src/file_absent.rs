@@ -15,7 +15,8 @@ struct Options {
     #[serde(default)]
     root_only: bool,
     /// Restrict matches to files tracked in git's index: entries present in the
-    /// walked tree but not in `git ls-files` are skipped. Repository
+    /// walked tree but not in `git ls-files` are skipped, and a tracked file
+    /// that only an ignore file hides from the walk is seen. Repository
     /// unavailability is an analysis failure when enabled. Default `false`.
     #[serde(default)]
     git_tracked_only: bool,

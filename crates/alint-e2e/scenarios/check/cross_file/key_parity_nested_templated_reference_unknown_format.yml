@@ -28,4 +28,6 @@ expect:
   - exit: policy_failure
     violations: []
     analysis_failures:
-      - {rule: locale-parity, kind: nested_rule_build, path: notes/en.txt}
+      # The message quotes the rendered `{path}`, which uses the OS separator
+      # (`"notes\\en.txt"` on Windows).
+      - {rule: locale-parity, kind: nested_rule_build, path: notes/en.txt, message: {regex: 'cannot infer the key format of `reference` "notes(/|\\\\)en\.txt": the name is not'}}
