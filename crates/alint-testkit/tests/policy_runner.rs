@@ -247,3 +247,57 @@ snapshot: snapshots/result.json
     assert!(!run.commit_snapshot_update().unwrap());
     assert!(package.path().join("snapshots/result.json").exists());
 }
+
+/// A spawning rule nested in another rule's `require:` needs the spawn
+/// capability too, from the document and the host, before anything runs.
+#[cfg(unix)]
+#[test]
+fn nested_spawning_rule_needs_both_capability_keys() {
+    let package = tempfile::tempdir().unwrap();
+    let yaml = r#"test_version: 1
+name: a nested command rule spawns
+capabilities:
+  spawn: true
+given:
+  tree:
+    pkg/file.txt: "x\n"
+  config: |
+    version: 1
+    rules:
+      - id: per-dir
+        kind: for_each_dir
+        select: pkg
+        level: error
+        require:
+          - kind: command
+            paths: "{path}/file.txt"
+            command: ["sh", "-c", "printf ran > ran.txt"]
+when: [check]
+expect:
+  - exit: success
+    violations: []
+"#;
+    let (source, mut test) = policy_file(package.path(), "nested.yml", yaml);
+
+    let denied = Runner::default().run(&test, &source).unwrap_err();
+    assert!(matches!(denied, Error::Capability(_)), "{denied:?}");
+    assert!(
+        denied
+            .to_string()
+            .contains(r#"rule "per-dir" require[0] (command)"#),
+        "{denied}"
+    );
+
+    let runner = Runner::new(RunnerOptions {
+        allow_spawn: true,
+        allow_host_keyring: false,
+        update_snapshots: false,
+    });
+    let run = runner.run(&test, &source).unwrap();
+    assert!(run.passed(), "{:#?}", run.mismatches);
+    assert!(run.root.join("ran.txt").exists());
+
+    test.capabilities.spawn = false;
+    let undeclared = runner.run(&test, &source).unwrap_err();
+    assert!(matches!(undeclared, Error::Capability(_)), "{undeclared:?}");
+}

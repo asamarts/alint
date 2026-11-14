@@ -310,6 +310,76 @@ fn canonical_pass_fail_corpus_produces_complete_traces() {
     );
 }
 
+/// The spawn and keyring uses a rule makes, as the capability check names
+/// them.
+fn capability_uses(rule: &str) -> (Option<String>, Option<String>) {
+    let rule: RuleSpec = alint_core::yaml::from_str(rule).unwrap();
+    let registry = alint_rules::builtin_registry();
+    let (mut spawn_use, mut keyring_use) = (None, None);
+    inspect_rule_capabilities(&rule, registry.catalog(), &mut spawn_use, &mut keyring_use);
+    (spawn_use, keyring_use)
+}
+
+/// Nested rules have no `id` or `level`, and are still read for the kinds and
+/// fix operations they use, at any depth and in any option.
+#[test]
+fn nested_rules_report_their_capabilities_at_any_depth() {
+    let parent = "id: outer\nkind: for_each_dir\nselect: pkg\nlevel: error\n";
+    let spawn = |usage: &str| (Some(format!("rule \"outer\" {usage}")), None);
+    let cases = [
+        ("require: [{kind: file_exists, paths: x}]\n", (None, None)),
+        (
+            "require: [{kind: file_exists, paths: x}, {kind: command, command: [a]}]\n",
+            spawn("require[1] (command)"),
+        ),
+        (
+            "require: [{kind: for_each_file, select: x, require: [{kind: command}]}]\n",
+            spawn("require[0] require[0] (command)"),
+        ),
+        (
+            "require: [{kind: file_exists, paths: x, fix: {command: {run: [a]}}}]\n",
+            spawn("require[0] fix.command"),
+        ),
+        (
+            "require: [{kind: file_exists, paths: x, fix: {file_create: {content: a}}}]\n",
+            (None, None),
+        ),
+        (
+            "options: {inner: {kind: command}}\n",
+            spawn("options inner (command)"),
+        ),
+        // The first use is the one named.
+        (
+            "require: [{kind: command}, {kind: command_idempotent}]\n",
+            spawn("require[0] (command)"),
+        ),
+        (
+            "require: [{kind: git_commit_gpg_signed}, {kind: git_commit_gpg_signed}]\n",
+            (
+                None,
+                Some("rule \"outer\" require[0] (git_commit_gpg_signed)".to_string()),
+            ),
+        ),
+    ];
+    for (options, expected) in cases {
+        assert_eq!(
+            capability_uses(&format!("{parent}{options}")),
+            expected,
+            "{options}"
+        );
+    }
+    assert_eq!(
+        capability_uses("id: top\nkind: command\ncommand: [a]\nlevel: error\n"),
+        (Some("rule \"top\" (command)".to_string()), None)
+    );
+    assert_eq!(
+        capability_uses(
+            "id: top\nkind: file_exists\npaths: x\nlevel: error\nfix: {command: {run: [a]}}\n"
+        ),
+        (Some("rule \"top\" fix.command".to_string()), None)
+    );
+}
+
 #[test]
 fn runner_with_registry_replaces_the_builtin_registry() {
     let builtin = Runner::default();

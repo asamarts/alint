@@ -6,6 +6,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+
+- **`alint test` now asks for the spawn capability for a spawning rule nested in another
+  rule's `require:`.** Since v0.20.0, a policy test could run a `command` rule nested in
+  `for_each_dir`, `for_each_file` or `every_matching_has` without `capabilities: { spawn: true }`
+  or `--allow-spawn`: the preflight read a nested rule only when it also had an `id` and a
+  `level`, which nested rules do not have. It now reads each nested rule by its `kind`, at any
+  depth, as the configuration trust gate does, and names it in the error
+  (`rule "per-dir" require[0] (command)`). Host-keyring kinds are checked the same way, and so is
+  a spawning `fix:` operation on a nested rule, although nested fixes do not run. `alint check`
+  and `alint fix` were not affected: a configuration's own rules may spawn by design, and the
+  trust gate already refuses spawning rules, nested ones included, from `extends:`.
+
 ### Removed
 
 - **A baseline no longer matches the fingerprint v0.21 wrote for a hidden-path finding**
