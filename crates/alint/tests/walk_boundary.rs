@@ -199,12 +199,13 @@ fn a_tracked_view_lists_hidden_paths_in_path_order() {
     let output = check(repo);
     assert_eq!(output.status.code(), Some(1), "{output:?}");
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    let paths: Vec<&str> = report["results"]
+    // Reports use the OS separator.
+    let paths: Vec<String> = report["results"]
         .as_array()
         .unwrap()
         .iter()
         .flat_map(|result| result["violations"].as_array().unwrap())
-        .map(|violation| violation["path"].as_str().unwrap())
+        .map(|violation| violation["path"].as_str().unwrap().replace('\\', "/"))
         .collect();
     assert_eq!(paths, ["a/build", "z/build"]);
 }
