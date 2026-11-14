@@ -939,63 +939,87 @@ fn inspect_rule_capabilities(
     spawn_use: &mut Option<String>,
     keyring_use: &mut Option<String>,
 ) {
-    if let Some(meta) = catalog.meta(&rule.kind) {
-        for capability in meta.effective_capabilities() {
-            match capability.capability {
-                Capability::SpawnUserCommand if spawn_use.is_none() => {
-                    *spawn_use = Some(format!("rule {:?} ({})", rule.id, rule.kind));
-                }
-                Capability::HostKeyring if keyring_use.is_none() => {
-                    *keyring_use = Some(format!("rule {:?} ({})", rule.id, rule.kind));
-                }
-                _ => {}
-            }
-        }
+    let usage = format!("rule {:?}", rule.id);
+    inspect_kind_capabilities(&usage, &rule.kind, catalog, spawn_use, keyring_use);
+    if let Some(fix) = &rule.fix {
+        inspect_fix_op(&usage, fix.op_name(), catalog, spawn_use);
     }
-    if let Some(fix) = &rule.fix
-        && catalog
-            .fix_op(fix.op_name())
-            .is_some_and(|meta| meta.trust == alint_core::FixTrustClass::Spawning)
-        && spawn_use.is_none()
-    {
-        *spawn_use = Some(format!("rule {:?} fix.{}", rule.id, fix.op_name()));
-    }
-    inspect_nested_values(&rule.extra, catalog, spawn_use, keyring_use);
+    inspect_nested_values(&usage, &rule.extra, catalog, spawn_use, keyring_use);
 }
 
+fn inspect_kind_capabilities(
+    usage: &str,
+    kind: &str,
+    catalog: alint_core::KindCatalog<'_>,
+    spawn_use: &mut Option<String>,
+    keyring_use: &mut Option<String>,
+) {
+    let Some(meta) = catalog.meta(kind) else {
+        return;
+    };
+    for capability in meta.effective_capabilities() {
+        match capability.capability {
+            Capability::SpawnUserCommand if spawn_use.is_none() => {
+                *spawn_use = Some(format!("{usage} ({kind})"));
+            }
+            Capability::HostKeyring if keyring_use.is_none() => {
+                *keyring_use = Some(format!("{usage} ({kind})"));
+            }
+            _ => {}
+        }
+    }
+}
+
+fn inspect_fix_op(
+    usage: &str,
+    op: &str,
+    catalog: alint_core::KindCatalog<'_>,
+    spawn_use: &mut Option<String>,
+) {
+    if spawn_use.is_none()
+        && catalog
+            .fix_op(op)
+            .is_some_and(|meta| meta.trust == alint_core::FixTrustClass::Spawning)
+    {
+        *spawn_use = Some(format!("{usage} fix.{op}"));
+    }
+}
+
+/// Nested rules (a `require:` entry, at any depth) are raw mappings in the
+/// parent's options: they have no `id` or `level` of their own, so each mapping
+/// with a `kind` is read by its kind and its `fix:` operations, as the
+/// configuration trust gate reads them. A nested `fix:` does not run today
+/// (`NestedRuleSpec` leaves it out), but it counts, so a change that runs nested
+/// fixes cannot skip this check.
 fn inspect_nested_values(
+    usage: &str,
     mapping: &ayaml::Mapping,
     catalog: alint_core::KindCatalog<'_>,
     spawn_use: &mut Option<String>,
     keyring_use: &mut Option<String>,
 ) {
-    for value in mapping.values() {
-        match value {
-            ayaml::Value::Mapping(nested) => {
-                if nested.contains_key("kind")
-                    && let Ok(rule) =
-                        ayaml::from_value::<RuleSpec>(ayaml::Value::Mapping(nested.clone()))
-                {
-                    inspect_rule_capabilities(&rule, catalog, spawn_use, keyring_use);
-                } else {
-                    inspect_nested_values(nested, catalog, spawn_use, keyring_use);
-                }
-            }
-            ayaml::Value::Sequence(values) => {
-                for value in values {
-                    if let ayaml::Value::Mapping(nested) = value {
-                        if nested.contains_key("kind")
-                            && let Ok(rule) =
-                                ayaml::from_value::<RuleSpec>(ayaml::Value::Mapping(nested.clone()))
-                        {
-                            inspect_rule_capabilities(&rule, catalog, spawn_use, keyring_use);
-                        } else {
-                            inspect_nested_values(nested, catalog, spawn_use, keyring_use);
-                        }
+    for (key, value) in mapping {
+        let field = format!("{usage} {}", key.as_str().unwrap_or("option"));
+        let mut inspect = |usage: &str, nested: &ayaml::Mapping| {
+            if let Some(kind) = nested.get("kind").and_then(ayaml::Value::as_str) {
+                inspect_kind_capabilities(usage, kind, catalog, spawn_use, keyring_use);
+                let fix = nested.get("fix").and_then(ayaml::Value::as_mapping);
+                for op in fix.into_iter().flat_map(ayaml::Mapping::keys) {
+                    if let Some(op) = op.as_str() {
+                        inspect_fix_op(usage, op, catalog, spawn_use);
                     }
                 }
             }
-            _ => {}
+            inspect_nested_values(usage, nested, catalog, spawn_use, keyring_use);
+        };
+        if let Some(nested) = value.as_mapping() {
+            inspect(&field, nested);
+        } else if let Some(values) = value.as_sequence() {
+            for (index, nested) in values.iter().enumerate() {
+                if let Some(nested) = nested.as_mapping() {
+                    inspect(&format!("{field}[{index}]"), nested);
+                }
+            }
         }
     }
 }

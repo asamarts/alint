@@ -40,8 +40,9 @@ Snapshots supplement inline behavior assertions; they cannot replace them.
 
 ## Capabilities
 
-Tests start with no host authority. A command-spawning rule or fixer requires
-both `capabilities: { spawn: true }` in the document and `--allow-spawn` on the
+Tests start with no host authority. A command-spawning rule or fixer, including
+one nested in another rule's `require:`, requires both
+`capabilities: { spawn: true }` in the document and `--allow-spawn` on the
 command line. This grants native code execution with the invoking user's host
 filesystem and network permissions; it is not an OS sandbox. Host-keyring
 access similarly requires both `host_keyring: true` and
