@@ -5,7 +5,7 @@ use super::diagnostics::{
 };
 use super::render::{kind_description, rule_docs_url};
 use super::*;
-use alint_core::{FindingDisposition, FixEdit, Level, RelatedLocation, SourceRange};
+use alint_core::{FixEdit, Level, RelatedLocation, SourceRange};
 use std::borrow::Cow;
 use tower_lsp::lsp_types::{DocumentChangeOperation, DocumentChanges, NumberOrString, ResourceOp};
 
@@ -23,22 +23,11 @@ fn install_session(st: &mut State, root: &Path, uri: &Url, session: Session) {
 }
 
 fn violation(line: Option<usize>, column: Option<usize>) -> Violation {
-    Violation {
-        path: None,
-        message: Cow::Borrowed("boom"),
-        line,
-        column,
-        range: None,
-        related_locations: Vec::new(),
-        related_locations_omitted: 0,
-        disposition: FindingDisposition::default(),
-        baseline_key: None,
-        fix_key: None,
-        sensitive: false,
-        is_fixable: false,
-        not_fixable: false,
-        proposed_edits: Vec::new(),
-        path_sensitive: false,
+    {
+        let mut value = Violation::new(Cow::Borrowed("boom"));
+        value.line = line;
+        value.column = column;
+        value
     }
 }
 

@@ -242,18 +242,7 @@ mod tests {
 
     fn eval(rule: &UniqueByRule, files: &[&str]) -> Vec<Violation> {
         let idx = index(files);
-        let ctx = Context {
-            root: Path::new("/"),
-            index: &idx,
-            registry: None,
-            facts: None,
-            vars: None,
-            git_tracked: None,
-            git_blame: None,
-            analysis_time: None,
-            process_environment: None,
-            trace: None,
-        };
+        let ctx = Context::new(Path::new("/"), &idx);
         rule.evaluate(&ctx).unwrap()
     }
 

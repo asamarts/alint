@@ -301,21 +301,7 @@ mod tests {
     }
 
     fn spec(id: &str, level: Level, msg: Option<&str>) -> alint_core::RuleSpec {
-        alint_core::RuleSpec {
-            id: id.into(),
-            kind: "file_exists".into(),
-            level,
-            paths: None,
-            message: msg.map(str::to_string),
-            policy_url: None,
-            when: None,
-            expect_matches: false,
-            sensitive: false,
-            sensitive_fields: std::collections::BTreeSet::new(),
-            fix: None,
-            scope_filter: None,
-            extra: alint_core::yaml::Mapping::new(),
-        }
+        alint_core::RuleSpec::new(id, "file_exists", level).with_message(msg.map(str::to_string))
     }
 
     fn config_with(rules: Vec<alint_core::RuleSpec>) -> alint_core::Config {

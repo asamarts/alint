@@ -720,18 +720,43 @@ impl<'a> Iterator for DescendantsIter<'a> {
     }
 }
 
+/// How [`walk`] builds a [`FileIndex`].
+///
+/// Built with [`WalkOptions::default`] and the `with_*` setters; the fields
+/// stay readable.
 #[derive(Debug, Clone)]
 pub struct WalkOptions {
+    /// Honor `.gitignore`, `.ignore` and git's exclude files, which stop at
+    /// the repository boundary (ADR-0028).
     pub respect_gitignore: bool,
+    /// More glob patterns to leave out, such as a configuration's `ignore:`.
+    /// `.git` is always left out.
     pub extra_ignores: Vec<String>,
 }
 
 impl Default for WalkOptions {
+    /// Respects `.gitignore`, with no extra patterns.
     fn default() -> Self {
         Self {
             respect_gitignore: true,
             extra_ignores: Vec::new(),
         }
+    }
+}
+
+impl WalkOptions {
+    /// Sets [`Self::respect_gitignore`].
+    #[must_use]
+    pub fn with_respect_gitignore(mut self, respect_gitignore: bool) -> Self {
+        self.respect_gitignore = respect_gitignore;
+        self
+    }
+
+    /// Sets [`Self::extra_ignores`].
+    #[must_use]
+    pub fn with_extra_ignores(mut self, extra_ignores: Vec<String>) -> Self {
+        self.extra_ignores = extra_ignores;
+        self
     }
 }
 

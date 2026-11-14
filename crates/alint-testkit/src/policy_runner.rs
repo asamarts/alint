@@ -422,10 +422,9 @@ impl Runner {
             })?;
             engine = engine.with_analysis_time(analysis_time);
         }
-        let walk_options = WalkOptions {
-            respect_gitignore: config.respect_gitignore,
-            extra_ignores: config.ignore.clone(),
-        };
+        let walk_options = WalkOptions::default()
+            .with_respect_gitignore(config.respect_gitignore)
+            .with_extra_ignores(config.ignore.clone());
         let index = walk(context.repository, &walk_options)?;
         if step == TestStep::CheckChanged {
             let changed = alint_core::git::collect_changed_paths(context.repository, None)

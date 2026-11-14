@@ -428,10 +428,7 @@ fn md_url(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alint_core::{
-        FindingDisposition, FixItem, FixReport, FixRuleResult, FixStatus, Report, RuleResult,
-        Violation,
-    };
+    use alint_core::{FixItem, FixReport, FixRuleResult, FixStatus, Report, RuleResult, Violation};
     use std::path::{Path, PathBuf};
 
     fn render(report: &Report) -> String {
@@ -501,23 +498,11 @@ mod tests {
             results: vec![rule(
                 "no-todo",
                 Level::Error,
-                vec![Violation {
-                    path: Some(Path::new("src/lib.rs").into()),
-                    message: "TODO marker found".into(),
-                    line: Some(12),
-                    column: Some(4),
-                    range: None,
-                    related_locations: Vec::new(),
-                    related_locations_omitted: 0,
-                    disposition: FindingDisposition::default(),
-                    baseline_key: None,
-                    fix_key: None,
-                    sensitive: false,
-                    is_fixable: false,
-                    not_fixable: false,
-                    proposed_edits: Vec::new(),
-                    path_sensitive: false,
-                }],
+                vec![
+                    Violation::new("TODO marker found")
+                        .with_path(Path::new("src/lib.rs"))
+                        .with_location(12, 4),
+                ],
             )],
         };
         let out = render(&report);
@@ -533,44 +518,12 @@ mod tests {
                 rule(
                     "r-z",
                     Level::Warning,
-                    vec![Violation {
-                        path: Some(Path::new("zeta.rs").into()),
-                        message: "z".into(),
-                        line: None,
-                        column: None,
-                        range: None,
-                        related_locations: Vec::new(),
-                        related_locations_omitted: 0,
-                        disposition: FindingDisposition::default(),
-                        baseline_key: None,
-                        fix_key: None,
-                        sensitive: false,
-                        is_fixable: false,
-                        not_fixable: false,
-                        proposed_edits: Vec::new(),
-                        path_sensitive: false,
-                    }],
+                    vec![Violation::new("z").with_path(Path::new("zeta.rs"))],
                 ),
                 rule(
                     "r-a",
                     Level::Error,
-                    vec![Violation {
-                        path: Some(Path::new("alpha.rs").into()),
-                        message: "a".into(),
-                        line: None,
-                        column: None,
-                        range: None,
-                        related_locations: Vec::new(),
-                        related_locations_omitted: 0,
-                        disposition: FindingDisposition::default(),
-                        baseline_key: None,
-                        fix_key: None,
-                        sensitive: false,
-                        is_fixable: false,
-                        not_fixable: false,
-                        proposed_edits: Vec::new(),
-                        path_sensitive: false,
-                    }],
+                    vec![Violation::new("a").with_path(Path::new("alpha.rs"))],
                 ),
             ],
         };
@@ -692,22 +645,10 @@ mod tests {
             results: vec![rule(
                 "r1",
                 Level::Warning,
-                vec![Violation {
-                    path: Some(Path::new("a.rs").into()),
-                    message: "x".into(),
-                    line: Some(7),
-                    column: None,
-                    range: None,
-                    related_locations: Vec::new(),
-                    related_locations_omitted: 0,
-                    disposition: FindingDisposition::default(),
-                    baseline_key: None,
-                    fix_key: None,
-                    sensitive: false,
-                    is_fixable: false,
-                    not_fixable: false,
-                    proposed_edits: Vec::new(),
-                    path_sensitive: false,
+                vec![{
+                    let mut value = Violation::new("x").with_path(Path::new("a.rs"));
+                    value.line = Some(7);
+                    value
                 }],
             )],
         };
@@ -718,40 +659,12 @@ mod tests {
 
     #[test]
     fn output_is_deterministic_across_input_order() {
-        let v1 = Violation {
-            range: None,
-            related_locations: Vec::new(),
-            related_locations_omitted: 0,
-            path: Some(Path::new("a.rs").into()),
-            message: "a".into(),
-            line: Some(1),
-            column: Some(1),
-            disposition: FindingDisposition::default(),
-            baseline_key: None,
-            fix_key: None,
-            sensitive: false,
-            is_fixable: false,
-            not_fixable: false,
-            proposed_edits: Vec::new(),
-            path_sensitive: false,
-        };
-        let v2 = Violation {
-            range: None,
-            related_locations: Vec::new(),
-            related_locations_omitted: 0,
-            path: Some(Path::new("a.rs").into()),
-            message: "b".into(),
-            line: Some(2),
-            column: Some(1),
-            disposition: FindingDisposition::default(),
-            baseline_key: None,
-            fix_key: None,
-            sensitive: false,
-            is_fixable: false,
-            not_fixable: false,
-            proposed_edits: Vec::new(),
-            path_sensitive: false,
-        };
+        let v1 = Violation::new("a")
+            .with_path(Path::new("a.rs"))
+            .with_location(1, 1);
+        let v2 = Violation::new("b")
+            .with_path(Path::new("a.rs"))
+            .with_location(2, 1);
         let r1 = Report {
             results: vec![rule("r1", Level::Error, vec![v1.clone(), v2.clone()])],
         };
@@ -789,23 +702,7 @@ mod tests {
                 rule_id: "cfg".into(),
                 level: Level::Error,
                 items: vec![FixItem {
-                    violation: Violation {
-                        path: Some(Path::new("app.json").into()),
-                        message: "value mismatch".into(),
-                        line: None,
-                        column: None,
-                        range: None,
-                        related_locations: Vec::new(),
-                        related_locations_omitted: 0,
-                        disposition: FindingDisposition::default(),
-                        baseline_key: None,
-                        fix_key: None,
-                        sensitive: false,
-                        is_fixable: false,
-                        not_fixable: false,
-                        proposed_edits: Vec::new(),
-                        path_sensitive: false,
-                    },
+                    violation: Violation::new("value mismatch").with_path(Path::new("app.json")),
                     status: FixStatus::Suggested {
                         summary: "would set $.debug to false".into(),
                         edit: Some(FixEdit::SetContent {
@@ -839,43 +736,17 @@ mod tests {
                 level: Level::Warning,
                 items: vec![
                     FixItem {
-                        violation: Violation {
-                            path: Some(Path::new("a.rs").into()),
-                            message: "trailing whitespace".into(),
-                            line: Some(1),
-                            column: None,
-                            range: None,
-                            related_locations: Vec::new(),
-                            related_locations_omitted: 0,
-                            disposition: FindingDisposition::default(),
-                            baseline_key: None,
-                            fix_key: None,
-                            sensitive: false,
-                            is_fixable: false,
-                            not_fixable: false,
-                            proposed_edits: Vec::new(),
-                            path_sensitive: false,
+                        violation: {
+                            let mut value =
+                                Violation::new("trailing whitespace").with_path(Path::new("a.rs"));
+                            value.line = Some(1);
+                            value
                         },
                         status: FixStatus::Applied("trimmed trailing whitespace in a.rs".into()),
                     },
                     FixItem {
-                        violation: Violation {
-                            path: Some(Path::new("b.rs").into()),
-                            message: "trailing whitespace".into(),
-                            line: None,
-                            column: None,
-                            range: None,
-                            related_locations: Vec::new(),
-                            related_locations_omitted: 0,
-                            disposition: FindingDisposition::default(),
-                            baseline_key: None,
-                            fix_key: None,
-                            sensitive: false,
-                            is_fixable: false,
-                            not_fixable: false,
-                            proposed_edits: Vec::new(),
-                            path_sensitive: false,
-                        },
+                        violation: Violation::new("trailing whitespace")
+                            .with_path(Path::new("b.rs")),
                         status: FixStatus::Unfixable,
                     },
                 ],

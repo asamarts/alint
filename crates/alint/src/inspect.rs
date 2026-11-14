@@ -168,10 +168,9 @@ pub(super) fn cmd_facts(path: &Path, cli: &Cli) -> Result<ExitCode> {
     } else {
         loaded.respect_gitignore
     };
-    let walk_opts = WalkOptions {
-        respect_gitignore: effective_gitignore,
-        extra_ignores: loaded.extra_ignores,
-    };
+    let walk_opts = WalkOptions::default()
+        .with_respect_gitignore(effective_gitignore)
+        .with_extra_ignores(loaded.extra_ignores);
     let index = walk(&root, &walk_opts).context("walking repository")?;
     let values =
         alint_core::evaluate_facts(&loaded.facts, &root, &index).context("evaluating facts")?;
@@ -533,10 +532,9 @@ fn run_explain_trace(
     );
     let index = walk(
         &loaded.root,
-        &WalkOptions {
-            respect_gitignore: use_gitignore && loaded.respect_gitignore,
-            extra_ignores,
-        },
+        &WalkOptions::default()
+            .with_respect_gitignore(use_gitignore && loaded.respect_gitignore)
+            .with_extra_ignores(extra_ignores),
     )
     .context("walking repository for rule trace")?;
     let trace_options = match options.preview_limit {
@@ -739,12 +737,12 @@ fn build_explain_trace_document(
     kind_meta: &alint_core::KindMeta,
     analysis_time: Option<&alint_core::AnalysisTimeResolution>,
     options: &ExplainOptions,
-    no_gitignore: bool,
+    use_gitignore: bool,
 ) -> Result<Option<alint_core::RuleTraceDocument>> {
     if !options.trace {
         return Ok(None);
     }
-    let trace = run_explain_trace(loaded, entry, options, analysis_time, no_gitignore)?;
+    let trace = run_explain_trace(loaded, entry, options, analysis_time, use_gitignore)?;
     let rule = serde_json::to_value(explain_rule_json_document(
         entry,
         kind_meta,

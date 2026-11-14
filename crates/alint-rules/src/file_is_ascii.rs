@@ -235,18 +235,8 @@ mod tests {
     }
 
     fn eval(r: &FileIsAsciiRule, bytes: &[u8]) -> Vec<Violation> {
-        let ctx = Context {
-            root: Path::new("/"),
-            index: &alint_core::FileIndex::from_entries(Vec::new()),
-            registry: None,
-            facts: None,
-            vars: None,
-            git_tracked: None,
-            git_blame: None,
-            analysis_time: None,
-            process_environment: None,
-            trace: None,
-        };
+        let index = alint_core::FileIndex::from_entries(Vec::new());
+        let ctx = Context::new(Path::new("/"), &index);
         r.evaluate_file(&ctx, Path::new("f.txt"), bytes).unwrap()
     }
 

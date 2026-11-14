@@ -1,14 +1,17 @@
-//! [`Config`]'s constructor and setters, for code that builds a configuration
-//! instead of loading one (ADR-0030 decision 2).
+//! The constructors and setters of [`Config`] (ADR-0030 decision 2), and of
+//! [`RuleSpec`] and [`NestedRuleSpec`] (ADR-0032 decision 3), for code that
+//! builds a configuration instead of loading one.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 
 use crate::config::{
-    AllowOutOfRoot, Config, ExtendsEntry, RuleSpec, default_fix_size_limit,
-    default_respect_gitignore,
+    AllowOutOfRoot, Config, ExtendsEntry, FixSpec, NestedRuleSpec, PathsSpec, RuleSpec,
+    default_fix_size_limit, default_respect_gitignore,
 };
 use crate::facts::FactSpec;
+use crate::level::Level;
+use crate::scope_filter::ScopeFilterSpec;
 
 impl Config {
     /// A configuration of `version` with `rules`, and every other field as a
@@ -112,6 +115,175 @@ impl Config {
     }
 }
 
+impl RuleSpec {
+    /// A rule `id` of `kind` at `level`, with every other field as a rule that
+    /// sets only those three would load: no paths, message, policy URL, `when:`,
+    /// fix or scope filter, not sensitive, and no options.
+    #[must_use]
+    pub fn new(id: impl Into<String>, kind: impl Into<String>, level: Level) -> Self {
+        Self {
+            id: id.into(),
+            kind: kind.into(),
+            level,
+            paths: None,
+            message: None,
+            policy_url: None,
+            when: None,
+            expect_matches: false,
+            sensitive: false,
+            sensitive_fields: BTreeSet::new(),
+            fix: None,
+            scope_filter: None,
+            extra: crate::yaml::Mapping::new(),
+        }
+    }
+
+    /// Sets [`Self::paths`].
+    #[must_use]
+    pub fn with_paths(mut self, paths: Option<PathsSpec>) -> Self {
+        self.paths = paths;
+        self
+    }
+
+    /// Sets [`Self::message`].
+    #[must_use]
+    pub fn with_message(mut self, message: Option<String>) -> Self {
+        self.message = message;
+        self
+    }
+
+    /// Sets [`Self::policy_url`].
+    #[must_use]
+    pub fn with_policy_url(mut self, policy_url: Option<String>) -> Self {
+        self.policy_url = policy_url;
+        self
+    }
+
+    /// Sets [`Self::when`].
+    #[must_use]
+    pub fn with_when(mut self, when: Option<String>) -> Self {
+        self.when = when;
+        self
+    }
+
+    /// Sets [`Self::expect_matches`].
+    #[must_use]
+    pub fn with_expect_matches(mut self, expect_matches: bool) -> Self {
+        self.expect_matches = expect_matches;
+        self
+    }
+
+    /// Sets [`Self::sensitive`].
+    #[must_use]
+    pub fn with_sensitive(mut self, sensitive: bool) -> Self {
+        self.sensitive = sensitive;
+        self
+    }
+
+    /// Sets [`Self::sensitive_fields`].
+    #[must_use]
+    pub fn with_sensitive_fields(mut self, sensitive_fields: BTreeSet<String>) -> Self {
+        self.sensitive_fields = sensitive_fields;
+        self
+    }
+
+    /// Sets [`Self::fix`].
+    #[must_use]
+    pub fn with_fix(mut self, fix: Option<FixSpec>) -> Self {
+        self.fix = fix;
+        self
+    }
+
+    /// Sets [`Self::scope_filter`].
+    #[must_use]
+    pub fn with_scope_filter(mut self, scope_filter: Option<ScopeFilterSpec>) -> Self {
+        self.scope_filter = scope_filter;
+        self
+    }
+
+    /// Sets [`Self::extra`], the kind's options.
+    #[must_use]
+    pub fn with_extra(mut self, extra: crate::yaml::Mapping) -> Self {
+        self.extra = extra;
+        self
+    }
+}
+
+impl NestedRuleSpec {
+    /// A nested rule of `kind`, with every other field as a nested rule that
+    /// sets only `kind` would load.
+    #[must_use]
+    pub fn new(kind: impl Into<String>) -> Self {
+        Self {
+            kind: kind.into(),
+            paths: None,
+            message: None,
+            policy_url: None,
+            when: None,
+            expect_matches: false,
+            sensitive: false,
+            scope_filter: None,
+            extra: crate::yaml::Mapping::new(),
+        }
+    }
+
+    /// Sets [`Self::paths`].
+    #[must_use]
+    pub fn with_paths(mut self, paths: Option<PathsSpec>) -> Self {
+        self.paths = paths;
+        self
+    }
+
+    /// Sets [`Self::message`].
+    #[must_use]
+    pub fn with_message(mut self, message: Option<String>) -> Self {
+        self.message = message;
+        self
+    }
+
+    /// Sets [`Self::policy_url`].
+    #[must_use]
+    pub fn with_policy_url(mut self, policy_url: Option<String>) -> Self {
+        self.policy_url = policy_url;
+        self
+    }
+
+    /// Sets [`Self::when`].
+    #[must_use]
+    pub fn with_when(mut self, when: Option<String>) -> Self {
+        self.when = when;
+        self
+    }
+
+    /// Sets [`Self::expect_matches`].
+    #[must_use]
+    pub fn with_expect_matches(mut self, expect_matches: bool) -> Self {
+        self.expect_matches = expect_matches;
+        self
+    }
+
+    /// Sets [`Self::sensitive`].
+    #[must_use]
+    pub fn with_sensitive(mut self, sensitive: bool) -> Self {
+        self.sensitive = sensitive;
+        self
+    }
+
+    /// Sets [`Self::scope_filter`].
+    #[must_use]
+    pub fn with_scope_filter(mut self, scope_filter: Option<ScopeFilterSpec>) -> Self {
+        self.scope_filter = scope_filter;
+        self
+    }
+
+    /// Sets [`Self::extra`], the kind's options.
+    #[must_use]
+    pub fn with_extra(mut self, extra: crate::yaml::Mapping) -> Self {
+        self.extra = extra;
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,5 +342,82 @@ mod tests {
         );
         assert_eq!(config.compatibility, [compatibility]);
         assert_eq!(config.environment_values, ["secret"]);
+    }
+
+    fn options() -> crate::yaml::Mapping {
+        crate::yaml::from_str("pattern: x\n").unwrap()
+    }
+
+    fn scope_filter() -> ScopeFilterSpec {
+        crate::yaml::from_str("has_ancestor: Cargo.toml\n").unwrap()
+    }
+
+    #[test]
+    fn every_rule_spec_setter_sets_its_field() {
+        let bare = RuleSpec::new("r", "file_exists", Level::Warning);
+        assert_eq!((bare.id.as_str(), bare.kind.as_str()), ("r", "file_exists"));
+        assert_eq!(bare.level, Level::Warning);
+        assert!(bare.paths.is_none() && bare.message.is_none() && bare.policy_url.is_none());
+        assert!(bare.when.is_none() && bare.fix.is_none() && bare.scope_filter.is_none());
+        assert!(!bare.expect_matches && !bare.sensitive);
+        assert!(bare.sensitive_fields.is_empty() && bare.extra.is_empty());
+
+        let spec = bare
+            .with_paths(Some(PathsSpec::Single("**/*.rs".into())))
+            .with_message(Some("m".into()))
+            .with_policy_url(Some("https://example.invalid/p".into()))
+            .with_when(Some("facts.x".into()))
+            .with_expect_matches(true)
+            .with_sensitive(true)
+            .with_sensitive_fields(BTreeSet::from(["message".to_string()]))
+            .with_fix(Some(
+                crate::yaml::from_str("file_create: {content: x}\n").unwrap(),
+            ))
+            .with_scope_filter(Some(scope_filter()))
+            .with_extra(options());
+        assert!(matches!(&spec.paths, Some(PathsSpec::Single(p)) if p == "**/*.rs"));
+        assert_eq!(spec.message.as_deref(), Some("m"));
+        assert_eq!(
+            spec.policy_url.as_deref(),
+            Some("https://example.invalid/p")
+        );
+        assert_eq!(spec.when.as_deref(), Some("facts.x"));
+        assert!(spec.expect_matches && spec.sensitive);
+        assert_eq!(
+            spec.sensitive_fields,
+            BTreeSet::from(["message".to_string()])
+        );
+        assert_eq!(spec.fix.as_ref().map(FixSpec::op_name), Some("file_create"));
+        assert!(spec.scope_filter.is_some());
+        assert_eq!(spec.extra, options());
+    }
+
+    #[test]
+    fn every_nested_rule_spec_setter_sets_its_field() {
+        let bare = NestedRuleSpec::new("file_exists");
+        assert_eq!(bare.kind, "file_exists");
+        assert!(bare.paths.is_none() && bare.message.is_none() && bare.policy_url.is_none());
+        assert!(bare.when.is_none() && bare.scope_filter.is_none() && bare.extra.is_empty());
+        assert!(!bare.expect_matches && !bare.sensitive);
+
+        let spec = bare
+            .with_paths(Some(PathsSpec::Single("{path}/README.md".into())))
+            .with_message(Some("m".into()))
+            .with_policy_url(Some("https://example.invalid/p".into()))
+            .with_when(Some("iter.has_file(\"x\")".into()))
+            .with_expect_matches(true)
+            .with_sensitive(true)
+            .with_scope_filter(Some(scope_filter()))
+            .with_extra(options());
+        assert!(matches!(&spec.paths, Some(PathsSpec::Single(p)) if p == "{path}/README.md"));
+        assert_eq!(spec.message.as_deref(), Some("m"));
+        assert_eq!(
+            spec.policy_url.as_deref(),
+            Some("https://example.invalid/p")
+        );
+        assert_eq!(spec.when.as_deref(), Some("iter.has_file(\"x\")"));
+        assert!(spec.expect_matches && spec.sensitive);
+        assert!(spec.scope_filter.is_some());
+        assert_eq!(spec.extra, options());
     }
 }

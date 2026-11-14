@@ -222,18 +222,7 @@ mod tests {
             ("packages/x.md", false),
         ]);
         let reg = registry();
-        let ctx = Context {
-            root: Path::new("/"),
-            index: &idx,
-            registry: Some(&reg),
-            facts: None,
-            vars: None,
-            git_tracked: None,
-            git_blame: None,
-            analysis_time: None,
-            process_environment: None,
-            trace: None,
-        };
+        let ctx = Context::new(Path::new("/"), &idx).with_registry(Some(&reg));
         let v = r.evaluate(&ctx).unwrap();
         // `{path}` resolves to "packages/a" (dir) and "packages/x.md" (file).
         // The dir "packages/a" is not a file in the index — file_exists
@@ -287,18 +276,7 @@ scope_filter:
             ("packages/internal", true),
         ]);
         let reg = registry();
-        let ctx = Context {
-            root: Path::new("/"),
-            index: &idx,
-            registry: Some(&reg),
-            facts: None,
-            vars: None,
-            git_tracked: None,
-            git_blame: None,
-            analysis_time: None,
-            process_environment: None,
-            trace: None,
-        };
+        let ctx = Context::new(Path::new("/"), &idx).with_registry(Some(&reg));
         let v = rule.evaluate(&ctx).unwrap();
         // packages/a is iterated (a dir, not a file → file_exists
         // fires); packages/internal is excluded, so it is not.

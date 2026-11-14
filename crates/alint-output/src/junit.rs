@@ -259,7 +259,7 @@ fn is_xml_illegal_control(ch: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alint_core::{FindingDisposition, Report, RuleResult, Violation};
+    use alint_core::{Report, RuleResult, Violation};
     use std::path::{Path, PathBuf};
 
     fn render(report: &Report) -> String {
@@ -306,23 +306,11 @@ mod tests {
             results: vec![rule(
                 "no-todo",
                 Level::Error,
-                vec![Violation {
-                    path: Some(Path::new("src/lib.rs").into()),
-                    message: "TODO marker found".into(),
-                    line: Some(12),
-                    column: Some(4),
-                    range: None,
-                    related_locations: Vec::new(),
-                    related_locations_omitted: 0,
-                    disposition: FindingDisposition::default(),
-                    baseline_key: None,
-                    fix_key: None,
-                    sensitive: false,
-                    is_fixable: false,
-                    not_fixable: false,
-                    proposed_edits: Vec::new(),
-                    path_sensitive: false,
-                }],
+                vec![
+                    Violation::new("TODO marker found")
+                        .with_path(Path::new("src/lib.rs"))
+                        .with_location(12, 4),
+                ],
             )],
         };
         let out = render(&report);
@@ -373,23 +361,7 @@ mod tests {
             results: vec![rule(
                 "r&<>\"'",
                 Level::Error,
-                vec![Violation {
-                    path: Some(Path::new("a&b.rs").into()),
-                    message: "<bad> & \"quoted\"".into(),
-                    line: None,
-                    column: None,
-                    range: None,
-                    related_locations: Vec::new(),
-                    related_locations_omitted: 0,
-                    disposition: FindingDisposition::default(),
-                    baseline_key: None,
-                    fix_key: None,
-                    sensitive: false,
-                    is_fixable: false,
-                    not_fixable: false,
-                    proposed_edits: Vec::new(),
-                    path_sensitive: false,
-                }],
+                vec![Violation::new("<bad> & \"quoted\"").with_path(Path::new("a&b.rs"))],
             )],
         };
         let out = render(&report);
@@ -405,23 +377,7 @@ mod tests {
             results: vec![rule(
                 "ctrl",
                 Level::Error,
-                vec![Violation {
-                    path: Some(Path::new("a.rs").into()),
-                    message: "before\u{0001}\u{0008}after".into(),
-                    line: None,
-                    column: None,
-                    range: None,
-                    related_locations: Vec::new(),
-                    related_locations_omitted: 0,
-                    disposition: FindingDisposition::default(),
-                    baseline_key: None,
-                    fix_key: None,
-                    sensitive: false,
-                    is_fixable: false,
-                    not_fixable: false,
-                    proposed_edits: Vec::new(),
-                    path_sensitive: false,
-                }],
+                vec![Violation::new("before\u{0001}\u{0008}after").with_path(Path::new("a.rs"))],
             )],
         };
         let out = render(&report);
@@ -435,23 +391,7 @@ mod tests {
             results: vec![rule(
                 "r",
                 Level::Error,
-                vec![Violation {
-                    path: Some(Path::new("a").into()),
-                    message: "line1\nline2".into(),
-                    line: None,
-                    column: None,
-                    range: None,
-                    related_locations: Vec::new(),
-                    related_locations_omitted: 0,
-                    disposition: FindingDisposition::default(),
-                    baseline_key: None,
-                    fix_key: None,
-                    sensitive: false,
-                    is_fixable: false,
-                    not_fixable: false,
-                    proposed_edits: Vec::new(),
-                    path_sensitive: false,
-                }],
+                vec![Violation::new("line1\nline2").with_path(Path::new("a"))],
             )],
         };
         let out = render(&report);

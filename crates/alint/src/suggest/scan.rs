@@ -48,14 +48,8 @@ impl Scan {
     /// existing config (best-effort), and probes git.
     pub fn collect(root: &Path, progress: &Progress) -> Result<Self> {
         let phase = progress.phase("Walking repository", None);
-        let index = walk(
-            root,
-            &WalkOptions {
-                respect_gitignore: true,
-                extra_ignores: Vec::new(),
-            },
-        )
-        .with_context(|| format!("walking {}", root.display()))?;
+        let index = walk(root, &WalkOptions::default())
+            .with_context(|| format!("walking {}", root.display()))?;
         let n = index.entries.len();
         phase.finish(&format!("Walked {n} entries"));
 

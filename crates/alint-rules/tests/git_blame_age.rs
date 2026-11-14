@@ -96,10 +96,7 @@ fn fires_on_old_line_silent_on_recent_line() {
     commit_with_date(root, "a.rs", "fresh", "2026-10-16T12:00:00Z");
 
     let engine = build_engine(r"\bTODO\b", 180);
-    let walk_opts = WalkOptions {
-        respect_gitignore: true,
-        extra_ignores: Vec::new(),
-    };
+    let walk_opts = WalkOptions::default();
     let index = walk(root, &walk_opts).unwrap();
     let report = engine.run(root, &index).unwrap();
 
@@ -153,14 +150,7 @@ fn strict_boundary_young_future_and_uncommitted_lines_do_not_fire() {
     .unwrap();
 
     let engine = build_engine(r"\bTODO\b", 10).with_analysis_time("2026-10-16".parse().unwrap());
-    let index = walk(
-        root,
-        &WalkOptions {
-            respect_gitignore: true,
-            extra_ignores: Vec::new(),
-        },
-    )
-    .unwrap();
+    let index = walk(root, &WalkOptions::default()).unwrap();
     let report = engine.run(root, &index).unwrap();
     let violations: Vec<_> = report
         .results
@@ -206,10 +196,7 @@ message: \"`{{ctx.match}}` marker is ancient — resolve or remove\"
     let engine = Engine::from_entries(vec![RuleEntry::new(rule)], registry)
         .with_analysis_time("2026-10-16".parse().unwrap());
 
-    let walk_opts = WalkOptions {
-        respect_gitignore: true,
-        extra_ignores: Vec::new(),
-    };
+    let walk_opts = WalkOptions::default();
     let index = walk(root, &walk_opts).unwrap();
     let report = engine.run(root, &index).unwrap();
 
@@ -266,14 +253,7 @@ fn nested_parent_message_preserves_analysis_date() {
     let rule = registry.build(&spec).unwrap();
     let engine = Engine::from_entries(vec![RuleEntry::new(rule)], registry)
         .with_analysis_time("2026-10-16".parse().unwrap());
-    let index = walk(
-        root,
-        &WalkOptions {
-            respect_gitignore: true,
-            extra_ignores: Vec::new(),
-        },
-    )
-    .unwrap();
+    let index = walk(root, &WalkOptions::default()).unwrap();
 
     let report = engine.run(root, &index).unwrap();
     let violations = &report.results[0].violations;
@@ -292,10 +272,7 @@ fn reports_resource_read_failure_outside_git() {
     std::fs::write(root.join("a.rs"), "// TODO old marker\n").unwrap();
 
     let engine = build_engine(r"\bTODO\b", 180);
-    let walk_opts = WalkOptions {
-        respect_gitignore: true,
-        extra_ignores: Vec::new(),
-    };
+    let walk_opts = WalkOptions::default();
     let index = walk(root, &walk_opts).unwrap();
     let report = engine.run(root, &index).unwrap();
 
@@ -340,10 +317,7 @@ level: error
     let engine = Engine::from_entries(vec![RuleEntry::new(rule)], registry)
         .with_analysis_time("2026-10-16".parse().unwrap());
 
-    let walk_opts = WalkOptions {
-        respect_gitignore: true,
-        extra_ignores: Vec::new(),
-    };
+    let walk_opts = WalkOptions::default();
     let index = walk(root, &walk_opts).unwrap();
     let report = engine.run(root, &index).unwrap();
     let levels: Vec<Level> = report

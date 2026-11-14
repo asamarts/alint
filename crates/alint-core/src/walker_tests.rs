@@ -1849,3 +1849,22 @@ fn tracked_entries_ignore_files_hid_skips_a_symlink_out_of_the_root() {
     let hidden = FileIndex::from_entries(tracked_entries_ignore_files_hid(root, &index, &tracked));
     assert_eq!(paths(&hidden), ["out", "out/kept.txt"]);
 }
+
+#[test]
+fn walk_options_default_and_setters() {
+    let default = WalkOptions::default();
+    assert!(default.respect_gitignore);
+    assert_eq!(default.extra_ignores, Vec::<String>::new());
+    let set = WalkOptions::default()
+        .with_respect_gitignore(false)
+        .with_extra_ignores(vec!["target".to_string()]);
+    assert!(!set.respect_gitignore);
+    assert_eq!(set.extra_ignores, ["target"]);
+
+    // The setters reach the walk.
+    let tmp = td();
+    touch(tmp.path(), "keep.txt", b"");
+    touch(tmp.path(), "target/out.txt", b"");
+    let index = walk(tmp.path(), &set).unwrap();
+    assert_eq!(paths(&index), ["keep.txt"]);
+}

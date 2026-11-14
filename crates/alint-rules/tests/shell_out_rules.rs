@@ -52,14 +52,7 @@ fn build_engine_from_yaml(yaml: &str) -> Engine {
 }
 
 fn run_engine(engine: &Engine, root: &Path) -> alint_core::Report {
-    let index = walk(
-        root,
-        &WalkOptions {
-            respect_gitignore: true,
-            extra_ignores: Vec::new(),
-        },
-    )
-    .unwrap();
+    let index = walk(root, &WalkOptions::default()).unwrap();
     engine.run(root, &index).unwrap()
 }
 

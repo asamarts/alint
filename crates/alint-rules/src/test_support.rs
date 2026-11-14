@@ -61,18 +61,7 @@ pub fn index_with_dirs(entries: &[(&str, bool)]) -> FileIndex {
 /// or `Path::new("/fake")` when the rule doesn't read the
 /// filesystem) and the previously-built `FileIndex`.
 pub fn ctx<'a>(root: &'a Path, idx: &'a FileIndex) -> Context<'a> {
-    Context {
-        root,
-        index: idx,
-        registry: None,
-        facts: None,
-        vars: None,
-        git_tracked: None,
-        git_blame: None,
-        analysis_time: None,
-        process_environment: None,
-        trace: None,
-    }
+    Context::new(root, idx)
 }
 
 /// A tempdir + matching `FileIndex` populated with files whose
