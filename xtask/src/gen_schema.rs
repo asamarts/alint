@@ -1014,7 +1014,7 @@ mod tests {
         let path = crate::workspace_root().unwrap().join(rel_path);
         let yaml = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-        let value: yaml_serde::Value = yaml_serde::from_str(&yaml).unwrap();
+        let value: ayaml::Value = ayaml::compat::from_str(&yaml).unwrap();
         serde_json::to_value(value).unwrap()
     }
 

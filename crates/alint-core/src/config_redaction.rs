@@ -70,9 +70,9 @@ impl NumberMask {
 /// `id`, `kind` and `level` of a nested rule (a mapping with a string `kind`)
 /// are never interpolated (they are its identity), so both stay as written.
 #[doc(hidden)]
-pub fn mask_configuration_values(value: &mut yaml_serde::Value, numbers: NumberMask) {
+pub fn mask_configuration_values(value: &mut ayaml::Value, numbers: NumberMask) {
     match value {
-        yaml_serde::Value::String(text) => {
+        ayaml::Value::String(text) => {
             let [mask, other] = if text.starts_with('$') {
                 [JSONPATH_MASK, "$['<masked>']"]
             } else {
@@ -80,16 +80,14 @@ pub fn mask_configuration_values(value: &mut yaml_serde::Value, numbers: NumberM
             };
             *text = if text == mask { other } else { mask }.to_string();
         }
-        yaml_serde::Value::Number(number) => *number = differing_number(number, numbers),
-        yaml_serde::Value::Bool(flag) => *flag = !*flag,
-        yaml_serde::Value::Sequence(items) => items
+        ayaml::Value::Number(number) => *number = differing_number(number, numbers),
+        ayaml::Value::Bool(flag) => *flag = !*flag,
+        ayaml::Value::Sequence(items) => items
             .iter_mut()
             .for_each(|item| mask_configuration_values(item, numbers)),
-        yaml_serde::Value::Mapping(mapping) => {
+        ayaml::Value::Mapping(mapping) => {
             // A nested rule (a mapping with a `kind`) keeps its identity.
-            let rule = mapping
-                .get("kind")
-                .is_some_and(yaml_serde::Value::is_string);
+            let rule = mapping.get("kind").is_some_and(ayaml::Value::is_string);
             for (key, item) in mapping.iter_mut() {
                 match key.as_str() {
                     Some("id" | "kind" | "level") if rule => {}
@@ -98,8 +96,8 @@ pub fn mask_configuration_values(value: &mut yaml_serde::Value, numbers: NumberM
                 }
             }
         }
-        yaml_serde::Value::Tagged(tagged) => mask_configuration_values(&mut tagged.value, numbers),
-        yaml_serde::Value::Null => {}
+        ayaml::Value::Tagged(tagged) => mask_configuration_values(&mut tagged.value, numbers),
+        ayaml::Value::Null => {}
     }
 }
 
@@ -108,9 +106,9 @@ pub fn mask_configuration_values(value: &mut yaml_serde::Value, numbers: NumberM
 /// string condition masks to one that parses too (`false`, or `true` where it
 /// was `false`).
 #[doc(hidden)]
-pub fn mask_configuration_field(field: &str, value: &mut yaml_serde::Value, numbers: NumberMask) {
+pub fn mask_configuration_field(field: &str, value: &mut ayaml::Value, numbers: NumberMask) {
     match value {
-        yaml_serde::Value::String(text) if matches!(field, "when" | "when_iter") => {
+        ayaml::Value::String(text) if matches!(field, "when" | "when_iter") => {
             *text = if text == "false" { "true" } else { "false" }.to_string();
         }
         _ => mask_configuration_values(value, numbers),
@@ -122,7 +120,7 @@ pub fn mask_configuration_field(field: &str, value: &mut yaml_serde::Value, numb
 /// cannot move (the type's maximum or minimum, an infinity). A float moves by
 /// the smallest step, which still prints differently: Rust prints the shortest
 /// text that reads back as the same float. A NaN becomes zero.
-fn differing_number(number: &yaml_serde::Number, numbers: NumberMask) -> yaml_serde::Number {
+fn differing_number(number: &ayaml::Number, numbers: NumberMask) -> ayaml::Number {
     let up = numbers == NumberMask::Up;
     if let Some(value) = number.as_u64() {
         let moved = if (up && value < u64::MAX) || value == 0 {
@@ -130,7 +128,7 @@ fn differing_number(number: &yaml_serde::Number, numbers: NumberMask) -> yaml_se
         } else {
             value - 1
         };
-        yaml_serde::Number::from(moved)
+        ayaml::Number::from(moved)
     } else if let Some(value) = number.as_i64() {
         // Only a negative integer is not a `u64`.
         let moved = if up || value == i64::MIN {
@@ -138,7 +136,7 @@ fn differing_number(number: &yaml_serde::Number, numbers: NumberMask) -> yaml_se
         } else {
             value - 1
         };
-        yaml_serde::Number::from(moved)
+        ayaml::Number::from(moved)
     } else {
         let value = number.as_f64().unwrap_or_default();
         let (next, other) = if up {
@@ -153,7 +151,7 @@ fn differing_number(number: &yaml_serde::Number, numbers: NumberMask) -> yaml_se
         } else {
             next
         };
-        yaml_serde::Number::from(moved)
+        ayaml::Number::from(moved)
     }
 }
 
@@ -215,7 +213,7 @@ pub fn redact_environment_values<'a>(
             }
         }
         if value.len() <= 64
-            && let Ok(yaml_serde::Value::Number(number)) = yaml_serde::from_str(value)
+            && let Ok(ayaml::Value::Number(number)) = ayaml::compat::from_str(value)
         {
             forms.push(number.to_string());
         }

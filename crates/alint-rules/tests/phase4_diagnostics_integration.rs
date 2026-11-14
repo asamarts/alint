@@ -20,7 +20,7 @@ use alint_core::Error;
 use alint_rules::builtin_registry;
 
 fn build_err(yaml: &str) -> String {
-    let spec: alint_core::RuleSpec = yaml_serde::from_str(yaml).unwrap();
+    let spec: alint_core::RuleSpec = ayaml::compat::from_str(yaml).unwrap();
     let registry = builtin_registry();
     match registry.build(&spec) {
         Err(Error::RuleConfig { message, .. }) => message,
@@ -196,7 +196,7 @@ paths: "Cargo.toml"
 path: "$.package.edition"
 matches: '^(2021|2024)$'
 "#;
-    let spec: alint_core::RuleSpec = yaml_serde::from_str(yaml).unwrap();
+    let spec: alint_core::RuleSpec = ayaml::compat::from_str(yaml).unwrap();
     let registry = builtin_registry();
     // This should build successfully — no error to enrich.
     assert!(registry.build(&spec).is_ok());

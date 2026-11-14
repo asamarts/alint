@@ -1,7 +1,7 @@
 use super::*;
 
 fn spec(yaml: &str) -> RuleSpec {
-    yaml_serde::from_str(yaml).unwrap()
+    ayaml::compat::from_str(yaml).unwrap()
 }
 
 fn environment_fields(fields: &[&str]) -> std::collections::BTreeSet<String> {
@@ -58,19 +58,19 @@ fn masking_changes_every_value_but_keeps_names_types_and_nested_rule_identity() 
             expected(123_456_789_011, 1, 1.5_f64.next_down(), -8),
         ),
     ] {
-        let mut value: yaml_serde::Value = yaml_serde::from_str(document).unwrap();
+        let mut value: ayaml::Value = ayaml::compat::from_str(document).unwrap();
         mask_configuration_values(&mut value, numbers);
-        let expected: yaml_serde::Value = yaml_serde::from_str(&expected).unwrap();
+        let expected: ayaml::Value = ayaml::compat::from_str(&expected).unwrap();
         assert_eq!(value, expected, "{numbers:?}");
     }
 }
 
 #[test]
 fn a_masked_number_always_differs_and_stays_next_to_the_value() {
-    let moved = |number: yaml_serde::Number, numbers| {
-        let mut value = yaml_serde::Value::Number(number);
+    let moved = |number: ayaml::Number, numbers| {
+        let mut value = ayaml::Value::Number(number);
         mask_configuration_values(&mut value, numbers);
-        let yaml_serde::Value::Number(masked) = value else {
+        let ayaml::Value::Number(masked) = value else {
             panic!("a number stays a number: {value:?}");
         };
         masked
@@ -431,9 +431,9 @@ fn a_when_error_is_hidden_only_when_the_condition_may_be_secret() {
 #[test]
 fn a_masked_jsonpath_still_parses_and_differs() {
     for query in ["$.k", "$['a-b'][0]", "$", "$['<redacted>']"] {
-        let mut value = yaml_serde::Value::String(query.to_string());
+        let mut value = ayaml::Value::String(query.to_string());
         mask_configuration_values(&mut value, NumberMask::Up);
-        let yaml_serde::Value::String(masked) = value else {
+        let ayaml::Value::String(masked) = value else {
             panic!("a string stays a string: {value:?}");
         };
         assert_ne!(masked, query);
@@ -468,7 +468,7 @@ fn a_masked_nested_condition_still_parses() {
     // A nested rule parses its `when:` and `when_iter:` before the rules they
     // guard, so an unrelated error in those rules recurs on the masked copy
     // only when the masked conditions parse.
-    let mut value: yaml_serde::Value = yaml_serde::from_str(concat!(
+    let mut value: ayaml::Value = ayaml::compat::from_str(concat!(
         "- kind: for_each_file\n",
         "  select: '*.md'\n",
         "  when_iter: 'iter.basename != \"x\"'\n",
@@ -487,7 +487,7 @@ fn a_masked_nested_condition_still_parses() {
     assert_eq!(inner["when"], "true");
     assert_eq!(inner["paths"], CONFIGURATION_MASK);
     // Outside a rule, `when` is an ordinary value.
-    let mut plain: yaml_serde::Value = yaml_serde::from_str("when: 'false'\n").unwrap();
+    let mut plain: ayaml::Value = ayaml::compat::from_str("when: 'false'\n").unwrap();
     mask_configuration_values(&mut plain, NumberMask::Up);
     assert_eq!(plain["when"], CONFIGURATION_MASK);
 }

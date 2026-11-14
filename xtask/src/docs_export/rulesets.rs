@@ -379,7 +379,7 @@ pub(super) fn render_ruleset_page(
     overview_md: &str,
     yaml_text: &str,
     rel_repo_path: &str,
-    yaml: &yaml_serde::Value,
+    yaml: &ayaml::Value,
     kind_to_family: &std::collections::HashMap<String, String>,
 ) -> String {
     let mut out = String::new();
@@ -455,7 +455,7 @@ pub(super) fn render_ruleset_page(
 }
 
 /// A string field of a rule mapping.
-fn str_field(rule: &yaml_serde::Value, key: &str) -> Option<String> {
+fn str_field(rule: &ayaml::Value, key: &str) -> Option<String> {
     rule.get(key).and_then(|v| v.as_str()).map(str::to_string)
 }
 
@@ -465,7 +465,7 @@ fn str_field(rule: &yaml_serde::Value, key: &str) -> Option<String> {
 /// `when:` fact gates. Two columns, and the ids as plain link text (which
 /// wraps at its hyphens, where a code span wouldn't), so the table fits the
 /// content width.
-fn write_ruleset_summary(out: &mut String, rules: &[yaml_serde::Value]) {
+fn write_ruleset_summary(out: &mut String, rules: &[ayaml::Value]) {
     let _ = writeln!(out, "## What it checks");
     let _ = writeln!(out);
     let _ = writeln!(
@@ -529,7 +529,7 @@ fn write_ruleset_summary(out: &mut String, rules: &[yaml_serde::Value]) {
 fn write_rule_section(
     out: &mut String,
     id: &str,
-    rule: &yaml_serde::Value,
+    rule: &ayaml::Value,
     source: Option<&RuleSource>,
     kind_to_family: &std::collections::HashMap<String, String>,
 ) {
@@ -594,7 +594,7 @@ fn write_rule_section(
 /// The "Customize" section, with this ruleset's own ids: the first rule
 /// turned off, and the next rule that isn't already an error promoted to
 /// one (left out when every other rule is an error).
-fn write_ruleset_customize(out: &mut String, name: &str, rules: &[yaml_serde::Value]) {
+fn write_ruleset_customize(out: &mut String, name: &str, rules: &[ayaml::Value]) {
     let first = str_field(&rules[0], "id").unwrap_or_default();
     let promote = rules[1..]
         .iter()
@@ -697,7 +697,7 @@ pub(super) fn generate_bundled_ruleset_pages(
 
         let yaml_text =
             fs::read_to_string(&entry).with_context(|| format!("reading {}", entry.display()))?;
-        let yaml: yaml_serde::Value = yaml_serde::from_str(&yaml_text)
+        let yaml: ayaml::Value = ayaml::compat::from_str(&yaml_text)
             .with_context(|| format!("parsing {}", entry.display()))?;
 
         // Repo-relative path for the source link, always forward-

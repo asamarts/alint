@@ -1128,13 +1128,13 @@ mod tests {
     fn require_file_exists(path: &str) -> NestedRuleSpec {
         // Build via YAML to exercise the same path production users take.
         let yaml = format!("kind: file_exists\npaths: \"{path}\"\n");
-        yaml_serde::from_str(&yaml).unwrap()
+        ayaml::compat::from_str(&yaml).unwrap()
     }
 
     #[test]
     fn nested_sensitive_rule_redacts_before_parent_reporting() {
         const SECRET: &str = "NESTED_TOKEN_VALUE_DO_NOT_REPORT";
-        let nested: NestedRuleSpec = yaml_serde::from_str(&format!(
+        let nested: NestedRuleSpec = ayaml::compat::from_str(&format!(
             "kind: file_exists\npaths: \"{{path}}/missing\"\n\
              message: \"nested evidence: {SECRET}\"\nsensitive: true\n"
         ))
@@ -1199,7 +1199,7 @@ mod tests {
             size: 0,
         });
         let idx = FileIndex::from_entries(entries);
-        let nested: NestedRuleSpec = yaml_serde::from_str(
+        let nested: NestedRuleSpec = ayaml::compat::from_str(
             "kind: json_path_equals\npaths: \"{path}/package.json\"\n\
              path: \"$.private\"\nequals: true\n",
         )
@@ -1258,7 +1258,7 @@ mod tests {
             "fix:\n  file_create:\n    content: x",
         ] {
             let yaml = format!("kind: file_exists\npaths: \"{{path}}/LICENSE\"\n{extra}\n");
-            let nested: NestedRuleSpec = yaml_serde::from_str(&yaml).unwrap();
+            let nested: NestedRuleSpec = ayaml::compat::from_str(&yaml).unwrap();
             let err = rule("pkgs/*", vec![nested])
                 .validate_nested(&reg)
                 .unwrap_err()
@@ -1272,7 +1272,7 @@ mod tests {
 
     #[test]
     fn validate_nested_uses_leaf_kind_metadata_for_common_fields() {
-        let nested: NestedRuleSpec = yaml_serde::from_str(
+        let nested: NestedRuleSpec = ayaml::compat::from_str(
             "kind: dir_contains\npaths: packages/*\nselect: packages/*\nrequire: README.md\n",
         )
         .unwrap();
@@ -1297,14 +1297,14 @@ mod tests {
         // a nested typo is caught even when no directory would be iterated
         // (the gap where `check` previously reported "passed").
         let bad_kind: NestedRuleSpec =
-            yaml_serde::from_str("kind: totally_fake_kind\npaths: \"{path}/x\"\n").unwrap();
+            ayaml::compat::from_str("kind: totally_fake_kind\npaths: \"{path}/x\"\n").unwrap();
         let r = rule("matches-nothing/*", vec![bad_kind]);
         let err = r.validate_nested(&reg).unwrap_err().to_string();
         assert!(err.contains("totally_fake_kind"), "{err}");
 
         // Unknown nested OPTION → Err.
         let bad_opt: NestedRuleSpec =
-            yaml_serde::from_str("kind: file_exists\npaths: \"{path}/x\"\nbogusopt: true\n")
+            ayaml::compat::from_str("kind: file_exists\npaths: \"{path}/x\"\nbogusopt: true\n")
                 .unwrap();
         let r = rule("src/*", vec![bad_opt]);
         let err = r.validate_nested(&reg).unwrap_err().to_string();
@@ -1316,15 +1316,15 @@ mod tests {
 
     #[test]
     fn runtime_nested_failures_are_structural_and_ordered() {
-        let build_failure: NestedRuleSpec = yaml_serde::from_str(
+        let build_failure: NestedRuleSpec = ayaml::compat::from_str(
             "kind: filename_regex\npaths: \"{path}/**\"\npattern: \"{basename}\"\n",
         )
         .unwrap();
-        let condition_failure: NestedRuleSpec = yaml_serde::from_str(
+        let condition_failure: NestedRuleSpec = ayaml::compat::from_str(
             "kind: file_exists\npaths: \"{path}/README.md\"\nwhen: '1 < \"x\"'\n",
         )
         .unwrap();
-        let evaluation_failure: NestedRuleSpec = yaml_serde::from_str(
+        let evaluation_failure: NestedRuleSpec = ayaml::compat::from_str(
             "kind: git_blame_age\npaths: \"{path}/**/*.rs\"\npattern: TODO\nmax_age_days: 1\n",
         )
         .unwrap();
@@ -1410,9 +1410,10 @@ mod tests {
         // "{path}"` unescaped, compiled as a character class matching `app/s`:
         // `app/[slug]` (no .tsx) was never checked (false negative) and `app/s`
         // was checked twice. Only `paths:` was escaped.
-        let nested: NestedRuleSpec =
-            yaml_serde::from_str("kind: dir_contains\nselect: \"{path}\"\nrequire: [\"*.tsx\"]\n")
-                .unwrap();
+        let nested: NestedRuleSpec = ayaml::compat::from_str(
+            "kind: dir_contains\nselect: \"{path}\"\nrequire: [\"*.tsx\"]\n",
+        )
+        .unwrap();
         let files = [
             ("app", true),
             ("app/[slug]", true),
@@ -1442,8 +1443,10 @@ mod tests {
     fn nested_specs_take_their_parents_sensitive_require() {
         let require = || {
             vec![
-                yaml_serde::from_str::<NestedRuleSpec>("kind: file_exists\npaths: \"{path}/x\"\n")
-                    .unwrap(),
+                ayaml::compat::from_str::<NestedRuleSpec>(
+                    "kind: file_exists\npaths: \"{path}/x\"\n",
+                )
+                .unwrap(),
             ]
         };
         let parent = |extra: &str| {
@@ -1502,7 +1505,7 @@ scope_filter:
         std::fs::create_dir(tmp.path().join("pkg-b")).unwrap();
         std::fs::write(tmp.path().join("pkg-a/marker"), b"ok").unwrap();
         let spec: std::sync::Arc<RuleSpec> = std::sync::Arc::new(
-            yaml_serde::from_str(
+            ayaml::compat::from_str(
                 r#"
 id: nested
 kind: for_each_dir
@@ -1580,7 +1583,7 @@ require:
         std::fs::create_dir(tmp.path().join("pkg")).unwrap();
         std::fs::write(tmp.path().join("pkg/data.json"), br#"{"ok":true}"#).unwrap();
         let spec: std::sync::Arc<RuleSpec> = std::sync::Arc::new(
-            yaml_serde::from_str(
+            ayaml::compat::from_str(
                 r#"
 id: nested-structured
 kind: for_each_dir
@@ -1623,7 +1626,7 @@ require:
         let tmp = tempfile::tempdir().unwrap();
         std::fs::create_dir(tmp.path().join("pkg")).unwrap();
         let spec: std::sync::Arc<RuleSpec> = std::sync::Arc::new(
-            yaml_serde::from_str(
+            ayaml::compat::from_str(
                 r#"
 id: nested
 kind: for_each_dir

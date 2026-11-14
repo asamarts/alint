@@ -964,31 +964,29 @@ fn inspect_rule_capabilities(
 }
 
 fn inspect_nested_values(
-    mapping: &yaml_serde::Mapping,
+    mapping: &ayaml::Mapping,
     catalog: alint_core::KindCatalog<'_>,
     spawn_use: &mut Option<String>,
     keyring_use: &mut Option<String>,
 ) {
     for value in mapping.values() {
         match value {
-            yaml_serde::Value::Mapping(nested) => {
+            ayaml::Value::Mapping(nested) => {
                 if nested.contains_key("kind")
-                    && let Ok(rule) = yaml_serde::from_value::<RuleSpec>(
-                        yaml_serde::Value::Mapping(nested.clone()),
-                    )
+                    && let Ok(rule) =
+                        ayaml::from_value::<RuleSpec>(ayaml::Value::Mapping(nested.clone()))
                 {
                     inspect_rule_capabilities(&rule, catalog, spawn_use, keyring_use);
                 } else {
                     inspect_nested_values(nested, catalog, spawn_use, keyring_use);
                 }
             }
-            yaml_serde::Value::Sequence(values) => {
+            ayaml::Value::Sequence(values) => {
                 for value in values {
-                    if let yaml_serde::Value::Mapping(nested) = value {
+                    if let ayaml::Value::Mapping(nested) = value {
                         if nested.contains_key("kind")
-                            && let Ok(rule) = yaml_serde::from_value::<RuleSpec>(
-                                yaml_serde::Value::Mapping(nested.clone()),
-                            )
+                            && let Ok(rule) =
+                                ayaml::from_value::<RuleSpec>(ayaml::Value::Mapping(nested.clone()))
                         {
                             inspect_rule_capabilities(&rule, catalog, spawn_use, keyring_use);
                         } else {

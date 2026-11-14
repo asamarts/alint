@@ -601,7 +601,7 @@ impl RuleEntry {
     /// The rule's kind-specific options (the flattened non-common `RuleSpec`
     /// fields, e.g. `pattern`, `max_lines`), or `None` when built without a spec.
     #[must_use]
-    pub fn extra(&self) -> Option<&yaml_serde::Mapping> {
+    pub fn extra(&self) -> Option<&ayaml::Mapping> {
         self.spec.as_ref().map(|s| &s.extra)
     }
 
@@ -670,15 +670,15 @@ impl RuleEntry {
     }
 }
 
-fn option_value_is_set(value: &yaml_serde::Value) -> bool {
+fn option_value_is_set(value: &ayaml::Value) -> bool {
     match value {
-        yaml_serde::Value::Null => false,
-        yaml_serde::Value::Bool(value) => *value,
-        yaml_serde::Value::String(value) => !value.is_empty(),
-        yaml_serde::Value::Sequence(value) => !value.is_empty(),
-        yaml_serde::Value::Mapping(value) => !value.is_empty(),
-        yaml_serde::Value::Number(_) => true,
-        yaml_serde::Value::Tagged(value) => option_value_is_set(&value.value),
+        ayaml::Value::Null => false,
+        ayaml::Value::Bool(value) => *value,
+        ayaml::Value::String(value) => !value.is_empty(),
+        ayaml::Value::Sequence(value) => !value.is_empty(),
+        ayaml::Value::Mapping(value) => !value.is_empty(),
+        ayaml::Value::Number(_) => true,
+        ayaml::Value::Tagged(value) => option_value_is_set(&value.value),
     }
 }
 
@@ -774,7 +774,7 @@ fn when_expr_uses_iter(expr: &WhenExpr) -> bool {
 
 fn configured_iteration_gate(spec: Option<&crate::RuleSpec>) -> Result<Option<WhenExpr>> {
     spec.and_then(|spec| spec.extra.get("when_iter"))
-        .and_then(yaml_serde::Value::as_str)
+        .and_then(ayaml::Value::as_str)
         .map(crate::when::parse)
         .transpose()
         .map_err(|error| {
@@ -789,10 +789,10 @@ fn configured_select_scope(spec: Option<&crate::RuleSpec>) -> Result<Option<crat
         return Ok(None);
     };
     let patterns = match value {
-        yaml_serde::Value::String(pattern) => vec![pattern.clone()],
-        yaml_serde::Value::Sequence(patterns) => patterns
+        ayaml::Value::String(pattern) => vec![pattern.clone()],
+        ayaml::Value::Sequence(patterns) => patterns
             .iter()
-            .filter_map(yaml_serde::Value::as_str)
+            .filter_map(ayaml::Value::as_str)
             .map(str::to_string)
             .collect(),
         _ => return Ok(None),

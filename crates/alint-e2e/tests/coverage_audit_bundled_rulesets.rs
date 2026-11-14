@@ -26,7 +26,7 @@ struct ScenarioConfig {
     #[serde(default)]
     extends: Vec<ExtendsEntry>,
     #[serde(default)]
-    rules: Vec<yaml_serde::Value>,
+    rules: Vec<ayaml::Value>,
 }
 
 fn parse_policy_test(path: &Path, yaml: &str) -> PolicyTest {
@@ -57,7 +57,7 @@ fn config_body(path: &Path, test: &PolicyTest) -> String {
 
 fn parse_scenario_config(path: &Path, test: &PolicyTest) -> ScenarioConfig {
     let config = config_body(path, test);
-    yaml_serde::from_str(&config)
+    ayaml::compat::from_str(&config)
         .unwrap_or_else(|error| panic!("parse config from {}: {error}", path.display()))
 }
 
@@ -296,7 +296,7 @@ fn every_bundle_requirement_value_reaches_production_compatibility_metadata() {
     for (name, revision) in alint_dsl::bundled::catalog() {
         let spec = format!("{name}@{revision}");
         let body = alint_dsl::bundled::resolve(&spec).expect("catalog entry resolves");
-        let raw: alint_core::Config = yaml_serde::from_str(body)
+        let raw: alint_core::Config = ayaml::compat::from_str(body)
             .unwrap_or_else(|error| panic!("parse bundled ruleset {spec}: {error}"));
         let expected_requirement = raw.requires.map(|requirements| requirements.alint);
 

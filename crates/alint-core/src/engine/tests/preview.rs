@@ -932,7 +932,7 @@ fn a_path_selection_read_from_the_environment_is_sensitive() {
     }
     let entry = |kind: &str, field: Option<&str>| {
         let mut spec: crate::RuleSpec =
-            yaml_serde::from_str(&format!("id: r\nkind: {kind}\nlevel: error\n")).unwrap();
+            ayaml::compat::from_str(&format!("id: r\nkind: {kind}\nlevel: error\n")).unwrap();
         spec.set_sensitive_fields(field.map(str::to_string).into_iter().collect());
         RuleEntry::new(stub("r", "**/*.txt")).with_spec(std::sync::Arc::new(spec))
     };

@@ -366,8 +366,8 @@ pub fn render_path_argv(template: &str, t: &PathTokens) -> String {
 /// through unchanged. Used by nested-rule specs (e.g. `for_each_dir`) so that
 /// the `{dir}` in a nested rule's `paths`, `pattern`, or `partner` field
 /// resolves to the iterated entry's path at rule-build time.
-pub fn render_mapping(m: yaml_serde::Mapping, tokens: &PathTokens) -> yaml_serde::Mapping {
-    let mut out = yaml_serde::Mapping::with_capacity(m.len());
+pub fn render_mapping(m: ayaml::Mapping, tokens: &PathTokens) -> ayaml::Mapping {
+    let mut out = ayaml::Mapping::with_capacity(m.len());
     for (k, v) in m {
         out.insert(k, render_value(v, tokens));
     }
@@ -375,8 +375,8 @@ pub fn render_mapping(m: yaml_serde::Mapping, tokens: &PathTokens) -> yaml_serde
 }
 
 /// Recursive mate to [`render_mapping`] for arbitrary YAML values.
-pub fn render_value(v: yaml_serde::Value, tokens: &PathTokens) -> yaml_serde::Value {
-    use yaml_serde::Value;
+pub fn render_value(v: ayaml::Value, tokens: &PathTokens) -> ayaml::Value {
+    use ayaml::Value;
     match v {
         Value::String(s) => Value::String(render_path(&s, tokens)),
         Value::Sequence(seq) => {
@@ -517,11 +517,7 @@ nested_glob_options_table! {
 /// `dir_contains` `select: "{path}"` as the literal `app/[[]slug[]]`, not a
 /// character class that matches `app/s`.
 #[must_use]
-pub fn render_nested_options(
-    kind: &str,
-    m: yaml_serde::Mapping,
-    tokens: &PathTokens,
-) -> yaml_serde::Mapping {
+pub fn render_nested_options(kind: &str, m: ayaml::Mapping, tokens: &PathTokens) -> ayaml::Mapping {
     render_options(kind, m, tokens, false)
 }
 
@@ -529,17 +525,17 @@ pub fn render_nested_options(
 /// `paths:` (a nested spec inside a nested spec list) as globs.
 fn render_options(
     kind: &str,
-    m: yaml_serde::Mapping,
+    m: ayaml::Mapping,
     tokens: &PathTokens,
     with_paths: bool,
-) -> yaml_serde::Mapping {
+) -> ayaml::Mapping {
     const PATHS: &[&str] = &["paths", "paths.include", "paths.exclude"];
     let globs = nested_glob_options(kind);
     let spec_list = NESTED_SPEC_LISTS
         .iter()
         .find(|(kinds, _)| kinds.contains(&kind))
         .map(|(_, key)| *key);
-    let mut out = yaml_serde::Mapping::with_capacity(m.len());
+    let mut out = ayaml::Mapping::with_capacity(m.len());
     for (k, v) in m {
         let key = k.as_str().unwrap_or_default().to_string();
         let v = if spec_list == Some(key.as_str()) {
@@ -556,13 +552,8 @@ fn render_options(
 
 /// Render `v`, found at dotted key path `at`, glob-escaping where `at` is one
 /// of `globs`.
-fn render_keyed(
-    v: yaml_serde::Value,
-    at: &str,
-    globs: &[&str],
-    tokens: &PathTokens,
-) -> yaml_serde::Value {
-    use yaml_serde::Value;
+fn render_keyed(v: ayaml::Value, at: &str, globs: &[&str], tokens: &PathTokens) -> ayaml::Value {
+    use ayaml::Value;
     match v {
         Value::String(s) if globs.contains(&at) => Value::String(match s.strip_prefix('!') {
             Some(rest) => format!("!{}", render_path_glob(rest, tokens)),
@@ -591,8 +582,8 @@ fn render_keyed(
 
 /// Render a list of nested rule specs, each for its own `kind` (its `paths:`
 /// as globs too).
-fn render_nested_spec_list(v: yaml_serde::Value, tokens: &PathTokens) -> yaml_serde::Value {
-    use yaml_serde::Value;
+fn render_nested_spec_list(v: ayaml::Value, tokens: &PathTokens) -> ayaml::Value {
+    use ayaml::Value;
     let Value::Sequence(seq) = v else {
         return render_value(v, tokens);
     };
@@ -976,11 +967,11 @@ mod tests {
         assert!(matches("pkgs/a\\b", "{path}/x", "pkgs/a\\b/x"));
     }
 
-    fn yaml(s: &str) -> yaml_serde::Mapping {
-        yaml_serde::from_str(s).unwrap()
+    fn yaml(s: &str) -> ayaml::Mapping {
+        ayaml::compat::from_str(s).unwrap()
     }
 
-    fn get<'a>(m: &'a yaml_serde::Mapping, path: &[&str]) -> &'a yaml_serde::Value {
+    fn get<'a>(m: &'a ayaml::Mapping, path: &[&str]) -> &'a ayaml::Value {
         let mut v = m.get(path[0]).unwrap();
         for k in &path[1..] {
             v = match k.parse::<usize>() {

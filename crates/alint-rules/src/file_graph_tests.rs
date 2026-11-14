@@ -5,7 +5,7 @@ use alint_core::{FileEntry, FileIndex, Format};
 fn require_spec_error_names_accepted_forms_not_internal_enum() {
     // A value that is neither a mode name nor a map is rejected with a
     // message naming the accepted forms, not the internal untagged enum.
-    let err = yaml_serde::from_str::<RequireSpec>("42").unwrap_err();
+    let err = ayaml::compat::from_str::<RequireSpec>("42").unwrap_err();
     assert!(
         err.to_string().contains("a mode name"),
         "expected a friendly message, got: {err}"

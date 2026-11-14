@@ -29,7 +29,7 @@ struct Status {
 /// `require:` blocks contribute too — `for_each_dir` and friends
 /// might wrap a `file_exists` whose pass/fail behaviour we want
 /// counted.
-fn rules_in_scenario(scenario: &yaml_serde::Value) -> Vec<(String, String)> {
+fn rules_in_scenario(scenario: &ayaml::Value) -> Vec<(String, String)> {
     let mut out = Vec::new();
     let Some(given) = scenario.get("given") else {
         return out;
@@ -37,21 +37,21 @@ fn rules_in_scenario(scenario: &yaml_serde::Value) -> Vec<(String, String)> {
     let Some(config) = given.get("config").and_then(|v| v.as_str()) else {
         return out;
     };
-    let Ok(parsed) = yaml_serde::from_str::<yaml_serde::Value>(config) else {
+    let Ok(parsed) = ayaml::compat::from_str::<ayaml::Value>(config) else {
         return out;
     };
     walk_rules(&parsed, &mut out);
     out
 }
 
-fn walk_rules(v: &yaml_serde::Value, out: &mut Vec<(String, String)>) {
+fn walk_rules(v: &ayaml::Value, out: &mut Vec<(String, String)>) {
     match v {
-        yaml_serde::Value::Mapping(m) => {
+        ayaml::Value::Mapping(m) => {
             let id = m
-                .get(yaml_serde::Value::String("id".into()))
+                .get(ayaml::Value::String("id".into()))
                 .and_then(|v| v.as_str());
             let kind = m
-                .get(yaml_serde::Value::String("kind".into()))
+                .get(ayaml::Value::String("kind".into()))
                 .and_then(|v| v.as_str());
             if let (Some(id), Some(kind)) = (id, kind) {
                 out.push((id.to_string(), kind.to_string()));
@@ -60,7 +60,7 @@ fn walk_rules(v: &yaml_serde::Value, out: &mut Vec<(String, String)>) {
                 walk_rules(child, out);
             }
         }
-        yaml_serde::Value::Sequence(seq) => {
+        ayaml::Value::Sequence(seq) => {
             for child in seq {
                 walk_rules(child, out);
             }
@@ -71,7 +71,7 @@ fn walk_rules(v: &yaml_serde::Value, out: &mut Vec<(String, String)>) {
 
 /// Collect every `rule:` id from `expect[*].violations[*]`. A
 /// rule whose id appears here was firing in this scenario.
-fn fired_rule_ids(scenario: &yaml_serde::Value) -> HashSet<String> {
+fn fired_rule_ids(scenario: &ayaml::Value) -> HashSet<String> {
     let mut out = HashSet::new();
     let Some(expect) = scenario.get("expect") else {
         return out;
@@ -80,11 +80,11 @@ fn fired_rule_ids(scenario: &yaml_serde::Value) -> HashSet<String> {
     out
 }
 
-fn walk_violations(v: &yaml_serde::Value, out: &mut HashSet<String>) {
+fn walk_violations(v: &ayaml::Value, out: &mut HashSet<String>) {
     match v {
-        yaml_serde::Value::Mapping(m) => {
+        ayaml::Value::Mapping(m) => {
             if let Some(id) = m
-                .get(yaml_serde::Value::String("rule".into()))
+                .get(ayaml::Value::String("rule".into()))
                 .and_then(|v| v.as_str())
             {
                 out.insert(id.to_string());
@@ -93,7 +93,7 @@ fn walk_violations(v: &yaml_serde::Value, out: &mut HashSet<String>) {
                 walk_violations(child, out);
             }
         }
-        yaml_serde::Value::Sequence(seq) => {
+        ayaml::Value::Sequence(seq) => {
             for child in seq {
                 walk_violations(child, out);
             }
@@ -154,7 +154,7 @@ fn every_registered_rule_kind_has_pass_and_fail_scenarios() {
         let Ok(text) = std::fs::read_to_string(&path) else {
             continue;
         };
-        let Ok(scenario) = yaml_serde::from_str::<yaml_serde::Value>(&text) else {
+        let Ok(scenario) = ayaml::compat::from_str::<ayaml::Value>(&text) else {
             continue;
         };
         let rules = rules_in_scenario(&scenario);

@@ -1206,7 +1206,7 @@ fn rule_sources_cover_every_bundled_rule() {
             continue;
         }
         let source = std::fs::read_to_string(&entry).expect("read bundled ruleset");
-        let yaml: yaml_serde::Value = yaml_serde::from_str(&source).expect("parse");
+        let yaml: ayaml::Value = ayaml::compat::from_str(&source).expect("parse");
         let rules = yaml
             .get("rules")
             .and_then(|r| r.as_sequence())
@@ -1220,7 +1220,7 @@ fn rule_sources_cover_every_bundled_rule() {
         let split_ids: Vec<&str> = split.iter().map(|s| s.id.as_str()).collect();
         assert_eq!(ids, split_ids, "{}", entry.display());
         for (rule, s) in rules.iter().zip(&split) {
-            let parsed: Vec<yaml_serde::Value> = yaml_serde::from_str(&s.definition)
+            let parsed: Vec<ayaml::Value> = ayaml::compat::from_str(&s.definition)
                 .unwrap_or_else(|e| panic!("{} {}: {e}\n{}", entry.display(), s.id, s.definition));
             assert_eq!(parsed.first(), Some(rule), "{} {}", entry.display(), s.id);
             assert!(

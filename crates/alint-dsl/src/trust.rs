@@ -6,7 +6,7 @@
 //! expansion.
 
 use alint_core::{Capability, Error, FixTrustClass, KindCatalog, Result};
-use yaml_serde::Mapping;
+use ayaml::Mapping;
 
 use crate::{RawConfig, instance_vars, render_template_vars};
 
@@ -86,7 +86,7 @@ impl Provenance {
     pub(crate) fn read(mapping: &Mapping) -> Self {
         let marker = mapping
             .get(PROVENANCE_MARKER)
-            .and_then(yaml_serde::Value::as_mapping);
+            .and_then(ayaml::Value::as_mapping);
         let source = |class: SourceClass| {
             marker
                 .and_then(|m| m.get(class.key()))
@@ -107,7 +107,7 @@ impl Provenance {
 pub(crate) fn mark_provenance_in(mappings: &mut [Mapping], class: SourceClass, source: &str) {
     for mapping in mappings {
         let mut marker = match mapping.remove(PROVENANCE_MARKER) {
-            Some(yaml_serde::Value::Mapping(m)) => m,
+            Some(ayaml::Value::Mapping(m)) => m,
             _ => Mapping::new(),
         };
         if !marker.contains_key(class.key()) {
@@ -147,7 +147,7 @@ fn mark_field_sources_one(mapping: &mut Mapping, source: &str) {
         mark_field_sources_in(std::slice::from_mut(mapping), source);
         return;
     }
-    if let Some(yaml_serde::Value::Mapping(sources)) = mapping.get_mut(FIELD_SOURCES_MARKER) {
+    if let Some(ayaml::Value::Mapping(sources)) = mapping.get_mut(FIELD_SOURCES_MARKER) {
         for value in sources.values_mut() {
             if value.as_str() != Some(source) {
                 *value = source.into();
@@ -162,7 +162,7 @@ fn mark_provenance_one(mapping: &mut Mapping, class: SourceClass, source: &str) 
         .last()
         .is_some_and(|key| key.as_str() == Some(PROVENANCE_MARKER));
     if last_is_marker
-        && let Some(yaml_serde::Value::Mapping(marker)) = mapping.get_mut(PROVENANCE_MARKER)
+        && let Some(ayaml::Value::Mapping(marker)) = mapping.get_mut(PROVENANCE_MARKER)
     {
         if !marker.contains_key(class.key()) {
             marker.insert(class.key().into(), source.into());
@@ -177,12 +177,12 @@ fn mark_provenance_one(mapping: &mut Mapping, class: SourceClass, source: &str) 
 pub(crate) fn union_provenance(existing: &mut Mapping, incoming: &Mapping) {
     let Some(theirs) = incoming
         .get(PROVENANCE_MARKER)
-        .and_then(yaml_serde::Value::as_mapping)
+        .and_then(ayaml::Value::as_mapping)
     else {
         return;
     };
     let mut ours = match existing.remove(PROVENANCE_MARKER) {
-        Some(yaml_serde::Value::Mapping(m)) => m,
+        Some(ayaml::Value::Mapping(m)) => m,
         _ => Mapping::new(),
     };
     for (class, source) in theirs {
@@ -193,7 +193,7 @@ pub(crate) fn union_provenance(existing: &mut Mapping, incoming: &Mapping) {
     existing.insert(PROVENANCE_MARKER.into(), ours.into());
 }
 
-fn is_internal_field(key: &yaml_serde::Value) -> bool {
+fn is_internal_field(key: &ayaml::Value) -> bool {
     key.as_str()
         .is_some_and(|name| name.starts_with(INTERNAL_FIELD_PREFIX))
 }
@@ -201,7 +201,7 @@ fn is_internal_field(key: &yaml_serde::Value) -> bool {
 fn field_sources(mapping: &Mapping) -> Option<&Mapping> {
     mapping
         .get(FIELD_SOURCES_MARKER)
-        .and_then(yaml_serde::Value::as_mapping)
+        .and_then(ayaml::Value::as_mapping)
 }
 
 /// Attribute every current user-authored field in each mapping to `source`.
@@ -265,7 +265,7 @@ pub(crate) fn merge_field_sources(existing: &mut Mapping, incoming: &Mapping) {
 fn sensitive_fields(mapping: &Mapping) -> Option<&Mapping> {
     mapping
         .get(SENSITIVE_FIELDS_MARKER)
-        .and_then(yaml_serde::Value::as_mapping)
+        .and_then(ayaml::Value::as_mapping)
 }
 
 /// Whether `mapping`'s `field` took its value from the environment.
@@ -273,7 +273,7 @@ pub(crate) fn field_reads_environment(mapping: &Mapping, field: &str) -> bool {
     sensitive_fields(mapping).is_some_and(|fields| fields.contains_key(field))
 }
 
-fn add_sensitive_field(mapping: &mut Mapping, field: &yaml_serde::Value) {
+fn add_sensitive_field(mapping: &mut Mapping, field: &ayaml::Value) {
     let mut fields = mapping
         .remove(SENSITIVE_FIELDS_MARKER)
         .and_then(|value| value.as_mapping().cloned())
@@ -341,7 +341,7 @@ pub(crate) fn mark_sensitive_conditions(
         let sensitive = match top_level {
             "when" | "when_iter" => mapping
                 .get(top_level)
-                .and_then(yaml_serde::Value::as_str)
+                .and_then(ayaml::Value::as_str)
                 .is_some_and(|source| when_reads_sensitive_input(source, env_vars)),
             "require" => mapping
                 .get("require")
@@ -368,7 +368,7 @@ fn when_reads_sensitive_input(
 }
 
 fn nested_when_reads_sensitive_input(
-    value: &yaml_serde::Value,
+    value: &ayaml::Value,
     env_vars: &std::collections::HashMap<String, String>,
 ) -> bool {
     let Some(sequence) = value.as_sequence() else {
@@ -381,7 +381,7 @@ fn nested_when_reads_sensitive_input(
         ["when", "when_iter"].iter().any(|field| {
             mapping
                 .get(*field)
-                .and_then(yaml_serde::Value::as_str)
+                .and_then(ayaml::Value::as_str)
                 .is_some_and(|source| when_reads_sensitive_input(source, env_vars))
         }) || mapping
             .get("require")
@@ -403,7 +403,7 @@ pub(crate) fn masked_rule_mappings(mapping: &Mapping) -> Option<Vec<Mapping>> {
         .collect();
     let sensitive = mapping
         .get("sensitive")
-        .and_then(yaml_serde::Value::as_bool)
+        .and_then(ayaml::Value::as_bool)
         .unwrap_or(false);
     if !sensitive && environment_fields.is_empty() {
         return None;
@@ -451,18 +451,18 @@ pub(crate) fn configured_field_source<'a>(mapping: &'a Mapping, field: &str) -> 
     let top_level = field.split('.').next().unwrap_or(field);
     field_sources(mapping)
         .and_then(|sources| sources.get(top_level))
-        .and_then(yaml_serde::Value::as_str)
+        .and_then(ayaml::Value::as_str)
 }
 
-fn visit_strings(value: &yaml_serde::Value, visit: &mut impl FnMut(&str)) {
+fn visit_strings(value: &ayaml::Value, visit: &mut impl FnMut(&str)) {
     match value {
-        yaml_serde::Value::String(text) => visit(text),
-        yaml_serde::Value::Sequence(values) => {
+        ayaml::Value::String(text) => visit(text),
+        ayaml::Value::Sequence(values) => {
             for value in values {
                 visit_strings(value, visit);
             }
         }
-        yaml_serde::Value::Mapping(mapping) => {
+        ayaml::Value::Mapping(mapping) => {
             for value in mapping.values() {
                 visit_strings(value, visit);
             }
@@ -742,11 +742,11 @@ pub(crate) fn reject_untrusted_env_instance_vars(
     templates_by_id: &std::collections::HashMap<String, &Mapping>,
     id: &str,
 ) -> Result<()> {
-    fn strings(v: &yaml_serde::Value, f: &mut impl FnMut(&str)) {
+    fn strings(v: &ayaml::Value, f: &mut impl FnMut(&str)) {
         match v {
-            yaml_serde::Value::String(s) => f(s),
-            yaml_serde::Value::Sequence(seq) => seq.iter().for_each(|v| strings(v, f)),
-            yaml_serde::Value::Mapping(m) => m.values().for_each(|v| strings(v, f)),
+            ayaml::Value::String(s) => f(s),
+            ayaml::Value::Sequence(seq) => seq.iter().for_each(|v| strings(v, f)),
+            ayaml::Value::Mapping(m) => m.values().for_each(|v| strings(v, f)),
             _ => {}
         }
     }
@@ -824,10 +824,10 @@ fn render_placeholder_whens(
         }
     }
     if let Some(require) = rule.get("require").and_then(|v| v.as_sequence()) {
-        let nested: Vec<yaml_serde::Value> = require
+        let nested: Vec<ayaml::Value> = require
             .iter()
             .map(|n| {
-                n.as_mapping().map_or(yaml_serde::Value::Null, |m| {
+                n.as_mapping().map_or(ayaml::Value::Null, |m| {
                     render_placeholder_whens(m, vars).into()
                 })
             })
@@ -845,13 +845,13 @@ fn find_assembled_env_ref(
     key: &str,
 ) -> Option<String> {
     fn walk(
-        v: &yaml_serde::Value,
+        v: &ayaml::Value,
         vars: &std::collections::HashMap<String, String>,
         key: &str,
         path: &str,
     ) -> Option<String> {
         match v {
-            yaml_serde::Value::Mapping(m) => m.iter().find_map(|(k, v)| {
+            ayaml::Value::Mapping(m) => m.iter().find_map(|(k, v)| {
                 let name = k.as_str().unwrap_or_default();
                 let child = if path.is_empty() {
                     name.to_string()
@@ -867,14 +867,14 @@ fn find_assembled_env_ref(
                 }
                 walk(v, vars, key, &child)
             }),
-            yaml_serde::Value::Sequence(seq) => seq
+            ayaml::Value::Sequence(seq) => seq
                 .iter()
                 .enumerate()
                 .find_map(|(i, v)| walk(v, vars, key, &format!("{path}[{i}]"))),
             _ => None,
         }
     }
-    walk(&yaml_serde::Value::Mapping(m.clone()), vars, key, "")
+    walk(&ayaml::Value::Mapping(m.clone()), vars, key, "")
 }
 
 /// One-release transition list for spawning rule kinds.
@@ -1068,8 +1068,8 @@ pub(crate) fn demote_content_fixers_in(rules: &mut [Mapping], catalog: Option<Ki
 pub(crate) fn mark_untrusted_fix_sources_in(mappings: &mut [Mapping]) {
     for mapping in mappings {
         mapping.insert(
-            yaml_serde::Value::from(UNTRUSTED_FIX_SOURCE_MARKER),
-            yaml_serde::Value::Bool(true),
+            ayaml::Value::from(UNTRUSTED_FIX_SOURCE_MARKER),
+            ayaml::Value::Bool(true),
         );
     }
 }
@@ -1077,7 +1077,7 @@ pub(crate) fn mark_untrusted_fix_sources_in(mappings: &mut [Mapping]) {
 pub(crate) fn has_untrusted_fix_source(mapping: &Mapping) -> bool {
     mapping
         .get(UNTRUSTED_FIX_SOURCE_MARKER)
-        .and_then(yaml_serde::Value::as_bool)
+        .and_then(ayaml::Value::as_bool)
         .unwrap_or(false)
 }
 
@@ -1117,17 +1117,14 @@ pub(crate) fn merge_mapping_fields(existing: &mut Mapping, incoming: Mapping) {
     }
     if untrusted_fix_source {
         existing.insert(
-            yaml_serde::Value::from(UNTRUSTED_FIX_SOURCE_MARKER),
-            yaml_serde::Value::Bool(true),
+            ayaml::Value::from(UNTRUSTED_FIX_SOURCE_MARKER),
+            ayaml::Value::Bool(true),
         );
     }
 }
 
 pub(crate) fn demote_content_fixers_in_rule(rule: &mut Mapping, catalog: Option<KindCatalog<'_>>) {
-    if let Some(fix) = rule
-        .get_mut("fix")
-        .and_then(yaml_serde::Value::as_mapping_mut)
-    {
+    if let Some(fix) = rule.get_mut("fix").and_then(ayaml::Value::as_mapping_mut) {
         for (op, args) in fix.iter_mut() {
             let is_content = op.as_str().is_some_and(|op| {
                 catalog
@@ -1145,14 +1142,14 @@ pub(crate) fn demote_content_fixers_in_rule(rule: &mut Mapping, catalog: Option<
             // to `suggestion` already stays there. A demote is one-directional.
             let already_stricter = args_map
                 .get("applicability")
-                .and_then(yaml_serde::Value::as_str)
+                .and_then(ayaml::Value::as_str)
                 .is_some_and(|a| {
                     a.eq_ignore_ascii_case("suggestion") || a.eq_ignore_ascii_case("never")
                 });
             if !already_stricter {
                 args_map.insert(
-                    yaml_serde::Value::from("applicability"),
-                    yaml_serde::Value::from("suggestion"),
+                    ayaml::Value::from("applicability"),
+                    ayaml::Value::from("suggestion"),
                 );
             }
         }
@@ -1165,7 +1162,7 @@ pub(crate) fn demote_content_fixers_in_rule(rule: &mut Mapping, catalog: Option<
     // mapping must not be treated as a nested rule).
     if let Some(require) = rule
         .get_mut("require")
-        .and_then(yaml_serde::Value::as_sequence_mut)
+        .and_then(ayaml::Value::as_sequence_mut)
     {
         for nested in require {
             if let Some(nested_map) = nested.as_mapping_mut() {
@@ -1232,7 +1229,7 @@ pub(crate) fn find_spawning_kind<'a>(
         .and_then(|v| v.as_sequence())
         .into_iter()
         .flatten()
-        .filter_map(yaml_serde::Value::as_mapping)
+        .filter_map(ayaml::Value::as_mapping)
         .find_map(|nested| find_spawning_kind(nested, catalog))
 }
 
@@ -1240,7 +1237,7 @@ pub(crate) fn find_spawning_kind<'a>(
 /// `fix.<op>.applicability`, at any `require:` depth) whose value contains a
 /// `{{` placeholder, named for the error message.
 pub(crate) fn find_template_placeholder_in_guarded_field(rule: &Mapping) -> Option<String> {
-    let has_placeholder = |v: &yaml_serde::Value| v.as_str().is_some_and(|s| s.contains("{{"));
+    let has_placeholder = |v: &ayaml::Value| v.as_str().is_some_and(|s| s.contains("{{"));
     if rule.get("kind").is_some_and(has_placeholder) {
         return Some("kind".to_string());
     }
@@ -1260,7 +1257,7 @@ pub(crate) fn find_template_placeholder_in_guarded_field(rule: &Mapping) -> Opti
         .and_then(|v| v.as_sequence())
         .into_iter()
         .flatten()
-        .filter_map(yaml_serde::Value::as_mapping)
+        .filter_map(ayaml::Value::as_mapping)
         .find_map(find_template_placeholder_in_guarded_field)
 }
 
@@ -1269,15 +1266,12 @@ pub(crate) fn find_template_placeholder_in_guarded_field(rule: &Mapping) -> Opti
 /// effective rule with untrusted provenance: such a rule may never carry a
 /// promotion, whoever authored the fix block it acquired.
 pub(crate) fn strip_fix_promotions_in_rule(rule: &mut Mapping) {
-    if let Some(fix) = rule
-        .get_mut("fix")
-        .and_then(yaml_serde::Value::as_mapping_mut)
-    {
+    if let Some(fix) = rule.get_mut("fix").and_then(ayaml::Value::as_mapping_mut) {
         for (_op, args) in fix.iter_mut() {
             if let Some(args_map) = args.as_mapping_mut() {
                 let promotes = args_map
                     .get("applicability")
-                    .and_then(yaml_serde::Value::as_str)
+                    .and_then(ayaml::Value::as_str)
                     .is_some_and(|a| a.eq_ignore_ascii_case("safe"));
                 if promotes {
                     args_map.remove("applicability");
@@ -1287,7 +1281,7 @@ pub(crate) fn strip_fix_promotions_in_rule(rule: &mut Mapping) {
     }
     if let Some(require) = rule
         .get_mut("require")
-        .and_then(yaml_serde::Value::as_sequence_mut)
+        .and_then(ayaml::Value::as_sequence_mut)
     {
         for nested in require {
             if let Some(nested_map) = nested.as_mapping_mut() {
@@ -1526,7 +1520,7 @@ pub(crate) fn reject_env_expansion_in(
     source: &str,
 ) -> Result<()> {
     fn offending(m: &Mapping) -> Option<String> {
-        let has_env = |v: &yaml_serde::Value| v.as_str().is_some_and(|s| s.contains("${"));
+        let has_env = |v: &ayaml::Value| v.as_str().is_some_and(|s| s.contains("${"));
         if m.get("since").is_some_and(has_env) {
             return Some("since".to_string());
         }
@@ -1541,7 +1535,7 @@ pub(crate) fn reject_env_expansion_in(
             .and_then(|v| v.as_sequence())
             .into_iter()
             .flatten()
-            .filter_map(yaml_serde::Value::as_mapping)
+            .filter_map(ayaml::Value::as_mapping)
             .find_map(offending)
     }
     for m in rules.iter().chain(templates) {
@@ -1588,7 +1582,7 @@ pub(crate) fn reject_ambiguous_yaml_in(raw: &RawConfig, source: &str) -> Result<
 }
 
 fn find_ambiguous_yaml_in_mapping(m: &Mapping, path: &mut String) -> Option<String> {
-    use yaml_serde::Value;
+    use ayaml::Value;
     for (k, v) in m {
         let key = match k {
             Value::String(s) if s == "<<" => {
@@ -1615,9 +1609,9 @@ fn find_ambiguous_yaml_in_mapping(m: &Mapping, path: &mut String) -> Option<Stri
     None
 }
 
-fn find_ambiguous_yaml_in_value(v: &yaml_serde::Value, path: &mut String) -> Option<String> {
+fn find_ambiguous_yaml_in_value(v: &ayaml::Value, path: &mut String) -> Option<String> {
+    use ayaml::Value;
     use std::fmt::Write as _;
-    use yaml_serde::Value;
     match v {
         Value::Tagged(t) => Some(format!("`{path}` has the YAML tag `{}`", t.tag)),
         Value::Mapping(m) => find_ambiguous_yaml_in_mapping(m, path),
