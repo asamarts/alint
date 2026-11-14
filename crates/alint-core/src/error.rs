@@ -10,8 +10,8 @@ impl From<ignore::Error> for Error {
     }
 }
 
-impl From<yaml_serde::Error> for Error {
-    fn from(e: yaml_serde::Error) -> Self {
+impl From<ayaml::Error> for Error {
+    fn from(e: ayaml::Error) -> Self {
         Self::Yaml(e)
     }
 }
@@ -40,7 +40,7 @@ pub enum Error {
     },
 
     #[error("YAML parse error: {0}")]
-    Yaml(yaml_serde::Error),
+    Yaml(ayaml::Error),
 
     #[error("unknown rule kind {0:?}")]
     UnknownRuleKind(String),
@@ -149,10 +149,10 @@ mod tests {
 
     #[test]
     fn yaml_error_propagates_via_from_impl() {
-        // The `#[from] yaml_serde::Error` derive lets `?` lift
+        // The `#[from] ayaml::Error` derive lets `?` lift
         // a YAML parse failure into our Error type without
         // boilerplate. Sanity-check the impl is wired.
-        let parse: std::result::Result<i32, _> = yaml_serde::from_str("not: yaml: [");
+        let parse: std::result::Result<i32, _> = ayaml::compat::from_str("not: yaml: [");
         let yaml_err = parse.unwrap_err();
         let our_err: Error = yaml_err.into();
         assert!(matches!(our_err, Error::Yaml(_)));

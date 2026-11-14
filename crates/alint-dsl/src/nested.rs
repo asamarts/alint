@@ -15,7 +15,7 @@ use alint_core::{
     ConfigCompatibility, ConfigSourceClass, Error, KindCatalog, KindMeta, PathsSupport, Result,
     RunningVersion, SelectorType,
 };
-use yaml_serde::{Mapping, Value};
+use ayaml::{Mapping, Value};
 
 use crate::{DEFAULT_CONFIG_NAMES, RawConfig};
 
@@ -334,10 +334,7 @@ fn nested_config_rules(
         let mut marker = Mapping::new();
         marker.insert("prefix".into(), dir_prefix.clone().into());
         marker.insert("source".into(), source.into());
-        rule.insert(
-            NESTED_SCOPE_MARKER.into(),
-            yaml_serde::Value::Mapping(marker),
-        );
+        rule.insert(NESTED_SCOPE_MARKER.into(), ayaml::Value::Mapping(marker));
         out.push(rule);
     }
     Ok((out, compatibility))
@@ -616,24 +613,20 @@ fn scope_value_in(value: &str, prefix: &str, in_require: bool) -> Result<String>
 
 /// [`scope_paths_value`] with the `require:`-block token rule applied to every
 /// string in the value.
-fn scope_paths_value_in(
-    value: &mut yaml_serde::Value,
-    prefix: &str,
-    in_require: bool,
-) -> Result<()> {
+fn scope_paths_value_in(value: &mut ayaml::Value, prefix: &str, in_require: bool) -> Result<()> {
     if !in_require {
         return scope_paths_value(value, prefix);
     }
     match value {
-        yaml_serde::Value::String(s) => *s = scope_value_in(s, prefix, true)?,
-        yaml_serde::Value::Sequence(seq) => {
+        ayaml::Value::String(s) => *s = scope_value_in(s, prefix, true)?,
+        ayaml::Value::Sequence(seq) => {
             for item in seq {
-                if let yaml_serde::Value::String(s) = item {
+                if let ayaml::Value::String(s) = item {
                     *s = scope_value_in(s, prefix, true)?;
                 }
             }
         }
-        yaml_serde::Value::Mapping(m) => {
+        ayaml::Value::Mapping(m) => {
             for key in &["include", "exclude"] {
                 if let Some(inner) = m.get_mut(*key) {
                     scope_paths_value_in(inner, prefix, true)?;
@@ -652,15 +645,15 @@ fn scope_paths_value_in(
 ///
 /// Absolute paths and `..`-prefixed globs are rejected; they'd
 /// escape the subtree the nested config is supposed to confine.
-fn scope_paths_value(value: &mut yaml_serde::Value, prefix: &str) -> Result<()> {
+fn scope_paths_value(value: &mut ayaml::Value, prefix: &str) -> Result<()> {
     match value {
-        yaml_serde::Value::String(s) => {
+        ayaml::Value::String(s) => {
             *s = scope_glob(s, prefix)?;
         }
-        yaml_serde::Value::Sequence(seq) => {
+        ayaml::Value::Sequence(seq) => {
             for item in seq {
                 if let Some(s) = item.as_str() {
-                    *item = yaml_serde::Value::String(scope_glob(s, prefix)?);
+                    *item = ayaml::Value::String(scope_glob(s, prefix)?);
                 } else {
                     return Err(Error::Other(
                         "path array contains a non-string entry; nested scoping only \
@@ -670,7 +663,7 @@ fn scope_paths_value(value: &mut yaml_serde::Value, prefix: &str) -> Result<()> 
                 }
             }
         }
-        yaml_serde::Value::Mapping(m) => {
+        ayaml::Value::Mapping(m) => {
             // include / exclude form — prefix each list in place.
             for key in &["include", "exclude"] {
                 if let Some(inner) = m.get_mut(*key) {

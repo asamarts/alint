@@ -58,6 +58,7 @@ dependencies = [
  "alint-testkit",
  "anstream",
  "anyhow",
+ "ayaml",
  "clap",
  "indicatif",
  "jsonschema",
@@ -72,7 +73,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "trycmd",
- "yaml_serde",
 ]
 
 [[package]]
@@ -97,6 +97,7 @@ name = "alint-core"
 version = "0.22.1"
 dependencies = [
  "adotenv",
+ "ayaml",
  "encoding_rs",
  "globset",
  "hcl-rs",
@@ -123,7 +124,6 @@ dependencies = [
  "toml",
  "toml_edit",
  "tracing",
- "yaml_serde",
 ]
 
 [[package]]
@@ -132,6 +132,7 @@ version = "0.22.1"
 dependencies = [
  "alint-core",
  "alint-rules",
+ "ayaml",
  "directories",
  "jsonschema",
  "serde",
@@ -141,7 +142,6 @@ dependencies = [
  "thiserror 2.0.21",
  "tracing",
  "ureq",
- "yaml_serde",
 ]
 
 [[package]]
@@ -153,6 +153,7 @@ dependencies = [
  "alint-output",
  "alint-rules",
  "alint-testkit",
+ "ayaml",
  "dir-test",
  "jsonschema",
  "proptest",
@@ -161,7 +162,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "toml",
- "yaml_serde",
 ]
 
 [[package]]
@@ -198,6 +198,7 @@ name = "alint-rules"
 version = "0.22.1"
 dependencies = [
  "alint-core",
+ "ayaml",
  "content_inspector",
  "globset",
  "jsonschema",
@@ -216,7 +217,6 @@ dependencies = [
  "tempfile",
  "toml",
  "unicode-general-category",
- "yaml_serde",
 ]
 
 [[package]]
@@ -227,6 +227,7 @@ dependencies = [
  "alint-dsl",
  "alint-output",
  "alint-rules",
+ "ayaml",
  "jsonschema",
  "proptest",
  "regex",
@@ -235,7 +236,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
- "yaml_serde",
 ]
 
 [[package]]
@@ -363,6 +363,16 @@ name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
+
+[[package]]
+name = "ayaml"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c8fa4b10832a9ec125b53aa3c63f75914d52f3e96b49a4e4ecad96d0afc18dfa"
+dependencies = [
+ "indexmap",
+ "serde",
+]
 
 [[package]]
 name = "backtrace"
@@ -1484,9 +1494,9 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.14.0"
+version = "2.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d466e9454f08e4a911e14806c24e16fba1b4c121d1ea474396f396069cf949d9"
+checksum = "cc4e190f5d26ca7051642629da2c52fc03bde85a03197c99408dcd291734c855"
 dependencies = [
  "equivalent",
  "hashbrown 0.17.0",
@@ -1674,12 +1684,6 @@ dependencies = [
  "plain",
  "redox_syscall 0.7.4",
 ]
-
-[[package]]
-name = "libyaml-rs"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e126dda6f34391ab7b444f9922055facc83c07a910da3eb16f1e4d9c45dc777"
 
 [[package]]
 name = "linux-raw-sys"
@@ -3958,26 +3962,13 @@ dependencies = [
  "alint-rules",
  "alint-testkit",
  "anyhow",
+ "ayaml",
  "clap",
  "jsonschema",
  "regex",
  "serde",
  "serde_json",
  "tempfile",
- "yaml_serde",
-]
-
-[[package]]
-name = "yaml_serde"
-version = "0.10.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33b729a08a9a6be689bbad3e2bf8015926db54b6622cc89c3a5f7dc174b9e918"
-dependencies = [
- "indexmap",
- "itoa",
- "libyaml-rs",
- "ryu",
- "serde",
 ]
 
 [[package]]

@@ -275,7 +275,7 @@ fn skip_for_changed_returns_false_for_full_check() {
 
 /// A scope with `scope_filter: { has_ancestor: Cargo.toml }` over `**/*.rs`.
 fn ancestor_scope() -> Scope {
-    let spec: crate::RuleSpec = yaml_serde::from_str(
+    let spec: crate::RuleSpec = ayaml::compat::from_str(
             "id: a\nkind: x\nlevel: error\npaths: \"**/*.rs\"\nscope_filter:\n  has_ancestor: Cargo.toml\n",
         )
         .unwrap();
@@ -470,7 +470,7 @@ fn run_for_file_applies_explicit_sensitivity_before_returning() {
         scope: Scope::from_patterns(&["**/*.txt".to_string()]).unwrap(),
         prefix: b"MAGIC".to_vec(),
     });
-    let spec: crate::RuleSpec = yaml_serde::from_str(
+    let spec: crate::RuleSpec = ayaml::compat::from_str(
         "id: needs-magic\nkind: file_content_matches\npaths: \"**/*.txt\"\n\
              pattern: MAGIC\nsensitive: true\nlevel: error\n",
     )
@@ -503,7 +503,7 @@ fn explicit_sensitive_scope_covers_an_unindexed_editor_file() {
         scope: Scope::from_patterns(&["**/*.txt".to_string()]).unwrap(),
         prefix: b"MAGIC".to_vec(),
     });
-    let spec: crate::RuleSpec = yaml_serde::from_str(
+    let spec: crate::RuleSpec = ayaml::compat::from_str(
         "id: needs-magic\nkind: file_content_matches\npaths: \"**/*.txt\"\n\
              pattern: MAGIC\nsensitive: true\nlevel: error\n",
     )
@@ -901,7 +901,7 @@ fn an_unresolvable_changed_since_ref_that_may_be_secret_is_left_out_of_the_error
     ]);
     let index = crate::walk(root, &crate::WalkOptions::default()).unwrap();
     let error = |sensitive: &str, environment_fields: &[&str]| {
-        let mut spec: crate::RuleSpec = yaml_serde::from_str(&format!(
+        let mut spec: crate::RuleSpec = ayaml::compat::from_str(&format!(
             "id: scoped\nkind: nested_scope_fixture\npaths: '**/*.txt'\nscope_filter:\n  \
              changed_since: canary-missing-ref\n{sensitive}level: error\n"
         ))

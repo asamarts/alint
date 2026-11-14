@@ -470,11 +470,11 @@ fn bundled_ruleset_sizes(root: &Path) -> Result<BTreeMap<String, usize>> {
                     .replace('\\', "/");
                 let src = fs::read_to_string(&path)
                     .with_context(|| format!("read {}", path.display()))?;
-                let doc: yaml_serde::Value = yaml_serde::from_str(&src)
+                let doc: ayaml::Value = ayaml::compat::from_str(&src)
                     .with_context(|| format!("parse {} as YAML", path.display()))?;
                 let count = doc
                     .get("rules")
-                    .and_then(yaml_serde::Value::as_sequence)
+                    .and_then(ayaml::Value::as_sequence)
                     .map_or(0, Vec::len);
                 out.insert(rel, count);
             }

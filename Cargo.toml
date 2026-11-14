@@ -36,7 +36,7 @@ alint-testkit = { path = "crates/alint-testkit", version = "0.22.0" }
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-yaml_serde = "0.10.7"
+ayaml = { version = "=0.1.2", features = ["libyaml-compat"] }
 globset = "0.4"
 # 0.4.34: `walker::would_walk_skip` mirrors its linked-worktree exclude file.
 ignore = "0.4.34"

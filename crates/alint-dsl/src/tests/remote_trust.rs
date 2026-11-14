@@ -1175,7 +1175,7 @@ fn fused_extended_marking_matches_the_separate_passes() {
     use crate::trust::{
         SourceClass, mark_extended_source_in, mark_field_sources_in, mark_provenance_in,
     };
-    use yaml_serde::Mapping;
+    use ayaml::Mapping;
     let docs = [
         "id: a\nkind: file_exists\n",
         "id: a\nkind: file_exists\n__alint_internal_field_sources: {id: old, kind: old}\n__alint_internal_provenance: {extended: old}\n",
@@ -1191,10 +1191,10 @@ fn fused_extended_marking_matches_the_separate_passes() {
         &[SourceClass::Extended, SourceClass::Remote],
     ];
     // Serialized YAML compares key order too (Mapping equality does not).
-    let ordered = |m: &Mapping| yaml_serde::to_string(m).unwrap();
+    let ordered = |m: &Mapping| ayaml::to_string(m).unwrap();
     for doc in docs {
         for classes in class_sets {
-            let base: Mapping = yaml_serde::from_str(doc).unwrap();
+            let base: Mapping = ayaml::compat::from_str(doc).unwrap();
             let mut separate = vec![base.clone()];
             let mut fused = vec![base];
             // Two levels of an `extends:` chain, then the same source again.

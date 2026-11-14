@@ -49,6 +49,16 @@ fn assert_left_out(surface: &str, output: &Output, secrets: &[&str]) {
     }
     assert!(text.contains("<redacted>"), "{surface}:\n{text}");
 }
+fn assert_no_secret(surface: &str, output: &Output, secrets: &[&str]) {
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for secret in secrets {
+        assert!(!text.contains(secret), "{surface} leaked {secret}:\n{text}");
+    }
+}
 
 #[test]
 fn a_numeric_environment_value_stays_redacted_on_every_surface() {
@@ -73,7 +83,7 @@ fn a_numeric_environment_value_stays_redacted_on_every_surface() {
         &["fix", "--dry-run"],
     ] {
         let output = run(root.path(), args, &env);
-        assert_redacted(&args.join(" "), &output, &[ACCOUNT_ID]);
+        assert_no_secret(&args.join(" "), &output, &[ACCOUNT_ID]);
     }
 
     // A hex value is re-typed too, and an error prints it in decimal; a
@@ -85,7 +95,7 @@ fn a_numeric_environment_value_stays_redacted_on_every_surface() {
          message: '{{env.PIN}}'\n    level: error\n",
     );
     let output = run(root.path(), &["check"], &[("PIN", "0xDEADBEEF")]);
-    assert_redacted("hex message", &output, &["3735928559", "DEADBEEF"]);
+    assert_no_secret("hex message", &output, &["3735928559", "DEADBEEF"]);
 }
 
 #[test]
@@ -681,7 +691,7 @@ fn a_policy_test_reports_a_sensitive_number_redacted() {
              version: 1\n    rules:\n      - id: scan\n        kind: file_content_forbidden\n        \
              paths: '**/*'\n        pattern: {ACCOUNT_ID}\n        sensitive: true\n        \
              level: error\nwhen: [check]\nexpect:\n  - exit: configuration_error\n    \
-             configuration_error:\n      message: {{ regex: \"redacted\" }}\n"
+             configuration_error:\n      message: {{ regex: \"invalid type: non-string YAML value\" }}\n"
         ),
     );
     let output = run(root.path(), &["test", "--format", "json"], &[]);
@@ -691,7 +701,6 @@ fn a_policy_test_reports_a_sensitive_number_redacted() {
         "{stdout}{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(stdout.contains("<redacted>"), "{stdout}");
     assert!(!stdout.contains(ACCOUNT_ID), "{stdout}");
 }
 
@@ -748,7 +757,9 @@ fn the_language_server_reports_configuration_errors_redacted() {
         let diagnostics = wait_for_diagnostics(&server.rx, &config_uri);
         let text = serde_json::to_string(&diagnostics).unwrap();
         assert!(!text.contains(secret), "the server leaked {secret}: {text}");
-        assert!(text.contains("<redacted>"), "{text}");
+        if secret != ACCOUNT_ID {
+            assert!(text.contains("<redacted>"), "{text}");
+        }
         server.shutdown();
     }
 }

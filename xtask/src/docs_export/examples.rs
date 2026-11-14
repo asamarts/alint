@@ -161,8 +161,8 @@ fn validate_documented(
     if test.given.tree.is_none() {
         bail!("documented examples require inline `given.tree`");
     }
-    let config: yaml_serde::Value =
-        yaml_serde::from_str(config_text).context("parsing the documented example config")?;
+    let config: ayaml::Value =
+        ayaml::compat::from_str(config_text).context("parsing the documented example config")?;
 
     if has_remote_extends(&config) {
         bail!(
@@ -314,7 +314,7 @@ fn asserts_violations(test: &PolicyTest) -> bool {
 }
 
 /// The `kind:` of each top-level rule in a config's `rules:` list.
-fn config_rule_kinds(config: &yaml_serde::Value) -> Vec<String> {
+fn config_rule_kinds(config: &ayaml::Value) -> Vec<String> {
     config
         .get("rules")
         .and_then(|r| r.as_sequence())
@@ -328,15 +328,13 @@ fn config_rule_kinds(config: &yaml_serde::Value) -> Vec<String> {
 }
 
 /// A top-level `extends:` that resolves over the network (`http(s)://`).
-fn has_remote_extends(config: &yaml_serde::Value) -> bool {
+fn has_remote_extends(config: &ayaml::Value) -> bool {
     fn is_remote(s: &str) -> bool {
         s.starts_with("http://") || s.starts_with("https://")
     }
     match config.get("extends") {
-        Some(yaml_serde::Value::String(s)) => is_remote(s),
-        Some(yaml_serde::Value::Sequence(seq)) => {
-            seq.iter().any(|v| v.as_str().is_some_and(is_remote))
-        }
+        Some(ayaml::Value::String(s)) => is_remote(s),
+        Some(ayaml::Value::Sequence(seq)) => seq.iter().any(|v| v.as_str().is_some_and(is_remote)),
         _ => false,
     }
 }
@@ -767,7 +765,7 @@ mod tests {
 
     #[test]
     fn config_rule_kinds_lists_top_level_rules() {
-        let cfg = yaml_serde::from_str(
+        let cfg = ayaml::compat::from_str(
             "version: 1\nrules:\n  - id: a\n    kind: file_exists\n  - id: b\n    kind: dir_absent\n",
         )
         .unwrap();
@@ -776,17 +774,18 @@ mod tests {
 
     #[test]
     fn config_rule_kinds_empty_without_rules() {
-        let cfg = yaml_serde::from_str("version: 1\nextends: alint://bundled/x\n").unwrap();
+        let cfg = ayaml::compat::from_str("version: 1\nextends: alint://bundled/x\n").unwrap();
         assert_eq!(config_rule_kinds(&cfg), [] as [String; 0]);
     }
 
     #[test]
     fn has_remote_extends_detects_http() {
-        let remote = yaml_serde::from_str("extends: https://example.com/r.yml\n").unwrap();
+        let remote = ayaml::compat::from_str("extends: https://example.com/r.yml\n").unwrap();
         assert!(has_remote_extends(&remote));
-        let seq = yaml_serde::from_str("extends: [alint://bundled/x, http://h/r.yml]\n").unwrap();
+        let seq =
+            ayaml::compat::from_str("extends: [alint://bundled/x, http://h/r.yml]\n").unwrap();
         assert!(has_remote_extends(&seq));
-        let local = yaml_serde::from_str("extends: alint://bundled/x\n").unwrap();
+        let local = ayaml::compat::from_str("extends: alint://bundled/x\n").unwrap();
         assert!(!has_remote_extends(&local));
     }
 

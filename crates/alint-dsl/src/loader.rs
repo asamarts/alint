@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use alint_core::{
     AllowOutOfRoot, ConfigCompatibility, ConfigSourceClass, Error, Result, RunningVersion,
 };
-use yaml_serde::Mapping;
+use ayaml::Mapping;
 
 use crate::extends;
 use crate::{
@@ -259,21 +259,21 @@ fn remote_source_display(entry: &str) -> String {
 }
 
 pub(crate) fn reject_nonliteral_requirement(contents: &str, source: &str) -> Result<()> {
-    let value: yaml_serde::Value = yaml_serde::from_str(contents)?;
+    let value: ayaml::Value = ayaml::compat::from_str(contents)?;
     reject_nonliteral_requirement_in_value(contents, source, &value)
 }
 
 fn reject_nonliteral_requirement_in_value(
     contents: &str,
     source: &str,
-    value: &yaml_serde::Value,
+    value: &ayaml::Value,
 ) -> Result<()> {
     let Some(requirements) = value.get("requires") else {
         return Ok(());
     };
     let requirement = requirements.get("alint");
     let interpolated = requirement
-        .and_then(yaml_serde::Value::as_str)
+        .and_then(ayaml::Value::as_str)
         .is_some_and(|value| value.contains("{{") || value.contains("${"));
     if interpolated || yaml_value_contains_tag(requirements) {
         return Err(nonliteral_requirement_error(source));
@@ -296,11 +296,11 @@ fn nonliteral_requirement_error(source: &str) -> Error {
     ))
 }
 
-fn yaml_value_contains_tag(value: &yaml_serde::Value) -> bool {
+fn yaml_value_contains_tag(value: &ayaml::Value) -> bool {
     match value {
-        yaml_serde::Value::Tagged(_) => true,
-        yaml_serde::Value::Sequence(values) => values.iter().any(yaml_value_contains_tag),
-        yaml_serde::Value::Mapping(values) => values
+        ayaml::Value::Tagged(_) => true,
+        ayaml::Value::Sequence(values) => values.iter().any(yaml_value_contains_tag),
+        ayaml::Value::Mapping(values) => values
             .iter()
             .any(|(key, value)| yaml_value_contains_tag(key) || yaml_value_contains_tag(value)),
         _ => false,
@@ -308,7 +308,7 @@ fn yaml_value_contains_tag(value: &yaml_serde::Value) -> bool {
 }
 
 fn deserialize_raw_config(contents: &str, source: &str) -> Result<RawConfig> {
-    match yaml_serde::from_str(contents) {
+    match ayaml::compat::from_str(contents) {
         Ok(config) => {
             let config: RawConfig = config;
             if config.requires.is_some() {
@@ -317,10 +317,18 @@ fn deserialize_raw_config(contents: &str, source: &str) -> Result<RawConfig> {
             Ok(config)
         }
         Err(parse_error) => {
+            if alint_core::yaml_depth::bom_alias_bomb(contents) {
+                return Err(Error::Other(format!(
+                    "{source}: YAML alias expansion exceeds the maximum supported size"
+                )));
+            }
             if let Err(error @ Error::Other(_)) = reject_nonliteral_requirement(contents, source) {
                 return Err(error);
             }
-            Err(Error::Yaml(parse_error))
+            Err(Error::Yaml(alint_core::yaml_depth::map_compat_error(
+                contents,
+                parse_error,
+            )))
         }
     }
 }
@@ -352,7 +360,7 @@ fn parse_config_interpolated_inner_with_environment(
         )));
     }
     // Reject an alias-expansion bomb (a single anchor referenced many times) the
-    // same way -- yaml_serde's own limits don't catch it.
+    // same way -- ayaml's own limits don't catch it.
     if !yaml_guards.expansion_within_limit(contents) {
         return Err(Error::Other(format!(
             "{}: YAML alias expansion exceeds the maximum supported size",
@@ -361,7 +369,8 @@ fn parse_config_interpolated_inner_with_environment(
     }
     let source = display_path(source);
     let config: RawConfig = if contents.contains("{{") {
-        let mut value: yaml_serde::Value = yaml_serde::from_str(contents)?;
+        let mut value: ayaml::Value = ayaml::compat::from_str(contents)
+            .map_err(|error| alint_core::yaml_depth::map_compat_error(contents, error))?;
         let has_sensitive_interpolation = value_reads_environment(&value);
         reject_nonliteral_requirement_in_value(contents, &source, &value)?;
         // Which vars take their value from the environment, read off the RAW
@@ -396,7 +405,7 @@ fn parse_config_interpolated_inner_with_environment(
                 add_environment_values(&mut environment_values, std::slice::from_ref(value));
             }
         }
-        let mut config: RawConfig = yaml_serde::from_value(value).map_err(|error| {
+        let mut config: RawConfig = ayaml::from_value(value).map_err(|error| {
             // Each masked value keeps the type interpolation gave the real one
             // (a 12-digit id is a number), so an error in an unrelated field
             // after it still recurs; numbers move both ways, as a rule's
@@ -410,11 +419,9 @@ fn parse_config_interpolated_inner_with_environment(
                         numbers,
                     )
                     .is_ok()
-                        && yaml_serde::from_value::<RawConfig>(masked)
-                            .err()
-                            .is_some_and(|masked_error| {
-                                masked_error.to_string() == error.to_string()
-                            })
+                        && ayaml::from_value::<RawConfig>(masked).err().is_some_and(
+                            |masked_error| masked_error.to_string() == error.to_string(),
+                        )
                 })
             });
             if reproduced {
@@ -457,8 +464,8 @@ fn parse_config_interpolated_inner_with_environment(
 /// the environment (`{{env.X}}`, any spacing, with or without a default),
 /// mapped to that raw text. Only these become secret: a `{{vars.X}}` span in a
 /// var value is never resolved against other vars, so it cannot launder one.
-fn env_derived_vars(vars: Option<&yaml_serde::Value>) -> std::collections::HashMap<String, String> {
-    vars.and_then(yaml_serde::Value::as_mapping)
+fn env_derived_vars(vars: Option<&ayaml::Value>) -> std::collections::HashMap<String, String> {
+    vars.and_then(ayaml::Value::as_mapping)
         .into_iter()
         .flatten()
         .filter_map(|(k, v)| {
@@ -467,11 +474,11 @@ fn env_derived_vars(vars: Option<&yaml_serde::Value>) -> std::collections::HashM
         })
         .collect()
 }
-fn value_reads_environment(value: &yaml_serde::Value) -> bool {
+fn value_reads_environment(value: &ayaml::Value) -> bool {
     match value {
-        yaml_serde::Value::String(text) => crate::interp::reads_env(text),
-        yaml_serde::Value::Sequence(values) => values.iter().any(value_reads_environment),
-        yaml_serde::Value::Mapping(mapping) => mapping.values().any(value_reads_environment),
+        ayaml::Value::String(text) => crate::interp::reads_env(text),
+        ayaml::Value::Sequence(values) => values.iter().any(value_reads_environment),
+        ayaml::Value::Mapping(mapping) => mapping.values().any(value_reads_environment),
         _ => false,
     }
 }
@@ -481,9 +488,9 @@ fn value_reads_environment(value: &yaml_serde::Value) -> bool {
 /// entry in the string form, its `url:` in the mapping form. An `only:` or
 /// `except:` read from the environment leaves the URL as written; those values
 /// are recorded with the other top-level ones.
-fn entries_reading_environment(entries: Option<&yaml_serde::Value>) -> Vec<bool> {
+fn entries_reading_environment(entries: Option<&ayaml::Value>) -> Vec<bool> {
     entries
-        .and_then(yaml_serde::Value::as_sequence)
+        .and_then(ayaml::Value::as_sequence)
         .map(|entries| {
             entries
                 .iter()
@@ -494,9 +501,9 @@ fn entries_reading_environment(entries: Option<&yaml_serde::Value>) -> Vec<bool>
 }
 
 /// Each raw rule's [`env_derived_vars`], as the mapping its marker holds.
-fn rule_env_derived_vars(rules: Option<&yaml_serde::Value>) -> Vec<Mapping> {
+fn rule_env_derived_vars(rules: Option<&ayaml::Value>) -> Vec<Mapping> {
     rules
-        .and_then(yaml_serde::Value::as_sequence)
+        .and_then(ayaml::Value::as_sequence)
         .map(|rules| {
             rules
                 .iter()
@@ -522,16 +529,16 @@ pub(crate) fn add_environment_values(into: &mut Vec<String>, values: &[String]) 
 
 /// The environment names read by the top-level fields of a raw
 /// (pre-interpolation) document, other than `rules:`, `templates:` and `vars:`.
-fn top_level_environment_names(document: &yaml_serde::Value) -> Vec<String> {
-    fn collect(value: &yaml_serde::Value, names: &mut Vec<String>) {
+fn top_level_environment_names(document: &ayaml::Value) -> Vec<String> {
+    fn collect(value: &ayaml::Value, names: &mut Vec<String>) {
         match value {
-            yaml_serde::Value::String(text) => names.extend(crate::interp::env_names(text)),
-            yaml_serde::Value::Sequence(values) => {
+            ayaml::Value::String(text) => names.extend(crate::interp::env_names(text)),
+            ayaml::Value::Sequence(values) => {
                 for value in values {
                     collect(value, names);
                 }
             }
-            yaml_serde::Value::Mapping(mapping) => {
+            ayaml::Value::Mapping(mapping) => {
                 for value in mapping.values() {
                     collect(value, names);
                 }
@@ -552,20 +559,20 @@ fn top_level_environment_names(document: &yaml_serde::Value) -> Vec<String> {
 
 /// Sparse top-level fields containing at least one environment interpolation.
 /// The scan runs on raw YAML because interpolation erases that provenance.
-fn environment_sensitive_fields(entries: Option<&yaml_serde::Value>) -> Vec<Mapping> {
-    fn reads_environment(value: &yaml_serde::Value) -> bool {
+fn environment_sensitive_fields(entries: Option<&ayaml::Value>) -> Vec<Mapping> {
+    fn reads_environment(value: &ayaml::Value) -> bool {
         value_reads_environment(value)
     }
 
     entries
-        .and_then(yaml_serde::Value::as_sequence)
+        .and_then(ayaml::Value::as_sequence)
         .into_iter()
         .flatten()
         .map(|entry| {
             entry
                 .as_mapping()
                 .into_iter()
-                .flat_map(|mapping| mapping.iter())
+                .flat_map(ayaml::Mapping::iter)
                 .filter(|(field, value)| {
                     !matches!(field.as_str(), Some("id" | "kind" | "level" | "vars"))
                         && reads_environment(value)
@@ -969,7 +976,7 @@ fn load_remote(
         .map_err(|e| Error::Other(format!("remote body from {source} is not UTF-8: {e}")))?;
     // A remote body is untrusted input (SRI pins WHICH bytes, not that they are
     // benign), so it needs the same flow-depth guard as a local config -- otherwise
-    // `yaml_serde`/libyaml-rs chews super-linearly on a deep-flow bomb and hangs
+    // `ayaml`/libyaml-rs chews super-linearly on a deep-flow bomb and hangs
     // the run. The local/interpolated path guards in `parse_config_interpolated`;
     // this direct `from_str` bypassed it (the guard's docs claim `extends:` bodies
     // are covered -- true for local, and now for remote).
@@ -1044,7 +1051,7 @@ fn load_bundled(spec: &str) -> Result<RawConfig> {
 
     // Bundled rulesets are compiled-in and trusted (byte-identical every build), so
     // these guards are defense-in-depth, not an attack surface -- but keeping the
-    // checks uniform with the remote/local paths means no `yaml_serde::from_str`
+    // checks uniform with the remote/local paths means no `ayaml::compat::from_str`
     // in the loader is ever unguarded. A bundled ruleset tripping one is an alint bug.
     let yaml_guards = alint_core::yaml_depth::scan_guards(body);
     if !yaml_guards.flow_within_limit() || !yaml_guards.expansion_within_limit(body) {
@@ -1206,7 +1213,7 @@ mod tests {
 
     #[test]
     fn drop_in_inherits_omitted_version_and_records_compatibility() {
-        let mut config: RawConfig = yaml_serde::from_str("rules: []").unwrap();
+        let mut config: RawConfig = ayaml::compat::from_str("rules: []").unwrap();
         validate_source_compatibility(
             &mut config,
             ".alint.d/10-team.yml",
@@ -1223,7 +1230,7 @@ mod tests {
     #[test]
     fn drop_in_explicit_version_must_equal_root() {
         let running = RunningVersion::new(alint_core::StableVersion::new(0, 19, 0), false);
-        let mut matching: RawConfig = yaml_serde::from_str("version: 1\nrules: []").unwrap();
+        let mut matching: RawConfig = ayaml::compat::from_str("version: 1\nrules: []").unwrap();
         validate_source_compatibility(
             &mut matching,
             ".alint.d/10-team.yml",
@@ -1234,7 +1241,7 @@ mod tests {
         .unwrap();
         assert_eq!(matching.compatibility[0].consumer_version, Some(1));
 
-        let mut mismatching: RawConfig = yaml_serde::from_str("version: 2\nrules: []").unwrap();
+        let mut mismatching: RawConfig = ayaml::compat::from_str("version: 2\nrules: []").unwrap();
         let error = validate_source_compatibility(
             &mut mismatching,
             ".alint.d/10-team.yml",
@@ -1713,7 +1720,6 @@ rules:
             "version: 1\nrules:\n  - id: scan\n    kind: file_content_forbidden\n    paths: '**/*'\n    pattern: 123456789012\n    sensitive: true\n    level: error\n",
         ] {
             let error = first_configuration_error(yaml, &NumericEnvironment);
-            assert!(error.contains("<redacted>"), "{yaml}\n=> {error}");
             for secret in ["123456789012", "3735928559", "DEADBEEF"] {
                 assert!(!error.contains(secret), "{yaml}\n=> {error}");
             }

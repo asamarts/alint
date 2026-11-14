@@ -213,7 +213,7 @@ fn canonical_pass_fail_corpus_produces_complete_traces() {
             break;
         }
         let text = std::fs::read_to_string(&source).unwrap();
-        let document: yaml_serde::Value = match yaml_serde::from_str(&text) {
+        let document: ayaml::Value = match ayaml::compat::from_str(&text) {
             Ok(document) => document,
             Err(_) => continue,
         };

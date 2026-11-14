@@ -137,7 +137,7 @@ fn read_existing_extends(root: &Path) -> Vec<String> {
         if !yaml_guards.flow_within_limit() || !yaml_guards.expansion_within_limit(&body) {
             return Vec::new();
         }
-        let Ok(doc) = yaml_serde::from_str::<yaml_serde::Value>(&body) else {
+        let Ok(doc) = ayaml::compat::from_str::<ayaml::Value>(&body) else {
             return Vec::new();
         };
         return collect_extends(&doc);
@@ -151,11 +151,11 @@ fn read_existing_extends(root: &Path) -> Vec<String> {
 /// silently — the loader will surface its own error if the
 /// user's config is malformed; we just need our best-effort
 /// already-covered set.
-fn collect_extends(doc: &yaml_serde::Value) -> Vec<String> {
+fn collect_extends(doc: &ayaml::Value) -> Vec<String> {
     let Some(map) = doc.as_mapping() else {
         return Vec::new();
     };
-    let Some(extends) = map.get(yaml_serde::Value::String("extends".into())) else {
+    let Some(extends) = map.get(ayaml::Value::String("extends".into())) else {
         return Vec::new();
     };
     let Some(seq) = extends.as_sequence() else {
@@ -163,9 +163,9 @@ fn collect_extends(doc: &yaml_serde::Value) -> Vec<String> {
     };
     seq.iter()
         .filter_map(|entry| match entry {
-            yaml_serde::Value::String(s) => Some(s.clone()),
-            yaml_serde::Value::Mapping(m) => m
-                .get(yaml_serde::Value::String("url".into()))
+            ayaml::Value::String(s) => Some(s.clone()),
+            ayaml::Value::Mapping(m) => m
+                .get(ayaml::Value::String("url".into()))
                 .and_then(|v| v.as_str())
                 .map(str::to_string),
             _ => None,

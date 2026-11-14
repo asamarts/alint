@@ -1098,7 +1098,7 @@ fn reconciliation_drops_a_moot_fix_error_when_the_file_is_removed() {
 fn fix_against_baseline(sensitive: bool, grandfathered: &Violation) -> (bool, bool) {
     let tmp = tempfile::tempdir().unwrap();
     std::fs::write(tmp.path().join("x.txt"), b"hi").unwrap();
-    let spec: crate::RuleSpec = yaml_serde::from_str(&format!(
+    let spec: crate::RuleSpec = ayaml::compat::from_str(&format!(
         "id: removes\nkind: action\nlevel: error\nsensitive: {sensitive}\n"
     ))
     .unwrap();
