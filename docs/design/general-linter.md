@@ -912,6 +912,12 @@ kind may ignore; otherwise it supersedes ADR-0008 with the same flaw. And `input
 pathway to the host environment beside `when: env.*` and `{{env.X}}`, both already denied to
 untrusted remote rulesets. It is therefore declarable only in the top-level config.
 
+The v0.23 design pass is [`v0.23/selectors-and-constraints.md`](v0.23/selectors-and-constraints.md)
+section 4 (ADR-0034 decision 2). It differs from this sketch: a selector is a `paths:` value with
+`scope_filter:` and no new predicate, so there is no `tracked` predicate and ADR-0008 stands; there
+is no `inputs:` (section 10 there); and its `where:` filters a relation's rows (section 7 there),
+not a selector's resources.
+
 ### 7.3 Named relations
 
 The key new construct is a named extraction plan. For example, dependency consistency could
@@ -1955,12 +1961,12 @@ outcome differs from the review's recommendation, the outcome column says so.
 | Record | What changes | When |
 |---|---|---|
 | Constitution invariant 1 (determinism) | an explicit time input and a declared-host-input class (DEC-11) | Phase 1a |
-| Constitution invariant 2 and ADR-0003 (dispatch) | full-index context separated from target selection (Q2) | Phase 3; recorded by ADR-0034 |
-| ADR-0002 (YAML, flat merge by id) | per-source version/requirement checks (Q11), then namespaced modules and a `version: 2` envelope (DEC-9, Q12) | Phase 1b, then Phases 3 and 4; Phase 1b recorded by ADR-0022 |
-| ADR-0004 (trust boundary) | policy-test host grants (DEC-6), then plugin and named-object grants (DEC-14f, Q12) | Phase 1b, then Phases 3 and 6; Phase 1b recorded by ADR-0022 |
+| Constitution invariant 2 and ADR-0003 (dispatch) | full-index context separated from target selection (Q2) | Phase 3; recorded by ADR-0034, with the enforcing tests restated by ADR-0037 |
+| ADR-0002 (YAML, flat merge by id) | per-source version/requirement checks (Q11), then namespaced modules and a `version: 2` envelope (DEC-9, Q12) | Phase 1b, then Phases 3 and 4; Phase 1b recorded by ADR-0022; Phase 3's per-source namespaces and `extends:` aliases by ADR-0034 decision 4, and its envelope by decision 1 |
+| ADR-0004 (trust boundary) | policy-test host grants (DEC-6), then plugin and named-object grants (DEC-14f, Q12) | Phase 1b, then Phases 3 and 6; Phase 1b recorded by ADR-0022; Phase 3's named-object gates by ADR-0034 decision 4, for local v2 sources only |
 | `ARCHITECTURE.md` "Plugin model" (native Rust plugins out of scope) | compiled-in native plugins, process plugins, and WASM components (DEC-14) | updated 2026-10-14 |
 | ADR-0006 (baseline) | exception relations and the stale default (Q3); fingerprint freeze stated explicitly (DEC-5) | Phases 1a and 4 |
-| ADR-0008 (`git_tracked_only` is a kind option) | a selector-level `tracked` predicate implemented for every domain | Phase 3 |
+| ADR-0008 (`git_tracked_only` is a kind option) | a selector-level `tracked` predicate implemented for every domain | not in v0.23: ADR-0034 decision 2 adds no predicate; ADR-0008 stands |
 | ADR-0009, ADR-0012, ADR-0013 (explain and output projections) | an evaluating trace and new finding fields under the completeness gates | Phases 1a and 1b; Phase 1b recorded by ADR-0022 |
 | ADR-0010 (manifest values never decide verdicts) | policy-source files (DEC-12) | before `editorconfig_conforms` |
 | ADR-0017 (fix model) | generic edit plans built on `sync_from` and the deferred section 5.2.4 transaction | after Phase 3 |
