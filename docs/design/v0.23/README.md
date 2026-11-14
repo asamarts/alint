@@ -386,3 +386,11 @@ decided then.
     `alint-rules`, `alint-output`, `alint`, `alint-lsp`, `alint-dsl`, `alint-testkit` and
     `alint-e2e`, most of them in tests.
   - Next: phase 4.3, `#[non_exhaustive]` on the five.
+- 2026-11-14: phase 4.3 (#518).
+  - `Violation`, `Context`, `RuleSpec`, `NestedRuleSpec` and `WalkOptions` are
+    `#[non_exhaustive]`, which completes ADR-0032 decision 3: with `alint_core::Error` from 4.1,
+    `FixContext`, `Config` and `CompiledNestedSpec` from v0.22, nine types are sealed.
+  - A doctest on a `#[cfg(doctest)]` item keeps them sealed: for each of the nine, a block that
+    builds it with a functional record update, or matches every variant of `Error` without a
+    wildcard arm, must fail to compile.
+  - Next: phase 5, the differential fuzzing harness (#482).

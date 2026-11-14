@@ -112,6 +112,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     `reject_fix_promotion_in`, `reject_fix_promotion_templates_in`,
     `reject_spawning_fix_op_templates_in`, `reject_spawning_fix_ops_in` and
     `reject_spawning_templates_in`. The loader still runs them on every configuration.
+- **Breaking (library API): `Violation`, `Context`, `RuleSpec`, `NestedRuleSpec` and
+  `WalkOptions` are `#[non_exhaustive]`** (ADR-0032 decision 3, ADR-0038). Adding a field to them
+  is no longer a breaking change, and code outside `alint-core` can no longer build them with a
+  struct literal or a functional record update (`..other`). Build them with the constructors and
+  setters listed under Added; the fields stay public to read and to assign, and a pattern that
+  destructures one needs `..`.
 
 ### Fixed
 

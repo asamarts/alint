@@ -722,9 +722,10 @@ impl<'a> Iterator for DescendantsIter<'a> {
 
 /// How [`walk`] builds a [`FileIndex`].
 ///
-/// Built with [`WalkOptions::default`] and the `with_*` setters; the fields
-/// stay readable.
+/// Built with [`WalkOptions::default`] and the `with_*` setters, so a later
+/// field is an addition rather than a breaking change; the fields stay readable.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct WalkOptions {
     /// Honor `.gitignore`, `.ignore` and git's exclude files, which stop at
     /// the repository boundary (ADR-0028).

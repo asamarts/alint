@@ -119,3 +119,72 @@ pub use walker::{
     read_for_analysis, walk,
 };
 pub use when::{WhenEnv, WhenError, WhenExpr};
+
+/// The types alint-core seals, as a crate that depends on it sees them. Each
+/// block must fail to compile: a sealed struct cannot be built with a literal
+/// or a functional record update, and a `match` on a sealed enum needs a
+/// wildcard arm (ADR-0030 decision 2, ADR-0032 decision 3, ADR-0038 decision
+/// 4). A block that compiles means its type lost `#[non_exhaustive]`.
+///
+/// ```compile_fail
+/// let _ = alint_core::Violation { line: Some(1), ..alint_core::Violation::new("m") };
+/// ```
+///
+/// ```compile_fail
+/// fn untraced<'a>(ctx: &alint_core::Context<'a>) -> alint_core::Context<'a> {
+///     alint_core::Context { trace: None, ..ctx.clone() }
+/// }
+/// ```
+///
+/// ```compile_fail
+/// let _ = alint_core::RuleSpec {
+///     sensitive: true,
+///     ..alint_core::RuleSpec::new("r", "file_exists", alint_core::Level::Error)
+/// };
+/// ```
+///
+/// ```compile_fail
+/// let _ = alint_core::NestedRuleSpec {
+///     sensitive: true,
+///     ..alint_core::NestedRuleSpec::new("file_exists")
+/// };
+/// ```
+///
+/// ```compile_fail
+/// let _ = alint_core::WalkOptions { respect_gitignore: false, ..Default::default() };
+/// ```
+///
+/// ```compile_fail
+/// let _ = alint_core::FixContext {
+///     dry_run: true,
+///     ..alint_core::FixContext::new(std::path::Path::new("."), false)
+/// };
+/// ```
+///
+/// ```compile_fail
+/// let _ = alint_core::Config { nested_configs: true, ..alint_core::Config::new(1, Vec::new()) };
+/// ```
+///
+/// ```compile_fail
+/// fn ungated(spec: alint_core::CompiledNestedSpec) -> alint_core::CompiledNestedSpec {
+///     alint_core::CompiledNestedSpec { when: None, ..spec }
+/// }
+/// ```
+///
+/// ```compile_fail
+/// fn name(error: &alint_core::Error) -> &'static str {
+///     match error {
+///         alint_core::Error::Io { .. } => "io",
+///         alint_core::Error::Walk(_) => "walk",
+///         alint_core::Error::Glob { .. } => "glob",
+///         alint_core::Error::Yaml(_) => "yaml",
+///         alint_core::Error::UnknownRuleKind(_) => "kind",
+///         alint_core::Error::RuleConfig { .. } => "rule",
+///         alint_core::Error::FileNotInIndex { .. } => "index",
+///         alint_core::Error::Other(_) => "other",
+///         alint_core::Error::Internal(_) => "internal",
+///     }
+/// }
+/// ```
+#[cfg(doctest)]
+pub struct SealedTypes;

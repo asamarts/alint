@@ -175,8 +175,12 @@ impl AnalysisFailure {
 /// while fixed messages can live as `Cow::Borrowed("…")` if a
 /// rule chooses to construct them that way. Renderers consume the inner
 /// `&str`, so the ownership choice does not alter report bytes.
+///
+/// Built with [`Violation::new`] and the `with_*` setters, so a later field is
+/// an addition rather than a breaking change; the fields stay readable.
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Violation {
     pub path: Option<Arc<Path>>,
     pub message: Cow<'static, str>,
@@ -742,9 +746,11 @@ pub(crate) fn locator_path(path: Option<&Path>, hidden: bool) -> String {
 /// - `trace` — optional selected-rule diagnostic sink. Ordinary check/fix/LSP
 ///   contexts always carry `None`.
 ///
-/// Built with [`Context::new`] and the `with_*` setters; the fields stay
-/// readable. A copy with one part changed is `ctx.clone().with_trace(None)`.
+/// Built with [`Context::new`] and the `with_*` setters, so a later field is an
+/// addition rather than a breaking change; the fields stay readable. A copy with
+/// one part changed is `ctx.clone().with_trace(None)`.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Context<'a> {
     pub root: &'a Path,
     pub index: &'a FileIndex,

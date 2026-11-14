@@ -394,8 +394,10 @@ where
 }
 
 /// YAML-level description of a rule before it is instantiated into a `Box<dyn Rule>`
-/// by a [`RuleBuilder`](crate::registry::RuleBuilder).
+/// by a [`RuleBuilder`](crate::registry::RuleBuilder). Code builds one with
+/// [`RuleSpec::new`] and the `with_*` setters; the fields stay readable.
 #[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
 pub struct RuleSpec {
     pub id: String,
     pub kind: String,
@@ -1277,8 +1279,10 @@ impl RuleSpec {
 /// Rule specification for nested rules (e.g. the `require:` block of
 /// `for_each_dir`). Unlike [`RuleSpec`], `id` and `level` are synthesized
 /// from the parent rule — users just supply the `kind` plus kind-specific
-/// options, optionally with a `message` / `policy_url` / `when`.
+/// options, optionally with a `message` / `policy_url` / `when`. Code builds one
+/// with [`NestedRuleSpec::new`] and the `with_*` setters.
 #[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
 pub struct NestedRuleSpec {
     pub kind: String,
     #[serde(default)]
