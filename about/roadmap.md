@@ -1638,7 +1638,9 @@ and
   `alint baseline` before upgrading.
 
 Later: the remaining assertion families, specialized kinds and templates, and a stable
-`version: 2` (v0.24 or later); plugin hosts start in v0.24.
+`version: 2` (v0.24 or later); plugin hosts start in v0.24. saphyr leaves the dependency graph in
+v0.24, when source spans and structured YAML fixes move to ayaml
+([ADR-0036](../adr/0036-ayaml-issues-and-the-saphyr-exit.md)).
 
 ## v1.0: Stability
 
