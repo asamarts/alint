@@ -1924,6 +1924,42 @@ mod tests {
         assert!(!spec.sensitive);
     }
 
+    /// `templates` reaches every string an iteration renders: `paths`,
+    /// `message`, and the options' strings at any depth, inside sequences,
+    /// mappings (keys included) and tagged values.
+    #[test]
+    fn nested_rule_spec_templates_reach_every_option_string() {
+        let nested: NestedRuleSpec = crate::yaml::from_str(
+            "kind: x\npaths: \"{dir}/a\"\nmessage: \"in {stem}\"\n\
+             items: [\"{path}\", [\"{ext}\"]]\n\
+             table: { \"{basename}\": { deep: \"{parent_name}\" } }\n",
+        )
+        .unwrap();
+        // A tagged value cannot arrive through the flattened decode, but
+        // `extra` is public, so a spec built in code can hold one.
+        let mut nested = nested;
+        nested.extra.insert(
+            ayaml::Value::String("tagged".into()),
+            ayaml::Value::Tagged(Box::new(ayaml::TaggedValue::new(
+                ayaml::Tag::new("!", "custom"),
+                ayaml::Value::String("{dir}/t".into()),
+            ))),
+        );
+        let mut templates = nested.templates();
+        templates.sort_unstable();
+        for expected in [
+            "{dir}/a",
+            "in {stem}",
+            "{path}",
+            "{ext}",
+            "{basename}",
+            "{parent_name}",
+            "{dir}/t",
+        ] {
+            assert!(templates.contains(&expected), "{expected}: {templates:?}");
+        }
+    }
+
     #[test]
     fn nested_rule_spec_instantiate_synthesizes_id_and_inherits_level() {
         let nested: NestedRuleSpec = crate::yaml::from_str(

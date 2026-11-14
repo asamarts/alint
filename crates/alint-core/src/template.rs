@@ -891,6 +891,12 @@ mod tests {
             unrender_placeholders("a_b _ __", ["{stem}", "plain"]),
             "a_b _ __"
         );
+        // A quote in the template: the message's `{:?}` escaping turns it
+        // into `\"`, and only the escaped form of the value is in the text.
+        assert_eq!(
+            unrender_placeholders(r#"pattern a\"_stem_[: bad"#, [r#"a"{stem}["#]),
+            r#"pattern a\"{stem}[: bad"#
+        );
         assert_eq!(unrender_placeholders("", ["{stem}"]), "");
         assert_eq!(unrender_placeholders("_stem_", [] as [&str; 0]), "_stem_");
     }
@@ -901,11 +907,11 @@ mod tests {
     #[test]
     fn unrendering_leaves_lookalike_text_alone() {
         let message = "nested rule #0 (`json_path_equals`): rule \"pkg_dir_layout.require[0]\": \
-                       invalid JSONPath \"$[[\" in _path_/src_dir_x and \"_path_\"";
+                       invalid JSONPath \"$[[\" in _path_/src_dir_x and \"_path_\" (a_dir_/b, c/_dir_d)";
         assert_eq!(
             unrender_placeholders(message, ["{path}", "{dir}", "$[["]),
             "nested rule #0 (`json_path_equals`): rule \"pkg_dir_layout.require[0]\": \
-             invalid JSONPath \"$[[\" in {path}/src_dir_x and \"{path}\""
+             invalid JSONPath \"$[[\" in {path}/src_dir_x and \"{path}\" (a_dir_/b, c/_dir_d)"
         );
     }
 
