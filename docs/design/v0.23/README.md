@@ -11,7 +11,9 @@ cutover, and qualifying it before the release);
 [ADR-0036](../../adr/0036-ayaml-issues-and-the-saphyr-exit.md) (filing ayaml gaps as ayaml
 issues, and the saphyr exit in v0.24);
 [ADR-0037](../../adr/0037-phase-3-design-refinements.md) (row-level `equal`, CLDR plurals in
-`set`, and the corrections to ADR-0034 after an audit).
+`set`, and the corrections to ADR-0034 after an audit);
+[ADR-0038](../../adr/0038-owned-yaml-types-and-the-api-gate.md) (the owned YAML types, the
+public-API gate, and a sealed `alint_core::Error`).
 
 v0.23 starts Phase 3 of [`general-linter.md`](../general-linter.md) (section 11.6), which v0.22.0
 unblocked by meeting all three gates of Phase 2 (section 11.1, "v0.22 gate results"). Phase 3 is
@@ -76,7 +78,8 @@ Also in v0.23:
 8. **YAML parser types leave the public API (#484)** for opaque alint-owned types (ADR-0032
    decision 3).
 9. **`Violation`, `Context`, `RuleSpec`, `NestedRuleSpec` and `WalkOptions` are sealed** with
-   constructors and setters (ADR-0032 decision 3). This completes the v1.0 roadmap item.
+   constructors and setters (ADR-0032 decision 3), and so is `alint_core::Error`, without them
+   (ADR-0038). A v1.0 item audits the other open public structs.
 10. **Differential YAML parser fuzzing (#482).**
 11. **The ayaml cutover is qualified before the release** (ADR-0035). #510 moved `main` to ayaml
     0.1.2 ahead of #482 and #483. Before v0.23.0, the #482 harness compares ayaml with
@@ -178,7 +181,7 @@ it must respect:
 ### 3.1 The owned YAML types (#484)
 
 - **The types.** `alint_core::yaml` holds `Value`, `Mapping` and `Error`, opaque wrappers over the
-  parser's types.
+  parser's types. Phase 4 added `Sequence` and `Location` (ADR-0038).
   - `Value` and `Mapping` implement `Serialize` and `Deserialize`, offer the reads and edits that
     rules, templates, redaction and the loader use, and deserialize into a typed options struct.
   - `Error` gives a message and, where the parser has one, a location.
@@ -187,7 +190,8 @@ it must respect:
   the parser until the cutover, converting at the API boundary.
 - **A gate.** Either a public-API check or a scan of the generated documentation fails CI if a
   public item of `alint-core`, `alint-dsl` or `alint-testkit` names the parser crate. The phase
-  picks one that runs on stable Rust.
+  picks one that runs on stable Rust. It picked the scan, of documentation built with hidden
+  items shown (ADR-0038).
 - **Library users migrate once.** The CHANGELOG lists each changed signature with its
   replacement.
 
@@ -215,7 +219,7 @@ next. Phases 1, 4 and 5 do not depend on the design and can run alongside phases
 | 1 | Stop matching the v0.21 hidden-path fingerprint | yes (old baselines) |
 | 2 | The corpus stratum: repositories chosen, pinned, configured and scored with section 12.3's buckets | no |
 | 3 | The design document and the version-boundary ADR. **Owner gate:** implementation starts after approval. Approved in #512 (ADR-0034) | no |
-| 4 | #484: the owned YAML types and the public-API gate; then sealing the five structs, with constructors (a short series) | API only |
+| 4 | #484: the owned YAML types, the public-API gate and a sealed `alint_core::Error` (4.1); constructors and setters for the five structs, with the workspace converted (4.2); then sealing the five (4.3) | API only |
 | 5 | #482: the differential fuzzing harness, its allowlist, and the pull-request and scheduled runs | no |
 | 6 | The version dispatch, named selectors and relations, per-source namespaces with `extends:` aliases, value-bearing entry rows, the equality join, the draft v2 schema, and `validate-config`, `list`, `explain` and `export-agents-md` for v2 | v2 only |
 | 7 | The `constraint` kind: equality (with row-level `equal`), unique/key and set (with `plurals: cldr`), report-only, and the related-location gate over JSON, SARIF and the language server | v2 only |
@@ -360,3 +364,16 @@ decided then.
     literal names, `read:` formats, `constraint`'s registration and the facts field.
   - [ADR-0036](../../adr/0036-ayaml-issues-and-the-saphyr-exit.md): ayaml gaps are filed as ayaml
     issues (asamarts/ayaml#123 to asamarts/ayaml#128), and saphyr leaves in v0.24.
+- 2026-11-14: phase 4.1 (#516), [ADR-0038](../../adr/0038-owned-yaml-types-and-the-api-gate.md).
+  - No public item of `alint-core`, `alint-dsl` or `alint-testkit` names a YAML parser crate.
+    `alint_core::yaml` holds alint's own `Value`, `Mapping`, `Sequence`, `Error` and `Location`,
+    which wrap the parser's privately. The `extra` fields, the YAML error variants and the
+    `TreeSpec` methods use them; the `render_*` functions and six `alint-dsl` rejection
+    functions became crate-private.
+  - `ci/scripts/public-api-parser-gate.sh`, run by `docs.sh`, documents the three crates with
+    their dependencies and hidden items shown, and fails on a page that links to a parser crate.
+  - `alint_core::Error` is `#[non_exhaustive]`. The ROADMAP's v1.0 item says what v0.23 seals,
+    and a new v1.0 item audits the other open public structs.
+  - cargo-mutants over the phase showed that `alint test` ran a spawning rule nested in
+    `require:` without the spawn capability, since v0.20.0; #515 fixes it.
+  - Next: phase 4.2, constructors and setters for the five structs.

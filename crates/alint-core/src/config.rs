@@ -461,7 +461,7 @@ pub struct RuleSpec {
     /// The entire YAML mapping, retained so each rule builder can deserialize
     /// its kind-specific fields without every option being represented here.
     #[serde(flatten)]
-    pub extra: ayaml::Mapping,
+    pub extra: crate::yaml::Mapping,
 }
 
 /// The `fix:` block on a rule. Exactly one op key must be present —
@@ -1195,9 +1195,7 @@ impl RuleSpec {
     where
         T: serde::de::DeserializeOwned,
     {
-        Ok(ayaml::from_value(ayaml::Value::Mapping(
-            self.extra.clone(),
-        ))?)
+        Ok(crate::yaml::from_value(self.extra.clone().into())?)
     }
 
     /// Record environment-derived effective fields after config composition.
@@ -1305,7 +1303,7 @@ pub struct NestedRuleSpec {
     #[serde(default)]
     pub scope_filter: Option<crate::ScopeFilterSpec>,
     #[serde(flatten)]
-    pub extra: ayaml::Mapping,
+    pub extra: crate::yaml::Mapping,
 }
 
 /// A [`NestedRuleSpec`] with its `when:` source pre-compiled
@@ -1474,7 +1472,7 @@ impl NestedRuleSpec {
         if let Some(message) = &self.message {
             visit(message);
         }
-        for (k, v) in &self.extra {
+        for (k, v) in self.extra.parser() {
             walk(k, visit);
             walk(v, visit);
         }
@@ -1539,10 +1537,12 @@ impl NestedRuleSpec {
             // options, and would otherwise trip the leaf's unknown-option
             // validation (a deny-unknown-fields `Options` struct, or an
             // option-less rule's `deny_unknown_options`).
-            extra: crate::template::render_nested_options(&self.kind, self.extra.clone(), tokens)
-                .into_iter()
-                .filter(|(k, _)| k.as_str().is_none_or(|s| !Self::PARENT_FIELDS.contains(&s)))
-                .collect(),
+            extra: crate::template::render_nested_extra(
+                &self.kind,
+                &self.extra,
+                tokens,
+                Self::PARENT_FIELDS,
+            ),
         }
     }
 }
@@ -1938,13 +1938,8 @@ mod tests {
         // A tagged value cannot arrive through the flattened decode, but
         // `extra` is public, so a spec built in code can hold one.
         let mut nested = nested;
-        nested.extra.insert(
-            ayaml::Value::String("tagged".into()),
-            ayaml::Value::Tagged(Box::new(ayaml::TaggedValue::new(
-                ayaml::Tag::new("!", "custom"),
-                ayaml::Value::String("{dir}/t".into()),
-            ))),
-        );
+        let tagged: crate::yaml::Value = crate::yaml::from_str("!custom '{dir}/t'").unwrap();
+        nested.extra.insert("tagged", tagged);
         let mut templates = nested.templates();
         templates.sort_unstable();
         for expected in [

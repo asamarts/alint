@@ -704,7 +704,7 @@ fn assert_instance_conformance(kind: &str, meta: &KindMeta, spec: &RuleSpec, rul
     let git_tracked_only = spec
         .extra
         .get("git_tracked_only")
-        .and_then(ayaml::Value::as_bool)
+        .and_then(crate::yaml::Value::as_bool)
         .unwrap_or(false);
     let expected_git_mode = match (meta.git_tracked_only, git_tracked_only) {
         (GitTrackedSupport::FileOnly, true) => GitTrackedMode::FileOnly,
@@ -856,7 +856,7 @@ mod tests {
             sensitive_fields: std::collections::BTreeSet::new(),
             fix: None,
             scope_filter: None,
-            extra: ayaml::Mapping::new(),
+            extra: crate::yaml::Mapping::new(),
         }
     }
 
@@ -1072,6 +1072,20 @@ mod tests {
                 "{fields:?}: {error}"
             );
         }
+    }
+
+    /// A debug build checks a built rule against its kind's metadata, and
+    /// reads `git_tracked_only:` from the rule's options to do it.
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "instance git-tracked mode disagrees with metadata")]
+    fn conformance_check_reads_git_tracked_only() {
+        let mut meta = TEST_META.clone();
+        meta.git_tracked_only = GitTrackedSupport::FileOnly;
+        let mut registry = RuleRegistry::new();
+        registry.register_owned("test_kind", Arc::new(meta), ok_builder);
+        registry.build(&parsed_spec("")).unwrap();
+        let _ = registry.build(&parsed_spec("git_tracked_only: true\n"));
     }
 
     #[test]

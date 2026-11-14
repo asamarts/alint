@@ -314,7 +314,7 @@ mod tests {
             sensitive_fields: std::collections::BTreeSet::new(),
             fix: None,
             scope_filter: None,
-            extra: ayaml::Mapping::new(),
+            extra: alint_core::yaml::Mapping::new(),
         }
     }
 

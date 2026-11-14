@@ -108,6 +108,7 @@ dependencies = [
  "proc-macro2",
  "proptest",
  "rayon",
+ "ref-cast",
  "regex",
  "regex-syntax",
  "roxmltree",

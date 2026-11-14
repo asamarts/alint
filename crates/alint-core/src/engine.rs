@@ -601,7 +601,7 @@ impl RuleEntry {
     /// The rule's kind-specific options (the flattened non-common `RuleSpec`
     /// fields, e.g. `pattern`, `max_lines`), or `None` when built without a spec.
     #[must_use]
-    pub fn extra(&self) -> Option<&ayaml::Mapping> {
+    pub fn extra(&self) -> Option<&crate::yaml::Mapping> {
         self.spec.as_ref().map(|s| &s.extra)
     }
 
@@ -691,7 +691,7 @@ fn capability_condition_is_active(
         crate::CapabilityCondition::OptionSet { option } => spec
             .extra
             .get(option.as_ref())
-            .is_some_and(option_value_is_set),
+            .is_some_and(|value| option_value_is_set(value.parser())),
         crate::CapabilityCondition::OptionMatches { option, predicate } => {
             let Some(value) = spec
                 .extra
@@ -791,7 +791,7 @@ fn when_expr_uses_iter(expr: &WhenExpr) -> bool {
 
 fn configured_iteration_gate(spec: Option<&crate::RuleSpec>) -> Result<Option<WhenExpr>> {
     spec.and_then(|spec| spec.extra.get("when_iter"))
-        .and_then(ayaml::Value::as_str)
+        .and_then(crate::yaml::Value::as_str)
         .map(crate::when::parse)
         .transpose()
         .map_err(|error| {
@@ -805,7 +805,7 @@ fn configured_select_scope(spec: Option<&crate::RuleSpec>) -> Result<Option<crat
     let Some(value) = spec.and_then(|spec| spec.extra.get("select")) else {
         return Ok(None);
     };
-    let patterns = match value {
+    let patterns = match value.parser() {
         ayaml::Value::String(pattern) => vec![pattern.clone()],
         ayaml::Value::Sequence(patterns) => patterns
             .iter()

@@ -296,8 +296,8 @@ fn example_ordered_block_markers_are_literal_lines() {
             for key in ["start", "end"] {
                 let Some(marker) = rule
                     .extra
-                    .get(ayaml::Value::String(key.to_owned()))
-                    .and_then(ayaml::Value::as_str)
+                    .get(key)
+                    .and_then(alint_core::yaml::Value::as_str)
                 else {
                     continue;
                 };

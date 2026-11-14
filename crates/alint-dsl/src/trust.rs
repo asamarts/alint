@@ -421,7 +421,7 @@ pub(crate) fn masked_rule_mappings(mapping: &Mapping) -> Option<Vec<Mapping>> {
             }) else {
                 continue;
             };
-            alint_core::mask_configuration_field(field, value, numbers);
+            crate::core_yaml::mask_configuration_field(field, value, numbers);
         }
         masked
     };
@@ -899,7 +899,7 @@ pub const SPAWNING_FIX_OPS: &[&str] = &["git_untrack", "command"];
 ///
 /// (Kept its original name for API stability; it now gates the
 /// whole spawning-kind set, not only `kind: command`.)
-pub fn reject_command_rules_in(
+pub(crate) fn reject_command_rules_in(
     rules: &[Mapping],
     source: &str,
     catalog: Option<KindCatalog<'_>>,
@@ -918,7 +918,7 @@ pub fn reject_command_rules_in(
 /// *promoted*). An extended ruleset promoting `file_remove` to `Safe` would
 /// silently opt a repo into auto-deletion, so it is refused here. Same trust
 /// model as [`reject_command_rules_in`]. Scans nested `require:` blocks too.
-pub fn reject_fix_promotion_in(rules: &[Mapping], source: &str) -> Result<()> {
+pub(crate) fn reject_fix_promotion_in(rules: &[Mapping], source: &str) -> Result<()> {
     for rule in rules {
         reject_fix_promotion_in_rule(rule, source)?;
     }
@@ -1297,7 +1297,7 @@ pub(crate) fn strip_fix_promotions_in_rule(rule: &mut Mapping) {
 /// in the user's own top-level config, never through `extends:`, a nested
 /// `.alint.yml`, or a bundled ruleset. Scans nested `require:` blocks at every
 /// depth.
-pub fn reject_spawning_fix_ops_in(
+pub(crate) fn reject_spawning_fix_ops_in(
     rules: &[Mapping],
     source: &str,
     catalog: Option<KindCatalog<'_>>,
@@ -1368,7 +1368,7 @@ pub(crate) fn find_spawning_fix_op<'a>(
 /// template is shaped like a rule (`fix:` + optional `require:`), so the same
 /// per-rule scan applies. `finalize` enforces the same invariant for every
 /// source; this earlier per-source check names the offending ruleset.
-pub fn reject_spawning_fix_op_templates_in(
+pub(crate) fn reject_spawning_fix_op_templates_in(
     templates: &[Mapping],
     source: &str,
     catalog: Option<KindCatalog<'_>>,
@@ -1384,7 +1384,7 @@ pub fn reject_spawning_fix_op_templates_in(
 /// template must be classified before expansion. Missing catalogs and unknown
 /// kinds fail closed. `finalize` enforces the same invariant for every source;
 /// this earlier check names the offending ruleset.
-pub fn reject_spawning_templates_in(
+pub(crate) fn reject_spawning_templates_in(
     templates: &[Mapping],
     source: &str,
     catalog: Option<KindCatalog<'_>>,
@@ -1429,7 +1429,7 @@ pub fn reject_spawning_templates_in(
 /// legal in any template), a promotion in the user's OWN top-level template is
 /// legitimate, so the refusal must be source-aware -- which only this
 /// extends-time, per-source check is.
-pub fn reject_fix_promotion_templates_in(templates: &[Mapping], source: &str) -> Result<()> {
+pub(crate) fn reject_fix_promotion_templates_in(templates: &[Mapping], source: &str) -> Result<()> {
     for template in templates {
         reject_fix_promotion_in_rule(template, source)?;
     }
@@ -1437,7 +1437,7 @@ pub fn reject_fix_promotion_templates_in(templates: &[Mapping], source: &str) ->
 }
 
 /// Reject a non-default `allow_out_of_root:` in an inherited ruleset.
-/// Like [`reject_command_rules_in`], the path-confinement escape hatch
+/// Like the spawning-rule gate, the path-confinement escape hatch
 /// may only be opened by the user's own top-level config — an
 /// `extends:`'d ruleset granting itself reads outside the repo root is
 /// the exact threat confinement exists to stop. `source` names the

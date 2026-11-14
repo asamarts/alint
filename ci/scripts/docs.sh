@@ -7,6 +7,12 @@ cd "$REPO_ROOT"
 echo "==> Running cargo doc"
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace
 
+# No public item of alint-core, alint-dsl or alint-testkit names a YAML parser
+# crate, hidden items included (ADR-0038): the gate documents the three crates
+# with their dependencies and fails on a page that links to a parser crate.
+echo "==> Running ci/scripts/public-api-parser-gate.sh"
+bash ci/scripts/public-api-parser-gate.sh
+
 # `xtask docs-export --check` writes the bundle to a tempdir and
 # discards it. It re-parses every bundled ruleset YAML, captures
 # `alint --help` per subcommand, and exits non-zero on any failure

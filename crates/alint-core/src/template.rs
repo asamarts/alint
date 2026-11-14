@@ -285,13 +285,16 @@ pub fn unrender_placeholders<'t>(
         }
         pairs.push((rendered, template.to_string()));
     }
+    // An empty value would match everywhere without moving the scan.
+    pairs.retain(|(rendered, _)| !rendered.is_empty());
     // Longest first, so a whole value wins over a shorter one inside it.
     pairs.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then_with(|| a.cmp(b)));
     pairs.dedup();
     let is_word = |c: char| c.is_alphanumeric() || c == '_';
     let mut out = String::with_capacity(text.len());
-    let mut at = 0;
-    'scan: while at < text.len() {
+    // The scan walks `text`'s characters once, so it ends whatever matches.
+    let mut chars = text.char_indices();
+    'scan: while let Some((at, ch)) = chars.next() {
         let rest = &text[at..];
         let before = text[..at].chars().next_back();
         for (rendered, template) in &pairs {
@@ -302,13 +305,14 @@ pub fn unrender_placeholders<'t>(
             let joins_after = rendered.ends_with(is_word) && after.starts_with(is_word);
             if !joins_before && !joins_after {
                 out.push_str(template);
-                at += rendered.len();
+                // `ch` starts the match; skip the rest of it.
+                for _ in 1..rendered.chars().count() {
+                    chars.next();
+                }
                 continue 'scan;
             }
         }
-        let ch = rest.chars().next().unwrap_or_default();
         out.push(ch);
-        at += ch.len_utf8();
     }
     out
 }
@@ -504,7 +508,7 @@ pub fn render_path_argv(template: &str, t: &PathTokens) -> String {
 /// through unchanged. Used by nested-rule specs (e.g. `for_each_dir`) so that
 /// the `{dir}` in a nested rule's `paths`, `pattern`, or `partner` field
 /// resolves to the iterated entry's path at rule-build time.
-pub fn render_mapping(m: ayaml::Mapping, tokens: &PathTokens) -> ayaml::Mapping {
+pub(crate) fn render_mapping(m: ayaml::Mapping, tokens: &PathTokens) -> ayaml::Mapping {
     let mut out = ayaml::Mapping::with_capacity(m.len());
     for (k, v) in m {
         out.insert(k, render_value(v, tokens));
@@ -513,7 +517,7 @@ pub fn render_mapping(m: ayaml::Mapping, tokens: &PathTokens) -> ayaml::Mapping 
 }
 
 /// Recursive mate to [`render_mapping`] for arbitrary YAML values.
-pub fn render_value(v: ayaml::Value, tokens: &PathTokens) -> ayaml::Value {
+pub(crate) fn render_value(v: ayaml::Value, tokens: &PathTokens) -> ayaml::Value {
     use ayaml::Value;
     match v {
         Value::String(s) => Value::String(render_path(&s, tokens)),
@@ -655,8 +659,29 @@ nested_glob_options_table! {
 /// `dir_contains` `select: "{path}"` as the literal `app/[[]slug[]]`, not a
 /// character class that matches `app/s`.
 #[must_use]
-pub fn render_nested_options(kind: &str, m: ayaml::Mapping, tokens: &PathTokens) -> ayaml::Mapping {
+pub(crate) fn render_nested_options(
+    kind: &str,
+    m: ayaml::Mapping,
+    tokens: &PathTokens,
+) -> ayaml::Mapping {
     render_options(kind, m, tokens, false)
+}
+
+/// [`render_nested_options`] for a nested spec's `extra`, without the string
+/// keys in `parent_fields`, which the nested spec takes from its parent.
+pub(crate) fn render_nested_extra(
+    kind: &str,
+    extra: &crate::yaml::Mapping,
+    tokens: &PathTokens,
+    parent_fields: &[&str],
+) -> crate::yaml::Mapping {
+    let rendered = render_nested_options(kind, extra.parser().clone(), tokens);
+    crate::yaml::Mapping::from_parser(
+        rendered
+            .into_iter()
+            .filter(|(k, _)| k.as_str().is_none_or(|s| !parent_fields.contains(&s)))
+            .collect(),
+    )
 }
 
 /// [`render_nested_options`]; `with_paths` also renders the mapping's own

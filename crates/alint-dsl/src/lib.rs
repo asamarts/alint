@@ -30,6 +30,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 pub mod bundled;
+mod core_yaml;
 pub mod extends;
 mod interp;
 mod loader;
@@ -44,16 +45,16 @@ pub(crate) use trust::{
     has_untrusted_fix_source, mark_field_sources_in, mark_provenance_in, mark_sensitive_conditions,
     mark_template_sensitive_fields, mark_unattributed_field_sources, mark_untrusted_fix_sources_in,
     masked_rule_mappings, merge_field_sources, merge_mapping_fields, merge_sensitive_fields,
-    reject_ambiguous_yaml_in, reject_env_expansion_in, reject_env_reads_in_when,
-    reject_remote_assembled_env_refs, reject_untrusted_assembled_when,
+    reject_ambiguous_yaml_in, reject_command_rules_in, reject_env_expansion_in,
+    reject_env_reads_in_when, reject_fix_promotion_in, reject_fix_promotion_templates_in,
+    reject_remote_assembled_env_refs, reject_spawning_fix_op_templates_in,
+    reject_spawning_fix_ops_in, reject_spawning_templates_in, reject_untrusted_assembled_when,
     reject_untrusted_env_instance_vars, reject_untrusted_env_var_reads,
     strip_fix_promotions_in_rule, take_sensitive_fields, take_untrusted_fix_source,
     union_provenance,
 };
 pub use trust::{
     SPAWNING_FIX_OPS, SPAWNING_RULE_KINDS, reject_allow_out_of_root_in, reject_baseline_in,
-    reject_command_rules_in, reject_fix_promotion_in, reject_fix_promotion_templates_in,
-    reject_spawning_fix_op_templates_in, reject_spawning_fix_ops_in, reject_spawning_templates_in,
     reject_trusted_extends_in, reject_untrusted_ignore_in,
 };
 

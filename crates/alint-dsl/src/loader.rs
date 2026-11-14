@@ -406,7 +406,7 @@ fn parse_config_interpolated_inner_with_environment(
                 add_environment_values(&mut environment_values, std::slice::from_ref(value));
             }
         }
-        let mut config: RawConfig = ayaml::from_value(value).map_err(|error| {
+        let mut config: RawConfig = crate::core_yaml::decode(value).map_err(|error| {
             // Each masked value keeps the type interpolation gave the real one
             // (a 12-digit id is a number), so an error in an unrelated field
             // after it still recurs; numbers move both ways, as a rule's
@@ -420,9 +420,11 @@ fn parse_config_interpolated_inner_with_environment(
                         numbers,
                     )
                     .is_ok()
-                        && ayaml::from_value::<RawConfig>(masked).err().is_some_and(
-                            |masked_error| masked_error.to_string() == error.to_string(),
-                        )
+                        && crate::core_yaml::decode::<RawConfig>(masked)
+                            .err()
+                            .is_some_and(|masked_error| {
+                                masked_error.to_string() == error.to_string()
+                            })
                 })
             });
             if reproduced {

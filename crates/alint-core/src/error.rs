@@ -10,13 +10,19 @@ impl From<ignore::Error> for Error {
     }
 }
 
-impl From<ayaml::Error> for Error {
-    fn from(e: ayaml::Error) -> Self {
+impl From<crate::yaml::Error> for Error {
+    fn from(e: crate::yaml::Error) -> Self {
         Self::Yaml(e)
     }
 }
 
+/// An error from loading a configuration, building its rules, or walking and
+/// checking a tree.
+///
+/// More variants may be added in a minor release, so a `match` on it needs a
+/// wildcard arm.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum Error {
     #[error("I/O error at {path}: {source}")]
     Io {
@@ -40,7 +46,7 @@ pub enum Error {
     },
 
     #[error("YAML parse error: {0}")]
-    Yaml(ayaml::Error),
+    Yaml(crate::yaml::Error),
 
     #[error("unknown rule kind {0:?}")]
     UnknownRuleKind(String),
@@ -149,7 +155,7 @@ mod tests {
 
     #[test]
     fn yaml_error_propagates_via_from_impl() {
-        // The `#[from] ayaml::Error` derive lets `?` lift
+        // The `From<yaml::Error>` impl lets `?` lift
         // a YAML parse failure into our Error type without
         // boilerplate. Sanity-check the impl is wired.
         let parse: std::result::Result<i32, _> = crate::yaml::from_str("not: yaml: [");

@@ -478,7 +478,7 @@ pub enum PolicyTestParseError {
     #[error("policy-test YAML uses explicit `null`; omit optional fields instead")]
     ExplicitNull,
     #[error("policy-test YAML parse error: {0}")]
-    Yaml(#[from] ayaml::Error),
+    Yaml(#[from] alint_core::yaml::Error),
     #[error("policy-test document must be a YAML mapping")]
     NotMapping,
     #[error("policy-test document must declare integer `test_version: 1`")]
@@ -552,7 +552,11 @@ impl PolicyTest {
                 supported: POLICY_TEST_VERSION,
             });
         }
-        ayaml::from_value(value).map_err(PolicyTestParseError::Yaml)
+        // alint-core's API takes its own YAML value (ADR-0038); Serde carries
+        // the parser's across unchanged.
+        let value = <alint_core::yaml::Value as serde::Deserialize>::deserialize(value)
+            .expect("a parser value reads as alint-core's");
+        alint_core::yaml::from_value(value).map_err(PolicyTestParseError::Yaml)
     }
 
     /// Return every definition error in deterministic document order.

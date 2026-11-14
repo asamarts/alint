@@ -487,10 +487,7 @@ fn every_rule_kind_rejects_an_unknown_option() {
                     continue;
                 }
                 let mut bogus = spec.clone();
-                bogus.extra.insert(
-                    ayaml::Value::String("__alint_unknown_option_probe__".into()),
-                    ayaml::Value::Bool(true),
-                );
+                bogus.extra.insert("__alint_unknown_option_probe__", true);
                 probed.insert(spec.kind.clone());
                 if registry.build(&bogus).is_ok() {
                     swallowers.insert(spec.kind.clone());
@@ -521,10 +518,7 @@ fn every_rule_kind_rejects_an_unknown_option() {
                 continue;
             }
             let mut bogus = spec.clone();
-            bogus.extra.insert(
-                ayaml::Value::String("__alint_unknown_option_probe__".into()),
-                ayaml::Value::Bool(true),
-            );
+            bogus.extra.insert("__alint_unknown_option_probe__", true);
             probed.insert(spec.kind.clone());
             if registry.build(&bogus).is_ok() {
                 swallowers.insert(spec.kind.clone());

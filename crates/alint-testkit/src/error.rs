@@ -18,7 +18,7 @@ pub enum Error {
     NotADirectory(PathBuf),
 
     #[error("YAML parse error: {0}")]
-    Yaml(#[from] ayaml::Error),
+    Yaml(#[from] alint_core::yaml::Error),
 
     #[error("alint error: {0}")]
     Alint(#[from] alint_core::Error),
