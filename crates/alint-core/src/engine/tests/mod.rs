@@ -784,3 +784,35 @@ mod fix;
 mod preview;
 mod run;
 mod trace;
+
+/// The parent's `select:` and `when_iter:` gate a nested rule's dependency
+/// preparation: a nested rule that no selected, gated iteration activates
+/// never probes git.
+#[test]
+fn parent_select_and_when_iter_gate_nested_dependencies() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(tmp.path().join("a.txt"), b"payload").unwrap();
+    let nested = "kind: nested_git_fixture\nwhen: iter.basename == \"a.txt\"\n";
+    for (gate, failures) in [
+        ("", 1),
+        ("select: '**/*.txt'\n", 1),
+        ("select: [never/*, '**/*.txt']\n", 1),
+        ("select: [never/*, '**/*.md']\n", 0),
+        ("select: never/*\n", 0),
+        ("select: 5\n", 1),
+        ("when_iter: iter.basename == \"never\"\n", 0),
+        ("when_iter: 'false'\n", 0),
+        ("when_iter: iter.basename == \"a.txt\"\n", 1),
+    ] {
+        let index = crate::walk(tmp.path(), &crate::WalkOptions::default()).unwrap();
+        let spec: crate::RuleSpec = crate::yaml::from_str(&format!(
+            "id: owner\nkind: for_each_file\nlevel: error\n{gate}"
+        ))
+        .unwrap();
+        let entry = RuleEntry::new(nested_parent(nested)).with_spec(std::sync::Arc::new(spec));
+        let report = Engine::from_entries(vec![entry], nested_registry())
+            .run(tmp.path(), &index)
+            .unwrap();
+        assert_eq!(report.total_analysis_failures(), failures, "{gate}");
+    }
+}

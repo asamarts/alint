@@ -688,12 +688,14 @@ mod tests {
     #[test]
     fn value_accessors_read_each_kind() {
         let value: Value = from_str(concat!(
-            "s: text\nt: true\nn: -3\nu: 18446744073709551615\nf: 0.5\nz: ~\n",
+            "s: text\nt: true\nb: false\nn: -3\nu: 18446744073709551615\nf: 0.5\nz: ~\n",
             "q: [a, 1]\nm: {k: v}\ntagged: !celsius 21\n",
         ))
         .unwrap();
         assert_eq!(value.get("s").and_then(Value::as_str), Some("text"));
         assert_eq!(value.get("t").and_then(Value::as_bool), Some(true));
+        assert_eq!(value.get("b").and_then(Value::as_bool), Some(false));
+        assert_eq!(value.get("s").and_then(Value::as_bool), None);
         assert_eq!(value.get("n").and_then(Value::as_i64), Some(-3));
         assert_eq!(value.get("n").and_then(Value::as_u64), None);
         assert_eq!(value.get("u").and_then(Value::as_u64), Some(u64::MAX));
@@ -732,6 +734,8 @@ mod tests {
         assert_eq!(mapping.insert("b", true), None);
         assert_eq!(mapping.insert("c", "x"), None);
         assert_eq!(mapping.insert("a", 2_u64), Some(Value::from(1_u64)));
+        assert_eq!(mapping.len(), 3);
+        assert!(!mapping.is_empty());
         let keys = |mapping: &Mapping| -> Vec<String> {
             mapping
                 .keys()
@@ -850,6 +854,8 @@ mod tests {
         let written = to_string(&spec.extra).unwrap();
         assert_eq!(from_str::<Mapping>(&written).unwrap(), spec.extra);
         let sequence: Sequence = from_str("[a, b]").unwrap();
+        let items: Vec<_> = sequence.iter().map(|item| item.as_str().unwrap()).collect();
+        assert_eq!(items, ["a", "b"]);
         assert_eq!(
             from_str::<Sequence>(&to_string(&sequence).unwrap()).unwrap(),
             sequence
@@ -876,13 +882,28 @@ mod tests {
             "{}",
             error.message()
         );
+        let inline = from_str::<Value>("a: b: c\n")
+            .unwrap_err()
+            .location()
+            .unwrap();
+        assert_eq!((inline.line(), inline.column()), (1, 5));
         let typed = from_str::<u32>("text").unwrap_err();
-        assert!(typed.message().contains("invalid type"), "{}", typed.message());
+        assert!(
+            typed.message().contains("invalid type"),
+            "{}",
+            typed.message()
+        );
         let custom = <Error as serde::de::Error>::custom("bad option");
         assert_eq!(custom.to_string(), "bad option");
         assert_eq!(custom.message(), "bad option");
         assert!(custom.location().is_none());
         assert!(std::error::Error::source(&custom).is_none());
+        let chained = Error::from_parser(
+            ayaml::Error::new(ayaml::ErrorKind::Serde, "outer")
+                .with_source(std::io::Error::other("cause")),
+        );
+        let source = std::error::Error::source(&chained).map(ToString::to_string);
+        assert_eq!(source.as_deref(), Some("cause"));
         let custom = <Error as serde::ser::Error>::custom("cannot write");
         assert_eq!(custom.to_string(), "cannot write");
         assert_eq!(format!("{custom:?}"), format!("{:?}", custom.into_parser()));

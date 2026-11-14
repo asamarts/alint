@@ -285,13 +285,16 @@ pub fn unrender_placeholders<'t>(
         }
         pairs.push((rendered, template.to_string()));
     }
+    // An empty value would match everywhere without moving the scan.
+    pairs.retain(|(rendered, _)| !rendered.is_empty());
     // Longest first, so a whole value wins over a shorter one inside it.
     pairs.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then_with(|| a.cmp(b)));
     pairs.dedup();
     let is_word = |c: char| c.is_alphanumeric() || c == '_';
     let mut out = String::with_capacity(text.len());
-    let mut at = 0;
-    'scan: while at < text.len() {
+    // The scan walks `text`'s characters once, so it ends whatever matches.
+    let mut chars = text.char_indices();
+    'scan: while let Some((at, ch)) = chars.next() {
         let rest = &text[at..];
         let before = text[..at].chars().next_back();
         for (rendered, template) in &pairs {
@@ -302,13 +305,14 @@ pub fn unrender_placeholders<'t>(
             let joins_after = rendered.ends_with(is_word) && after.starts_with(is_word);
             if !joins_before && !joins_after {
                 out.push_str(template);
-                at += rendered.len();
+                // `ch` starts the match; skip the rest of it.
+                for _ in 1..rendered.chars().count() {
+                    chars.next();
+                }
                 continue 'scan;
             }
         }
-        let ch = rest.chars().next().unwrap_or_default();
         out.push(ch);
-        at += ch.len_utf8();
     }
     out
 }
