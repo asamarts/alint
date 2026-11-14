@@ -3,7 +3,9 @@
 Status: proposed (2026-11-12).
 Decisions: [ADR-0032](../../adr/0032-v023-owner-decisions.md) (the owner decisions and the scope);
 [ADR-0033](../../adr/0033-v023-slice-after-the-corpus-stratum.md) (the slice after the corpus
-stratum, and the #503 fix).
+stratum, and the #503 fix);
+[ADR-0034](../../adr/0034-v2-version-boundary-and-phase-3-design.md)
+(the `version: 2` boundary and the Phase 3 design).
 
 v0.23 starts Phase 3 of [`general-linter.md`](../general-linter.md) (section 11.6), which v0.22.0
 unblocked by meeting all three gates of Phase 2 (section 11.1, "v0.22 gate results"). Phase 3 is
@@ -30,10 +32,18 @@ The Phase 3 slice (ADR-0032 decision 1, amended by ADR-0033 decisions 1 and 2):
    - section 7.8: the v2 schema, the commands, the generated documentation and the facts counts.
 
    An ADR records the version boundary (DEC-9). The owner approves both before implementation
-   starts.
-3. **Named selectors and relations,** top-level and rule-local, on the relation layer, in
-   `version: 2` only. The `entry` adapter can emit value-bearing (key path, value) rows for JSON,
-   YAML and TOML, which the dependency version policy needs (ADR-0033 decision 2).
+   starts. Both were approved on 2026-11-14: [the design](selectors-and-constraints.md) and
+   [ADR-0034](../../adr/0034-v2-version-boundary-and-phase-3-design.md),
+   which decides each question.
+3. **Named selectors and relations,** top-level and inline, on the relation layer, in
+   `version: 2` only (ADR-0034 decision 2).
+   - Relations emit value-bearing rows of named scalar fields for JSON, YAML and TOML, which the
+     dependency version policy needs (ADR-0033 decision 2). The value-bearing modes have their
+     own adapter ids, and TOML values come from the TOML rows adapter (ADR-0034 decision 5).
+   - Rows combine by grouping, by membership filters, and by an inner equality join with one side
+     unique on the key (ADR-0034 decision 6).
+   - A v2 source may name another local source's selectors and relations through an `extends:`
+     alias (`deps.ranges`; ADR-0034 decision 4).
 4. **The `constraint` kind, report-only,** with the assertion families the three conformance
    policies need: equality, unique/key and set (ADR-0033 decision 1). `set` covers inclusion,
    equality and disjointness, also per group. It has no fixes (section 8.3).
@@ -42,9 +52,12 @@ The Phase 3 slice (ADR-0032 decision 1, amended by ADR-0033 decisions 1 and 2):
    toolchain-pin consistency. Each ships firing and silent `alint test` cases and is measured
    against section 12.1.
 6. **`version: 2`, experimental.**
+   - The loader reads `version:` before any typed decode and dispatches on it. v2 accepts every
+     v1 key and kind with v1's meaning (ADR-0034 decision 1).
+   - In v0.23, v2 sources are local files; a bundled or remote source must be `version: 1`.
    - A draft `schemas/v2/config.json`, with a versioned `$id`.
-   - `validate-config` for both versions; `list` and `explain` render named selectors and
-     relations.
+   - `validate-config` for both versions; `list`, `explain` and `export-agents-md` render named
+     selectors and relations.
    - `init` and `suggest` keep emitting v1. The documentation marks v2 experimental, and
      `validate-config` says so for a v2 configuration.
 
@@ -78,7 +91,8 @@ Out of scope:
 
 ## 2. Where the code stands
 
-- **Relation layer** (`crates/alint-core/src/relation/`, about 3,600 lines).
+- **Relation layer** (`crates/alint-core/src/relation/`, about 3,600 lines, or 4,700 with its
+  adapters).
   - It provides resources, typed rows and values with provenance, row adapters (entry, extract,
     TOML, XML), run-scoped read and decode caches, limits, paths and pointers, and the draft
     contract traits.
@@ -90,8 +104,8 @@ Out of scope:
   other version.
 - **Conformance policies today.**
   - Locale key parity is the `key_parity` kind (v0.21).
-  - Toolchain-pin consistency is `alint://bundled/toolchain-pins@v1`: 41 rules, mostly
-    `cross_file`, with `sync_from` fixes.
+  - Toolchain-pin consistency is `alint://bundled/toolchain-pins@v1`: 24 rules, 18 of them
+    `cross_file`, over 17 facts, with `sync_from` fixes.
   - Dependency version consistency (gap C3) has no kind and no bundle.
 - **Hidden-path fingerprints.** v0.22 writes the path-free form and still matches the v0.21 form,
   in `crates/alint-core/src/baseline.rs` and `crates/alint/src/check.rs`. The language server
@@ -131,11 +145,12 @@ it must respect:
   reverse, at any recursive edge.
 - **Trust is no weaker than v1** (section 7.1 rules 9, 11 and 12):
   - every named object carries its provenance;
-  - references resolve by namespace;
+  - references resolve by namespace, and reach another source only through an `extends:` alias;
   - an inherited name never shadows a local one;
   - the planner refuses a rule that would gain a capability through what it references.
 
-  The section 12.2 trust tests cover v2 sources from remote `extends:`.
+  In v0.23 a v2 source is a local file (ADR-0034 decision 4). The section 12.2 trust tests cover
+  aliased references between local sources and the refusal of a bundled or remote v2 source.
 - **Bounded and fail-loud.**
   - A v2 plan's cost is estimated before the walk and bounded (rule 7).
   - Incomplete analysis is an analysis failure, never an empty success: mutation tests on the
@@ -184,10 +199,10 @@ next. Phases 1, 4 and 5 do not depend on the design and can run alongside phases
 | 0 | This plan, ADR-0032, the roadmap section, and section 11.1's plugin row | no |
 | 1 | Stop matching the v0.21 hidden-path fingerprint | yes (old baselines) |
 | 2 | The corpus stratum: repositories chosen, pinned, configured and scored with section 12.3's buckets | no |
-| 3 | The design document and the version-boundary ADR. **Owner gate:** implementation starts after approval | no |
+| 3 | The design document and the version-boundary ADR. **Owner gate:** implementation starts after approval. Approved in #512 (ADR-0034) | no |
 | 4 | #484: the owned YAML types and the public-API gate; then sealing the five structs, with constructors (a short series) | API only |
 | 5 | #482: the differential fuzzing harness, its allowlist, and the pull-request and scheduled runs | no |
-| 6 | Named selectors and relations, value-bearing entry rows, the draft v2 schema, and `validate-config`, `list` and `explain` for v2 | v2 only |
+| 6 | The version dispatch, named selectors and relations, per-source namespaces with `extends:` aliases, value-bearing entry rows, the equality join, the draft v2 schema, and `validate-config`, `list`, `explain` and `export-agents-md` for v2 | v2 only |
 | 7 | The `constraint` kind: equality, unique/key and set, report-only | v2 only |
 | 8 | The three conformance policies with `alint test` cases, and the section 12.1 measurements | v2 only |
 | 9 | If ayaml 0.1.2 qualifies: #483, then #481. Otherwise a status-log entry that moves them | yes (parser) |
@@ -211,9 +226,10 @@ decided then.
   - each is a documented v2 configuration of bounded length, with firing and silent `alint test`
     cases;
   - for each policy that already has a specialized v1 spelling, that spelling stays shorter;
-  - SARIF and the language server reach all of a finding's evidence (the ADR-0012 completeness
-    gates);
-  - the trust tests pass for v2 sources;
+  - every format reaches all of a finding's evidence: the ADR-0012 completeness gates cover the
+    JSON and human formats today, and phase 7 adds `constraint` findings to them with a SARIF
+    case;
+  - the trust tests pass for local v2 sources and refuse bundled and remote ones;
   - no "empty success" mutant survives on the `constraint` kind's error, truncation and
     type-mismatch paths.
 - **The public-API gate holds:** no parser type in a public signature. Each sealed struct has a
@@ -272,7 +288,7 @@ decided then.
   itself. #508 (#504): a nested `key_parity` loads with a templated `reference:` and settles the
   format, `strip_root` and `ignore_keys` per iteration. #509 (#503, item 12): the git-tracked
   views add the tracked paths that only an ignore file hid.
-- 2026-11-13: an audit of #506 to #509 hardened the three fixes:
+- 2026-11-13: an audit of #506 to #509 (#511) hardened the three fixes:
   - a nested rule leaves the run caches alone;
   - nested rules of every kind are prepared with placeholders that their options accept (the
     `_stem_` form), and an error shows the template;
@@ -287,3 +303,14 @@ decided then.
   packages named `build`, which that rule reports, so its advice to untrack now applies only to a
   directory that holds build output. The four repositories the replays skip fail to load under
   both versions.
+- 2026-11-14: phase 3 (#512). The owner approved [the design](selectors-and-constraints.md)
+  and [ADR-0034](../../adr/0034-v2-version-boundary-and-phase-3-design.md),
+  taking each question in turn.
+  - v2 is a superset of v1, dispatched on `version:` before any typed decode, and only local
+    files may be v2 in v0.23.
+  - Under `--changed`, a full-index rule's path scope decides whether it runs, never what it
+    sees. This amends constitution invariant 2.
+  - Two outcomes differ from the recommendations: names reach another source through an
+    `extends:` alias, and v0.23 adds an inner equality join with one side unique on the key.
+  - Phase 6 grows by the version dispatch, the per-source namespaces and the join. If it cannot
+    carry the join before the feature freeze, this log records the move (ADR-0034 consequences).
