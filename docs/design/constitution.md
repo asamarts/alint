@@ -16,11 +16,21 @@ wins and this document is wrong.
 1. Determinism. Output (report, violations, fixes) is byte-identical across runs on the same
    input. No reliance on HashMap iteration order or filesystem readdir order. Enforced by the
    post-walk sort and per-rule output sorting; see ADR-0003.
-2. Cross-file dispatch. A rule with `requires_full_index() == true` sees the whole index. A path
-   scope, when it declares one, decides only whether it runs under `--changed`, never what it sees
-   (ADR-0034 decision 3, amending ADR-0003; five full-index kinds, `key_parity` among them, already
-   work this way). Enforced by `v010_cross_file_kinds_require_full_index_and_no_path_scope`, which
-   checks nine kinds and which v0.23 phase 7 extends to every full-index kind.
+2. Cross-file dispatch. A rule with `requires_full_index() == true` evaluates over the whole index,
+   never the `--changed` subset. A path scope it declares (for `constraint`, its trigger scope)
+   decides only whether it runs under `--changed`, never what it sees (ADR-0034 decision 3,
+   amending ADR-0003; ADR-0037). Enforced by:
+   - `v010_cross_file_kinds_require_full_index_and_no_path_scope`, for the eight kinds and one
+     alias it lists, which declare no scope;
+   - `metadata_inventory_matches_the_audited_v019_shape`, which pins the five full-index kinds that
+     declare one (`file_absent`, `file_exists`, `key_parity`, `max_files_per_directory`,
+     `no_case_conflicts`);
+   - build-time rejection of `scope_filter:` on cross-file rules
+     (`reject_scope_filter_on_cross_file` in `alint-core/src/scope_filter.rs`); `constraint` takes
+     `scope_filter:` only in its selectors.
+
+   v0.23 phase 7 replaces the first test with one over every full-index kind that asserts it
+   receives the full index under `--changed`.
 3. Bounded analysis reads. Whole-file analysis reads (not fixers) go through
    `crate::io::read_capped` (256 MiB `MAX_ANALYZE_BYTES`); over-cap files produce a clear
    violation, never a silent skip or OOM.

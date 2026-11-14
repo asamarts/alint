@@ -110,8 +110,8 @@ that lexer coupling deliberately rather than silently assuming equivalent tokens
 The committed `proptest` differential corpus generates hostile scanner prefixes, separators, and
 repeated BOMs, then requires the guard to catch every deep-flow or alias shape accepted by the real
 parser. Fixed regressions cover block scalars, comments, document markers, Unicode breaks, tags,
-large anchored scalars, and merge aliases. That property boundary—not the third-party parser
-internals—is alint's fuzzing responsibility for this like-for-like fork migration. A parser-family
+large anchored scalars, and merge aliases. That property boundary, not the third-party parser
+internals, is alint's fuzzing responsibility for this like-for-like fork migration. A parser-family
 change must add differential parser fuzzing before cutover.
 
 ## Migration and rollback
@@ -168,3 +168,19 @@ maintained libyaml fork is the lower-risk ownership boundary.
     U+2029 parse; a block scalar whose header sits at its parent `-` or `?` indentation is
     rejected; several parse errors are worded differently.
   - Criteria: Y-C1 and Y-C2 are met, Y-C6 and Y-C7 are not, and Y-C3 needs the harness.
+- **2026-11-14: gaps filed as ayaml issues; saphyr leaves in v0.24.** With the ayaml
+  maintainers' agreement, gaps are now filed as issues on asamarts/ayaml, in generic text that
+  names no consumer ([ADR-0036](../adr/0036-ayaml-issues-and-the-saphyr-exit.md), amending
+  ADR-0031 decision 3).
+  - Filed on asamarts/ayaml:
+    - asamarts/ayaml#123: plain-scalar spans and `raw` include trailing whitespace;
+    - asamarts/ayaml#124: the default count limits refuse valid documents of 0.3 to 7 MB;
+    - asamarts/ayaml#125: the compatibility mode has no lazy event stream;
+    - asamarts/ayaml#126: document that an alias to an undefined anchor is reported without an
+      error;
+    - asamarts/ayaml#127: about twice the bytes allocated per read;
+    - asamarts/ayaml#128: a spanned tree with path lookup.
+  - saphyr and saphyr-parser, which still give source spans, structured fixes, `yaml_depth`'s
+    literal-subtree check and `pinned_references`' scan, move to ayaml's events in v0.24, after
+    #482 and #483. The move depends on asamarts/ayaml#123, or on alint trimming the spans itself,
+    and benefits from asamarts/ayaml#128.

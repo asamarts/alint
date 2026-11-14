@@ -7,7 +7,11 @@ stratum, and the #503 fix);
 [ADR-0034](../../adr/0034-v2-version-boundary-and-phase-3-design.md)
 (the `version: 2` boundary and the Phase 3 design);
 [ADR-0035](../../adr/0035-keep-the-early-ayaml-cutover.md) (keeping the early ayaml
-cutover, and qualifying it before the release).
+cutover, and qualifying it before the release);
+[ADR-0036](../../adr/0036-ayaml-issues-and-the-saphyr-exit.md) (filing ayaml gaps as ayaml
+issues, and the saphyr exit in v0.24);
+[ADR-0037](../../adr/0037-phase-3-design-refinements.md) (row-level `equal`, CLDR plurals in
+`set`, and the corrections to ADR-0034 after an audit).
 
 v0.23 starts Phase 3 of [`general-linter.md`](../general-linter.md) (section 11.6), which v0.22.0
 unblocked by meeting all three gates of Phase 2 (section 11.1, "v0.22 gate results"). Phase 3 is
@@ -48,7 +52,9 @@ The Phase 3 slice (ADR-0032 decision 1, amended by ADR-0033 decisions 1 and 2):
      alias (`deps.ranges`; ADR-0034 decision 4).
 4. **The `constraint` kind, report-only,** with the assertion families the three conformance
    policies need: equality, unique/key and set (ADR-0033 decision 1). `set` covers inclusion,
-   equality and disjointness, also per group. It has no fixes (section 8.3).
+   equality and disjointness, also per group. It has no fixes (section 8.3). `equal` also compares
+   two fields of one row, which a join's output needs, and `set` can collapse CLDR plural groups as
+   `key_parity` does (ADR-0037).
 5. **Three conformance policies** as `version: 2` configurations: locale key parity (re-expressed
    from `key_parity` as per-locale set equality), dependency version consistency, and
    toolchain-pin consistency. Each ships firing and silent `alint test` cases and is measured
@@ -90,12 +96,15 @@ Also in v0.23:
 Out of scope:
 - **v0.24 or later:** the remaining assertion families (reference, cardinality, group, bounded
   count), the specialized kinds and templates of DEC-8, and a stable `version: 2`.
+- **v0.24:** saphyr and saphyr-parser leave the dependency graph. After #482 and #483, source
+  spans, structured YAML fixes, `yaml_depth`'s literal-subtree check and `pinned_references` read
+  ayaml's events instead (ADR-0036).
 - **Plugin hosts:** these start in v0.24 (ADR-0032 decision 4).
 - **Phase 4:** stale exceptions.
 
 ## 2. Where the code stands
 
-- **Relation layer** (`crates/alint-core/src/relation/`, about 3,600 lines, or 4,700 with its
+- **Relation layer** (`crates/alint-core/src/relation/`, about 3,600 lines, or 4,800 with its
   adapters).
   - It provides resources, typed rows and values with provenance, row adapters (entry, extract,
     TOML, XML), run-scoped read and decode caches, limits, paths and pointers, and the draft
@@ -121,7 +130,7 @@ Out of scope:
   - four `alint-testkit` items.
 
   alint parses YAML with ayaml 0.1.2 since #510, through `alint_core::yaml`. saphyr and
-  saphyr-parser still give source spans and structured fixes.
+  saphyr-parser still give source spans and structured fixes; they leave in v0.24 (ADR-0036).
 - **Open structs.**
   - `Violation`, `Context`, `RuleSpec`, `NestedRuleSpec` and `WalkOptions` are struct literals
     outside `alint-core`.
@@ -209,7 +218,7 @@ next. Phases 1, 4 and 5 do not depend on the design and can run alongside phases
 | 4 | #484: the owned YAML types and the public-API gate; then sealing the five structs, with constructors (a short series) | API only |
 | 5 | #482: the differential fuzzing harness, its allowlist, and the pull-request and scheduled runs | no |
 | 6 | The version dispatch, named selectors and relations, per-source namespaces with `extends:` aliases, value-bearing entry rows, the equality join, the draft v2 schema, and `validate-config`, `list`, `explain` and `export-agents-md` for v2 | v2 only |
-| 7 | The `constraint` kind: equality, unique/key and set, report-only | v2 only |
+| 7 | The `constraint` kind: equality (with row-level `equal`), unique/key and set (with `plurals: cldr`), report-only, and the related-location gate over JSON, SARIF and the language server | v2 only |
 | 8 | The three conformance policies with `alint test` cases, and the section 12.1 measurements | v2 only |
 | 9 | Qualify the cutover that #510 made: #483, and the #482 harness's verdict with an approved allowlist. Otherwise the owner holds the release or reverts #510 (ADR-0035) | yes (parser) |
 | 10 | Documentation, the CHANGELOG (re-run `alint baseline`; the library migration; the `git_tracked_only` change), facts, and the release check | no |
@@ -232,9 +241,8 @@ decided then.
   - each is a documented v2 configuration of bounded length, with firing and silent `alint test`
     cases;
   - for each policy that already has a specialized v1 spelling, that spelling stays shorter;
-  - every format reaches all of a finding's evidence: the ADR-0012 completeness gates cover the
-    JSON and human formats today, and phase 7 adds `constraint` findings to them with a SARIF
-    case;
+  - SARIF, JSON and the language server reach all of a finding's evidence, under a completeness
+    gate phase 7 adds;
   - the trust tests pass for local v2 sources and refuse bundled and remote ones;
   - no "empty success" mutant survives on the `constraint` kind's error, truncation and
     type-mismatch paths.
@@ -338,3 +346,17 @@ decided then.
   - **CI:** the Windows and e2e `cargo test --workspace` runs stopped at the first failing test
     binary; they run every binary, and a dogfood rule keeps `--no-fail-fast` in CI;
   - the parser's observable differences from v0.22 are in the CHANGELOG.
+- 2026-11-14: design corrections (#514).
+  - An audit of the Phase 3 design and ADR-0034 found 31 issues: five high (H1 to H5), 16
+    medium (M1 to M16) and ten low. #513 fixed the stale YAML text (H5). The design now fixes the
+    rest, adds syntax tables for relations and `constraint`, and adds a false-positive section.
+  - Two owner decisions ([ADR-0037](../../adr/0037-phase-3-design-refinements.md)): `equal`
+    compares two fields of one row, which makes the join usable (nextcloud-b02's equality part),
+    and CLDR plural collapse is `set`'s `plurals: cldr`, decided per pair of groups as
+    `key_parity` does.
+  - ADR-0037 also records the corrections that change an ADR-0034 decision: path-free
+    `constraint` fingerprints, groups with no rows, the invariant 2 test (replaced, not
+    extended), a required `unique:` side, version dispatch for fragments and non-literal versions,
+    literal names, `read:` formats, `constraint`'s registration and the facts field.
+  - [ADR-0036](../../adr/0036-ayaml-issues-and-the-saphyr-exit.md): ayaml gaps are filed as ayaml
+    issues (asamarts/ayaml#123 to asamarts/ayaml#128), and saphyr leaves in v0.24.

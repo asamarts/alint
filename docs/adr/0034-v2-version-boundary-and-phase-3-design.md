@@ -15,6 +15,10 @@ Q1, Q2, Q6, Q12 and Q15 of general-linter section 13.2, and the parts of
 Amends constitution invariant 2 and [ADR-0003](0003-rule-engine-dispatch-and-determinism.md)
 (decision 3 here). [ADR-0008](0008-git-tracked-only-is-a-kind-option.md) and
 [ADR-0010](0010-manifest-derived-rule-scope.md) stand.
+[ADR-0037](0037-phase-3-design-refinements.md) (2026-11-14) amends decisions 1 and 3 to 9 after an
+audit: `equal` gains a row-level form, CLDR plurals become an option of `set`, a `constraint`
+fingerprint leaves the path out, and invariant 2's test is replaced rather than extended. The rest
+stands.
 
 ## Context
 

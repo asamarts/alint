@@ -14,6 +14,8 @@ placed the npm move in its own release after v0.22.0; ADR-0015 chose the optiona
 The plan is [`docs/design/v0.22.1/README.md`](../design/v0.22.1/README.md).
 [ADR-0035](0035-keep-the-early-ayaml-cutover.md) (2026-11-14) amends decision 1: the ayaml cutover
 merged before it was qualified, and is qualified before v0.23.0 instead.
+[ADR-0036](0036-ayaml-issues-and-the-saphyr-exit.md) (2026-11-14) amends decision 3: with the ayaml
+maintainers' agreement, ayaml gaps are filed as issues on asamarts/ayaml, in generic text.
 
 ## Context
 

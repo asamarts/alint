@@ -50,3 +50,5 @@ in `docs/adr/` is missing from this table.
 | [0033](../adr/0033-v023-slice-after-the-corpus-stratum.md) | v0.23 slice after the corpus stratum: set instead of cardinality, entry values, and the #503 fix | accepted |
 | [0034](../adr/0034-v2-version-boundary-and-phase-3-design.md) | The `version: 2` boundary and the Phase 3 design decisions | accepted |
 | [0035](../adr/0035-keep-the-early-ayaml-cutover.md) | Keep the early ayaml cutover and qualify it before v0.23.0 | accepted |
+| [0036](../adr/0036-ayaml-issues-and-the-saphyr-exit.md) | File ayaml gaps as ayaml issues, and remove saphyr in v0.24 | accepted |
+| [0037](../adr/0037-phase-3-design-refinements.md) | Phase 3 refinements: row-level equality, CLDR plurals in `set`, and ADR-0034 corrections | accepted |

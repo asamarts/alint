@@ -9,6 +9,10 @@ decision-makers: asamarts
 ## Status
 
 Accepted. Backfilled on 2026-06-10; the decision itself predates this record (see ADR-0001).
+[ADR-0034](0034-v2-version-boundary-and-phase-3-design.md) (2026-11-14) amends the full-index
+dispatch class: a full-index rule may declare a path scope that decides whether it runs under
+`--changed`, never what it sees. [ADR-0037](0037-phase-3-design-refinements.md) replaces the test
+named below with one over every full-index kind.
 
 ## Context
 
