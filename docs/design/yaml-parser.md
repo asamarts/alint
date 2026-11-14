@@ -157,3 +157,14 @@ maintained libyaml fork is the lower-risk ownership boundary.
   The re-qualification targets ayaml 0.1.2 and the first minor after it
   ([ADR-0031](../adr/0031-v0221-owner-decisions.md), [`v0.22.1/README.md`](v0.22.1/README.md)
   section 4, #481-#484).
+- **2026-11-14: ayaml 0.1.2, on `main` ahead of qualification.** #510 moved alint from
+  `yaml_serde` 0.10.7 to ayaml 0.1.2; `yaml_serde` and `libyaml-rs` left the graph, and saphyr
+  stays for source spans and structured fixes. The owner kept it and moved the qualification
+  (#482, #483) before v0.23.0 ([ADR-0035](../adr/0035-keep-the-early-ayaml-cutover.md)).
+  - ayaml's default caps on events, collection entries, anchors and alias uses refused valid
+    files that `yaml_serde` read. alint decodes through `alint_core::yaml`, which lifts those
+    caps and keeps 32 MiB input, depth 128 and the alias-expansion allowance.
+  - Against v0.22.0: the same values on every probe; plain scalars containing U+0085, U+2028 or
+    U+2029 parse; a block scalar whose header sits at its parent `-` or `?` indentation is
+    rejected; several parse errors are worded differently.
+  - Criteria: Y-C1 and Y-C2 are met, Y-C6 and Y-C7 are not, and Y-C3 needs the harness.

@@ -1797,6 +1797,37 @@ fn a_name_counts_only_as_its_directory_lists_it() {
     assert!(!listings.spelled_as_listed(root, Path::new("missing/x.txt")));
 }
 
+/// What `fix --dry-run` predicts for a create follows the same spelling rule:
+/// where the file system ignores case, a create of `Docs/x.txt` under an
+/// existing `docs/` lands as `docs/x.txt`, which no rule sees as `Docs/x.txt`.
+/// The components a create makes are spelled as written.
+#[test]
+fn a_create_keeps_its_spelling_only_where_the_disk_agrees() {
+    let tmp = td();
+    let root = tmp.path();
+    touch(root, "docs/x.txt", b"x\n");
+    let ignores_case = root.join("DOCS").exists();
+    assert!(existing_prefix_spelled_as_listed(
+        root,
+        Path::new("docs/x.txt")
+    ));
+    assert!(existing_prefix_spelled_as_listed(
+        root,
+        Path::new("docs/new.txt")
+    ));
+    assert!(existing_prefix_spelled_as_listed(
+        root,
+        Path::new("new/dir/x.txt")
+    ));
+    for other in ["Docs/x.txt", "docs/X.txt", "DOCS/new.txt"] {
+        assert_eq!(
+            existing_prefix_spelled_as_listed(root, Path::new(other)),
+            !ignores_case,
+            "{other}"
+        );
+    }
+}
+
 /// A tracked symlink in an ignored directory that leads out of the root stays
 /// out, as the walk keeps it out of the index without ignore files.
 #[cfg(unix)]

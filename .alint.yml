@@ -486,6 +486,37 @@ rules:
       `@sha256:<64-hex-digest>` so a compromised tag cannot silently change
       what runs. Local `./` references are allowed.
 
+  # Every YAML decode goes through alint_core::yaml, which pins the parser
+  # limits. ayaml's own defaults cap a document at 1,000,000 events and
+  # refused valid multi-megabyte files that v0.22 read.
+  - id: yaml-decodes-go-through-alint-core
+    kind: file_content_forbidden
+    paths:
+      include:
+        - "crates/**/*.rs"
+        - "xtask/**/*.rs"
+      exclude:
+        - "crates/alint-core/src/yaml.rs"
+    pattern: 'ayaml::(compat|parse_[a-z_]+|from_str[a-z_]*|from_slice|from_reader|Deserializer)\b'
+    level: error
+    message: >-
+      Decode YAML with alint_core::yaml::from_str (crate::yaml inside
+      alint-core), which applies alint's parser limits; ayaml's defaults
+      refuse valid large files.
+
+  # CI runs the workspace tests with --no-fail-fast, so a failing test binary
+  # does not hide the ones after it (Windows CI showed one failure per run).
+  - id: ci-workspace-tests-run-every-binary
+    kind: file_content_forbidden
+    paths:
+      - ".github/workflows/*.yml"
+      - "ci/scripts/*.sh"
+    pattern: '(?m)cargo test --workspace(?: --locked| --quiet)*[ \t]*(?:$|`)'
+    level: error
+    message: >-
+      Run `cargo test --workspace` with --no-fail-fast in CI, so one failing
+      test binary does not hide the others.
+
   # docs/design/README.md indexes every ADR. A new ADR that is not listed
   # there fails here, so the index cannot fall behind docs/adr/.
   - id: adr-index-lists-every-adr

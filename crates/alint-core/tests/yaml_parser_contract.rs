@@ -8,7 +8,7 @@ use ayaml::Value;
 
 #[test]
 fn scalar_resolution_tags_merges_and_aliases_keep_the_supported_semantics() {
-    let document: Value = ayaml::compat::from_str(
+    let document: Value = alint_core::yaml::from_str(
         "plain_bool_word: yes\n\
          legacy_octal: 0123\n\
          binary: 0b11\n\
@@ -48,7 +48,7 @@ fn scalar_resolution_tags_merges_and_aliases_keep_the_supported_semantics() {
 
 #[test]
 fn duplicate_keys_multi_document_streams_and_malformed_locations_remain_errors() {
-    let duplicate = ayaml::compat::from_str::<Value>("a: 1\na: 2\n")
+    let duplicate = alint_core::yaml::from_str::<Value>("a: 1\na: 2\n")
         .expect_err("duplicate mapping keys are ambiguous and must fail")
         .to_string();
     assert!(
@@ -56,7 +56,7 @@ fn duplicate_keys_multi_document_streams_and_malformed_locations_remain_errors()
         "unexpected duplicate-key diagnostic: {duplicate}"
     );
 
-    let multiple = ayaml::compat::from_str::<Value>("a: 1\n---\nb: 2\n")
+    let multiple = alint_core::yaml::from_str::<Value>("a: 1\n---\nb: 2\n")
         .expect_err("single-document entry points must reject YAML streams")
         .to_string();
     assert!(
@@ -64,7 +64,7 @@ fn duplicate_keys_multi_document_streams_and_malformed_locations_remain_errors()
         "unexpected multi-document diagnostic: {multiple}"
     );
 
-    let malformed = ayaml::compat::from_str::<Value>("a: [1,\n")
+    let malformed = alint_core::yaml::from_str::<Value>("a: [1,\n")
         .expect_err("malformed flow sequence must fail");
     let location = malformed
         .location()

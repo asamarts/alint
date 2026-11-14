@@ -1789,8 +1789,9 @@ and
 - **One library API break.** YAML parser types leave the public API of `alint-core`,
   `alint-dsl` and `alint-testkit` (#484), and `Violation`, `Context`, `RuleSpec`,
   `NestedRuleSpec` and `WalkOptions` become `#[non_exhaustive]` with constructors.
-- **YAML groundwork.** Differential parser fuzzing (#482). The ayaml cutover (#481, #483) joins
-  only if ayaml 0.1.2 meets the criteria before the feature freeze.
+- **A pure-Rust YAML parser.** alint parses YAML with ayaml (#510), and the release ships it
+  once differential parser fuzzing (#482) and the re-derived depth guard (#483) qualify it
+  ([ADR-0035](../adr/0035-keep-the-early-ayaml-cutover.md)).
 - **Baselines.** The v0.21 fingerprint of a hidden-path finding is no longer matched; re-run
   `alint baseline` before upgrading.
 

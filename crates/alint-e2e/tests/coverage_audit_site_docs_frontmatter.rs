@@ -1,5 +1,5 @@
 //! Hard audit: every `docs/site/**/*.md` page MUST have a YAML
-//! frontmatter block that parses cleanly via `ayaml::compat::from_str`.
+//! frontmatter block that parses cleanly via `alint_core::yaml::from_str`.
 //!
 //! Why this exists. The `docs/site/` subtree is copied verbatim into
 //! the docs-bundle artifact that alint.org pulls at build time. Each
@@ -36,7 +36,7 @@
 //! - Missing/extra `---` frontmatter delimiters.
 //! - Bad indentation inside multi-line list/mapping values.
 //! - Tab-vs-spaces mixing inside frontmatter.
-//! - Any other malformation `yaml_serde` rejects.
+//! - Any other malformation the YAML parser rejects.
 //!
 //! What it deliberately does NOT catch:
 //! - Astro/Starlight-specific frontmatter schema (e.g. `sidebar.order`
@@ -134,9 +134,9 @@ fn every_site_doc_has_parseable_yaml_frontmatter() {
             ));
             continue;
         };
-        if let Err(e) = ayaml::compat::from_str::<ayaml::Value>(fm) {
+        if let Err(e) = alint_core::yaml::from_str::<ayaml::Value>(fm) {
             failures.push(format!(
-                "{}: YAML frontmatter rejected by yaml_serde: {}\n\
+                "{}: YAML frontmatter rejected by the YAML parser: {}\n\
                  frontmatter source (between --- delimiters):\n{}",
                 rel.display(),
                 e,
@@ -179,7 +179,7 @@ fn every_site_doc_has_its_own_description() {
         let src = std::fs::read_to_string(root.join(&rel)).unwrap();
         // A missing or unparseable block is reported by the test above.
         let Some(Ok(front)) =
-            extract_frontmatter(&src).map(ayaml::compat::from_str::<ayaml::Value>)
+            extract_frontmatter(&src).map(alint_core::yaml::from_str::<ayaml::Value>)
         else {
             continue;
         };
@@ -249,12 +249,12 @@ fn extract_frontmatter_tolerates_crlf_line_endings() {
     let src = "---\r\ntitle: hello\r\nfoo: bar\r\n---\r\n\r\nbody\r\n";
     let fm = extract_frontmatter(src).expect("CRLF frontmatter should be found");
     assert_eq!(fm, "title: hello\r\nfoo: bar");
-    ayaml::compat::from_str::<ayaml::Value>(fm).expect("CRLF frontmatter should parse");
+    alint_core::yaml::from_str::<ayaml::Value>(fm).expect("CRLF frontmatter should parse");
 }
 
 /// Regression specifically for the `variable-interpolation.md` failure
 /// shape: unquoted scalar value containing `:<space>`. If
-/// `yaml_serde` ever changes its behaviour to accept this (it
+/// the YAML parser ever changes its behaviour to accept this (it
 /// shouldn't — the YAML 1.2 spec is unambiguous), we want to know.
 #[test]
 fn unquoted_scalar_with_colon_space_is_rejected_by_yaml_parser() {
@@ -262,10 +262,10 @@ fn unquoted_scalar_with_colon_space_is_rejected_by_yaml_parser() {
     // description: ... The when: language gains ...
     let fm = "title: ok\n\
               description: lead-in text. The when: language continues.\n";
-    let parsed: Result<ayaml::Value, _> = ayaml::compat::from_str(fm);
+    let parsed: Result<ayaml::Value, _> = alint_core::yaml::from_str(fm);
     assert!(
         parsed.is_err(),
-        "yaml_serde started accepting unquoted scalars with embedded \
+        "the YAML parser started accepting unquoted scalars with embedded \
          `:<space>`; this test's premise (and the alint.org-side bug it \
          exists to prevent) needs revisiting"
     );

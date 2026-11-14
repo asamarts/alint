@@ -256,7 +256,7 @@ struct Derived {
 }
 
 fn derive_config(source: &str, catalog: KindCatalog<'_>) -> Result<Derived> {
-    let mut doc: Yaml = ayaml::compat::from_str(source).context("parse the config")?;
+    let mut doc: Yaml = alint_core::yaml::from_str(source).context("parse the config")?;
     let custom_facts: Vec<String> = doc
         .get("facts")
         .and_then(Yaml::as_sequence)
@@ -1346,7 +1346,7 @@ mod tests {
                 pin.config.replace(".alint.yml", ".json"),
                 "{repo}: the record's file name"
             );
-            let config: Yaml = ayaml::compat::from_str(
+            let config: Yaml = alint_core::yaml::from_str(
                 &std::fs::read_to_string(root.join("docs/design/v0.12/corpus").join(&pin.config))
                     .unwrap(),
             )
@@ -1594,7 +1594,7 @@ rules:
             derived.dropped,
             ["fmt", "nested", "signed", "future", "fixed (fix)"]
         );
-        let doc: Yaml = ayaml::compat::from_str(&derived.yaml).unwrap();
+        let doc: Yaml = alint_core::yaml::from_str(&derived.yaml).unwrap();
         let rules = doc["rules"].as_sequence().unwrap();
         let ids: Vec<&str> = rules.iter().map(|r| r["id"].as_str().unwrap()).collect();
         assert_eq!(ids, ["keep", "fixed", "safe-fix"]);

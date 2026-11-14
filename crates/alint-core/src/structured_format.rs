@@ -158,10 +158,12 @@ impl Format {
                         crate::yaml_depth::MAX_YAML_FLOW_DEPTH
                     ));
                 }
-                // Bound ALIAS expansion: yaml_serde's own limits miss a single
-                // anchor referenced many times (`*a` x N -> N x anchor-size nodes),
-                // which balloons a small file into millions of nodes. Cheap
-                // discard-only pre-count; alias-free text short-circuits for free.
+                // Bound ALIAS expansion: a single anchor referenced many times
+                // (`*a` x N -> N x anchor-size nodes) balloons a small file into
+                // millions of nodes. Written for the parser v0.22 used, whose
+                // limits missed it; ayaml has an alias budget too, and #483
+                // re-derives this guard. Cheap discard-only pre-count; alias-free
+                // text short-circuits for free.
                 if !yaml_guards.expansion_within_limit(text) {
                     return Err(
                         "YAML alias expansion exceeds the maximum supported size".to_string()
@@ -1641,8 +1643,8 @@ mod tests {
         // GATE for the "Duplicate keys differ" caveat in docs/rules.md: a key
         // repeated within one scope resolves three incompatible ways, and a rule
         // author needs to know which. Pinning it here keeps the doc honest and
-        // catches a parser swap that changes the behavior (e.g. a serde_yaml that
-        // starts rejecting dup keys would move YAML from keep-last to reject).
+        // catches a parser change that changes the behavior (e.g. a YAML parser
+        // that starts rejecting dup keys would move YAML from keep-last to reject).
         //
         // Keep-LAST (earlier value invisible):
         assert_eq!(
@@ -1653,7 +1655,7 @@ mod tests {
         assert_eq!(
             Format::Yaml.parse("a: 1\na: 2\n").unwrap()["a"],
             serde_json::json!(2),
-            "YAML (yaml_serde) keeps the last duplicate key"
+            "YAML keeps the last duplicate key"
         );
         assert_eq!(
             Format::Dotenv.parse("a=1\na=2\n").unwrap()["a"],

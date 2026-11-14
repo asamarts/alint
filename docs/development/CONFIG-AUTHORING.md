@@ -513,8 +513,8 @@ each `examples/*/README.md` for the gap catalogue feeding it.)
 
 `json_path_matches`, `yaml_path_matches`, and `toml_path_matches` apply
 their `matches:` regex to the *string representation* of the matched
-value. The implementation requires the underlying `serde_json::Value` /
-`serde_yaml::Value` / `toml::Value` to be a string variant. Against a
+value. The implementation requires the underlying JSON, YAML or TOML
+value to be a string. Against a
 bool field (e.g. `[package].publish`, `compilerOptions.strict`,
 `engineStrict`), the rule fires this runtime error on **every match**:
 
@@ -548,7 +548,7 @@ configs** before next.js's case study made the pattern explicit.
 ```
 
 `*_path_equals` deserialises the right-hand side into a generic
-`serde_yaml::Value` and compares with `==`, so it transparently handles
+YAML value and compares with `==`, so it transparently handles
 booleans, numbers, null, arrays, and objects in addition to strings.
 
 **Right (either-of-many bools — `*_path_equals` only matches one literal,
@@ -828,12 +828,11 @@ identical semantic value).
 ### 21. `yaml_path_*` rules error on multi-document YAML files
 
 `yaml_path_equals` and the `yaml_path_*` family parse the YAML body
-through `yaml_serde::from_str::<serde_json::Value>()`, which rejects
-streams containing more than one `---`-separated document. Files that
-contain multi-doc streams (k8s manifests bundled together, release-notes
-stitched into one file, helm-chart-rendered output) trip a runtime
-"more than one document is not supported" error rather than a clean rule
-verdict.
+as a single document, which rejects streams containing more than one
+`---`-separated document. Files that contain multi-doc streams (k8s
+manifests bundled together, release-notes stitched into one file,
+helm-chart-rendered output) trip a runtime "more than one document in
+stream" analysis failure rather than a clean rule verdict.
 
 **Wrong (rule fires runtime error on multi-doc files):**
 <!-- alint:ignore-example -->

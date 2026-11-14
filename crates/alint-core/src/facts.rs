@@ -535,7 +535,7 @@ mod tests {
     }
 
     fn parse(yaml: &str) -> Vec<FactSpec> {
-        ayaml::compat::from_str(yaml).unwrap()
+        crate::yaml::from_str(yaml).unwrap()
     }
 
     /// `FactKind::ALL_NAMES` is the source of truth for the `facts.json`

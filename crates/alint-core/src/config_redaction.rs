@@ -213,7 +213,7 @@ pub fn redact_environment_values<'a>(
             }
         }
         if value.len() <= 64
-            && let Ok(ayaml::Value::Number(number)) = ayaml::compat::from_str(value)
+            && let Ok(ayaml::Value::Number(number)) = crate::yaml::from_str(value)
         {
             forms.push(number.to_string());
         }

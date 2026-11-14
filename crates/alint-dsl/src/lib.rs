@@ -1130,8 +1130,8 @@ impl<'catalog> LoadOptions<'catalog> {
 }
 
 pub fn parse(yaml: &str) -> Result<Config> {
-    // Guard the deep-flow bomb before `ayaml`/libyaml-rs processes it
-    // super-linearly, same as `load()` / the remote+bundled `extends:` bodies. This
+    // Guard the deep-flow bomb before the parser sees it (the guard was written
+    // for libyaml-rs, which hung on one), same as `load()` / the remote+bundled `extends:` bodies. This
     // is a public entry point, so an external caller's untrusted YAML must be as
     // safe here as through the file loader.
     let yaml_guards = alint_core::yaml_depth::scan_guards(yaml);
@@ -1151,7 +1151,7 @@ pub fn parse(yaml: &str) -> Result<Config> {
             "YAML alias expansion exceeds the maximum supported size".to_string(),
         ));
     }
-    let mut config: Config = match ayaml::compat::from_str(yaml) {
+    let mut config: Config = match alint_core::yaml::from_str(yaml) {
         Ok(config) => config,
         Err(parse_error) => {
             if let Err(error @ Error::Other(_)) =

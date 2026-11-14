@@ -741,10 +741,13 @@ fn prepare_nested_rule(
     registry.build(nested_spec).map_err(|error| {
         Error::rule_config(
             parent_id,
-            crate::template::unrender_placeholders(&format!(
-                "nested rule #{idx} (`{}`) could not be prepared: {error}",
-                compiled.spec.kind
-            )),
+            crate::template::unrender_placeholders(
+                &format!(
+                    "nested rule #{idx} (`{}`) could not be prepared: {error}",
+                    compiled.spec.kind
+                ),
+                compiled.spec.templates(),
+            ),
         )
     })
 }

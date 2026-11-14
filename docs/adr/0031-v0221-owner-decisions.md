@@ -12,6 +12,8 @@ Accepted (2026-11-08). Settles the shape of the release after v0.22.0, how the n
 its binary, and where gaps found in alint's own dependencies are filed. ADR-0030 decision 4 already
 placed the npm move in its own release after v0.22.0; ADR-0015 chose the optionalDependencies model.
 The plan is [`docs/design/v0.22.1/README.md`](../design/v0.22.1/README.md).
+[ADR-0035](0035-keep-the-early-ayaml-cutover.md) (2026-11-14) amends decision 1: the ayaml cutover
+merged before it was qualified, and is qualified before v0.23.0 instead.
 
 ## Context
 

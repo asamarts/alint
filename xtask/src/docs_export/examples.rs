@@ -162,7 +162,7 @@ fn validate_documented(
         bail!("documented examples require inline `given.tree`");
     }
     let config: ayaml::Value =
-        ayaml::compat::from_str(config_text).context("parsing the documented example config")?;
+        alint_core::yaml::from_str(config_text).context("parsing the documented example config")?;
 
     if has_remote_extends(&config) {
         bail!(
@@ -765,7 +765,7 @@ mod tests {
 
     #[test]
     fn config_rule_kinds_lists_top_level_rules() {
-        let cfg = ayaml::compat::from_str(
+        let cfg = alint_core::yaml::from_str(
             "version: 1\nrules:\n  - id: a\n    kind: file_exists\n  - id: b\n    kind: dir_absent\n",
         )
         .unwrap();
@@ -774,18 +774,18 @@ mod tests {
 
     #[test]
     fn config_rule_kinds_empty_without_rules() {
-        let cfg = ayaml::compat::from_str("version: 1\nextends: alint://bundled/x\n").unwrap();
+        let cfg = alint_core::yaml::from_str("version: 1\nextends: alint://bundled/x\n").unwrap();
         assert_eq!(config_rule_kinds(&cfg), [] as [String; 0]);
     }
 
     #[test]
     fn has_remote_extends_detects_http() {
-        let remote = ayaml::compat::from_str("extends: https://example.com/r.yml\n").unwrap();
+        let remote = alint_core::yaml::from_str("extends: https://example.com/r.yml\n").unwrap();
         assert!(has_remote_extends(&remote));
         let seq =
-            ayaml::compat::from_str("extends: [alint://bundled/x, http://h/r.yml]\n").unwrap();
+            alint_core::yaml::from_str("extends: [alint://bundled/x, http://h/r.yml]\n").unwrap();
         assert!(has_remote_extends(&seq));
-        let local = ayaml::compat::from_str("extends: alint://bundled/x\n").unwrap();
+        let local = alint_core::yaml::from_str("extends: alint://bundled/x\n").unwrap();
         assert!(!has_remote_extends(&local));
     }
 

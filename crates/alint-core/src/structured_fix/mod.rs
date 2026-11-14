@@ -1657,8 +1657,8 @@ mod json_ {
 /// the target scalar's range (like JSON): the span covers the full scalar token
 /// (quotes included for quoted scalars, trailing comment/whitespace EXCLUDED after
 /// the clamp below), so the splice never disturbs a neighbour. The check side
-/// parses YAML via `yaml_serde`/libyaml-rs, which exposes no spans, hence this
-/// separate spanned view; a JSON scalar is valid YAML with the same value+type
+/// parses YAML via ayaml's compat layer, whose 0.1 releases have no spanned node
+/// tree, hence this separate spanned view; a JSON scalar is valid YAML with the same value+type
 /// (YAML is a superset of JSON), so the serializer reuses `serde_json`.
 ///
 /// CONSERVATIVE by design: for SET the resolver declines a multi-document stream, a

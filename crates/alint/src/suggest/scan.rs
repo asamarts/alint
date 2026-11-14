@@ -128,8 +128,8 @@ fn read_existing_extends(root: &Path) -> Vec<String> {
         let Ok(body) = std::fs::read_to_string(&path) else {
             continue;
         };
-        // Guard a deep-flow YAML bomb before yaml_serde/libyaml-rs processes it
-        // super-linearly -- the same guard the config loader applies. `suggest`
+        // Guard a deep-flow YAML bomb before the parser sees it -- the same
+        // guard the config loader applies. `suggest`
         // reads the repo's `.alint.yml` directly, so an untrusted checkout could
         // otherwise hang it. Degrade gracefully to "no existing extends", as this
         // function already does for an unparseable config.
@@ -137,7 +137,7 @@ fn read_existing_extends(root: &Path) -> Vec<String> {
         if !yaml_guards.flow_within_limit() || !yaml_guards.expansion_within_limit(&body) {
             return Vec::new();
         }
-        let Ok(doc) = ayaml::compat::from_str::<ayaml::Value>(&body) else {
+        let Ok(doc) = alint_core::yaml::from_str::<ayaml::Value>(&body) else {
             return Vec::new();
         };
         return collect_extends(&doc);
