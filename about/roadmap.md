@@ -1606,16 +1606,21 @@ Starts Phase 3 of
 (section 11.6) with its design and a first slice. The plan is
 [`v0.23/README.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.23/README.md) and
 the owner decisions are
-[ADR-0032](https://github.com/asamarts/alint/blob/main/docs/adr/0032-v023-owner-decisions.md) and
-[ADR-0033](https://github.com/asamarts/alint/blob/main/docs/adr/0033-v023-slice-after-the-corpus-stratum.md).
+[ADR-0032](https://github.com/asamarts/alint/blob/main/docs/adr/0032-v023-owner-decisions.md),
+[ADR-0033](https://github.com/asamarts/alint/blob/main/docs/adr/0033-v023-slice-after-the-corpus-stratum.md)
+and
+[ADR-0034](https://github.com/asamarts/alint/blob/main/docs/adr/0034-v2-version-boundary-and-phase-3-design.md).
 
 - **Measured demand first.** An i18n stratum and a JavaScript-monorepo stratum join the pinned
   corpus and are scored before the design commits to operators.
-- **Design and version boundary.** A design document for selectors and constraints and an ADR
-  for the `version: 2` boundary, approved before implementation starts.
-- **Named selectors and relations,** with (key path, value) rows from JSON, YAML and TOML, and a
-  report-only **`constraint`** rule with equality, unique/key and set assertions, in `version: 2`
-  only.
+- **Design and version boundary.**
+  [`v0.23/selectors-and-constraints.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.23/selectors-and-constraints.md)
+  and ADR-0034: `version: 2` is a superset of v1, read before decoding; selectors and relations
+  are named or inline, referenced across local sources by an `extends:` alias; a `constraint`
+  rule's selectors decide whether it runs under `--changed`.
+- **Named selectors and relations,** with (key path, value) rows from JSON, YAML and TOML,
+  membership filters and equality joins, and a report-only **`constraint`** rule with equality,
+  unique/key and set assertions, in `version: 2` only.
 - **Three conformance policies** expressed as `version: 2` configuration with `alint test` cases:
   locale key parity, dependency version consistency, and toolchain-pin consistency.
 - **`version: 2` is experimental** in v0.23: opt-in, with a draft schema, and it may change before
