@@ -281,8 +281,9 @@ decided then.
   - the symlink check costs about 6,000 syscalls on a 20,000-file tree, where it cost 1.26
     million.
 
-  A corpus replay of #509 against v0.22.1 (124 repositories replayed) differs in two,
-  gradle/gradle and quarkusio/quarkus, and only in the reworded `java-no-tracked-build` message;
-  the reported paths are the same. Both repositories have Java packages named `build`, which
-  that rule reports, so its advice to untrack now applies only to a directory that holds build
-  output. The four repositories the replay skips fail to load under both versions.
+  Corpus replays against v0.22.1, of #509 and of this audit (124 repositories replayed each),
+  differ in two, gradle/gradle and quarkusio/quarkus, and only in the reworded
+  `java-no-tracked-build` message; the reported paths are the same. Both repositories have Java
+  packages named `build`, which that rule reports, so its advice to untrack now applies only to a
+  directory that holds build output. The four repositories the replays skip fail to load under
+  both versions.
