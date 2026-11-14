@@ -1918,12 +1918,12 @@ outcome differs from the review's recommendation, the outcome column says so.
 
 | ID | Question | Phase | Outcome / recommendation |
 |---|---|---|---|
-| Q1 | Are selectors and relations top-level, rule-local, or both, and how do they relate to ADR-0010's deferred `path_sets:` block? | 3 | both, with local definitions anonymous and top-level ones namespaced; `path_sets:` becomes the selector feature, not a second concept |
-| Q2 | How do selectors on full-index rules interact with `--changed`? | 3 | selectors filter compared rows, never path scope; the rule runs when any context row changed |
+| Q1 | Are selectors and relations top-level, rule-local, or both, and how do they relate to ADR-0010's deferred `path_sets:` block? | 3 | **Decided 2026-11-14 (ADR-0034):** both, inline ones anonymous; a named selector is the `path_sets:` feature under ADR-0010's boundary; only relations reference selectors in v0.23 |
+| Q2 | How do selectors on full-index rules interact with `--changed`? | 3 | **Decided 2026-11-14 (ADR-0034):** the selectors of the relations a rule reads decide whether it runs; it judges the full snapshot and reports every finding; invariant 2 is amended accordingly |
 | Q3 | Do exception relations supersede ADR-0006's rejection of config-embedded suppressions, and what is the stale default? | 4 | yes, by a superseding ADR justified by the stale check; stale exceptions warn by default and fail under the existing strict flag; the first release keeps exceptions in the top-level config file |
 | Q4 | Which value types are core? | 2 | **Decided 2026-10-24 (ADR-0023):** primitives with lexeme-preserving numbers, path, lists, and records; semantic scalars (`semver`, SPDX) only with several consumers |
 | Q5 | How are object keys and duplicate entries represented across all eight formats? | 1a | as ordered entry rows with spans, never as a JSON object |
-| Q6 | What is the smallest join vocabulary that covers the corpus without accidental quadratic plans? | 3 | equality joins on declared fields only, with explicit caps; no implicit cross products |
+| Q6 | What is the smallest join vocabulary that covers the corpus without accidental quadratic plans? | 3 | **Decided 2026-11-14 (ADR-0034):** grouping, equality semi-joins and an inner equality join whose one side must be unique on the key; the reserved join limits enforced; no cross products and no finding cap |
 | Q7 | Are relation rows user-visible in JSON output? | 1b | **Decided 2026-10-18 (ADR-0022):** only through bounded experimental `explain --trace --preview`; this is not the Phase 2 relation IR |
 | Q8 | Which existing kinds compile to generic constraints, and which stay native? | 2 | decided per kind from the shadow-port results; graph, Unicode, and Git kernels stay native |
 | Q9 | Can snapshot views support every pure rule? | 5 | no; the `KindMeta` inventory declares snapshot compatibility and incompatible rules are rejected per view |
@@ -1931,17 +1931,17 @@ outcome differs from the review's recommendation, the outcome column says so.
 | Q16 | Name and repository of the WIT contract compiler, and its first-release scope | now | **Decided 2026-10-14:** `witforge` (`asamarts/witforge`), private first, public with 0.1 once alint's contract `0.x` consumes it; MVP emits Rust types and traits plus `.proto` with the lockfile, JSON Schema next |
 | Q17 | The plugin manifest and `alint build` manifest formats, and how plugin kinds are namespaced in `.alint.yml` | 6 | `<plugin>/<kind>` kind names; YAML for `plugins:` in config; TOML for the build manifest |
 | Q11 | How do versions mix across `extends:`, and when does `requires:` land? | 1b | **Decided 2026-10-18 (ADR-0022):** every source is checked before merge; v2 consumers may extend v1 sources, never the reverse; v1 gains literal minimum `requires.alint` stable triplets |
-| Q12 | How are named objects namespaced and protected from shadowing? | 3 | provenance on every named object, namespace-qualified references, no shadowing of local names, plan-time capability monotonicity |
+| Q12 | How are named objects namespaced and protected from shadowing? | 3 | **Decided 2026-11-14 (ADR-0034):** a namespace per source, qualified references through an `extends:` alias, no re-export, each object gated by its source, capability monotonicity after resolution; v2 sources are local files in v0.23 |
 | Q13 | How are paths compared in joins? | 2 | **Decided 2026-10-24 (ADR-0023):** byte-exact on normalized paths, opt-in case folding, never host-dependent |
 | Q14 | What is the stability tier of `explain --trace` and previews? | 1b | **Decided 2026-10-18 (ADR-0022):** separate experimental JSON until v2 is stable; stable static explain JSON is unchanged |
-| Q15 | Is the `when` expression syntax evolved in place or replaced for v2? | 3 | preserve v1 `when`; extend a typed evaluator internally before choosing syntax |
+| Q15 | Is the `when` expression syntax evolved in place or replaced for v2? | 3 | **Decided 2026-11-14 (ADR-0034):** v1 `when` unchanged in v2; rows are filtered by a structural `where:` with a fixed transform list; no expression language in v0.23 |
 
 ### 13.3 Records this program would amend or supersede
 
 | Record | What changes | When |
 |---|---|---|
 | Constitution invariant 1 (determinism) | an explicit time input and a declared-host-input class (DEC-11) | Phase 1a |
-| Constitution invariant 2 and ADR-0003 (dispatch) | full-index context separated from target selection (Q2) | Phase 3 |
+| Constitution invariant 2 and ADR-0003 (dispatch) | full-index context separated from target selection (Q2) | Phase 3; recorded by ADR-0034 |
 | ADR-0002 (YAML, flat merge by id) | per-source version/requirement checks (Q11), then namespaced modules and a `version: 2` envelope (DEC-9, Q12) | Phase 1b, then Phases 3 and 4; Phase 1b recorded by ADR-0022 |
 | ADR-0004 (trust boundary) | policy-test host grants (DEC-6), then plugin and named-object grants (DEC-14f, Q12) | Phase 1b, then Phases 3 and 6; Phase 1b recorded by ADR-0022 |
 | `ARCHITECTURE.md` "Plugin model" (native Rust plugins out of scope) | compiled-in native plugins, process plugins, and WASM components (DEC-14) | updated 2026-10-14 |

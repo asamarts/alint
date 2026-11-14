@@ -16,9 +16,11 @@ wins and this document is wrong.
 1. Determinism. Output (report, violations, fixes) is byte-identical across runs on the same
    input. No reliance on HashMap iteration order or filesystem readdir order. Enforced by the
    post-walk sort and per-rule output sorting; see ADR-0003.
-2. Cross-file dispatch. A rule with `requires_full_index() == true` must have
-   `path_scope() == None`. Enforced by `v010_cross_file_kinds_require_full_index_and_no_path_scope`
-   and by build-time rejection of `scope_filter:` on cross-file rules. See ADR-0003.
+2. Cross-file dispatch. A rule with `requires_full_index() == true` sees the whole index. A path
+   scope, when it declares one, decides only whether it runs under `--changed`, never what it sees
+   (ADR-0034 decision 3, amending ADR-0003; five full-index kinds, `key_parity` among them, already
+   work this way). Enforced by `v010_cross_file_kinds_require_full_index_and_no_path_scope`, which
+   checks nine kinds and which v0.23 phase 7 extends to every full-index kind.
 3. Bounded analysis reads. Whole-file analysis reads (not fixers) go through
    `crate::io::read_capped` (256 MiB `MAX_ANALYZE_BYTES`); over-cap files produce a clear
    violation, never a silent skip or OOM.
