@@ -993,18 +993,20 @@ fn inspect_fix_op(
 /// fixes cannot skip this check.
 fn inspect_nested_values(
     usage: &str,
-    mapping: &ayaml::Mapping,
+    mapping: &alint_core::yaml::Mapping,
     catalog: alint_core::KindCatalog<'_>,
     spawn_use: &mut Option<String>,
     keyring_use: &mut Option<String>,
 ) {
     for (key, value) in mapping {
         let field = format!("{usage} {}", key.as_str().unwrap_or("option"));
-        let mut inspect = |usage: &str, nested: &ayaml::Mapping| {
-            if let Some(kind) = nested.get("kind").and_then(ayaml::Value::as_str) {
+        let mut inspect = |usage: &str, nested: &alint_core::yaml::Mapping| {
+            if let Some(kind) = nested.get("kind").and_then(alint_core::yaml::Value::as_str) {
                 inspect_kind_capabilities(usage, kind, catalog, spawn_use, keyring_use);
-                let fix = nested.get("fix").and_then(ayaml::Value::as_mapping);
-                for op in fix.into_iter().flat_map(ayaml::Mapping::keys) {
+                let fix = nested
+                    .get("fix")
+                    .and_then(alint_core::yaml::Value::as_mapping);
+                for op in fix.into_iter().flat_map(alint_core::yaml::Mapping::keys) {
                     if let Some(op) = op.as_str() {
                         inspect_fix_op(usage, op, catalog, spawn_use);
                     }

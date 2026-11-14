@@ -1787,8 +1787,10 @@ and
   tracks but an ignore file excludes, as documented, so a configuration that uses it can gain or
   lose findings.
 - **One library API break.** YAML parser types leave the public API of `alint-core`,
-  `alint-dsl` and `alint-testkit` (#484), and `Violation`, `Context`, `RuleSpec`,
-  `NestedRuleSpec` and `WalkOptions` become `#[non_exhaustive]` with constructors.
+  `alint-dsl` and `alint-testkit` for alint's own (#484,
+  [ADR-0038](https://github.com/asamarts/alint/blob/main/docs/adr/0038-owned-yaml-types-and-the-api-gate.md)),
+  `Violation`, `Context`, `RuleSpec`, `NestedRuleSpec` and `WalkOptions` become
+  `#[non_exhaustive]` with constructors, and `alint_core::Error` becomes `#[non_exhaustive]` too.
 - **A pure-Rust YAML parser.** alint parses YAML with ayaml (#510), and the release ships it
   once differential parser fuzzing (#482) and the re-derived depth guard (#483) qualify it
   ([ADR-0035](../adr/0035-keep-the-early-ayaml-cutover.md)).
@@ -1809,10 +1811,16 @@ v0.24, when source spans and structured YAML fixes move to ayaml
 - Plugin contract 1.0 committed (the WIT contract and its generated Rust
   and protobuf bindings; see [`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md)
   section 9.4).
-- `alint-core` public API frozen; breaking changes follow semver-major. The remaining public
-  structs are sealed in v0.23
+- `alint-core` public API frozen; breaking changes follow semver-major. v0.23 seals `Violation`,
+  `Context`, `RuleSpec`, `NestedRuleSpec`, `WalkOptions` and `alint_core::Error`
   ([ADR-0032](https://github.com/asamarts/alint/blob/main/docs/adr/0032-v023-owner-decisions.md)
-  decision 3), so the frozen API does not commit to struct literals.
+  decision 3,
+  [ADR-0038](https://github.com/asamarts/alint/blob/main/docs/adr/0038-owned-yaml-types-and-the-api-gate.md)),
+  so the frozen API does not commit to their literals.
+- **An audit of the other open public structs** of the published crates, before the freeze.
+  For each struct whose fields are all public, it decides whether to seal it, keep it open as
+  plain data, or make it private, and a gate lists the structs that stay open. The audit also
+  reviews `Error::Walk` and `Error::Glob`, which wrap `ignore` and `globset` errors.
 - Documentation site.
 - **Remove the deprecated `${VAR}` interpolation path** in
   `git_commit_message.since:` (replaced by `{{env.X}}` in v0.11).

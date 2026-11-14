@@ -161,7 +161,11 @@ fn expansion_within_limit_with(text: &str, max: usize) -> bool {
 ///
 /// ayaml's public compatibility module no longer carries product-specific
 /// error strings or the BOM alias-bomb heuristic; the consumer owns them.
-pub fn map_compat_error(input: &str, error: ayaml::Error) -> ayaml::Error {
+pub fn map_compat_error(input: &str, error: crate::yaml::Error) -> crate::yaml::Error {
+    crate::yaml::Error::from_parser(map_parser_error(input, error.into_parser()))
+}
+
+fn map_parser_error(input: &str, error: ayaml::Error) -> ayaml::Error {
     let message = error.to_string();
     if !message.starts_with("requires.alint:")
         && (message.contains("ConfigRequirements") || message.contains("StableVersion"))
@@ -1302,6 +1306,7 @@ mod tests {
         crate::yaml::from_str::<ayaml::Value>(doc)
             .err()
             .is_some_and(|e| {
+                let e = e.into_parser();
                 let message = e.to_string();
                 message.contains("unknown anchor")
                     || (matches!(e.kind(), ayaml::ErrorKind::Limit) && message.contains("alias"))

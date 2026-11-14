@@ -70,7 +70,11 @@ impl NumberMask {
 /// `id`, `kind` and `level` of a nested rule (a mapping with a string `kind`)
 /// are never interpolated (they are its identity), so both stay as written.
 #[doc(hidden)]
-pub fn mask_configuration_values(value: &mut ayaml::Value, numbers: NumberMask) {
+pub fn mask_configuration_values(value: &mut crate::yaml::Value, numbers: NumberMask) {
+    mask_values(value.parser_mut(), numbers);
+}
+
+fn mask_values(value: &mut ayaml::Value, numbers: NumberMask) {
     match value {
         ayaml::Value::String(text) => {
             let [mask, other] = if text.starts_with('$') {
@@ -82,21 +86,23 @@ pub fn mask_configuration_values(value: &mut ayaml::Value, numbers: NumberMask) 
         }
         ayaml::Value::Number(number) => *number = differing_number(number, numbers),
         ayaml::Value::Bool(flag) => *flag = !*flag,
-        ayaml::Value::Sequence(items) => items
-            .iter_mut()
-            .for_each(|item| mask_configuration_values(item, numbers)),
+        ayaml::Value::Sequence(items) => {
+            for item in items {
+                mask_values(item, numbers);
+            }
+        }
         ayaml::Value::Mapping(mapping) => {
             // A nested rule (a mapping with a `kind`) keeps its identity.
             let rule = mapping.get("kind").is_some_and(ayaml::Value::is_string);
             for (key, item) in mapping.iter_mut() {
                 match key.as_str() {
                     Some("id" | "kind" | "level") if rule => {}
-                    Some(field) if rule => mask_configuration_field(field, item, numbers),
-                    _ => mask_configuration_values(item, numbers),
+                    Some(field) if rule => mask_field(field, item, numbers),
+                    _ => mask_values(item, numbers),
                 }
             }
         }
-        ayaml::Value::Tagged(tagged) => mask_configuration_values(&mut tagged.value, numbers),
+        ayaml::Value::Tagged(tagged) => mask_values(&mut tagged.value, numbers),
         ayaml::Value::Null => {}
     }
 }
@@ -106,12 +112,16 @@ pub fn mask_configuration_values(value: &mut ayaml::Value, numbers: NumberMask) 
 /// string condition masks to one that parses too (`false`, or `true` where it
 /// was `false`).
 #[doc(hidden)]
-pub fn mask_configuration_field(field: &str, value: &mut ayaml::Value, numbers: NumberMask) {
+pub fn mask_configuration_field(field: &str, value: &mut crate::yaml::Value, numbers: NumberMask) {
+    mask_field(field, value.parser_mut(), numbers);
+}
+
+fn mask_field(field: &str, value: &mut ayaml::Value, numbers: NumberMask) {
     match value {
         ayaml::Value::String(text) if matches!(field, "when" | "when_iter") => {
             *text = if text == "false" { "true" } else { "false" }.to_string();
         }
-        _ => mask_configuration_values(value, numbers),
+        _ => mask_values(value, numbers),
     }
 }
 
@@ -421,7 +431,7 @@ impl RuleSpec {
                 scope.changed_since = Some(mask());
             }
         }
-        for (field, value) in &mut masked.extra {
+        for (field, value) in masked.extra.iter_mut() {
             let Some(field) = field.as_str().filter(|field| secret(field)) else {
                 continue;
             };

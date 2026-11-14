@@ -18,7 +18,9 @@ section 11.1 one release later. It does not change the parser criteria of
 [ADR-0033](0033-v023-slice-after-the-corpus-stratum.md) (2026-11-13) amends decision 1's
 assertion families and relations, and the consequence that v1 configurations keep their findings.
 [ADR-0035](0035-keep-the-early-ayaml-cutover.md) (2026-11-14) amends decision 2: the ayaml cutover
-is on `main` already and is qualified before the release. The rest stands.
+is on `main` already and is qualified before the release.
+[ADR-0038](0038-owned-yaml-types-and-the-api-gate.md) (2026-11-14) refines decision 3: the owned
+types, the gate, and `alint_core::Error` sealed as well. The rest stands.
 
 ## Context
 

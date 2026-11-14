@@ -77,12 +77,26 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Source spans and structured YAML fixes still use saphyr. Before v0.23.0 ships, differential
   fuzzing against `yaml_serde` (#482) and a depth guard re-derived from ayaml's tokens (#483)
   qualify the parser (ADR-0035).
-- **Breaking (library API):** `RuleSpec::extra`, `NestedRuleSpec::extra` and `RuleEntry::extra()`
-  in `alint-core` hold an `ayaml::Mapping`, and `alint_core::Error::Yaml`,
-  `alint_testkit::Error::Yaml`, `alint_testkit::PolicyTestParseError::Yaml`,
-  `TreeSpec::from_yaml` and `TreeSpec::to_yaml` carry an `ayaml::Error`, in place of the
-  `yaml_serde` types. `alint_core::yaml::from_str` decodes a document under the limits alint
-  uses.
+- **Breaking (library API): YAML values and errors are alint's own types** (#484, ADR-0038). No
+  public item of `alint-core`, `alint-dsl` or `alint-testkit` names a YAML parser crate any more,
+  so a later change of parser is not a breaking change. `alint_core::yaml` holds `Value`,
+  `Mapping`, `Sequence`, `Error` and `Location`, and `from_str`, `from_value`, `to_value` and
+  `to_string`, which decode and encode under the limits alint uses. In place of the
+  `yaml_serde` types of 0.22:
+  - `RuleSpec::extra`, `NestedRuleSpec::extra` and `RuleEntry::extra()` hold an
+    `alint_core::yaml::Mapping`. Read an option with `get("name")` and the `Value` accessors
+    (`as_str`, `as_bool`, `as_u64`, `as_mapping`, `as_sequence` and the rest) in place of a
+    `match` on the parser's `Value` variants; `insert` takes anything that converts into a
+    `Value`, such as a `&str` or a `bool`.
+  - `alint_core::Error::Yaml`, `alint_testkit::Error::Yaml` and
+    `alint_testkit::PolicyTestParseError::Yaml` hold an `alint_core::yaml::Error`, which
+    `TreeSpec::from_yaml` and `TreeSpec::to_yaml` return as well.
+  - `alint_core::Error` is `#[non_exhaustive]`, so a `match` on it needs a wildcard arm.
+  - `alint_core::template::render_mapping`, `render_value` and `render_nested_options` are no
+    longer public, and neither are `alint_dsl::reject_command_rules_in`,
+    `reject_fix_promotion_in`, `reject_fix_promotion_templates_in`,
+    `reject_spawning_fix_op_templates_in`, `reject_spawning_fix_ops_in` and
+    `reject_spawning_templates_in`. The loader still runs them on every configuration.
 
 ### Fixed
 

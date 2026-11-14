@@ -504,7 +504,7 @@ pub fn render_path_argv(template: &str, t: &PathTokens) -> String {
 /// through unchanged. Used by nested-rule specs (e.g. `for_each_dir`) so that
 /// the `{dir}` in a nested rule's `paths`, `pattern`, or `partner` field
 /// resolves to the iterated entry's path at rule-build time.
-pub fn render_mapping(m: ayaml::Mapping, tokens: &PathTokens) -> ayaml::Mapping {
+pub(crate) fn render_mapping(m: ayaml::Mapping, tokens: &PathTokens) -> ayaml::Mapping {
     let mut out = ayaml::Mapping::with_capacity(m.len());
     for (k, v) in m {
         out.insert(k, render_value(v, tokens));
@@ -513,7 +513,7 @@ pub fn render_mapping(m: ayaml::Mapping, tokens: &PathTokens) -> ayaml::Mapping 
 }
 
 /// Recursive mate to [`render_mapping`] for arbitrary YAML values.
-pub fn render_value(v: ayaml::Value, tokens: &PathTokens) -> ayaml::Value {
+pub(crate) fn render_value(v: ayaml::Value, tokens: &PathTokens) -> ayaml::Value {
     use ayaml::Value;
     match v {
         Value::String(s) => Value::String(render_path(&s, tokens)),
@@ -655,8 +655,29 @@ nested_glob_options_table! {
 /// `dir_contains` `select: "{path}"` as the literal `app/[[]slug[]]`, not a
 /// character class that matches `app/s`.
 #[must_use]
-pub fn render_nested_options(kind: &str, m: ayaml::Mapping, tokens: &PathTokens) -> ayaml::Mapping {
+pub(crate) fn render_nested_options(
+    kind: &str,
+    m: ayaml::Mapping,
+    tokens: &PathTokens,
+) -> ayaml::Mapping {
     render_options(kind, m, tokens, false)
+}
+
+/// [`render_nested_options`] for a nested spec's `extra`, without the string
+/// keys in `parent_fields`, which the nested spec takes from its parent.
+pub(crate) fn render_nested_extra(
+    kind: &str,
+    extra: &crate::yaml::Mapping,
+    tokens: &PathTokens,
+    parent_fields: &[&str],
+) -> crate::yaml::Mapping {
+    let rendered = render_nested_options(kind, extra.parser().clone(), tokens);
+    crate::yaml::Mapping::from_parser(
+        rendered
+            .into_iter()
+            .filter(|(k, _)| k.as_str().is_none_or(|s| !parent_fields.contains(&s)))
+            .collect(),
+    )
 }
 
 /// [`render_nested_options`]; `with_paths` also renders the mapping's own

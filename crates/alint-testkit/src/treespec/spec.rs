@@ -77,13 +77,13 @@ impl TreeSpec {
     }
 
     /// Parse a YAML tree spec.
-    pub fn from_yaml(yaml: &str) -> Result<Self, ayaml::Error> {
+    pub fn from_yaml(yaml: &str) -> Result<Self, alint_core::yaml::Error> {
         alint_core::yaml::from_str(yaml)
     }
 
     /// Emit the spec as YAML.
-    pub fn to_yaml(&self) -> Result<String, ayaml::Error> {
-        ayaml::to_string(self)
+    pub fn to_yaml(&self) -> Result<String, alint_core::yaml::Error> {
+        alint_core::yaml::to_string(self)
     }
 
     /// Iterate over (relative-path, node) pairs in a stable order.

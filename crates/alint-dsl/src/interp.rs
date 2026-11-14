@@ -144,7 +144,11 @@ where
                 *s = result.text;
             }
             if let (true, Some(numbers)) = (substituted, mask) {
-                alint_core::mask_configuration_field(field.unwrap_or_default(), value, numbers);
+                crate::core_yaml::mask_configuration_field(
+                    field.unwrap_or_default(),
+                    value,
+                    numbers,
+                );
             }
             Ok(())
         }

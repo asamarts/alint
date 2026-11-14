@@ -23,6 +23,7 @@ path = "tests/main.rs"
 thiserror.workspace = true
 serde.workspace = true
 ayaml.workspace = true
+ref-cast.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 globset.workspace = true

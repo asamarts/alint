@@ -704,7 +704,7 @@ fn assert_instance_conformance(kind: &str, meta: &KindMeta, spec: &RuleSpec, rul
     let git_tracked_only = spec
         .extra
         .get("git_tracked_only")
-        .and_then(ayaml::Value::as_bool)
+        .and_then(crate::yaml::Value::as_bool)
         .unwrap_or(false);
     let expected_git_mode = match (meta.git_tracked_only, git_tracked_only) {
         (GitTrackedSupport::FileOnly, true) => GitTrackedMode::FileOnly,
@@ -856,7 +856,7 @@ mod tests {
             sensitive_fields: std::collections::BTreeSet::new(),
             fix: None,
             scope_filter: None,
-            extra: ayaml::Mapping::new(),
+            extra: crate::yaml::Mapping::new(),
         }
     }
 
