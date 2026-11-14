@@ -1290,7 +1290,7 @@ mod tests {
             "kind: file_content_matches\npaths: \"{path}/*\"\npattern: \"[{stem}-z]\"\n",
             "kind: json_path_equals\npaths: \"{path}/package.json\"\npath: \"$.{basename}\"\nequals: x\n",
         ] {
-            let nested: NestedRuleSpec = yaml_serde::from_str(yaml).unwrap();
+            let nested: NestedRuleSpec = ayaml::compat::from_str(yaml).unwrap();
             rule("src/*", vec![nested])
                 .validate_nested(&reg)
                 .unwrap_or_else(|error| panic!("{yaml}: {error}"));
@@ -1305,7 +1305,7 @@ mod tests {
                 "({stem}",
             ),
         ] {
-            let nested: NestedRuleSpec = yaml_serde::from_str(yaml).unwrap();
+            let nested: NestedRuleSpec = ayaml::compat::from_str(yaml).unwrap();
             let error = rule("src/*", vec![nested])
                 .validate_nested(&reg)
                 .expect_err(yaml)
