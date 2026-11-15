@@ -49,16 +49,26 @@ fn limits() -> ayaml::Limits {
 
 /// Decode one YAML document into `T`, under alint's parser limits.
 ///
+/// The parser is ayaml, unless a build with the `yaml-reference` feature
+/// chooses another for testing (see [`crate::yaml_backend`]).
+///
 /// # Errors
 ///
 /// When the input is not one valid YAML document, exceeds a limit, or does
 /// not decode into `T`.
 pub fn from_str<'de, T: Deserialize<'de>>(input: &'de str) -> Result<T, Error> {
-    ayaml::compat::from_str_with_limits(input, &limits()).map_err(Error)
+    crate::yaml_backend::from_str(input)
 }
 
-/// Decode one YAML document through `seed`, under alint's parser limits.
-pub(crate) fn from_str_seed<'de, S: serde::de::DeserializeSeed<'de>>(
+/// [`from_str`] through ayaml, whatever parser the build chose.
+pub(crate) fn ayaml_from_str<'de, T: Deserialize<'de>>(input: &'de str) -> Result<T, Error> {
+    ayaml::compat::from_str_with_limits(input, &limits()).map_err(Error::ayaml)
+}
+
+/// Decode one YAML document through `seed` with ayaml, under alint's parser
+/// limits, whatever parser the build chose: the guards measure what ayaml
+/// reads.
+pub(crate) fn ayaml_from_str_seed<'de, S: serde::de::DeserializeSeed<'de>>(
     input: &'de str,
     seed: S,
 ) -> Result<S::Value, ayaml::Error> {
@@ -79,7 +89,7 @@ pub(crate) fn stream_events(input: &str) -> Result<Vec<ayaml::Event<'_>>, ayaml:
 ///
 /// When `value` does not decode into `T`.
 pub fn from_value<T: serde::de::DeserializeOwned>(value: Value) -> Result<T, Error> {
-    ayaml::from_value(value.0).map_err(Error)
+    ayaml::from_value(value.0).map_err(Error::ayaml)
 }
 
 /// The YAML value of `value`.
@@ -88,7 +98,7 @@ pub fn from_value<T: serde::de::DeserializeOwned>(value: Value) -> Result<T, Err
 ///
 /// When `value` cannot be represented in YAML.
 pub fn to_value<T: Serialize + ?Sized>(value: &T) -> Result<Value, Error> {
-    ayaml::to_value(value).map(Value).map_err(Error)
+    ayaml::to_value(value).map(Value).map_err(Error::ayaml)
 }
 
 /// `value` written as a YAML document.
@@ -97,7 +107,7 @@ pub fn to_value<T: Serialize + ?Sized>(value: &T) -> Result<Value, Error> {
 ///
 /// When `value` cannot be represented in YAML.
 pub fn to_string<T: Serialize + ?Sized>(value: &T) -> Result<String, Error> {
-    ayaml::to_string(value).map_err(Error)
+    ayaml::to_string(value).map_err(Error::ayaml)
 }
 
 /// A YAML value: null, a boolean, a number, a string, a [`Sequence`], a
@@ -988,17 +998,41 @@ mapping_side!(MappingValuesMut => &'a mut Value, |(_, value)| value);
 /// Why a YAML document did not parse, or a value did not decode or encode.
 ///
 /// It prints a message and, where there is one, the location.
-pub struct Error(ayaml::Error);
+pub struct Error(ErrorRepr);
+
+/// The error of the parser that failed (see [`crate::yaml_backend`]).
+enum ErrorRepr {
+    Ayaml(ayaml::Error),
+    /// libyaml's, through `yaml_serde`, with its message without the
+    /// locations its `Display` adds.
+    #[cfg(feature = "yaml-reference")]
+    Libyaml(yaml_serde::Error, String),
+}
 
 impl Error {
-    #[cfg(test)]
-    pub(crate) fn from_parser(error: ayaml::Error) -> Self {
-        Self(error)
+    pub(crate) fn ayaml(error: ayaml::Error) -> Self {
+        Self(ErrorRepr::Ayaml(error))
+    }
+
+    #[cfg(feature = "yaml-reference")]
+    pub(crate) fn libyaml(error: yaml_serde::Error) -> Self {
+        let message = crate::yaml_backend::without_marks(&error.to_string());
+        Self(ErrorRepr::Libyaml(error, message))
     }
 
     #[cfg(test)]
+    pub(crate) fn from_parser(error: ayaml::Error) -> Self {
+        Self::ayaml(error)
+    }
+
+    /// ayaml's error; a caller that reads one decodes with ayaml.
+    #[cfg(any(test, feature = "yaml-reference"))]
     pub(crate) fn into_parser(self) -> ayaml::Error {
-        self.0
+        match self.0 {
+            ErrorRepr::Ayaml(error) => error,
+            #[cfg(feature = "yaml-reference")]
+            ErrorRepr::Libyaml(error, _) => panic!("a libyaml error, not ayaml's: {error}"),
+        }
     }
 
     /// The message, without the error's own location, which `Display` puts
@@ -1006,34 +1040,57 @@ impl Error {
     /// where the collection that failed began.
     #[must_use]
     pub fn message(&self) -> &str {
-        self.0.message()
+        match &self.0 {
+            ErrorRepr::Ayaml(error) => error.message(),
+            #[cfg(feature = "yaml-reference")]
+            ErrorRepr::Libyaml(_, message) => message,
+        }
     }
 
     /// Where in the document the error is, if it has a place there.
     #[must_use]
     pub fn location(&self) -> Option<Location> {
-        self.0.location().map(|location| Location {
-            line: location.line(),
-            column: location.column(),
-        })
+        match &self.0 {
+            ErrorRepr::Ayaml(error) => error.location().map(|location| Location {
+                line: location.line(),
+                column: location.column(),
+            }),
+            #[cfg(feature = "yaml-reference")]
+            ErrorRepr::Libyaml(error, _) => error.location().map(|location| Location {
+                line: location.line(),
+                column: location.column(),
+            }),
+        }
     }
 }
 
 impl fmt::Debug for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
+        match &self.0 {
+            ErrorRepr::Ayaml(error) => error.fmt(f),
+            #[cfg(feature = "yaml-reference")]
+            ErrorRepr::Libyaml(error, _) => error.fmt(f),
+        }
     }
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
+        match &self.0 {
+            ErrorRepr::Ayaml(error) => error.fmt(f),
+            #[cfg(feature = "yaml-reference")]
+            ErrorRepr::Libyaml(error, _) => error.fmt(f),
+        }
     }
 }
 
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.0.source()
+        match &self.0 {
+            ErrorRepr::Ayaml(error) => error.source(),
+            #[cfg(feature = "yaml-reference")]
+            ErrorRepr::Libyaml(error, _) => error.source(),
+        }
     }
 }
 
@@ -1041,7 +1098,7 @@ impl std::error::Error for Error {
 /// this message.
 impl serde::de::Error for Error {
     fn custom<T: fmt::Display>(message: T) -> Self {
-        Self(ayaml::Error::new(
+        Self::ayaml(ayaml::Error::new(
             ayaml::ErrorKind::Serde,
             message.to_string(),
         ))
@@ -1050,7 +1107,7 @@ impl serde::de::Error for Error {
 
 impl serde::ser::Error for Error {
     fn custom<T: fmt::Display>(message: T) -> Self {
-        Self(ayaml::Error::new(
+        Self::ayaml(ayaml::Error::new(
             ayaml::ErrorKind::Serde,
             message.to_string(),
         ))
@@ -1405,10 +1462,11 @@ mod tests {
     /// 32 MiB cap.
     #[test]
     fn the_depth_and_input_caps_still_refuse() {
+        // The caps are ayaml's limits; a reference parser has its own.
         let deep = format!("{}{}", "[".repeat(129), "]".repeat(129));
-        assert!(from_str::<ayaml::Value>(&deep).is_err());
+        assert!(ayaml_from_str::<ayaml::Value>(&deep).is_err());
         let large = format!("a: \"{}\"\n", "x".repeat(crate::MAX_STRUCTURED_BYTES));
-        assert!(from_str::<ayaml::Value>(&large).is_err());
+        assert!(ayaml_from_str::<ayaml::Value>(&large).is_err());
     }
 
     /// The predicates and the tag accessor read each kind of value; the

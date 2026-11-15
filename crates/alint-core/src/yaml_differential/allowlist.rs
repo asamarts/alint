@@ -29,6 +29,13 @@ use super::predicates::{
 use super::{Case, Class, Entry};
 
 /// One documented difference in what the parsers accept or read.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "documentation, which the tests and the long run's report read"
+    )
+)]
 pub(crate) struct Deviation {
     /// A short name, used in the report.
     pub(crate) id: &'static str,
@@ -51,6 +58,13 @@ pub(crate) struct Deviation {
 /// How a [`Deviation`] tells the cases it explains.
 pub(crate) enum Trigger {
     /// A check of the results that names the cause itself.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "documentation, which the tests and the long run's report read"
+        )
+    )]
     Narrow {
         covers: fn(&Case<'_>) -> bool,
         /// Why the check names the cause, and so needs no counterfactual.
@@ -77,24 +91,63 @@ impl Deviation {
     }
 
     /// The ayaml errors that its trigger is documented to hide: removing the
-    /// trigger may make ayaml reject what it read, with one of these
-    /// messages, where the oracle rejected the case.
-    pub(crate) fn hides(&self) -> &'static [&'static str] {
+    /// trigger may make ayaml reject what it read, with one of them, where
+    /// the oracle rejected the case.
+    pub(crate) fn hides(&self) -> Hidden {
         match self.id {
             // asamarts/ayaml#137.
-            "byte-order-mark-starting-a-line" => {
-                &["quoted scalar continuation must be indented more than its parent"]
-            }
-            _ => &[],
+            "byte-order-mark-starting-a-line" => Hidden::Messages(&[
+                "quoted scalar continuation must be indented more than its parent",
+            ]),
+            // asamarts/ayaml#139.
+            "anchor-name-before-a-colon-and-a-flow-indicator" => Hidden::AfterTheTrigger,
+            _ => Hidden::Nothing,
         }
     }
 
     /// The entry point its example is about.
+    #[cfg(test)]
     pub(crate) fn example_entry(&self) -> Entry {
         match self.id {
             "typed-decode-core-tags" => Entry::Config,
             "rule-keys-that-are-not-strings" => Entry::Rule,
             _ => Entry::Value,
+        }
+    }
+}
+
+/// The ayaml errors a [`Deviation`]'s trigger hides.
+pub(crate) enum Hidden {
+    Nothing,
+    /// The errors with one of these messages.
+    Messages(&'static [&'static str]),
+    /// Any error on a line after the trigger's: the trigger makes ayaml read
+    /// the lines after it as part of a scalar, whatever they hold.
+    AfterTheTrigger,
+}
+
+impl Hidden {
+    /// Whether `next`, `case` with the trigger removed, shows an error the
+    /// trigger hid from ayaml.
+    pub(crate) fn shown(&self, case: &Case<'_>, next: &Case<'_>) -> bool {
+        let Err(error) = &next.ayaml else {
+            return false;
+        };
+        match self {
+            Self::Nothing => false,
+            Self::Messages(messages) => messages
+                .iter()
+                .any(|message| error.message.contains(message)),
+            Self::AfterTheTrigger => {
+                let changed = case
+                    .input
+                    .bytes()
+                    .zip(next.input.bytes())
+                    .position(|(before, after)| before != after)
+                    .unwrap_or(case.input.len().min(next.input.len()));
+                let trigger_line = case.input[..changed].matches('\n').count() + 1;
+                error.location.is_some_and(|(line, _)| line > trigger_line)
+            }
         }
     }
 }
@@ -197,7 +250,10 @@ pub(crate) const DEVIATIONS: &[Deviation] = &[
                 does; after the one that starts the stream, it does not check that a quoted \
                 scalar's continuation line under a nested parent is indented past it",
         oracle: "counts the one that starts the stream as a column too, so a structure \
-                 that lines up with the first line is misread or rejected",
+                 that lines up with the first line is misread or rejected. Both read a \
+                 second mark right after it as content, which YAML 1.2 does not allow \
+                 (asamarts/ayaml#140), so it shifts the first line by one column for the \
+                 oracle only",
         reason: "a libyaml defect; ayaml reads such files as their author meant. The missed \
                  indentation check is an ayaml defect in a malformed document \
                  (asamarts/ayaml#137), which the oracle accepts with or without the mark",
@@ -337,6 +393,24 @@ pub(crate) const DEVIATIONS: &[Deviation] = &[
                  `&é x` an error",
         reason: "YAML 1.2 (rule 102) allows the wider set",
         example: "&a\"1 x",
+    },
+    Deviation {
+        id: "anchor-name-before-a-colon-and-a-flow-indicator",
+        classes: ALL_DIFFERENCES,
+        trigger: Trigger::Input {
+            covers: any,
+            neutralize: neutralize::names_ended_at_a_colon_before_a_flow_indicator,
+        },
+        ayaml: "ends an anchor name at a `:` that a flow indicator follows, outside a flow \
+                collection, so `&a:[: x` is the anchor `a` on the key `:[`, as the oracle \
+                reads it; but its line reader, which decides indentation, reads that line \
+                as the anchor `a:` and an unclosed `[`, so the value on it continues onto \
+                lines at any indentation",
+        oracle: "ends the value at a line indented no more than the key",
+        reason: "an ayaml defect in a malformed document: YAML 1.2 does not allow a flow \
+                 indicator right after an anchor name, and ayaml's own reader rejects the \
+                 line (asamarts/ayaml#139)",
+        example: "&a:[: x\n- y\n",
     },
     Deviation {
         id: "redefined-anchor",
@@ -805,6 +879,13 @@ pub(crate) const DEVIATIONS: &[Deviation] = &[
 ];
 
 /// The ayaml errors whose place may differ from the oracle's, and why.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "documentation, which the tests and the long run's report read"
+    )
+)]
 pub(crate) struct Location {
     /// A short name, used in the report.
     pub(crate) id: &'static str,
@@ -990,6 +1071,7 @@ pub(crate) const LOCATIONS: &[Location] = &[
 
 /// The location class, among those that check messages only, that covers
 /// an ayaml error of `kind` with `message`.
+#[cfg(test)]
 pub(crate) fn locate(kind: ErrorKind, message: &str) -> Option<&'static Location> {
     LOCATIONS
         .iter()

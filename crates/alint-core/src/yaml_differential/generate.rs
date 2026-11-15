@@ -96,6 +96,7 @@ const INDICATORS: &[&str] = &[
     " #c",
     "&a ",
     "&b ",
+    "&a",
     "*a",
     "*b",
     "!t ",

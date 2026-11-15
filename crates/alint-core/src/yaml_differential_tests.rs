@@ -232,6 +232,11 @@ const TRIGGERS: &[(&str, &str, &[&str])] = &[
         &[UNEXPLAINED_ENTRY],
     ),
     (
+        "anchor-name-before-a-colon-and-a-flow-indicator",
+        "a: '\u{7f}'\n&k:[: x\n",
+        &[UNEXPLAINED_ENTRY],
+    ),
+    (
         "redefined-anchor",
         "a: '\u{7f}'\nb: [&x 1, &x 2, *x]\n",
         &[UNEXPLAINED_ENTRY],
@@ -326,7 +331,7 @@ fn a_rewrite_must_not_make_a_parser_reject() {
     let rewrites = neutralize::line_breaks(case.input);
     let (broken, _) = compare(&rewrites[2], Entry::Value);
     assert!(broken.ayaml.is_err(), "{broken:?}");
-    assert!(fairness(&case, &broken, &[]).is_none());
+    assert!(fairness(&case, &broken, &Hidden::Nothing).is_none());
     let (indented, _) = compare(&rewrites[1], Entry::Value);
     assert_eq!(indented.class, Class::SameValue, "{indented:?}");
     assert_eq!(explanation(&case), Some(vec!["yaml-1.2-line-breaks"]));
@@ -463,15 +468,27 @@ fn a_moved_error_is_kept_revealed_or_agreed_on() {
     let both = case(error("A", 2, scanner), error("X", 3, None));
     // The oracle's error moved up a line, and ayaml kept its own.
     let agreed = case(error("A", 2, scanner), error("Y", 2, None));
-    assert_eq!(fairness(&both, &agreed, &[]), Some(Fairness::BothAgree));
+    assert_eq!(
+        fairness(&both, &agreed, &Hidden::Nothing),
+        Some(Fairness::BothAgree)
+    );
     // As above, but ayaml's error changed: nothing agrees.
     let changed = case(error("B", 2, scanner), error("Y", 2, None));
-    assert_eq!(fairness(&both, &changed, &[]), Some(Fairness::Revealed));
+    assert_eq!(
+        fairness(&both, &changed, &Hidden::Nothing),
+        Some(Fairness::Revealed)
+    );
     let read = case(Ok("x".to_string()), error("X", 3, None));
     let alias = case(Ok("x".to_string()), error("unknown anchor", 1, None));
-    assert_eq!(fairness(&read, &alias, &[]), Some(Fairness::Kept));
+    assert_eq!(
+        fairness(&read, &alias, &Hidden::Nothing),
+        Some(Fairness::Kept)
+    );
     let other = case(Ok("x".to_string()), error("Y", 1, None));
-    assert_eq!(fairness(&read, &other, &[]), Some(Fairness::Revealed));
+    assert_eq!(
+        fairness(&read, &other, &Hidden::Nothing),
+        Some(Fairness::Revealed)
+    );
     for (input, entry, ids) in [
         (
             "-9223372036854775809 # \n\t",
@@ -634,6 +651,40 @@ const FINDINGS: &[(&str, &[&str])] = &[
             "byte-order-mark-starting-a-line",
             "tab-as-white-space",
             "quoted-scalar-continuation-indentation",
+        ],
+    ),
+    // Shapes the parser facade's compare mode found in the depth guard's
+    // tests, which the generator had not made. A second leading mark is
+    // content for both, and the first moves it to column 1 for the oracle.
+    (
+        "\u{feff}\u{feff}  k: |2 #\nb: [1]\nc: \"\"\n",
+        &["byte-order-mark-starting-a-line"],
+    ),
+    (
+        "\u{feff}\u{feff}|k: |2 #x.&ak: |\n  k: \"\nb: [[[1]]]\nc: \"\"\n",
+        &["byte-order-mark-starting-a-line"],
+    ),
+    // ayaml's line reader takes `a:` for the name and the quote line for
+    // the value's continuation (asamarts/ayaml#139).
+    (
+        "&a:[: x\ny\n",
+        &[
+            "anchor-name-before-a-colon-and-a-flow-indicator",
+            "after-the-root-node",
+        ],
+    ),
+    (
+        "&a:[: x\n\"\n",
+        &[
+            "anchor-name-before-a-colon-and-a-flow-indicator",
+            "where-a-construct-opened",
+        ],
+    ),
+    (
+        "&a:[: x\n\"\nb: [[[1]]]\nc: \"\"\n",
+        &[
+            "anchor-name-before-a-colon-and-a-flow-indicator",
+            "where-a-construct-opened",
         ],
     ),
 ];
@@ -896,17 +947,20 @@ fn the_oracle_message_drops_every_location() {
         rejection.message
     );
     assert_eq!(
-        without_marks(
+        crate::yaml_backend::without_marks(
             "found unexpected ':' at line 1 column 3, while scanning a plain scalar at line 1 \
              column 2"
         ),
         "found unexpected ':', while scanning a plain scalar"
     );
     assert_eq!(
-        without_marks("control characters are not allowed at position 4"),
+        crate::yaml_backend::without_marks("control characters are not allowed at position 4"),
         "control characters are not allowed"
     );
-    assert_eq!(without_marks("a at b at line x"), "a at b at line x");
+    assert_eq!(
+        crate::yaml_backend::without_marks("a at b at line x"),
+        "a at b at line x"
+    );
     let (case, _) = compare("[:a]\n", Entry::Value);
     assert_eq!(
         describe(&case.oracle),

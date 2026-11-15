@@ -393,7 +393,9 @@ pub(super) fn line_breaks(input: &str) -> Vec<String> {
 
 /// Without each byte-order mark that starts a line; then with each as a
 /// space, the column the oracle counts it as; then as ayaml reads them,
-/// without the one that starts the stream and with the others as spaces.
+/// without the one that starts the stream and with the others as spaces;
+/// then, where more marks follow the first, as both read those (see
+/// [`second_leading_marks_as_content`]).
 pub(super) fn line_start_byte_order_marks(input: &str) -> Vec<String> {
     let rewrite = |first: &str, with: &str| {
         let mut out = String::with_capacity(input.len());
@@ -413,12 +415,32 @@ pub(super) fn line_start_byte_order_marks(input: &str) -> Vec<String> {
         return Vec::new();
     }
     let mut rewrites = vec![without];
-    for rewrite in [rewrite(" ", " "), rewrite("", " ")] {
-        if !rewrites.contains(&rewrite) {
+    for rewrite in [
+        rewrite(" ", " "),
+        rewrite("", " "),
+        second_leading_marks_as_content(input),
+    ] {
+        if !rewrites.contains(&rewrite) && rewrite != input {
             rewrites.push(rewrite);
         }
     }
     rewrites
+}
+
+/// Without the mark that starts the stream, and with each mark right after
+/// it as `x`. Both parsers read such a mark as content (asamarts/ayaml#140),
+/// so `x` keeps what follows it a scalar's text, where without the first
+/// mark the second would start the stream and be skipped.
+fn second_leading_marks_as_content(input: &str) -> String {
+    let Some(rest) = input.strip_prefix('\u{feff}') else {
+        return input.to_string();
+    };
+    let marks = rest.len() - rest.trim_start_matches('\u{feff}').len();
+    let count = marks / '\u{feff}'.len_utf8();
+    if count == 0 {
+        return input.to_string();
+    }
+    format!("{}{}", "x".repeat(count), &rest[marks..])
 }
 
 /// With a tab as a space, wherever it is; then with the tabs that only
@@ -543,6 +565,26 @@ fn narrowed(name: &str) -> String {
     name.chars()
         .map(|ch| if narrow_name_character(ch) { ch } else { '_' })
         .collect()
+}
+
+/// With a space after each anchor or alias name that, outside a flow
+/// collection, ends at a `:` that a flow indicator follows, as in `&a:[`:
+/// there ayaml's scanner ends the name and its line reader does not
+/// (asamarts/ayaml#139). Both parsers read the `:` and what follows as
+/// before, and ayaml's readers agree.
+pub(super) fn names_ended_at_a_colon_before_a_flow_indicator(input: &str) -> Vec<String> {
+    let places = places(input);
+    let edits: Vec<(Range<usize>, String)> = tokens(input, &['&', '*'])
+        .into_iter()
+        .filter(|range| {
+            let rest = &input[range.end..];
+            places[range.start].depth == 0
+                && rest.starts_with(':')
+                && rest[1..].starts_with(|ch: char| ",[]{}".contains(ch))
+        })
+        .map(|range| (range.end..range.end, " ".to_string()))
+        .collect();
+    apply(input, &edits)
 }
 
 /// With each anchor or alias name that holds a character other than an

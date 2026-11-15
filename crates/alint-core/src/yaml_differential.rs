@@ -35,19 +35,24 @@
 //! A value that is not a number fails the run.
 
 mod allowlist;
+#[cfg(test)]
 mod configuration;
+#[cfg(test)]
 mod generate;
 mod neutralize;
 mod predicates;
 
 use std::collections::{BTreeMap, BTreeSet};
+#[cfg(test)]
 use std::fmt::Write as _;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+#[cfg(test)]
 use std::path::Path;
 
 use serde::de::DeserializeSeed;
 
-use allowlist::Trigger;
+use allowlist::{Hidden, Trigger};
+#[cfg(test)]
 use generate::Rng;
 
 /// Where alint decodes YAML.
@@ -60,6 +65,7 @@ pub(crate) enum Entry {
 }
 
 impl Entry {
+    #[cfg(test)]
     const ALL: [Self; 4] = [Self::Value, Self::Json, Self::Config, Self::Rule];
 }
 
@@ -81,6 +87,7 @@ pub(crate) enum Class {
 }
 
 impl Class {
+    #[cfg(test)]
     const ALL: [Self; 6] = [
         Self::SameValue,
         Self::DifferentValue,
@@ -91,7 +98,7 @@ impl Class {
     ];
 
     /// Whether a result of this class needs an allowlist entry.
-    fn is_difference(self) -> bool {
+    pub(crate) fn is_difference(self) -> bool {
         !matches!(self, Self::SameValue | Self::RejectedAtSameLocation)
     }
 }
@@ -197,6 +204,81 @@ fn from_oracle(value: &yaml_serde::Value) -> Node {
     }
 }
 
+/// saphyr's value as a [`Node`], or why it has none: an alias it did not
+/// resolve, or a scalar its tag does not fit, which ayaml rejects.
+fn from_saphyr(value: &saphyr::Yaml<'_>) -> Result<Node, String> {
+    use saphyr::{Scalar, Yaml};
+    Ok(match value {
+        Yaml::Value(Scalar::Null) => Node::Null,
+        Yaml::Value(Scalar::Boolean(value)) => Node::Bool(*value),
+        Yaml::Value(Scalar::Integer(value)) => Node::Integer(value.to_string()),
+        Yaml::Value(Scalar::FloatingPoint(value)) => float(value.into_inner()),
+        Yaml::Value(Scalar::String(value)) => Node::String(value.to_string()),
+        Yaml::Sequence(values) => {
+            Node::Sequence(values.iter().map(from_saphyr).collect::<Result<_, _>>()?)
+        }
+        Yaml::Mapping(mapping) => Node::Mapping(
+            mapping
+                .iter()
+                .map(|(key, value)| Ok((from_saphyr(key)?, from_saphyr(value)?)))
+                .collect::<Result<_, String>>()?,
+        ),
+        Yaml::Tagged(tag, value) => Node::Tagged(
+            format!("{}{}", tag.handle, tag.suffix),
+            Box::new(from_saphyr(value)?),
+        ),
+        Yaml::Representation(..) => return Err("an unresolved scalar".to_string()),
+        Yaml::Alias(_) => return Err("an unresolved alias".to_string()),
+        Yaml::BadValue => return Err("a scalar its tag does not fit".to_string()),
+    })
+}
+
+/// saphyr's value tree for `input`, as the value entry point reads it: no
+/// document is null, and more than one is an error.
+pub(crate) fn run_saphyr(input: &str) -> Side {
+    use saphyr::LoadableYamlNode as _;
+    let rejection = |message: String| Rejection {
+        message,
+        location: None,
+        kind: None,
+    };
+    let documents =
+        saphyr::Yaml::load_from_str(input).map_err(|error| rejection(error.to_string()))?;
+    match documents.as_slice() {
+        [] => Ok(format!("{:?}", Node::Null)),
+        [document] => from_saphyr(document)
+            .map(|node| format!("{node:?}"))
+            .map_err(rejection),
+        _ => Err(rejection("more than one document".to_string())),
+    }
+}
+
+/// Whether saphyr, which reads YAML 1.2, sides with ayaml on a difference
+/// at the value entry point: it reads the value ayaml reads, or rejects the
+/// input ayaml rejects (ADR-0041). It does not vote on where an error is,
+/// nor on the other entry points, which saphyr has no serde support for.
+pub(crate) fn saphyr_agrees(case: &Case<'_>) -> bool {
+    if case.entry != Entry::Value {
+        return false;
+    }
+    let voting = matches!(
+        case.class,
+        Class::DifferentValue | Class::OnlyAyamlRejects | Class::OnlyOracleRejects
+    );
+    if !voting {
+        return false;
+    }
+    let (saphyr, panicked) = guarded(|| run_saphyr(case.input));
+    if panicked {
+        return false;
+    }
+    match (&case.ayaml, &saphyr) {
+        (Ok(ayaml), Ok(saphyr)) => ayaml == saphyr,
+        (Err(_), Err(_)) => true,
+        _ => false,
+    }
+}
+
 fn ayaml_rejection(error: &ayaml::Error) -> Rejection {
     Rejection {
         message: error.message().to_string(),
@@ -207,49 +289,11 @@ fn ayaml_rejection(error: &ayaml::Error) -> Rejection {
     }
 }
 
-/// `message` without each ` at line L column C` and ` at position P` that
-/// libyaml's errors put after their problem and context.
-fn without_marks(message: &str) -> String {
-    let mut out = String::with_capacity(message.len());
-    let mut rest = message;
-    while let Some(at) = rest.find(" at ") {
-        out.push_str(&rest[..at]);
-        let after = &rest[at + 4..];
-        let numbers = |text: &str, words: &[&str]| -> Option<usize> {
-            let mut text = text;
-            let mut len = 0;
-            for word in words {
-                let stripped = text.strip_prefix(word)?;
-                let digits = stripped.len()
-                    - stripped
-                        .trim_start_matches(|ch: char| ch.is_ascii_digit())
-                        .len();
-                if digits == 0 {
-                    return None;
-                }
-                len += word.len() + digits;
-                text = &stripped[digits..];
-            }
-            Some(len)
-        };
-        if let Some(len) =
-            numbers(after, &["line ", " column "]).or_else(|| numbers(after, &["position "]))
-        {
-            rest = &after[len..];
-        } else {
-            out.push_str(" at ");
-            rest = after;
-        }
-    }
-    out.push_str(rest);
-    out
-}
-
 fn oracle_rejection(error: &yaml_serde::Error) -> Rejection {
     Rejection {
         // The oracle's Display holds its own location, and the context's
         // when it differs; the ayaml message leaves its own out.
-        message: without_marks(&error.to_string()),
+        message: crate::yaml_backend::without_marks(&error.to_string()),
         location: error
             .location()
             .map(|location| (location.line(), location.column())),
@@ -288,7 +332,7 @@ type RuleSides = Result<Vec<Side>, Rejection>;
 /// ayaml's result for each rule of `rules:` in `input`, decoded one by one
 /// from the document's value tree.
 fn ayaml_rules(input: &str) -> RuleSides {
-    let value = crate::yaml::from_str::<crate::yaml::Value>(input)
+    let value = crate::yaml::ayaml_from_str::<crate::yaml::Value>(input)
         .map_err(|error| ayaml_rejection(&error.into_parser()))?;
     let rules = value
         .get("rules")
@@ -344,6 +388,7 @@ fn rule_side(rules: &RuleSides, index: usize) -> Side {
 /// The case of each rule of `input`, with the document decoded once for all
 /// of them, and whether a parser panicked; none for an input without rules,
 /// unless a parser panicked.
+#[cfg(test)]
 fn rule_cases(input: &str) -> Vec<(Case<'_>, bool)> {
     let (ayaml, ayaml_panicked) = guarded(|| ayaml_rules(input));
     let (oracle, oracle_panicked) = guarded(|| oracle_rules(input));
@@ -396,15 +441,15 @@ fn guarded<T>(parse: impl FnOnce() -> Result<T, Rejection>) -> (Result<T, Reject
 /// rule at index `rule`.
 fn run_ayaml(input: &str, entry: Entry, rule: usize) -> Side {
     match entry {
-        Entry::Value => crate::yaml::from_str::<crate::yaml::Value>(input)
+        Entry::Value => crate::yaml::ayaml_from_str::<crate::yaml::Value>(input)
             .map(|value| format!("{:?}", from_ayaml(value.parser())))
             .map_err(|error| ayaml_rejection(&error.into_parser())),
         Entry::Json => {
-            crate::yaml::from_str_seed(input, crate::structured_format::json_seed(input))
+            crate::yaml::ayaml_from_str_seed(input, crate::structured_format::json_seed(input))
                 .map(|value| format!("{value:?}"))
                 .map_err(|error| ayaml_rejection(&error))
         }
-        Entry::Config => crate::yaml::from_str::<crate::Config>(input)
+        Entry::Config => crate::yaml::ayaml_from_str::<crate::Config>(input)
             .map(config_form)
             .map_err(|error| ayaml_rejection(&error.into_parser())),
         Entry::Rule => rule_side(&ayaml_rules(input), rule),
@@ -520,6 +565,12 @@ pub(crate) fn compare_at(input: &str, entry: Entry, rule: usize) -> (Case<'_>, b
 /// compared.
 fn explanation(case: &Case<'_>) -> Option<Vec<&'static str>> {
     explanation_without(case, &[])
+}
+
+/// [`explanation`], for the parser facade's compare mode.
+#[cfg(feature = "yaml-reference")]
+pub(crate) fn explain(case: &Case<'_>) -> Option<Vec<&'static str>> {
+    explanation(case)
 }
 
 /// [`explanation`] with the deviations of `excluded` left out.
@@ -712,14 +763,10 @@ fn same_value_error(ayaml: &Rejection, oracle: &Rejection) -> bool {
 }
 
 /// How fair a counterfactual of `case` the rewritten case `next` is, or
-/// `None` when it is not fair. `hides` lists the ayaml errors the rewrite's
+/// `None` when it is not fair. `hides` names the ayaml errors the rewrite's
 /// trigger is documented to hide.
-fn fairness(case: &Case<'_>, next: &Case<'_>, hides: &[&str]) -> Option<Fairness> {
-    let shown = case.ayaml.is_ok()
-        && case.oracle.is_err()
-        && hides
-            .iter()
-            .any(|message| predicates::rejects(&next.ayaml, message));
+fn fairness(case: &Case<'_>, next: &Case<'_>, hides: &Hidden) -> Option<Fairness> {
+    let shown = case.ayaml.is_ok() && case.oracle.is_err() && hides.shown(case, next);
     let ayaml = side_fairness(case, next, |case| &case.ayaml, |case| &case.oracle)
         .or(shown.then_some(Fairness::Kept));
     let oracle = side_fairness(case, next, |case| &case.oracle, |case| &case.ayaml);
@@ -894,7 +941,7 @@ impl Search {
             let (next, panicked) = compare_at(input, case.entry, case.rule);
             if !panicked {
                 let kept = |before: &Side, after: &Side| matches!((before, after), (Err(before), Err(after)) if before.message == after.message);
-                *separated |= fairness(case, &next, deviation.hides()) == Some(Fairness::Kept)
+                *separated |= fairness(case, &next, &deviation.hides()) == Some(Fairness::Kept)
                     && ((kept(&case.ayaml, &next.ayaml) && next.oracle.is_ok())
                         || (kept(&case.oracle, &next.oracle) && next.ayaml.is_ok()));
                 compared.push(next);
@@ -903,7 +950,7 @@ impl Search {
         for tier in [Fairness::Kept, Fairness::Revealed, Fairness::BothAgree] {
             for next in &compared {
                 let both_agree = tier == Fairness::BothAgree;
-                if fairness(case, next, deviation.hides()) != Some(tier)
+                if fairness(case, next, &deviation.hides()) != Some(tier)
                     || (both_agree && self.complete)
                 {
                     continue;
@@ -927,12 +974,24 @@ impl Search {
 
 /// The counts of a run, and the cases it fails on.
 #[derive(Default)]
+#[cfg(test)]
 struct Report {
     inputs: usize,
     classes: BTreeMap<(Entry, Class), usize>,
     /// How often each deviation or location class helped explain a
-    /// difference.
+    /// difference that saphyr's vote did not.
     explained: BTreeMap<(Entry, &'static str), usize>,
+    /// The differences saphyr's vote explained (see [`saphyr_agrees`]).
+    voted: BTreeMap<(Entry, Class), usize>,
+    /// How often each deviation or location class would also have explained
+    /// a difference the vote explained: an entry with no other count is one
+    /// the vote makes redundant.
+    also_voted: BTreeMap<&'static str, usize>,
+    /// The differences only the vote explained, which no entry would: where
+    /// a defect ayaml shares with saphyr would pass, so the report lists the
+    /// shortest few.
+    vote_only: usize,
+    vote_only_inputs: Vec<String>,
     /// The shortest input each deviation or location class helped explain,
     /// and where.
     examples: BTreeMap<&'static str, (Entry, String)>,
@@ -952,8 +1011,14 @@ struct Report {
     configuration_classes: BTreeMap<(Entry, Class), usize>,
 }
 
+#[cfg(test)]
 const KEPT_FAILURES: usize = 8;
 
+/// How the report names saphyr's vote.
+#[cfg(test)]
+const SAPHYR_VOTE: &str = "saphyr's vote";
+
+#[cfg(test)]
 impl Report {
     fn add(&mut self, input: &str) {
         self.add_input(input, false);
@@ -998,18 +1063,33 @@ impl Report {
 
     fn record(&mut self, case: &Case<'_>, panicked: bool) {
         *self.classes.entry((case.entry, case.class)).or_default() += 1;
+        let voted = case.class.is_difference() && saphyr_agrees(case);
         let explained = explanation(case);
-        for id in explained.iter().flatten() {
-            *self.explained.entry((case.entry, id)).or_default() += 1;
-            let example = self
-                .examples
-                .entry(id)
-                .or_insert_with(|| (case.entry, case.input.to_string()));
-            if case.input.chars().count() < example.1.chars().count() {
-                *example = (case.entry, case.input.to_string());
+        if voted {
+            *self.voted.entry((case.entry, case.class)).or_default() += 1;
+            self.example(SAPHYR_VOTE, case);
+            if explained.is_none() {
+                self.vote_only += 1;
+                self.vote_only_inputs.push(format!(
+                    "{:?}\n      ayaml:  {}\n      oracle: {}",
+                    case.input,
+                    describe(&case.ayaml),
+                    describe(&case.oracle)
+                ));
+                self.vote_only_inputs.sort_by_key(String::len);
+                self.vote_only_inputs.dedup();
+                self.vote_only_inputs.truncate(KEPT_FAILURES);
             }
         }
-        if panicked || explained.is_none() {
+        for id in explained.iter().flatten() {
+            if voted {
+                *self.also_voted.entry(id).or_default() += 1;
+            } else {
+                *self.explained.entry((case.entry, id)).or_default() += 1;
+                self.example(id, case);
+            }
+        }
+        if panicked || (explained.is_none() && !voted) {
             self.failure_count += 1;
             let kept = self
                 .failures
@@ -1024,6 +1104,17 @@ impl Report {
             kept.sort_by_key(String::len);
             kept.dedup();
             kept.truncate(KEPT_FAILURES);
+        }
+    }
+
+    /// Keep `case`'s input as `id`'s example if it is the shortest yet.
+    fn example(&mut self, id: &'static str, case: &Case<'_>) {
+        let example = self
+            .examples
+            .entry(id)
+            .or_insert_with(|| (case.entry, case.input.to_string()));
+        if case.input.chars().count() < example.1.chars().count() {
+            *example = (case.entry, case.input.to_string());
         }
     }
 
@@ -1050,8 +1141,23 @@ impl Report {
             out.push('\n');
         }
         out.push_str(
-            "\n| Explained by | Value | JSON | Config | Rules |\n|---|---:|---:|---:|---:|\n",
+            "\nsaphyr's vote explains a difference at the value entry point when saphyr reads \
+             the input as ayaml does. An entry's \"Also voted\" counts differences it explains \
+             that the vote explained first; an entry with no other count is one the vote makes \
+             redundant.\n\n| Explained by | Value | JSON | Config | Rules | Also voted |\n\
+             |---|---:|---:|---:|---:|---:|\n",
         );
+        let voted = |entry| {
+            Class::ALL
+                .iter()
+                .map(|class| self.voted.get(&(entry, *class)).copied().unwrap_or(0))
+                .sum::<usize>()
+        };
+        let _ = write!(out, "| {SAPHYR_VOTE} |");
+        for entry in Entry::ALL {
+            let _ = write!(out, " {} |", voted(entry));
+        }
+        out.push_str(" |\n");
         let ids = allowlist::DEVIATIONS
             .iter()
             .map(|deviation| deviation.id)
@@ -1062,7 +1168,16 @@ impl Report {
                 let count = self.explained.get(&(entry, id)).copied().unwrap_or(0);
                 let _ = write!(out, " {count} |");
             }
-            out.push('\n');
+            let also = self.also_voted.get(id).copied().unwrap_or(0);
+            let _ = writeln!(out, " {also} |");
+        }
+        let _ = writeln!(
+            out,
+            "\n{} differences only the vote explains, which no entry does.",
+            self.vote_only
+        );
+        for input in &self.vote_only_inputs {
+            let _ = writeln!(out, "  - {input}");
         }
         out.push_str("\nThe shortest input each one explained:\n\n");
         for (id, (entry, input)) in &self.examples {
@@ -1085,7 +1200,7 @@ impl Report {
 }
 
 /// `input` written with `{:?}`, cut to 160 characters.
-fn shortened(input: &str) -> String {
+pub(crate) fn shortened(input: &str) -> String {
     let mut text = format!("{input:?}");
     if let Some((cut, _)) = text.char_indices().nth(160) {
         text.truncate(cut);
@@ -1095,6 +1210,7 @@ fn shortened(input: &str) -> String {
 }
 
 /// The allowlist as Markdown, for the long run's report.
+#[cfg(test)]
 fn allowlist_markdown() -> String {
     let mut out = String::from("\n### Documented differences\n");
     for deviation in allowlist::DEVIATIONS {
@@ -1126,6 +1242,7 @@ fn allowlist_markdown() -> String {
     out
 }
 
+#[cfg(test)]
 fn describe(side: &Side) -> String {
     match side {
         Ok(value) => {
@@ -1144,6 +1261,7 @@ fn describe(side: &Side) -> String {
 }
 
 /// The repository's root.
+#[cfg(test)]
 fn repository() -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
@@ -1151,6 +1269,7 @@ fn repository() -> std::path::PathBuf {
 /// The committed YAML files of the repository, by path, with their line
 /// breaks as committed whatever Git's `core.autocrlf`; none outside a Git
 /// checkout.
+#[cfg(test)]
 fn corpus() -> Vec<(String, String)> {
     let root = repository();
     let Ok(output) = std::process::Command::new("git")
@@ -1177,6 +1296,7 @@ fn corpus() -> Vec<(String, String)> {
 }
 
 /// FNV-1a, to give each corpus file a seed of its own.
+#[cfg(test)]
 fn fnv1a(text: &str) -> u64 {
     text.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
         (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
@@ -1187,6 +1307,7 @@ fn fnv1a(text: &str) -> u64 {
 /// documents, two mutated documents, one a configuration and one a mutated
 /// configuration. When `specials` is set, every other input may hold
 /// [`generate::SPECIALS`].
+#[cfg(test)]
 fn generated(rng: &mut Rng, index: usize, specials: bool) -> String {
     let specials = specials && index % 2 == 1;
     match index % 8 {
@@ -1209,6 +1330,7 @@ fn generated(rng: &mut Rng, index: usize, specials: bool) -> String {
 /// other generated input and corpus mutation may hold [`generate::SPECIALS`]
 /// (see `docs/design/yaml-parser.md` for how many do); none does when it is
 /// not.
+#[cfg(test)]
 fn differential_run(seed: u64, inputs: usize, mutations: usize, specials: bool) -> Report {
     let mut rng = Rng::new(seed);
     let mut report = Report::default();
@@ -1227,6 +1349,7 @@ fn differential_run(seed: u64, inputs: usize, mutations: usize, specials: bool) 
 /// Each corpus file, then `mutations` mutations of it from a seed of its
 /// own, passed to `add` with whether it is a mutation. When `specials` is
 /// set, every other mutation may hold [`generate::SPECIALS`].
+#[cfg(test)]
 fn for_each_corpus_input(
     seed: u64,
     mutations: usize,
@@ -1250,11 +1373,13 @@ fn for_each_corpus_input(
 ///
 /// When it is set to something else, so that a mistyped size or seed fails
 /// the run instead of running the default.
+#[cfg(test)]
 fn env_number(name: &str, default: u64) -> u64 {
     number_setting(name, std::env::var(name).ok().as_deref(), default)
 }
 
 /// The number `value` of the setting `name`, or `default` without one.
+#[cfg(test)]
 fn number_setting(name: &str, value: Option<&str>, default: u64) -> u64 {
     value.map_or(default, |value| {
         value

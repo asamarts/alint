@@ -211,6 +211,27 @@ jobs:
           key: ci-test
       - run: ci/scripts/test.sh
 
+  # The workspace's tests with every YAML decode checked against libyaml and
+  # saphyr, the reference parsers behind alint-core's test-only
+  # `yaml-reference` feature, after the check that no release build holds one
+  # (ADR-0041, docs/design/yaml-parser.md "Parser facade").
+  yaml-compare:
+    name: YAML Compare
+    needs: [changes, fmt]
+    if: >-
+      !cancelled() && !failure()
+      && needs.changes.outputs.rust == 'true'
+    runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: ci-yaml-compare
+      - run: ci/scripts/test-yaml-compare.sh
+
   # Blocking on RustSec vulnerabilities, like Deny's advisories pass. Also on
   # `supply_chain`: its waiver list is deny.toml [advisories].ignore, so a PR
   # adding a waiver must run the gate that honours it.
@@ -621,6 +642,7 @@ jobs:
       - msrv
       - clippy
       - test
+      - yaml-compare
       - audit
       - deny
       - supply-chain
@@ -657,6 +679,7 @@ jobs:
           MSRV_RESULT: ${{ needs.msrv.result }}
           CLIPPY_RESULT: ${{ needs.clippy.result }}
           TEST_RESULT: ${{ needs.test.result }}
+          YAML_COMPARE_RESULT: ${{ needs.yaml-compare.result }}
           AUDIT_RESULT: ${{ needs.audit.result }}
           DENY_RESULT: ${{ needs.deny.result }}
           SUPPLY_CHAIN_RESULT: ${{ needs.supply-chain.result }}

@@ -68,6 +68,7 @@ row() {
   row "MSRV"         "$MSRV_RESULT"        "$RUST_CHANGED"
   row "Clippy"       "$CLIPPY_RESULT"      "$RUST_CHANGED"
   row "Test"         "$TEST_RESULT"        "$RUST_CHANGED"
+  row "YAML compare" "${YAML_COMPARE_RESULT:-skipped}" "$RUST_CHANGED"
   row "Audit"        "$AUDIT_RESULT"       "$( [[ "$RUST_CHANGED" == true || "$SUPPLY_CHAIN_CHANGED" == true ]] && echo true || echo false )"
   row "Deny"         "$DENY_RESULT"        "$( [[ "$RUST_CHANGED" == true || "$SUPPLY_CHAIN_CHANGED" == true ]] && echo true || echo false )"
   row "Supply chain" "$SUPPLY_CHAIN_RESULT" "$SUPPLY_CHAIN_CHANGED"
@@ -133,7 +134,8 @@ for check in "Secrets inventory=${SECRETS_INVENTORY_RESULT:-}" "Action pins=${AC
   fi
 done
 for result in \
-  "$FMT_RESULT" "$MSRV_RESULT" "$CLIPPY_RESULT" "$TEST_RESULT" "$AUDIT_RESULT" \
+  "$FMT_RESULT" "$MSRV_RESULT" "$CLIPPY_RESULT" "$TEST_RESULT" \
+  "${YAML_COMPARE_RESULT:-skipped}" "$AUDIT_RESULT" \
   "$DENY_RESULT" "$SUPPLY_CHAIN_RESULT" "$BUILD_RESULT" "$DOCS_JOB_RESULT" \
   "$DOGFOOD_RESULT" "$BENCH_SMOKE_RESULT" "$EXAMPLES_RESULT" \
   "$SHELL_TESTS_RESULT" "$EDITORS_RESULT" "${PACKAGING_RESULT:-skipped}" \

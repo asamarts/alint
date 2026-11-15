@@ -197,7 +197,7 @@ fn expansion_budget_pass(text: &str, max: usize) -> bool {
         remaining: &remaining,
         exceeded: &exceeded,
     };
-    let result = crate::yaml::from_str_seed(text, seed);
+    let result = crate::yaml::ayaml_from_str_seed(text, seed);
     // D28: ayaml enforces its own alias budget before the visitor sees every
     // node. Its alias-expansion limit error therefore means the document is
     // over budget; treat it exactly like a NodeBudget overflow instead of

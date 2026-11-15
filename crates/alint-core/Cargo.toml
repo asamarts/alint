@@ -47,6 +47,14 @@ hcl.workspace = true
 saphyr.workspace = true
 saphyr-parser.workspace = true
 adotenv.workspace = true
+# The parser facade's reference backend (ADR-0041), behind the test-only
+# `yaml-reference` feature, which no release build enables.
+yaml_serde = { workspace = true, optional = true }
+
+[features]
+# libyaml and saphyr as reference parsers, and `ALINT_YAML_PARSER` to choose
+# one or to compare them with ayaml (ADR-0041). For testing only.
+yaml-reference = ["dep:yaml_serde"]
 
 [dev-dependencies]
 tempfile.workspace = true
