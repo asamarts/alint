@@ -196,9 +196,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     reported line 1, column 1. After a byte-order mark, a character that cannot start a token is
     reported without a line and column (asamarts/ayaml#133).
 
-  Source spans and structured YAML fixes still use saphyr. Before v0.23.0 ships, a depth guard
-  re-derived from ayaml's tokens (#483) and the owner's approval of the harness's documented
-  differences qualify the parser (ADR-0035).
+  Source spans and structured YAML fixes still use saphyr. The checks that refuse deep flow
+  nesting and alias bombs before a parse now read YAML as ayaml does, and ayaml's own depth,
+  input and alias limits are set from the same constants (#483). Before v0.23.0 ships, the
+  owner's approval of the harness's documented differences qualifies the parser (ADR-0035).
 - **Breaking (library API): YAML values and errors are alint's own types** (#484, #516,
   ADR-0038). No public item of `alint-core`, `alint-dsl` or `alint-testkit` names a YAML parser
   crate any more, so a later change of parser is not a breaking change. `alint_core::yaml` holds

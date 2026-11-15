@@ -1681,10 +1681,11 @@ mod json_ {
 /// QUOTED scalar's `span.end` runs to end-of-line (past a trailing comment), so
 /// `clamp_quoted_scalar_span` tightens it to the closing quote -- else a splice
 /// silently deletes the comment (the audit's HIGH finding; a plain scalar's end is
-/// already tight). (3) `saphyr` does not bound recursion, so a defensive flow-depth
-/// guard mirrors the check side's `Format::parse` (which the fixer runs first
-/// anyway) to keep this resolver self-safe on deeply-nested flow input. A leading
-/// BOM is stripped + offset (the check side strips it but saphyr rejects it).
+/// already tight). (3) saphyr's parser stops at 256 levels of nesting, in linear
+/// time, but the flow-depth guard of the check side's `Format::parse` (which the
+/// fixer runs first anyway) runs here too, so the resolver refuses what the check
+/// side refuses. A leading BOM is stripped + offset (the check side strips it but
+/// saphyr rejects it).
 mod yaml_ {
     use super::PathSeg;
     use saphyr::{LoadableYamlNode, MarkedYaml, Scalar, YamlData};
@@ -1693,9 +1694,10 @@ mod yaml_ {
     /// The byte range of the scalar value at `path`. `None` if the source does not
     /// parse, is a multi-document stream, or the path does not resolve to a scalar.
     pub(super) fn yaml_value_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
-        // Defensive DoS guard (parser-guard parity): `saphyr` is recursive-descent
-        // and unbounded. The fixer runs `Format::parse` (which applies this) before
-        // reaching here, but guard directly so the resolver is self-safe.
+        // The check side's guard (parser-guard parity). The fixer runs
+        // `Format::parse` (which applies this) before reaching here, but guard
+        // directly so the resolver is self-safe. It scans the raw text, whose
+        // reading of a BOM as zero width covers the stripped text saphyr parses.
         if !crate::yaml_depth::flow_depth_within_limit(text) {
             return None;
         }

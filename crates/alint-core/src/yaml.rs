@@ -2,9 +2,9 @@
 //! value and error types alint's public API uses.
 //!
 //! Every document is read under the same parser limits: ayaml's defaults,
-//! without its caps on events, collection entries, anchors and alias uses. The
-//! input cap (32 MiB), the depth cap (128) and the alias-expansion allowance
-//! stay.
+//! without its caps on events, collection entries, anchors and alias uses, and
+//! with the input cap (32 MiB), the depth cap (128) and the alias-expansion
+//! budget set from the constants alint's own pre-parse guards use.
 //!
 //! [`Value`], [`Mapping`], [`Sequence`], [`Error`] and [`Location`] are alint's
 //! own types. Each wraps the parser's, which stays private, so a change of
@@ -19,14 +19,27 @@ use serde::{Deserialize, Serialize};
 /// The parser limits every decode runs under: ayaml's defaults, without its
 /// caps on events, collection entries, anchors and alias uses. The parser
 /// v0.22 used had no cap on events, entries or anchors, and capped alias uses
-/// at 100 per event of the document, where the alias-expansion budget below
-/// bounds what aliases expand to instead; ayaml's default of 1,000,000
-/// events refuses a valid file of a few megabytes, far below the input cap.
-/// The input cap (32 MiB, as [`crate::MAX_STRUCTURED_BYTES`]), the depth cap
-/// (128) and the alias-expansion budget stay, and together they bound what
-/// one parse can cost.
+/// at 100 per event of the document, where the alias-expansion budget bounds
+/// what aliases expand to instead; ayaml's default of 1,000,000 events refuses
+/// a valid file of a few megabytes, far below the input cap. The input cap
+/// ([`crate::MAX_STRUCTURED_BYTES`]), the depth cap and the alias-expansion
+/// budget come from the constants of [`crate::yaml_depth`], whose guards
+/// refuse the same documents before a parse, and together they bound what one
+/// parse can cost. ayaml's defaults are the same values.
 fn limits() -> ayaml::Limits {
+    // The parser cannot go deeper than its cap, so the guard's ceiling must not
+    // either: a deeper ceiling would let through what the parser refuses.
+    const _: () = assert!(crate::yaml_depth::MAX_YAML_FLOW_DEPTH <= ayaml::MAX_DEPTH_CAP);
+    use crate::yaml_depth::{
+        MAX_YAML_EXPANSION_BYTES, MAX_YAML_FLOW_DEPTH, YAML_EXPANSION_BYTES_PER_INPUT_BYTE,
+        YAML_NODE_COST,
+    };
     ayaml::Limits::default()
+        .with_max_input_bytes(crate::MAX_STRUCTURED_BYTES)
+        .with_max_depth(MAX_YAML_FLOW_DEPTH)
+        .with_max_alias_expansion_bytes(MAX_YAML_EXPANSION_BYTES)
+        .with_alias_bytes_per_input_byte(YAML_EXPANSION_BYTES_PER_INPUT_BYTE)
+        .with_node_cost_bytes(YAML_NODE_COST)
         .with_max_events(usize::MAX)
         .with_max_collection_entries(usize::MAX)
         .with_max_anchors(usize::MAX)
@@ -967,10 +980,12 @@ mapping_side!(
 pub struct Error(ayaml::Error);
 
 impl Error {
+    #[cfg(test)]
     pub(crate) fn from_parser(error: ayaml::Error) -> Self {
         Self(error)
     }
 
+    #[cfg(test)]
     pub(crate) fn into_parser(self) -> ayaml::Error {
         self.0
     }
@@ -1056,6 +1071,58 @@ impl Location {
 mod tests {
     use super::*;
     use std::fmt::Write as _;
+
+    /// Every limit a decode runs under. The guards in `yaml_depth` and the
+    /// parser must refuse the same documents, so the depth and alias limits
+    /// are alint's constants, and ayaml's defaults are checked against them so
+    /// that an ayaml release that changes one is noticed.
+    #[test]
+    fn the_parser_limits_are_alints() {
+        use crate::yaml_depth::{
+            MAX_YAML_EXPANSION_BYTES, MAX_YAML_FLOW_DEPTH, YAML_EXPANSION_BYTES_PER_INPUT_BYTE,
+            YAML_NODE_COST,
+        };
+        let limits = limits();
+        let pinned = [
+            (limits.max_input_bytes, crate::MAX_STRUCTURED_BYTES),
+            (limits.max_depth, MAX_YAML_FLOW_DEPTH),
+            (limits.max_alias_expansion_bytes, MAX_YAML_EXPANSION_BYTES),
+            (
+                limits.alias_bytes_per_input_byte,
+                YAML_EXPANSION_BYTES_PER_INPUT_BYTE,
+            ),
+            (limits.node_cost_bytes, YAML_NODE_COST),
+            (limits.max_events, usize::MAX),
+            (limits.max_collection_entries, usize::MAX),
+            (limits.max_anchors, usize::MAX),
+            (limits.max_alias_dereferences, usize::MAX),
+            // A scalar may be the whole input.
+            (limits.max_scalar_bytes, crate::MAX_STRUCTURED_BYTES),
+            (limits.max_documents, 10_000),
+            (limits.max_output_bytes, 64 * 1024 * 1024),
+            (limits.max_tag_expansion_bytes, 64 * 1024 * 1024),
+        ];
+        for (index, (actual, expected)) in pinned.into_iter().enumerate() {
+            assert_eq!(actual, expected, "limit {index}");
+        }
+        let defaults = ayaml::Limits::default();
+        assert_eq!(
+            (
+                defaults.max_input_bytes,
+                defaults.max_depth,
+                defaults.max_alias_expansion_bytes,
+                defaults.alias_bytes_per_input_byte,
+                defaults.node_cost_bytes,
+            ),
+            (
+                crate::MAX_STRUCTURED_BYTES,
+                MAX_YAML_FLOW_DEPTH,
+                MAX_YAML_EXPANSION_BYTES,
+                YAML_EXPANSION_BYTES_PER_INPUT_BYTE,
+                YAML_NODE_COST,
+            )
+        );
+    }
 
     /// A valid document with more events, entries, anchors and alias uses
     /// than ayaml's defaults allow (1,000,000, 1,000,000, 100,000 and

@@ -88,9 +88,8 @@ impl<'de> Deserialize<'de> for StableVersion {
         D: Deserializer<'de>,
     {
         let input = String::deserialize(deserializer)?;
-        input
-            .parse()
-            .map_err(|error| serde::de::Error::custom(format!("requires.alint: {error}")))
+        // No field name here: the parser prefixes the path of the field.
+        input.parse().map_err(serde::de::Error::custom)
     }
 }
 

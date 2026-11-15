@@ -1161,6 +1161,33 @@ fn direct_parse_enforces_literal_requirement_and_records_inline_source() {
     }
 }
 
+/// The parser names the field an error is in, so a requirement error names it
+/// once, with one location, through `parse`, `load` and an interpolated file.
+#[test]
+fn requirement_errors_name_the_field_once() {
+    let tmp = tempfile::tempdir().unwrap();
+    for (body, field) in [
+        ("requires:\n  alint: '1.x'\n", "requires.alint: "),
+        ("requires:\n  alint: [1]\n", "requires.alint: "),
+        ("requires: 3\n", "requires: "),
+    ] {
+        let plain = format!("version: 1\n{body}rules: []\n");
+        // A `{{` anywhere sends the loader down its interpolating path.
+        let interpolated = format!("# {{{{x}}}}\n{plain}");
+        let path = tmp.path().join(".alint.yml");
+        let mut errors = vec![parse(&plain).unwrap_err().to_string()];
+        for contents in [&plain, &interpolated] {
+            std::fs::write(&path, contents).unwrap();
+            errors.push(load(&path).unwrap_err().to_string());
+        }
+        for error in errors {
+            assert_eq!(error.matches("requires").count(), 1, "{body:?}: {error}");
+            assert!(error.contains(field), "{body:?}: {error}");
+            assert!(error.matches(" line ").count() <= 1, "{body:?}: {error}");
+        }
+    }
+}
+
 /// A distinct value per name, so a test can tell which were recorded.
 #[derive(Debug)]
 struct NamedEnvironment;
