@@ -517,6 +517,51 @@ fn explicit_sensitive_scope_covers_an_unindexed_editor_file() {
         &FileIndex::default(),
         Path::new("new.txt"),
     ));
+    assert!(!engine.path_contains_sensitive_evidence(
+        tmp.path(),
+        &FileIndex::default(),
+        Path::new("new.md"),
+    ));
+}
+
+/// A rule's `when:` in the sensitive-evidence check reads the engine's
+/// process environment, as the run does, not the host's.
+#[test]
+fn sensitive_evidence_reads_the_engines_environment() {
+    let tmp = tempfile::tempdir().unwrap();
+    let engine = |environment: &[(&str, &str)]| {
+        let rule = Box::new(PerFileStub {
+            id: "needs-magic".into(),
+            scope: Scope::from_patterns(&["**/*.txt".to_string()]).unwrap(),
+            prefix: b"MAGIC".to_vec(),
+        });
+        let spec: crate::RuleSpec = crate::yaml::from_str(
+            "id: needs-magic\nkind: file_content_matches\npaths: \"**/*.txt\"\n\
+                 pattern: MAGIC\nsensitive: true\nlevel: error\n",
+        )
+        .unwrap();
+        // `CARGO_PKG_NAME` is set for every test process, so a condition that
+        // read the host's environment would hold in both cases below.
+        let when = crate::when::parse("env.FROM_ENGINE == \"1\" or env.CARGO_PKG_NAME").unwrap();
+        let entry = RuleEntry::new(rule)
+            .with_spec(std::sync::Arc::new(spec))
+            .with_when(when);
+        Engine::from_entries(vec![entry], RuleRegistry::new()).with_process_environment(
+            environment
+                .iter()
+                .map(|(name, value)| ((*name).to_string(), (*value).to_string()))
+                .collect(),
+        )
+    };
+    let sensitive = |engine: &Engine| {
+        engine.path_contains_sensitive_evidence(
+            tmp.path(),
+            &FileIndex::default(),
+            Path::new("new.txt"),
+        )
+    };
+    assert!(sensitive(&engine(&[("FROM_ENGINE", "1")])));
+    assert!(!sensitive(&engine(&[])));
 }
 #[test]
 fn run_for_file_uses_supplied_bytes_not_disk() {

@@ -774,6 +774,12 @@ impl WalkOptions {
         self.global_git_excludes = global_git_excludes;
         self
     }
+
+    /// Whether a walk reads the global excludes file: only when it honors
+    /// ignore files at all.
+    fn uses_global_git_excludes(&self) -> bool {
+        self.respect_gitignore && self.global_git_excludes
+    }
 }
 
 pub fn walk(root: &Path, opts: &WalkOptions) -> Result<FileIndex> {
@@ -1261,7 +1267,7 @@ impl<'a> WalkSkips<'a> {
                 parents,
                 global: self
                     .opts
-                    .global_git_excludes
+                    .uses_global_git_excludes()
                     .then(|| ignore::gitignore::Gitignore::global().0),
                 bounded,
             }
@@ -1466,7 +1472,7 @@ fn build_walk_builder(root: &Path, opts: &WalkOptions) -> Result<(WalkBuilder, E
     let mut builder = WalkBuilder::new(root);
     builder
         .standard_filters(opts.respect_gitignore)
-        .git_global(opts.respect_gitignore && opts.global_git_excludes)
+        .git_global(opts.uses_global_git_excludes())
         .hidden(false)
         .follow_links(true);
     // Ignore files stop at the repository boundary, as git's do (ADR-0028). In

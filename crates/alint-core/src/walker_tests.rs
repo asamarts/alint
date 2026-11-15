@@ -1894,3 +1894,29 @@ fn walk_options_default_and_setters() {
     let index = walk(tmp.path(), &set).unwrap();
     assert_eq!(paths(&index), ["keep.txt"]);
 }
+
+/// The global excludes file is read only with ignore files on, and the setter
+/// keeps the other options.
+#[test]
+fn global_excludes_need_ignore_files() {
+    for (respect, global, uses) in [
+        (true, true, true),
+        (true, false, false),
+        (false, true, false),
+        (false, false, false),
+    ] {
+        let opts = WalkOptions::default()
+            .with_respect_gitignore(respect)
+            .with_extra_ignores(vec!["x".to_string()])
+            .with_global_git_excludes(global);
+        assert_eq!(
+            (
+                opts.respect_gitignore,
+                opts.global_git_excludes,
+                opts.extra_ignores.len()
+            ),
+            (respect, global, 1)
+        );
+        assert_eq!(opts.uses_global_git_excludes(), uses, "{respect} {global}");
+    }
+}

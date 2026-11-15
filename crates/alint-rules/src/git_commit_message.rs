@@ -490,6 +490,26 @@ fn legacy_since_warning(spec: &RuleSpec, raw: &str) -> String {
 mod tests {
     use super::*;
 
+    /// `${VAR}` reads the run's process environment when it has one, and
+    /// nothing of this process's; without one, this process's.
+    #[test]
+    fn env_lookup_reads_the_runs_environment() {
+        let root = std::path::Path::new(".");
+        let index = alint_core::FileIndex::default();
+        let environment =
+            std::collections::BTreeMap::from([("FROM_RUN".to_string(), "1".to_string())]);
+        let ctx = Context::new(root, &index).with_process_environment(Some(&environment));
+        assert_eq!(env_lookup(&ctx, "FROM_RUN").as_deref(), Some("1"));
+        // Set for every test process by cargo.
+        assert_eq!(env_lookup(&ctx, "CARGO_PKG_NAME"), None);
+        let host = Context::new(root, &index);
+        assert_eq!(
+            env_lookup(&host, "CARGO_PKG_NAME").as_deref(),
+            Some("alint-rules")
+        );
+        assert_eq!(env_lookup(&host, "FROM_RUN"), None);
+    }
+
     #[test]
     fn split_one_line_message() {
         let (subj, body) = split_subject_body("just a subject");
