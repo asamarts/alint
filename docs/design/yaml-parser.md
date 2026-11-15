@@ -114,6 +114,59 @@ large anchored scalars, and merge aliases. That property boundary, not the third
 internals, is alint's fuzzing responsibility for this like-for-like fork migration. A parser-family
 change must add differential parser fuzzing before cutover.
 
+## Differential harness
+
+`crates/alint-core/src/yaml_differential.rs` (#482) compares ayaml with `yaml_serde` 0.10.7, the
+parser v0.22 used, which stays as the oracle: a dev-dependency of `alint-core` and of no published
+crate.
+
+- **Entry points.** Both parsers decode each input three ways: into a value tree, as every option
+  and `extends:` source is; into the `serde_json` tree that the structured-format rules query,
+  through alint's own seed, which applies merge keys and drops custom tags; and into `Config`,
+  only when the value trees agree, so that a typed difference is about the decode. alint reads no
+  ayaml events in v0.23, so the event stream joins the harness when saphyr leaves in v0.24.
+- **Inputs.** Seeded token soup; generated documents in block and flow style, with anchors,
+  aliases, tags, comments, block scalars and directives; and mutations of them: a line dropped,
+  repeated, re-indented, cut or swapped, or a token inserted. Then the repository's committed
+  YAML files, read with LF line breaks, and mutations of each, seeded per file so that a new file
+  changes no other input. Half the generated inputs hold NEL, LS, PS or a byte-order mark.
+- **Classes.** Each pair of results is one of six classes: the same value, different values, both
+  rejected at the same line and column, both rejected at different places, rejected by ayaml
+  only, and rejected by the oracle only. A panic in either parser fails the run.
+- **The allowlist.** `yaml_differential/allowlist.rs` lists each documented difference with the
+  inputs and classes it covers, both behaviors, the reason and an example; a test checks that
+  each example is explained by its own entry. Location differences are listed by ayaml's error
+  kind and message, with where each parser reports. A test checks that every syntax message of
+  the pinned ayaml has a location class, so a new message fails until its place is documented.
+  Any other difference fails the run.
+- **Runs.** The bounded run, 6,000 generated inputs plus the corpus and one mutation per file, is
+  an ordinary test, about 7 seconds in a debug build, so every pull request runs it. The long
+  run, 300,000 generated inputs and 20 mutations per file, about 30 seconds in a release build,
+  runs in `.github/workflows/yaml-differential.yml` on pull requests that touch YAML parsing or
+  the lockfile, weekly with a new seed, and on dispatch. It writes a Markdown report with the
+  class counts, the entry that explained each difference, and the allowlist.
+- **Another ayaml.** To qualify ayaml's main branch, point a `[patch.crates-io]` entry at it and
+  run the long run.
+
+The documented differences fall into five groups; the report lists every entry.
+- **YAML 1.2 where libyaml follows YAML 1.1.** NEL, LS and PS are content; tabs separate; empty
+  keys, wider anchor names, `#` in a tag, a later `%YAML` minor version, reserved directives,
+  top-level block scalar content in column 1 and the 1.2 flow forms are accepted; the
+  non-specific `!` makes a string; global tags stay on their nodes.
+- **ayaml is as strict as YAML 1.2.** A comment needs white space before it, continuation lines
+  and block scalars must be indented past their parent, a lone `-` or an unseparated `?` or `:`
+  in a flow collection is rejected, and so is a tag handle with characters other than letters,
+  digits and `-`.
+- **libyaml and `yaml_serde` defects.** A byte-order mark that starts a line counts as a column,
+  an alias to a redefined anchor resolves to the wrong node, and a value has no integer beyond 64
+  bits.
+- **ayaml defects in malformed documents.** A block scalar header under its parent's indentation
+  after an anchor is accepted (asamarts/ayaml#132), and an error after a leading byte-order mark
+  has no location (asamarts/ayaml#133).
+- **Error locations.** ayaml checks a stream's syntax before it builds values, so a later syntax
+  error wins over an earlier value error; the oracle reports where its look-ahead stopped, and
+  once the first document ends, `yaml_serde` reports "more than one document" with no place.
+
 ## Migration and rollback
 
 1. Replace the workspace dependency and lockfile entry.
@@ -193,3 +246,20 @@ maintained libyaml fork is the lower-risk ownership boundary.
   exported macro, and gave the owned types the conversions, indexing and iteration that the
   `yaml_serde` types had, apart from non-string mapping lookups, the serde `Deserializer` on
   `Value` and the byte offset of an error.
+- **2026-11-14: the differential harness (#482).** The harness that the "Differential harness"
+  section describes compared ayaml 0.1.2 with `yaml_serde` 0.10.7.
+  - **The corpus.** Of the 904 committed YAML files, 903 decode to the same value and JSON tree,
+    and both parsers reject the other at the same place. 254 decode to the same `Config`, and both
+    refuse the other 649 at the same place. There is no difference.
+  - **Generated and mutated input.** Over 24 seeds, 7.66 million inputs (300,000 generated per
+    seed, the corpus, and 20 mutations of each file) left no unexplained difference and no panic.
+    At the value entry point, 49.1% decode to the same value, 5.1% to different values, 19.0% are
+    rejected at the same place, 21.3% at different places, 0.3% by ayaml only and 5.3% by the
+    oracle only.
+  - **#482's reference figures.** Without NEL, LS, PS or a byte-order mark, of 300,904 inputs:
+    162,034 decode to the same value; 5,869 to different values, 5,445 of them because of global
+    tags, which #482's ad hoc generator rarely wrote; 61,937 are rejected at the same place and
+    63,456 at different places; 118 by ayaml only and 7,490 by the oracle only.
+  - **Y-C3.** The corpus has no difference, and every difference elsewhere is documented in
+    the allowlist (23 deviations and 5 location classes); approving it is phase 9's decision
+    (ADR-0035). The harness found asamarts/ayaml#132 and asamarts/ayaml#133.

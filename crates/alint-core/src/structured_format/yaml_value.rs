@@ -34,8 +34,15 @@ pub(super) fn yaml_to_value(text: &str) -> std::result::Result<Value, String> {
 /// (an ordinary string key, per YAML 1.1: the merge type is resolved only from
 /// the plain scalar).
 #[derive(Clone, Copy)]
-struct YamlJson<'t> {
+pub(crate) struct YamlJson<'t> {
     src: &'t str,
+}
+
+/// The [`yaml_to_value`] seed for `text`, which the differential harness also
+/// runs through the parser v0.22 used.
+#[cfg(test)]
+pub(crate) fn json_seed(text: &str) -> YamlJson<'_> {
+    YamlJson { src: text }
 }
 
 impl<'de> serde::de::DeserializeSeed<'de> for YamlJson<'_> {

@@ -37,6 +37,7 @@ EXPECTED_TOP = {
     'mutants.yml': {'contents': 'read'},
     'post-publish-smoke.yml': {'contents': 'read'},
     'release.yml': {},
+    'yaml-differential.yml': {'contents': 'read'},
 }
 
 EXPECTED_JOB_OVERRIDES = {
