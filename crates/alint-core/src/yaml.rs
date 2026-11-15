@@ -49,8 +49,9 @@ fn limits() -> ayaml::Limits {
 
 /// Decode one YAML document into `T`, under alint's parser limits.
 ///
-/// The parser is ayaml, unless a build with the `yaml-reference` feature
-/// chooses another for testing (see [`crate::yaml_backend`]).
+/// The parser is ayaml, unless a build with `alint-core`'s `yaml-reference`
+/// feature, which is for testing, chooses another with `ALINT_YAML_PARSER`
+/// (ADR-0041).
 ///
 /// # Errors
 ///

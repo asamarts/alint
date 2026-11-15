@@ -147,3 +147,83 @@ pub(crate) fn without_marks(message: &str) -> String {
     out.push_str(rest);
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(not(feature = "yaml-reference"))]
+    #[test]
+    fn without_the_feature_ayaml_decodes() {
+        assert_eq!(parser(), Parser::Ayaml);
+    }
+
+    #[test]
+    fn the_json_tree_is_the_chosen_parsers() {
+        assert_eq!(
+            json_tree("a: [1, x]\nb: ~\n").unwrap(),
+            serde_json::json!({"a": [1, "x"], "b": null})
+        );
+        assert!(json_tree("a: [1\n").is_err());
+    }
+
+    #[cfg(feature = "yaml-reference")]
+    #[test]
+    fn the_variable_names_a_parser() {
+        assert_eq!(parser_named(None), Parser::Ayaml);
+        assert_eq!(parser_named(Some("")), Parser::Ayaml);
+        assert_eq!(parser_named(Some("ayaml")), Parser::Ayaml);
+        assert_eq!(parser_named(Some("libyaml")), Parser::Libyaml);
+        assert_eq!(parser_named(Some("compare")), Parser::Compare);
+        // A misspelled setting must not fall back to ayaml unnoticed.
+        for other in ["libYAML", "saphyr", " compare", "yaml_serde", "0"] {
+            let payload = std::panic::catch_unwind(|| parser_named(Some(other))).unwrap_err();
+            let message = payload.downcast_ref::<String>().unwrap();
+            assert!(
+                message.contains("names no parser: use ayaml, libyaml or compare"),
+                "{message}"
+            );
+        }
+    }
+
+    #[cfg(feature = "yaml-reference")]
+    #[test]
+    fn libyaml_reads_what_both_read_alike_as_ayaml_does() {
+        let input = "a: [1, x]\nb: {c: ~, d: 'q'}\n";
+        let ayaml: crate::yaml::Value = crate::yaml::ayaml_from_str(input).unwrap();
+        let libyaml: crate::yaml::Value = libyaml_from_str(input).unwrap();
+        assert_eq!(ayaml, libyaml);
+        assert_eq!(
+            ayaml_json_tree(input).unwrap(),
+            libyaml_json_tree(input).unwrap()
+        );
+        // And its own reading where the two differ: NEL, which YAML 1.2 made
+        // content, is a line break to libyaml, which makes this plain scalar
+        // an implicit key without a `:` (`yaml-1.2-line-breaks`).
+        let nel = "a: x\u{85}y\n";
+        let ayaml: crate::yaml::Value = crate::yaml::ayaml_from_str(nel).unwrap();
+        assert_eq!(ayaml["a"].as_str(), Some("x\u{85}y"));
+        assert!(libyaml_from_str::<crate::yaml::Value>(nel).is_err());
+    }
+
+    #[cfg(feature = "yaml-reference")]
+    #[test]
+    fn a_libyaml_error_reads_as_an_ayaml_one() {
+        let error = libyaml_from_str::<crate::yaml::Value>("a: [1\nb: 2\n").unwrap_err();
+        let location = error.location().unwrap();
+        assert_eq!((location.line(), location.column()), (2, 2));
+        // The message leaves out the places that libyaml's Display adds,
+        // which Display keeps.
+        assert!(!error.message().contains(" at line "), "{error}");
+        assert!(error.to_string().contains(" at line "), "{error}");
+        assert_eq!(without_marks(&error.to_string()), error.message());
+        let payload =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| error.into_parser()))
+                .unwrap_err();
+        let message = payload.downcast_ref::<String>().unwrap();
+        assert!(
+            message.starts_with("a libyaml error, not ayaml's"),
+            "{message}"
+        );
+    }
+}
