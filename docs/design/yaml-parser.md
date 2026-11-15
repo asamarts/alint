@@ -184,3 +184,12 @@ maintained libyaml fork is the lower-risk ownership boundary.
     literal-subtree check and `pinned_references`' scan, move to ayaml's events in v0.24, after
     #482 and #483. The move depends on asamarts/ayaml#123, or on alint trimming the spans itself,
     and benefits from asamarts/ayaml#128.
+- **2026-11-14: the parser leaves alint's public API.** #516 replaced the parser's types in the
+  public API of `alint-core`, `alint-dsl` and `alint-testkit` with alint's own
+  ([ADR-0038](../adr/0038-owned-yaml-types-and-the-api-gate.md)), and
+  `ci/scripts/public-api-parser-gate.sh` fails on a public item that names a parser crate. A
+  later change of parser, including the saphyr exit, is no longer a breaking change for library
+  users. The review after phase 4 (#520) widened the gate to every feature, hidden item and
+  exported macro, and gave the owned types the conversions, indexing and iteration that the
+  `yaml_serde` types had, apart from non-string mapping lookups, the serde `Deserializer` on
+  `Value` and the byte offset of an error.

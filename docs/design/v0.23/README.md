@@ -1,6 +1,6 @@
 # v0.23: selectors, a first constraint slice, and the YAML groundwork
 
-Status: accepted (2026-11-12, ADR-0032); in progress, phases 0 to 3 merged.
+Status: accepted (2026-11-12, ADR-0032); in progress, phases 0 to 4 merged.
 Decisions: [ADR-0032](../../adr/0032-v023-owner-decisions.md) (the owner decisions and the scope);
 [ADR-0033](../../adr/0033-v023-slice-after-the-corpus-stratum.md) (the slice after the corpus
 stratum, and the #503 fix);
@@ -133,16 +133,16 @@ Out of scope:
 - **Parser types in the public API.** The #484 list:
   - in `alint-core`: the `extra` fields and accessor, configuration masking, template rendering,
     and `Error::Yaml`;
-  - two `alint-dsl` functions;
+  - six `alint-dsl` functions;
   - four `alint-testkit` items.
 
   alint parses YAML with ayaml 0.1.2 since #510, through `alint_core::yaml`. saphyr and
   saphyr-parser still give source spans and structured fixes; they leave in v0.24 (ADR-0036).
 - **Open structs.**
-  - `Violation`, `Context`, `RuleSpec`, `NestedRuleSpec` and `WalkOptions` are struct literals
-    outside `alint-core`.
-  - Excluding `alint-core`'s own source, the literal constructions number about 56, 34, 17, 1 and
-    19, tests included.
+  - `Violation`, `Context`, `RuleSpec`, `NestedRuleSpec` and `WalkOptions` were built with struct
+    literals outside `alint-core` until phase 4 sealed them (#517, #518).
+  - Excluding `alint-core`'s own source, the literal constructions numbered 23, 34, 1, 0 and 19,
+    77 in all, tests included.
   - `FixContext`, `Config` and `CompiledNestedSpec` were sealed in v0.22.
 - **Corpus.** 110 configurations under `docs/design/v0.12/corpus/`, at pinned commits, replayed by
   `xtask corpus-replay` and `corpus-replay.yml`. None is an i18n-heavy repository or a
@@ -384,7 +384,8 @@ decided then.
 - 2026-11-14: phase 4.2 (#517).
   - `Context`, `RuleSpec`, `NestedRuleSpec` and `WalkOptions` have a constructor for their
     required parts and a `with_*` setter for each other field, as `FixContext` and `Config` do,
-    and `Violation` gains the three setters it lacked. `Context` is `Clone`.
+    and `Violation` gains three setters, which the review after phase 4 removed again: its
+    fields stay public to assign. `Context` is `Clone`.
   - The workspace builds the five through them. A build with the five marked
     `#[non_exhaustive]` found every struct literal outside `alint-core`: 77 sites in
     `alint-rules`, `alint-output`, `alint`, `alint-lsp`, `alint-dsl`, `alint-testkit` and
@@ -393,7 +394,8 @@ decided then.
 - 2026-11-14: phase 4.3 (#518).
   - `Violation`, `Context`, `RuleSpec`, `NestedRuleSpec` and `WalkOptions` are
     `#[non_exhaustive]`, which completes ADR-0032 decision 3: with `alint_core::Error` from 4.1,
-    `FixContext`, `Config` and `CompiledNestedSpec` from v0.22, nine types are sealed.
+    `FixContext`, `Config` and `CompiledNestedSpec` from v0.22, nine `alint-core` types are
+    sealed.
   - A doctest on a `#[cfg(doctest)]` item keeps them sealed: for each of the nine, a block that
     builds it with a functional record update, or matches every variant of `Error` without a
     wildcard arm, must fail to compile.
@@ -407,3 +409,20 @@ decided then.
   capability, and the setup ran before the capability check. Those commands now get a fixed
   environment; the fix ships with #515 in v0.23.0 (scope item 13). The nested-rule check now
   follows `require:` only, as the trust gate does.
+- 2026-11-14: the review after phase 4 (#520).
+  - A corpus replay of 126 repositories, `main` at #518 against the commit before #515, found no
+    difference in `check` output.
+  - **The public-API gate** documents the three crates with every feature, strips each spelling
+    of `doc(hidden)`, and fails on a `cfg` or `cfg_attr` predicate on `doc` and on an exported
+    macro that names a parser crate. Any documented crate whose name contains `yaml` or `saphyr`
+    counts as a parser. `test-public-api-parser-gate.sh` checks each rule.
+  - **The sealed-type doctests** each have a compiling twin, so a block that fails for another
+    reason is caught, and a unit test checks that the `Error` blocks name every variant.
+  - **The owned YAML types** gained the conversions, predicates, `tag()`, indexing, mutable and
+    owned iteration and `Extend` that 0.22's types had; `value[0]` finds an integer key, as
+    before. The CHANGELOG lists what remains different.
+  - **Removed:** `Violation`'s three new setters and `RuleSpec::with_sensitive_fields`, whose
+    fields are assigned; the unused `miette` dependency; the redundant `homepage` keys; and
+    `alint-bench`'s build dependencies on crates only its benches use.
+  - The records now give the counts phase 4 measured.
+  - Next: phase 5, the differential fuzzing harness (#482).

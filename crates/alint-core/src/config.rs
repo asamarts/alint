@@ -18,7 +18,7 @@ where
 ///
 /// Outside deserialization, built with [`Config::new`] and the `with_*`
 /// setters, so a later field is an addition rather than a breaking change; the
-/// fields stay readable.
+/// fields stay public, to read and to assign.
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -395,7 +395,7 @@ where
 
 /// YAML-level description of a rule before it is instantiated into a `Box<dyn Rule>`
 /// by a [`RuleBuilder`](crate::registry::RuleBuilder). Code builds one with
-/// [`RuleSpec::new`] and the `with_*` setters; the fields stay readable.
+/// [`RuleSpec::new`] and the `with_*` setters; its public fields can be assigned.
 #[derive(Debug, Clone, Deserialize)]
 #[non_exhaustive]
 pub struct RuleSpec {
@@ -1328,7 +1328,7 @@ pub struct NestedRuleSpec {
 /// their `build` impl; `evaluate_for_each` consumes the
 /// compiled form.
 ///
-/// Built only by [`CompiledNestedSpec::compile`]; the fields stay readable.
+/// Built only by [`CompiledNestedSpec::compile`]; its fields stay public.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct CompiledNestedSpec {

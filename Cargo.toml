@@ -51,7 +51,6 @@ regex-syntax = "0.8"
 rayon = "1"
 parking_lot = "0.12"
 clap = { version = "4", features = ["derive", "cargo", "env", "wrap_help"] }
-miette = { version = "7", features = ["fancy"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 content_inspector = "0.2"

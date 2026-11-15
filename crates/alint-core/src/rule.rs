@@ -177,7 +177,8 @@ impl AnalysisFailure {
 /// `&str`, so the ownership choice does not alter report bytes.
 ///
 /// Built with [`Violation::new`] and the `with_*` setters, so a later field is
-/// an addition rather than a breaking change; the fields stay readable.
+/// an addition rather than a breaking change. The fields stay public, to read
+/// and to assign.
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -269,27 +270,6 @@ impl Violation {
             not_fixable: false,
             proposed_edits: Vec::new(),
         }
-    }
-
-    /// Sets [`Self::sensitive`].
-    #[must_use]
-    pub fn with_sensitive(mut self, sensitive: bool) -> Self {
-        self.sensitive = sensitive;
-        self
-    }
-
-    /// Sets [`Self::path_sensitive`].
-    #[must_use]
-    pub fn with_path_sensitive(mut self, path_sensitive: bool) -> Self {
-        self.path_sensitive = path_sensitive;
-        self
-    }
-
-    /// Sets [`Self::is_fixable`].
-    #[must_use]
-    pub fn with_is_fixable(mut self, is_fixable: bool) -> Self {
-        self.is_fixable = is_fixable;
-        self
     }
 
     /// Mark this finding as not auto-fixable. See [`Violation::not_fixable`].
@@ -747,8 +727,11 @@ pub(crate) fn locator_path(path: Option<&Path>, hidden: bool) -> String {
 ///   contexts always carry `None`.
 ///
 /// Built with [`Context::new`] and the `with_*` setters, so a later field is an
-/// addition rather than a breaking change; the fields stay readable. A copy with
-/// one part changed is `ctx.clone().with_trace(None)`.
+/// addition rather than a breaking change. The fields stay public, to read and
+/// to assign. A copy with one part changed is `ctx.clone().with_vars(None)`.
+///
+/// A field added here also reaches the rules nested in `for_each_dir`, which
+/// builds their context as a clone of its own: decide there whether it should.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct Context<'a> {
@@ -846,7 +829,8 @@ impl<'a> Context<'a> {
         self
     }
 
-    /// Sets [`Self::trace`].
+    /// Sets the trace sink, an internal hook for `explain --trace`.
+    #[doc(hidden)]
     #[must_use]
     pub fn with_trace(mut self, trace: Option<&'a dyn crate::trace::TraceSink>) -> Self {
         self.trace = trace;
@@ -1465,7 +1449,8 @@ pub fn unreadable_file_violation(rel: &Path, err: &std::io::Error) -> Violation 
 /// Runtime context for applying a fix.
 ///
 /// Built with [`FixContext::new`] and the `with_*` setters, so a later field is
-/// an addition rather than a breaking change; the fields stay readable.
+/// an addition rather than a breaking change. The fields stay public, to read
+/// and to assign.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct FixContext<'a> {

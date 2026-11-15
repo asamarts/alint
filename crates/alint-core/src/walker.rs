@@ -723,7 +723,8 @@ impl<'a> Iterator for DescendantsIter<'a> {
 /// How [`walk`] builds a [`FileIndex`].
 ///
 /// Built with [`WalkOptions::default`] and the `with_*` setters, so a later
-/// field is an addition rather than a breaking change; the fields stay readable.
+/// field is an addition rather than a breaking change. The fields stay public,
+/// to read and to assign.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct WalkOptions {
