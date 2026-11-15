@@ -240,6 +240,7 @@ fn runtime_when_error_is_a_condition_failure_in_check_and_fix() {
             &crate::WalkOptions {
                 respect_gitignore: true,
                 extra_ignores: Vec::new(),
+                global_git_excludes: true,
             },
             true,
             Applicability::Safe,

@@ -51,10 +51,13 @@ access similarly requires both `host_keyring: true` and
 All selected definitions, package paths, configs, and capability grants are
 preflighted before any rule or user command executes.
 
-`given.env` reaches config interpolation and granted commands only. The Git
-commands the runner runs itself, for `given.git` and for rules that read Git,
-run with a fixed environment: a sandboxed home, no system or global Git
-configuration, `PATH`, and the C locale.
+`given.env` reaches config interpolation, `when:` conditions (`env.X`) and
+granted commands only, and none of the host's other variables reach them. The
+Git commands the runner runs itself, for `given.git` and for rules that read
+Git, run with a fixed environment: a sandboxed home (the host's home when the
+host keyring is granted), no system or global Git configuration, `PATH`, and
+the C locale. They never read a fixture as a bare repository, and the host's
+global excludes file hides nothing from a test.
 
 ## Exit codes
 

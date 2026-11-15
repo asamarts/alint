@@ -422,9 +422,11 @@ impl Runner {
             })?;
             engine = engine.with_analysis_time(analysis_time);
         }
+        // The host's global excludes file must not decide what a test sees.
         let walk_options = WalkOptions::default()
             .with_respect_gitignore(config.respect_gitignore)
-            .with_extra_ignores(config.ignore.clone());
+            .with_extra_ignores(config.ignore.clone())
+            .with_global_git_excludes(false);
         let index = walk(context.repository, &walk_options)?;
         if step == TestStep::CheckChanged {
             let changed = alint_core::git::collect_changed_paths(context.repository, None)
@@ -1383,6 +1385,9 @@ fn git(
         )
         .arg("--literal-pathspecs")
         .arg("--no-replace-objects")
+        // A fixture shaped like a bare repository must not become one (see
+        // alint-core's `git_command`).
+        .args(["-c", "safe.bareRepository=explicit"])
         .arg("-C")
         .arg(root)
         .args(args);

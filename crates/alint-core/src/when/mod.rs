@@ -32,7 +32,7 @@
 //! - **Type coercion is explicit, not silent.** Comparing `Int` to `String`
 //!   is an error, not `false`.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 use regex::Regex;
@@ -173,14 +173,16 @@ pub struct WhenEnv<'a> {
     /// resolve to falsy / null per the "unknown fact is
     /// falsy" convention.
     pub iter: Option<IterEnv<'a>>,
-    /// Optional environment-variable snapshot backing the `env.*`
-    /// namespace. `None` — the production default — means the
-    /// evaluator reads the live process environment via
-    /// `std::env::var` (env is constant during a run, so the
-    /// eval-time read matches a load-time snapshot). Tests inject
-    /// a fake map via [`WhenEnv::with_env`] so they never touch
-    /// the real environment (Rust 2024 marks `set_var` unsafe).
-    pub env: Option<&'a HashMap<String, String>>,
+    /// The environment behind the `env.*` namespace. `None` means the
+    /// live process environment, read through `std::env::var` (it is
+    /// constant during a run, so the eval-time read matches a
+    /// load-time snapshot). A run with its own child-process
+    /// environment (the engine's process environment, as `alint test`
+    /// sets it) passes that map, so a condition sees what a spawned
+    /// command would and nothing else of the host's. Tests inject a
+    /// map via [`WhenEnv::with_env`] so they never touch the real
+    /// environment (Rust 2024 marks `set_var` unsafe).
+    pub env: Option<&'a BTreeMap<String, String>>,
 }
 
 impl<'a> WhenEnv<'a> {
@@ -211,7 +213,7 @@ impl<'a> WhenEnv<'a> {
     /// the live process environment. Used by tests to resolve
     /// `env.X` hermetically.
     #[must_use]
-    pub fn with_env(mut self, env: &'a HashMap<String, String>) -> Self {
+    pub fn with_env(mut self, env: &'a BTreeMap<String, String>) -> Self {
         self.env = Some(env);
         self
     }
@@ -676,7 +678,7 @@ mod tests {
 
     fn check_env(src: &str, vars_env: &[(&str, &str)]) -> bool {
         let (facts, vars) = env();
-        let env_map: HashMap<String, String> = vars_env
+        let env_map: BTreeMap<String, String> = vars_env
             .iter()
             .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
             .collect();

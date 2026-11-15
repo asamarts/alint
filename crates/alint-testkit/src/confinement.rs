@@ -343,11 +343,34 @@ fn validate_tree_entry_name(name: &str) -> Option<String> {
         if component == "." || component == ".." {
             return Some("entry path must not contain `.` or `..` components".to_string());
         }
-        if component.eq_ignore_ascii_case(".git") {
+        if names_git_directory(component) {
             return Some("`.git` entries are runner-owned".to_string());
         }
     }
     None
+}
+
+/// Whether a file system could open the entry `name` as `.git`, the
+/// runner's own repository directory. Beyond `.git` in any case, Git's own
+/// checks name three more spellings: Windows drops trailing dots and spaces
+/// (`.git.`, `.git `) and reads `name:stream` as a stream of `name`
+/// (`.git::$INDEX_ALLOCATION`), and its short name for `.git` is `GIT~1`;
+/// macOS's HFS+ ignores some invisible code points (`.g\u{200c}it`).
+fn names_git_directory(name: &str) -> bool {
+    const HFS_IGNORED: [std::ops::RangeInclusive<char>; 4] = [
+        '\u{200c}'..='\u{200f}',
+        '\u{202a}'..='\u{202e}',
+        '\u{206a}'..='\u{206f}',
+        '\u{feff}'..='\u{feff}',
+    ];
+    let visible: String = name
+        .chars()
+        .filter(|c| !HFS_IGNORED.iter().any(|range| range.contains(c)))
+        .collect();
+    let file = visible.split(':').next().unwrap_or_default();
+    file.trim_end_matches(['.', ' '])
+        .eq_ignore_ascii_case(".git")
+        || file.eq_ignore_ascii_case("git~1")
 }
 
 fn validate_tree_symlink(
@@ -420,11 +443,7 @@ fn validate_fixture_dir(root: &Path, directory: &Path) -> Result<(), Confinement
             source,
         })?;
         let path = entry.path();
-        if entry
-            .file_name()
-            .to_string_lossy()
-            .eq_ignore_ascii_case(".git")
-        {
+        if names_git_directory(&entry.file_name().to_string_lossy()) {
             return Err(ConfinementError::UnsupportedFixture {
                 path,
                 reason: "`.git` entries are runner-owned".to_string(),
@@ -518,6 +537,41 @@ fn validate_regular_metadata(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_spelling_of_git_is_runner_owned() {
+        for name in [
+            ".git",
+            ".GIT",
+            ".git.",
+            ".git ",
+            ".git. .",
+            ".git::$INDEX_ALLOCATION",
+            ".git:stream",
+            "GIT~1",
+            "git~1",
+            ".g\u{200c}it",
+            "\u{feff}.git",
+            "sub/.git.",
+        ] {
+            assert_eq!(
+                validate_tree_entry_name(name).as_deref(),
+                Some("`.git` entries are runner-owned"),
+                "{name:?}"
+            );
+        }
+        for name in [
+            ".github",
+            ".gitignore",
+            "git",
+            ".git-blame",
+            "git~2",
+            "a.git",
+            ".gi t",
+        ] {
+            assert_eq!(validate_tree_entry_name(name), None, "{name:?}");
+        }
+    }
 
     #[test]
     fn lexical_package_paths_reject_escape_and_platform_prefixes() {

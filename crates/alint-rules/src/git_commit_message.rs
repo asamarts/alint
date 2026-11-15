@@ -103,7 +103,7 @@ impl Rule for GitCommitMessageRule {
         // expansions reflect the current process environment.
         let since = match &self.since_raw {
             None => None,
-            Some(raw) => match expand_env(raw, env_lookup) {
+            Some(raw) => match expand_env(raw, |name| env_lookup(ctx, name)) {
                 Ok(resolved) => Some(resolved),
                 Err(missing) => {
                     return Err(Error::rule_config(
@@ -319,9 +319,14 @@ where
     Ok(out)
 }
 
-/// Production lookup: read from the process environment.
-fn env_lookup(name: &str) -> Option<String> {
-    std::env::var(name).ok()
+/// Production lookup: the run's process environment when it has one (as
+/// `alint test` sets it), so a test reads its own `given.env` and nothing of
+/// the host's; otherwise this process's environment.
+fn env_lookup(ctx: &Context<'_>, name: &str) -> Option<String> {
+    match ctx.process_environment {
+        Some(environment) => environment.get(name).cloned(),
+        None => std::env::var(name).ok(),
+    }
 }
 
 /// Rewrite POSIX `${VAR}` / `${VAR:-default}` occurrences into the

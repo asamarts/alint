@@ -141,7 +141,9 @@ the filesystem, reads file contents, optionally calls `git` and `sh`-via-the-
   fixer or custom fact that spawns a process, at any `require:` depth, or
   reads the host keyring, only when the test declares the capability and the
   command line grants it (`--allow-spawn`, `--allow-host-keyring`). A test's
-  `given.env` never reaches the Git commands the runner runs itself.
+  `given.env` never reaches the Git commands the runner runs itself, which
+  never read a fixture as a repository, and its conditions read `given.env`,
+  not the host's environment.
 - **No telemetry.** alint sends nothing over the network except the
   user-explicit `extends:` URLs above.
 - **Reproducible builds.** `Cargo.lock` is committed. CI installs toolchains

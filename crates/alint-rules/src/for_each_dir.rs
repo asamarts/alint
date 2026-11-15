@@ -412,7 +412,7 @@ pub(crate) fn visit_sensitive_for_each(
                 facts,
                 vars,
                 iter: Some(iter_env),
-                env: None,
+                env: ctx.process_environment,
             };
             if !matches!(expr.evaluate(&env), Ok(true)) {
                 continue;
@@ -428,7 +428,7 @@ pub(crate) fn visit_sensitive_for_each(
                     facts,
                     vars,
                     iter: Some(iter_env),
-                    env: None,
+                    env: ctx.process_environment,
                 };
                 if !matches!(expr.evaluate(&env), Ok(true)) {
                     continue;
@@ -541,7 +541,7 @@ fn evaluate_for_each_inner<const TRACE: bool>(
                 facts,
                 vars,
                 iter: Some(iter_env),
-                env: None,
+                env: ctx.process_environment,
             };
             match expr.evaluate(&env) {
                 Ok(true) => {}
@@ -585,7 +585,7 @@ fn evaluate_for_each_inner<const TRACE: bool>(
                     facts,
                     vars,
                     iter: Some(iter_env),
-                    env: None,
+                    env: ctx.process_environment,
                 };
                 match expr.evaluate(&env) {
                     Ok(true) => {}

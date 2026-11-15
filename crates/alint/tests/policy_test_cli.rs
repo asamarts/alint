@@ -502,3 +502,36 @@ fn explicit_symlink_directory_is_rejected_without_following_it() {
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["issues"][0]["code"], "symlink_path");
 }
+
+/// What a test sees does not depend on the host's Git setup: the user's
+/// global excludes file (`$XDG_CONFIG_HOME/git/ignore`) hides nothing.
+#[test]
+fn the_hosts_global_excludes_file_hides_nothing_from_a_test() {
+    let root = tempfile::tempdir().unwrap();
+    let host = tempfile::tempdir().unwrap();
+    write(host.path(), "git/ignore", "secret-*.txt\n");
+    write(
+        root.path(),
+        "alint-tests/excludes.yml",
+        "test_version: 1\nname: excludes\ngiven:\n  tree:\n    secret-1.txt: \"x\"\n  git: \
+{ init: true }\n  config: |\n    version: 1\n    rules:\n      - id: no-secret\n        kind: \
+file_absent\n        paths: \"secret-*.txt\"\n        level: error\nwhen: [check]\nexpect:\n  - \
+exit: policy_failure\n    violations:\n      - { rule: no-secret, path: secret-1.txt }\n",
+    );
+
+    let output = Command::new(alint())
+        .args(["test"])
+        .current_dir(root.path())
+        .env("NO_COLOR", "1")
+        .env("XDG_CONFIG_HOME", host.path())
+        .env("HOME", host.path())
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

@@ -548,6 +548,7 @@ fn per_file_single_file_and_fix_failures_are_structural_and_path_preserving() {
     let walk_opts = crate::WalkOptions {
         respect_gitignore: true,
         extra_ignores: Vec::new(),
+        global_git_excludes: true,
     };
 
     let engine = Engine::new(vec![failing_per_file_rule()], RuleRegistry::new());
@@ -685,6 +686,7 @@ fn empty_changed_fix_and_diff_do_not_resolve_analysis_time() {
     let walk_opts = crate::WalkOptions {
         respect_gitignore: true,
         extra_ignores: Vec::new(),
+        global_git_excludes: true,
     };
 
     let report = engine

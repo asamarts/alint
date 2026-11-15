@@ -809,7 +809,7 @@ impl Engine {
             facts: &fact_values,
             vars: &self.vars,
             iter: None,
-            env: None,
+            env: self.process_environment.as_ref(),
         };
         let git_required = self.git_requirements(index, &when_env)?;
         let git_tracked = Self::collect_git_tracked_if_needed(root, &git_required);
