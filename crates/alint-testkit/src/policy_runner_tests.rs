@@ -485,3 +485,77 @@ expect:\n  - exit: policy_failure\n    violations:\n      - {rule: marker, messa
         "without the kind the config fails to load"
     );
 }
+
+/// The runner's own Git commands get a sandboxed home, no system or global
+/// configuration, no prompts and the C locale, and the host's `PATH`.
+#[test]
+fn runner_git_environment_is_fixed_and_sandboxed() {
+    let sandbox = tempfile::tempdir().unwrap();
+    let environment = runner_git_environment(sandbox.path(), false).unwrap();
+    let home = sandbox.path().join("home");
+    assert!(home.is_dir());
+    assert_eq!(environment["HOME"], home.to_string_lossy());
+    assert_eq!(
+        environment["GNUPGHOME"],
+        home.join("gnupg").to_string_lossy()
+    );
+    assert_eq!(environment["GIT_CONFIG_NOSYSTEM"], "1");
+    let global = if cfg!(windows) { "NUL" } else { "/dev/null" };
+    assert_eq!(environment["GIT_CONFIG_GLOBAL"], global);
+    assert_eq!(environment["GIT_TERMINAL_PROMPT"], "0");
+    assert_eq!(environment["GIT_OPTIONAL_LOCKS"], "0");
+    assert_eq!(environment["LC_ALL"], "C");
+    assert_eq!(
+        environment.get("PATH").map(String::as_str),
+        std::env::var("PATH").ok().as_deref()
+    );
+    for name in environment.keys() {
+        assert!(RUNNER_GIT_VARIABLES.contains(&name.as_str()), "{name}");
+    }
+
+    // With the host keyring granted, the home is the host's.
+    let sandbox = tempfile::tempdir().unwrap();
+    let environment = runner_git_environment(sandbox.path(), true).unwrap();
+    assert_eq!(
+        environment.get("HOME").map(String::as_str),
+        std::env::var("HOME").ok().as_deref()
+    );
+    assert_eq!(environment["GIT_CONFIG_NOSYSTEM"], "1");
+}
+
+/// A granted command gets `given.env`, with the runner's variables taking
+/// precedence over a `given.env` entry of the same name.
+#[test]
+fn granted_process_environment_is_given_env_under_the_runners_variables() {
+    let test = PolicyTest::from_yaml(
+        r#"test_version: 1
+name: demo
+given:
+  tree: { a.txt: "x" }
+  env: { CUSTOM: from-test, HOME: /test-home, LC_ALL: en_US.UTF-8 }
+  config: |
+    version: 1
+    rules: []
+when: [check]
+expect:
+  - exit: success
+    violations: []
+"#,
+    )
+    .unwrap();
+    let runner = BTreeMap::from([
+        ("HOME".to_string(), "/sandbox/home".to_string()),
+        ("LC_ALL".to_string(), "C".to_string()),
+        ("PATH".to_string(), "/bin".to_string()),
+    ]);
+    let environment = granted_process_environment(&test, &runner);
+    assert_eq!(
+        environment,
+        BTreeMap::from([
+            ("CUSTOM".to_string(), "from-test".to_string()),
+            ("HOME".to_string(), "/sandbox/home".to_string()),
+            ("LC_ALL".to_string(), "C".to_string()),
+            ("PATH".to_string(), "/bin".to_string()),
+        ])
+    );
+}
