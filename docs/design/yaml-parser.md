@@ -117,55 +117,110 @@ change must add differential parser fuzzing before cutover.
 ## Differential harness
 
 `crates/alint-core/src/yaml_differential.rs` (#482) compares ayaml with `yaml_serde` 0.10.7, the
-parser v0.22 used, which stays as the oracle: a dev-dependency of `alint-core` and of no published
-crate.
+parser v0.22 used, which stays as the oracle: a dev-dependency of `alint-core` only, and no
+runtime dependency of any published crate
+([ADR-0039](../adr/0039-the-yaml-oracle-as-a-dev-dependency-of-alint-core.md)).
 
-- **Entry points.** Both parsers decode each input three ways: into a value tree, as every option
+- **Entry points.** Both parsers decode each input four ways: into a value tree, as every option
   and `extends:` source is; into the `serde_json` tree that the structured-format rules query,
-  through alint's own seed, which applies merge keys and drops custom tags; and into `Config`,
-  only when the value trees agree, so that a typed difference is about the decode. alint reads no
-  ayaml events in v0.23, so the event stream joins the harness when saphyr leaves in v0.24.
-- **Inputs.** Seeded token soup; generated documents in block and flow style, with anchors,
-  aliases, tags, comments, block scalars and directives; and mutations of them: a line dropped,
-  repeated, re-indented, cut or swapped, or a token inserted. Then the repository's committed
-  YAML files, read with LF line breaks, and mutations of each, seeded per file so that a new file
-  changes no other input. Half the generated inputs hold NEL, LS, PS or a byte-order mark.
+  through alint's own seed, which applies merge keys and drops custom tags; into `Config`; and,
+  rule by rule, each entry of `rules:` from its value tree into `RuleSpec` with `from_value`, as
+  alint's loader decodes rules, each rule a case of its own, so that a refused rule hides none
+  after it. The two typed decodes run only when the value trees agree, so that a typed
+  difference is about the decode. alint reads no ayaml events in v0.23, so the event stream
+  joins the harness when saphyr leaves in v0.24.
+- **Inputs.** Seeded token soup; generated documents in block and flow style, with anchors (on
+  keys too), aliases (also aliases that fan out), merge keys, tags, comments, escapes, block
+  scalars with blank lines, complex keys, tabs, CRLF line breaks, control characters, long
+  scalars and keys, nesting past four levels, and directives; generated configurations, with
+  `version`, `vars`, options and rules of real kinds; and mutations of documents and
+  configurations: a line dropped, repeated, re-indented, cut or swapped, or a token inserted.
+  Then the repository's committed YAML files, read with LF line breaks, and mutations of each,
+  seeded per file so that a new file changes no other input. By default, every other generated
+  input and every other corpus mutation may hold NEL, LS, PS or a byte-order mark; with seed 1,
+  20.1% of the generated inputs and 1.9% of the corpus mutations hold one, as a test checks.
+  `ALINT_YAML_DIFF_SPECIALS=0` leaves them out.
 - **Classes.** Each pair of results is one of six classes: the same value, different values, both
   rejected at the same line and column, both rejected at different places, rejected by ayaml
   only, and rejected by the oracle only. A panic in either parser fails the run.
 - **The allowlist.** `yaml_differential/allowlist.rs` lists each documented difference with the
-  inputs and classes it covers, both behaviors, the reason and an example; a test checks that
-  each example is explained by its own entry. Location differences are listed by ayaml's error
-  kind and message, with where each parser reports. A test checks that every syntax message of
-  the pinned ayaml has a location class, so a new message fails until its place is documented.
-  Any other difference fails the run.
+  classes it covers, how it tells its cases, both behaviors, the reason and an example; a test
+  checks that each example is explained by its own entry. A narrow entry reads a parser's error,
+  which names the cause. An input-wide entry looks for a construct anywhere in the input, such
+  as a NEL, a tab, a tag or a wide anchor name, so the construct's presence proves nothing: the
+  harness rewrites the input without it and compares again, and the entry explains the case only
+  if the rewritten input no longer differs, or differs in a way another entry explains. A rewrite
+  keeps keys apart: a wide integer also becomes a number the input does not otherwise hold, and
+  a long key is cut short of every other key. A test adds each input-wide entry's construct, in a
+  comment, a string or a command, to a difference that entry does not explain, and checks that
+  it stays unexplained.
+- **A fair rewrite.** A rewrite counts only if it hides nothing the case showed. A parser that
+  read the case must read the rewrite, or reject it at the place where the other parser, which
+  rejected the case, still gives the same error; an error both give only after the rewrite is
+  one the rewrite made. A parser that rejected the case may read the rewrite, keep its message,
+  or give another error no earlier than the line of the first; an error about a value or an
+  alias may come earlier, since a parser reports it where its node starts. An error that moves
+  to an earlier line shows something the trigger hid, and the search must then reach a rewrite
+  both parsers read alike. A rewrite after which one parser keeps its error and the other gives
+  the same value error, or an error at the same place, ends the search. A test puts three
+  differences, one that both parsers read, one that only ayaml rejects and one that only the
+  oracle rejects, beside the constructs of the input-wide entries, before and after them, and
+  checks that each stays unexplained without its own entry.
+- **Locations.** Location differences are listed by ayaml's error kind and message, with where
+  each parser reports. A location class takes two errors for one, found at two places, so it
+  explains a case only when both errors are about the syntax or neither is: when one parser
+  reads the syntax alone (the oracle reads the input into no value) and its error is about a
+  value, the case is explained as if only the other parser rejected it, and two such errors at
+  one place are not one either. Nor does a location class explain a case that an input-wide
+  entry's rewrite splits, one parser then reading the input while the other keeps its error;
+  the rewrites must explain it. A test checks that every syntax message of the pinned ayaml,
+  taken from its scanner and parser sources, has a location class, so a new message fails until
+  its place is documented. Any other difference fails the run.
 - **Runs.** The bounded run, 6,000 generated inputs plus the corpus and one mutation per file, is
-  an ordinary test, about 7 seconds in a debug build, so every pull request runs it. The long
-  run, 300,000 generated inputs and 20 mutations per file, about 30 seconds in a release build,
-  runs in `.github/workflows/yaml-differential.yml` on pull requests that touch YAML parsing or
-  the lockfile, weekly with a new seed, and on dispatch. It writes a Markdown report with the
-  class counts, the entry that explained each difference, and the allowlist.
+  an ordinary test, about 16 seconds in a debug build. CI's test job runs it when a pull request
+  or a push changes the crates, the workspace manifests or CI (`ci/scripts/detect-changes.sh`).
+  The long run, 300,000 generated inputs and 20 mutations per file, about 50 seconds in a release
+  build, runs in `.github/workflows/yaml-differential.yml` on pull requests that touch
+  `alint-core`'s sources or manifest, the workspace manifests or any YAML file, weekly with a new
+  seed, and on dispatch, each dispatched run in a concurrency group of its own. It writes a
+  Markdown report with the class counts, the entries that explained each difference, and the
+  allowlist.
 - **Another ayaml.** To qualify ayaml's main branch, point a `[patch.crates-io]` entry at it and
-  run the long run.
+  run the long run. Cargo applies the patch only while main's version satisfies the workspace's
+  exact pin (`=0.1.2`); once main's version moves past it, change the pin as well.
 
 The documented differences fall into five groups; the report lists every entry.
-- **YAML 1.2 where libyaml follows YAML 1.1.** NEL, LS and PS are content; tabs separate; empty
-  keys, wider anchor names, `#` in a tag, a later `%YAML` minor version, reserved directives,
-  top-level block scalar content in column 1 and the 1.2 flow forms are accepted; the
-  non-specific `!` makes a string; global tags stay on their nodes.
-- **ayaml is as strict as YAML 1.2.** A comment needs white space before it, continuation lines
-  and block scalars must be indented past their parent, a lone `-` or an unseparated `?` or `:`
-  in a flow collection is rejected, and so is a tag handle with characters other than letters,
-  digits and `-`.
-- **libyaml and `yaml_serde` defects.** A byte-order mark that starts a line counts as a column,
-  an alias to a redefined anchor resolves to the wrong node, and a value has no integer beyond 64
-  bits.
+- **YAML 1.2 where libyaml follows YAML 1.1.** NEL, LS and PS are content; tabs separate. These
+  are accepted: empty keys, a stream that starts with `...`, wider anchor names, `#` in a tag or
+  a `%TAG` prefix, any `%YAML 1.x` minor version, reserved directives, top-level block scalar
+  content in column 1, the 1.2 flow forms (among them `[? ]`, after which libyaml drops the `]`),
+  a flow mapping key of more than 1,024 characters, an implicit key whose 1,024-character limit
+  counts characters rather than bytes, and DEL, the C1 controls, U+FFFE and U+FFFF in a quoted
+  scalar. In a flow sequence, a plain scalar that starts with `:` after properties is that
+  scalar, as in `[!!str :a]`, which libyaml reads as a mapping. The non-specific `!` makes a
+  string, and global tags stay on their nodes. A core tag on another kind of node is ignored, an
+  empty `!!null` node is null, a scalar its core tag does not fit is an error, and a typed decode
+  reads a scalar by its core tag.
+- **ayaml is as strict as YAML 1.2.** A comment needs white space before it; continuation lines
+  and block scalars must be indented past their parent, and a flow collection's continuation
+  line under a block collection by spaces; a lone `-` or an unseparated `?` or `:` in a flow
+  collection is rejected, and so are a tag handle with characters other than letters, digits and
+  `-`, and the verbatim tag `!<!>`.
+- **libyaml and `yaml_serde` defects.** A byte-order mark that starts the stream counts as a
+  column, an alias to a redefined anchor resolves to the wrong node, a value has no integer
+  beyond 64 bits, in any base, a count of alias uses refuses aliases that fan out, and
+  `from_value` refuses a rule key that is not a string, which alint's loader rejects before it
+  decodes a rule.
 - **ayaml defects in malformed documents.** A block scalar header under its parent's indentation
-  after an anchor is accepted (asamarts/ayaml#132), and an error after a leading byte-order mark
-  has no location (asamarts/ayaml#133).
+  after an anchor, or after a key with an anchor, is accepted (asamarts/ayaml#132); after a
+  leading byte-order mark, an error has no location (asamarts/ayaml#133) and a quoted scalar's
+  continuation line under a nested parent is not checked against its indentation
+  (asamarts/ayaml#137).
 - **Error locations.** ayaml checks a stream's syntax before it builds values, so a later syntax
-  error wins over an earlier value error; the oracle reports where its look-ahead stopped, and
-  once the first document ends, `yaml_serde` reports "more than one document" with no place.
+  error wins over an earlier value error; it reports an error about an empty node where what
+  follows starts, and a character YAML does not allow where it stands; the oracle reports where
+  its look-ahead stopped, a disallowed character at line 1, column 1, and once the first
+  document ends, "more than one document" with no place.
 
 ## Migration and rollback
 
@@ -247,22 +302,45 @@ maintained libyaml fork is the lower-risk ownership boundary.
   `yaml_serde` types had, apart from non-string mapping lookups, the serde `Deserializer` on
   `Value` and the byte offset of an error.
 - **2026-11-14: the differential harness (#482).** The harness that the "Differential harness"
-  section describes compared ayaml 0.1.2 with `yaml_serde` 0.10.7.
-  - **The corpus.** Of the 904 committed YAML files, 903 decode to the same value and JSON tree,
+  section describes compared ayaml 0.1.2 with `yaml_serde` 0.10.7. The figures are from the
+  harness as two review rounds revised it (2026-11-15). The first added the rule decode and
+  configuration-shaped input. The second, a review of the first round's fixes, kept one
+  difference from masking another (the fair rewrite and the location rules above), made each
+  rule a case of its own, and rewrites integers beyond 64 bits in any base, apart from any
+  other key. Its long runs found one more difference, which ayaml reads as YAML 1.2 does: a
+  plain scalar that starts with `:` after properties in a flow sequence, as `[!!str :a]`,
+  which libyaml reads as a mapping.
+  - **The corpus.** Of the 905 committed YAML files, 904 decode to the same value and JSON tree,
     and both parsers reject the other at the same place. 254 decode to the same `Config`, and both
-    refuse the other 649 at the same place. There is no difference.
-  - **Generated and mutated input.** Over 24 seeds, 7.66 million inputs (300,000 generated per
-    seed, the corpus, and 20 mutations of each file) left no unexplained difference and no panic.
-    At the value entry point, 49.1% decode to the same value, 5.1% to different values, 19.0% are
-    rejected at the same place, 21.3% at different places, 0.3% by ayaml only and 5.3% by the
-    oracle only.
-  - **#482's reference figures.** Without NEL, LS, PS or a byte-order mark, of 300,904 inputs:
+    refuse 650 at the same place; the file both reject is not decoded. Of the 3,801 rules in the
+    251 files with rules, both decode 3,792 alike and refuse 9 at the same place. There is no
+    difference.
+  - **Generated and mutated input.** Each run compares 319,005 inputs: 300,000 generated, the
+    corpus, and 20 mutations of each file. Seeds 1 to 16 and 101 to 110 with special characters
+    (the default) and seeds 1 to 8 and 101 to 108 with `ALINT_YAML_DIFF_SPECIALS=0`, 13.40 million
+    inputs in all, left no unexplained difference and no panic. At the value entry point:
+
+    | Runs | Same value | Different values | Same place | Different places | ayaml only | Oracle only |
+    |---|---:|---:|---:|---:|---:|---:|
+    | Specials, 26 seeds, 8,294,130 inputs | 46.2% | 3.6% | 15.9% | 29.1% | 0.3% | 4.9% |
+    | No specials, 16 seeds, 5,104,080 inputs | 50.3% | 1.3% | 17.5% | 28.4% | 0.1% | 2.5% |
+
+    The typed decodes run where the value trees agree. With specials, of 3,830,615 `Config`
+    decodes, 4.0% agree, 79.5% are refused at the same place, 15.2% at different places, 0.9% by
+    ayaml only and 0.3% by the oracle only; without, of 2,568,190, 3.7%, 81.0%, 14.1%, 0.9% and
+    0.3%. Of the rules, each a case of its own, 4,525,658 with specials and 2,815,749 without,
+    56.1% and 56.2% agree and the rest are refused at the same place.
+  - **The first run, at #521.** Without NEL, LS, PS or a byte-order mark, of 300,904 inputs:
     162,034 decode to the same value; 5,869 to different values, 5,445 of them because of global
     tags, which #482's ad hoc generator rarely wrote; 61,937 are rejected at the same place and
     63,456 at different places; 118 by ayaml only and 7,490 by the oracle only.
   - **Y-C3.** The corpus has no difference, and every difference elsewhere is documented in
-    the allowlist (23 deviations and 5 location classes); approving it is phase 9's decision
-    (ADR-0035). The harness found asamarts/ayaml#132 and asamarts/ayaml#133.
+    the allowlist (33 deviations and 7 location classes); approving it is phase 9's decision
+    (ADR-0035). The harness found asamarts/ayaml#132 and asamarts/ayaml#133. Its first review
+    round found asamarts/ayaml#137, a quoted scalar's continuation line under a nested parent
+    that goes unchecked after a leading byte-order mark; asamarts/ayaml#138, a tab and then
+    spaces on a quoted scalar's continuation line, which both parsers accept; and #132 after a
+    key with an anchor, added as a comment there. The second round found no other.
 - **2026-11-15: the owned types, corrected.** The 2026-11-14 entry on the public API overstated
   how close alint's YAML types came to those of `yaml_serde` 0.10.7: code that compiled against
   0.22 can fail now. The review of #520 added `Value::get_mut`, indexing by `&String`, index
