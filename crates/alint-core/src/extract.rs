@@ -779,8 +779,9 @@ fn yaml_entry_rows(
             crate::structured_format::MAX_STRUCTURED_BYTES
         )));
     }
-    // Keep the lexical flow guard ahead of saphyr's scanner: deeply nested flow
-    // collections are super-linear before the parser can emit their starts.
+    // Keep the lexical flow guard ahead of saphyr's scanner, which stops at 256
+    // levels of its own: this one refuses past 128, as the parser alint decodes
+    // with does.
     let yaml_guards = crate::yaml_depth::scan_guards(stripped);
     if !yaml_guards.flow_within_limit() {
         return Err(EntryRowsError::Parse(

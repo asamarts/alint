@@ -740,9 +740,8 @@ fn xml_depth_beyond_parse_recursion_limit_is_rejected_pre_parse_not_aborted() {
 #[test]
 fn yaml_flow_depth_bomb_is_rejected_pre_parse_not_hung() {
     // W2 wiring regression: a `yaml_path_*` rule over a deeply-nested FLOW
-    // document (`[[[…`) must be rejected as a contained parse-error, not fed
-    // to libyaml (which is super-linear on flow nesting and would hang the
-    // run). This exercises the `flow_depth_within_limit` guard *at its
+    // document (`[[[…`) must be rejected as a contained parse-error before
+    // any parser reads it (the parser v0.22 used hung on it). This exercises the `flow_depth_within_limit` guard *at its
     // structured-query call site* — the yaml_depth unit tests only cover the
     // scanner in isolation, so without this a deleted guard here would pass
     // CI while reopening the DoS.

@@ -95,10 +95,14 @@ Also in v0.23:
     ignored" where they said "on disk", and the bundled `java@v1` and `php@v1` rules that these
     changes touch reword their messages to match. This is the one exception to section 3's "v1 is
     unchanged". Done in #509.
-13. **Two `alint test` capability fixes.** v0.20.0 to v0.22.1 ran a spawning rule nested in
-    `require:` without the spawn capability (#515), and passed a test's `given.env` to the Git
-    commands the runner runs itself, so `GIT_CONFIG_*` or `LD_PRELOAD` could run code without it.
-    Both ship in v0.23.0 only, with no v0.22.2 (the owner's decision, 2026-11-14).
+13. **Four `alint test` fixes.** v0.20.0 to v0.22.1 ran a spawning rule nested in `require:`
+    without the spawn capability (#515), and passed a test's `given.env` to the Git commands the
+    runner runs itself, so `GIT_CONFIG_*` or `LD_PRELOAD` could run code without it (#519). Both
+    ship in v0.23.0 only, with no v0.22.2 (the owner's decision, 2026-11-14). The same releases
+    read a fixture shaped like a bare repository as one, so a `core.fsmonitor` in it ran a
+    command, and let a test's `when:` conditions and `${VAR}` expansions read the host's
+    environment (#522). Those also ship in v0.23.0; whether they need a v0.22.2 or an advisory
+    is the owner's decision before the release.
 
 Out of scope:
 - **v0.24 or later:** the remaining assertion families (reference, cardinality, group, bounded
@@ -489,4 +493,19 @@ decided then.
     filed as asamarts/ayaml#137 and #138 and as a comment on #132, and documented one more
     difference, where ayaml reads YAML 1.2 and libyaml does not: `[!!str :a]` holds the string
     `:a`, which libyaml reads as a mapping.
+  - Next: #483 and phase 6; phase 9 brings the allowlist to the owner.
+- 2026-11-15: #522 and #483.
+  - **#522** closes two more ways a policy test reached outside its fixture: alint's own Git
+    reads took a fixture shaped like a bare repository for one and ran its `core.fsmonitor`, and
+    `when:` conditions and `${VAR}` expansions read the host's environment. Every Git command
+    alint runs sets `safe.bareRepository=explicit`.
+  - **#483** moves the `yaml_depth` lexer to the tokens of ayaml's compatibility reader and drops
+    the ayaml 0.1.1 shims. Re-deriving it found five ways the old lexer hid structure that ayaml
+    reads. Long runs of the parity property found a hang in the new lexer, fixed before it
+    merged, and three places where ayaml's compatibility reader disagrees with itself
+    (asamarts/ayaml#139, #140, #141). ayaml bounds depth and aliases itself, so none of them let
+    a bomb through. After the last fix, 12 million parity cases found nothing. Mutation testing
+    then found 45 lexer mutants that no test caught: the code behind the seven that changed no
+    token is gone, and for each of the others the tests hold the inputs where it reads
+    otherwise, as ayaml decides them.
   - Next: phase 6; phase 9 brings the allowlist to the owner.

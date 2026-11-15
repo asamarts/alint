@@ -149,9 +149,10 @@ impl Format {
                 serde_json::from_str(&strip_jsonc(text)).map_err(|_| strict_err.to_string())
             }),
             Self::Yaml => {
-                // Bound flow-nesting before libyaml parses it super-linearly (a
-                // crafted `[[[…` file otherwise hangs the run) — the YAML analogue
-                // of the `xml_within_parse_limits` guard below. JSON (serde_json,
+                // Bound flow-nesting before any parser reads it (the parser v0.22
+                // used hung on a crafted `[[[…` file; ayaml stops at the same
+                // depth itself) — the YAML analogue of the
+                // `xml_within_parse_limits` guard below. JSON (serde_json,
                 // 128-deep) and TOML (toml, 80-deep) carry their own limits.
                 let yaml_guards = crate::yaml_depth::scan_guards(text);
                 if !yaml_guards.flow_within_limit() {
@@ -163,9 +164,9 @@ impl Format {
                 // Bound ALIAS expansion: a single anchor referenced many times
                 // (`*a` x N -> N x anchor-size nodes) balloons a small file into
                 // millions of nodes. Written for the parser v0.22 used, whose
-                // limits missed it; ayaml has an alias budget too, and #483
-                // re-derives this guard. Cheap discard-only pre-count; alias-free
-                // text short-circuits for free.
+                // limits missed it; ayaml charges the same budget itself, and
+                // this guard stays as defense in depth (`yaml_depth`). Cheap
+                // discard-only pre-count; alias-free text short-circuits for free.
                 if !yaml_guards.expansion_within_limit(text) {
                     return Err(
                         "YAML alias expansion exceeds the maximum supported size".to_string()

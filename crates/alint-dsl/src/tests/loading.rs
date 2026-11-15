@@ -568,7 +568,7 @@ fn extended_config_allow_out_of_root_does_not_lift_confinement_before_reject() {
 }
 
 #[test]
-fn deeply_nested_flow_config_is_rejected_before_libyaml_parses_it() {
+fn deeply_nested_flow_config_is_rejected_before_it_is_parsed() {
     // W2 wiring regression: a config whose YAML nests flow collections far too
     // deep must be rejected by the pre-parse `flow_depth_within_limit` guard
     // BEFORE it reaches the parser (libyaml-rs, alint's parser until v0.23, was
@@ -591,11 +591,12 @@ fn deeply_nested_flow_config_is_rejected_before_libyaml_parses_it() {
 }
 
 #[test]
-fn bom_prefixed_config_bombs_are_rejected_before_libyaml_parses_them() {
+fn bom_prefixed_config_bombs_are_rejected_before_they_expand() {
     // Regression: the guards scan the RAW config text, and a leading BOM put
-    // their lexer one column behind libyaml on line 1, so `\u{feff}--- '...`
-    // hid a flow bomb (7.7 s) or an alias bomb (3.5 GB) inside a phantom
-    // single-quoted scalar. Both reported repros, through the real loader.
+    // their lexer one column behind the parser v0.22 used on line 1, so
+    // `\u{feff}--- '...` hid a flow bomb (7.7 s) or an alias bomb (3.5 GB)
+    // inside a phantom single-quoted scalar. Both reported repros, through the
+    // real loader, and a valid alias bomb behind a BOM.
     let tmp = tempfile::tempdir().unwrap();
     let cfg = tmp.path().join(".alint.yml");
     let n = 60_000;
@@ -608,21 +609,41 @@ fn bom_prefixed_config_bombs_are_rejected_before_libyaml_parses_them() {
         "1,".repeat(1000),
         "*a,".repeat(50_000)
     );
+    // ayaml gives the BOM a column, so `---` is text and the quote on line 2
+    // never closes; it checks the stream's syntax before it replays an alias.
     std::fs::write(&cfg, &alias).unwrap();
-    let err = load(&cfg).unwrap_err().to_string();
-    assert!(
-        err.contains("alias expansion"),
-        "BOM alias bomb; got: {err}"
+    for err in [
+        load(&cfg).unwrap_err().to_string(),
+        crate::parse(&alias).unwrap_err().to_string(),
+    ] {
+        assert!(
+            err.contains("unterminated single-quoted scalar at line 2 column 1"),
+            "BOM alias shape; got: {err}"
+        );
+    }
+    // Before `...` the BOM takes no column, so this one is valid YAML: its
+    // aliases are charged against the expansion budget.
+    let small = "\u{feff}...\na: &a [1]\nb: [*a, *a]\n";
+    assert!(alint_core::yaml::from_str::<alint_core::yaml::Value>(small).is_ok());
+    let valid = format!(
+        "\u{feff}...\na: &a [{}]\nb: [{}]\n",
+        "1,".repeat(1000),
+        "*a,".repeat(50_000)
     );
-    let err = crate::parse(&alias).unwrap_err().to_string();
-    assert!(
-        err.contains("alias expansion"),
-        "BOM alias bomb; got: {err}"
-    );
+    std::fs::write(&cfg, &valid).unwrap();
+    for err in [
+        load(&cfg).unwrap_err().to_string(),
+        crate::parse(&valid).unwrap_err().to_string(),
+    ] {
+        assert!(
+            err.contains("alias expansion"),
+            "BOM alias bomb; got: {err}"
+        );
+    }
 }
 
 #[test]
-fn big_scalar_alias_bomb_config_is_rejected_before_libyaml_parses_it() {
+fn big_scalar_alias_bomb_config_is_rejected_before_it_expands() {
     // Regression: the alias budget counted nodes, so a 1 MB anchored scalar
     // replayed 4000 times (4000 nodes, 4 GB of string copies into the
     // `ayaml::Value` the loader builds) passed the guard.

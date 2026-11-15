@@ -317,18 +317,10 @@ fn deserialize_raw_config(contents: &str, source: &str) -> Result<RawConfig> {
             Ok(config)
         }
         Err(parse_error) => {
-            if alint_core::yaml_depth::bom_alias_bomb(contents) {
-                return Err(Error::Other(format!(
-                    "{source}: YAML alias expansion exceeds the maximum supported size"
-                )));
-            }
             if let Err(error @ Error::Other(_)) = reject_nonliteral_requirement(contents, source) {
                 return Err(error);
             }
-            Err(Error::Yaml(alint_core::yaml_depth::map_compat_error(
-                contents,
-                parse_error,
-            )))
+            Err(Error::Yaml(parse_error))
         }
     }
 }
@@ -350,7 +342,8 @@ fn parse_config_interpolated_inner_with_environment(
         ))
     }
 
-    // on it super-linearly — a DoS reachable through an `extends:`'d ruleset.
+    // Reject a deeply-nested-flow config before any parser reads it (the parser
+    // v0.22 used hung on one) — a DoS reachable through an `extends:`'d ruleset.
     let yaml_guards = alint_core::yaml_depth::scan_guards(contents);
     if !yaml_guards.flow_within_limit() {
         return Err(Error::Other(format!(
@@ -361,7 +354,8 @@ fn parse_config_interpolated_inner_with_environment(
     }
     // Reject an alias-expansion bomb (a single anchor referenced many times) the
     // same way. The guard was written for the parser v0.22 used, whose limits
-    // missed it; ayaml's alias budget catches it too, and #483 re-derives this.
+    // missed it; ayaml charges the same budget, and the guard stays as defense
+    // in depth (`yaml_depth`).
     if !yaml_guards.expansion_within_limit(contents) {
         return Err(Error::Other(format!(
             "{}: YAML alias expansion exceeds the maximum supported size",
@@ -370,8 +364,7 @@ fn parse_config_interpolated_inner_with_environment(
     }
     let source = display_path(source);
     let config: RawConfig = if contents.contains("{{") {
-        let mut value: ayaml::Value = alint_core::yaml::from_str(contents)
-            .map_err(|error| alint_core::yaml_depth::map_compat_error(contents, error))?;
+        let mut value: ayaml::Value = alint_core::yaml::from_str(contents)?;
         let has_sensitive_interpolation = value_reads_environment(&value);
         reject_nonliteral_requirement_in_value(contents, &source, &value)?;
         // Which vars take their value from the environment, read off the RAW
@@ -978,9 +971,9 @@ fn load_remote(
     let body_str = std::str::from_utf8(&body)
         .map_err(|e| Error::Other(format!("remote body from {source} is not UTF-8: {e}")))?;
     // A remote body is untrusted input (SRI pins WHICH bytes, not that they are
-    // benign), so it needs the same flow-depth guard as a local config, which
-    // was written for libyaml-rs (super-linear on a deep-flow bomb, it hung the
-    // run) and stays until #483 re-derives it for ayaml. The local/interpolated path guards in `parse_config_interpolated`;
+    // benign), so it needs the same guards as a local config (written for the
+    // parser v0.22 used, which hung on a deep-flow bomb, and kept as defense in
+    // depth). The local/interpolated path guards in `parse_config_interpolated`;
     // this direct `from_str` bypassed it (the guard's docs claim `extends:` bodies
     // are covered -- true for local, and now for remote).
     let yaml_guards = alint_core::yaml_depth::scan_guards(body_str);
