@@ -95,6 +95,10 @@ Also in v0.23:
     ignored" where they said "on disk", and the bundled `java@v1` and `php@v1` rules that these
     changes touch reword their messages to match. This is the one exception to section 3's "v1 is
     unchanged". Done in #509.
+13. **Two `alint test` capability fixes.** v0.20.0 to v0.22.1 ran a spawning rule nested in
+    `require:` without the spawn capability (#515), and passed a test's `given.env` to the Git
+    commands the runner runs itself, so `GIT_CONFIG_*` or `LD_PRELOAD` could run code without it.
+    Both ship in v0.23.0 only, with no v0.22.2 (the owner's decision, 2026-11-14).
 
 Out of scope:
 - **v0.24 or later:** the remaining assertion families (reference, cardinality, group, bounded
@@ -225,7 +229,7 @@ next. Phases 1, 4 and 5 do not depend on the design and can run alongside phases
 | 7 | The `constraint` kind: equality (with row-level `equal`), unique/key and set (with `plurals: cldr`), report-only, and the related-location gate over JSON, SARIF and the language server | v2 only |
 | 8 | The three conformance policies with `alint test` cases, and the section 12.1 measurements | v2 only |
 | 9 | Qualify the cutover that #510 made: #483, and the #482 harness's verdict with an approved allowlist. Otherwise the owner holds the release or reverts #510 (ADR-0035) | yes (parser) |
-| 10 | Documentation, the CHANGELOG (re-run `alint baseline`; the library migration; the `git_tracked_only` change), facts, and the release check | no |
+| 10 | Documentation, the CHANGELOG (re-run `alint baseline`; the library migration; the `git_tracked_only` change; the affected versions of item 13's fixes), facts, the decision on a security advisory for item 13, and the release check | no |
 
 The #503 fix (item 12) is its own pull request, with `add -f` e2e scenarios for `file_absent`,
 `dir_absent`, `file_exists` and `dir_exists`, and does not depend on the design. It merged as #509
@@ -394,3 +398,12 @@ decided then.
     builds it with a functional record update, or matches every variant of `Error` without a
     wildcard arm, must fail to compile.
   - Next: phase 5, the differential fuzzing harness (#482).
+- 2026-11-14: the owner decided that #515 ships in v0.23.0 and that there is no v0.22.2.
+  SECURITY.md supports only the latest minor. Whether to publish a GitHub security advisory is
+  decided before the release (phase 10).
+- 2026-11-14: the review of #515 to #518 found that `alint test` passed `given.env` to its own
+  Git commands, the `given.git` setup and alint-core's Git reads, since v0.20.0: `GIT_CONFIG_*`
+  could name an fsmonitor or filter command, and `LD_PRELOAD` a library, with no spawn
+  capability, and the setup ran before the capability check. Those commands now get a fixed
+  environment; the fix ships with #515 in v0.23.0 (scope item 13). The nested-rule check now
+  follows `require:` only, as the trust gate does.

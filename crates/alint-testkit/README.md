@@ -16,7 +16,7 @@ assert!(run.passed(), "{:#?}", run.mismatches);
 
 `Runner::run` validates the document, confines package paths and repository fixtures, disables remote config resolution, isolates Git and process environments, reloads configuration for every step, and removes its temporary repository when the result is dropped.
 
-Rules or fixers that spawn commands, and rules that access a host keyring, require both a document declaration under `capabilities` and the corresponding `RunnerOptions` grant. The default grants neither capability.
+Rules or fixers that spawn commands, including a rule nested in another rule's `require:`, custom facts, and rules that access a host keyring, require both a document declaration under `capabilities` and the corresponding `RunnerOptions` grant. The default grants neither capability. A test's `given.env` reaches config interpolation and granted commands only; the runner's own Git commands run with a fixed environment.
 
 Batch callers can invoke `Runner::preflight` for every selected document before execution.
 `Runner::run_deferred_snapshot_update` and `PolicyTestRun::commit_snapshot_update` support
