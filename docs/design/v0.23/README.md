@@ -425,4 +425,8 @@ decided then.
     fields are assigned; the unused `miette` dependency; the redundant `homepage` keys; and
     `alint-bench`'s build dependencies on crates only its benches use.
   - The records now give the counts phase 4 measured.
+  - **Mutation testing.** Three mutants that make an owned iterator endless allocated until the
+    hosted runner was lost, twice. `ci/scripts/mutants.sh` now caps each process's address space
+    at 12 GiB with no core files, so such a mutant counts as caught; a test pins each iterator's
+    length and reverse order, which 15 mutants had escaped.
   - Next: phase 5, the differential fuzzing harness (#482).
