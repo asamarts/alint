@@ -127,7 +127,9 @@ token boundaries of ayaml's compatibility reader:
 - a byte-order mark that starts a line is read three ways: with a column, as libyaml reads it and
   ayaml reads one on a later line or before `---`; without a width, as saphyr reads the text alint
   strips; and as ayaml reads a text that starts with one, the first mark without a width and a
-  second right after it as content (asamarts/ayaml#140).
+  second right after it as content (asamarts/ayaml#140). ayaml reads a `...` after the first mark
+  as text when more text follows it on its line, as libyaml does; that reading counts what
+  follows, which can only refuse more.
 
 Every token the lexer reads consumes input, so one pass over the text ends in linear time: a debug
 assertion checks it after each token, and a release build would step over a byte rather than read
@@ -425,3 +427,11 @@ maintained libyaml fork is the lower-risk ownership boundary.
     `requires.alint` no longer appears twice, and the byte-order-mark heuristic, which refused a
     valid document with a BOM, `--- ` and more than 100 `*`, is not needed: the lexer reads each
     BOM reading, and ayaml checks the whole stream's syntax before it replays an alias.
+  - Mutation testing found 45 changes to the lexer that no test caught. Seven changed no token:
+    end-of-text checks that the next character already decides, and a byte-order-mark case the
+    scan never reached; that code is gone. For each of the others, 400,000 sampled inputs showed
+    where the change reads other tokens, and ayaml decided which reading is right. The tests now
+    hold those inputs, as deep collections the change would hide or valid documents it would
+    refuse. One test compares the reading of byte-order marks as ayaml reads them with the values
+    ayaml returns, since the union of the readings hides one reading's mistakes. The tests moved
+    to `yaml_depth_tests.rs`.
