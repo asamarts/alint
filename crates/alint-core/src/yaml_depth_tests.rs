@@ -346,6 +346,12 @@ fn flow_bomb_hidden_by_a_lexer_desync_is_still_rejected() {
         // there.
         ("tag-name-hash", format!("k: !a# {b}\n")),
         ("verbatim-tag-hash", format!("k: !<!a#b> {b}\n")),
+        // A key candidate expires at the end of its line, so the `:` below
+        // `? a` has no key: the plain scalar after it goes on at column 1.
+        (
+            "key-candidate-ends-with-its-line",
+            format!("? a\n: b\n \"\nc: {b}\nd: \"\"\n"),
+        ),
         // An alias name gives back a final `:` only, not a quote...
         ("alias-name-quote", format!("k: [*a', {b}]\n")),
         // ...and the `:` it gives back is a value indicator, so the block
@@ -466,6 +472,7 @@ fn alias_hidden_by_a_lexer_desync_is_still_detected() {
         "k: &x\" v\nb: *undefined_zz\nc: \"\"\n",
         "k: &x|\n  [*undefined_zz]\n",
         "k: !t# [*undefined_zz]\n",
+        "? a\n: b\n \"\nc: *undefined_zz\nd: \"\"\n",
     ];
     for doc in fixtures {
         assert!(
