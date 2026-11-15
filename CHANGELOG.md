@@ -89,24 +89,53 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   ignored. Their baseline keys are unchanged.
 - **alint parses YAML with ayaml 0.1.2, a pure-Rust parser, in place of `yaml_serde` and
   `libyaml-rs`** (#510, ADR-0035). Configurations, `extends:` sources, the `yaml_path_*` rules,
-  `json_schema_passes` on YAML, front matter and `alint test` packages all read through it.
-  Documents decode to the same values, and the size and depth limits are those of 0.22 (32 MiB,
-  128 levels). What differs:
-  - a plain scalar may contain U+0085 (next line), U+2028 (line separator) or U+2029 (paragraph
-    separator), which YAML 1.2 reads as content; libyaml read them as line breaks and rejected
-    the document;
-  - a block scalar whose header sits at the indentation of the `-` or `?` it belongs to, as in
-    `-` followed by `|2` on the next line at the same column, is rejected, where libyaml
-    accepted it;
-  - several parse errors are worded differently, in a `resource_parse` analysis failure and in a
-    configuration error. A stream of more than one document reports "more than one document in
-    stream at line 2 column 1" where 0.22 said "deserializing from YAML containing more than one
-    document is not supported", and an option of the wrong type names its field ("`pattern`:
-    invalid type").
+  `json_schema_passes` on YAML, front matter and `alint test` packages all read through it. The
+  size and depth limits are those of 0.22 (32 MiB, 128 levels). ayaml reads YAML 1.2, where
+  libyaml read YAML 1.1. A differential harness (#482) compared the two on more than five
+  million generated and mutated documents and on every YAML file in this repository: valid
+  documents decode to the same values, except in the cases below.
+  - **Read differently:**
+    - a plain scalar may contain U+0085 (next line), U+2028 (line separator) or U+2029
+      (paragraph separator), which YAML 1.2 reads as content; libyaml read them as line breaks.
+      Between tokens they are now an error;
+    - a node with a global tag (`!<tag:...>` or a `%TAG` handle) keeps the tag in a value, and
+      where alint drops tags (`yaml_path_*`, `json_schema_passes`, front matter) its scalar
+      resolves as if untagged, so `!<tag:x,2000:y> 1` is the number 1 where 0.22 read the string
+      `"1"`. A core tag on another kind of node, as in `!!map 1`, is ignored the same way;
+    - a node tagged with the non-specific `!` is a string, as YAML 1.2 says, where 0.22 resolved
+      it as if untagged;
+    - an alias to an anchor defined more than once refers to the latest definition before it;
+      0.22 could resolve it to the wrong node, or fail with "recursion limit exceeded";
+    - an integer beyond the 64-bit range decodes as a 128-bit integer, where 0.22 rejected the
+      document (the JSON form the structured-format rules query still rejects it);
+    - an anchor or alias name may hold any character but white space and the flow indicators,
+      so `&a: x` anchors `x` under the name `a:` where 0.22 read a mapping;
+    - a byte-order mark that starts a line no longer counts as a column of that line.
+  - **Now accepted:** a tab as separating white space outside indentation, including on a blank
+    line after `...`; an empty implicit key (`: value`); a stream of only `...`; reserved
+    directives, which are ignored; `%YAML 1.x` with a later minor version; top-level block scalar
+    content in column 1; YAML 1.2's flow forms, such as `[:a]`, `{:}`, `[a:]` and a flow mapping
+    key that spans lines; and `#` inside a tag, as in `!t#`. ayaml also accepts a block scalar
+    header that is not indented past its parent on the line after an anchor
+    (asamarts/ayaml#132).
+  - **Now rejected:** a `#` directly after a token, as in `'x'#c` or `%YAML 1.2#`, which is not a
+    comment; a quoted scalar's continuation line that is not indented past its parent; a block
+    scalar whose header or content is not indented past its parent, as in `-` followed by `|2` on
+    the next line at the same column; a lone `-` in a flow collection, as in `[-]`; a flow `?`
+    not followed by white space, as in `{?}`; a `:` directly before a flow collection after an
+    empty key with properties, as in `[&a :[b]]`; and a tag handle holding characters other than
+    letters, digits and `-`, as in `!e:a!z`.
+  - **Errors.** Several parse errors are worded differently, in a `resource_parse` analysis
+    failure and in a configuration error. A stream of more than one document reports "more than
+    one document in stream at line 2 column 1" where 0.22 said "deserializing from YAML
+    containing more than one document is not supported", and an option of the wrong type names
+    its field ("`pattern`: invalid type"). An error can also be reported at another place:
+    ayaml checks a stream's syntax before it builds values, so a syntax error later in a file
+    is reported before an earlier duplicate key or type error.
 
-  Source spans and structured YAML fixes still use saphyr. Before v0.23.0 ships, differential
-  fuzzing against `yaml_serde` (#482) and a depth guard re-derived from ayaml's tokens (#483)
-  qualify the parser (ADR-0035).
+  Source spans and structured YAML fixes still use saphyr. Before v0.23.0 ships, a depth guard
+  re-derived from ayaml's tokens (#483) and the owner's approval of the harness's documented
+  differences qualify the parser (ADR-0035).
 - **Breaking (library API): YAML values and errors are alint's own types** (#484, #516,
   ADR-0038). No public item of `alint-core`, `alint-dsl` or `alint-testkit` names a YAML parser
   crate any more, so a later change of parser is not a breaking change. `alint_core::yaml` holds

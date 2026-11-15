@@ -1,6 +1,6 @@
 # v0.23: selectors, a first constraint slice, and the YAML groundwork
 
-Status: accepted (2026-11-12, ADR-0032); in progress, phases 0 to 4 merged.
+Status: accepted (2026-11-12, ADR-0032); in progress, phases 0 to 5 merged.
 Decisions: [ADR-0032](../../adr/0032-v023-owner-decisions.md) (the owner decisions and the scope);
 [ADR-0033](../../adr/0033-v023-slice-after-the-corpus-stratum.md) (the slice after the corpus
 stratum, and the #503 fix);
@@ -202,15 +202,20 @@ it must respect:
 ### 3.2 The fuzzing harness (#482)
 
 - **What it compares.** It runs `yaml_serde` and ayaml through the entry points alint uses:
-  Serde typed decoding, `Value` parsing and the event stream. Since #510 `yaml_serde` is the
-  oracle only, a dependency of the harness and of no published crate (ADR-0035).
-- **Inputs.** Generated token soup, alint's committed YAML, and mutations of that YAML.
-- **Results.** Each input is classified into the five classes #482 lists. Documented deviations are
-  an explicit allowlist, and any other difference fails.
-- **When it runs.** A bounded run on pull requests that touch YAML parsing, and a longer scheduled
-  run.
-- **Against which ayaml.** It runs against ayaml's latest release, and against its main branch when
-  re-qualifying.
+  `Value` parsing, the JSON tree the structured-format rules query, and Serde typed decoding into
+  `Config`. Since #510 `yaml_serde` is the oracle only, a dev-dependency of `alint-core` and of
+  no published crate (ADR-0035). alint reads no ayaml events in v0.23, so the event stream joins
+  the harness with the saphyr exit in v0.24.
+- **Inputs.** Generated token soup and documents, alint's committed YAML, and mutations of both.
+- **Results.** Each input is classified into six classes: #482's five, with "only one rejects"
+  split by which parser rejects. Documented deviations are an explicit allowlist, and any other
+  difference fails.
+- **When it runs.** A bounded run in `cargo test`, so on every pull request, and a long run on
+  pull requests that touch YAML parsing or the lockfile, weekly and on dispatch.
+- **Against which ayaml.** It runs against the pinned release, and against ayaml's main branch
+  through a `[patch.crates-io]` entry when re-qualifying.
+- **As built (phase 5).** `docs/design/yaml-parser.md` describes the harness and the five groups
+  of documented differences.
 
 ## 4. Phases
 
@@ -430,3 +435,14 @@ decided then.
     at 12 GiB with no core files, so such a mutant counts as caught; a test pins each iterator's
     length and reverse order, which 15 mutants had escaped.
   - Next: phase 5, the differential fuzzing harness (#482).
+- 2026-11-14: phase 5, the differential harness (#482).
+  - `alint-core` compares ayaml with `yaml_serde` 0.10.7 at the value, JSON and typed-decode entry
+    points, over generated token soup and documents, the repository's YAML, and mutations of
+    both. The bounded run is an ordinary test; `yaml-differential.yml` runs the long run on
+    parser and lockfile changes, weekly and on dispatch.
+  - The corpus has no difference. Over 24 seeds and 7.66 million inputs, every difference is
+    documented: 23 deviations and 5 location classes, in five groups (`yaml-parser.md`). Two
+    are ayaml defects in malformed documents, filed as asamarts/ayaml#132 and #133.
+  - The CHANGELOG now lists each change in what alint accepts and reads. The event stream joins
+    the harness in v0.24.
+  - Next: #483 and phase 6; phase 9 brings the allowlist to the owner.

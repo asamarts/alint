@@ -46,6 +46,8 @@ mod walker;
 pub mod when;
 pub mod yaml;
 pub mod yaml_depth;
+#[cfg(test)]
+mod yaml_differential;
 
 pub use analysis_time::{
     AnalysisTime, AnalysisTimeResolution, AnalysisTimeSource, AnalysisTimeUnavailable,

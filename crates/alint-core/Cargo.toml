@@ -50,6 +50,7 @@ adotenv.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+yaml_serde.workspace = true
 proptest.workspace = true
 syn.workspace = true
 proc-macro2.workspace = true
