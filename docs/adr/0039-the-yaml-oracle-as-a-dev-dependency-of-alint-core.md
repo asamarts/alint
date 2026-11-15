@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0041
 date: 2026-11-15
 decision-makers: asamarts
 ---
@@ -8,8 +8,10 @@ decision-makers: asamarts
 
 ## Status
 
-Accepted (2026-11-15). Amends [ADR-0035](0035-keep-the-early-ayaml-cutover.md) decision 2 on
-where `yaml_serde` may be a dependency. The rest of ADR-0035 stands.
+Superseded by [ADR-0041](0041-a-yaml-parser-facade-with-test-only-reference-parsers.md)
+(2026-11-15), which makes `yaml_serde` an optional dependency of `alint-core` for a parser
+facade. Accepted 2026-11-15; it amended [ADR-0035](0035-keep-the-early-ayaml-cutover.md)
+decision 2 on where `yaml_serde` may be a dependency.
 
 ## Context
 

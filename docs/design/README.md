@@ -53,4 +53,6 @@ in `docs/adr/` is missing from this table.
 | [0036](../adr/0036-ayaml-issues-and-the-saphyr-exit.md) | File ayaml gaps as ayaml issues, and remove saphyr in v0.24 | accepted |
 | [0037](../adr/0037-phase-3-design-refinements.md) | Phase 3 refinements: row-level equality, CLDR plurals in `set`, and ADR-0034 corrections | accepted |
 | [0038](../adr/0038-owned-yaml-types-and-the-api-gate.md) | Owned YAML types, the public-API gate, and a sealed `Error` | accepted |
-| [0039](../adr/0039-the-yaml-oracle-as-a-dev-dependency-of-alint-core.md) | The YAML oracle as a dev-dependency of `alint-core` | accepted |
+| [0039](../adr/0039-the-yaml-oracle-as-a-dev-dependency-of-alint-core.md) | The YAML oracle as a dev-dependency of `alint-core` | superseded by ADR-0041 |
+| [0040](../adr/0040-the-v023-advisory-and-the-allowlist-approval.md) | The v0.23 security advisory, and the YAML allowlist approved on ayaml's fixes | accepted |
+| [0041](../adr/0041-a-yaml-parser-facade-with-test-only-reference-parsers.md) | A YAML parser facade with test-only reference parsers | accepted |

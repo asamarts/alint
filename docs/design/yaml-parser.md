@@ -249,6 +249,70 @@ The documented differences fall into five groups; the report lists every entry.
   its look-ahead stopped, a disallowed character at line 1, column 1, and once the first
   document ends, "more than one document" with no place.
 
+## Parser facade
+
+[ADR-0041](../adr/0041-a-yaml-parser-facade-with-test-only-reference-parsers.md) puts the parser
+behind `alint_core::yaml`, so that alint's own suites can run on other parsers while ayaml is
+adopted and developed. It supersedes ADR-0039. This section is the design; the log below records
+each phase as it lands.
+
+- **Backends.** The two entry points that read text, `alint_core::yaml::from_str` and the JSON
+  tree the structured-format rules query, send each parse to a backend
+  (`crates/alint-core/src/yaml_backend.rs`):
+  - **ayaml**, the default, and the only one without the feature below;
+  - **libyaml**, through `yaml_serde` `=0.10.7`, for values, typed decodes and the JSON tree.
+
+  **saphyr**, `=0.3.3`, has no serde support, so it reads value trees in compare mode only.
+  `from_value`, `to_value` and `to_string` read no text and stay on ayaml's data model, which
+  ADR-0038's owned types hide. The depth guard's pre-parse checks measure what ayaml reads, so
+  they parse with ayaml whatever the backend. `Error` holds the error of whichever backend
+  failed, behind the same `message` and `location`.
+- **The feature.** `alint-core`'s non-default `yaml-reference` feature compiles libyaml, saphyr's
+  backend and compare mode, and makes `yaml_serde` an optional dependency. No release build
+  enables it. `ci/scripts/yaml-reference-gate.sh` checks that no workspace crate depends on
+  `yaml_serde` with default features, on any target, other than as a dev-dependency, and that
+  the same query finds it with the feature.
+- **Choosing a backend.** With the feature, `ALINT_YAML_PARSER` is read once per process:
+  `ayaml` (or unset), `libyaml`, or `compare`. Any other value panics with the accepted ones,
+  so a misspelled CI setting cannot fall back to ayaml unnoticed. Without the feature, the
+  variable is not read.
+- **Compare mode** (`yaml_backend/compare.rs`). ayaml decodes, and its result is what the caller
+  gets. The harness also compares the input's value tree, or for the structured-format rules
+  its JSON tree, as ayaml and libyaml read it, and libyaml runs the same typed decode. Then:
+  - the trees agree, and so does whether the decode succeeds: nothing to explain;
+  - the value trees differ, and saphyr reads the tree as ayaml does, or rejects the input as
+    ayaml does: a YAML 1.2 reading, explained by the vote;
+  - they differ otherwise: the harness's allowlist must explain the case, exactly as in the
+    harness;
+  - the trees agree but only one typed decode succeeds: a decode into `Config` must be
+    explained as the harness's `Config` entry point is; another type's must hold a `!!` tag,
+    which the harness's `typed-decode-core-tags` entry explains for `Config`, and is logged
+    as unchecked;
+  - nothing explains it: the decode panics, with the input, the three results and the class.
+
+  A defect ayaml shares with saphyr passes the vote, so the counts and examples of what the vote
+  explains are reviewed on each ayaml bump. With `ALINT_YAML_COMPARE_LOG` set to a file, each
+  explained difference appends a JSON line naming the verdict, the entry point, the class and
+  the entries, for a report.
+- **Where it runs.** A CI job runs `cargo test --workspace --features alint-core/yaml-reference`
+  with `ALINT_YAML_PARSER=compare`: the unit tests, the end-to-end tests that run the `alint`
+  binary, the policy tests and the dogfood check all read their YAML through the vote. The
+  harness's own runs add the vote to their report: per entry, the differences it also explains,
+  and the ones only the vote explains, with examples. An entry the vote makes redundant can go
+  on review; the first long runs found none, so the allowlist stays the source of the
+  CHANGELOG's record of what changed from v0.22 (ADR-0035 decision 5).
+- **The dogfood rule.** Beside the rule that fails on a direct ayaml decode outside
+  `alint_core::yaml` (ADR-0035 decision 4), `yaml-reference-parsers-stay-behind-the-facade`
+  fails on `yaml_serde::` outside the backends and the harness. saphyr's span uses stay until
+  they leave in v0.24.
+- **Phases.**
+  1. The backends, the variable and compare mode with the vote and the allowlist, as a module
+     beside `yaml.rs`; the harness's comparison tree and explanation compile with the feature as
+     well as in tests.
+  2. The harness through the backends, with saphyr's vote in its report, and an allowlist
+     entry for each difference compare mode finds that the harness had not.
+  3. The CI job, the release gate, the dogfood rule and the documents.
+
 ## Migration and rollback
 
 1. Replace the workspace dependency and lockfile entry.
