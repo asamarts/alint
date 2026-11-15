@@ -137,6 +137,11 @@ the filesystem, reads file contents, optionally calls `git` and `sh`-via-the-
 - **Plugin trust gating.** The `command` rule kind shells out to external
   CLIs; it's gated to the user's top-level config (extends'd configs cannot
   introduce a `command` rule).
+- **Policy tests start without host authority.** `alint test` runs a rule,
+  fixer or custom fact that spawns a process, at any `require:` depth, or
+  reads the host keyring, only when the test declares the capability and the
+  command line grants it (`--allow-spawn`, `--allow-host-keyring`). A test's
+  `given.env` never reaches the Git commands the runner runs itself.
 - **No telemetry.** alint sends nothing over the network except the
   user-explicit `extends:` URLs above.
 - **Reproducible builds.** `Cargo.lock` is committed. CI installs toolchains

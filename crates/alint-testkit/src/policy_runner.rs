@@ -174,16 +174,16 @@ impl Runner {
             source: source_error,
         })?;
         materialize_repository(test, &package, &repository)?;
-        let process_environment = deterministic_process_environment(
-            test,
+        let runner_environment = runner_git_environment(
             sandbox.path(),
             self.options.allow_host_keyring && test.capabilities.host_keyring,
         )?;
-        let git_environment =
-            alint_core::git::scoped_process_environment(&repository, process_environment.clone());
+        let process_environment = granted_process_environment(test, &runner_environment);
         if let Some(git_spec) = &test.given.git {
-            setup_git(&repository, git_spec, &process_environment)?;
+            setup_git(&repository, git_spec, &runner_environment)?;
         }
+        let git_environment =
+            alint_core::git::scoped_process_environment(&repository, runner_environment);
         let (config_path, source_provider) = config_source(test, &package, source)?;
         let environment: Arc<dyn alint_dsl::EnvironmentProvider> =
             Arc::new(FixedEnvironment(test.given.env.clone()));
@@ -943,7 +943,7 @@ fn inspect_rule_capabilities(
     if let Some(fix) = &rule.fix {
         inspect_fix_op(&usage, fix.op_name(), catalog, spawn_use);
     }
-    inspect_nested_values(&usage, &rule.extra, catalog, spawn_use, keyring_use);
+    inspect_nested_rules(&usage, &rule.extra, catalog, spawn_use, keyring_use);
 }
 
 fn inspect_kind_capabilities(
@@ -985,43 +985,38 @@ fn inspect_fix_op(
 }
 
 /// Nested rules (a `require:` entry, at any depth) are raw mappings in the
-/// parent's options: they have no `id` or `level` of their own, so each mapping
-/// with a `kind` is read by its kind and its `fix:` operations, as the
-/// configuration trust gate reads them. A nested `fix:` does not run today
-/// (`NestedRuleSpec` leaves it out), but it counts, so a change that runs nested
-/// fixes cannot skip this check.
-fn inspect_nested_values(
+/// parent's options: they have no `id` or `level` of their own, so each one is
+/// read by its `kind` and its `fix:` operations, following `require:` only, as
+/// the configuration trust gate reads them. Loading refuses a nested `fix:`
+/// today, so it never reaches this check; it counts anyway, so a change that
+/// runs nested fixes cannot skip it.
+fn inspect_nested_rules(
     usage: &str,
-    mapping: &alint_core::yaml::Mapping,
+    rule: &alint_core::yaml::Mapping,
     catalog: alint_core::KindCatalog<'_>,
     spawn_use: &mut Option<String>,
     keyring_use: &mut Option<String>,
 ) {
-    for (key, value) in mapping {
-        let field = format!("{usage} {}", key.as_str().unwrap_or("option"));
-        let mut inspect = |usage: &str, nested: &alint_core::yaml::Mapping| {
-            if let Some(kind) = nested.get("kind").and_then(alint_core::yaml::Value::as_str) {
-                inspect_kind_capabilities(usage, kind, catalog, spawn_use, keyring_use);
-                let fix = nested
-                    .get("fix")
-                    .and_then(alint_core::yaml::Value::as_mapping);
-                for op in fix.into_iter().flat_map(alint_core::yaml::Mapping::keys) {
-                    if let Some(op) = op.as_str() {
-                        inspect_fix_op(usage, op, catalog, spawn_use);
-                    }
-                }
-            }
-            inspect_nested_values(usage, nested, catalog, spawn_use, keyring_use);
+    let nested = rule
+        .get("require")
+        .and_then(alint_core::yaml::Value::as_sequence);
+    for (index, nested) in nested.into_iter().flatten().enumerate() {
+        let Some(nested) = nested.as_mapping() else {
+            continue;
         };
-        if let Some(nested) = value.as_mapping() {
-            inspect(&field, nested);
-        } else if let Some(values) = value.as_sequence() {
-            for (index, nested) in values.iter().enumerate() {
-                if let Some(nested) = nested.as_mapping() {
-                    inspect(&format!("{field}[{index}]"), nested);
-                }
+        let usage = format!("{usage} require[{index}]");
+        if let Some(kind) = nested.get("kind").and_then(alint_core::yaml::Value::as_str) {
+            inspect_kind_capabilities(&usage, kind, catalog, spawn_use, keyring_use);
+        }
+        let fix = nested
+            .get("fix")
+            .and_then(alint_core::yaml::Value::as_mapping);
+        for op in fix.into_iter().flat_map(alint_core::yaml::Mapping::keys) {
+            if let Some(op) = op.as_str() {
+                inspect_fix_op(&usage, op, catalog, spawn_use);
             }
         }
+        inspect_nested_rules(&usage, nested, catalog, spawn_use, keyring_use);
     }
 }
 
@@ -1270,6 +1265,13 @@ fn copy_fixture_dir(fixture_root: &Path, source: &Path, destination: &Path) -> R
 }
 
 /// Deterministic, isolated Git setup used by the public runner and docs exporter.
+///
+/// Git runs with only the variables of `environment` that the runner itself
+/// sets (`PATH`, `HOME`, `GNUPGHOME`, `LC_ALL`, the `GIT_CONFIG_NOSYSTEM`,
+/// `GIT_CONFIG_GLOBAL`, `GIT_TERMINAL_PROMPT` and `GIT_OPTIONAL_LOCKS`
+/// settings, and Windows' system variables); any other variable is dropped. A
+/// policy test's `given.env` must not reach Git: `GIT_CONFIG_*` can name a
+/// command Git runs, and `LD_PRELOAD` a library it loads.
 pub fn setup_git(
     root: &Path,
     spec: &PolicyGit,
@@ -1374,7 +1376,11 @@ fn git(
     let mut command = Command::new("git");
     command
         .env_clear()
-        .envs(environment)
+        .envs(
+            environment
+                .iter()
+                .filter(|(name, _)| RUNNER_GIT_VARIABLES.contains(&name.as_str())),
+        )
         .arg("--literal-pathspecs")
         .arg("--no-replace-objects")
         .arg("-C")
@@ -1396,17 +1402,36 @@ fn git(
     Ok(())
 }
 
-fn deterministic_process_environment(
-    test: &PolicyTest,
-    sandbox: &Path,
-    host_keyring: bool,
-) -> Result<BTreeMap<String, String>> {
+/// The variables of the runner's own Git commands: the fixture setup and
+/// alint-core's Git reads. Nothing else reaches them (see [`setup_git`]).
+const RUNNER_GIT_VARIABLES: &[&str] = &[
+    "PATH",
+    "HOME",
+    "GNUPGHOME",
+    "GIT_CONFIG_NOSYSTEM",
+    "GIT_CONFIG_GLOBAL",
+    "GIT_TERMINAL_PROMPT",
+    "GIT_OPTIONAL_LOCKS",
+    "LC_ALL",
+    "SystemRoot",
+    "WINDIR",
+    "COMSPEC",
+    "PATHEXT",
+    "TEMP",
+    "TMP",
+];
+
+/// The fixed environment of the runner's own Git commands, without
+/// `given.env`: a sandboxed home (or the host's, when the host keyring is
+/// granted), no system or global Git configuration, no prompts and the C
+/// locale.
+fn runner_git_environment(sandbox: &Path, host_keyring: bool) -> Result<BTreeMap<String, String>> {
     let home = sandbox.join("home");
     std::fs::create_dir(&home).map_err(|source_error| Error::Io {
         path: home.clone(),
         source: source_error,
     })?;
-    let mut environment = test.given.env.clone();
+    let mut environment = BTreeMap::new();
     if let Some(path) = std::env::var_os("PATH") {
         environment.insert("PATH".to_string(), path.to_string_lossy().into_owned());
     }
@@ -1432,12 +1457,37 @@ fn deterministic_process_environment(
     environment.insert("GIT_OPTIONAL_LOCKS".to_string(), "0".to_string());
     environment.insert("LC_ALL".to_string(), "C".to_string());
     #[cfg(windows)]
-    for name in ["SystemRoot", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP"] {
+    for name in WINDOWS_SYSTEM_VARIABLES {
         if let Ok(value) = std::env::var(name) {
-            environment.entry(name.to_string()).or_insert(value);
+            environment.insert(name.to_string(), value);
         }
     }
     Ok(environment)
+}
+
+#[cfg(windows)]
+const WINDOWS_SYSTEM_VARIABLES: [&str; 6] =
+    ["SystemRoot", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP"];
+
+/// The environment of the commands a test was granted (`spawn`): `given.env`,
+/// overridden by the runner's variables, except that `given.env` may set
+/// Windows' system variables.
+fn granted_process_environment(
+    test: &PolicyTest,
+    runner_environment: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    let mut environment = test.given.env.clone();
+    for (name, value) in runner_environment {
+        #[cfg(windows)]
+        if WINDOWS_SYSTEM_VARIABLES.contains(&name.as_str()) {
+            environment
+                .entry(name.clone())
+                .or_insert_with(|| value.clone());
+            continue;
+        }
+        environment.insert(name.clone(), value.clone());
+    }
+    environment
 }
 
 fn sanitize_observation(observation: &mut StepObservation, context: &ExecutionContext<'_>) {

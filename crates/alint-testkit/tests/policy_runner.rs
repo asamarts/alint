@@ -254,7 +254,12 @@ snapshot: snapshots/result.json
 #[test]
 fn nested_spawning_rule_needs_both_capability_keys() {
     let package = tempfile::tempdir().unwrap();
-    let yaml = r#"test_version: 1
+    // The canary is outside the sandbox, which is deleted when a run ends, so
+    // a check that refused the test only after the command ran still fails.
+    let canary_dir = tempfile::tempdir().unwrap();
+    let canary = canary_dir.path().join("ran.txt");
+    let yaml = format!(
+        r#"test_version: 1
 name: a nested command rule spawns
 capabilities:
   spawn: true
@@ -270,14 +275,16 @@ given:
         level: error
         require:
           - kind: command
-            paths: "{path}/file.txt"
-            command: ["sh", "-c", "printf ran > ran.txt"]
+            paths: "{{path}}/file.txt"
+            command: ["sh", "-c", "printf ran > '{canary}'"]
 when: [check]
 expect:
   - exit: success
     violations: []
-"#;
-    let (source, mut test) = policy_file(package.path(), "nested.yml", yaml);
+"#,
+        canary = canary.display()
+    );
+    let (source, mut test) = policy_file(package.path(), "nested.yml", &yaml);
 
     let denied = Runner::default().run(&test, &source).unwrap_err();
     assert!(matches!(denied, Error::Capability(_)), "{denied:?}");
@@ -287,6 +294,9 @@ expect:
             .contains(r#"rule "per-dir" require[0] (command)"#),
         "{denied}"
     );
+    let preflight = Runner::default().preflight(&test, &source).unwrap_err();
+    assert!(matches!(preflight, Error::Capability(_)), "{preflight:?}");
+    assert!(!canary.exists(), "a refused test ran its command");
 
     let runner = Runner::new(RunnerOptions {
         allow_spawn: true,
@@ -295,9 +305,64 @@ expect:
     });
     let run = runner.run(&test, &source).unwrap();
     assert!(run.passed(), "{:#?}", run.mismatches);
-    assert!(run.root.join("ran.txt").exists());
+    assert!(canary.exists());
 
+    std::fs::remove_file(&canary).unwrap();
     test.capabilities.spawn = false;
     let undeclared = runner.run(&test, &source).unwrap_err();
     assert!(matches!(undeclared, Error::Capability(_)), "{undeclared:?}");
+    assert!(!canary.exists(), "an undeclared test ran its command");
+}
+
+/// `given.env` reaches interpolation and granted commands only. The runner's
+/// own Git commands (the fixture setup and alint-core's Git reads) run with a
+/// fixed environment, so a test cannot make Git run a command or write a file
+/// without the `spawn` capability.
+#[cfg(unix)]
+#[test]
+fn given_env_does_not_reach_the_runners_git() {
+    let package = tempfile::tempdir().unwrap();
+    let canary_dir = tempfile::tempdir().unwrap();
+    let canary = canary_dir.path().display().to_string();
+    let yaml = format!(
+        r#"test_version: 1
+name: git ignores the test's environment
+given:
+  env:
+    GIT_TRACE: "{canary}/trace.txt"
+    GIT_CONFIG_COUNT: "2"
+    GIT_CONFIG_KEY_0: core.fsmonitor
+    GIT_CONFIG_VALUE_0: "printf ran > '{canary}/fsmonitor.txt'; true"
+    GIT_CONFIG_KEY_1: filter.probe.clean
+    GIT_CONFIG_VALUE_1: "printf ran > '{canary}/filter.txt'; cat"
+  git:
+    init: true
+    add: [a.txt, .gitattributes]
+  tree:
+    a.txt: "x\n"
+    .gitattributes: "* filter=probe\n"
+  config: |
+    version: 1
+    rules:
+      - id: tracked
+        kind: file_exists
+        paths: a.txt
+        git_tracked_only: true
+        level: error
+when: [check]
+expect:
+  - exit: success
+    violations: []
+"#
+    );
+    let (source, test) = policy_file(package.path(), "git-env.yml", &yaml);
+
+    Runner::default().preflight(&test, &source).unwrap();
+    let run = Runner::default().run(&test, &source).unwrap();
+    assert!(run.passed(), "{:#?}", run.mismatches);
+    let written: Vec<_> = std::fs::read_dir(canary_dir.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(written, Vec::<std::ffi::OsString>::new());
 }

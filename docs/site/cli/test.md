@@ -46,10 +46,15 @@ one nested in another rule's `require:`, requires both
 command line. This grants native code execution with the invoking user's host
 filesystem and network permissions; it is not an OS sandbox. Host-keyring
 access similarly requires both `host_keyring: true` and
-`--allow-host-keyring`.
+`--allow-host-keyring`. A custom fact needs the spawn capability too.
 
 All selected definitions, package paths, configs, and capability grants are
 preflighted before any rule or user command executes.
+
+`given.env` reaches config interpolation and granted commands only. The Git
+commands the runner runs itself, for `given.git` and for rules that read Git,
+run with a fixed environment: a sandboxed home, no system or global Git
+configuration, `PATH`, and the C locale.
 
 ## Exit codes
 

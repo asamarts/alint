@@ -321,7 +321,7 @@ fn capability_uses(rule: &str) -> (Option<String>, Option<String>) {
 }
 
 /// Nested rules have no `id` or `level`, and are still read for the kinds and
-/// fix operations they use, at any depth and in any option.
+/// fix operations they use, at any `require:` depth.
 #[test]
 fn nested_rules_report_their_capabilities_at_any_depth() {
     let parent = "id: outer\nkind: for_each_dir\nselect: pkg\nlevel: error\n";
@@ -344,9 +344,13 @@ fn nested_rules_report_their_capabilities_at_any_depth() {
             "require: [{kind: file_exists, paths: x, fix: {file_create: {content: a}}}]\n",
             (None, None),
         ),
+        // Only `require:` holds nested rules: a mapping with a `kind` in any
+        // other option is data, as the configuration trust gate reads it.
+        ("options: {inner: {kind: command}}\n", (None, None)),
+        ("equals: [{kind: git_commit_gpg_signed}]\n", (None, None)),
         (
-            "options: {inner: {kind: command}}\n",
-            spawn("options inner (command)"),
+            "require: [{kind: file_exists, paths: x, options: {kind: command}}]\n",
+            (None, None),
         ),
         // The first use is the one named.
         (

@@ -8,16 +8,33 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Security
 
+- **`given.env` in a policy test no longer reaches Git.** Since v0.20.0, `alint test` passed a
+  test's `given.env` to the Git commands it runs itself: the `given.git` fixture setup, and
+  alint's Git reads for rules such as `git_tracked_only`. A variable such as `GIT_CONFIG_*`
+  (naming an fsmonitor or filter command), `GIT_TRACE` or `LD_PRELOAD` could then run a command,
+  load a library or write a file without `capabilities: { spawn: true }` or `--allow-spawn`, and
+  the fixture setup ran before the capability check, so even a refused test could do it. Those
+  Git commands now run with a fixed environment (a sandboxed home, no system or global Git
+  configuration, `PATH` and the C locale), and `setup_git` drops any other variable it is given.
+  `given.env` reaches configuration interpolation and granted commands only, as the
+  [policy-test design](docs/design/v0.20/policy-tests.md) section 2.4 specifies. `alint check`
+  and `alint fix` were not affected: they read the invoking user's own environment.
 - **`alint test` now asks for the spawn capability for a spawning rule nested in another
   rule's `require:`.** Since v0.20.0, a policy test could run a `command` rule nested in
   `for_each_dir`, `for_each_file` or `every_matching_has` without `capabilities: { spawn: true }`
   or `--allow-spawn`: the preflight read a nested rule only when it also had an `id` and a
-  `level`, which nested rules do not have. It now reads each nested rule by its `kind`, at any
-  depth, as the configuration trust gate does, and names it in the error
-  (`rule "per-dir" require[0] (command)`). Host-keyring kinds are checked the same way, and so is
-  a spawning `fix:` operation on a nested rule, although nested fixes do not run. `alint check`
-  and `alint fix` were not affected: a configuration's own rules may spawn by design, and the
-  trust gate already refuses spawning rules, nested ones included, from `extends:`.
+  `level`, which nested rules do not have. It now reads each `require:` entry by its `kind`, at
+  any depth, as the configuration trust gate does, and names it in the error
+  (`rule "per-dir" require[0] (command)`). Host-keyring kinds are checked the same way. A
+  spawning `fix:` operation on a nested rule counts too, although loading already refuses a
+  nested `fix:`. `alint check` and `alint fix` were not affected: a configuration's own rules may
+  spawn by design, and the trust gate already refuses spawning rules, nested ones included, from
+  `extends:`.
+
+  Both affect `alint test` and the `alint_testkit::Runner` library in v0.20.0 to v0.22.1, and only
+  for a policy-test package the user does not trust. No v0.22.x patch release follows: upgrade to
+  v0.23.0, and until then run `alint test` only on policy-test packages whose configurations and
+  `given:` blocks you trust.
 
 ### Added
 
