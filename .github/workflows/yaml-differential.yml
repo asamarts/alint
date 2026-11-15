@@ -5,19 +5,24 @@ name: YAML differential
 # repository's YAML files and 20 mutations of each. A difference that
 # crates/alint-core/src/yaml_differential/allowlist.rs does not document fails the job.
 #
-# Every pull request already makes the bounded run, an ordinary test in `cargo test`. This
-# job runs the long one on a pull request that touches YAML parsing or the lockfile, with
-# seed 1; weekly, with the run number as its seed, so each week reads new inputs; and on
-# dispatch, with the seed and size given. The Markdown report goes to the job summary and an
-# artifact; its title names the seed, which reproduces a failure locally (see the module
-# documentation of crates/alint-core/src/yaml_differential.rs).
+# CI's test job makes the bounded run, an ordinary test in `cargo test`, when a pull request
+# or a push changes the crates, the workspace manifests or CI (ci/scripts/detect-changes.sh).
+# This job runs the long one on a pull request that touches alint-core's sources or manifest,
+# the workspace manifests or any YAML file, which the run reads as its corpus, with seed 1;
+# weekly, with the run number as its seed, so each week reads new inputs; and on dispatch,
+# with the seed and size given, where a value that is not a whole number fails the run. The
+# Markdown report goes to the job summary and an artifact; its title names the seed, which
+# reproduces a failure locally (see the module documentation of
+# crates/alint-core/src/yaml_differential.rs).
 on:
   pull_request:
     paths:
-      - "crates/alint-core/src/yaml*.rs"
-      - "crates/alint-core/src/yaml_differential/**"
-      - "crates/alint-core/src/structured_format/yaml_value.rs"
+      - "crates/alint-core/src/**"
+      - "crates/alint-core/Cargo.toml"
+      - "Cargo.toml"
       - "Cargo.lock"
+      - "**/*.yml"
+      - "**/*.yaml"
       - ".github/workflows/yaml-differential.yml"
   schedule:
     # Tuesdays 06:00 UTC.
@@ -25,19 +30,22 @@ on:
   workflow_dispatch:
     inputs:
       seed:
-        description: "Seed of the generated inputs and mutations"
+        description: "Seed of the generated inputs and mutations (a whole number)"
         required: false
         default: "1"
       inputs:
-        description: "Number of generated inputs"
+        description: "Number of generated inputs (a whole number)"
         required: false
         default: "300000"
 
 permissions:
   contents: read
 
+# A new push to a pull request cancels its earlier run. A scheduled run and a dispatched one
+# on main do not cancel each other, and each dispatched run, with its own seed and size, has
+# a group of its own.
 concurrency:
-  group: yaml-differential-${{ github.event.pull_request.number || github.ref }}
+  group: yaml-differential-${{ github.event_name }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -61,9 +69,14 @@ jobs:
           ALINT_YAML_DIFF_SEED: ${{ github.event_name == 'schedule' && github.run_number || inputs.seed || '1' }}
           ALINT_YAML_DIFF_INPUTS: ${{ inputs.inputs || '300000' }}
         run: |
+          set -o pipefail
           export ALINT_YAML_DIFF_REPORT="$RUNNER_TEMP/yaml-differential.md"
           cargo test --release --locked -p alint-core --lib \
-            yaml_differential::tests::long_run -- --ignored --exact
+            yaml_differential::tests::long_run -- --ignored --exact --color never \
+            | tee "$RUNNER_TEMP/long-run.log"
+          # `--exact` passes when no test has the name, as after a rename: the
+          # run counts only if it ran the one test.
+          grep -Eq '^test result: ok\. 1 passed;' "$RUNNER_TEMP/long-run.log"
       - name: the report
         if: always()
         run: |

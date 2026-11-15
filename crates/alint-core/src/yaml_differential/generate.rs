@@ -1,7 +1,10 @@
-//! The harness's inputs: seeded token soup, generated documents, and
-//! mutations of a document. The same seed always gives the same inputs.
+//! The harness's inputs: seeded token soup, generated documents, generated
+//! configurations, and mutations of a document. The same seed always gives
+//! the same inputs.
 
 use std::fmt::Write as _;
+
+pub(super) use super::configuration::configuration;
 
 /// `SplitMix64`: small, fast and deterministic, which is all an input generator
 /// needs.
@@ -39,6 +42,42 @@ impl Rng {
 /// The characters libyaml and YAML 1.2 read differently (next line, line
 /// separator, paragraph separator), and the byte-order mark.
 pub(super) const SPECIALS: &[&str] = &["\u{85}", "\u{2028}", "\u{2029}", "\u{feff}"];
+
+/// Characters YAML allows in a quoted scalar only (DEL, C1 controls,
+/// U+FFFE and U+FFFF), and C0 controls, which it allows nowhere.
+pub(super) const CONTROLS: &[&str] = &[
+    "\u{7f}", "\u{80}", "\u{8a}", "\u{9f}", "\u{fffe}", "\u{ffff}", "\u{1}", "\u{8}", "\u{1b}",
+    "\u{1f}",
+];
+
+/// The escapes of a double-quoted scalar, valid and not.
+const ESCAPES: &[&str] = &[
+    "\\n",
+    "\\t",
+    "\\\t",
+    "\\0",
+    "\\a",
+    "\\b",
+    "\\e",
+    "\\f",
+    "\\r",
+    "\\v",
+    "\\/",
+    "\\\"",
+    "\\\\",
+    "\\ ",
+    "\\N",
+    "\\_",
+    "\\L",
+    "\\P",
+    "\\x41",
+    "\\u00e9",
+    "\\U0001F600",
+    "\\x4",
+    "\\uD800",
+    "\\q",
+    "\\\n  ",
+];
 
 const INDICATORS: &[&str] = &[
     "-",
@@ -82,6 +121,9 @@ const INDICATORS: &[&str] = &[
     "`",
     "<<: ",
     "%",
+    "? [",
+    "? {",
+    "\t",
 ];
 
 const SCALARS: &[&str] = &[
@@ -130,6 +172,10 @@ const SCALARS: &[&str] = &[
     "-a",
     "?a",
     ":a",
+    "'\u{7f}'",
+    "\"\u{9f}\"",
+    "'\u{ffff}'",
+    "x\u{1}y",
 ];
 
 const SPACE: &[&str] = &[
@@ -153,14 +199,21 @@ pub(super) fn token_soup(rng: &mut Rng, specials: bool) -> String {
 }
 
 /// A document built from a random tree, written in a random mix of block and
-/// flow styles, with anchors, aliases, tags, comments and markers. Most are
-/// valid YAML; the specials, when set, land inside scalars and comments.
+/// flow styles, with anchors, aliases, merge keys, tags, comments, escapes,
+/// long and odd scalars and markers, sometimes with CRLF line breaks. Most
+/// are valid YAML; the specials, when set, land inside scalars and comments.
+/// A few are aliases that fan out, which only the oracle's count of alias
+/// uses refuses.
 pub(super) fn document(rng: &mut Rng, specials: bool) -> String {
+    if rng.chance(1, 40) {
+        return fan_out(rng);
+    }
     let mut writer = Writer {
         rng,
         specials,
         out: String::new(),
         anchors: 0,
+        mapping_anchors: Vec::new(),
     };
     if writer.rng.chance(1, 8) {
         let prefix = writer.rng.pick(&[
@@ -175,7 +228,11 @@ pub(super) fn document(rng: &mut Rng, specials: bool) -> String {
             writer.out.push_str(prefix);
         }
     }
-    let depth = writer.rng.below(4);
+    let depth = if writer.rng.chance(1, 8) {
+        4 + writer.rng.below(5)
+    } else {
+        writer.rng.below(4)
+    };
     // The sequence's chance is drawn only when the mapping's fails.
     let mapping = writer.rng.chance(1, 2);
     if mapping {
@@ -191,7 +248,27 @@ pub(super) fn document(rng: &mut Rng, specials: bool) -> String {
             .out
             .push_str(writer.rng.pick(&["...\n", "---\nb: 2\n", "# end\n"]));
     }
+    if writer.rng.chance(1, 16) {
+        writer.out = writer.out.replace('\n', "\r\n");
+    }
     writer.out
+}
+
+/// A sequence of anchored flow sequences, each holding `width` aliases to the
+/// one before, so the last expands to `width` to the power of the levels.
+fn fan_out(rng: &mut Rng) -> String {
+    let width = 2 + rng.below(9);
+    let levels = 2 + rng.below(3);
+    let mut out = String::from("- &l0 [x]\n");
+    for level in 1..=levels {
+        let aliases = vec![format!("*l{}", level - 1); width].join(", ");
+        if level == levels {
+            let _ = writeln!(out, "- [{aliases}]");
+        } else {
+            let _ = writeln!(out, "- &l{level} [{aliases}]");
+        }
+    }
+    out
 }
 
 struct Writer<'r> {
@@ -199,6 +276,8 @@ struct Writer<'r> {
     specials: bool,
     out: String,
     anchors: usize,
+    /// The anchors on block mappings, which a merge key can name.
+    mapping_anchors: Vec<usize>,
 }
 
 impl Writer<'_> {
@@ -214,26 +293,60 @@ impl Writer<'_> {
         }
     }
 
+    /// Now and then, a character YAML allows in a quoted scalar only, or
+    /// nowhere.
+    fn control(&mut self) -> &'static str {
+        if self.rng.chance(1, 40) {
+            self.rng.pick(CONTROLS)
+        } else {
+            ""
+        }
+    }
+
+    /// Separating white space: a space, sometimes a tab.
+    fn separation(&mut self) -> &'static str {
+        if self.rng.chance(1, 20) { "\t" } else { " " }
+    }
+
+    fn new_anchor(&mut self) -> usize {
+        self.anchors += 1;
+        self.anchors
+    }
+
     /// An optional anchor or tag before a node.
     fn properties(&mut self) {
         if self.rng.chance(1, 8) {
-            self.anchors += 1;
-            let _ = write!(self.out, "&a{} ", self.anchors);
+            let anchor = self.new_anchor();
+            let _ = write!(self.out, "&a{anchor} ");
         }
         if self.rng.chance(1, 12) {
-            self.out.push_str(
-                self.rng
-                    .pick(&["!t ", "!!str ", "!e!z ", "!<tag:x,2000:y> "]),
-            );
+            self.out.push_str(self.rng.pick(&[
+                "!t ",
+                "!!str ",
+                "!e!z ",
+                "!<tag:x,2000:y> ",
+                "!!null ",
+                "!!binary ",
+            ]));
         }
     }
 
     fn plain_key(&mut self) -> String {
+        if self.rng.chance(1, 60) {
+            // Around the 1,024 characters libyaml allows in an implicit key.
+            let len = 1_000 + self.rng.below(60);
+            return "k".repeat(len);
+        }
         let key = self
             .rng
             .pick(&["a", "b", "key", "k1", "1", "true", "null", "a b", "<<"]);
         let special = self.special();
-        format!("{key}{special}")
+        let anchor = if self.rng.chance(1, 20) {
+            format!("&a{} ", self.new_anchor())
+        } else {
+            String::new()
+        };
+        format!("{anchor}{key}{special}")
     }
 
     fn scalar(&mut self, indent: usize) {
@@ -244,7 +357,8 @@ impl Writer<'_> {
         }
         self.properties();
         let special = self.special();
-        match self.rng.below(8) {
+        let control = self.control();
+        match self.rng.below(9) {
             0..=2 => {
                 let scalar = self.rng.pick(&[
                     "x",
@@ -265,34 +379,69 @@ impl Writer<'_> {
                     "é",
                     "18446744073709551616",
                 ]);
-                let _ = write!(self.out, "{scalar}{special}");
+                let _ = write!(self.out, "{scalar}{special}{control}");
             }
             3 => {
-                let _ = write!(self.out, "'s{special} ''q'''");
+                let _ = write!(self.out, "'s{special}{control} ''q'''");
             }
             4 => {
-                let _ = write!(self.out, "\"d{special}\\n\\u00e9\\t\"");
+                let escape = self.rng.pick(ESCAPES);
+                let _ = write!(self.out, "\"d{special}{control}{escape}\\u00e9\\t\"");
             }
-            5 | 6 => {
-                let header = self.rng.pick(&["|", ">", "|-", ">+", "|2", "|+", ">-"]);
-                self.out.push_str(header);
-                self.out.push('\n');
-                for line in 0..=self.rng.below(3) {
-                    self.indent(indent + 2);
-                    let _ = writeln!(self.out, "line {line}{special}");
-                }
-                // The block scalar ended its own line.
-                self.out.pop();
+            5 | 6 => self.block_scalar(indent, special),
+            7 if self.rng.chance(1, 6) => {
+                let len = 100 + self.rng.below(2_000);
+                let word = self.rng.pick(&["word ", "x", "'q' ", "é"]);
+                let text = word.repeat(len / word.len() + 1);
+                let _ = write!(self.out, "{}", text.trim_end());
             }
             // An empty value, which is null.
             _ => {}
         }
     }
 
+    /// A block scalar, with blank lines among and after its lines now and
+    /// then, which its chomping keeps or strips.
+    fn block_scalar(&mut self, indent: usize, special: &str) {
+        let header = self
+            .rng
+            .pick(&["|", ">", "|-", ">+", "|2", "|+", ">-", "|+2", ">2-"]);
+        self.out.push_str(header);
+        self.out.push('\n');
+        for line in 0..=self.rng.below(3) {
+            if self.rng.chance(1, 4) {
+                let blank = self.rng.pick(&["\n", "  \n", "\t\n"]);
+                self.out.push_str(blank);
+            }
+            self.indent(indent + 2);
+            let more = if self.rng.chance(1, 6) { "  " } else { "" };
+            let _ = writeln!(self.out, "{more}line {line}{special}");
+        }
+        if self.rng.chance(1, 4) {
+            let trailing = self.rng.pick(&["\n", "\n\n", "  \n"]);
+            self.out.push_str(trailing);
+        }
+        // The block scalar ended its own line.
+        self.out.pop();
+    }
+
     fn comment(&mut self) {
         if self.rng.chance(1, 10) {
             let special = self.special();
-            let _ = write!(self.out, " # c{special}");
+            let control = self.control();
+            let separation = self.separation();
+            let _ = write!(self.out, "{separation}# c{special}{control}");
+        }
+    }
+
+    /// An explicit key: a plain scalar, or a flow collection.
+    fn explicit_key(&mut self) {
+        self.out.push_str("? ");
+        if self.rng.chance(1, 2) {
+            let key = self.plain_key();
+            self.out.push_str(&key);
+        } else {
+            self.flow(1);
         }
     }
 
@@ -301,10 +450,18 @@ impl Writer<'_> {
             if index > 0 || indent > 0 {
                 self.indent(indent);
             }
+            if !self.mapping_anchors.is_empty() && self.rng.chance(1, 8) {
+                let named = self.mapping_anchors[self.rng.below(self.mapping_anchors.len())];
+                if self.rng.chance(1, 3) {
+                    let other = self.mapping_anchors[self.rng.below(self.mapping_anchors.len())];
+                    let _ = writeln!(self.out, "<<: [*a{named}, *a{other}]");
+                } else {
+                    let _ = writeln!(self.out, "<<: *a{named}");
+                }
+                continue;
+            }
             if self.rng.chance(1, 14) {
-                self.out.push_str("? ");
-                let key = self.plain_key();
-                self.out.push_str(&key);
+                self.explicit_key();
                 self.out.push('\n');
                 self.indent(indent);
                 self.out.push(':');
@@ -330,7 +487,8 @@ impl Writer<'_> {
     /// A value after `key:` or `-`, ending its line.
     fn value(&mut self, indent: usize, depth: usize) {
         if depth == 0 || self.rng.chance(1, 2) {
-            self.out.push(' ');
+            let separation = self.separation();
+            self.out.push_str(separation);
             self.scalar(indent);
             self.comment();
             self.out.push('\n');
@@ -338,6 +496,11 @@ impl Writer<'_> {
         }
         match self.rng.below(3) {
             0 => {
+                if self.rng.chance(1, 6) {
+                    let anchor = self.new_anchor();
+                    self.mapping_anchors.push(anchor);
+                    let _ = write!(self.out, " &a{anchor}");
+                }
                 self.comment();
                 self.out.push('\n');
                 let child = indent + 2;
@@ -390,10 +553,23 @@ impl Writer<'_> {
             return;
         }
         let special = self.special();
+        let control = self.control();
         let scalar = self.rng.pick(&[
-            "x", "1", "-2.5", "true", "null", "~", "'s'", "\"d\"", "a b", "", "é",
+            "x",
+            "1",
+            "-2.5",
+            "true",
+            "null",
+            "~",
+            "'s'",
+            "\"d\"",
+            "a b",
+            "",
+            "é",
+            "'q",
+            "\"\\x41\"",
         ]);
-        let _ = write!(self.out, "{scalar}{special}");
+        let _ = write!(self.out, "{scalar}{special}{control}");
     }
 }
 

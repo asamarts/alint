@@ -203,17 +203,21 @@ it must respect:
 
 - **What it compares.** It runs `yaml_serde` and ayaml through the entry points alint uses:
   `Value` parsing, the JSON tree the structured-format rules query, and Serde typed decoding into
-  `Config`. Since #510 `yaml_serde` is the oracle only, a dev-dependency of `alint-core` and of
-  no published crate (ADR-0035). alint reads no ayaml events in v0.23, so the event stream joins
-  the harness with the saphyr exit in v0.24.
+  `Config` and of each rule into `RuleSpec`. Since #510 `yaml_serde` is the oracle only, a
+  dev-dependency of `alint-core` only, and no runtime dependency of any published crate
+  (ADR-0035, ADR-0039). alint reads no ayaml events in v0.23, so the event stream joins the
+  harness with the saphyr exit in v0.24.
 - **Inputs.** Generated token soup and documents, alint's committed YAML, and mutations of both.
 - **Results.** Each input is classified into six classes: #482's five, with "only one rejects"
   split by which parser rejects. Documented deviations are an explicit allowlist, and any other
   difference fails.
-- **When it runs.** A bounded run in `cargo test`, so on every pull request, and a long run on
-  pull requests that touch YAML parsing or the lockfile, weekly and on dispatch.
+- **When it runs.** A bounded run in `cargo test`, which CI's test job runs when a pull request
+  or a push changes the crates, the workspace manifests or CI, and a long run on pull requests
+  that touch YAML parsing, the configuration types, the manifests or any YAML file, weekly and on
+  dispatch.
 - **Against which ayaml.** It runs against the pinned release, and against ayaml's main branch
-  through a `[patch.crates-io]` entry when re-qualifying.
+  through a `[patch.crates-io]` entry when re-qualifying, which applies while main's version
+  still satisfies the exact pin.
 - **As built (phase 5).** `docs/design/yaml-parser.md` describes the harness and the five groups
   of documented differences.
 
@@ -282,9 +286,10 @@ decided then.
   out-of-tree users of `alint-core`. Phase 4 converts the workspace mechanically, adds
   constructors before any literal is removed, and keeps the change apart from behavior changes.
 - **ayaml qualification.** `main` runs ayaml since #510, before the harness that qualifies it.
-  If #482 and #483 are not done by the freeze, or find a difference the owner does not approve,
-  the release waits or #510 is reverted (ADR-0035). The corpus replay of every pull request
-  compares against v0.22.1, so a difference on real repositories shows up before then.
+  If #483 is not done by the freeze, or the harness of #482 (merged in #521) or #483 finds a
+  difference the owner does not approve, the release waits or #510 is reverted (ADR-0035). The
+  corpus replay of every pull request compares against v0.22.1, so a difference on real
+  repositories shows up before then.
 
 ## 7. Status log
 
@@ -469,3 +474,19 @@ decided then.
     the 12 GiB cap, where sudo allows it, so several runaway test processes together cannot
     exhaust the runner; the per-process cap stays.
   - Next: #483 and phase 6; phase 9 brings the allowlist to the owner.
+- 2026-11-15: two review rounds of the differential harness.
+  - An input-wide entry now explains a difference only when its trigger causes it: the harness
+    rewrites the input without the trigger and compares again. One difference can no longer mask
+    another: a rewrite after which a parser rejects what it read, or both reject for an error the
+    rewrite made, an error that moves to an earlier line, two errors a location class would take
+    for one, and a value error in place of a syntax error each have a rule, and a test puts
+    differences of three kinds beside every input-wide entry's construct.
+  - The harness also decodes each rule into `RuleSpec`, each rule a case of its own, generates
+    configurations and the shapes the review found missing, and its workflow watches every YAML
+    file.
+  - 42 long runs, 13.40 million inputs, leave no unexplained difference: 33 deviations and 7
+    location classes (`yaml-parser.md`). The review found ayaml defects in malformed documents,
+    filed as asamarts/ayaml#137 and #138 and as a comment on #132, and documented one more
+    difference, where ayaml reads YAML 1.2 and libyaml does not: `[!!str :a]` holds the string
+    `:a`, which libyaml reads as a mapping.
+  - Next: phase 6; phase 9 brings the allowlist to the owner.

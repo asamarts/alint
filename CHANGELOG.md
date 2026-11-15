@@ -134,40 +134,67 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     - a plain scalar may contain U+0085 (next line), U+2028 (line separator) or U+2029
       (paragraph separator), which YAML 1.2 reads as content; libyaml read them as line breaks.
       Between tokens they are now an error;
-    - a node with a global tag (`!<tag:...>` or a `%TAG` handle) keeps the tag in a value, and
-      where alint drops tags (`yaml_path_*`, `json_schema_passes`, front matter) its scalar
-      resolves as if untagged, so `!<tag:x,2000:y> 1` is the number 1 where 0.22 read the string
-      `"1"`. A core tag on another kind of node, as in `!!map 1`, is ignored the same way;
+    - a node with a global tag (`!<tag:...>`, a `%TAG` handle, or `!!` with a name outside the
+      core schema, such as `!!binary`, `!!timestamp`, `!!merge` or `!!value`) keeps the tag in a
+      value, and where alint drops tags (`yaml_path_*`, `json_schema_passes`, front matter) its
+      scalar resolves as if untagged, so `!<tag:x,2000:y> 1` is the number 1 where 0.22 read the
+      string `"1"`. A core tag on another kind of node, as in `!!map 1`, is ignored the same
+      way, and an empty node tagged `!!null` is null, where 0.22 rejected it;
     - a node tagged with the non-specific `!` is a string, as YAML 1.2 says, where 0.22 resolved
       it as if untagged;
-    - an alias to an anchor defined more than once refers to the latest definition before it;
-      0.22 could resolve it to the wrong node, or fail with "recursion limit exceeded";
+    - an alias to an anchor defined more than once refers to the latest definition before it,
+      and is an error inside that node; 0.22 could resolve it to the wrong node, or fail with
+      "recursion limit exceeded";
     - an integer beyond the 64-bit range decodes as a 128-bit integer, where 0.22 rejected the
       document (the JSON form the structured-format rules query still rejects it);
     - an anchor or alias name may hold any character but white space and the flow indicators,
-      so `&a: x` anchors `x` under the name `a:` where 0.22 read a mapping;
-    - a byte-order mark that starts a line no longer counts as a column of that line.
+      so `&a: x` anchors `x` under the name `a:` where 0.22 read a mapping, and `[*a:b]` holds
+      an alias to `a:b` where 0.22 read `{*a: b}`;
+    - in a flow sequence, a plain scalar that starts with `:` after properties is that scalar,
+      so `[!!str :a]` holds the string `:a`, where 0.22 read the mapping `{"": a}`;
+    - a byte-order mark that starts the stream no longer counts as a column of the first line;
+      one that starts another line still counts as one.
   - **Now accepted:** a tab as separating white space outside indentation, including on a blank
-    line after `...`; an empty implicit key (`: value`); a stream of only `...`; reserved
-    directives, which are ignored; `%YAML 1.x` with a later minor version; top-level block scalar
-    content in column 1; YAML 1.2's flow forms, such as `[:a]`, `{:}`, `[a:]` and a flow mapping
-    key that spans lines; and `#` inside a tag, as in `!t#`. ayaml also accepts a block scalar
-    header that is not indented past its parent on the line after an anchor
-    (asamarts/ayaml#132).
+    line after `...`, and as content after the indentation of a block scalar's first line; an
+    empty implicit key (`: value`); a stream that starts with `...`, with or without a document
+    after it; reserved directives, which are ignored; `%YAML 1.x` with any minor version other
+    than 1 and 2, earlier or later, read as 1.2; top-level block scalar content in column 1; YAML
+    1.2's flow forms, such as `[:a]`, `{:}`, `[a:]`, `[? ]` and a flow mapping key that spans
+    lines; an implicit key of more than 1,024 characters in a flow mapping; an implicit key of
+    1,024 characters or fewer that takes more than 1,024 bytes, such as 600 accented letters,
+    which 0.22 measured in bytes; `#` inside a tag or a `%TAG` prefix, as in `!t#`; U+007F,
+    U+0080 to U+009F other than U+0085, U+FFFE and U+FFFF inside a single- or double-quoted
+    scalar, where YAML 1.2 allows any JSON character; aliases that fan out, as ten aliases to a
+    node of ten aliases to a node of ten, within ayaml's alias-expansion allowance, where 0.22
+    stopped after 100 alias uses per event ("repetition limit exceeded"); and, in a
+    configuration, a quoted scalar tagged `!!int` where a number is expected, as in
+    `version: !!int '1'`. ayaml also accepts a block scalar header that is not indented past its
+    parent on the line after an anchor, or after a key with an anchor (asamarts/ayaml#132).
   - **Now rejected:** a `#` directly after a token, as in `'x'#c` or `%YAML 1.2#`, which is not a
     comment; a quoted scalar's continuation line that is not indented past its parent; a block
     scalar whose header or content is not indented past its parent, as in `-` followed by `|2` on
     the next line at the same column; a lone `-` in a flow collection, as in `[-]`; a flow `?`
     not followed by white space, as in `{?}`; a `:` directly before a flow collection after an
-    empty key with properties, as in `[&a :[b]]`; and a tag handle holding characters other than
-    letters, digits and `-`, as in `!e:a!z`.
+    empty key with properties, as in `[&a :[b]]`; a tag handle holding characters other than
+    letters, digits and `-`, as in `!e:a!z`; the verbatim tag `!<!>`, which names no tag; a flow
+    collection's continuation line in a block collection that only tabs indent, as a tab and
+    `b]` on the line after `a: [x,`; a mapping key whose core tag does not fit it, as
+    `!!int x: 1`, which 0.22 read as the key `x` where alint drops tags; and, in a
+    configuration, a core tag that does not fit its field, as in `version: !!str 1`, `!!float 1`
+    where an integer is expected or `!!str true` where a boolean is, which 0.22 read by their
+    text.
   - **Errors.** Several parse errors are worded differently, in a `resource_parse` analysis
     failure and in a configuration error. A stream of more than one document reports "more than
     one document in stream at line 2 column 1" where 0.22 said "deserializing from YAML
     containing more than one document is not supported", and an option of the wrong type names
     its field ("`pattern`: invalid type"). An error can also be reported at another place:
     ayaml checks a stream's syntax before it builds values, so a syntax error later in a file
-    is reported before an earlier duplicate key or type error.
+    is reported before an earlier duplicate key or type error, and an error about an empty
+    value, as `version:` with nothing after it, is reported where what follows starts (the next
+    line's content or the end of the file), where 0.22 reported the place after the key. A
+    character YAML does not allow, such as a C0 control, is reported where it stands, where 0.22
+    reported line 1, column 1. After a byte-order mark, a character that cannot start a token is
+    reported without a line and column (asamarts/ayaml#133).
 
   Source spans and structured YAML fixes still use saphyr. Before v0.23.0 ships, a depth guard
   re-derived from ayaml's tokens (#483) and the owner's approval of the harness's documented

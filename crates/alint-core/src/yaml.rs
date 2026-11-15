@@ -18,9 +18,11 @@ use serde::{Deserialize, Serialize};
 
 /// The parser limits every decode runs under: ayaml's defaults, without its
 /// caps on events, collection entries, anchors and alias uses. The parser
-/// v0.22 used had none of those caps, and ayaml's default of 1,000,000 events
-/// refuses a valid file of a few megabytes, far below the input cap. The
-/// input cap (32 MiB, as [`crate::MAX_STRUCTURED_BYTES`]), the depth cap
+/// v0.22 used had no cap on events, entries or anchors, and capped alias uses
+/// at 100 per event of the document, where the alias-expansion budget below
+/// bounds what aliases expand to instead; ayaml's default of 1,000,000
+/// events refuses a valid file of a few megabytes, far below the input cap.
+/// The input cap (32 MiB, as [`crate::MAX_STRUCTURED_BYTES`]), the depth cap
 /// (128) and the alias-expansion budget stay, and together they bound what
 /// one parse can cost.
 fn limits() -> ayaml::Limits {
