@@ -1638,8 +1638,10 @@ and
   `#[non_exhaustive]` with constructors, and `alint_core::Error` becomes `#[non_exhaustive]` too.
   `baseline::Fingerprints` and `baseline::fingerprints`, which matched the v0.21 fingerprint,
   are removed.
-- **A pure-Rust YAML parser.** alint parses YAML with ayaml (#510), and the release ships it
-  once differential parser fuzzing (#482) and the re-derived depth guard (#483) qualify it
+- **A pure-Rust YAML parser.** alint parses YAML with ayaml (#510). A differential harness
+  compares it with the parser v0.22 used (#482), and the checks that refuse YAML bombs before a
+  parse now read YAML as ayaml does (#483). The release ships it once the owner approves the
+  differences the harness documents
   ([ADR-0035](../adr/0035-keep-the-early-ayaml-cutover.md)).
 - **Baselines.** The v0.21 fingerprint of a hidden-path finding is no longer matched; re-run
   `alint baseline` before upgrading.
