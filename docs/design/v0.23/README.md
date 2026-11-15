@@ -95,18 +95,18 @@ Also in v0.23:
     ignored" where they said "on disk", and the bundled `java@v1` and `php@v1` rules that these
     changes touch reword their messages to match. This is the one exception to section 3's "v1 is
     unchanged". Done in #509.
-13. **Six sandbox fixes.** v0.20.0 to v0.22.1 ran a spawning rule nested in `require:`
+13. **Seven sandbox fixes.** v0.20.0 to v0.22.1 ran a spawning rule nested in `require:`
     without the spawn capability (#515), and passed a test's `given.env` to the Git commands the
     runner runs itself, so `GIT_CONFIG_*` or `LD_PRELOAD` could run code without it (#519). Both
     ship in v0.23.0 only, with no v0.22.2 (the owner's decision, 2026-11-14). The same releases
     read a fixture shaped like a bare repository as one, so a `core.fsmonitor` in it ran a
     command, and let a test's `when:` conditions and `${VAR}` expansions read the host's
-    environment (#522). The review of #522 found two more: a chain of `given.tree` symlinks
-    wrote outside the sandbox, and a fixer could write `.git`, so Git ran a command from a
-    configuration it wrote, in `alint test` and, from a ruleset `extends:` reads from the local
-    tree, in `alint fix`. All six ship in v0.23.0, fixed in public pull requests, with no
-    v0.22.2, and a security advisory for all six, drafted now, is published with v0.23.0
-    (ADR-0040).
+    environment (#522). The review of #522 and its fix found three more (#527): a chain of
+    `given.tree` symlinks wrote outside the sandbox, a fixture symlink read a host file from the
+    copy, and a fixer could write `.git`, so Git ran a command from a configuration it wrote, in
+    `alint test` and, from a ruleset `extends:` reads from the local tree, in `alint fix` since
+    v0.2.1. All seven ship in v0.23.0, fixed in public pull requests, with no v0.22.2, and a
+    security advisory for all seven, drafted now, is published with v0.23.0 (ADR-0040).
 
 Out of scope:
 - **v0.24 or later:** the remaining assertion families (reference, cardinality, group, bounded
@@ -247,7 +247,7 @@ next. Phases 1, 4 and 5 do not depend on the design and can run alongside phases
 | 7 | The `constraint` kind: equality (with row-level `equal`), unique/key and set (with `plurals: cldr`), report-only, and the related-location gate over JSON, SARIF and the language server | v2 only |
 | 8 | The three conformance policies with `alint test` cases, and the section 12.1 measurements | v2 only |
 | 9 | Qualify the cutover that #510 made: #483, and the #482 harness's verdict with an approved allowlist. Otherwise the owner holds the release or reverts #510 (ADR-0035). Approved on 2026-11-15, on condition that v0.23.0 is tagged on an ayaml release that fixes asamarts/ayaml#132, #133 and #137 (ADR-0040) | yes (parser) |
-| 10 | Documentation, the CHANGELOG (re-run `alint baseline`; the library migration; the `git_tracked_only` change; the affected versions of item 13's fixes), facts, publishing the security advisory drafted for item 13 (ADR-0040), and the release check | no |
+| 10 | Documentation, the CHANGELOG (re-run `alint baseline`; the library migration; the `git_tracked_only` change; the affected versions of item 13's fixes), facts, publishing the security advisory drafted for item 13 (GHSA-78jj-xfpm-g6px, a private draft; ADR-0040), and the release check | no |
 
 The #503 fix (item 12) is its own pull request, with `add -f` e2e scenarios for `file_absent`,
 `dir_absent`, `file_exists` and `dir_exists`, and does not depend on the design. It merged as #509
@@ -515,12 +515,13 @@ decided then.
     otherwise, as ayaml decides them.
   - Next: phase 6; phase 9 brings the allowlist to the owner.
 - 2026-11-15: the owner's decisions on the advisory, the allowlist and a parser facade.
-  - **The advisory** (ADR-0040): no v0.22.x patch. A GitHub security advisory, drafted now and
-    published with v0.23.0, covers the four fixes of #515, #519 and #522, and two holes the
-    review of #522 found: a chain of `given.tree` symlinks that wrote outside the sandbox, and a
-    fixer that could write `.git`, so that Git ran a command from a configuration it wrote, in
-    `alint test` and, from a ruleset `extends:` reads from the local tree, in `alint fix`. Both
-    are fixed in public pull requests, like the first four.
+  - **The advisory** (ADR-0040): no v0.22.x patch. A GitHub security advisory, drafted as
+    GHSA-78jj-xfpm-g6px and published with v0.23.0, covers the four fixes of #515, #519 and
+    #522, and the holes the review of #522 found, which #527 fixes in public like the first
+    four: a chain of `given.tree` symlinks that wrote outside the sandbox, a fixture symlink
+    that read a host file from the copy, and a fixer that could write `.git`, so that Git ran a
+    command from a configuration it wrote, in `alint test` and, from a ruleset `extends:` reads
+    from the local tree, in `alint fix` since v0.2.1.
   - **The allowlist** (ADR-0040): approved, on condition that v0.23.0 is tagged on an ayaml
     release that fixes asamarts/ayaml#132, #133 and #137, after the ayaml-bump procedure. A
     difference the bump adds comes back to the owner.
@@ -528,7 +529,7 @@ decided then.
     backend, and alint-core's test-only `yaml-reference` feature adds libyaml and a compare mode
     that checks every decode in the workspace's tests against libyaml and saphyr, so ayaml can
     be held to older parsers while it is developed.
-  - The reviews of #522 to #525 found the two holes above, gaps in the public API gate and the
+  - The reviews of #522 to #525 found the holes above, gaps in the public API gate and the
     mutation script's memory limit (#523), two constructs that hid nesting from the depth guard,
     which ayaml's own limits still stopped (#524), and ways the harness could explain a
     difference its trigger did not cause (#525). The pull requests that follow fix them.

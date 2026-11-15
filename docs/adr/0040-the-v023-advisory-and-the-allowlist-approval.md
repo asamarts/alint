@@ -19,13 +19,15 @@ Accepted (2026-11-15). Settles the security-advisory decision that phase 10 of t
   `command` rule nested in `require:`, a `given.env` that reached alint's own Git, or a fixture
   shaped like a bare repository. Or it could read the host's environment, through `when:` and
   `${VAR}`. Each affects v0.20.0 to v0.22.1, and the CHANGELOG on `main` describes them.
-- **Two more, found by the review of #522.** Neither is public yet.
+- **Three more, found by the review of #522 and its fix.** None is public yet.
   - A chain of symlinks in `given.tree` passes the sandbox check, so `alint test` writes files
     outside its sandbox before any capability check. A planted `git` then runs.
+  - A `given.fixture` symlink is checked where it resolves in the fixture, but resolves from the
+    copy, so `expect_tree` can read a host file.
   - A fixer can write a `.git` file or directory, and Git then runs a command from a
-    configuration the fixer wrote. In `alint test` this needs no capability. In `alint fix`, a
-    ruleset that `extends:` brings in from the local tree gets past the trust gate that stops it
-    from spawning.
+    configuration the fixer wrote. In `alint test` this needs no capability. In `alint fix`
+    since v0.2.1, a ruleset that `extends:` brings in from the local tree gets past the trust
+    gate that stops it from spawning.
 - **What SECURITY.md says.** Only the latest released minor is supported, and fixes ship in a new
   release. v0.23.0 is phases 6 to 10 away.
 - **The harness's verdict.** The differential harness (#482, #521, #525) documents 33 deviations
@@ -40,7 +42,7 @@ Accepted (2026-11-15). Settles the security-advisory decision that phase 10 of t
 
 1. **No v0.22.x patch release.** A GitHub security advisory is drafted now and published with
    v0.23.0, which it names as the first patched version.
-   - It covers all six holes. The owner weighed a private fix and a v0.22.2 for the two found
+   - It covers all seven holes. The owner weighed a private fix and a v0.22.2 for the three found
      later, and chose to fix them on `main` in public pull requests like the first four.
    - Until v0.23.0, the CHANGELOG's advice stands: run `alint test` only on policy-test packages
      whose configurations and `given:` blocks you trust, and `alint fix` only with rulesets you
@@ -58,15 +60,15 @@ Accepted (2026-11-15). Settles the security-advisory decision that phase 10 of t
 
 - The v0.23.0 tag waits on an ayaml release. ayaml's maintainers schedule the three fixes.
 - Users of v0.20 to v0.22 learn of the fixes from the advisory only when v0.23.0 ships. In
-  between, only the CHANGELOG on `main` describes them, and the pull requests that fix the two
-  later holes disclose them before any release is patched.
+  between, only the CHANGELOG on `main` describes them, and the pull request that fixes the
+  three later holes discloses them before any release is patched.
 - Phase 9 is met once the condition is: the cutover is qualified, and #510 stays.
 
 ## Considered Options
 
 - **The advisory:** a v0.22.2 with the four fixes and an advisory now; an advisory now that names
   0.23.0 as patched; no advisory. The owner chose to publish it with v0.23.0.
-- **The two later holes:** fix them privately in the advisory's temporary fork and release
+- **The later holes:** fix them privately in the advisory's temporary fork and release
   v0.22.2 with every fix; fix them in public and release v0.22.2 soon after; keep them private
   until v0.23.0. The owner chose public fixes, with the advisory at v0.23.0.
 - **The allowlist:** approve it as is; approve it but keep v0.22's reading of the seven forms
@@ -78,5 +80,5 @@ Accepted (2026-11-15). Settles the security-advisory decision that phase 10 of t
 - [ADR-0035](0035-keep-the-early-ayaml-cutover.md): the qualification this approval completes.
 - [ADR-0041](0041-a-yaml-parser-facade-with-test-only-reference-parsers.md): the parser facade
   whose compare mode qualifies the ayaml bump across alint's test suites.
-- The fixes: #515, #519, #522, and the pull request that fixes the two later holes. The
+- The fixes: #515, #519, #522 and #527. The advisory: GHSA-78jj-xfpm-g6px, a private draft. The
   harness: #482, #521, #525. The depth guard: #483, #524.
