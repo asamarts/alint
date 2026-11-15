@@ -27,8 +27,17 @@ CARGO_MUTANTS_VERSION="27.1.0"
 BUDGET_SECONDS="${MUTANTS_BUDGET_SECONDS:-5400}"
 # A mutant can make a loop allocate without bound, such as an iterator that never ends and a
 # test that collects it. On a hosted runner that exhausts the memory and the runner is lost,
-# so the job fails with no log (#520 lost two runs that way). Each process's address space is
-# capped instead: such a mutant aborts its test, which counts as caught, and writes no core file.
+# so the job fails with no log (#520 lost two runs that way). The memory is capped in two
+# layers, and such a mutant's test is killed instead, which counts as caught:
+#   - The whole run, every process together: where systemd and passwordless sudo are there
+#     (GitHub's ubuntu-latest), cargo-mutants runs in a transient scope, a cgroup whose
+#     MemoryMax is the cap, with no swap. A per-process cap alone is not enough, since a
+#     mutant in the CLI crate is run by many test threads that each spawn `alint`, and a few
+#     such children together still exhaust a 16 GiB runner. Creating a system scope needs
+#     root, so sudo starts systemd-run, which runs the command as the invoking user, and
+#     `env -i` gives it this script's environment again (sudo resets it, and PATH, HOME,
+#     CARGO_HOME and RUSTUP_HOME must reach cargo). Elsewhere this layer is left out.
+#   - Each process: its address space (`ulimit -v`), with no core files, everywhere.
 MEMORY_LIMIT_KIB="${MUTANTS_MEMORY_LIMIT_KIB:-12582912}"
 OUTPUT=target/mutants
 REPORT="$OUTPUT/mutants.out"
@@ -73,10 +82,21 @@ mkdir -p "$OUTPUT"
 echo "==> cargo mutants ${filter[*]} (budget ${BUDGET_SECONDS} s)"
 ulimit -v "$MEMORY_LIMIT_KIB"
 ulimit -c 0
+export RUSTFLAGS=''
+run=(timeout --signal=INT --kill-after=60 "$BUDGET_SECONDS"
+  cargo mutants "${filter[@]}" --in-place --no-shuffle --output "$OUTPUT")
+cgroup=(sudo -n systemd-run --scope --quiet --collect -p "MemoryMax=${MEMORY_LIMIT_KIB}K"
+  -p MemorySwapMax=0 --uid="$(id -u)" --gid="$(id -g)")
+if "${cgroup[@]}" -- true >/dev/null 2>&1; then
+  echo "==> in a transient scope with MemoryMax=${MEMORY_LIMIT_KIB}K and no swap"
+  mapfile -d '' -t environment < <(env -0)
+  run=("${cgroup[@]}" -- env -i "${environment[@]}" "${run[@]}")
+else
+  echo "==> without a memory scope (no systemd or passwordless sudo); each process is capped"
+fi
 rc=0
 started=$SECONDS
-RUSTFLAGS='' timeout --signal=INT --kill-after=60 "$BUDGET_SECONDS" \
-  cargo mutants "${filter[@]}" --in-place --no-shuffle --output "$OUTPUT" || rc=$?
+"${run[@]}" || rc=$?
 elapsed=$((SECONDS - started))
 
 count() { [[ -s "$REPORT/$1" ]] && wc -l < "$REPORT/$1" | tr -d ' ' || echo 0; }

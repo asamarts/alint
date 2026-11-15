@@ -67,6 +67,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - `WalkOptions::default()`, as before, with `with_respect_gitignore`, `with_extra_ignores`
     and `with_global_git_excludes` (below).
   - `Violation::new` and its existing setters are unchanged; its other fields are assigned.
+- **The options structs of 14 fix operations are exported from `alint_core`** (library API,
+  ADR-0038): `ChmodFixSpec`, `CommandFixSpec`, `CreateAndRegisterFixSpec`, `DirCreateFixSpec`,
+  `GitUntrackFixSpec`, `IndentStyleFixSpec`, `InsertHeaderFixSpec`, `InsertLineFixSpec`,
+  `RelocateFixSpec`, `RemoveValueFixSpec`, `ReplaceFixSpec`, `SetValueFixSpec`, `SortFixSpec` and
+  `SyncFromFixSpec`. `FixSpec`'s variants already held them, but they could not be named and had
+  no documentation. `alint-core`, `alint-dsl` and `alint-testkit` now deny the
+  `unnameable_types` lint, so every public type they reach has a name and a page.
 
 - **`WalkOptions::global_git_excludes`** (library API). With `false`
   (`with_global_git_excludes(false)`), a walk leaves out the user's global excludes file (Git's
@@ -169,9 +176,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   ADR-0038). No public item of `alint-core`, `alint-dsl` or `alint-testkit` names a YAML parser
   crate any more, so a later change of parser is not a breaking change. `alint_core::yaml` holds
   `Value`, `Mapping`, `Sequence`, their iterators (`SequenceIter`, `SequenceIterMut`,
-  `SequenceIntoIter`, `MappingIter`, `MappingIterMut` and `MappingIntoIter`), `Error` and
-  `Location`. Its functions are `from_str`, which decodes under alint's parser limits, and
-  `from_value`, `to_value` and `to_string`. In place of the `yaml_serde` types of 0.22:
+  `SequenceIntoIter`, `MappingIter`, `MappingIterMut`, `MappingIntoIter`, `MappingKeys`,
+  `MappingValues` and `MappingValuesMut`), `Error` and `Location`. Its functions are `from_str`,
+  which decodes under alint's parser limits, and `from_value`, `to_value` and `to_string`. A CI
+  gate keeps the parser out: it documents the three crates with every feature and with hidden
+  items shown, fails on a page that names a parser crate, and fails on what the documentation
+  cannot show, such as an item that exists only on another platform or in a release build, a
+  public type in a private module, code included from outside the crate, or an exported macro
+  that names a parser. In place of the `yaml_serde` types of 0.22:
   - `RuleSpec::extra`, `NestedRuleSpec::extra` and `RuleEntry::extra()` hold an
     `alint_core::yaml::Mapping`. Read an option with `get("name")` and the `Value` accessors
     (`as_str`, `as_bool`, `as_u64`, `as_mapping`, `as_sequence` and the rest) in place of a
@@ -182,16 +194,42 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     `TreeSpec::from_yaml` and `TreeSpec::to_yaml` return as well.
   - `alint_core::Error` is `#[non_exhaustive]`, so a `match` on it needs a wildcard arm.
   - `Value` has `is_null`, `is_bool`, `is_number`, `is_string`, `is_sequence`, `is_mapping` and
-    `tag`, the `as_*` accessors, `get`, and indexing by string key or by integer, which can also
-    assign. It converts from `bool`, every integer and float type, `String`, `&str`,
-    `Vec<Value>`, `Sequence` and `Mapping`, and compares with `==` against strings, `bool` and
-    the integer and float types up to 64 bits. `Sequence` and `Mapping` iterate by reference,
-    mutably and by value, and implement `FromIterator` and `Extend`.
-
-  What the `yaml_serde` types did that these do not: `Mapping`'s `get`, `get_mut`,
-  `contains_key`, `remove` and indexing find string keys only, so iterate to find another key;
-  `Value` is not a serde `Deserializer`, so decode one with `from_value`; and `Error` has a
-  message and a line and column, without the byte offset.
+    `tag`, the `as_*` accessors, `get` and `get_mut` by string key, and indexing by string key
+    (`&str` or `&String`) or by integer, which can also assign; assigning a key on a null, tagged
+    or not, makes it a mapping. It converts from `bool`, every integer and float type, `String`,
+    `&str`, `Vec<Value>`, `Sequence` and `Mapping`, and compares with `==` against strings,
+    `bool` and the integer and float types up to 64 bits. `Sequence` and `Mapping` iterate by
+    reference, mutably and by value, and implement `FromIterator` and `Extend`. `Mapping` also
+    has `keys`, `values` and `values_mut`, and index assignment, which adds a missing key last.
+    Every iterator knows its length, runs from both ends and is fused, and those over shared
+    references or owned values are `Clone`.
+  - What the `yaml_serde` types did that these do not:
+    - `Value` is not an enum: read it with the accessors in place of matching its variants, and
+      build one with `From`. There is no `Number`, `Tag` or `TaggedValue`: a number reads
+      through `as_i64`, `as_u64` or `as_f64`, and a tag as a string through `tag()`; a tagged
+      value comes only from a document, and the accessors look through its tag in place of
+      `untag`. There is no `as_null`, `is_i64`, `is_u64`, `is_f64` or `apply_merge`.
+    - `Value::get`, `Value::get_mut`, and `Mapping`'s `get`, `get_mut`, `contains_key`, `remove`
+      and indexing take a string key: `value.get(0)` is `value[0]` or `Sequence::get`, and a key
+      of another kind is found by iterating. Indexing takes `&str`, `&String` or an integer, not
+      a `Value` or an owned `String`.
+    - `mapping["missing"]` is null, where `yaml_serde` panicked, and `mapping[key] = value` adds
+      a missing key, where it panicked. `Mapping::remove` keeps the order of the other keys,
+      where `yaml_serde`'s moved the last key into the removed one's place.
+    - `Mapping` has no `entry`, `retain`, `clear`, `with_capacity`, `reserve`, `capacity`,
+      `shrink_to_fit`, `swap_remove`, `shift_remove` (its `remove` is one), `remove_entry` or
+      the other `*_entry` removals, `into_keys` or `into_values`.
+    - `Sequence` is a type of its own, not a `Vec<Value>`. It has `len`, `is_empty`, `get`,
+      `get_mut`, `push`, `pop`, iteration and indexing by position, and converts from a
+      `Vec<Value>`, but has no other `Vec` or slice method, such as `first`, `insert`, `sort` or
+      `&sequence[0..1]`; collect its values into a `Vec` for those.
+    - `&value == 1` does not compile, where `yaml_serde` compared a reference with a number
+      (write `*value == 1`), and values and mappings have no order (`<`). `Value::from` takes
+      a `Vec<Value>`, not a `Vec` or slice of another type or a `Cow<str>`, and a `Sequence`,
+      not a `Value`, is collected from an iterator.
+    - `Value` is not a serde `Deserializer`, so decode one with `from_value`, and `{:?}` prints
+      ayaml's form, such as `Number(Number(PosInt(1)))` where `yaml_serde` printed `Number(1)`.
+    - `Error` has a message and a line and column, without the byte offset.
   - `alint_core::template::render_mapping`, `render_value` and `render_nested_options` are no
     longer public, and neither are `alint_dsl::reject_command_rules_in`,
     `reject_fix_promotion_in`, `reject_fix_promotion_templates_in`,

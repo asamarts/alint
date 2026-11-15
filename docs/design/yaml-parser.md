@@ -263,3 +263,36 @@ maintained libyaml fork is the lower-risk ownership boundary.
   - **Y-C3.** The corpus has no difference, and every difference elsewhere is documented in
     the allowlist (23 deviations and 5 location classes); approving it is phase 9's decision
     (ADR-0035). The harness found asamarts/ayaml#132 and asamarts/ayaml#133.
+- **2026-11-15: the owned types, corrected.** The 2026-11-14 entry on the public API overstated
+  how close alint's YAML types came to those of `yaml_serde` 0.10.7: code that compiled against
+  0.22 can fail now. The review of #520 added `Value::get_mut`, indexing by `&String`, index
+  assignment on `Mapping` (which adds a missing key), `Mapping::values_mut`, the `MappingKeys`,
+  `MappingValues` and `MappingValuesMut` iterators, and `Clone` and `FusedIterator` on the
+  iterators; assigning a key on a tagged null now makes it a mapping that keeps its tag. What
+  the `yaml_serde` types did that alint's still do not, which the CHANGELOG lists for library
+  users as well:
+  - `Value` is not an enum, so its variants cannot be matched or built, and there is no
+    `Number`, `Tag` or `TaggedValue`, and no `as_null`, `is_i64`, `is_u64`, `is_f64`, `untag`
+    or `apply_merge`. A tagged value comes only from a document, and `tag()` gives its tag as a
+    string.
+  - `Value::get` and `get_mut`, and `Mapping`'s lookups and indexing, take a string key only;
+    indexing takes `&str`, `&String` or an integer, not a `Value` or an owned `String`.
+  - `mapping["missing"]` is null where `yaml_serde` panicked, and `mapping[key] = value` adds a
+    missing key where it panicked. `Mapping::remove` keeps the other keys' order where
+    `yaml_serde`'s moved the last key into the gap.
+  - `Mapping` has no `entry`, `retain`, `clear`, capacity methods, `swap_remove`,
+    `shift_remove`, `*_entry` removals, `into_keys` or `into_values`, and no order.
+  - `Sequence` is not a `Vec<Value>`: it has `len`, `is_empty`, `get`, `get_mut`, `push`, `pop`,
+    iteration and indexing by position, and no other `Vec` or slice method (`first`, slicing).
+  - `&value == 1` does not compile, values have no order, `Value::from` takes no `Vec` or slice
+    of another type and no `Cow<str>`, and an iterator collects into a `Sequence`, not a
+    `Value`.
+  - `Value` is not a serde `Deserializer`, its `{:?}` is ayaml's, and an `Error` has no byte
+    offset.
+
+  The public-API gate now also fails on what the documentation cannot show: a `hidden` left in
+  any `doc(...)` list, an attribute a macro builds, a `cfg` on `doc` at any depth, a public item
+  under a platform, profile or `not(feature)` cfg, an `include!` or `#[path]` outside the
+  crate, and a crate without `#![deny(unnameable_types)]`. It reads literals and comments as
+  Rust does, and checks itself on every run with a hidden, feature-gated canary that the scan
+  must find.

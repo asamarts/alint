@@ -446,3 +446,26 @@ decided then.
   - The CHANGELOG now lists each change in what alint accepts and reads. The event stream joins
     the harness in v0.24.
   - Next: #483 and phase 6; phase 9 brings the allowlist to the owner.
+- 2026-11-15: the review of #520.
+  - **Correction to the 2026-11-14 entry on #520.** The gate did not strip each spelling of
+    `doc(hidden)` (`#[doc(alias = "x", hidden)]` stayed hidden), and the owned YAML types did not
+    have all that 0.22's types had: `&value == 1`, `mapping["a"] = v`, `Value::from(vec![1, 2])`,
+    `value.get(0)` and slicing a `Sequence`, among others, compiled against 0.22 and fail now,
+    and `mapping["missing"]`, which panicked, is null. The CHANGELOG under-listed the
+    differences; it and `yaml-parser.md` now list every one.
+  - **The owned YAML types** gain `Value::get_mut`, indexing by `&String`, index assignment on
+    `Mapping`, `Mapping::values_mut`, concrete key and value iterators, and `FusedIterator` and
+    `Clone` on the iterators. `tag()` documents what it returns for verbatim, `%TAG` and core
+    tags, and assigning a key on a tagged null no longer panics.
+  - **The public-API gate** reads every `.rs` file under each crate, with literals and comments
+    removed as Rust reads them, and fails on a `hidden` in any `doc(...)` list, an attribute a
+    macro builds, a `cfg` on `doc` inside a `cfg_attr`, a public item under a platform,
+    profile or `not(feature)` cfg, an `include!` or `#[path]` outside the crate, an exported
+    macro in brackets, and a crate without `#![deny(unnameable_types)]`. The three crates deny
+    that lint, and `alint-core` exports the 14 fix-operation option structs it made nameable.
+    A hidden, feature-gated canary in each crate must show up in every scan, so a build that
+    drops `--all-features`, the stripping or the dependencies' documentation fails.
+  - **Mutation testing** runs cargo-mutants in a transient systemd scope whose `MemoryMax` is
+    the 12 GiB cap, where sudo allows it, so several runaway test processes together cannot
+    exhaust the runner; the per-process cap stays.
+  - Next: #483 and phase 6; phase 9 brings the allowlist to the owner.

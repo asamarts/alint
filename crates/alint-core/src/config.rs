@@ -924,7 +924,7 @@ pub struct FileCollapseBlankLinesFixSpec {
 /// -- has nothing to act on there and rejects the op.) `replacement` is a byte
 /// template supporting `$1` / `${name}`
 /// capture references (the regex-crate substitution syntax); a literal `$` is
-/// written `$$`. This is a *located* op (one [`FixEdit::ReplaceRange`] per
+/// written `$$`. This is a *located* op (one [`crate::FixEdit::ReplaceRange`] per
 /// match), Unsafe by default (a regex rewrite is not behavior-preserving in
 /// general), applied only under `--unsafe-fixes` unless promoted per-rule.
 #[derive(Debug, Clone, Deserialize)]

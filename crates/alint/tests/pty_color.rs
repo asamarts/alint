@@ -87,8 +87,8 @@ fn color_auto_emits_ansi_when_stdout_is_a_tty() {
     // host environment skews the test.
     cmd.env_remove("NO_COLOR");
     cmd.env_remove("CLICOLOR_FORCE");
-    // alint's miette / anstream rely on TERM for some
-    // capability detection. Ensure we look like a real terminal.
+    // alint's anstream relies on TERM for some capability
+    // detection. Ensure we look like a real terminal.
     cmd.env("TERM", "xterm-256color");
     cmd.cwd(tmp.path() as &Path);
 
