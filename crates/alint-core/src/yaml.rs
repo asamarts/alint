@@ -651,8 +651,10 @@ impl FusedIterator for SequenceIntoIter {}
 /// inserted.
 ///
 /// Two mappings are equal when they hold the same keys with equal values, in
-/// any order. The string-key methods (`get`, `contains_key`, `remove`,
-/// indexing) find string keys only; iterate to reach other keys.
+/// any order. The string-key methods (`get`, `get_mut`, `contains_key`,
+/// `remove`, indexing) find untagged string keys only: `get("k")` does not
+/// find the key of `!t k: v`. Iterate to reach a tagged key or one of another
+/// kind.
 #[derive(Clone, Default, PartialEq, Eq, Hash, RefCastCustom)]
 #[repr(transparent)]
 pub struct Mapping(ayaml::Mapping);
@@ -935,14 +937,12 @@ impl ExactSizeIterator for MappingIntoIter {}
 
 impl FusedIterator for MappingIntoIter {}
 
-/// An iterator over one side of a [`Mapping`]'s entries: `$name` wraps `$entries` and
-/// yields `$item`, taken from each entry by `$take`.
+/// The iterator impls of one side of a [`Mapping`]'s entries: `$name` yields `$item`,
+/// taken by `$take` from each entry of the iterator it wraps. Each type is written out
+/// where it is defined, with its documentation and derives, so the macro builds no
+/// attribute (the public-API gate refuses one a macro builds).
 macro_rules! mapping_side {
-    ($doc:literal, [$($derive:ident),*], $name:ident($entries:ident) => $item:ty, $take:expr) => {
-        #[doc = $doc]
-        #[derive($($derive),*)]
-        pub struct $name<'a>($entries<'a>);
-
+    ($name:ident => $item:ty, $take:expr) => {
         impl<'a> Iterator for $name<'a> {
             type Item = $item;
 
@@ -967,21 +967,23 @@ macro_rules! mapping_side {
     };
 }
 
-mapping_side!(
-    "The keys of a [`Mapping`], in order.",
-    [Clone, Debug],
-    MappingKeys(MappingIter) => &'a Value, |(key, _)| key
-);
-mapping_side!(
-    "The values of a [`Mapping`], in order.",
-    [Clone, Debug],
-    MappingValues(MappingIter) => &'a Value, |(_, value)| value
-);
-mapping_side!(
-    "The values of a [`Mapping`], mutably, in order.",
-    [Debug],
-    MappingValuesMut(MappingIterMut) => &'a mut Value, |(_, value)| value
-);
+/// The keys of a [`Mapping`], in order.
+#[derive(Clone, Debug)]
+pub struct MappingKeys<'a>(MappingIter<'a>);
+
+mapping_side!(MappingKeys => &'a Value, |(key, _)| key);
+
+/// The values of a [`Mapping`], in order.
+#[derive(Clone, Debug)]
+pub struct MappingValues<'a>(MappingIter<'a>);
+
+mapping_side!(MappingValues => &'a Value, |(_, value)| value);
+
+/// The values of a [`Mapping`], mutably, in order.
+#[derive(Debug)]
+pub struct MappingValuesMut<'a>(MappingIterMut<'a>);
+
+mapping_side!(MappingValuesMut => &'a mut Value, |(_, value)| value);
 
 /// Why a YAML document did not parse, or a value did not decode or encode.
 ///
@@ -1554,6 +1556,77 @@ mod tests {
         assert_eq!(mapping["c"], true);
         let keys: Vec<_> = mapping.keys().map(|key| key.as_str().unwrap()).collect();
         assert_eq!(keys, ["a", "b", "c"]);
+    }
+
+    /// The string-key lookups find an untagged string key only: `!t k` is a
+    /// tagged key, which `get("k")` does not find and iteration does.
+    #[test]
+    fn string_key_lookups_skip_a_tagged_key() {
+        let mut value: Value = from_str("!t k: tagged\nplain: 1\n").unwrap();
+        assert!(value.get("k").is_none());
+        assert!(value.get_mut("k").is_none());
+        assert!(value["k"].is_null());
+        let mapping = value.as_mapping_mut().unwrap();
+        assert!(mapping.get("k").is_none());
+        assert!(mapping.get_mut("k").is_none());
+        assert!(!mapping.contains_key("k"));
+        assert!(mapping["k"].is_null());
+        assert!(mapping.remove("k").is_none());
+        assert_eq!(mapping.len(), 2);
+        let (key, tagged) = mapping.iter().next().unwrap();
+        assert_eq!(
+            (key.tag().as_deref(), key.as_str()),
+            (Some("!t"), Some("k"))
+        );
+        assert_eq!(*tagged, "tagged");
+        assert_eq!(mapping["plain"], 1_i32);
+    }
+
+    /// The owned types' auto traits, pinned: a user may rely on each, so
+    /// losing one, as wrapping another parser type could, is a breaking
+    /// change. Every type here is `Send`, `Sync` and `Unpin`, and all but
+    /// `Error` are also `UnwindSafe` and `RefUnwindSafe`; `Error` is `'static`
+    /// and boxes into `Box<dyn std::error::Error + Send + Sync>`.
+    ///
+    /// Not asserted, since a negative bound needs a dependency: `Error` is not
+    /// `UnwindSafe` or `RefUnwindSafe`, because ayaml's error is not, and the
+    /// iterators that borrow mutably (`SequenceIterMut`, `MappingIterMut`,
+    /// `MappingValuesMut`) are not `UnwindSafe`, as no `&mut` is.
+    #[test]
+    fn owned_types_keep_their_auto_traits() {
+        fn threads<T: Send + Sync + Unpin>() {}
+        fn unwind<T: std::panic::UnwindSafe + std::panic::RefUnwindSafe>() {}
+        fn ref_unwind<T: std::panic::RefUnwindSafe>() {}
+        fn error<T: std::error::Error + Send + Sync + 'static>() {}
+
+        threads::<Value>();
+        threads::<Mapping>();
+        threads::<Sequence>();
+        threads::<Location>();
+        threads::<Error>();
+        threads::<SequenceIter<'_>>();
+        threads::<SequenceIterMut<'_>>();
+        threads::<SequenceIntoIter>();
+        threads::<MappingIter<'_>>();
+        threads::<MappingIterMut<'_>>();
+        threads::<MappingIntoIter>();
+        threads::<MappingKeys<'_>>();
+        threads::<MappingValues<'_>>();
+        threads::<MappingValuesMut<'_>>();
+        unwind::<Value>();
+        unwind::<Mapping>();
+        unwind::<Sequence>();
+        unwind::<Location>();
+        unwind::<SequenceIter<'_>>();
+        unwind::<SequenceIntoIter>();
+        unwind::<MappingIter<'_>>();
+        unwind::<MappingIntoIter>();
+        unwind::<MappingKeys<'_>>();
+        unwind::<MappingValues<'_>>();
+        ref_unwind::<SequenceIterMut<'_>>();
+        ref_unwind::<MappingIterMut<'_>>();
+        ref_unwind::<MappingValuesMut<'_>>();
+        error::<Error>();
     }
 
     /// An integer index assignment on a scalar panics.

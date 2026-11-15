@@ -37,6 +37,10 @@ BUDGET_SECONDS="${MUTANTS_BUDGET_SECONDS:-5400}"
 #     root, so sudo starts systemd-run, which runs the command as the invoking user, and
 #     `env -i` gives it this script's environment again (sudo resets it, and PATH, HOME,
 #     CARGO_HOME and RUSTUP_HOME must reach cargo). Elsewhere this layer is left out.
+#     The scope's OOMPolicy is `continue`: a scope inherits DefaultOOMPolicy=stop, under
+#     which the first process the kernel kills at the cap makes systemd stop the whole
+#     scope, cargo-mutants included, and the run ends (143) with nothing reported. With
+#     `continue` only the killed test process dies, and its mutant counts as caught.
 #   - Each process: its address space (`ulimit -v`), with no core files, everywhere.
 MEMORY_LIMIT_KIB="${MUTANTS_MEMORY_LIMIT_KIB:-12582912}"
 OUTPUT=target/mutants
@@ -86,9 +90,9 @@ export RUSTFLAGS=''
 run=(timeout --signal=INT --kill-after=60 "$BUDGET_SECONDS"
   cargo mutants "${filter[@]}" --in-place --no-shuffle --output "$OUTPUT")
 cgroup=(sudo -n systemd-run --scope --quiet --collect -p "MemoryMax=${MEMORY_LIMIT_KIB}K"
-  -p MemorySwapMax=0 --uid="$(id -u)" --gid="$(id -g)")
+  -p MemorySwapMax=0 -p OOMPolicy=continue --uid="$(id -u)" --gid="$(id -g)")
 if "${cgroup[@]}" -- true >/dev/null 2>&1; then
-  echo "==> in a transient scope with MemoryMax=${MEMORY_LIMIT_KIB}K and no swap"
+  echo "==> in a transient scope with MemoryMax=${MEMORY_LIMIT_KIB}K, no swap, OOMPolicy=continue"
   mapfile -d '' -t environment < <(env -0)
   run=("${cgroup[@]}" -- env -i "${environment[@]}" "${run[@]}")
 else
