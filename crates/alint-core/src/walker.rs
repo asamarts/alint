@@ -734,14 +734,21 @@ pub struct WalkOptions {
     /// More glob patterns to leave out, such as a configuration's `ignore:`.
     /// `.git` is always left out.
     pub extra_ignores: Vec<String>,
+    /// With [`Self::respect_gitignore`], also honor the user's global excludes
+    /// file (git's `core.excludesFile`, by default `$XDG_CONFIG_HOME/git/ignore`),
+    /// found through this process's environment. A run that must not depend
+    /// on the host, such as `alint test`, turns it off.
+    pub global_git_excludes: bool,
 }
 
 impl Default for WalkOptions {
-    /// Respects `.gitignore`, with no extra patterns.
+    /// Respects `.gitignore` and the global excludes file, with no extra
+    /// patterns.
     fn default() -> Self {
         Self {
             respect_gitignore: true,
             extra_ignores: Vec::new(),
+            global_git_excludes: true,
         }
     }
 }
@@ -759,6 +766,19 @@ impl WalkOptions {
     pub fn with_extra_ignores(mut self, extra_ignores: Vec<String>) -> Self {
         self.extra_ignores = extra_ignores;
         self
+    }
+
+    /// Sets [`Self::global_git_excludes`].
+    #[must_use]
+    pub fn with_global_git_excludes(mut self, global_git_excludes: bool) -> Self {
+        self.global_git_excludes = global_git_excludes;
+        self
+    }
+
+    /// Whether a walk reads the global excludes file: only when it honors
+    /// ignore files at all.
+    fn uses_global_git_excludes(&self) -> bool {
+        self.respect_gitignore && self.global_git_excludes
     }
 }
 
@@ -916,6 +936,7 @@ pub(crate) fn without_ignore_files(opts: &WalkOptions) -> WalkOptions {
     WalkOptions {
         respect_gitignore: false,
         extra_ignores: opts.extra_ignores.clone(),
+        global_git_excludes: opts.global_git_excludes,
     }
 }
 
@@ -1244,7 +1265,10 @@ impl<'a> WalkSkips<'a> {
                 overrides,
                 canonical_root,
                 parents,
-                global: Some(ignore::gitignore::Gitignore::global().0),
+                global: self
+                    .opts
+                    .uses_global_git_excludes()
+                    .then(|| ignore::gitignore::Gitignore::global().0),
                 bounded,
             }
         })
@@ -1448,6 +1472,7 @@ fn build_walk_builder(root: &Path, opts: &WalkOptions) -> Result<(WalkBuilder, E
     let mut builder = WalkBuilder::new(root);
     builder
         .standard_filters(opts.respect_gitignore)
+        .git_global(opts.uses_global_git_excludes())
         .hidden(false)
         .follow_links(true);
     // Ignore files stop at the repository boundary, as git's do (ADR-0028). In

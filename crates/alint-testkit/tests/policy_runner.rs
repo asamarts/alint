@@ -366,3 +366,157 @@ expect:
         .collect();
     assert_eq!(written, Vec::<std::ffi::OsString>::new());
 }
+
+/// A fixture whose top level looks like a bare repository (`HEAD`, `objects`,
+/// `refs`, `config`) must not become the repository the runner's own Git
+/// reads: its `config` would name a command (`core.fsmonitor`) that runs with
+/// no `spawn` capability.
+#[cfg(unix)]
+#[test]
+fn a_fixture_shaped_like_a_bare_repository_is_not_one() {
+    for rule in [
+        "kind: git_no_denied_paths\n        denied: [\"*.secret\"]",
+        "kind: file_exists\n        paths: a.txt\n        git_tracked_only: true",
+    ] {
+        let package = tempfile::tempdir().unwrap();
+        let canary_dir = tempfile::tempdir().unwrap();
+        let canary = canary_dir.path().display().to_string();
+        let yaml = format!(
+            r#"test_version: 1
+name: a bare-shaped fixture stays content
+given:
+  tree:
+    HEAD: "ref: refs/heads/main\n"
+    objects: {{}}
+    refs: {{}}
+    config: |
+      [core]
+      	repositoryformatversion = 0
+      	bare = false
+      	worktree = .
+      	fsmonitor = "printf ran > '{canary}/fsmonitor.txt'; false"
+    a.txt: "x"
+  config: |
+    version: 1
+    rules:
+      - id: probe
+        {rule}
+        level: error
+when: [check]
+expect:
+  - exit: success
+    violations: []
+"#
+        );
+        let (source, test) = policy_file(package.path(), "bare.yml", &yaml);
+
+        Runner::default().preflight(&test, &source).unwrap();
+        let _ = Runner::default().run(&test, &source);
+        let written: Vec<_> = std::fs::read_dir(canary_dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(written, Vec::<std::ffi::OsString>::new(), "{rule}");
+    }
+}
+
+/// A `when:` condition reads the test's own environment: `given.env`, and
+/// none of the host's variables (cargo sets `CARGO_PKG_NAME` for this test).
+#[test]
+fn a_condition_reads_the_tests_environment_not_the_hosts() {
+    assert!(std::env::var_os("CARGO_PKG_NAME").is_some());
+    let package = tempfile::tempdir().unwrap();
+    let yaml = r#"test_version: 1
+name: conditions see given.env only
+given:
+  tree:
+    a.txt: "x"
+    d/a.txt: "x"
+  env:
+    FROM_TEST: "1"
+  config: |
+    version: 1
+    rules:
+      - id: from-test
+        kind: file_exists
+        paths: MISSING.md
+        when: 'env.FROM_TEST == "1"'
+        level: error
+      - id: from-host
+        kind: file_exists
+        paths: MISSING.md
+        when: env.CARGO_PKG_NAME
+        level: error
+      - id: nested-from-test
+        kind: for_each_dir
+        select: d
+        require:
+          - kind: file_exists
+            paths: "{path}/MISSING.md"
+            when: 'env.FROM_TEST == "1"'
+        level: error
+      - id: nested-from-host
+        kind: for_each_dir
+        select: d
+        require:
+          - kind: file_exists
+            paths: "{path}/MISSING.md"
+            when: env.CARGO_PKG_NAME
+        level: error
+when: [check]
+expect:
+  - exit: policy_failure
+    violations:
+      - { rule: from-test }
+      - { rule: nested-from-test }
+"#;
+    let (source, test) = policy_file(package.path(), "when-env.yml", yaml);
+
+    let run = Runner::default().run(&test, &source).unwrap();
+    assert!(run.passed(), "{:#?}", run.mismatches);
+}
+
+/// The legacy `${VAR}` form of `git_commit_message`'s `since:` expands from
+/// the test's own environment too.
+#[test]
+fn legacy_since_expands_from_the_tests_environment() {
+    for (env, expected) in [
+        (
+            "{ BASE_FROM_TEST: \"HEAD~1\" }",
+            "exit: success\n    violations: []",
+        ),
+        (
+            "{}",
+            "exit: policy_failure\n    violations: []\n    analysis_failures:\n      \
+             - { rule: msg, message: { regex: \"undefined env var\" } }",
+        ),
+    ] {
+        let package = tempfile::tempdir().unwrap();
+        let yaml = format!(
+            r#"test_version: 1
+name: since reads given.env
+given:
+  tree:
+    a.txt: "x"
+  env: {env}
+  git:
+    commits: ["feat: one", "feat: two"]
+  config: |
+    version: 1
+    rules:
+      - id: msg
+        kind: git_commit_message
+        since: "${{BASE_FROM_TEST}}"
+        subject_max_length: 72
+        level: error
+when: [check]
+expect:
+  - {expected}
+"#
+        );
+        let (source, test) = policy_file(package.path(), "since.yml", &yaml);
+
+        let run = Runner::default().run(&test, &source).unwrap();
+        assert!(run.passed(), "{env}: {:#?}", run.mismatches);
+    }
+}

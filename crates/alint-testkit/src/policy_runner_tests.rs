@@ -559,3 +559,47 @@ expect:
         ])
     );
 }
+
+/// `setup_git` passes Git only the runner's own variables, whatever else its
+/// caller hands it (`xtask docs-export` hands it a test's `given.env`).
+#[cfg(unix)]
+#[test]
+fn setup_git_drops_every_variable_but_the_runners() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("a.txt"), "x\n").unwrap();
+    std::fs::write(root.path().join(".gitattributes"), "* filter=probe\n").unwrap();
+    let canary_dir = tempfile::tempdir().unwrap();
+    let canary = canary_dir.path().display().to_string();
+    let sandbox = tempfile::tempdir().unwrap();
+    let mut environment = runner_git_environment(sandbox.path(), false).unwrap();
+    for (name, value) in [
+        ("GIT_TRACE", format!("{canary}/trace.txt")),
+        ("GIT_CONFIG_COUNT", "2".to_string()),
+        ("GIT_CONFIG_KEY_0", "core.fsmonitor".to_string()),
+        (
+            "GIT_CONFIG_VALUE_0",
+            format!("printf ran > '{canary}/fsmonitor.txt'; true"),
+        ),
+        ("GIT_CONFIG_KEY_1", "filter.probe.clean".to_string()),
+        (
+            "GIT_CONFIG_VALUE_1",
+            format!("printf ran > '{canary}/filter.txt'; cat"),
+        ),
+    ] {
+        environment.insert(name.to_string(), value);
+    }
+    let spec = PolicyGit {
+        init: true,
+        add: vec!["a.txt".to_string(), ".gitattributes".to_string()],
+        add_force: Vec::new(),
+        commit: true,
+        commits: Vec::new(),
+    };
+
+    setup_git(root.path(), &spec, &environment).unwrap();
+    let written: Vec<_> = std::fs::read_dir(canary_dir.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(written, Vec::<std::ffi::OsString>::new());
+}

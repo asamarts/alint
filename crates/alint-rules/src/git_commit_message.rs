@@ -103,7 +103,7 @@ impl Rule for GitCommitMessageRule {
         // expansions reflect the current process environment.
         let since = match &self.since_raw {
             None => None,
-            Some(raw) => match expand_env(raw, env_lookup) {
+            Some(raw) => match expand_env(raw, |name| env_lookup(ctx, name)) {
                 Ok(resolved) => Some(resolved),
                 Err(missing) => {
                     return Err(Error::rule_config(
@@ -319,9 +319,14 @@ where
     Ok(out)
 }
 
-/// Production lookup: read from the process environment.
-fn env_lookup(name: &str) -> Option<String> {
-    std::env::var(name).ok()
+/// Production lookup: the run's process environment when it has one (as
+/// `alint test` sets it), so a test reads its own `given.env` and nothing of
+/// the host's; otherwise this process's environment.
+fn env_lookup(ctx: &Context<'_>, name: &str) -> Option<String> {
+    match ctx.process_environment {
+        Some(environment) => environment.get(name).cloned(),
+        None => std::env::var(name).ok(),
+    }
 }
 
 /// Rewrite POSIX `${VAR}` / `${VAR:-default}` occurrences into the
@@ -484,6 +489,26 @@ fn legacy_since_warning(spec: &RuleSpec, raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `${VAR}` reads the run's process environment when it has one, and
+    /// nothing of this process's; without one, this process's.
+    #[test]
+    fn env_lookup_reads_the_runs_environment() {
+        let root = std::path::Path::new(".");
+        let index = alint_core::FileIndex::default();
+        let environment =
+            std::collections::BTreeMap::from([("FROM_RUN".to_string(), "1".to_string())]);
+        let ctx = Context::new(root, &index).with_process_environment(Some(&environment));
+        assert_eq!(env_lookup(&ctx, "FROM_RUN").as_deref(), Some("1"));
+        // Set for every test process by cargo.
+        assert_eq!(env_lookup(&ctx, "CARGO_PKG_NAME"), None);
+        let host = Context::new(root, &index);
+        assert_eq!(
+            env_lookup(&host, "CARGO_PKG_NAME").as_deref(),
+            Some("alint-rules")
+        );
+        assert_eq!(env_lookup(&host, "FROM_RUN"), None);
+    }
 
     #[test]
     fn split_one_line_message() {

@@ -30,10 +30,28 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   nested `fix:`. `alint check` and `alint fix` were not affected: a configuration's own rules may
   spawn by design, and the trust gate already refuses spawning rules, nested ones included, from
   `extends:`.
+- **A policy-test fixture shaped like a bare repository no longer runs a command through Git.**
+  Without `given.git`, a test's tree has no `.git`, and the Git reads alint makes for
+  `git_tracked_only` and the `git_*` rules discovered a repository from the fixture's root. A
+  tree with `HEAD`, `objects/`, `refs/` and `config` at its top was read as a bare repository, and
+  a `core.fsmonitor` in that `config` ran a command without `capabilities: { spawn: true }` or
+  `--allow-spawn`. Every Git command alint runs now sets `safe.bareRepository=explicit`, which
+  Git honors only from the command line and the user's own configuration, so discovery never
+  takes a directory for a bare repository. That also covers `alint check` and `alint fix` in a
+  directory without `.git` that holds such files. The runner also refuses fixture entries that
+  Windows or macOS open as `.git` (`.git.`, `.git `, `.git::$INDEX_ALLOCATION`, `GIT~1`, and
+  `.git` with a code point HFS+ ignores), as Git refuses them in a checkout.
+- **A policy test's `when:` conditions and `${VAR}` expansions no longer read the host's
+  environment.** `env.X` in a `when:` (top-level or nested in `require:`) and the legacy `${VAR}`
+  form of `git_commit_message`'s `since:` read the runner's own process environment, so a test
+  could tell a CI secret's characters apart through which of its rules fired, and could not see
+  its own `given.env`. Both now read the test's environment: `given.env` with the runner's
+  variables, which is what a granted command sees. `alint check` and `alint fix` still read the
+  invoking user's environment.
 
-  Both affect `alint test` and the `alint_testkit::Runner` library in v0.20.0 to v0.22.1, and only
-  for a policy-test package the user does not trust. No v0.22.x patch release follows: upgrade to
-  v0.23.0, and until then run `alint test` only on policy-test packages whose configurations and
+  All four affect `alint test` and the `alint_testkit::Runner` library in v0.20.0 to v0.22.1, and
+  only for a policy-test package the user does not trust. No v0.22.x patch release follows: upgrade
+  to v0.23.0, and until then run `alint test` only on policy-test packages whose configurations and
   `given:` blocks you trust.
 
 ### Added
@@ -46,8 +64,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     `Context` is now `Clone`, so a copy with one part changed is `ctx.clone().with_vars(None)`.
   - `RuleSpec::new(id, kind, level)` and `NestedRuleSpec::new(kind)`, with a `with_*` setter
     for each other field.
-  - `WalkOptions::default()`, as before, with `with_respect_gitignore` and `with_extra_ignores`.
+  - `WalkOptions::default()`, as before, with `with_respect_gitignore`, `with_extra_ignores`
+    and `with_global_git_excludes` (below).
   - `Violation::new` and its existing setters are unchanged; its other fields are assigned.
+
+- **`WalkOptions::global_git_excludes`** (library API). With `false`
+  (`with_global_git_excludes(false)`), a walk leaves out the user's global excludes file (Git's
+  `core.excludesFile`, by default `$XDG_CONFIG_HOME/git/ignore`), which it finds through the
+  process's environment. `alint test` sets it, so what a policy test sees no longer depends on the
+  host's Git setup; the default keeps it, as before.
 
 ### Removed
 
@@ -64,6 +89,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Breaking (library API):** `WhenEnv::env` and `WhenEnv::with_env` take a
+  `BTreeMap<String, String>`, the type of the engine's process environment, instead of a
+  `HashMap`. The engine now passes its process environment there whenever it has one, so `env.*`
+  in a condition reads the environment a spawned command would get (see Security).
 - **`git_tracked_only: true` sees tracked files that an ignore file excludes** (#503, ADR-0033
   decision 3). Under the default `respect_gitignore: true` the walk leaves out what `.gitignore`,
   `.ignore`, `.git/info/exclude` and the global excludes file list, and the tracked view was

@@ -124,11 +124,17 @@ fn git_command(root: &Path) -> Command {
     // Repository paths are byte-exact inputs, never user-authored pathspecs;
     // replacement refs are clone-local state, never repository history; log
     // display preferences must not invoke signature verifiers or alter stdout.
+    // A directory found by discovery that is shaped like a bare repository is
+    // content, not a repository: its `config` could name a command to run
+    // (`core.fsmonitor`). Git honors this setting only from the command line
+    // and the user's own configuration, so a repository cannot turn it off.
     command.args([
         "--literal-pathspecs",
         "--no-replace-objects",
         "-c",
         "log.showSignature=false",
+        "-c",
+        "safe.bareRepository=explicit",
     ]);
     command
 }

@@ -318,6 +318,7 @@ fn dry_run_predicts_each_create_the_real_fix_finds_unresolved() {
         let opts = crate::WalkOptions {
             respect_gitignore: true,
             extra_ignores: Vec::new(),
+            global_git_excludes: true,
         };
         let index = crate::walk(root, &opts).unwrap();
         let report = Engine::new(rules, RuleRegistry::new())
@@ -373,6 +374,7 @@ fn dry_run_judges_a_create_by_the_spelling_it_lands_under() {
         let opts = crate::WalkOptions {
             respect_gitignore: true,
             extra_ignores: Vec::new(),
+            global_git_excludes: true,
         };
         let index = crate::walk(root, &opts).unwrap();
         let report = Engine::new(rules, RuleRegistry::new())
@@ -401,6 +403,7 @@ fn dry_run_takes_the_first_of_two_creates_of_one_ignore_file() {
         let opts = crate::WalkOptions {
             respect_gitignore: true,
             extra_ignores: Vec::new(),
+            global_git_excludes: true,
         };
         let index = crate::walk(root, &opts).unwrap();
         let report = Engine::new(rules, RuleRegistry::new())
@@ -429,6 +432,7 @@ fn dry_run_reads_an_absolute_create_inside_the_root_as_relative() {
     let opts = crate::WalkOptions {
         respect_gitignore: true,
         extra_ignores: Vec::new(),
+        global_git_excludes: true,
     };
     let index = crate::walk(&root, &opts).unwrap();
     let report = Engine::new(rules, RuleRegistry::new())
@@ -457,6 +461,7 @@ fn dry_run_trusts_a_rule_that_looks_past_the_walk() {
         let opts = crate::WalkOptions {
             respect_gitignore: true,
             extra_ignores: Vec::new(),
+            global_git_excludes: true,
         };
         let index = crate::walk(root, &opts).unwrap();
         let report = Engine::new(rules, RuleRegistry::new())
@@ -516,6 +521,7 @@ fn dry_run_resolves_a_tracked_only_rule_only_with_a_tracked_path() {
     let opts = crate::WalkOptions {
         respect_gitignore: true,
         extra_ignores: Vec::new(),
+        global_git_excludes: true,
     };
     let index = crate::walk(root, &opts).unwrap();
     let report = Engine::new(rules, RuleRegistry::new())
@@ -636,6 +642,7 @@ fn dry_run_judges_a_create_by_where_it_lands() {
         let opts = crate::WalkOptions {
             respect_gitignore: true,
             extra_ignores: Vec::new(),
+            global_git_excludes: true,
         };
         let index = crate::walk(root, &opts).unwrap();
         let report = Engine::new(rules, RuleRegistry::new())
@@ -699,6 +706,7 @@ fn dry_run_names_an_absolute_create_through_the_canonical_root() {
         let opts = crate::WalkOptions {
             respect_gitignore: true,
             extra_ignores: Vec::new(),
+            global_git_excludes: true,
         };
         let index = crate::walk(root, &opts).unwrap();
         let report = Engine::new(rules, RuleRegistry::new())
