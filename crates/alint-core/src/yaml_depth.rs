@@ -1,16 +1,20 @@
 //! Pre-parse bounds on YAML flow-collection nesting depth and alias use.
 //!
-//! The parser bounds both itself: ayaml stops at 128 levels of nesting and at
-//! an alias-expansion budget, in time linear in the input, under the limits
-//! [`crate::yaml`] sets from this module's constants. These guards scan the raw
-//! text before any parse and refuse a document past either bound with alint's
-//! own error. They were written for the parser v0.22 used (libyaml-rs through
-//! `yaml_serde`), whose tokenizer was super-linear on deep flow nesting (a
-//! 40 KB `[`x20000 document took seconds) and which did not bound one anchor
-//! replayed many times. They stay as defense in depth (`docs/design/yaml-parser.md`,
+//! The parser bounds both itself: ayaml stops at 128 levels of nesting, block
+//! and flow, and at an alias-expansion budget, in time linear in the input,
+//! under the limits [`crate::yaml`] sets from this module's constants. These
+//! guards scan the raw text before any parse and refuse a document past bounds
+//! of their own with alint's own error: flow nesting past the same 128 levels,
+//! and an alias expansion the guard charges more strictly than ayaml (see
+//! [`MAX_YAML_FLOW_DEPTH`] and [`MAX_YAML_EXPANSION_BYTES`]). They were written
+//! for the parser v0.22 used (libyaml-rs through `yaml_serde`), whose tokenizer
+//! was super-linear on deep flow nesting (a 40 KB `[`x20000 document took
+//! seconds) and which did not bound one anchor replayed many times. They stay
+//! as defense in depth (`docs/design/yaml-parser.md`,
 //! "Security and resource invariants"): a bomb is refused before any parser
 //! reads it, whichever parser that is. saphyr, which reads YAML for source spans
-//! and structured fixes, stops at 256 levels in linear time of its own.
+//! and structured fixes, refuses a 256th level of flow nesting of its own (its
+//! flow level is a `u8`), but does not bound block nesting.
 //!
 //! **The scan follows the parser's token boundaries** (`Lexer`), not a
 //! heuristic. Both guards are only as sound as the scanner's agreement with the
@@ -26,11 +30,15 @@
 //! the indent stack it rolls on `-` / `?` / simple keys. Where ayaml's
 //! compatibility reader, which alint parses with, reads YAML differently from
 //! libyaml, the lexer follows ayaml: NEL, LS and PS are content, not line
-//! breaks; in a flow collection a `:` is the value indicator only before a
-//! blank or a flow indicator, or right after a quoted scalar or a closed
-//! collection (a `?` there is always the key indicator, as in libyaml); an
-//! anchor or alias name runs to a blank or a flow indicator; and a byte order
-//! mark that starts a line is read both ways (see `lex`). Where
+//! breaks; in a flow collection a `:` is the value indicator before a blank,
+//! `,`, `]` or `}`, or right after a quoted scalar or a closed collection, and
+//! a `?` is the key indicator, as in libyaml (ayaml refuses a `:` before `[`
+//! or `{` and a `?` before any flow indicator, and the lexer reads the
+//! indicator there: see `is_key_indicator_at` and `is_value_indicator_at`); an
+//! anchor or alias name runs to a blank or a flow indicator; a tag runs over
+//! ayaml's tag characters, `#` among them; an implicit key's `:` may come up to
+//! 1024 characters after the key, counted in characters, not bytes; and a byte
+//! order mark that starts a line is read in each of three ways (see `lex`). Where
 //! the parser would raise a syntax error the lexer keeps going: the parser
 //! stops there, so nothing after the error point is ever parsed, and continuing
 //! (rather than stopping) never hides input. A differential property test
@@ -38,12 +46,18 @@
 
 /// Real config/manifest YAML nests a handful of flow levels; anything past this
 /// is a bomb. It is also the parser's depth limit ([`crate::yaml`] sets it): the
-/// parser allows 128 nested collections (block or flow) and fails the 129th, so
-/// a document whose flow nesting alone exceeds 128 can never deserialize into a
-/// value anyway -- rejecting it here introduces no new false reject. (The one
-/// exception is a subtree serde IGNORES -- `IgnoredAny` skips events without a
-/// depth check -- which no alint path relies on: configs are
-/// `deny_unknown_fields`, and every structured query builds the whole tree.)
+/// parser allows 128 nested collections (block or flow) and fails the 129th,
+/// whatever the document decodes into, so a document whose flow nesting alone
+/// exceeds 128 never decodes anyway. The guard counts only flow levels, so the
+/// parser still refuses documents the guard passes, nested deep in block
+/// collections.
+///
+/// The guard refuses a few documents the parser reads, where the lexer counts
+/// more than ayaml nests (see the module docs): after an anchor name that
+/// ayaml reads two ways it counts every later `[` and `{`, quoted or not, so
+/// `- &a:, x\n- '[[[…'` is refused; and it reads a `...` right after the byte
+/// order mark that starts the text as a document end, where ayaml reads
+/// `\u{feff}... [[[…` as one plain scalar. Both are known false refusals.
 pub const MAX_YAML_FLOW_DEPTH: usize = 128;
 
 /// `true` when the YAML text's flow-collection nesting stays within
@@ -83,9 +97,13 @@ fn flow_depth_within_limit_with(text: &str, max: usize) -> bool {
 /// this: its recursion limit (128) only caught *nested* aliases (classic
 /// billion-laughs), and its alias-DEREF counter (`jumpcount > events.len()*100`)
 /// was never reached by a SINGLE anchor referenced many times -- N flat `*a`
-/// refs make only N derefs but N x (anchor size) materializations. ayaml charges
-/// the same budget as this guard ([`crate::yaml`] sets it from these constants)
-/// and stops at it. Measured on the parser v0.22 used (release,
+/// refs make only N derefs but N x (anchor size) materializations. ayaml
+/// charges an alias budget of its own, set from these constants by
+/// [`crate::yaml`], but not the same one: it charges only what each alias
+/// replays, where this guard's pass charges every node of the expanded tree,
+/// the document's own nodes too. The guard is deliberately the stricter of the
+/// two, and refuses some alias-bearing documents ayaml would decode (a large
+/// document with one small alias). Measured on the parser v0.22 used (release,
 /// peak RSS, both the `ayaml::Value` config path and the
 /// `serde_json::Value` structured-query path): an 18.5 KB `a: &a [{k: v} x 500]` +
 /// 5000 refs (7.5M nodes, ~235 B/node) took 1.6-1.8 GB and 2-3 s, and a 1 MB
@@ -130,8 +148,10 @@ const _: () = assert!(
 /// The alias-expansion budget for a document of `len` input bytes: the fixed
 /// [`MAX_YAML_EXPANSION_BYTES`] amplification allowance plus a share
 /// proportional to the input (see [`YAML_EXPANSION_BYTES_PER_INPUT_BYTE`]),
-/// counted up to the structured-parse byte cap so padding a config body (which
-/// has no such cap) cannot buy more: the budget never exceeds ~768 MiB.
+/// counted up to the structured-parse byte cap. [`crate::yaml`] sets that cap
+/// as the parser's input cap for every document, config bodies included, so a
+/// longer text never decodes; counting only up to it keeps the budget at
+/// ~768 MiB at most whatever `len` a caller passes.
 #[must_use]
 pub fn expansion_budget(len: usize) -> usize {
     let len = len.min(crate::structured_format::MAX_STRUCTURED_BYTES);
@@ -150,10 +170,11 @@ pub fn expansion_budget(len: usize) -> usize {
 /// nodes, and 4000 copies of a 1 MB scalar -- are rejected in well under a
 /// second without allocating). It builds NO value, so it cannot change the real
 /// parse's output; the caller runs the real parse only after this returns
-/// `true`. A non-budget deserialize error (malformed YAML, or an unusual node the
-/// counter doesn't model) is ignored -- only a genuine budget overflow returns
-/// `false`, and everything else falls through to the real parse, which produces
-/// the proper error. This is fail-safe: a real bomb is ordinary scalars /
+/// `true`. A non-budget deserialize error (malformed YAML, a parser limit other
+/// than the alias budget, such as the input cap, or an unusual node the counter
+/// doesn't model) is ignored -- only a genuine budget overflow returns `false`,
+/// and everything else falls through to the real parse, which produces the
+/// proper error. This is fail-safe: a real bomb is ordinary scalars /
 /// sequences / maps (and tagged nodes, via `visit_enum`) and is counted.
 #[must_use]
 pub fn expansion_within_limit(text: &str) -> bool {
@@ -178,10 +199,16 @@ fn expansion_budget_pass(text: &str, max: usize) -> bool {
     };
     let result = crate::yaml::from_str_seed(text, seed);
     // D28: ayaml enforces its own alias budget before the visitor sees every
-    // node. An ayaml limit error therefore means the document is over budget;
-    // treat it exactly like a NodeBudget overflow instead of letting the
-    // early error fall through as "within limit".
-    if result.is_err_and(|error| matches!(error.kind(), ayaml::ErrorKind::Limit)) {
+    // node. Its alias-expansion limit error therefore means the document is
+    // over budget; treat it exactly like a NodeBudget overflow instead of
+    // letting the early error fall through as "within limit". Any other limit
+    // (the input cap, the document count) is not about aliases: it falls
+    // through, and the real parse reports it.
+    if result.is_err_and(|error| {
+        error
+            .limit()
+            .is_some_and(|limit| limit.kind() == ayaml::LimitKind::AliasExpansion)
+    }) {
         exceeded.set(true);
     }
     !exceeded.get()
@@ -429,7 +456,6 @@ enum Tok {
 #[derive(Debug, Clone, Copy)]
 struct KeyMark {
     line: usize,
-    index: usize,
     col: isize,
 }
 
@@ -501,7 +527,8 @@ struct Lexer<'a> {
     /// An anchor or alias name has ended where ayaml's scanner and the line
     /// reader it decides indentation with disagree (see `scan_anchor`).
     distrust: bool,
-    /// The anchor names so far that end in `:`, which an alias keeps whole.
+    /// The anchor names so far in this document that end in `:`, which an
+    /// alias keeps whole.
     colon_anchors: std::collections::HashSet<&'a [u8]>,
 }
 
@@ -618,7 +645,6 @@ impl<'a> Lexer<'a> {
         if self.flow == 0 && self.simple_key_allowed {
             self.key = Some(KeyMark {
                 line: self.line,
-                index: self.i,
                 col: self.col,
             });
         }
@@ -638,11 +664,12 @@ impl<'a> Lexer<'a> {
                 return;
             }
             self.scan_to_next_token();
-            // `yaml_parser_stale_simple_keys`: a key candidate expires at a new
-            // line or 1024 bytes on.
+            // `yaml_parser_stale_simple_keys`, by ayaml's rule: a key candidate
+            // expires at a new line or more than 1024 characters on, as ayaml
+            // refuses a key whose `:` is further from it (`implicit_key_fits`).
             if self
                 .key
-                .is_some_and(|k| k.line < self.line || k.index + 1024 < self.i)
+                .is_some_and(|k| k.line < self.line || k.col + 1024 < self.col)
             {
                 self.key = None;
             }
@@ -665,6 +692,9 @@ impl<'a> Lexer<'a> {
                 self.unroll_indent(-1);
                 self.remove_simple_key();
                 self.simple_key_allowed = false;
+                // An alias keeps a final `:` only for an anchor of its own
+                // document, as ayaml forgets the names at either marker.
+                self.colon_anchors.clear();
                 for _ in 0..3 {
                     self.advance();
                 }
@@ -866,17 +896,22 @@ impl<'a> Lexer<'a> {
     }
 
     /// Whether the `?` at the cursor is the key indicator rather than the start
-    /// of a plain scalar: it always is in a flow collection, where ayaml's
+    /// of a plain scalar: it is in a flow collection, where ayaml's
     /// compatibility reader keeps libyaml's rule (`[?a]` is the key `a`), and
-    /// elsewhere when a blank or a line break follows it.
+    /// elsewhere when a blank or a line break follows it. ayaml refuses a flow
+    /// `?` right before a flow indicator (`[?[a]]`); the lexer reads the key
+    /// indicator there, and the parser stops at it.
     fn is_key_indicator_at(&self) -> bool {
         self.flow != 0 || self.is_blankz_at(1)
     }
 
     /// Whether the `:` at the cursor is the value indicator rather than the
     /// start of a plain scalar: a blank or a line break follows it, or, in a
-    /// flow collection, a flow indicator does (YAML 1.2, as ayaml reads it:
-    /// `[a:b]` is one scalar).
+    /// flow collection, a flow indicator does. ayaml takes a `,`, `]` or `}`
+    /// after it there (YAML 1.2: `[a:b]` is one scalar), and refuses a `[` or
+    /// `{` (`[a:[b]]`), unless the `:` follows a quoted scalar or a closed
+    /// collection; the lexer reads the value indicator before those too, so it
+    /// counts the collection the parser stops at.
     fn is_value_indicator_at(&self) -> bool {
         self.is_blankz_at(1) || (self.flow != 0 && self.is_flow_indicator_at(1))
     }
@@ -887,7 +922,7 @@ impl<'a> Lexer<'a> {
     /// that no flow indicator follows, and, outside a flow collection, at a `:`
     /// after the name's first character that a character other than a blank or a
     /// line break follows. An alias name that ends in `:` gives the `:` back
-    /// unless an anchor before it has that whole name.
+    /// unless an anchor before it in its document has that whole name.
     ///
     /// The line reader ayaml decides indentation with does not stop at a `:`
     /// that a flow indicator follows, so for `&a:[: x` it reads an unclosed
@@ -933,8 +968,12 @@ impl<'a> Lexer<'a> {
         matches!(self.at(k), b',' | b'[' | b']' | b'{' | b'}')
     }
 
-    /// `yaml_parser_scan_tag`: `!<verbatim-uri>` or `!handle!suffix` / `!suffix`;
-    /// the token is a run of URI characters (`,` `[` `]` only inside `!<…>`).
+    /// `yaml_parser_scan_tag`: `!<verbatim-uri>` or `!handle!suffix` / `!suffix`.
+    /// The token runs over ayaml's characters for each: a verbatim tag over URI
+    /// characters (`is_uri_char`), a shorthand over tag characters
+    /// (`is_tag_char`: the URI characters but `!`, `,`, `[` and `]`) and the `!`s
+    /// of its handle. A `#` is one of them, so `!a# [b]` is the tag `!a#`, not a
+    /// tag and a comment.
     fn scan_tag(&mut self) {
         let verbatim = self.at(1) == b'<';
         self.advance();
@@ -944,7 +983,7 @@ impl<'a> Lexer<'a> {
         loop {
             let c = self.at(0);
             let uri = c.is_ascii_alphanumeric()
-                || b"-_;/?:@&=+$.%!~*'()".contains(&c)
+                || b"-#_;/?:@&=+$.%!~*'()".contains(&c)
                 || (verbatim && matches!(c, b',' | b'[' | b']'));
             if !uri || self.eof() {
                 break;

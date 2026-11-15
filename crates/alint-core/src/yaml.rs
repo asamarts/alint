@@ -23,9 +23,10 @@ use serde::{Deserialize, Serialize};
 /// what aliases expand to instead; ayaml's default of 1,000,000 events refuses
 /// a valid file of a few megabytes, far below the input cap. The input cap
 /// ([`crate::MAX_STRUCTURED_BYTES`]), the depth cap and the alias-expansion
-/// budget come from the constants of [`crate::yaml_depth`], whose guards
-/// refuse the same documents before a parse, and together they bound what one
-/// parse can cost. ayaml's defaults are the same values.
+/// budget come from the constants of [`crate::yaml_depth`], whose guards bound
+/// flow nesting and alias expansion before a parse (counting flow levels only,
+/// and charging aliases more strictly), and together they bound what one parse
+/// can cost. ayaml's defaults are the same values.
 fn limits() -> ayaml::Limits {
     // The parser cannot go deeper than its cap, so the guard's ceiling must not
     // either: a deeper ceiling would let through what the parser refuses.
@@ -62,6 +63,14 @@ pub(crate) fn from_str_seed<'de, S: serde::de::DeserializeSeed<'de>>(
     seed: S,
 ) -> Result<S::Value, ayaml::Error> {
     ayaml::compat::from_str_seed_with_limits(input, &limits(), seed)
+}
+
+/// The events of every document in `input`, from the compatibility reader
+/// [`from_str`] decodes with, under alint's parser limits. alint decodes one
+/// document; the `yaml_depth` tests read a whole stream with this.
+#[cfg(test)]
+pub(crate) fn stream_events(input: &str) -> Result<Vec<ayaml::Event<'_>>, ayaml::Error> {
+    ayaml::compat::parse_events_with_limits(input, &limits())
 }
 
 /// Decode `value` into `T`.
@@ -1073,9 +1082,9 @@ mod tests {
     use std::fmt::Write as _;
 
     /// Every limit a decode runs under. The guards in `yaml_depth` and the
-    /// parser must refuse the same documents, so the depth and alias limits
-    /// are alint's constants, and ayaml's defaults are checked against them so
-    /// that an ayaml release that changes one is noticed.
+    /// parser bound depth and aliases from the same constants, so the depth and
+    /// alias limits are alint's constants, and ayaml's defaults are checked
+    /// against them so that an ayaml release that changes one is noticed.
     #[test]
     fn the_parser_limits_are_alints() {
         use crate::yaml_depth::{

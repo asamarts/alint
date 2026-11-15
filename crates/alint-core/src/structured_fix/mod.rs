@@ -1681,11 +1681,11 @@ mod json_ {
 /// QUOTED scalar's `span.end` runs to end-of-line (past a trailing comment), so
 /// `clamp_quoted_scalar_span` tightens it to the closing quote -- else a splice
 /// silently deletes the comment (the audit's HIGH finding; a plain scalar's end is
-/// already tight). (3) saphyr's parser stops at 256 levels of nesting, in linear
-/// time, but the flow-depth guard of the check side's `Format::parse` (which the
-/// fixer runs first anyway) runs here too, so the resolver refuses what the check
-/// side refuses. A leading BOM is stripped + offset (the check side strips it but
-/// saphyr rejects it).
+/// already tight). (3) saphyr's parser refuses a 256th level of flow nesting
+/// (its flow level is a `u8`) but does not bound block nesting, so the flow-depth
+/// guard of the check side's `Format::parse` (which the fixer runs first anyway)
+/// runs here too, and the resolver refuses what the check side refuses. A leading
+/// BOM is stripped + offset (the check side strips it but saphyr rejects it).
 mod yaml_ {
     use super::PathSeg;
     use saphyr::{LoadableYamlNode, MarkedYaml, Scalar, YamlData};

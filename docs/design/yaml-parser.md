@@ -105,25 +105,47 @@ alint and run before materialization:
 - depth/event checks for duplicate-aware YAML extraction;
 - extends-chain depth, memoization, remote-size, and source-confinement limits.
 
-ayaml enforces the input cap, the depth cap and the alias budget itself, in time linear in the
-input, and `alint_core::yaml` sets those limits from the guards' constants, so the guards and the
-parser refuse the same documents; a test pins every limit and ayaml's defaults (#483). The guards
-stay as defense in depth (decided in #483): they refuse a bomb before any parser reads it, with
-alint's own error, whichever parser reads the text next. saphyr, which reads YAML for source spans
-and structured fixes, stops at 256 levels of its own, in linear time. The cost is one linear pass
-over text that holds a `[`, `{` or `*`, and a second parse of a document that uses an alias.
+ayaml enforces the input cap, a depth cap and an alias budget itself, in time linear in the input,
+and `alint_core::yaml` sets those limits from the guards' constants; a test pins every limit and
+ayaml's defaults (#483). The guards and the parser do not refuse the same documents:
+
+- ayaml's depth cap counts block levels and the height of what an alias replays as well as flow
+  levels, where the flow guard counts flow levels only, so ayaml refuses documents the guard
+  passes;
+- ayaml charges its alias budget only for what each alias replays, where the guard's counting pass
+  charges every node of the expanded tree, the document's own nodes too. The guard is deliberately
+  the stricter of the two on aliases, and refuses some documents ayaml decodes, such as a large
+  document with one small alias;
+- the lexer counts more than ayaml nests in a few places, each of which can only refuse more: after
+  a name ayaml reads two ways, and after the byte-order mark that starts the text (see the lexer
+  rules below). `MAX_YAML_FLOW_DEPTH` lists the valid documents this refuses.
+
+The guards stay as defense in depth (decided in #483): they refuse a bomb before any parser reads
+it, with alint's own error, whichever parser reads the text next. saphyr, which reads YAML for
+source spans and structured fixes, refuses a 256th level of flow nesting of its own (its flow level
+is a `u8`), but does not bound block nesting. The cost is one linear pass over text that holds a
+`[`, `{` or `*`, and a second parse of a document that uses an alias.
 
 The pre-scanner's lexer began as a port of libyaml-rs 0.3.0's scanner, and #483 moved it to the
 token boundaries of ayaml's compatibility reader:
 
 - NEL, LS and PS are content, not line breaks;
-- in a flow collection, a `?` is always the key indicator, and a `:` is the value indicator only
-  before a blank or a flow indicator, or right after a quoted scalar or a closed collection; a
-  comment right after a flow `?` ends at a NEL too, as ayaml reads it (asamarts/ayaml#141);
+- in a flow collection, a `?` is the key indicator, and a `:` is the value indicator before a
+  blank, `,`, `]` or `}`, or right after a quoted scalar or a closed collection. ayaml refuses a
+  `?` right before a flow indicator (`[?[a]]`) and a `:` right before `[` or `{` (`[a:[b]]`), and
+  the lexer reads the indicator in both places, which counts the collection the parser stops at.
+  A comment right after a flow `?` ends at a NEL too, as ayaml reads it (asamarts/ayaml#141);
+- an implicit key's `:` comes at most 1024 characters after the key starts, as ayaml counts it,
+  in characters rather than bytes; ayaml refuses a longer key;
+- a tag runs over ayaml's characters: a verbatim tag over URI characters, a shorthand over tag
+  characters and the `!` that ends a handle. Both hold a `#`, so `!a# [b]` is a tag and a
+  sequence, not a tag and a comment;
 - an anchor or alias name runs to a blank or a flow indicator, with the compatibility reader's
   stops at `?` and `:`. Where the name stops at a `:` before a flow indicator, ayaml's line reader
   reads on (asamarts/ayaml#139) and lets later lines continue a value at any indentation; the
-  lexer does not follow that reading, but counts every `[`, `{` and `*` after the name;
+  lexer does not follow that reading, but counts every `[`, `{` and `*` after the name. An alias
+  name that ends in `:` keeps it only when an anchor before it in its document has that whole
+  name: ayaml forgets those names at `---` and `...`, and so does the lexer;
 - a byte-order mark that starts a line is read three ways: with a column, as libyaml reads it and
   ayaml reads one on a later line or before `---`; without a width, as saphyr reads the text alint
   strips; and as ayaml reads a text that starts with one, the first mark without a width and a
