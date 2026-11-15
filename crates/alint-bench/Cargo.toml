@@ -92,14 +92,14 @@ harness = false
 
 [dependencies]
 alint-core.workspace = true
-alint-dsl.workspace = true
-alint-output.workspace = true
-alint-rules.workspace = true
 rand.workspace = true
 rand_chacha.workspace = true
 tempfile.workspace = true
 
 [dev-dependencies]
+alint-dsl.workspace = true
+alint-output.workspace = true
+alint-rules.workspace = true
 criterion.workspace = true
 regex.workspace = true
 globset.workspace = true

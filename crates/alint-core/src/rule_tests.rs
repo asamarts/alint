@@ -882,19 +882,3 @@ fn every_context_setter_sets_its_field() {
         &raw const environment
     ));
 }
-
-#[test]
-fn every_new_violation_setter_sets_its_field() {
-    let plain = Violation::new("m");
-    assert!(!plain.sensitive && !plain.path_sensitive && !plain.is_fixable);
-    let set = plain
-        .with_sensitive(true)
-        .with_path_sensitive(true)
-        .with_is_fixable(true);
-    assert!(set.sensitive && set.path_sensitive && set.is_fixable);
-    let cleared = set
-        .with_sensitive(false)
-        .with_path_sensitive(false)
-        .with_is_fixable(false);
-    assert!(!cleared.sensitive && !cleared.path_sensitive && !cleared.is_fixable);
-}

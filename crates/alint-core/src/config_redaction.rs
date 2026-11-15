@@ -431,7 +431,7 @@ impl RuleSpec {
                 scope.changed_since = Some(mask());
             }
         }
-        for (field, value) in masked.extra.iter_mut() {
+        for (field, value) in &mut masked.extra {
             let Some(field) = field.as_str().filter(|field| secret(field)) else {
                 continue;
             };

@@ -38,18 +38,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- **Constructors and setters for the structs v0.23 seals** (library API, ADR-0032 decision 3,
-  ADR-0038). Code outside `alint-core` can build each of these without a struct literal, ahead
-  of their becoming `#[non_exhaustive]`:
+- **Constructors and setters for the structs v0.23 seals** (library API, #517, ADR-0032
+  decision 3, ADR-0038). Code outside `alint-core` builds each of these without a struct literal,
+  which `#[non_exhaustive]` no longer allows (see Changed):
   - `Context::new(root, index)`, with `with_registry`, `with_facts`, `with_vars`,
-    `with_git_tracked`, `with_git_blame`, `with_analysis_time`, `with_process_environment` and
-    `with_trace`. `Context` is now `Clone`, so a copy with one part changed is
-    `ctx.clone().with_trace(None)`.
+    `with_git_tracked`, `with_git_blame`, `with_analysis_time` and `with_process_environment`.
+    `Context` is now `Clone`, so a copy with one part changed is `ctx.clone().with_vars(None)`.
   - `RuleSpec::new(id, kind, level)` and `NestedRuleSpec::new(kind)`, with a `with_*` setter
     for each other field.
-  - `WalkOptions::default()`, with `with_respect_gitignore` and `with_extra_ignores`.
-  - `Violation::with_sensitive`, `with_path_sensitive` and `with_is_fixable`, beside the
-    existing `Violation::new` and its setters.
+  - `WalkOptions::default()`, as before, with `with_respect_gitignore` and `with_extra_ignores`.
+  - `Violation::new` and its existing setters are unchanged; its other fields are assigned.
 
 ### Removed
 
@@ -109,12 +107,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Source spans and structured YAML fixes still use saphyr. Before v0.23.0 ships, differential
   fuzzing against `yaml_serde` (#482) and a depth guard re-derived from ayaml's tokens (#483)
   qualify the parser (ADR-0035).
-- **Breaking (library API): YAML values and errors are alint's own types** (#484, ADR-0038). No
-  public item of `alint-core`, `alint-dsl` or `alint-testkit` names a YAML parser crate any more,
-  so a later change of parser is not a breaking change. `alint_core::yaml` holds `Value`,
-  `Mapping`, `Sequence`, `Error` and `Location`, and `from_str`, `from_value`, `to_value` and
-  `to_string`, which decode and encode under the limits alint uses. In place of the
-  `yaml_serde` types of 0.22:
+- **Breaking (library API): YAML values and errors are alint's own types** (#484, #516,
+  ADR-0038). No public item of `alint-core`, `alint-dsl` or `alint-testkit` names a YAML parser
+  crate any more, so a later change of parser is not a breaking change. `alint_core::yaml` holds
+  `Value`, `Mapping`, `Sequence`, their iterators (`SequenceIter`, `SequenceIterMut`,
+  `SequenceIntoIter`, `MappingIter`, `MappingIterMut` and `MappingIntoIter`), `Error` and
+  `Location`. Its functions are `from_str`, which decodes under alint's parser limits, and
+  `from_value`, `to_value` and `to_string`. In place of the `yaml_serde` types of 0.22:
   - `RuleSpec::extra`, `NestedRuleSpec::extra` and `RuleEntry::extra()` hold an
     `alint_core::yaml::Mapping`. Read an option with `get("name")` and the `Value` accessors
     (`as_str`, `as_bool`, `as_u64`, `as_mapping`, `as_sequence` and the rest) in place of a
@@ -124,17 +123,28 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     `alint_testkit::PolicyTestParseError::Yaml` hold an `alint_core::yaml::Error`, which
     `TreeSpec::from_yaml` and `TreeSpec::to_yaml` return as well.
   - `alint_core::Error` is `#[non_exhaustive]`, so a `match` on it needs a wildcard arm.
+  - `Value` has `is_null`, `is_bool`, `is_number`, `is_string`, `is_sequence`, `is_mapping` and
+    `tag`, the `as_*` accessors, `get`, and indexing by string key or by integer, which can also
+    assign. It converts from `bool`, every integer and float type, `String`, `&str`,
+    `Vec<Value>`, `Sequence` and `Mapping`, and compares with `==` against strings, `bool` and
+    the integer and float types up to 64 bits. `Sequence` and `Mapping` iterate by reference,
+    mutably and by value, and implement `FromIterator` and `Extend`.
+
+  What the `yaml_serde` types did that these do not: `Mapping`'s `get`, `get_mut`,
+  `contains_key`, `remove` and indexing find string keys only, so iterate to find another key;
+  `Value` is not a serde `Deserializer`, so decode one with `from_value`; and `Error` has a
+  message and a line and column, without the byte offset.
   - `alint_core::template::render_mapping`, `render_value` and `render_nested_options` are no
     longer public, and neither are `alint_dsl::reject_command_rules_in`,
     `reject_fix_promotion_in`, `reject_fix_promotion_templates_in`,
     `reject_spawning_fix_op_templates_in`, `reject_spawning_fix_ops_in` and
     `reject_spawning_templates_in`. The loader still runs them on every configuration.
 - **Breaking (library API): `Violation`, `Context`, `RuleSpec`, `NestedRuleSpec` and
-  `WalkOptions` are `#[non_exhaustive]`** (ADR-0032 decision 3, ADR-0038). Adding a field to them
-  is no longer a breaking change, and code outside `alint-core` can no longer build them with a
-  struct literal or a functional record update (`..other`). Build them with the constructors and
-  setters listed under Added; the fields stay public to read and to assign, and a pattern that
-  destructures one needs `..`.
+  `WalkOptions` are `#[non_exhaustive]`** (#518, ADR-0032 decision 3, ADR-0038). Adding a field
+  to them is no longer a breaking change, and code outside `alint-core` can no longer build them
+  with a struct literal or a functional record update (`..other`). Build them with the
+  constructors and setters listed under Added; the fields stay public to read and to assign, and
+  a pattern that destructures one needs `..`.
 
 ### Fixed
 

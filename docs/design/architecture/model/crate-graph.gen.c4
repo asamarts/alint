@@ -11,9 +11,6 @@ model {
   alint.cli.alintBin -> alint.cli.rules
   alint.cli.alintBin -> alint.tooling.testkit
   alint.tooling.bench -> alint.cli.core
-  alint.tooling.bench -> alint.cli.dsl
-  alint.tooling.bench -> alint.cli.output
-  alint.tooling.bench -> alint.cli.rules
   alint.cli.dsl -> alint.cli.core
   alint.lspServer.lspd -> alint.cli.core
   alint.lspServer.lspd -> alint.cli.dsl
@@ -30,6 +27,9 @@ model {
   alint.tooling.xtask -> alint.cli.rules
   alint.tooling.xtask -> alint.tooling.testkit
   // Dev/build-only edges (dashed via the `dev` kind).
+  alint.tooling.bench -[dev]-> alint.cli.dsl
+  alint.tooling.bench -[dev]-> alint.cli.output
+  alint.tooling.bench -[dev]-> alint.cli.rules
   alint.cli.dsl -[dev]-> alint.cli.rules
   alint.tooling.e2e -[dev]-> alint.cli.core
   alint.tooling.e2e -[dev]-> alint.cli.dsl

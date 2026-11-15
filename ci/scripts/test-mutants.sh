@@ -7,6 +7,7 @@
 #     tree fail, since then nothing was tested;
 #   - the pinned cargo-mutants is installed when the runner has another version;
 #   - only a diff file or a crate name reaches cargo mutants.
+#   - cargo mutants runs with each process's address space capped and no core files.
 #
 # Stub bodies are single-quoted on purpose: they expand when the stub runs.
 # shellcheck disable=SC2016
@@ -36,6 +37,7 @@ echo "cargo $*" >> "$STUB_LOG"
 case "$1 $2" in
   "mutants --version") echo "cargo-mutants ${STUB_VERSION:?}"; exit 0 ;;
   "mutants "*)
+    echo "limits $(ulimit -v) $(ulimit -c)" >> "$STUB_LOG"
     out=
     while [[ $# -gt 0 ]]; do [[ "$1" == --output ]] && out=$2; shift; done
     mkdir -p "$out/mutants.out"
@@ -163,6 +165,25 @@ for args in "--package alint;true" "--package" "--in-diff $sandbox/missing.diff"
     ok "rejected before running: $args"
   else
     bad "must reject '$args' without running cargo mutants"
+  fi
+done
+
+run -- --in-diff "$sandbox/pr.diff"
+if logged '^limits 12582912 0$'; then
+  ok "cargo mutants runs with a 12 GiB address-space cap and no core files"
+else
+  bad "cargo mutants must run under 'ulimit -v 12582912' and 'ulimit -c 0'"
+fi
+
+run MUTANTS_MEMORY_LIMIT_KIB=1048576 -- --in-diff "$sandbox/pr.diff"
+if logged '^limits 1048576 0$'; then ok "MUTANTS_MEMORY_LIMIT_KIB sets the cap"; else bad "MUTANTS_MEMORY_LIMIT_KIB must set the cap"; fi
+
+for limit in 0 12G -1; do
+  run MUTANTS_MEMORY_LIMIT_KIB="$limit" -- --in-diff "$sandbox/pr.diff"
+  if [[ "$rc" -ne 0 ]] && ! logged '^cargo mutants --'; then
+    ok "a memory cap of '$limit' is rejected"
+  else
+    bad "a memory cap of '$limit' must be rejected"
   fi
 done
 

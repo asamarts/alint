@@ -897,8 +897,8 @@ pub const SPAWNING_FIX_OPS: &[&str] = &["git_untrack", "command"];
 /// `alint_core::facts::reject_custom_facts_in`: extending a ruleset must never
 /// gain arbitrary code execution. `source` identifies the extended config.
 ///
-/// (Kept its original name for API stability; it now gates the
-/// whole spawning-kind set, not only `kind: command`.)
+/// (Kept its original name; it now gates the whole spawning-kind set, not
+/// only `kind: command`.)
 pub(crate) fn reject_command_rules_in(
     rules: &[Mapping],
     source: &str,

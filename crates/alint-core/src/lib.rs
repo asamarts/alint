@@ -120,20 +120,44 @@ pub use walker::{
 };
 pub use when::{WhenEnv, WhenError, WhenExpr};
 
-/// The types alint-core seals, as a crate that depends on it sees them. Each
-/// block must fail to compile: a sealed struct cannot be built with a literal
-/// or a functional record update, and a `match` on a sealed enum needs a
-/// wildcard arm (ADR-0030 decision 2, ADR-0032 decision 3, ADR-0038 decision
-/// 4). A block that compiles means its type lost `#[non_exhaustive]`.
+/// The types alint-core seals, as a crate that depends on it sees them
+/// (ADR-0030 decision 2, ADR-0032 decision 3, ADR-0038 decision 4).
+///
+/// Each type has two blocks. The first must compile: it uses the type's
+/// constructor and a field, or matches every variant with a wildcard arm. The
+/// second must fail to compile: it does the same with a functional record
+/// update, which a sealed struct refuses, or without the wildcard arm, which a
+/// sealed enum needs. With the first block compiling, the seal is the only
+/// reason the second can fail, so a second block that compiles means its type
+/// lost `#[non_exhaustive]`. `sealed_error_blocks_name_every_variant` keeps the
+/// `Error` blocks' variants in step with the enum.
+///
+/// ```
+/// let mut violation = alint_core::Violation::new("m");
+/// violation.line = Some(1);
+/// ```
 ///
 /// ```compile_fail
 /// let _ = alint_core::Violation { line: Some(1), ..alint_core::Violation::new("m") };
+/// ```
+///
+/// ```
+/// fn untraced<'a>(ctx: &alint_core::Context<'a>) -> alint_core::Context<'a> {
+///     let mut copy = ctx.clone();
+///     copy.trace = None;
+///     copy
+/// }
 /// ```
 ///
 /// ```compile_fail
 /// fn untraced<'a>(ctx: &alint_core::Context<'a>) -> alint_core::Context<'a> {
 ///     alint_core::Context { trace: None, ..ctx.clone() }
 /// }
+/// ```
+///
+/// ```
+/// let mut spec = alint_core::RuleSpec::new("r", "file_exists", alint_core::Level::Error);
+/// spec.sensitive = true;
 /// ```
 ///
 /// ```compile_fail
@@ -143,6 +167,11 @@ pub use when::{WhenEnv, WhenError, WhenExpr};
 /// };
 /// ```
 ///
+/// ```
+/// let mut spec = alint_core::NestedRuleSpec::new("file_exists");
+/// spec.sensitive = true;
+/// ```
+///
 /// ```compile_fail
 /// let _ = alint_core::NestedRuleSpec {
 ///     sensitive: true,
@@ -150,8 +179,18 @@ pub use when::{WhenEnv, WhenError, WhenExpr};
 /// };
 /// ```
 ///
+/// ```
+/// let mut options: alint_core::WalkOptions = Default::default();
+/// options.respect_gitignore = false;
+/// ```
+///
 /// ```compile_fail
 /// let _ = alint_core::WalkOptions { respect_gitignore: false, ..Default::default() };
+/// ```
+///
+/// ```
+/// let mut context = alint_core::FixContext::new(std::path::Path::new("."), false);
+/// context.dry_run = true;
 /// ```
 ///
 /// ```compile_fail
@@ -161,13 +200,42 @@ pub use when::{WhenEnv, WhenError, WhenExpr};
 /// };
 /// ```
 ///
+/// ```
+/// let mut config = alint_core::Config::new(1, Vec::new());
+/// config.nested_configs = true;
+/// ```
+///
 /// ```compile_fail
 /// let _ = alint_core::Config { nested_configs: true, ..alint_core::Config::new(1, Vec::new()) };
+/// ```
+///
+/// ```
+/// fn ungated(mut spec: alint_core::CompiledNestedSpec) -> alint_core::CompiledNestedSpec {
+///     spec.when = None;
+///     spec
+/// }
 /// ```
 ///
 /// ```compile_fail
 /// fn ungated(spec: alint_core::CompiledNestedSpec) -> alint_core::CompiledNestedSpec {
 ///     alint_core::CompiledNestedSpec { when: None, ..spec }
+/// }
+/// ```
+///
+/// ```
+/// fn name(error: &alint_core::Error) -> &'static str {
+///     match error {
+///         alint_core::Error::Io { .. } => "io",
+///         alint_core::Error::Walk(_) => "walk",
+///         alint_core::Error::Glob { .. } => "glob",
+///         alint_core::Error::Yaml(_) => "yaml",
+///         alint_core::Error::UnknownRuleKind(_) => "kind",
+///         alint_core::Error::RuleConfig { .. } => "rule",
+///         alint_core::Error::FileNotInIndex { .. } => "index",
+///         alint_core::Error::Other(_) => "other",
+///         alint_core::Error::Internal(_) => "internal",
+///         _ => "later",
+///     }
 /// }
 /// ```
 ///
@@ -188,3 +256,49 @@ pub use when::{WhenEnv, WhenError, WhenExpr};
 /// ```
 #[cfg(doctest)]
 pub struct SealedTypes;
+
+#[cfg(test)]
+mod sealed_types_tests {
+    /// The variants an `Error` block of [`super::SealedTypes`] names.
+    fn named_in(block: &str) -> Vec<&str> {
+        block
+            .split("alint_core::Error::")
+            .skip(1)
+            .map(|rest| rest.split(|c: char| !c.is_alphanumeric()).next().unwrap())
+            .collect()
+    }
+
+    /// Adding a variant to `Error` makes the `compile_fail` block fail for a
+    /// missing arm, sealed or not, so both `Error` blocks must name every
+    /// variant.
+    #[test]
+    fn sealed_error_blocks_name_every_variant() {
+        let enum_body = include_str!("error.rs")
+            .split("pub enum Error {")
+            .nth(1)
+            .and_then(|rest| rest.split("\n}").next())
+            .unwrap();
+        let variants: Vec<&str> = enum_body
+            .lines()
+            .filter_map(|line| line.strip_prefix("    "))
+            .filter(|line| line.starts_with(|c: char| c.is_ascii_uppercase()))
+            .map(|line| line.split(|c: char| !c.is_alphanumeric()).next().unwrap())
+            .collect();
+        assert_eq!(variants.len(), 9, "{variants:?}");
+        let docs = include_str!("lib.rs")
+            .split("pub struct SealedTypes;")
+            .next()
+            .unwrap();
+        // The text between each opening and closing fence.
+        let blocks: Vec<&str> = docs
+            .split("/// ```")
+            .skip(1)
+            .step_by(2)
+            .filter(|block| block.contains("match error"))
+            .collect();
+        assert_eq!(blocks.len(), 2);
+        for block in blocks {
+            assert_eq!(named_in(block), variants, "{block}");
+        }
+    }
+}

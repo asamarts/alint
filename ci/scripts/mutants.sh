@@ -25,6 +25,11 @@ cd "$REPO_ROOT"
 
 CARGO_MUTANTS_VERSION="27.1.0"
 BUDGET_SECONDS="${MUTANTS_BUDGET_SECONDS:-5400}"
+# A mutant can make a loop allocate without bound, such as an iterator that never ends and a
+# test that collects it. On a hosted runner that exhausts the memory and the runner is lost,
+# so the job fails with no log (#520 lost two runs that way). Each process's address space is
+# capped instead: such a mutant aborts its test, which counts as caught, and writes no core file.
+MEMORY_LIMIT_KIB="${MUTANTS_MEMORY_LIMIT_KIB:-12582912}"
 OUTPUT=target/mutants
 REPORT="$OUTPUT/mutants.out"
 
@@ -52,6 +57,7 @@ case "$1" in
   *) usage ;;
 esac
 [[ "$BUDGET_SECONDS" =~ ^[1-9][0-9]*$ ]] || { echo "[mutants] MUTANTS_BUDGET_SECONDS must be a positive integer" >&2; exit 1; }
+[[ "$MEMORY_LIMIT_KIB" =~ ^[1-9][0-9]*$ ]] || { echo "[mutants] MUTANTS_MEMORY_LIMIT_KIB must be a positive integer" >&2; exit 1; }
 
 if [[ "$(cargo mutants --version 2>/dev/null | awk '{ print $NF }' || true)" != "${CARGO_MUTANTS_VERSION}" ]]; then
   echo "==> cargo-mutants ${CARGO_MUTANTS_VERSION} not found; installing (cargo install --locked)"
@@ -65,6 +71,8 @@ fi
 rm -rf "$OUTPUT"
 mkdir -p "$OUTPUT"
 echo "==> cargo mutants ${filter[*]} (budget ${BUDGET_SECONDS} s)"
+ulimit -v "$MEMORY_LIMIT_KIB"
+ulimit -c 0
 rc=0
 started=$SECONDS
 RUSTFLAGS='' timeout --signal=INT --kill-after=60 "$BUDGET_SECONDS" \

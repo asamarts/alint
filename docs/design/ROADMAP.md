@@ -1789,11 +1789,13 @@ and
 - **Two `alint test` capability fixes.** A spawning rule nested in `require:` needs the spawn
   capability (#515), and a test's `given.env` no longer reaches the runner's own Git commands.
   v0.20.0 to v0.22.1 are affected, and both ship in v0.23.0 only.
-- **One library API break.** YAML parser types leave the public API of `alint-core`,
-  `alint-dsl` and `alint-testkit` for alint's own (#484,
-  [ADR-0038](https://github.com/asamarts/alint/blob/main/docs/adr/0038-owned-yaml-types-and-the-api-gate.md)),
+- **Library API breaks.** YAML parser types leave the public API of `alint-core`, `alint-dsl`
+  and `alint-testkit` for alint's own (#484,
+  [ADR-0038](https://github.com/asamarts/alint/blob/main/docs/adr/0038-owned-yaml-types-and-the-api-gate.md)).
   `Violation`, `Context`, `RuleSpec`, `NestedRuleSpec` and `WalkOptions` become
   `#[non_exhaustive]` with constructors, and `alint_core::Error` becomes `#[non_exhaustive]` too.
+  `baseline::Fingerprints` and `baseline::fingerprints`, which matched the v0.21 fingerprint,
+  are removed.
 - **A pure-Rust YAML parser.** alint parses YAML with ayaml (#510), and the release ships it
   once differential parser fuzzing (#482) and the re-derived depth guard (#483) qualify it
   ([ADR-0035](../adr/0035-keep-the-early-ayaml-cutover.md)).

@@ -180,13 +180,6 @@ impl RuleSpec {
         self
     }
 
-    /// Sets [`Self::sensitive_fields`].
-    #[must_use]
-    pub fn with_sensitive_fields(mut self, sensitive_fields: BTreeSet<String>) -> Self {
-        self.sensitive_fields = sensitive_fields;
-        self
-    }
-
     /// Sets [`Self::fix`].
     #[must_use]
     pub fn with_fix(mut self, fix: Option<FixSpec>) -> Self {
@@ -369,7 +362,6 @@ mod tests {
             .with_when(Some("facts.x".into()))
             .with_expect_matches(true)
             .with_sensitive(true)
-            .with_sensitive_fields(BTreeSet::from(["message".to_string()]))
             .with_fix(Some(
                 crate::yaml::from_str("file_create: {content: x}\n").unwrap(),
             ))
@@ -383,13 +375,15 @@ mod tests {
         );
         assert_eq!(spec.when.as_deref(), Some("facts.x"));
         assert!(spec.expect_matches && spec.sensitive);
-        assert_eq!(
-            spec.sensitive_fields,
-            BTreeSet::from(["message".to_string()])
-        );
         assert_eq!(spec.fix.as_ref().map(FixSpec::op_name), Some("file_create"));
         assert!(spec.scope_filter.is_some());
         assert_eq!(spec.extra, options());
+
+        // Each flag setter sets its own flag only.
+        let expect = RuleSpec::new("r", "file_exists", Level::Warning).with_expect_matches(true);
+        assert!(expect.expect_matches && !expect.sensitive);
+        let sensitive = RuleSpec::new("r", "file_exists", Level::Warning).with_sensitive(true);
+        assert!(!sensitive.expect_matches && sensitive.sensitive);
     }
 
     #[test]
@@ -419,5 +413,11 @@ mod tests {
         assert!(spec.expect_matches && spec.sensitive);
         assert!(spec.scope_filter.is_some());
         assert_eq!(spec.extra, options());
+
+        // Each flag setter sets its own flag only.
+        let expect = NestedRuleSpec::new("file_exists").with_expect_matches(true);
+        assert!(expect.expect_matches && !expect.sensitive);
+        let sensitive = NestedRuleSpec::new("file_exists").with_sensitive(true);
+        assert!(!sensitive.expect_matches && sensitive.sensitive);
     }
 }
