@@ -212,10 +212,10 @@ it must respect:
 
 - **What it compares.** It runs `yaml_serde` and ayaml through the entry points alint uses:
   `Value` parsing, the JSON tree the structured-format rules query, and Serde typed decoding into
-  `Config` and of each rule into `RuleSpec`. Since #510 `yaml_serde` is the oracle only, a
-  dev-dependency of `alint-core` only, and no runtime dependency of any published crate
-  (ADR-0035, ADR-0039). alint reads no ayaml events in v0.23, so the event stream joins the
-  harness with the saphyr exit in v0.24.
+  `Config` and of each rule into `RuleSpec`. Since #510 `yaml_serde` is the oracle only:
+  `alint-core` depends on it behind the test-only `yaml-reference` feature, and no published
+  crate depends on it at run time (ADR-0035, ADR-0041). alint reads no ayaml events in v0.23, so
+  the event stream joins the harness with the saphyr exit in v0.24.
 - **Inputs.** Generated token soup and documents, alint's committed YAML, and mutations of both.
 - **Results.** Each input is classified into six classes: #482's five, with "only one rejects"
   split by which parser rejects. Documented deviations are an explicit allowlist, and any other

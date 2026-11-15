@@ -221,6 +221,19 @@ Every new rule kind needs:
 For per-file rules, add the rule to the `S2` (`s2_content`) macro bench scenario
 if it's a content rule that fans out over `**/*.rs`.
 
+A change to how alint reads YAML, or a bump of ayaml, also runs the workspace's
+tests in compare mode (ADR-0041), which checks every decode against libyaml and
+saphyr. CI's `YAML compare` job runs it; locally:
+
+```sh
+ci/scripts/test-yaml-compare.sh   # ALINT_YAML_PARSER=compare + the yaml-reference feature
+```
+
+A difference it reports is either ayaml's to fix or a deviation to document in
+the differential harness's allowlist (`docs/design/yaml-parser.md`), which the
+owner approves; `ALINT_YAML_COMPARE_LOG=<file>` lists the differences it
+explained.
+
 ### PR conventions
 
 - Conventional Commits style: `feat(rules): add no_lockfile_drift`,

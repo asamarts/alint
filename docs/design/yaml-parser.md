@@ -166,9 +166,9 @@ differential harness below compares the parser itself with the one v0.22 used.
 ## Differential harness
 
 `crates/alint-core/src/yaml_differential.rs` (#482) compares ayaml with `yaml_serde` 0.10.7, the
-parser v0.22 used, which stays as the oracle: a dev-dependency of `alint-core` only, and no
-runtime dependency of any published crate
-([ADR-0039](../adr/0039-the-yaml-oracle-as-a-dev-dependency-of-alint-core.md)).
+parser v0.22 used, which stays as the oracle. It is a dependency of `alint-core` only behind the
+test-only `yaml-reference` feature, and no runtime dependency of any published crate (ADR-0041,
+superseding ADR-0039); the parser facade below uses it as its libyaml backend.
 
 - **Entry points.** Both parsers decode each input four ways: into a value tree, as every option
   and `extends:` source is; into the `serde_json` tree that the structured-format rules query,
