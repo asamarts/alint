@@ -1343,6 +1343,64 @@ mod tests {
         assert_eq!(sequence.into_iter().len(), 3);
     }
 
+    /// Each of the six iterators knows its length and runs from both ends.
+    /// Every collection takes one item more than it expects, so an iterator
+    /// that never ends fails here instead of exhausting memory.
+    #[test]
+    fn every_iterator_knows_its_length_and_runs_backward() {
+        let mut sequence: Sequence = from_str("[1, 2, 3]").unwrap();
+        let mut mapping: Mapping = from_str("a: 1\nb: 2\nc: 3\n").unwrap();
+        for hint in [
+            sequence.iter().size_hint(),
+            sequence.iter_mut().size_hint(),
+            sequence.clone().into_iter().size_hint(),
+            mapping.iter().size_hint(),
+            mapping.iter_mut().size_hint(),
+            mapping.clone().into_iter().size_hint(),
+        ] {
+            assert_eq!(hint, (3, Some(3)));
+        }
+
+        let backward = [Value::from(3_i32), Value::from(2_i32), Value::from(1_i32)];
+        let values: Vec<Value> = sequence.iter().rev().take(4).cloned().collect();
+        assert_eq!(values, backward);
+        let values: Vec<Value> = sequence
+            .iter_mut()
+            .rev()
+            .take(4)
+            .map(|v| v.clone())
+            .collect();
+        assert_eq!(values, backward);
+        let values: Vec<Value> = sequence.clone().into_iter().rev().take(4).collect();
+        assert_eq!(values, backward);
+
+        let key = |key: &Value| key.as_str().unwrap().to_string();
+        let keys: Vec<String> = mapping.iter().rev().take(4).map(|(k, _)| key(k)).collect();
+        assert_eq!(keys, ["c", "b", "a"]);
+        let keys: Vec<String> = mapping
+            .iter_mut()
+            .rev()
+            .take(4)
+            .map(|(k, _)| key(k))
+            .collect();
+        assert_eq!(keys, ["c", "b", "a"]);
+        let keys: Vec<String> = mapping
+            .into_iter()
+            .rev()
+            .take(4)
+            .map(|(k, _)| key(&k))
+            .collect();
+        assert_eq!(keys, ["c", "b", "a"]);
+
+        // Taking from the front shortens what the back can reach.
+        let mut values = sequence.into_iter();
+        assert_eq!(values.next().unwrap(), 1_i32);
+        assert_eq!(values.size_hint(), (2, Some(2)));
+        assert_eq!(values.next_back().unwrap(), 3_i32);
+        assert_eq!(values.next_back().unwrap(), 2_i32);
+        assert!(values.next_back().is_none());
+    }
+
     /// Two mappings with the same entries are equal in any order.
     #[test]
     fn mapping_equality_ignores_order() {
