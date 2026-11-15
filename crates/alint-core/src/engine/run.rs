@@ -38,6 +38,7 @@ impl Engine {
             fix_size_limit: Some(1 << 20),
             analysis_time: None,
             process_environment: None,
+            condition_environment: None,
             analysis_time_required: OnceLock::new(),
             analysis_time_cache: Mutex::new(None),
             changed_paths: None,
@@ -55,6 +56,7 @@ impl Engine {
             fix_size_limit: Some(1 << 20),
             analysis_time: None,
             process_environment: None,
+            condition_environment: None,
             analysis_time_required: OnceLock::new(),
             analysis_time_cache: Mutex::new(None),
             changed_paths: None,
@@ -107,6 +109,24 @@ impl Engine {
     pub fn with_process_environment(mut self, environment: BTreeMap<String, String>) -> Self {
         self.process_environment = Some(environment);
         self
+    }
+
+    /// What `env.*` in a `when:` condition and a legacy `${VAR}` expansion
+    /// read, in place of the [process environment](Self::with_process_environment)
+    /// they read by default. `alint test` leaves out of it the host variables
+    /// it passes its granted commands (`PATH`), so a condition cannot read them.
+    #[must_use]
+    pub fn with_condition_environment(mut self, environment: BTreeMap<String, String>) -> Self {
+        self.condition_environment = Some(environment);
+        self
+    }
+
+    /// The environment conditions read: the condition environment when set,
+    /// else the process environment; `None` reads the host's.
+    pub(super) fn when_environment(&self) -> Option<&BTreeMap<String, String>> {
+        self.condition_environment
+            .as_ref()
+            .or(self.process_environment.as_ref())
     }
 
     /// Override the reference instant used by every time-dependent rule.
@@ -208,7 +228,7 @@ impl Engine {
             facts: &fact_values,
             vars: &self.vars,
             iter: None,
-            env: self.process_environment.as_ref(),
+            env: self.when_environment(),
         };
         if self
             .resolve_manifest_paths(root, index, &when_env, None)
@@ -226,6 +246,7 @@ impl Engine {
             git_blame: None,
             analysis_time: None,
             process_environment: self.process_environment.as_ref(),
+            condition_environment: self.condition_environment.as_ref(),
             trace: None,
         };
         let target = Self::normalized_write_target(root, path);
@@ -320,6 +341,7 @@ impl Engine {
             fix_size_limit: self.fix_size_limit,
             analysis_time: self.analysis_time,
             process_environment: self.process_environment.clone(),
+            condition_environment: self.condition_environment.clone(),
             analysis_time_required: OnceLock::new(),
             analysis_time_cache: Mutex::new(None),
             changed_paths: self.changed_paths.clone(),
@@ -444,7 +466,7 @@ impl Engine {
             facts: &fact_values,
             vars: &self.vars,
             iter: None,
-            env: self.process_environment.as_ref(),
+            env: self.when_environment(),
         };
 
         let t_git = Instant::now();
@@ -481,6 +503,7 @@ impl Engine {
             git_blame: git_blame.as_ref(),
             analysis_time: analysis_time.as_ref(),
             process_environment: self.process_environment.as_ref(),
+            condition_environment: self.condition_environment.as_ref(),
             trace: trace.map(|trace| trace as &dyn TraceSink),
         };
         let filtered_ctx = filtered_index.as_ref().map(|fi| Context {
@@ -493,6 +516,7 @@ impl Engine {
             git_blame: git_blame.as_ref(),
             analysis_time: analysis_time.as_ref(),
             process_environment: self.process_environment.as_ref(),
+            condition_environment: self.condition_environment.as_ref(),
             trace: trace.map(|trace| trace as &dyn TraceSink),
         });
         let git_file_only_ctx = git_tracked_indexes
@@ -508,6 +532,7 @@ impl Engine {
                 git_blame: git_blame.as_ref(),
                 analysis_time: analysis_time.as_ref(),
                 process_environment: self.process_environment.as_ref(),
+                condition_environment: self.condition_environment.as_ref(),
                 trace: trace.map(|trace| trace as &dyn TraceSink),
             });
         let git_dir_aware_ctx = git_tracked_indexes
@@ -523,6 +548,7 @@ impl Engine {
                 git_blame: git_blame.as_ref(),
                 analysis_time: analysis_time.as_ref(),
                 process_environment: self.process_environment.as_ref(),
+                condition_environment: self.condition_environment.as_ref(),
                 trace: trace.map(|trace| trace as &dyn TraceSink),
             });
 
@@ -945,7 +971,7 @@ impl Engine {
             facts: fact_values,
             vars: &self.vars,
             iter: None,
-            env: self.process_environment.as_ref(),
+            env: self.when_environment(),
         };
         let git_required = self.git_requirements(index, &when_env)?;
         let git_tracked = Self::collect_git_tracked_if_needed(root, &git_required);
@@ -969,6 +995,7 @@ impl Engine {
             git_blame: git_blame.as_ref(),
             analysis_time: analysis_time.as_ref(),
             process_environment: self.process_environment.as_ref(),
+            condition_environment: self.condition_environment.as_ref(),
             trace: None,
         };
 

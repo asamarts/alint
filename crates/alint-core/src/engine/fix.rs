@@ -809,7 +809,7 @@ impl Engine {
             facts: &fact_values,
             vars: &self.vars,
             iter: None,
-            env: self.process_environment.as_ref(),
+            env: self.when_environment(),
         };
         let git_required = self.git_requirements(index, &when_env)?;
         let git_tracked = Self::collect_git_tracked_if_needed(root, &git_required);
@@ -827,6 +827,7 @@ impl Engine {
             git_blame: git_blame.as_ref(),
             analysis_time,
             process_environment: self.process_environment.as_ref(),
+            condition_environment: self.condition_environment.as_ref(),
             trace: None,
         };
         let filtered_ctx = filtered_index.as_ref().map(|fi| Context {
@@ -839,6 +840,7 @@ impl Engine {
             git_blame: git_blame.as_ref(),
             analysis_time,
             process_environment: self.process_environment.as_ref(),
+            condition_environment: self.condition_environment.as_ref(),
             trace: None,
         });
         let git_file_only_ctx = git_tracked_indexes
@@ -854,6 +856,7 @@ impl Engine {
                 git_blame: git_blame.as_ref(),
                 analysis_time,
                 process_environment: self.process_environment.as_ref(),
+                condition_environment: self.condition_environment.as_ref(),
                 trace: None,
             });
         let git_dir_aware_ctx = git_tracked_indexes
@@ -869,6 +872,7 @@ impl Engine {
                 git_blame: git_blame.as_ref(),
                 analysis_time,
                 process_environment: self.process_environment.as_ref(),
+                condition_environment: self.condition_environment.as_ref(),
                 trace: None,
             });
         // Compose mode for a real (non-dry-run) pass: content fixers route

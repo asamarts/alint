@@ -17,7 +17,9 @@ use tempfile::TempDir;
 
 use matching::match_step;
 
-use crate::confinement::{ConfinementError, PackageEntryKind, PackageRoot};
+use crate::confinement::{
+    ConfinementError, PackageEntryKind, PackageRoot, validate_repository_symlinks,
+};
 use crate::error::{Error, Result};
 use crate::policy_test::{
     ExpectedExit, PolicyCommit, PolicyGit, PolicyTest, StepExpectation, TestStep,
@@ -50,6 +52,7 @@ struct ExecutionContext<'a> {
     source_provider: Arc<dyn alint_dsl::ConfigSourceProvider>,
     environment: Arc<dyn alint_dsl::EnvironmentProvider>,
     process_environment: &'a BTreeMap<String, String>,
+    condition_environment: &'a BTreeMap<String, String>,
     test: &'a PolicyTest,
     package: &'a PackageRoot,
 }
@@ -62,6 +65,7 @@ struct PreparedPolicyTest {
     source_provider: Arc<dyn alint_dsl::ConfigSourceProvider>,
     environment: Arc<dyn alint_dsl::EnvironmentProvider>,
     process_environment: BTreeMap<String, String>,
+    condition_environment: BTreeMap<String, String>,
     _git_environment: alint_core::git::ScopedProcessEnvironment,
 }
 
@@ -146,6 +150,7 @@ impl Runner {
             source_provider: prepared.source_provider.clone(),
             environment: prepared.environment.clone(),
             process_environment: &prepared.process_environment,
+            condition_environment: &prepared.condition_environment,
             test,
             package: &prepared.package,
         };
@@ -174,11 +179,10 @@ impl Runner {
             source: source_error,
         })?;
         materialize_repository(test, &package, &repository)?;
-        let runner_environment = runner_git_environment(
-            sandbox.path(),
-            self.options.allow_host_keyring && test.capabilities.host_keyring,
-        )?;
+        let host_keyring = self.options.allow_host_keyring && test.capabilities.host_keyring;
+        let runner_environment = runner_git_environment(sandbox.path(), host_keyring)?;
         let process_environment = granted_process_environment(test, &runner_environment);
+        let condition_environment = condition_environment(test, &runner_environment, host_keyring);
         if let Some(git_spec) = &test.given.git {
             setup_git(&repository, git_spec, &runner_environment)?;
         }
@@ -195,6 +199,7 @@ impl Runner {
             source_provider,
             environment,
             process_environment,
+            condition_environment,
             _git_environment: git_environment,
         })
     }
@@ -223,6 +228,7 @@ impl Runner {
                 source_provider: prepared.source_provider.clone(),
                 environment: prepared.environment.clone(),
                 process_environment: &prepared.process_environment,
+                condition_environment: &prepared.condition_environment,
                 test,
                 package,
             };
@@ -230,6 +236,9 @@ impl Runner {
             let mut mismatches = Vec::new();
             for (index, (step, expectation)) in test.when.iter().zip(&test.expect).enumerate() {
                 let mut observation = self.execute_step(*step, expectation, &context)?;
+                if matches!(step, TestStep::Fix | TestStep::FixUnsafe) {
+                    validate_repository_symlinks(repository).map_err(Error::from)?;
+                }
                 sanitize_observation(&mut observation, &context);
                 mismatches.extend(match_step(index, expectation, &observation));
                 observations.push(observation);
@@ -413,7 +422,8 @@ impl Runner {
             .with_facts(config.facts.clone())
             .with_vars(config.vars.clone())
             .with_fix_size_limit(config.fix_size_limit)
-            .with_process_environment(context.process_environment.clone());
+            .with_process_environment(context.process_environment.clone())
+            .with_condition_environment(context.condition_environment.clone());
         if let Some(as_of) = &context.test.given.as_of {
             let analysis_time = as_of.parse().map_err(|error| {
                 Error::runtime(format!(
@@ -1185,18 +1195,23 @@ fn materialize_repository(
     repository: &Path,
 ) -> Result<()> {
     if let Some(tree) = &test.given.tree {
-        return materialize(tree, repository);
+        materialize(tree, repository)?;
+    } else {
+        let relative = test
+            .given
+            .fixture
+            .as_deref()
+            .ok_or_else(|| Error::runtime("validated test has no repository source"))?;
+        let fixture = package.validate_fixture(relative).map_err(Error::from)?;
+        copy_fixture_dir(&fixture, &fixture, repository)?;
     }
-    let relative = test
-        .given
-        .fixture
-        .as_deref()
-        .ok_or_else(|| Error::runtime("validated test has no repository source"))?;
-    let fixture = package.validate_fixture(relative).map_err(Error::from)?;
-    copy_fixture_dir(&fixture, &fixture, repository)
+    validate_repository_symlinks(repository).map_err(Error::from)
 }
 
+/// Copy a validated fixture directory. Its symlinks are made after its other
+/// entries, so no copy follows one.
 fn copy_fixture_dir(fixture_root: &Path, source: &Path, destination: &Path) -> Result<()> {
+    let mut links = Vec::new();
     for entry in std::fs::read_dir(source).map_err(|source_error| Error::Io {
         path: source.to_path_buf(),
         source: source_error,
@@ -1251,17 +1266,20 @@ fn copy_fixture_dir(fixture_root: &Path, source: &Path, destination: &Path) -> R
                 path: from.clone(),
                 source: source_error,
             })?;
-            #[cfg(unix)]
-            std::os::unix::fs::symlink(&target, &to).map_err(|source_error| Error::Io {
-                path: to.clone(),
-                source: source_error,
-            })?;
-            #[cfg(windows)]
-            std::os::windows::fs::symlink_file(&target, &to).map_err(|source_error| Error::Io {
-                path: to.clone(),
-                source: source_error,
-            })?;
+            links.push((target, to));
         }
+    }
+    for (target, to) in links {
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&target, &to).map_err(|source_error| Error::Io {
+            path: to.clone(),
+            source: source_error,
+        })?;
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_file(&target, &to).map_err(|source_error| Error::Io {
+            path: to.clone(),
+            source: source_error,
+        })?;
     }
     Ok(())
 }
@@ -1413,8 +1431,10 @@ const RUNNER_GIT_VARIABLES: &[&str] = &[
     "PATH",
     "HOME",
     "GNUPGHOME",
+    "XDG_CONFIG_HOME",
     "GIT_CONFIG_NOSYSTEM",
     "GIT_CONFIG_GLOBAL",
+    "GIT_CEILING_DIRECTORIES",
     "GIT_TERMINAL_PROMPT",
     "GIT_OPTIONAL_LOCKS",
     "LC_ALL",
@@ -1428,8 +1448,9 @@ const RUNNER_GIT_VARIABLES: &[&str] = &[
 
 /// The fixed environment of the runner's own Git commands, without
 /// `given.env`: a sandboxed home (or the host's, when the host keyring is
-/// granted), no system or global Git configuration, no prompts and the C
-/// locale.
+/// granted), no system or global Git configuration (so no global excludes or
+/// attributes file, even from the host's home), a discovery that stops at the
+/// sandbox, no prompts and the C locale.
 fn runner_git_environment(sandbox: &Path, host_keyring: bool) -> Result<BTreeMap<String, String>> {
     let home = sandbox.join("home");
     std::fs::create_dir(&home).map_err(|source_error| Error::Io {
@@ -1437,6 +1458,17 @@ fn runner_git_environment(sandbox: &Path, host_keyring: bool) -> Result<BTreeMap
         source: source_error,
     })?;
     let mut environment = BTreeMap::new();
+    // Without `given.git` the repository has no `.git`, and Git would look
+    // for one in every directory above it, up to a repository the host's
+    // temporary directory is in. The sandbox is the last it reads. (Git
+    // resolves the symlinks in a ceiling itself, and drops a relative one.)
+    let sandbox = std::path::absolute(sandbox).unwrap_or_else(|_| sandbox.to_path_buf());
+    if let Some(parent) = sandbox.parent() {
+        environment.insert(
+            "GIT_CEILING_DIRECTORIES".to_string(),
+            parent.to_string_lossy().into_owned(),
+        );
+    }
     if let Some(path) = std::env::var_os("PATH") {
         environment.insert("PATH".to_string(), path.to_string_lossy().into_owned());
     }
@@ -1453,6 +1485,13 @@ fn runner_git_environment(sandbox: &Path, host_keyring: bool) -> Result<BTreeMap
             home.join("gnupg").to_string_lossy().into_owned(),
         );
     }
+    // Git's default global excludes and attributes files are under
+    // `$XDG_CONFIG_HOME/git`, or `$HOME/.config/git` (the host's, when the
+    // host keyring is granted); `GIT_CONFIG_GLOBAL` does not cover them.
+    environment.insert(
+        "XDG_CONFIG_HOME".to_string(),
+        home.join(".config").to_string_lossy().into_owned(),
+    );
     environment.insert("GIT_CONFIG_NOSYSTEM".to_string(), "1".to_string());
     environment.insert(
         "GIT_CONFIG_GLOBAL".to_string(),
@@ -1470,7 +1509,8 @@ fn runner_git_environment(sandbox: &Path, host_keyring: bool) -> Result<BTreeMap
     Ok(environment)
 }
 
-#[cfg(windows)]
+/// Windows' system variables, which the runner takes from the host for its
+/// granted commands.
 const WINDOWS_SYSTEM_VARIABLES: [&str; 6] =
     ["SystemRoot", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP"];
 
@@ -1491,6 +1531,30 @@ fn granted_process_environment(
             continue;
         }
         environment.insert(name.clone(), value.clone());
+    }
+    environment
+}
+
+/// The environment a test's `when:` conditions (`env.X`) and legacy `${VAR}`
+/// expansions read: `given.env` under the runner's own sandbox values,
+/// without the variables the runner takes from the host for its granted
+/// commands (`PATH`, Windows' system variables, and the host's home when the
+/// host keyring is granted). No other host variable reaches a test.
+fn condition_environment(
+    test: &PolicyTest,
+    runner_environment: &BTreeMap<String, String>,
+    host_keyring: bool,
+) -> BTreeMap<String, String> {
+    let from_host = |name: &str| {
+        name == "PATH"
+            || WINDOWS_SYSTEM_VARIABLES.contains(&name)
+            || (host_keyring && matches!(name, "HOME" | "GNUPGHOME"))
+    };
+    let mut environment = test.given.env.clone();
+    for (name, value) in runner_environment {
+        if !from_host(name) {
+            environment.insert(name.clone(), value.clone());
+        }
     }
     environment
 }

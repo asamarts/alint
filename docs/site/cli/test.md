@@ -51,13 +51,23 @@ access similarly requires both `host_keyring: true` and
 All selected definitions, package paths, configs, and capability grants are
 preflighted before any rule or user command executes.
 
+A test's repository stays in its sandbox. A `given.tree` symlink must lead to
+an entry of the tree as the file system resolves it, through any symlink it
+reaches, and no tree entry may sit under a symlink. Every symlink in the
+repository, from a tree or a fixture, must lead inside it, checked again after
+each fix step. A fix never writes or reads a Git directory (`.git` in any
+spelling a file system opens as one).
+
 `given.env` reaches config interpolation, `when:` conditions (`env.X`) and
-granted commands only, and none of the host's other variables reach them. The
-Git commands the runner runs itself, for `given.git` and for rules that read
-Git, run with a fixed environment: a sandboxed home (the host's home when the
-host keyring is granted), no system or global Git configuration, `PATH`, and
-the C locale. They never read a fixture as a bare repository, and the host's
-global excludes file hides nothing from a test.
+granted commands only. A condition reads no other variable; a granted command
+also gets the host's `PATH` (and, on Windows, its system variables). The Git
+commands the runner runs itself, for `given.git` and for rules that read Git,
+run with a fixed environment: a sandboxed home (the host's home when the host
+keyring is granted), no system or global Git configuration, no global excludes
+or attributes file, `PATH`, and the C locale. They never read a fixture as a
+bare repository, and their repository discovery stops at the test's sandbox,
+so a test without `given.git` never reads a repository the host's temporary
+directory is in.
 
 ## Exit codes
 

@@ -280,10 +280,29 @@ pub(crate) fn validate_tree_spec(
     let mut issues = Vec::new();
     let mut entries = BTreeMap::new();
     collect_tree_entries(&tree.root, "", &mut entries, &mut issues);
+    // A write to `link/file` follows `link`, wherever it leads.
+    for path in entries.keys() {
+        let under_symlink = path.match_indices('/').any(|(end, _)| {
+            entries
+                .get(&path[..end])
+                .is_some_and(|node| matches!(node, TreeNode::Symlink(_)))
+        });
+        if under_symlink {
+            issues.push(TreeSpecIssue {
+                path: path.clone(),
+                reason: "entry must not sit under a symlink".to_string(),
+            });
+        }
+    }
     if validate_symlink_targets {
+        // A slash in a key makes the directories before it.
+        let directories: BTreeSet<&str> = entries
+            .keys()
+            .flat_map(|path| path.match_indices('/').map(|(end, _)| &path[..end]))
+            .collect();
         for (path, node) in &entries {
             if matches!(node, TreeNode::Symlink(_))
-                && let Err(reason) = validate_tree_symlink(path, &entries)
+                && let Err(reason) = validate_tree_symlink(path, &entries, &directories)
             {
                 issues.push(TreeSpecIssue {
                     path: path.clone(),
@@ -343,59 +362,109 @@ fn validate_tree_entry_name(name: &str) -> Option<String> {
         if component == "." || component == ".." {
             return Some("entry path must not contain `.` or `..` components".to_string());
         }
-        if names_git_directory(component) {
+        if alint_core::names_git_directory(component) {
             return Some("`.git` entries are runner-owned".to_string());
         }
     }
     None
 }
 
-/// Whether a file system could open the entry `name` as `.git`, the
-/// runner's own repository directory. Beyond `.git` in any case, Git's own
-/// checks name three more spellings: Windows drops trailing dots and spaces
-/// (`.git.`, `.git `) and reads `name:stream` as a stream of `name`
-/// (`.git::$INDEX_ALLOCATION`), and its short name for `.git` is `GIT~1`;
-/// macOS's HFS+ ignores some invisible code points (`.g\u{200c}it`).
-fn names_git_directory(name: &str) -> bool {
-    const HFS_IGNORED: [std::ops::RangeInclusive<char>; 4] = [
-        '\u{200c}'..='\u{200f}',
-        '\u{202a}'..='\u{202e}',
-        '\u{206a}'..='\u{206f}',
-        '\u{feff}'..='\u{feff}',
-    ];
-    let visible: String = name
-        .chars()
-        .filter(|c| !HFS_IGNORED.iter().any(|range| range.contains(c)))
-        .collect();
-    let file = visible.split(':').next().unwrap_or_default();
-    file.trim_end_matches(['.', ' '])
-        .eq_ignore_ascii_case(".git")
-        || file.eq_ignore_ascii_case("git~1")
-}
+/// The most symlinks one resolution follows before it counts as a cycle, as
+/// Linux's `ELOOP` limit.
+const MAX_TREE_SYMLINK_HOPS: usize = 40;
 
+/// Prove that the symlink at `link_path` leads to an entry of the tree, as the
+/// file system resolves it once the tree is written: each component in turn,
+/// following a symlink it reaches before a later `..` steps up from where that
+/// link leads. Read as text instead, `a/c/t/../../../x` (with `a/c/t -> ../../b`)
+/// is `x`, while on disk it is two levels above the root.
 fn validate_tree_symlink(
     link_path: &str,
     entries: &BTreeMap<String, &TreeNode>,
+    directories: &BTreeSet<&str>,
 ) -> Result<(), String> {
-    let mut current = link_path.to_string();
-    let mut seen = BTreeSet::new();
-    loop {
-        if !seen.insert(current.clone()) {
-            return Err("symlink chain must not contain a cycle".to_string());
-        }
-        let Some(node) = entries.get(&current) else {
-            return Err("symlink target must exist in the inline tree".to_string());
-        };
-        match node {
-            TreeNode::File(_) | TreeNode::Exec(_) | TreeNode::Dir(_) => return Ok(()),
-            TreeNode::Symlink(link) => {
-                current = normalize_tree_link_target(&current, &link.target)?;
+    let Some(TreeNode::Symlink(link)) = entries.get(link_path) else {
+        return Err("symlink target must exist in the inline tree".to_string());
+    };
+    let mut directory: Vec<&str> = link_path.split('/').collect();
+    directory.pop();
+    let tree = TreeLinks {
+        entries,
+        directories,
+    };
+    let mut hops = 0;
+    let resolved = tree.resolve(directory, &link.target, &mut hops)?;
+    if resolved.is_empty() {
+        return Err("symlink must resolve to an in-tree file".to_string());
+    }
+    Ok(())
+}
+
+/// An inline tree's entries, and the directories a slash in a key makes, as
+/// a symlink resolves against them.
+struct TreeLinks<'t, 'a> {
+    entries: &'t BTreeMap<String, &'a TreeNode>,
+    directories: &'t BTreeSet<&'t str>,
+}
+
+impl<'a> TreeLinks<'_, 'a> {
+    /// The entry `target` leads to from the tree directory `directory`, as its
+    /// components, following every symlink entry it reaches.
+    fn resolve(
+        &self,
+        directory: Vec<&'a str>,
+        target: &'a str,
+        hops: &mut usize,
+    ) -> Result<Vec<&'a str>, String> {
+        validate_tree_link_text(target)?;
+        let mut resolved = directory;
+        let mut at_file = false;
+        for component in target.split('/') {
+            if at_file {
+                return Err("symlink target must not pass through a file".to_string());
+            }
+            match component {
+                "" | "." => {}
+                ".." => {
+                    if resolved.pop().is_none() {
+                        return Err("symlink resolves outside the inline tree".to_string());
+                    }
+                }
+                name => {
+                    resolved.push(name);
+                    let path = resolved.join("/");
+                    match self.entries.get(&path) {
+                        Some(TreeNode::Symlink(link)) => {
+                            *hops += 1;
+                            if *hops > MAX_TREE_SYMLINK_HOPS {
+                                return Err("symlink chain must not contain a cycle".to_string());
+                            }
+                            resolved.pop();
+                            resolved = self.resolve(resolved, &link.target, hops)?;
+                            at_file = !self.is_directory(&resolved.join("/"));
+                        }
+                        Some(TreeNode::File(_) | TreeNode::Exec(_)) => at_file = true,
+                        Some(TreeNode::Dir(_)) => {}
+                        None if self.directories.contains(path.as_str()) => {}
+                        None => {
+                            return Err("symlink target must exist in the inline tree".to_string());
+                        }
+                    }
+                }
             }
         }
+        Ok(resolved)
+    }
+
+    /// Whether `path` (`""` for the root) is a directory of the tree.
+    fn is_directory(&self, path: &str) -> bool {
+        path.is_empty()
+            || matches!(self.entries.get(path), Some(TreeNode::Dir(_)))
+            || (!self.entries.contains_key(path) && self.directories.contains(path))
     }
 }
 
-fn normalize_tree_link_target(link_path: &str, target: &str) -> Result<String, String> {
+fn validate_tree_link_text(target: &str) -> Result<(), String> {
     if target.is_empty() {
         return Err("symlink target must not be empty".to_string());
     }
@@ -412,24 +481,65 @@ fn normalize_tree_link_target(link_path: &str, target: &str) -> Result<String, S
     if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
         return Err("Windows-prefixed symlinks are forbidden".to_string());
     }
+    Ok(())
+}
 
-    let mut components: Vec<&str> = link_path.split('/').collect();
-    components.pop();
-    for component in target.split('/') {
-        match component {
-            "" | "." => {}
-            ".." => {
-                if components.pop().is_none() {
-                    return Err("symlink resolves outside the inline tree".to_string());
-                }
+/// Prove that every symlink in a test repository leads, as the file system
+/// follows it, inside the repository (or would, once a missing target exists
+/// there). The checks of `given.tree` and `given.fixture` read link text
+/// before it is written; this one reads where each written link leads, so a
+/// link they misjudge (a fixture link's text resolves from where the copy is,
+/// not from where the fixture is) is refused before a rule, a fixer or Git
+/// follows it. The runner checks again after each fix step: a fix that moves
+/// a link (`relocate`) changes where its relative text leads.
+pub(crate) fn validate_repository_symlinks(repository: &Path) -> Result<(), ConfinementError> {
+    let root = repository
+        .canonicalize()
+        .map_err(|source| ConfinementError::Io {
+            path: repository.to_path_buf(),
+            source,
+        })?;
+    validate_repository_dir(&root, &root)
+}
+
+fn validate_repository_dir(root: &Path, directory: &Path) -> Result<(), ConfinementError> {
+    let entries = std::fs::read_dir(directory).map_err(|source| ConfinementError::Io {
+        path: directory.to_path_buf(),
+        source,
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|source| ConfinementError::Io {
+            path: directory.to_path_buf(),
+            source,
+        })?;
+        let path = entry.path();
+        let file_type = entry.file_type().map_err(|source| ConfinementError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        if file_type.is_symlink() {
+            if !symlink_leads_inside(root, directory, &path) {
+                return Err(ConfinementError::UnsupportedFixture {
+                    path: path.strip_prefix(root).unwrap_or(&path).to_path_buf(),
+                    reason: "symlink leads outside the test repository".to_string(),
+                });
             }
-            value => components.push(value),
+        } else if file_type.is_dir() {
+            validate_repository_dir(root, &path)?;
         }
     }
-    if components.is_empty() {
-        return Err("symlink must resolve to an in-tree file".to_string());
+    Ok(())
+}
+
+/// Whether the symlink `link` in `directory` leads inside the canonical
+/// `root`: where it resolves, or, when its target is missing, where the
+/// target would be.
+fn symlink_leads_inside(root: &Path, directory: &Path, link: &Path) -> bool {
+    match link.canonicalize() {
+        Ok(target) => target.starts_with(root),
+        Err(_) => std::fs::read_link(link)
+            .is_ok_and(|text| alint_core::resolved_within_root(&directory.join(text), root)),
     }
-    Ok(components.join("/"))
 }
 
 fn validate_fixture_dir(root: &Path, directory: &Path) -> Result<(), ConfinementError> {
@@ -443,7 +553,7 @@ fn validate_fixture_dir(root: &Path, directory: &Path) -> Result<(), Confinement
             source,
         })?;
         let path = entry.path();
-        if names_git_directory(&entry.file_name().to_string_lossy()) {
+        if alint_core::names_git_directory(&entry.file_name().to_string_lossy()) {
             return Err(ConfinementError::UnsupportedFixture {
                 path,
                 reason: "`.git` entries are runner-owned".to_string(),
@@ -550,6 +660,9 @@ mod tests {
             ".git:stream",
             "GIT~1",
             "git~1",
+            "git~1.",
+            "GIT~1 ",
+            "git~1. .",
             ".g\u{200c}it",
             "\u{feff}.git",
             "sub/.git.",
@@ -639,6 +752,107 @@ mod tests {
                 issues.iter().any(|issue| issue.reason.contains(expected)),
                 "missing {expected:?} in {issues:#?}"
             );
+        }
+    }
+
+    /// A symlink resolves as the file system resolves it, through the
+    /// symlinks it reaches, not as text: with `a/c/t -> ../../b`,
+    /// `a/c/t/../../../x` is two levels above the root, not `x`. And no entry
+    /// sits under a symlink, where a write would follow it.
+    #[test]
+    fn inline_symlinks_resolve_through_the_symlinks_they_reach() {
+        let escape = TreeSpec::from_yaml(
+            "a: { c: { t: { \"$symlink\": \"../../b\" } } }\n\
+             b: {}\n\
+             rev522-escape-target: {}\n\
+             s: { \"$symlink\": \"a/c/t/../../../rev522-escape-target\" }\n\
+             \"s/pwned.txt\": \"written outside the sandbox\\n\"\n",
+        )
+        .unwrap();
+        let issues = validate_tree_spec(&escape, true);
+        assert!(
+            issues.contains(&TreeSpecIssue {
+                path: "s".to_string(),
+                reason: "symlink resolves outside the inline tree".to_string(),
+            }),
+            "{issues:#?}"
+        );
+        assert!(
+            issues.contains(&TreeSpecIssue {
+                path: "s/pwned.txt".to_string(),
+                reason: "entry must not sit under a symlink".to_string(),
+            }),
+            "{issues:#?}"
+        );
+        // `expect_tree` gets the second check too.
+        assert_eq!(validate_tree_spec(&escape, false).len(), 1);
+
+        let valid = TreeSpec::from_yaml(
+            "a: { c: { t: { \"$symlink\": \"../../b\" } } }\n\
+             b: { f: x }\n\
+             through-link: { \"$symlink\": \"a/c/t/f\" }\n\
+             up-from-link: { \"$symlink\": \"a/c/t/../b/f\" }\n\
+             implied/dir/f: x\n\
+             to-implied: { \"$symlink\": \"implied/dir\" }\n\
+             nested: { link: { \"$symlink\": \"../implied/dir/f\" } }\n",
+        )
+        .unwrap();
+        assert_eq!(validate_tree_spec(&valid, true), Vec::new());
+
+        let invalid = TreeSpec::from_yaml(
+            "f: x\n\
+             l: { \"$symlink\": \"f\" }\n\
+             through-file: { \"$symlink\": \"f/../f\" }\n\
+             through-file-link: { \"$symlink\": \"l/../f\" }\n\
+             root: { \"$symlink\": \"b/..\" }\n\
+             b: {}\n",
+        )
+        .unwrap();
+        let issues = validate_tree_spec(&invalid, true);
+        for (path, reason) in [
+            ("through-file", "must not pass through a file"),
+            ("through-file-link", "must not pass through a file"),
+            ("root", "must resolve to an in-tree file"),
+        ] {
+            assert!(
+                issues
+                    .iter()
+                    .any(|issue| issue.path == path && issue.reason.contains(reason)),
+                "{path}: {issues:#?}"
+            );
+        }
+    }
+
+    /// A written link is checked where it leads: one that leaves the
+    /// repository, or whose missing target would be outside it, is refused,
+    /// wherever its text came from.
+    #[cfg(unix)]
+    #[test]
+    fn written_repository_symlinks_must_lead_inside_it() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let repository = temp.path().join("repository");
+        std::fs::create_dir_all(repository.join("d")).unwrap();
+        std::fs::write(repository.join("f"), "x").unwrap();
+        std::fs::write(temp.path().join("outside"), "x").unwrap();
+        symlink("../f", repository.join("d/in")).unwrap();
+        symlink("d", repository.join("dir-link")).unwrap();
+        assert!(validate_repository_symlinks(&repository).is_ok());
+
+        // A missing target in the repository is there once it exists.
+        symlink("missing", repository.join("dangling")).unwrap();
+        assert!(validate_repository_symlinks(&repository).is_ok());
+        std::fs::remove_file(repository.join("dangling")).unwrap();
+
+        for (link, target) in [("d/out", "../../outside"), ("d/missing", "../../missing")] {
+            symlink(target, repository.join(link)).unwrap();
+            let error = validate_repository_symlinks(&repository).unwrap_err();
+            assert!(
+                matches!(&error, ConfinementError::UnsupportedFixture { path, .. } if path == Path::new(link)),
+                "{error:?}"
+            );
+            std::fs::remove_file(repository.join(link)).unwrap();
         }
     }
 

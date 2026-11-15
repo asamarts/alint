@@ -319,11 +319,11 @@ where
     Ok(out)
 }
 
-/// Production lookup: the run's process environment when it has one (as
+/// Production lookup: the run's condition environment when it has one (as
 /// `alint test` sets it), so a test reads its own `given.env` and nothing of
 /// the host's; otherwise this process's environment.
 fn env_lookup(ctx: &Context<'_>, name: &str) -> Option<String> {
-    match ctx.process_environment {
+    match ctx.environment_for_conditions() {
         Some(environment) => environment.get(name).cloned(),
         None => std::env::var(name).ok(),
     }

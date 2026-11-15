@@ -747,6 +747,11 @@ pub struct Context<'a> {
     /// production behavior); `Some` means callers must clear the inherited
     /// environment before applying this map.
     pub process_environment: Option<&'a std::collections::BTreeMap<String, String>>,
+    /// What `env.*` in a `when:` condition and a legacy `${VAR}` expansion
+    /// read, when it is not [`Self::process_environment`] (`alint test` leaves
+    /// the host's `PATH` out of it). Read it through
+    /// [`Self::environment_for_conditions`].
+    pub condition_environment: Option<&'a std::collections::BTreeMap<String, String>>,
     #[doc(hidden)]
     pub trace: Option<&'a dyn crate::trace::TraceSink>,
 }
@@ -767,6 +772,7 @@ impl<'a> Context<'a> {
             git_blame: None,
             analysis_time: None,
             process_environment: None,
+            condition_environment: None,
             trace: None,
         }
     }
@@ -827,6 +833,26 @@ impl<'a> Context<'a> {
     ) -> Self {
         self.process_environment = process_environment;
         self
+    }
+
+    /// Sets [`Self::condition_environment`].
+    #[must_use]
+    pub fn with_condition_environment(
+        mut self,
+        condition_environment: Option<&'a std::collections::BTreeMap<String, String>>,
+    ) -> Self {
+        self.condition_environment = condition_environment;
+        self
+    }
+
+    /// The environment `env.*` in a `when:` condition and a legacy `${VAR}`
+    /// expansion read: [`Self::condition_environment`] when set, else
+    /// [`Self::process_environment`]. `None` reads the host's.
+    #[must_use]
+    pub fn environment_for_conditions(
+        &self,
+    ) -> Option<&'a std::collections::BTreeMap<String, String>> {
+        self.condition_environment.or(self.process_environment)
     }
 
     /// Sets the trace sink, an internal hook for `explain --trace`.

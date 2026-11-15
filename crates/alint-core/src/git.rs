@@ -86,11 +86,19 @@ const GIT_LOCAL_ENV_VARS: &[&str] = &[
     "GIT_ICASE_PATHSPECS",
 ];
 
+/// The ceiling a scoped environment may set: it only narrows discovery, and
+/// the embedder sets it to keep discovery inside its own sandbox (`alint
+/// test` sets the sandbox's parent).
+const SCOPED_CEILING: &str = "GIT_CEILING_DIRECTORIES";
+
 fn clear_git_repository_env(
     command: &mut Command,
     scoped_environment: Option<&ProcessEnvironment>,
 ) {
     for name in GIT_LOCAL_ENV_VARS {
+        if *name == SCOPED_CEILING && scoped_environment.is_some() {
+            continue;
+        }
         // `Command::env_remove` forces Rust to copy the complete process
         // environment at spawn time, even when the named variable is absent.
         // Preserve the direct-inheritance fast path without weakening scoped

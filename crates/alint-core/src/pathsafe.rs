@@ -283,6 +283,67 @@ impl Landing {
     }
 }
 
+/// Whether a file system could open the entry `name` as `.git`, a Git
+/// directory. Beyond `.git` in any case, Git's own checks name three more
+/// spellings: Windows drops trailing dots and spaces (`.git.`, `.git `), reads
+/// `name:stream` as a stream of `name` (`.git::$INDEX_ALLOCATION`) and `\` as
+/// a separator (`a\.git`), and its short name for `.git` is `GIT~1`, which
+/// drops them too (`git~1.`); macOS's HFS+ ignores some invisible code points
+/// (`.g\u{200c}it`).
+///
+/// A fix never writes or reads a path with such a component: a file it puts
+/// there (`.git/config`, `.git/commondir`, a `.git` file) is configuration
+/// Git runs commands from. Rules may still read one.
+#[must_use]
+pub fn names_git_directory(name: &str) -> bool {
+    const HFS_IGNORED: [std::ops::RangeInclusive<char>; 4] = [
+        '\u{200c}'..='\u{200f}',
+        '\u{202a}'..='\u{202e}',
+        '\u{206a}'..='\u{206f}',
+        '\u{feff}'..='\u{feff}',
+    ];
+    let visible: String = name
+        .chars()
+        .filter(|c| !HFS_IGNORED.iter().any(|range| range.contains(c)))
+        .collect();
+    visible.split('\\').any(|piece| {
+        let file = piece
+            .split(':')
+            .next()
+            .unwrap_or_default()
+            .trim_end_matches(['.', ' ']);
+        file.eq_ignore_ascii_case(".git") || file.eq_ignore_ascii_case("git~1")
+    })
+}
+
+/// Whether a component of `path` names a Git directory
+/// ([`names_git_directory`]).
+#[must_use]
+pub fn path_names_git_directory(path: &Path) -> bool {
+    path.components().any(|component| match component {
+        Component::Normal(name) => names_git_directory(&name.to_string_lossy()),
+        _ => false,
+    })
+}
+
+/// Whether `path`, relative to `root`, reaches a Git directory: a component
+/// of it names one ([`path_names_git_directory`]), or the place it leads to
+/// once the OS follows the symlinks in it (an in-repo `g -> .git`) is inside
+/// one below `root`.
+#[must_use]
+pub fn reaches_git_directory(root: &Path, path: &Path) -> bool {
+    if path_names_git_directory(path) {
+        return true;
+    }
+    let Ok(root_real) = root.canonicalize() else {
+        return false;
+    };
+    resolve_existing_prefix(&root.join(path)).is_some_and(|real| {
+        real.strip_prefix(&root_real)
+            .is_ok_and(path_names_git_directory)
+    })
+}
+
 /// Where a create of `path` lands once the OS resolves it, for the checks a
 /// creating fixer makes before it writes (already there, a symlink). A `..`
 /// after a directory the create makes steps back out of it, so the path as
@@ -676,6 +737,75 @@ mod tests {
             }
         }
         assert!(created > 100, "only {created} paths could be created");
+    }
+
+    /// Every spelling a file system opens as `.git` names a Git directory,
+    /// as Git's own `is_ntfs_dotgit` and `is_hfs_dotgit` read them.
+    #[test]
+    fn every_spelling_of_git_names_a_git_directory() {
+        use super::{names_git_directory, path_names_git_directory};
+        for name in [
+            ".git",
+            ".GIT",
+            ".git.",
+            ".git ",
+            ".git. .",
+            ".git::$INDEX_ALLOCATION",
+            ".git:stream",
+            ".git\\x",
+            "a\\.git",
+            "GIT~1",
+            "git~1",
+            "git~1.",
+            "GIT~1 ",
+            "git~1. .",
+            "git~1:stream",
+            ".g\u{200c}it",
+            "\u{feff}.git",
+        ] {
+            assert!(names_git_directory(name), "{name:?}");
+        }
+        for name in [
+            ".github",
+            ".gitignore",
+            "git",
+            ".git-blame",
+            "git~2",
+            "git~1x",
+            "a.git",
+            ".gi t",
+            ".git .x",
+        ] {
+            assert!(!names_git_directory(name), "{name:?}");
+        }
+        for path in [
+            ".git/x",
+            ".GIT/x",
+            "sub/.git/x",
+            "git~1/x",
+            ".git./x",
+            ".git /x",
+        ] {
+            assert!(path_names_git_directory(Path::new(path)), "{path:?}");
+        }
+        assert!(!path_names_git_directory(Path::new("sub/.github/x")));
+    }
+
+    /// A path reaches a Git directory through an in-repo symlink to one too.
+    #[test]
+    #[cfg(unix)]
+    fn a_symlink_to_the_git_directory_reaches_it() {
+        use super::reaches_git_directory;
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir(root.join(".git")).unwrap();
+        std::fs::create_dir(root.join("src")).unwrap();
+        std::os::unix::fs::symlink(".git", root.join("g")).unwrap();
+        assert!(reaches_git_directory(root, Path::new("g/config")));
+        assert!(reaches_git_directory(root, Path::new("g")));
+        assert!(reaches_git_directory(root, Path::new(".git/commondir")));
+        assert!(!reaches_git_directory(root, Path::new("src/config")));
+        assert!(!reaches_git_directory(root, Path::new("new/config")));
     }
 
     #[test]

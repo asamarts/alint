@@ -9,14 +9,28 @@ use crate::error::{Error, Result};
 /// directory; intermediate directories inside the spec are created
 /// as needed. Files are overwritten if they already exist at a path
 /// the spec names.
+///
+/// Symlinks are created after every other entry, so no write this makes
+/// follows one of them: a spec's `link/file` (or a key that another
+/// spelling of `link` names on a case-insensitive file system) fails
+/// where `link` is about to be made instead of writing where it leads.
 pub fn materialize(spec: &TreeSpec, root: &Path) -> Result<()> {
     if !root.is_dir() {
         return Err(Error::NotADirectory(root.to_path_buf()));
     }
-    write_map(&spec.root, root)
+    let mut links = Vec::new();
+    write_map(&spec.root, root, &mut links)?;
+    for (path, target) in links {
+        create_symlink(&path, target)?;
+    }
+    Ok(())
 }
 
-fn write_map(children: &std::collections::BTreeMap<String, TreeNode>, parent: &Path) -> Result<()> {
+fn write_map<'a>(
+    children: &'a std::collections::BTreeMap<String, TreeNode>,
+    parent: &Path,
+    links: &mut Vec<(std::path::PathBuf, &'a str)>,
+) -> Result<()> {
     for (name, node) in children {
         let path = parent.join(name);
         match node {
@@ -65,28 +79,33 @@ fn write_map(children: &std::collections::BTreeMap<String, TreeNode>, parent: &P
                         source,
                     })?;
                 }
-                #[cfg(unix)]
-                std::os::unix::fs::symlink(&link.target, &path).map_err(|source| Error::Io {
-                    path: path.clone(),
-                    source,
-                })?;
-                #[cfg(not(unix))]
-                return Err(Error::runtime(format!(
-                    "cannot materialise symlink {} -> {}: symlinks are unix-only",
-                    path.display(),
-                    link.target
-                )));
+                links.push((path, &link.target));
             }
             TreeNode::Dir(sub) => {
                 std::fs::create_dir_all(&path).map_err(|source| Error::Io {
                     path: path.clone(),
                     source,
                 })?;
-                write_map(sub, &path)?;
+                write_map(sub, &path, links)?;
             }
         }
     }
     Ok(())
+}
+
+fn create_symlink(path: &Path, target: &str) -> Result<()> {
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(target, path).map_err(|source| Error::Io {
+            path: path.to_path_buf(),
+            source,
+        })
+    }
+    #[cfg(not(unix))]
+    Err(Error::runtime(format!(
+        "cannot materialise symlink {} -> {target}: symlinks are unix-only",
+        path.display()
+    )))
 }
 
 #[cfg(test)]
@@ -164,6 +183,23 @@ empty: {}
         let spec = TreeSpec::from_yaml(r#"a.txt: "x""#).unwrap();
         let err = materialize(&spec, &bogus).unwrap_err();
         assert!(matches!(err, Error::NotADirectory(_)));
+    }
+
+    /// Symlinks are made last, so a key under one (`link/f`) is not written
+    /// where the link leads: the link fails to be made instead.
+    #[cfg(unix)]
+    #[test]
+    fn writes_nothing_through_a_symlink_it_makes() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("root");
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let spec =
+            TreeSpec::from_yaml("link: { \"$symlink\": \"../outside\" }\n\"link/f.txt\": \"x\"\n")
+                .unwrap();
+        assert!(materialize(&spec, &root).is_err());
+        assert!(!outside.join("f.txt").exists());
     }
 
     #[cfg(unix)]

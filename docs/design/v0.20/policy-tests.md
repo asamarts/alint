@@ -169,10 +169,21 @@ whole package and implementing a second closure resolver. Bundled `alint://` sou
 `https://` sources are rejected before cache lookup, DNS, or a fetcher call, including when a
 matching cache entry exists.
 
-The fixture copy refuses `.git` entries and escaping symlinks. It preserves only relative
-in-root file symlinks whose complete chain resolves inside the fixture and whose unchanged link
-text resolves inside the copied temporary tree; absolute links, directory links, dangling links,
-cycles, and links not representable on the host are rejected. No link is rewritten to a source
+The fixture copy refuses `.git` entries (any name a file system opens as `.git`, such as `.GIT`,
+`.git.` or `GIT~1`) and escaping symlinks. It preserves only relative in-root file symlinks whose
+complete chain resolves inside the fixture and whose unchanged link text resolves inside the copied
+temporary tree; absolute links, directory links, dangling links, cycles, and links not
+representable on the host are rejected. The copy writes symlinks after the other entries of their
+directory, then reads where each copied link leads and refuses one that leads outside the temporary
+repository: link text that resolves inside the fixture can resolve elsewhere from the copy's place.
+
+An inline `tree` follows the same rules, with directory links allowed. A symlink's target resolves
+as the file system resolves it, through each symlink it reaches before a later `..` (with
+`a/c/t -> ../../b`, `a/c/t/../../../x` is above the root, not `x`), and must reach an entry of the
+tree. No entry may sit under a symlink, and the tree writes its symlinks after every other entry, so
+no write follows one. The runner checks the written tree's links as it checks a fixture's, and
+checks every link in the repository again after each fix step, since a fix that moves a link
+(`relocate`) changes where its relative text leads. No link is rewritten to a source
 checkout path. An unsupported fixture is skipped only under an explicit platform tag already used
 by the corpus, never silently weakened. Device nodes, sockets, FIFOs, and setuid/setgid bits are
 rejected. Executable permission is preserved on Unix; other permissions are normalized.
@@ -192,7 +203,8 @@ reach the runner. Configured rule ids and repository paths remain visible struct
 the W5 contract and therefore must not contain secrets. Unknown host variables behave as absent.
 The runner supplies only the minimum platform variables needed to locate an explicitly granted
 executable (`PATH`, and on Windows the documented process-runtime variables); those values are not
-available to config interpolation.
+available to config interpolation, `when:` conditions (`env.X`) or `${VAR}` expansions, which read
+`given.env` and the runner's own sandbox values only.
 
 `given.as_of` accepts the same `YYYY-MM-DD` value as the CLI and is injected directly into the
 engine. When absent, the production HEAD-commit fallback applies inside the temporary Git
@@ -200,9 +212,14 @@ repository. No scenario reads wall time.
 
 The existing `given.git` model remains intact: `init`, `add`, `add_force`, `commit`, and an ordered
 `commits` chain with messages, staged paths, and dates. Git runs with hooks disabled, an isolated
-empty HOME and config, no system/global config, no credential or signing helper, no replacement
-refs, no optional locks inherited from the host, and fixed author/committer identity. User-controlled
-paths follow `--`; messages and dates are environment/arguments, never shell text.
+empty HOME and config, no system/global config, no global excludes or attributes file (with the host
+keyring granted HOME is the host's, so `XDG_CONFIG_HOME` points into the sandbox), no credential or
+signing helper, no replacement refs, no optional locks inherited from the host, and fixed
+author/committer identity. Its repository discovery stops at the sandbox
+(`GIT_CEILING_DIRECTORIES` is the sandbox's parent), so a test without `given.git` never reads a
+repository the host's temporary directory is in, and a fix never writes or reads a Git directory,
+so a test cannot make one for the next Git command to read. User-controlled paths follow `--`;
+messages and dates are environment/arguments, never shell text.
 
 ### 2.5 Capability declaration and grant
 
