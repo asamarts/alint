@@ -240,11 +240,20 @@ pub(crate) fn blocking_ancestor(dir: &Path) -> Option<&Path> {
 /// out-of-tree on `alint fix`. Shared with `DirCreateFixer` (see
 /// `crate::fixers::file_ops`), which must confine its `dir_create` target the
 /// same way.
+///
+/// A path in a Git directory is refused too, whatever `allow` says, as is one
+/// an in-repo symlink leads into one: a file a fix puts there (`.git/config`,
+/// `.git/commondir`, a `.git` file) is configuration Git runs commands from
+/// (`core.fsmonitor`), and one it reads there (`.git/config`) can hold
+/// credentials. Rules may still read such a path.
 pub(crate) fn confine_fix_path(
     rel: &Path,
     root: &Path,
     allow: bool,
 ) -> std::result::Result<PathBuf, String> {
+    if alint_core::reaches_git_directory(root, rel) {
+        return Err(git_directory_refusal(rel));
+    }
     match crate::pathsafe::confine_read(rel, root, allow) {
         crate::pathsafe::Confined::In(p) | crate::pathsafe::Confined::AllowedEscape(p) => {
             Ok(root.join(p))
@@ -254,6 +263,14 @@ pub(crate) fn confine_fix_path(
             rel.display()
         )),
     }
+}
+
+/// Why a fix declines a path in a Git directory (see [`confine_fix_path`]).
+pub(crate) fn git_directory_refusal(rel: &Path) -> String {
+    format!(
+        "{} is in a Git directory; a fix never writes or reads there",
+        rel.display()
+    )
 }
 
 /// Read a `ContentSourceSpec` to bytes. Returns the raw payload
@@ -749,6 +766,68 @@ mod tests {
 
     fn make_ctx_at(root: &Path, dry_run: bool) -> FixContext<'_> {
         FixContext::new(root, dry_run)
+    }
+
+    /// A fix never writes or reads a Git directory, in any spelling a file
+    /// system opens as `.git`, even where `allow_out_of_root` lets it leave
+    /// the root: a `file_create` or a `content_from` there declines.
+    #[test]
+    fn fix_paths_in_a_git_directory_are_refused() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir(tmp.path().join(".git")).unwrap();
+        std::fs::write(tmp.path().join(".git/config"), "[credential]\n").unwrap();
+        for path in [
+            ".git/x",
+            ".GIT/x",
+            "sub/.git/x",
+            "git~1/x",
+            ".git./x",
+            ".git /x",
+        ] {
+            for allow in [false, true] {
+                let reason = confine_fix_path(Path::new(path), tmp.path(), allow).unwrap_err();
+                assert!(reason.contains("Git directory"), "{path}: {reason}");
+            }
+            let outcome = FileCreateFixer::new(PathBuf::from(path), "x".into(), true)
+                .apply(&Violation::new("missing"), &make_ctx(&tmp, false))
+                .unwrap();
+            assert!(
+                matches!(&outcome, FixOutcome::Skipped(reason) if reason.contains("Git directory")),
+                "{path}: {outcome:?}"
+            );
+        }
+        let stolen = FileCreateFixer::new(
+            PathBuf::from("stolen.txt"),
+            ContentSourceSpec::File(PathBuf::from(".git/config")),
+            true,
+        )
+        .apply(&Violation::new("missing"), &make_ctx(&tmp, false))
+        .unwrap();
+        assert!(
+            matches!(&stolen, FixOutcome::Skipped(reason) if reason.contains("Git directory")),
+            "{stolen:?}"
+        );
+        assert!(!tmp.path().join("stolen.txt").exists());
+        assert_eq!(
+            std::fs::read_dir(tmp.path().join(".git")).unwrap().count(),
+            1,
+            "nothing was written into .git"
+        );
+        // `.github` and `.gitignore` are ordinary paths.
+        for path in [".github/x", ".gitignore"] {
+            assert!(confine_fix_path(Path::new(path), tmp.path(), false).is_ok());
+        }
+    }
+
+    /// An in-repo symlink to the Git directory is one too.
+    #[cfg(unix)]
+    #[test]
+    fn fix_paths_through_a_symlink_to_the_git_directory_are_refused() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir(tmp.path().join(".git")).unwrap();
+        std::os::unix::fs::symlink(".git", tmp.path().join("g")).unwrap();
+        let reason = confine_fix_path(Path::new("g/commondir"), tmp.path(), false).unwrap_err();
+        assert!(reason.contains("Git directory"), "{reason}");
     }
 
     #[test]

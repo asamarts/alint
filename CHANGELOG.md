@@ -16,7 +16,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the fixture setup ran before the capability check, so even a refused test could do it. Those
   Git commands now run with a fixed environment (a sandboxed home, no system or global Git
   configuration, `PATH` and the C locale), and `setup_git` drops any other variable it is given.
-  `given.env` reaches configuration interpolation and granted commands only, as the
+  `given.env` reaches configuration interpolation, `when:` conditions and `${VAR}` expansions
+  (below), and granted commands, never Git, as the
   [policy-test design](docs/design/v0.20/policy-tests.md) section 2.4 specifies. `alint check`
   and `alint fix` were not affected: they read the invoking user's own environment.
 - **`alint test` now asks for the spawn capability for a spawning rule nested in another
@@ -45,17 +46,70 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   environment.** `env.X` in a `when:` (top-level or nested in `require:`) and the legacy `${VAR}`
   form of `git_commit_message`'s `since:` read the runner's own process environment, so a test
   could tell a CI secret's characters apart through which of its rules fired, and could not see
-  its own `given.env`. Both now read the test's environment: `given.env` with the runner's
-  variables, which is what a granted command sees. `alint check` and `alint fix` still read the
-  invoking user's environment.
+  its own `given.env`. Both now read the test's environment: `given.env` and the runner's sandbox
+  values (its home and Git settings), but none of the host's variables. The host's `PATH` and
+  Windows' system variables, which the runner passes a granted command, stay out of it, so
+  `when: 'env.PATH matches "^/home/"'` is never true. `alint check` and `alint fix` still read
+  the invoking user's environment.
+- **An inline `given.tree` symlink can no longer lead out of a policy test's sandbox.** Since
+  v0.20.0 the runner checked where a tree's symlink leads by reading `..` in its target as text,
+  but the file system follows a symlink before it steps up from it. With `a/c/t -> ../../b`, a
+  link `s -> a/c/t/../../../x` passed as `x` and led two levels above the repository root, and a
+  tree key under it (`s/f`) wrote there while the tree was written, before any capability check
+  and during preflight too. An executable named `git` written that way into a directory on `PATH`
+  ran when the runner ran Git, and `expect_tree` read host files through such a link. The runner
+  now resolves a link's target through the symlinks it reaches, refuses a tree entry under a
+  symlink, writes symlinks after every other entry, and checks where each written link leads.
+  That covers `given.fixture` too: a fixture link was checked where it resolves in the fixture,
+  but its text is copied as it is and resolves from the copy's place, so `../../../secret`, led
+  back into a deep fixture through the package, read a host file above the temporary directory
+  in `expect_tree` (section 2.3 of the design said the copy was checked; nothing checked it).
+- **A fix step can no longer move a symlink out of a policy test's repository.** Since v0.20.0,
+  a `relocate` fix (v0.17.0) could move an in-tree symlink to the root, where its relative text
+  led above the repository, and `expect_tree` then read a host file through it. The runner checks
+  where every link leads after each fix step and refuses the test when one leads outside.
+- **A fix no longer writes or reads a Git directory.** A `file_create` could write `.git/HEAD`,
+  `.git/config` with a `core.fsmonitor`, and `.git/objects/` and `.git/refs/` entries, a `.git`
+  file naming another directory (`gitdir: gitdata`), or a `.git/commondir` pointing at one, and
+  the next Git command to read the repository (a later step's, in a policy test, or the user's)
+  ran that command. In `alint test` it needed no `spawn` capability; in `alint fix` a ruleset
+  reached through `extends:`, which the trust gate keeps from spawning, could run one, and its
+  `file_create: { content_from: .git/config }` copied the repository's configuration, credential
+  sections included, into a worktree file. Every fixer path a
+  configuration chooses (a `file_create` target and `content_from`, a `dir_create` target,
+  `sync_from` and cross-file sources and targets, `create_and_register` members, `file_rename`
+  and `relocate` targets) now refuses a component that names a Git directory in any spelling a
+  file system opens as `.git` (`.GIT`, `.git.`, `git~1`), or that an in-repository symlink leads
+  into one. Rules still read such paths. This affects `alint fix` with a ruleset from `extends:`
+  in v0.2.1 to v0.22.1 (`content_from` since v0.5.10), and `alint test` since v0.20.0.
+- **A policy test's Git reads no longer find a repository above the sandbox.** Since v0.20.0,
+  without `given.git` the test repository has no `.git`, and Git's discovery climbed to any
+  repository the temporary directory was in: with `TMPDIR` inside a checkout, `git_commit_message`
+  read the host repository's HEAD message. The runner now sets `GIT_CEILING_DIRECTORIES` to the
+  sandbox's parent, which alint keeps for its own Git commands (it still drops the invoking
+  user's), so such a test reports that the root is not a usable Git repository.
+- **With the host keyring granted, the host's global excludes no longer hide files from a policy
+  test.** Since v0.20.0, a test granted `host_keyring` ran the runner's Git with the host's home,
+  and `GIT_CONFIG_GLOBAL` does not keep Git from its default global excludes and attributes files
+  there (`~/.config/git/ignore`), so `check_changed` missed an untracked file the host's excludes
+  listed. The runner's Git commands now get `XDG_CONFIG_HOME` in the sandbox.
 
-  All four affect `alint test` and the `alint_testkit::Runner` library in v0.20.0 to v0.22.1, and
-  only for a policy-test package the user does not trust. No v0.22.x patch release follows: upgrade
-  to v0.23.0, and until then run `alint test` only on policy-test packages whose configurations and
-  `given:` blocks you trust.
+  Except where a bullet says otherwise, these affect `alint test` and the `alint_testkit::Runner`
+  library in v0.20.0 to v0.22.1, and only for a policy-test package the user does not trust. No
+  v0.22.x patch release follows: upgrade to v0.23.0, and until then run `alint test` only on
+  policy-test packages whose configurations and `given:` blocks you trust, and `alint fix` only
+  with `extends:` rulesets you trust.
 
 ### Added
 
+- **`alint_core::names_git_directory`, `path_names_git_directory` and `reaches_git_directory`**
+  (library API): whether a name, a path or a path below a root (through its symlinks) names a
+  Git directory in any spelling a file system opens as `.git`. Fixers refuse such paths (see
+  Security).
+- **`Engine::with_condition_environment` and `Context::condition_environment`** (library API,
+  with `Context::with_condition_environment` and `Context::environment_for_conditions`): the
+  environment `env.*` in a `when:` and a legacy `${VAR}` read, when it is not the process
+  environment. `alint test` leaves the host variables it passes its granted commands out of it.
 - **Constructors and setters for the structs v0.23 seals** (library API, #517, ADR-0032
   decision 3, ADR-0038). Code outside `alint-core` builds each of these without a struct literal,
   which `#[non_exhaustive]` no longer allows (see Changed):
@@ -98,8 +152,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **Breaking (library API):** `WhenEnv::env` and `WhenEnv::with_env` take a
   `BTreeMap<String, String>`, the type of the engine's process environment, instead of a
-  `HashMap`. The engine now passes its process environment there whenever it has one, so `env.*`
-  in a condition reads the environment a spawned command would get (see Security).
+  `HashMap`. The engine now passes its condition environment there whenever it has one (by
+  default its process environment), so `env.*` in a condition reads the environment the embedder
+  chose, not the host's (see Security).
 - **`git_tracked_only: true` sees tracked files that an ignore file excludes** (#503, ADR-0033
   decision 3). Under the default `respect_gitignore: true` the walk leaves out what `.gitignore`,
   `.ignore`, `.git/info/exclude` and the global excludes file list, and the tracked view was

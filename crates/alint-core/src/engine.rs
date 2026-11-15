@@ -947,6 +947,9 @@ pub struct Engine {
     fix_size_limit: Option<u64>,
     analysis_time: Option<crate::AnalysisTimeResolution>,
     process_environment: Option<BTreeMap<String, String>>,
+    /// What `env.*` in a `when:` and a legacy `${VAR}` read, when it is not
+    /// [`Self::process_environment`]; see [`Engine::with_condition_environment`].
+    condition_environment: Option<BTreeMap<String, String>>,
     analysis_time_required: OnceLock<bool>,
     analysis_time_cache: Mutex<Option<AnalysisTimeCache>>,
     /// In `--changed` mode, the set of paths (relative to root)

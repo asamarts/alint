@@ -133,7 +133,10 @@ the filesystem, reads file contents, optionally calls `git` and `sh`-via-the-
   `extends: https://...` URLs the user explicitly puts in their config; those
   are SRI-pinned, so a swap on the upstream URL fails verification.
 - **Path-traversal hardened.** All paths are validated to stay within the
-  repo root. Symlinks are honoured per the `no_symlinks` rule's verdict.
+  repo root. Symlinks are honoured per the `no_symlinks` rule's verdict. A
+  fix never writes or reads a Git directory (`.git` in any spelling a file
+  system opens as one, or through a symlink to one): a file there would be
+  configuration Git runs commands from.
 - **Plugin trust gating.** The `command` rule kind shells out to external
   CLIs; it's gated to the user's top-level config (extends'd configs cannot
   introduce a `command` rule).
@@ -141,9 +144,12 @@ the filesystem, reads file contents, optionally calls `git` and `sh`-via-the-
   fixer or custom fact that spawns a process, at any `require:` depth, or
   reads the host keyring, only when the test declares the capability and the
   command line grants it (`--allow-spawn`, `--allow-host-keyring`). A test's
-  `given.env` never reaches the Git commands the runner runs itself, which
-  never read a fixture as a repository, and its conditions read `given.env`,
-  not the host's environment.
+  tree, fixture and fixes stay in its sandbox: every symlink in its
+  repository leads inside it. The Git commands the runner runs itself get
+  none of `given.env` and read only the repository `given.git` makes: Git
+  takes no fixture directory for a repository, a fix cannot write one, and
+  discovery stops at the sandbox. A test's conditions read `given.env`, not
+  the host's environment.
 - **No telemetry.** alint sends nothing over the network except the
   user-explicit `extends:` URLs above.
 - **Reproducible builds.** `Cargo.lock` is committed. CI installs toolchains

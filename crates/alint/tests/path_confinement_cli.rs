@@ -311,3 +311,106 @@ fn content_providing_fixers_refuse_out_of_root_content_from() {
         );
     }
 }
+
+// ─── FIXER confinement — a fix never reaches the Git directory ─────────────
+//
+// A file a fix puts in `.git` is configuration Git runs commands from, and a
+// file it reads there can hold credentials, so no fixer path a config chooses
+// may name a Git directory, even inside the root.
+
+/// A ruleset reached through `extends:` cannot create `.git/commondir`, which
+/// points Git at a configuration the same ruleset writes (its
+/// `core.fsmonitor` names a command the next Git read runs), and cannot copy
+/// `.git/config` into the worktree with `content_from`.
+#[test]
+fn fixers_from_extends_never_reach_the_git_directory() {
+    use std::fmt::Write as _;
+
+    let base = tempfile::Builder::new()
+        .prefix("alint-fixgit-")
+        .tempdir()
+        .unwrap();
+    let repo = base.path().join("repo");
+    let canary = base.path().join("canary");
+    std::fs::create_dir_all(repo.join("policy")).unwrap();
+    std::fs::create_dir_all(&canary).unwrap();
+    let init = std::process::Command::new("git")
+        .args(["init", "-q"])
+        .arg(&repo)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .output()
+        .expect("run git");
+    assert!(init.status.success(), "{init:?}");
+    let mut config = std::fs::read_to_string(repo.join(".git/config")).unwrap();
+    config.push_str("[credential \"https://example.invalid\"]\n\thelper = rev522-credential\n");
+    std::fs::write(repo.join(".git/config"), config).unwrap();
+    std::fs::write(repo.join("a.txt"), "x\n").unwrap();
+
+    let fsmonitor = format!(
+        "[core]\n\trepositoryformatversion = 0\n\tfsmonitor = \"printf ran > '{}/fsmonitor.txt'; false\"\n",
+        canary.display()
+    );
+    let mut rules = String::new();
+    for (index, (path, content)) in [
+        ("gitdata/config", fsmonitor.as_str()),
+        ("gitdata/HEAD", "ref: refs/heads/main\n"),
+        ("gitdata/objects/k", ""),
+        ("gitdata/refs/k", ""),
+        (".git/commondir", "../gitdata\n"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        write!(
+            rules,
+            "  - id: create-{index}\n    kind: file_exists\n    level: error\n    \
+             paths: [\"{path}\"]\n    fix:\n      file_create:\n        \
+             content: {content:?}\n        create_parents: true\n"
+        )
+        .unwrap();
+    }
+    rules.push_str(
+        "  - id: steal\n    kind: file_exists\n    level: error\n    paths: [\"stolen.txt\"]\n    \
+         fix:\n      file_create:\n        content_from: .git/config\n  \
+         - id: tracked\n    kind: file_exists\n    level: error\n    paths: a.txt\n    \
+         git_tracked_only: true\n",
+    );
+    std::fs::write(
+        repo.join("policy/evil.yml"),
+        format!("version: 1\nrules:\n{rules}"),
+    )
+    .unwrap();
+    std::fs::write(
+        repo.join(".alint.yml"),
+        "version: 1\nextends: [./policy/evil.yml]\nrules: []\n",
+    )
+    .unwrap();
+
+    let out = run(&repo, &["fix", "."]);
+    assert!(
+        !repo.join(".git/commondir").exists(),
+        "a fix from extends wrote .git/commondir:\n{}",
+        out_text(&out)
+    );
+    assert_eq!(
+        std::fs::read_dir(&canary).unwrap().count(),
+        0,
+        "Git ran the fsmonitor command:\n{}",
+        out_text(&out)
+    );
+    let stolen = std::fs::read_to_string(repo.join("stolen.txt")).unwrap_or_default();
+    assert!(
+        !stolen.contains("rev522-credential"),
+        "content_from copied .git/config into the worktree: {stolen:?}"
+    );
+    let normalized = out_text(&out)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(
+        normalized.contains("is in a Git directory"),
+        "the refusal should say why; got:\n{}",
+        out_text(&out)
+    );
+}

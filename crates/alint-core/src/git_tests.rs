@@ -274,6 +274,46 @@ fn scoped_process_environment_filters_repository_redirectors() {
     );
 }
 
+/// A ceiling only narrows discovery: one the embedder's scoped environment
+/// sets reaches Git (`alint test` keeps discovery in its sandbox with it),
+/// while the host's own is still dropped.
+#[test]
+#[cfg(unix)]
+fn a_scoped_ceiling_reaches_git_and_stops_discovery() {
+    let outer = tempfile::tempdir().unwrap();
+    let parent = outer.path().join("parent");
+    let root = parent.join("sandbox/repository");
+    std::fs::create_dir_all(&root).unwrap();
+    let init = std::process::Command::new("git")
+        .args(["init", "-q"])
+        .arg(outer.path())
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .output()
+        .unwrap();
+    assert!(init.status.success(), "{init:?}");
+    assert!(
+        collect_tracked_paths(&root).is_some(),
+        "without a ceiling, discovery reaches the outer repository"
+    );
+
+    let ceiling = parent.to_string_lossy().into_owned();
+    let environment: ProcessEnvironment = std::env::vars()
+        .filter(|(name, _)| !GIT_LOCAL_ENV_VARS.contains(&name.as_str()))
+        .chain([("GIT_CEILING_DIRECTORIES".to_string(), ceiling.clone())])
+        .collect();
+    let _guard = scoped_process_environment(&root, environment);
+    let command = git_command(&root);
+    assert_eq!(
+        command
+            .get_envs()
+            .find(|(name, _)| *name == "GIT_CEILING_DIRECTORIES")
+            .map(|(_, value)| value),
+        Some(Some(std::ffi::OsStr::new(&ceiling)))
+    );
+    assert_eq!(collect_tracked_paths(&root), None);
+}
+
 #[test]
 #[cfg(unix)]
 fn git_log_queries_disable_configured_signature_verification() {

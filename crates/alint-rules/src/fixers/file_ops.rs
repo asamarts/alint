@@ -174,10 +174,18 @@ impl FileRenameFixer {
             new_basename.push('.');
             new_basename.push_str(ext);
         }
-        Ok(match path.parent() {
+        let target = match path.parent() {
             Some(p) if !p.as_os_str().is_empty() => p.join(&new_basename),
             _ => PathBuf::from(&new_basename),
-        })
+        };
+        // Never move a file into or out of a Git directory (`GIT~1` on
+        // Windows; see `confine_fix_path`).
+        if alint_core::path_names_git_directory(path)
+            || alint_core::path_names_git_directory(&target)
+        {
+            return Err(crate::fixers::creators::git_directory_refusal(&target));
+        }
+        Ok(target)
     }
 }
 
@@ -381,7 +389,16 @@ impl RelocateFixer {
                 path.display()
             ));
         }
-        Ok(PathBuf::from(basename))
+        // Never move a file into or out of a Git directory: a `.GIT` file
+        // relocated to the root is the repository's `.git` on a
+        // case-insensitive file system (see `confine_fix_path`).
+        let target = PathBuf::from(basename);
+        if alint_core::path_names_git_directory(path)
+            || alint_core::path_names_git_directory(&target)
+        {
+            return Err(crate::fixers::creators::git_directory_refusal(&target));
+        }
+        Ok(target)
     }
 }
 

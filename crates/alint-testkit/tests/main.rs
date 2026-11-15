@@ -9,3 +9,4 @@
 //! `-E 'test(/^<module>::/)'`).
 
 mod policy_runner;
+mod policy_runner_sandbox;

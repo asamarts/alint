@@ -238,6 +238,7 @@ fn canonical_pass_fail_corpus_produces_complete_traces() {
             source_provider: prepared.source_provider.clone(),
             environment: prepared.environment.clone(),
             process_environment: &prepared.process_environment,
+            condition_environment: &prepared.condition_environment,
             test: &policy,
             package: &prepared.package,
         };
