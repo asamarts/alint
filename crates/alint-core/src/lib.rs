@@ -3,6 +3,10 @@
 //! See `docs/design/ARCHITECTURE.md` in the alint repository for the
 //! rule model, execution order, and crate layout rationale.
 
+// A public type in a private module has no documentation page, so the public-API
+// gate (ci/scripts/public-api-parser-gate.sh) would not see what its fields name.
+#![deny(unnameable_types)]
+
 pub mod analysis_time;
 pub mod baseline;
 mod category;
@@ -59,12 +63,15 @@ pub use compatibility::{
     RunningVersion, StableVersion,
 };
 pub use config::{
-    AllowOutOfRoot, CONFIGURATION_MASK, CompiledNestedSpec, Config, ContentSourceSpec,
-    ExtendsEntry, FileAppendFinalNewlineFixSpec, FileAppendFixSpec, FileCollapseBlankLinesFixSpec,
+    AllowOutOfRoot, CONFIGURATION_MASK, ChmodFixSpec, CommandFixSpec, CompiledNestedSpec, Config,
+    ContentSourceSpec, CreateAndRegisterFixSpec, DirCreateFixSpec, ExtendsEntry,
+    FileAppendFinalNewlineFixSpec, FileAppendFixSpec, FileCollapseBlankLinesFixSpec,
     FileCreateFixSpec, FileNormalizeLineEndingsFixSpec, FilePrependFixSpec, FileRemoveFixSpec,
     FileRenameFixSpec, FileStripBidiFixSpec, FileStripBomFixSpec, FileStripZeroWidthFixSpec,
-    FileTrimTrailingWhitespaceFixSpec, FixSpec, NestedRuleSpec, NumberMask, PathsSpec,
-    REDACTED_CONFIGURATION_ERROR, RuleSpec, configuration_field_may_be_secret,
+    FileTrimTrailingWhitespaceFixSpec, FixSpec, GitUntrackFixSpec, IndentStyleFixSpec,
+    InsertHeaderFixSpec, InsertLineFixSpec, NestedRuleSpec, NumberMask, PathsSpec,
+    REDACTED_CONFIGURATION_ERROR, RelocateFixSpec, RemoveValueFixSpec, ReplaceFixSpec, RuleSpec,
+    SetValueFixSpec, SortFixSpec, SyncFromFixSpec, configuration_field_may_be_secret,
     mask_configuration_field, mask_configuration_values, redact_environment_values,
     redact_environment_values_in_error, resolve_content_source,
 };

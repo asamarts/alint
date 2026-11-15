@@ -7,7 +7,10 @@
 #     tree fail, since then nothing was tested;
 #   - the pinned cargo-mutants is installed when the runner has another version;
 #   - only a diff file or a crate name reaches cargo mutants.
-#   - cargo mutants runs with each process's address space capped and no core files.
+#   - cargo mutants runs with each process's address space capped and no core files,
+#     and, where sudo and systemd-run work, in a transient scope whose MemoryMax is
+#     the cap, as the invoking user with the script's environment; stub `sudo` and
+#     `systemd-run` stand in for the real ones, which are never run.
 #
 # Stub bodies are single-quoted on purpose: they expand when the stub runs.
 # shellcheck disable=SC2016
@@ -38,6 +41,7 @@ case "$1 $2" in
   "mutants --version") echo "cargo-mutants ${STUB_VERSION:?}"; exit 0 ;;
   "mutants "*)
     echo "limits $(ulimit -v) $(ulimit -c)" >> "$STUB_LOG"
+    echo "env HOME=${HOME-} CARGO_HOME=${CARGO_HOME-} RUSTUP_HOME=${RUSTUP_HOME-} RUSTFLAGS=${RUSTFLAGS-unset}" >> "$STUB_LOG"
     out=
     while [[ $# -gt 0 ]]; do [[ "$1" == --output ]] && out=$2; shift; done
     mkdir -p "$out/mutants.out"
@@ -49,7 +53,26 @@ case "$1 $2" in
 esac
 exit 0
 STUB
-chmod +x "$sandbox/bin/cargo"
+# sudo fails unless STUB_SUDO=ok (no passwordless sudo), and resets the
+# environment as the real one does.
+cat > "$sandbox/bin/sudo" <<'STUB'
+#!/usr/bin/env bash
+echo "sudo $*" >> "$STUB_LOG"
+[[ "${STUB_SUDO:-}" == ok ]] || exit 1
+[[ "$1" == -n ]] && shift
+exec env -i STUB_LOG="$STUB_LOG" STUB_SCOPE="${STUB_SCOPE:-}" PATH="$STUB_BIN:/usr/bin:/bin" "$@"
+STUB
+# systemd-run fails with STUB_SCOPE=fail (no systemd), and otherwise runs the
+# command after `--`, as a scope does.
+cat > "$sandbox/bin/systemd-run" <<'STUB'
+#!/usr/bin/env bash
+echo "systemd-run $*" >> "$STUB_LOG"
+[[ "${STUB_SCOPE:-}" != fail ]] || exit 1
+while [[ $# -gt 0 && "$1" != -- ]]; do shift; done
+shift
+exec "$@"
+STUB
+chmod +x "$sandbox/bin/cargo" "$sandbox/bin/sudo" "$sandbox/bin/systemd-run"
 
 # run [VAR=value...] -- <args...> -> $rc
 run() {
@@ -59,8 +82,8 @@ run() {
   : > "$sandbox/log"
   : > "$sandbox/summary"
   rc=0
-  env PATH="$sandbox/bin:$PATH" STUB_LOG="$sandbox/log" STUB_VERSION="$pinned" \
-    GITHUB_STEP_SUMMARY="$sandbox/summary" "${vars[@]}" \
+  env PATH="$sandbox/bin:$PATH" STUB_BIN="$sandbox/bin" STUB_LOG="$sandbox/log" \
+    STUB_VERSION="$pinned" GITHUB_STEP_SUMMARY="$sandbox/summary" "${vars[@]}" \
     bash "$root/ci/scripts/mutants.sh" "$@" > "$sandbox/out" 2>&1 || rc=$?
 }
 logged() { grep -qE -- "$1" "$sandbox/log"; }
@@ -177,6 +200,46 @@ fi
 
 run MUTANTS_MEMORY_LIMIT_KIB=1048576 -- --in-diff "$sandbox/pr.diff"
 if logged '^limits 1048576 0$'; then ok "MUTANTS_MEMORY_LIMIT_KIB sets the cap"; else bad "MUTANTS_MEMORY_LIMIT_KIB must set the cap"; fi
+
+# Without passwordless sudo, or without systemd, the per-process cap is the only layer.
+for stubs in "STUB_SUDO=no" "STUB_SUDO=ok STUB_SCOPE=fail"; do
+  # shellcheck disable=SC2086
+  run $stubs -- --in-diff "$sandbox/pr.diff"
+  if [[ "$rc" -eq 0 ]] && logged '^sudo -n systemd-run --scope .* -- true$' &&
+     ! logged '^(sudo -n )?systemd-run .* -- env -i' && logged '^limits 12582912 0$' &&
+     logged '^cargo mutants --workspace --in-diff' && said 'without a memory scope'; then
+    ok "with $stubs, cargo mutants runs outside a scope, each process capped"
+  else
+    bad "with $stubs, cargo mutants must run outside a scope, each process capped"
+  fi
+done
+
+# With both, the whole run is in one scope capped at the limit, with no swap, as the
+# invoking user, and with the script's environment, which sudo would have reset.
+uid=$(id -u)
+gid=$(id -g)
+scope_args="--scope --quiet --collect -p MemoryMax=12582912K -p MemorySwapMax=0 --uid=$uid --gid=$gid"
+run STUB_SUDO=ok HOME="$sandbox/home" CARGO_HOME="$sandbox/cargo" RUSTUP_HOME="$sandbox/rustup" \
+  STUB_RC=0 -- --in-diff "$sandbox/pr.diff"
+if [[ "$rc" -eq 0 ]] && logged "^sudo -n systemd-run $scope_args -- true$" &&
+   logged "^systemd-run $scope_args -- env -i .* timeout --signal=INT --kill-after=60 5400 cargo mutants --workspace --in-diff $sandbox/pr.diff --in-place --no-shuffle --output target/mutants$" &&
+   logged '^limits 12582912 0$' &&
+   logged "^env HOME=$sandbox/home CARGO_HOME=$sandbox/cargo RUSTUP_HOME=$sandbox/rustup RUSTFLAGS=$" &&
+   said 'in a transient scope with MemoryMax=12582912K' &&
+   summarised 'No mutants in the lines this change touches.'; then
+  ok "with sudo and systemd, cargo mutants runs in a 12 GiB scope as the user, with its environment"
+else
+  bad "with sudo and systemd, cargo mutants must run in a MemoryMax scope with the script's environment"
+fi
+
+run STUB_SUDO=ok MUTANTS_MEMORY_LIMIT_KIB=1048576 STUB_RC=2 STUB_MISSED="$missed" -- --package alint-output
+if [[ "$rc" -eq 0 ]] && logged '^systemd-run --scope .* -p MemoryMax=1048576K -p MemorySwapMax=0 .* -- env -i ' &&
+   logged '^limits 1048576 0$' && summarised '0 caught, 2 missed' &&
+   said '::warning file=crates/a/src/lib.rs,line=12,col=5,title=Missed mutant::'; then
+  ok "MUTANTS_MEMORY_LIMIT_KIB sets the scope's MemoryMax; a run in a scope is reported as usual"
+else
+  bad "MUTANTS_MEMORY_LIMIT_KIB must set the scope's MemoryMax, and the run must be reported"
+fi
 
 for limit in 0 12G -1; do
   run MUTANTS_MEMORY_LIMIT_KIB="$limit" -- --in-diff "$sandbox/pr.diff"

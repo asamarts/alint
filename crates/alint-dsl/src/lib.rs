@@ -25,6 +25,10 @@
 //! a rule that never gets a `kind` assigned anywhere in its chain
 //! is a clean error.
 
+// A public type in a private module has no documentation page, so the public-API
+// gate (ci/scripts/public-api-parser-gate.sh) would not see what its fields name.
+#![deny(unnameable_types)]
+
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};

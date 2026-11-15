@@ -11,6 +11,7 @@
 //! parser does not change alint's API (ADR-0038).
 
 use std::fmt;
+use std::iter::FusedIterator;
 
 use ref_cast::{RefCastCustom, ref_cast_custom};
 use serde::{Deserialize, Serialize};
@@ -147,10 +148,18 @@ impl Value {
         self.0.is_mapping()
     }
 
-    /// The tag on this value as YAML writes it (`!celsius`), or `None` when it
-    /// has none. A core-schema tag such as `!!str` is applied when the document
-    /// is read, so it is not kept. The other accessors look through a tag: a
-    /// tagged string is a string.
+    /// The tag on this value, or `None` when it has none. A local tag reads as
+    /// written (`!celsius`, and `!` for the non-specific tag), a tag in the
+    /// YAML namespace in its short form (`!!binary`), and any other global tag
+    /// by its full name, however the document wrote it: `!<tag:x,2000:y>`, and
+    /// `!e!y` under `%TAG !e! tag:x,2000:`, both read `tag:x,2000:y`.
+    ///
+    /// A tag that only restates the kind of value is not kept: the core-schema
+    /// scalar tags (`!!str`, `!!int`, `!!float`, `!!bool`, `!!null`) are
+    /// applied when the document is read, and the collection tags (`!!seq`,
+    /// `!!map`, `!!set`, `!!omap`, `!!pairs`) leave a plain sequence or
+    /// mapping. The other accessors look through a tag: a tagged string is a
+    /// string.
     #[must_use]
     pub fn tag(&self) -> Option<String> {
         match &self.0 {
@@ -218,6 +227,13 @@ impl Value {
     pub fn get(&self, key: &str) -> Option<&Self> {
         self.as_mapping().and_then(|mapping| mapping.get(key))
     }
+
+    /// The value under `key`, mutably, if this is a mapping that has one.
+    #[must_use]
+    pub fn get_mut(&mut self, key: &str) -> Option<&mut Self> {
+        self.as_mapping_mut()
+            .and_then(|mapping| mapping.get_mut(key))
+    }
 }
 
 /// Null.
@@ -266,15 +282,36 @@ impl std::ops::Index<usize> for Value {
     }
 }
 
+/// `value[&key]` is `value[key.as_str()]`.
+impl std::ops::Index<&String> for Value {
+    type Output = Self;
+
+    fn index(&self, key: &String) -> &Self {
+        &self[key.as_str()]
+    }
+}
+
 /// `value[key] = ...` sets the value under `key`. A mapping gains a missing
-/// key, and a null becomes a mapping first.
+/// key, and a null becomes a mapping first; a tagged null keeps its tag.
 ///
 /// # Panics
 ///
 /// When this is neither a mapping nor null.
 impl std::ops::IndexMut<&str> for Value {
     fn index_mut(&mut self, key: &str) -> &mut Self {
+        // The parser turns only an untagged null into a mapping.
+        let untagged = self.0.untag_mut();
+        if untagged.is_null() {
+            *untagged = ayaml::Value::Mapping(ayaml::Mapping::new());
+        }
         Self::from_parser_mut(&mut self.0[key])
+    }
+}
+
+/// `value[&key] = ...` is `value[key.as_str()] = ...`.
+impl std::ops::IndexMut<&String> for Value {
+    fn index_mut(&mut self, key: &String) -> &mut Self {
+        &mut self[key.as_str()]
     }
 }
 
@@ -532,6 +569,8 @@ impl DoubleEndedIterator for SequenceIter<'_> {
 
 impl ExactSizeIterator for SequenceIter<'_> {}
 
+impl FusedIterator for SequenceIter<'_> {}
+
 /// The values of a [`Sequence`], mutably, in order.
 #[derive(Debug)]
 pub struct SequenceIterMut<'a>(std::slice::IterMut<'a, ayaml::Value>);
@@ -556,6 +595,8 @@ impl DoubleEndedIterator for SequenceIterMut<'_> {
 
 impl ExactSizeIterator for SequenceIterMut<'_> {}
 
+impl FusedIterator for SequenceIterMut<'_> {}
+
 /// The values of a [`Sequence`] it gave up, in order.
 #[derive(Clone, Debug)]
 pub struct SequenceIntoIter(std::vec::IntoIter<ayaml::Value>);
@@ -579,6 +620,8 @@ impl DoubleEndedIterator for SequenceIntoIter {
 }
 
 impl ExactSizeIterator for SequenceIntoIter {}
+
+impl FusedIterator for SequenceIntoIter {}
 
 /// A YAML mapping: keys and their values, in the order they were written or
 /// inserted.
@@ -664,13 +707,18 @@ impl Mapping {
     }
 
     /// The keys, in order.
-    pub fn keys(&self) -> impl Iterator<Item = &Value> {
-        self.iter().map(|(key, _)| key)
+    pub fn keys(&self) -> MappingKeys<'_> {
+        MappingKeys(self.iter())
     }
 
     /// The values, in order.
-    pub fn values(&self) -> impl Iterator<Item = &Value> {
-        self.iter().map(|(_, value)| value)
+    pub fn values(&self) -> MappingValues<'_> {
+        MappingValues(self.iter())
+    }
+
+    /// The values, mutably, in order.
+    pub fn values_mut(&mut self) -> MappingValuesMut<'_> {
+        MappingValuesMut(self.iter_mut())
     }
 }
 
@@ -698,6 +746,34 @@ impl std::ops::Index<&str> for Mapping {
 
     fn index(&self, key: &str) -> &Value {
         self.get(key).unwrap_or(&NULL)
+    }
+}
+
+/// `mapping[&key]` is `mapping[key.as_str()]`.
+impl std::ops::Index<&String> for Mapping {
+    type Output = Value;
+
+    fn index(&self, key: &String) -> &Value {
+        &self[key.as_str()]
+    }
+}
+
+/// `mapping[key] = ...` sets the value under `key`; a missing key is added
+/// last, with null until the assignment.
+impl std::ops::IndexMut<&str> for Mapping {
+    fn index_mut(&mut self, key: &str) -> &mut Value {
+        Value::from_parser_mut(
+            self.0
+                .entry(ayaml::Value::from(key))
+                .or_insert(ayaml::Value::Null),
+        )
+    }
+}
+
+/// `mapping[&key] = ...` is `mapping[key.as_str()] = ...`.
+impl std::ops::IndexMut<&String> for Mapping {
+    fn index_mut(&mut self, key: &String) -> &mut Value {
+        &mut self[key.as_str()]
     }
 }
 
@@ -775,6 +851,8 @@ impl DoubleEndedIterator for MappingIter<'_> {
 
 impl ExactSizeIterator for MappingIter<'_> {}
 
+impl FusedIterator for MappingIter<'_> {}
+
 /// The keys of a [`Mapping`] and their values, mutably, in order.
 #[derive(Debug)]
 pub struct MappingIterMut<'a>(<&'a mut ayaml::Mapping as IntoIterator>::IntoIter);
@@ -803,8 +881,10 @@ impl DoubleEndedIterator for MappingIterMut<'_> {
 
 impl ExactSizeIterator for MappingIterMut<'_> {}
 
+impl FusedIterator for MappingIterMut<'_> {}
+
 /// The keys of a [`Mapping`] it gave up and their values, in order.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct MappingIntoIter(<ayaml::Mapping as IntoIterator>::IntoIter);
 
 impl Iterator for MappingIntoIter {
@@ -828,6 +908,56 @@ impl DoubleEndedIterator for MappingIntoIter {
 }
 
 impl ExactSizeIterator for MappingIntoIter {}
+
+impl FusedIterator for MappingIntoIter {}
+
+/// An iterator over one side of a [`Mapping`]'s entries: `$name` wraps `$entries` and
+/// yields `$item`, taken from each entry by `$take`.
+macro_rules! mapping_side {
+    ($doc:literal, [$($derive:ident),*], $name:ident($entries:ident) => $item:ty, $take:expr) => {
+        #[doc = $doc]
+        #[derive($($derive),*)]
+        pub struct $name<'a>($entries<'a>);
+
+        impl<'a> Iterator for $name<'a> {
+            type Item = $item;
+
+            fn next(&mut self) -> Option<$item> {
+                self.0.next().map($take)
+            }
+
+            fn size_hint(&self) -> (usize, Option<usize>) {
+                self.0.size_hint()
+            }
+        }
+
+        impl DoubleEndedIterator for $name<'_> {
+            fn next_back(&mut self) -> Option<Self::Item> {
+                self.0.next_back().map($take)
+            }
+        }
+
+        impl ExactSizeIterator for $name<'_> {}
+
+        impl FusedIterator for $name<'_> {}
+    };
+}
+
+mapping_side!(
+    "The keys of a [`Mapping`], in order.",
+    [Clone, Debug],
+    MappingKeys(MappingIter) => &'a Value, |(key, _)| key
+);
+mapping_side!(
+    "The values of a [`Mapping`], in order.",
+    [Clone, Debug],
+    MappingValues(MappingIter) => &'a Value, |(_, value)| value
+);
+mapping_side!(
+    "The values of a [`Mapping`], mutably, in order.",
+    [Debug],
+    MappingValuesMut(MappingIterMut) => &'a mut Value, |(_, value)| value
+);
 
 /// Why a YAML document did not parse, or a value did not decode or encode.
 ///
@@ -1202,14 +1332,30 @@ mod tests {
     }
 
     /// The predicates and the tag accessor read each kind of value; the
-    /// predicates, like the other accessors, look through a tag.
+    /// predicates, like the other accessors, look through a tag. A global tag
+    /// reads by its full name however it was written, a YAML-namespace one in
+    /// its short form, and a tag that restates the kind of value is dropped.
     #[test]
     fn predicates_and_tag_read_each_kind() {
         let value: Value = from_str(concat!(
             "b: true\nn: 1.5\ns: text\nq: [a]\nm: {k: v}\nz: ~\n",
             "local: !celsius 21\ncore: !!str 7\n",
+            "verbatim: !<tag:x,2000:y> 1\nbinary: !!binary aGk=\nset: !!set {a: ~}\n",
+            "omap: !!omap [a: 1]\nnonspecific: ! 21\n",
         ))
         .unwrap();
+        assert_eq!(value["verbatim"].tag().as_deref(), Some("tag:x,2000:y"));
+        assert_eq!(value["verbatim"].as_u64(), Some(1));
+        let expanded: Value = from_str("%TAG !e! tag:x,2000:\n--- !e!y 1\n").unwrap();
+        assert_eq!(expanded.tag().as_deref(), Some("tag:x,2000:y"));
+        assert_eq!(value["binary"].tag().as_deref(), Some("!!binary"));
+        assert_eq!(value["binary"].as_str(), Some("aGk="));
+        assert_eq!(value["set"].tag(), None);
+        assert!(value["set"].is_mapping());
+        assert_eq!(value["omap"].tag(), None);
+        assert!(value["omap"].is_sequence());
+        assert_eq!(value["nonspecific"].tag().as_deref(), Some("!"));
+        assert_eq!(value["nonspecific"].as_str(), Some("21"));
         let kinds = |key: &str| {
             let v = &value[key];
             [
@@ -1294,6 +1440,44 @@ mod tests {
         assert!(Value::default()[0].is_null());
     }
 
+    /// Assigning a key on a tagged null makes it a mapping that keeps the tag,
+    /// as an untagged null becomes a mapping.
+    #[test]
+    fn index_assignment_on_a_tagged_null_keeps_the_tag() {
+        let mut value: Value = from_str("!t ~").unwrap();
+        assert!(value.is_null());
+        value["k"] = Value::from("v");
+        assert_eq!(value["k"], "v");
+        assert!(value.is_mapping());
+        assert_eq!(value.tag().as_deref(), Some("!t"));
+        let key = String::from("j");
+        value[&key] = Value::from(1_i32);
+        assert_eq!(value[&key], 1_i32);
+        assert_eq!(value["k"], "v");
+    }
+
+    /// `Value::get_mut`, indexing by `&String`, and a mapping's index
+    /// assignment, which adds a missing key last; reading one adds nothing.
+    #[test]
+    fn get_mut_string_keys_and_mapping_assignment() {
+        let mut value: Value = from_str("a: 1\nb: [x]\n").unwrap();
+        *value.get_mut("a").unwrap() = Value::from(2_i32);
+        assert_eq!(value["a"], 2_i32);
+        assert!(value.get_mut("missing").is_none());
+        assert!(Value::from("s").get_mut("a").is_none());
+        let key = String::from("b");
+        assert_eq!(value[&key][0], "x");
+        let mapping = value.as_mapping_mut().unwrap();
+        assert_eq!(mapping[&key][0], "x");
+        mapping["a"] = Value::from(3_i32);
+        mapping[&String::from("c")] = Value::from(true);
+        assert!(mapping["missing"].is_null());
+        assert_eq!(mapping["a"], 3_i32);
+        assert_eq!(mapping["c"], true);
+        let keys: Vec<_> = mapping.keys().map(|key| key.as_str().unwrap()).collect();
+        assert_eq!(keys, ["a", "b", "c"]);
+    }
+
     /// An integer index assignment on a scalar panics.
     #[test]
     #[should_panic(expected = "cannot access index 0")]
@@ -1343,23 +1527,55 @@ mod tests {
         assert_eq!(sequence.into_iter().len(), 3);
     }
 
-    /// Each of the six iterators knows its length and runs from both ends.
-    /// Every collection takes one item more than it expects, so an iterator
-    /// that never ends fails here instead of exhausting memory.
+    /// Each of the nine iterators knows its length, runs from both ends, and
+    /// stays done once done. Every collection takes one item more than it
+    /// expects, so an iterator that never ends fails here instead of
+    /// exhausting memory.
     #[test]
     fn every_iterator_knows_its_length_and_runs_backward() {
+        fn sized<I: ExactSizeIterator + DoubleEndedIterator + FusedIterator>(iter: I) -> I {
+            iter
+        }
         let mut sequence: Sequence = from_str("[1, 2, 3]").unwrap();
         let mut mapping: Mapping = from_str("a: 1\nb: 2\nc: 3\n").unwrap();
         for hint in [
-            sequence.iter().size_hint(),
-            sequence.iter_mut().size_hint(),
-            sequence.clone().into_iter().size_hint(),
-            mapping.iter().size_hint(),
-            mapping.iter_mut().size_hint(),
-            mapping.clone().into_iter().size_hint(),
+            sized(sequence.iter()).size_hint(),
+            sized(sequence.iter_mut()).size_hint(),
+            sized(sequence.clone().into_iter()).size_hint(),
+            sized(mapping.iter()).size_hint(),
+            sized(mapping.iter_mut()).size_hint(),
+            sized(mapping.clone().into_iter().clone()).size_hint(),
+            sized(mapping.keys().clone()).size_hint(),
+            sized(mapping.values().clone()).size_hint(),
+            sized(mapping.values_mut()).size_hint(),
         ] {
             assert_eq!(hint, (3, Some(3)));
         }
+        let mut keys = mapping.keys();
+        assert_eq!(keys.by_ref().count(), 3);
+        assert!(keys.next().is_none() && keys.next_back().is_none());
+
+        let ints = [Value::from(3_i32), Value::from(2_i32), Value::from(1_i32)];
+        let values: Vec<Value> = mapping.values().rev().take(4).cloned().collect();
+        assert_eq!(values, ints);
+        let values: Vec<Value> = mapping
+            .values_mut()
+            .rev()
+            .take(4)
+            .map(|v| v.clone())
+            .collect();
+        assert_eq!(values, ints);
+        let keys: Vec<&str> = mapping
+            .keys()
+            .rev()
+            .take(4)
+            .map(|k| k.as_str().unwrap())
+            .collect();
+        assert_eq!(keys, ["c", "b", "a"]);
+        for value in mapping.values_mut() {
+            *value = Value::from(value.as_i64().unwrap() * 2);
+        }
+        assert_eq!(mapping["c"], 6_i32);
 
         let backward = [Value::from(3_i32), Value::from(2_i32), Value::from(1_i32)];
         let values: Vec<Value> = sequence.iter().rev().take(4).cloned().collect();

@@ -1,6 +1,10 @@
 //! Versioned policy-test models, a validating hermetic runner, and declarative
 //! repository fixture utilities.
 
+// A public type in a private module has no documentation page, so the public-API
+// gate (ci/scripts/public-api-parser-gate.sh) would not see what its fields name.
+#![deny(unnameable_types)]
+
 pub mod confinement;
 mod error;
 pub mod policy_runner;
