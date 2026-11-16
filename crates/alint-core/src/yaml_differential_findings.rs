@@ -440,6 +440,16 @@ const FINDINGS: &[(&str, Entry, &[&str])] = &[
             "after-the-root-node",
         ],
     ),
+    // A `#` in a verbatim tag that names a local tag, which the oracle
+    // rejects: no global tag (seed 7).
+    ("!<!a#b> {1: 1}\n", Entry::Json, &["number-sign-in-a-tag"]),
+    // U+FFFF in a verbatim tag that names a local tag: ayaml's error about
+    // the tag is at the character the oracle's reader refuses (seed 7).
+    (
+        "- &a1 !<!'\u{ffff}'> [a b]\n- \n",
+        Entry::Value,
+        &["non-printable-character"],
+    ),
 ];
 
 #[test]

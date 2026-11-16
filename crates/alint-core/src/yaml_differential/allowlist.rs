@@ -611,6 +611,8 @@ pub(crate) const DEVIATIONS: &[Deviation] = &[
                     case,
                     &[
                         "did not find expected whitespace or line break",
+                        // A verbatim tag.
+                        "did not find the expected '>'",
                         // A `%TAG` prefix that starts with `#`.
                         "did not find expected tag URI",
                     ],
@@ -618,7 +620,8 @@ pub(crate) const DEVIATIONS: &[Deviation] = &[
             },
             because: "the oracle's error points at a `#` inside a tag or a `%TAG` prefix",
         },
-        ayaml: "reads `#` as part of a tag or a `%TAG` prefix, as in `!t#`",
+        ayaml: "reads `#` as part of a tag, a verbatim one too, or a `%TAG` prefix, as in \
+                `!t#` or `!<!a#b>`",
         oracle: "rejects `#` there",
         reason: "YAML 1.2 (rules 39 and 40) allows `#` in a tag and a tag prefix",
         example: "- !t# x\n",
@@ -1164,10 +1167,11 @@ pub(crate) const LOCATIONS: &[Location] = &[
         messages: &[
             "non-printable character",
             "a tag must be followed by whitespace or a line break",
+            "a verbatim tag may only hold URI characters",
         ],
         places: Some(errors_about_one_character),
-        ayaml: "the character YAML does not allow, or, where it ends a tag, the error that \
-                white space does not follow the tag",
+        ayaml: "the character YAML does not allow, or, where it ends a tag or stands in a \
+                verbatim tag, its error about the tag",
         oracle: "line 1, column 1, with the character's byte offset in its message, since \
                  its reader checks each character before the scanner reads it",
         example: ("a: x\u{1}y\n", Entry::Value),
