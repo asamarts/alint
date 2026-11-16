@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 
+use alint_core::yaml_depth::Expansion;
 use alint_core::{
     AnalysisFailureKind, Context, Error, Level, PerFileRule, Result, Rule, RuleSpec, Scope,
     SourceRange, Violation, eval_per_file,
@@ -13,6 +14,11 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 const MAX_YAML_NESTING: usize = 128;
+/// Mapping entries and merge sources the merge-key lookups of one document may
+/// inspect while they follow `<<` sources, across all its lookups. A file of
+/// 2,000 jobs that each merge a 10-key template inspects about 130,000; merge
+/// sources reused at every level would otherwise cost `sources^depth`.
+const MAX_MERGE_WORK: usize = 1 << 22;
 const MAX_GITLAB_EXTENDS_DEPTH: usize = 11;
 const MAX_PINNED_REFERENCES_BYTES: usize = alint_core::MAX_STRUCTURED_BYTES;
 const LEGACY_GITHUB_STEPS_PATH: &str = "$.jobs.*.steps[*].uses";
@@ -155,6 +161,14 @@ impl PinnedReferencesRule {
             }
             InputFormat::Auto | InputFormat::Dockerfile => unreachable!("format resolved above"),
         };
+        if document.merge_work.get().is_none() {
+            return vec![Self::analysis_failure(
+                path,
+                AnalysisFailureKind::ResourceParse,
+                "could not resolve pinned_references YAML merge keys: they take more work than \
+                 the safety limit allows",
+            )];
+        }
         if let Err(error) = collection {
             return vec![Self::analysis_failure(
                 path,
@@ -328,6 +342,9 @@ struct YamlDocument {
     nodes: Vec<YamlNode>,
     anchors: HashMap<usize, NodeId>,
     root: NodeId,
+    /// What is left of [`MAX_MERGE_WORK`]; `None` once it ran out, which fails
+    /// the analysis rather than leave a lookup unanswered.
+    merge_work: std::cell::Cell<Option<usize>>,
 }
 
 type NodeId = usize;
@@ -378,9 +395,25 @@ impl YamlDocument {
         if !yaml_guards.flow_within_limit() {
             return Err("flow collection nesting exceeds the safety limit".to_owned());
         }
-        if !yaml_guards.expansion_within_limit(text) {
-            return Err("alias expansion exceeds the safety limit".to_owned());
+        // saphyr reads what ayaml may refuse, so only a text the guard read
+        // whole has a bounded alias expansion.
+        match yaml_guards.expansion(text) {
+            Expansion::WithinLimit => {}
+            Expansion::OverLimit => {
+                return Err("alias expansion exceeds the safety limit".to_owned());
+            }
+            Expansion::Unparsed(error) => {
+                return Err(format!(
+                    "the YAML uses aliases, and their expansion cannot be bounded: {error}"
+                ));
+            }
         }
+        Self::parse_unguarded(text)
+    }
+
+    /// [`Self::parse`] without the guards, which tests bypass to reach the
+    /// lookups' own bounds.
+    fn parse_unguarded(text: &str) -> std::result::Result<Option<Self>, String> {
         let mut parser = Parser::new_from_str(text);
         expect_event(
             &mut parser,
@@ -400,6 +433,7 @@ impl YamlDocument {
             nodes: Vec::new(),
             anchors: HashMap::new(),
             root: 0,
+            merge_work: std::cell::Cell::new(Some(MAX_MERGE_WORK)),
         };
         document.root = document.parse_node(&mut parser, 0)?;
         expect_event(
@@ -433,6 +467,11 @@ impl YamlDocument {
                 is_explicit_string_tag(tag.as_deref()),
                 is_gitlab_reference_tag(tag.as_deref()),
             ),
+            // An anchor is recorded once its node is complete, so an alias to
+            // one still open refers to a collection that contains it: a cycle.
+            Event::Alias(anchor) if !self.anchors.contains_key(&anchor) => {
+                return Err("a YAML alias refers to a collection that contains it".to_owned());
+            }
             Event::Alias(anchor) => (
                 YamlNodeKind::Alias(anchor),
                 start_span,
@@ -620,6 +659,7 @@ impl YamlDocument {
             return None;
         }
         let (raw, mapping) = self.raw_mapping(reference)?;
+        self.charge_merge_work(depth, raw.len())?;
         let mut entries = Vec::new();
         let mut positions: HashMap<&str, usize> = HashMap::new();
 
@@ -642,6 +682,7 @@ impl YamlDocument {
             } else {
                 self.sequence(merge).unwrap_or_default()
             };
+            self.charge_merge_work(depth + 1, sources.len())?;
             for source in sources {
                 for entry in self.effective_mapping_inner(source, depth + 1)? {
                     let name = self.scalar(entry.key)?.value;
@@ -679,6 +720,18 @@ impl YamlDocument {
         Some(entries)
     }
 
+    /// Charge `entries` (and one for the visit) at merge depth `depth`, where
+    /// depth 0 follows no merge and is free; `None` once [`MAX_MERGE_WORK`] is
+    /// spent.
+    fn charge_merge_work(&self, depth: usize, entries: usize) -> Option<()> {
+        if depth == 0 {
+            return Some(());
+        }
+        let left = self.merge_work.get()?.checked_sub(entries + 1);
+        self.merge_work.set(left);
+        left.map(drop)
+    }
+
     fn get(&self, reference: YamlRef, wanted: &str) -> Option<YamlRef> {
         self.get_inner(reference, wanted, 0)
     }
@@ -688,6 +741,7 @@ impl YamlDocument {
             return None;
         }
         let (entries, mapping) = self.raw_mapping(reference)?;
+        self.charge_merge_work(depth, entries.len())?;
         for (key_id, value_id) in entries.iter().rev() {
             let key = YamlRef {
                 id: *key_id,
@@ -719,6 +773,7 @@ impl YamlDocument {
                 return Some(found);
             }
             if let Some((sources, sequence)) = self.raw_sequence(merge) {
+                self.charge_merge_work(depth + 1, sources.len())?;
                 for source in sources {
                     let source = YamlRef {
                         id: *source,

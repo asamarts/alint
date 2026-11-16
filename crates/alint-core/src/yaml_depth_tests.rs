@@ -989,3 +989,94 @@ fn realistic_anchor_heavy_yaml_passes_with_a_wide_margin() {
     ));
     assert!(expansion_within_limit(&doc));
 }
+
+/// ROB-1: the guard took any refusal but its own budget for "within budget",
+/// though only ayaml's own parse refuses what ayaml refused: saphyr, which
+/// `pinned_references` and entry extraction read with, accepts an alias to a
+/// collection that contains it, and anything after an ayaml-only error. The
+/// verdict now says the text was not read.
+#[test]
+fn a_text_ayaml_refuses_is_not_vouched_for() {
+    use std::fmt::Write as _;
+
+    let chain = |head: &str| {
+        let mut doc = format!("{head}m1: &m1 {{a: 1}}\n");
+        for level in 2..=12 {
+            let sources = vec![format!("*m{}", level - 1); 10].join(", ");
+            writeln!(doc, "m{level}: &m{level} {{<<: [{sources}]}}").unwrap();
+        }
+        doc
+    };
+    for doc in [
+        "&r\n<<: [*r, *r]\n".to_string(),
+        "jobs:\n  a: &r\n    <<: [*r, *r]\n".to_string(),
+        chain("z: &z [*z]\n"),
+        chain("x: !<> y\n"),
+    ] {
+        let verdict = expansion(&doc);
+        assert!(
+            matches!(verdict, Expansion::Unparsed(_)),
+            "{doc:?}: {verdict:?}"
+        );
+        assert!(matches!(
+            scan_guards(&doc).expansion(&doc),
+            Expansion::Unparsed(_)
+        ));
+        // A caller that parses with ayaml goes on: its parse refuses the text.
+        assert!(expansion_within_limit(&doc));
+        assert!(crate::yaml::ayaml_from_str::<ayaml::Value>(&doc).is_err());
+    }
+    // Without the ayaml-only error, the chain is over budget.
+    assert_eq!(expansion(&chain("")), Expansion::OverLimit);
+    assert!(!expansion_within_limit(&chain("")));
+    // An alias-free text needs no reading at all, valid or not.
+    assert_eq!(expansion("x: !<> y\n"), Expansion::WithinLimit);
+    assert_eq!(expansion("a: &a [1]\nb: *a\n"), Expansion::WithinLimit);
+}
+
+/// ROB-4 / YAML-15: the `requires:` check walked saphyr's reading of the whole
+/// first document recursively, so a value saphyr reads 100,000 levels deep
+/// (ayaml reads a scalar) overflowed the stack, and a text saphyr refuses but
+/// ayaml reads failed with saphyr's error. It reads ayaml's events now, with a
+/// stack of its own.
+#[test]
+fn the_literal_subtree_check_reads_as_alint_decodes_without_recursion() {
+    let on_small_stack = |doc: String| {
+        std::thread::Builder::new()
+            .stack_size(2 << 20)
+            .spawn(move || mapping_subtree_is_literal(&doc, &["requires"]))
+            .unwrap()
+            .join()
+            .unwrap()
+    };
+    let deep = "- ".repeat(100_000);
+    let saphyr_deep = format!("requires:\n  alint: '0.1.0'\nvars:\n  x: &ak:---\n    {deep}x\n");
+    assert_eq!(on_small_stack(saphyr_deep), Ok(true));
+    let ayaml_deep = format!("requires:\n  alint: '0.1.0'\nvars:\n  x:\n    {deep}x\n");
+    assert!(on_small_stack(ayaml_deep).is_err());
+    assert_eq!(
+        mapping_subtree_is_literal("requires:\n  alint: '0.1.0'\na:\tx\n", &["requires"]),
+        Ok(true)
+    );
+    // What the check refuses, and what it leaves alone.
+    for (doc, literal) in [
+        ("requires: {alint: '0.1.0'}\n", true),
+        ("vars: {v: &v '0.1.0'}\nrequires: {alint: *v}\n", false),
+        ("requires: {alint: &v '0.1.0'}\n", false),
+        ("requires: {alint: !t '0.1.0'}\n", false),
+        ("requires: {<<: {alint: '0.1.0'}}\n", false),
+        ("vars: {k: &k requires}\n*k : {alint: '0.1.0'}\n", false),
+        ("k: &k requires\nk2: &k [x]\n*k : {alint: '0.1.0'}\n", true),
+        (
+            "other: &o {alint: !t x}\nrequires: {alint: '0.1.0'}\n",
+            true,
+        ),
+        ("[requires]\n", true),
+    ] {
+        assert_eq!(
+            mapping_subtree_is_literal(doc, &["requires"]),
+            Ok(literal),
+            "{doc:?}"
+        );
+    }
+}

@@ -119,7 +119,13 @@ impl Scan {
 fn read_existing_extends(root: &Path) -> Vec<String> {
     for name in [".alint.yml", ".alint.yaml", "alint.yml", "alint.yaml"] {
         let path = root.join(name);
-        let Ok(body) = std::fs::read_to_string(&path) else {
+        // The loader's reader: a FIFO or a device (`/dev/zero`) planted under
+        // the config's name is refused, not read forever, and so is a file
+        // past the size a config may have.
+        let Ok(body) = alint_dsl::ConfigSourceProvider::read_to_string(
+            &alint_dsl::FilesystemConfigSource,
+            &path,
+        ) else {
             continue;
         };
         // Guard a deep-flow YAML bomb before the parser sees it -- the same
@@ -263,6 +269,37 @@ mod tests {
         let bomb = format!("extends: {}1{}", "[".repeat(200_000), "]".repeat(200_000));
         touch(tmp.path(), ".alint.yml", &bomb);
         assert_eq!(read_existing_extends(tmp.path()), Vec::<String>::new());
+    }
+
+    /// ROB-11: the reader read `.alint.yml` with `read_to_string`, so a FIFO
+    /// under a config's name blocked it forever, and a symlink to `/dev/zero`
+    /// grew without bound. Both are refused unread now, and the next candidate
+    /// name is read.
+    #[cfg(unix)]
+    #[test]
+    fn extends_reader_refuses_a_fifo_or_a_device_under_a_config_name() {
+        let tmp = td();
+        let fifo = tmp.path().join(".alint.yml");
+        let made = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .is_ok_and(|status| status.success());
+        if !made {
+            eprintln!("mkfifo unavailable; reading the device only");
+        }
+        std::os::unix::fs::symlink("/dev/zero", tmp.path().join(".alint.yaml")).unwrap();
+        touch(
+            tmp.path(),
+            "alint.yml",
+            "version: 1\nextends: [alint://bundled/rust@v1]\n",
+        );
+        let root = tmp.path().to_path_buf();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || drop(sender.send(read_existing_extends(&root))));
+        let extends = receiver
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("reading a FIFO or /dev/zero must not run on");
+        assert_eq!(extends, ["alint://bundled/rust@v1"]);
     }
 
     #[test]
