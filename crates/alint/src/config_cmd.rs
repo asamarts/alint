@@ -436,10 +436,11 @@ pub(super) fn load_rules_for_explain(
             .validate_nested(spec, rule.as_ref())
             .with_context(|| format!("building rule {:?}", spec.id))?;
         // Apply the top-level `allow_out_of_root:` policy (parsed from
-        // the user's own config only — never from `extends:`). A rule
-        // not opted in stays confined (the setter is a no-op for every
-        // kind that doesn't honor the flag).
-        let allow_out_of_root = config.allow_out_of_root.allows(&spec.id, &spec.kind);
+        // the user's own config only — never from `extends:`), to the
+        // user's own rules only: a rule an extended ruleset or a nested
+        // config shaped stays confined. A rule not opted in stays confined
+        // (the setter is a no-op for every kind that doesn't honor the flag).
+        let allow_out_of_root = config.allow_out_of_root.allows_rule(spec);
         rule.set_allow_out_of_root(allow_out_of_root);
         // Retain the whole spec (one `Arc`-wrapped clone) so `explain`/`list`
         // render every configured detail from a single source of truth. The

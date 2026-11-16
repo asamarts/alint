@@ -98,7 +98,8 @@ pub struct Discovery {
     /// The config file found, if any.
     pub path: Option<PathBuf>,
     /// Config files discovery passed over because another user owns them
-    /// (outside every repository only), nearest first. A caller warns about
+    /// (above the start directory, outside every repository only), nearest
+    /// first. A caller warns about
     /// each: `skipping <path>: owned by another user`.
     pub skipped: Vec<PathBuf>,
 }
@@ -111,10 +112,12 @@ pub struct Discovery {
 /// write (`/tmp`, a shared home), never governs it.
 ///
 /// Outside every repository, the walk goes on to the file-system root, and
-/// skips a config file another user owns (on Unix, one whose owner is not the
-/// effective user id; root's files are root's own), listing it in
-/// [`Discovery::skipped`]. On Windows, where alint reads no owner, no file is
-/// skipped.
+/// skips a config file another user owns in a directory above `start` (on
+/// Unix, one whose owner is not the effective user id; root's files are
+/// root's own), listing it in [`Discovery::skipped`]. A config in `start`
+/// itself is used whoever owns it: it is the directory the run names (root
+/// in a container, on a directory the host's user owns). On Windows, where
+/// alint reads no owner, no file is skipped.
 #[must_use]
 pub fn discover_config(start: &Path) -> Discovery {
     discover_config_with(start, &alint_core::git::owned_by_current_user)
@@ -142,7 +145,7 @@ pub(crate) fn discover_config_with(
             if !candidate.is_file() {
                 continue;
             }
-            if top.is_none() && owned_by_current_user(&candidate) == Some(false) {
+            if top.is_none() && dir != start && owned_by_current_user(&candidate) == Some(false) {
                 discovery.skipped.push(candidate);
                 continue;
             }

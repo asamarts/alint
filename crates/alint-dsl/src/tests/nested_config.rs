@@ -815,9 +815,10 @@ fn discover_stops_at_the_repository_top() {
 }
 
 /// Outside every repository, discovery climbs as before but skips a config
-/// file another user owns (here through the ownership seam), listing it; one
-/// the current user owns is found, and so is any where no owner is read
-/// (Windows).
+/// file another user owns in a directory above the start (here through the
+/// ownership seam), listing it; one the current user owns is found, and so is
+/// any where no owner is read (Windows). A config in the start directory
+/// itself is used whoever owns it.
 #[test]
 fn discover_outside_a_repository_skips_another_users_config() {
     let tmp = tempfile::tempdir().unwrap();
@@ -848,6 +849,15 @@ fn discover_outside_a_repository_skips_another_users_config() {
     let found = discover_config_with(&nested, &foreign);
     assert_eq!(found.path, Some(mine.join("alint.yaml")));
     assert_eq!(found.skipped, [mine.join("alint.yml")]);
+
+    // In the start directory, another user's config is used: the run names
+    // that directory (root in a container, on a directory the host's user
+    // owns). From below, the same file is skipped.
+    let found = discover_config_with(&mine, &foreign);
+    assert_eq!(found.path, Some(mine.join("alint.yml")));
+    assert_eq!(found.skipped, Vec::<PathBuf>::new());
+    let found = discover_config_with(tmp.path(), &|_| Some(false));
+    assert_eq!(found.path, Some(shared.clone()));
 
     // No owner read (Windows): nothing is skipped.
     let found = discover_config_with(&nested, &|_| None);

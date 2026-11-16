@@ -57,7 +57,9 @@ Fetched and bundled configs are **leaf nodes**: they cannot declare `extends:` o
 Sources are not equally trusted, and the boundary is drawn at `extends:`. Your own `.alint.yml` and its `.alint.d/` drop-ins are **trusted source**: they may declare process-spawning rules (`kind: command` and its siblings), `custom:` facts (which also spawn), `allow_out_of_root:`, and `baseline:`. A config reached **through `extends:`** may declare none of these. Each is rejected at load, by name, so adopting a published ruleset can never:
 
 - **run code** on your machine (a spawning rule, including one smuggled through a `require:` block or a `templates:` entry, is refused),
-- **read outside the repo** (`allow_out_of_root:` is a top-level-only grant), or
+- **read outside the repo** (`allow_out_of_root:` is a top-level-only grant, and it never covers
+  a rule an extended config shaped, even one your config overrides by id or names under
+  `rules:`), or
 - **choose which findings are suppressed** (`baseline:` is a top-level-only input).
 
 Merging by `id` cannot be used to get around this. A rule whose kind or fix spawns a process must be declared entirely in your own config: if an extended config shares its `id` (contributing a `workdir:`, `paths:`, or any other field) or defines the template it instantiates, loading fails and names that config. Rename your rule to keep it separate.

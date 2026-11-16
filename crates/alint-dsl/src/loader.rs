@@ -782,7 +782,7 @@ fn load_extended_source(
 ) -> Result<RawConfig> {
     let url = entry.url();
     let kind = ExtendsEntryKind::of(url);
-    let source_display = if matches!(kind, ExtendsEntryKind::PlainHttp | ExtendsEntryKind::Https) {
+    let source_display = if kind.is_url() {
         remote_source_display(url)
     } else {
         url.to_string()
@@ -797,6 +797,12 @@ fn load_extended_source(
         return Err(Error::Other(format!(
             "plain http:// is not allowed in `extends:` (entry {source_display:?}); \
              use https:// with an SRI hash instead"
+        )));
+    } else if let ExtendsEntryKind::Unsupported(scheme) = kind {
+        return Err(Error::Other(format!(
+            "unsupported `extends:` scheme `{}` (entry {source_display:?}); use https://, \
+             alint://bundled/ or a local path",
+            scheme.to_ascii_lowercase()
         )));
     } else if kind == ExtendsEntryKind::Https {
         if opts.remote_policy == crate::RemotePolicy::Deny {

@@ -414,3 +414,81 @@ fn fixers_from_extends_never_reach_the_git_directory() {
         out_text(&out)
     );
 }
+
+// ─── A rule an extended ruleset shaped reads nothing outside the root ─────
+
+/// `allow_out_of_root:` grants the user's own top-level rules only. A rule an
+/// `extends:`'d ruleset shaped stays confined at check time whatever the grant
+/// says: under `true`, under a `rules:` list naming its id, and when the
+/// user's own config overrides it by id (it counts as extended once an
+/// extended source shaped any of its fields). The out-of-root manifest names
+/// an entry that does not exist, so reading it would report that entry.
+#[test]
+fn an_extended_rule_reads_nothing_outside_the_root_whatever_the_grant() {
+    let rule = "  - id: registry\n    kind: registry_paths_resolve\n    \
+                source: ../outside.txt\n    extract: { lines: {} }\n    base: lint_root\n    \
+                level: error\n";
+    let extended = |grant: &str, own: &str| {
+        (
+            format!("version: 1\nrules:\n{rule}"),
+            if own.is_empty() {
+                format!("version: 1\nextends: [./rules.yml]\n{grant}rules: []\n")
+            } else {
+                format!("version: 1\nextends: [./rules.yml]\n{grant}rules:\n{own}")
+            },
+        )
+    };
+    let cases = [
+        ("extended, true", extended("allow_out_of_root: true\n", "")),
+        (
+            "extended, its id listed",
+            extended("allow_out_of_root: { rules: [registry] }\n", ""),
+        ),
+        (
+            "extended, kind listed",
+            extended(
+                "allow_out_of_root: { kinds: [registry_paths_resolve] }\n",
+                "",
+            ),
+        ),
+        (
+            "extended, overridden by the user",
+            extended(
+                "allow_out_of_root: true\n",
+                "  - id: registry\n    level: warning\n",
+            ),
+        ),
+    ];
+    for (case, (ruleset, config)) in cases {
+        let base = tempfile::tempdir().unwrap();
+        let repo = base.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        std::fs::write(base.path().join("outside.txt"), "leaked-entry\n").unwrap();
+        std::fs::write(repo.join("rules.yml"), ruleset).unwrap();
+        std::fs::write(repo.join(".alint.yml"), config).unwrap();
+        let out = run(&repo, &["check"]);
+        let text = out_text(&out);
+        assert!(
+            !text.contains("leaked-entry"),
+            "{case}: read outside: {text}"
+        );
+        assert!(!text.contains("permitted by"), "{case}: {text}");
+        assert!(text.contains("escapes the repo root"), "{case}: {text}");
+    }
+
+    // Positive control: the user's own rule reads it under the grant.
+    let base = tempfile::tempdir().unwrap();
+    let repo = base.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    std::fs::write(base.path().join("outside.txt"), "leaked-entry\n").unwrap();
+    std::fs::write(
+        repo.join(".alint.yml"),
+        format!("version: 1\nallow_out_of_root: true\nrules:\n{rule}"),
+    )
+    .unwrap();
+    let text = out_text(&run(&repo, &["check"]));
+    assert!(
+        text.contains("leaked-entry"),
+        "the user's own rule reads: {text}"
+    );
+}

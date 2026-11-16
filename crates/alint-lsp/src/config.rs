@@ -442,9 +442,10 @@ fn build_entries(
             .validate_nested(spec, rule.as_ref())
             .map_err(|error| format!("building rule {:?}: {error}", spec.id))?;
         // Apply the top-level `allow_out_of_root:` policy (top-level
-        // config only; never via `extends:`). No-op for kinds that
-        // don't honor the flag.
-        let allow_out_of_root = allow_out_of_root.allows(&spec.id, &spec.kind);
+        // config only; never via `extends:`) to the user's own rules: a
+        // rule an extended ruleset or a nested config shaped stays
+        // confined. No-op for kinds that don't honor the flag.
+        let allow_out_of_root = allow_out_of_root.allows_rule(spec);
         rule.set_allow_out_of_root(allow_out_of_root);
         let mut entry = RuleEntry::new(rule)
             .with_spec(std::sync::Arc::new(spec.clone()))
