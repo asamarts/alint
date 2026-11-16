@@ -8,7 +8,12 @@
 # dependencies, so rustdoc links every external type to its crate's pages, and
 # fails on any page of the three crates that links to a parser crate's pages,
 # relatively or on docs.rs (prose may link elsewhere, such as to an issue): one
-# of PARSERS, or any documented crate whose name contains `yaml` or `saphyr`. It
+# of PARSERS, or any documented crate whose name contains `yaml` or `saphyr`.
+# It fails as well on a link to such a crate's source (`../src/ayaml/...`):
+# rustdoc copies an item another crate re-exports (`pub use ayaml::ErrorKind as
+# E;`, plain, `#[doc(inline)]`, a glob, or in a public module) onto the
+# re-exporting crate's own pages, where only its source links lead to the
+# parser, and links the crate's other mentions of the item to that copy. It
 # documents a copy of the sources with `#[doc(hidden)]` removed, so a hidden
 # public item is checked as well, including one that names a parser type
 # imported with `use`.
@@ -40,7 +45,10 @@
 #     public type in a private module never gets a page, nor do its fields;
 #   - a `#[macro_export]` macro (`r#` names too) whose body names a parser crate
 #     anywhere, even as a bare word (`use ::ayaml as parser;`): rustdoc shows an
-#     exported macro's matchers, not what it expands to.
+#     exported macro's matchers, not what it expands to;
+#   - a `pub use` or `pub extern crate` that names a parser crate anywhere in
+#     its path (`pub(crate)` and narrower are not API): a re-export, which the
+#     scan finds only through the source links rustdoc happens to give it.
 # Comments, string literals and character literals are removed first, as Rust
 # reads them, so neither can hide code from these checks or fake it.
 #
@@ -88,52 +96,64 @@ CANARY_FEATURE=public-api-gate-canary
 # entry accepts every cfg with that key, and one that matches no cfg in its file
 # fails, so the list holds exactly the cfgs in the code. Each says why what it
 # hides cannot name a parser type.
+#
+# A key names where a cfg is, not what it hides, so what an allowlisted cfg
+# hides may declare nothing beyond the item its key names: no impl, fn, struct,
+# enum, union, trait, type, const, static, mod, use, extern block or crate, or
+# macro, nor a macro call, which can expand to any of them; and a cfg_attr may
+# apply no attribute but a lint level, a `doc` or a `cfg`, so not a derive.
+# Where one is needed, a fourth field lists its kinds, as the check prints them
+# (`use`, `fn`, `debug_assert!`, `#[derive]`), and the entry's reason covers
+# them; a kind listed that nothing hides fails.
 PLATFORM_ALLOWLIST=(
   # Statements in a function's body that call the platform's file-system or
   # process API (file modes, symlinks, process groups, a path's bytes) or keep
   # Windows' system variables: they declare no impl or other item, and name no
-  # parser type.
+  # parser type. Some import the platform's extension trait for the call
+  # (`use`), or format an argument or an error message (`format!`).
   "crates/alint-core/src/engine/fix.rs|cfg(not(unix))|in fn stage_fixes"
-  "crates/alint-core/src/engine/fix.rs|cfg(unix)|in fn stage_fixes"
+  "crates/alint-core/src/engine/fix.rs|cfg(unix)|in fn stage_fixes|use"
   "crates/alint-core/src/git.rs|cfg(not(unix))|in fn path_from_git_chunk"
-  "crates/alint-core/src/git.rs|cfg(unix)|in fn path_from_git_chunk"
+  "crates/alint-core/src/git.rs|cfg(unix)|in fn path_from_git_chunk|use"
   "crates/alint-core/src/process.rs|cfg(not(unix))|in fn kill_group"
-  "crates/alint-core/src/process.rs|cfg(unix)|in fn kill_group"
-  "crates/alint-core/src/process.rs|cfg(unix)|in fn run_bounded_in"
+  "crates/alint-core/src/process.rs|cfg(unix)|in fn kill_group|format!"
+  "crates/alint-core/src/process.rs|cfg(unix)|in fn run_bounded_in|use"
   "crates/alint-core/src/relation/cache.rs|cfg(not(windows))|in fn is_interested"
   "crates/alint-core/src/relation/cache.rs|cfg(windows)|in fn is_interested"
   "crates/alint-core/src/relation/cache.rs|cfg(windows)|in fn mark_interest"
   "crates/alint-core/src/scope.rs|cfg(not(unix))|in fn literal_matches"
-  "crates/alint-core/src/scope.rs|cfg(unix)|in fn literal_matches"
+  "crates/alint-core/src/scope.rs|cfg(unix)|in fn literal_matches|use"
   "crates/alint-core/src/trace.rs|cfg(not(windows))|in fn normalize_repository_path"
   "crates/alint-core/src/trace.rs|cfg(windows)|in fn normalize_repository_path"
-  "crates/alint-testkit/src/policy_runner.rs|cfg(unix)|in fn copy_fixture_dir"
+  "crates/alint-testkit/src/policy_runner.rs|cfg(unix)|in fn copy_fixture_dir|use"
   "crates/alint-testkit/src/policy_runner.rs|cfg(windows)|in fn copy_fixture_dir"
   "crates/alint-testkit/src/policy_runner.rs|cfg(windows)|in fn granted_process_environment"
   "crates/alint-testkit/src/policy_runner.rs|cfg(windows)|in fn runner_git_environment"
   "crates/alint-testkit/src/runner_artifacts.rs|cfg(not(unix))|in fn collect"
-  "crates/alint-testkit/src/runner_artifacts.rs|cfg(unix)|in fn collect"
-  "crates/alint-testkit/src/treespec/materialize.rs|cfg(not(unix))|in fn create_symlink"
+  "crates/alint-testkit/src/runner_artifacts.rs|cfg(unix)|in fn collect|use"
+  "crates/alint-testkit/src/treespec/materialize.rs|cfg(not(unix))|in fn create_symlink|format!"
   "crates/alint-testkit/src/treespec/materialize.rs|cfg(unix)|in fn create_symlink"
-  "crates/alint-testkit/src/treespec/materialize.rs|cfg(unix)|in fn write_map"
-  "crates/alint-testkit/src/treespec/verify.rs|cfg(unix)|in fn verify_exec"
+  "crates/alint-testkit/src/treespec/materialize.rs|cfg(unix)|in fn write_map|use"
+  "crates/alint-testkit/src/treespec/verify.rs|cfg(unix)|in fn verify_exec|use"
   # Private items with one definition per platform, the same signature on each,
-    # and no parser type in it: a path's bytes, a symlink-loop check and a
-  # fixture's setuid check.
+  # and no parser type in it: a path's bytes, a symlink-loop check (whose errno
+  # is a `const` that `cfg!` picks) and a fixture's setuid check, two of which
+  # import the platform's extension trait (`use`).
   "crates/alint-core/src/baseline.rs|cfg(not(any(unix, windows)))|fn normalize_path"
-  "crates/alint-core/src/baseline.rs|cfg(unix)|fn normalize_path"
+  "crates/alint-core/src/baseline.rs|cfg(unix)|fn normalize_path|use"
   "crates/alint-core/src/baseline.rs|cfg(windows)|fn normalize_path"
   "crates/alint-core/src/walker.rs|cfg(not(unix))|fn is_eloop"
-  "crates/alint-core/src/walker.rs|cfg(unix)|fn is_eloop"
+  "crates/alint-core/src/walker.rs|cfg(unix)|fn is_eloop|cfg!, const"
   "crates/alint-testkit/src/confinement.rs|cfg(not(unix))|fn validate_regular_metadata"
-  "crates/alint-testkit/src/confinement.rs|cfg(unix)|fn validate_regular_metadata"
+  "crates/alint-testkit/src/confinement.rs|cfg(unix)|fn validate_regular_metadata|use"
   # Debug-build checks: private assertions on the rule registry and the fix
-  # merge, the imports they use, and index-build timing traces (a private macro
-  # with a no-op twin for release builds). None declares public API or names a
-  # parser type.
-  "crates/alint-core/src/engine/fix.rs|cfg(debug_assertions)|in fn fix"
-  "crates/alint-core/src/registry.rs|cfg(debug_assertions)|fn assert_dispatch_and_content"
-  "crates/alint-core/src/registry.rs|cfg(debug_assertions)|fn assert_instance_conformance"
+  # merge (`assert!`, `assert_eq!`, `matches!`, `panic!`), the imports they
+  # use, and index-build timing traces (a private macro, whose body logs with
+  # `tracing::debug!`, with a no-op twin for release builds). None declares
+  # public API or names a parser type.
+  "crates/alint-core/src/engine/fix.rs|cfg(debug_assertions)|in fn fix|assert!"
+  "crates/alint-core/src/registry.rs|cfg(debug_assertions)|fn assert_dispatch_and_content|assert!, assert_eq!, panic!"
+  "crates/alint-core/src/registry.rs|cfg(debug_assertions)|fn assert_instance_conformance|assert!, assert_eq!, matches!"
   "crates/alint-core/src/registry.rs|cfg(debug_assertions)|in fn build"
   "crates/alint-core/src/registry.rs|cfg(debug_assertions)|use crate::kind_meta::"
   "crates/alint-core/src/registry.rs|cfg(debug_assertions)|use crate::rule::GitTrackedMode"
@@ -141,24 +161,25 @@ PLATFORM_ALLOWLIST=(
   "crates/alint-core/src/walker.rs|cfg(debug_assertions)|in fn children_of"
   "crates/alint-core/src/walker.rs|cfg(debug_assertions)|in fn file_entry_indices_arc"
   "crates/alint-core/src/walker.rs|cfg(debug_assertions)|in fn file_path_set_arc"
-  "crates/alint-core/src/walker.rs|cfg(debug_assertions)|macro_rules! trace_index_build"
+  "crates/alint-core/src/walker.rs|cfg(debug_assertions)|macro_rules! trace_index_build|tracing::debug!"
   "crates/alint-core/src/walker.rs|cfg(not(debug_assertions))|macro_rules! trace_index_build"
   # Kani proofs, and the path model they share with the unit tests: private
   # modules that only the Kani verifier (`cfg(kani)`) and `cargo test` compile,
-  # never a user's build.
-  "crates/alint-core/src/located_fix.rs|cfg(kani)|mod kani_proofs"
-  "crates/alint-core/src/pathsafe.rs|cfg(any(test, kani))|mod model"
-  "crates/alint-core/src/pathsafe.rs|cfg(kani)|mod kani_proofs"
-  "crates/alint-core/src/pathsafe.rs|cfg_attr(kani)|pub(super) enum Step"
+  # never a user's build, with the functions, imports, constants, assertions and
+  # derive (of Kani's `Arbitrary`) that the proofs and the model are made of.
+  "crates/alint-core/src/located_fix.rs|cfg(kani)|mod kani_proofs|assert!, const, fn"
+  "crates/alint-core/src/pathsafe.rs|cfg(any(test, kani))|mod model|enum, fn, use"
+  "crates/alint-core/src/pathsafe.rs|cfg(kani)|mod kani_proofs|assert!, fn, matches!, use"
+  "crates/alint-core/src/pathsafe.rs|cfg_attr(kani)|pub(super) enum Step|#[derive]"
   # The YAML parser facade (ADR-0041): ayaml, when alint-core's test-only
   # `yaml-reference` feature is off; the differential harness's stand-in, in a
   # build with that feature outside tests, for the defects its tests plant; and
   # lint expectations on the harness's private items, which such a build
   # compiles but uses only in tests. The first is a statement that names ayaml's
   # decode through alint's own types, the stand-in a private module whose one
-  # function returns its argument, and a lint level hides no code.
+  # function (`fn`) returns its argument, and a lint level hides no code.
   "crates/alint-core/src/yaml_backend.rs|cfg(not(feature = \"yaml-reference\"))|in fn parser"
-  "crates/alint-core/src/yaml_differential.rs|cfg(not(test))|mod planted"
+  "crates/alint-core/src/yaml_differential.rs|cfg(not(test))|mod planted|fn"
   "crates/alint-core/src/yaml_differential/allowlist.rs|cfg_attr(not(test))|Narrow"
   "crates/alint-core/src/yaml_differential/allowlist.rs|cfg_attr(not(test))|pub(crate) struct Deviation"
   "crates/alint-core/src/yaml_differential/allowlist.rs|cfg_attr(not(test))|pub(crate) struct Location"
@@ -182,6 +203,13 @@ parser_pattern() {
 # one to docs.rs. Prose may link elsewhere, such as to an issue on GitHub.
 link_to() {
   printf '((\\.\\./)+|https://docs\\.rs/([^"/]+/)*)(%s)/[^"]*"' "$1"
+}
+
+# The same for the rest of an href to the source of the crates $1: the source
+# link of an item another crate re-exports, which rustdoc copies onto the
+# re-exporting crate's pages.
+source_link_to() {
+  printf '(\\.\\./)+src/(%s)/[^"]*"' "$1"
 }
 
 scan() {
@@ -210,7 +238,8 @@ scan() {
     while IFS= read -r -d '' page; do
       [[ $page == "$canary" ]] && continue
       local links
-      links=$(grep -oE "href=\"$(link_to "$parsers")" "$page" | sort -u || true)
+      links=$(grep -oE "href=\"($(link_to "$parsers")|$(source_link_to "$parsers"))" "$page" |
+        sort -u || true)
       if [[ -n "$links" ]]; then
         found=1
         echo "public-api-parser-gate: ${page#"$doc"/} names a parser crate:" >&2
@@ -219,8 +248,8 @@ scan() {
     done < <(find "$doc/$crate" -name '*.html' -print0)
   done
   if ((found)); then
-    echo "public-api-parser-gate: a public item names a YAML parser crate; use the" \
-      "alint_core::yaml types instead (ADR-0038)" >&2
+    echo "public-api-parser-gate: a public item names a YAML parser crate, or is a parser's" \
+      "item re-exported; use the alint_core::yaml types instead (ADR-0038)" >&2
   fi
   if ((found || broken)); then
     return $((found | broken << 1))
@@ -250,7 +279,16 @@ read -r -d '' CHECK_SOURCES <<'PERL' || true
 BEGIN {
   $status = 0;
   @dirs = split /\n/, $ENV{CRATE_DIRS};
-  %allowed = map { $_ => 0 } grep { length } split /\n/, $ENV{ALLOWED};
+  # Each allowlist key, with the cfgs it matched, and the kinds of declaration
+  # its entry lets what it hides hold, with how many each excused.
+  %allowed = ();
+  %excepted = ();
+  for (grep { length } split /\n/, $ENV{ALLOWED}) {
+    my ($file, $cfg, $item, $kinds) = split /\|/, $_, 4;
+    my $key = "$file|$cfg|$item";
+    $allowed{$key} = 0;
+    $excepted{$key} = { map { $_ => 0 } grep { length } split /\s*,\s*/, $kinds // "" };
+  }
   %denies = ();
   # Each file read, with its crate directory; what can load a file; and the
   # findings that do not count in test-only code.
@@ -324,11 +362,12 @@ my $report = sub {
   printf STDERR "public-api-parser-gate: %s:%d: %s\n", $name, $line->($at), $message;
   $status |= $code;
 };
-# A finding that test-only code does not count, reported at the end; a cfg's
-# carries its allowlist key.
+# A finding that test-only code does not count, reported at the end with its
+# exit code (2 unless given); a cfg's carries its allowlist key, what it is
+# shown as, and the declarations it hides.
 my $defer = sub {
-  my ($at, $message, $key) = @_;
-  push @deferred, [$file, $name, $line->($at), $message, $key];
+  my ($at, $message, $key, $code, $shown, $hidden) = @_;
+  push @deferred, [$file, $name, $line->($at), $message, $key, $code // 2, $shown, $hidden];
 };
 # The arguments of a cfg_attr up to its first top-level comma: its predicate.
 my $predicate = sub {
@@ -463,6 +502,69 @@ my $head = sub {
   $s =~ s/\A | \z//g;
   return length $s ? $s : "?";
 };
+# Where what a cfg at $_[0] (whose arguments end at $_[1]) is on starts and
+# ends: past any further attributes, to its end; for an inner attribute, the
+# rest of the block or file it is in.
+my $hidden_region = sub {
+  my ($at, $after) = @_;
+  my $in = $attribute->($at);
+  return ($in->[1], $enclosing->($in->[1])) if $in && $in->[2];
+  pos($copy) = $in ? $in->[1] : $after;
+  $copy =~ /\G\s*\]?(?:\s*#\s*!?\s*$brackets)*\s*/g;
+  my $from = pos $copy;
+  return ($from, ($scan->($from))[0]);
+};
+# The declarations from $_[0] to $_[1], outside test-only code, in order, as
+# [kind, what it is, line, place]: an item, at the start or after a `;`, `{` or
+# `}` (where any item starts), and a macro call anywhere, which can expand to
+# items, even in an expression (a block holding an impl).
+my $declarations = sub {
+  my ($from, $to) = @_;
+  my @starts = ($from);
+  pos($copy) = $from;
+  while ($copy =~ /[;{}]/g && $+[0] < $to) {
+    push @starts, $+[0];
+  }
+  my @found;
+  for my $start (@starts) {
+    pos($copy) = $start;
+    $copy =~ /\G\s*(?:#\s*!?\s*$brackets\s*)*/g;
+    my $at = pos $copy;
+    next if $at >= $to || $test_only->($at);
+    next unless $copy =~ /\G(?:pub\b(?:\s*$group)?\s*)?
+        (?:(?:const|async|unsafe|safe|default|extern(?:\s*"\d+")?)\s+)*
+        (?<kind>(?:impl|fn|struct|enum|trait|type|const|static|mod|use)\b
+          | (?:union|macro)(?=\s+(?:r\#)?\w) | macro_rules\s*! | extern\s+crate\b | extern\b)/gx;
+    my $kind = $+{kind} =~ s/\s+/ /gr =~ s/ !/!/r;
+    push @found, [$kind, $head->($at), $line->($at), $at];
+  }
+  pos($copy) = $from;
+  while ($copy =~ /(?<![\w:])(?!(?:if|while|match|return|in|else|break|macro_rules)\b)
+      ((?:::\s*)?(?:r\#)?\w+(?:\s*::\s*(?:r\#)?\w+)*)\s*!\s*(?=[(\[{])/gx) {
+    my ($at, $path) = ($-[0], $1);
+    last if $at >= $to;
+    next if $test_only->($at);
+    my $kind = ($path =~ s/\s+//gr =~ s/(\A|::)r\#/$1/gr) . "!";
+    push @found, [$kind, "$kind(...)", $line->($at), $at];
+  }
+  return [sort { $a->[3] <=> $b->[3] } @found];
+};
+# The attributes a cfg_attr with arguments $_[0] at $_[1] applies that can
+# declare or change items, as [kind, what it is, line]: all but lint levels,
+# `doc` and `cfg`, which the other checks read.
+my $applied = sub {
+  my ($args, $at) = @_;
+  my (undef, @attributes) = cfg_terms($args);
+  my @found;
+  for my $attribute (@attributes) {
+    my ($path) = $attribute =~ /\A(?:r\#)?(\w+(?:\s*::\s*\w+)*)/;
+    $path = defined $path ? $path =~ s/\s+//gr : "?";
+    next if $path =~ /\A(?:allow|expect|warn|deny|forbid|doc|cfg|cfg_attr)\z/;
+    my $shown = $attribute =~ s/"(\d+)"/"$literals[$1]"/gr =~ s/\s+/ /gr;
+    push @found, ["#[$path]", "#[$shown]", $line->($at)];
+  }
+  return \@found;
+};
 
 while ($text =~ /\bdoc\s*(?=$group)/g) {
   my ($args, $at) = ($1, $-[0]);
@@ -500,9 +602,25 @@ while ($text =~ /\b(cfg|cfg_attr)\s*(?=$group)/g) {
     }
   }
   my $key = "$name|$shown|$item";
+  # What it hides: a cfg_attr, the attributes it applies; a cfg, what it is on,
+  # where its key names the item it is on, unless that is a macro call or a
+  # `mod name;`, whose file this check does not read for declarations.
+  my $hidden;
+  if ($kind eq "cfg_attr") {
+    $hidden = $applied->($args, $at);
+  } else {
+    my ($from, $to) = $hidden_region->($at, $after);
+    $hidden = $declarations->($from, $to);
+    my $first = $hidden->[0];
+    if ($item !~ /\A(?:in fn |the module\z)/ && $first && $first->[3] == $from
+        && ($first->[0] eq "macro_rules!" || $first->[0] !~ /!\z/)
+        && !($first->[0] eq "mod" && substr($copy, $from, $to - $from) !~ /\{/)) {
+      shift @$hidden;
+    }
+  }
   $defer->($at, "`$shown` on `$item` hides code from the documentation, which is built for " .
     "this target, in a debug build, with every feature; if what it hides cannot name a " .
-    "parser, allowlist \"$key\" in the gate with the reason", $key);
+    "parser, allowlist \"$key\" in the gate with the reason", $key, 2, $shown, $hidden);
 }
 while ($text =~ /\bcfg_(?:select|match)\b/g) {
   my $at = $-[0];
@@ -612,6 +730,17 @@ while ($text =~ /((?:#\s*$brackets\s*)*)macro_rules\s*!\s*(?:r#)?\w+\s*/g) {
   }
 }
 
+# A public re-export of a parser crate, or of an item of one: rustdoc shows such
+# an item as this crate's own, and the scan finds it only by its source link.
+# `pub(crate)` and narrower are not API. Its path may name the parser anywhere
+# (`pub use {::ayaml::Value};`, a glob, `pub extern crate ayaml;`).
+while ($text =~ /\bpub\b(?!\s*\()\s*(use\b[^;]*|extern\s+crate\s+(?:r#)?\w+)/g) {
+  my ($at, $what) = ($-[0], $1);
+  next if $test_only->($at) || $what !~ /\b(?:$ENV{PARSERS})\b/;
+  $defer->($at, "`pub " . ($what =~ s/\s+/ /gr =~ s/ \z//r) . "` re-exports a parser " .
+    "crate or its item, which the documentation shows as this crate's own", undef, 1);
+}
+
 END {
   # A name is a file's path, or the end of it, which any file it ends counts as.
   my $names = sub {
@@ -655,22 +784,44 @@ END {
     }
   }
   for (sort { $a->[1] cmp $b->[1] || $a->[2] <=> $b->[2] } @deferred) {
-    my ($file, $name, $line, $message, $key) = @$_;
+    my ($file, $name, $line, $message, $key, $code, $shown, $hidden) = @$_;
     next if $test{$file};
     if (defined $key && exists $allowed{$key}) {
       $allowed{$key}++;
+      # The entry names where the cfg is: what it hides may declare only the
+      # kinds the entry excepts.
+      for (@$hidden) {
+        my ($kind, $what, $at) = @$_;
+        if (exists $excepted{$key}{$kind}) {
+          $excepted{$key}{$kind}++;
+          next;
+        }
+        printf STDERR "public-api-parser-gate: %s:%d: `%s` hides `%s`, which declares what " .
+          "the documentation never shows, and the allowlist entry \"%s\" does not except `%s`; " .
+          "if it cannot name a parser, add `%s` to the entry's fourth field with the reason\n",
+          $name, $at, $shown, $what, $key, $kind, $kind;
+        $status |= 2;
+      }
       next;
     }
     printf STDERR "public-api-parser-gate: %s:%d: %s\n", $name, $line, $message;
-    $status |= 2;
+    $status |= $code;
   }
   my %names = map { substr($_, length($ENV{ROOT}) + 1) => 1 } keys %crate_of;
   for my $key (sort keys %allowed) {
     my ($name) = split /\|/, $key;
-    next if !$names{$name} || $allowed{$key};
-    print STDERR "public-api-parser-gate: $name: the allowlist entry \"$key\" matches no cfg " .
-      "outside test-only code; remove it\n";
-    $status |= 2;
+    next if !$names{$name};
+    if (!$allowed{$key}) {
+      print STDERR "public-api-parser-gate: $name: the allowlist entry \"$key\" matches no " .
+        "cfg outside test-only code; remove it\n";
+      $status |= 2;
+      next;
+    }
+    for my $kind (sort grep { !$excepted{$key}{$_} } keys %{$excepted{$key}}) {
+      print STDERR "public-api-parser-gate: $name: the allowlist entry \"$key\" excepts " .
+        "`$kind`, which nothing it matches hides; remove it\n";
+      $status |= 2;
+    }
   }
   for my $dir (@dirs) {
     next if $denies{$dir};

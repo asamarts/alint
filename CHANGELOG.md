@@ -271,12 +271,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `MappingValues` and `MappingValuesMut`), `Error` and `Location`. Its functions are `from_str`,
   which decodes under alint's parser limits, and `from_value`, `to_value` and `to_string`. A CI
   gate keeps the parser out: it documents the three crates with every feature and with hidden
-  items shown, fails on a page that links to a parser crate's documentation, and fails on what
-  the documentation cannot show: code under a `cfg` other than one on features or tests (such
-  as code for another platform or a release build) unless the gate's allowlist names it with a
-  reason, an attribute a macro builds, a public type in a private module, code included from
-  outside the crate, or an exported macro that names a parser. In place of the `yaml_serde`
-  types of 0.22:
+  items shown, fails on a page that links to a parser crate's documentation or to its source
+  (which a re-exported parser item has), and fails on what the documentation cannot show: code
+  under a `cfg` other than one on features or tests (such as code for another platform or a
+  release build) unless the gate's allowlist names it with a reason, and then any item or macro
+  call under it that the entry does not except, an attribute a macro builds, a public type in a
+  private module, code included from outside the crate, an exported macro that names a parser, or
+  a `pub use` of a parser crate. In place of the `yaml_serde` types of 0.22:
   - `RuleSpec::extra`, `NestedRuleSpec::extra` and `RuleEntry::extra()` hold an
     `alint_core::yaml::Mapping`. Read an option with `get("name")` and the `Value` accessors
     (`as_str`, `as_bool`, `as_u64`, `as_mapping`, `as_sequence` and the rest) in place of a

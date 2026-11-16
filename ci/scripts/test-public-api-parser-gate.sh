@@ -2,9 +2,11 @@
 # Regression tests for public-api-parser-gate.sh, on hand-made trees.
 # - The scan: a clean tree with its canaries passes; a link to any parser crate
 #   (a listed one, or a documented crate named like one) from any page of the
-#   three crates fails and names the page; a link from a source page or another
-#   crate's page, or one in prose to elsewhere (an issue on GitHub), does not
-#   count; a missing crate, a missing or unlinked canary, and missing parser
+#   three crates fails and names the page, and so does a link to a parser
+#   crate's source, which a parser item re-exported in any form has; a link from
+#   a source page or another crate's page, one in prose to elsewhere (an issue
+#   on GitHub), and a source link to alint's own source or another crate's do
+#   not count; a missing crate, a missing or unlinked canary, and missing parser
 #   documentation are errors.
 # - The source checks: every spelling of `#[doc(hidden)]` is removed, in every
 #   .rs file under a crate's directory; a `hidden` left in a doc list, a `$` in
@@ -15,10 +17,14 @@
 #   `include` or the word in a macro, a crate without
 #   `#![deny(unnameable_types)]` or with an `allow` of it, and an exported macro
 #   naming a parser crate in any form fail; comments, string and character
-#   literals and private macros do not count, and cannot hide code. Test-only
-#   code is an item under `cfg(test)`, a file only such code loads, and the
-#   files outside src/ while the library loads none; and the repository's own
-#   sources pass, so the allowlist holds exactly their cfgs.
+#   literals and private macros do not count, and cannot hide code. A `pub use`
+#   or `pub extern crate` of a parser crate fails in every form, and a narrower
+#   one passes. An allowlisted cfg may hide no declaration (an impl, a function,
+#   a `use`, a macro call, a derive) but the item its key names and the kinds
+#   its entry excepts, and an exception nothing needs fails. Test-only code is
+#   an item under `cfg(test)`, a file only such code loads, and the files
+#   outside src/ while the library loads none; and the repository's own sources
+#   pass, so the allowlist holds exactly their cfgs and declarations.
 #
 # Rust bodies are single-quoted on purpose: `$a` in them is a macro variable.
 # shellcheck disable=SC2016
@@ -38,9 +44,13 @@ make_tree() {
   for crate in alint_core alint_dsl alint_testkit; do
     mkdir -p "$doc/$crate/yaml"
     printf '<a href="../serde/index.html">serde</a>\n' >"$doc/$crate/index.html"
+    # Its own source, and a blanket impl's in another crate, as rustdoc links
+    # them.
     printf '<a href="../../serde/trait.Serialize.html">Serialize</a>
-<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>\n' \
-      >"$doc/$crate/yaml/struct.Value.html"
+<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html">String</a>
+<a class="src" href="../../src/%s/yaml.rs.html#121">Source</a>
+<a class="src rightside" href="../../src/crossbeam_epoch/atomic.rs.html#194">Source</a>\n' \
+      "$crate" >"$doc/$crate/yaml/struct.Value.html"
     printf '<a href="../ayaml/number/struct.Number.html">Number</a>\n' \
       >"$doc/$crate/type.PublicApiGateCanary.html"
   done
@@ -78,7 +88,53 @@ for parser in "${parsers[@]}"; do
   printf '<a href="../../%s/struct.Mapping.html">Mapping</a>\n' "$parser" \
     >>"$doc/$crate/yaml/struct.Value.html"
   expect "a $crate page linking $parser fails" 1 "$crate/yaml/struct.Value.html" "$doc"
+  doc="$sandbox/$parser-$crate-source"
+  make_tree "$doc"
+  printf '<a class="src" href="../src/%s/lib.rs.html#9">Source</a>\n' "$parser" \
+    >"$doc/$crate/struct.Reexported.html"
+  expect "a $crate page linking $parser's source fails" 1 "$crate/struct.Reexported.html" "$doc"
 done
+
+# rustdoc copies an item another crate re-exports onto the re-exporting crate's
+# pages, whose links to the parser are only its source links, and links the
+# crate's other mentions of the item to that copy (the review of #530). Each
+# form, as rustdoc 1.100 writes its page: `pub use ayaml::ErrorKind as
+# ParserErrorKind;` in alint_core::yaml, a plain `pub use ayaml::LimitKind;`, a
+# `#[doc(inline)]` one, a glob `pub use ayaml::*;` in a public module, and a
+# re-export in a public module.
+# reexport NAME PAGE SOURCE: the page, under the tree, with the source link.
+reexport() {
+  local name=$1 page=$2 source=$3
+  doc="$sandbox/reexport-$((pass + fail))"
+  make_tree "$doc"
+  mkdir -p "$(dirname "$doc/$page")"
+  cat >"$doc/$page" <<HTML
+<h1>Enum <span class="enum">Item</span></h1><span class="sub-heading">
+<a class="src" href="$source">Source</a> </span>
+<section class="impl"><a class="src rightside" href="$source">Source</a>
+<h3 class="code-header">impl <a class="trait"
+href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">Clone</a> for
+<a class="enum" href="enum.Item.html">Item</a></h3></section>
+<section class="impl"><a class="src rightside"
+href="${source%%src/*}src/crossbeam_epoch/atomic.rs.html#194">Source</a></section>
+HTML
+  expect "$name fails" 1 "$page names a parser crate" "$doc"
+}
+reexport "an aliased re-export of a parser item" alint_core/yaml/enum.ParserErrorKind.html \
+  ../../src/ayaml/error.rs.html#18
+reexport "a plain re-export of a parser item" alint_core/enum.LimitKind.html \
+  ../src/ayaml/limits.rs.html#46
+reexport "a doc(inline) re-export of a parser item" alint_dsl/struct.ParserSpan.html \
+  ../src/ayaml/span.rs.html#100
+reexport "a glob re-export of a parser crate" alint_testkit/parser/fn.from_str.html \
+  ../../src/ayaml/lib.rs.html#692
+reexport "a re-export in a public module" alint_core/parser/struct.Marker.html \
+  ../../src/ayaml/span.rs.html#15
+doc="$sandbox/lookalike-source"
+make_tree "$doc"
+printf '<a class="src" href="../src/ayamlish/lib.rs.html#9">Source</a>\n' \
+  >"$doc/alint_dsl/struct.Reexported.html"
+expect "a lookalike crate's source passes" 0 "no public item" "$doc"
 
 # A documented crate whose name contains `yaml` or `saphyr` counts as a parser.
 doc="$sandbox/named-like-a-parser"
@@ -484,6 +540,110 @@ expect_sources "an allowlist entry that matches no cfg fails" 2 \
   "the allowlist entry \"crates/alint-core/src/extra.rs|cfg(unix)|in fn f\" matches no cfg" \
   '#[cfg(windows)]
 pub fn a() {}'
+
+# An entry names where its cfg is, not what the cfg hides (the review of #530:
+# an impl in the facade's `fn parser`, under its allowlisted cfg, was API that
+# the documentation, built with every feature, never showed). What it hides may
+# declare nothing beyond the item the key names: an impl, a function, a `use`
+# or a macro call, which can expand to an impl even in an expression, fails.
+allowed_a='#[cfg(windows)]
+pub fn a() {}'
+expect_sources "an impl under an allowlisted cfg in a function fails" 2 \
+  "extra.rs:5: \`cfg(unix)\` hides \`impl crate::yaml::Value\`, which declares" "$allowed_a
+pub fn f() {
+    #[cfg(unix)]
+    impl crate::yaml::Value {
+        pub fn parser_value(&self) -> &ayaml::Value { todo!() }
+    }
+}"
+expect_sources "a public fn under an allowlisted cfg in a function fails" 2 \
+  "\`cfg(unix)\` hides \`pub fn leak\`" "$allowed_a
+pub fn f() {
+    #[cfg(unix)]
+    pub fn leak() -> ayaml::Value { todo!() }
+}"
+expect_sources "a pub use under an allowlisted cfg in a function fails" 2 \
+  "\`cfg(unix)\` hides \`pub use crate::yaml::Value as Leak\`" "$allowed_a
+pub fn f() {
+    #[cfg(unix)]
+    pub use crate::yaml::Value as Leak;
+}"
+expect_sources "an impl in a block under an allowlisted cfg fails" 2 \
+  "\`cfg(unix)\` hides \`impl From<ayaml::Value> for crate::yaml::Value\`" "$allowed_a
+pub fn f() {
+    #[cfg(unix)]
+    {
+        let _ = 1;
+        impl From<ayaml::Value> for crate::yaml::Value {
+            fn from(_: ayaml::Value) -> Self { todo!() }
+        }
+    }
+}"
+expect_sources "a macro call in an expression under an allowlisted cfg fails" 2 \
+  "\`cfg(unix)\` hides \`declare!(...)\`, which declares" "$allowed_a
+pub fn f() {
+    #[cfg(unix)]
+    let _ = 1 + declare!(ayaml::Value);
+}"
+expect_sources "an impl in an allowlisted item fails" 2 \
+  "\`cfg(windows)\` hides \`impl crate::yaml::Value\`" '#[cfg(windows)]
+pub fn a() {
+    impl crate::yaml::Value {
+        pub fn leak(&self) -> &ayaml::Value { todo!() }
+    }
+}
+pub fn f() {
+    #[cfg(unix)]
+    let _ = 1;
+}'
+unset GATE_UNDER_TEST
+
+# A fourth field excepts kinds of declaration, each of which something must
+# need; a cfg_attr may apply no attribute but a lint level, doc or cfg.
+GATE_UNDER_TEST="$sandbox/excepting-gate.sh"
+sed 's/^PLATFORM_ALLOWLIST=($/&\
+  "crates\/alint-core\/src\/extra.rs|cfg(unix)|in fn g|use, debug_assert!"\
+  "crates\/alint-core\/src\/extra.rs|cfg_attr(windows)|pub struct S"/' "$GATE" >"$GATE_UNDER_TEST"
+if cmp -s "$GATE" "$GATE_UNDER_TEST"; then
+  fail=$((fail + 1))
+  echo "FAIL: could not add an allowlist entry with exceptions to a copy of the gate" >&2
+fi
+allowed_s='#[cfg_attr(windows, allow(dead_code), doc = "A struct.")]
+pub struct S;'
+expect_sources "an entry's exceptions let what its cfg hides declare those kinds" 0 "" \
+  "$allowed_s
+pub fn g() {
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt as _;
+    #[cfg(unix)]
+    debug_assert!(true);
+}"
+expect_sources "an exception excepts its kind only" 2 \
+  "\`cfg(unix)\` hides \`impl crate::yaml::Value\`" "$allowed_s
+pub fn g() {
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt as _;
+    #[cfg(unix)]
+    {
+        debug_assert!(true);
+        impl crate::yaml::Value {}
+    }
+}"
+expect_sources "an exception that nothing hides fails" 2 \
+  "excepts \`debug_assert!\`, which nothing it matches hides; remove it" "$allowed_s
+pub fn g() {
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt as _;
+}"
+expect_sources "a derive under an allowlisted cfg_attr fails" 2 \
+  "\`cfg_attr(windows)\` hides \`#[derive(Debug)]\`" '#[cfg_attr(windows, derive(Debug))]
+pub struct S;
+pub fn g() {
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt as _;
+    #[cfg(unix)]
+    debug_assert!(true);
+}'
 unset GATE_UNDER_TEST
 
 # Files outside src/ are stripped and checked too; only code outside the crate
@@ -587,6 +747,41 @@ expect_sources "a macro exported through a cfg_attr fails" 1 "a macro names a pa
 macro_rules! leak { () => { ::ayaml::Value::Null } }'
 expect_sources "a private macro naming a parser as a bare word passes" 0 "" \
   'macro_rules! private { () => {{ use ::ayaml as parser; parser::Value::Null }} }'
+# A public re-export of a parser crate or its item fails in every form (the
+# review of #530: rustdoc shows such an item as alint's own); `pub(crate)` and
+# narrower, a private `use`, a path that only contains a parser's name, and
+# test-only code pass.
+expect_sources "an aliased re-export of a parser item fails" 1 \
+  "\`pub use ayaml::ErrorKind as ParserErrorKind\` re-exports a parser crate or its item" \
+  'pub use ayaml::ErrorKind as ParserErrorKind;'
+expect_sources "a plain re-export of a parser item fails" 1 \
+  "\`pub use ayaml::LimitKind\` re-exports" 'pub use ayaml::LimitKind;'
+expect_sources "a doc(inline) re-export of a parser item fails" 1 \
+  "extra.rs:2: \`pub use ayaml::Span as ParserSpan\` re-exports" '#[doc(inline)]
+pub use ayaml::Span as ParserSpan;'
+expect_sources "a glob re-export of a parser crate fails" 1 "\`pub use ayaml::*\` re-exports" \
+  'pub use ayaml::*;'
+expect_sources "a re-export in a public module fails" 1 \
+  "extra.rs:2: \`pub use ayaml::Marker\` re-exports" 'pub mod parser {
+    pub use ayaml::Marker;
+}'
+expect_sources "a re-export of a parser crate itself fails" 1 \
+  "\`pub use ::ayaml as parser\` re-exports" 'pub use ::ayaml as parser;'
+expect_sources "a pub extern crate of a parser fails" 1 "\`pub extern crate saphyr\` re-exports" \
+  'pub extern crate saphyr;'
+expect_sources "a parser item in a use group fails" 1 \
+  "\`pub use {crate::yaml::Value, ::serde_yaml::Mapping}\` re-exports" \
+  'pub use {crate::yaml::Value, ::serde_yaml::Mapping};'
+expect_sources "narrower re-exports, private uses and lookalikes pass" 0 "" \
+  'pub(crate) use ayaml::Value;
+pub(super) use ayaml::Marker;
+pub (in crate::x) use saphyr::Yaml;
+use ayaml::Mapping;
+pub use crate::yaml::ayaml_from_str;
+#[cfg(test)]
+mod tests {
+    pub use ayaml::Number;
+}'
 # Literals are read as Rust reads them: a comment marker inside one is text, and
 # each finding keeps its line.
 expect_sources "a // in a string does not hide the rest of the line" 1 \
