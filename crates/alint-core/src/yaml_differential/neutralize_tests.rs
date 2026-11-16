@@ -84,6 +84,16 @@ fn a_leading_line_of_tabs_alone_stays() {
 /// quoted scalar that follows a node on its line: no plain scalar then runs
 /// on to the next line. A block scalar ends at a line indented less than its
 /// content.
+/// A byte-order mark past a line's start starts a plain scalar, so a quote
+/// after it opens none; at a line's start both scanners skip it (seed 6).
+#[test]
+fn a_byte_order_mark_starts_a_plain_scalar_past_a_line_s_start() {
+    let found = places("- \u{feff}'q\n- : \n");
+    assert!(!found[6].quoted && found[6].plain, "{:?}", found[6]);
+    let found = places("\u{feff}'q'\n");
+    assert!(found[4].quoted, "{:?}", found[4]);
+}
+
 #[test]
 fn places_follow_the_scanners_tokens() {
     let at = |input: &str, text: &str| places(input)[input.rfind(text).unwrap()];
@@ -649,6 +659,80 @@ fn a_tab_ayaml_rejects_on_a_flow_line_is_a_flow_line_tab() {
         ]
     );
     assert_eq!(tabs(input), Vec::<String>::new());
+}
+
+/// A tab that starts a flow collection's line goes with the tab entry's
+/// rewrite where the line holds only a closing bracket or a comment after
+/// it, which ayaml exempts from a flow line's indentation (seeds 4 and 9);
+/// where it holds an entry, ayaml rejects it, and it stays.
+#[test]
+fn a_tab_before_a_closing_bracket_or_a_comment_on_a_flow_line_is_white_space() {
+    for (input, spaced) in [
+        ("a: [x\n\t]\n", "a: [x\n ]\n"),
+        ("a: {x: y\n\t  }\n", "a: {x: y\n   }\n"),
+        ("a: [x\n\t# c\n]\n", "a: [x\n # c\n]\n"),
+        ("a: [x\n\t\n]\n", "a: [x\n \n]\n"),
+    ] {
+        assert_eq!(tabs(input).first().map(String::as_str), Some(spaced));
+    }
+    assert_eq!(tabs("a: [x,\n\t  b]\n"), Vec::<String>::new());
+    assert_eq!(tabs("a: [x\n\t  , b]\n"), Vec::<String>::new());
+}
+
+/// A tab ayaml rejects as a block scalar's leading indentation, where a
+/// line of a tab before it ended the scalar around it, is white space once
+/// that line's tab is a space, which ayaml then reads as an empty line of
+/// the scalar around it: a last variant has it as a space too (seed 8).
+#[test]
+fn a_tab_ayaml_rejects_only_after_another_goes_with_it() {
+    let input = "a: >-\n  x\n\t\n  - >-\n\t\n    y\n";
+    assert_eq!(tabs_ayaml_rejects(input), [(19, false)]);
+    assert_eq!(
+        tabs(input).last().map(String::as_str),
+        Some("a: >-\n  x\n \n  - >-\n \n    y\n")
+    );
+    assert_eq!(
+        tabs(input).first().map(String::as_str),
+        Some("a: >-\n  x\n \n  - >-\n\t\n    y\n")
+    );
+    // The variants before the last keep it, as the one with the tabs before
+    // it as content (`x`), after which ayaml still rejects it (seed 2).
+    let input = "- >+\n  line 0\n\t\n  line 1\n # c\n- [a b,\n- |2\n  line 0\n\t\n  \
+                 line 1\n\t\n    line 2\n";
+    let rewrites = tabs(input);
+    assert!(rewrites[0].ends_with("\n\t\n    line 2\n"), "{rewrites:?}");
+    assert!(!rewrites.last().unwrap().contains('\t'), "{rewrites:?}");
+    // A tab ayaml rejects whatever the others are stays.
+    let input = "a: >-\n  x\n\t\nb:\n\t- c\n";
+    let rewrites = tabs(input);
+    assert!(
+        !rewrites.is_empty() && rewrites.iter().all(|rewrite| rewrite.contains("\t- c")),
+        "{rewrites:?}"
+    );
+}
+
+/// A block scalar header under an anchor, a key with one, or properties
+/// alone on their line moves past the end of the line before it, where the
+/// oracle reads it as the node's.
+#[test]
+fn block_scalar_headers_under_an_anchor_move_past_the_line_before() {
+    assert_eq!(
+        block_scalar_headers("a:\n  b: &x\n>\n  c\n"),
+        ["a:\n  b: &x\n        >\n  c\n"]
+    );
+    assert_eq!(
+        block_scalar_headers("- \n- &b on: \n|\n  \"x"),
+        ["- \n- &b on: \n         |\n  \"x"]
+    );
+    assert_eq!(
+        block_scalar_headers("m:\n  -\n    !t\n>\n"),
+        ["m:\n  -\n    !t\n       >\n"]
+    );
+    assert_eq!(block_scalar_headers("a:\n  b:\n>\n"), Vec::<String>::new());
+    assert_eq!(
+        block_scalar_headers("a:\n  b: &x\n    >\n"),
+        Vec::<String>::new()
+    );
 }
 
 /// A variant of the tab entry's leaves out a tab that starts a line, past

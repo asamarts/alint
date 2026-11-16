@@ -316,7 +316,9 @@ pub(super) fn places(input: &str) -> Vec<Place> {
                             root_scalar = !nested;
                             comment = true;
                         }
-                        _ if ch.is_whitespace() || ch == '\u{feff}' => {}
+                        // Both scanners skip a byte-order mark at a line's
+                        // start only; elsewhere it starts a plain scalar.
+                        _ if ch.is_whitespace() || (ch == '\u{feff}' && column == 0) => {}
                         _ => {
                             node.get_or_insert(column);
                             state = match ch {
@@ -604,29 +606,47 @@ pub(super) fn tab_in_content(input: &str, places: &[Place], at: usize) -> bool {
 /// stays (see
 /// [`tab_in_content`]): both parsers read it alike, and a rewrite that
 /// changed it could hide a difference there. So does a tab that starts a
-/// line in a flow collection, [`flow_line_tabs`]' construct, and one ayaml
-/// rejects (see [`tabs_ayaml_rejects`]), which it does not read as white
-/// space.
+/// line in a flow collection, [`flow_line_tabs`]' construct, but on a line
+/// ayaml exempts (see [`exempt_flow_line`]), and one ayaml rejects (see
+/// [`tabs_ayaml_rejects`]), which it does not read as white space, but in
+/// a last variant, where it does once the others are spaces.
 pub(super) fn tabs(input: &str) -> Vec<String> {
     if !input.contains('\t') {
         return Vec::new();
     }
     let places = places(input);
-    let rejected = tabs_ayaml_rejects(input);
+    let mut rejected = tabs_ayaml_rejects(input);
     let flow_lines = flow_line_tab_offsets(input, &places, &rejected);
-    let white: Vec<usize> = input
-        .match_indices('\t')
-        .map(|(at, _)| at)
-        .filter(|at| {
-            !tab_in_content(input, &places, *at)
-                && !flow_lines.contains(at)
-                && !rejected.iter().any(|(tab, _)| tab == at)
-        })
-        .collect();
+    let white_among = |rejected: &[(usize, bool)]| -> Vec<usize> {
+        input
+            .match_indices('\t')
+            .map(|(at, _)| at)
+            .filter(|at| {
+                !tab_in_content(input, &places, *at)
+                    && (!flow_lines.contains(at) || exempt_flow_line(input, *at))
+                    && !rejected.iter().any(|(tab, _)| tab == at)
+            })
+            .collect()
+    };
+    let white = white_among(&rejected);
     if white.is_empty() {
         return Vec::new();
     }
-    let leading = |with: &str| {
+    // A tab ayaml rejects where a tab before it, as white space, left it,
+    // as a line of a tab that ended a block scalar leaves the next one at
+    // the leading indentation of a block scalar ayaml then opens, is white
+    // space once the tabs before it are spaces: a last variant has those
+    // as spaces too.
+    let mut freed = white.clone();
+    while !rejected.is_empty() {
+        rejected = tabs_ayaml_rejects(&spaced(input, &freed, 1));
+        let more = white_among(&rejected);
+        if more.len() == freed.len() {
+            break;
+        }
+        freed = more;
+    }
+    let leading = |white: &[usize], with: &str| {
         let mut out = String::with_capacity(input.len());
         let mut line_start = true;
         for (at, ch) in input.char_indices() {
@@ -640,16 +660,31 @@ pub(super) fn tabs(input: &str) -> Vec<String> {
         }
         out
     };
-    let mut rewrites = vec![leading(" ")];
-    for rewrite in [leading(""), leading("x")]
+    let mut rewrites = vec![leading(&white, " ")];
+    for rewrite in [leading(&white, ""), leading(&white, "x")]
         .into_iter()
         .chain(leading_out(input, &white))
+        .chain(Some(spaced(input, &freed, 1)))
     {
         if !rewrites.contains(&rewrite) {
             rewrites.push(rewrite);
         }
     }
     rewrites
+}
+
+/// Whether the tab at byte `at` of `input` starts a flow collection's line
+/// whose white space runs to a closing `]` or `}`, a comment, or the line's
+/// end: ayaml exempts such a line from the indentation it holds a flow
+/// line to (its 0.1.2 CHANGELOG), so the tab is white space there, which
+/// the oracle rejects after a plain scalar's line, as in `a: [x` then
+/// `\t]` (`tab-as-white-space`).
+fn exempt_flow_line(input: &str, at: usize) -> bool {
+    input[at..]
+        .trim_start_matches([' ', '\t'])
+        .chars()
+        .next()
+        .is_none_or(|ch| matches!(ch, ']' | '}' | '#' | '\n' | '\r'))
 }
 
 /// `input` with each tab at the byte offsets `tabs` as `width` spaces.
@@ -783,6 +818,28 @@ pub(super) fn flow_line_tabs(input: &str) -> Vec<String> {
         }
         rewrites
     })
+}
+
+/// With each block scalar header that follows a line with an anchor or
+/// properties alone, at no greater indentation (see
+/// [`super::predicates::block_scalar_headers_under_an_anchor`]), indented
+/// past that line's last character, where YAML 1.2 (section 8.1) and the
+/// oracle read it as the node's, as ayaml reads it where it is
+/// (`block-scalar-under-an-anchor`). Its content's indentation counts from
+/// the node's parent, not the header, so the lines after it read alike.
+pub(super) fn block_scalar_headers(input: &str) -> Vec<String> {
+    let counter = super::predicates::Counter::Oracle;
+    let (starts, lines) = (counter.line_starts(input), counter.lines(input));
+    let edits: Vec<(Range<usize>, String)> =
+        super::predicates::block_scalar_headers_under_an_anchor(input)
+            .into_iter()
+            .map(|line| {
+                let width = lines[line - 2].trim_end().chars().count();
+                let at = starts[line - 1];
+                (at..at, " ".repeat(width + 1))
+            })
+            .collect();
+    apply(input, &edits)
 }
 
 /// Whether `text` starts with `indicator` followed by white space or nothing.

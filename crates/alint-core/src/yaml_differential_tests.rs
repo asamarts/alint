@@ -289,6 +289,13 @@ const TRIGGERS: &[(&str, &str, &[&str])] = &[
         "a: '\u{7f}'\nb: '!!'\n# !!x\nc: !!binary aGk=\n",
         &[UNEXPLAINED_ENTRY],
     ),
+    // The entry covers a case by the oracle's error, at the header, which
+    // comes first: ayaml reads on to the tag.
+    (
+        "block-scalar-under-an-anchor",
+        "b:\n  c: &x\n>\nd: !<!> x\n",
+        &["verbatim-non-specific-tag"],
+    ),
     (
         "non-specific-tag",
         "a: !!binary x\nb: ! 1\n",
@@ -395,6 +402,9 @@ fn masking_triggers() -> Vec<String> {
         "m: [&x 1, &x 2, *x]\n",
         "m: !<!> x\n",
         "m: [x,\n\t  y]\n",
+        "m: [x\n\t]\n",
+        "m:\n  n: &x\n>\n",
+        "m:\n  -\n    !t\n>\n",
         // The narrow entries'.
         "m: [:a]\n",
         "m: [-]\n",
@@ -402,8 +412,6 @@ fn masking_triggers() -> Vec<String> {
         "m: !t# x\n",
         "m: 'x'#c\n",
         "m: 'x\ny'\n",
-        "m:\n  n: &x\n>\n",
-        "m:\n  -\n    !t\n>\n",
         "m:\n|2\n  x\n",
         "---\nn: 2\n",
     ]
@@ -753,13 +761,108 @@ fn the_rest_stands_alone_unless_a_line_at_the_top_is_indented_less() {
     }
 }
 
+/// Where the oracle's error is in a flow collection that ayaml read, and
+/// ayaml's comes on a later line, the input with the collection empty, which
+/// keeps its line breaks, stands for the rest: the oracle reads the lines
+/// around it as ayaml read them in the case (seeds 4 and 10). A difference
+/// after the collection still needs its own entry.
+#[test]
+fn an_empty_flow_collection_stands_for_one_only_the_oracle_rejects() {
+    let search = || Search {
+        tried: Vec::new(),
+        ids: Vec::new(),
+        comparisons: 0,
+        complete: false,
+    };
+    for (input, prefix, rest) in [
+        (
+            "? {a:}\n%YAML 1.2\n\n.inf--- \n",
+            "? {a:}\n",
+            "? {}\n%YAML 1.2\n\n.inf--- \n",
+        ),
+        ("[:a]\n  b\nc\n", "[:a]\n", "[]\n  b\nc\n"),
+        (
+            "- m: [a,\n  :b]\n  c: !<!> x\n- d\n",
+            "- m: [a,\n  :b]\n",
+            "- m: []\n\n  c: !<!> x\n- d\n",
+        ),
+    ] {
+        let (case, _) = compare(input, Entry::Value);
+        let split = search().split(&case);
+        let Split::Two(two, emptied) = &split else {
+            panic!("{input:?}: {split:?}");
+        };
+        assert_eq!((two.input, emptied.as_str()), (prefix, rest), "{input:?}");
+    }
+    for input in ["? {a:}\n%YAML 1.2\n\n.inf--- \n", "[:a]\n  b\nc\n"] {
+        let (case, _) = compare(input, Entry::Value);
+        assert_eq!(
+            explanation(&case),
+            Some(vec!["yaml-1.2-flow-syntax", "after-the-root-node"]),
+            "{case:?}"
+        );
+    }
+    // Where ayaml read no collection, as past a NEL, its content to the
+    // oracle, the oracle rejects the prefix with it empty too (seed 1).
+    let input = "\u{85}  {18446744073709551616]\n    -2\u{2028} #c\n- 😀-a\n-   TRUE";
+    let (case, _) = compare(input, Entry::Value);
+    let split = search().split(&case);
+    assert!(matches!(split, Split::Apart), "{split:?}");
+    assert_eq!(
+        explanation(&case),
+        Some(vec!["yaml-1.2-line-breaks", "indentation"]),
+        "{case:?}"
+    );
+    let (case, _) = compare("- m: [:a]\n  c: !<!> x\n- d\n", Entry::Value);
+    assert_eq!(
+        explanation(&case),
+        Some(vec!["yaml-1.2-flow-syntax", "verbatim-non-specific-tag"]),
+        "{case:?}"
+    );
+    assert_eq!(
+        explanation_without(&case, &["verbatim-non-specific-tag"]),
+        None
+    );
+}
+
+/// ayaml reports a second document only once the first one's values hold
+/// no error, so a rewrite that removes a value error and shows a second
+/// document hides nothing, where a syntax error a rewrite makes still
+/// hides one (seeds 9 and 12).
+#[test]
+fn a_second_document_hides_no_value_error() {
+    let (case, _) = compare("a: !!int x\n---\nb\n", Entry::Value);
+    assert!(
+        case.ayaml.as_ref().is_err_and(ayaml_value_error),
+        "{case:?}"
+    );
+    let (next, _) = compare("a: x\n---\nb\n", Entry::Value);
+    assert!(
+        next.ayaml
+            .as_ref()
+            .is_err_and(|rejection| rejection.message.contains(AYAML_SECOND_DOCUMENT)),
+        "{next:?}"
+    );
+    assert_eq!(
+        fairness(&case, &next, &Hidden::Nothing),
+        Some(Fairness::Kept)
+    );
+    let (broken, _) = compare("a: [x\n---\nb\n", Entry::Value);
+    assert!(
+        broken.ayaml.as_ref().is_err_and(ayaml_syntax_error),
+        "{broken:?}"
+    );
+    assert_eq!(fairness(&case, &broken, &Hidden::Nothing), None);
+}
+
 /// A search counts each comparison out of its budget (see
 /// [`MAX_COMPARISONS`]), and a split compares each prefix once and never
 /// the whole input, which the search already compared. An error on the last
 /// line leaves no prefix; a construct that ends with the error's line
 /// leaves one; one that goes on past it, and whose prefix shows nothing,
 /// leaves the prefix through the line too; one that goes on to the end of
-/// the input leaves only that.
+/// the input leaves only that. A flow collection the oracle's error is in
+/// adds the prefix through it and the input with it empty.
 #[test]
 fn a_search_counts_each_comparison() {
     let search = || Search {
@@ -773,6 +876,7 @@ fn a_search_counts_each_comparison() {
         ("a: |\n x\n\t y\nb\n", 1, "One"),
         ("a: [x, 'y'#c,\n b]\nc: 1\n", 2, "One"),
         ("-\n|2\n  x\n", 1, "Through"),
+        ("[:a]\n  b\nc\n", 4, "Two"),
     ] {
         let (case, _) = compare(input, Entry::Value);
         let mut search = search();
@@ -791,7 +895,7 @@ fn a_search_counts_each_comparison() {
     // The rest after a prefix, which both read alike.
     let (case, _) = compare("a: 'x'#c\nb: 1\n", Entry::Value);
     let mut rest = search();
-    assert!(rest.explain_rest(&case, "a: 'x'#c\n".len()));
+    assert!(rest.explain_rest(&case, &after_prefix(case.input, "a: 'x'#c\n".len())));
     assert_eq!(rest.comparisons, 1);
     // Each rewrite, of which the first explains the case.
     let (case, _) = compare("a: !<!> x\n", Entry::Value);
@@ -805,15 +909,15 @@ fn a_search_counts_each_comparison() {
     assert_eq!(rewritten.comparisons, 2);
     // A prefix and the rest, each explained, the prefix by a rewrite.
     let (case, _) = compare("c: !<!> x\nm: [:a]\n", Entry::Value);
-    let Split::Two(prefix) = search().split(&case) else {
+    let Split::Two(prefix, rest) = search().split(&case) else {
         panic!("{case:?}");
     };
     let mut prefix_alone = search();
     assert!(prefix_alone.explain(&prefix));
     let mut rest_alone = search();
-    assert!(rest_alone.explain_rest(&case, prefix.input.len()));
+    assert!(rest_alone.explain_rest(&case, &rest));
     let mut both = search();
-    assert!(both.explain_both(&case, &prefix));
+    assert!(both.explain_both(&case, &prefix, &rest));
     assert!(prefix_alone.comparisons > 0);
     assert_eq!(
         both.comparisons,

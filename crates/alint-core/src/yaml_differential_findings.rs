@@ -450,6 +450,96 @@ const FINDINGS: &[(&str, Entry, &[&str])] = &[
         Entry::Value,
         &["non-printable-character"],
     ),
+    // A flow key with an empty value, `:}`, which the oracle rejects, then
+    // a directive after the document, which ayaml rejects: with the flow
+    // collection empty, the oracle reads on to a second document (seed 4).
+    (
+        "? {-a.nan\tFalse%'open \n  :}\n%YAML 1.2\n\n.inf--- \n",
+        Entry::Value,
+        &["yaml-1.2-flow-syntax", "after-the-root-node"],
+    ),
+    // The same after a root flow sequence (seed 10).
+    (
+        "[:12:30😀'open,-0.0  ]\n    TRUE\n  - &b \n\n \n0o17- \u{85}*a\n  - [key-2",
+        Entry::Value,
+        &["yaml-1.2-flow-syntax", "after-the-root-node"],
+    ),
+    // A block scalar header after a key with an anchor, past which ayaml
+    // reads to a quote no line ends: with the header past the key, the
+    // oracle does too (seed 4).
+    (
+        "- \n- &b on: \n|\n  \"unterminated?\t|2",
+        Entry::Value,
+        &["block-scalar-under-an-anchor", "where-a-construct-opened"],
+    ),
+    // The same, to a verbatim tag that names nothing (seed 8).
+    (
+        "k1:\n  - 1e3\n  -\n    &a1 true:\n      - &a2 true: &a3\n>\n  line 0\n  line 1\n\n  \
+         line 2\n  \ntrue:\n-\n  -\n    - !<!> null\n    -\t*a2 # c\n  - 's ''q'''\n- \
+         [\"d\"]\n-\n  ? a b\n  :\t.nan\t# c\n  b: \n  k1:\n    a: *a3\n    <<: \
+         18446744073709551616\n    <<: 2001-12-14\n",
+        Entry::Value,
+        &[
+            "verbatim-non-specific-tag",
+            "block-scalar-under-an-anchor",
+            "after-the-root-node",
+        ],
+    ),
+    // A tab before the `]` that ends a flow collection's line after a plain
+    // scalar's (seeds 4 and 9).
+    (
+        "b: &a2 [a b,\nb: &a1 0x10\n\t  ]\na: *a1 # c\n",
+        Entry::Value,
+        &["tab-as-white-space"],
+    ),
+    (
+        "- 0x10\n- [~\u{2028},1\n\t  ]\n# end\n",
+        Entry::Value,
+        &["yaml-1.2-line-breaks", "tab-as-white-space"],
+    ),
+    // A byte-order mark after `- ` starts a plain scalar, in which a quote
+    // opens nothing, so the `- :` line is an empty key (seed 6).
+    (
+        "\n- \u{feff}'q''s'\"\"e\\n\\u0041\"!e!z ? [\n- on\t\t,\n- : ",
+        Entry::Value,
+        &["empty-implicit-key"],
+    ),
+    // A line of a tab ends a block scalar for ayaml, which then rejects a
+    // tab as the leading indentation of a scalar it opens below; with the
+    // first a space, it reads the second as white space too (seed 8).
+    (
+        "<<: >-\n  line 0\n  line 1\n\n\n  null:\n    -\t>+\n      line 0\n\t\n        \
+         line 1\n      line 2\n\n    - >-\n\t\n      line 0\n  key: .nan\n",
+        Entry::Value,
+        &["tab-as-white-space"],
+    ),
+    // Tabs ayaml reads as white space, then one it rejects, which it still
+    // does with them as content (`x`): that variant, which keeps it,
+    // explains the case, where the one that frees it too does not (seed 2).
+    (
+        "- >+\n  line 0\n\t\n  line 1\n # c\n- [a b,\n- |2\n  line 0\n\t\n  \
+         line 1\n\t\n    line 2\n",
+        Entry::Value,
+        &["tab-as-white-space", "indentation"],
+    ),
+    // Once the core tags go, ayaml reports the second document it reports
+    // only after the first one's values (seeds 9 and 12).
+    (
+        "key: {}\n1:\n  - 's\u{80} ''q'''\n  - &a1 null\n  - !!null |\n  - !!null |\n    \
+         line 0\n\n # c\n1: *a1\n---\nb: 2\n",
+        Entry::Value,
+        &[
+            "quoted-only-characters",
+            "core-tag-on-another-kind",
+            "after-the-root-node",
+        ],
+    ),
+    (
+        "!!int :a%~%TAG !e! tag:x,2000:\n--- &a.inf007&a\n    1_000\tb c%%TAG !e! tag:x,2000:\n \
+         'a b'\n    \n    \r\n18446744073709551616\n    !t ",
+        Entry::Json,
+        &["core-tag-on-another-kind", "after-the-root-node"],
+    ),
 ];
 
 #[test]

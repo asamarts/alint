@@ -312,13 +312,19 @@ pub(crate) const DEVIATIONS: &[Deviation] = &[
         ayaml: "reads a tab as separating white space where YAML 1.2 allows one, such as \
                 after `-`, before a top-level scalar, or on a blank line after `...`, and as \
                 content after the indentation of a block scalar's first line, as in `|` and \
-                then a line of two spaces and a tab",
+                then a line of two spaces and a tab; and so before a closing `]` or `}` or a \
+                comment on a flow collection's line that tabs alone indent, as `a: [x` then \
+                `\\t]`",
         oracle: "rejects a tab where a token could start or before a block scalar's \
-                 indentation is known, and reads a line of white space with a tab after \
-                 `...` as a second document",
+                 indentation is known, or that starts a flow collection's line after a plain \
+                 scalar's under a block collection, and reads a line of white space with a \
+                 tab after `...` as a second document",
         reason: "YAML 1.2 (section 6.2, rule 78 and section 8.1.1.1) allows tabs as \
-                 separation outside indentation and on blank lines, and sets a block \
-                 scalar's indentation by the spaces before its first line's content",
+                 separation outside indentation and on blank and comment lines, and sets a \
+                 block scalar's indentation by the spaces before its first line's content; \
+                 ayaml exempts a flow collection's line that holds only a closing bracket or \
+                 a comment from the indentation of its other lines (its 0.1.2 CHANGELOG), as \
+                 both parsers read such a line that no space indents",
         example: "- a\n-\tb\n",
     },
     Deviation {
@@ -940,11 +946,10 @@ pub(crate) const DEVIATIONS: &[Deviation] = &[
     },
     Deviation {
         id: "block-scalar-under-an-anchor",
-        classes: &[Class::OnlyOracleRejects],
-        trigger: Trigger::Narrow {
+        classes: &[Class::OnlyOracleRejects, Class::RejectedAtDifferentLocation],
+        trigger: Trigger::Input {
             covers: oracle_points_at_a_block_scalar_under_an_anchor,
-            because: "the oracle's error is on the block scalar header, on the line after \
-                      properties with an anchor, properties alone or a key with an anchor",
+            neutralize: neutralize::block_scalar_headers,
         },
         ayaml: "accepts a block scalar header on the line after properties that include an \
                 anchor, as `b: &x` then `>`, after properties alone on their line, as `!t` \

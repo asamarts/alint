@@ -748,8 +748,16 @@ fn side_fairness(
         (_, Ok(_)) => Some(Fairness::Kept),
         // ayaml reads the whole stream's syntax before it builds a value, so
         // a syntax error the rewrite makes hides the value error the case
-        // showed, wherever each is. The oracle's errors have no kind.
-        (Err(before), Err(after)) if ayaml_value_error(before) && ayaml_syntax_error(after) => None,
+        // showed, wherever each is. The oracle's errors have no kind. A
+        // second document is the exception: ayaml finds it only once it
+        // built the first one's value, which then held no error.
+        (Err(before), Err(after))
+            if ayaml_value_error(before)
+                && ayaml_syntax_error(after)
+                && !after.message.contains(AYAML_SECOND_DOCUMENT) =>
+        {
+            None
+        }
         // The other parser rejected the case with the error it still gives,
         // and this one now gives an error at the same place: the trigger made
         // this parser read what the other could not. An error the other
@@ -884,6 +892,11 @@ fn fairness(case: &Case<'_>, next: &Case<'_>, hides: &Hidden) -> Option<Fairness
     }
 }
 
+/// ayaml's error about a second document at an entry point that reads one,
+/// which it reports after the first document's value errors, as for
+/// `a: !!int x` then `---` and `b`.
+const AYAML_SECOND_DOCUMENT: &str = "more than one document in stream";
+
 /// ayaml's messages about aliases, of kind Composition: ayaml 0.1.2 gives
 /// no error of kind Alias, which names the same errors.
 const AYAML_ALIAS_MESSAGES: &[&str] = &[
@@ -936,9 +949,12 @@ enum Split<'a> {
     /// they may be one, found at two places.
     One,
     /// That the case holds two: the prefix's case holds the first error
-    /// alone, and the rest of the input is a case of its own, which the
-    /// parser that gave the first error never read.
-    Two(Case<'a>),
+    /// alone, and the rest is a case of its own: the rest of the input,
+    /// which the parser that gave the first error never read, or, where the
+    /// oracle's error is in a flow collection ayaml read, the input with
+    /// that collection empty, in which ayaml gives its error as it is (see
+    /// [`Search::split_at_a_flow_collection`]).
+    Two(Case<'a>, String),
     /// That the case holds two, and the rest of the input is no case of its
     /// own: the oracle read the first error's line, ayaml's, in its first
     /// document before it found a second, which has no place, or ayaml read
@@ -1108,8 +1124,8 @@ impl Search {
             Split::Unknown => Err(false),
             Split::One => Ok(false),
             Split::Apart => Ok(true),
-            Split::Two(prefix) => {
-                if self.explain_both(case, &prefix) {
+            Split::Two(prefix, rest) => {
+                if self.explain_both(case, &prefix, &rest) {
                     Err(true)
                 } else {
                     Ok(true)
@@ -1211,8 +1227,8 @@ impl Search {
                 // another entry may yet explain the case.
                 Trigger::Narrow { .. } => match self.split(case) {
                     Split::Unknown => return false,
-                    Split::Two(prefix) => {
-                        if self.explain_both(case, &prefix) {
+                    Split::Two(prefix, rest) => {
+                        if self.explain_both(case, &prefix, &rest) {
                             return true;
                         }
                     }
@@ -1268,12 +1284,76 @@ impl Search {
         } else {
             Split::One
         };
-        match split {
+        let split = match split {
             Split::One if line < case.input.len() && !(compared && end == line) => {
                 self.split_after_line(case, line, by_ayaml)
             }
             split => split,
+        };
+        match split {
+            Split::Apart if !by_ayaml => self
+                .split_at_a_flow_collection(case, earlier, &places)
+                .unwrap_or(Split::Apart),
+            split => split,
         }
+    }
+
+    /// Where the oracle's error, at byte `earlier`, is the first and in a
+    /// flow collection, and ayaml's comes on a later line than the
+    /// collection ends on, the split of `case` into the prefix through that
+    /// line, which ayaml reads and the oracle rejects with its error, and
+    /// the input with the collection empty (`[]` or `{}`, with the line
+    /// breaks it held), after which ayaml gives its error as it is. The
+    /// oracle must read the prefix with the collection empty: its error was
+    /// the collection's alone, as an empty one both parsers read alike. The
+    /// oracle then reads the lines around it as ayaml read them in the case.
+    /// None where that does not hold, as when the search ran out of
+    /// comparisons.
+    fn split_at_a_flow_collection<'a>(
+        &mut self,
+        case: &Case<'a>,
+        earlier: usize,
+        places: &[neutralize::Place],
+    ) -> Option<Split<'a>> {
+        let input = case.input;
+        if places[earlier].depth == 0 {
+            return None;
+        }
+        let open = (0..earlier).rev().find(|&at| places[at].depth == 0)?;
+        let close = (earlier..input.len()).find(|&at| places[at + 1].depth == 0)?;
+        let end = line_end(input, close);
+        let ayaml = predicates::error_offset(input, &case.ayaml)?;
+        if !input[open..].starts_with(['[', '{'])
+            || !input[close..].starts_with([']', '}'])
+            || ayaml < end
+            || self.comparisons + 3 > MAX_COMPARISONS
+        {
+            return None;
+        }
+        let breaks: String = input[open + 1..close]
+            .chars()
+            .filter(|ch| matches!(ch, '\n' | '\r'))
+            .collect();
+        let emptied = format!(
+            "{}{}{breaks}{}",
+            &input[..=open],
+            &input[close..=close],
+            &input[close + 1..]
+        );
+        let emptied_end = end - (close - open - 1) + breaks.len();
+        self.comparisons += 1;
+        let (alone, panicked) = compare_at(&emptied[..emptied_end], case.entry, case.rule);
+        if panicked || alone.oracle.is_err() {
+            return None;
+        }
+        self.comparisons += 1;
+        let (prefix, panicked) = compare_at(&input[..end], case.entry, case.rule);
+        if panicked || prefix.ayaml.is_err() || prefix.oracle != case.oracle {
+            return None;
+        }
+        self.comparisons += 1;
+        let (rest, panicked) = compare_at(&emptied, case.entry, case.rule);
+        (!panicked && rest.ayaml == case.ayaml).then_some(Split::Two(prefix, emptied))
     }
 
     /// [`Search::split`] at `end`, past the construct that the case's first
@@ -1311,7 +1391,7 @@ impl Search {
         if panicked {
             Split::Unknown
         } else if (earlier.is_err() && later.is_ok()) || shared {
-            Split::Two(prefix)
+            Split::Two(prefix, after_prefix(case.input, end))
         } else if oracle.is_none() && oracle_more_than_one_document(case) && prefix.oracle.is_ok() {
             Split::Apart
         } else {
@@ -1377,37 +1457,37 @@ impl Search {
     }
 
     /// Whether `prefix`, which holds the first error of `case` alone (see
-    /// [`Search::split`]), and the rest of the input after it are each
-    /// explained, the rest with the entries the case may use, whichever
-    /// explained the prefix.
-    fn explain_both(&mut self, case: &Case<'_>, prefix: &Case<'_>) -> bool {
+    /// [`Search::split`]), and `rest`, the rest of the input after it or
+    /// the input without it, are each explained, the rest with the entries
+    /// the case may use, whichever explained the prefix.
+    fn explain_both(&mut self, case: &Case<'_>, prefix: &Case<'_>, rest: &str) -> bool {
         let mut branch = self.clone();
         if !branch.explain(prefix) {
             self.comparisons = branch.comparisons;
             return false;
         }
-        let mut rest = Search {
+        let mut search = Search {
             ids: branch.ids,
             comparisons: branch.comparisons,
             ..self.clone()
         };
-        if rest.explain_rest(case, prefix.input.len()) {
-            *self = rest;
+        if search.explain_rest(case, rest) {
+            *self = search;
             return true;
         }
-        self.comparisons = rest.comparisons;
+        self.comparisons = search.comparisons;
         false
     }
 
-    /// Whether the rest of `case`'s input after its first `end` bytes, which
-    /// a prefix that holds one of its errors took, is explained.
-    fn explain_rest(&mut self, case: &Case<'_>, end: usize) -> bool {
+    /// Whether `rest`, the rest of `case`'s input after a prefix that holds
+    /// one of its errors, or its input without that error (see
+    /// [`Split::Two`]), is explained.
+    fn explain_rest(&mut self, case: &Case<'_>, rest: &str) -> bool {
         if self.comparisons == MAX_COMPARISONS {
             return false;
         }
         self.comparisons += 1;
-        let rest = after_prefix(case.input, end);
-        let (rest, panicked) = compare_at(&rest, case.entry, case.rule);
+        let (rest, panicked) = compare_at(rest, case.entry, case.rule);
         !panicked && self.explain(&rest)
     }
 

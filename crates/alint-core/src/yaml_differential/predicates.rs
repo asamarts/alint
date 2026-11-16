@@ -42,7 +42,7 @@ impl Counter {
     }
 
     /// The byte offsets where the lines of `input` start.
-    fn line_starts(self, input: &str) -> Vec<usize> {
+    pub(super) fn line_starts(self, input: &str) -> Vec<usize> {
         let mut starts = vec![0];
         for (at, ch) in input.char_indices() {
             let next = at + ch.len_utf8();
