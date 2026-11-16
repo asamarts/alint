@@ -1477,6 +1477,7 @@ pub fn unreadable_file_violation(rel: &Path, err: &std::io::Error) -> Violation 
 /// Built with [`FixContext::new`] and the `with_*` setters, so a later field is
 /// an addition rather than a breaking change. The fields stay public, to read
 /// and to assign.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct FixContext<'a> {
@@ -1520,6 +1521,19 @@ pub struct FixContext<'a> {
     /// `<redacted>` for the path. A fixer's warning on stderr, which no
     /// embedder scrubs, shows the same ([`Self::shown_path`]).
     pub paths_sensitive: bool,
+    /// An `extends:`'d ruleset or a nested config, sources that may not run
+    /// commands, contributed to the owning rule
+    /// ([`RuleSpec::extended_source`](crate::RuleSpec::extended_source)). Its
+    /// fixes never write alint's own configuration, which may
+    /// ([`Self::write_refusal`]), and never outside the root, whatever
+    /// [`Self::allow_out_of_root`] says.
+    pub extended_source: bool,
+    /// The resolved files the loaded configuration came from (its top-level
+    /// file and local `extends:` targets), which a fix from an
+    /// [`extended_source`](Self::extended_source) rule never writes. Empty by
+    /// default; files with a name configuration discovery accepts are refused
+    /// regardless.
+    pub config_files: &'a [PathBuf],
 }
 
 impl<'a> FixContext<'a> {
@@ -1538,6 +1552,8 @@ impl<'a> FixContext<'a> {
             stage_ops: None,
             process_environment: None,
             paths_sensitive: false,
+            extended_source: false,
+            config_files: &[],
         }
     }
 
@@ -1589,6 +1605,20 @@ impl<'a> FixContext<'a> {
         self
     }
 
+    /// Sets [`Self::extended_source`].
+    #[must_use]
+    pub fn with_extended_source(mut self, extended_source: bool) -> Self {
+        self.extended_source = extended_source;
+        self
+    }
+
+    /// Sets [`Self::config_files`].
+    #[must_use]
+    pub fn with_config_files(mut self, config_files: &'a [PathBuf]) -> Self {
+        self.config_files = config_files;
+        self
+    }
+
     /// `path` as a fixer's stderr warning may print it: `<redacted>` when
     /// [`Self::paths_sensitive`].
     #[must_use]
@@ -1598,61 +1628,6 @@ impl<'a> FixContext<'a> {
         } else {
             path.to_string_lossy()
         }
-    }
-
-    /// Persist a whole-file write of `bytes` for the file whose absolute path
-    /// is `abs`. In compose mode the bytes are buffered for the engine's single
-    /// per-file flush; otherwise they are written atomically now — byte-for-byte
-    /// the same as a direct [`write_atomic`]. Content fixers call this instead
-    /// of `write_atomic` so the engine can unify the write path.
-    ///
-    /// The compose buffer is keyed by the *resolved write target*
-    /// (`resolve_write_target`): a symlink and its in-tree target coalesce to
-    /// one entry, so two fixers touching the same underlying file through
-    /// different paths compose (the second reads the first's buffered write)
-    /// exactly as they would when writing straight to disk.
-    ///
-    /// # Errors
-    /// Propagates the underlying [`write_atomic`] I/O error in direct mode;
-    /// buffering in compose mode is infallible.
-    pub fn commit_write(&self, abs: &Path, bytes: &[u8]) -> std::io::Result<()> {
-        // A dry run must write NOTHING: every fixer guards `if ctx.dry_run` before
-        // reaching here, and the fixpoint's cap-confirmation pass relies on that
-        // (it runs `fix_run(dry_run=true)` purely to test convergence). Assert the
-        // invariant at the choke point so a fixer that forgets the guard fails
-        // loudly in tests/debug rather than silently mutating the tree.
-        debug_assert!(
-            !self.dry_run,
-            "commit_write reached during a dry run; a fixer must check ctx.dry_run before writing"
-        );
-        // Release-safe backstop (the assert is compiled out in release): a dry run
-        // writes NOTHING, so a fixer that forgot its `ctx.dry_run` guard becomes a
-        // silent no-op here instead of mutating the tree during, e.g., the
-        // fixpoint's cap-confirmation pass.
-        if self.dry_run {
-            return Ok(());
-        }
-        match self.compose {
-            Some(buf) => {
-                buf.borrow_mut()
-                    .insert(resolve_write_target(abs), bytes.to_vec());
-                Ok(())
-            }
-            None => write_atomic(abs, bytes),
-        }
-    }
-
-    /// True when a content fixer earlier in this pass has already composed a
-    /// pending whole-file write for `abs` (coalesced by resolved target, so a
-    /// symlink and its target share the answer). A whole-file op (remove /
-    /// rename) MUST yield when this is true: the pending content write is
-    /// flushed *after* the fixer loop, so acting on the pre-edit file now would
-    /// let the flush resurrect the removed/renamed path or strand the composed
-    /// bytes at a vacated path (a file-duplication corruption). Returns `false`
-    /// when there is no compose buffer (a `--dry-run` pass composes nothing).
-    pub fn has_pending_write(&self, abs: &Path) -> bool {
-        self.compose
-            .is_some_and(|buf| buf.borrow().contains_key(&resolve_write_target(abs)))
     }
 }
 
@@ -1987,7 +1962,7 @@ pub trait Fixer: Send + Sync + std::fmt::Debug {
 #[path = "rule_fix_io.rs"]
 mod fix_io;
 pub(crate) use fix_io::resolve_write_target;
-pub use fix_io::{ReadForFix, check_fix_size, read_for_fix, write_atomic};
+pub use fix_io::{ReadForFix, check_fix_size, read_for_fix, read_source_for_fix, write_atomic};
 
 #[cfg(test)]
 #[path = "rule_tests.rs"]

@@ -79,8 +79,9 @@ use serde::Deserialize;
 /// keep the schema and the actual DSL in sync.
 pub const CONFIG_SCHEMA_V1: &str = include_str!("../schemas/v1/config.json");
 
-pub(crate) const DEFAULT_CONFIG_NAMES: &[&str] =
-    &[".alint.yml", ".alint.yaml", "alint.yml", "alint.yaml"];
+/// The names discovery accepts. A fix from an `extends:`'d ruleset never
+/// writes a file with one of these names (`alint_core::reaches_alint_config`).
+pub(crate) const DEFAULT_CONFIG_NAMES: &[&str] = &alint_core::CONFIG_FILE_NAMES;
 
 /// Locate a config file starting at `start` and walking upward until one is
 /// found or the filesystem root is hit.
@@ -248,7 +249,7 @@ fn resolve_top_level(
     let drop_in_dir = path
         .parent()
         .unwrap_or_else(|| Path::new("."))
-        .join(".alint.d");
+        .join(alint_core::CONFIG_DROP_IN_DIRECTORY);
     for drop_in_path in collect_drop_ins(&drop_in_dir, opts.config_source.as_ref())? {
         // Drop-ins are trust-equivalent to the top-level config (local,
         // user-controlled), so `is_top: true` — they may open the escape hatch.
@@ -267,6 +268,9 @@ fn resolve_top_level(
     // With the forms the loader printed an `extends:` entry read from the
     // environment in, which a later error can quote too (`load_extended_source`).
     loader::add_environment_values(&mut raw.environment_values, &state.environment_values);
+    // Every local file the configuration came from, which a fix from an
+    // `extends:`'d ruleset must not rewrite.
+    raw.config_files = std::mem::take(&mut state.config_files);
     Ok(raw)
 }
 
@@ -371,6 +375,10 @@ pub(crate) struct RawConfig {
     /// schema.
     #[serde(skip)]
     environment_values: Vec<String>,
+    /// The resolved local files this configuration was loaded from, carried to
+    /// [`Config::config_files`]. Not part of the schema.
+    #[serde(skip)]
+    config_files: Vec<PathBuf>,
     /// Whether each of [`Self::extends`] read the environment, recorded by the
     /// local-config parser before interpolation erases it. Not part of the
     /// schema.
@@ -538,6 +546,10 @@ impl RawConfig {
             let untrusted_fix_source = take_untrusted_fix_source(&mut expanded);
             let provenance = Provenance::read(&expanded);
             expanded.remove(PROVENANCE_MARKER);
+            // Neither an extended source nor a nested config (whose rules carry
+            // the untrusted-fix marker) may spawn, so neither may have a fix
+            // write the configuration that can.
+            let extended_source = provenance.extended.is_some() || untrusted_fix_source;
             // A spawning rule runs whatever its fields say, so ALL of them must
             // come from the user's own config. An extended source cannot declare
             // a spawning kind or fix op (the per-source gates), but it could share
@@ -574,7 +586,9 @@ impl RawConfig {
                 // op's own default tier.
                 strip_fix_promotions_in_rule(&mut expanded);
             }
-            rules.push(deserialize_effective_rule(expanded, catalog, &id_hint)?);
+            let mut spec = deserialize_effective_rule(expanded, catalog, &id_hint)?;
+            spec.set_extended_source(extended_source);
+            rules.push(spec);
         }
         Ok(Config::new(self.version.unwrap_or(0), rules)
             .with_requires(effective_requirements(&self.compatibility))
@@ -587,7 +601,8 @@ impl RawConfig {
             .with_allow_out_of_root(self.allow_out_of_root)
             .with_baseline(self.baseline)
             .with_compatibility(self.compatibility)
-            .with_environment_values(self.environment_values))
+            .with_environment_values(self.environment_values)
+            .with_config_files(self.config_files))
     }
 }
 
@@ -1380,6 +1395,8 @@ pub(crate) fn merge(a: RawConfig, b: RawConfig) -> RawConfig {
     let compatibility = merged_compatibility(a.compatibility, b.compatibility);
     let mut environment_values = a.environment_values;
     loader::add_environment_values(&mut environment_values, &b.environment_values);
+    let mut config_files = a.config_files;
+    config_files.extend(b.config_files);
     let facts = merge_facts(a.facts, b.facts);
 
     // Templates merge by id, same shape as rules — later wins
@@ -1464,6 +1481,7 @@ pub(crate) fn merge(a: RawConfig, b: RawConfig) -> RawConfig {
         untrusted_when_var_reads,
         compatibility,
         environment_values,
+        config_files,
         extends_environment: Vec::new(),
     }
 }

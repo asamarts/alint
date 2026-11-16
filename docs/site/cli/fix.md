@@ -22,7 +22,8 @@ field; treat that as `false`.
 
 A dry run is a single pass over the current tree. A real `fix` writes, re-walks
 and re-checks until nothing changes, and a fix that ran but left its violation
-standing is reported `skipped` (`skip_kind: "unresolved"` in JSON) with a
+standing is reported `unresolved`, not `skipped`, since it may have written a
+file (in JSON, `status: "skipped"` with `skip_kind: "unresolved"`), with a
 nonzero exit. The dry run predicts the common case of that: a `file_create`,
 `dir_create` or `create_and_register` member that the walk would index under
 no name, neither the path as written nor where the file lands once symlinks
@@ -76,6 +77,16 @@ reported as a suggestion instead of being applied:
 ```bash
 alint fix --changed --base origin/main
 ```
+
+A fix never writes into a Git directory (`.git` in any spelling, or through a
+symlink to one), from any configuration, your own top-level one included. A
+`file_create` of `.git/hooks/pre-commit` is reported skipped
+(`.git/hooks/pre-commit is in a Git directory; a fix never writes or reads
+there`); v0.22.0 created it. Keep hooks in a tracked directory and point
+`git config core.hooksPath` at it, or use a hook manager. A fix of a rule a
+ruleset from `extends:` shaped also never writes alint's own configuration
+(`.alint.yml`, `.alint.d/`) or outside the root, whatever `allow_out_of_root`
+says.
 
 ## Reference date for time-dependent rules
 

@@ -170,7 +170,9 @@ pub(super) fn cmd_check(
         // `fix_size_limit` as `fix`; without this it silently used the 1 MiB
         // default and advertised (or omitted) fixes `fix` would not (audit HIGH,
         // 2026-09-20). Inert for a plain `check` (no fix derivation runs).
-        .with_fix_size_limit(loaded.fix_size_limit);
+        .with_fix_size_limit(loaded.fix_size_limit)
+        // ...and the same configuration files a fix from `extends:` never writes.
+        .with_config_files(loaded.config_files.clone());
     if let Some(analysis_time) = cli.as_of {
         engine = engine.with_analysis_time(analysis_time);
     }

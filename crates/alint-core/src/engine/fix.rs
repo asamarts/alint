@@ -889,7 +889,8 @@ impl Engine {
             .with_fix_size_limit(self.fix_size_limit)
             .with_compose(compose_buf.as_ref())
             .with_stage_ops(stage_ops)
-            .with_process_environment(self.process_environment.as_ref());
+            .with_process_environment(self.process_environment.as_ref())
+            .with_config_files(&self.config_files);
 
         // Same dependency resolution as `run`, so a fix pass respects per-rule
         // diff and manifest scoping without touching false `when:` rules.
@@ -1229,6 +1230,12 @@ impl Engine {
             };
             fix_ctx.allow_out_of_root = entry.allow_out_of_root;
             fix_ctx.paths_sensitive = paths_sensitive;
+            // A rule an `extends:`'d ruleset or a nested config shaped never
+            // writes alint's configuration, nor outside the root.
+            fix_ctx.extended_source = entry
+                .spec
+                .as_deref()
+                .is_some_and(|spec| spec.extended_source);
             // Located-edit fixers (Phase 1+) route through the batched
             // located_fix path instead of `apply`: collect their byte-range
             // edits per file (size-guarded via read_for_fix -- invariant 4 on
@@ -1494,6 +1501,10 @@ impl Engine {
         // rerun / the Phase-1 fixpoint. Never splice into bytes the offsets do
         // not index.
         if !located_batches.is_empty() {
+            // A file's batch mixes rules. Each rule's own read above already
+            // refused what its provenance may not edit, so the last rule's must
+            // not decide for the others here.
+            fix_ctx.extended_source = false;
             let mut located_items: BTreeMap<usize, Vec<FixItem>> = BTreeMap::new();
             for (file, batch) in located_batches {
                 let abs = root.join(&file);
@@ -1652,8 +1663,23 @@ impl Engine {
             && let Some(buf) = &compose_buf
         {
             let mut failed: Vec<PathBuf> = Vec::new();
+            let root_real = root.canonicalize().ok();
             for (target, bytes) in buf.borrow().iter() {
-                if let Err(source) = write_atomic(target, bytes) {
+                // `commit_write` refused a Git directory before buffering; the
+                // keys are resolved, so check again where the write lands.
+                let below_root = root_real
+                    .as_deref()
+                    .and_then(|real| target.strip_prefix(real).ok())
+                    .unwrap_or(target);
+                let written = if crate::reaches_git_directory(root, below_root) {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        crate::git_directory_refusal(below_root),
+                    ))
+                } else {
+                    write_atomic(target, bytes)
+                };
+                if let Err(source) = written {
                     if reported.borrow_mut().insert(target.clone()) {
                         if hidden_paths.contains(target) {
                             // The I/O error names the file as well.

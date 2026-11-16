@@ -86,6 +86,9 @@ pub(super) struct LoadedConfig {
     pub(super) fix_size_limit: Option<u64>,
     /// The `baseline:` config key (the raw repo-root-relative path), if set.
     pub(super) baseline: Option<PathBuf>,
+    /// The resolved local files the configuration came from, which a fix from
+    /// an `extends:`'d ruleset never writes.
+    pub(super) config_files: Vec<PathBuf>,
     /// The loaded top-level config file.
     config_path: PathBuf,
 }
@@ -424,6 +427,7 @@ pub(super) fn load_rules_for_explain(
         extra_ignores: config.ignore,
         fix_size_limit: config.fix_size_limit,
         baseline: config.baseline,
+        config_files: config.config_files,
         config_path,
     })
 }

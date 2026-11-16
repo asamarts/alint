@@ -136,10 +136,16 @@ the filesystem, reads file contents, optionally calls `git` and `sh`-via-the-
   repo root. Symlinks are honoured per the `no_symlinks` rule's verdict. A
   fix never writes or reads a Git directory (`.git` in any spelling a file
   system opens as one, or through a symlink to one): a file there would be
-  configuration Git runs commands from.
+  configuration Git runs commands from. The walk leaves out a symlink whose
+  target is in a Git directory, so no content fix edits `.git/config` under
+  another name.
 - **Plugin trust gating.** The `command` rule kind shells out to external
   CLIs; it's gated to the user's top-level config (extends'd configs cannot
-  introduce a `command` rule).
+  introduce a `command` rule). A fix of a rule an `extends:`'d ruleset or a
+  nested config shaped never writes alint's own configuration (`.alint.yml`
+  and the other discovery names, `.alint.d/`, or a file the configuration was
+  loaded from), so it cannot add such a rule for the next run, and never
+  writes outside the repo root, whatever `allow_out_of_root` says.
 - **Policy tests start without host authority.** `alint test` runs a rule,
   fixer or custom fact that spawns a process, at any `require:` depth, or
   reads the host keyring, only when the test declares the capability and the

@@ -82,6 +82,44 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   file system opens as `.git` (`.GIT`, `.git.`, `git~1`), or that an in-repository symlink leads
   into one. Rules still read such paths. This affects `alint fix` with a ruleset from `extends:`
   in v0.2.1 to v0.22.1 (`content_from` since v0.5.10), and `alint test` since v0.20.0.
+- **A content fix no longer writes through a symlink into the Git directory.** A repository
+  could commit `src/evil.rs -> ../.git/config`, which the walk followed, so the user's own
+  `file_header` rule on `src/**/*.rs` prepended its header to `.git/config`. With
+  `content_from: HEADER.txt`, a file the repository supplies, that header could set
+  `core.fsmonitor`, and the next Git command to read the repository ran it: the one a
+  `git_tracked_only` rule runs in the same `alint fix`, or the user's. A directory link
+  `gitdata -> .git` indexed the repository's own files the same way. The walk now leaves out a
+  symlink whose target is in a Git directory, in the same sense as above (`no_symlinks` still
+  reports it), and every fix that writes, removes, renames or changes the mode of a file refuses
+  one in a Git directory, through symlinks too, and reports it skipped: `src/evil.rs is in a Git
+  directory; a fix never writes or reads there`. A symlink to an ordinary file is still fixed
+  through. This affects `alint fix` on a repository you do not trust in v0.2.0 to v0.22.1
+  (writing the configuration's own text into `.git/config`), and running a command since
+  v0.5.10 (`content_from`).
+- **A fix from an extended ruleset no longer writes alint's configuration.** A ruleset reached
+  through `extends:` may not declare a `kind: command` rule, but its fixes could write one: a
+  `file_create` of `.alint.d/housekeeping.yml`, or a `file_append` to `.alint.yml`, put a
+  `command` rule into the user's own configuration, and the next `alint check` ran it. A fix of a
+  rule an extended ruleset or a nested config shaped (it declared the rule, contributed a field to
+  it, or defined its template) now never creates, edits, removes, renames, moves onto or changes
+  the mode of a configuration file: `.alint.yml`, `.alint.yaml`, `alint.yml` or `alint.yaml` at
+  any depth and in any spelling a file system opens as one, anything under `.alint.d/`, or a file
+  the configuration was loaded from (a `--config` file and local `extends:` targets included). It
+  reports `.alint.yml is an alint configuration file; a fix from an extended ruleset never writes
+  one`. The user's own rules still write configuration, and `trusted_extends` does not lift this
+  (it never let a ruleset spawn). This affects `alint fix` with a local ruleset from `extends:` in
+  v0.5.8 to v0.22.1 (a drop-in since v0.5.10), with any `https://` ruleset before v0.17.0, and
+  since then with one listed in `trusted_extends`.
+- **`allow_out_of_root` no longer lets an extended ruleset's fix write outside the repository.**
+  The top-level `allow_out_of_root: true` lifted the root confinement of a fix's write targets
+  too, for every rule, so a `file_create` in a ruleset reached through `extends:` could write
+  `../outside/planted.sh`. The human report then called it skipped, because no re-check of the
+  root sees the file. A fix of a rule an extended ruleset or a nested config shaped now never
+  writes outside the root (`dir_create`, `sync_from`, cross-file and `create_and_register`
+  targets included), and reports `../outside/planted.sh escapes the repo root; a fix from an
+  extended ruleset never writes outside it, whatever `allow_out_of_root` says`. The user's own
+  rules keep the option. This affects `alint fix` with `allow_out_of_root` and an `extends:`
+  ruleset in v0.14.0 to v0.22.1 (before v0.14.0 no fix write was confined to the root).
 - **A policy test's Git reads no longer find a repository above the sandbox.** Since v0.20.0,
   without `given.git` the test repository has no `.git`, and Git's discovery climbed to any
   repository the temporary directory was in: with `TMPDIR` inside a checkout, `git_commit_message`
@@ -98,7 +136,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   library in v0.20.0 to v0.22.1, and only for a policy-test package the user does not trust. No
   v0.22.x patch release follows: upgrade to v0.23.0, and until then run `alint test` only on
   policy-test packages whose configurations and `given:` blocks you trust, and `alint fix` only
-  with `extends:` rulesets you trust.
+  with `extends:` rulesets you trust and, with a content fix, only on repositories you trust.
 
 ### Added
 
@@ -106,6 +144,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (library API): whether a name, a path or a path below a root (through its symlinks) names a
   Git directory in any spelling a file system opens as `.git`. Fixers refuse such paths (see
   Security).
+- **Where a fix may write** (library API, see Security): `FixContext::write_refusal`, the reason
+  a fix may not write a path, with the `extended_source` and `config_files` fields and their
+  setters `with_extended_source` and `with_config_files`; `alint_core::read_source_for_fix`, for
+  a fix's read of a file it does not write; `alint_core::path_names_alint_config`,
+  `reaches_alint_config`, `CONFIG_FILE_NAMES` and `CONFIG_DROP_IN_DIRECTORY`; `Config::config_files`
+  and `Config::with_config_files`, the local files a configuration was loaded from, which
+  `Engine::with_config_files` hands the fixes; and `FixReport::unresolved`.
 - **`Engine::with_condition_environment` and `Context::condition_environment`** (library API,
   with `Context::with_condition_environment` and `Context::environment_for_conditions`): the
   environment `env.*` in a `when:` and a legacy `${VAR}` read, when it is not the process
@@ -158,6 +203,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **`alint fix` no longer writes into `.git` for the user's own rules either.** The Git-directory
+  refusal (see Security) applies to every configuration, the top-level one included, so a
+  user's own `file_create` of `.git/hooks/pre-commit`, which v0.22.0 created, is now reported
+  skipped. Keep hooks in a tracked directory and point `git config core.hooksPath` at it, or use
+  a hook manager. [`alint fix`](docs/site/cli/fix.md) and
+  [fixing](docs/site/concepts/adoption/fixing.md) say so.
+- **The human and Markdown fix reports call a fix that ran without resolving its violation
+  `unresolved`, not `skipped`.** Such a fix may have written a file (a `file_create` into a path
+  the walk does not index, or outside the root under `allow_out_of_root`), so its line reads
+  `(unresolved: fix ran (created ...) ...)` and the summary counts it apart:
+  `0 applied, 0 skipped, 0 unfixable, 1 unresolved.`, with `unresolved` shown only when nonzero.
+  The JSON report is unchanged (`status: "skipped"`, `skip_kind: "unresolved"`, and the
+  summary's `skipped` still includes it), as is the exit code.
 - **Breaking (library API):** `WhenEnv::env` and `WhenEnv::with_env` take a
   `BTreeMap<String, String>`, the type of the engine's process environment, instead of a
   `HashMap`. The engine now passes its condition environment there whenever it has one (by

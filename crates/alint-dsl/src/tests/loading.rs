@@ -1195,3 +1195,84 @@ fn a_condition_that_reads_the_environment_marks_its_field_sensitive() {
         fields("literal-iter")
     );
 }
+
+/// A rule an `extends:`'d ruleset, a nested config or an extended template
+/// shaped is marked, so its fixes never write alint's configuration; the
+/// user's own rules, drop-ins included, are not. Every local file the
+/// configuration came from is recorded.
+#[test]
+fn extended_and_nested_rules_are_marked_and_config_files_recorded() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::create_dir_all(root.join("vendor")).unwrap();
+    std::fs::create_dir_all(root.join(".alint.d")).unwrap();
+    std::fs::create_dir_all(root.join("pkg")).unwrap();
+    let rule =
+        |id: &str| format!("  - {{id: {id}, kind: file_exists, paths: {id}.md, level: warning}}\n");
+    std::fs::write(
+        root.join("vendor/policy.yml"),
+        format!(
+            "version: 1\nrules:\n{}{}templates:\n  - {{id: tpl, kind: file_exists, \
+             paths: t.md, level: warning}}\n",
+            rule("inherited"),
+            rule("overridden")
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        root.join(".alint.yml"),
+        format!(
+            "version: 1\nnested_configs: true\nextends: [./vendor/policy.yml]\nrules:\n{}\
+             \x20 - {{id: overridden, level: error}}\n\
+             \x20 - {{id: from-template, extends_template: tpl}}\n",
+            rule("own")
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        root.join(".alint.d/10-team.yml"),
+        format!("version: 1\nrules:\n{}", rule("drop-in")),
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("pkg/.alint.yml"),
+        format!("version: 1\nrules:\n{}", rule("nested")),
+    )
+    .unwrap();
+
+    let config = load(&root.join(".alint.yml")).unwrap();
+    let marked: std::collections::BTreeMap<&str, bool> = config
+        .rules
+        .iter()
+        .map(|spec| (spec.id.as_str(), spec.extended_source))
+        .collect();
+    let expected: std::collections::BTreeMap<&str, bool> = [
+        ("inherited", true),
+        ("overridden", true),
+        ("from-template", true),
+        ("own", false),
+        ("drop-in", false),
+    ]
+    .into_iter()
+    .collect();
+    for (id, extended) in &expected {
+        assert_eq!(marked.get(id), Some(extended), "{id}: {marked:?}");
+    }
+    let nested = config
+        .rules
+        .iter()
+        .find(|spec| spec.id.contains("nested"))
+        .expect("the nested rule loads");
+    assert!(nested.extended_source, "{}", nested.id);
+
+    let canonical = |rel: &str| root.join(rel).canonicalize().unwrap();
+    let mut files = config.config_files.clone();
+    files.sort();
+    let mut want = vec![
+        canonical(".alint.yml"),
+        canonical(".alint.d/10-team.yml"),
+        canonical("vendor/policy.yml"),
+    ];
+    want.sort();
+    assert_eq!(files, want);
+}

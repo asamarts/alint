@@ -79,7 +79,8 @@ pub(super) fn cmd_fix(
     let mut engine = Engine::from_entries(entries, loaded.registry)
         .with_facts(loaded.facts)
         .with_vars(loaded.vars)
-        .with_fix_size_limit(loaded.fix_size_limit);
+        .with_fix_size_limit(loaded.fix_size_limit)
+        .with_config_files(loaded.config_files);
     if let Some(analysis_time) = cli.as_of {
         engine = engine.with_analysis_time(analysis_time);
     }

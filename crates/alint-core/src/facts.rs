@@ -1042,6 +1042,7 @@ mod tests {
             baseline: None,
             compatibility: Vec::new(),
             environment_values: Vec::new(),
+            config_files: Vec::new(),
         };
         let err = reject_custom_facts(&config, "./base.yml").unwrap_err();
         assert!(err.to_string().contains("custom"), "{err}");
@@ -1066,6 +1067,7 @@ mod tests {
             baseline: None,
             compatibility: Vec::new(),
             environment_values: Vec::new(),
+            config_files: Vec::new(),
         };
         assert!(reject_custom_facts(&config, "./base.yml").is_ok());
     }

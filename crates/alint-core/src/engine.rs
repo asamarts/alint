@@ -962,6 +962,9 @@ pub struct Engine {
     /// resolves only NEW findings -- matching `check --baseline`. `None` means
     /// "fix everything". See [`Engine::with_fix_baseline`].
     fix_baseline: Option<crate::baseline::Baseline>,
+    /// The resolved files the configuration came from, which a fix from an
+    /// `extends:`'d rule never writes. See [`Engine::with_config_files`].
+    config_files: Vec<PathBuf>,
 }
 
 #[allow(clippy::too_many_lines)]

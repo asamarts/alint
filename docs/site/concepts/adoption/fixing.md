@@ -77,6 +77,13 @@ The five content-providing ops -- `file_create`, `file_prepend`, `file_append`, 
 
 These ops are careful about repeat runs: `file_prepend`, `file_append`, and `insert_header` are idempotent (a no-op when the content is already present); `file_prepend` and `insert_header` preserve a leading byte-order mark; and `file_create` skips a target that already exists.
 
+A fix never writes into a Git directory (`.git` in any spelling a file system opens as one, or
+through a symlink to one), whatever configuration declares it, your own top-level one included:
+a `file_create` of `.git/hooks/pre-commit`, which v0.22.0 created, is now reported skipped. Keep
+hooks in a tracked directory and point `git config core.hooksPath` at it, or use a hook manager.
+A fix of a rule a ruleset from `extends:` shaped also never writes alint's own configuration or
+outside the root ([the trust boundary](/docs/concepts/composition/composition-and-trust/)).
+
 ## fix_size_limit
 
 `fix_size_limit` (default 1 MiB) bounds the file a fixer **rewrites in place**: if that target is over the cap it is reported `Skipped` rather than rewritten. It covers the whole-file ops that read a target to splice or rewrite its content -- the seven text-hygiene ops, `file_prepend` / `file_append` / `insert_header`, `sort` / `insert_line` / `indent_style`, and `sync_from`. The pure path and metadata ops read no target content and fall outside it (`file_remove`, `file_rename`, `relocate`, `dir_create`, `chmod`, `git_untrack`); `file_create` reads its `content_from:` template, but that read is not itself bounded by `fix_size_limit`.
@@ -116,6 +123,10 @@ info [md-trim]:
 ```
 
 Each applied line names the file in its summary; skipped and unfixable lines carry it as a prefix. A file over `fix_size_limit`, or a `content_from:` source that is missing, shows on its rule as `(skipped: <reason>)` and lands in the `skipped` count instead.
+
+A fix that ran but left its violation standing, such as a `file_create` of a path the walk does
+not index, may have written a file, so it shows as `(unresolved: <reason>)` and lands in an
+`unresolved` count, never in `skipped`.
 
 A finding that `check` does not tag as fixable even though its rule declares a fix (a UTF-16 BOM, a bidi control in a binary-looking file, an ambiguous reindent) is listed as unfixable without running the fixer, and lands in the `unfixable` count.
 

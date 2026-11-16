@@ -16,12 +16,12 @@ use std::path::{Path, PathBuf};
 use alint_core::located_fix::{LocatedEdit, LocatedOutcome, apply_file_edits};
 use alint_core::{
     Applicability, Error, Extract, FixContext, FixEdit, FixOutcome, Fixer, Format, ReadForFix,
-    Result, Violation, extract_values_bounded, is_non_literal, read_for_fix,
+    Result, Violation, extract_values_bounded, is_non_literal, read_for_fix, read_source_for_fix,
 };
 
 use crate::cross_file::{Normalize, apply_normalize};
 use crate::fixers::StructuredFixer;
-use crate::fixers::creators::confine_fix_path;
+use crate::fixers::creators::{confine_fix_path, confine_fix_write};
 
 /// Overwrites the violating (drifted) target with the bytes of the host rule's
 /// canonical `source:`, making the two byte-identical. A *content-injecting*
@@ -52,15 +52,20 @@ impl SyncFromFixer {
         &self,
         target_rel: &Path,
         root: &Path,
-        allow: bool,
+        ctx: Option<&FixContext<'_>>,
     ) -> std::result::Result<(PathBuf, PathBuf), String> {
         // Both the READ (source) and the WRITE (target) must stay in the tree: an
         // absolute path discards `root` on join, and a symlinked parent escapes
         // `create`/`read` -- without confinement an untrusted ruleset could
         // exfiltrate (`source: /etc/passwd`) or overwrite (`target: ../x`)
-        // out-of-tree. Same gate the same-file content fixers use.
+        // out-of-tree. Same gate the same-file content fixers use. The editor
+        // (`ctx` is `None`) confines strictly.
+        let allow = ctx.is_some_and(|ctx| ctx.allow_out_of_root);
         let source_abs = confine_fix_path(&self.source, root, allow)?;
-        let target_abs = confine_fix_path(target_rel, root, allow)?;
+        let target_abs = match ctx {
+            Some(ctx) => confine_fix_write(target_rel, ctx)?,
+            None => confine_fix_path(target_rel, root, false)?,
+        };
         // A file is trivially identical to itself: never overwrite a target with
         // its own bytes (a no-op that would still churn the diff). Not reachable
         // from a real violation (`check` finds a self-referential target already
@@ -91,16 +96,16 @@ impl Fixer for SyncFromFixer {
             ));
         };
         let target_rel: &Path = target;
-        let (source_abs, target_abs) =
-            match self.resolve_endpoints(target_rel, ctx.root, ctx.allow_out_of_root) {
-                Ok(pair) => pair,
-                Err(reason) => return Ok(FixOutcome::Skipped(reason)),
-            };
+        let (source_abs, target_abs) = match self.resolve_endpoints(target_rel, ctx.root, Some(ctx))
+        {
+            Ok(pair) => pair,
+            Err(reason) => return Ok(FixOutcome::Skipped(reason)),
+        };
         // Source read is compose-aware (an earlier fixer in this pass may have
         // rewritten the canonical file) and size-capped. A missing / unreadable
         // source is a clean Skip, not a hard error: `check` already reports it as a
         // source-side violation, and the fix genuinely cannot proceed.
-        let source_bytes = match read_for_fix(&source_abs, &self.source, ctx) {
+        let source_bytes = match read_source_for_fix(&source_abs, &self.source, ctx) {
             Ok(ReadForFix::Bytes(b)) => b,
             Ok(ReadForFix::Skipped(outcome)) => return Ok(outcome),
             Err(_) => {
@@ -150,7 +155,7 @@ impl Fixer for SyncFromFixer {
         // strictly, so the editor / SARIF / agent surfaces never propose an
         // out-of-root read or write. An `allow_out_of_root` sync is still applied
         // by `apply`; only the proposed-edit form declines it.
-        let (source_abs, _target_abs) = self.resolve_endpoints(target_rel, root, false).ok()?;
+        let (source_abs, _target_abs) = self.resolve_endpoints(target_rel, root, None).ok()?;
         // Read the source from disk (capped). `_bytes` (the target's current
         // content) is deliberately ignored: the two suggestion sites call
         // `fix_edit(.., &[], root)` with EMPTY bytes, so a `bytes`-equality
@@ -281,7 +286,7 @@ impl CrossFileValueFixer {
     /// the fixer Skips (consistent with what `check` already reported).
     fn source_scalar(&self, ctx: &FixContext<'_>) -> std::result::Result<String, String> {
         let source_abs = confine_fix_path(&self.source_file, ctx.root, ctx.allow_out_of_root)?;
-        let source_bytes = match read_for_fix(&source_abs, &self.source_file, ctx) {
+        let source_bytes = match read_source_for_fix(&source_abs, &self.source_file, ctx) {
             Ok(ReadForFix::Bytes(b)) => b,
             Ok(ReadForFix::Skipped(FixOutcome::Skipped(r) | FixOutcome::Applied(r))) => {
                 return Err(r);
@@ -736,7 +741,7 @@ impl Fixer for CrossFileValueFixer {
                 target_rel.display()
             )));
         };
-        let target_abs = match confine_fix_path(target_rel, ctx.root, ctx.allow_out_of_root) {
+        let target_abs = match confine_fix_write(target_rel, ctx) {
             Ok(p) => p,
             Err(reason) => return Ok(FixOutcome::Skipped(reason)),
         };
@@ -906,7 +911,7 @@ impl CreateAndRegisterFixer {
                 member.display()
             )));
         };
-        let abs = match confine_fix_path(member, ctx.root, ctx.allow_out_of_root) {
+        let abs = match confine_fix_write(member, ctx) {
             Ok(p) => p,
             Err(reason) => return Ok(FixOutcome::Skipped(reason)),
         };
@@ -1145,7 +1150,7 @@ impl Fixer for CreateAndRegisterFixer {
                 target_rel.display()
             )));
         };
-        let target_abs = match confine_fix_path(target_rel, ctx.root, ctx.allow_out_of_root) {
+        let target_abs = match confine_fix_write(target_rel, ctx) {
             Ok(p) => p,
             Err(reason) => return Ok(FixOutcome::Skipped(reason)),
         };

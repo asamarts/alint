@@ -36,6 +36,7 @@ mod fix_flags;
 mod fix_robustness;
 mod fix_skip_classification;
 mod fix_spawn_gate;
+mod fix_target_confinement_cli;
 mod hidden_path_baseline;
 mod lsp_audit;
 mod lsp_protocol;
