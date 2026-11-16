@@ -223,7 +223,7 @@ if it's a content rule that fans out over `**/*.rs`.
 
 A change to how alint reads YAML, or a bump of ayaml, also runs the workspace's
 tests in compare mode (ADR-0041), which checks every decode against libyaml and
-saphyr. CI's `YAML compare` job runs it; locally:
+saphyr. CI's `YAML compare` job and the release preflight run it; locally:
 
 ```sh
 ci/scripts/test-yaml-compare.sh   # ALINT_YAML_PARSER=compare + the yaml-reference feature

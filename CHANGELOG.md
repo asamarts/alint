@@ -134,14 +134,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `core.excludesFile`, by default `$XDG_CONFIG_HOME/git/ignore`), which it finds through the
   process's environment. `alint test` sets it, so what a policy test sees no longer depends on the
   host's Git setup; the default keeps it, as before.
-- **A YAML parser facade with test-only reference parsers** (ADR-0041). `alint_core::yaml`
-  decodes through a backend. alint-core's `yaml-reference` feature, which no release enables and
-  which is not a stable API, adds libyaml (through `yaml_serde` 0.10.7, the parser v0.22 used)
-  and a compare mode, chosen with `ALINT_YAML_PARSER=libyaml` or `compare` in a build with the
-  feature. In compare mode every decode returns ayaml's result, and a difference from libyaml
-  that neither saphyr's reading nor the differential harness's allowlist explains panics. CI
-  runs the workspace's tests that way (`ci/scripts/test-yaml-compare.sh`), and a gate fails if a
-  build without the feature depends on `yaml_serde`.
+- **A YAML parser facade with test-only reference parsers** (ADR-0041). `alint_core::yaml` decodes
+  through a backend. alint-core's `yaml-reference` feature, which no release enables and which is
+  not a stable API, adds libyaml (through `yaml_serde` 0.10.7, the parser v0.22 used) and a compare
+  mode, chosen with `ALINT_YAML_PARSER=libyaml` or `compare` in a build with the feature. In compare
+  mode every decode returns ayaml's result, and a difference from libyaml that neither saphyr's
+  reading nor the differential harness's allowlist explains panics. CI and the release preflight run
+  the workspace's tests that way (`ci/scripts/test-yaml-compare.sh`), and a gate fails if a build
+  without the feature depends on `yaml_serde`.
 
 ### Removed
 
