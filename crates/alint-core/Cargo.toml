@@ -53,7 +53,10 @@ yaml_serde = { workspace = true, optional = true }
 
 [features]
 # libyaml and saphyr as reference parsers, and `ALINT_YAML_PARSER` to choose
-# one or to compare them with ayaml (ADR-0041). For testing only.
+# one or to compare them with ayaml (ADR-0041). For alint's own tests only, and
+# not a stable API: a crate that depends on alint-core must not enable it. If
+# any crate in a build's dependency graph enables it, `ALINT_YAML_PARSER`
+# chooses the parser of every YAML decode in the process, for every crate.
 yaml-reference = ["dep:yaml_serde"]
 
 [dev-dependencies]

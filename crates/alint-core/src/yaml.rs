@@ -51,7 +51,9 @@ fn limits() -> ayaml::Limits {
 ///
 /// The parser is ayaml, unless a build with `alint-core`'s `yaml-reference`
 /// feature, which is for testing, chooses another with `ALINT_YAML_PARSER`
-/// (ADR-0041).
+/// (ADR-0041). The feature is for alint's own tests: a crate that depends on
+/// alint-core must not enable it, as the variable then chooses the parser for
+/// the whole process.
 ///
 /// # Errors
 ///
@@ -1024,6 +1026,15 @@ impl Error {
     #[cfg(test)]
     pub(crate) fn from_parser(error: ayaml::Error) -> Self {
         Self::ayaml(error)
+    }
+
+    /// The kind of limit ayaml's error is about, if it is about one.
+    #[cfg(feature = "yaml-reference")]
+    pub(crate) fn limit(&self) -> Option<ayaml::LimitKind> {
+        match &self.0 {
+            ErrorRepr::Ayaml(error) => error.limit().map(ayaml::LimitExceeded::kind),
+            ErrorRepr::Libyaml(..) => None,
+        }
     }
 
     /// ayaml's error; a caller that reads one decodes with ayaml.

@@ -466,6 +466,7 @@ fn ayaml_side(input: &str, entry: Entry, rule: usize) -> Side {
 /// The oracle's result for `input` at `entry`, and at [`Entry::Rule`] for
 /// the rule at index `rule`.
 fn run_oracle(input: &str, entry: Entry, rule: usize) -> Side {
+    crate::yaml_backend::before_libyaml_decode();
     match entry {
         Entry::Value => yaml_serde::from_str::<yaml_serde::Value>(input)
             .map(|value| format!("{:?}", from_oracle(&value)))

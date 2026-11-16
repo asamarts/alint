@@ -137,11 +137,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **A YAML parser facade with test-only reference parsers** (ADR-0041). `alint_core::yaml` decodes
   through a backend. alint-core's `yaml-reference` feature, which no release enables and which is
   not a stable API, adds libyaml (through `yaml_serde` 0.10.7, the parser v0.22 used) and a compare
-  mode, chosen with `ALINT_YAML_PARSER=libyaml` or `compare` in a build with the feature. In compare
-  mode every decode returns ayaml's result, and a difference from libyaml that neither saphyr's
-  reading nor the differential harness's allowlist explains panics. CI and the release preflight run
-  the workspace's tests that way (`ci/scripts/yaml-compare.sh`), and a gate fails if a build
-  without the feature depends on `yaml_serde`.
+  mode, chosen with `ALINT_YAML_PARSER=libyaml` or `compare` in a build with the feature. The
+  feature is for alint's own tests, and a crate that depends on alint-core must not enable it:
+  the variable then chooses the parser of every decode in the process. In compare mode every
+  decode returns ayaml's result, and a difference from libyaml that neither saphyr's reading nor
+  the differential harness's allowlist explains panics. Neither mode lets libyaml read an input
+  past the limits ayaml decodes under, which libyaml lacks: compare mode leaves such an input
+  uncompared, and logs it, and libyaml mode refuses it; libyaml would expand an alias bomb in
+  full, even one that ayaml refuses for its syntax. CI and the release preflight run the
+  workspace's tests that way (`ci/scripts/yaml-compare.sh`), and a gate fails if a build without
+  the feature depends on `yaml_serde`.
 
 ### Removed
 
