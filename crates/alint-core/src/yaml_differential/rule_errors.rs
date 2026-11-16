@@ -113,17 +113,10 @@ fn problem(text: &str) -> String {
 
 /// Whether the oracle's error for the rule at index `rule` of `input` is in
 /// its field `field`: the oracle gives it for the rule cut down to that
-/// field and the fields the rule cannot do without, and not for the rule
-/// cut down to those others alone. A field the rule cannot do without is
-/// one without which the oracle says it is missing; serde reads the fields
-/// in their order in the struct, so a field the rule needs ahead of the
-/// failing one is among them.
-///
-/// It cannot tell a field the rule needs, which the oracle reads, from the
-/// failing field after it: when ayaml refuses `id` and the oracle reads it
-/// and refuses `kind` with the same problem, it takes the two for one.
-/// That takes a difference in how the two decode `id`, which another rule
-/// shows.
+/// field alone, and not for the rule with no field. serde reports a field's
+/// error as it reads the field's entry, before it finds a field the rule
+/// needs missing, so the field alone shows its error, as `id` alone shows
+/// one of its own, not `kind`'s.
 fn oracle_error_is_in(input: &str, rule: usize, field: &str, oracle: &Rejection) -> bool {
     let Some(mapping) = oracle_rule(input, rule) else {
         return false;
@@ -141,17 +134,8 @@ fn oracle_error_is_in(input: &str, rule: usize, field: &str, oracle: &Rejection)
         });
         result.err().map(|rejection| rejection.message)
     };
-    let needed: Vec<&str> = mapping
-        .keys()
-        .filter_map(yaml_serde::Value::as_str)
-        .filter(|key| {
-            *key != field
-                && error(&|other| other != *key).as_deref()
-                    == Some(format!("missing field `{key}`").as_str())
-        })
-        .collect();
-    let with = error(&|key| key == field || needed.contains(&key));
-    let without = error(&|key| needed.contains(&key));
+    let with = error(&|key| key == field);
+    let without = error(&|_| false);
     with.as_ref() == Some(&oracle.message) && without.as_ref() != Some(&oracle.message)
 }
 
@@ -189,7 +173,12 @@ mod tests {
             Some(("scope_filter", "x"))
         );
         assert_eq!(ayaml_path("a[\"b \\\"c]: d\"][?].e-f: g"), Some(("a", "g")));
+        assert_eq!(ayaml_path("a[\"b\"]: x"), Some(("a", "x")));
+        // A name starts with a letter or `_`.
+        assert_eq!(ayaml_path("_a: x"), Some(("_a", "x")));
         for message in [
+            "1a: x",
+            "-a: x",
             "invalid type: integer `1`, expected struct RuleSpec",
             "missing field `id`",
             "a glob string, a list of globs, or an `{ include, exclude }` map",

@@ -960,8 +960,11 @@ fn a_moved_error_is_kept_revealed_or_agreed_on() {
     // A parser error the case gave, or a scanner error now, was not hidden
     // by a scanner error.
     let parser_error = case(error("A", 3, Some(ErrorKind::Parser)), error("X", 3, None));
-    let scanned = case(error("B", 1, scanner), error("X", 3, None));
-    for (before, after) in [(&parser_error, &parsed), (&scanner_error, &scanned)] {
+    let moved_scanner_error = case(error("B", 1, scanner), error("X", 3, None));
+    for (before, after) in [
+        (&parser_error, &parsed),
+        (&scanner_error, &moved_scanner_error),
+    ] {
         assert_eq!(
             fairness(before, after, &Hidden::ParserErrors),
             Some(Fairness::Revealed)
@@ -1528,29 +1531,47 @@ fn rule_errors_are_one_in_one_field_with_one_problem() {
         assert_eq!(case.class, Class::RejectedAtSameLocation, "{case:?}");
     }
     // The same problem in another field: ayaml's error, moved to the
-    // message, which the oracle read.
-    let input = "rules:\n  - {id: a, kind: k, level: error, message: x, when: 1}\n";
-    let moved: planted::Plant = |_, _, side| {
+    // message, or to `id`, a field the rule needs, which the oracle read.
+    let to_message: planted::Plant = |_, _, side| {
         side.map_err(|rejection| Rejection {
             message: rejection.message.replacen("when: ", "message: ", 1),
             ..rejection
         })
     };
-    let (clean, planted) = planted::clean_and_planted(input, Entry::Rule, moved);
-    assert_eq!(clean.class, Class::RejectedAtSameLocation, "{clean:?}");
-    assert!(
-        planted
-            .ayaml
-            .as_ref()
-            .unwrap_err()
-            .message
-            .starts_with("message: ")
-    );
-    assert_eq!(
-        planted.class,
-        Class::RejectedAtDifferentLocation,
-        "{planted:?}"
-    );
+    let to_id: planted::Plant = |_, _, side| {
+        side.map_err(|rejection| Rejection {
+            message: rejection.message.replacen("kind: ", "id: ", 1),
+            ..rejection
+        })
+    };
+    for (input, moved, field) in [
+        (
+            "rules:\n  - {id: a, kind: k, level: error, message: x, when: 1}\n",
+            to_message,
+            "message: ",
+        ),
+        (
+            "rules:\n  - {id: a, kind: [1], level: error}\n",
+            to_id,
+            "id: ",
+        ),
+    ] {
+        let (clean, planted) = planted::clean_and_planted(input, Entry::Rule, moved);
+        assert_eq!(clean.class, Class::RejectedAtSameLocation, "{clean:?}");
+        assert!(
+            planted
+                .ayaml
+                .as_ref()
+                .unwrap_err()
+                .message
+                .starts_with(field)
+        );
+        assert_eq!(
+            planted.class,
+            Class::RejectedAtDifferentLocation,
+            "{planted:?}"
+        );
+    }
 }
 
 /// A rule's entry explains the two errors it names, not the oracle's alone:

@@ -414,10 +414,7 @@ pub(super) fn ayaml_takes_a_document_marker_for_block_scalar_content(case: &Case
     let Some(at) = error_offset(case.input, &case.ayaml) else {
         return false;
     };
-    let from = case.input[..at]
-        .rfind(['\n', '\r'])
-        .map_or(0, |offset| offset + 1);
-    case.input[from..]
+    case.input[super::line_start(case.input, at)..]
         .split_inclusive(['\n', '\r'])
         .map(|line| line.trim_end_matches(['\n', '\r']))
         .find(|line| !line.trim_start_matches(' ').is_empty())
@@ -531,10 +528,10 @@ pub(super) fn errors_about_one_character(case: &Case<'_>) -> bool {
     let control = |ch: char| ch < ' ' && !matches!(ch, '\t' | '\n' | '\r');
     match super::oracle_error_offset(case.input, &case.oracle) {
         Some(oracle) if oracle == ayaml => true,
-        Some(oracle) => {
-            oracle < ayaml
-                && rejects(&case.oracle, ORACLE_READER_ERROR)
-                && case.input.find(control) == Some(ayaml)
+        // The oracle's reader refuses that control too, so its error, if
+        // it is the reader's, is then before ayaml's.
+        Some(_) => {
+            rejects(&case.oracle, ORACLE_READER_ERROR) && case.input.find(control) == Some(ayaml)
         }
         None => false,
     }
@@ -722,10 +719,32 @@ mod tests {
             block_scalar_headers_under_an_anchor("true:\n  &a2 null: \n>1-"),
             [3]
         );
+        // The root ends at the first line indented less, however long.
+        assert_eq!(first_line_out_of_the_root("  a\nbbbbbbbb: c\n"), Some(2));
+        assert_eq!(first_line_out_of_the_root("a\n  bbbbbbbb\nc\n"), None);
+        // Past a `---` that a comment alone follows, after white space.
+        assert_eq!(first_line_out_of_the_root("--- # c\n  a\nb\n"), Some(3));
+        // Not past another marker, a directive or a byte order mark.
+        for other in [
+            "---# c\n  a\nb\n",
+            "--- x\n  a\nb\n",
+            "  a\n---\nb\n",
+            "  a\n...\nb\n",
+            "  a\n%YAML 1.2\nb\n",
+            "  a\n\u{feff}b\n",
+        ] {
+            assert_eq!(first_line_out_of_the_root(other), None, "{other:?}");
+        }
         assert!(has_tab_line_after_document_end("a: 1\n...\n\t# c\n"));
         assert!(has_tab_line_after_document_end("- a\r\n...\r\t\n"));
         assert!(!has_tab_line_after_document_end("a: 1\n...\n# c\t\n"));
-        for other in ["a:\n  b: !t\n|\n", "a: &x\n  |\n  y\n", "a: &x |\n x\n"] {
+        for other in [
+            "a:\n  b: !t\n|\n",
+            "a: &x\n  |\n  y\n",
+            "a: &x |\n x\n",
+            "a:\n|\n",
+            "&x a\n|\n",
+        ] {
             assert!(
                 block_scalar_headers_under_an_anchor(other).is_empty(),
                 "{other:?}"
@@ -780,6 +799,27 @@ mod tests {
             oracle.message = ORACLE_READER_ERROR.to_string();
         }
         assert!(!errors_around_an_empty_node(&reader));
+    }
+
+    /// ayaml's error at `!<>` and the oracle's at its `>`, two columns on,
+    /// are about one tag; not elsewhere, nor at `!<!>`.
+    #[test]
+    fn errors_in_an_empty_verbatim_tag_are_two_columns_apart() {
+        assert!(errors_in_an_empty_verbatim_tag(&rejected_at(
+            "a: !<> x\n",
+            (1, 6),
+            (1, 4)
+        )));
+        assert!(!errors_in_an_empty_verbatim_tag(&rejected_at(
+            "a: !<> x\n",
+            (1, 7),
+            (1, 4)
+        )));
+        assert!(!errors_in_an_empty_verbatim_tag(&rejected_at(
+            "a: !<!> x\n",
+            (1, 6),
+            (1, 4)
+        )));
     }
 
     fn oracle_error_at(input: &str, line: usize, column: usize) -> Case<'_> {
