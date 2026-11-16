@@ -19,12 +19,14 @@ use ayaml::ErrorKind;
 
 use super::neutralize;
 use super::predicates::{
-    ayaml_points_at_a_flow_value_after_a_property, ayaml_points_at_a_lone_flow_indicator,
+    ORACLE_READER_ERROR, VERBATIM_NEEDS_A_NAME, ayaml_points_at_a_flow_value_after_a_property,
+    ayaml_points_at_a_lone_flow_indicator,
     ayaml_points_at_a_yaml_directive_with_an_adjacent_number_sign, ayaml_rejects,
-    errors_around_an_empty_node, has_tab_line_after_document_end,
-    oracle_points_at_a_block_scalar_under_an_anchor, oracle_points_at_a_flow_form,
-    oracle_points_into_a_tag_at_a_number_sign, oracle_rejects,
-    oracle_rejects_in_a_quote_after_a_flow_colon, root_is_block_scalar,
+    ayaml_rejects_a_nameless_verbatim_tag, ayaml_takes_a_document_marker_for_block_scalar_content,
+    errors_about_one_character, errors_around_an_empty_node, errors_in_an_empty_verbatim_tag,
+    has_tab_line_after_document_end, oracle_points_at_a_block_scalar_under_an_anchor,
+    oracle_points_at_a_flow_form, oracle_points_into_a_tag_at_a_number_sign, oracle_rejects,
+    oracle_rejects_in_a_quote_after_a_flow_colon, rejects, root_is_block_scalar,
 };
 use super::{Case, Class, Entry};
 
@@ -101,6 +103,8 @@ impl Deviation {
             ]),
             // asamarts/ayaml#139.
             "anchor-name-before-a-colon-and-a-flow-indicator" => Hidden::AfterTheTrigger,
+            // Each is a scanner error.
+            "flow-line-tab-indentation" | "verbatim-non-specific-tag" => Hidden::ParserErrors,
             _ => Hidden::Nothing,
         }
     }
@@ -109,8 +113,10 @@ impl Deviation {
     #[cfg(test)]
     pub(crate) fn example_entry(&self) -> Entry {
         match self.id {
-            "typed-decode-core-tags" => Entry::Config,
-            "rule-keys-that-are-not-strings" => Entry::Rule,
+            "typed-decode-core-tags" | "negative-zero-in-an-unsigned-field" => Entry::Config,
+            "rule-keys-that-are-not-strings"
+            | "rule-that-is-null"
+            | "enum-as-a-one-entry-mapping" => Entry::Rule,
             _ => Entry::Value,
         }
     }
@@ -124,6 +130,11 @@ pub(crate) enum Hidden {
     /// Any error on a line after the trigger's: the trigger makes ayaml read
     /// the lines after it as part of a scalar, whatever they hold.
     AfterTheTrigger,
+    /// A parser error, when the trigger is a scanner error: ayaml reads the
+    /// whole stream's tokens before it parses them, so a scanner error hides
+    /// a parser error before it, which a rewrite that leaves the tokens as
+    /// they were, only moved along their line, did not make.
+    ParserErrors,
 }
 
 impl Hidden {
@@ -134,7 +145,7 @@ impl Hidden {
             return false;
         };
         match self {
-            Self::Nothing => false,
+            Self::Nothing | Self::ParserErrors => false,
             Self::Messages(messages) => messages
                 .iter()
                 .any(|message| error.message.contains(message)),
@@ -149,6 +160,15 @@ impl Hidden {
                 error.location.is_some_and(|(line, _)| line > trigger_line)
             }
         }
+    }
+
+    /// Whether ayaml's error on `next`, `case` with the trigger removed, is
+    /// one that the case's error, the trigger's, hid wherever it was.
+    pub(crate) fn revealed(&self, case: &Case<'_>, next: &Case<'_>) -> bool {
+        let kind = |side: &super::Side| side.as_ref().err().and_then(|rejection| rejection.kind);
+        matches!(self, Self::ParserErrors)
+            && kind(&case.ayaml) == Some(ErrorKind::Scanner)
+            && kind(&next.ayaml) == Some(ErrorKind::Parser)
     }
 }
 
@@ -263,7 +283,7 @@ pub(crate) const DEVIATIONS: &[Deviation] = &[
         id: "quoted-only-characters",
         classes: &[Class::OnlyOracleRejects],
         trigger: Trigger::Input {
-            covers: |case| oracle_rejects(case, &["control characters are not allowed"]),
+            covers: |case| oracle_rejects(case, &[ORACLE_READER_ERROR]),
             neutralize: neutralize::quoted_only_characters,
         },
         ayaml: "keeps U+007F, U+0080 to U+009F other than U+0085, U+FFFE and U+FFFF in a \
@@ -469,6 +489,21 @@ pub(crate) const DEVIATIONS: &[Deviation] = &[
         reason: "YAML 1.2 (`ns-s-implicit-yaml-key`, `c-s-implicit-json-key`) limits an \
                  implicit key to 1,024 characters; documented in the 0.23 CHANGELOG",
         example: WIDE_KEY,
+    },
+    // A form of `yaml-1.2-flow-syntax` that a rewrite removes, so that the
+    // search can read past it where another error follows.
+    Deviation {
+        id: "empty-flow-implicit-key",
+        classes: &[Class::OnlyOracleRejects, Class::RejectedAtDifferentLocation],
+        trigger: Trigger::Input {
+            covers: |case| !neutralize::empty_flow_implicit_keys(case.input).is_empty(),
+            neutralize: neutralize::empty_flow_implicit_keys,
+        },
+        ayaml: "reads an entry of a flow collection with an empty implicit key, as `[: x]` \
+                and `{:}`, with a null key",
+        oracle: "rejects it, and reads `~:` there",
+        reason: "YAML 1.2 (`c-ns-flow-map-empty-key-entry`) allows it",
+        example: "[: x]\n",
     },
     Deviation {
         id: "yaml-1.2-flow-syntax",
@@ -688,26 +723,86 @@ pub(crate) const DEVIATIONS: &[Deviation] = &[
         example: "version: !!str 1\n",
     },
     Deviation {
-        id: "rule-keys-that-are-not-strings",
+        id: "negative-zero-in-an-unsigned-field",
         classes: &[Class::OnlyOracleRejects],
+        trigger: Trigger::Input {
+            covers: typed,
+            neutralize: neutralize::negative_zeros,
+        },
+        ayaml: "decodes a plain `-0` into an unsigned field as 0",
+        oracle: "refuses it there as a negative integer: `invalid type: integer `0`, \
+                 expected u64`; it reads `+0` and `0` as 0",
+        reason: "`-0` is the integer 0 in the core schema (YAML 1.2, section 10.3.2), which \
+                 the value entry points read alike",
+        example: "version: 1\nfix_size_limit: -0\n",
+    },
+    Deviation {
+        id: "rule-keys-that-are-not-strings",
+        classes: &[Class::OnlyOracleRejects, Class::RejectedAtDifferentLocation],
         trigger: Trigger::Narrow {
             covers: |case| {
-                case.entry == Entry::Rule
-                    && oracle_rejects(case, &["expected field identifier"])
-                    && case.ayaml.is_ok()
+                case.entry == Entry::Rule && oracle_rejects(case, &["expected field identifier"])
             },
-            because: "the oracle's message says it refused a mapping key as a field name, and \
-                      ayaml decoded the rule, which is a case of its own",
+            because: "the oracle's message says it refused a mapping key as a field name, which \
+                      it does as it gathers the rule's entries, before it reads any field; the \
+                      rule is a case of its own",
         },
         ayaml: "decodes a rule whose mapping has a key that is not a string, as `1: y` or \
-                `~: y`, into `RuleSpec`, with the key among its flattened options",
+                `~: y`, into `RuleSpec`, with the key among its flattened options, or refuses \
+                the rule for one of its fields",
         oracle: "refuses the key as a field name, as \"invalid type: integer `1`, expected \
-                 field identifier\"",
+                 field identifier\", before it reads a field",
         reason: "alint's loader rejects a rule with a key that is not a string before it \
                  decodes the rule (\"`rules[0]` has a non-string key\"), with either parser, \
                  so a configuration loads the same way",
         example: "version: 1\nrules:\n  - {id: a, kind: file_exists, level: error, paths: x, \
                   1: y}\n",
+    },
+    Deviation {
+        id: "rule-that-is-null",
+        classes: &[Class::RejectedAtDifferentLocation],
+        trigger: Trigger::Narrow {
+            covers: |case| {
+                case.entry == Entry::Rule
+                    && ayaml_rejects(
+                        case,
+                        &["invalid type: unit value, expected struct RuleSpec"],
+                    )
+                    && oracle_rejects(case, &["missing field `id`"])
+            },
+            because: "ayaml's message says it refused a null where the rule goes, and the \
+                      oracle's that it missed the first field a rule needs, which is all it \
+                      finds in the empty mapping it reads a null as",
+        },
+        ayaml: "refuses a rule that is null, as a `-` alone in `rules:`, when it decodes the \
+                rule from its value, where a null is not an empty mapping: \"invalid type: \
+                unit value, expected struct RuleSpec\"",
+        oracle: "read the null as an empty mapping and refused it for the first field it \
+                 lacks, \"missing field `id`\"",
+        reason: "both refuse the rule, and so the configuration; only the message differs",
+        example: "version: 1\nrules:\n  -\n",
+    },
+    Deviation {
+        id: "enum-as-a-one-entry-mapping",
+        classes: &[Class::RejectedAtDifferentLocation],
+        trigger: Trigger::Narrow {
+            covers: |case| {
+                case.entry == Entry::Rule
+                    && ayaml_rejects(case, &["unknown variant"])
+                    && oracle_rejects(case, &["invalid type: map, expected a Value::Tagged enum"])
+            },
+            because: "ayaml's message names a variant it found as the key of a mapping where \
+                      the enum goes, and the oracle's says it refused that mapping, in the one \
+                      field both refuse",
+        },
+        ayaml: "reads a mapping of one entry where an enum goes, as a level with the rule's \
+                next lines indented under it, as serde's externally tagged form of a variant, \
+                its key the variant's name: `level:` with `paths: x` under it is the unknown \
+                variant `paths`",
+        oracle: "refuses any mapping where an enum goes, as \"invalid type: map, expected a \
+                 Value::Tagged enum\"",
+        reason: "both refuse the rule, and so the configuration; only the message differs",
+        example: "version: 1\nrules:\n  - id: a\n    kind: k\n    level:\n      paths: x\n",
     },
     Deviation {
         id: "global-tags",
@@ -727,12 +822,14 @@ pub(crate) const DEVIATIONS: &[Deviation] = &[
     },
     Deviation {
         id: "verbatim-non-specific-tag",
-        classes: &[Class::OnlyAyamlRejects],
-        trigger: Trigger::Narrow {
-            covers: |case| ayaml_rejects(case, &["a verbatim tag needs a name"]),
-            because: "ayaml's message names the verbatim tag",
+        classes: &[Class::OnlyAyamlRejects, Class::RejectedAtDifferentLocation],
+        trigger: Trigger::Input {
+            covers: ayaml_rejects_a_nameless_verbatim_tag,
+            neutralize: neutralize::verbatim_non_specific_tags,
         },
-        ayaml: "rejects `!<!>`, a verbatim tag that names no tag",
+        ayaml: "rejects `!<!>`, a verbatim tag that names no tag, before it reports \
+                another error about the tag, as a character after it with no white space \
+                between, or about the lines before",
         oracle: "reads it as the non-specific tag `!`",
         reason: "YAML 1.2 (example 6.25) gives `!<!>` as an invalid verbatim tag, which must \
                  be a local tag or a URI; documented in the 0.23 CHANGELOG",
@@ -820,19 +917,20 @@ pub(crate) const DEVIATIONS: &[Deviation] = &[
     },
     Deviation {
         id: "flow-line-tab-indentation",
-        classes: &[Class::OnlyAyamlRejects],
-        trigger: Trigger::Narrow {
+        classes: &[Class::OnlyAyamlRejects, Class::RejectedAtDifferentLocation],
+        trigger: Trigger::Input {
             covers: |case| {
                 ayaml_rejects(
                     case,
                     &["tabs cannot be the only flow-collection indentation"],
                 )
             },
-            because: "ayaml's message names the flow collection's indentation",
+            neutralize: neutralize::flow_line_tabs,
         },
         ayaml: "rejects a flow collection's continuation line under a block collection that \
-                only tabs indent, as `\\t  b]` after `a: [x,`",
-        oracle: "accepts it",
+                only tabs indent, as `\\t  b]` after `a: [x,`, before an error the line \
+                comes after, since it reads the stream's tokens first",
+        oracle: "accepts it, and reports the error before it",
         reason: "YAML 1.2 (`s-flow-line-prefix`, rule 69, and section 6.1) indents such a line \
                  with spaces; documented in the 0.23 CHANGELOG",
         example: "a: [x,\n\t  b]\n",
@@ -843,20 +941,22 @@ pub(crate) const DEVIATIONS: &[Deviation] = &[
         trigger: Trigger::Narrow {
             covers: oracle_points_at_a_block_scalar_under_an_anchor,
             because: "the oracle's error is on the block scalar header, on the line after \
-                      properties with an anchor or a key with one",
+                      properties with an anchor, properties alone or a key with an anchor",
         },
         ayaml: "accepts a block scalar header on the line after properties that include an \
-                anchor, as `b: &x` then `>`, or after a key with an anchor and no value, as \
-                `&x b:` then `>`, even when it is not indented past its parent",
-        oracle: "rejects it",
+                anchor, as `b: &x` then `>`, after properties alone on their line, as `!t` \
+                then `>`, or after a key with an anchor and no value, as `&x b:` then `>`, \
+                even when it is not indented past its parent",
+        oracle: "rejects it, or reads it as a second document where it is the first line \
+                 indented less than the document's root",
         reason: "an ayaml defect in a malformed document (asamarts/ayaml#132, with the \
-                 anchor on a key in a comment there): with a tag alone, ayaml rejects the \
-                 same layout, as YAML 1.2 (section 8.1) does",
+                 anchor on a key in a comment there): with a tag alone after a key or `-`, \
+                 ayaml rejects the same layout, as YAML 1.2 (section 8.1) does",
         example: "a:\n  b: &x\n>\n",
     },
     Deviation {
         id: "block-scalar-indentation",
-        classes: &[Class::OnlyAyamlRejects],
+        classes: &[Class::OnlyAyamlRejects, Class::RejectedAtDifferentLocation],
         trigger: Trigger::Narrow {
             covers: |case| {
                 ayaml_rejects(
@@ -865,16 +965,42 @@ pub(crate) const DEVIATIONS: &[Deviation] = &[
                         "a block scalar is not indented past its parent",
                         "leading empty block-scalar lines are more indented than the content",
                     ],
-                )
+                ) && !ayaml_takes_a_document_marker_for_block_scalar_content(case)
+                    && (case.class != Class::RejectedAtDifferentLocation
+                        || super::first_error(case).is_some_and(|(_, by_ayaml)| by_ayaml))
             },
-            because: "ayaml's messages name the block scalar's indentation",
+            because: "ayaml's messages name the block scalar's indentation; where both \
+                      reject, ayaml's error comes first, and the oracle read its line",
         },
         ayaml: "rejects a block scalar whose header or content is not indented past its \
-                parent, such as `-` followed by `|2` at the same column",
-        oracle: "accepts it",
+                parent, such as `-` followed by `|2` at the same column, or whose leading \
+                empty lines are more indented than its first line of content",
+        oracle: "accepts it, and for leading empty lines takes the content's indentation \
+                 from the most indented of them, which ends the scalar before its first \
+                 line of content; it may then reject what follows, as a second document \
+                 or at a later place",
         reason: "YAML 1.2 (section 8.1.1.1) requires the indentation; documented in the 0.23 \
                  CHANGELOG",
         example: "-\n|2\n  x\n",
+    },
+    Deviation {
+        id: "document-marker-after-indented-empty-lines",
+        classes: &[Class::OnlyAyamlRejects, Class::RejectedAtDifferentLocation],
+        trigger: Trigger::Narrow {
+            covers: ayaml_takes_a_document_marker_for_block_scalar_content,
+            because: "ayaml's message is about the leading empty lines, and the first line \
+                      after them with more than spaces is a document marker",
+        },
+        ayaml: "rejects a top-level block scalar whose only lines before a document marker \
+                (`---` or `...` at column 1) are empty, one of them indented, as `|`, a line \
+                of two spaces and `...`: it takes the marker for content indented less than \
+                they are",
+        oracle: "ends the scalar, empty, at the marker, and reads on, so that `---` and what \
+                 follows it make more than one document",
+        reason: "an ayaml defect in a valid document, not yet filed: a document marker ends \
+                 any node (YAML 1.2, rule 206, `c-forbidden`); a scalar that is not top-level \
+                 ends there in ayaml too",
+        example: "|\n  \n...\n",
     },
 ];
 
@@ -936,14 +1062,14 @@ pub(crate) const LOCATIONS: &[Location] = &[
     },
     Location {
         id: "where-a-construct-opened",
-        kinds: &[ErrorKind::Parser, ErrorKind::Scanner, ErrorKind::Tag],
+        kinds: &[ErrorKind::Parser, ErrorKind::Scanner],
         messages: &[
             "unterminated",
             "did not find expected node content, while parsing a flow",
             "did not find expected ',' or",
             "flow collection entries must be indented",
             "quoted scalar continuation must be indented",
-            "tabs cannot be the only",
+            "tabs cannot be the only quoted-scalar indentation",
             "document marker inside quoted scalar",
             "expected ',' or a closing bracket",
             "expected a flow item",
@@ -982,7 +1108,7 @@ pub(crate) const LOCATIONS: &[Location] = &[
     },
     Location {
         id: "at-the-token",
-        kinds: &[ErrorKind::Parser, ErrorKind::Scanner, ErrorKind::Tag],
+        kinds: &[ErrorKind::Parser, ErrorKind::Scanner],
         messages: &[
             "is a reserved indicator",
             "in block scalar header",
@@ -995,7 +1121,8 @@ pub(crate) const LOCATIONS: &[Location] = &[
             "a node cannot have duplicate",
             "a tag must be followed",
             "a tag's handle needs a suffix",
-            "a verbatim tag",
+            "a verbatim tag may only hold",
+            "a verbatim tag must name",
             "undefined tag handle",
             "hexadecimal escape",
             "unknown escape",
@@ -1020,14 +1147,27 @@ pub(crate) const LOCATIONS: &[Location] = &[
         places: None,
         ayaml: "the start of the token that breaks the grammar",
         oracle: ORACLE,
-        example: ("a: 'x'#c\nb", Entry::Value),
+        example: ("a: & x\n", Entry::Value),
+    },
+    Location {
+        id: "verbatim-tag-that-names-nothing",
+        kinds: &[ErrorKind::Scanner],
+        messages: &[VERBATIM_NEEDS_A_NAME],
+        places: Some(errors_in_an_empty_verbatim_tag),
+        ayaml: "the start of a verbatim tag that names nothing, `!<>`",
+        oracle: "its `>`, where it looks for the name",
+        example: ("a: !<> x\n", Entry::Value),
     },
     Location {
         id: "non-printable-character",
         kinds: &[ErrorKind::Scanner],
-        messages: &["non-printable character"],
-        places: None,
-        ayaml: "the character YAML does not allow",
+        messages: &[
+            "non-printable character",
+            "a tag must be followed by whitespace or a line break",
+        ],
+        places: Some(errors_about_one_character),
+        ayaml: "the character YAML does not allow, or, where it ends a tag, the error that \
+                white space does not follow the tag",
         oracle: "line 1, column 1, with the character's byte offset in its message, since \
                  its reader checks each character before the scanner reads it",
         example: ("a: x\u{1}y\n", Entry::Value),
@@ -1050,7 +1190,6 @@ pub(crate) const LOCATIONS: &[Location] = &[
     Location {
         id: "values-after-syntax",
         kinds: &[
-            ErrorKind::Alias,
             ErrorKind::DuplicateKey,
             ErrorKind::Resolution,
             ErrorKind::Composition,
@@ -1069,13 +1208,12 @@ pub(crate) const LOCATIONS: &[Location] = &[
     },
 ];
 
-/// The location class, among those that check messages only, that covers
-/// an ayaml error of `kind` with `message`.
+/// The location class that covers an ayaml error of `kind` with `message`
+/// by its kind and message, which a class that also checks places narrows.
 #[cfg(test)]
 pub(crate) fn locate(kind: ErrorKind, message: &str) -> Option<&'static Location> {
     LOCATIONS
         .iter()
-        .filter(|location| location.places.is_none())
         .find(|location| covers_message(location, kind, message))
 }
 
@@ -1089,14 +1227,19 @@ fn covers_message(location: &Location, kind: ErrorKind, message: &str) -> bool {
 }
 
 /// The first location class that covers `case`, whose ayaml error is of
-/// `kind` with `message`.
+/// `kind` with `message`. The oracle's error about a character it does not
+/// allow is about that character, not the syntax: its reader decodes the
+/// whole of a short input before its scanner reads a token. Only a class
+/// that checks both places takes it, as `non-printable-character` does.
 pub(crate) fn locate_case(
     case: &Case<'_>,
     kind: ErrorKind,
     message: &str,
 ) -> Option<&'static Location> {
+    let reader = rejects(&case.oracle, ORACLE_READER_ERROR);
     LOCATIONS.iter().find(|location| {
-        covers_message(location, kind, message) && location.places.is_none_or(|places| places(case))
+        covers_message(location, kind, message)
+            && location.places.map_or(!reader, |places| places(case))
     })
 }
 

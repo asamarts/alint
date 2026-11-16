@@ -7,6 +7,8 @@
 use std::collections::HashMap;
 use std::ops::Range;
 
+use super::predicates::{NAMELESS_VERBATIM, VERBATIM_NEEDS_A_NAME};
+
 /// The core schema's tags, which ayaml resolves (YAML 1.2, section 10.3).
 pub(super) const CORE_TAGS: &[&str] = &[
     "!!map", "!!seq", "!!str", "!!int", "!!float", "!!bool", "!!null",
@@ -31,8 +33,9 @@ fn in_directive(input: &str, at: usize) -> bool {
 }
 
 /// The byte ranges of the tokens that start with one of `sigils` where a
-/// property or an alias can: not in a directive, a quoted scalar, a comment
-/// or a block scalar, as [`places`] reads them. A token runs to white
+/// property or an alias can: not in a directive, a quoted scalar, a comment,
+/// a block scalar or a plain scalar's text, as [`places`] reads them, so that
+/// `make && test` holds none. A token runs to white
 /// space or a flow indicator; a verbatim tag (`!<...>`) runs to its `>`. An
 /// anchor or alias name, as ayaml's compatibility mode reads it, also ends
 /// before a `?` that a character other than a flow indicator follows, and,
@@ -51,6 +54,7 @@ pub(super) fn tokens(input: &str, sigils: &[char]) -> Vec<Range<usize>> {
         .filter(|(at, ch)| {
             sigils.contains(ch)
                 && !places[*at].literal
+                && !places[*at].plain
                 && starts_token(input, *at)
                 && !in_directive(input, *at)
         })
@@ -87,12 +91,32 @@ pub(super) fn tokens(input: &str, sigils: &[char]) -> Vec<Range<usize>> {
 
 /// Where a byte of an input stands, roughly as a scanner sees it.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag is a fact of its own about the byte, which the rewrites read alone"
+)]
 pub(super) struct Place {
     /// The flow collections around it.
     pub(super) depth: u32,
     /// Whether it is inside a quoted scalar, a comment, a directive or a
     /// block scalar's header or content, rather than structure.
     pub(super) literal: bool,
+    /// Whether it is inside a quoted scalar, past its opening quote.
+    pub(super) quoted: bool,
+    /// Whether it is inside a plain scalar, past its first character, which
+    /// a property, an alias or a tab there is part of; white space at its
+    /// end too, which [`places`] cannot tell apart from what follows.
+    pub(super) plain: bool,
+    /// Whether it is white space at the start of a block scalar's line, short
+    /// of the content's indentation once a line set it: libyaml takes a tab
+    /// there for indentation, and ayaml for content. Before then, libyaml
+    /// rejects a tab, and ayaml makes a line with one the first line of
+    /// content, with its spaces as the indentation, when they are past the
+    /// parent's column, as they always are under a top-level header, and
+    /// otherwise ends the scalar before the line and reads it as white space
+    /// (YAML 1.2, section 8.1.1.1). A line of tabs alone, from its start, it
+    /// rejects, as libyaml does, but under a top-level header.
+    pub(super) indentation: bool,
 }
 
 /// What a line outside a flow collection is at, as [`places`] reads it.
@@ -137,11 +161,21 @@ pub(super) fn places(input: &str) -> Vec<Place> {
     let mut depth = 0_u32;
     let mut flow = Flow::Start;
     let mut quote: Option<char> = None;
-    // The column a block scalar's content is indented past, while it lasts.
+    // The column a block scalar's content is indented past, while it lasts,
+    // and its content's indentation, once a line with content set it.
     let mut header: Option<usize> = None;
+    let mut content: Option<usize> = None;
+    // Whether that block scalar is the document's root node, whose content
+    // may start at column 1.
+    let mut root_scalar = false;
     // The column of the key or indicator of a plain scalar that ran to the
-    // end of its line.
+    // end of its line, and whether the scalar is the document's root node,
+    // whose lines continue it at any indentation.
     let mut continued: Option<usize> = None;
+    let mut continued_root = false;
+    // Whether the document so far holds a key, an indicator or a flow
+    // collection, so that a plain scalar starting now is not its root.
+    let mut nested = false;
     // The column of the key or indicator that ended the last line, whose
     // node starts on a later one.
     let mut open: Option<usize> = None;
@@ -149,25 +183,44 @@ pub(super) fn places(input: &str) -> Vec<Place> {
         let text = line.trim_end_matches(['\n', '\r']);
         let indent = text.len() - text.trim_start_matches(' ').len();
         let blank = text.trim().is_empty();
+        let tabs_alone = !text.is_empty() && text.chars().all(|ch| ch == '\t');
         if let Some(parent) = header {
-            if blank || indent > parent {
-                places.extend(std::iter::repeat_n(
-                    Place {
-                        depth,
-                        literal: true,
-                    },
-                    line.len(),
-                ));
+            // A line with content indented less than the content's ends the
+            // scalar (YAML 1.2, rule 170), even past the parent.
+            if blank || (indent > parent && content.is_none_or(|content| indent >= content)) {
+                let mut leading = true;
+                for (column, ch) in line.chars().enumerate() {
+                    leading &= matches!(ch, ' ' | '\t');
+                    let indentation = leading
+                        && content.map_or(root_scalar || !tabs_alone, |content| column < content);
+                    places.extend(std::iter::repeat_n(
+                        Place {
+                            depth,
+                            literal: true,
+                            quoted: false,
+                            plain: false,
+                            indentation,
+                        },
+                        ch.len_utf8(),
+                    ));
+                }
+                if !blank {
+                    content.get_or_insert(indent);
+                }
                 continue;
             }
             header = None;
         }
         let block = depth == 0 && quote.is_none();
-        let continuation = continued.filter(|owner| {
-            block && !blank && indent > *owner && !text.trim_start().starts_with('#')
-        });
         let marker = (text.starts_with("---") || text.starts_with("..."))
             && text[3..].chars().next().is_none_or(char::is_whitespace);
+        let comment_line = text.trim_start().starts_with('#');
+        let continuation = continued.filter(|owner| {
+            block && !blank && (indent > *owner || continued_root) && !comment_line && !marker
+        });
+        if marker {
+            nested = false;
+        }
         let mut comment = block && text.starts_with('%');
         let mut state = if continuation.is_some() {
             Block::Scalar
@@ -188,7 +241,22 @@ pub(super) fn places(input: &str) -> Vec<Place> {
             let after = line[offset + ch.len_utf8()..].chars().next();
             let blank_after = after.is_none_or(char::is_whitespace);
             let literal = comment || quote.is_some() || (block && marker && offset < 3);
-            places.extend(std::iter::repeat_n(Place { depth, literal }, ch.len_utf8()));
+            let plain = !literal
+                && if depth > 0 {
+                    flow == Flow::Plain
+                } else {
+                    state == Block::Scalar
+                };
+            places.extend(std::iter::repeat_n(
+                Place {
+                    depth,
+                    literal,
+                    quoted: quote.is_some(),
+                    plain,
+                    indentation: false,
+                },
+                ch.len_utf8(),
+            ));
             if literal {
                 if let Some(open) = quote {
                     if escaped {
@@ -239,10 +307,13 @@ pub(super) fn places(input: &str) -> Vec<Place> {
                         '-' | '?' | ':' if blank_after => {
                             owner = column;
                             node = None;
+                            nested = true;
                         }
                         '#' => comment = true,
                         '|' | '>' => {
                             header = Some(owner);
+                            content = None;
+                            root_scalar = !nested;
                             comment = true;
                         }
                         _ if ch.is_whitespace() || ch == '\u{feff}' => {}
@@ -250,16 +321,21 @@ pub(super) fn places(input: &str) -> Vec<Place> {
                             node.get_or_insert(column);
                             state = match ch {
                                 '&' | '!' => Block::Property,
-                                '*' => Block::After,
                                 '[' | '{' => {
                                     depth = 1;
                                     flow = Flow::Start;
+                                    nested = true;
                                     Block::After
                                 }
                                 '\'' | '"' => {
                                     quote = Some(ch);
                                     Block::After
                                 }
+                                // An alias, and what both scanners take
+                                // for tokens of their own, or reject,
+                                // anywhere: no plain scalar starts with one
+                                // (YAML 1.2, rule 126).
+                                '*' | ',' | ']' | '}' | '@' | '`' | '%' => Block::After,
                                 _ => Block::Scalar,
                             };
                         }
@@ -270,23 +346,41 @@ pub(super) fn places(input: &str) -> Vec<Place> {
                         ':' if blank_after => {
                             owner = node.take().unwrap_or(owner);
                             state = Block::Start;
+                            nested = true;
                         }
                         '#' if before.is_whitespace() => comment = true,
+                        // After a node, the scanners read a flow collection
+                        // or a quoted scalar that follows on its line as
+                        // one, which the parsers then reject.
+                        '[' | '{' if state == Block::After => {
+                            depth = 1;
+                            flow = Flow::Start;
+                            nested = true;
+                        }
+                        '\'' | '"' if state == Block::After => quote = Some(ch),
                         _ => {}
                     },
                 }
             }
             before = ch;
         }
-        if !blank {
+        // A comment line ends a plain scalar, and leaves the node that
+        // started on a later line to its owner before it.
+        if comment_line && !marker {
+            continued = None;
+        } else if !blank {
             let block = depth == 0 && quote.is_none();
             continued = (block && !comment && state == Block::Scalar).then_some(owner);
+            continued_root = continued.is_some() && !nested;
             open = (block && state == Block::Start).then_some(owner);
         }
     }
     places.push(Place {
         depth,
         literal: quote.is_some(),
+        quoted: quote.is_some(),
+        plain: false,
+        indentation: false,
     });
     places
 }
@@ -315,7 +409,9 @@ fn apply(input: &str, edits: &[(Range<usize>, String)]) -> Vec<String> {
 /// What deleting the token at `range` of `input` removes. A token that comes
 /// first on its line, after indentation and indicators, goes with the white
 /// space after it, so that the node it was on keeps the token's column:
-/// `!t   c: 2` becomes `c: 2`.
+/// `!t   c: 2` becomes `c: 2`. Not where that would start the line, or the
+/// stream, with what both parsers read there as something else (see
+/// [`starts_anew`]).
 fn deletion(input: &str, range: Range<usize>) -> Range<usize> {
     let line = input[..range.start]
         .rfind('\n')
@@ -325,7 +421,28 @@ fn deletion(input: &str, range: Range<usize>) -> Range<usize> {
         .all(|ch| " \t-?:\u{feff}".contains(ch));
     let rest = &input[range.end..];
     let gap = rest.len() - rest.trim_start_matches([' ', '\t']).len();
-    range.start..range.end + if first { gap } else { 0 }
+    if first && !starts_anew(input, range.start, &rest[gap..]) {
+        range.start..range.end + gap
+    } else {
+        range
+    }
+}
+
+/// Whether `after`, put at byte `at` of `input` in place of what was there,
+/// would be read anew: a byte-order mark at the start of the stream, which
+/// both parsers skip, or a directive or a document marker at the start of a
+/// line, as `!!int \u{feff}%TAG` or `!t ---` would become.
+fn starts_anew(input: &str, at: usize, after: &str) -> bool {
+    let before = &input[..at];
+    let line_start =
+        before.trim_start_matches('\u{feff}').is_empty() || before.ends_with(['\n', '\r']);
+    let marker = |text: &str| {
+        after
+            .strip_prefix(text)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace))
+    };
+    (at == 0 && after.starts_with('\u{feff}'))
+        || (line_start && (after.starts_with('%') || marker("---") || marker("...")))
 }
 
 /// `input` without the tokens of `ranges`: as [`deletion`] removes them, and
@@ -359,7 +476,11 @@ fn delete(input: &str, ranges: impl IntoIterator<Item = Range<usize>>) -> Vec<St
 /// line break, with the next line at the break's column, as a scalar's
 /// continuation line must be indented, and at column 1; then as ayaml reads
 /// it, as a content character, a different one for each (`x`, `y`, `z`), so
-/// that two keys stay apart.
+/// that two keys stay apart. A tab before the character, which stays, then
+/// ends its line in the variants with a break: both parsers read it there as
+/// they read it before any other line break, as trailing white space or a
+/// block scalar's content, and only removing the tab, outside the construct,
+/// would avoid it.
 pub(super) fn line_breaks(input: &str) -> Vec<String> {
     const BREAKS: [char; 3] = ['\u{85}', '\u{2028}', '\u{2029}'];
     if !input.contains(BREAKS) {
@@ -443,19 +564,74 @@ fn second_leading_marks_as_content(input: &str) -> String {
     format!("{}{}", "x".repeat(count), &rest[marks..])
 }
 
-/// With a tab as a space, wherever it is; then with the tabs that only
-/// spaces come before on their line left out, and then as content (`x`),
-/// where the first line of a block scalar can hold them; the other tabs as
-/// spaces.
+/// Whether the tab at byte `at` of `input` is a scalar's content, as
+/// [`places`] reads it: in a quoted scalar, a comment, a directive, or a
+/// block scalar past its content's indentation, or in a plain scalar between
+/// its text on the line and more of it.
+pub(super) fn tab_in_content(input: &str, places: &[Place], at: usize) -> bool {
+    if places[at].literal {
+        return !places[at].indentation;
+    }
+    let start = input[..at]
+        .rfind(['\n', '\r'])
+        .map_or(0, |offset| offset + 1);
+    let end = input[at..]
+        .find(['\n', '\r'])
+        .map_or(input.len(), |offset| at + offset);
+    let white = |ch: char| matches!(ch, ' ' | '\t');
+    let before = input[start..at].trim_end_matches(white);
+    let after = input[at..end].trim_start_matches(white);
+    let flow = places[at].depth > 0;
+    let ends = |text: &str| {
+        text.chars()
+            .next()
+            .is_none_or(|next| next.is_whitespace() || (flow && ",[]{}".contains(next)))
+    };
+    places[at].plain
+        && !before.trim_start_matches(white).is_empty()
+        && !after.is_empty()
+        && !after.starts_with('#')
+        && (!flow || !after.starts_with([',', ']', '}']))
+        && !(after.starts_with(':') && ends(&after[1..]))
+}
+
+/// With each tab that is white space as a space, wherever it is; then with
+/// the tabs that only spaces come before on their line left out, and then as
+/// content (`x`), where the first line of a block scalar can hold them; the
+/// other tabs as spaces; then with those tabs left out with the white space
+/// after them (see [`leading_out`]), which keeps the indentation ayaml reads
+/// a line with. A tab in a scalar's content
+/// stays (see
+/// [`tab_in_content`]): both parsers read it alike, and a rewrite that
+/// changed it could hide a difference there. So does a tab that starts a
+/// line in a flow collection, [`flow_line_tabs`]' construct, and one ayaml
+/// rejects (see [`tabs_ayaml_rejects`]), which it does not read as white
+/// space.
 pub(super) fn tabs(input: &str) -> Vec<String> {
     if !input.contains('\t') {
+        return Vec::new();
+    }
+    let places = places(input);
+    let rejected = tabs_ayaml_rejects(input);
+    let flow_lines = flow_line_tab_offsets(input, &places, &rejected);
+    let white: Vec<usize> = input
+        .match_indices('\t')
+        .map(|(at, _)| at)
+        .filter(|at| {
+            !tab_in_content(input, &places, *at)
+                && !flow_lines.contains(at)
+                && !rejected.iter().any(|(tab, _)| tab == at)
+        })
+        .collect();
+    if white.is_empty() {
         return Vec::new();
     }
     let leading = |with: &str| {
         let mut out = String::with_capacity(input.len());
         let mut line_start = true;
-        for ch in input.chars() {
+        for (at, ch) in input.char_indices() {
             match ch {
+                '\t' if !white.contains(&at) => out.push(ch),
                 '\t' if line_start => out.push_str(with),
                 '\t' => out.push(' '),
                 _ => out.push(ch),
@@ -464,13 +640,153 @@ pub(super) fn tabs(input: &str) -> Vec<String> {
         }
         out
     };
-    let mut rewrites = vec![input.replace('\t', " ")];
-    for rewrite in [leading(""), leading("x")] {
+    let mut rewrites = vec![leading(" ")];
+    for rewrite in [leading(""), leading("x")]
+        .into_iter()
+        .chain(leading_out(input, &white))
+    {
         if !rewrites.contains(&rewrite) {
             rewrites.push(rewrite);
         }
     }
     rewrites
+}
+
+/// `input` with each tab at the byte offsets `tabs` as `width` spaces.
+fn spaced(input: &str, tabs: &[usize], width: usize) -> String {
+    let mut out = String::with_capacity(input.len() + tabs.len() * width);
+    for (at, ch) in input.char_indices() {
+        if tabs.contains(&at) {
+            out.extend(std::iter::repeat_n(' ', width));
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+/// `input` with each of the tabs at the byte offsets `white`, which are
+/// white space, that only spaces come before on its line left out, with the
+/// white space after it up to the line's content, and the others as spaces:
+/// ayaml reads the line's indentation from the spaces before the first tab,
+/// and a space for it would add to that. None where the content would then
+/// read anew (see [`starts_anew`]).
+fn leading_out(input: &str, white: &[usize]) -> Option<String> {
+    let mut edits = Vec::new();
+    let mut next = 0;
+    for &at in white {
+        if at < next {
+            continue;
+        }
+        let start = input[..at]
+            .rfind(['\n', '\r'])
+            .map_or(0, |offset| offset + 1);
+        if !input[start..at].chars().all(|ch| ch == ' ') {
+            edits.push((at..at + 1, " ".to_string()));
+            continue;
+        }
+        let content = input[at..]
+            .char_indices()
+            .find(|&(offset, ch)| ch != ' ' && !(ch == '\t' && white.contains(&(at + offset))))
+            .map_or(input.len(), |(offset, _)| at + offset);
+        if starts_anew(input, at, &input[content..]) {
+            return None;
+        }
+        edits.push((at..content, String::new()));
+        next = content;
+    }
+    apply(input, &edits).pop()
+}
+
+/// ayaml's error about a tab that alone indents a flow collection's line.
+const FLOW_LINE_TAB: &str = "tabs cannot be the only flow-collection indentation";
+
+/// The byte offsets of the tabs ayaml rejects, each with whether ayaml
+/// rejects it as a flow line's only indentation: each found by reading the
+/// input again once the one it reported before is a space, until it reports
+/// an error elsewhere or none. Its scanner reports them before any parser
+/// error, in their order, and stops at the first error that is not about a
+/// tab.
+fn tabs_ayaml_rejects(input: &str) -> Vec<(usize, bool)> {
+    let mut tabs = Vec::new();
+    let mut spaced = input.to_string();
+    for _ in 0..input.matches('\t').count() {
+        let (side, _) = super::guarded(|| super::run_ayaml(&spaced, super::Entry::Value, 0));
+        let Some(at) = super::predicates::error_offset(&spaced, &side)
+            .filter(|&at| side.is_err() && spaced[at..].starts_with('\t'))
+        else {
+            break;
+        };
+        let flow = side
+            .as_ref()
+            .is_err_and(|rejection| rejection.message.contains(FLOW_LINE_TAB));
+        tabs.push((at, flow));
+        spaced.replace_range(at..=at, " ");
+    }
+    tabs
+}
+
+/// The byte offsets of the tabs that start a line in a flow collection,
+/// outside a quoted scalar, as [`places`] reads the input or as ayaml does
+/// (see [`tabs_ayaml_rejects`]). In a malformed document ayaml's scanner may
+/// open a flow collection where YAML 1.2 continues a plain scalar, and the
+/// tab is its own error there.
+fn flow_line_tab_offsets(input: &str, places: &[Place], rejected: &[(usize, bool)]) -> Vec<usize> {
+    let mut tabs: Vec<usize> = input
+        .match_indices('\t')
+        .map(|(at, _)| at)
+        .filter(|&at| {
+            ((at == 0 || input[..at].ends_with(['\n', '\r']))
+                && places[at].depth > 0
+                && !places[at].literal)
+                || rejected.contains(&(at, true))
+        })
+        .collect();
+    tabs.dedup();
+    tabs
+}
+
+/// With spaces for each tab that starts a line in a flow collection (see
+/// [`flow_line_tab_offsets`]): one, and then one more than the widest
+/// indentation of the input, past that of any block collection the flow
+/// collection is in; then with one space for only those ayaml rejects, as
+/// a flow line's only indentation, since the oracle may reject one of the
+/// others, in a plain scalar's line, after the error ayaml's hides. The
+/// oracle reads the tab as white space, and ayaml rejects it under a block
+/// collection as the line's only indentation (`flow-line-tab-indentation`).
+/// No variant moves the line's content to its start, where it could read as
+/// a marker.
+pub(super) fn flow_line_tabs(input: &str) -> Vec<String> {
+    if !input.contains('\t') {
+        return Vec::new();
+    }
+    let rejected = tabs_ayaml_rejects(input);
+    let tabs = flow_line_tab_offsets(input, &places(input), &rejected);
+    if tabs.is_empty() {
+        return Vec::new();
+    }
+    let only_rejected: Vec<usize> = rejected
+        .iter()
+        .filter(|(_, flow)| *flow)
+        .map(|(at, _)| *at)
+        .collect();
+    let widest = input
+        .split(['\n', '\r'])
+        .map(|line| line.len() - line.trim_start_matches(' ').len())
+        .max()
+        .unwrap_or(0);
+    [
+        spaced(input, &tabs, 1),
+        spaced(input, &tabs, widest + 1),
+        spaced(input, &only_rejected, 1),
+    ]
+    .into_iter()
+    .fold(Vec::new(), |mut rewrites, rewrite| {
+        if !rewrites.contains(&rewrite) && rewrite != input {
+            rewrites.push(rewrite);
+        }
+        rewrites
+    })
 }
 
 /// Whether `text` starts with `indicator` followed by white space or nothing.
@@ -605,10 +921,11 @@ pub(super) fn wide_anchor_names(input: &str) -> Vec<String> {
             (renamed != name).then_some((name_range, renamed))
         } else if let Some(renamed) = anchors.get(name) {
             (renamed != name).then(|| (name_range, renamed.clone()))
-        } else if let Some(stem) = name.strip_suffix(':')
-            && let Some(renamed) = anchors.get(stem)
-        {
-            (renamed != stem).then(|| (name_range.start..name_range.end - 1, renamed.clone()))
+        } else if let Some(stem) = name.strip_suffix(':') {
+            // The `:` that ends an alias is the value indicator after it,
+            // which stays, as for `*b<<: x`, whose name no anchor gave.
+            let renamed = anchors.get(stem).cloned().unwrap_or_else(|| narrowed(stem));
+            (renamed != stem).then(|| (name_range.start..name_range.end - 1, renamed))
         } else {
             (narrowed(name) != name).then(|| (name_range, narrowed(name)))
         };
@@ -776,7 +1093,11 @@ fn node_below(input: &str, at: usize) -> bool {
 /// tag was on unquoted, so that `!!int '1'` leaves the number it was read as;
 /// then with a tag on an empty node as `~`, the null the node is untagged,
 /// so that `!!map : x` does not become an empty key; then with only the
-/// tags on empty nodes replaced so, the others kept.
+/// tags on empty nodes replaced so, the others kept; then with each as a
+/// local tag of its width, as `!xint` for `!!int`, which both parsers read
+/// alike at every entry point, and which moves nothing, where a deletion
+/// would move a key off its column or make the text after the tag start the
+/// stream anew.
 pub(super) fn core_tags(input: &str) -> Vec<String> {
     if tag_handles(input).contains(&"!!") {
         return Vec::new();
@@ -802,6 +1123,15 @@ pub(super) fn core_tags(input: &str) -> Vec<String> {
         .iter()
         .filter(|range| empty_node_after(input, range.end))
         .map(|range| (range.clone(), "~".to_string()))
+        .collect();
+    let local: Vec<(Range<usize>, String)> = ranges
+        .iter()
+        .map(|range| {
+            (
+                range.clone(),
+                format!("!x{}", &input[range.start + 2..range.end]),
+            )
+        })
         .collect();
     let mut edits = Vec::new();
     for range in ranges {
@@ -832,6 +1162,7 @@ pub(super) fn core_tags(input: &str) -> Vec<String> {
         .into_iter()
         .chain(apply(input, &nulls))
         .chain(apply(input, &empty))
+        .chain(apply(input, &local))
     {
         if !rewrites.contains(&rewrite) {
             rewrites.push(rewrite);
@@ -888,7 +1219,8 @@ fn named_handle(tag: &str) -> Option<&str> {
     (close > 1 && handle[1..close].chars().all(narrow_name_character)).then_some(handle)
 }
 
-/// Without each global tag: a verbatim tag that names a tag, a tag of a
+/// Without each global tag: a verbatim tag that names a global tag, not a
+/// local one, as `!<!t>`, which both parsers read as `!t`, a tag of a
 /// handle a `%TAG` directive defines, `!!` with a name outside the core
 /// schema, and every `!` tag when a `%TAG` directive redefines `!`. Then,
 /// unless `!` is redefined, with each as the local tag `!t`, which both
@@ -901,7 +1233,7 @@ pub(super) fn global_tags(input: &str) -> Vec<String> {
     let handles = tag_handles(input);
     let global = |tag: &str| {
         if let Some(verbatim) = tag.strip_prefix("!<") {
-            return !matches!(verbatim, "" | ">" | "!>");
+            return !matches!(verbatim, "" | ">") && !verbatim.starts_with('!');
         }
         if let Some(name) = tag.strip_prefix("!!") {
             return !name.is_empty() && (handles.contains(&"!!") || !CORE_TAGS.contains(&tag));
@@ -986,16 +1318,95 @@ pub(super) fn quoted_only_character(ch: char) -> bool {
     matches!(ch, '\u{7f}'..='\u{84}' | '\u{86}'..='\u{9f}' | '\u{fffe}' | '\u{ffff}')
 }
 
-/// Without the characters YAML 1.2 allows only in a quoted scalar; then with
-/// each as `x`.
+/// Without the characters YAML 1.2 allows only in a quoted scalar, which
+/// ayaml keeps or never reads; then with each as `x`; then, of those,
+/// without the first and as `x`, where more follow. ayaml keeps the ones its
+/// scanner read without an error: all of them when it reads the input or
+/// rejects it as it parses or builds values, after its scanner read the
+/// whole stream, and those before its scanner's error otherwise, past which
+/// it reads none. In a malformed document its scanner may read a quoted
+/// scalar where YAML 1.2 reads a plain one. Its reader rejects a C0 control
+/// before its scanner reads anything, and then the ones [`places`] reads in
+/// a quoted scalar stand for them. One it rejects, which both parsers
+/// reject, stays. One where ayaml reports an error about something else,
+/// as a quoted scalar's line that is not indented enough, is always `x`,
+/// which keeps that error: without it, the line could hold nothing. The
+/// oracle's reader rejects them anywhere before its scanner reads a token,
+/// and its error names only the first: a rewrite of the first alone shows
+/// its error at the next.
 pub(super) fn quoted_only_characters(input: &str) -> Vec<String> {
     if !input.contains(quoted_only_character) {
         return Vec::new();
     }
-    vec![
-        input.replace(quoted_only_character, ""),
-        input.replace(quoted_only_character, "x"),
-    ]
+    let places = places(input);
+    let (side, _) = super::guarded(|| super::run_ayaml(input, super::Entry::Value, 0));
+    let error = super::predicates::error_offset(input, &side);
+    let control = error
+        .and_then(|at| input[at..].chars().next())
+        .is_some_and(|ch| ch < ' ' && !matches!(ch, '\t' | '\n' | '\r'));
+    let scanned = side.is_ok() || (!control && error.is_some());
+    let at_error = error.filter(|&at| input[at..].starts_with(quoted_only_character));
+    let (rejected, elsewhere) = match at_error {
+        Some(at) if rejects_the_character(input, at, &side) => (Some(at), None),
+        at => (None, at),
+    };
+    let quoted: Vec<Range<usize>> = input
+        .char_indices()
+        .filter(|&(at, ch)| {
+            quoted_only_character(ch) && rejected != Some(at) && (scanned || places[at].quoted)
+        })
+        .map(|(at, ch)| at..at + ch.len_utf8())
+        .collect();
+    if quoted.is_empty() {
+        return Vec::new();
+    }
+    let first = &quoted[..1];
+    let sets: &[&[Range<usize>]] = if quoted.len() > 1 {
+        &[&quoted, first]
+    } else {
+        &[&quoted]
+    };
+    let mut rewrites: Vec<String> = Vec::new();
+    let all = sets.iter().flat_map(|set| {
+        ["", "x"].iter().flat_map(|with| {
+            let edits: Vec<(Range<usize>, String)> = set
+                .iter()
+                .map(|range| {
+                    let with = if elsewhere == Some(range.start) {
+                        "x"
+                    } else {
+                        with
+                    };
+                    (range.clone(), with.to_string())
+                })
+                .collect();
+            apply(input, &edits)
+        })
+    });
+    for rewrite in all {
+        if !rewrites.contains(&rewrite) {
+            rewrites.push(rewrite);
+        }
+    }
+    rewrites
+}
+
+/// Whether ayaml's error `side`, at byte `at` of `input`, is about the
+/// character there: with `x` in its place, ayaml reports another error, or
+/// none.
+fn rejects_the_character(input: &str, at: usize, side: &super::Side) -> bool {
+    let Some(ch) = input[at..].chars().next() else {
+        return false;
+    };
+    let mut other = input.to_string();
+    other.replace_range(at..at + ch.len_utf8(), "x");
+    let (again, _) = super::guarded(|| super::run_ayaml(&other, super::Entry::Value, 0));
+    match (side, &again) {
+        (Err(before), Err(after)) => {
+            before.message != after.message || before.location != after.location
+        }
+        _ => true,
+    }
 }
 
 /// The longest implicit key YAML 1.2 allows, in characters, and the oracle,
@@ -1119,14 +1530,13 @@ fn wide_integer(text: &str) -> Option<(bool, u128)> {
     wide.then_some((negative, magnitude))
 }
 
-/// With each plain integer that a 128-bit integer holds and a 64-bit one
-/// does not, as `18446744073709551616` or `0x10000000000000000`, written as
-/// `1` after its sign; then with each such value written as a number of its
-/// own that the rest of the input does not hold, so that a rewritten key
-/// meets no other key, as `1` would meet the key of `? 1`. Not one in a
-/// quoted scalar, a comment or a block scalar. Only in a flow collection do
-/// `,`, `[`, `]`, `{` and `}` end a plain scalar.
-pub(super) fn wide_integers(input: &str) -> Vec<String> {
+/// The plain scalars of `input` that are letters and digits after a sign or
+/// none, which start with a digit or the sign, as `-0` or `0x10`: each starts
+/// a node and ends before white space, a `:` that white space follows or,
+/// in a flow collection, a flow indicator. Not one in a quoted scalar, a
+/// comment, a block scalar or a plain scalar's text, as `x 0`. Only in a
+/// flow collection do `,`, `[`, `]`, `{` and `}` end a plain scalar.
+fn plain_numbers(input: &str) -> Vec<Range<usize>> {
     let places = places(input);
     let mut found = Vec::new();
     let mut before = ' ';
@@ -1134,7 +1544,11 @@ pub(super) fn wide_integers(input: &str) -> Vec<String> {
         let flow = places[at].depth > 0;
         let starts = before.is_whitespace() || (flow && "[{,".contains(before));
         before = ch;
-        if !starts || places[at].literal || !(ch.is_ascii_digit() || ch == '-' || ch == '+') {
+        if !starts
+            || places[at].literal
+            || places[at].plain
+            || !(ch.is_ascii_digit() || ch == '-' || ch == '+')
+        {
             continue;
         }
         let sign = usize::from(!ch.is_ascii_digit());
@@ -1153,11 +1567,45 @@ pub(super) fn wide_integers(input: &str) -> Vec<String> {
         };
         if end > at + sign
             && (ends(rest, closing) || (rest.starts_with(':') && ends(&rest[1..], after_colon)))
-            && let Some(value) = wide_integer(&input[at..end])
         {
-            found.push((at + sign..end, value));
+            found.push(at..end);
         }
     }
+    found
+}
+
+/// With each plain `-0` written as `+0`, the same integer, which both
+/// parsers decode into an unsigned field; not one in a longer scalar, as
+/// `-00` or `x -0`, or in a quoted or block scalar or a comment.
+pub(super) fn negative_zeros(input: &str) -> Vec<String> {
+    let mut out = input.to_string();
+    let mut changed = false;
+    for range in plain_numbers(input) {
+        if &input[range.clone()] == "-0" {
+            out.replace_range(range.start..=range.start, "+");
+            changed = true;
+        }
+    }
+    if changed { vec![out] } else { Vec::new() }
+}
+
+/// With each plain integer that a 128-bit integer holds and a 64-bit one
+/// does not, as `18446744073709551616` or `0x10000000000000000`, written as
+/// `1` after its sign; then with each such value written as a number of its
+/// own that the rest of the input does not hold, so that a rewritten key
+/// meets no other key, as `1` would meet the key of `? 1`. Not one in a
+/// quoted scalar, a comment, a block scalar or a plain scalar's text, as
+/// `x 18446744073709551616`. Only in a flow collection do
+/// `,`, `[`, `]`, `{` and `}` end a plain scalar.
+pub(super) fn wide_integers(input: &str) -> Vec<String> {
+    let found: Vec<(Range<usize>, (bool, u128))> = plain_numbers(input)
+        .into_iter()
+        .filter_map(|range| {
+            let sign = usize::from(input[range.clone()].starts_with(['-', '+']));
+            let value = wide_integer(&input[range.clone()])?;
+            Some((range.start + sign..range.end, value))
+        })
+        .collect();
     let ones: Vec<(Range<usize>, String)> = found
         .iter()
         .map(|(range, _)| (range.clone(), "1".to_string()))
@@ -1217,9 +1665,11 @@ pub(super) fn flow_colon_scalars(input: &str) -> Vec<String> {
             continue;
         }
         let before = input[..colon].trim_end_matches([' ', '\t']);
+        // White space may be wider than a byte, as a line separator.
         let token = before
-            .rfind(|ch: char| ch.is_whitespace() || "[{,".contains(ch))
-            .map_or(0, |offset| offset + 1);
+            .char_indices()
+            .rfind(|&(_, ch)| ch.is_whitespace() || "[{,".contains(ch))
+            .map_or(0, |(offset, ch)| offset + ch.len_utf8());
         if before.len() == colon
             || !before[token..].starts_with(['!', '&'])
             || !super::predicates::starts_a_flow_node(input, &places, colon)
@@ -1278,6 +1728,112 @@ pub(super) fn empty_flow_keys(input: &str) -> Vec<String> {
     apply(input, &edits)
 }
 
+/// With `~` as the key of each entry of a flow collection whose implicit key
+/// is empty, as `[~: x]` for `[: x]`, and a space after its `:` where a flow
+/// indicator follows, as `{~: }` for `{:}`: YAML 1.2 reads the key as null,
+/// and libyaml reads `~` and rejects the empty key. A `:` opens such an
+/// entry where a `[`, `{` or `,` comes before it, past white space and line
+/// breaks, and white space, a line break, a flow indicator or the end comes
+/// after it. One in a quoted scalar, a comment or a block scalar is not one.
+pub(super) fn empty_flow_implicit_keys(input: &str) -> Vec<String> {
+    let places = places(input);
+    let white = |ch: char| matches!(ch, ' ' | '\t' | '\n' | '\r');
+    let mut edits = Vec::new();
+    for (at, ch) in input.char_indices() {
+        if ch != ':' || places[at].literal || places[at].depth == 0 {
+            continue;
+        }
+        let opens = input[..at]
+            .char_indices()
+            .rev()
+            .find(|&(offset, ch)| !white(ch) && !places[offset].literal)
+            .is_some_and(|(_, ch)| "[{,".contains(ch));
+        let rest = &input[at + 1..];
+        if opens && (rest.is_empty() || rest.starts_with(white)) {
+            edits.push((at..at, "~".to_string()));
+        } else if opens && rest.starts_with([',', '[', ']', '{', '}']) {
+            edits.push((at..at + 1, "~: ".to_string()));
+        }
+    }
+    apply(input, &edits)
+}
+
+/// The byte offsets of the verbatim tags that name no tag which ayaml
+/// rejects: each found by reading the input again once the one it reported
+/// before is a local tag and a space, of its width, until it reports an
+/// error elsewhere or none. Its scanner reports them before any parser
+/// error, in their order. In a malformed document it may read one where
+/// YAML 1.2 continues a plain scalar, or right after a quoted scalar.
+fn nameless_verbatim_tags_ayaml_rejects(input: &str) -> Vec<usize> {
+    let mut tags = Vec::new();
+    let mut named = input.to_string();
+    for _ in 0..input.matches(NAMELESS_VERBATIM).count() {
+        let (side, _) = super::guarded(|| super::run_ayaml(&named, super::Entry::Value, 0));
+        let Some(at) = super::predicates::error_offset(&named, &side).filter(|&at| {
+            named[at..].starts_with(NAMELESS_VERBATIM)
+                && side
+                    .as_ref()
+                    .is_err_and(|rejection| rejection.message.contains(VERBATIM_NEEDS_A_NAME))
+        }) else {
+            break;
+        };
+        tags.push(at);
+        named.replace_range(at..at + NAMELESS_VERBATIM.len(), "!tt ");
+    }
+    tags
+}
+
+/// Each verbatim tag that names no tag, `!<!>`, which the oracle reads as
+/// the non-specific tag `!` and ayaml rejects: where it starts a node, after
+/// white space, a line break, the start or `[`, `{` or `,`, outside a scalar
+/// and a comment, or where ayaml rejects it (see
+/// [`nameless_verbatim_tags_ayaml_rejects`]). One that [`places`] reads in a
+/// scalar or a comment counts only when the oracle rejects the input: where
+/// it reads one, ayaml reads a tag in its text, which is no form of this.
+/// With each as `!<!t>`, which both parsers read alike, as a tag: a node
+/// keeps its properties, an alias after it stays an error, and so does a
+/// character after it with no white space between, as in `!<!>~`.
+pub(super) fn verbatim_non_specific_tags(input: &str) -> Vec<String> {
+    if !input.contains(NAMELESS_VERBATIM) {
+        return Vec::new();
+    }
+    let places = places(input);
+    let text = |at: usize| places[at].literal || places[at].plain;
+    let mut tags: Vec<usize> = input
+        .match_indices(NAMELESS_VERBATIM)
+        .map(|(at, _)| at)
+        .filter(|&at| {
+            let starts = input[..at]
+                .chars()
+                .next_back()
+                .is_none_or(|ch| matches!(ch, ' ' | '\t' | '\n' | '\r' | '[' | '{' | ','));
+            starts && !text(at)
+        })
+        .collect();
+    let mut oracle_rejects = None;
+    for at in nameless_verbatim_tags_ayaml_rejects(input) {
+        if tags.contains(&at) {
+            continue;
+        }
+        if text(at)
+            && !*oracle_rejects.get_or_insert_with(|| {
+                super::guarded(|| super::run_oracle(input, super::Entry::Value, 0))
+                    .0
+                    .is_err()
+            })
+        {
+            continue;
+        }
+        tags.push(at);
+    }
+    tags.sort_unstable();
+    let edits: Vec<(Range<usize>, String)> = tags
+        .into_iter()
+        .map(|at| (at..at + NAMELESS_VERBATIM.len(), "!<!t>".to_string()))
+        .collect();
+    apply(input, &edits)
+}
+
 /// With each implicit key of more than 1,024 characters, as [`cut_runs`]
 /// finds keys, cut to its first and last 500 bytes.
 pub(super) fn long_runs(input: &str) -> Vec<String> {
@@ -1295,447 +1851,5 @@ pub(super) fn wide_runs(input: &str) -> Vec<String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn one(rewrites: Vec<String>) -> String {
-        assert_eq!(rewrites.len(), 1, "{rewrites:?}");
-        rewrites.into_iter().next().unwrap()
-    }
-
-    #[test]
-    fn tokens_start_where_properties_can() {
-        let input = "a: &x [*y,&z] b&c !<tag:x,2000:y> !t";
-        let found: Vec<&str> = tokens(input, &['&', '*', '!'])
-            .into_iter()
-            .map(|range| &input[range])
-            .collect();
-        assert_eq!(found, ["&x", "*y", "&z", "!<tag:x,2000:y>", "!t"]);
-        // Nor does one in a quoted scalar, a comment or a block scalar.
-        let input = "a: 'x &y'\nb: \"!t\" # &z\nc: |\n  *w\nd: &v 1\n";
-        let found: Vec<&str> = tokens(input, &['&', '*', '!'])
-            .into_iter()
-            .map(|range| &input[range])
-            .collect();
-        assert_eq!(found, ["&v"]);
-        assert_eq!(
-            wide_anchor_names("a: 'x &\u{e9}'\nb: 1\n"),
-            Vec::<String>::new()
-        );
-        // A sigil inside a token starts none.
-        let input = "&a\u{feff}&b x";
-        let found: Vec<&str> = tokens(input, &['&'])
-            .into_iter()
-            .map(|range| &input[range])
-            .collect();
-        assert_eq!(found, ["&a\u{feff}&b"]);
-        // A `:` ends a name before text outside a flow collection only; a `?`
-        // ends it before anything but a flow indicator.
-        let input = "&a:b x\n[*c:d, &e?f g, *h?]\n";
-        let found: Vec<&str> = tokens(input, &['&', '*'])
-            .into_iter()
-            .map(|range| &input[range])
-            .collect();
-        assert_eq!(found, ["&a", "*c:d", "&e", "*h?"]);
-    }
-
-    #[test]
-    fn an_edit_that_overlaps_the_one_before_is_left_out() {
-        let edits = [(0..2, "x".to_string()), (1..3, "y".to_string())];
-        assert_eq!(apply("abcd", &edits), ["xcd"]);
-    }
-
-    #[test]
-    fn places_follow_flow_collections_quotes_and_block_scalars() {
-        let depths = |input: &str| -> Vec<u32> {
-            places(input).into_iter().map(|place| place.depth).collect()
-        };
-        // Outside a flow collection, a `[` or `{` inside a plain scalar is text.
-        assert!(
-            depths("a b [c\nTRUE{<<: \n:\n- -a? [x\n")
-                .iter()
-                .all(|depth| *depth == 0)
-        );
-        let input = "a: [b, '[', {c: \"}\"}] # [\nd: !t {e: [\n  f]}\n";
-        let found = depths(input);
-        assert_eq!(found[input.find("b,").unwrap()], 1);
-        assert_eq!(found[input.find("c:").unwrap()], 2);
-        assert_eq!(found[input.find("# [").unwrap()], 0);
-        assert_eq!(found[input.find("f]").unwrap()], 2);
-        assert_eq!(found[input.len()], 0);
-        let found = places("a: 'x\n: y'\nb: |\n  [z\n: w\n");
-        assert!(found[6].literal && found[16].literal);
-        assert_eq!(found[16].depth, 0);
-        assert!(!found[21].literal);
-        // A plain scalar's next line, indented past its key, continues it.
-        let input = "a: .nan\n ? ['q,\n  b]\n: \n";
-        assert!(depths(input).iter().all(|depth| *depth == 0));
-        assert!(places(input).iter().all(|place| !place.literal));
-        // A block scalar's content is indented past its key, not its line.
-        let input = "  - id: |-\n    : r2\n";
-        assert!(!places(input)[input.find(": r2").unwrap()].literal);
-        // A node on the line after `- ` belongs to the `-`, so the line after
-        // it continues a plain scalar there.
-        let input = "- \n  ~,\n  'q]]\n:\n";
-        assert!(!places(input)[input.find("\n:").unwrap() + 1].literal);
-        // In a flow collection, a quote starts a scalar only where a node
-        // starts: not inside a plain scalar, even on its next line, or
-        // after a `:` that a non-space follows.
-        for input in [
-            "[a 'b, c]\n",
-            "[a\n 'b, c]\n",
-            "[:'b, c]\n",
-            "{a:'b, c: d}\n",
-        ] {
-            assert!(
-                places(input).iter().all(|place| !place.literal),
-                "{input:?}"
-            );
-        }
-        for input in [
-            "['b, c']\n",
-            "[&a 'b, c']\n",
-            "{\"a\":'b, c'}\n",
-            "{a: 'b, c'}\n",
-        ] {
-            assert!(
-                places(input)[input.find("c'").unwrap()].literal,
-                "{input:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn line_breaks_and_byte_order_marks_go() {
-        assert_eq!(
-            line_breaks("a: x\u{85}y\n"),
-            ["a: xy\n", "a: x\n    y\n", "a: x\ny\n", "a: xxy\n"]
-        );
-        // Each break's next line starts at the break's column.
-        assert_eq!(
-            line_breaks("- 'a\u{85}b\u{2028}c'\nd\n")[1],
-            "- 'a\n    b\n     c'\nd\n"
-        );
-        assert_eq!(line_breaks("a\u{2028}: \u{2029}\n")[3], "ay: z\n");
-        assert_eq!(line_breaks("a\n"), Vec::<String>::new());
-        assert_eq!(
-            line_start_byte_order_marks("\u{feff}a\n\u{feff}\u{feff}b c\u{feff}\n"),
-            [
-                "a\nb c\u{feff}\n",
-                " a\n  b c\u{feff}\n",
-                "a\n  b c\u{feff}\n"
-            ]
-        );
-        assert_eq!(line_start_byte_order_marks("a:\n\u{feff}b\n").len(), 2);
-        assert_eq!(
-            line_start_byte_order_marks("a\u{feff}\n"),
-            Vec::<String>::new()
-        );
-        assert_eq!(one(tabs("-\ta\n")), "- a\n");
-        assert_eq!(
-            tabs("a:\t|\n \t\n  b\n"),
-            ["a: |\n  \n  b\n", "a: |\n \n  b\n", "a: |\n x\n  b\n"]
-        );
-    }
-
-    #[test]
-    fn empty_keys_get_a_null_key() {
-        assert_eq!(one(empty_keys(": v\n- :\nb: c\n")), "~: v\n- ~:\nb: c\n");
-        assert_eq!(empty_keys("a: :b\n"), Vec::<String>::new());
-        assert_eq!(
-            one(empty_keys("? b\n  # c\n: {}\n: {}\n- ? x\n  : y\n")),
-            "? b\n  # c\n: {}\n~: {}\n- ? x\n  : y\n"
-        );
-        assert_eq!(empty_keys("? a\n:\n"), Vec::<String>::new());
-        assert_eq!(empty_keys("  ? [1,\n  2]\n  : x\n"), Vec::<String>::new());
-        assert_eq!(one(empty_keys("TRUE{<<: \n\n:\n")), "TRUE{<<: \n\n~:\n");
-        assert_eq!(
-            empty_keys("a: 'x\n: y'\nb: |\n  : z\n"),
-            Vec::<String>::new()
-        );
-        assert_eq!(one(empty_keys("? b\r\n: : {}\r\n")), "? b\r\n: ~: {}\r\n");
-    }
-
-    #[test]
-    fn a_leading_document_end_goes() {
-        assert_eq!(one(leading_document_end("# c\n...\na: 1\n")), "# c\na: 1\n");
-        assert_eq!(one(leading_document_end("... # c\n")), "");
-        // Each of them.
-        assert_eq!(
-            one(leading_document_end("...\n... #c\n\n...\r\na: 1\n")),
-            "\n\na: 1\n"
-        );
-        assert_eq!(leading_document_end("a\n...\n"), Vec::<String>::new());
-        assert_eq!(leading_document_end("...a\n"), Vec::<String>::new());
-    }
-
-    #[test]
-    fn wide_names_narrow_with_their_aliases() {
-        assert_eq!(
-            wide_anchor_names("- &a.b x\n- *a.b\n"),
-            ["- &a_b x\n- *a_b\n", "- &a .b x\n- *a .b\n"]
-        );
-        // A `:` before a character other than white space ends a name.
-        assert_eq!(
-            wide_anchor_names("&a!<t:x> y\n"),
-            ["&a__t:x> y\n", "&a !<t:x> y\n"]
-        );
-        assert_eq!(
-            one(wide_anchor_names("run: make && test\n")),
-            "run: make &_ test\n"
-        );
-        assert_eq!(one(wide_anchor_names("&é x")), "&_ x");
-        assert_eq!(wide_anchor_names("&a1: x\n")[1], "&a1 : x\n");
-        // `*a:` is the alias `a` and a `:`.
-        assert_eq!(
-            wide_anchor_names("- &a k\n- {*a: v}\n"),
-            Vec::<String>::new()
-        );
-        // In a flow collection, a `:` before text is part of a name.
-        assert_eq!(
-            wide_anchor_names("- &l x\n- [*l:a]\n")[1],
-            "- &l x\n- [*l : a]\n"
-        );
-        assert_eq!(wide_anchor_names("&a-1_b x\n*a-1_b"), Vec::<String>::new());
-    }
-
-    #[test]
-    fn redefined_anchors_get_names_of_their_own() {
-        assert_eq!(
-            redefined_anchors("- &a 1\n- &a 2\n- *a\n"),
-            ["- &a 1\n- &a-2r 2\n- *a-2r\n", "- &a 1\n- &a-2r 2\n- *a\n"]
-        );
-        assert_eq!(redefined_anchors("- &a 1\n- *a\n"), Vec::<String>::new());
-    }
-
-    #[test]
-    fn tags_go_by_kind() {
-        assert_eq!(
-            one(core_tags("a: !!map 1\nb: !!binary x\n")),
-            "a:  1\nb: !!binary x\n"
-        );
-        assert_eq!(
-            core_tags("a: !!int '1'\nb: !!str \"x:y\"\n"),
-            ["a:  '1'\nb:  \"x:y\"\n", "a:  1\nb:  \"x:y\"\n"]
-        );
-        assert_eq!(
-            one(root_block_scalar_content("--- !t |\nx\n\n  y\n...\nz\n")),
-            "--- !t |\n x\n\n   y\n...\nz\n"
-        );
-        assert_eq!(one(root_block_scalar_content(">\n...x\n")), ">\n ...x\n");
-        assert_eq!(root_block_scalar_content("a: |\nx\n"), Vec::<String>::new());
-        assert_eq!(
-            core_tags("%TAG !! tag:x,2000:\n---\na: !!int 1\n"),
-            Vec::<String>::new()
-        );
-        assert_eq!(
-            global_tags("a: !<tag:x,2000:y> 1\nb: !!binary x\nc: !!str y\n"),
-            [
-                "a:  1\nb:  x\nc: !!str y\n",
-                "a: !t 1\nb: !t x\nc: !!str y\n",
-                "a: !!str 1\nb: !!str x\nc: !!str y\n"
-            ]
-        );
-        // `!!str` goes on a scalar only, after any anchor.
-        assert_eq!(
-            global_tags("a: !<t:x> [1]\nb: !<t:x> &a 2\nc: !<t:x>\n")[2],
-            "a:  [1]\nb: !!str &a 2\nc: \n"
-        );
-        assert_eq!(
-            global_tags("%TAG !! tag:x,2000:\n---\na: !!int 1\n").len(),
-            2
-        );
-        assert_eq!(
-            global_tags("%TAG !! tag:x,2000:\n---\na: !!int 1\n")[0],
-            "%TAG !! tag:x,2000:\n---\na:  1\n"
-        );
-        assert_eq!(
-            global_tags("%TAG !e! tag:x,2000:\n---\n[!e!z a, !f!z b, !t c]\n")[0],
-            "%TAG !e! tag:x,2000:\n---\n[ a, !f!z b, !t c]\n"
-        );
-        assert_eq!(
-            global_tags("%TAG ! tag:x,2000:\n---\n!a b\n")[0],
-            "%TAG ! tag:x,2000:\n---\nb\n"
-        );
-        assert_eq!(
-            global_tags("a: !<!> x\nb: !<> y\nc: !t z\n"),
-            Vec::<String>::new()
-        );
-        assert_eq!(
-            global_tags("a:\n  b: 1\n!<tag:x,2000:y>   c: 2\n- !!binary\tx\n")[..2],
-            ["a:\n  b: 1\nc: 2\n- x\n", "a:\n  b: 1\n   c: 2\n- \tx\n"]
-        );
-        assert_eq!(core_tags("!!map : x\n")[2], "~ : x\n");
-        assert_eq!(
-            non_specific_tags("[1,!  ,]\n"),
-            ["[1,  ,]\n", "[1,''  ,]\n"]
-        );
-        assert_eq!(
-            one(non_specific_tags("a: ! 1\nb: !t 2\n")),
-            "a:  1\nb: !t 2\n"
-        );
-    }
-
-    #[test]
-    fn quoted_only_characters_and_long_runs_go() {
-        assert_eq!(
-            quoted_only_characters("a: '\u{7f}\u{85}\u{ffff}'\n"),
-            ["a: '\u{85}'\n", "a: 'x\u{85}x'\n"]
-        );
-        let key = "k".repeat(1_025);
-        let cut = one(long_runs(&format!("{{{key}: v}}")));
-        assert_eq!(cut, format!("{{{}: v}}", "k".repeat(1_000)));
-        assert_eq!(
-            long_runs(&format!("{{{}: v}}", "k".repeat(1_024))),
-            Vec::<String>::new()
-        );
-        // Only a key is cut: not a value, a quoted scalar, a comment or a
-        // block scalar, nor a run that a `:` in one of them ends.
-        for input in [
-            format!("a: {key}\n"),
-            format!("- \"{key}\"\n"),
-            format!("- '{key}: v'\n"),
-            format!("# {key}: v\n"),
-            format!("a: |\n  {key}: v\n"),
-            format!("a: {key}:v\n"),
-        ] {
-            assert_eq!(long_runs(&input), Vec::<String>::new(), "{input}");
-        }
-        let wide = "\u{e9}".repeat(513);
-        assert_eq!(
-            one(wide_runs(&format!("{wide}: v\n- '{wide}'\n"))),
-            format!("{}: v\n- '{wide}'\n", "\u{e9}".repeat(500))
-        );
-        // A `:` inside a key is part of it; keys that differ stay apart, and
-        // equal keys stay equal.
-        let other = "k".repeat(1_030);
-        assert_eq!(
-            one(long_runs(&format!("{{{key}:a{key}: v}}"))),
-            format!("{{{}: v}}", "k".repeat(1_000))
-        );
-        assert_eq!(
-            one(long_runs(&format!("{{{key}: 1, {other}: 2, {key}: 3}}"))),
-            format!(
-                "{{{}: 1, {}: 2, {}: 3}}",
-                "k".repeat(1_000),
-                "k".repeat(999),
-                "k".repeat(1_000)
-            )
-        );
-        // A cut key does not become another key of the input.
-        let short = "k".repeat(1_000);
-        assert_eq!(
-            one(long_runs(&format!("{{{other}: 1, {short}: 2}}"))),
-            format!("{{{}: 1, {short}: 2}}", "k".repeat(999))
-        );
-    }
-
-    #[test]
-    fn wide_integers_become_one() {
-        // As 1, then as a number of each value's own.
-        assert_eq!(
-            wide_integers(
-                "a: 18446744073709551616\n-9223372036854775809: [+18446744073709551616]\n"
-            ),
-            ["a: 1\n-1: [+1]\n", "a: 1\n-2: [+1]\n"]
-        );
-        // Each base, with a sign, and in a flow collection; the numbers of
-        // their own skip what the rest of the input holds.
-        assert_eq!(
-            wide_integers(
-                "- 0x10000000000000000\n- -0o2000000000000000000001\n\
-                 - [+0b1_0, 0b10000000000000000000000000000000000000000000000000000000000000000]\n"
-            ),
-            ["- 1\n- -1\n- [+0b1_0, 1]\n", "- 2\n- -3\n- [+0b1_0, 2]\n"]
-        );
-        assert_eq!(
-            wide_integers("? 1\n18446744073709551616: x\n"),
-            ["? 1\n1: x\n", "? 1\n2: x\n"]
-        );
-        // Not a 64-bit integer, a scalar wider than 128 bits, a quoted
-        // scalar, a comment, digits inside a plain scalar, a leading zero,
-        // or a flow indicator in a block scalar's place, which ends nothing.
-        for input in [
-            "a: 18446744073709551615\nb: -9223372036854775808\nc: 0xFFFFFFFFFFFFFFFF\n",
-            "a: 340282366920938463463374607431768211456\n",
-            "a: -170141183460469231731687303715884105729\n",
-            "a: '18446744073709551616'\n# 18446744073709551616\n",
-            "a: x18446744073709551616\nb: 18446744073709551616x\n",
-            "a: 018446744073709551616\nb: 0x\nc: 0X10000000000000000\n",
-            "a: 18446744073709551616]\nb: x,18446744073709551616\n",
-        ] {
-            assert_eq!(wide_integers(input), Vec::<String>::new(), "{input:?}");
-        }
-    }
-
-    #[test]
-    fn a_node_below_its_properties_is_not_empty() {
-        // The properties' node is the collection below them.
-        for input in [
-            "!!map \n- a\n",
-            "--- !!map\n- a\n",
-            "k: !!seq\n- a\n",
-            "k: !!map # c\n\n  a: 1\n",
-            "- !!map\n  a: 1\n",
-            "[!!str\n x]\n",
-        ] {
-            let at = input.find(['!']).unwrap() + 5;
-            assert!(!empty_node_after(input, at), "{input:?}");
-        }
-        // The next line is another entry, or nothing follows.
-        for input in [
-            "- !!null\n- a\n",
-            "k: !!null\nj: a\n",
-            "a:\n  k: !!null\nj: a\n",
-            "k: !!null\n",
-            "[!!null\n , x]\n",
-        ] {
-            let at = input.find(['!']).unwrap() + 6;
-            assert!(empty_node_after(input, at), "{input:?}");
-        }
-        // A document marker below is no node.
-        for input in ["!!map \n\n...\n", "!!map\n--- a\n"] {
-            let at = input.find(['!']).unwrap() + 5;
-            assert!(empty_node_after(input, at), "{input:?}");
-        }
-    }
-
-    #[test]
-    fn flow_scalars_that_start_with_a_colon_are_quoted() {
-        assert_eq!(
-            one(flow_colon_scalars("[!!str :a/**, &x :b c, !t :d'e]\n")),
-            "[!!str ':a/**', &x ':b c', !t ':d''e']\n"
-        );
-        // Not without properties, outside a flow collection, in a quoted
-        // scalar, after properties inside a plain scalar, or before a space.
-        for input in [
-            "[:a]\n",
-            "a: !!str :b\n",
-            "['!!str :a']\n",
-            "[a !!str :b]\n",
-            "[!!str : a]\n",
-        ] {
-            assert_eq!(flow_colon_scalars(input), Vec::<String>::new(), "{input:?}");
-        }
-    }
-
-    #[test]
-    fn empty_flow_keys_become_null() {
-        assert_eq!(
-            one(empty_flow_keys("[? ]\n{? , a: b}\n[a, ?\n ]\n")),
-            "[? ~ ]\n{? ~ , a: b}\n[a, ? ~\n ]\n"
-        );
-        // A key, a `?` that opens no entry, in a block mapping, a quoted
-        // scalar or a comment, or with no space after it.
-        for input in [
-            "[? a]\n",
-            "[a ? ]\n",
-            "? ]\n",
-            "['? ]']\n",
-            "[ # ? ]\n]\n",
-            "[?]\n",
-        ] {
-            assert_eq!(empty_flow_keys(input), Vec::<String>::new(), "{input:?}");
-        }
-    }
-}
+#[path = "neutralize_tests.rs"]
+mod tests;

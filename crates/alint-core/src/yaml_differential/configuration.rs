@@ -245,6 +245,11 @@ fn rule(rng: &mut Rng, out: &mut String, index: usize, anchored: &mut Vec<usize>
         let filter = rng.pick(&["{has_ancestor: Cargo.toml}", "{has_ancestor: [a, b]}", "1"]);
         let _ = writeln!(out, "    scope_filter: {filter}");
     }
+    // A key that is not a string, which a typed decode cannot name a field.
+    if rng.chance(1, 24) {
+        let key = rng.pick(&["1", "true", "~", "[a]"]);
+        let _ = writeln!(out, "    {key}: y");
+    }
     options(rng, out, kind);
 }
 

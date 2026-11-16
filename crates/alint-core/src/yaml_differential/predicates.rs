@@ -337,12 +337,11 @@ pub(super) fn ayaml_points_at_a_lone_flow_indicator(case: &Case<'_>) -> bool {
 /// Whether the flow collection at byte `at` follows a `:` that follows a
 /// property and white space, as `[b]` in `[&a :[b]]`.
 pub(super) fn flow_value_after_a_property_at(input: &str, at: usize) -> bool {
-    let Some(colon) = at.checked_sub(1) else {
+    // The character before `at` may be wider than a byte.
+    let Some(before) = input[..at].strip_suffix(':') else {
         return false;
     };
-    let before = &input[..colon];
-    input[colon..].starts_with(':')
-        && input[at..].starts_with(['[', '{'])
+    input[at..].starts_with(['[', '{'])
         && before.ends_with([' ', '\t'])
         && before
             .trim_end()
@@ -373,8 +372,8 @@ pub(super) fn has_tab_line_after_document_end(input: &str) -> bool {
 
 /// The one-based lines, as the oracle counts them, that hold a block scalar
 /// header and follow a line that ends with properties that include an
-/// anchor, or with the `:` of a key that has an anchor, at no greater
-/// indentation.
+/// anchor, holds properties alone, or ends with the `:` of a key that has an
+/// anchor, at no greater indentation.
 pub(super) fn block_scalar_headers_under_an_anchor(input: &str) -> Vec<usize> {
     let indentation = |line: &str| line.len() - line.trim_start_matches(' ').len();
     let lines = Counter::Oracle.lines(input);
@@ -389,7 +388,8 @@ pub(super) fn block_scalar_headers_under_an_anchor(input: &str) -> Vec<usize> {
                 .collect();
             let anchored_key = tokens.first().is_some_and(|token| token.ends_with(':'))
                 && tokens.iter().any(|token| token.starts_with('&'));
-            (properties.iter().any(|token| token.starts_with('&')) || anchored_key)
+            let alone = !properties.is_empty() && properties.len() == tokens.len();
+            (properties.iter().any(|token| token.starts_with('&')) || alone || anchored_key)
                 && line.trim_start().starts_with(['|', '>'])
                 && indentation(line) <= indentation(above)
         })
@@ -397,10 +397,83 @@ pub(super) fn block_scalar_headers_under_an_anchor(input: &str) -> Vec<usize> {
         .collect()
 }
 
-/// Whether the oracle's error is on a block scalar header under an anchor.
+/// Whether ayaml's error is that a block scalar's leading empty lines are
+/// more indented than its content, and the first line after them with more
+/// than spaces is a document marker (`---` or `...` at column 1, then white
+/// space or the end), which ends the scalar (YAML 1.2, rule 206) and so is
+/// not its content. ayaml 0.1.2 takes it for a top-level scalar's content
+/// and rejects the input, as `|`, a line of two spaces and `...`: a defect
+/// (`document-marker-after-indented-empty-lines`).
+pub(super) fn ayaml_takes_a_document_marker_for_block_scalar_content(case: &Case<'_>) -> bool {
+    if !ayaml_rejects(
+        case,
+        &["leading empty block-scalar lines are more indented than the content"],
+    ) {
+        return false;
+    }
+    let Some(at) = error_offset(case.input, &case.ayaml) else {
+        return false;
+    };
+    let from = case.input[..at]
+        .rfind(['\n', '\r'])
+        .map_or(0, |offset| offset + 1);
+    case.input[from..]
+        .split_inclusive(['\n', '\r'])
+        .map(|line| line.trim_end_matches(['\n', '\r']))
+        .find(|line| !line.trim_start_matches(' ').is_empty())
+        .is_some_and(|line| {
+            ["---", "..."].iter().any(|marker| {
+                line.strip_prefix(marker)
+                    .is_some_and(|after| after.is_empty() || after.starts_with([' ', '\t']))
+            })
+        })
+}
+
+/// Whether the oracle's error is on a block scalar header under an anchor
+/// or properties alone (see [`block_scalar_headers_under_an_anchor`]), or is
+/// its "more than one document" when such a header is the first line
+/// indented less than the document's first, where the oracle ends the
+/// document.
 pub(super) fn oracle_points_at_a_block_scalar_under_an_anchor(case: &Case<'_>) -> bool {
-    error_line(case.input, &case.oracle)
-        .is_some_and(|(line, _)| block_scalar_headers_under_an_anchor(case.input).contains(&line))
+    let headers = block_scalar_headers_under_an_anchor(case.input);
+    if rejects(&case.oracle, "more than one document") {
+        return first_line_out_of_the_root(case.input).is_some_and(|line| headers.contains(&line));
+    }
+    error_line(case.input, &case.oracle).is_some_and(|(line, _)| headers.contains(&line))
+}
+
+/// The one-based line, as the oracle counts them, of the first line with
+/// content indented less than the first, past directives and a `---` that
+/// only a comment follows on its line, in an input with no other document
+/// marker or byte order mark before it: where the root node ends.
+fn first_line_out_of_the_root(input: &str) -> Option<usize> {
+    let indentation = |line: &str| line.len() - line.trim_start_matches(' ').len();
+    let bare_start = |line: &str| {
+        line.strip_prefix("---").is_some_and(|rest| {
+            let comment = rest.trim_start_matches([' ', '\t']);
+            comment.is_empty() || (comment.starts_with('#') && comment.len() < rest.len())
+        })
+    };
+    let mut root = None;
+    let mut started = false;
+    for (index, line) in Counter::Oracle.lines(input).into_iter().enumerate() {
+        let text = line.trim();
+        if text.is_empty() || text.starts_with('#') {
+            continue;
+        }
+        if root.is_none() && !started && (line.starts_with('%') || bare_start(line)) {
+            started = bare_start(line);
+            continue;
+        }
+        if text.starts_with(['%', '\u{feff}']) || text.starts_with("---") || text.starts_with("...")
+        {
+            return None;
+        }
+        if indentation(line) < *root.get_or_insert(indentation(line)) {
+            return Some(index + 1);
+        }
+    }
+    None
 }
 
 /// Whether the document's root node is a block scalar: the first line with
@@ -440,6 +513,33 @@ pub(super) fn ayaml_points_at_a_yaml_directive_with_an_adjacent_number_sign(
     })
 }
 
+/// The oracle's error about a character its reader does not allow.
+pub(super) const ORACLE_READER_ERROR: &str = "control characters are not allowed";
+
+/// Whether the oracle's error is about the character ayaml rejects: the
+/// first its reader does not allow, which it reports at line 1, column 1.
+/// Or ayaml's is about the first C0 control, other than a tab or a line
+/// break, which its reader rejects anywhere before its scanner rejects a
+/// character YAML allows only in a quoted scalar, outside one: the input
+/// then shows nothing of how ayaml reads such a character before it, about
+/// which the oracle's error may be. Otherwise the oracle's error about an
+/// earlier character, which ayaml keeps in a quoted scalar, is another.
+pub(super) fn errors_about_one_character(case: &Case<'_>) -> bool {
+    let Some(ayaml) = error_offset(case.input, &case.ayaml) else {
+        return false;
+    };
+    let control = |ch: char| ch < ' ' && !matches!(ch, '\t' | '\n' | '\r');
+    match super::oracle_error_offset(case.input, &case.oracle) {
+        Some(oracle) if oracle == ayaml => true,
+        Some(oracle) => {
+            oracle < ayaml
+                && rejects(&case.oracle, ORACLE_READER_ERROR)
+                && case.input.find(control) == Some(ayaml)
+        }
+        None => false,
+    }
+}
+
 /// Whether both parsers place their errors at different ends of white space
 /// and comments alone, the oracle first: where an empty node would be, and
 /// at the start of what follows it.
@@ -450,11 +550,44 @@ pub(super) fn errors_around_an_empty_node(case: &Case<'_>) -> bool {
     ) else {
         return false;
     };
+    // The oracle's error about a character is at line 1, column 1, not
+    // where an empty node would be (see [`super::allowlist::locate_case`]).
+    if rejects(&case.oracle, ORACLE_READER_ERROR) {
+        return false;
+    }
     oracle < ayaml
         && case.input[oracle..ayaml].split(['\n', '\r']).all(|line| {
             let line = line.trim_start();
             line.is_empty() || line.starts_with('#')
         })
+}
+
+/// A verbatim tag that names no tag.
+pub(super) const NAMELESS_VERBATIM: &str = "!<!>";
+
+/// ayaml's error about a verbatim tag that names no tag, or nothing.
+pub(super) const VERBATIM_NEEDS_A_NAME: &str = "a verbatim tag needs a name";
+
+/// Whether ayaml rejects the input at a verbatim tag that names no tag,
+/// `!<!>`, which the oracle reads as the non-specific tag `!`. Not at `!<>`,
+/// which names nothing, with the same message: both parsers reject that
+/// (see [`errors_in_an_empty_verbatim_tag`]).
+pub(super) fn ayaml_rejects_a_nameless_verbatim_tag(case: &Case<'_>) -> bool {
+    ayaml_rejects(case, &[VERBATIM_NEEDS_A_NAME])
+        && error_offset(case.input, &case.ayaml)
+            .is_some_and(|at| case.input[at..].starts_with(NAMELESS_VERBATIM))
+}
+
+/// Whether ayaml's error is at a verbatim tag that names nothing, `!<>`,
+/// and the oracle's at its `>`, where it looks for the name.
+pub(super) fn errors_in_an_empty_verbatim_tag(case: &Case<'_>) -> bool {
+    let (Some(ayaml), Some(oracle)) = (
+        error_offset(case.input, &case.ayaml),
+        error_offset(case.input, &case.oracle),
+    ) else {
+        return false;
+    };
+    case.input[ayaml..].starts_with("!<>") && oracle == ayaml + 2
 }
 
 #[cfg(test)]
@@ -640,6 +773,13 @@ mod tests {
             (2, 1),
             (1, 3)
         )));
+        // The oracle's reader error is at line 1, column 1 wherever the
+        // character it refuses is, here in a comment.
+        let mut reader = rejected_at("# \u{7f}\n", (1, 1), (2, 1));
+        if let Err(oracle) = &mut reader.oracle {
+            oracle.message = ORACLE_READER_ERROR.to_string();
+        }
+        assert!(!errors_around_an_empty_node(&reader));
     }
 
     fn oracle_error_at(input: &str, line: usize, column: usize) -> Case<'_> {

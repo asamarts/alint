@@ -219,6 +219,7 @@ pub(super) fn document(rng: &mut Rng, specials: bool) -> String {
     if writer.rng.chance(1, 8) {
         let prefix = writer.rng.pick(&[
             "%YAML 1.2\n---\n",
+            "%YAML 1.3\n---\n",
             "---\n",
             "--- # c\n",
             "\u{feff}",
@@ -326,6 +327,7 @@ impl Writer<'_> {
                 "!!str ",
                 "!e!z ",
                 "!<tag:x,2000:y> ",
+                "!<!> ",
                 "!!null ",
                 "!!binary ",
             ]));
@@ -499,6 +501,16 @@ impl Writer<'_> {
             0 => {
                 if self.rng.chance(1, 6) {
                     let anchor = self.new_anchor();
+                    // Now and then a block scalar instead, its header on the
+                    // next line and not indented past the key.
+                    if self.rng.chance(1, 8) {
+                        let _ = writeln!(self.out, " &a{anchor}");
+                        self.indent(indent);
+                        let special = self.special();
+                        self.block_scalar(indent, special);
+                        self.out.push('\n');
+                        return;
+                    }
                     self.mapping_anchors.push(anchor);
                     let _ = write!(self.out, " &a{anchor}");
                 }
@@ -528,7 +540,8 @@ impl Writer<'_> {
         let entries = self.rng.below(4);
         for index in 0..entries {
             if index > 0 {
-                self.out.push_str(self.rng.pick(&[", ", ",", ",\n  "]));
+                self.out
+                    .push_str(self.rng.pick(&[", ", ",", ",\n  ", ",\n\t  "]));
             }
             if mapping {
                 let key = self.plain_key();
