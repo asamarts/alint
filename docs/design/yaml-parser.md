@@ -503,13 +503,15 @@ maintained libyaml fork is the lower-risk ownership boundary.
     162,034 decode to the same value; 5,869 to different values, 5,445 of them because of global
     tags, which #482's ad hoc generator rarely wrote; 61,937 are rejected at the same place and
     63,456 at different places; 118 by ayaml only and 7,490 by the oracle only.
-  - **Y-C3.** The corpus has no difference, and every difference elsewhere is documented in
-    the allowlist (33 deviations and 7 location classes); approving it is phase 9's decision
-    (ADR-0035). The harness found asamarts/ayaml#132 and asamarts/ayaml#133. Its first review
-    round found asamarts/ayaml#137, a quoted scalar's continuation line under a nested parent
-    that goes unchecked after a leading byte-order mark; asamarts/ayaml#138, a tab and then
-    spaces on a quoted scalar's continuation line, which both parsers accept; and #132 after a
-    key with an anchor, added as a comment there. The second round found no other.
+  - **Y-C3.** The corpus has no difference, and every difference elsewhere is documented in the
+    allowlist: 33 deviations and 7 location classes when the owner approved it (ADR-0040), 39 and 8
+    after the review of #525, whose additions phase 9 brings to the owner (ADR-0035). The harness
+    found asamarts/ayaml#132 and asamarts/ayaml#133. Its first review round found
+    asamarts/ayaml#137, a quoted scalar's continuation line under a nested parent that goes
+    unchecked after a leading byte-order mark; asamarts/ayaml#138, a tab and then spaces on a quoted
+    scalar's continuation line, which both parsers accept; and #132 after a key with an anchor,
+    added as a comment there. The second round found no other; later reviews found
+    asamarts/ayaml#139, #140, #146 and #147.
 - **2026-11-15: the owned types, corrected.** The 2026-11-14 entry on the public API overstated
   how close alint's YAML types came to those of `yaml_serde` 0.10.7: code that compiled against
   0.22 can fail now. The review of #520 added `Value::get_mut`, indexing by `&String`, index

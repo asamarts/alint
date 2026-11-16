@@ -601,4 +601,42 @@ decided then.
     field alone shows it. Of the other two, one is a shortcut that only saves a search, and one
     is the stub that stands for the planted defects outside the tests, which no test build
     compiles. The long runs read the same after the changes.
-  - Next: the parser facade; then phase 6. Phase 9 brings the allowlist to the owner.
+  - Next: the parser facade; then phase 6.
+- 2026-11-16: long runs with seeds 4 to 12.
+  - Seeds 4, 6, 8, 9, 10 and 12 left 18 unexplained cases from 10 inputs, none a new ayaml defect.
+    Four were harness bugs: a rewrite that turned ayaml's value error into its "more than one
+    document" was taken to hide the value error, though ayaml reports a second document only after
+    the first one's value holds no error; a byte-order mark past a line's start counted as white
+    space; and the tab rewrite kept a tab before a closing bracket or a comment on a flow line,
+    which ayaml exempts from a flow line's indentation, and a tab ayaml rejects only because a tab
+    before it ended a block scalar. The search now also splits a case whose first error, the
+    oracle's, is in a flow collection ayaml read: the prefix through the collection's line, and the
+    input with the collection empty. `tab-as-white-space` now describes the flow lines, and
+    `block-scalar-under-an-anchor` is an input-wide entry, so a difference beside it needs its own.
+  - Long runs with seeds 1 to 12, 3.83 million inputs, leave no unexplained difference.
+    cargo-mutants leaves no mutant of the changes uncaught; two make the tab rewrite's loop endless
+    and time out.
+- 2026-11-16: the parser facade (ADR-0041, #530).
+  - `alint_core::yaml` decodes text through `yaml_backend`, ayaml by default. alint-core's test-only
+    `yaml-reference` feature adds `ALINT_YAML_PARSER=libyaml` and `compare`: in compare mode a
+    decode returns ayaml's result, and a difference from libyaml that neither saphyr's reading nor
+    the harness's allowlist explains panics. CI's `YAML compare` job runs the workspace's tests that
+    way, `ci/scripts/yaml-reference-gate.sh` fails if a build without the feature depends on
+    `yaml_serde`, and a dogfood rule keeps `yaml_serde::` calls in the facade and the harness.
+  - The workspace's 4,465 tests pass in compare mode, with 40 differences explained: 35 by the
+    allowlist, 4 by saphyr's vote, and one typed decode put down to core tags. The long runs'
+    reports count no difference that only the vote explains: the allowlist explains every one. Tests
+    that measure ayaml itself, the depth guard's and the harness's, decode with ayaml under any
+    backend; three of #529's failed under `libyaml` before.
+  - **For the owner, in phase 9.** The allowlist approved in ADR-0040 had 33 deviations and 7
+    location classes. The reviews since added 6 deviations and 1 class:
+    `anchor-name-before-a-colon-and-a-flow-indicator` (asamarts/ayaml#139) and
+    `document-marker-after-indented-empty-lines` (asamarts/ayaml#146), ayaml defects;
+    `empty-flow-implicit-key`, a YAML 1.2 reading; `negative-zero-in-an-unsigned-field`, the core
+    schema's `-0`; `rule-that-is-null` and `enum-as-a-one-entry-mapping`, rules both parsers refuse
+    with other messages; and the class `verbatim-tag-that-names-nothing`, `!<>`, which both reject.
+  - **ayaml.** 0.1.3 was published on 2026-11-15 without fixes for asamarts/ayaml#132, #133 and
+    #137, so v0.23.0 waits on a later release. #526's description said that the release "fixes
+    asamarts/ayaml#132", which GitHub read as a closing keyword, so merging it closed that issue; it
+    is reopened. The two defects the review found are asamarts/ayaml#146 and #147.
+  - Next: phase 6; phase 9 brings the allowlist, with the entries above, to the owner.
