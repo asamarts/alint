@@ -174,10 +174,13 @@ fn rewrites_leave_what_is_not_their_construct() {
         assert_eq!(wide_integers(input), Vec::<String>::new(), "{input:?}");
     }
     // A tab in a quoted scalar, a plain scalar's text, a comment, or a
-    // block scalar's content past its indentation is content.
+    // block scalar's content past its indentation is content; outside a
+    // flow collection, before a flow indicator too.
     assert_eq!(one(tabs("- \"a\tb\"\n-\tc\n")), "- \"a\tb\"\n- c\n");
     for input in [
         "a: x\ty\n",
+        "a: x\t,y\n",
+        "a: x\t:,y\n",
         "[a\tb]\n",
         "a: 'x\n\t  y'\n",
         "# a\tb\n",
@@ -192,7 +195,9 @@ fn rewrites_leave_what_is_not_their_construct() {
     for (input, rewritten) in [
         ("a:\tx\n", "a: x\n"),
         ("a: x\t# c\n", "a: x # c\n"),
+        ("a\t: x\n", "a : x\n"),
         ("[a\t, b]\n", "[a , b]\n"),
+        ("[a\t:, b]\n", "[a :, b]\n"),
         ("k:\n  a: x\n  \ty\n", "k:\n  a: x\n   y\n"),
         ("a: |\n  \tx\n", "a: |\n   x\n"),
         ("a: |\n  x\n \ty\n", "a: |\n  x\n  y\n"),
@@ -240,6 +245,13 @@ fn places_follow_flow_collections_quotes_and_block_scalars() {
     assert!(found[6].literal && found[16].literal);
     assert_eq!(found[16].depth, 0);
     assert!(!found[21].literal);
+    // A quoted scalar's line that starts with `%` is no directive: past the
+    // closing quote, the line is structure again.
+    let found = places("'x\n%y' \n");
+    assert!(found[3].quoted && !found[6].literal);
+    // A document marker is literal, and the white space after it is not.
+    let found = places("--- x\n");
+    assert!(found[2].literal && !found[3].literal);
     // A plain scalar's next line, indented past its key, continues it.
     let input = "a: .nan\n ? ['q,\n  b]\n: \n";
     assert!(depths(input).iter().all(|depth| *depth == 0));
@@ -654,9 +666,23 @@ fn a_variant_leaves_out_a_leading_tab_with_the_white_space_after_it() {
     assert_eq!(tabs("a\n\t---\n").len(), 3);
 }
 
+/// That variant leaves a tab out with the white space after it up to the
+/// line's content: spaces and the tabs that are white space, but not a tab
+/// that is content, which stays.
+#[test]
+fn a_leading_tab_goes_with_the_white_space_up_to_the_content() {
+    assert_eq!(leading_out(" \t\tx\n", &[1, 2]).as_deref(), Some(" x\n"));
+    assert_eq!(
+        leading_out("   \t\t\tx\n", &[3, 4, 5]).as_deref(),
+        Some("   x\n")
+    );
+    assert_eq!(leading_out(" \t\tx\n", &[1]).as_deref(), Some(" \tx\n"));
+}
+
 /// An empty implicit key of a flow entry becomes `~`, with a space after
 /// its `:` where a flow indicator follows; a `:` that starts a plain scalar,
-/// one after a key, and one in a quoted scalar or a comment stay.
+/// one after a key, one in a quoted scalar or a comment, and one outside a
+/// flow collection stay.
 #[test]
 fn empty_flow_implicit_keys_become_null() {
     assert_eq!(
@@ -669,6 +695,7 @@ fn empty_flow_implicit_keys_become_null() {
         "a: [': x']\n",
         "a: [x] # [: x]\n",
         ": x\n",
+        "a,: x\n",
     ] {
         assert!(empty_flow_implicit_keys(input).is_empty(), "{input:?}");
     }
@@ -676,8 +703,9 @@ fn empty_flow_implicit_keys_become_null() {
 
 /// `!<!>` is named where it is a node's tag, or where ayaml rejects it:
 /// after a quoted scalar, and, in a malformed document, in what YAML 1.2
-/// reads as a plain scalar's second line. Both parsers then read what
-/// follows it alike.
+/// reads as a plain scalar's second line, but not `!<>`, which ayaml
+/// rejects with the same message. Both parsers then read what follows it
+/// alike.
 #[test]
 fn verbatim_non_specific_tags_become_named() {
     for (input, rewrite) in [
@@ -689,6 +717,7 @@ fn verbatim_non_specific_tags_become_named() {
         ("a: [!<!>, !<!>]\n", "a: [!<!t>, !<!t>]\n"),
         ("'q''s'!<!> x\n", "'q''s'!<!t> x\n"),
         (" ---\n!<!> {a: a b,}\n", " ---\n!<!t> {a: a b,}\n"),
+        ("a: !<> x\nb: !<!> y\n", "a: !<> x\nb: !<!t> y\n"),
     ] {
         assert_eq!(one(verbatim_non_specific_tags(input)), rewrite);
     }
@@ -716,6 +745,32 @@ fn quoted_only_characters_keep_the_place_of_ayamls_error() {
     assert_eq!(
         quoted_only_characters("k: !'\u{7f}'e x\n"),
         Vec::<String>::new()
+    );
+}
+
+/// Where ayaml's reader rejects a C0 control, or its error has no place,
+/// its scanner may have read nothing: only the characters [`places`] reads
+/// in a quoted scalar go. Where its error is about the character there, as
+/// the first U+007F of two, that one stays, though the same error then
+/// follows at the next.
+#[test]
+fn quoted_only_characters_go_from_quoted_scalars_where_ayaml_may_read_none() {
+    for input in [
+        "a: '\u{80}'\nb: c\u{ffff}d\nc: \u{1}\n",
+        "\u{feff}%YAML 1.2\na: '\u{80}'\nb: c\u{ffff}d\n",
+    ] {
+        let rewrites = quoted_only_characters(input);
+        assert_eq!(rewrites.len(), 2, "{input:?}: {rewrites:?}");
+        assert!(
+            rewrites
+                .iter()
+                .all(|rewrite| rewrite.contains('\u{ffff}') && !rewrite.contains('\u{80}')),
+            "{input:?}: {rewrites:?}"
+        );
+    }
+    assert_eq!(
+        quoted_only_characters("a: \u{7f}\u{7f}\n"),
+        ["a: \u{7f}\n", "a: \u{7f}x\n"]
     );
 }
 

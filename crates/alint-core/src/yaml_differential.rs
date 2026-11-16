@@ -930,6 +930,7 @@ fn one_rejects_the_syntax(case: &Case<'_>) -> Option<Class> {
 
 /// What the prefix through the line of a case's first error shows (see
 /// [`Search::split`]).
+#[derive(Debug)]
 enum Split<'a> {
     /// That the first error may stand for the case: for two errors, that
     /// they may be one, found at two places.
@@ -1332,7 +1333,9 @@ impl Search {
         self.comparisons += 1;
         let (prefix, panicked) = compare_at(&case.input[..end], case.entry, case.rule);
         let holds = |part: &Side, whole: &Side| part.is_err() && part == whole;
-        let multiple_documents = by_ayaml && oracle_more_than_one_document(case);
+        // The oracle's "more than one document" has no place: ayaml's error
+        // is then the first.
+        let multiple_documents = oracle_more_than_one_document(case);
         if panicked {
             Split::Unknown
         } else if by_ayaml && prefix.oracle.is_ok() && holds(&prefix.ayaml, &case.ayaml) {

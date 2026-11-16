@@ -673,11 +673,7 @@ fn spaced(input: &str, tabs: &[usize], width: usize) -> String {
 /// read anew (see [`starts_anew`]).
 fn leading_out(input: &str, white: &[usize]) -> Option<String> {
     let mut edits = Vec::new();
-    let mut next = 0;
     for &at in white {
-        if at < next {
-            continue;
-        }
         let start = input[..at]
             .rfind(['\n', '\r'])
             .map_or(0, |offset| offset + 1);
@@ -693,8 +689,8 @@ fn leading_out(input: &str, white: &[usize]) -> Option<String> {
             return None;
         }
         edits.push((at..content, String::new()));
-        next = content;
     }
+    // A tab in the white space an edit leaves out overlaps it, and goes.
     apply(input, &edits).pop()
 }
 
@@ -1341,9 +1337,10 @@ pub(super) fn quoted_only_characters(input: &str) -> Vec<String> {
     let places = places(input);
     let (side, _) = super::guarded(|| super::run_ayaml(input, super::Entry::Value, 0));
     let error = super::predicates::error_offset(input, &side);
+    // A C0 control but a tab or a line break, which ayaml's reader rejects.
     let control = error
         .and_then(|at| input[at..].chars().next())
-        .is_some_and(|ch| ch < ' ' && !matches!(ch, '\t' | '\n' | '\r'));
+        .is_some_and(|ch| matches!(ch, '\0'..='\u{8}' | '\u{b}' | '\u{c}' | '\u{e}'..='\u{1f}'));
     let scanned = side.is_ok() || (!control && error.is_some());
     let at_error = error.filter(|&at| input[at..].starts_with(quoted_only_character));
     let (rejected, elsewhere) = match at_error {
@@ -1360,12 +1357,9 @@ pub(super) fn quoted_only_characters(input: &str) -> Vec<String> {
     if quoted.is_empty() {
         return Vec::new();
     }
-    let first = &quoted[..1];
-    let sets: &[&[Range<usize>]] = if quoted.len() > 1 {
-        &[&quoted, first]
-    } else {
-        &[&quoted]
-    };
+    // The first alone repeats them all where it is the only one, and the
+    // rewrites it gives then go below.
+    let sets: [&[Range<usize>]; 2] = [&quoted, &quoted[..1]];
     let mut rewrites: Vec<String> = Vec::new();
     let all = sets.iter().flat_map(|set| {
         ["", "x"].iter().flat_map(|with| {

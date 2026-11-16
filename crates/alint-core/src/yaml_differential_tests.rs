@@ -704,6 +704,146 @@ fn two_errors_at_two_places_are_explained_each_on_its_own() {
     }
 }
 
+/// The first error of a case is ayaml's where the two are at one place, as
+/// ayaml's at a character the oracle's reader refuses and its error at
+/// 1:1; the oracle's where it comes first or ayaml read the input; and none
+/// where ayaml's has no place, which could be anywhere.
+#[test]
+fn the_first_error_is_ayaml_s_where_the_two_are_at_one_place() {
+    let (case, _) = compare("a: \u{7f}\n", Entry::Value);
+    assert_eq!(case.class, Class::RejectedAtDifferentLocation, "{case:?}");
+    assert_eq!(first_error(&case), Some((3, true)));
+    let made_up = |ayaml: Side, oracle: Side| Case {
+        input: "a\nb\n",
+        entry: Entry::Value,
+        rule: 0,
+        class: classify(&ayaml, &oracle),
+        ayaml,
+        oracle,
+    };
+    let at = |line| Err(rejection("e", Some((line, 1))));
+    assert_eq!(first_error(&made_up(at(2), at(1))), Some((0, false)));
+    assert_eq!(first_error(&made_up(at(1), at(2))), Some((0, true)));
+    assert_eq!(
+        first_error(&made_up(Ok("x".to_string()), at(2))),
+        Some((2, false))
+    );
+    assert_eq!(
+        first_error(&made_up(Err(rejection("e", None)), at(1))),
+        None
+    );
+}
+
+/// The lines after a prefix read as they would alone where the prefix
+/// holds no node, only blank lines and comments, or where no line after it
+/// at the top is indented less than the first. Blank lines, comments and
+/// lines inside a construct do not count.
+#[test]
+fn the_rest_stands_alone_unless_a_line_at_the_top_is_indented_less() {
+    for (input, start, alone) in [
+        ("# c\n\n  - a\nb\n", 5, true),
+        ("- [x]\n  - a\nb\n", 6, false),
+        ("- [x]\n  - a\n\n  - b\n", 6, true),
+        ("- [x]\n  - a\n# c\n  - b\n", 6, true),
+        ("- [x]\n  - [a,\n b]\n", 6, true),
+    ] {
+        let places = neutralize::places(input);
+        assert!(at_the_top(input, &places, start), "{input:?}");
+        assert_eq!(stands_alone(input, &places, start), alone, "{input:?}");
+    }
+}
+
+/// A search counts each comparison out of its budget (see
+/// [`MAX_COMPARISONS`]), and a split compares each prefix once and never
+/// the whole input, which the search already compared. An error on the last
+/// line leaves no prefix; a construct that ends with the error's line
+/// leaves one; one that goes on past it, and whose prefix shows nothing,
+/// leaves the prefix through the line too; one that goes on to the end of
+/// the input leaves only that.
+#[test]
+fn a_search_counts_each_comparison() {
+    let search = || Search {
+        tried: Vec::new(),
+        ids: Vec::new(),
+        comparisons: 0,
+        complete: false,
+    };
+    for (input, comparisons, shown) in [
+        ("a: !<!> x\n", 0, "One"),
+        ("a: |\n x\n\t y\nb\n", 1, "One"),
+        ("a: [x, 'y'#c,\n b]\nc: 1\n", 2, "One"),
+        ("-\n|2\n  x\n", 1, "Through"),
+    ] {
+        let (case, _) = compare(input, Entry::Value);
+        let mut search = search();
+        let split = search.split(&case);
+        assert!(
+            format!("{split:?}").starts_with(shown),
+            "{input:?}: {split:?}"
+        );
+        assert_eq!(search.comparisons, comparisons, "{input:?}");
+    }
+    // The line before the error, which both read alike.
+    let (case, _) = compare("a: 1\nb: !<!> x\n", Entry::Value);
+    let mut before = search();
+    assert!(before.explain_before(&case));
+    assert_eq!(before.comparisons, 1);
+    // The rest after a prefix, which both read alike.
+    let (case, _) = compare("a: 'x'#c\nb: 1\n", Entry::Value);
+    let mut rest = search();
+    assert!(rest.explain_rest(&case, "a: 'x'#c\n".len()));
+    assert_eq!(rest.comparisons, 1);
+    // Each rewrite, of which the first explains the case.
+    let (case, _) = compare("a: !<!> x\n", Entry::Value);
+    let deviation = allowlist::DEVIATIONS
+        .iter()
+        .find(|deviation| deviation.id == "verbatim-non-specific-tag")
+        .unwrap();
+    let rewrites = ["a: !<!t> x\n".to_string(), "a: x\n".to_string()];
+    let mut rewritten = search();
+    assert!(rewritten.explain_rewrites(&case, deviation, &rewrites, &mut false));
+    assert_eq!(rewritten.comparisons, 2);
+    // A prefix and the rest, each explained, the prefix by a rewrite.
+    let (case, _) = compare("c: !<!> x\nm: [:a]\n", Entry::Value);
+    let Split::Two(prefix) = search().split(&case) else {
+        panic!("{case:?}");
+    };
+    let mut prefix_alone = search();
+    assert!(prefix_alone.explain(&prefix));
+    let mut rest_alone = search();
+    assert!(rest_alone.explain_rest(&case, prefix.input.len()));
+    let mut both = search();
+    assert!(both.explain_both(&case, &prefix));
+    assert!(prefix_alone.comparisons > 0);
+    assert_eq!(
+        both.comparisons,
+        prefix_alone.comparisons + rest_alone.comparisons
+    );
+}
+
+/// Once a rewrite revealed an error that the case's error hid, only a case
+/// both parsers read alike ends the search: a narrow entry explains the
+/// case's error, not the text after the revealed one.
+#[test]
+fn a_narrow_entry_does_not_end_a_search_past_a_revealed_error() {
+    let (case, _) = compare("[-]\n", Entry::Value);
+    assert_eq!(case.class, Class::OnlyAyamlRejects);
+    let explained = |complete| {
+        let mut search = Search {
+            tried: Vec::new(),
+            ids: Vec::new(),
+            comparisons: 0,
+            complete,
+        };
+        search.explain(&case).then_some(search.ids)
+    };
+    assert_eq!(
+        explained(false),
+        Some(vec!["flow-indicator-needs-white-space"])
+    );
+    assert_eq!(explained(true), None);
+}
+
 /// A rewrite that turns a value error of ayaml's into a syntax error hides
 /// the value error, wherever each is: ayaml reads the whole stream's syntax
 /// before it builds a value. Without the core-tag entry, the `!!int` on a
@@ -760,8 +900,9 @@ fn a_core_tag_rewrite_keeps_the_kinds_other_tags_give() {
 /// an alias error is kept wherever it moved; an error that moved to an
 /// earlier line for another reason was revealed, unless the parser that
 /// rejected the case kept its message and both now reject at one place,
-/// where the two agree. The inputs after are cases of the long runs that
-/// each rule explains.
+/// where the two agree, or the trigger is documented to hide the error now
+/// shown. The inputs after are cases of the long runs that each rule
+/// explains.
 #[test]
 fn a_moved_error_is_kept_revealed_or_agreed_on() {
     let error = |message: &str, line, kind| -> Side {
@@ -804,6 +945,28 @@ fn a_moved_error_is_kept_revealed_or_agreed_on() {
         fairness(&read, &other, &Hidden::Nothing),
         Some(Fairness::Revealed)
     );
+    // ayaml's scanner error gave way to a parser error two lines up, which
+    // only a trigger documented to hide parser errors may have hidden.
+    let scanner_error = case(error("A", 3, scanner), error("X", 3, None));
+    let parsed = case(error("B", 1, Some(ErrorKind::Parser)), error("X", 3, None));
+    assert_eq!(
+        fairness(&scanner_error, &parsed, &Hidden::Nothing),
+        Some(Fairness::Revealed)
+    );
+    assert_eq!(
+        fairness(&scanner_error, &parsed, &Hidden::ParserErrors),
+        Some(Fairness::Kept)
+    );
+    // A parser error the case gave, or a scanner error now, was not hidden
+    // by a scanner error.
+    let parser_error = case(error("A", 3, Some(ErrorKind::Parser)), error("X", 3, None));
+    let scanned = case(error("B", 1, scanner), error("X", 3, None));
+    for (before, after) in [(&parser_error, &parsed), (&scanner_error, &scanned)] {
+        assert_eq!(
+            fairness(before, after, &Hidden::ParserErrors),
+            Some(Fairness::Revealed)
+        );
+    }
     for (input, entry, ids) in [
         (
             "-9223372036854775809 # \n\t",
@@ -1388,6 +1551,39 @@ fn rule_errors_are_one_in_one_field_with_one_problem() {
         Class::RejectedAtDifferentLocation,
         "{planted:?}"
     );
+}
+
+/// A rule's entry explains the two errors it names, not the oracle's alone:
+/// with ayaml's error about another field, as a regression would give, the
+/// rule's case is left unexplained.
+#[test]
+fn a_rule_entry_needs_both_errors_it_names() {
+    let other: planted::Plant = |_, _, side| {
+        side.map_err(|rejection| Rejection {
+            message: "kind: invalid type: integer `1`, expected a string".to_string(),
+            ..rejection
+        })
+    };
+    for (input, id) in [
+        ("version: 1\nrules:\n  -\n", "rule-that-is-null"),
+        (
+            "version: 1\nrules:\n  - id: a\n    kind: k\n    level:\n      paths: x\n",
+            "enum-as-a-one-entry-mapping",
+        ),
+    ] {
+        let (clean, planted) = planted::clean_and_planted(input, Entry::Rule, other);
+        assert_eq!(explanation(&clean), Some(vec![id]), "{clean:?}");
+        assert_eq!(
+            planted.class,
+            Class::RejectedAtDifferentLocation,
+            "{planted:?}"
+        );
+        assert_eq!(
+            planted::planted_explanation(&planted, other),
+            None,
+            "{planted:?}"
+        );
+    }
 }
 
 #[test]
