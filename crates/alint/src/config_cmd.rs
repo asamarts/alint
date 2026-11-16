@@ -159,7 +159,7 @@ pub(super) fn cmd_validate_config(
     // 3. discovery from the current directory (same as `check`)
     let config_path: PathBuf = if let Some(p) = path {
         if p.is_dir() {
-            if let Some(found) = alint_dsl::discover(&p) {
+            if let Some(found) = discover_config(&p) {
                 found
             } else {
                 let err = anyhow::anyhow!(
@@ -174,7 +174,7 @@ pub(super) fn cmd_validate_config(
         }
     } else if let Some(first) = cli.config.first() {
         first.clone()
-    } else if let Some(p) = alint_dsl::discover(Path::new(".")) {
+    } else if let Some(p) = discover_config(Path::new(".")) {
         p
     } else {
         let err = anyhow::anyhow!(
@@ -363,6 +363,25 @@ fn refuse_spawning(
     Ok(())
 }
 
+/// The config discovery finds from `start` (`alint_dsl::discover_config`),
+/// with a warning on stderr for each file it skipped because another user
+/// owns it.
+pub(crate) fn discover_config(start: &Path) -> Option<PathBuf> {
+    let discovery = alint_dsl::discover_config(start);
+    for skipped in &discovery.skipped {
+        eprintln!("{}", skipped_config_warning(skipped));
+    }
+    discovery.path
+}
+
+/// The warning for a config file discovery skipped.
+fn skipped_config_warning(path: &Path) -> String {
+    format!(
+        "alint: warning: skipping {}: owned by another user",
+        term(&path.display().to_string())
+    )
+}
+
 pub(super) fn load_rules(cwd: &Path, cli: &Cli) -> Result<LoadedConfig> {
     load_rules_for_explain(cwd, cli, None)
 }
@@ -379,7 +398,7 @@ pub(super) fn load_rules_for_explain(
         // command's path remains authoritative.
         (first.clone(), cwd_abs)
     } else {
-        let config_path = alint_dsl::discover(cwd).ok_or_else(|| {
+        let config_path = discover_config(cwd).ok_or_else(|| {
             anyhow::anyhow!(
                 "no .alint.yml found (searched from {}) \
                  (run `alint init` to scaffold one)",
@@ -450,4 +469,21 @@ pub(super) fn load_rules_for_explain(
         config_files: config.config_files,
         config_path,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The warning names the skipped file, with any terminal control in its
+    /// path neutralised (a directory name someone else chose).
+    #[test]
+    fn a_skipped_config_is_named_in_a_warning() {
+        assert_eq!(
+            skipped_config_warning(Path::new("/tmp/.alint.yml")),
+            "alint: warning: skipping /tmp/.alint.yml: owned by another user"
+        );
+        let hostile = skipped_config_warning(Path::new("/tmp/\u{1b}]8;;x\u{7}/.alint.yml"));
+        assert!(!hostile.contains('\u{1b}'), "{hostile:?}");
+    }
 }

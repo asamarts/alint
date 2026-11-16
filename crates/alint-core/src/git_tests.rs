@@ -255,8 +255,9 @@ fn scoped_process_environment_filters_repository_redirectors() {
         ("SAFE_VALUE".to_string(), "retained".to_string()),
     ]);
     let _guard = scoped_process_environment(root.path(), environment);
+    std::fs::create_dir(root.path().join(".git")).unwrap();
 
-    let command = git_command(root.path());
+    let command = git_command(root.path()).expect("a repository to name");
     let git_dir = command
         .get_envs()
         .find(|(name, _)| *name == "GIT_DIR")
@@ -274,9 +275,10 @@ fn scoped_process_environment_filters_repository_redirectors() {
     );
 }
 
-/// A ceiling only narrows discovery: one the embedder's scoped environment
-/// sets reaches Git (`alint test` keeps discovery in its sandbox with it),
-/// while the host's own is still dropped.
+/// A ceiling only narrows discovery: alint's own search for the repository
+/// stops below one the embedder's scoped environment sets (`alint test` keeps
+/// discovery in its sandbox with it), and it reaches Git, while the host's own
+/// is still dropped.
 #[test]
 #[cfg(unix)]
 fn a_scoped_ceiling_reaches_git_and_stops_discovery() {
@@ -303,7 +305,14 @@ fn a_scoped_ceiling_reaches_git_and_stops_discovery() {
         .chain([("GIT_CEILING_DIRECTORIES".to_string(), ceiling.clone())])
         .collect();
     let _guard = scoped_process_environment(&root, environment);
-    let command = git_command(&root);
+    assert!(
+        git_command(&root).is_none(),
+        "no repository below the ceiling"
+    );
+    assert_eq!(collect_tracked_paths(&root), None);
+
+    std::fs::create_dir(root.join(".git")).unwrap();
+    let command = git_command(&root).expect("the sandbox's repository");
     assert_eq!(
         command
             .get_envs()
@@ -311,7 +320,6 @@ fn a_scoped_ceiling_reaches_git_and_stops_discovery() {
             .map(|(_, value)| value),
         Some(Some(std::ffi::OsStr::new(&ceiling)))
     );
-    assert_eq!(collect_tracked_paths(&root), None);
 }
 
 #[test]

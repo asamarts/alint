@@ -73,16 +73,17 @@ Every op has a tier. **Safe** fixes are behavior-preserving -- normalizing white
 
 ## content_from
 
-The five content-providing ops -- `file_create`, `file_prepend`, `file_append`, `insert_header`, and `create_and_register` -- take either an inline `content:` string or a `content_from: <path>` that reads the bytes from a file (exactly one of the two must be set). This is how boilerplate that is awkward to inline stays under version control: a real Apache-2 `LICENSE` is ~10 KB, and pasting it into YAML is fragile (escape rules, indentation drift, stray code-search hits), so stash the canonical bytes under `.alint/templates/` and point `content_from:` at them. The path resolves against the lint root (and, like every fix op that writes a path, stays confined to that root unless `allow_out_of_root` is set) and is read at fix-apply time, so the template need not exist when `alint check` runs, only when `alint fix` writes the target; a missing source is reported as `Skipped`, never a half-written file. In a monorepo with `nested_configs: true`, a sub-config's `content_from:` still resolves against the workspace root, so one root `.alint/templates/` supplies every package.
+The five content-providing ops -- `file_create`, `file_prepend`, `file_append`, `insert_header`, and `create_and_register` -- take either an inline `content:` string or a `content_from: <path>` that reads the bytes from a file (exactly one of the two must be set). This is how boilerplate that is awkward to inline stays under version control: a real Apache-2 `LICENSE` is ~10 KB, and pasting it into YAML is fragile (escape rules, indentation drift, stray code-search hits), so stash the canonical bytes under `.alint/templates/` and point `content_from:` at them. The path resolves against the lint root (and, like every fix op that writes a path, stays confined to that root unless `allow_out_of_root` is set, and always for a rule an `extends:`'d ruleset shaped) and is read at fix-apply time, so the template need not exist when `alint check` runs, only when `alint fix` writes the target; a missing source is reported as `Skipped`, never a half-written file. In a monorepo with `nested_configs: true`, a sub-config's `content_from:` still resolves against the workspace root, so one root `.alint/templates/` supplies every package.
 
 These ops are careful about repeat runs: `file_prepend`, `file_append`, and `insert_header` are idempotent (a no-op when the content is already present); `file_prepend` and `insert_header` preserve a leading byte-order mark; and `file_create` skips a target that already exists.
 
-A fix never writes into a Git directory (`.git` in any spelling a file system opens as one, or
-through a symlink to one), whatever configuration declares it, your own top-level one included:
-a `file_create` of `.git/hooks/pre-commit`, which v0.22.0 created, is now reported skipped. Keep
-hooks in a tracked directory and point `git config core.hooksPath` at it, or use a hook manager.
-A fix of a rule a ruleset from `extends:` shaped also never writes alint's own configuration or
-outside the root ([the trust boundary](/docs/concepts/composition/composition-and-trust/)).
+A fix never writes into a Git directory (`.git` in the spellings Git's own checks name, such as
+`.GIT`, `.git.` and `git~1`, or through a symlink to one), whatever configuration declares it, your
+own top-level one included: a `file_create` of `.git/hooks/pre-commit`, which v0.22.0 created, is
+now reported skipped. Keep hooks in a tracked directory and point `git config core.hooksPath` at
+it, or use a hook manager. A fix of a rule a ruleset from `extends:` shaped also never writes
+alint's own configuration, and never writes or reads outside the root
+([the trust boundary](/docs/concepts/composition/composition-and-trust/)).
 
 ## fix_size_limit
 

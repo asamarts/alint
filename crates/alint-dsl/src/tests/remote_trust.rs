@@ -509,6 +509,62 @@ fn w2_local_extends_content_fixer_is_not_demoted() {
     );
 }
 
+/// SEC-12: a URL scheme matches in any case. `HTTPS://` was read as a local
+/// path, so no SRI pin was required or checked, the entry kept none of a remote
+/// entry's limits, and the error for the missing file echoed its user,
+/// password and query.
+#[test]
+fn an_upper_case_scheme_is_a_remote_entry() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cache = extends::Cache::at(tmp.path().join("cache"));
+    let pinned = seed_remote(&cache, REMOTE_REPLACE);
+    let (_, sri) = pinned.split_once('#').unwrap();
+    let config_path = tmp.path().join(".alint.yml");
+    let load_entry = |entry: &str| {
+        std::fs::write(
+            &config_path,
+            format!("version: 1\nextends: [\"{entry}\"]\nrules: []\n"),
+        )
+        .unwrap();
+        load_with(&config_path, &LoadOptions::with_cache(cache.clone()))
+    };
+    let secret = "HTTPS://user:pw@example.invalid/remote.yml?token=t";
+
+    // Pinned: loaded from the pinned bytes as an untrusted remote, whose
+    // content fixer is demoted.
+    let cfg = load_entry(&format!("{secret}#{sri}")).unwrap();
+    let rule = cfg.rules.iter().find(|r| r.id == "no-todo").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion)
+    );
+
+    // Unpinned: refused as a remote entry, shown without its credentials and
+    // query.
+    let error = load_entry(secret).unwrap_err().to_string();
+    assert!(error.contains("no integrity hash"), "{error}");
+    assert!(
+        error.contains("HTTPS://example.invalid/remote.yml"),
+        "{error}"
+    );
+    assert!(
+        !error.contains("pw") && !error.contains("token=t"),
+        "{error}"
+    );
+
+    let error = load_entry("Http://user:pw@example.invalid/x.yml?token=t")
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("plain http:// is not allowed"), "{error}");
+    assert!(
+        !error.contains("pw") && !error.contains("token=t"),
+        "{error}"
+    );
+
+    let cfg = load_entry("ALINT://Bundled/oss-baseline@v1").unwrap();
+    assert!(!cfg.rules.is_empty());
+}
+
 #[test]
 fn w2_remote_security_positive_strip_is_not_demoted() {
     // `file_strip_bidi` / `file_strip_zero_width` are security-POSITIVE (they remove

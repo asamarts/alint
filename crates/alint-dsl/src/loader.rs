@@ -11,6 +11,7 @@ use alint_core::{
 use ayaml::Mapping;
 
 use crate::extends;
+use crate::extends::EntryKind as ExtendsEntryKind;
 use crate::{
     LoadOptions, RawConfig, apply_rule_filter, merge, reject_allow_out_of_root_in,
     reject_baseline_in, reject_command_rules_in, reject_spawning_templates_in,
@@ -764,7 +765,8 @@ fn load_extended_source(
     consumer_version: Option<u32>,
 ) -> Result<RawConfig> {
     let url = entry.url();
-    let source_display = if url.starts_with("http://") || url.starts_with("https://") {
+    let kind = ExtendsEntryKind::of(url);
+    let source_display = if matches!(kind, ExtendsEntryKind::PlainHttp | ExtendsEntryKind::Https) {
         remote_source_display(url)
     } else {
         url.to_string()
@@ -775,12 +777,12 @@ fn load_extended_source(
             std::slice::from_ref(&source_display),
         );
     }
-    let mut parent = if url.starts_with("http://") {
+    let mut parent = if kind == ExtendsEntryKind::PlainHttp {
         return Err(Error::Other(format!(
             "plain http:// is not allowed in `extends:` (entry {source_display:?}); \
              use https:// with an SRI hash instead"
         )));
-    } else if url.starts_with("https://") {
+    } else if kind == ExtendsEntryKind::Https {
         if opts.remote_policy == crate::RemotePolicy::Deny {
             return Err(Error::Other(format!(
                 "remote `extends` is disabled for this load (entry {source_display:?})"
@@ -802,7 +804,7 @@ fn load_extended_source(
         }
         crate::reject_env_expansion_in(&remote.rules, &remote.templates, &source_display)?;
         remote
-    } else if let Some(spec) = url.strip_prefix("alint://bundled/") {
+    } else if let ExtendsEntryKind::Bundled(spec) = kind {
         let mut bundled = load_bundled(spec)?;
         validate_source_compatibility(
             &mut bundled,
@@ -839,13 +841,17 @@ fn load_extended_source(
         )?
     };
     gate_extended_source(&parent, &source_display, opts.kind_catalog)?;
-    mark_extended_provenance(&mut parent, &source_display);
+    mark_extended_provenance(
+        &mut parent,
+        &source_display,
+        kind == ExtendsEntryKind::Https,
+    );
     parent.drop_top_level_settings(&alint_core::redact_environment_values(
         &source_display,
         &state.environment_values,
     ));
     parent.rules = apply_rule_filter(parent.rules, entry, &source_display)?;
-    if url.starts_with("https://") {
+    if kind == ExtendsEntryKind::Https {
         let base = url.split('#').next().unwrap_or(url);
         if !trusted.iter().any(|entry| entry == base || entry == url) {
             cap_untrusted_remote(&mut parent, &source_display, opts.kind_catalog)?;
@@ -854,12 +860,13 @@ fn load_extended_source(
     Ok(parent)
 }
 
-/// Record that the `extends:` source `url` shaped `parent`'s rules / templates,
-/// so `finalize` can judge the EFFECTIVE rule after the id-based field-merge has
-/// blurred where each field came from (e.g. refuse any contribution to a
-/// spawning rule, or a remote-assembled `${` env reference).
-fn mark_extended_provenance(parent: &mut RawConfig, url: &str) {
-    let classes: &[crate::SourceClass] = if url.starts_with("https://") {
+/// Record that the `extends:` source `url` (fetched when `remote`) shaped
+/// `parent`'s rules / templates, so `finalize` can judge the EFFECTIVE rule
+/// after the id-based field-merge has blurred where each field came from (e.g.
+/// refuse any contribution to a spawning rule, or a remote-assembled `${` env
+/// reference).
+fn mark_extended_provenance(parent: &mut RawConfig, url: &str, remote: bool) {
+    let classes: &[crate::SourceClass] = if remote {
         &[crate::SourceClass::Extended, crate::SourceClass::Remote]
     } else {
         &[crate::SourceClass::Extended]

@@ -85,7 +85,7 @@ pub fn run(
     let cwd = std::env::current_dir().context("resolving current directory")?;
     let resolved_config_path = match config_path {
         Some(p) => p.to_path_buf(),
-        None => alint_dsl::discover(&cwd).ok_or_else(|| {
+        None => crate::config_cmd::discover_config(&cwd).ok_or_else(|| {
             anyhow::anyhow!("no .alint.yml found (searched from {})", cwd.display())
         })?,
     };

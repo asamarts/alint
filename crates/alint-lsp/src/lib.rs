@@ -204,12 +204,30 @@ struct Session {
     /// rule or fact that spawns, or an environment value (see
     /// [`config::UNTRUSTED_NOTE`]).
     withheld: bool,
+    /// The ids of the rules an `extends:`'d ruleset or a nested config shaped
+    /// ([`alint_core::RuleSpec::extended_source`]): their code actions never
+    /// edit alint's configuration, as `alint fix` never writes it for them.
+    extended_rules: HashSet<String>,
+    /// The resolved local files the configuration came from
+    /// ([`alint_core::Config::config_files`]).
+    config_files: Vec<PathBuf>,
 }
 
 impl Session {
     /// `message` without the config's environment values.
     fn redact(&self, message: &str) -> String {
         alint_core::redact_environment_values(message, &self.environment_values).into_owned()
+    }
+
+    /// Why a code action of `rule_id` may not edit `path` (root-relative), as
+    /// [`alint_core::FixContext::write_refusal`] refuses an `alint fix` write:
+    /// a path in a Git directory, and for a rule an `extends:`'d ruleset
+    /// shaped, alint's own configuration.
+    fn edit_refusal(&self, rule_id: &str, path: &Path) -> Option<String> {
+        alint_core::FixContext::new(&self.root, false)
+            .with_extended_source(self.extended_rules.contains(rule_id))
+            .with_config_files(&self.config_files)
+            .write_refusal(path)
     }
 
     fn group_ctx(&self) -> GroupCtx<'_> {
@@ -940,6 +958,10 @@ fn fix_actions(
         // and falls back to fixing every occurrence -- exactly the "fix all"
         // action wanted here. A whole-file fixer keeps the `fix_edit` -> edit path.
         let workspace_edit = if fixer.collects_located_edits() {
+            // A located fix edits this document only.
+            if session.edit_refusal(&finding.rule_id, &rel).is_some() {
+                continue;
+            }
             // Run the SAME pipeline `alint fix` uses (tier-filter -> overlap-skip
             // -> post-splice verify/demote) and offer ONLY the surviving edits.
             // Without this the LSP would one-click-apply a fix the engine
@@ -979,6 +1001,10 @@ fn fix_actions(
             let Some(edit) = fixer.fix_edit(&violation, bytes, &session.root) else {
                 continue;
             };
+            if edit_paths(&edit).any(|path| session.edit_refusal(&finding.rule_id, path).is_some())
+            {
+                continue;
+            }
             match fix_edit_to_workspace_edit(&edit, &session.root) {
                 Some(we) => we,
                 None => continue,
@@ -1002,6 +1028,20 @@ fn fix_actions(
         unsafe_flags.push(unsafe_fix);
     }
     Some((actions, unsafe_flags))
+}
+
+/// Every path `edit` writes, creates, removes or renames.
+fn edit_paths(edit: &alint_core::FixEdit) -> impl Iterator<Item = &Path> {
+    use alint_core::FixEdit;
+    let (first, second) = match edit {
+        FixEdit::SetContent { path, .. }
+        | FixEdit::CreateFile { path, .. }
+        | FixEdit::DeleteFile { path }
+        | FixEdit::ReplaceRange { path, .. }
+        | FixEdit::SetMode { path, .. } => (path.as_path(), None),
+        FixEdit::RenameFile { from, to } => (from.as_path(), Some(to.as_path())),
+    };
+    std::iter::once(first).chain(second)
 }
 
 /// Fold a finished [`WorkspaceCheck`] into the server state and work out

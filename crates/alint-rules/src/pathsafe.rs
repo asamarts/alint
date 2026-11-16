@@ -62,8 +62,8 @@ pub(crate) fn confine(path: &Path, allow_escape: bool) -> Confined {
 }
 
 /// Refuse at load a path option `field` names for a rule to read by name (not
-/// through the walk), when it names a Git directory in any spelling a file
-/// system opens as `.git`: no rule reads there, since a file there can hold
+/// through the walk), when it names a Git directory in a spelling Git's own
+/// checks name (`alint_core::names_git_directory`): no rule reads there, since a file there can hold
 /// credentials. A path that reaches one through a symlink is refused at read
 /// ([`confine_read`], the relation read cache).
 pub(crate) fn reject_git_directory_read(
@@ -190,8 +190,8 @@ mod tests {
         }
     }
 
-    /// No rule reads a Git directory: a named path there, in any spelling, is
-    /// a load error, and one a symlink leads into is refused at read, whatever
+    /// No rule reads a Git directory: a named path there, in a spelling Git's
+    /// own checks name, is a load error, and one a symlink leads into is refused at read, whatever
     /// `allow_out_of_root` says. `.github` and a gitignored `.env` still read.
     #[cfg(unix)]
     #[test]

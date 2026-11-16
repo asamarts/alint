@@ -354,3 +354,59 @@ fn allow_out_of_root_never_lets_an_extended_ruleset_write_outside() {
     );
     assert_eq!(out.status.code(), Some(1), "{}", text(&out));
 }
+
+/// The read half of SEC-3: under the user's `allow_out_of_root: true`, a
+/// `file_create` from a ruleset they extend read its `content_from` outside
+/// the root and copied the file into the repository. It is refused now; the
+/// user's own rule still reads there.
+#[test]
+fn allow_out_of_root_never_lets_an_extended_ruleset_read_outside() {
+    let base = tempfile::tempdir().unwrap();
+    let repo = base.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    std::fs::write(base.path().join("secret"), "TOKEN=hunter2\n").unwrap();
+    for (name, fix) in [
+        ("v.yml", "{file_create: {content_from: ../secret}}"),
+        ("w.yml", "{file_create: {content_from: ./../secret}}"),
+    ] {
+        std::fs::write(
+            repo.join(name),
+            format!(
+                "version: 1\nrules:\n\
+                 - {{id: copy-{name}, kind: file_exists, paths: stolen-{name}, level: error, \
+                 fix: {fix}}}\n"
+            ),
+        )
+        .unwrap();
+    }
+    std::fs::write(
+        repo.join(".alint.yml"),
+        "version: 1\nallow_out_of_root: true\nextends: [./v.yml, ./w.yml]\nrules:\n\
+         - {id: own, kind: file_exists, paths: mine.txt, level: error, \
+         fix: {file_create: {content_from: ../secret}}}\n",
+    )
+    .unwrap();
+
+    let out = run(&repo, &["fix", "."]);
+    for name in ["v.yml", "w.yml"] {
+        assert!(
+            !repo.join(format!("stolen-{name}")).exists(),
+            "{}",
+            text(&out)
+        );
+    }
+    assert!(
+        text(&out).contains(
+            "../secret escapes the repo root; a fix from an extended ruleset never reads \
+             outside it"
+        ),
+        "{}",
+        text(&out)
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.join("mine.txt")).unwrap(),
+        "TOKEN=hunter2\n",
+        "{}",
+        text(&out)
+    );
+}

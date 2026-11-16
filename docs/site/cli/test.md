@@ -57,19 +57,25 @@ A test's repository stays in its sandbox. A `given.tree` symlink must lead to
 an entry of the tree as the file system resolves it, through any symlink it
 reaches, and no tree entry may sit under a symlink. Every symlink in the
 repository, from a tree or a fixture, must lead inside it, checked again after
-each fix step. A fix never writes or reads a Git directory (`.git` in any
-spelling a file system opens as one), and no rule reads one.
+each fix step. A fix never writes or reads a Git directory (`.git` in the
+spellings Git's own checks name, such as `.GIT`, `.git.` and `git~1`; a short
+name such as `GIT~2` or a hashed one passes), and no rule reads one.
 
 `given.env` reaches config interpolation, `when:` conditions (`env.X`) and
-granted commands only. A condition reads no other variable; a granted command
-also gets the host's `PATH` (and, on Windows, its system variables). The Git
-commands the runner runs itself, for `given.git` and for rules that read Git,
-run with a fixed environment: a sandboxed home (the host's home when the host
-keyring is granted), no system or global Git configuration, no global excludes
-or attributes file, `PATH`, and the C locale. They never read a fixture as a
-bare repository, and their repository discovery stops at the test's sandbox,
-so a test without `given.git` never reads a repository the host's temporary
-directory is in.
+granted commands only. A condition also sees the runner's own sandbox values:
+`HOME` and `GNUPGHOME` (unless the host keyring is granted, when they are the
+host's and a condition does not see them), `XDG_CONFIG_HOME`, `LC_ALL`, and the
+`GIT_*` settings below (`GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_GLOBAL`,
+`GIT_TERMINAL_PROMPT`, `GIT_OPTIONAL_LOCKS`, `GIT_CEILING_DIRECTORIES`). It
+never sees the host's `PATH` or any other host variable. A granted command also
+gets the host's `PATH` (and, on Windows, its system variables). The Git commands the runner runs itself, for `given.git` and for
+rules that read Git, run with a fixed environment: a sandboxed home (the host's
+home when the host keyring is granted), no system or global Git configuration,
+no global excludes or attributes file, `PATH`, and the C locale. Each names the
+repository `given.git` made (`--git-dir`, `--work-tree`), so Git never
+discovers one: a fixture shaped like a bare repository stays content whatever
+the Git version, and a test without `given.git` runs no Git at all, so it never
+reads a repository the host's temporary directory is in.
 
 ## Exit codes
 

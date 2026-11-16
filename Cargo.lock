@@ -96,6 +96,7 @@ dependencies = [
  "regex",
  "regex-syntax",
  "roxmltree",
+ "rustix",
  "saphyr",
  "saphyr-parser",
  "schemars",
