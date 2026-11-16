@@ -779,7 +779,7 @@ fn rule_json_path_absent_remove_value() -> impl Strategy<Value = String> {
 
 /// A `yaml_path_equals` rule fixed via the located `set_value` op (Phase 2):
 /// rewrites the scalar at `$.region` (planted as "OLD" only in `_trig/sv.yaml`)
-/// to "NEW" via a span-splice over saphyr's `MarkedYaml` node range. YAML is
+/// to "NEW" via a span-splice over the range saphyr's parser events give. YAML is
 /// TYPED, but the target here is a STRING so a bare `Fix` applies it -- exercising
 /// the spanned YAML resolver (incl. its char->byte offset conversion) against
 /// arbitrary co-resident trees.
