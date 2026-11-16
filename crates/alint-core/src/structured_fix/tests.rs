@@ -1189,7 +1189,7 @@ fn json_serialize_scalar_is_typed_including_null() {
     assert!(serialize_scalar(Format::Json, &json!([1])).is_none());
 }
 
-// ---- YAML (saphyr::MarkedYaml spans; SET only, remove deferred) ----
+// ---- YAML (saphyr parser-event spans; the resolver's own bounds are in yaml_/tests.rs) ----
 
 fn yaml_value(src: &str, path: &[PathSeg]) -> std::ops::Range<usize> {
     resolve_value_span(Format::Yaml, src.as_bytes(), path).unwrap()
@@ -1228,8 +1228,8 @@ fn yaml_value_span_declines_non_scalar_alias_multidoc_and_bad_input() {
     let src = "a:\n  b: 1\nlist:\n  - x\n";
     assert!(resolve_value_span(Format::Yaml, src.as_bytes(), &[key("a")]).is_none());
     assert!(resolve_value_span(Format::Yaml, src.as_bytes(), &[key("list")]).is_none());
-    // An aliased value resolves to the anchor's value with its span on `*d`, so
-    // the resolver declines it rather than replace the reference with a literal.
+    // An alias declines: a splice over `*d` would replace the reference with a
+    // literal.
     let al = "defaults: &d 5\nuse: *d\n";
     assert!(resolve_value_span(Format::Yaml, al.as_bytes(), &[key("use")]).is_none());
     // A multi-document stream is ambiguous -> declines.

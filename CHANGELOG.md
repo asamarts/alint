@@ -378,6 +378,37 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and a temporary directory such as `/tmp` that also occurs inside the package path, as in
   `/home/me/tmp/policies`, left the part of the package path before it visible. The longer path
   is now replaced first (#494).
+- **A structured YAML fix no longer overflows the stack.** Since v0.17.0, `set_value`,
+  `remove_value` and `replace` on a YAML file found the value's bytes with saphyr's loader, which
+  recurses once per level of nesting. saphyr does not read every document as the check side does:
+  a file that starts `&ak:---` (saphyr's anchor names run through a `:`), or that has a
+  byte-order mark at the start of a later line, can be one plain scalar to the check side and a
+  sequence 100,000 levels deep to saphyr. `alint fix` aborted on such a 60 KB file, as did
+  `check --format sarif`, and the language server's code action at 3,000 levels. The resolver
+  now walks saphyr's parser events without recursing, declines a document nested past 128
+  levels (block or flow, the check side's limit) and stops at a second document.
+- **A structured YAML fix no longer exhausts memory on an alias bomb.** Since v0.17.0, saphyr's
+  loader copied an anchored node for every alias. Its alias budget does not count what a mapping
+  key holds, so a 600-byte file of twelve nested `{? *a}` levels ran `fix` for 17 s and aborted
+  at 3.35 GB, where `check` took 0.02 s. The resolver keeps an alias as one node and never copies
+  it.
+- **A structured YAML fix no longer edits through an alias.** Since v0.17.0, a `set_value` or
+  `remove_value` whose path ran through an alias, as `$.job.image` does with `job: *base`,
+  edited the anchored node's definition: every other alias of it changed too, and the re-verify
+  checked only the path fixed. Such a path now declines, as one that ends at an alias did.
+- **`set_value` on an anchored YAML scalar keeps the anchor.** Since v0.17.0, the replaced bytes
+  began at the scalar's anchor, so `a: &x 1` set to `5` became `a: 5`, and a later `*x` no
+  longer parsed; a quoted scalar after an anchor also lost its trailing comment. The value is now
+  replaced after the anchor (`a: &x 5`). A core-schema tag is still replaced with the value,
+  which carries its own type (`!!str 5` set to `6` becomes `6`), and a core tag written before
+  an anchor declines.
+- **`remove_value` and `replace` on many YAML matches take linear time.** Since v0.17.0, each
+  matched node parsed the whole file again to find its bytes, the engine parsed the result again
+  to verify each edit, and each edit's splice moved the rest of the file: 2,000 matches took
+  3.8 s, 5,000 took 25 s, and 10,000 did not finish in two minutes, in `fix` and in
+  `check --format sarif`. One parse now finds every match's bytes, each verification pass parses
+  the result once (for every structured format), and the edits are spliced in one pass; 10,000
+  matches take under two seconds.
 
 ## [0.22.1] - 2026-11-11
 

@@ -87,6 +87,50 @@ pub fn resolve_removal_span(
     }
 }
 
+/// [`resolve_value_span`] for each of `paths`, in order. A YAML document is
+/// parsed once for all of them, so a fix with many matches costs one parse,
+/// not one per match; another format resolves each path on its own.
+#[must_use]
+pub fn resolve_value_spans(
+    format: Format,
+    bytes: &[u8],
+    paths: &[Vec<PathSeg>],
+) -> Vec<Option<Range<usize>>> {
+    match (format, std::str::from_utf8(bytes)) {
+        (Format::Yaml, Ok(text)) => yaml_::yaml_value_spans(text, paths),
+        _ => paths
+            .iter()
+            .map(|path| resolve_value_span(format, bytes, path))
+            .collect(),
+    }
+}
+
+/// [`resolve_removal_span`] for each of `paths`, in order, with one parse of a
+/// YAML document for all of them (see [`resolve_value_spans`]).
+#[must_use]
+pub fn resolve_removal_spans(
+    format: Format,
+    bytes: &[u8],
+    paths: &[Vec<PathSeg>],
+) -> Vec<Option<Range<usize>>> {
+    match (format, std::str::from_utf8(bytes)) {
+        (Format::Yaml, Ok(text)) => yaml_::yaml_removal_spans(text, paths),
+        _ => paths
+            .iter()
+            .map(|path| resolve_removal_span(format, bytes, path))
+            .collect(),
+    }
+}
+
+/// How many YAML documents this thread has parsed to resolve spans. Test and
+/// diagnostic only: the located fixers' tests count with it that a file is
+/// parsed once however many nodes a fix edits.
+#[doc(hidden)]
+#[must_use]
+pub fn yaml_span_reads() -> usize {
+    yaml_::reads()
+}
+
 /// Render `value` (a scalar: string, number, bool, or null) as `format`-correct
 /// bytes to splice in place of an existing scalar. `None` for a non-scalar
 /// (object / array -- routed to Suggestion by the caller) or a format without a
@@ -1651,288 +1695,53 @@ mod json_ {
     }
 }
 
-/// YAML span resolution + value serialization via `saphyr::MarkedYaml`.
+/// YAML span resolution + value serialization over `saphyr-parser`'s events.
 ///
-/// `MarkedYaml` is a spanned YAML node tree, so `set_value` is a SPAN-splice of
-/// the target scalar's range (like JSON): the span covers the full scalar token
-/// (quotes included for quoted scalars, trailing comment/whitespace EXCLUDED after
-/// the clamp below), so the splice never disturbs a neighbour. The check side
-/// parses YAML via ayaml's compat layer, whose 0.1 releases have no spanned node
-/// tree, hence this separate spanned view; a JSON scalar is valid YAML with the same value+type
-/// (YAML is a superset of JSON), so the serializer reuses `serde_json`.
+/// The resolver parses the document once into a flat tree (collections hold node
+/// indices) and resolves every path against it, so a fix with many matches parses
+/// the file once. `set_value` is a SPAN-splice of the target scalar's range (like
+/// JSON): the span covers the scalar token (quotes included for quoted scalars,
+/// trailing comment/whitespace EXCLUDED after the clamp below) and starts after
+/// the scalar's anchor, so the splice never disturbs a neighbour and the anchor
+/// survives. The check side parses YAML via ayaml's compat layer, whose 0.1
+/// releases have no spanned node tree, hence this separate spanned view; a JSON
+/// scalar is valid YAML with the same value+type (YAML is a superset of JSON), so
+/// the serializer reuses `serde_json`.
+///
+/// The two parsers do not read every document alike (saphyr's anchor names run
+/// through a `:`, and it skips a BOM at the start of a later line), so the check
+/// side's guards do not protect this resolver, and it bounds itself: it walks
+/// saphyr's events iteratively (never its recursive loader), declines a document
+/// that nests past 128 levels, block or flow (the check side's limit), stops at a
+/// second document, and keeps an alias as one node, never a copy of what it
+/// names. A deep document and an alias bomb each cost one pass over their events.
 ///
 /// CONSERVATIVE by design: for SET the resolver declines a multi-document stream, a
-/// non-scalar target, an aliased value (`saphyr` resolves an alias by cloning the
-/// anchored subtree but keeps the span on the `*ref` text, so the resolver declines
-/// a span starting with `*`; since 0.3.3 the loader also fails past 100,000
-/// alias-produced nodes, below `Format::parse`'s expansion budget, so a document
-/// between the two declines), a non-string mapping key, a BLOCK (`|` /
-/// `>`) or line-folded scalar (multi-line span), and an IMPLICIT null (`x:` --
-/// saphyr's zero-width span sits at the colon). `remove_value` (`yaml_removal_span`)
-/// deletes a single-line block-mapping entry's whole line (saphyr is read-only, so
-/// this is a hand-rolled line scan kept provably minimal -- it declines a
-/// sequence-element path, a multi-line / non-scalar value, and a flow member whose
-/// key does not own its line).
+/// non-scalar target, a path through or onto an alias (an edit inside the anchored
+/// node would change every alias of it; a splice over `*ref` would replace the
+/// reference with a literal), a document whose mapping repeats a key (as saphyr's
+/// loader refused one), a non-string mapping key, a scalar under a tag outside the
+/// core schema or one its core tag cannot read, a BLOCK (`|` / `>`) or line-folded
+/// scalar (multi-line span), an IMPLICIT null (`x:`: saphyr's zero-width span sits at
+/// the colon), and a core tag written before an anchor. A set keeps the anchor (`&a 5`
+/// becomes `&a 6`) and replaces a core-schema tag with the value, whose serialized
+/// form carries its own type (`!!str 5` set to the number 6 becomes `6`).
+/// `remove_value` (`removal_span`) deletes a single-line
+/// block-mapping entry's whole line (saphyr is read-only, so this is a hand-rolled
+/// line scan kept provably minimal: it declines a sequence-element path, a
+/// multi-line / non-scalar value, and a flow member whose key does not own its line).
 ///
 /// THREE `saphyr` quirks handled here (all verified empirically + gated; re-checked
-/// on 0.3.3, which, like 0.2.2, loads an empty plain node as null): (1)
-/// `Marker::index` is a CHAR offset despite the `index()` rustdoc claiming bytes,
-/// so spans are converted char->byte; a bump must re-verify this. (2) a
-/// QUOTED scalar's `span.end` runs to end-of-line (past a trailing comment), so
-/// `clamp_quoted_scalar_span` tightens it to the closing quote -- else a splice
+/// on 0.3.3, which, like 0.2.2, types an empty plain scalar as null): (1)
+/// `Marker::index` is a CHAR offset despite the `index()` rustdoc claiming bytes, so
+/// spans are converted char->byte; a bump must re-verify this.
+/// (2) a QUOTED scalar's `span.end` runs to end-of-line (past a trailing comment),
+/// so `clamp_quoted_scalar_span` tightens it to the closing quote, else a splice
 /// silently deletes the comment (the audit's HIGH finding; a plain scalar's end is
-/// already tight). (3) saphyr's parser refuses a 256th level of flow nesting
-/// (its flow level is a `u8`) but does not bound block nesting, so the flow-depth
-/// guard of the check side's `Format::parse` (which the fixer runs first anyway)
-/// runs here too, and the resolver refuses what the check side refuses. A leading
-/// BOM is stripped + offset (the check side strips it but saphyr rejects it).
-mod yaml_ {
-    use super::PathSeg;
-    use saphyr::{LoadableYamlNode, MarkedYaml, Scalar, YamlData};
-    use std::ops::Range;
-
-    /// The byte range of the scalar value at `path`. `None` if the source does not
-    /// parse, is a multi-document stream, or the path does not resolve to a scalar.
-    pub(super) fn yaml_value_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
-        // The check side's guard (parser-guard parity). The fixer runs
-        // `Format::parse` (which applies this) before reaching here, but guard
-        // directly so the resolver is self-safe. It scans the raw text, whose
-        // reading of a BOM as zero width covers the stripped text saphyr parses.
-        if !crate::yaml_depth::flow_depth_within_limit(text) {
-            return None;
-        }
-        // Strip a leading UTF-8 BOM before parsing: the check side (`Format::parse`)
-        // strips it, but `saphyr` rejects a `\u{FEFF}` prefix, so a BOM file would
-        // else be advertised-fixable yet always skipped. Resolve against the stripped
-        // text, then shift the span back into ORIGINAL byte coordinates by the
-        // stripped length (the caller splices the raw file bytes, BOM included).
-        let stripped = text.trim_start_matches('\u{feff}');
-        let bom_len = text.len() - stripped.len();
-        let docs = MarkedYaml::load_from_str(stripped).ok()?;
-        // Conservative: only a single-document stream (multi-doc `$path` resolution
-        // is ambiguous).
-        let [doc] = docs.as_slice() else {
-            return None;
-        };
-        let mut node = doc;
-        for seg in path {
-            node = match seg {
-                PathSeg::Key(k) => get_key(node, k)?,
-                PathSeg::Index(i) => get_index(node, *i)?,
-            };
-        }
-        // Only a SCALAR leaf is a set_value target (a mapping/sequence/tagged node
-        // declines).
-        if !matches!(node.data, YamlData::Value(_) | YamlData::Representation(..)) {
-            return None;
-        }
-        // `saphyr`'s `Marker::index` is a CHAR offset -> convert to bytes.
-        let raw = char_span_to_byte(stripped, node.span.start.index(), node.span.end.index())?;
-        let at = stripped.get(raw.clone())?;
-        // Decline two saphyr span shapes a flow-scalar splice cannot safely replace
-        // (both are verify-gated anyway, but decline cleanly rather than emit an
-        // un-appliable suggestion / trust a bogus span):
-        //   - an EMPTY span: an IMPLICIT null (`x:`) -- saphyr places a zero-width
-        //     span AT THE COLON, a bogus splice point (explicit `~` / `""` are fine);
-        //   - a MULTI-LINE span: a block (`|` / `>`) or line-folded scalar -- the
-        //     span is the block CONTENT, so splicing a flow scalar leaves the block
-        //     indicator and changes meaning.
-        if at.is_empty() || at.contains('\n') {
-            return None;
-        }
-        // Decline a YAML ALIAS reference (`use: *anchor`): saphyr resolves it to the
-        // anchored VALUE but leaves the span on the `*ref` text, so a splice would
-        // silently DE-ALIAS it (replace the reference with a literal) -- a semantic
-        // change, so decline (conservative). A plain scalar can never begin with the
-        // reserved `*`; an anchor DEFINITION value (`&a 5`) has span `5` (the `&a` is
-        // excluded) and stays fixable. A quoted `"*x"` string's span starts with `"`.
-        if at.starts_with('*') {
-            return None;
-        }
-        // Tighten the trailing edge of a QUOTED scalar: saphyr's span end runs to
-        // END-OF-LINE (over trailing whitespace + a `#` comment), whereas a plain
-        // scalar's end is tight. Without this, a splice over `"old"  # keep` DELETES
-        // the comment and COMMITS (a comment is not part of the value, so re-verify
-        // cannot catch it) -- the audit's HIGH silent-data-loss finding.
-        let span = clamp_quoted_scalar_span(stripped, raw);
-        Some(span.start + bom_len..span.end + bom_len)
-    }
-
-    /// Clamp a quoted scalar's span end to just after its closing quote. `saphyr`
-    /// over-extends a quoted scalar's `span.end` to end-of-line (past trailing
-    /// whitespace + a comment); a plain / block scalar's end is already tight, so
-    /// its span is returned unchanged. Byte-scanning is UTF-8-safe: the quote and
-    /// backslash bytes are ASCII and never collide with a multibyte continuation.
-    fn clamp_quoted_scalar_span(text: &str, span: Range<usize>) -> Range<usize> {
-        let bytes = text.as_bytes();
-        let open = bytes[span.start];
-        if open != b'"' && open != b'\'' {
-            return span; // plain / block scalar: `span.end` is already tight.
-        }
-        let mut i = span.start + 1;
-        while i < span.end {
-            match bytes[i] {
-                // A double-quote escape (`\"`, `\\`, `\n`, ... all ASCII) skips 2.
-                b'\\' if open == b'"' => i += 2,
-                b if b == open => {
-                    // In a single-quoted scalar `''` is a literal quote, not a close.
-                    if open == b'\'' && bytes.get(i + 1) == Some(&b'\'') {
-                        i += 2;
-                    } else {
-                        return span.start..i + 1; // just after the closing quote
-                    }
-                }
-                _ => i += 1,
-            }
-        }
-        span // unterminated within the span (unreachable for a valid parsed scalar)
-    }
-
-    /// The mapping value for a STRING key `key` (declines a non-mapping node or a
-    /// non-string key -- the conservative common case).
-    fn get_key<'a, 'i>(node: &'a MarkedYaml<'i>, key: &str) -> Option<&'a MarkedYaml<'i>> {
-        let YamlData::Mapping(m) = &node.data else {
-            return None;
-        };
-        m.iter().find_map(|(k, v)| match &k.data {
-            YamlData::Value(Scalar::String(s)) if s == key => Some(v),
-            _ => None,
-        })
-    }
-
-    /// The `i`th sequence element (declines a non-sequence node).
-    fn get_index<'a, 'i>(node: &'a MarkedYaml<'i>, i: usize) -> Option<&'a MarkedYaml<'i>> {
-        let YamlData::Sequence(seq) = &node.data else {
-            return None;
-        };
-        seq.get(i)
-    }
-
-    /// Map a `[cs, ce)` CHAR span to a `[bs, be)` BYTE span over `text`. An offset
-    /// equal to the total char count is the end of the string.
-    fn char_span_to_byte(text: &str, cs: usize, ce: usize) -> Option<Range<usize>> {
-        if cs > ce {
-            return None;
-        }
-        let (mut bs, mut be) = (None, None);
-        let mut count = 0usize;
-        for (b, _) in text.char_indices() {
-            if count == cs {
-                bs = Some(b);
-            }
-            if count == ce {
-                be = Some(b);
-            }
-            count += 1;
-        }
-        if cs == count {
-            bs = Some(text.len());
-        }
-        if ce == count {
-            be = Some(text.len());
-        }
-        Some(bs?..be?)
-    }
-
-    /// Serialize a scalar as YAML bytes. A JSON scalar is valid YAML with the same
-    /// value + type (YAML is a superset of JSON): a number/bool renders bare, `null`
-    /// as `null`, a string double-quoted + escaped -- and it re-parses to the same
-    /// value so the `equals` re-verify holds. `None` for a non-scalar (routed to a
-    /// Suggestion).
-    pub(super) fn yaml_serialize_scalar(value: &serde_json::Value) -> Option<Vec<u8>> {
-        use serde_json::Value as J;
-        match value {
-            J::String(_) | J::Number(_) | J::Bool(_) | J::Null => serde_json::to_vec(value).ok(),
-            J::Array(_) | J::Object(_) => None,
-        }
-    }
-
-    /// The byte range `remove_value` deletes for the block-mapping entry at `path`:
-    /// the target key's WHOLE physical line (through its trailing newline), so the
-    /// splice is a clean line removal. `saphyr` is read-only (no edit CST), so this
-    /// is a hand-rolled line scan -- CONSERVATIVE to stay provably minimal (the
-    /// over-deletion class): resolves ONLY when
-    ///   - the last path segment is a mapping KEY (sequence-element removal declines);
-    ///   - the value is a single-line SCALAR (a block `|`/`>` or nested mapping /
-    ///     sequence value spans lines -> declines, else the line delete would orphan
-    ///     the continuation);
-    ///   - the KEY OWNS its line (only indentation precedes it) -- so a FLOW-mapping
-    ///     member (`x: {a: 1, b: 2}`, key not at line start) declines rather than
-    ///     delete the whole `x:` line and eat its siblings.
-    ///
-    /// Deleting exactly that one line removes exactly the one entry (block mappings
-    /// are one entry per line); a trailing `# comment` on the line goes with it. The
-    /// `Absent` re-verify catches any residual syntax breakage (e.g. a now-dangling
-    /// anchor alias). A leading BOM is stripped before parse + the span offset back.
-    pub(super) fn yaml_removal_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
-        if !crate::yaml_depth::flow_depth_within_limit(text) {
-            return None;
-        }
-        let stripped = text.trim_start_matches('\u{feff}');
-        let bom_len = text.len() - stripped.len();
-        let docs = MarkedYaml::load_from_str(stripped).ok()?;
-        let [doc] = docs.as_slice() else {
-            return None;
-        };
-        // The last segment must be a mapping KEY (sequence-element removal deferred).
-        let (PathSeg::Key(target), parents) = path.split_last()? else {
-            return None;
-        };
-        let mut node = doc;
-        for seg in parents {
-            node = match seg {
-                PathSeg::Key(k) => get_key(node, k)?,
-                PathSeg::Index(i) => get_index(node, *i)?,
-            };
-        }
-        // Find the `target` (key_node, value_node) pair in the parent mapping.
-        let YamlData::Mapping(m) = &node.data else {
-            return None;
-        };
-        let (knode, vnode) = m
-            .iter()
-            .find(|(k, _)| matches!(&k.data, YamlData::Value(Scalar::String(s)) if s == target))?;
-        // The value must be a SCALAR (a mapping/sequence value is multi-line).
-        if !matches!(
-            vnode.data,
-            YamlData::Value(_) | YamlData::Representation(..)
-        ) {
-            return None;
-        }
-        // The entry, from the key start to the value end, must be single-line.
-        let entry = char_span_to_byte(stripped, knode.span.start.index(), vnode.span.end.index())?;
-        if stripped.get(entry.clone())?.contains('\n') {
-            return None;
-        }
-        // The KEY must OWN its line: only indentation before it (excludes a flow
-        // member, whose deletion would eat siblings on the same physical line).
-        let line_start = stripped[..entry.start].rfind('\n').map_or(0, |i| i + 1);
-        if !stripped[line_start..entry.start]
-            .bytes()
-            .all(|b| b == b' ' || b == b'\t')
-        {
-            return None;
-        }
-        // Delete the whole line, through its trailing newline (or to EOF).
-        let line_end = stripped[entry.end..]
-            .find('\n')
-            .map_or(stripped.len(), |i| entry.end + i + 1);
-        // The value must also be the LAST content on its physical line: the tail
-        // after it may be only whitespace and/or a `#` comment. Without this, a
-        // MULTI-LINE flow mapping (`x: {\n  a: 1, b: 2\n}` -- where the key starts a
-        // physical line it SHARES with sibling members after the value) would have
-        // the whole-line delete engulf those siblings: an over-deletion that still
-        // parses, so the `Absent` re-verify is blind to it (the audit HIGH bug --
-        // symmetric to the leading `line_start..entry.start` guard, mirroring HCL).
-        let tail = stripped[entry.end..line_end]
-            .trim_end_matches(['\r', '\n'])
-            .trim_start_matches([' ', '\t']);
-        if !(tail.is_empty() || tail.starts_with('#')) {
-            return None;
-        }
-        Some(line_start + bom_len..line_end + bom_len)
-    }
-}
+/// already tight). (3) a scalar's span starts at its anchor or tag, so the set span
+/// starts past them. A leading BOM is stripped + offset (the check side strips it
+/// but saphyr rejects it).
+mod yaml_;
 
 #[cfg(test)]
 mod tests;

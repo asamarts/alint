@@ -1,0 +1,46 @@
+test_version: 1
+name: set_value declines a YAML path that runs through an alias
+tags: [fix, yaml_path_equals, set_value, yaml, safety]
+
+# `job: *base` is an alias, so `$.job.image` reads the `image` of the anchored
+# `base` mapping. saphyr's loader followed a copy of that mapping whose spans
+# point into its definition, so the fix rewrote `base.image` too, and the
+# re-verify (of `job.image` only) passed: an edit beyond the finding. The
+# resolver declines a path through an alias, so the fix is `skipped` and the
+# file is unchanged.
+
+given:
+  tree:
+    ci.yaml: |
+      base: &base
+        image: old
+      job: *base
+  config: |
+    version: 1
+    rules:
+      - id: job-image
+        kind: yaml_path_equals
+        paths: "**/*.yaml"
+        path: "$['job']['image']"
+        equals: new
+        level: error
+        fix:
+          set_value: {}
+
+when: [check, fix, check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - {rule: job-image, level: error, path: ci.yaml}
+  - exit: policy_failure
+    skipped: [job-image]
+  - exit: policy_failure
+    violations:
+      - {rule: job-image, level: error, path: ci.yaml}
+
+expect_tree:
+  ci.yaml: |
+    base: &base
+      image: old
+    job: *base

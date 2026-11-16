@@ -103,6 +103,8 @@ alint and run before materialization:
 - byte-weighted alias expansion allowance capped independently of parser dereference counting;
 - literal compatibility metadata checks through the Saphyr event stream;
 - depth/event checks for duplicate-aware YAML extraction;
+- the structured-fix span resolver's own bounds on the Saphyr event stream: an iterative walk that
+  declines past 128 levels, block or flow, stops at a second document, and never expands an alias;
 - extends-chain depth, memoization, remote-size, and source-confinement limits.
 
 ayaml enforces the input cap, a depth cap and an alias budget itself, in time linear in the input,
@@ -121,10 +123,17 @@ ayaml's defaults (#483). The guards and the parser do not refuse the same docume
   rules below). `MAX_YAML_FLOW_DEPTH` lists the valid documents this refuses.
 
 The guards stay as defense in depth (decided in #483): they refuse a bomb before any parser reads
-it, with alint's own error, whichever parser reads the text next. saphyr, which reads YAML for
-source spans and structured fixes, refuses a 256th level of flow nesting of its own (its flow level
-is a `u8`), but does not bound block nesting. The cost is one linear pass over text that holds a
-`[`, `{` or `*`, and a second parse of a document that uses an alias.
+it, with alint's own error, whichever parser reads the text next. The cost is one linear pass over
+text that holds a `[`, `{` or `*`, and a second parse of a document that uses an alias.
+
+The guards read the text as ayaml does, and saphyr, which reads YAML for source spans and
+structured fixes, does not always read it alike: its anchor names run through a `:`, and it skips
+a byte-order mark at the start of a later line. A document the guards pass can therefore nest
+100,000 levels deep, or hold an alias bomb, in saphyr's reading. saphyr refuses a 256th level of
+flow nesting of its own (its flow level is a `u8`) but bounds neither block nesting nor what its
+loader copies for an alias, so no span reader uses its loader: the structured-fix resolver and the
+entry extraction walk its events and decline past 128 levels themselves, and the resolver keeps an
+alias as one node.
 
 The pre-scanner's lexer began as a port of libyaml-rs 0.3.0's scanner, and #483 moved it to the
 token boundaries of ayaml's compatibility reader:

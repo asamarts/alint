@@ -2568,10 +2568,22 @@
     "fingerprint": "1034252f774ed5676ae91e88e22cab601c5a06e234c3e6b08e1baa0cc8ac95b5"
   },
   {
+    "scenario": "fix/set_value_yaml_keeps_anchor.yml",
+    "rule_id": "defaults-nine",
+    "path": "app.yaml",
+    "fingerprint": "3f4223c1b27c709b4905580e035d813f7509395f9ce0e6c8aebb9e114762fa7f"
+  },
+  {
     "scenario": "fix/set_value_yaml_quoted_preserves_comment.yml",
     "rule_id": "host",
     "path": "app.yaml",
     "fingerprint": "d746a73d8a571c752030b2e9d4693e72768eccc352c6fecbe76b15a68d8f4c36"
+  },
+  {
+    "scenario": "fix/set_value_yaml_through_alias_declined.yml",
+    "rule_id": "job-image",
+    "path": "ci.yaml",
+    "fingerprint": "8cc191f6d095738b4d0a015e8ebd006256e94967ec3c1e30165e10a06038b0ac"
   },
   {
     "scenario": "fix/size_limit_skips_large_files.yml",
