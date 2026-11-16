@@ -342,6 +342,16 @@ fn flow_bomb_hidden_by_a_lexer_desync_is_still_rejected() {
         ("anchor-colon-nel", format!("&a:\u{85} {b}\n")),
         ("anchor-colon-ls", format!("&a:\u{2028} {b}\n")),
         ("anchor-colon-ps", format!("&a:\u{2029} {b}\n")),
+        // A tag holds a `#`, as a verbatim tag does, so no comment starts
+        // there.
+        ("tag-name-hash", format!("k: !a# {b}\n")),
+        ("verbatim-tag-hash", format!("k: !<!a#b> {b}\n")),
+        // A key candidate expires at the end of its line, so the `:` below
+        // `? a` has no key: the plain scalar after it goes on at column 1.
+        (
+            "key-candidate-ends-with-its-line",
+            format!("? a\n: b\n \"\nc: {b}\nd: \"\"\n"),
+        ),
         // An alias name gives back a final `:` only, not a quote...
         ("alias-name-quote", format!("k: [*a', {b}]\n")),
         // ...and the `:` it gives back is a value indicator, so the block
@@ -427,6 +437,26 @@ fn scalar_and_comment_contents_never_false_reject() {
     }
 }
 
+/// The known false refusals that `MAX_YAML_FLOW_DEPTH` documents: valid
+/// documents where the scanner counts brackets ayaml reads as text.
+#[test]
+fn the_documented_false_refusals_still_refuse() {
+    let deep = "[".repeat(MAX_YAML_FLOW_DEPTH + 72);
+    for doc in [
+        // After a name ayaml reads two ways, every later bracket counts.
+        format!("- &a:, x\n- '{deep}'\n"),
+        // A `...` after the leading byte order mark ends a document in the
+        // reading that gives the mark no width; to ayaml it is text here.
+        format!("\u{feff}... {deep}\n"),
+    ] {
+        assert!(
+            crate::yaml::from_str::<ayaml::Value>(&doc).is_ok(),
+            "{doc:?}"
+        );
+        assert!(!flow_depth_within_limit(&doc), "{doc:?}");
+    }
+}
+
 #[test]
 fn alias_hidden_by_a_lexer_desync_is_still_detected() {
     // The alias short-circuit must never miss a real `*alias`: a missed one
@@ -441,6 +471,8 @@ fn alias_hidden_by_a_lexer_desync_is_still_detected() {
         "- k: >\n    \"\n  b: *undefined_zz\n  c: \"\"\n",
         "k: &x\" v\nb: *undefined_zz\nc: \"\"\n",
         "k: &x|\n  [*undefined_zz]\n",
+        "k: !t# [*undefined_zz]\n",
+        "? a\n: b\n \"\nc: *undefined_zz\nd: \"\"\n",
     ];
     for doc in fixtures {
         assert!(
@@ -555,6 +587,80 @@ fn an_alias_name_gives_back_a_final_colon() {
     assert_eq!(end("*: x\n", true, &[]), (2, 2, 0));
     assert_eq!(end("*a: x\n", true, &[b"a:"]), (3, 3, 1));
     assert_eq!(end("&a: x\n", false, &[]), (3, 3, 1));
+}
+
+/// The deepest flow nesting in ayaml's event stream for `doc`, which reads
+/// every document of a stream.
+fn stream_flow_depth(doc: &str) -> usize {
+    use ayaml::Event;
+    let events = crate::yaml::stream_events(doc).unwrap();
+    // Whether each open collection is a flow one.
+    let mut open = Vec::new();
+    let mut deepest = 0;
+    for event in &events {
+        match event {
+            Event::SequenceStart { style, .. } | Event::MappingStart { style, .. } => {
+                open.push(*style == ayaml::CollectionStyle::Flow);
+                deepest = deepest.max(open.iter().filter(|&&flow| flow).count());
+            }
+            Event::SequenceEnd { .. } | Event::MappingEnd { .. } => {
+                open.pop();
+            }
+            _ => {}
+        }
+    }
+    deepest
+}
+
+/// ayaml forgets the anchor names that end in `:` at `---` and `...`, so
+/// an alias in a later document gives its final `:` back unless an anchor
+/// of its own document has the whole name: here `*a:` is the key `*a`, and
+/// its empty block scalar ends at the sibling key below it.
+///
+/// No alint entry point reads past the first document with ayaml (a decode
+/// refuses a second one at its marker), so ayaml's event stream, which reads
+/// them all, is the oracle; the scanner keeps step with ayaml's scanner for
+/// a reader that goes on.
+#[test]
+fn colon_anchor_names_end_with_their_document() {
+    for marker in ["---", "..."] {
+        let doc = format!("&a: 1\n{marker}\nx: &a 1\nk:\n  *a: |\n  b: [[1]]\n");
+        let error = crate::yaml::from_str::<ayaml::Value>(&doc)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.starts_with("more than one document in stream"),
+            "{error}"
+        );
+        assert_eq!(stream_flow_depth(&doc), 2, "{marker}");
+        assert!(!flow_depth_within_limit_with(&doc, 1), "{marker}");
+    }
+}
+
+/// ayaml counts an implicit key in characters, up to 1024 from the key to
+/// its `:`, and refuses a longer one. A key of 1024 multi-byte characters
+/// (3,072 bytes) is still a key to the scanner, so its empty block scalar
+/// ends at the sibling key below it; one of 1025 ayaml refuses before it
+/// reads on.
+#[test]
+fn an_implicit_key_of_1024_characters_is_still_a_key() {
+    let key = |n: usize| "\u{20ac}".repeat(n);
+    let b = bomb(MAX_YAML_FLOW_DEPTH + 76);
+    let flow = |n: usize| format!("{}: |\n  \"\nb: {b}\nc: \"\"\n", key(n));
+    let alias = |n: usize| format!("{}: |\n  \"\nb: *undefined_zz\nc: \"\"\n", key(n));
+    assert!(parser_sees_deep_nesting(&flow(1024)));
+    assert!(!flow_depth_within_limit(&flow(1024)));
+    assert!(parser_sees_alias(&alias(1024)));
+    assert!(contains_alias(&alias(1024)));
+    for doc in [flow(1025), alias(1025)] {
+        let error = crate::yaml::from_str::<ayaml::Value>(&doc)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.starts_with("an implicit mapping key may be at most 1024 characters long"),
+            "{error}"
+        );
+    }
 }
 
 /// ayaml stops at a character that cannot start a token, such as the
@@ -680,6 +786,8 @@ const PARITY_ALPHABET: &[&str] = &[
     "*a",
     "&a:",
     "*a:",
+    "!t#",
+    "!<!t#>",
     ".",
     "\\",
     "\t",
@@ -788,6 +896,29 @@ fn alias_expansion_budget_is_charged_in_bytes() {
     assert!(!expansion_within_limit_with(&key, 300_000));
     let tag = format!("a: &a !{s} 1\nb: [{}]\n", "*a,".repeat(200));
     assert!(!expansion_within_limit_with(&tag, 300_000));
+}
+
+/// Only ayaml's alias-expansion limit means the alias budget is spent. A
+/// document past the input cap that uses one alias passes the budget pass,
+/// so its caller does not report an alias expansion, and the parse refuses
+/// it for its size.
+#[test]
+fn a_document_over_the_input_cap_is_not_an_alias_bomb() {
+    // One allocation just past the cap, padded with a comment.
+    let head = b"a: &a 1\nb: *a\n# ";
+    let mut bytes = vec![b'x'; crate::structured_format::MAX_STRUCTURED_BYTES + 1];
+    bytes[..head.len()].copy_from_slice(head);
+    let doc = String::from_utf8(bytes).unwrap();
+    let error = crate::yaml::from_str::<ayaml::Value>(&doc)
+        .unwrap_err()
+        .into_parser();
+    assert_eq!(
+        error.limit().map(ayaml::LimitExceeded::kind),
+        Some(ayaml::LimitKind::InputBytes),
+        "{error}"
+    );
+    assert!(expansion_within_limit(&doc));
+    assert!(scan_guards(&doc).expansion_within_limit(&doc));
 }
 
 #[test]

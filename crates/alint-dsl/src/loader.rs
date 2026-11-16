@@ -354,8 +354,8 @@ fn parse_config_interpolated_inner_with_environment(
     }
     // Reject an alias-expansion bomb (a single anchor referenced many times) the
     // same way. The guard was written for the parser v0.22 used, whose limits
-    // missed it; ayaml charges the same budget, and the guard stays as defense
-    // in depth (`yaml_depth`).
+    // missed it; ayaml charges an alias budget of its own, which the guard's
+    // is stricter than, and the guard stays as defense in depth (`yaml_depth`).
     if !yaml_guards.expansion_within_limit(contents) {
         return Err(Error::Other(format!(
             "{}: YAML alias expansion exceeds the maximum supported size",
