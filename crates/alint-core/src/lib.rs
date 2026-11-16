@@ -94,9 +94,9 @@ pub use level::Level;
 pub use location::{MAX_RELATED_LOCATIONS, RelatedLocation, SourceRange, physical_lines};
 pub use pathsafe::{
     CONFIG_DROP_IN_DIRECTORY, CONFIG_FILE_NAMES, alint_config_refusal, create_landing,
-    derive_target, git_directory_refusal, names_git_directory, normalize_confined,
-    path_names_alint_config, path_names_git_directory, reaches_alint_config, reaches_git_directory,
-    resolved_within_root,
+    derive_target, git_directory_read_refusal, git_directory_refusal, names_git_directory,
+    normalize_confined, path_names_alint_config, path_names_git_directory, reaches_alint_config,
+    reaches_git_directory, resolved_within_root,
 };
 pub use proposed_fix::{EditRegion, ProposedEdit, attach_proposed_edits, byte_to_line_col};
 pub use redaction::{redact_evidence, redaction_marker};

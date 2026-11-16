@@ -244,7 +244,7 @@ pub(crate) fn blocking_ancestor(dir: &Path) -> Option<&Path> {
 /// an in-repo symlink leads into one: a file a fix puts there (`.git/config`,
 /// `.git/commondir`, a `.git` file) is configuration Git runs commands from
 /// (`core.fsmonitor`), and one it reads there (`.git/config`) can hold
-/// credentials. Rules may still read such a path.
+/// credentials. No rule reads one either (`crate::pathsafe::confine_read`).
 pub(crate) fn confine_fix_path(
     rel: &Path,
     root: &Path,
@@ -261,6 +261,7 @@ pub(crate) fn confine_fix_path(
             "{} escapes the repo root (set a top-level `allow_out_of_root` to permit)",
             rel.display()
         )),
+        crate::pathsafe::Confined::GitDirectory => Err(git_directory_refusal(rel)),
     }
 }
 

@@ -293,7 +293,10 @@ impl Landing {
 ///
 /// A fix never writes or reads a path with such a component: a file it puts
 /// there (`.git/config`, `.git/commondir`, a `.git` file) is configuration
-/// Git runs commands from. Rules may still read one.
+/// Git runs commands from. No rule reads one either, since it can hold
+/// credentials (an `http.*.extraheader`): a rule that names one is refused at
+/// load, and a named read that reaches one through a symlink is refused when
+/// it happens ([`git_directory_read_refusal`]).
 #[must_use]
 pub fn names_git_directory(name: &str) -> bool {
     opens_as(name, |file| {
@@ -377,6 +380,19 @@ pub(crate) fn walk_follows_symlink(root_real: &Path, target: &Path) -> bool {
 pub fn git_directory_refusal(path: &Path) -> String {
     format!(
         "{} is in a Git directory; a fix never writes or reads there",
+        path.display()
+    )
+}
+
+/// Why a rule may not read a path it names (a `cross_file` `source.file`, a
+/// `json_schema_passes` `schema_path`): the path is in a Git directory, by
+/// name or through a symlink ([`reaches_git_directory`]), and a file there
+/// can hold credentials.
+#[doc(hidden)]
+#[must_use]
+pub fn git_directory_read_refusal(path: &Path) -> String {
+    format!(
+        "{} is in a Git directory; rules never read there",
         path.display()
     )
 }

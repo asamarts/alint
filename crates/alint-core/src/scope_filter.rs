@@ -262,6 +262,15 @@ impl ManifestPredicate {
                 ),
             )
         })?;
+        if crate::pathsafe::path_names_git_directory(Path::new(&spec.source)) {
+            return Err(Error::rule_config(
+                rule_id,
+                format!(
+                    "scope_filter manifest `source` {}",
+                    crate::pathsafe::git_directory_read_refusal(Path::new(&spec.source))
+                ),
+            ));
+        }
         let extract = spec.extract.resolve().map_err(|e| {
             Error::rule_config(rule_id, format!("scope_filter manifest `extract:` {e}"))
         })?;
@@ -691,6 +700,13 @@ pub(crate) fn read_manifest_confined(
     if !cabs.starts_with(&croot) {
         return Err(ManifestFailure::read(
             "scope manifest resolves outside the lint root",
+        ));
+    }
+    // A `source` naming a Git directory is refused at load; this one reaches
+    // one through a symlink, and a file there can hold credentials.
+    if crate::pathsafe::reaches_git_directory(root, rel) {
+        return Err(ManifestFailure::read(
+            "scope manifest is in a Git directory; rules never read there",
         ));
     }
     let meta = std::fs::metadata(&cabs).map_err(|error| {

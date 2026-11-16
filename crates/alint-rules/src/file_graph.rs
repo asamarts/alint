@@ -609,16 +609,23 @@ impl FileGraphRule {
             // which the symlink-blind `normalize_confined` alone misses.
             // `file_graph` has no `allow_out_of_root` opt-in, so any escape
             // is denied.
-            let crate::pathsafe::Confined::In(target) =
-                crate::pathsafe::confine_read(Path::new(&target), ctx.root, false)
-            else {
-                out.push(Self::node_violation(
-                    source,
-                    &format!(
-                        "derives the out-of-repo freshness target {target:?} (escapes the repo root)"
-                    ),
-                ));
-                continue;
+            let target = match crate::pathsafe::confine_read(Path::new(&target), ctx.root, false) {
+                crate::pathsafe::Confined::In(target) => target,
+                crate::pathsafe::Confined::GitDirectory => {
+                    out.push(crate::pathsafe::git_directory_read_failure(Path::new(
+                        &target,
+                    )));
+                    continue;
+                }
+                crate::pathsafe::Confined::AllowedEscape(_) | crate::pathsafe::Confined::Denied => {
+                    out.push(Self::node_violation(
+                        source,
+                        &format!(
+                            "derives the out-of-repo freshness target {target:?} (escapes the repo root)"
+                        ),
+                    ));
+                    continue;
+                }
             };
 
             let src_bytes = match crate::io::read_capped(&ctx.root.join(source)) {

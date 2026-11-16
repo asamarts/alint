@@ -355,6 +355,11 @@ pub(super) fn resolve_targets(ts: TargetsSpec, cfg: &impl Fn(String) -> Error) -
                 // match the normalized violation path (audit F2). A lexical escape
                 // keeps the raw string (read confinement then reports it out-of-root).
                 let file = std::path::Path::new(&t.file);
+                if let Some(message) =
+                    crate::pathsafe::git_directory_read_option(&format!("targets[{i}].file"), file)
+                {
+                    return Err(cfg(message));
+                }
                 let file = crate::pathsafe::normalize_confined(file).map_or(t.file, |p| {
                     // git's canonical diff spelling is always `/`-separated, even on
                     // Windows -- but `to_string_lossy()` on the normalized `PathBuf`

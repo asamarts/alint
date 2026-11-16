@@ -175,6 +175,12 @@ impl Rule for JsonSchemaPassesRule {
                 );
                 return Ok(violations);
             }
+            crate::pathsafe::Confined::GitDirectory => {
+                violations.push(crate::pathsafe::git_directory_read_failure(
+                    &self.schema_path,
+                ));
+                return Ok(violations);
+            }
         };
         let schema_abs = ctx.root.join(&schema_rel);
         let validator_res = self
@@ -344,6 +350,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
             "json_schema_passes has no fix op - alint can't synthesize correct content",
         ));
     }
+    crate::pathsafe::reject_git_directory_read(&spec.id, "schema_path", &opts.schema_path)?;
 
     Ok(Box::new(JsonSchemaPassesRule {
         id: spec.id.clone(),

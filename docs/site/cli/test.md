@@ -58,7 +58,7 @@ an entry of the tree as the file system resolves it, through any symlink it
 reaches, and no tree entry may sit under a symlink. Every symlink in the
 repository, from a tree or a fixture, must lead inside it, checked again after
 each fix step. A fix never writes or reads a Git directory (`.git` in any
-spelling a file system opens as one).
+spelling a file system opens as one), and no rule reads one.
 
 `given.env` reaches config interpolation, `when:` conditions (`env.X`) and
 granted commands only. A condition reads no other variable; a granted command
