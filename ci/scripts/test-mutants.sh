@@ -9,8 +9,11 @@
 #   - only a diff file or a crate name reaches cargo mutants.
 #   - cargo mutants runs with each process's address space capped and no core files,
 #     and, where sudo and systemd-run work, in a transient scope whose MemoryMax is
-#     the cap, as the invoking user with the script's environment; stub `sudo` and
-#     `systemd-run` stand in for the real ones, which are never run.
+#     the cap and whose OOMPolicy is `continue`, as the invoking user with the
+#     script's environment; stub `sudo` and `systemd-run` stand in for the real ones.
+#   - Where this user's systemd can make a scope, a real one with the script's
+#     properties (and a small MemoryMax) keeps a parent running when the kernel
+#     kills its child at the cap, which the default OOMPolicy does not.
 #
 # Stub bodies are single-quoted on purpose: they expand when the stub runs.
 # shellcheck disable=SC2016
@@ -218,19 +221,23 @@ done
 # invoking user, and with the script's environment, which sudo would have reset.
 uid=$(id -u)
 gid=$(id -g)
-scope_args="--scope --quiet --collect -p MemoryMax=12582912K -p MemorySwapMax=0 --uid=$uid --gid=$gid"
+scope_args="--scope --quiet --collect -p MemoryMax=12582912K -p MemorySwapMax=0 -p OOMPolicy=continue"
+scope_args+=" --uid=$uid --gid=$gid"
 run STUB_SUDO=ok HOME="$sandbox/home" CARGO_HOME="$sandbox/cargo" RUSTUP_HOME="$sandbox/rustup" \
   STUB_RC=0 -- --in-diff "$sandbox/pr.diff"
 if [[ "$rc" -eq 0 ]] && logged "^sudo -n systemd-run $scope_args -- true$" &&
    logged "^systemd-run $scope_args -- env -i .* timeout --signal=INT --kill-after=60 5400 cargo mutants --workspace --in-diff $sandbox/pr.diff --in-place --no-shuffle --output target/mutants$" &&
    logged '^limits 12582912 0$' &&
    logged "^env HOME=$sandbox/home CARGO_HOME=$sandbox/cargo RUSTUP_HOME=$sandbox/rustup RUSTFLAGS=$" &&
-   said 'in a transient scope with MemoryMax=12582912K' &&
+   said 'in a transient scope with MemoryMax=12582912K, no swap, OOMPolicy=continue' &&
    summarised 'No mutants in the lines this change touches.'; then
   ok "with sudo and systemd, cargo mutants runs in a 12 GiB scope as the user, with its environment"
 else
   bad "with sudo and systemd, cargo mutants must run in a MemoryMax scope with the script's environment"
 fi
+# The scope's properties, as mutants.sh passes them, for the real scope below.
+mapfile -t properties < <(grep -m 1 '^systemd-run --scope .* -- true$' "$sandbox/log" |
+  grep -oE -- '-p [^ ]+' | sed 's/^-p //')
 
 run STUB_SUDO=ok MUTANTS_MEMORY_LIMIT_KIB=1048576 STUB_RC=2 STUB_MISSED="$missed" -- --package alint-output
 if [[ "$rc" -eq 0 ]] && logged '^systemd-run --scope .* -p MemoryMax=1048576K -p MemorySwapMax=0 .* -- env -i ' &&
@@ -252,6 +259,46 @@ done
 
 run MUTANTS_BUDGET_SECONDS=0 -- --in-diff "$sandbox/pr.diff"
 if [[ "$rc" -ne 0 ]] && ! logged '^cargo mutants --'; then ok "a zero budget is rejected"; else bad "a zero budget must be rejected"; fi
+
+# A real scope with the script's properties, where this user's systemd can make
+# one: the kernel kills a child that outgrows MemoryMax (64 MiB here), and its
+# parent, standing in for cargo-mutants, must run on. A control scope with the
+# default OOMPolicy shows that systemd would stop the parent; where it does not
+# (an older systemd, or no memory controller for the user), this proves nothing
+# and is skipped.
+# real_scope <systemd-run property args...> <command...>
+# (In braces, so that bash's notice of a scope systemd stopped goes to the file.)
+real_scope() {
+  { timeout 120 env XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" \
+    systemd-run --user --scope --quiet --collect "$@"; } > "$sandbox/out" 2>&1
+}
+# The parent waits after the kill, long enough for systemd to stop the scope if
+# its policy says so.
+outgrow='perl -e "\$x = q(a) x (512 * 1024 * 1024)"; echo "child $?"; sleep 3; echo "parent alive"'
+scope=()
+for property in "${properties[@]}"; do
+  [[ "$property" == MemoryMax=* ]] && property=MemoryMax=64M
+  scope+=(-p "$property")
+done
+if [[ " ${properties[*]} " != *" MemoryMax="* ]]; then
+  bad "could not read the scope's properties from the stub systemd-run's arguments"
+elif ! real_scope "${scope[@]}" -- true; then
+  echo "  skip: this user's systemd cannot make such a scope, so the OOM policy is not run for real"
+else
+  real_scope "${scope[@]/OOMPolicy=continue/OOMPolicy=stop}" -- bash -c "$outgrow" || true
+  if grep -q '^child 0$' "$sandbox/out"; then
+    echo "  skip: a child over the scope's MemoryMax is not killed here (no memory controller)"
+  elif grep -q '^parent alive$' "$sandbox/out"; then
+    echo "  skip: this systemd does not stop a scope on an OOM kill, so continue proves nothing here"
+  else
+    real_scope "${scope[@]}" -- bash -c "$outgrow" || true
+    if grep -q '^child 137$' "$sandbox/out" && grep -q '^parent alive$' "$sandbox/out"; then
+      ok "in a real scope with the script's properties, an OOM-killed child leaves its parent running"
+    else
+      bad "in a real scope with the script's properties, an OOM-killed child must leave its parent running"
+    fi
+  fi
+fi
 
 echo "[test-mutants] $pass passed, $fail failed"
 [[ "$fail" -eq 0 ]]

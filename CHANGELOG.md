@@ -263,10 +263,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `MappingValues` and `MappingValuesMut`), `Error` and `Location`. Its functions are `from_str`,
   which decodes under alint's parser limits, and `from_value`, `to_value` and `to_string`. A CI
   gate keeps the parser out: it documents the three crates with every feature and with hidden
-  items shown, fails on a page that names a parser crate, and fails on what the documentation
-  cannot show, such as an item that exists only on another platform or in a release build, a
-  public type in a private module, code included from outside the crate, or an exported macro
-  that names a parser. In place of the `yaml_serde` types of 0.22:
+  items shown, fails on a page that links to a parser crate's documentation, and fails on what
+  the documentation cannot show: code under a `cfg` other than one on features or tests (such
+  as code for another platform or a release build) unless the gate's allowlist names it with a
+  reason, an attribute a macro builds, a public type in a private module, code included from
+  outside the crate, or an exported macro that names a parser. In place of the `yaml_serde`
+  types of 0.22:
   - `RuleSpec::extra`, `NestedRuleSpec::extra` and `RuleEntry::extra()` hold an
     `alint_core::yaml::Mapping`. Read an option with `get("name")` and the `Value` accessors
     (`as_str`, `as_bool`, `as_u64`, `as_mapping`, `as_sequence` and the rest) in place of a
@@ -290,18 +292,23 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     - `Value` is not an enum: read it with the accessors in place of matching its variants, and
       build one with `From`. There is no `Number`, `Tag` or `TaggedValue`: a number reads
       through `as_i64`, `as_u64` or `as_f64`, and a tag as a string through `tag()`; a tagged
-      value comes only from a document, and the accessors look through its tag in place of
-      `untag`. There is no `as_null`, `is_i64`, `is_u64`, `is_f64` or `apply_merge`.
+      value comes only from a document, and the accessors look through its tag, as
+      `yaml_serde`'s did. There is no `as_null`, `is_i64`, `is_u64`, `is_f64` or `apply_merge`.
     - `Value::get`, `Value::get_mut`, and `Mapping`'s `get`, `get_mut`, `contains_key`, `remove`
-      and indexing take a string key: `value.get(0)` is `value[0]` or `Sequence::get`, and a key
-      of another kind is found by iterating. Indexing takes `&str`, `&String` or an integer, not
-      a `Value` or an owned `String`.
+      and indexing take a string key, which they find untagged only, as `yaml_serde`'s did:
+      `value.get(0)` is `value[0]` or `Sequence::get`, and a key of another kind, or a tagged
+      one (`!t k: v`), is found by iterating. Indexing takes `&str`, `&String` or an integer,
+      not a `Value` or an owned `String`.
     - `mapping["missing"]` is null, where `yaml_serde` panicked, and `mapping[key] = value` adds
       a missing key, where it panicked. `Mapping::remove` keeps the order of the other keys,
       where `yaml_serde`'s moved the last key into the removed one's place.
     - `Mapping` has no `entry`, `retain`, `clear`, `with_capacity`, `reserve`, `capacity`,
       `shrink_to_fit`, `swap_remove`, `shift_remove` (its `remove` is one), `remove_entry` or
-      the other `*_entry` removals, `into_keys` or `into_values`.
+      the other `*_entry` removals, `into_keys` or `into_values`. Of the public types of
+      `yaml_serde::mapping`, `Iter`, `IterMut`, `IntoIter`, `Keys`, `Values` and `ValuesMut`
+      are `MappingIter`, `MappingIterMut`, `MappingIntoIter`, `MappingKeys`, `MappingValues`
+      and `MappingValuesMut`; `Entry`, `OccupiedEntry`, `VacantEntry`, `IntoKeys` and
+      `IntoValues` have no counterpart.
     - `Sequence` is a type of its own, not a `Vec<Value>`. It has `len`, `is_empty`, `get`,
       `get_mut`, `push`, `pop`, iteration and indexing by position, and converts from a
       `Vec<Value>`, but has no other `Vec` or slice method, such as `first`, `insert`, `sort` or
@@ -310,8 +317,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
       (write `*value == 1`), and values and mappings have no order (`<`). `Value::from` takes
       a `Vec<Value>`, not a `Vec` or slice of another type or a `Cow<str>`, and a `Sequence`,
       not a `Value`, is collected from an iterator.
-    - `Value` is not a serde `Deserializer`, so decode one with `from_value`, and `{:?}` prints
-      ayaml's form, such as `Number(Number(PosInt(1)))` where `yaml_serde` printed `Number(1)`.
+    - Neither `Value` nor `&Value` is a serde `Deserializer`, and `Value` is not
+      `IntoDeserializer`, so decode one with `from_value`. `{:?}` prints ayaml's form, such as
+      `Number(Number(PosInt(1)))` where `yaml_serde` printed `Number(1)`.
     - `Error` has a message and a line and column, without the byte offset.
   - `alint_core::template::render_mapping`, `render_value` and `render_nested_options` are no
     longer public, and neither are `alint_dsl::reject_command_rules_in`,

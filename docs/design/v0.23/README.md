@@ -463,10 +463,11 @@ decided then.
 - 2026-11-15: the review of #520.
   - **Correction to the 2026-11-14 entry on #520.** The gate did not strip each spelling of
     `doc(hidden)` (`#[doc(alias = "x", hidden)]` stayed hidden), and the owned YAML types did not
-    have all that 0.22's types had: `&value == 1`, `mapping["a"] = v`, `Value::from(vec![1, 2])`,
-    `value.get(0)` and slicing a `Sequence`, among others, compiled against 0.22 and fail now,
-    and `mapping["missing"]`, which panicked, is null. The CHANGELOG under-listed the
-    differences; it and `yaml-parser.md` now list every one.
+    have all that 0.22's types had: `&value == 1`, `Value::from(vec![1, 2])`, `value.get(0)` and
+    slicing a `Sequence`, among others, compiled against 0.22 and fail now, and
+    `mapping["missing"]`, which panicked, is null. (`mapping["a"] = v` compiles, as it did:
+    this change adds index assignment, which adds a missing key where 0.22 panicked.) The
+    CHANGELOG under-listed the differences; it and `yaml-parser.md` now list every one.
   - **The owned YAML types** gain `Value::get_mut`, indexing by `&String`, index assignment on
     `Mapping`, `Mapping::values_mut`, concrete key and value iterators, and `FusedIterator` and
     `Clone` on the iterators. `tag()` documents what it returns for verbatim, `%TAG` and core
@@ -534,3 +535,23 @@ decided then.
     which ayaml's own limits still stopped (#524), and ways the harness could explain a
     difference its trigger did not cause (#525). The pull requests that follow fix them.
   - Next: those fixes and the facade; then phase 6.
+- 2026-11-15: the review of #523.
+  - **Correction to the 2026-11-15 entry on the review of #520.** It listed `mapping["a"] = v`
+    among what no longer compiles; #523 itself made it compile, and the entry now says so. The
+    lists of differences named `untag`, which `yaml_serde` 0.10.7 keeps private, and missed
+    `IntoDeserializer`, the `Deserializer` on `&Value`, and the entry types and owned key and
+    value iterators of `yaml_serde::mapping`; the CHANGELOG and `yaml-parser.md` now list them.
+  - **The public-API gate** fails on any `cfg` that is not on features or tests, wherever it is,
+    unless its allowlist names it with a reason, and skips test-only code; the review's shapes
+    (a `cfg(windows)` module of impls, a `const _` block, a variant, a trait item, a
+    `cfg(panic = "abort")` function) passed before. It also fails on any `$` in an attribute,
+    `cfg_select!`, a renamed or macro-passed `include`, and an exported macro naming a parser
+    as a bare word or with a raw name, and its scan no longer counts a prose link to a parser's
+    issue. `yaml-parser.md` records why `ref_cast`'s hidden impls stay outside the gate.
+  - **Mutation testing.** A transient scope stopped everything in it, cargo-mutants included,
+    when the kernel killed one test process at its `MemoryMax`, so a runaway mutant ended the
+    run with nothing reported. The scope's `OOMPolicy` is `continue` now, and the self-test
+    checks it in a real scope where the user's systemd allows one.
+  - `Mapping`'s documentation says its string-key methods find untagged keys only, and tests
+    pin that and the auto traits of every owned type.
+  - Next: the other review fixes and the facade; then phase 6.

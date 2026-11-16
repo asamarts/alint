@@ -463,23 +463,28 @@ maintained libyaml fork is the lower-risk ownership boundary.
   the `yaml_serde` types did that alint's still do not, which the CHANGELOG lists for library
   users as well:
   - `Value` is not an enum, so its variants cannot be matched or built, and there is no
-    `Number`, `Tag` or `TaggedValue`, and no `as_null`, `is_i64`, `is_u64`, `is_f64`, `untag`
-    or `apply_merge`. A tagged value comes only from a document, and `tag()` gives its tag as a
-    string.
-  - `Value::get` and `get_mut`, and `Mapping`'s lookups and indexing, take a string key only;
+    `Number`, `Tag` or `TaggedValue`, and no `as_null`, `is_i64`, `is_u64`, `is_f64` or
+    `apply_merge`. A tagged value comes only from a document, `tag()` gives its tag as a
+    string, and the accessors look through it, as `yaml_serde`'s did (its `untag` family is
+    private to the crate).
+  - `Value::get` and `get_mut`, and `Mapping`'s lookups and indexing, take a string key only,
+    which they find untagged only, as `yaml_serde`'s did (`!t k: v` is found by iterating);
     indexing takes `&str`, `&String` or an integer, not a `Value` or an owned `String`.
   - `mapping["missing"]` is null where `yaml_serde` panicked, and `mapping[key] = value` adds a
     missing key where it panicked. `Mapping::remove` keeps the other keys' order where
     `yaml_serde`'s moved the last key into the gap.
   - `Mapping` has no `entry`, `retain`, `clear`, capacity methods, `swap_remove`,
-    `shift_remove`, `*_entry` removals, `into_keys` or `into_values`, and no order.
+    `shift_remove`, `*_entry` removals, `into_keys` or `into_values`, and no order. The public
+    types of `yaml_serde::mapping` that alint's iterators replace are `Iter`, `IterMut`,
+    `IntoIter`, `Keys`, `Values` and `ValuesMut`; `Entry`, `OccupiedEntry`, `VacantEntry`,
+    `IntoKeys` and `IntoValues` have no counterpart.
   - `Sequence` is not a `Vec<Value>`: it has `len`, `is_empty`, `get`, `get_mut`, `push`, `pop`,
     iteration and indexing by position, and no other `Vec` or slice method (`first`, slicing).
   - `&value == 1` does not compile, values have no order, `Value::from` takes no `Vec` or slice
     of another type and no `Cow<str>`, and an iterator collects into a `Sequence`, not a
     `Value`.
-  - `Value` is not a serde `Deserializer`, its `{:?}` is ayaml's, and an `Error` has no byte
-    offset.
+  - Neither `Value` nor `&Value` is a serde `Deserializer`, `Value` is not `IntoDeserializer`,
+    its `{:?}` is ayaml's, and an `Error` has no byte offset.
 
   The public-API gate now also fails on what the documentation cannot show: a `hidden` left in
   any `doc(...)` list, an attribute a macro builds, a `cfg` on `doc` at any depth, a public item
@@ -521,3 +526,24 @@ maintained libyaml fork is the lower-risk ownership boundary.
     refuse. One test compares the reading of byte-order marks as ayaml reads them with the values
     ayaml returns, since the union of the readings hides one reading's mistakes. The tests moved
     to `yaml_depth_tests.rs`.
+- **2026-11-15: the gate after the review of #523.** The review found code the public-API gate
+  passed although rustdoc never documents it, so a parser type in it would reach users on
+  another target. The gate now fails on any `cfg` or `cfg_attr` whose predicate is not one on
+  features, `test`, `doctest` or `docsrs` (combined with `all` or `any` only), whatever it is on:
+  a module, a `const _` block of impls, a variant, a field, a trait item, a statement, or an
+  item under `cfg(panic = "abort")`. Test-only code is exempt: an item under such a `cfg`, a file
+  only test-only code loads, and the files outside `src/` while the library includes none. The
+  cfgs the crates have are listed in the gate's `PLATFORM_ALLOWLIST`, each with why what it hides
+  cannot name a parser, and an entry no cfg matches fails, so the list is exactly the code's.
+  `cfg_select!` fails, as do a `$` anywhere in an attribute, a module a macro names, a `use` of
+  `include` and the word `include` in a macro's input or body (each can reach code the checks
+  never read), and an exported macro whose body names a parser crate as a bare word or whose
+  name is raw. The scan counts only rustdoc's links to a parser crate's pages, relative or on
+  docs.rs, so prose may link to a parser's issues.
+
+  One exception is by design. `ref_cast`'s `RefCastCustom` derive, used on `Value`, `Mapping`
+  and `Sequence`, implements its trait `ref_cast::__private<N>::RefCastCustom<ayaml::...>` for
+  each, in an anonymous `const _` block; the trait is `doc(hidden)`, so with hidden items shown
+  rustdoc still leaves the impls out. A doc(hidden) item under a `__private` path is, by Rust's
+  semver conventions, not public API, and nothing outside `ref_cast` can name the trait, so the
+  impls are not a way to reach a parser type.

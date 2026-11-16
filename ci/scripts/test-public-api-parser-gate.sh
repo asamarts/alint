@@ -3,16 +3,22 @@
 # - The scan: a clean tree with its canaries passes; a link to any parser crate
 #   (a listed one, or a documented crate named like one) from any page of the
 #   three crates fails and names the page; a link from a source page or another
-#   crate's page does not count; a missing crate, a missing or unlinked canary,
-#   and missing parser documentation are errors.
+#   crate's page, or one in prose to elsewhere (an issue on GitHub), does not
+#   count; a missing crate, a missing or unlinked canary, and missing parser
+#   documentation are errors.
 # - The source checks: every spelling of `#[doc(hidden)]` is removed, in every
-#   .rs file under a crate's directory; a `hidden` left in a doc list, an
-#   attribute a macro builds, a `cfg` predicate on `doc` at any depth, a public
-#   item under a platform, profile or `not(feature)` cfg (unless allowlisted), an
-#   `include!` or `#[path]` that leaves the crate, a crate without
+#   .rs file under a crate's directory; a `hidden` left in a doc list, a `$` in
+#   an attribute, a `cfg` predicate on `doc` at any depth, any `cfg` other than
+#   one on features, `test`, `doctest` or `docsrs` (on an item, field, variant,
+#   trait item, module or statement; unless allowlisted or in test-only code),
+#   `cfg_select!`, an `include!` or `#[path]` that leaves the crate, a `use` of
+#   `include` or the word in a macro, a crate without
 #   `#![deny(unnameable_types)]` or with an `allow` of it, and an exported macro
-#   naming a parser crate with any delimiter fail; comments, string and
-#   character literals and private macros do not count, and cannot hide code.
+#   naming a parser crate in any form fail; comments, string and character
+#   literals and private macros do not count, and cannot hide code. Test-only
+#   code is an item under `cfg(test)`, a file only such code loads, and the
+#   files outside src/ while the library loads none; and the repository's own
+#   sources pass, so the allowlist holds exactly their cfgs.
 #
 # Rust bodies are single-quoted on purpose: `$a` in them is a macro variable.
 # shellcheck disable=SC2016
@@ -81,6 +87,14 @@ mkdir -p "$doc/yaml_peg"
 printf '<a href="../../yaml_peg/struct.Node.html">Node</a>\n' >>"$doc/alint_dsl/index.html"
 expect "a link to a crate named like a parser fails" 1 "alint_dsl/index.html" "$doc"
 
+# Prose may link to a parser's repository or issues; only rustdoc's links to a
+# crate's pages count.
+doc="$sandbox/prose-link"
+make_tree "$doc"
+printf '<a href="https://github.com/asamarts/ayaml/issues/132">asamarts/ayaml#132</a>\n' \
+  >>"$doc/alint_core/yaml/struct.Value.html"
+expect "a prose link to a parser's issue passes" 0 "no public item" "$doc"
+
 # alint's own yaml module is not a parser crate.
 doc="$sandbox/own-yaml-module"
 make_tree "$doc"
@@ -148,14 +162,18 @@ make_sources() {
   printf '%s\n' "$body" >"$root/crates/alint-core/src/extra.rs"
 }
 
+# expect_sources NAME RC TEXT BODY [PATH CONTENT]...: the body in extra.rs and
+# each further file at its path.
 expect_sources() {
   local name=$1 want_rc=$2 want_text=$3 body=$4 root rc=0 out
   root="$sandbox/sources-$((pass + fail))"
   make_sources "$root" "$body"
-  if [[ -n ${5-} ]]; then
-    mkdir -p "$(dirname "$root/$5")"
-    printf '%s\n' "$6" >"$root/$5"
-  fi
+  shift 4
+  while (($# >= 2)); do
+    mkdir -p "$(dirname "$root/$1")"
+    printf '%s\n' "$2" >"$root/$1"
+    shift 2
+  done
   out=$(bash "${GATE_UNDER_TEST:-$GATE}" --check-sources "$root" 2>&1) || rc=$?
   if [[ $rc -eq $want_rc && $out == *"$want_text"* ]]; then
     pass=$((pass + 1))
@@ -185,17 +203,9 @@ pub fn named() {}
 pub struct Sealed;
 #[cfg_attr(docsrs, doc(cfg(feature = "strategies")))]
 pub fn d() {}
-#[cfg(unix)]
-fn private_on_unix() {}
-#[cfg(debug_assertions)]
-pub(crate) fn crate_only() {}
-pub fn statements() {
-    #[cfg(windows)]
-    let _ = 1;
-}
 #[path = "inner/more.rs"]
 mod more;
-#[cfg_attr(unix, path = "inner/more.rs")]
+#[cfg_attr(feature = "x", path = "inner/more.rs")]
 mod also_more;
 macro_rules! private { () => { ayaml::Value::Null } }
 #[macro_export]
@@ -218,13 +228,35 @@ pub fn a() {}'
 expect_sources "hidden after another doc option fails" 2 "a doc(hidden) is left" \
   '#[doc(alias = "x", hidden)]
 pub fn a() -> ayaml::Value { todo!() }'
-expect_sources "a doc attribute a macro builds fails" 2 "a macro builds a doc attribute" \
+expect_sources "a doc attribute a macro builds fails" 2 "a macro builds an attribute" \
   'macro_rules! m { ($a:meta) => { #[doc($a)] pub fn f() -> ayaml::Value { todo!() } } }
 m!(hidden);'
 expect_sources "an attribute a macro builds fails" 2 "a macro builds an attribute" \
   'macro_rules! m { ($a:meta) => { #[$a] pub fn f() -> ayaml::Value { todo!() } } }'
-expect_sources "a cfg a macro builds fails" 2 "a macro builds a cfg" \
+expect_sources "a cfg a macro builds fails" 2 "a macro builds an attribute" \
   'macro_rules! m { ($p:meta) => { #[cfg($p)] pub fn f() -> ayaml::Value { todo!() } } }'
+# Any `$` in an attribute, or in brackets after a `$` variable: a macro builds
+# it (the review of #523's shapes, which the doc and cfg checks missed).
+expect_sources "a doc attribute a macro builds from its tokens fails" 2 \
+  "a macro builds an attribute" \
+  'macro_rules! m { ($($t:tt)*) => { #[doc $($t)*] pub fn f() -> ayaml::Value { todo!() } } }
+m!((hidden));'
+expect_sources "a cfg a macro builds from its tokens fails" 2 "a macro builds an attribute" \
+  'macro_rules! m { ($($t:tt)*) => { #[cfg $($t)*] pub fn f() -> ayaml::Value { todo!() } } }
+m!((not(doc)));'
+expect_sources "a #[path] a macro builds fails" 2 "a macro builds an attribute" \
+  'macro_rules! m { ($p:literal) => { #[path = $p] pub mod x; } }
+m!("../../../outside.rs");'
+expect_sources "an allow a macro builds fails" 2 "a macro builds an attribute" \
+  'macro_rules! m { ($l:ident) => { mod hidden { #[allow($l)] pub struct U(pub ayaml::Marker); } } }
+m!(unnameable_types);'
+expect_sources "an attribute a macro builds after a # it is given fails" 2 \
+  "a macro builds an attribute" \
+  'macro_rules! m { ($h:tt $($t:tt)*) => { $h [doc $($t)*] pub fn f() -> ayaml::Value { todo!() } } }
+m!(# (hidden));'
+expect_sources "a module a macro names fails" 2 "a macro declares a module" \
+  'macro_rules! m { ($n:ident) => { pub mod $n; } }
+m!(leak);'
 expect_sources "cfg(not(doc)) fails" 2 "predicate on \`doc\`" '#[cfg(not(doc))]
 pub fn a() {}'
 expect_sources "cfg(any(test, doc)) fails" 2 "predicate on \`doc\`" '#[cfg(any(test, doc))]
@@ -235,39 +267,223 @@ expect_sources "a cfg on doc inside a cfg_attr fails" 2 "a cfg predicate on \`do
   '#[cfg_attr(all(), cfg(not(doc)))]
 pub fn a() -> ayaml::Value { todo!() }'
 
-# Public items rustdoc never sees on the documented target and profile.
-expect_sources "a public fn under cfg(windows) fails" 2 "\`pub fn a\` exists only under" \
+# Code rustdoc never sees on the documented target, profile and features: any
+# cfg but one on features, test, doctest or docsrs fails, on whatever it is on,
+# and names its allowlist key.
+expect_sources "a public fn under cfg(windows) fails" 2 "\`cfg(windows)\` on \`pub fn a\`" \
   '#[cfg(windows)]
 pub fn a() -> ayaml::Value { todo!() }'
 expect_sources "a public item under cfg(not(debug_assertions)) fails" 2 \
-  "\`pub struct S\` exists only under" '#[cfg(not(debug_assertions))]
+  "\`cfg(not(debug_assertions))\` on \`pub struct S(pub ayaml::Value)\`" \
+  '#[cfg(not(debug_assertions))]
 #[derive(Debug)]
 pub struct S(pub ayaml::Value);'
-expect_sources "an impl under a target cfg fails" 2 "\`impl From<ayaml::Value> for Value\`" \
+expect_sources "an impl under a target cfg fails" 2 \
+  "\`cfg(target_os = \"macos\")\` on \`impl From<ayaml::Value> for Value\`" \
   '#[cfg(target_os = "macos")]
 impl From<ayaml::Value> for Value { fn from(_: ayaml::Value) -> Self { todo!() } }'
-expect_sources "a public item under cfg_attr(unix, cfg(...)) fails" 2 "\`pub fn a\`" \
+expect_sources "a public item under cfg_attr(unix, cfg(...)) fails" 2 "\`cfg(unix)\` on \`pub fn a\`" \
   '#[cfg_attr(all(), cfg(unix))]
 pub fn a() {}'
-expect_sources "a public item under cfg(not(feature)) fails" 2 "\`pub fn a\` exists only under" \
+expect_sources "a public item under cfg(not(feature)) fails" 2 \
+  "\`cfg(not(feature = \"strategies\"))\` on \`pub fn a\`" \
   '#[cfg(not(feature = "strategies"))]
 pub fn a() -> ayaml::Value { todo!() }'
-expect_sources "a module under #![cfg(unix)] with a public item fails" 2 "\`the module\`" \
-  '#![cfg(unix)]
+expect_sources "a module under #![cfg(unix)] with a public item fails" 2 \
+  "\`cfg(unix)\` on \`the module\`" '#![cfg(unix)]
 pub fn a() {}'
-# The allowlist names an item it accepts, in a copy of the gate.
+# The shapes the review of #523 found passing: none is a public item or an impl
+# under a cfg the old check knew, and each is API on another target.
+expect_sources "a module under cfg(windows) holding impls fails" 2 \
+  "extra.rs:1: \`cfg(windows)\` on \`mod m\`" '#[cfg(windows)]
+mod m;' crates/alint-core/src/extra/m.rs 'impl crate::yaml::Value {
+    pub fn f(&self) -> &ayaml::Value { todo!() }
+}
+impl From<ayaml::Value> for crate::yaml::Mapping {
+    fn from(_: ayaml::Value) -> Self { todo!() }
+}'
+expect_sources "an impl in a const block under cfg(windows) fails" 2 \
+  "\`cfg(windows)\` on \`const _: ()\`" '#[cfg(windows)]
+const _: () = {
+    impl From<ayaml::Mapping> for crate::yaml::Value {
+        fn from(_: ayaml::Mapping) -> Self { todo!() }
+    }
+};'
+expect_sources "a variant under cfg(windows) fails" 2 "\`cfg(windows)\` on \`Leak(ayaml::Value)\`" \
+  'pub enum E {
+    Plain,
+    #[cfg(windows)]
+    Leak(ayaml::Value),
+}'
+expect_sources "a trait item under cfg(windows) fails" 2 "\`cfg(windows)\` on \`fn f\`" \
+  'pub trait T {
+    #[cfg(windows)]
+    fn f(&self) -> ayaml::Value;
+}'
+expect_sources "a public fn under cfg(panic = \"abort\") fails" 2 \
+  "\`cfg(panic = \"abort\")\` on \`pub fn f\`" '#[cfg(panic = "abort")]
+pub fn f() -> ayaml::Value { todo!() }'
+expect_sources "a function is named by its name and qualifiers" 2 \
+  "\`cfg(unix)\` on \`pub(crate) unsafe extern \"C\" fn r#g\`" '#[cfg(unix)]
+pub(crate) unsafe extern "C" fn r#g<T>(x: T) -> T { x }'
+expect_sources "a field under a target cfg fails" 2 \
+  "\`cfg(target_os = \"macos\")\` on \`pub leak: ayaml::Value\`" 'pub struct S {
+    pub plain: u8,
+    #[cfg(target_os = "macos")]
+    pub leak: ayaml::Value,
+}'
+expect_sources "a statement under cfg(windows) fails, named by its function" 2 \
+  "\`cfg(windows)\` on \`in fn f\`" 'pub fn f() {
+    #[cfg(windows)]
+    {
+        impl From<ayaml::Value> for crate::yaml::Value {
+            fn from(_: ayaml::Value) -> Self { todo!() }
+        }
+    }
+}'
+expect_sources "a cfg a macro puts after a # it is given fails" 2 "\`cfg(windows)\` on \`pub fn f\`" \
+  'macro_rules! m { ($h:tt) => { $h [cfg(windows)] pub fn f() -> ayaml::Value { todo!() } } }
+m!(#);'
+expect_sources "a raw r#cfg fails" 2 "\`cfg(windows)\` on \`pub fn f\`" \
+  '#[r#cfg(windows)]
+pub fn f() -> ayaml::Value { todo!() }'
+expect_sources "cfg_select! fails" 2 "cfg_select! picks code by platform" 'cfg_select! {
+    windows => { pub fn leak() -> ayaml::Value { todo!() } }
+    _ => {}
+}'
+expect_sources "cfgs on features, test, doctest and docsrs pass" 0 "" '#[cfg(feature = "x")]
+pub fn a() -> ayaml::Value { todo!() }
+#[cfg(all(feature = "a", any(test, docsrs, doctest)))]
+pub fn b() {}
+#[cfg_attr(feature = "x", derive(Debug))]
+pub struct S;
+#[cfg_attr(docsrs, doc(cfg(feature = "x")))]
+pub fn c() {}'
+
+# Test-only code is skipped: an item under a test-only cfg and what it holds,
+# up to its end only.
+expect_sources "cfgs in a test module pass" 0 "" '#[cfg(test)]
+mod tests {
+    #[cfg(windows)]
+    fn t() -> ayaml::Value { todo!() }
+    #[test]
+    fn u() {
+        #[cfg(unix)]
+        let _ = 1;
+    }
+}
+#[cfg(all(test, unix))]
+mod unix_tests {
+    #[cfg(target_os = "linux")]
+    fn t() {}
+}
+#[doc = "A helper."]
+#[cfg(test)]
+pub(crate) fn helper() {
+    #[cfg(windows)]
+    let _ = 1;
+}'
+expect_sources "a test-only region ends with its item" 2 \
+  "extra.rs:3: \`cfg(windows)\` on \`pub fn leak\`" '#[cfg(test)]
+fn helper() {}
+#[cfg(windows)]
+pub fn leak() -> ayaml::Value { todo!() }'
+expect_sources "a test-only field does not cover the next one" 2 \
+  "\`cfg(windows)\` on \`pub leak: ayaml::Value\`" 'pub struct S {
+    #[cfg(test)]
+    a: u8,
+    #[cfg(windows)]
+    pub leak: ayaml::Value,
+}'
+# A file only test-only code loads is test-only, and so are the files it loads;
+# one that a library mod, #[path] or include! may load is not.
+expect_sources "a test file a cfg(test) #[path] module loads passes" 0 "" '#[cfg(test)]
+#[path = "extra_tests.rs"]
+mod tests;' crates/alint-core/src/extra_tests.rs '#[cfg(windows)]
+pub fn x() -> ayaml::Value { todo!() }'
+expect_sources "a test file the library also loads fails" 2 \
+  "extra_tests.rs:1: \`cfg(windows)\` on \`pub fn x\`" '#[cfg(test)]
+#[path = "extra_tests.rs"]
+mod tests;
+#[path = "extra_tests.rs"]
+pub mod leak;' crates/alint-core/src/extra_tests.rs '#[cfg(windows)]
+pub fn x() -> ayaml::Value { todo!() }'
+expect_sources "a module a test module loads passes" 0 "" '#[cfg(test)]
+mod tests;
+mod deeper;' crates/alint-core/src/extra/tests.rs 'mod deeper;' \
+  crates/alint-core/src/extra/tests/deeper.rs '#[cfg(windows)]
+pub fn x() -> ayaml::Value { todo!() }' crates/alint-core/src/extra/deeper.rs 'pub fn y() {}'
+expect_sources "a module a test module and a #[path] load fails" 2 \
+  "tests/deeper.rs:1: \`cfg(windows)\`" '#[cfg(test)]
+mod tests;
+#[path = "extra/tests/deeper.rs"]
+pub mod leak;' crates/alint-core/src/extra/tests.rs 'mod deeper;' \
+  crates/alint-core/src/extra/tests/deeper.rs '#[cfg(windows)]
+pub fn x() -> ayaml::Value { todo!() }'
+expect_sources "a module an inline module of the library loads fails" 2 \
+  "extra/inner/deeper.rs:1: \`cfg(windows)\`" '#[cfg(test)]
+mod tests;
+pub mod inner {
+    pub mod deeper;
+}' crates/alint-core/src/extra/tests.rs '#[cfg(test)]
+#[path = "inner/deeper.rs"]
+mod deeper;' crates/alint-core/src/extra/inner/deeper.rs '#[cfg(windows)]
+pub fn x() -> ayaml::Value { todo!() }'
+# The files outside src/ (integration tests, benches) are test-only, unless the
+# library loads one.
+expect_sources "an integration test's cfgs pass" 0 "" 'pub fn f() {}' \
+  crates/alint-core/tests/it.rs '#[cfg(unix)]
+#[test]
+fn t() {}'
+expect_sources "an integration test's cfgs fail when the library includes a file outside src/" \
+  2 "tests/it.rs:1: \`cfg(unix)\`" 'include!("../tests/shared.rs");' \
+  crates/alint-core/tests/shared.rs 'pub fn shared() {}' crates/alint-core/tests/it.rs '#[cfg(unix)]
+#[test]
+fn t() {}'
+expect_sources "an include! outside src/ in test-only code keeps the tests test-only" 0 "" \
+  '#[cfg(test)]
+mod tests {
+    include!("../tests/shared.rs");
+}' crates/alint-core/tests/shared.rs 'fn shared() {}' crates/alint-core/tests/it.rs '#[cfg(unix)]
+#[test]
+fn t() {}'
+
+# The allowlist accepts the cfgs it names, in a copy of the gate, and an entry
+# that matches no cfg in its file fails.
 GATE_UNDER_TEST="$sandbox/allowing-gate.sh"
-sed 's/^PLATFORM_ALLOWLIST=()$/PLATFORM_ALLOWLIST=("crates\/alint-core\/src\/extra.rs|pub fn a")/' \
-  "$GATE" >"$GATE_UNDER_TEST"
+sed 's/^PLATFORM_ALLOWLIST=($/&\
+  "crates\/alint-core\/src\/extra.rs|cfg(windows)|pub fn a"\
+  "crates\/alint-core\/src\/extra.rs|cfg(unix)|in fn f"/' "$GATE" >"$GATE_UNDER_TEST"
 if cmp -s "$GATE" "$GATE_UNDER_TEST"; then
   fail=$((fail + 1))
   echo "FAIL: could not add an allowlist entry to a copy of the gate" >&2
 fi
-expect_sources "an allowlisted public item under cfg(windows) passes" 0 "" '#[cfg(windows)]
-pub fn a() {}'
-expect_sources "the allowlist names one item only" 2 "\`pub fn b\` exists only under" \
+expect_sources "allowlisted cfgs pass" 0 "" '#[cfg(windows)]
+pub fn a() {}
+pub fn f() {
+    #[cfg(unix)]
+    let _ = 1;
+    #[cfg(unix)]
+    let _ = 2;
+}'
+expect_sources "the allowlist names one item only" 2 "\`cfg(windows)\` on \`pub fn b\`" \
   '#[cfg(windows)]
-pub fn b() {}'
+pub fn b() {}
+pub fn f() {
+    #[cfg(unix)]
+    let _ = 1;
+}'
+expect_sources "an allowlist entry for another predicate does not count" 2 \
+  "\`cfg(not(windows))\` on \`pub fn a\`" '#[cfg(not(windows))]
+pub fn a() {}
+pub fn f() {
+    #[cfg(unix)]
+    let _ = 1;
+}'
+expect_sources "an allowlist entry that matches no cfg fails" 2 \
+  "the allowlist entry \"crates/alint-core/src/extra.rs|cfg(unix)|in fn f\" matches no cfg" \
+  '#[cfg(windows)]
+pub fn a() {}'
 unset GATE_UNDER_TEST
 
 # Files outside src/ are stripped and checked too; only code outside the crate
@@ -294,6 +510,40 @@ pub mod leak;'
 expect_sources "a #[path] in a cfg_attr outside the crate fails" 2 "a #[path] to a file outside" \
   '#[cfg_attr(all(), path = "/abs/leak.rs")]
 pub mod leak;'
+# include! renamed, or called through a macro given the word, reaches a file the
+# checks never read (the review of #523); a field or a local named `include`,
+# and the word in test-only code, do not count.
+expect_sources "a use renaming include fails" 2 "a \`use\` of \`include\` can rename include!" \
+  'use core::include as inc;
+inc!("../../outside.rs");'
+expect_sources "a use of include in braces fails" 2 "a \`use\` of \`include\`" \
+  'pub use ::std::{include as splice};'
+expect_sources "include passed to a macro fails" 2 "\`include\` in a macro's input or body" \
+  'macro_rules! call { ($m:ident) => { $m!("../../outside.rs"); } }
+call!(include);'
+expect_sources "include in a macro's body fails" 2 "\`include\` in a macro's input or body" \
+  'macro_rules! call { ($b:tt) => { include $b ("../../outside.rs"); } }
+call!(!);'
+expect_sources "a field, a local and include_str! named include pass" 0 "" \
+  'pub struct Paths { pub include: Vec<String> }
+pub fn count(paths: &Paths) -> usize {
+    let include = &paths.include;
+    include.len() + include_str!("extra.rs").len()
+}
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn t() {
+        let include = 1;
+        assert_eq!(include, 1);
+    }
+}'
+expect_sources "include in a test file's macro passes" 0 "" '#[cfg(test)]
+#[path = "extra_tests.rs"]
+mod tests;' crates/alint-core/src/extra_tests.rs 'fn t() {
+    let include = 1;
+    assert_eq!(include, 1);
+}'
 
 # A public type in a private module has no page; the lint makes it nameable.
 expect_sources "an allow of unnameable_types fails" 2 "an \`allow\` of unnameable_types" \
@@ -325,6 +575,18 @@ macro_rules! leak ( () => { saphyr::Yaml::Null } );'
 expect_sources "an exported macro in brackets naming a parser fails" 1 \
   "a macro names a parser crate" '#[macro_export]
 macro_rules! leak [ () => { ::ayaml::Value::Null } ];'
+# The review of #523: a parser crate renamed in the body, and a raw name.
+expect_sources "an exported macro naming a parser as a bare word fails" 1 \
+  "a macro names a parser crate" '#[macro_export]
+macro_rules! leak { () => {{ use ::ayaml as parser; parser::Value::Null }} }'
+expect_sources "an exported macro with a raw name fails" 1 "a macro names a parser crate" \
+  '#[macro_export]
+macro_rules! r#leak { () => { ::ayaml::Value::Null } }'
+expect_sources "a macro exported through a cfg_attr fails" 1 "a macro names a parser crate" \
+  '#[cfg_attr(feature = "x", macro_export)]
+macro_rules! leak { () => { ::ayaml::Value::Null } }'
+expect_sources "a private macro naming a parser as a bare word passes" 0 "" \
+  'macro_rules! private { () => {{ use ::ayaml as parser; parser::Value::Null }} }'
 # Literals are read as Rust reads them: a comment marker inside one is text, and
 # each finding keeps its line.
 expect_sources "a // in a string does not hide the rest of the line" 1 \
@@ -352,6 +614,22 @@ expect_sources "a quote in a comment does not start a string" 1 \
 #[macro_export]
 macro_rules! leak { () => { ::ayaml::Value::Null } } // "'
 
+# The repository's own sources pass, so PLATFORM_ALLOWLIST holds exactly the
+# cfgs outside test-only code: each entry matches one, and each needs one.
+root="$sandbox/repository"
+mkdir -p "$root"
+(cd "$REPO_ROOT" && find crates/alint-core crates/alint-dsl crates/alint-testkit -name '*.rs' \
+  -print0 | tar --null -T - -cf -) | tar -xf - -C "$root"
+rc=0
+out=$(bash "$GATE" --check-sources "$root" 2>&1) || rc=$?
+if [[ $rc -eq 0 ]]; then
+  pass=$((pass + 1))
+else
+  fail=$((fail + 1))
+  echo "FAIL: the repository's sources must pass --check-sources: rc=$rc, output:" >&2
+  sed 's/^/  /' <<<"$out" >&2
+fi
+
 rc=0
 out=$(bash "$GATE" --check-sources "$sandbox/no-such-tree" 2>&1) || rc=$?
 if [[ $rc -eq 2 && $out == *"no sources at"* ]]; then
@@ -368,6 +646,22 @@ if [[ $rc -eq 2 && $out == *usage* ]]; then
 else
   fail=$((fail + 1))
   echo "FAIL: an extra argument is an error: rc=$rc, output: $out" >&2
+fi
+
+# --check-sources rewrites what it is given, so it refuses a Git work tree and
+# leaves it as it was.
+root="$sandbox/work-tree"
+make_sources "$root" '#[doc(hidden)]
+pub fn f() {}'
+git -C "$root" init -q
+rc=0
+out=$(bash "$GATE" --check-sources "$root" 2>&1) || rc=$?
+if [[ $rc -eq 2 && $out == *"pass a copy outside any Git work tree"* ]] &&
+  grep -q 'doc(hidden)' "$root/crates/alint-core/src/extra.rs"; then
+  pass=$((pass + 1))
+else
+  fail=$((fail + 1))
+  echo "FAIL: --check-sources must refuse a Git work tree: rc=$rc, output: $out" >&2
 fi
 
 echo "test-public-api-parser-gate: $pass passed, $fail failed"
