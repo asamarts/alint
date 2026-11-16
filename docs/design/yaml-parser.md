@@ -308,15 +308,15 @@ The documented differences fall into five groups; the report lists every entry.
   beyond 64 bits, in any base, a count of alias uses refuses aliases that fan out, `-0` is no
   number for an unsigned field, and `from_value` refuses a rule key that is not a string, which
   alint's loader rejects before it decodes a rule.
-- **ayaml defects in malformed documents.** A block scalar header under its parent's indentation
-  after an anchor, after properties alone on their line, or after a key with an anchor, is
-  accepted (asamarts/ayaml#132), where the oracle rejects it, or reads it as a second document
-  when it is indented less than the root, past any directives and `---`;
-  after a leading byte-order mark, an error has no location (asamarts/ayaml#133) and a quoted
-  scalar's continuation line under a nested parent is not checked against its indentation
-  (asamarts/ayaml#137). One more is in a valid document, and not yet filed: a document marker
-  after a top-level block scalar's empty lines, one of them indented, is taken for content and
-  rejected, as in `|`, a line of two spaces and `...`.
+- **ayaml defects.** In malformed documents, a block scalar header under its parent's indentation
+  after an anchor or after a key with an anchor (asamarts/ayaml#132), or after properties alone on
+  their line (asamarts/ayaml#147), is accepted, where the oracle rejects it, or reads it as a second
+  document when it is indented less than the root, past any directives and `---`; after a leading
+  byte-order mark, an error has no location (asamarts/ayaml#133) and a quoted scalar's continuation
+  line under a nested parent is not checked against its indentation (asamarts/ayaml#137). One more
+  is in a valid document (asamarts/ayaml#146): a document marker after a top-level block scalar's
+  empty lines, one of them indented, is taken for content and rejected, as in `|`, a line of two
+  spaces and `...`.
 - **Error locations.** ayaml checks a stream's syntax before it builds values, so a later syntax
   error wins over an earlier value error, and reads its tokens before it parses them, so a later
   scanner error wins over an earlier parser error; it reports an error about an empty node where

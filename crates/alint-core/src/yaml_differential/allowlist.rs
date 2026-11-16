@@ -952,9 +952,10 @@ pub(crate) const DEVIATIONS: &[Deviation] = &[
                 even when it is not indented past its parent",
         oracle: "rejects it, or reads it as a second document where it is the first line \
                  indented less than the document's root",
-        reason: "an ayaml defect in a malformed document (asamarts/ayaml#132, with the \
-                 anchor on a key in a comment there): with a tag alone after a key or `-`, \
-                 ayaml rejects the same layout, as YAML 1.2 (section 8.1) does",
+        reason: "ayaml defects in a malformed document (asamarts/ayaml#132, with the \
+                 anchor on a key in a comment there, and #147 for properties alone on their \
+                 line): with a tag on the line of its key or `-`, ayaml rejects the same \
+                 layout, as YAML 1.2 (section 8.1) does",
         example: "a:\n  b: &x\n>\n",
     },
     Deviation {
@@ -1000,7 +1001,7 @@ pub(crate) const DEVIATIONS: &[Deviation] = &[
                 they are",
         oracle: "ends the scalar, empty, at the marker, and reads on, so that `---` and what \
                  follows it make more than one document",
-        reason: "an ayaml defect in a valid document, not yet filed: a document marker ends \
+        reason: "an ayaml defect in a valid document (asamarts/ayaml#146): a document marker ends \
                  any node (YAML 1.2, rule 206, `c-forbidden`); a scalar that is not top-level \
                  ends there in ayaml too",
         example: "|\n  \n...\n",
