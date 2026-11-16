@@ -265,9 +265,12 @@ impl<'de> Deserialize<'de> for ExtendsEntry {
         use serde::de::Error as _;
         match ayaml::Value::deserialize(deserializer)? {
             ayaml::Value::String(url) => Ok(Self::Url(url)),
+            ayaml::Value::Tagged(tagged) => Err(D::Error::custom(crate::yaml_decode::tag_refused(
+                &tagged.tag,
+            ))),
             value @ ayaml::Value::Mapping(_) => {
                 let FilteredExtendsEntry { url, only, except } =
-                    ayaml::from_value(value).map_err(D::Error::custom)?;
+                    crate::yaml_decode::from_value(value).map_err(D::Error::custom)?;
                 Ok(Self::Filtered { url, only, except })
             }
             _ => Err(D::Error::custom(
@@ -633,7 +636,7 @@ where
              with no options)"
         )));
     }
-    ayaml::from_value(value)
+    crate::yaml_decode::from_value(value)
         .map(Some)
         .map_err(|e| match single_op {
             Some(op) => D::Error::custom(format!(

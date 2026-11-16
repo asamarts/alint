@@ -680,6 +680,8 @@ fn a_pattern_that_may_be_secret_raises_no_hint_and_no_quoted_warning() {
     }
 }
 
+/// The error names the number it found (`invalid type: integer ...`), so a
+/// sensitive rule's error is redacted whole.
 #[test]
 fn a_policy_test_reports_a_sensitive_number_redacted() {
     let root = tempfile::tempdir().unwrap();
@@ -691,7 +693,7 @@ fn a_policy_test_reports_a_sensitive_number_redacted() {
              version: 1\n    rules:\n      - id: scan\n        kind: file_content_forbidden\n        \
              paths: '**/*'\n        pattern: {ACCOUNT_ID}\n        sensitive: true\n        \
              level: error\nwhen: [check]\nexpect:\n  - exit: configuration_error\n    \
-             configuration_error:\n      message: {{ regex: \"invalid type: non-string YAML value\" }}\n"
+             configuration_error:\n      message: {{ regex: '^rule \"scan\": <redacted> ' }}\n"
         ),
     );
     let output = run(root.path(), &["test", "--format", "json"], &[]);

@@ -5,6 +5,7 @@ mod loading;
 mod nested_config;
 mod remote_trust;
 mod resource_budgets;
+mod yaml_errors;
 
 fn test_registry() -> &'static alint_core::RuleRegistry {
     static REGISTRY: std::sync::LazyLock<alint_core::RuleRegistry> =

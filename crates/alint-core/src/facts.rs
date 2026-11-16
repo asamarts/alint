@@ -123,7 +123,7 @@ impl<'de> Deserialize<'de> for FactSpec {
                 }
             )));
         }
-        let kind = ayaml::from_value(ayaml::Value::Mapping(map))
+        let kind = crate::yaml_decode::from_value(ayaml::Value::Mapping(map))
             .map_err(|e| D::Error::custom(format!("fact {id:?}: {e}")))?;
         Ok(Self { id, kind })
     }

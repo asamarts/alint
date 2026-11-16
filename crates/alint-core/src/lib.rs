@@ -50,6 +50,7 @@ mod walker;
 pub mod when;
 pub mod yaml;
 mod yaml_backend;
+mod yaml_decode;
 pub mod yaml_depth;
 #[cfg(any(test, feature = "yaml-reference"))]
 mod yaml_differential;

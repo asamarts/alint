@@ -1646,6 +1646,11 @@ fn rule_errors_are_one_in_one_field_with_one_problem() {
         "rules:\n  - {when: 1, level: error, id: a, kind: k, policy_url: 1}\n",
         "rules:\n  - {id: a, kind: k, level: error, paths: {include: 1}}\n",
         "rules:\n  - 1\n",
+        // A mapping where an enum goes, which ayaml read as a variant's name
+        // and data, as `level:` with the rule's next lines indented under it.
+        "rules:\n  - {id: a, kind: k, level: {error: ~}}\n",
+        "version: 1\nrules:\n  - id: a\n    kind: k\n    level:\n      paths: x\n",
+        "rules:\n  - {id: a, kind: k, level: 1}\n",
     ] {
         let (case, _) = compare_at(input, Entry::Rule, 0);
         assert_eq!(case.class, Class::RejectedAtSameLocation, "{case:?}");
@@ -1705,26 +1710,23 @@ fn a_rule_entry_needs_both_errors_it_names() {
             ..rejection
         })
     };
-    for (input, id) in [
-        ("version: 1\nrules:\n  -\n", "rule-that-is-null"),
-        (
-            "version: 1\nrules:\n  - id: a\n    kind: k\n    level:\n      paths: x\n",
-            "enum-as-a-one-entry-mapping",
-        ),
-    ] {
-        let (clean, planted) = planted::clean_and_planted(input, Entry::Rule, other);
-        assert_eq!(explanation(&clean), Some(vec![id]), "{clean:?}");
-        assert_eq!(
-            planted.class,
-            Class::RejectedAtDifferentLocation,
-            "{planted:?}"
-        );
-        assert_eq!(
-            planted::planted_explanation(&planted, other),
-            None,
-            "{planted:?}"
-        );
-    }
+    let input = "version: 1\nrules:\n  -\n";
+    let (clean, planted) = planted::clean_and_planted(input, Entry::Rule, other);
+    assert_eq!(
+        explanation(&clean),
+        Some(vec!["rule-that-is-null"]),
+        "{clean:?}"
+    );
+    assert_eq!(
+        planted.class,
+        Class::RejectedAtDifferentLocation,
+        "{planted:?}"
+    );
+    assert_eq!(
+        planted::planted_explanation(&planted, other),
+        None,
+        "{planted:?}"
+    );
 }
 
 #[test]

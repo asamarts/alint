@@ -1634,6 +1634,39 @@ expect:
         ));
     }
 
+    /// API-3 and YAML-1b: a step that is not a step's name was refused for its
+    /// shape alone, as "expected a unit enum variant"; the error lists the
+    /// steps and says what it found.
+    #[test]
+    fn a_step_is_one_of_the_steps_names() {
+        for (step, found) in [
+            ("{check: 1}", "a mapping"),
+            ("{check: [fix]}", "a mapping"),
+            ("1", "integer `1`"),
+            ("[check]", "a sequence"),
+            ("true", "boolean `true`"),
+        ] {
+            let yaml = valid_yaml().replace("when: [check]", &format!("when: [{step}]"));
+            let error = PolicyTest::from_yaml(&yaml).unwrap_err().to_string();
+            assert!(
+                error.starts_with(&format!(
+                    "policy-test YAML parse error: when[0]: expected one of `check`, `fix`, \
+                     `fix_unsafe`, `fix_dry_run`, `check_changed`, found {found}"
+                )),
+                "{step}: {error}"
+            );
+        }
+        let yaml = format!("{}expect_tree_mode: {{contains: 1}}\n", valid_yaml());
+        let error = PolicyTest::from_yaml(&yaml).unwrap_err().to_string();
+        assert!(
+            error.starts_with(
+                "policy-test YAML parse error: expect_tree_mode: expected `strict` or \
+                 `contains`, found a mapping"
+            ),
+            "{error}"
+        );
+    }
+
     #[test]
     fn guarded_parser_rejects_explicit_null_for_optional_fields() {
         let yaml = valid_yaml().replace("violations: []", "violations: null");

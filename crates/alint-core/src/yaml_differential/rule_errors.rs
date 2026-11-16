@@ -80,23 +80,21 @@ fn ayaml_path(message: &str) -> Option<(&str, &str)> {
     }
 }
 
-/// ayaml's messages for an enum's value that is neither a variant's name nor
-/// a tagged value, by the value's shape: the oracle words them all as
-/// "invalid type: ..., expected a `Value::Tagged` enum".
-const AYAML_ENUM_SHAPES: &[&str] = &[
-    "enum value must be tagged or a single-entry mapping",
-    "enum mapping must contain one variant",
-    "enum variant key must be a string",
-    "expected a unit enum variant",
-];
+/// Whether `text` is alint's error for an enum's value that is not a
+/// variant's name, as `expected one of `a`, `b`, found a mapping` (see
+/// [`crate::yaml_decode`]).
+fn ayaml_enum_shape(text: &str) -> bool {
+    text.starts_with("expected `") || text.starts_with("expected one of `")
+}
 
 /// A rule error's problem, with what an "invalid type" or "invalid value"
-/// found left out: ayaml names it by its kind, as `non-string YAML value`,
-/// and the oracle by its value, as ``integer `1` ``, so the two agree on
-/// what was expected only. An enum's value that is not a variant's name is
-/// one problem, however each words it (see [`AYAML_ENUM_SHAPES`]).
+/// found left out: alint names a string where a struct goes without quoting
+/// it, as `invalid type: string`, and the oracle quotes it, so the two agree
+/// on what was expected only. An enum's value that is not a variant's name
+/// is one problem, which alint words as `expected one of ..., found ...` and
+/// the oracle as `invalid type: ..., expected a Value::Tagged enum`.
 fn problem(text: &str) -> String {
-    if AYAML_ENUM_SHAPES.contains(&text)
+    if (ayaml_enum_shape(text) && text.contains(", found "))
         || (text.starts_with("invalid type: ") && text.ends_with(", expected a Value::Tagged enum"))
     {
         return "an enum's value that is not a variant's name".to_string();
@@ -162,11 +160,8 @@ mod tests {
     #[test]
     fn a_path_is_the_names_indexes_and_keys_before_the_problem() {
         assert_eq!(
-            ayaml_path("message: invalid type: non-string YAML value, expected a string"),
-            Some((
-                "message",
-                "invalid type: non-string YAML value, expected a string"
-            ))
+            ayaml_path("message: invalid type: integer `1`, expected a string"),
+            Some(("message", "invalid type: integer `1`, expected a string"))
         );
         assert_eq!(
             ayaml_path("scope_filter.has_ancestor[1]: x"),
@@ -196,24 +191,38 @@ mod tests {
     #[test]
     fn an_invalid_type_or_value_is_compared_on_what_was_expected() {
         assert_eq!(
-            problem("invalid type: non-string YAML value, expected a string"),
-            problem("invalid type: integer `1`, expected a string")
+            problem("invalid type: string, expected struct ScopeFilterSpec"),
+            problem("invalid type: string \"x\", expected struct ScopeFilterSpec")
         );
         assert_eq!(
             problem("invalid value: string \"a, expected b\", expected a boolean"),
             "invalid value: ..., expected a boolean"
         );
         assert_ne!(
-            problem("invalid type: non-string YAML value, expected a string"),
+            problem("invalid type: integer `1`, expected a string"),
             problem("invalid type: integer `1`, expected field identifier")
         );
         assert_eq!(problem("missing field `id`"), "missing field `id`");
-        for ayaml in AYAML_ENUM_SHAPES {
+        for ayaml in [
+            "expected one of `error`, `warning`, `info`, `off`, found a mapping",
+            "expected `a` or `b`, found null",
+            "expected `a`, found integer `1`",
+        ] {
             assert_eq!(
                 problem(ayaml),
                 problem("invalid type: unit value, expected a Value::Tagged enum")
             );
         }
+        // An unknown variant's name both word alike, so it stays as it is,
+        // and so does a message that names no value found.
+        assert_ne!(
+            problem("unknown variant `x`, expected `a` or `b`"),
+            problem("invalid type: unit value, expected a Value::Tagged enum")
+        );
+        assert_ne!(
+            problem("expected one of `a`, `b`, `c`"),
+            problem("invalid type: unit value, expected a Value::Tagged enum")
+        );
         assert_ne!(
             problem("invalid type: unit value, expected a Value::Tagged enum"),
             problem("invalid type: unit value, expected a string")

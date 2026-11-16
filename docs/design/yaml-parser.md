@@ -338,9 +338,9 @@ The documented differences fall into five groups; the report lists every entry.
   what follows starts, and a character YAML does not allow where it stands; the oracle reports where
   its look-ahead stopped, a disallowed character at line 1, column 1, and once the first
   document ends, "more than one document" with no place. Of a rule both refuse, each may name
-  another problem: ayaml calls a null rule a unit value, which the oracle finds without `id`,
-  and names the variant that a one-entry mapping in an enum's place does not, which the oracle
-  refuses as a mapping.
+  another problem: ayaml calls a null rule a unit value, which the oracle finds without `id`.
+  alint refuses a one-entry mapping in an enum's place, as the oracle does, so it no longer names
+  the variant ayaml read there.
 
 ## Parser facade
 
@@ -360,6 +360,14 @@ each phase as it lands.
   ADR-0038's owned types hide. The depth guard's pre-parse checks measure what ayaml reads, so
   they parse with ayaml whatever the backend. `Error` holds the error of whichever backend
   failed, behind the same `message` and `location`.
+- **Decoding.** Every typed decode through ayaml, from text or from a value tree, goes through a
+  deserializer of alint's own (`crates/alint-core/src/yaml_decode.rs`) that reads what ayaml
+  reads, except that an enum's variant without data takes only its name, as the parser v0.22
+  used read it: ayaml read a one-entry mapping or a tag there as the variant. Where ayaml names
+  only a value's kind, as `non-string YAML value`, it names the value, as ``integer `1` ``; it
+  lists an enum's values, and names a tag a field cannot read. An "unexpected content after
+  document" that is likely an indentation mistake ends with a hint, which `Error::message` and
+  `Display` include and the harness, reading ayaml's own error, leaves out.
 - **The feature.** `alint-core`'s non-default `yaml-reference` feature compiles libyaml, saphyr's
   backend and compare mode, and makes `yaml_serde` an optional dependency. No release build
   enables it. `ci/scripts/yaml-reference-gate.sh` checks that no workspace crate depends on
