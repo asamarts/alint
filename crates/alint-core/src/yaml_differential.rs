@@ -1284,76 +1284,12 @@ impl Search {
         } else {
             Split::One
         };
-        let split = match split {
+        match split {
             Split::One if line < case.input.len() && !(compared && end == line) => {
-                self.split_after_line(case, line, by_ayaml)
+                self.split_after_line(case, line, by_ayaml, &places)
             }
             split => split,
-        };
-        match split {
-            Split::Apart if !by_ayaml => self
-                .split_at_a_flow_collection(case, earlier, &places)
-                .unwrap_or(Split::Apart),
-            split => split,
         }
-    }
-
-    /// Where the oracle's error, at byte `earlier`, is the first and in a
-    /// flow collection, and ayaml's comes on a later line than the
-    /// collection ends on, the split of `case` into the prefix through that
-    /// line, which ayaml reads and the oracle rejects with its error, and
-    /// the input with the collection empty (`[]` or `{}`, with the line
-    /// breaks it held), after which ayaml gives its error as it is. The
-    /// oracle must read the prefix with the collection empty: its error was
-    /// the collection's alone, as an empty one both parsers read alike. The
-    /// oracle then reads the lines around it as ayaml read them in the case.
-    /// None where that does not hold, as when the search ran out of
-    /// comparisons.
-    fn split_at_a_flow_collection<'a>(
-        &mut self,
-        case: &Case<'a>,
-        earlier: usize,
-        places: &[neutralize::Place],
-    ) -> Option<Split<'a>> {
-        let input = case.input;
-        if places[earlier].depth == 0 {
-            return None;
-        }
-        let open = (0..earlier).rev().find(|&at| places[at].depth == 0)?;
-        let close = (earlier..input.len()).find(|&at| places[at + 1].depth == 0)?;
-        let end = line_end(input, close);
-        let ayaml = predicates::error_offset(input, &case.ayaml)?;
-        if !input[open..].starts_with(['[', '{'])
-            || !input[close..].starts_with([']', '}'])
-            || ayaml < end
-            || self.comparisons + 3 > MAX_COMPARISONS
-        {
-            return None;
-        }
-        let breaks: String = input[open + 1..close]
-            .chars()
-            .filter(|ch| matches!(ch, '\n' | '\r'))
-            .collect();
-        let emptied = format!(
-            "{}{}{breaks}{}",
-            &input[..=open],
-            &input[close..=close],
-            &input[close + 1..]
-        );
-        let emptied_end = end - (close - open - 1) + breaks.len();
-        self.comparisons += 1;
-        let (alone, panicked) = compare_at(&emptied[..emptied_end], case.entry, case.rule);
-        if panicked || alone.oracle.is_err() {
-            return None;
-        }
-        self.comparisons += 1;
-        let (prefix, panicked) = compare_at(&input[..end], case.entry, case.rule);
-        if panicked || prefix.ayaml.is_err() || prefix.oracle != case.oracle {
-            return None;
-        }
-        self.comparisons += 1;
-        let (rest, panicked) = compare_at(&emptied, case.entry, case.rule);
-        (!panicked && rest.ayaml == case.ayaml).then_some(Split::Two(prefix, emptied))
     }
 
     /// [`Search::split`] at `end`, past the construct that the case's first
@@ -1405,8 +1341,15 @@ impl Search {
     /// past a construct cut in two, so the prefix shows two errors apart, or
     /// that ayaml's error is all of ayaml's result (see [`Split::Through`]),
     /// or nothing, when the parser with the later error rejects it too, as
-    /// when the cut leaves a construct open.
-    fn split_after_line<'a>(&mut self, case: &Case<'a>, end: usize, by_ayaml: bool) -> Split<'a> {
+    /// when the cut leaves a construct open. `places` are the input's (see
+    /// [`neutralize::places`]).
+    fn split_after_line<'a>(
+        &mut self,
+        case: &Case<'a>,
+        end: usize,
+        by_ayaml: bool,
+        places: &[neutralize::Place],
+    ) -> Split<'a> {
         if self.comparisons == MAX_COMPARISONS {
             return Split::Unknown;
         }
@@ -1420,13 +1363,67 @@ impl Search {
             Split::Unknown
         } else if by_ayaml && prefix.oracle.is_ok() && holds(&prefix.ayaml, &case.ayaml) {
             Split::Through(prefix)
-        } else if (!by_ayaml && prefix.ayaml.is_ok() && holds(&prefix.oracle, &case.oracle))
-            || (multiple_documents && prefix.oracle.is_ok())
-        {
+        } else if !by_ayaml && prefix.ayaml.is_ok() && holds(&prefix.oracle, &case.oracle) {
+            self.split_at_a_flow_collection(case, prefix, places)
+                .unwrap_or(Split::Apart)
+        } else if multiple_documents && prefix.oracle.is_ok() {
             Split::Apart
         } else {
             Split::One
         }
+    }
+
+    /// Where `prefix`, the lines of `case` through its first error, the
+    /// oracle's, holds that error alone, and the error is in a flow
+    /// collection that ends on the prefix's last line, the split of `case`
+    /// into the prefix and the input with the collection empty (`[]` or
+    /// `{}`, with the line breaks it held), in which ayaml gives its error as
+    /// it is. The oracle must read the prefix with the collection empty: its
+    /// error was the collection's alone, as an empty one both parsers read
+    /// alike, and it then reads the lines around it as ayaml read them in the
+    /// case. None where that does not hold, as when the search ran out of
+    /// comparisons. `places` are the input's.
+    fn split_at_a_flow_collection<'a>(
+        &mut self,
+        case: &Case<'a>,
+        prefix: Case<'a>,
+        places: &[neutralize::Place],
+    ) -> Option<Split<'a>> {
+        let input = case.input;
+        let end = prefix.input.len();
+        let earlier = oracle_error_offset(input, &case.oracle)?;
+        if places[earlier].depth == 0 {
+            return None;
+        }
+        // `places` gives a flow collection's brackets the depth around it,
+        // and the bytes between them more, so these are its brackets.
+        let open = (0..earlier).rev().find(|&at| places[at].depth == 0)?;
+        let close = (earlier..input.len()).find(|&at| places[at + 1].depth == 0)?;
+        if line_end(input, close) != end {
+            return None;
+        }
+        let breaks: String = input[open..close]
+            .chars()
+            .filter(|ch| matches!(ch, '\n' | '\r'))
+            .collect();
+        let emptied = format!(
+            "{}{}{breaks}{}",
+            &input[..=open],
+            &input[close..=close],
+            &input[close + 1..end]
+        );
+        if self.comparisons == MAX_COMPARISONS {
+            return None;
+        }
+        self.comparisons += 1;
+        let (alone, panicked) = compare_at(&emptied, case.entry, case.rule);
+        if panicked || alone.oracle.is_err() || self.comparisons == MAX_COMPARISONS {
+            return None;
+        }
+        self.comparisons += 1;
+        let emptied = emptied + &input[end..];
+        let (rest, panicked) = compare_at(&emptied, case.entry, case.rule);
+        (!panicked && rest.ayaml == case.ayaml).then_some(Split::Two(prefix, emptied))
     }
 
     /// Whether the lines of `case` before the line of its first error (see

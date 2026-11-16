@@ -677,6 +677,8 @@ fn a_tab_before_a_closing_bracket_or_a_comment_on_a_flow_line_is_white_space() {
     }
     assert_eq!(tabs("a: [x,\n\t  b]\n"), Vec::<String>::new());
     assert_eq!(tabs("a: [x\n\t  , b]\n"), Vec::<String>::new());
+    // Nor does one ayaml reads, as at the top level.
+    assert_eq!(tabs("[x,\n\tb]\n"), Vec::<String>::new());
 }
 
 /// A tab ayaml rejects as a block scalar's leading indentation, where a

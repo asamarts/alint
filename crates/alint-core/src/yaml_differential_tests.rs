@@ -823,6 +823,22 @@ fn an_empty_flow_collection_stands_for_one_only_the_oracle_rejects() {
         explanation_without(&case, &["verbatim-non-specific-tag"]),
         None
     );
+    // Where ayaml's error changes with the collection empty, as an alias of
+    // an anchor in it, the collection does not stand for it.
+    let (case, _) = compare("- m: [&x a,\n  :b]\n  c: *x\n  d: *y\n- e\n", Entry::Value);
+    let mut changed = search();
+    let split = changed.split(&case);
+    assert!(matches!(split, Split::Apart), "{split:?}");
+    assert_eq!(changed.comparisons, 3, "{case:?}");
+    // The split takes two comparisons after the prefix's, within the budget.
+    let (case, _) = compare("[:a]\n  b\nc\n", Entry::Value);
+    for (left, two) in [(3, true), (2, false), (1, false)] {
+        let mut budget = search();
+        budget.comparisons = MAX_COMPARISONS - left;
+        let split = budget.split(&case);
+        assert_eq!(matches!(split, Split::Two(..)), two, "{left}: {split:?}");
+        assert!(budget.comparisons <= MAX_COMPARISONS, "{left}");
+    }
 }
 
 /// ayaml reports a second document only once the first one's values hold
@@ -876,7 +892,7 @@ fn a_search_counts_each_comparison() {
         ("a: |\n x\n\t y\nb\n", 1, "One"),
         ("a: [x, 'y'#c,\n b]\nc: 1\n", 2, "One"),
         ("-\n|2\n  x\n", 1, "Through"),
-        ("[:a]\n  b\nc\n", 4, "Two"),
+        ("[:a]\n  b\nc\n", 3, "Two"),
     ] {
         let (case, _) = compare(input, Entry::Value);
         let mut search = search();
