@@ -80,8 +80,25 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `sync_from` and cross-file sources and targets, `create_and_register` members, `file_rename`
   and `relocate` targets) now refuses a component that names a Git directory in any spelling a
   file system opens as `.git` (`.GIT`, `.git.`, `git~1`), or that an in-repository symlink leads
-  into one. Rules still read such paths. This affects `alint fix` with a ruleset from `extends:`
-  in v0.2.1 to v0.22.1 (`content_from` since v0.5.10), and `alint test` since v0.20.0.
+  into one; no rule reads such a path either (below). This affects `alint fix` with a ruleset
+  from `extends:` in v0.2.1 to v0.22.1 (`content_from` since v0.5.10), and `alint test` since
+  v0.20.0.
+- **No rule reads a file in a Git directory.** A rule could name one, and print what it read:
+  a `cross_file` rule with `source: { file: .git/config, extract: { regex: 'extraheader =
+  (.*)' } }` and `relation: equals` against any file put the `AUTHORIZATION: basic ...` header
+  that `actions/checkout` persists into its mismatch message, from any configuration, a remote
+  ruleset pinned by its hash and not in `trusted_extends` included. A path a rule reads by name
+  that names a Git directory, in any spelling a file system opens as `.git`, is now a load
+  error: `cross_file` `source.file` and `targets[].file`, `pair_hash` `target`,
+  `json_schema_passes` `schema_path`, `registry_paths_resolve` `source`, `key_parity`
+  `reference` and a literal `peers`, `generated_file_fresh` `file`, a `scope_filter` manifest
+  `source`, and every `content_from`
+  (``rule "x": `source.file` .git/config is in a Git directory; rules never read there``). A path
+  that reaches one through a symlink is refused when it is read, as a `resource_read` analysis
+  failure in the same terms, and the walk no longer follows such a link (below). Checks that a
+  path exists (`file_exists`, the `*_resolve` kinds) are unchanged, and a gitignored file such
+  as `.env` is still read by name. This affects `alint check` and `alint fix` in v0.10.0
+  (`cross_file_value_equals`, which v0.12.0 folded into `cross_file`) to v0.22.1.
 - **A content fix no longer writes through a symlink into the Git directory.** A repository
   could commit `src/evil.rs -> ../.git/config`, which the walk followed, so the user's own
   `file_header` rule on `src/**/*.rs` prepended its header to `.git/config`. With

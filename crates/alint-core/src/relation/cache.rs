@@ -224,6 +224,14 @@ fn read_once(root: &Path, relative: &Path, size_hint: u64, literal: bool) -> Res
         if !crate::pathsafe::resolved_within_root(&absolute, root) {
             return ResourceRead::Unreadable("path escapes the repo root".to_string());
         }
+        // A literal the configuration names is refused at load when it names a
+        // Git directory; this one reaches one through a symlink (`cfg ->
+        // .git/config`), and a file there can hold credentials.
+        if crate::pathsafe::reaches_git_directory(root, relative) {
+            return ResourceRead::Unreadable(
+                "path is in a Git directory; rules never read there".to_string(),
+            );
+        }
         // A literal resource is config-derived and may name a FIFO, socket, or
         // device. Opening a FIFO `O_RDONLY` blocks until a writer appears, so
         // reject every non-regular file before `read_for_analysis` opens it.
@@ -629,6 +637,39 @@ mod tests {
         index.clear_relation_caches();
         assert_eq!(value(), Some(Value::String("new".into())));
         assert_eq!((reads.reads(), decodes.decodes()), (2, 2));
+    }
+
+    /// A literal that reaches a Git directory through a symlink is never read:
+    /// `.git/config` can hold credentials. Ordinary literals still read.
+    #[cfg(unix)]
+    #[test]
+    fn a_literal_through_a_symlink_into_the_git_directory_is_not_read() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        std::fs::write(dir.path().join(".git/config"), "extraheader = secret\n").unwrap();
+        std::fs::write(dir.path().join("real.ini"), "x = 1\n").unwrap();
+        std::os::unix::fs::symlink(".git/config", dir.path().join("cfg.ini")).unwrap();
+        std::os::unix::fs::symlink(".git", dir.path().join("g")).unwrap();
+        std::os::unix::fs::symlink("real.ini", dir.path().join("alias.ini")).unwrap();
+        let cache = ReadCache::new();
+        for path in ["cfg.ini", "g/config", ".git/config"] {
+            assert_eq!(
+                cache.read(dir.path(), &literal(path), 0).as_ref(),
+                &ResourceRead::Unreadable(
+                    "path is in a Git directory; rules never read there".to_string()
+                ),
+                "{path}"
+            );
+        }
+        for path in ["real.ini", "alias.ini"] {
+            assert!(
+                matches!(
+                    cache.read(dir.path(), &literal(path), 0).as_ref(),
+                    ResourceRead::Present(_)
+                ),
+                "{path}"
+            );
+        }
     }
 
     #[test]

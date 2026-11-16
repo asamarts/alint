@@ -946,6 +946,38 @@ fn read_manifest_confined_refuses_escaping_symlink() {
     assert!(failure.message.contains("outside"), "{}", failure.message);
 }
 
+/// No rule reads a Git directory: a manifest `source` naming one is a load
+/// error, and one a symlink leads into is refused at read.
+#[cfg(unix)]
+#[test]
+fn a_scope_manifest_in_a_git_directory_is_never_read() {
+    for source in [".git/config", "sub/.GIT/x.json"] {
+        let spec: ScopeFilterSpec = crate::yaml::from_str(&format!(
+            "include_manifest_paths:\n  source: {source}\n  extract: {{ json: \"$[*]\" }}"
+        ))
+        .unwrap();
+        let error = ScopeFilter::from_spec("r", spec).unwrap_err().to_string();
+        assert_eq!(
+            error,
+            format!(
+                "rule \"r\": scope_filter manifest `source` {source} is in a Git directory; \
+                 rules never read there"
+            )
+        );
+    }
+    let root_dir = tempfile::tempdir().unwrap();
+    let root = root_dir.path();
+    std::fs::create_dir(root.join(".git")).unwrap();
+    std::fs::write(root.join(".git/config"), "[\"secret\"]").unwrap();
+    std::os::unix::fs::symlink(".git/config", root.join("m.json")).unwrap();
+    let failure = read_manifest_confined(root, Path::new("m.json")).unwrap_err();
+    assert_eq!(failure.kind, AnalysisFailureKind::ResourceRead);
+    assert_eq!(
+        failure.message,
+        "scope manifest is in a Git directory; rules never read there"
+    );
+}
+
 #[test]
 fn manifest_set_copies_onto_the_filtered_changed_index() {
     // The `--changed` fix: the engine resolves manifests against the full

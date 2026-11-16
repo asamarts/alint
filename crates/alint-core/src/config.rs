@@ -803,7 +803,8 @@ pub struct FileAppendFixSpec {
 
 /// Resolution of an `(content, content_from)` pair to a single
 /// content source. Used by the three fixers that take either.
-/// Errors when neither or both are set.
+/// Errors when neither or both are set, or when `content_from` names a Git
+/// directory, which no rule reads.
 pub fn resolve_content_source(
     rule_id: &str,
     op_name: &str,
@@ -820,6 +821,17 @@ pub fn resolve_content_source(
             format!("fix.{op_name}: one of `content` or `content_from` is required"),
         )),
         (Some(s), None) => Ok(ContentSourceSpec::Inline(s.clone())),
+        // A rule never reads a Git directory: `.git/config` can hold
+        // credentials, which a created file would copy into the worktree.
+        (None, Some(p)) if crate::path_names_git_directory(p) => {
+            Err(crate::error::Error::rule_config(
+                rule_id,
+                format!(
+                    "`fix.{op_name}.content_from` {}",
+                    crate::git_directory_read_refusal(p)
+                ),
+            ))
+        }
         (None, Some(p)) => Ok(ContentSourceSpec::File(p.clone())),
     }
 }

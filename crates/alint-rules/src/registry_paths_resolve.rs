@@ -590,6 +590,10 @@ impl RegistryPathsResolveRule {
                 );
                 None
             }
+            crate::pathsafe::Confined::GitDirectory => {
+                out.push(crate::pathsafe::git_directory_read_failure(&rel));
+                None
+            }
         }
     }
 
@@ -761,6 +765,9 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     // `literal_glob_path` resolves escapes, so a `source` rendered from a
     // directory literally named `a\b` (`a\\b`) reads that file.
     let literal_source = alint_core::template::literal_glob_path(&opts.source);
+    if let Some(source) = &literal_source {
+        crate::pathsafe::reject_git_directory_read(&spec.id, "source", Path::new(source))?;
+    }
     let is_glob = literal_source.is_none();
     let registry_scope = if is_glob {
         Some(

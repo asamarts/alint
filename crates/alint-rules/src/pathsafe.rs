@@ -39,6 +39,11 @@ pub(crate) enum Confined {
     /// Escapes the root and the rule is not permitted - the caller
     /// emits an "escapes the repo root" violation and does not read.
     Denied,
+    /// In a Git directory, by name or through an in-repo symlink, whatever
+    /// `allow_out_of_root` says: a file there can hold credentials (an
+    /// `http.*.extraheader`). The caller reports
+    /// [`alint_core::git_directory_read_refusal`] and does not read.
+    GitDirectory,
 }
 
 /// Confine a config-derived read path, honouring an
@@ -54,6 +59,39 @@ pub(crate) fn confine(path: &Path, allow_escape: bool) -> Confined {
         None if allow_escape => Confined::AllowedEscape(path.components().collect()),
         None => Confined::Denied,
     }
+}
+
+/// Refuse at load a path option `field` names for a rule to read by name (not
+/// through the walk), when it names a Git directory in any spelling a file
+/// system opens as `.git`: no rule reads there, since a file there can hold
+/// credentials. A path that reaches one through a symlink is refused at read
+/// ([`confine_read`], the relation read cache).
+pub(crate) fn reject_git_directory_read(
+    rule_id: &str,
+    field: &str,
+    path: impl AsRef<Path>,
+) -> alint_core::Result<()> {
+    match git_directory_read_option(field, path.as_ref()) {
+        Some(message) => Err(alint_core::Error::rule_config(rule_id, message)),
+        None => Ok(()),
+    }
+}
+
+/// [`reject_git_directory_read`]'s message, for a parser that wraps its own
+/// errors: `` `source.file` .git/config is in a Git directory; rules never
+/// read there ``.
+pub(crate) fn git_directory_read_option(field: &str, path: &Path) -> Option<String> {
+    alint_core::path_names_git_directory(path)
+        .then(|| format!("`{field}` {}", alint_core::git_directory_read_refusal(path)))
+}
+
+/// The finding for a named read [`confine_read`] refused because `path` is in
+/// a Git directory: an analysis failure (the rule has no input to judge), in
+/// the terms of the load-time refusal.
+pub(crate) fn git_directory_read_failure(path: &Path) -> alint_core::Violation {
+    alint_core::Violation::new(alint_core::git_directory_read_refusal(path))
+        .with_path(std::sync::Arc::<Path>::from(path))
+        .as_analysis_failure(alint_core::AnalysisFailureKind::ResourceRead)
 }
 
 /// The informational-note message for a permitted out-of-root read.
@@ -76,8 +114,12 @@ pub(crate) use alint_core::resolved_within_root;
 /// [`resolved_within_root`]. Use this for every config-derived *read*; the
 /// bare lexical [`confine`] is symlink-blind. Same In/AllowedEscape/Denied
 /// verdict, honouring `allow_escape` for the symlink escape exactly as for
-/// the lexical one.
+/// the lexical one, and [`Confined::GitDirectory`] first for a path in a Git
+/// directory, which no rule reads.
 pub(crate) fn confine_read(path: &Path, root: &Path, allow_escape: bool) -> Confined {
+    if alint_core::reaches_git_directory(root, path) {
+        return Confined::GitDirectory;
+    }
     match confine(path, allow_escape) {
         // Lexically in-tree — but the lexical check is symlink-blind, so
         // re-verify on the filesystem before trusting it for a read.
@@ -144,6 +186,60 @@ mod tests {
                     Confined::In(_)
                 ),
                 "{ok} should be In"
+            );
+        }
+    }
+
+    /// No rule reads a Git directory: a named path there, in any spelling, is
+    /// a load error, and one a symlink leads into is refused at read, whatever
+    /// `allow_out_of_root` says. `.github` and a gitignored `.env` still read.
+    #[cfg(unix)]
+    #[test]
+    fn named_reads_never_reach_a_git_directory() {
+        use super::{Confined, confine_read, reject_git_directory_read};
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join(".git")).unwrap();
+        std::fs::write(root.path().join(".git/config"), "x").unwrap();
+        std::fs::write(root.path().join(".env"), "x").unwrap();
+        std::os::unix::fs::symlink(".git/config", root.path().join("cfg.ini")).unwrap();
+        std::os::unix::fs::symlink(".git", root.path().join("g")).unwrap();
+        for named in [
+            ".git/config",
+            "./.git/config",
+            "a/.GIT/x",
+            "git~1/config",
+            ".git./x",
+        ] {
+            let error = reject_git_directory_read("r", "source.file", Path::new(named))
+                .unwrap_err()
+                .to_string();
+            assert_eq!(
+                error,
+                format!(
+                    "rule \"r\": `source.file` {named} is in a Git directory; rules never read \
+                     there"
+                )
+            );
+        }
+        for path in [".git/config", "cfg.ini", "g/config", "../repo/.git/config"] {
+            for allow in [false, true] {
+                assert!(
+                    matches!(
+                        confine_read(Path::new(path), root.path(), allow),
+                        Confined::GitDirectory
+                    ),
+                    "{path}"
+                );
+            }
+        }
+        for path in [".env", ".github/workflows/ci.yml", ".gitignore"] {
+            assert!(reject_git_directory_read("r", "f", Path::new(path)).is_ok());
+            assert!(
+                matches!(
+                    confine_read(Path::new(path), root.path(), false),
+                    Confined::In(_)
+                ),
+                "{path}"
             );
         }
     }

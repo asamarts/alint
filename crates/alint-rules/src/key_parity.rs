@@ -1395,6 +1395,7 @@ fn build_rule(spec: &RuleSpec) -> Result<KeyParityRule> {
     let reference = RelPath::parse(opts.reference.trim()).ok_or_else(|| {
         Error::rule_config(&spec.id, "`reference` must be a confined repository path")
     })?;
+    crate::pathsafe::reject_git_directory_read(&spec.id, "reference", reference.as_str())?;
     if opts.peers.trim().is_empty() {
         return Err(Error::rule_config(&spec.id, "`peers` must not be empty"));
     }
@@ -1555,6 +1556,7 @@ fn literal_peer(
             "a literal `peers` path must be a confined repository path",
         )
     })?;
+    crate::pathsafe::reject_git_directory_read(&spec.id, "peers", path.as_str())?;
     if alint_core::template::same_iteration_path(path.as_str(), reference.as_str()) {
         return Err(Error::rule_config(
             &spec.id,

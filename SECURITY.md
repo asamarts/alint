@@ -138,7 +138,10 @@ the filesystem, reads file contents, optionally calls `git` and `sh`-via-the-
   system opens as one, or through a symlink to one): a file there would be
   configuration Git runs commands from. The walk leaves out a symlink whose
   target is in a Git directory, so no content fix edits `.git/config` under
-  another name.
+  another name. No rule reads a Git directory either, from any configuration:
+  `.git/config` can hold credentials (the `http.<url>.extraheader` that
+  `actions/checkout` persists). A path a rule names there is a load error, and
+  one a symlink leads into is refused when it is read.
 - **Plugin trust gating.** The `command` rule kind shells out to external
   CLIs; it's gated to the user's top-level config (extends'd configs cannot
   introduce a `command` rule). A fix of a rule an `extends:`'d ruleset or a
