@@ -555,3 +555,38 @@ decided then.
   - `Mapping`'s documentation says its string-key methods find untagged keys only, and tests
     pin that and the auto traits of every owned type.
   - Next: the other review fixes and the facade; then phase 6.
+- 2026-11-15: the review of #525.
+  - **A correction to the 2026-11-15 entry on two review rounds of the differential harness.**
+    Its long runs left no unexplained difference partly because a location class took two errors for one: ayaml's error and the oracle's at another
+    place, among them the oracle's "more than one document", which has no place, and its error
+    about a character its reader refuses, which it gives before its scanner reads a token. And
+    the test that puts differences beside the input-wide entries' constructs left three out: the
+    implicit-key limit counted in characters, the typed decode's core tags and the content of a
+    top-level block scalar.
+  - A location class now explains two errors only when no prefix of the input shows them to be
+    two. It never takes the oracle's "more than one document" when the oracle read the line of
+    ayaml's error, and only the class about a character takes the oracle's reader error. A
+    rewrite that turns an ayaml value error into a syntax error hides the value error. A rewrite
+    changes its construct only, which a defect planted in the text around it checks with no
+    tolerance. Two rule errors are one only when they agree on the field and on the problem. An
+    explanation keeps no entry the case does not need, and ayaml's alias errors are known by
+    their messages, since ayaml 0.1.2 gives no error of kind `Alias` or `Tag`.
+  - Where ayaml's scanner reads a malformed document otherwise than YAML 1.2, the rewrites follow
+    it: the tabs it rejects, the characters it keeps in what it reads as a quoted scalar, the
+    indentation it reads a line with and the `!<!>` it rejects. `!<!>` becomes `!<!t>`, so that a
+    node keeps its properties.
+  - The masking test now covers the key limit at the value and JSON entry points and the typed
+    decode's core tags beside `-0`. A top-level block scalar's content takes in the lines around
+    it, so no difference can sit beside it. The five entries that no long run used now explain
+    differences, and the allowlist holds 39 deviations, 5 of them new, and 8 location classes,
+    one of them new: `!<>`, which names nothing and which both parsers reject.
+  - Long runs with seeds 1, 2, 3, 7 and 11, 1.60 million inputs, leave no unexplained
+    difference. They make no implicit key of more than 1,024 bytes and at most 1,024 characters,
+    so `implicit-key-length-in-characters` is checked by its example and the masking test alone.
+  - Two more ayaml defects, filed as asamarts/ayaml#146 and #147. In a valid document, a
+    document marker after a top-level block scalar's empty lines, one of them indented, is read
+    as content, as in `|`, a line of two spaces and `...`
+    (`document-marker-after-indented-empty-lines`). And a block scalar header after properties
+    alone on their line, as a tag alone under `-`, is accepted under its parent's indentation,
+    by both of ayaml's readers, where #132 is the compatibility reader's after an anchor.
+  - Next: the parser facade; then phase 6. Phase 9 brings the allowlist to the owner.
