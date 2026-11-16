@@ -556,13 +556,13 @@ decided then.
     pin that and the auto traits of every owned type.
   - Next: the other review fixes and the facade; then phase 6.
 - 2026-11-15: the review of #525.
-  - **A correction to the 2026-11-15 entry on two review rounds of the differential harness.**
-    Its long runs left no unexplained difference partly because a location class took two errors for one: ayaml's error and the oracle's at another
-    place, among them the oracle's "more than one document", which has no place, and its error
-    about a character its reader refuses, which it gives before its scanner reads a token. And
-    the test that puts differences beside the input-wide entries' constructs left three out: the
-    implicit-key limit counted in characters, the typed decode's core tags and the content of a
-    top-level block scalar.
+  - **A correction to the 2026-11-15 entry on two review rounds of the differential harness.** Its
+    long runs left no unexplained difference partly because a location class took two errors for
+    one: ayaml's error and the oracle's at another place, among them the oracle's "more than one
+    document", which has no place, and its error about a character its reader refuses, which it
+    gives before its scanner reads a token. And the test that puts differences beside the input-wide
+    entries' constructs left three out: the implicit-key limit counted in characters, the typed
+    decode's core tags and the content of a top-level block scalar.
   - A location class now explains two errors only when no prefix of the input shows them to be
     two. It never takes the oracle's "more than one document" when the oracle read the line of
     ayaml's error, and only the class about a character takes the oracle's reader error. A
@@ -589,4 +589,16 @@ decided then.
     (`document-marker-after-indented-empty-lines`). And a block scalar header after properties
     alone on their line, as a tag alone under `-`, is accepted under its parent's indentation,
     by both of ayaml's readers, where #132 is the compatibility reader's after an anchor.
+  - **Mutation testing.** cargo-mutants over the review's changes left 59 of 646 mutants that no
+    test caught. For 49 of them a test now holds an input the mutant reads otherwise: how fair a
+    rewrite is that reveals a parser error of ayaml's, where a split cuts and what it counts
+    against the comparison budget, a tie for the first error, which lines stand alone after a
+    prefix, a narrow entry past a revealed error, a rule entry with one of its two errors, the
+    places of a document marker and of a quoted line that starts with `%`, the tabs that are
+    content, the characters ayaml may not have read, and the predicates' lines and tags. The
+    code behind 8 that no input tells apart is gone, among it the fields a rule needs in the
+    rule-error check: serde reports a field's own error before it finds one missing, so the
+    field alone shows it. Of the other two, one is a shortcut that only saves a search, and one
+    is the stub that stands for the planted defects outside the tests, which no test build
+    compiles. The long runs read the same after the changes.
   - Next: the parser facade; then phase 6. Phase 9 brings the allowlist to the owner.
