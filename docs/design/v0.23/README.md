@@ -325,11 +325,12 @@ decided then.
   the one exception to "v1 is unchanged". The stratum's rulings stand. Projected under the
   amended slice, with entry values: `locale` 35%, `dep-version` 61%, `toolchain-pin` 63%, pooled
   58%.
-- 2026-11-13: the stratum's three defects are fixed, in v0.23 only (the owner's decision), with
-  no public API change. #507 (#502): a nested rule that needs the relation caches builds them
-  itself. #508 (#504): a nested `key_parity` loads with a templated `reference:` and settles the
-  format, `strip_root` and `ignore_keys` per iteration. #509 (#503, item 12): the git-tracked
-  views add the tracked paths that only an ignore file hid.
+- 2026-11-13: the stratum's three defects are fixed, in v0.23 only (the owner's decision). What
+  they add to the public API serves alint's own crates and is hidden from the documentation (the
+  placeholder helpers only since the audit of 2026-11-16). #507 (#502): a nested rule that needs
+  the relation caches builds them itself. #508 (#504): a nested `key_parity` loads with a
+  templated `reference:` and settles the format, `strip_root` and `ignore_keys` per iteration.
+  #509 (#503, item 12): the git-tracked views add the tracked paths that only an ignore file hid.
 - 2026-11-13: an audit of #506 to #509 (#511) hardened the three fixes:
   - a nested rule leaves the run caches alone;
   - nested rules of every kind are prepared with placeholders that their options accept (the
@@ -640,3 +641,21 @@ decided then.
     asamarts/ayaml#132", which GitHub read as a closing keyword, so merging it closed that issue; it
     is reopened. The two defects the review found are asamarts/ayaml#146 and #147.
   - Next: phase 6; phase 9 brings the allowlist, with the entries above, to the owner.
+- 2026-11-16: the audit of the changes since v0.22.1: engine, templates and rules.
+  - **Correction to the 2026-11-13 entry on the stratum's three defects.** It said the fixes
+    changed no public API. #508 and #511 added `PathTokens::placeholder`, `has_placeholder`,
+    `first_placeholder`, `same_iteration_path`, `unrender_placeholders` and
+    `NestedRuleSpec::templates` to `alint-core`'s documented API, though they work only inside
+    the hidden `template::Preparation`. They are hidden now, like `Preparation`, for alint's own
+    crates, and the entry now says so. `templates_rendering` replaces the three that read a
+    placeholder's spelling.
+  - A nested `key_parity` decides at load from the templates the configuration wrote, not from
+    the rendered text, so a name spelled like a placeholder (`data/_stem_`) is a load error, as
+    at the top level. On Windows it reads a reference that `{path}` rendered with `\` as the
+    index spells it. Glob `peers` are tested only under their literal directories.
+  - The git-tracked views skip #509's search for what an ignore file hid when every tracked path
+    is a walked one, the common case; the audit measured building the views at 6.1 times the
+    instructions of v0.22.1. With one `git_tracked_only` rule over a committed 10k tree, they
+    now take 9.4M instructions in place of 47.5M (Callgrind, bench profile), and `det_check`
+    gains that cell. Looking walked paths up by a binary search over the sorted entries, in
+    place of the path set the search builds, doubled its instructions, so it keeps the set.

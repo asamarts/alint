@@ -368,9 +368,10 @@ std::thread_local! {
 /// iteration's files and decoded rows for the whole run, and charge them all to
 /// one run-wide row budget (#502's audit).
 ///
-/// A thread-local rather than a `Context` field, so the fix adds no field to a
-/// public struct before v0.23 seals it. Nested rules evaluate on the thread
-/// that iterates, inside the scope.
+/// A thread-local rather than a `Context` field: nested rules evaluate on the
+/// thread that iterates, inside the scope, and a field on the sealed `Context`
+/// would add public API for state that only alint's own iteration kinds set,
+/// for the length of one iteration.
 #[doc(hidden)]
 #[derive(Debug)]
 #[must_use = "the scope closes when the guard drops"]

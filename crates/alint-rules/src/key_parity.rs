@@ -26,6 +26,7 @@ use alint_core::relation::{
     Origin, Pointer, ReadCache, RelPath, Resource, ResourceRead, ResxAdapter, Row, RowState,
     Segment, Selector, TomlRowsAdapter,
 };
+use alint_core::template::{PathTokens, render_path, render_path_glob};
 use alint_core::{
     AnalysisFailureKind, ByteSpan, Context, Error, Level, RelatedLocation, Result, Rule, RuleSpec,
     Scope, SourceRange, Violation,
@@ -241,7 +242,8 @@ pub struct KeyParityRule {
     format_pending: bool,
     format_override: Option<KeyFormat>,
     peers: String,
-    peers_scope: Scope,
+    /// Selects the files `peers` matches, under its literal directories only.
+    peers_selector: Selector,
     /// The peer a `peers` value without glob metacharacters names. It is read
     /// from disk even when the index leaves it out, so a gitignored `.env`
     /// can be a peer of `.env.example`.
@@ -424,7 +426,7 @@ impl Rule for KeyParityRule {
         let mut peers: Vec<Resource> = if let Some(path) = &self.literal_peer {
             vec![Resource::literal(path.clone())]
         } else {
-            let selection = Selector::new(self.peers_scope.clone()).select(ctx.index);
+            let selection = self.peers_selector.select(ctx.index);
             for path in selection.unrepresentable {
                 findings.push(
                     Violation::new(format!(
@@ -1388,13 +1390,20 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
 }
 
 fn build_rule(spec: &RuleSpec) -> Result<KeyParityRule> {
+    build_rule_with(spec, std::path::is_separator('\\'))
+}
+
+/// [`build_rule`], reading `\` in `reference` and a literal `peers` path as a
+/// separator when `backslash_separates` ([`config_path`]).
+fn build_rule_with(spec: &RuleSpec, backslash_separates: bool) -> Result<KeyParityRule> {
     alint_core::reject_scope_filter_on_cross_file(spec, "key_parity")?;
     let opts: Options = spec
         .deserialize_options()
         .map_err(|error| Error::rule_config(&spec.id, format!("invalid options: {error}")))?;
-    let reference = RelPath::parse(opts.reference.trim()).ok_or_else(|| {
+    let reference = config_path(opts.reference.trim(), backslash_separates).ok_or_else(|| {
         Error::rule_config(&spec.id, "`reference` must be a confined repository path")
     })?;
+    let reference_written = as_written(&opts.reference, false, backslash_separates);
     if opts.peers.trim().is_empty() {
         return Err(Error::rule_config(&spec.id, "`peers` must not be empty"));
     }
@@ -1415,7 +1424,7 @@ fn build_rule(spec: &RuleSpec) -> Result<KeyParityRule> {
     // iteration renders the name, and that iteration's build infers it.
     let format_pending = opts.format.is_none()
         && infer_format(Path::new(reference.as_str())).is_none()
-        && format_from_token(reference.as_str());
+        && format_from_token(&reference_written);
     let reference_format = match opts.format {
         Some(format) => format,
         None if format_pending => KeyFormat::Json,
@@ -1455,16 +1464,16 @@ fn build_rule(spec: &RuleSpec) -> Result<KeyParityRule> {
             ),
         ));
     }
-    if opts.ignore_keys.iter().any(|pattern| pattern.len() > 1024) {
-        return Err(Error::rule_config(
-            &spec.id,
-            "`ignore_keys` patterns must be at most 1024 bytes",
-        ));
-    }
     let ignore = ignore_patterns(spec, &opts.ignore_keys, model_format)?;
     let known_format = (!format_pending).then_some(reference_format);
-    let literal_peer = literal_peer(spec, &opts, &reference, known_format)?;
-    let peers_scope = Scope::from_patterns(std::slice::from_ref(&opts.peers))?;
+    let literal_peer = literal_peer(
+        spec,
+        &opts,
+        (&reference, &reference_written),
+        known_format,
+        backslash_separates,
+    )?;
+    let peers_selector = Selector::for_glob(&opts.peers)?;
     // The reference is a literal path: escape it, so a name such as
     // `locales/[id].json` matches its own `--changed` edit. Git cannot report
     // an edit to a gitignored literal peer such as `.env`, so a rule with a
@@ -1487,7 +1496,7 @@ fn build_rule(spec: &RuleSpec) -> Result<KeyParityRule> {
         format_pending,
         format_override: opts.format,
         peers: opts.peers,
-        peers_scope,
+        peers_selector,
         literal_peer,
         scope,
         direction: opts.direction,
@@ -1507,6 +1516,12 @@ fn ignore_patterns(
     patterns: &[String],
     reference_format: Option<KeyFormat>,
 ) -> Result<Vec<KeyPattern>> {
+    if patterns.iter().any(|pattern| pattern.len() > 1024) {
+        return Err(Error::rule_config(
+            &spec.id,
+            "`ignore_keys` patterns must be at most 1024 bytes",
+        ));
+    }
     let models: &[KeyModel] = match reference_format {
         Some(format) => &[format.model()],
         None => &[KeyModel::Tree, KeyModel::Flat],
@@ -1535,34 +1550,37 @@ fn ignore_patterns(
 }
 
 /// A `peers` value with no glob metacharacters, as a confined path other than
-/// the reference. Its extension implies a key model (without an explicit
-/// `format`, it picks the format), so a key-model mismatch with a known
-/// reference format is a config error here rather than an analysis failure
-/// when it is read. With the reference format pending, each iteration's build
-/// makes that check.
+/// the reference (given with what [`as_written`] made of it). Its extension
+/// implies a key model (without an explicit `format`, it picks the format), so
+/// a key-model mismatch with a known reference format is a config error here
+/// rather than an analysis failure when it is read. With the reference format
+/// pending, each iteration's build makes that check.
 fn literal_peer(
     spec: &RuleSpec,
     opts: &Options,
-    reference: &RelPath,
+    reference: (&RelPath, &[String]),
     reference_format: Option<KeyFormat>,
+    backslash_separates: bool,
 ) -> Result<Option<RelPath>> {
     let Some(path) = alint_core::template::literal_glob_path(&opts.peers) else {
         return Ok(None);
     };
-    let path = RelPath::parse(&path).ok_or_else(|| {
+    let path = config_path(&path, backslash_separates).ok_or_else(|| {
         Error::rule_config(
             &spec.id,
             "a literal `peers` path must be a confined repository path",
         )
     })?;
-    if alint_core::template::same_iteration_path(path.as_str(), reference.as_str()) {
+    let written = as_written(&opts.peers, true, backslash_separates);
+    if same_in_every_iteration((&path, &written), reference) {
         return Err(Error::rule_config(
             &spec.id,
             "`peers` must select at least one file other than the reference",
         ));
     }
     let inferred = infer_format(Path::new(path.as_str()));
-    if opts.format.is_none() && inferred.is_none() && !format_from_token(path.as_str()) {
+    let from_token = format_from_token(&written);
+    if opts.format.is_none() && inferred.is_none() && !from_token {
         return Err(Error::rule_config(
             &spec.id,
             "cannot infer the key format of the literal `peers` path; set `format` explicitly",
@@ -1596,27 +1614,100 @@ fn no_reference_format(reference: &RelPath) -> String {
     )
 }
 
-/// Whether a path token decides the format [`infer_format`] gives `path`'s
-/// file name: the extension comes from a token, the name has no literal
-/// extension, or a token can make the name start with `.env.`. That is known
-/// only in a nested rule's preparation build, which renders the tokens as
-/// placeholders ([`alint_core::template::PathTokens::placeholder`]); each
-/// iteration's build sees the real name. A name such as `strings-{stem}.xml`
-/// has the same unsupported extension in every iteration.
-fn format_from_token(path: &str) -> bool {
-    use alint_core::template::{first_placeholder, has_placeholder};
-    let path = Path::new(path);
-    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-        return false;
-    };
-    let Some(first) = first_placeholder(name) else {
-        return false;
-    };
-    match path.extension().and_then(|ext| ext.to_str()) {
-        None => true,
-        Some(ext) if has_placeholder(ext) => true,
-        Some(_) => ".env.".starts_with(&name[..first]),
+/// A `reference` or literal `peers` path as the index spells it. Path tokens
+/// render with the host's separator (`{path}` is `apps\web\en.json` on
+/// Windows) and the index joins names with `/`, so where `\` is a separator
+/// (`backslash_separates`, as on Windows) it splits names as `/` does; elsewhere
+/// it is part of a name.
+fn config_path(text: &str, backslash_separates: bool) -> Option<RelPath> {
+    if backslash_separates {
+        RelPath::parse(&text.replace('\\', "/"))
+    } else {
+        RelPath::parse(text)
     }
+}
+
+/// Marks each path token in what [`as_written`] returns: the token's name
+/// between two of these, a private-use character that a path in a
+/// configuration has no reason to hold.
+const MARK: char = '\u{E000}';
+
+fn marked(name: &str) -> String {
+    format!("{MARK}{name}{MARK}")
+}
+
+/// What the configuration wrote for `rendered`, the value of `reference` (or
+/// of `peers`, a glob, when `glob`), in a nested rule's preparation build:
+/// each template that renders it with the placeholder tokens
+/// ([`alint_core::template::templates_rendering`]), rendered again with each
+/// token marked by [`MARK`], as the path [`config_path`] reads (for `peers`,
+/// the literal path it names). Unlike a placeholder, a mark cannot come from
+/// text the configuration wrote, so `data/_stem_` has no token. Empty outside
+/// a preparation, where no part of a value comes from a token.
+fn as_written(rendered: &str, glob: bool, backslash_separates: bool) -> Vec<String> {
+    let tokens = PathTokens {
+        path: marked("path"),
+        dir: marked("dir"),
+        basename: marked("basename"),
+        stem: marked("stem"),
+        ext: marked("ext"),
+        parent_name: marked("parent_name"),
+    };
+    alint_core::template::templates_rendering(rendered)
+        .iter()
+        .filter_map(|template| {
+            let path = if glob {
+                alint_core::template::literal_glob_path(&render_path_glob(template, &tokens))?
+            } else {
+                render_path(template, &tokens).trim().to_owned()
+            };
+            config_path(&path, backslash_separates).map(|path| path.as_str().to_owned())
+        })
+        .collect()
+}
+
+/// Whether a path token decides the format [`infer_format`] gives the file
+/// name of a path [`as_written`] marked, for any of `written`: the extension
+/// comes from a token, the name has no literal extension, or a token can make
+/// the name start with `.env.`. Each iteration's build sees the real name. A
+/// name such as `strings-{stem}.xml` has the same unsupported extension in
+/// every iteration.
+fn format_from_token(written: &[String]) -> bool {
+    written.iter().any(|written| {
+        let path = Path::new(written);
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            return false;
+        };
+        let Some(first) = name.find(MARK) else {
+            return false;
+        };
+        match path.extension().and_then(|ext| ext.to_str()) {
+            None => true,
+            Some(ext) if ext.contains(MARK) => true,
+            Some(_) => ".env.".starts_with(&name[..first]),
+        }
+    })
+}
+
+/// Whether a literal peer names the reference in every iteration, each given
+/// as a path with what [`as_written`] made of it. Outside a preparation build
+/// the paths are compared. In one, every template written for the peer must
+/// name what every template written for the reference names, `{path}` read as
+/// `{dir}/{basename}`: when the configuration also spells a placeholder in
+/// another string, a load error is only for what holds whichever it wrote.
+fn same_in_every_iteration(peer: (&RelPath, &[String]), reference: (&RelPath, &[String])) -> bool {
+    if peer.1.is_empty() || reference.1.is_empty() {
+        return peer.0 == reference.0;
+    }
+    let path = marked("path");
+    let spelled_out = format!("{}/{}", marked("dir"), marked("basename"));
+    let normal = |written: &String| written.replace(&path, &spelled_out);
+    peer.1.iter().all(|peer| {
+        reference
+            .1
+            .iter()
+            .all(|reference| normal(peer) == normal(reference))
+    })
 }
 
 /// The format a literal `peers` path's name implies. As for the reference, a

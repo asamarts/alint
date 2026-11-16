@@ -47,7 +47,25 @@ Most rules judge one file at a time. **Cross-file rules** judge a relationship b
 
 ## The relational rules
 
-The oldest cross-file rules ask about neighbours. `pair` requires that every file matching `primary` has a matching `partner` (every `foo.c` a `foo.h`); `pair_hash` is stricter, requiring the partner to carry the source file's content digest; and the diff-scoped `pair_changed_together` is directional, requiring that when an `if_changed:` file appears in the diff, a `then_changed:` file changes with it. `for_each_dir` and `for_each_file` iterate directories or files and run nested `require:` rules against each, gated by `when_iter:`; `every_matching_has` is lighter sugar over that iteration, running nested `require:` rules against every file or directory matching `select:` (it honours `when_iter:` as well). `unique_by` forbids two files from sharing a **path-template key**: the default `{basename}` forbids the same filename anywhere in the tree, while the `case_insensitive:` option additionally catches names that collide only under case-folding, the Windows and macOS hazard (`no_case_conflicts` is the dedicated kind for exactly that check). `dir_contains` and `dir_only_contains` constrain a directory's membership, and a resolve family checks references against disk: `registry_paths_resolve` requires every path a manifest enumerates to exist, and `markdown_paths_resolve` does the same for the backticked workspace paths in a Markdown file. Most of these read the whole tree, because the answer for one path depends on the others, so they opt out of `--changed` filtering; the per-file `markdown_paths_resolve` (each file's links are self-contained) is the exception, participating in `--changed` like any per-file rule. The [rules reference](/docs/rules/) carries the complete set.
+The oldest cross-file rules ask about neighbours. `pair` requires that every file matching `primary`
+has a matching `partner` (every `foo.c` a `foo.h`); `pair_hash` is stricter, requiring the partner
+to carry the source file's content digest; and the diff-scoped `pair_changed_together` is
+directional, requiring that when an `if_changed:` file appears in the diff, a `then_changed:` file
+changes with it. `for_each_dir` and `for_each_file` iterate directories or files and run nested
+`require:` rules against each, gated by `when_iter:`; `every_matching_has` is lighter sugar over
+that iteration, running nested `require:` rules against every file or directory matching `select:`
+(it honours `when_iter:` as well). `unique_by` forbids two files from sharing a **path-template
+key**: the default `{basename}` forbids the same filename anywhere in the tree, while the
+`case_insensitive:` option additionally catches names that collide only under case-folding, the
+Windows and macOS hazard (`no_case_conflicts` is the dedicated kind for exactly that check).
+`dir_contains` and `dir_only_contains` constrain a directory's membership, and a resolve family
+checks references against the walked tree: `registry_paths_resolve` requires every path a manifest
+enumerates to be in it, so a path that is missing, or that an ignore file or `ignore:` excludes,
+does not resolve, and `markdown_paths_resolve` does the same for the backticked workspace paths in a
+Markdown file. Most of these read the whole tree, because the answer for one path depends on the
+others, so they opt out of `--changed` filtering; the per-file `markdown_paths_resolve` (each file's
+links are self-contained) is the exception, participating in `--changed` like any per-file rule. The
+[rules reference](/docs/rules/) carries the complete set.
 
 ## file_graph
 
@@ -57,7 +75,15 @@ Edges resolve **as paths**, which is the point: a `from_content` regex captures 
 
 ## cross_file
 
-`cross_file` asserts a **relation** between one file's extracted value and one or more targets. Six relations: the value relations `equals`, `subset`, `superset`, and `set_equals`; `identical`, a whole-file byte match; and `resolves`, which requires each extracted path to exist on disk. It pulls values through the shared `extract:` extractor and an optional `normalize`, so `normalize: semver-minor` reconciles `4.36-dev`, `4.36.0`, and `>=4.36` to the same `4.36` band, letting the `engines.node` in every `package.json` be checked against the root without version-string noise. `allow_missing_target` tolerates an absent target, and `cross_file_value_equals` is a registered alias with `relation: equals`.
+`cross_file` asserts a **relation** between one file's extracted value and one or more targets. Six
+relations: the value relations `equals`, `subset`, `superset`, and `set_equals`; `identical`, a
+whole-file byte match; and `resolves`, which requires each extracted path to be in the walked tree,
+so a path that is missing, or that an ignore file or `ignore:` excludes, does not resolve. It pulls
+values through the shared `extract:` extractor and an optional `normalize`, so `normalize:
+semver-minor` reconciles `4.36-dev`, `4.36.0`, and `>=4.36` to the same `4.36` band, letting the
+`engines.node` in every `package.json` be checked against the root without version-string noise.
+`allow_missing_target` tolerates an absent target, and `cross_file_value_equals` is a registered
+alias with `relation: equals`.
 
 ## key_parity
 

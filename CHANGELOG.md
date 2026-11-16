@@ -150,8 +150,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the environment. v0.22 gave such findings a fingerprint without the path and, for one minor
   release, still matched the v0.21 form, which hashed the path. If your baseline file was last
   written by v0.21 or earlier, `check --baseline` and `fix --baseline` now treat those findings as
-  new and their entries as stale. Regenerate the file once with `alint baseline --accept-new`; the
-  flag is needed because the findings count as new. A file written by v0.22 is unaffected.
+  new and their entries as stale, and the language server shows those findings again. Regenerate
+  the file once with `alint baseline --accept-new`; the flag is needed because the findings count
+  as new. A file written by v0.22 is unaffected.
 - **Breaking (library API):** `alint-core` drops `baseline::Fingerprints` and
   `baseline::fingerprints`, which existed only to match the v0.21 form. `baseline::apply` takes a
   fingerprinter that returns a `String` again, such as `baseline::fingerprint`.
@@ -180,12 +181,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that holds build output with `git rm -r --cached` as well as list it in `.gitignore`, since the
   directory they report can now already be listed there, and `java-no-class-files` says to
   untrack the files with `git rm --cached`.
-- `registry_paths_resolve`, `file_graph`'s `no_dangling` and `markdown_links_resolve` no longer
-  say that a path is missing "on disk". They resolve paths against the walked tree, so a path
-  that an ignore file or `ignore:` excludes does not resolve either, and the messages now say
-  "missing or ignored". A `registry_paths_resolve` entry of the other kind now says so ("resolves
-  to a file, not a directory"), and `php@v1`'s Composer rules say an entry must exist and not be
-  ignored. Their baseline keys are unchanged.
+- `registry_paths_resolve` and `file_graph`'s `no_dangling` no longer say that a path is missing "on
+  disk", and `markdown_links_resolve` no longer says that "no file or directory exists". They
+  resolve paths against the walked tree, so a path that an ignore file or `ignore:` excludes does
+  not resolve either, and the messages now say "missing or ignored". A `registry_paths_resolve`
+  entry of the other kind now says so ("resolves to a file, not a directory"), and `php@v1`'s
+  Composer rules say an entry must exist and not be ignored. Their baseline keys are unchanged.
 - **alint parses YAML with ayaml 0.1.2, a pure-Rust parser, in place of `yaml_serde` and
   `libyaml-rs`** (#510, ADR-0035). Configurations, `extends:` sources, the `yaml_path_*` rules,
   `json_schema_passes` on YAML, front matter and `alint test` packages all read through it. The
@@ -341,6 +342,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   constructors and setters listed under Added; the fields stay public to read and to assign, and
   a pattern that destructures one needs `..`.
 
+### Performance
+
+- A `key_parity` whose `peers:` glob starts with literal directories (`locales/*.json`, or a
+  nested rule's `{dir}/*.json`) tests only the files under them, where it tested every file in
+  the tree. Nested in `require:`, it did that in every iteration, so its cost grew with the
+  number of iterations times the number of files.
+
 ### Fixed
 
 - **A `key_parity` rule nested in the `require:` of `for_each_file`, `for_each_dir` or
@@ -351,7 +359,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`key_parity`, `cross_file`) now read through caches of their own, which nothing outlives. With
   a top-level relation rule configured as well, a nested one used the run's caches instead: every
   iteration's files and decoded rows stayed in memory for the whole run and counted against its
-  row limit, so a long iteration could fail with "relation limit `rows_per_run` reached".
+  row limit, so a long iteration could fail with "relation limit `rows_per_run` (5000000)
+  reached: ... rows or values".
 - **A nested `key_parity` whose `reference:` or literal `peers:` takes its key format from a path
   token loads.** A configuration with `reference: "{path}"` or `peers: "{dir}/fr.{ext}"` in a
   `require:` block was rejected with "cannot infer the key format", because nested rules are
@@ -359,9 +368,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `strip_root` and `ignore_keys` checks that depend on it, are now made in each iteration, and an
   iteration whose file has no key format is a `nested_rule_build` analysis failure whose message
   lists the supported names. What holds for every iteration is still a load error: a literal
-  extension such as `reference: "{dir}/strings-{stem}.xml"`, a literal peer whose key model does
-  not allow `strip_root` or an `ignore_keys` pattern, and `peers: "{dir}/{basename}"` against
-  `reference: "{path}"` (#504).
+  extension such as `reference: "{dir}/strings-{stem}.xml"`, a name no path token renders (even
+  one spelled like the load-time placeholder, `reference: "data/_stem_"`), a literal peer whose
+  key model does not allow `strip_root` or an `ignore_keys` pattern, and
+  `peers: "{dir}/{basename}"` against `reference: "{path}"` (#504).
+- **On Windows, a nested `key_parity` tells its templated `reference:` apart from its peers.**
+  `{path}` and `{dir}` render with the OS separator, so `reference: "{path}"` became
+  `apps\web\en.json`, which `key_parity` read as one file name where the walk lists
+  `apps/web/en.json`. A `peers:` glob that selected only the reference compared it with itself
+  and passed, where Linux and macOS report that the glob matched no other file;
+  `peers: "{dir}/en.json"` against `reference: "{path}"` passed, where they report that the peer
+  is the reference; and messages quoted the reference with backslashes. On Windows, `key_parity`
+  now reads a `\` in `reference:` and in a literal `peers:` path as a separator, as globs already
+  do.
 - **Nested rules of every kind are checked at load with a placeholder for each path token**
   (`{stem}` as `_stem_`), where 0.22 rendered `{dir}`, `{ext}` and `{parent_name}` empty. A
   template whose empty rendering was invalid now loads, such as `reference:

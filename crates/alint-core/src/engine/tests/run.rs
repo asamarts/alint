@@ -841,8 +841,8 @@ fn a_nested_relation_consumer_leaves_the_run_caches_off() {
 }
 
 /// The engine's preparation builds run inside a `template::Preparation`, so a
-/// builder recognises the placeholder values, and an error shows each token as
-/// the template wrote it (#504's audit).
+/// builder finds the template a value was rendered from, and an error shows
+/// each token as the template wrote it (#504's audit).
 #[test]
 fn a_nested_preparation_error_shows_the_template() {
     let mut registry = nested_registry();
@@ -855,8 +855,8 @@ fn a_nested_preparation_error_shows_the_template() {
         Err(crate::Error::rule_config(
             &spec.id,
             format!(
-                "invalid glob {target:?} (placeholder: {})",
-                crate::template::has_placeholder(target)
+                "invalid glob {target:?} (written: {:?})",
+                crate::template::templates_rendering(target)
             ),
         ))
     });
@@ -873,8 +873,11 @@ fn a_nested_preparation_error_shows_the_template() {
         ),
         "{error}"
     );
-    assert!(error.contains("(placeholder: true)"), "{error}");
-    assert!(!crate::template::has_placeholder("_stem_"), "closed again");
+    assert!(error.contains(r#"(written: ["{dir}/[{stem}"])"#), "{error}");
+    assert!(
+        crate::template::templates_rendering("_dir_/[_stem_").is_empty(),
+        "closed again"
+    );
 }
 
 #[test]
@@ -1001,4 +1004,106 @@ fn an_unresolvable_changed_since_ref_that_may_be_secret_is_left_out_of_the_error
         assert!(!secret.contains("canary-missing-ref"), "{secret}");
         assert!(secret.contains("`<redacted>...HEAD`"), "{secret}");
     }
+}
+
+/// A rule that reads one of the git-tracked views.
+#[derive(Debug)]
+struct TrackedViewRule(crate::GitTrackedMode);
+
+impl Rule for TrackedViewRule {
+    fn id(&self) -> &'static str {
+        "tracked-view"
+    }
+    fn level(&self) -> Level {
+        Level::Error
+    }
+    fn git_tracked_mode(&self) -> crate::GitTrackedMode {
+        self.0
+    }
+    fn evaluate(&self, _ctx: &Context<'_>) -> crate::error::Result<Vec<Violation>> {
+        Ok(Vec::new())
+    }
+}
+
+/// The git-tracked views search for what an ignore file hid only when the
+/// walk left out a tracked path, and are what that search would make of
+/// them either way: the walked entries git tracks, then the hidden ones.
+#[test]
+fn tracked_views_search_for_hidden_paths_only_when_the_walk_left_one_out() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    for (rel, content) in [
+        (".gitignore", "out/\n"),
+        ("a.txt", "a"),
+        ("src/b.txt", "b"),
+        ("out/c.txt", "c"),
+    ] {
+        std::fs::create_dir_all(root.join(rel).parent().unwrap()).unwrap();
+        std::fs::write(root.join(rel), content).unwrap();
+    }
+    let opts = crate::WalkOptions {
+        respect_gitignore: true,
+        extra_ignores: Vec::new(),
+        global_git_excludes: true,
+    };
+    let full = crate::walk(root, &opts).unwrap();
+    let engine = Engine::new(
+        vec![
+            Box::new(TrackedViewRule(crate::GitTrackedMode::FileOnly)),
+            Box::new(TrackedViewRule(crate::GitTrackedMode::DirAware)),
+        ],
+        RuleRegistry::new(),
+    );
+    let views = |tracked: &[&str]| {
+        let tracked: HashSet<std::path::PathBuf> =
+            tracked.iter().map(std::path::PathBuf::from).collect();
+        let searches = super::super::gates::HIDDEN_SEARCHES.get();
+        let views = engine
+            .build_git_tracked_indexes(root, &full, Some(&tracked))
+            .unwrap();
+        let listed = |index: Option<&FileIndex>| -> Vec<String> {
+            index
+                .unwrap()
+                .entries
+                .iter()
+                .map(|e| e.path.to_string_lossy().replace('\\', "/"))
+                .collect()
+        };
+        (
+            super::super::gates::HIDDEN_SEARCHES.get() - searches,
+            listed(views.file_only.as_ref()),
+            listed(views.dir_aware.as_ref()),
+        )
+    };
+    // Every tracked path is a walked entry: nothing to search for.
+    assert_eq!(
+        views(&[".gitignore", "a.txt", "src/b.txt"]),
+        (
+            0,
+            vec![".gitignore".into(), "a.txt".into(), "src/b.txt".into()],
+            vec![
+                ".gitignore".into(),
+                "a.txt".into(),
+                "src".into(),
+                "src/b.txt".into()
+            ],
+        )
+    );
+    assert_eq!(
+        views(&["a.txt"]),
+        (0, vec!["a.txt".into()], vec!["a.txt".into()])
+    );
+    // A force-added file the walk left out, and a deleted one.
+    assert_eq!(
+        views(&["a.txt", "out/c.txt"]),
+        (
+            1,
+            vec!["a.txt".into(), "out/c.txt".into()],
+            vec!["a.txt".into(), "out".into(), "out/c.txt".into()],
+        )
+    );
+    assert_eq!(
+        views(&["a.txt", "gone.txt"]),
+        (1, vec!["a.txt".into()], vec!["a.txt".into()])
+    );
 }

@@ -68,6 +68,19 @@ const SFIX_ALL: &str = include_str!(concat!(
     "/../../xtask/src/bench/scenarios/sfix_all.yml"
 ));
 
+// One rule that reads the git-tracked view, so the cell measures building it
+// (`build_git_tracked_indexes`) over a committed tree where git tracks every
+// walked file, the common case.
+const GIT_TRACKED: &str = r#"
+version: 1
+rules:
+  - id: tracked-manifest
+    kind: file_exists
+    paths: "Cargo.toml"
+    git_tracked_only: true
+    level: error
+"#;
+
 const ANALYSIS_TIME: &str = r#"
 version: 1
 rules:
@@ -143,10 +156,15 @@ fn materialize_analysis_time() {
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
     std::fs::write(root.join(".alint.yml"), ANALYSIS_TIME).unwrap();
+    commit_fixed(&root, ".alint.yml");
+}
+
+/// Make `root` a repository with one commit, at a fixed date, of `paths`.
+fn commit_fixed(root: &Path, paths: &str) {
     let run_git = |args: &[&str]| {
         let output = std::process::Command::new("git")
             .arg("-C")
-            .arg(&root)
+            .arg(root)
             .args(args)
             .env("GIT_AUTHOR_DATE", "2024-01-02T03:04:05Z")
             .env("GIT_COMMITTER_DATE", "2024-01-02T03:04:05Z")
@@ -162,8 +180,15 @@ fn materialize_analysis_time() {
     run_git(&["config", "user.name", "Test"]);
     run_git(&["config", "user.email", "test@example.com"]);
     run_git(&["config", "commit.gpgsign", "false"]);
-    run_git(&["add", ".alint.yml"]);
+    run_git(&["add", paths]);
     run_git(&["commit", "-qm", "fixed"]);
+}
+
+/// setup for the `git_tracked` cell: like [`materialize`], then commit the
+/// whole tree, so git tracks every file the walk lists.
+fn materialize_committed(scenario: &str, config: &str, n: usize) {
+    materialize(scenario, config, n);
+    commit_fixed(&tree_path(scenario, n), ".");
 }
 
 /// setup for the `fix` cell: like [`materialize`], then inject a trailing space
@@ -296,6 +321,21 @@ fn explain_analysis_time() -> Command {
 
 binary_benchmark_group!(name = analysis_time_grp, benchmarks = explain_analysis_time);
 
+// `check` with one `git_tracked_only` rule over a committed tree: the cost of
+// the git-tracked view (and of the `git ls-files` it runs), which the scenario
+// cells above, outside a repository, never build.
+#[binary_benchmark(setup = materialize_committed)]
+#[bench::git_tracked_10k("git-tracked", GIT_TRACKED, 10_000)]
+fn git_tracked(scenario: &str, config: &str, n: usize) -> Command {
+    let _ = config; // consumed by `materialize_committed` (setup)
+    Command::new(alint_bin())
+        .arg("check")
+        .arg(tree_path(scenario, n))
+        .build()
+}
+
+binary_benchmark_group!(name = git_tracked_grp, benchmarks = git_tracked);
+
 main!(
     config = BinaryBenchmarkConfig::default().tool(
         Callgrind::default()
@@ -308,5 +348,11 @@ main!(
             // moving net cycles <1%, so gating them only false-positives.
             .soft_limits([(EventKind::Ir, 2.0), (EventKind::EstimatedCycles, 5.0)]),
     ),
-    binary_benchmark_groups = [check_grp, relation_grp, fix_grp, analysis_time_grp]
+    binary_benchmark_groups = [
+        check_grp,
+        relation_grp,
+        fix_grp,
+        analysis_time_grp,
+        git_tracked_grp
+    ]
 );

@@ -654,6 +654,12 @@
     "fingerprint": "fa8c0e9a3ffca8a371b3e9bcab889ee6ec7679ecce90575c64fa09ac392b4dab"
   },
   {
+    "scenario": "check/cross_file/key_parity_nested_glob_peers_exclude_the_reference.yml",
+    "rule_id": "locale-parity",
+    "path": "web/fr.json",
+    "fingerprint": "18e63f8208f3a80f8d8d861bad5c9fc1eb99a4f82dae0ad9e3ba5d1a8e4797e0"
+  },
+  {
     "scenario": "check/cross_file/key_parity_nested_literal_peer_model_per_iteration.yml",
     "rule_id": "env-parity",
     "path": "api/.env",
@@ -682,6 +688,12 @@
     "rule_id": "package-locale-parity",
     "path": "packages/ui/locales/fr.json",
     "fingerprint": "864ba062abb810c8e8d967484af9f230ae5a6ed82a9f29856637afa3f004075f"
+  },
+  {
+    "scenario": "check/cross_file/key_parity_nested_twice_templated_reference.yml",
+    "rule_id": "package-locale-parity",
+    "path": "packages/ui/fr.json",
+    "fingerprint": "764fe1cdb927354c7d550271166d91128ee13aeb37c68c5de501b47a449049a6"
   },
   {
     "scenario": "check/cross_file/key_parity_properties_dotted_fires.yml",
