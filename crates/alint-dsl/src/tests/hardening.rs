@@ -319,6 +319,51 @@ fn nested_configs_enabled_matches_load() {
 }
 
 #[test]
+fn nested_configs_enabled_resolves_no_extends_and_reads_no_environment() {
+    // The language server asked this of a nested `.alint.yml` it was deciding
+    // whether to trust. Resolving that config's `extends:` interpolated an
+    // environment variable into the URL and connected to the host it named.
+    #[derive(Debug, Default)]
+    struct Recording(std::sync::Mutex<Vec<String>>);
+    impl EnvironmentProvider for Recording {
+        fn get(&self, name: &str) -> Option<String> {
+            self.0.lock().unwrap().push(name.to_string());
+            Some("canary".to_string())
+        }
+    }
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let tmp = tempfile::tempdir().unwrap();
+    let top = tmp.path().join(".alint.yml");
+    std::fs::write(
+        &top,
+        format!(
+            "version: 1\nnested_configs: true\nextends:\n  - \
+             \"https://127.0.0.1:{port}/{{{{env.AUDIT_CANARY}}}}.yml#sha256-{}\"\nrules: []\n",
+            "0".repeat(64)
+        ),
+    )
+    .unwrap();
+    let environment = std::sync::Arc::new(Recording::default());
+    let opts = LoadOptions {
+        environment: environment.clone(),
+        cache: Some(extends::Cache::at(tmp.path().join("cache"))),
+        fetcher: Some(extends::Fetcher::new(std::time::Duration::from_secs(2))),
+        ..LoadOptions::with_catalog(test_catalog())
+    };
+    let enabled = nested_configs_enabled_with(&top, &opts);
+    assert_eq!(*environment.0.lock().unwrap(), Vec::<String>::new());
+    assert!(
+        listener
+            .accept()
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::WouldBlock),
+        "a connection reached the listener"
+    );
+    assert!(enabled.unwrap());
+}
+
+#[test]
 fn remote_yaml_tags_cannot_hide_fields_from_the_trust_gates() {
     // Audit R2 (CRITICAL): the gates read raw mappings with `get("kind")` /
     // `as_str()`, which miss a tagged KEY (`!x kind:`) or a tagged VALUE

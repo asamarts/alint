@@ -43,6 +43,14 @@
 //! - **Watched files** (`didChangeWatchedFiles`) reload the session, so
 //!   `.alint.yml` edits take effect without saving an open document.
 //!
+//! Workspace trust: a workspace's config is the repository's, so until the
+//! client vouches for the workspace (the `trusted: true` initialization
+//! option; the VS Code extension sends its Workspace Trust state) the server
+//! builds no rule or fact that spawns a process, fetches no remote
+//! `extends:`, and reads nothing from the environment. Every other rule lints
+//! as usual, and the user is told once what was left out (see
+//! `config::Settings`).
+//!
 //! Diagnostic positions use the LSP default UTF-16 encoding: alint's
 //! 1-based character columns are converted against the document text.
 //!
@@ -82,8 +90,10 @@ mod render;
 mod registry_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod trust_tests;
 
-use config::{check_workspace, eval_buffer, workspace_folders};
+use config::{ConfigError, SessionKey, Settings, check_workspace, eval_buffer, workspace_folders};
 use diagnostics::{GroupCtx, finding_to_diagnostic, range_contains, ranges_overlap};
 use edits::{fix_edit_to_workspace_edit, located_edits_to_workspace_edit};
 use render::{render_finding, render_notes};
@@ -98,6 +108,16 @@ pub struct LspOptions {
     pub analysis_time: Option<alint_core::AnalysisTime>,
     /// Injected rule registry, or the built-in catalog when `None`.
     pub registry: Option<alint_core::RuleRegistry>,
+    /// `--config`: lint every document with this config (an absolute path),
+    /// rooted at its workspace folder, in place of the folder's own config.
+    /// The user chose it, so it runs trusted, as `alint check --config` does,
+    /// whatever the client says about the workspace.
+    pub config: Option<PathBuf>,
+    /// `--no-gitignore`: walk without `.gitignore` handling.
+    pub no_gitignore: bool,
+    /// `--no-spawn`: a config with a rule, fix or fact that spawns a process
+    /// fails to load, as with `alint check --no-spawn`.
+    pub no_spawn: bool,
 }
 
 impl LspOptions {
@@ -105,6 +125,18 @@ impl LspOptions {
         self.registry
             .clone()
             .unwrap_or_else(alint_rules::builtin_registry)
+    }
+
+    /// The session settings for a workspace the client did (`trusted`) or
+    /// did not vouch for.
+    fn settings(&self, trusted: bool) -> Settings {
+        Settings {
+            analysis_time: self.analysis_time,
+            trusted: trusted || self.config.is_some(),
+            no_spawn: self.no_spawn,
+            no_gitignore: self.no_gitignore,
+            config: self.config.clone(),
+        }
     }
 }
 
@@ -168,6 +200,10 @@ struct Session {
     /// any error the session reports (a rule run that fails on an `ignore:`
     /// or `facts:` value read from the environment).
     environment_values: Vec<String>,
+    /// The session is untrusted and left out something this config uses: a
+    /// rule or fact that spawns, or an environment value (see
+    /// [`config::UNTRUSTED_NOTE`]).
+    withheld: bool,
 }
 
 impl Session {
@@ -199,8 +235,8 @@ struct ConfigRun {
 /// and each config's run (or its load/build error message).
 #[derive(Debug, Default)]
 struct WorkspaceCheck {
-    doc_config: HashMap<Url, PathBuf>,
-    runs: Vec<(PathBuf, Result<ConfigRun, String>)>,
+    doc_config: HashMap<Url, SessionKey>,
+    runs: Vec<(SessionKey, Result<ConfigRun, ConfigError>)>,
 }
 
 /// Build a tokio runtime and serve the alint language server over
@@ -214,8 +250,11 @@ struct WorkspaceCheck {
 /// stdin reader, so the process terminates promptly on `exit` even
 /// while the client keeps stdin open.
 pub fn run_stdio(options: LspOptions) -> std::io::Result<i32> {
+    // Rules and fixers recurse over parsed documents; give the workers and
+    // the blocking pool the stack a main thread has, not tokio's 2 MiB.
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
+        .thread_stack_size(8 * 1024 * 1024)
         .build()?;
     let shutdown = Arc::new(AtomicBool::new(false));
     let shutdown_flag = Arc::clone(&shutdown);
@@ -293,18 +332,23 @@ struct State {
     folders: Vec<PathBuf>,
     /// Whether the client accepts `Diagnostic.relatedInformation`.
     related_information_supported: bool,
+    /// The client vouched for the workspace (`trusted: true` in its
+    /// initialization options). See [`Settings::trusted`].
+    trusted: bool,
+    /// The untrusted-workspace note was shown (once per server).
+    untrusted_note_shown: bool,
     /// URIs of documents the editor currently has open. Diagnostics
     /// are published (and cleared) for these.
     open: HashSet<Url>,
-    /// Cached engine + index per config path from the last full check.
+    /// Cached engine + index per session from the last full check.
     /// The change hot path and code actions need them.
-    sessions: HashMap<PathBuf, Arc<Session>>,
+    sessions: HashMap<SessionKey, Arc<Session>>,
     /// Configs that failed to load/build, with the error. Documents
     /// governed by a broken config show no findings (only the config
     /// error, on the config file) until it loads again.
-    broken: HashMap<PathBuf, String>,
-    /// Which config governs each open document (nearest ancestor).
-    doc_config: HashMap<Url, PathBuf>,
+    broken: HashMap<SessionKey, ConfigError>,
+    /// Which session governs each open document (its workspace folder's).
+    doc_config: HashMap<Url, SessionKey>,
     /// Config-file URIs we published diagnostics to (findings anchored
     /// there, or a config error) — cleared when no longer relevant.
     config_uris: HashSet<Url>,
@@ -317,9 +361,9 @@ struct State {
     documents: HashMap<Url, String>,
     /// The editor's version per open URI.
     versions: HashMap<Url, i32>,
-    /// The last notes block printed per config, so an unchanged set
+    /// The last notes block printed per session, so an unchanged set
     /// isn't re-printed on every save.
-    last_notes: HashMap<PathBuf, String>,
+    last_notes: HashMap<SessionKey, String>,
 }
 
 #[derive(Debug)]
@@ -334,13 +378,18 @@ struct Backend {
     /// state the panic left — the session survives (good for an editor) but
     /// consistency-on-panic is NOT guaranteed. Critical sections are kept tiny
     /// and infallible (map inserts/clones) to keep that window closed; the
-    /// engine runs off-lock inside `spawn_blocking`.
-    state: Mutex<State>,
+    /// engine runs off-lock inside `spawn_blocking`, which reads it (an
+    /// `Arc`) to skip a buffer that a newer edit superseded while it waited.
+    state: Arc<Mutex<State>>,
     /// Serialises the "is this result still current?" check with the
     /// publish that follows it in [`Backend::reeval_file`], so an older
     /// buffer's diagnostics can never reach the client after a newer
     /// buffer's.
     reeval_publish: tokio::sync::Mutex<()>,
+    /// Buffer evaluations started, for the tests of `reeval_file`'s
+    /// coalescing.
+    #[cfg(test)]
+    evaluations: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 /// A document to publish: URI, diagnostics, and the buffer version they
@@ -358,6 +407,8 @@ struct Applied {
     /// Open documents edited while the full check ran: re-evaluate
     /// their current buffer afterwards so the newest edit wins.
     reeval: Vec<(Url, String, i32)>,
+    /// Show the untrusted-workspace note ([`config::UNTRUSTED_NOTE`]).
+    untrusted_note: bool,
 }
 
 impl Backend {
@@ -365,8 +416,10 @@ impl Backend {
         Self {
             client,
             options,
-            state: Mutex::new(State::default()),
+            state: Arc::new(Mutex::new(State::default())),
             reeval_publish: tokio::sync::Mutex::new(()),
+            #[cfg(test)]
+            evaluations: Arc::default(),
         }
     }
 
@@ -375,7 +428,7 @@ impl Backend {
     /// clearing those that no longer have findings. Runs on open, save,
     /// watched-file changes, and workspace-folder changes.
     async fn check_and_publish(&self) {
-        let (folders, docs) = {
+        let (folders, docs, trusted) = {
             let state = self.state.lock();
             let docs: Vec<(Url, Option<String>, Option<i32>)> = state
                 .open
@@ -388,7 +441,7 @@ impl Backend {
                     )
                 })
                 .collect();
-            (state.folders.clone(), docs)
+            (state.folders.clone(), docs, state.trusted)
         };
         if folders.is_empty() {
             return;
@@ -398,10 +451,10 @@ impl Backend {
             .iter()
             .map(|(u, t, _)| (u.clone(), t.clone()))
             .collect();
-        let analysis_time = self.options.analysis_time;
+        let settings = self.options.settings(trusted);
         let registry = self.options.registry();
         let check = match tokio::task::spawn_blocking(move || {
-            check_workspace(&folders, &task_docs, analysis_time, &registry)
+            check_workspace(&folders, &task_docs, &settings, &registry)
         })
         .await
         {
@@ -429,6 +482,11 @@ impl Backend {
         for block in applied.notes {
             eprintln!("{block}");
         }
+        if applied.untrusted_note {
+            self.client
+                .show_message(MessageType::INFO, config::UNTRUSTED_NOTE)
+                .await;
+        }
         self.publish_all(applied.publish).await;
         for (uri, text, version) in applied.reeval {
             self.reeval_file(uri, text, version).await;
@@ -441,9 +499,18 @@ impl Backend {
     /// but cached cross-file findings (from the last full run) are
     /// preserved so they don't flicker away while typing — they refresh
     /// on the next save. `version` ties the diagnostics to the edit.
+    ///
+    /// Only the latest version of a document is evaluated: a version that a
+    /// newer edit superseded is skipped before it starts, and again if it
+    /// waited in the blocking pool while the newer edit arrived. Rapid typing
+    /// therefore costs one evaluation per edit at most, and usually far fewer.
     async fn reeval_file(&self, uri: Url, text: String, version: i32) {
         let session = {
             let state = self.state.lock();
+            if state.versions.get(&uri) != Some(&version) {
+                // Superseded (its successor re-evaluates), or closed.
+                return;
+            }
             state
                 .doc_config
                 .get(&uri)
@@ -462,8 +529,19 @@ impl Backend {
             return;
         };
 
-        let outcome =
-            tokio::task::spawn_blocking(move || eval_buffer(&session, &abs, &rel, text)).await;
+        let shared = Arc::clone(&self.state);
+        let task_uri = uri.clone();
+        #[cfg(test)]
+        let evaluations = Arc::clone(&self.evaluations);
+        let outcome = tokio::task::spawn_blocking(move || {
+            if shared.lock().versions.get(&task_uri) != Some(&version) {
+                return None;
+            }
+            #[cfg(test)]
+            evaluations.fetch_add(1, Ordering::SeqCst);
+            Some(eval_buffer(&session, &abs, &rel, text))
+        })
+        .await;
 
         // tower-lsp runs `didChange` handlers concurrently, so a slow
         // evaluation of an older buffer can finish after a newer one. Drop
@@ -475,13 +553,15 @@ impl Backend {
         let _publish_guard = self.reeval_publish.lock().await;
 
         let per_file = match outcome {
-            Ok(Ok(per_file)) => per_file,
+            // Superseded while it waited for a blocking thread.
+            Ok(None) => return,
+            Ok(Some(Ok(per_file))) => per_file,
             // Excluded from the walk, or not walked yet: no per-file rule
             // applies, but a finding from the last full run still does. A
             // `git_tracked_only` rule reports a tracked file that an ignore
             // file hides (#503).
-            Ok(Err(Error::FileNotInIndex { .. })) => Vec::new(),
-            Ok(Err(err)) => {
+            Ok(Some(Err(Error::FileNotInIndex { .. }))) => Vec::new(),
+            Ok(Some(Err(err))) => {
                 self.client
                     .log_message(MessageType::WARNING, format!("alint: {err}"))
                     .await;
@@ -526,20 +606,22 @@ impl Backend {
             .await;
     }
 
-    /// The governing session, cached findings, and buffer for `uri` —
-    /// everything `codeAction` needs, or `None` when any is missing.
-    fn code_action_inputs(&self, uri: &Url) -> Option<(Arc<Session>, Vec<Finding>, String, bool)> {
+    /// The governing session, cached findings, buffer and buffer version
+    /// for `uri`: everything `codeAction` needs, or `None` when any is
+    /// missing.
+    fn code_action_inputs(&self, uri: &Url) -> Option<CodeActionInputs> {
         let state = self.state.lock();
         let session = state
             .doc_config
             .get(uri)
             .and_then(|c| state.sessions.get(c).cloned())?;
-        Some((
+        Some(CodeActionInputs {
             session,
-            state.diagnostics.get(uri).cloned()?,
-            state.documents.get(uri).cloned()?,
-            state.related_information_supported,
-        ))
+            findings: state.diagnostics.get(uri).cloned()?,
+            text: state.documents.get(uri).cloned()?,
+            version: state.versions.get(uri).copied(),
+            related_information_supported: state.related_information_supported,
+        })
     }
 
     async fn publish_all(&self, items: Vec<Publication>) {
@@ -555,6 +637,14 @@ impl Backend {
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> JsonRpcResult<InitializeResult> {
+        // Strictly `true`: a missing or malformed value leaves the workspace
+        // untrusted.
+        let trusted = params
+            .initialization_options
+            .as_ref()
+            .and_then(|options| options.get("trusted"))
+            .and_then(tower_lsp::lsp_types::LSPAny::as_bool)
+            .unwrap_or(false);
         let related_information_supported = params
             .capabilities
             .text_document
@@ -565,6 +655,7 @@ impl LanguageServer for Backend {
         let mut state = self.state.lock();
         state.folders = workspace_folders(&params);
         state.related_information_supported = related_information_supported;
+        state.trusted = trusted;
         drop(state);
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
@@ -735,128 +826,24 @@ impl LanguageServer for Backend {
             }
         }
 
-        let Some((session, findings, text, related_information_supported)) =
-            self.code_action_inputs(&uri)
-        else {
+        let Some(inputs) = self.code_action_inputs(&uri) else {
             return Ok(None);
         };
         let Ok(abs) = uri.to_file_path() else {
             return Ok(None);
         };
-        let Ok(rel) = abs.strip_prefix(&session.root).map(Path::to_path_buf) else {
+        let version = inputs.version;
+        // Fixers recurse over the parsed buffer: compute off the async
+        // workers, on a blocking thread with a full-sized stack.
+        let computed =
+            tokio::task::spawn_blocking(move || fix_actions(&inputs, &abs, selection)).await;
+        let Ok(Some((mut actions, unsafe_flags))) = computed else {
             return Ok(None);
         };
-        // A sibling rule may have read secret-bearing evidence from this file
-        // even when the selected diagnostic itself is ordinary. Whole-file and
-        // spanning fixes can otherwise copy unchanged secret bytes into the LSP
-        // response, so suppress every public edit for a sensitive input path.
-        if session
-            .engine
-            .path_contains_sensitive_evidence(&session.root, &session.index, &rel)
-        {
+        // The buffer changed while the edits were computed: they would
+        // apply to text the editor no longer has.
+        if self.state.lock().versions.get(&uri).copied() != version {
             return Ok(None);
-        }
-
-        let bytes = text.as_bytes();
-        // Honor the config's `fix_size_limit`: `alint fix` skips a file
-        // this large, so the editor must not offer to fix it either.
-        if let Some(limit) = session.engine.fix_size_limit()
-            && u64::try_from(bytes.len()).unwrap_or(u64::MAX) > limit
-        {
-            return Ok(None);
-        }
-        let mut actions: CodeActionResponse = Vec::new();
-        // Parallel to `actions`: whether each offered fix is Unsafe-tier. An Unsafe
-        // quick-fix is labeled `(unsafe)` and never auto-preferred, so the click is
-        // a visible, explicit opt-in (the LSP analogue of `--unsafe-fixes`) rather
-        // than a silent one-click apply of a behavior-changing edit (e.g. a file
-        // delete). Only Safe and Unsafe tiers reach here -- Suggestion / demoted
-        // fixes are already filtered out below.
-        let mut unsafe_flags: Vec<bool> = Vec::new();
-        for finding in &findings {
-            if !finding.fixable || finding.sensitive || !ranges_overlap(finding.range, selection) {
-                continue;
-            }
-            let Some(fixer) = session.engine.fixer_for(&finding.rule_id) else {
-                continue;
-            };
-            let unsafe_fix = fixer.applicability() == Applicability::Unsafe;
-            let mut violation = Violation::new(finding.message.clone()).with_path(rel.clone());
-            // Preserve the reported location so range-scoped fixers act on
-            // the right line/column (not just whole-file fixers).
-            violation.line = finding.line;
-            violation.column = finding.column;
-            // A LOCATED fixer (Phase 1 `replace`) emits byte-range edits via
-            // `collect_edits`, not `fix_edit`. Collect ALL of them for this file and
-            // map each byte range to a UTF-16 `TextEdit` -- one multi-edit
-            // `WorkspaceEdit`, so the code action rewrites every occurrence, matching
-            // `alint fix` (the diagnostic is one-per-file but the located fix is
-            // per-match). The synthetic `violation` carries NO baseline_key, so the
-            // structured fixer's W4 violation-set correlation finds an empty budget
-            // and falls back to fixing every occurrence -- exactly the "fix all"
-            // action wanted here. A whole-file fixer keeps the `fix_edit` -> edit path.
-            let workspace_edit = if fixer.collects_located_edits() {
-                // Run the SAME pipeline `alint fix` uses (tier-filter -> overlap-skip
-                // -> post-splice verify/demote) and offer ONLY the surviving edits.
-                // Without this the LSP would one-click-apply a fix the engine
-                // refuses -- a partial removal that leaves the violation, an
-                // unverifiable `replace`, or a below-threshold / W2-demoted
-                // (Suggestion-tier) untrusted-remote content fixer.
-                let batch: Vec<LocatedEdit> = fixer
-                    .collect_edits(std::slice::from_ref(&violation), &rel, bytes, &session.root)
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, ce)| LocatedEdit {
-                        rule_index: 0,
-                        violation_index: i,
-                        sensitive: false,
-                        collected: ce,
-                    })
-                    .collect();
-                let (_, outcomes) =
-                    located_fix::apply_file_edits(bytes, batch, Applicability::Unsafe);
-                let applied: Vec<CollectedEdit> = outcomes
-                    .into_iter()
-                    .filter(|(_, outcome)| *outcome == LocatedOutcome::Applied)
-                    .map(|(le, _)| le.collected)
-                    .collect();
-                match located_edits_to_workspace_edit(&applied, &text, &rel, &session.root) {
-                    Some(we) => we,
-                    None => continue,
-                }
-            } else {
-                // Whole-file / file-op fixer: gate on its tier so a Suggestion-tier
-                // fixer -- notably a W2-demoted content fixer from an untrusted
-                // remote `extends:` -- is not offered as an ordinary quick-fix
-                // (demotion drops it to Suggestion; a bare `alint fix` only
-                // suggests it, never auto-writes).
-                if !fixer.applicability().applies_at(Applicability::Unsafe) {
-                    continue;
-                }
-                let Some(edit) = fixer.fix_edit(&violation, bytes, &session.root) else {
-                    continue;
-                };
-                match fix_edit_to_workspace_edit(&edit, &session.root) {
-                    Some(we) => we,
-                    None => continue,
-                }
-            };
-            let title = if unsafe_fix {
-                format!("alint: fix `{}` (unsafe)", finding.rule_id)
-            } else {
-                format!("alint: fix `{}`", finding.rule_id)
-            };
-            actions.push(CodeActionOrCommand::CodeAction(CodeAction {
-                title,
-                kind: Some(CodeActionKind::QUICKFIX),
-                diagnostics: Some(vec![finding_to_diagnostic(
-                    finding,
-                    related_information_supported,
-                )]),
-                edit: Some(workspace_edit),
-                ..CodeAction::default()
-            }));
-            unsafe_flags.push(unsafe_fix);
         }
         if actions.is_empty() {
             return Ok(None);
@@ -872,6 +859,149 @@ impl LanguageServer for Backend {
         }
         Ok(Some(actions))
     }
+}
+
+/// What `codeAction` computes its fixes from, read under the state lock.
+struct CodeActionInputs {
+    session: Arc<Session>,
+    findings: Vec<Finding>,
+    text: String,
+    /// The buffer's version, to drop edits computed for an older buffer.
+    version: Option<i32>,
+    related_information_supported: bool,
+}
+
+/// The quick-fixes for the findings of `abs` that overlap `selection`, and
+/// whether each is Unsafe-tier; `None` when the file gets no fix at all.
+/// Runs on a blocking thread (`codeAction` awaits it).
+fn fix_actions(
+    inputs: &CodeActionInputs,
+    abs: &Path,
+    selection: Range,
+) -> Option<(CodeActionResponse, Vec<bool>)> {
+    let CodeActionInputs {
+        session,
+        findings,
+        text,
+        related_information_supported,
+        ..
+    } = inputs;
+    let related_information_supported = *related_information_supported;
+    let Ok(rel) = abs.strip_prefix(&session.root).map(Path::to_path_buf) else {
+        return None;
+    };
+    // A sibling rule may have read secret-bearing evidence from this file
+    // even when the selected diagnostic itself is ordinary. Whole-file and
+    // spanning fixes can otherwise copy unchanged secret bytes into the LSP
+    // response, so suppress every public edit for a sensitive input path.
+    if session
+        .engine
+        .path_contains_sensitive_evidence(&session.root, &session.index, &rel)
+    {
+        return None;
+    }
+
+    let bytes = text.as_bytes();
+    // Honor the config's `fix_size_limit`: `alint fix` skips a file
+    // this large, so the editor must not offer to fix it either.
+    if let Some(limit) = session.engine.fix_size_limit()
+        && u64::try_from(bytes.len()).unwrap_or(u64::MAX) > limit
+    {
+        return None;
+    }
+    let mut actions: CodeActionResponse = Vec::new();
+    // Parallel to `actions`: whether each offered fix is Unsafe-tier. An Unsafe
+    // quick-fix is labeled `(unsafe)` and never auto-preferred, so the click is
+    // a visible, explicit opt-in (the LSP analogue of `--unsafe-fixes`) rather
+    // than a silent one-click apply of a behavior-changing edit (e.g. a file
+    // delete). Only Safe and Unsafe tiers reach here -- Suggestion / demoted
+    // fixes are already filtered out below.
+    let mut unsafe_flags: Vec<bool> = Vec::new();
+    for finding in findings {
+        if !finding.fixable || finding.sensitive || !ranges_overlap(finding.range, selection) {
+            continue;
+        }
+        let Some(fixer) = session.engine.fixer_for(&finding.rule_id) else {
+            continue;
+        };
+        let unsafe_fix = fixer.applicability() == Applicability::Unsafe;
+        let mut violation = Violation::new(finding.message.clone()).with_path(rel.clone());
+        // Preserve the reported location so range-scoped fixers act on
+        // the right line/column (not just whole-file fixers).
+        violation.line = finding.line;
+        violation.column = finding.column;
+        // A LOCATED fixer (Phase 1 `replace`) emits byte-range edits via
+        // `collect_edits`, not `fix_edit`. Collect ALL of them for this file and
+        // map each byte range to a UTF-16 `TextEdit` -- one multi-edit
+        // `WorkspaceEdit`, so the code action rewrites every occurrence, matching
+        // `alint fix` (the diagnostic is one-per-file but the located fix is
+        // per-match). The synthetic `violation` carries NO baseline_key, so the
+        // structured fixer's W4 violation-set correlation finds an empty budget
+        // and falls back to fixing every occurrence -- exactly the "fix all"
+        // action wanted here. A whole-file fixer keeps the `fix_edit` -> edit path.
+        let workspace_edit = if fixer.collects_located_edits() {
+            // Run the SAME pipeline `alint fix` uses (tier-filter -> overlap-skip
+            // -> post-splice verify/demote) and offer ONLY the surviving edits.
+            // Without this the LSP would one-click-apply a fix the engine
+            // refuses -- a partial removal that leaves the violation, an
+            // unverifiable `replace`, or a below-threshold / W2-demoted
+            // (Suggestion-tier) untrusted-remote content fixer.
+            let batch: Vec<LocatedEdit> = fixer
+                .collect_edits(std::slice::from_ref(&violation), &rel, bytes, &session.root)
+                .into_iter()
+                .enumerate()
+                .map(|(i, ce)| LocatedEdit {
+                    rule_index: 0,
+                    violation_index: i,
+                    sensitive: false,
+                    collected: ce,
+                })
+                .collect();
+            let (_, outcomes) = located_fix::apply_file_edits(bytes, batch, Applicability::Unsafe);
+            let applied: Vec<CollectedEdit> = outcomes
+                .into_iter()
+                .filter(|(_, outcome)| *outcome == LocatedOutcome::Applied)
+                .map(|(le, _)| le.collected)
+                .collect();
+            match located_edits_to_workspace_edit(&applied, text, &rel, &session.root) {
+                Some(we) => we,
+                None => continue,
+            }
+        } else {
+            // Whole-file / file-op fixer: gate on its tier so a Suggestion-tier
+            // fixer -- notably a W2-demoted content fixer from an untrusted
+            // remote `extends:` -- is not offered as an ordinary quick-fix
+            // (demotion drops it to Suggestion; a bare `alint fix` only
+            // suggests it, never auto-writes).
+            if !fixer.applicability().applies_at(Applicability::Unsafe) {
+                continue;
+            }
+            let Some(edit) = fixer.fix_edit(&violation, bytes, &session.root) else {
+                continue;
+            };
+            match fix_edit_to_workspace_edit(&edit, &session.root) {
+                Some(we) => we,
+                None => continue,
+            }
+        };
+        let title = if unsafe_fix {
+            format!("alint: fix `{}` (unsafe)", finding.rule_id)
+        } else {
+            format!("alint: fix `{}`", finding.rule_id)
+        };
+        actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+            title,
+            kind: Some(CodeActionKind::QUICKFIX),
+            diagnostics: Some(vec![finding_to_diagnostic(
+                finding,
+                related_information_supported,
+            )]),
+            edit: Some(workspace_edit),
+            ..CodeAction::default()
+        }));
+        unsafe_flags.push(unsafe_fix);
+    }
+    Some((actions, unsafe_flags))
 }
 
 /// Fold a finished [`WorkspaceCheck`] into the server state and work out
@@ -894,6 +1024,43 @@ fn findings_to_diagnostics(
         .collect()
 }
 
+/// Record each config's run in `state` (its session, or its load error) and
+/// queue its notes block when it changed. Returns each config's findings by
+/// path, and whether an untrusted session withheld anything.
+fn record_runs(
+    state: &mut State,
+    runs: Vec<(SessionKey, Result<ConfigRun, ConfigError>)>,
+    options: &LspOptions,
+    applied: &mut Applied,
+) -> (HashMap<SessionKey, FindingsByPath>, bool) {
+    let mut by_config: HashMap<SessionKey, FindingsByPath> = HashMap::new();
+    let mut withheld = false;
+    state.sessions.clear();
+    state.broken.clear();
+    for (key, run) in runs {
+        match run {
+            Ok(run) => {
+                let block = render_notes(&key.config, &run.notes, options.show_notes);
+                if state.last_notes.get(&key) != Some(&block) {
+                    if !block.is_empty() {
+                        applied.notes.push(block.clone());
+                    }
+                    state.last_notes.insert(key.clone(), block);
+                }
+                withheld |= run.session.withheld;
+                state.sessions.insert(key.clone(), run.session);
+                by_config.insert(key, run.by_path);
+            }
+            Err(error) => {
+                withheld |= error.untrusted;
+                applied.logs.push(error.message.clone());
+                state.broken.insert(key, error);
+            }
+        }
+    }
+    (by_config, withheld)
+}
+
 fn apply_check(
     state: &mut State,
     docs: &[(Url, Option<String>, Option<i32>)],
@@ -901,27 +1068,11 @@ fn apply_check(
     options: &LspOptions,
 ) -> Applied {
     let mut applied = Applied::default();
-    let mut by_config: HashMap<PathBuf, FindingsByPath> = HashMap::new();
-    state.sessions.clear();
-    state.broken.clear();
-    for (config, run) in check.runs {
-        match run {
-            Ok(run) => {
-                let block = render_notes(&config, &run.notes, options.show_notes);
-                if state.last_notes.get(&config) != Some(&block) {
-                    if !block.is_empty() {
-                        applied.notes.push(block.clone());
-                    }
-                    state.last_notes.insert(config.clone(), block);
-                }
-                state.sessions.insert(config.clone(), run.session);
-                by_config.insert(config, run.by_path);
-            }
-            Err(message) => {
-                applied.logs.push(message.clone());
-                state.broken.insert(config, message);
-            }
-        }
+    let (by_config, withheld) = record_runs(state, check.runs, options, &mut applied);
+    // Once per server: the note says what the workspace's trust turns on.
+    if withheld && !state.untrusted_note_shown {
+        state.untrusted_note_shown = true;
+        applied.untrusted_note = true;
     }
     state.doc_config = check.doc_config;
 
@@ -956,29 +1107,31 @@ fn apply_check(
 
     // Config files: anchored findings, or the load/build error.
     let mut config_uris: HashSet<Url> = HashSet::new();
-    let configs: Vec<PathBuf> = state
+    let keys: Vec<SessionKey> = state
         .sessions
         .keys()
         .chain(state.broken.keys())
         .cloned()
         .collect();
-    for config in configs {
-        let Ok(uri) = Url::from_file_path(&config) else {
+    for key in keys {
+        let Ok(uri) = Url::from_file_path(&key.config) else {
             continue;
         };
-        let (findings, diagnostics) = if let Some(message) = state.broken.get(&config) {
+        let (findings, diagnostics) = if let Some(error) = state.broken.get(&key) {
             let diagnostic = Diagnostic {
-                range: Range::new(Position::new(0, 0), Position::new(0, 1)),
+                range: error
+                    .range
+                    .unwrap_or_else(|| Range::new(Position::new(0, 0), Position::new(0, 1))),
                 severity: Some(DiagnosticSeverity::ERROR),
                 source: Some("alint".to_string()),
-                message: message.clone(),
+                message: error.message.clone(),
                 ..Diagnostic::default()
             };
             (Vec::new(), vec![diagnostic])
         } else {
             let findings = by_config
-                .get(&config)
-                .and_then(|m| m.get(&config).cloned())
+                .get(&key)
+                .and_then(|m| m.get(&key.config).cloned())
                 .unwrap_or_default();
             let diagnostics =
                 findings_to_diagnostics(&findings, state.related_information_supported);

@@ -40,6 +40,8 @@ mod hidden_path_baseline;
 mod lsp_audit;
 mod lsp_protocol;
 mod lsp_smoke;
+mod lsp_trust;
+mod no_spawn;
 mod only_filter;
 mod path_confinement_cli;
 mod pattern_hints_cli;

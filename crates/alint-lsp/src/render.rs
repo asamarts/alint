@@ -8,12 +8,18 @@ use crate::diagnostics::severity_label;
 /// Markdown hover body for one finding: rule id + severity, the
 /// message, the rule kind's description, fix availability, and links to
 /// the rule reference and (when declared) the rule's policy.
+///
+/// The rule id, the message and the policy URL come from the repository (its
+/// config and its files), so none of them is read as Markdown: the id is a
+/// code span, the message is escaped, and the policy URL is a link only when
+/// it is a plain `http(s)` URL. File content can therefore neither load an
+/// image nor dress itself up as a link in the hover.
 pub(crate) fn render_finding(f: &Finding) -> String {
     let mut s = format!(
-        "**alint** · `{}` ({})\n\n{}",
-        f.rule_id,
+        "**alint** · {} ({})\n\n{}",
+        code_span(&f.rule_id),
         severity_label(f.severity),
-        f.message
+        escape_markdown(&f.message)
     );
     if let Some(description) = f.description {
         s.push_str("\n\n");
@@ -29,13 +35,60 @@ pub(crate) fn render_finding(f: &Finding) -> String {
         links.push(format!("[Rule reference →]({url})"));
     }
     if let Some(url) = &f.policy_url {
-        links.push(format!("[Policy →]({url})"));
+        links.push(policy_link(url));
     }
     if !links.is_empty() {
         s.push_str("\n\n");
         s.push_str(&links.join(" · "));
     }
     s
+}
+
+/// `text` with every ASCII punctuation character backslash-escaped, so
+/// Markdown renders it as written: no emphasis, link, image, HTML, heading,
+/// list or autolink (`CommonMark` lets any ASCII punctuation be escaped).
+pub(crate) fn escape_markdown(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if c.is_ascii_punctuation() {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// `text` as a Markdown code span: delimited by one backtick more than its
+/// longest backtick run, and padded with a space when it starts or ends
+/// with a backtick, so the text cannot close the span early.
+fn code_span(text: &str) -> String {
+    let mut longest = 0;
+    let mut run = 0;
+    for c in text.chars() {
+        run = if c == '`' { run + 1 } else { 0 };
+        longest = longest.max(run);
+    }
+    let fence = "`".repeat(longest + 1);
+    let pad = if text.starts_with('`') || text.ends_with('`') {
+        " "
+    } else {
+        ""
+    };
+    // A newline would end the hover's first line; a code span shows it as a space.
+    let text = text.replace(['\n', '\r'], " ");
+    format!("{fence}{pad}{text}{pad}{fence}")
+}
+
+/// The policy link: a Markdown link for an `http(s)` URL (serialized, so it
+/// has no space, `<` or `>` to escape its `<...>` destination), the escaped
+/// text otherwise.
+fn policy_link(url: &str) -> String {
+    match tower_lsp::lsp_types::Url::parse(url) {
+        Ok(parsed) if matches!(parsed.scheme(), "http" | "https") => {
+            format!("[Policy →](<{parsed}>)")
+        }
+        _ => format!("Policy: {}", escape_markdown(url)),
+    }
 }
 
 /// Resolve an alias kind spelling to its canonical kind (identity for a

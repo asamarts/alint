@@ -44,6 +44,30 @@ customizable mode/command list (see [`alint.el`](./alint.el)):
 
 `:add-on? t` lets alint run alongside a language-specific server.
 
+## Workspace trust
+
+Until the server is told a workspace is trusted, it runs nothing the
+repository's `.alint.yml` could start: command rules and `custom:` facts
+are skipped, a remote `extends:` is not fetched, and `{{env.*}}` values
+are left unset. Every other rule lints. See
+[Workspace trust](https://alint.org/docs/cli/lsp/#workspace-trust).
+
+To turn them on with Eglot, add the initialization option after the
+command:
+
+```elisp
+'(... . ("alint" "lsp" :initializationOptions (:trusted t)))
+```
+
+With the bundled `alint.el`, set `(setq alint-trusted t)` before it
+loads. With lsp-mode, add
+`:initialization-options (lambda () (list :trusted t))` to the
+`make-lsp-client` call.
+Set it in your user-level config, never in a file a repository can
+supply, and only if you open repositories you trust: it trusts every
+workspace alint lints.
+A repository's `.dir-locals.el` must not be the place.
+
 ## Known limitation
 
 Eglot attaches language servers **per major mode** — there is no "all

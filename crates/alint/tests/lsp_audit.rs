@@ -5,7 +5,7 @@
 //!      the "clear the old config error" publish),
 //!   3. a full check overlays unsaved buffers instead of republishing
 //!      stale on-disk results,
-//!   4. per-document config discovery (nearest `.alint.yml`), a broken
+//!   4. config discovery (the workspace folder's `.alint.yml`), a broken
 //!      config disables the stale engine, `baseline:` is honored,
 //!      multi-root workspaces, and `exit` terminates the process.
 //!
@@ -201,10 +201,13 @@ fn lsp_full_check_does_not_clobber_unsaved_buffer() {
     server.shutdown();
 }
 
-/// (4a) Per-document discovery: a file under `pkg/` is linted by
-/// `pkg/.alint.yml` (the nearest config), not the workspace root's.
+/// (4a) The workspace folder's config governs every file in it, as `alint
+/// check` from the folder does: a file under `pkg/` is linted by the root's
+/// config, not by `pkg/.alint.yml`, which (without `nested_configs: true`)
+/// the CLI never reads. Until v0.23 the nearest config governed, which gave
+/// a vendored package's `.alint.yml` the trust of the user's own.
 #[test]
-fn lsp_uses_nearest_config_per_document() {
+fn lsp_a_package_config_does_not_govern_without_nested_configs() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     std::fs::write(root.join(".alint.yml"), NO_TODO).unwrap();
@@ -219,13 +222,24 @@ fn lsp_uses_nearest_config_per_document() {
     std::fs::write(root.join("pkg/a.txt"), text).unwrap();
     let file_uri = uri_of(&root.join("pkg/a.txt"));
 
+    let cli = Command::new(env!("CARGO_BIN_EXE_alint"))
+        .args(["check", "--format", "json"])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    let cli_out = String::from_utf8_lossy(&cli.stdout);
+    assert!(
+        cli_out.contains("no-todo") && !cli_out.contains("pkg-no-fixme"),
+        "{cli_out}"
+    );
+
     let mut server = start(root);
     open(&mut server, &file_uri, text);
     let diags = wait_for_diagnostics(&server.rx, &file_uri);
     assert_eq!(
         codes(&diags),
-        vec!["pkg-no-fixme"],
-        "pkg/a.txt is governed by pkg/.alint.yml: {diags:?}"
+        vec!["no-todo"],
+        "pkg/a.txt is governed by the workspace's .alint.yml: {diags:?}"
     );
     server.shutdown();
 }

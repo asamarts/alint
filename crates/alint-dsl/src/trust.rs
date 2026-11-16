@@ -890,6 +890,111 @@ pub const SPAWNING_RULE_KINDS: &[&str] = &["command", "generated_file_fresh", "c
 /// complete.
 pub const SPAWNING_FIX_OPS: &[&str] = &["git_untrack", "command"];
 
+/// What makes a loaded `rule` start a process, named for a message: its kind
+/// (`kind: command`), its fix operation (`fix: git_untrack`), or either one in a
+/// nested `require:` entry at any depth (`require[0] kind: command`). `None`
+/// for a rule that never spawns.
+///
+/// The classification is the catalog's capability metadata, as the
+/// configuration trust gates and `alint test`'s capability check read it: a
+/// kind that declares [`Capability::SpawnUserCommand`] and a fix operation of
+/// trust class [`FixTrustClass::Spawning`] ([`SPAWNING_RULE_KINDS`] and
+/// [`SPAWNING_FIX_OPS`] list them today). A kind the catalog does not know is
+/// not reported here: building the rule fails on it.
+#[must_use]
+pub fn rule_spawn_use(rule: &alint_core::RuleSpec, catalog: KindCatalog<'_>) -> Option<String> {
+    if kind_declares_spawn(&rule.kind, catalog) {
+        return Some(format!("kind: {}", rule.kind));
+    }
+    if let Some(fix) = &rule.fix
+        && fix_op_spawns(fix.op_name(), catalog)
+    {
+        return Some(format!("fix: {}", fix.op_name()));
+    }
+    nested_spawn_use(&rule.extra, catalog, "")
+}
+
+/// Whether a loaded `fact` starts a process: a `custom:` fact runs its
+/// `argv`. No other fact kind spawns.
+#[must_use]
+pub fn fact_spawns(fact: &alint_core::FactSpec) -> bool {
+    matches!(fact.kind, alint_core::FactKind::Custom { .. })
+}
+
+/// Refuse the first of `rules` and `facts` that starts a process
+/// ([`rule_spawn_use`], [`fact_spawns`]), naming it and `refused_by` (the
+/// option that refuses it, such as `--no-spawn`):
+/// `rule "x" (kind: command) spawns a process; --no-spawn refuses it`.
+///
+/// # Errors
+///
+/// When a rule or fact spawns.
+pub fn refuse_spawning<'a>(
+    rules: impl IntoIterator<Item = &'a alint_core::RuleSpec>,
+    facts: &[alint_core::FactSpec],
+    catalog: KindCatalog<'_>,
+    refused_by: &str,
+) -> Result<()> {
+    for rule in rules {
+        if let Some(what) = rule_spawn_use(rule, catalog) {
+            return Err(Error::Other(format!(
+                "rule {:?} ({what}) spawns a process; {refused_by} refuses it",
+                rule.id
+            )));
+        }
+    }
+    if let Some(fact) = facts.iter().find(|fact| fact_spawns(fact)) {
+        return Err(Error::Other(format!(
+            "fact {:?} (custom:) spawns a process; {refused_by} refuses it",
+            fact.id
+        )));
+    }
+    Ok(())
+}
+
+fn kind_declares_spawn(kind: &str, catalog: KindCatalog<'_>) -> bool {
+    catalog.meta(kind).is_some_and(|meta| {
+        meta.effective_capabilities()
+            .any(|entry| matches!(entry.capability, Capability::SpawnUserCommand))
+    })
+}
+
+fn fix_op_spawns(op: &str, catalog: KindCatalog<'_>) -> bool {
+    catalog
+        .fix_op(op)
+        .is_some_and(|meta| meta.trust == FixTrustClass::Spawning)
+}
+
+/// [`rule_spawn_use`] for the nested `require:` entries of a rule's options,
+/// read by `kind` and `fix:` operation as the trust gates read them.
+fn nested_spawn_use(
+    options: &alint_core::yaml::Mapping,
+    catalog: KindCatalog<'_>,
+    prefix: &str,
+) -> Option<String> {
+    use alint_core::yaml::Value;
+    let nested = options.get("require").and_then(Value::as_sequence)?;
+    nested.iter().enumerate().find_map(|(index, entry)| {
+        let entry = entry.as_mapping()?;
+        let at = format!("{prefix}require[{index}] ");
+        if let Some(kind) = entry.get("kind").and_then(Value::as_str)
+            && kind_declares_spawn(kind, catalog)
+        {
+            return Some(format!("{at}kind: {kind}"));
+        }
+        let fix = entry.get("fix").and_then(Value::as_mapping);
+        if let Some(op) = fix
+            .into_iter()
+            .flat_map(alint_core::yaml::Mapping::keys)
+            .filter_map(Value::as_str)
+            .find(|op| fix_op_spawns(op, catalog))
+        {
+            return Some(format!("{at}fix: {op}"));
+        }
+        nested_spawn_use(entry, catalog, &at)
+    })
+}
+
 /// Reject any rule kind whose catalog metadata declares process spawning, plus
 /// any kind absent from the injected catalog, in the given mapping list. Used
 /// by the `extends:` resolver to enforce that only the user's own top-level

@@ -740,9 +740,14 @@ fn the_language_server_reports_configuration_errors_redacted() {
         write(&root_path, ".alint.yml", config);
         let config_uri = format!("file://{}", root_path.join(".alint.yml").display());
         let mut server = spawn_server_with_env(&root_path, &[("VALUE", env)]);
+        // Trusted: an untrusted workspace's config reads no environment value.
         server.send(&json!({
             "jsonrpc": "2.0", "id": 1, "method": "initialize",
-            "params": { "rootUri": format!("file://{}", root_path.display()), "capabilities": {} }
+            "params": {
+                "rootUri": format!("file://{}", root_path.display()),
+                "capabilities": {},
+                "initializationOptions": { "trusted": true }
+            }
         }));
         recv_response(&server.rx, 1);
         server.send(&json!({ "jsonrpc": "2.0", "method": "initialized", "params": {} }));

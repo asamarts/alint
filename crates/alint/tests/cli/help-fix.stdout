@@ -40,17 +40,27 @@ Options:
           instead of applied. `file_remove` (the fix for `file_absent` / `no_empty_files` /
           `no_submodules` / `no_symlinks`) is Unsafe, so this flag is what applies it
 
-      --fail-on-warning
-          Treat warnings as errors for exit-code purposes
-
       --fix-only
           Report only the fixes that were applied: suppress the residual (skipped / unfixable)
           findings and exit 0 unless a fix errored. For "apply what you can and move on" workflows
+
+      --no-spawn
+          Refuse a config whose rules, fixes or facts start processes.
+          
+          A repository's own config may run commands: `kind: command` and the other spawning rule
+          kinds (at any `require:` depth), spawning fixes such as `git_untrack`, and `custom:`
+          facts. With this flag such a config fails to load with an error naming the rule, before
+          anything runs. Lint a repository you do not trust with it, or with your own config (`-c`).
+          Applies to `check`, `fix`, `baseline`, `list`, `explain`, `facts`, `validate-config` and
+          `lsp`; `test` already refuses spawning without `--allow-spawn`, which this flag forbids.
 
       --diff
           Show a unified diff of the fixes that would be applied, writing nothing. Reflects the
           composed result of one pass at the chosen tier; a real `fix` can still exit nonzero where
           this exits 0. Output is a unified diff regardless of `--format`
+
+      --fail-on-warning
+          Treat warnings as errors for exit-code purposes
 
       --show-notes
           List informational notes in full on stderr.

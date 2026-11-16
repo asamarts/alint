@@ -98,6 +98,14 @@ block.
 - **`--only <rule-id>`** runs one rule (repeatable), handy while writing or
   debugging a rule.
 - **`--fail-on-warning`** turns warnings into a failing exit code.
+- **`--no-spawn`** refuses a config that would start a process: a rule of a
+  spawning kind such as `kind: command` (at any `require:` depth), a spawning
+  fix such as `git_untrack`, or a `custom:` fact. The config fails to load,
+  naming the rule, before anything runs. A repository's own `.alint.yml` is
+  trusted like its `Makefile`, so lint a repository you do not trust with
+  `--no-spawn` or with your own config (`-c`). The flag is global: `fix`,
+  `baseline`, `list`, `explain`, `facts`, `validate-config` and `lsp` take it
+  too.
 - **`--as-of YYYY-MM-DD`** sets the UTC reference date for time-dependent
   rules; `ALINT_AS_OF` is the environment equivalent. Without either, alint
   uses the HEAD commit's committer timestamp, so repeated checks of one commit

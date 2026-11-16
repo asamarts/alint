@@ -125,9 +125,15 @@ No advisories published as of the v0.22.1 release.
 
 ## Threat model
 
-alint is designed to be safe to run against untrusted repositories. It walks
-the filesystem, reads file contents, optionally calls `git` and `sh`-via-the-
-`command` rule kind. The defensive posture is:
+alint walks the filesystem, reads file contents, and optionally calls `git` and the commands a
+config names. A repository's own top-level `.alint.yml` is trusted the way its `Makefile` is:
+`alint check` in a clone runs that config's command rules (`kind: command` and the other spawning
+kinds), spawning fixes and `custom:` facts, fetches its remote `extends:`, and reads the
+environment values it names. To lint a repository you do not trust, use your own config
+(`alint check -c your-config.yml`) or refuse every spawning rule, fix and fact with `--no-spawn`.
+The language server (`alint lsp`) runs none of these until the editor says the workspace is
+trusted. Everything else (a nested or extended config, and the repository's file contents) is
+treated as untrusted input. The defensive posture is:
 
 - **No network access by default.** The only network-touching feature is
   `extends: https://...` URLs the user explicitly puts in their config; those
@@ -140,6 +146,13 @@ the filesystem, reads file contents, optionally calls `git` and `sh`-via-the-
 - **Plugin trust gating.** The `command` rule kind shells out to external
   CLIs; it's gated to the user's top-level config (extends'd configs cannot
   introduce a `command` rule).
+- **The language server waits for workspace trust.** Until the editor sends
+  the initialization option `{"trusted": true}` (VS Code sends its Workspace
+  Trust state), `alint lsp` skips spawning rules and `custom:` facts, fetches
+  no remote `extends:` and reads no environment value; other rules lint as
+  usual. A nested or vendored `.alint.yml` never governs a file as a top-level
+  config: the workspace folder's config does, as for `alint check` from the
+  root, and adds nested configs only with `nested_configs: true`.
 - **Policy tests start without host authority.** `alint test` runs a rule,
   fixer or custom fact that spawns a process, at any `require:` depth, or
   reads the host keyring, only when the test declares the capability and the
