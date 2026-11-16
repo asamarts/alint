@@ -450,7 +450,7 @@ fn the_documented_false_refusals_still_refuse() {
         format!("\u{feff}... {deep}\n"),
     ] {
         assert!(
-            crate::yaml::from_str::<ayaml::Value>(&doc).is_ok(),
+            crate::yaml::ayaml_from_str::<ayaml::Value>(&doc).is_ok(),
             "{doc:?}"
         );
         assert!(!flow_depth_within_limit(&doc), "{doc:?}");
@@ -625,7 +625,7 @@ fn stream_flow_depth(doc: &str) -> usize {
 fn colon_anchor_names_end_with_their_document() {
     for marker in ["---", "..."] {
         let doc = format!("&a: 1\n{marker}\nx: &a 1\nk:\n  *a: |\n  b: [[1]]\n");
-        let error = crate::yaml::from_str::<ayaml::Value>(&doc)
+        let error = crate::yaml::ayaml_from_str::<ayaml::Value>(&doc)
             .unwrap_err()
             .to_string();
         assert!(
@@ -653,7 +653,7 @@ fn an_implicit_key_of_1024_characters_is_still_a_key() {
     assert!(parser_sees_alias(&alias(1024)));
     assert!(contains_alias(&alias(1024)));
     for doc in [flow(1025), alias(1025)] {
-        let error = crate::yaml::from_str::<ayaml::Value>(&doc)
+        let error = crate::yaml::ayaml_from_str::<ayaml::Value>(&doc)
             .unwrap_err()
             .to_string();
         assert!(
@@ -909,7 +909,7 @@ fn a_document_over_the_input_cap_is_not_an_alias_bomb() {
     let mut bytes = vec![b'x'; crate::structured_format::MAX_STRUCTURED_BYTES + 1];
     bytes[..head.len()].copy_from_slice(head);
     let doc = String::from_utf8(bytes).unwrap();
-    let error = crate::yaml::from_str::<ayaml::Value>(&doc)
+    let error = crate::yaml::ayaml_from_str::<ayaml::Value>(&doc)
         .unwrap_err()
         .into_parser();
     assert_eq!(

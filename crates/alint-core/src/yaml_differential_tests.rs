@@ -1224,7 +1224,7 @@ fn corpus_files_have_their_own_seeds_and_line_breaks() {
 #[test]
 fn values_from_both_parsers_meet_in_one_form() {
     let text = "a: [1, -2.5, .nan, true, ~, !t x]\n18446744073709551615: b\n";
-    let ayaml = crate::yaml::from_str::<crate::yaml::Value>(text).unwrap();
+    let ayaml = crate::yaml::ayaml_from_str::<crate::yaml::Value>(text).unwrap();
     let oracle: yaml_serde::Value = yaml_serde::from_str(text).unwrap();
     assert_eq!(from_ayaml(ayaml.parser()), from_oracle(&oracle));
     assert_eq!(
@@ -1242,7 +1242,7 @@ fn values_from_both_parsers_meet_in_one_form() {
 #[test]
 fn config_form_orders_hashed_collections() {
     let text = "version: 1\nvars:\n  b: 2\n  a: 1\n  c: 3\n";
-    let first = config_form(crate::yaml::from_str(text).unwrap());
+    let first = config_form(crate::yaml::ayaml_from_str(text).unwrap());
     let second = config_form(yaml_serde::from_str(text).unwrap());
     assert_eq!(first, second);
     assert!(
