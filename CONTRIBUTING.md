@@ -226,7 +226,7 @@ tests in compare mode (ADR-0041), which checks every decode against libyaml and
 saphyr. CI's `YAML compare` job and the release preflight run it; locally:
 
 ```sh
-ci/scripts/test-yaml-compare.sh   # ALINT_YAML_PARSER=compare + the yaml-reference feature
+ci/scripts/yaml-compare.sh   # ALINT_YAML_PARSER=compare + the yaml-reference feature
 ```
 
 A difference it reports is either ayaml's to fix or a deviation to document in

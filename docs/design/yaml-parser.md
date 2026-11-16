@@ -373,8 +373,10 @@ each phase as it lands.
   explained difference appends a JSON line naming the verdict, the entry point, the class and
   the entries, for a report.
 - **Where it runs.** A CI job runs `cargo test --workspace --features alint-core/yaml-reference`
-  with `ALINT_YAML_PARSER=compare`: the unit tests, the end-to-end tests that run the `alint`
-  binary, the policy tests and the dogfood check all read their YAML through the vote. The
+  with `ALINT_YAML_PARSER=compare` (`ci/scripts/yaml-compare.sh`, which the release preflight
+  runs too; it has no `test-` prefix, so the Shell Tests job does not run it a second time):
+  the unit tests, the end-to-end tests that run the `alint` binary, the policy tests and the
+  dogfood check all read their YAML through the vote. The
   harness's own runs add the vote to their report: per entry, the differences it also explains,
   and the ones only the vote explains, with examples. An entry the vote makes redundant can go
   on review; the first long runs found none, so the allowlist stays the source of the

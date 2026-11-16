@@ -140,7 +140,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   mode, chosen with `ALINT_YAML_PARSER=libyaml` or `compare` in a build with the feature. In compare
   mode every decode returns ayaml's result, and a difference from libyaml that neither saphyr's
   reading nor the differential harness's allowlist explains panics. CI and the release preflight run
-  the workspace's tests that way (`ci/scripts/test-yaml-compare.sh`), and a gate fails if a build
+  the workspace's tests that way (`ci/scripts/yaml-compare.sh`), and a gate fails if a build
   without the feature depends on `yaml_serde`.
 
 ### Removed

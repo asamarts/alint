@@ -5,6 +5,10 @@
 # difference neither saphyr's reading nor the differential harness's allowlist
 # explains panics in the test that made it. First, check that no release build
 # holds a reference parser.
+#
+# CI's `YAML Compare` job and the release preflight run it. Its name has no
+# `test-` prefix, as shell-tests.sh runs every ci/scripts/test-*.sh, and
+# test-shell-tests.sh fails on a harness that runs a workspace test suite.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"

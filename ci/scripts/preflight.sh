@@ -20,7 +20,7 @@
 #   - coverage (~5 min; not load-bearing for correctness)
 #   - cross-platform build matrix (~10 min wall-clock for the five
 #     release targets — release.yml is the gate that matters)
-#   - shell-tests (~1s; CI runs `ci/scripts/shell-tests.sh` as its
+#   - shell-tests (~3 min; CI runs `ci/scripts/shell-tests.sh` as its
 #     own job — opt in locally with that script if you've changed
 #     anything under ci/scripts/*.sh)
 #   - examples-validate (~30s build + run; CI runs it as its own
