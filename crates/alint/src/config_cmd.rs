@@ -208,6 +208,7 @@ fn validate_config_inner(
         &alint_dsl::LoadOptions::with_catalog(registry.catalog()),
     )?;
     remember_environment_values(&config);
+    refuse_spawning(&config, &registry, None, cli)?;
     let mut count = 0usize;
     let mut hints = Vec::new();
     for spec in &config.rules {
@@ -341,6 +342,24 @@ pub(super) fn report_pattern_hints(
     }
 }
 
+/// With `--no-spawn`, refuse a config with an enabled rule (or the off rule
+/// `explain --trace` includes), fix or fact that spawns a process.
+fn refuse_spawning(
+    config: &alint_core::Config,
+    registry: &RuleRegistry,
+    include_off_rule: Option<&str>,
+    cli: &Cli,
+) -> Result<()> {
+    if !cli.no_spawn {
+        return Ok(());
+    }
+    let enabled = config.rules.iter().filter(|spec| {
+        !matches!(spec.level, alint_core::Level::Off) || include_off_rule == Some(spec.id.as_str())
+    });
+    alint_dsl::refuse_spawning(enabled, &config.facts, registry.catalog(), "--no-spawn")?;
+    Ok(())
+}
+
 pub(super) fn load_rules(cwd: &Path, cli: &Cli) -> Result<LoadedConfig> {
     load_rules_for_explain(cwd, cli, None)
 }
@@ -376,6 +395,7 @@ pub(super) fn load_rules_for_explain(
         &alint_dsl::LoadOptions::with_catalog(registry.catalog()),
     )?;
     remember_environment_values(&config);
+    refuse_spawning(&config, &registry, include_off_rule, cli)?;
 
     let mut entries: Vec<alint_core::RuleEntry> = Vec::with_capacity(config.rules.len());
     for spec in &config.rules {

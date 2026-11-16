@@ -34,6 +34,16 @@ Options:
       --no-gitignore
           Disable .gitignore handling (overrides config)
 
+      --no-spawn
+          Refuse a config whose rules, fixes or facts start processes.
+          
+          A repository's own config may run commands: `kind: command` and the other spawning rule
+          kinds (at any `require:` depth), spawning fixes such as `git_untrack`, and `custom:`
+          facts. With this flag such a config fails to load with an error naming the rule, before
+          anything runs. Lint a repository you do not trust with it, or with your own config (`-c`).
+          Applies to `check`, `fix`, `baseline`, `list`, `explain`, `facts`, `validate-config` and
+          `lsp`; `test` already refuses spawning without `--allow-spawn`, which this flag forbids.
+
       --fail-on-warning
           Treat warnings as errors for exit-code purposes
 

@@ -5,6 +5,14 @@
 // client. Diagnostics, hover, and quick-fixes are rendered natively by
 // VS Code from the server's LSP messages — none of that logic lives
 // here. See `docs/design/v0.11/vscode_extension.md`.
+//
+// Workspace trust: the server is told whether the workspace is trusted
+// (`initializationOptions.trusted`). Until it is, the server runs nothing the
+// repository's config could start (command rules, custom facts), fetches no
+// remote `extends:` and reads no environment value. Granting trust restarts
+// the server with `trusted: true`. `alint.path` and `alint.serverArgs` are
+// restricted settings (package.json), so a workspace cannot choose the binary
+// or its arguments while untrusted.
 
 import { execFile, spawn } from "node:child_process";
 
@@ -28,6 +36,8 @@ export async function activate(context: ExtensionContext): Promise<void> {
     commands.registerCommand("alint.restartServer", () => restart(context)),
     commands.registerCommand("alint.showRules", () => showRules(context)),
     commands.registerCommand("alint.openConfig", openConfig),
+    // The server reads trust at `initialize`, so a grant restarts it.
+    workspace.onDidGrantWorkspaceTrust(() => restart(context)),
   );
   await start(context);
 }
@@ -60,6 +70,9 @@ async function start(context: ExtensionContext): Promise<void> {
     synchronize: {
       fileEvents: workspace.createFileSystemWatcher("**/.alint.yml"),
     },
+    // An untrusted workspace's config runs no command rule, custom fact,
+    // remote `extends:` or environment read until trust is granted.
+    initializationOptions: { trusted: workspace.isTrusted },
     outputChannel: log,
   };
   client = new LanguageClient("alint", "alint", serverOptions, clientOptions);
@@ -81,6 +94,14 @@ async function restart(context: ExtensionContext): Promise<void> {
 
 async function showRules(context: ExtensionContext): Promise<void> {
   const log = channel!;
+  // `alint list` loads the repository's config, which can fetch a remote
+  // `extends:` and read the environment.
+  if (!workspace.isTrusted) {
+    window.showInformationMessage(
+      "alint: trust this workspace to list its rules (Workspace Trust). Until then the alint language server lints it without command rules, custom facts, remote `extends:` or environment values.",
+    );
+    return;
+  }
   const binary = await resolveAlintBinary(context, log);
   if (!binary) {
     return;

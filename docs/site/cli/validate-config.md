@@ -22,6 +22,13 @@ A specific file:
 alint validate-config path/to/.alint.yml
 ```
 
+Check that a config starts no process (no command rule, spawning fix or
+`custom:` fact), for example before linting a repository you do not trust:
+
+```bash
+alint validate-config --no-spawn
+```
+
 ## See also
 
 - [Configuration](/docs/configuration/): what goes in the config file

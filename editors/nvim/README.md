@@ -31,6 +31,25 @@ shape, so the upstream contribution is simply
 `vim.lsp.enable("alint")` works without copying anything. Until then,
 use the runtimepath approach above.
 
+## Workspace trust
+
+Until the server is told a workspace is trusted, it runs nothing the
+repository's `.alint.yml` could start: command rules and `custom:` facts
+are skipped, a remote `extends:` is not fetched, and `{{env.*}}` values
+are left unset. Every other rule lints. See
+[Workspace trust](https://alint.org/docs/cli/lsp/#workspace-trust).
+
+To turn them on, add this to your `init.lua`:
+
+```lua
+vim.lsp.config("alint", { init_options = { trusted = true } })
+```
+
+Set it in your user-level config, never in a file a repository can
+supply, and only if you open repositories you trust: it trusts every
+workspace alint lints.
+With `exrc`, a repository's `.nvim.lua` must not be the place.
+
 ## Known limitation
 
 Neovim attaches language servers **by filetype** — there is no "all

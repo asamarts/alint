@@ -25,6 +25,19 @@ Requires the `alint` binary on `PATH`.
 > A first-party Eclipse plugin is out of scope — open an issue if you
 > need one.
 
+## Workspace trust
+
+Until the server is told a workspace is trusted, it runs nothing the
+repository's `.alint.yml` could start: command rules and `custom:` facts
+are skipped, a remote `extends:` is not fetched, and `{{env.*}}` values
+are left unset. Every other rule lints. See
+[Workspace trust](https://alint.org/docs/cli/lsp/#workspace-trust).
+
+LSP4E's preference UI does not send initialization options, so the
+server stays untrusted here. To lint with command rules, start it with
+your own config, which is trusted as `alint check -c` is:
+`alint lsp -c /path/to/your/alint.yml`.
+
 ## Known limitation
 
 LSP4E binds servers to **content types**, not "all files". alint is

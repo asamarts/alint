@@ -1,10 +1,11 @@
-//! Config discovery, per-config sessions, and baseline filtering.
+//! Config discovery, per-config sessions, trust, and baseline filtering.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use tower_lsp::lsp_types::{InitializeParams, Url};
+use tower_lsp::lsp_types::{InitializeParams, Position, Range, Url};
 
 use alint_core::baseline::Baseline;
 use alint_core::{Engine, Level, Report, RuleEntry, RuleResult, WalkOptions, walk};
@@ -14,119 +15,162 @@ use alint_core::RuleRegistry;
 
 use crate::{ConfigRun, Finding, Session, WorkspaceCheck};
 
-/// Run every config relevant to the workspace: the config each open
-/// document resolves to, plus each workspace folder's own config (so a
-/// config error surfaces even when the open file lives elsewhere).
+/// How the server builds sessions: the `alint lsp` command line, and whether
+/// the client vouched for the workspace.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Settings {
+    /// Explicit reference date shared by full checks and buffer re-evaluation.
+    pub(crate) analysis_time: Option<alint_core::AnalysisTime>,
+    /// The client sent `trusted: true` (VS Code: a trusted workspace), or the
+    /// config is the user's own (`--config`). Until then a session builds no
+    /// rule or fact that spawns a process, fetches no remote `extends:`, and
+    /// reads nothing from the environment.
+    pub(crate) trusted: bool,
+    /// `--no-spawn`: a config with a spawning rule or fact fails to load, as
+    /// it does for `alint check --no-spawn`, trusted or not.
+    pub(crate) no_spawn: bool,
+    /// `--no-gitignore`: walk without `.gitignore` handling.
+    pub(crate) no_gitignore: bool,
+    /// `--config`: the config every document is linted with, rooted at its
+    /// workspace folder, in place of the folder's own.
+    pub(crate) config: Option<PathBuf>,
+}
+
+/// What identifies a session: the config it loads and the root it lints.
+/// Without `--config` the root is the config's directory, as for `alint
+/// check` run where the config was found; with it, the workspace folder.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct SessionKey {
+    pub(crate) config: PathBuf,
+    pub(crate) root: PathBuf,
+}
+
+/// A config that failed to load or build, as its diagnostic shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ConfigError {
+    pub(crate) message: String,
+    /// Where in the config file the error is, when the file itself is not
+    /// valid YAML; otherwise the diagnostic goes at its start.
+    pub(crate) range: Option<Range>,
+    /// The workspace's untrusted limits caused the error: a remote
+    /// `extends:` or an environment value the session would not resolve.
+    pub(crate) untrusted: bool,
+}
+
+impl From<String> for ConfigError {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            range: None,
+            untrusted: false,
+        }
+    }
+}
+
+/// The note an untrusted workspace gets, once, when its config uses
+/// something the session left out.
+pub(crate) const UNTRUSTED_NOTE: &str = "alint: this workspace is not trusted, so command rules, \
+     custom facts, remote `extends:` and environment values (`{{env.*}}`, `env.*` in `when:`) \
+     are off; other rules lint as usual. To turn them on, trust the workspace: in VS Code, grant \
+     Workspace Trust; in other editors, start the server with the initialization option \
+     `\"trusted\": true`. See https://alint.org/docs/cli/lsp/#workspace-trust";
+
+/// Run every config relevant to the workspace: each workspace folder's
+/// config, which governs every open document in that folder.
 pub(crate) fn check_workspace(
     folders: &[PathBuf],
     docs: &[(Url, Option<String>)],
-    analysis_time: Option<alint_core::AnalysisTime>,
+    settings: &Settings,
     registry: &RuleRegistry,
 ) -> WorkspaceCheck {
+    let fixed = settings.config.as_deref();
     let mut check = WorkspaceCheck::default();
-    let mut configs: Vec<PathBuf> = Vec::new();
+    let mut keys: Vec<SessionKey> = Vec::new();
     for folder in folders {
-        if let Some(config) = alint_dsl::discover(folder)
-            && !configs.contains(&config)
+        if let Some(key) = folder_key(folder, fixed)
+            && !keys.contains(&key)
         {
-            configs.push(config);
+            keys.push(key);
         }
     }
     for (uri, _) in docs {
         if let Ok(abs) = uri.to_file_path()
-            && let Some(config) = config_for_document_with_registry(&abs, folders, registry)
+            && let Some(key) = session_key(&abs, folders, fixed)
         {
-            if !configs.contains(&config) {
-                configs.push(config.clone());
+            if !keys.contains(&key) {
+                keys.push(key.clone());
             }
-            check.doc_config.insert(uri.clone(), config);
+            check.doc_config.insert(uri.clone(), key);
         }
     }
-    for config in configs {
+    for key in keys {
         let overlays: Vec<(PathBuf, String)> = docs
             .iter()
-            .filter(|(uri, _)| check.doc_config.get(uri) == Some(&config))
+            .filter(|(uri, _)| check.doc_config.get(uri) == Some(&key))
             .filter_map(|(uri, text)| Some((uri.to_file_path().ok()?, text.clone()?)))
             .collect();
-        let run = run_config(&config, &overlays, analysis_time, registry);
-        check.runs.push((config, run));
+        let run = run_config(&key, &overlays, settings, registry);
+        check.runs.push((key, run));
     }
     check
 }
 
-/// The config that governs `doc`: the nearest `.alint.yml` walking up
-/// from the document's directory — the same search the CLI does from
-/// its working directory. A document outside every workspace folder is
-/// not linted (`None`). The walk may continue above the folder, so a
-/// client rooted at a subdirectory still finds the repo's config.
+/// The session that governs `doc`: its workspace folder's (the deepest
+/// folder holding it). A document outside every workspace folder is not
+/// linted (`None`).
 ///
-/// `nested_configs: true` follows the CLI: run from the workspace folder,
-/// the CLI loads the folder's config, which lifts every nested
-/// `.alint.yml` into one rule set. So when a config between the nearest
-/// one and the folder's own config (inclusive) enables
-/// `nested_configs:`, the outermost such config governs the document
-/// (its rules AND the nested config's, scoped), not the nearest config
-/// alone.
-#[cfg(test)]
-pub(crate) fn config_for_document(doc: &Path, folders: &[PathBuf]) -> Option<PathBuf> {
-    config_for_document_with_registry(doc, folders, &alint_rules::builtin_registry())
-}
-
-pub(crate) fn config_for_document_with_registry(
+/// The folder's own config governs every file in the folder, as `alint check`
+/// run from the folder does: the nearest `.alint.yml` found walking up from the
+/// folder, which may sit above it, so a client rooted at a subdirectory still
+/// finds the repository's config. A `.alint.yml` below that config (a
+/// package's, or one in a vendored or ignored directory) never governs a file
+/// as a top-level config; it contributes rules only through the governing
+/// config's `nested_configs: true`, with a nested config's limits. A folder
+/// without a config of its own is not linted. With `--config` (`fixed`), that
+/// config governs every folder, rooted at the folder.
+pub(crate) fn session_key(
     doc: &Path,
     folders: &[PathBuf],
-    registry: &RuleRegistry,
-) -> Option<PathBuf> {
+    fixed: Option<&Path>,
+) -> Option<SessionKey> {
     let folder = folders
         .iter()
         .filter(|f| doc.starts_with(f))
         .max_by_key(|f| f.components().count())?;
-    let load_options = alint_dsl::LoadOptions::with_catalog(registry.catalog());
-    let nearest = alint_dsl::discover(doc.parent()?)?;
-    let Some(top) = alint_dsl::discover(folder) else {
-        return Some(nearest);
-    };
-    let Some(top_dir) = top.parent() else {
-        return Some(nearest);
-    };
-    // Walk the config chain upward from the nearest config to the
-    // folder's own config, remembering the outermost that enables
-    // nested configs.
-    let mut governing = nearest.clone();
-    let mut current = nearest;
-    loop {
-        if alint_dsl::nested_configs_enabled_with(&current, &load_options).unwrap_or(false) {
-            governing.clone_from(&current);
-        }
-        if current == top {
-            break;
-        }
-        let Some(next) = current
-            .parent()
-            .and_then(Path::parent)
-            .and_then(alint_dsl::discover)
-        else {
-            break;
-        };
-        // Stop once the walk leaves the folder's own config's tree.
-        if !next.parent().is_some_and(|d| d.starts_with(top_dir)) {
-            break;
-        }
-        current = next;
+    folder_key(folder, fixed)
+}
+
+/// The session a workspace folder's documents use (see [`session_key`]).
+fn folder_key(folder: &Path, fixed: Option<&Path>) -> Option<SessionKey> {
+    if let Some(config) = fixed {
+        return Some(SessionKey {
+            config: config.to_path_buf(),
+            root: folder.to_path_buf(),
+        });
     }
-    Some(governing)
+    let config = alint_dsl::discover(folder)?;
+    let root = config
+        .parent()
+        .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+    Some(SessionKey { config, root })
+}
+
+/// The config path that governs `doc` (test convenience over [`session_key`]).
+#[cfg(test)]
+pub(crate) fn config_for_document(doc: &Path, folders: &[PathBuf]) -> Option<PathBuf> {
+    session_key(doc, folders, None).map(|key| key.config)
 }
 
 /// Build one config's session, run it over the tree, apply the
 /// baseline, and overlay unsaved buffers. `overlays` are the open
 /// documents this config governs, with their editor text.
 fn run_config(
-    config_path: &Path,
+    key: &SessionKey,
     overlays: &[(PathBuf, String)],
-    analysis_time: Option<alint_core::AnalysisTime>,
+    settings: &Settings,
     registry: &RuleRegistry,
-) -> Result<ConfigRun, String> {
-    let session = build_session_for_config(config_path, analysis_time, registry)?;
+) -> Result<ConfigRun, ConfigError> {
+    let session = build_session_for_config(key, settings, registry)?;
     let report = session
         .engine
         .run(&session.root, &session.index)
@@ -219,44 +263,136 @@ pub(crate) fn workspace_folders(params: &InitializeParams) -> Vec<PathBuf> {
 
 /// Load the config discovered from `start` and build the engine +
 /// index. Returns `Ok(None)` (not an error) when no config is present.
+///
+/// The session is trusted, as before workspace trust existed; tests of the
+/// untrusted limits build theirs with [`build_session_with`].
 #[cfg(test)]
 pub(crate) fn build_session(start: &Path) -> Result<Option<Session>, String> {
-    match alint_dsl::discover(start) {
-        Some(config_path) => {
-            build_session_for_config(&config_path, None, &alint_rules::builtin_registry()).map(Some)
-        }
-        None => Ok(None),
+    let settings = Settings {
+        trusted: true,
+        ..Settings::default()
+    };
+    build_session_with(start, &settings)
+}
+
+/// [`build_session`] with explicit settings.
+#[cfg(test)]
+pub(crate) fn build_session_with(
+    start: &Path,
+    settings: &Settings,
+) -> Result<Option<Session>, String> {
+    let Some(key) = folder_key(start, settings.config.as_deref()) else {
+        return Ok(None);
+    };
+    build_session_for_config(&key, settings, &alint_rules::builtin_registry())
+        .map(Some)
+        .map_err(|error| error.message)
+}
+
+/// An environment that holds nothing, for an untrusted session's
+/// `{{env.*}}` interpolation. It records whether the config asked for a
+/// variable, so the session can tell the user why one resolved to nothing.
+#[derive(Debug, Default)]
+struct UntrustedEnvironment {
+    asked: AtomicBool,
+}
+
+impl alint_dsl::EnvironmentProvider for UntrustedEnvironment {
+    fn get(&self, _name: &str) -> Option<String> {
+        self.asked.store(true, Ordering::Relaxed);
+        None
     }
 }
 
-/// Load `config_path` and build the engine + index, honoring the same
-/// top-level settings `alint check` does (`fix_size_limit`, `baseline:`,
-/// `ignore:`, `respect_gitignore:`).
-fn build_session_for_config(
+/// Where in `config` its YAML error is, when the file itself does not parse.
+/// An error from another file of the chain (an `extends:` target, a drop-in)
+/// or from a later stage keeps the diagnostic at the file's start.
+fn yaml_error_range(config: &Path) -> Option<Range> {
+    let text = std::fs::read_to_string(config).ok()?;
+    let error = alint_core::yaml::from_str::<alint_core::yaml::Value>(&text).err()?;
+    let location = error.location()?;
+    let line_index = location.line().checked_sub(1)?;
+    let line_text = text.lines().nth(line_index).unwrap_or_default();
+    let (character, width) = crate::diagnostics::utf16_column(line_text, location.column());
+    let line = u32::try_from(line_index).ok()?;
+    Some(Range::new(
+        Position::new(line, character),
+        Position::new(line, character.saturating_add(width)),
+    ))
+}
+
+/// Load `config_path` as [`build_session_for_config`] needs it: untrusted,
+/// with an empty environment and remote `extends:` refused; with
+/// `--no-spawn`, refusing a config that spawns. Returns the config and
+/// whether loading it asked for an environment value an untrusted session
+/// withheld.
+fn load_session_config(
     config_path: &Path,
-    analysis_time: Option<alint_core::AnalysisTime>,
+    settings: &Settings,
     registry: &RuleRegistry,
-) -> Result<Session, String> {
-    // The config's directory is the effective repo root, so relative
-    // paths in rules resolve from there, matching the CLI.
-    let effective_root = config_path
-        .parent()
-        .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
-    let config = alint_dsl::load_with(
-        config_path,
-        &alint_dsl::LoadOptions::with_catalog(registry.catalog()),
-    )
-    .map_err(|e| format!("loading config: {e}"))?;
-    // A top-level value read from the environment can reach an error below
-    // (an unreadable `baseline:`, an invalid `ignore:` glob in the walk).
-    let environment_values = config.environment_values.clone();
-    let redact = |message: String| {
-        alint_core::redact_environment_values(&message, &environment_values).into_owned()
-    };
-    let mut entries: Vec<RuleEntry> = Vec::with_capacity(config.rules.len());
+) -> Result<(alint_core::Config, bool), ConfigError> {
+    let trusted = settings.trusted;
+    let environment = Arc::new(UntrustedEnvironment::default());
+    let mut load_options = alint_dsl::LoadOptions::with_catalog(registry.catalog());
+    if !trusted {
+        load_options.environment = environment.clone();
+        load_options.remote_policy = alint_dsl::RemotePolicy::Deny;
+    }
+    let config = alint_dsl::load_with(config_path, &load_options).map_err(|error| {
+        let message = error.to_string();
+        let untrusted = !trusted
+            && (environment.asked.load(Ordering::Relaxed)
+                || message.contains("remote `extends` is disabled"));
+        let mut message = format!("loading config: {message}");
+        if untrusted {
+            message.push_str("\n\n");
+            message.push_str(UNTRUSTED_NOTE);
+        }
+        ConfigError {
+            message,
+            range: yaml_error_range(config_path),
+            untrusted,
+        }
+    })?;
+    if settings.no_spawn {
+        let enabled = config
+            .rules
+            .iter()
+            .filter(|spec| !matches!(spec.level, Level::Off));
+        alint_dsl::refuse_spawning(enabled, &config.facts, registry.catalog(), "--no-spawn")
+            .map_err(|error| format!("loading config: {error}"))?;
+    }
+    let asked = !trusted && environment.asked.load(Ordering::Relaxed);
+    Ok((config, asked))
+}
+
+/// The engine entries for a config's enabled rules, from [`build_entries`].
+struct BuiltRules {
+    entries: Vec<RuleEntry>,
+    /// Each rule id's canonical kind, for hover.
+    kinds: HashMap<String, String>,
+    /// Whether an untrusted session skipped a spawning rule or kept a
+    /// `when:` that reads `env.*`.
+    withheld: bool,
+}
+
+/// Build the engine entries for a config's enabled rules. An untrusted
+/// session skips every rule that spawns a process.
+fn build_entries(
+    rules: &[alint_core::RuleSpec],
+    allow_out_of_root: &alint_core::AllowOutOfRoot,
+    trusted: bool,
+    registry: &RuleRegistry,
+) -> Result<BuiltRules, ConfigError> {
+    let mut withheld = false;
+    let mut entries: Vec<RuleEntry> = Vec::with_capacity(rules.len());
     let mut kinds: HashMap<String, String> = HashMap::new();
-    for spec in &config.rules {
+    for spec in rules {
         if matches!(spec.level, Level::Off) {
+            continue;
+        }
+        if !trusted && alint_dsl::rule_spawn_use(spec, registry.catalog()).is_some() {
+            withheld = true;
             continue;
         }
         let mut rule = registry
@@ -271,7 +407,7 @@ fn build_session_for_config(
         // Apply the top-level `allow_out_of_root:` policy (top-level
         // config only; never via `extends:`). No-op for kinds that
         // don't honor the flag.
-        let allow_out_of_root = config.allow_out_of_root.allows(&spec.id, &spec.kind);
+        let allow_out_of_root = allow_out_of_root.allows(&spec.id, &spec.kind);
         rule.set_allow_out_of_root(allow_out_of_root);
         let mut entry = RuleEntry::new(rule)
             .with_spec(std::sync::Arc::new(spec.clone()))
@@ -284,6 +420,7 @@ fn build_session_for_config(
                     spec.redact_when_error(error)
                 )
             })?;
+            withheld |= !trusted && expr.first_env_ref().is_some();
             entry = entry.with_when(expr);
         }
         // Resolve aliases through the session's registry, which may be an
@@ -294,13 +431,58 @@ fn build_session_for_config(
         );
         entries.push(entry);
     }
+    Ok(BuiltRules {
+        entries,
+        kinds,
+        withheld,
+    })
+}
+
+/// Load the session's config and build the engine + index, honoring the same
+/// top-level settings `alint check` does (`fix_size_limit`, `baseline:`,
+/// `ignore:`, `respect_gitignore:`) and the `--no-gitignore` and
+/// `--no-spawn` flags.
+///
+/// An untrusted session ([`Settings::trusted`]) loads with an empty
+/// environment and refuses remote `extends:`, skips each rule and fact that
+/// spawns a process ([`alint_dsl::rule_spawn_use`], [`alint_dsl::fact_spawns`]),
+/// and gives `env.*` in a `when:` an empty environment. Everything else lints
+/// as it would trusted. [`Session::withheld`] records whether any of that
+/// changed what this config does.
+fn build_session_for_config(
+    key: &SessionKey,
+    settings: &Settings,
+    registry: &RuleRegistry,
+) -> Result<Session, ConfigError> {
+    let config_path = key.config.as_path();
+    let effective_root = key.root.clone();
+    let trusted = settings.trusted;
+    let (config, mut withheld) = load_session_config(config_path, settings, registry)?;
+    // A top-level value read from the environment can reach an error below
+    // (an unreadable `baseline:`, an invalid `ignore:` glob in the walk).
+    let environment_values = config.environment_values.clone();
+    let redact = |message: String| {
+        alint_core::redact_environment_values(&message, &environment_values).into_owned()
+    };
+    let mut facts = config.facts;
+    if !trusted {
+        let before = facts.len();
+        facts.retain(|fact| !alint_dsl::fact_spawns(fact));
+        withheld |= facts.len() != before;
+    }
+    let BuiltRules {
+        entries,
+        kinds,
+        withheld: rules_withheld,
+    } = build_entries(&config.rules, &config.allow_out_of_root, trusted, registry)?;
+    withheld |= rules_withheld;
 
     // A fact's id may be read from the environment.
     let pattern_hints: Vec<_> = entries
         .iter()
         .flat_map(|entry| entry.pattern_hints(registry))
         .chain(alint_core::pattern_hints::environment_fact_hints(
-            &config.facts,
+            &facts,
             &environment_values,
         ))
         .map(|mut hint| {
@@ -309,10 +491,14 @@ fn build_session_for_config(
         })
         .collect();
     let mut engine = Engine::from_entries(entries, registry.clone())
-        .with_facts(config.facts)
+        .with_facts(facts)
         .with_vars(config.vars)
         .with_fix_size_limit(config.fix_size_limit);
-    if let Some(analysis_time) = analysis_time {
+    if !trusted {
+        // `env.*` in a `when:` and a legacy `${VAR}` read this, not the host.
+        engine = engine.with_condition_environment(BTreeMap::new());
+    }
+    if let Some(analysis_time) = settings.analysis_time {
         engine = engine.with_analysis_time(analysis_time);
     }
 
@@ -332,7 +518,7 @@ fn build_session_for_config(
     }
 
     let walk_opts = WalkOptions::default()
-        .with_respect_gitignore(config.respect_gitignore)
+        .with_respect_gitignore(config.respect_gitignore && !settings.no_gitignore)
         .with_extra_ignores(extra_ignores);
     let index = walk(&effective_root, &walk_opts)
         .map_err(|e| redact(format!("walking repository: {e}")))?;
@@ -346,6 +532,7 @@ fn build_session_for_config(
         kinds,
         pattern_hints,
         environment_values,
+        withheld,
     })
 }
 
