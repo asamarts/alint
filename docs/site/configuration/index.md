@@ -406,6 +406,23 @@ baseline: .alint-baseline.json
 
 A `--baseline <path>` flag overrides this key. There is **no silent auto-detect**: a baseline suppresses findings only when it is explicitly opted in (via this key or the flag), never because a baseline file merely exists on disk. Write and refresh the file with `alint baseline`. See [Baseline mode](/docs/concepts/adoption/baseline/) for the full workflow, the fingerprinting semantics, and which output formats are baseline-aware.
 
+## Limits
+
+A config is untrusted for what it costs to load, so loading it is bounded:
+
+- each source (the root, an `extends:` target, a drop-in, a nested config) may be at most 32 MiB
+  (33,554,432 bytes). A larger one fails with "input exceeds the maximum supported size for a
+  structured document (33554432 bytes)" and its path. A source must be a regular file (or a
+  symlink to one): a FIFO or a device is refused unread. One byte order mark that starts a
+  source is dropped, before `---` or `%YAML` too;
+- YAML nests at most 128 levels deep, and aliases may expand a source only so far;
+- an `ignore:` pattern listed more than once, in one source or in several (as when `extends:`
+  reaches one source by two paths), is kept once. The merged config may hold at most 1,048,576
+  rules, templates, facts, vars and `ignore:` patterns;
+- all the [`extends_template:`](/docs/configuration/templates/) instances of a config may expand
+  to at most 64 MiB, and no rendered string may be longer than 32 MiB. An error names the budget
+  and the rule.
+
 ## See also
 
 - [JSON Schema](https://alint.org/_alint/configuration/schema.json): authoritative source for option types.

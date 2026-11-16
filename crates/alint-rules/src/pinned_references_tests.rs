@@ -663,3 +663,138 @@ fn builder_rejects_missing_paths_unknown_options_and_fix() {
         .is_err()
     );
 }
+
+/// Run `job` on a thread of its own, and fail unless it returns within `limit`
+/// (a hang leaves the thread spinning, but fails the test).
+fn within<T: Send + 'static>(
+    limit: std::time::Duration,
+    job: impl FnOnce() -> T + Send + 'static,
+) -> T {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || drop(sender.send(job())));
+    receiver
+        .recv_timeout(limit)
+        .unwrap_or_else(|_| panic!("did not finish within {limit:?}"))
+}
+
+/// `prefix`, then a workflow whose `build` job merges `m{depth}`, each `m`
+/// merging the one before `fanout` times: an unbounded lookup of a key that is
+/// not there visits `fanout^depth` merge sources.
+fn merge_chain(prefix: &str, depth: usize, fanout: usize) -> String {
+    use std::fmt::Write as _;
+
+    let mut text =
+        format!("{prefix}m1: &m1 {{runs-on: x, steps: [{{uses: actions/checkout@v4}}]}}\n");
+    for level in 2..=depth {
+        let sources = vec![format!("*m{}", level - 1); fanout].join(", ");
+        writeln!(text, "m{level}: &m{level} {{<<: [{sources}]}}").unwrap();
+    }
+    writeln!(text, "jobs: {{build: {{<<: *m{depth}}}}}").unwrap();
+    text
+}
+
+fn github_rule() -> PinnedReferencesRule {
+    let spec = spec_yaml("id: pins\nkind: pinned_references\npaths: ci.yml\nlevel: error\n");
+    PinnedReferencesRule {
+        id: spec.id.clone(),
+        level: spec.level,
+        policy_url: None,
+        message: None,
+        scope: Scope::from_spec(&spec).unwrap(),
+        format: InputFormat::GithubActions,
+    }
+}
+
+/// Texts ayaml refuses, as the alias guard measures with it, but saphyr reads:
+/// an alias to a collection that contains it, and an empty verbatim tag.
+const AYAML_ONLY_ERRORS: &[&str] = &["z: &z [*z]\n", "z: &z {k: [*z]}\n", "x: !<> y\n"];
+
+/// ROB-1: the alias guard took any refusal but its own budget for "within
+/// budget", and saphyr then read what ayaml refused: a merge source that
+/// contains its own merge key, or a merge chain after an ayaml-only error,
+/// spun the lookups for 2^128 or 10^12 steps.
+#[test]
+fn merge_aliases_ayaml_cannot_read_are_refused_promptly() {
+    let workflow = "name: ci\non: push\njobs:\n  a: &r\n    <<: [*r, *r]\n";
+    let minimal = "&r\n<<: [*r, *r]\n";
+    let chain = merge_chain("z: &z [*z]\n", 12, 10);
+    assert!(chain.len() < 1024, "{}", chain.len());
+    for text in [workflow, minimal, chain.as_str()] {
+        let text = text.to_owned();
+        let findings = within(std::time::Duration::from_secs(1), move || {
+            run(".github/workflows/ci.yml", &text, Some("github_actions"))
+        });
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(
+            findings[0].analysis_failure_kind(),
+            Some(AnalysisFailureKind::ResourceParse)
+        );
+    }
+}
+
+/// Without the guard, the lookups bound themselves: an alias to a collection
+/// still open is refused while parsing, and merge work runs out of budget (a
+/// small one here, to keep a debug build fast: the production one is spent in
+/// about 0.1 s in a release build).
+#[test]
+fn merge_lookups_are_bounded_without_the_guard() {
+    for cycle in ["&r\n<<: [*r, *r]\n", "jobs:\n  a: &r\n    <<: [*r, *r]\n"] {
+        let error = YamlDocument::parse_unguarded(cycle).unwrap_err();
+        assert!(error.contains("contains it"), "{error}");
+    }
+    let chain = merge_chain("x: !<> y\n", 12, 10);
+    let document = YamlDocument::parse_unguarded(&chain).unwrap().unwrap();
+    document.merge_work.set(Some(MAX_MERGE_WORK / 32));
+    let exhausted = within(std::time::Duration::from_secs(1), move || {
+        let rule = github_rule();
+        let mut collector = Collector::new(&rule, Path::new("ci.yml"), &document);
+        collect_github_actions(&mut collector);
+        document.merge_work.get().is_none()
+    });
+    assert!(exhausted);
+}
+
+proptest::proptest! {
+    #![proptest_config(proptest::prelude::ProptestConfig::with_cases(64))]
+
+    /// Any merge chain after an ayaml-only error: the rule refuses it, and
+    /// read without the guard, its lookups' work counter never passes the
+    /// budget, and the lookups either finish (and find the reference) or
+    /// report the budget spent.
+    #[test]
+    fn an_ayaml_error_before_merge_aliases_never_runs_unbounded(
+        prefix in proptest::sample::select(AYAML_ONLY_ERRORS),
+        depth in 2usize..14,
+        fanout in 1usize..11,
+    ) {
+        const BUDGET: usize = 100_000;
+        let limit = std::time::Duration::from_secs(5);
+        let text = merge_chain(prefix, depth, fanout);
+        let shared = text.clone();
+        let kinds = within(limit, move || {
+            run(".github/workflows/ci.yml", &shared, None)
+                .iter()
+                .map(Violation::analysis_failure_kind)
+                .collect::<Vec<_>>()
+        });
+        proptest::prop_assert_eq!(kinds, [Some(AnalysisFailureKind::ResourceParse)]);
+        let unguarded = within(limit, move || {
+            let Ok(Some(document)) = YamlDocument::parse_unguarded(&text) else {
+                return None;
+            };
+            document.merge_work.set(Some(BUDGET));
+            let rule = github_rule();
+            let mut collector = Collector::new(&rule, Path::new("ci.yml"), &document);
+            collect_github_actions(&mut collector);
+            Some((document.merge_work.get(), collector.findings.len()))
+        });
+        match unguarded {
+            None => {}
+            Some((Some(left), findings)) => {
+                proptest::prop_assert!(left <= BUDGET);
+                proptest::prop_assert_eq!(findings, 1);
+            }
+            Some((None, _)) => proptest::prop_assert!(fanout > 1),
+        }
+    }
+}

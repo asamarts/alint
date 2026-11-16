@@ -48,6 +48,44 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`![x](http://...)`), a link, or HTML. The message is now escaped, the rule id is a code span,
   and a policy URL is a link only when it is `http` or `https` (any other shows as text).
 
+- **`pinned_references` no longer hangs on a workflow whose merge keys refer to themselves.**
+  Since v0.19.0, the rule resolved a `<<` merge key in a GitHub Actions workflow or a GitLab CI
+  file by following every merge source again at each level, with no memo. A 16-byte workflow
+  (`a: &r` over `<<: [*r, *r]`) made `alint check` with `ci/github-actions@v1` spin until it was
+  killed. The YAML alias guard did not stop it: it measures with the parser alint decodes with,
+  and took that parser's refusal of the text (here of an alias to a collection that contains
+  it, or of anything before an alias bomb, such as an empty `!<>` tag) for "within budget",
+  while the rule reads the text with another parser, which accepts it. The guard's verdict now
+  says when the text could not be read, and the rule refuses such a file with an analysis
+  failure, as does `key_parity`'s YAML entry extraction. The rule also refuses an alias to a
+  collection that contains it, and holds merge-key lookups to a work budget, so a file the guard
+  passes cannot spin either. This affects every command that runs the rule, from v0.19.0 to
+  v0.22.1.
+- **A repository's configuration can no longer make loading it crash, hang or exhaust memory.**
+  A configuration is untrusted for what it costs to load, and a small one could:
+  - overflow the stack, since v0.20.0: the `requires:` check walked the whole first document
+    recursively, so a value nested 100,000 levels deep, as the check's parser read it, crashed
+    the process. The check now reads the events alint decodes, without recursion, and refuses
+    nesting past 128 levels;
+  - double `ignore:` at every level of an `extends:` diamond, since v0.2.1: 30 configurations
+    that each extend the next one twice held 2^30 copies of one pattern and aborted at 5.8 GB.
+    A pattern listed more than once is now kept once (an `ignore:` pattern only excludes, so no
+    result changes), and the merged configuration holds at most 1,048,576 rules, templates,
+    facts, vars and `ignore:` patterns;
+  - expand templates without bound, since v0.5.10: every `extends_template:` instance copied its
+    template and rendered `{{vars.<name>}}` at every placeholder, so a 1.2 MB configuration (a
+    1 MiB `message:` and 4,000 instances) needed more than 8 GB, and a message of 100,000
+    placeholders for a 20 KB var rendered 2 GB. All the instances of a configuration now expand
+    to at most 64 MiB, and one rendered string to at most 32 MiB; the error names the budget,
+    the rule and the template;
+  - hang, since v0.2.1: a configuration, a local `extends:` target or a nested configuration
+    was read whatever it was, so a FIFO blocked the load forever, and a symlink to `/dev/zero`
+    grew until memory ran out. The `.alint.yml` that `alint suggest` reads (since v0.7.0) was
+    read the same way. Each is now read only when it is a regular file, and only up to 32 MiB.
+
+  These affect every command that loads a configuration (`alint check`, `alint fix`, `alint
+  test`, the language server and the others), from the version each item names to v0.22.1.
+  Until v0.23.0, run alint on a repository you do not trust under a time and a memory limit.
 - **`given.env` in a policy test no longer reaches Git.** Since v0.20.0, `alint test` passed a
   test's `given.env` to the Git commands it runs itself: the `given.git` fixture setup, and
   alint's Git reads for rules such as `git_tracked_only`. A variable such as `GIT_CONFIG_*`
@@ -188,7 +226,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and `GIT_CONFIG_GLOBAL` does not keep Git from its default global excludes and attributes files
   there (`~/.config/git/ignore`), so `check_changed` missed an untracked file the host's excludes
   listed. The runner's Git commands now get `XDG_CONFIG_HOME` in the sandbox.
-
   Except where a bullet says otherwise, these affect `alint test` and the `alint_testkit::Runner`
   library in v0.20.0 to v0.22.1, and only for a policy-test package the user does not trust. No
   v0.22.x patch release follows: upgrade to v0.23.0, and until then run `alint test` only on
@@ -215,6 +252,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Language-server configuration errors are placed where they are.** A YAML syntax error in
   `.alint.yml` is shown on its line instead of on the first line of the file.
 
+- **`alint_core::yaml_depth::expansion`, `GuardScan::expansion` and `Expansion`** (library
+  API): the alias guard's verdict on a text, as within the budget, over it, or not read, when
+  ayaml refuses the text before the budget decides. A caller that reads the text with another
+  parser refuses the last (see Security); `expansion_within_limit` keeps its meaning for a caller
+  that decodes with ayaml. `mapping_subtree_is_literal` now reads the text as ayaml does.
 - **`alint_core::names_git_directory`, `path_names_git_directory` and `reaches_git_directory`**
   (library API): whether a name, a path or a path below a root (through its symlinks) names a
   Git directory in any spelling a file system opens as `.git`. Fixers refuse such paths (see
@@ -339,8 +381,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **alint parses YAML with ayaml 0.1.2, a pure-Rust parser, in place of `yaml_serde` and
   `libyaml-rs`** (#510, ADR-0035). Configurations, `extends:` sources, the `yaml_path_*` rules,
   `json_schema_passes` on YAML, front matter and `alint test` packages all read through it. The
-  size and depth limits are those of 0.22 (32 MiB, 128 levels). ayaml reads YAML 1.2, where
-  libyaml read YAML 1.1. A differential harness (#482) compared the two on more than five
+  depth limit is that of 0.22 (128 levels), and the 32 MiB size limit 0.22 set on data files now
+  holds for configurations too: a configuration, `extends:` source or nested configuration past
+  33,554,432 bytes fails with "input exceeds the maximum supported size for a structured document
+  (33554432 bytes)" and its path, where 0.22 read it. ayaml reads YAML 1.2, where libyaml read
+  YAML 1.1. A differential harness (#482) compared the two on more than five
   million generated and mutated documents and on every YAML file in this repository: valid
   documents decode to the same values, except in the cases below.
   - **Read differently:**
@@ -359,14 +404,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
       and is an error inside that node; 0.22 could resolve it to the wrong node, or fail with
       "recursion limit exceeded";
     - an integer beyond the 64-bit range decodes as a 128-bit integer, where 0.22 rejected the
-      document (the JSON form the structured-format rules query still rejects it);
+      document (the JSON form the structured-format rules query still rejects it). In a rule or
+      template of a configuration it is still an error, which names the file and the field
+      (`rules[0].message`);
     - an anchor or alias name may hold any character but white space and the flow indicators,
       so `&a: x` anchors `x` under the name `a:` where 0.22 read a mapping, and `[*a:b]` holds
       an alias to `a:b` where 0.22 read `{*a: b}`;
     - in a flow sequence, a plain scalar that starts with `:` after properties is that scalar,
       so `[!!str :a]` holds the string `:a`, where 0.22 read the mapping `{"": a}`;
-    - a byte-order mark that starts the stream no longer counts as a column of the first line;
-      one that starts another line still counts as one.
+    - a byte-order mark that starts a configuration, an `extends:` source, a policy test or a
+      data file is dropped before the text is read, so one may come before `---` or `%YAML`,
+      where 0.22 read `---` as the start of a scalar, and it no longer counts as a column of the
+      first line. One that starts another line still counts as one.
   - **Now accepted:** a tab as separating white space outside indentation, including on a blank
     line after `...`, and as content after the indentation of a block scalar's first line; an
     empty implicit key (`: value`); a stream that starts with `...`, with or without a document
@@ -578,6 +627,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `check --format sarif`. One parse now finds every match's bytes, each verification pass parses
   the result once (for every structured format), and the edits are spliced in one pass; 10,000
   matches take under two seconds.
+- **A configuration with `requires:` loads exactly when it loads without it.** Since v0.20.0,
+  the `requires:` check read the configuration with a second YAML parser, so text alint decodes
+  but that parser refuses, such as a tab after a key's colon (`a:\tx`), failed with that
+  parser's message. The check now reads the events alint decodes. A configuration that fails to
+  decode is parsed again, to say why a `requires:` is not a literal, only when it spells
+  `requires`, so a large one that fails is no longer parsed three times.
 
 ## [0.22.1] - 2026-11-11
 

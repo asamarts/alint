@@ -511,6 +511,7 @@ pub fn has_policy_test_discriminator(input: &str) -> bool {
     if has_top_level_marker {
         return true;
     }
+    let input = input.strip_prefix('\u{feff}').unwrap_or(input);
     let yaml_guards = alint_core::yaml_depth::scan_guards(input);
     if !yaml_guards.flow_within_limit() || !yaml_guards.expansion_within_limit(input) {
         return false;
@@ -524,7 +525,11 @@ pub fn has_policy_test_discriminator(input: &str) -> bool {
 
 impl PolicyTest {
     /// Parse one v1 document after shared YAML complexity guards and version dispatch.
+    ///
+    /// One leading byte order mark is dropped, as for a config and a data file:
+    /// ayaml reads one before `---` or `%YAML` as content.
     pub fn from_yaml(input: &str) -> Result<Self, PolicyTestParseError> {
+        let input = input.strip_prefix('\u{feff}').unwrap_or(input);
         let yaml_guards = alint_core::yaml_depth::scan_guards(input);
         if !yaml_guards.flow_within_limit() {
             return Err(PolicyTestParseError::FlowDepth(
@@ -1592,6 +1597,20 @@ expect:
             error,
             PolicyTestParseError::UnsupportedVersion { found: 2, .. }
         ));
+    }
+
+    /// YAML-6: a byte order mark before `---` or `%YAML` was read as content
+    /// ("unexpected content after document"); one leading mark is dropped, as
+    /// for a config and a data file.
+    #[test]
+    fn a_leading_byte_order_mark_before_a_document_marker_is_dropped() {
+        for head in ["\u{feff}---\n", "\u{feff}%YAML 1.2\n---\n"] {
+            let yaml = format!("{head}{}", valid_yaml());
+            assert!(PolicyTest::from_yaml(&yaml).is_ok(), "{yaml:?}");
+            assert!(has_policy_test_discriminator(&format!(
+                "{head}{{test_version: 1}}\n"
+            )));
+        }
     }
 
     #[test]

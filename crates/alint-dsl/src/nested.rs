@@ -8,7 +8,6 @@
 //! get prefixed with the sub-config's directory so the rule's
 //! effective scope can't escape its subtree.
 
-use std::fs;
 use std::path::Path;
 
 use alint_core::{
@@ -184,10 +183,9 @@ fn load_nested_config(
     catalog: Option<KindCatalog<'_>>,
     environment: &dyn crate::EnvironmentProvider,
 ) -> Result<NestedRules> {
-    let contents = fs::read_to_string(abs_path).map_err(|source| Error::Io {
-        path: abs_path.to_path_buf(),
-        source,
-    })?;
+    let contents =
+        crate::ConfigSourceProvider::read_to_string(&crate::FilesystemConfigSource, abs_path)
+            .map_err(|source| crate::loader::config_read_error(abs_path, source))?;
     // Route through the shared parse path so nested configs get the
     // same `{{env.X}}` interpolation as the top-level config and
     // drop-ins. Its errors already name the file.

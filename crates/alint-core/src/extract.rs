@@ -825,11 +825,20 @@ fn yaml_entry_rows(
     }
     // This guard drives a recursive discard-only deserializer when aliases are
     // present, so run it only after collection depth is known safe and before
-    // traversing or materializing the parser result.
-    if !yaml_guards.expansion_within_limit(stripped) {
-        return Err(EntryRowsError::Parse(
-            "YAML alias expansion exceeds the maximum supported size".to_string(),
-        ));
+    // traversing or materializing the parser result. saphyr reads what ayaml
+    // may refuse, so a text the guard could not read is refused too.
+    match yaml_guards.expansion(stripped) {
+        crate::yaml_depth::Expansion::WithinLimit => {}
+        crate::yaml_depth::Expansion::OverLimit => {
+            return Err(EntryRowsError::Parse(
+                "YAML alias expansion exceeds the maximum supported size".to_string(),
+            ));
+        }
+        crate::yaml_depth::Expansion::Unparsed(error) => {
+            return Err(EntryRowsError::Parse(format!(
+                "the YAML uses aliases, and their expansion cannot be bounded: {error}"
+            )));
+        }
     }
 
     let byte_offsets = YamlByteOffsets::new(stripped, &events);
@@ -1909,6 +1918,13 @@ flow: [é, 🚀]
         let amplified = format!("base: &base \"{anchor}\"\ncopies: [{aliases}]\n");
         let error = extract_entry_rows(Format::Yaml, &amplified).unwrap_err();
         assert!(error.to_string().contains("alias expansion"), "{error}");
+
+        // ROB-1: saphyr reads what ayaml, which the alias guard measures with,
+        // refuses, so such a text is refused rather than walked unbounded.
+        for refused in ["a: &a [*a]\nb: v\n", "x: !<> y\nm: &m {a: 1}\nn: *m\n"] {
+            let error = extract_entry_rows(Format::Yaml, refused).unwrap_err();
+            assert!(error.to_string().contains("cannot be bounded"), "{error}");
+        }
     }
 
     #[test]
