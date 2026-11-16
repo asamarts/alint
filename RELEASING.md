@@ -64,8 +64,12 @@ points are explicit.
 
    Runs the full preflight bundle: fmt + clippy + test + doc +
    version-pins + dep-floors + secrets-inv + dogfood. The
-   `release.yml` `preflight` job runs the same gates remotely; this
-   is the pre-push sanity gate.
+   `release.yml` `preflight` job runs the same gates remotely, and
+   more: the slower, network-bound and release-only ones, such as
+   YAML compare mode (`ci/scripts/yaml-compare.sh`), the MSRV build
+   and the shell tests, which CONTRIBUTING.md's "Not in
+   `preflight.sh`" list names. This is the pre-push sanity gate; run
+   a listed script locally when a change touches what it checks.
 
    For a patch release (`x.y.z` with `z > 0`), also run
    `ci/scripts/check-patch-compat.sh <every earlier x.y.z>` (for example

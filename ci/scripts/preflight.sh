@@ -23,6 +23,14 @@
 #   - shell-tests (~3 min; CI runs `ci/scripts/shell-tests.sh` as its
 #     own job — opt in locally with that script if you've changed
 #     anything under ci/scripts/*.sh)
+#   - YAML compare mode (the workspace's tests again, with every
+#     decode checked against libyaml and saphyr; CI's `YAML Compare`
+#     job and the release preflight run `ci/scripts/yaml-compare.sh`;
+#     opt in locally when a change touches how alint reads YAML)
+#
+# CONTRIBUTING.md's "Not in `preflight.sh`" list names every script
+# the release preflight runs that this bundle does not, and
+# ci/scripts/test-release-preflight-parity.sh keeps it complete.
 #   - examples-validate (~30s build + run; CI runs it as its own
 #     job when examples/ or schemas/ change)
 #

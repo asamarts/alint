@@ -11,6 +11,11 @@
 #      [workspace.package].rust-version by ci/scripts/msrv.sh; no workflow may
 #      hand-copy a numeric `toolchain:` pin that could drift from what every
 #      published crate advertises.
+#
+#   3. Local preflight parity. RELEASING.md and CONTRIBUTING.md say the local
+#      ci/scripts/preflight.sh mirrors CI, so every script the release
+#      preflight runs is run by preflight.sh too, or named in CONTRIBUTING.md's
+#      "Not in `preflight.sh`" list, which names nothing else.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -115,6 +120,35 @@ for where, body in (('ci.yml msrv job', msrv_job), ('release.yml preflight job',
         if 'ci/scripts/' in line and re.search(r'\|\|\s*(true|:)(\s|$)|;\s*(true|exit 0)(\s|$)', line):
             failures.append(f'{where}: a gate result is swallowed: {line.strip()!r}')
 
+
+
+def not_in_preflight(text):
+    """The scripts the bullets of the "Not in `preflight.sh`" list name."""
+    m = re.search(r'^Not in `preflight\.sh`:(?:.+\n)+\n(?P<list>(?:- .*\n(?:  .*\n)*)+)', text,
+                  re.MULTILINE)
+    return None if m is None else set(any_script_re.findall(m.group('list')))
+
+
+assert not_in_preflight('Not in `preflight.sh`: ci/scripts/z.sh is\nnot.\n\n'
+                        '- `ci/scripts/a.sh`: why.\n- `ci/scripts/b.sh` and\n'
+                        '  `ci/scripts/c.py`: why.\n\nci/scripts/d.sh\n') \
+    == {'ci/scripts/a.sh', 'ci/scripts/b.sh', 'ci/scripts/c.py'}
+
+local = set(any_script_re.findall(code('ci/scripts/preflight.sh')))
+listed = not_in_preflight(Path('CONTRIBUTING.md').read_text(encoding='utf-8'))
+if listed is None:
+    failures.append('CONTRIBUTING.md: no "Not in `preflight.sh`:" list of scripts')
+    listed = set()
+for script in sorted(pre_scripts - local - listed):
+    failures.append(f'release.yml preflight runs {script}, which ci/scripts/preflight.sh does not; '
+                    'run it there or name it in CONTRIBUTING.md\'s "Not in `preflight.sh`" list')
+for script in sorted(listed - pre_scripts):
+    failures.append(f'CONTRIBUTING.md\'s "Not in `preflight.sh`" list names {script}, which the '
+                    'release preflight does not run; remove it')
+for script in sorted(listed & local):
+    failures.append(f'CONTRIBUTING.md\'s "Not in `preflight.sh`" list names {script}, which '
+                    'ci/scripts/preflight.sh runs; remove it')
+
 if failures:
     for f in failures:
         print(f'[release-preflight-parity] {f}', file=sys.stderr)
@@ -152,4 +186,5 @@ if [[ "$(bash ci/scripts/msrv.sh --print)" != "$live" && "$(bash ci/scripts/msrv
   exit 1
 fi
 
-echo "[release-preflight-parity] OK - preflight mirrors ci.yml gates; MSRV derived from Cargo.toml"
+echo "[release-preflight-parity] OK - preflight mirrors ci.yml gates; local preflight's gaps listed;" \
+  "MSRV derived from Cargo.toml"
