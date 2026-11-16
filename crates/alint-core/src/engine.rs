@@ -727,9 +727,10 @@ fn unavailable_git_failure() -> Violation {
         .as_analysis_failure(AnalysisFailureKind::ResourceRead)
 }
 
-/// Build one nested rule from the placeholder tokens, as a preparation build
-/// ([`crate::template::Preparation`]). An error shows each token as the
-/// template wrote it.
+/// Build one nested rule from the placeholder tokens, inside the preparation
+/// ([`crate::template::Preparation`]) the caller holds open while it visits
+/// the rules nested in this one. An error shows each token as the template
+/// wrote it.
 fn prepare_nested_rule(
     registry: &RuleRegistry,
     parent_id: &str,
@@ -737,7 +738,6 @@ fn prepare_nested_rule(
     compiled: &crate::config::CompiledNestedSpec,
     nested_spec: &crate::RuleSpec,
 ) -> Result<Box<dyn Rule>> {
-    let _preparing = crate::template::Preparation::enter();
     registry.build(nested_spec).map_err(|error| {
         Error::rule_config(
             parent_id,
@@ -766,6 +766,7 @@ pub(crate) fn visit_rule_tree_with_registry(
     let tokens = crate::template::PathTokens::placeholder();
     for (idx, compiled) in rule.nested_rule_specs().iter().enumerate() {
         let nested_spec = compiled.instantiate(rule.id(), idx, rule.level(), &tokens);
+        let _preparing = crate::template::Preparation::enter(compiled.spec.templates());
         let nested_rule = prepare_nested_rule(registry, rule.id(), idx, compiled, &nested_spec)?;
         visit_rule_tree_with_registry(registry, nested_rule.as_ref(), Some(&nested_spec), visit)?;
     }
@@ -918,6 +919,7 @@ fn visit_active_rule_tree_with_registry(
             continue;
         }
         let nested_spec = compiled.instantiate(rule.id(), idx, rule.level(), &tokens);
+        let _preparing = crate::template::Preparation::enter(compiled.spec.templates());
         let nested_rule = prepare_nested_rule(registry, rule.id(), idx, compiled, &nested_spec)?;
         visit_active_rule_tree_with_registry(
             registry,

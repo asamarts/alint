@@ -172,7 +172,7 @@ fn a_rule_with_a_pending_format_does_not_evaluate() {
         &alint_core::template::PathTokens::placeholder(),
     );
     let rule = {
-        let _preparing = alint_core::template::Preparation::enter();
+        let _preparing = alint_core::template::Preparation::enter(nested.templates());
         build(&spec).expect("a templated name waits for the iteration")
     };
     let (tmp, index) = tempdir_with_files(&[("en.json", b"{}")]);
@@ -181,6 +181,122 @@ fn a_rule_with_a_pending_format_does_not_evaluate() {
         .expect_err("no format to read the reference with");
     assert!(
         error.to_string().contains("cannot infer the key format"),
+        "{error}"
+    );
+}
+
+/// A name the configuration wrote is a real name in a nested rule too, even
+/// one spelled like a placeholder: what holds for every iteration is a load
+/// error, not a `nested_rule_build` failure in each iteration. Two levels deep,
+/// the outermost rule's templates tell a token from its spelling.
+#[test]
+fn a_nested_name_spelled_like_a_placeholder_is_checked_at_load() {
+    for (options, error) in [
+        (
+            "reference: 'data/_stem_'\npeers: 'data/*'",
+            "cannot infer the key format of `reference` \"data/_stem_\"",
+        ),
+        (
+            "reference: '{dir}/_ext_'\npeers: '{dir}/*'",
+            "cannot infer the key format of `reference` \"{dir}/_ext_\"",
+        ),
+        (
+            "reference: '{path}'\npeers: 'data/x._ext_'",
+            "cannot infer the key format of the literal `peers` path",
+        ),
+    ] {
+        let message = load_nested(options).expect_err(options).to_string();
+        assert!(message.contains(error), "{options}: {message}");
+        let message = load_nested_twice(options).expect_err(options).to_string();
+        assert!(
+            message.contains(error),
+            "two levels deep, {options}: {message}"
+        );
+    }
+    // Two literal names that a placeholder's spelling would have equated.
+    load_nested("reference: 'x/_path_.json'\npeers: 'x/_dir_/_basename_.json'")
+        .expect("different files");
+    for options in [
+        "reference: '{path}'\npeers: '{dir}/fr.{ext}'",
+        "reference: '{dir}/{stem}.local'\npeers: '{dir}/*.local'",
+    ] {
+        load_nested_twice(options).unwrap_or_else(|error| panic!("{options}: {error}"));
+    }
+    let message = load_nested_twice("reference: '{path}'\npeers: '{dir}/{basename}'")
+        .expect_err("the same file in every iteration")
+        .to_string();
+    assert!(
+        message.contains("must select at least one file other than the reference"),
+        "{message}"
+    );
+}
+
+/// [`load_nested`] with the `key_parity` one level deeper, under a
+/// `for_each_dir` in the `for_each_file`'s `require:` block.
+fn load_nested_twice(options: &str) -> Result<()> {
+    let registry = crate::builtin_registry();
+    let options = options.replace('\n', "\n        ");
+    let spec = spec_yaml(&format!(
+        "id: p\nkind: for_each_file\nselect: '*/en.*'\nlevel: error\n\
+         require:\n  - kind: for_each_dir\n    select: '{{dir}}'\n    require:\n      \
+         - kind: key_parity\n        {options}\n"
+    ));
+    let rule = registry.build(&spec)?;
+    registry.validate_nested(&spec, rule.as_ref())
+}
+
+/// Path tokens render with the host's separator, so on Windows a nested
+/// `reference: "{path}"` is `apps\web\en.json`. It names the file the index
+/// lists as `apps/web/en.json`: excluded from the peers a glob selects, and the
+/// same file as a literal peer (#504's audit). Simulated here with `\` as a
+/// separator, as on Windows.
+#[test]
+fn a_reference_rendered_with_backslashes_is_the_index_path() {
+    assert_eq!(
+        config_path("apps\\web\\en.json", true),
+        RelPath::parse("apps/web/en.json")
+    );
+    assert_eq!(
+        config_path("apps\\web/en.json", true),
+        RelPath::parse("apps/web/en.json")
+    );
+    assert_eq!(
+        config_path("a\\b", false).unwrap().as_str(),
+        "a\\b",
+        "a name"
+    );
+
+    let (tmp, index) = tempdir_with_files(&[("apps/web/en.json", b"{}")]);
+    let rule = build_rule_with(
+        &spec_yaml(
+            "id: t\nkind: key_parity\nreference: 'apps\\web\\en.json'\n\
+             peers: 'apps/web/*.json'\nlevel: error\n",
+        ),
+        true,
+    )
+    .expect("rule builds");
+    let findings = rule
+        .evaluate(&ctx(tmp.path(), &index))
+        .expect("rule evaluates");
+    assert_eq!(
+        messages(&findings),
+        [
+            "apps/web/en.json: `peers` glob \"apps/web/*.json\" matched no files other than the \
+          reference"
+        ]
+    );
+
+    let error = build_rule_with(
+        &spec_yaml(
+            "id: t\nkind: key_parity\nreference: 'apps\\web\\en.json'\n\
+             peers: ./apps/web/en.json\nlevel: error\n",
+        ),
+        true,
+    )
+    .expect_err("the peer is the reference")
+    .to_string();
+    assert!(
+        error.contains("must select at least one file other than the reference"),
         "{error}"
     );
 }

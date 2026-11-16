@@ -247,6 +247,38 @@ fn literal_pattern(pattern: &str, backslash_is_separator: bool) -> Option<String
     })
 }
 
+/// The directory every path `pattern` can match lies under, as globset
+/// compiles the pattern: the segments before its last `/` for as long as each
+/// is a literal name ([`literal_pattern`]), `a/b` for `a/b/*.json` or
+/// `a/b/**`, `app/[slug]` for `app/[[]slug[]]/*.tsx`. A match spells these
+/// names first, so it is at or below them, component by component. `None`
+/// when the first segment is not a literal name (`**/x`, `*/x`, `{a,b}/x`,
+/// `[ab]/x`), for a pattern with no `/` or one that starts with `/` or `.`,
+/// and for an exclude (`!x`). A segment that names nothing on its own (`.`,
+/// `..`, empty) ends the prefix, since globset compares it as text.
+pub(crate) fn literal_dir_prefix(pattern: &str) -> Option<String> {
+    if pattern.starts_with('!') {
+        return None;
+    }
+    let backslash_is_separator = std::path::is_separator('\\');
+    let (dirs, _) = pattern.rsplit_once('/')?;
+    let mut prefix = String::new();
+    for segment in dirs.split('/') {
+        let Some(name) = literal_pattern(segment, backslash_is_separator) else {
+            break;
+        };
+        // Where `\\` separates, the name can hold more than one.
+        if name.split('/').any(|part| matches!(part, "" | "." | "..")) {
+            break;
+        }
+        if !prefix.is_empty() {
+            prefix.push('/');
+        }
+        prefix.push_str(&name);
+    }
+    (!prefix.is_empty()).then_some(prefix)
+}
+
 /// globset's literal match: the path's bytes (lossy UTF-8 with every separator
 /// normalized to `/` off Unix) equal the literal.
 #[inline]

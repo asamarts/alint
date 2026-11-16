@@ -295,10 +295,11 @@ pub(crate) fn validate_nested_require(
                 ),
             )
         };
-        let nested_rule = {
-            let _preparing = alint_core::template::Preparation::enter();
-            registry.build(&synthesized).map_err(nested_error)?
-        };
+        // Open while the rules nested in this one are prepared as well: the
+        // outermost preparation's templates are the ones the configuration
+        // wrote.
+        let _preparing = alint_core::template::Preparation::enter(compiled.spec.templates());
+        let nested_rule = registry.build(&synthesized).map_err(nested_error)?;
         nested_rule
             .validate_nested(registry)
             .map_err(nested_error)?;

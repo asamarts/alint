@@ -1653,7 +1653,12 @@ KeyParityRule {
     format_pending: false,
     format_override: None,
     peers: "locales/*.json",
-    peers_scope: Scope { ... },
+    peers_selector: Selector {
+        scope: Scope { ... },
+        within: Some(
+            "locales",
+        ),
+    },
     literal_peer: None,
     scope: Scope { ... },
     direction: Both,

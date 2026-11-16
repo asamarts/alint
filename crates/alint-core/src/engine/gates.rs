@@ -14,6 +14,13 @@ use super::{
     visit_active_rule_tree_with_registry, visit_rule_tree_with_registry,
 };
 
+#[cfg(test)]
+std::thread_local! {
+    /// How many times this thread's `build_git_tracked_indexes` searched for
+    /// the tracked paths an ignore file hid.
+    pub(super) static HIDDEN_SEARCHES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 impl Engine {
     /// Resolve active Git dependencies from each configured rule tree's
     /// capability metadata. The vector stays aligned with `self.entries`.
@@ -160,10 +167,13 @@ impl Engine {
     /// directories (`tracked_entries_ignore_files_hid`): a force-added file
     /// is tracked whatever `.gitignore` says (#503, ADR-0033 decision 3).
     ///
-    /// Build cost: O(N) per mode (one `HashSet` lookup per entry, after one
-    /// pass over the tracked paths for the directories above them), plus one
-    /// lookup per tracked path and a `stat` for each one the walk left out.
-    /// Amortised across however many rules opt into each mode.
+    /// Build cost: one `HashSet` lookup per walked entry, shared by the two
+    /// views, and for `dir_aware` one per directory, after one pass over the
+    /// tracked paths for the directories above them. Only when the walk left
+    /// out a tracked path, so that fewer walked entries are tracked than git
+    /// tracks paths, does the search for what an ignore file hid run: a lookup
+    /// per tracked path and a `stat` for each one the walk left out. Amortised
+    /// across however many rules opt into each mode.
     pub(super) fn build_git_tracked_indexes(
         &self,
         root: &Path,
@@ -202,12 +212,37 @@ impl Engine {
             });
         };
 
-        let hidden = crate::walker::tracked_entries_ignore_files_hid(root, full, tracked);
+        // Whether git tracks each walked entry, by position. When every
+        // tracked path is a walked entry, the walk left none out, and the
+        // search for what an ignore file hid (which finds only paths the walk
+        // left out) is skipped: in most repositories it would find nothing.
+        let walked_tracked: Vec<bool> = full
+            .entries
+            .iter()
+            .map(|e| tracked.contains(&*e.path))
+            .collect();
+        let hidden = if walked_tracked.iter().filter(|&&t| t).count() == tracked.len() {
+            Vec::new()
+        } else {
+            #[cfg(test)]
+            HIDDEN_SEARCHES.set(HIDDEN_SEARCHES.get() + 1);
+            crate::walker::tracked_entries_ignore_files_hid(root, full, tracked)
+        };
         // The walked entries and the hidden ones, each sorted by path, merged
-        // in that order as the walk sorts its own.
-        let tracked_index = |keep: &dyn Fn(&FileEntry) -> bool| {
-            let mut walked = full.entries.iter().filter(|e| keep(e)).peekable();
-            let mut extra = hidden.iter().filter(|e| keep(e)).peekable();
+        // in that order as the walk sorts its own. `keep` is given an entry
+        // and whether git tracks its path.
+        let tracked_index = |keep: &dyn Fn(&FileEntry, bool) -> bool| {
+            let mut walked = full
+                .entries
+                .iter()
+                .zip(&walked_tracked)
+                .filter(|&(e, &is_tracked)| keep(e, is_tracked))
+                .map(|(e, _)| e)
+                .peekable();
+            let mut extra = hidden
+                .iter()
+                .filter(|e| keep(e, tracked.contains(&*e.path)))
+                .peekable();
             let mut entries = Vec::new();
             loop {
                 let next = match (walked.peek(), extra.peek()) {
@@ -224,7 +259,7 @@ impl Engine {
         };
 
         let file_only = any_file_only
-            .then(|| tracked_index(&|e: &FileEntry| !e.is_dir && tracked.contains(&*e.path)));
+            .then(|| tracked_index(&|e: &FileEntry, is_tracked| !e.is_dir && is_tracked));
 
         let dir_aware = any_dir_aware.then(|| {
             // Each path with a tracked path at or below it, as
@@ -232,11 +267,11 @@ impl Engine {
             // directory instead of a scan of every tracked path.
             let tracked_dirs: std::collections::HashSet<&Path> =
                 tracked.iter().flat_map(|path| path.ancestors()).collect();
-            tracked_index(&|e: &FileEntry| {
+            tracked_index(&|e: &FileEntry, is_tracked| {
                 if e.is_dir {
                     tracked_dirs.contains(&*e.path)
                 } else {
-                    tracked.contains(&*e.path)
+                    is_tracked
                 }
             })
         });
