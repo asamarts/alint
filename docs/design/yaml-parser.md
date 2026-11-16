@@ -166,9 +166,9 @@ differential harness below compares the parser itself with the one v0.22 used.
 ## Differential harness
 
 `crates/alint-core/src/yaml_differential.rs` (#482) compares ayaml with `yaml_serde` 0.10.7, the
-parser v0.22 used, which stays as the oracle: a dev-dependency of `alint-core` only, and no
-runtime dependency of any published crate
-([ADR-0039](../adr/0039-the-yaml-oracle-as-a-dev-dependency-of-alint-core.md)).
+parser v0.22 used, which stays as the oracle. It is a dependency of `alint-core` only behind the
+test-only `yaml-reference` feature, and no runtime dependency of any published crate (ADR-0041,
+superseding ADR-0039); the parser facade below uses it as its libyaml backend.
 
 - **Entry points.** Both parsers decode each input four ways: into a value tree, as every option
   and `extends:` source is; into the `serde_json` tree that the structured-format rules query,
@@ -195,13 +195,29 @@ runtime dependency of any published crate
 - **The allowlist.** `yaml_differential/allowlist.rs` lists each documented difference with the
   classes it covers, how it tells its cases, both behaviors, the reason and an example; a test
   checks that each example is explained by its own entry. A narrow entry reads a parser's error,
-  which names the cause. An input-wide entry looks for a construct anywhere in the input, such
-  as a NEL, a tab, a tag or a wide anchor name, so the construct's presence proves nothing: the
-  harness rewrites the input without it and compares again, and the entry explains the case only
-  if the rewritten input no longer differs, or differs in a way another entry explains. A rewrite
-  keeps keys apart: a wide integer also becomes a number the input does not otherwise hold, and
-  a long key is cut short of every other key. A test adds each input-wide entry's construct, in a
-  comment, a string or a command, to a difference that entry does not explain, and checks that
+  which names the cause. An input-wide entry looks for a construct anywhere in the input, such as a
+  NEL, a tab, a tag or a wide anchor name, so the construct's presence proves nothing: the harness
+  rewrites the input without it and compares again, and the entry explains the case only if the
+  rewritten input no longer differs, or differs in a way another entry explains. A rewrite changes
+  its construct only: a tab or a sigil in a scalar's text stays, a tab that starts a line in a flow
+  collection is another entry's, a line of tabs alone that leads a block scalar, which both parsers
+  reject, stays, and so does a tab ayaml rejects, found by reading the input again with each one it
+  reported as a space: in a malformed document its scanner may open a flow collection where YAML 1.2
+  goes on with a plain scalar, and the tab is then a flow line's. A tab that leads its line, past
+  spaces, also goes with the white space after it, which keeps the indentation ayaml reads the line
+  with. A character YAML allows only in a quoted scalar goes where ayaml keeps it, in what its
+  scanner reads as one, and past its scanner's error, where it reads nothing; the one ayaml rejects
+  stays, and one where ayaml's error is about something else, as a line not indented enough, becomes
+  `x`, so that the line keeps its content. `!<!>` becomes `!<!t>`, which both read as a tag, so that
+  a node keeps its properties, where it starts a node or where ayaml rejects it, as in what YAML 1.2
+  reads as the second line of a plain scalar of a malformed document. A deletion never leaves a
+  byte-order mark at the stream's start, or a `%`, `---` or `...` at a line's start. The oracle's
+  error names only the first character its reader does not allow, so that rewrite also removes the
+  first alone. A rewrite also keeps keys apart: a wide integer also becomes a number the input does
+  not otherwise hold, and a long key is cut short of every other key. An explanation keeps no entry
+  the case does not need: with each of its entries left out in turn, the others do not explain the
+  case. A test adds each input-wide entry's construct, in a comment, a string or a command, to a
+  difference that entry does not explain, at the entry point of the entry's example, and checks that
   it stays unexplained.
 - **A fair rewrite.** A rewrite counts only if it hides nothing the case showed. A parser that
   read the case must read the rewrite, or reject it at the place where the other parser, which
@@ -211,20 +227,52 @@ runtime dependency of any published crate
   alias may come earlier, since a parser reports it where its node starts. An error that moves
   to an earlier line shows something the trigger hid, and the search must then reach a rewrite
   both parsers read alike. A rewrite after which one parser keeps its error and the other gives
-  the same value error, or an error at the same place, ends the search. A test puts three
-  differences, one that both parsers read, one that only ayaml rejects and one that only the
-  oracle rejects, beside the constructs of the input-wide entries, before and after them, and
-  checks that each stays unexplained without its own entry.
-- **Locations.** Location differences are listed by ayaml's error kind and message, with where
-  each parser reports. A location class takes two errors for one, found at two places, so it
-  explains a case only when both errors are about the syntax or neither is: when one parser
-  reads the syntax alone (the oracle reads the input into no value) and its error is about a
-  value, the case is explained as if only the other parser rejected it, and two such errors at
-  one place are not one either. Nor does a location class explain a case that an input-wide
-  entry's rewrite splits, one parser then reading the input while the other keeps its error;
-  the rewrites must explain it. A test checks that every syntax message of the pinned ayaml,
-  taken from its scanner and parser sources, has a location class, so a new message fails until
-  its place is documented. Any other difference fails the run.
+  the same value error, or an error at the same place, ends the search. ayaml reads a stream's
+  syntax before it builds values, so a rewrite that turns one of its value errors into a syntax
+  error hides the value error, wherever each is. It also reads the whole stream's tokens before
+  it parses them, so a scanner error hides each parser error before it: a rewrite of a tab that
+  alone indents a flow line, or of `!<!>`, which ayaml rejects as it scans, may show a parser
+  error on an earlier line, which was the case's. One variant of the flow line's rewrite spaces
+  only the tabs ayaml rejects, since the oracle may reject a later one, in a plain scalar's
+  line, past an error that ayaml's first hides. A test puts three differences, one that both
+  parsers read, one that only ayaml rejects and one that only the oracle rejects, beside the
+  constructs of the input-wide entries that a value tree holds and the errors of the narrow
+  entries, before and after them, and checks at the value and JSON entry points that each stays
+  unexplained without its own entry (a wide integer, which no JSON number holds, at the first
+  only); another puts the two typed-decode entries' differences in a configuration beside each
+  other's construct. The content of a top-level block scalar is the one construct no difference
+  can sit beside, since it takes in the lines around it.
+- **Locations.** Location differences are listed by ayaml's error kind and message, with where each
+  parser reports. A location class takes two errors for one, found at two places, so it explains a
+  case only when both errors are about the syntax or neither is: when one parser reads the syntax
+  alone (the oracle reads the input into no value) and its error is about a value, the case is
+  explained as if only the other parser rejected it, and two such errors at one place are not one
+  either. Nor are two errors one when the parser with the later error reads the input through the
+  earlier error's line and the construct it is in, and the other rejects it: each is then explained
+  on its own, the rest of the input as a case of its own when it reads as it would after that
+  prefix. Where it does not, the prefix through the line alone tells: one that holds ayaml's error
+  as it is, which the oracle reads, explains ayaml's whole result, and one that holds the oracle's
+  error, which ayaml reads, leaves the case to the entries. The oracle's "more than one document",
+  which has no place, is not ayaml's error found elsewhere when the oracle read ayaml's error's line
+  in its first document, and a line that starts with a `:` holds the value of the `?` key before it,
+  which no split separates. The oracle's error about a character its reader does not allow is one
+  with ayaml's about the same character, or about a tag that the character ends or a verbatim tag
+  that holds it, or about the first C0 control, which ayaml's reader rejects anywhere before its
+  scanner rejects a character YAML allows only in a quoted scalar, outside one; an error about
+  another character is another error, and no other class takes that error of the oracle's: its
+  reader checks the whole of a short input before its scanner reads a token, so the error says
+  nothing of the syntax. ayaml's error about a tab that alone indents a flow line is its own
+  wherever the oracle's is, since the oracle reads the tab as white space, and so is its error about
+  `!<!>`: those entries' rewrites explain them, not a location class. Its error about `!<>`, which
+  names nothing and which both reject, has a class of its own. A location class or a narrow entry
+  explains the error it covers, not the lines before it, which must read alike or be explained. Nor
+  does a location class explain a case that an input-wide entry's rewrite splits, one parser then
+  reading the input while the other keeps its error; the rewrites must explain it. Both parsers
+  place a rule's error at the rule, so two errors there are one only when they agree on the problem
+  and on the field, which for the oracle, whose errors name none, is the one its error comes and
+  goes with. A test checks that every syntax message of the pinned ayaml, taken from its scanner and
+  parser sources, has a location class, so a new message fails until its place is documented. Any
+  other difference fails the run.
 - **Runs.** The bounded run, 6,000 generated inputs plus the corpus and one mutation per file, is
   an ordinary test, about 16 seconds in a debug build. CI's test job runs it when a pull request
   or a push changes the crates, the workspace manifests or CI (`ci/scripts/detect-changes.sh`).
@@ -239,37 +287,45 @@ runtime dependency of any published crate
   exact pin (`=0.1.2`); once main's version moves past it, change the pin as well.
 
 The documented differences fall into five groups; the report lists every entry.
-- **YAML 1.2 where libyaml follows YAML 1.1.** NEL, LS and PS are content; tabs separate. These
-  are accepted: empty keys, a stream that starts with `...`, wider anchor names, `#` in a tag or
-  a `%TAG` prefix, any `%YAML 1.x` minor version, reserved directives, top-level block scalar
-  content in column 1, the 1.2 flow forms (among them `[? ]`, after which libyaml drops the `]`),
-  a flow mapping key of more than 1,024 characters, an implicit key whose 1,024-character limit
-  counts characters rather than bytes, and DEL, the C1 controls, U+FFFE and U+FFFF in a quoted
-  scalar. In a flow sequence, a plain scalar that starts with `:` after properties is that
-  scalar, as in `[!!str :a]`, which libyaml reads as a mapping. The non-specific `!` makes a
-  string, and global tags stay on their nodes. A core tag on another kind of node is ignored, an
-  empty `!!null` node is null, a scalar its core tag does not fit is an error, and a typed decode
-  reads a scalar by its core tag.
-- **ayaml is as strict as YAML 1.2.** A comment needs white space before it; continuation lines
-  and block scalars must be indented past their parent, and a flow collection's continuation
-  line under a block collection by spaces; a lone `-` or an unseparated `?` or `:` in a flow
-  collection is rejected, and so are a tag handle with characters other than letters, digits and
-  `-`, and the verbatim tag `!<!>`.
+- **YAML 1.2 where libyaml follows YAML 1.1.** NEL, LS and PS are content; tabs separate. These are
+  accepted: empty keys, a stream that starts with `...`, wider anchor names, `#` in a tag, a
+  verbatim one too, or a `%TAG` prefix, any `%YAML 1.x` minor version, reserved directives,
+  top-level block scalar content in column 1, the 1.2 flow forms (among them `[? ]`, after which
+  libyaml drops the `]`, and an empty implicit key, as `[: x]`, which a rewrite to `~` removes), a
+  flow mapping key of more than 1,024 characters, an implicit key whose 1,024-character limit counts
+  characters rather than bytes, and DEL, the C1 controls, U+FFFE and U+FFFF in a quoted scalar. In a
+  flow sequence, a plain scalar that starts with `:` after properties is that scalar, as in `[!!str
+  :a]`, which libyaml reads as a mapping. The non-specific `!` makes a string, and global tags stay
+  on their nodes. A core tag on another kind of node is ignored, an empty `!!null` node is null, a
+  scalar its core tag does not fit is an error, and a typed decode reads a scalar by its core tag.
+- **ayaml is as strict as YAML 1.2.** A comment needs white space before it; continuation lines and
+  block scalars must be indented past their parent, a block scalar's leading empty lines no further
+  than its content, and a flow collection's continuation line under a block collection by spaces; a
+  lone `-` or an unseparated `?` or `:` in a flow collection is rejected, and so are a tag handle
+  with characters other than letters, digits and `-`, and the verbatim tag `!<!>`.
 - **libyaml and `yaml_serde` defects.** A byte-order mark that starts the stream counts as a
   column, an alias to a redefined anchor resolves to the wrong node, a value has no integer
-  beyond 64 bits, in any base, a count of alias uses refuses aliases that fan out, and
-  `from_value` refuses a rule key that is not a string, which alint's loader rejects before it
-  decodes a rule.
-- **ayaml defects in malformed documents.** A block scalar header under its parent's indentation
-  after an anchor, or after a key with an anchor, is accepted (asamarts/ayaml#132); after a
-  leading byte-order mark, an error has no location (asamarts/ayaml#133) and a quoted scalar's
-  continuation line under a nested parent is not checked against its indentation
-  (asamarts/ayaml#137).
+  beyond 64 bits, in any base, a count of alias uses refuses aliases that fan out, `-0` is no
+  number for an unsigned field, and `from_value` refuses a rule key that is not a string, which
+  alint's loader rejects before it decodes a rule.
+- **ayaml defects.** In malformed documents, a block scalar header under its parent's indentation
+  after an anchor or after a key with an anchor (asamarts/ayaml#132), or after properties alone on
+  their line (asamarts/ayaml#147), is accepted, where the oracle rejects it, or reads it as a second
+  document when it is indented less than the root, past any directives and `---`; after a leading
+  byte-order mark, an error has no location (asamarts/ayaml#133) and a quoted scalar's continuation
+  line under a nested parent is not checked against its indentation (asamarts/ayaml#137). One more
+  is in a valid document (asamarts/ayaml#146): a document marker after a top-level block scalar's
+  empty lines, one of them indented, is taken for content and rejected, as in `|`, a line of two
+  spaces and `...`.
 - **Error locations.** ayaml checks a stream's syntax before it builds values, so a later syntax
-  error wins over an earlier value error; it reports an error about an empty node where what
-  follows starts, and a character YAML does not allow where it stands; the oracle reports where
+  error wins over an earlier value error, and reads its tokens before it parses them, so a later
+  scanner error wins over an earlier parser error; it reports an error about an empty node where
+  what follows starts, and a character YAML does not allow where it stands; the oracle reports where
   its look-ahead stopped, a disallowed character at line 1, column 1, and once the first
-  document ends, "more than one document" with no place.
+  document ends, "more than one document" with no place. Of a rule both refuse, each may name
+  another problem: ayaml calls a null rule a unit value, which the oracle finds without `id`,
+  and names the variant that a one-entry mapping in an enum's place does not, which the oracle
+  refuses as a mapping.
 
 ## Parser facade
 
@@ -447,13 +503,15 @@ maintained libyaml fork is the lower-risk ownership boundary.
     162,034 decode to the same value; 5,869 to different values, 5,445 of them because of global
     tags, which #482's ad hoc generator rarely wrote; 61,937 are rejected at the same place and
     63,456 at different places; 118 by ayaml only and 7,490 by the oracle only.
-  - **Y-C3.** The corpus has no difference, and every difference elsewhere is documented in
-    the allowlist (33 deviations and 7 location classes); approving it is phase 9's decision
-    (ADR-0035). The harness found asamarts/ayaml#132 and asamarts/ayaml#133. Its first review
-    round found asamarts/ayaml#137, a quoted scalar's continuation line under a nested parent
-    that goes unchecked after a leading byte-order mark; asamarts/ayaml#138, a tab and then
-    spaces on a quoted scalar's continuation line, which both parsers accept; and #132 after a
-    key with an anchor, added as a comment there. The second round found no other.
+  - **Y-C3.** The corpus has no difference, and every difference elsewhere is documented in the
+    allowlist: 33 deviations and 7 location classes when the owner approved it (ADR-0040), 39 and 8
+    after the review of #525, whose additions phase 9 brings to the owner (ADR-0035). The harness
+    found asamarts/ayaml#132 and asamarts/ayaml#133. Its first review round found
+    asamarts/ayaml#137, a quoted scalar's continuation line under a nested parent that goes
+    unchecked after a leading byte-order mark; asamarts/ayaml#138, a tab and then spaces on a quoted
+    scalar's continuation line, which both parsers accept; and #132 after a key with an anchor,
+    added as a comment there. The second round found no other; later reviews found
+    asamarts/ayaml#139, #140, #146 and #147.
 - **2026-11-15: the owned types, corrected.** The 2026-11-14 entry on the public API overstated
   how close alint's YAML types came to those of `yaml_serde` 0.10.7: code that compiled against
   0.22 can fail now. The review of #520 added `Value::get_mut`, indexing by `&String`, index

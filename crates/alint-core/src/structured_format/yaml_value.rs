@@ -24,7 +24,7 @@ use serde_json::Value;
 /// `serde_json::Value`'s own visitor, keys are read as strings the same way, and a
 /// duplicate key keeps its last value -- which a test pins on untagged documents.
 pub(super) fn yaml_to_value(text: &str) -> std::result::Result<Value, String> {
-    crate::yaml::from_str_seed(text, YamlJson { src: text }).map_err(|e| e.to_string())
+    crate::yaml_backend::json_tree(text).map_err(|e| e.to_string())
 }
 
 /// The [`yaml_to_value`] seed / visitor: builds a `serde_json::Value`, applying
@@ -38,9 +38,8 @@ pub(crate) struct YamlJson<'t> {
     src: &'t str,
 }
 
-/// The [`yaml_to_value`] seed for `text`, which the differential harness also
-/// runs through the parser v0.22 used.
-#[cfg(test)]
+/// The [`yaml_to_value`] seed for `text`, which every parser of
+/// [`crate::yaml_backend`] runs.
 pub(crate) fn json_seed(text: &str) -> YamlJson<'_> {
     YamlJson { src: text }
 }

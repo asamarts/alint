@@ -27,7 +27,6 @@ mod yaml_value;
 use xml_scan::MAX_XML_ATTRS_PER_ELEMENT;
 pub use xml_scan::MAX_XML_DEPTH;
 pub(crate) use xml_scan::xml_within_parse_limits;
-#[cfg(test)]
 pub(crate) use yaml_value::json_seed;
 
 /// Maximum INPUT size any structured format will parse into a value tree. The read

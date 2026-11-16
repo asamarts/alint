@@ -192,6 +192,16 @@ const TRIGGERS: &[(&str, &str, &[&str])] = &[
         "a: !!binary x\nb: '\u{7f}'\n",
         &["global-tags"],
     ),
+    (
+        "verbatim-non-specific-tag",
+        "a: '\u{7f}'\nb: !<!> x\n",
+        &[UNEXPLAINED_ENTRY],
+    ),
+    (
+        "empty-flow-implicit-key",
+        "a: '\u{7f}'\nb: [: x]\n",
+        &[UNEXPLAINED_ENTRY],
+    ),
     // The entry covers a case by the oracle's message, which an anchor name
     // with `@` shares.
     (
@@ -223,12 +233,17 @@ const TRIGGERS: &[(&str, &str, &[&str])] = &[
     ),
     (
         "anchor-name-characters",
-        "a: '\u{7f}'\nrun: make && test\n",
+        "a: '\u{7f}'\nb: &ci.env x\nc: *ci.env\n",
         &[UNEXPLAINED_ENTRY],
     ),
     (
         "integers-beyond-64-bits",
         "a: '\u{7f}'\nb: 18446744073709551616\n",
+        &[UNEXPLAINED_ENTRY],
+    ),
+    (
+        "anchor-name-before-a-colon-and-a-flow-indicator",
+        "a: '\u{7f}'\n&k:[: x\n",
         &[UNEXPLAINED_ENTRY],
     ),
     (
@@ -260,9 +275,26 @@ const TRIGGERS: &[(&str, &str, &[&str])] = &[
         &[UNEXPLAINED_ENTRY],
     ),
     (
+        "negative-zero-in-an-unsigned-field",
+        "version: 1\nfix_size_limit: -0\nvars:\n  a: '\u{7f}'\nrules: []\n",
+        &[UNEXPLAINED_ENTRY],
+    ),
+    (
+        "flow-line-tab-indentation",
+        "a: '\u{7f}'\nb: [x,\n\t  y]\n",
+        &[UNEXPLAINED_ENTRY],
+    ),
+    (
         "global-tags",
         "a: '\u{7f}'\nb: '!!'\n# !!x\nc: !!binary aGk=\n",
         &[UNEXPLAINED_ENTRY],
+    ),
+    // The entry covers a case by the oracle's error, at the header, which
+    // comes first: ayaml reads on to the tag.
+    (
+        "block-scalar-under-an-anchor",
+        "b:\n  c: &x\n>\nd: !<!> x\n",
+        &["verbatim-non-specific-tag"],
     ),
     (
         "non-specific-tag",
@@ -326,7 +358,7 @@ fn a_rewrite_must_not_make_a_parser_reject() {
     let rewrites = neutralize::line_breaks(case.input);
     let (broken, _) = compare(&rewrites[2], Entry::Value);
     assert!(broken.ayaml.is_err(), "{broken:?}");
-    assert!(fairness(&case, &broken, &[]).is_none());
+    assert!(fairness(&case, &broken, &Hidden::Nothing).is_none());
     let (indented, _) = compare(&rewrites[1], Entry::Value);
     assert_eq!(indented.class, Class::SameValue, "{indented:?}");
     assert_eq!(explanation(&case), Some(vec!["yaml-1.2-line-breaks"]));
@@ -341,14 +373,16 @@ const MASKED: &[(&str, &str)] = &[
     ("d: '\u{7f}'\n", "quoted-only-characters"),
 ];
 
-/// Triggers of the input-wide entries, as lines of a block mapping: among
-/// them the review's repros, a NEL rewrite that makes ayaml reject, a
-/// `!!str` the core-tag rewrite would drop onto another key, alone and after
-/// a `!!null` on an empty node, which the oracle rejects, so that both
-/// parsers would reject the rewrite at one place, and properties inside a
-/// quoted scalar and a comment. A narrow entry's trigger is not one: it
-/// explains a rejection, after which the parser that rejected reads nothing
-/// to compare.
+/// Triggers of the entries, as lines of a block mapping, which a base can
+/// come before or after. The input-wide entries', among them the review's
+/// repros, a NEL rewrite that makes ayaml reject, a `!!str` the core-tag
+/// rewrite would drop onto another key, alone and after a `!!null` on an
+/// empty node, which the oracle rejects, so that both parsers would reject
+/// the rewrite at one place, and properties inside a quoted scalar and a
+/// comment. Then the narrow entries', which one parser rejects: each
+/// explains that parser's error, not a difference in the lines both read
+/// before it, or in the lines after it, which the other parser read. And a
+/// second document, which the oracle refuses without a place.
 fn masking_triggers() -> Vec<String> {
     let mut triggers: Vec<String> = [
         "m: 'x\u{85}y'\n",
@@ -363,37 +397,75 @@ fn masking_triggers() -> Vec<String> {
         "run: make && test\n",
         ": e\n",
         "m: [? ]\n",
+        "m: [: c]\n",
         "m: [!!str :c]\n",
         "m: [&x 1, &x 2, *x]\n",
+        "m: !<!> x\n",
+        "m: [x,\n\t  y]\n",
+        "m: [x\n\t]\n",
+        "m:\n  n: &x\n>\n",
+        "m:\n  -\n    !t\n>\n",
+        // The narrow entries'.
+        "m: [:a]\n",
+        "m: [-]\n",
+        "m: !e:a!z x\n",
+        "m: !t# x\n",
+        "m: 'x'#c\n",
+        "m: 'x\ny'\n",
+        "m:\n|2\n  x\n",
+        "---\nn: 2\n",
     ]
     .map(String::from)
     .to_vec();
     triggers.push(format!("m: {{{}: v}}\n", "k".repeat(1_100)));
+    triggers.push(format!("{}: v\n", "é".repeat(600)));
     triggers
 }
+
+/// Triggers of the location classes, which both parsers reject at different
+/// places, for after a base only: neither parser reads past one, so a base
+/// after it shows nothing. A location class explains the two errors as one,
+/// not a difference in the lines before them.
+const REJECTING_TRIGGERS: &[&str] = &["m: & x\n", "m: &a [*a]\n"];
 
 /// No trigger explains a difference it does not cause: with the base's own
 /// entry left out, each base with each trigger before or after it, or with
 /// a byte-order mark or `...` in front, stays unexplained. This reaches each
 /// tier of the search: rewrites a parser newly rejects, differences both
 /// parsers agree on, errors that move, a value error in place of a syntax
-/// error, and two errors a location class would take for one.
+/// error, two errors a location class would take for one, and a narrow
+/// entry's error with a difference before or after it.
 #[test]
 fn a_trigger_masks_no_other_difference() {
-    for (base, id) in MASKED {
-        let (case, _) = compare(base, Entry::Value);
+    for ((base, id), entry) in MASKED
+        .iter()
+        .flat_map(|masked| [(masked, Entry::Value), (masked, Entry::Json)])
+    {
+        let (case, _) = compare(base, entry);
         assert!(case.class.is_difference(), "{case:?}");
         assert_eq!(explanation(&case), Some(vec![*id]), "{case:?}");
         assert_eq!(explanation_without(&case, &[id]), None, "{case:?}");
+        // A wide integer is no JSON number, which both reject alike.
         let mut inputs: Vec<String> = masking_triggers()
             .iter()
+            .filter(|trigger| {
+                entry == Entry::Value
+                    || !["18446744073709551616", "0x10000000000000000"]
+                        .iter()
+                        .any(|wide| trigger.contains(wide))
+            })
             .flat_map(|trigger| [format!("{trigger}{base}"), format!("{base}{trigger}")])
             .collect();
+        inputs.extend(
+            REJECTING_TRIGGERS
+                .iter()
+                .map(|trigger| format!("{base}{trigger}")),
+        );
         inputs.push(format!("\u{feff}{base}"));
         inputs.push(format!("...\n{base}"));
         let mut located = 0;
         for input in &inputs {
-            let (case, panicked) = compare(input, Entry::Value);
+            let (case, panicked) = compare(input, entry);
             assert!(!panicked && case.class.is_difference(), "{case:?}");
             located += usize::from(case.class == Class::RejectedAtDifferentLocation);
             assert_eq!(explanation_without(&case, &[id]), None, "{id}: {case:?}");
@@ -402,6 +474,514 @@ fn a_trigger_masks_no_other_difference() {
         assert!(
             *id != "verbatim-non-specific-tag" || located >= 8,
             "{located}"
+        );
+    }
+}
+
+/// The typed decodes' input-wide entries, beside each other's construct in a
+/// configuration, before and after it, explain only their own difference:
+/// a core tag that both read alike or that only ayaml refuses, beside `-0`,
+/// and `-0` beside a core tag.
+#[test]
+fn a_typed_decode_trigger_masks_no_other_difference() {
+    for (base, id, triggers) in [
+        (
+            "version: 1\nfix_size_limit: -0\n",
+            "negative-zero-in-an-unsigned-field",
+            &[
+                "nested_configs: !!bool false\n",
+                "respect_gitignore: !!str true\n",
+            ][..],
+        ),
+        (
+            "version: !!str 1\n",
+            "typed-decode-core-tags",
+            &["fix_size_limit: -0\n", "vars:\n  a: -0\n"],
+        ),
+    ] {
+        let (case, _) = compare(base, Entry::Config);
+        assert_eq!(explanation(&case), Some(vec![id]), "{case:?}");
+        for trigger in triggers {
+            for input in [format!("{base}{trigger}"), format!("{trigger}{base}")] {
+                let (case, panicked) = compare(&input, Entry::Config);
+                assert!(!panicked && case.class.is_difference(), "{case:?}");
+                assert_eq!(explanation_without(&case, &[id]), None, "{id}: {case:?}");
+            }
+        }
+    }
+}
+
+/// Whether `input` holds text that no rewrite may change: a tab in a
+/// scalar's content, or an anchor, alias or tag sigil in a scalar's text or
+/// a comment.
+fn holds_text_no_rewrite_touches(input: &str) -> bool {
+    let places = neutralize::places(input);
+    input.char_indices().any(|(at, ch)| match ch {
+        '\t' => neutralize::tab_in_content(input, &places, at),
+        '&' | '*' | '!' => places[at].literal || places[at].plain,
+        _ => false,
+    })
+}
+
+/// A defect planted in ayaml's value of an input that holds such text.
+fn defect_in_text(input: &str, _: Entry, side: Side) -> Side {
+    if holds_text_no_rewrite_touches(input) {
+        side.map(|value| format!("{value} (planted)"))
+    } else {
+        side
+    }
+}
+
+/// A rewrite changes its construct only, so a defect planted in ayaml's
+/// reading of an input with a tab or a sigil in a scalar's text, which
+/// every rewrite keeps, stays unexplained, with no exception: over the
+/// bounded run's generated inputs that both parsers read alike, and the
+/// review's repros beside the constructs of the input-wide entries that
+/// cover a different value. A rewrite that removed the text would remove
+/// the defect, and the search would take it for the entry's.
+#[test]
+fn a_defect_in_text_no_rewrite_touches_is_never_explained() {
+    let mut rng = Rng::new(1);
+    let mut inputs: Vec<String> = (0..6_000)
+        .map(|index| generated(&mut rng, index, true))
+        .collect();
+    for text in [
+        "s: \"a\tb\"\n",
+        "run: make && test\n",
+        "a: x !!int y\n",
+        "h: hello !\n",
+        "q: 'x &y' # *z\n",
+        "p: |\n  a\tb\n",
+    ] {
+        for beside in [
+            "",
+            "k: &a1 v\nl: *a1\n",
+            "t: !!str s\n",
+            "n: ! x\n",
+            "c: !<tag:x,2000:y> x\n",
+            "e: 'x\u{2028}y'\n",
+        ] {
+            inputs.push(format!("{text}{beside}"));
+            inputs.push(format!("{beside}{text}"));
+        }
+    }
+    let mut planted = 0;
+    for input in inputs
+        .iter()
+        .filter(|input| holds_text_no_rewrite_touches(input))
+    {
+        for entry in [Entry::Value, Entry::Json] {
+            let (clean, case) = planted::clean_and_planted(input, entry, defect_in_text);
+            if clean.class != Class::SameValue || !case.class.is_difference() {
+                continue;
+            }
+            planted += 1;
+            assert_eq!(
+                planted::planted_explanation(&case, defect_in_text),
+                None,
+                "{case:?}"
+            );
+        }
+    }
+    assert!(planted >= 2_000, "{planted}");
+}
+
+/// A line that starts with `:` holds the value of the `?` key before it: a
+/// split there would read `: b` alone, an empty key that only ayaml reads,
+/// and take ayaml's one error for two differences.
+#[test]
+fn a_split_keeps_a_colon_line_with_its_key() {
+    let (case, _) = compare("? 'x'#c\n: b\n", Entry::Value);
+    assert_eq!(case.class, Class::OnlyAyamlRejects, "{case:?}");
+    assert_eq!(
+        explanation(&case),
+        Some(vec!["comment-needs-white-space"]),
+        "{case:?}"
+    );
+}
+
+/// ayaml's error at `!<!>` in what YAML 1.2 and the oracle read as a plain
+/// scalar's second line: a defect planted where ayaml 0.1.2 reads the text
+/// as both do.
+fn verbatim_tag_in_text(input: &str, _: Entry, side: Side) -> Side {
+    if input.contains("\n!<!> a") {
+        Err(Rejection {
+            message: "a verbatim tag needs a name".to_string(),
+            location: Some((2, 1)),
+            kind: Some(ErrorKind::Scanner),
+        })
+    } else {
+        side
+    }
+}
+
+/// The rewrite of `!<!>` follows ayaml into what [`neutralize::places`]
+/// reads as a scalar's text only where the oracle rejects the input, so
+/// that ayaml reading a tag in a plain scalar that the oracle reads is not
+/// taken for the oracle reading the tag as `!`.
+#[test]
+fn a_tag_ayaml_reads_in_a_plain_scalar_is_not_a_nameless_verbatim_tag() {
+    let input = "x\n!<!> a\n";
+    let (clean, case) = planted::clean_and_planted(input, Entry::Value, verbatim_tag_in_text);
+    assert_eq!(clean.class, Class::SameValue, "{clean:?}");
+    assert_eq!(case.class, Class::OnlyAyamlRejects, "{case:?}");
+    assert_eq!(
+        planted::planted_explanation(&case, verbatim_tag_in_text),
+        None,
+        "{case:?}"
+    );
+}
+
+/// The oracle's error about a character it does not allow, which its reader
+/// gives before its scanner reads a token, is no location class's but the
+/// one about that character: ayaml's unterminated quoted scalar is another
+/// error, which the case shows once the character is gone.
+#[test]
+fn a_location_class_does_not_take_the_oracles_reader_error() {
+    let (case, _) = compare("a: 'x\n  \u{7f}", Entry::Value);
+    assert_eq!(case.class, Class::RejectedAtDifferentLocation, "{case:?}");
+    assert_eq!(
+        explanation_without(&case, &["quoted-only-characters"]),
+        None
+    );
+    assert_eq!(
+        explanation(&case),
+        Some(vec!["quoted-only-characters", "where-a-construct-opened"])
+    );
+}
+
+/// Two errors at two places are two when the prefix through the earlier
+/// one's line holds it alone, and each is then explained on its own: a
+/// location class does not take ayaml's verbatim-tag error for the oracle's
+/// flow error, or ayaml's comment error for the oracle's error at the end.
+/// The oracle's "more than one document", which has no place, is never
+/// ayaml's error found elsewhere when the oracle read ayaml's error's line.
+/// Where the rest of the input is no case of its own, past a construct cut
+/// in two, the prefix through the line alone still shows two errors: one
+/// that holds ayaml's error as it is explains ayaml's result, and the
+/// oracle's error past it is in text ayaml never read; one that holds the
+/// oracle's, which ayaml reads, leaves no location class.
+#[test]
+fn two_errors_at_two_places_are_explained_each_on_its_own() {
+    for (input, id, both) in [
+        (
+            "c: !<!> x\nm: [:a]\n",
+            "verbatim-non-specific-tag",
+            &["verbatim-non-specific-tag", "yaml-1.2-flow-syntax"][..],
+        ),
+        (
+            "m: [:a]\nc: !<!> x\n",
+            "verbatim-non-specific-tag",
+            &["yaml-1.2-flow-syntax", "verbatim-non-specific-tag"],
+        ),
+        (
+            "a: 'x'#c\nb",
+            "comment-needs-white-space",
+            &["comment-needs-white-space"],
+        ),
+        (
+            "c: !<!> x\n---\nb: 2\n",
+            "verbatim-non-specific-tag",
+            &["verbatim-non-specific-tag"],
+        ),
+        (
+            "'a'#c\n  x: 1\ny\n",
+            "comment-needs-white-space",
+            &["comment-needs-white-space"],
+        ),
+        (
+            "- 'a'#c\n  x\ny\n",
+            "comment-needs-white-space",
+            &["comment-needs-white-space"],
+        ),
+        (
+            "|\n  \nx\n",
+            "block-scalar-indentation",
+            &["block-scalar-indentation"],
+        ),
+        (
+            "- '\u{7f}'\n  x\ny\n",
+            "quoted-only-characters",
+            &["quoted-only-characters"],
+        ),
+    ] {
+        let (case, _) = compare(input, Entry::Value);
+        assert_eq!(case.class, Class::RejectedAtDifferentLocation, "{case:?}");
+        assert_eq!(explanation(&case).as_deref(), Some(both), "{input:?}");
+        assert_eq!(explanation_without(&case, &[id]), None, "{input:?}");
+    }
+}
+
+/// The first error of a case is ayaml's where the two are at one place, as
+/// ayaml's at a character the oracle's reader refuses and its error at
+/// 1:1; the oracle's where it comes first or ayaml read the input; and none
+/// where ayaml's has no place, which could be anywhere.
+#[test]
+fn the_first_error_is_ayaml_s_where_the_two_are_at_one_place() {
+    let (case, _) = compare("a: \u{7f}\n", Entry::Value);
+    assert_eq!(case.class, Class::RejectedAtDifferentLocation, "{case:?}");
+    assert_eq!(first_error(&case), Some((3, true)));
+    let made_up = |ayaml: Side, oracle: Side| Case {
+        input: "a\nb\n",
+        entry: Entry::Value,
+        rule: 0,
+        class: classify(&ayaml, &oracle),
+        ayaml,
+        oracle,
+    };
+    let at = |line| Err(rejection("e", Some((line, 1))));
+    assert_eq!(first_error(&made_up(at(2), at(1))), Some((0, false)));
+    assert_eq!(first_error(&made_up(at(1), at(2))), Some((0, true)));
+    assert_eq!(
+        first_error(&made_up(Ok("x".to_string()), at(2))),
+        Some((2, false))
+    );
+    assert_eq!(
+        first_error(&made_up(Err(rejection("e", None)), at(1))),
+        None
+    );
+}
+
+/// The lines after a prefix read as they would alone where the prefix
+/// holds no node, only blank lines and comments, or where no line after it
+/// at the top is indented less than the first. Blank lines, comments and
+/// lines inside a construct do not count.
+#[test]
+fn the_rest_stands_alone_unless_a_line_at_the_top_is_indented_less() {
+    for (input, start, alone) in [
+        ("# c\n\n  - a\nb\n", 5, true),
+        ("- [x]\n  - a\nb\n", 6, false),
+        ("- [x]\n  - a\n\n  - b\n", 6, true),
+        ("- [x]\n  - a\n# c\n  - b\n", 6, true),
+        ("- [x]\n  - [a,\n b]\n", 6, true),
+    ] {
+        let places = neutralize::places(input);
+        assert!(at_the_top(input, &places, start), "{input:?}");
+        assert_eq!(stands_alone(input, &places, start), alone, "{input:?}");
+    }
+}
+
+/// Where the oracle's error is in a flow collection that ayaml read, and
+/// ayaml's comes on a later line, the input with the collection empty, which
+/// keeps its line breaks, stands for the rest: the oracle reads the lines
+/// around it as ayaml read them in the case (seeds 4 and 10). A difference
+/// after the collection still needs its own entry.
+#[test]
+fn an_empty_flow_collection_stands_for_one_only_the_oracle_rejects() {
+    let search = || Search {
+        tried: Vec::new(),
+        ids: Vec::new(),
+        comparisons: 0,
+        complete: false,
+    };
+    for (input, prefix, rest) in [
+        (
+            "? {a:}\n%YAML 1.2\n\n.inf--- \n",
+            "? {a:}\n",
+            "? {}\n%YAML 1.2\n\n.inf--- \n",
+        ),
+        ("[:a]\n  b\nc\n", "[:a]\n", "[]\n  b\nc\n"),
+        (
+            "- m: [a,\n  :b]\n  c: !<!> x\n- d\n",
+            "- m: [a,\n  :b]\n",
+            "- m: []\n\n  c: !<!> x\n- d\n",
+        ),
+    ] {
+        let (case, _) = compare(input, Entry::Value);
+        let split = search().split(&case);
+        let Split::Two(two, emptied) = &split else {
+            panic!("{input:?}: {split:?}");
+        };
+        assert_eq!((two.input, emptied.as_str()), (prefix, rest), "{input:?}");
+    }
+    for input in ["? {a:}\n%YAML 1.2\n\n.inf--- \n", "[:a]\n  b\nc\n"] {
+        let (case, _) = compare(input, Entry::Value);
+        assert_eq!(
+            explanation(&case),
+            Some(vec!["yaml-1.2-flow-syntax", "after-the-root-node"]),
+            "{case:?}"
+        );
+    }
+    // Where ayaml read no collection, as past a NEL, its content to the
+    // oracle, the oracle rejects the prefix with it empty too (seed 1).
+    let input = "\u{85}  {18446744073709551616]\n    -2\u{2028} #c\n- 😀-a\n-   TRUE";
+    let (case, _) = compare(input, Entry::Value);
+    let split = search().split(&case);
+    assert!(matches!(split, Split::Apart), "{split:?}");
+    assert_eq!(
+        explanation(&case),
+        Some(vec!["yaml-1.2-line-breaks", "indentation"]),
+        "{case:?}"
+    );
+    let (case, _) = compare("- m: [:a]\n  c: !<!> x\n- d\n", Entry::Value);
+    assert_eq!(
+        explanation(&case),
+        Some(vec!["yaml-1.2-flow-syntax", "verbatim-non-specific-tag"]),
+        "{case:?}"
+    );
+    assert_eq!(
+        explanation_without(&case, &["verbatim-non-specific-tag"]),
+        None
+    );
+    // Where ayaml's error changes with the collection empty, as an alias of
+    // an anchor in it, the collection does not stand for it.
+    let (case, _) = compare("- m: [&x a,\n  :b]\n  c: *x\n  d: *y\n- e\n", Entry::Value);
+    let mut changed = search();
+    let split = changed.split(&case);
+    assert!(matches!(split, Split::Apart), "{split:?}");
+    assert_eq!(changed.comparisons, 3, "{case:?}");
+    // The split takes two comparisons after the prefix's, within the budget.
+    let (case, _) = compare("[:a]\n  b\nc\n", Entry::Value);
+    for (left, two) in [(3, true), (2, false), (1, false)] {
+        let mut budget = search();
+        budget.comparisons = MAX_COMPARISONS - left;
+        let split = budget.split(&case);
+        assert_eq!(matches!(split, Split::Two(..)), two, "{left}: {split:?}");
+        assert!(budget.comparisons <= MAX_COMPARISONS, "{left}");
+    }
+}
+
+/// ayaml reports a second document only once the first one's values hold
+/// no error, so a rewrite that removes a value error and shows a second
+/// document hides nothing, where a syntax error a rewrite makes still
+/// hides one (seeds 9 and 12).
+#[test]
+fn a_second_document_hides_no_value_error() {
+    let (case, _) = compare("a: !!int x\n---\nb\n", Entry::Value);
+    assert!(
+        case.ayaml.as_ref().is_err_and(ayaml_value_error),
+        "{case:?}"
+    );
+    let (next, _) = compare("a: x\n---\nb\n", Entry::Value);
+    assert!(
+        next.ayaml
+            .as_ref()
+            .is_err_and(|rejection| rejection.message.contains(AYAML_SECOND_DOCUMENT)),
+        "{next:?}"
+    );
+    assert_eq!(
+        fairness(&case, &next, &Hidden::Nothing),
+        Some(Fairness::Kept)
+    );
+    let (broken, _) = compare("a: [x\n---\nb\n", Entry::Value);
+    assert!(
+        broken.ayaml.as_ref().is_err_and(ayaml_syntax_error),
+        "{broken:?}"
+    );
+    assert_eq!(fairness(&case, &broken, &Hidden::Nothing), None);
+}
+
+/// A search counts each comparison out of its budget (see
+/// [`MAX_COMPARISONS`]), and a split compares each prefix once and never
+/// the whole input, which the search already compared. An error on the last
+/// line leaves no prefix; a construct that ends with the error's line
+/// leaves one; one that goes on past it, and whose prefix shows nothing,
+/// leaves the prefix through the line too; one that goes on to the end of
+/// the input leaves only that. A flow collection the oracle's error is in
+/// adds the prefix through it and the input with it empty.
+#[test]
+fn a_search_counts_each_comparison() {
+    let search = || Search {
+        tried: Vec::new(),
+        ids: Vec::new(),
+        comparisons: 0,
+        complete: false,
+    };
+    for (input, comparisons, shown) in [
+        ("a: !<!> x\n", 0, "One"),
+        ("a: |\n x\n\t y\nb\n", 1, "One"),
+        ("a: [x, 'y'#c,\n b]\nc: 1\n", 2, "One"),
+        ("-\n|2\n  x\n", 1, "Through"),
+        ("[:a]\n  b\nc\n", 3, "Two"),
+    ] {
+        let (case, _) = compare(input, Entry::Value);
+        let mut search = search();
+        let split = search.split(&case);
+        assert!(
+            format!("{split:?}").starts_with(shown),
+            "{input:?}: {split:?}"
+        );
+        assert_eq!(search.comparisons, comparisons, "{input:?}");
+    }
+    // The line before the error, which both read alike.
+    let (case, _) = compare("a: 1\nb: !<!> x\n", Entry::Value);
+    let mut before = search();
+    assert!(before.explain_before(&case));
+    assert_eq!(before.comparisons, 1);
+    // The rest after a prefix, which both read alike.
+    let (case, _) = compare("a: 'x'#c\nb: 1\n", Entry::Value);
+    let mut rest = search();
+    assert!(rest.explain_rest(&case, &after_prefix(case.input, "a: 'x'#c\n".len())));
+    assert_eq!(rest.comparisons, 1);
+    // Each rewrite, of which the first explains the case.
+    let (case, _) = compare("a: !<!> x\n", Entry::Value);
+    let deviation = allowlist::DEVIATIONS
+        .iter()
+        .find(|deviation| deviation.id == "verbatim-non-specific-tag")
+        .unwrap();
+    let rewrites = ["a: !<!t> x\n".to_string(), "a: x\n".to_string()];
+    let mut rewritten = search();
+    assert!(rewritten.explain_rewrites(&case, deviation, &rewrites, &mut false));
+    assert_eq!(rewritten.comparisons, 2);
+    // A prefix and the rest, each explained, the prefix by a rewrite.
+    let (case, _) = compare("c: !<!> x\nm: [:a]\n", Entry::Value);
+    let Split::Two(prefix, rest) = search().split(&case) else {
+        panic!("{case:?}");
+    };
+    let mut prefix_alone = search();
+    assert!(prefix_alone.explain(&prefix));
+    let mut rest_alone = search();
+    assert!(rest_alone.explain_rest(&case, &rest));
+    let mut both = search();
+    assert!(both.explain_both(&case, &prefix, &rest));
+    assert!(prefix_alone.comparisons > 0);
+    assert_eq!(
+        both.comparisons,
+        prefix_alone.comparisons + rest_alone.comparisons
+    );
+}
+
+/// Once a rewrite revealed an error that the case's error hid, only a case
+/// both parsers read alike ends the search: a narrow entry explains the
+/// case's error, not the text after the revealed one.
+#[test]
+fn a_narrow_entry_does_not_end_a_search_past_a_revealed_error() {
+    let (case, _) = compare("[-]\n", Entry::Value);
+    assert_eq!(case.class, Class::OnlyAyamlRejects);
+    let explained = |complete| {
+        let mut search = Search {
+            tried: Vec::new(),
+            ids: Vec::new(),
+            comparisons: 0,
+            complete,
+        };
+        search.explain(&case).then_some(search.ids)
+    };
+    assert_eq!(
+        explained(false),
+        Some(vec!["flow-indicator-needs-white-space"])
+    );
+    assert_eq!(explained(true), None);
+}
+
+/// A rewrite that turns a value error of ayaml's into a syntax error hides
+/// the value error, wherever each is: ayaml reads the whole stream's syntax
+/// before it builds a value. Without the core-tag entry, the `!!int` on a
+/// key that ayaml refuses does not stand for the line separator, which the
+/// line-break rewrite turns into a break that ends the quoted scalar.
+#[test]
+fn a_rewrite_must_not_trade_a_value_error_for_a_syntax_error() {
+    for input in [
+        "!!int x: 1\ny: 'd\u{2029}e'\n",
+        "!!int x: 1\ny: \"d\u{2029}\\\n  e\"\n",
+    ] {
+        let (case, _) = compare(input, Entry::Json);
+        assert!(case.class.is_difference(), "{case:?}");
+        assert!(explanation(&case).is_some(), "{case:?}");
+        assert_eq!(
+            explanation_without(&case, &["core-tag-on-another-kind"]),
+            None,
+            "{case:?}"
         );
     }
 }
@@ -440,8 +1020,9 @@ fn a_core_tag_rewrite_keeps_the_kinds_other_tags_give() {
 /// an alias error is kept wherever it moved; an error that moved to an
 /// earlier line for another reason was revealed, unless the parser that
 /// rejected the case kept its message and both now reject at one place,
-/// where the two agree. The inputs after are cases of the long runs that
-/// each rule explains.
+/// where the two agree, or the trigger is documented to hide the error now
+/// shown. The inputs after are cases of the long runs that each rule
+/// explains.
 #[test]
 fn a_moved_error_is_kept_revealed_or_agreed_on() {
     let error = |message: &str, line, kind| -> Side {
@@ -463,15 +1044,52 @@ fn a_moved_error_is_kept_revealed_or_agreed_on() {
     let both = case(error("A", 2, scanner), error("X", 3, None));
     // The oracle's error moved up a line, and ayaml kept its own.
     let agreed = case(error("A", 2, scanner), error("Y", 2, None));
-    assert_eq!(fairness(&both, &agreed, &[]), Some(Fairness::BothAgree));
+    assert_eq!(
+        fairness(&both, &agreed, &Hidden::Nothing),
+        Some(Fairness::BothAgree)
+    );
     // As above, but ayaml's error changed: nothing agrees.
     let changed = case(error("B", 2, scanner), error("Y", 2, None));
-    assert_eq!(fairness(&both, &changed, &[]), Some(Fairness::Revealed));
+    assert_eq!(
+        fairness(&both, &changed, &Hidden::Nothing),
+        Some(Fairness::Revealed)
+    );
     let read = case(Ok("x".to_string()), error("X", 3, None));
     let alias = case(Ok("x".to_string()), error("unknown anchor", 1, None));
-    assert_eq!(fairness(&read, &alias, &[]), Some(Fairness::Kept));
+    assert_eq!(
+        fairness(&read, &alias, &Hidden::Nothing),
+        Some(Fairness::Kept)
+    );
     let other = case(Ok("x".to_string()), error("Y", 1, None));
-    assert_eq!(fairness(&read, &other, &[]), Some(Fairness::Revealed));
+    assert_eq!(
+        fairness(&read, &other, &Hidden::Nothing),
+        Some(Fairness::Revealed)
+    );
+    // ayaml's scanner error gave way to a parser error two lines up, which
+    // only a trigger documented to hide parser errors may have hidden.
+    let scanner_error = case(error("A", 3, scanner), error("X", 3, None));
+    let parsed = case(error("B", 1, Some(ErrorKind::Parser)), error("X", 3, None));
+    assert_eq!(
+        fairness(&scanner_error, &parsed, &Hidden::Nothing),
+        Some(Fairness::Revealed)
+    );
+    assert_eq!(
+        fairness(&scanner_error, &parsed, &Hidden::ParserErrors),
+        Some(Fairness::Kept)
+    );
+    // A parser error the case gave, or a scanner error now, was not hidden
+    // by a scanner error.
+    let parser_error = case(error("A", 3, Some(ErrorKind::Parser)), error("X", 3, None));
+    let moved_scanner_error = case(error("B", 1, scanner), error("X", 3, None));
+    for (before, after) in [
+        (&parser_error, &parsed),
+        (&scanner_error, &moved_scanner_error),
+    ] {
+        assert_eq!(
+            fairness(before, after, &Hidden::ParserErrors),
+            Some(Fairness::Revealed)
+        );
+    }
     for (input, entry, ids) in [
         (
             "-9223372036854775809 # \n\t",
@@ -565,100 +1183,78 @@ fn a_core_tag_in_a_typed_decode_is_its_own_entry() {
     }
 }
 
-/// Differences that long runs left unexplained before the search and the
-/// rewrites were fixed for them, with the entries that explain them now.
-const FINDINGS: &[(&str, &[&str])] = &[
-    // Both reject the rewrite as a duplicate key, worded differently for a
-    // null key.
-    (
-        "null: -3\r\n!!map null: !!str .nan\r\nb: 's ''q'''\r\n",
-        &["core-tag-on-another-kind"],
-    ),
-    // `!` on an empty flow entry becomes `''`, not nothing.
-    ("[1,!  ,]\n", &["non-specific-tag"]),
-    // A wide integer as 1 would meet the key 1, an error the rewrite made.
-    (
-        "? 1\n18446744073709551616: x\n",
-        &["integers-beyond-64-bits"],
-    ),
-    (
-        "true: \n&a1 1: 's ''q'''\n118446744073709551616: []\n",
-        &["integers-beyond-64-bits"],
-    ),
-    // Each `...` before any content goes, not only the first.
-    ("...\n... #c", &["document-end-marker-alone"]),
-    ("...\n...\n  - ---", &["document-end-marker-alone"]),
-    // A plain scalar that starts with `:` after a tag, in a flow sequence.
-    (
-        "- [!!str a/**, !!str :a/**]\n",
-        &["flow-colon-scalar-after-properties"],
-    ),
-    // A `...` below a tag is no node of the tag's.
-    (
-        "\n\n\n \n\n  \n!!map \n\n...",
-        &["core-tag-on-another-kind"],
-    ),
-    // A flow value that starts with `:` before a quote.
-    ("- {key: :'q,}\n", &["yaml-1.2-flow-syntax"]),
-    // A `%TAG` prefix with `#` after a `,`.
-    (
-        "%TAG !e! tag:x,#2000:\n---\n[-2.5,\n  's', 's']\n",
-        &["number-sign-in-a-tag"],
-    ),
-    // A `%TAG` prefix that starts with `#` (seed 19).
-    (
-        "%TAG !e! #tag:x,2000:\n---\n[[1],x]\n",
-        &["number-sign-in-a-tag"],
-    ),
-    // The node on the line after `- ` continues there, so `'` opens no
-    // quote and the `:` line is an empty key.
-    ("b:\n- \n  ~,\n  'q]]\n:\n", &["empty-implicit-key"]),
-    // A block scalar header after a key with an anchor.
-    ("true:\n  &a2 null:\n>\n", &["block-scalar-under-an-anchor"]),
-    // ayaml's duplicate key, reported where the mapping starts, and the
-    // oracle's empty key, which hides it: without the empty key, both give
-    // the duplicate key, at the place where each reports it.
-    ("key: {key: x}\n: \n? key\n", &["empty-implicit-key"]),
-    // A tab before a comment, or a tab line after a CR, after `...`.
-    ("a: 1\n...\n\t# c\n", &["tab-as-white-space"]),
-    ("- 2001-12-14\r\n...\r\t\n", &["tab-as-white-space"]),
-    // A leading byte-order mark hides ayaml's error on the quoted scalar's
-    // continuation line (asamarts/ayaml#137); without it, both reject, at
-    // different places, and without the tab, ayaml's error is the
-    // continuation line's.
-    (
-        "\u{feff}-\n  -\t\"d\\\n  \\u00e9\\t\"\n  - \"d\\_\\u00e9\\t\"\n  -\n    - |\n      \
-         line 0\u{85}\n    - \n- []\n# end",
-        &[
-            "yaml-1.2-line-breaks",
-            "byte-order-mark-starting-a-line",
-            "tab-as-white-space",
-            "quoted-scalar-continuation-indentation",
-        ],
-    ),
-];
-
+/// A line separator, which Rust takes for white space, is three bytes wide:
+/// the rewrites and predicates that look back over white space before a
+/// property or a flow collection step over all of it. YAML 1.2 reads it as
+/// text, so `\u{2028}&a` here is no property.
 #[test]
-fn long_run_findings_are_explained() {
-    for (input, expected) in FINDINGS {
-        let (case, panicked) = compare(input, Entry::Value);
-        assert!(!panicked && case.class.is_difference(), "{case:?}");
-        assert_eq!(explanation(&case).as_deref(), Some(*expected), "{input:?}");
-    }
-    // A long flow key cut to 1,000 bytes would meet a key of 1,000, an
-    // error the rewrite made.
-    let input = format!(
-        "{{a: 1,{}: ~,{}: }}\n",
-        "k".repeat(1_000),
-        "k".repeat(1_042)
-    );
-    let (case, _) = compare(&input, Entry::Value);
-    assert_eq!(case.class, Class::OnlyOracleRejects, "{case:?}");
+fn white_space_wider_than_a_byte_is_stepped_over() {
     assert_eq!(
-        explanation(&case),
-        Some(vec!["long-flow-mapping-key"]),
-        "{case:?}"
+        neutralize::flow_colon_scalars("[\u{2028}&a :b]\n"),
+        Vec::<String>::new()
     );
+    let input = "a: [&b\u{2028}:[c]]\n";
+    let at = input.find(":[").unwrap() + 1;
+    assert!(!predicates::flow_value_after_a_property_at(input, at));
+    assert!(!predicates::flow_value_after_a_property_at(
+        "a\u{2028}[b]",
+        4
+    ));
+}
+
+/// ayaml 0.1.2 gives its alias errors the kind Composition, and none the
+/// kind Alias: a rewrite may move one to where its node starts, as the
+/// oracle's.
+#[test]
+fn ayaml_s_alias_errors_are_known_by_their_messages() {
+    for input in ["a: [&a [*a]]\n", "a: *b\n"] {
+        let (case, _) = compare(input, Entry::Value);
+        let (Err(ayaml), Err(oracle)) = (&case.ayaml, &case.oracle) else {
+            panic!("{case:?}");
+        };
+        assert_eq!(ayaml.kind, Some(ayaml::ErrorKind::Composition), "{case:?}");
+        assert!(alias_error(ayaml) && alias_error(oracle), "{case:?}");
+    }
+    let (case, _) = compare("a: {b: 1, b: 2}\n", Entry::Value);
+    let Err(ayaml) = &case.ayaml else {
+        panic!("{case:?}");
+    };
+    assert!(!alias_error(ayaml), "{case:?}");
+}
+
+/// ayaml's errors about a block scalar's indentation are its own, by YAML
+/// 1.2, where the oracle reads the scalar otherwise and rejects what
+/// follows: the entry explains such a case both reject only when ayaml's
+/// error comes first, and never a document marker that ayaml 0.1.2 takes for
+/// a top-level scalar's content, a defect that no entry explains.
+#[test]
+fn a_block_scalar_error_is_ayaml_s_own_only_before_the_oracle_s() {
+    let deviation = allowlist::DEVIATIONS
+        .iter()
+        .find(|deviation| deviation.id == "block-scalar-indentation")
+        .unwrap();
+    let (case, _) = compare("|\n  \nx\n", Entry::Value);
+    assert_eq!(case.class, Class::RejectedAtDifferentLocation, "{case:?}");
+    assert!(deviation.covers(&case));
+    // The oracle's error, at the character it does not allow, is first.
+    let (case, _) = compare("a: '\u{7f}'\nb: |\n   \n  x\n", Entry::Value);
+    assert_eq!(case.class, Class::RejectedAtDifferentLocation, "{case:?}");
+    assert!(!deviation.covers(&case));
+    // ayaml takes a document marker after the empty lines for content, a
+    // defect of its own.
+    for input in ["|\n  \n...\n", "|\n  \n---\nb\n", "--- |\n  \n--- x\n"] {
+        let (case, _) = compare(input, Entry::Value);
+        assert!(case.class.is_difference(), "{case:?}");
+        assert!(!deviation.covers(&case), "{case:?}");
+        assert_eq!(
+            explanation(&case),
+            Some(vec!["document-marker-after-indented-empty-lines"]),
+            "{case:?}"
+        );
+    }
+    // A scalar that is not top-level ends at the marker, as it should.
+    let (case, _) = compare("a: |\n   \n...\n", Entry::Value);
+    assert_eq!(case.class, Class::SameValue, "{case:?}");
 }
 
 /// Each syntax error message of ayaml 0.1.2, the version the workspace pins,
@@ -759,13 +1355,31 @@ const AYAML_SYNTAX_MESSAGES: &[&str] = &[
     "unterminated verbatim tag",
 ];
 
+/// Every syntax message has a place: a location class's, or, for an error
+/// that is ayaml's own wherever the oracle's is, the place of the construct
+/// of the input-wide entry that covers it, whose rewrite shows the oracle's
+/// error.
 #[test]
 fn every_ayaml_syntax_message_has_a_location_class() {
     for message in AYAML_SYNTAX_MESSAGES {
         let located = [ErrorKind::Parser, ErrorKind::Scanner, ErrorKind::Tag]
             .into_iter()
             .any(|kind| allowlist::locate(kind, message).is_some());
-        assert!(located, "no location class covers {message:?}");
+        let case = Case {
+            input: "",
+            entry: Entry::Value,
+            rule: 0,
+            class: Class::RejectedAtDifferentLocation,
+            ayaml: Err(rejection(message, Some((1, 1)))),
+            oracle: Err(rejection("e", Some((2, 1)))),
+        };
+        let owned = allowlist::DEVIATIONS.iter().any(|deviation| {
+            matches!(deviation.trigger, Trigger::Input { .. }) && deviation.covers(&case)
+        });
+        assert!(
+            located != owned,
+            "{message:?}: located {located}, owned {owned}"
+        );
     }
 }
 
@@ -896,17 +1510,20 @@ fn the_oracle_message_drops_every_location() {
         rejection.message
     );
     assert_eq!(
-        without_marks(
+        crate::yaml_backend::without_marks(
             "found unexpected ':' at line 1 column 3, while scanning a plain scalar at line 1 \
              column 2"
         ),
         "found unexpected ':', while scanning a plain scalar"
     );
     assert_eq!(
-        without_marks("control characters are not allowed at position 4"),
+        crate::yaml_backend::without_marks("control characters are not allowed at position 4"),
         "control characters are not allowed"
     );
-    assert_eq!(without_marks("a at b at line x"), "a at b at line x");
+    assert_eq!(
+        crate::yaml_backend::without_marks("a at b at line x"),
+        "a at b at line x"
+    );
     let (case, _) = compare("[:a]\n", Entry::Value);
     assert_eq!(
         describe(&case.oracle),
@@ -1001,6 +1618,115 @@ fn a_rule_both_reject_hides_no_other() {
     );
 }
 
+/// Two errors for one rule, which both parsers place at the rule's position
+/// only, are one only when they agree on the field and on the problem.
+#[test]
+fn rule_errors_are_one_in_one_field_with_one_problem() {
+    // ayaml refuses the message, and the oracle the key `1`, before it
+    // reads a field.
+    let input = "rules:\n  - {id: a, kind: file_exists, level: error, paths: x, 1: y, \
+                 message: [1]}\n";
+    let (case, _) = compare_at(input, Entry::Rule, 0);
+    assert_eq!(case.class, Class::RejectedAtDifferentLocation, "{case:?}");
+    assert_eq!(
+        explanation(&case),
+        Some(vec!["rule-keys-that-are-not-strings"])
+    );
+    assert_eq!(
+        explanation_without(&case, &["rule-keys-that-are-not-strings"]),
+        None
+    );
+    // One problem in one field, which the two word differently, wherever
+    // the field is in the mapping and whatever fields the rule needs.
+    for input in [
+        "rules:\n  - {id: a, kind: file_exists, level: error, when: 1}\n",
+        "rules:\n  - {id: a, kind: file_exists, level: bad}\n",
+        "rules:\n  - {id: [a], kind: 1, level: error}\n",
+        "rules:\n  - {kind: file_exists, level: error}\n",
+        "rules:\n  - {when: 1, level: error, id: a, kind: k, policy_url: 1}\n",
+        "rules:\n  - {id: a, kind: k, level: error, paths: {include: 1}}\n",
+        "rules:\n  - 1\n",
+    ] {
+        let (case, _) = compare_at(input, Entry::Rule, 0);
+        assert_eq!(case.class, Class::RejectedAtSameLocation, "{case:?}");
+    }
+    // The same problem in another field: ayaml's error, moved to the
+    // message, or to `id`, a field the rule needs, which the oracle read.
+    let to_message: planted::Plant = |_, _, side| {
+        side.map_err(|rejection| Rejection {
+            message: rejection.message.replacen("when: ", "message: ", 1),
+            ..rejection
+        })
+    };
+    let to_id: planted::Plant = |_, _, side| {
+        side.map_err(|rejection| Rejection {
+            message: rejection.message.replacen("kind: ", "id: ", 1),
+            ..rejection
+        })
+    };
+    for (input, moved, field) in [
+        (
+            "rules:\n  - {id: a, kind: k, level: error, message: x, when: 1}\n",
+            to_message,
+            "message: ",
+        ),
+        (
+            "rules:\n  - {id: a, kind: [1], level: error}\n",
+            to_id,
+            "id: ",
+        ),
+    ] {
+        let (clean, planted) = planted::clean_and_planted(input, Entry::Rule, moved);
+        assert_eq!(clean.class, Class::RejectedAtSameLocation, "{clean:?}");
+        assert!(
+            planted
+                .ayaml
+                .as_ref()
+                .unwrap_err()
+                .message
+                .starts_with(field)
+        );
+        assert_eq!(
+            planted.class,
+            Class::RejectedAtDifferentLocation,
+            "{planted:?}"
+        );
+    }
+}
+
+/// A rule's entry explains the two errors it names, not the oracle's alone:
+/// with ayaml's error about another field, as a regression would give, the
+/// rule's case is left unexplained.
+#[test]
+fn a_rule_entry_needs_both_errors_it_names() {
+    let other: planted::Plant = |_, _, side| {
+        side.map_err(|rejection| Rejection {
+            message: "kind: invalid type: integer `1`, expected a string".to_string(),
+            ..rejection
+        })
+    };
+    for (input, id) in [
+        ("version: 1\nrules:\n  -\n", "rule-that-is-null"),
+        (
+            "version: 1\nrules:\n  - id: a\n    kind: k\n    level:\n      paths: x\n",
+            "enum-as-a-one-entry-mapping",
+        ),
+    ] {
+        let (clean, planted) = planted::clean_and_planted(input, Entry::Rule, other);
+        assert_eq!(explanation(&clean), Some(vec![id]), "{clean:?}");
+        assert_eq!(
+            planted.class,
+            Class::RejectedAtDifferentLocation,
+            "{planted:?}"
+        );
+        assert_eq!(
+            planted::planted_explanation(&planted, other),
+            None,
+            "{planted:?}"
+        );
+    }
+}
+
 #[test]
 fn a_size_that_is_not_a_number_fails_the_run() {
     assert_eq!(number_setting("N", None, 7), 7);
@@ -1083,6 +1809,23 @@ fn the_generator_writes_every_shape() {
             input.starts_with("- &l0 [x]")
         }),
         ("a configuration", |input| input.contains("rules:\n  -")),
+        // The shapes of entries that long runs once never saw.
+        ("another YAML minor version", |input| {
+            input.contains("%YAML 1.3")
+        }),
+        ("the verbatim tag `!<!>`", |input| input.contains("!<!> ")),
+        ("a flow line that a tab indents", |input| {
+            input.contains(",\n\t  ")
+        }),
+        ("a block scalar header under an anchor", |input| {
+            !predicates::block_scalar_headers_under_an_anchor(input).is_empty()
+        }),
+        ("a rule key that is not a string", |input| {
+            input.contains("rules:\n  -")
+                && ["    1: y", "    true: y", "    ~: y", "    [a]: y"]
+                    .iter()
+                    .any(|line| input.contains(line))
+        }),
     ];
     for (shape, holds) in shapes {
         assert!(
@@ -1170,7 +1913,7 @@ fn corpus_files_have_their_own_seeds_and_line_breaks() {
 #[test]
 fn values_from_both_parsers_meet_in_one_form() {
     let text = "a: [1, -2.5, .nan, true, ~, !t x]\n18446744073709551615: b\n";
-    let ayaml = crate::yaml::from_str::<crate::yaml::Value>(text).unwrap();
+    let ayaml = crate::yaml::ayaml_from_str::<crate::yaml::Value>(text).unwrap();
     let oracle: yaml_serde::Value = yaml_serde::from_str(text).unwrap();
     assert_eq!(from_ayaml(ayaml.parser()), from_oracle(&oracle));
     assert_eq!(
@@ -1188,7 +1931,7 @@ fn values_from_both_parsers_meet_in_one_form() {
 #[test]
 fn config_form_orders_hashed_collections() {
     let text = "version: 1\nvars:\n  b: 2\n  a: 1\n  c: 3\n";
-    let first = config_form(crate::yaml::from_str(text).unwrap());
+    let first = config_form(crate::yaml::ayaml_from_str(text).unwrap());
     let second = config_form(yaml_serde::from_str(text).unwrap());
     assert_eq!(first, second);
     assert!(

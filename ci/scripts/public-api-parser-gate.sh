@@ -150,6 +150,18 @@ PLATFORM_ALLOWLIST=(
   "crates/alint-core/src/pathsafe.rs|cfg(any(test, kani))|mod model"
   "crates/alint-core/src/pathsafe.rs|cfg(kani)|mod kani_proofs"
   "crates/alint-core/src/pathsafe.rs|cfg_attr(kani)|pub(super) enum Step"
+  # The YAML parser facade (ADR-0041): ayaml, when alint-core's test-only
+  # `yaml-reference` feature is off; the differential harness's stand-in, in a
+  # build with that feature outside tests, for the defects its tests plant; and
+  # lint expectations on the harness's private items, which such a build
+  # compiles but uses only in tests. The first is a statement that names ayaml's
+  # decode through alint's own types, the stand-in a private module whose one
+  # function returns its argument, and a lint level hides no code.
+  "crates/alint-core/src/yaml_backend.rs|cfg(not(feature = \"yaml-reference\"))|in fn parser"
+  "crates/alint-core/src/yaml_differential.rs|cfg(not(test))|mod planted"
+  "crates/alint-core/src/yaml_differential/allowlist.rs|cfg_attr(not(test))|Narrow"
+  "crates/alint-core/src/yaml_differential/allowlist.rs|cfg_attr(not(test))|pub(crate) struct Deviation"
+  "crates/alint-core/src/yaml_differential/allowlist.rs|cfg_attr(not(test))|pub(crate) struct Location"
 )
 
 # PARSERS, and every crate documented under $1 whose name contains `yaml` or

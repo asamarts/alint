@@ -104,17 +104,17 @@ fn flow_depth_limit_matches_the_parsers_depth_limit() {
     let at = MAX_YAML_FLOW_DEPTH;
     let ok = bomb(at);
     assert!(flow_depth_within_limit(&ok));
-    let parsed = crate::yaml::from_str::<serde_json::Value>(&ok).unwrap();
+    let parsed = crate::yaml::ayaml_from_str::<serde_json::Value>(&ok).unwrap();
     assert_eq!(crate::Format::Yaml.parse(&ok).unwrap(), parsed);
     let over = bomb(at + 1);
-    assert!(crate::yaml::from_str::<serde_json::Value>(&over).is_err());
-    assert!(crate::yaml::from_str::<ayaml::Value>(&over).is_err());
+    assert!(crate::yaml::ayaml_from_str::<serde_json::Value>(&over).is_err());
+    assert!(crate::yaml::ayaml_from_str::<ayaml::Value>(&over).is_err());
     assert!(!flow_depth_within_limit(&over));
     // Curly flow maps count the same way.
     let maps = |n: usize| format!("{}1{}", "{a: ".repeat(n), "}".repeat(n));
-    assert!(crate::yaml::from_str::<serde_json::Value>(&maps(at)).is_ok());
+    assert!(crate::yaml::ayaml_from_str::<serde_json::Value>(&maps(at)).is_ok());
     assert!(flow_depth_within_limit(&maps(at)));
-    assert!(crate::yaml::from_str::<serde_json::Value>(&maps(at + 1)).is_err());
+    assert!(crate::yaml::ayaml_from_str::<serde_json::Value>(&maps(at + 1)).is_err());
     assert!(!flow_depth_within_limit(&maps(at + 1)));
 }
 
@@ -147,7 +147,7 @@ fn alias_hidden_behind_plain_scalar_quote_is_still_detected() {
     ];
     for case in cases {
         // Sanity: each case is genuinely parseable YAML (so the bomb is real).
-        let parsed: Result<ayaml::Value, _> = crate::yaml::from_str(case);
+        let parsed: Result<ayaml::Value, _> = crate::yaml::ayaml_from_str(case);
         assert!(parsed.is_ok(), "case must be valid YAML: {case:?}");
         assert!(
             contains_alias(case),
@@ -215,7 +215,7 @@ fn flow_bomb_hidden_behind_plain_scalar_quote_is_still_rejected() {
 /// -- i.e. the fixture's bracket run is genuine structure, not text hidden
 /// inside a scalar or comment.
 fn parser_sees_deep_nesting(doc: &str) -> bool {
-    crate::yaml::from_str::<ayaml::Value>(doc)
+    crate::yaml::ayaml_from_str::<ayaml::Value>(doc)
         .err()
         .is_some_and(|e| e.to_string().contains("recursion limit"))
 }
@@ -227,7 +227,7 @@ fn self_referencing_alias_is_not_mistaken_for_a_flow_bomb() {
     // "recursion limit" at any bracket depth, though the brackets sat in a
     // double-quoted scalar the scanner rightly skips. ayaml names the cycle
     // instead, so the depth oracle cannot blame the brackets for it.
-    let cycle = crate::yaml::from_str::<ayaml::Value>("&a [*a]\n")
+    let cycle = crate::yaml::ayaml_from_str::<ayaml::Value>("&a [*a]\n")
         .unwrap_err()
         .to_string();
     assert!(
@@ -239,7 +239,7 @@ fn self_referencing_alias_is_not_mistaken_for_a_flow_bomb() {
     // line, whatever the bracket depth after it.
     let doc = |b: &str| format!("&a \n*a : \"\n{b}\nc: \"\"\n");
     let error = |b: &str| {
-        crate::yaml::from_str::<ayaml::Value>(&doc(b))
+        crate::yaml::ayaml_from_str::<ayaml::Value>(&doc(b))
             .unwrap_err()
             .to_string()
     };
@@ -254,7 +254,7 @@ fn self_referencing_alias_is_not_mistaken_for_a_flow_bomb() {
 /// `true` when the REAL parser sees a genuine alias token (an undefined
 /// `*undefined_zz` reference is reported as an unknown anchor).
 fn parser_sees_alias(doc: &str) -> bool {
-    crate::yaml::from_str::<ayaml::Value>(doc)
+    crate::yaml::ayaml_from_str::<ayaml::Value>(doc)
         .err()
         .is_some_and(|e| {
             let e = e.into_parser();
@@ -430,7 +430,7 @@ fn scalar_and_comment_contents_never_false_reject() {
     ];
     for doc in &ok {
         assert!(
-            crate::yaml::from_str::<ayaml::Value>(doc).is_ok(),
+            crate::yaml::ayaml_from_str::<ayaml::Value>(doc).is_ok(),
             "fixture must be valid YAML: {doc:?}"
         );
         assert!(flow_depth_within_limit(doc), "false reject: {doc:?}");
@@ -450,7 +450,7 @@ fn the_documented_false_refusals_still_refuse() {
         format!("\u{feff}... {deep}\n"),
     ] {
         assert!(
-            crate::yaml::from_str::<ayaml::Value>(&doc).is_ok(),
+            crate::yaml::ayaml_from_str::<ayaml::Value>(&doc).is_ok(),
             "{doc:?}"
         );
         assert!(!flow_depth_within_limit(&doc), "{doc:?}");
@@ -503,7 +503,7 @@ fn leading_bom_does_not_desync_the_line_one_column() {
     for boms in ["\u{feff}", "\u{feff}\u{feff}"] {
         let flow = format!("{boms}--- 'x: {b}\n'\n");
         assert!(
-            crate::yaml::from_str::<ayaml::Value>(&flow).is_err(),
+            crate::yaml::ayaml_from_str::<ayaml::Value>(&flow).is_err(),
             "{boms:?}: malformed BOM document is rejected"
         );
         assert!(
@@ -512,7 +512,7 @@ fn leading_bom_does_not_desync_the_line_one_column() {
         );
         let alias = format!("{boms}--- 'x: *undefined_zz\n'\n");
         assert!(
-            crate::yaml::from_str::<ayaml::Value>(&alias).is_err(),
+            crate::yaml::ayaml_from_str::<ayaml::Value>(&alias).is_err(),
             "{boms:?}: malformed BOM document is rejected"
         );
         assert!(contains_alias(&alias), "{boms:?}: hidden alias");
@@ -525,7 +525,7 @@ fn leading_bom_does_not_desync_the_line_one_column() {
     // ayaml checks the whole stream's syntax before it replays an alias,
     // so the quote that `---` leaves open on line 2 stops it first.
     assert_eq!(
-        crate::yaml::from_str::<ayaml::Value>(&doc)
+        crate::yaml::ayaml_from_str::<ayaml::Value>(&doc)
             .unwrap_err()
             .to_string(),
         "unterminated single-quoted scalar at line 2 column 1"
@@ -625,7 +625,7 @@ fn stream_flow_depth(doc: &str) -> usize {
 fn colon_anchor_names_end_with_their_document() {
     for marker in ["---", "..."] {
         let doc = format!("&a: 1\n{marker}\nx: &a 1\nk:\n  *a: |\n  b: [[1]]\n");
-        let error = crate::yaml::from_str::<ayaml::Value>(&doc)
+        let error = crate::yaml::ayaml_from_str::<ayaml::Value>(&doc)
             .unwrap_err()
             .to_string();
         assert!(
@@ -653,7 +653,7 @@ fn an_implicit_key_of_1024_characters_is_still_a_key() {
     assert!(parser_sees_alias(&alias(1024)));
     assert!(contains_alias(&alias(1024)));
     for doc in [flow(1025), alias(1025)] {
-        let error = crate::yaml::from_str::<ayaml::Value>(&doc)
+        let error = crate::yaml::ayaml_from_str::<ayaml::Value>(&doc)
             .unwrap_err()
             .to_string();
         assert!(
@@ -712,7 +712,7 @@ fn the_ayaml_reading_of_a_byte_order_mark_nests_what_ayaml_nests() {
         ("\u{feff}\u{feff}[[1]]\n", 0),
         ("\u{feff}#\n\u{feff}...\n[[1]]\n", 0),
     ] {
-        let value = crate::yaml::from_str::<ayaml::Value>(doc).unwrap();
+        let value = crate::yaml::ayaml_from_str::<ayaml::Value>(doc).unwrap();
         assert_eq!(nesting(&value), depth, "ayaml: {doc:?}");
         let mut seen = 0;
         Lexer::new(doc, Bom::Ayaml).run(|tok| {
@@ -909,7 +909,7 @@ fn a_document_over_the_input_cap_is_not_an_alias_bomb() {
     let mut bytes = vec![b'x'; crate::structured_format::MAX_STRUCTURED_BYTES + 1];
     bytes[..head.len()].copy_from_slice(head);
     let doc = String::from_utf8(bytes).unwrap();
-    let error = crate::yaml::from_str::<ayaml::Value>(&doc)
+    let error = crate::yaml::ayaml_from_str::<ayaml::Value>(&doc)
         .unwrap_err()
         .into_parser();
     assert_eq!(
@@ -982,7 +982,7 @@ fn realistic_anchor_heavy_yaml_passes_with_a_wide_margin() {
         )
     }));
     assert!(contains_alias(&doc));
-    assert!(crate::yaml::from_str::<ayaml::Value>(&doc).is_ok());
+    assert!(crate::yaml::ayaml_from_str::<ayaml::Value>(&doc).is_ok());
     assert!(expansion_within_limit_with(
         &doc,
         MAX_YAML_EXPANSION_BYTES / 10

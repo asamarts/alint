@@ -49,8 +49,9 @@ pub mod trace;
 mod walker;
 pub mod when;
 pub mod yaml;
+mod yaml_backend;
 pub mod yaml_depth;
-#[cfg(test)]
+#[cfg(any(test, feature = "yaml-reference"))]
 mod yaml_differential;
 
 pub use analysis_time::{

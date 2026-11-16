@@ -212,10 +212,10 @@ it must respect:
 
 - **What it compares.** It runs `yaml_serde` and ayaml through the entry points alint uses:
   `Value` parsing, the JSON tree the structured-format rules query, and Serde typed decoding into
-  `Config` and of each rule into `RuleSpec`. Since #510 `yaml_serde` is the oracle only, a
-  dev-dependency of `alint-core` only, and no runtime dependency of any published crate
-  (ADR-0035, ADR-0039). alint reads no ayaml events in v0.23, so the event stream joins the
-  harness with the saphyr exit in v0.24.
+  `Config` and of each rule into `RuleSpec`. Since #510 `yaml_serde` is the oracle only:
+  `alint-core` depends on it behind the test-only `yaml-reference` feature, and no published
+  crate depends on it at run time (ADR-0035, ADR-0041). alint reads no ayaml events in v0.23, so
+  the event stream joins the harness with the saphyr exit in v0.24.
 - **Inputs.** Generated token soup and documents, alint's committed YAML, and mutations of both.
 - **Results.** Each input is classified into six classes: #482's five, with "only one rejects"
   split by which parser rejects. Documented deviations are an explicit allowlist, and any other
@@ -555,3 +555,88 @@ decided then.
   - `Mapping`'s documentation says its string-key methods find untagged keys only, and tests
     pin that and the auto traits of every owned type.
   - Next: the other review fixes and the facade; then phase 6.
+- 2026-11-15: the review of #525.
+  - **A correction to the 2026-11-15 entry on two review rounds of the differential harness.** Its
+    long runs left no unexplained difference partly because a location class took two errors for
+    one: ayaml's error and the oracle's at another place, among them the oracle's "more than one
+    document", which has no place, and its error about a character its reader refuses, which it
+    gives before its scanner reads a token. And the test that puts differences beside the input-wide
+    entries' constructs left three out: the implicit-key limit counted in characters, the typed
+    decode's core tags and the content of a top-level block scalar.
+  - A location class now explains two errors only when no prefix of the input shows them to be
+    two. It never takes the oracle's "more than one document" when the oracle read the line of
+    ayaml's error, and only the class about a character takes the oracle's reader error. A
+    rewrite that turns an ayaml value error into a syntax error hides the value error. A rewrite
+    changes its construct only, which a defect planted in the text around it checks with no
+    tolerance. Two rule errors are one only when they agree on the field and on the problem. An
+    explanation keeps no entry the case does not need, and ayaml's alias errors are known by
+    their messages, since ayaml 0.1.2 gives no error of kind `Alias` or `Tag`.
+  - Where ayaml's scanner reads a malformed document otherwise than YAML 1.2, the rewrites follow
+    it: the tabs it rejects, the characters it keeps in what it reads as a quoted scalar, the
+    indentation it reads a line with and the `!<!>` it rejects. `!<!>` becomes `!<!t>`, so that a
+    node keeps its properties.
+  - The masking test now covers the key limit at the value and JSON entry points and the typed
+    decode's core tags beside `-0`. A top-level block scalar's content takes in the lines around
+    it, so no difference can sit beside it. The five entries that no long run used now explain
+    differences, and the allowlist holds 39 deviations, 5 of them new, and 8 location classes,
+    one of them new: `!<>`, which names nothing and which both parsers reject.
+  - Long runs with seeds 1, 2, 3, 7 and 11, 1.60 million inputs, leave no unexplained
+    difference. They make no implicit key of more than 1,024 bytes and at most 1,024 characters,
+    so `implicit-key-length-in-characters` is checked by its example and the masking test alone.
+  - Two more ayaml defects, filed as asamarts/ayaml#146 and #147. In a valid document, a
+    document marker after a top-level block scalar's empty lines, one of them indented, is read
+    as content, as in `|`, a line of two spaces and `...`
+    (`document-marker-after-indented-empty-lines`). And a block scalar header after properties
+    alone on their line, as a tag alone under `-`, is accepted under its parent's indentation,
+    by both of ayaml's readers, where #132 is the compatibility reader's after an anchor.
+  - **Mutation testing.** cargo-mutants over the review's changes left 59 of 646 mutants that no
+    test caught. For 49 of them a test now holds an input the mutant reads otherwise: how fair a
+    rewrite is that reveals a parser error of ayaml's, where a split cuts and what it counts
+    against the comparison budget, a tie for the first error, which lines stand alone after a
+    prefix, a narrow entry past a revealed error, a rule entry with one of its two errors, the
+    places of a document marker and of a quoted line that starts with `%`, the tabs that are
+    content, the characters ayaml may not have read, and the predicates' lines and tags. The
+    code behind 8 that no input tells apart is gone, among it the fields a rule needs in the
+    rule-error check: serde reports a field's own error before it finds one missing, so the
+    field alone shows it. Of the other two, one is a shortcut that only saves a search, and one
+    is the stub that stands for the planted defects outside the tests, which no test build
+    compiles. The long runs read the same after the changes.
+  - Next: the parser facade; then phase 6.
+- 2026-11-16: long runs with seeds 4 to 12.
+  - Seeds 4, 6, 8, 9, 10 and 12 left 18 unexplained cases from 10 inputs, none a new ayaml defect.
+    Four were harness bugs: a rewrite that turned ayaml's value error into its "more than one
+    document" was taken to hide the value error, though ayaml reports a second document only after
+    the first one's value holds no error; a byte-order mark past a line's start counted as white
+    space; and the tab rewrite kept a tab before a closing bracket or a comment on a flow line,
+    which ayaml exempts from a flow line's indentation, and a tab ayaml rejects only because a tab
+    before it ended a block scalar. The search now also splits a case whose first error, the
+    oracle's, is in a flow collection ayaml read: the prefix through the collection's line, and the
+    input with the collection empty. `tab-as-white-space` now describes the flow lines, and
+    `block-scalar-under-an-anchor` is an input-wide entry, so a difference beside it needs its own.
+  - Long runs with seeds 1 to 12, 3.83 million inputs, leave no unexplained difference.
+    cargo-mutants leaves no mutant of the changes uncaught; two make the tab rewrite's loop endless
+    and time out.
+- 2026-11-16: the parser facade (ADR-0041, #530).
+  - `alint_core::yaml` decodes text through `yaml_backend`, ayaml by default. alint-core's test-only
+    `yaml-reference` feature adds `ALINT_YAML_PARSER=libyaml` and `compare`: in compare mode a
+    decode returns ayaml's result, and a difference from libyaml that neither saphyr's reading nor
+    the harness's allowlist explains panics. CI's `YAML compare` job runs the workspace's tests that
+    way, `ci/scripts/yaml-reference-gate.sh` fails if a build without the feature depends on
+    `yaml_serde`, and a dogfood rule keeps `yaml_serde::` calls in the facade and the harness.
+  - The workspace's 4,465 tests pass in compare mode, with 40 differences explained: 35 by the
+    allowlist, 4 by saphyr's vote, and one typed decode put down to core tags. The long runs'
+    reports count no difference that only the vote explains: the allowlist explains every one. Tests
+    that measure ayaml itself, the depth guard's and the harness's, decode with ayaml under any
+    backend; three of #529's failed under `libyaml` before.
+  - **For the owner, in phase 9.** The allowlist approved in ADR-0040 had 33 deviations and 7
+    location classes. The reviews since added 6 deviations and 1 class:
+    `anchor-name-before-a-colon-and-a-flow-indicator` (asamarts/ayaml#139) and
+    `document-marker-after-indented-empty-lines` (asamarts/ayaml#146), ayaml defects;
+    `empty-flow-implicit-key`, a YAML 1.2 reading; `negative-zero-in-an-unsigned-field`, the core
+    schema's `-0`; `rule-that-is-null` and `enum-as-a-one-entry-mapping`, rules both parsers refuse
+    with other messages; and the class `verbatim-tag-that-names-nothing`, `!<>`, which both reject.
+  - **ayaml.** 0.1.3 was published on 2026-11-15 without fixes for asamarts/ayaml#132, #133 and
+    #137, so v0.23.0 waits on a later release. #526's description said that the release "fixes
+    asamarts/ayaml#132", which GitHub read as a closing keyword, so merging it closed that issue; it
+    is reopened. The two defects the review found are asamarts/ayaml#146 and #147.
+  - Next: phase 6; phase 9 brings the allowlist, with the entries above, to the owner.
