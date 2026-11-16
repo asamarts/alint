@@ -542,12 +542,29 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     `!!int x: 1`, which 0.22 read as the key `x` where alint drops tags; and, in a
     configuration, a core tag that does not fit its field, as in `version: !!str 1`, `!!float 1`
     where an integer is expected or `!!str true` where a boolean is, which 0.22 read by their
-    text.
+    text. Some tags 0.22 dropped are now refused: a global tag (`!<tag:...>`, a `%TAG` handle,
+    or `!!` with a name outside the core schema, such as `!!binary`) in a rule, a template, a
+    fact, an `extends:` entry or a policy test, and a `!!` tag outside the core schema where a
+    configuration takes a number or a boolean, as in `version: !!timestamp 1`. The error names
+    the field and the tag (`` `version` has the YAML tag `!!timestamp` ``). `vars:` and
+    `ignore:` still read their strings through any tag.
   - **Errors.** Several parse errors are worded differently, in a `resource_parse` analysis
     failure and in a configuration error. A stream of more than one document reports "more than
     one document in stream at line 2 column 1" where 0.22 said "deserializing from YAML
-    containing more than one document is not supported", and an option of the wrong type names
-    its field ("`pattern`: invalid type"). An error can also be reported at another place:
+    containing more than one document is not supported", and an unclosed quoted scalar reports
+    "quoted scalar continuation must be indented more than its parent" at the first line after
+    it, where 0.22 said "found unexpected end of stream ... while scanning a quoted scalar".
+    Errors in what a file holds say more than 0.22's did. An option of the wrong type names its
+    field as well as what it found, as "pattern: invalid type: integer `1`, expected a string";
+    a value that is not one of an enum's, as a rule's `level`, a policy test's step or an option
+    such as `direction`, lists them, as "level: expected one of `error`, `warning`, `info`,
+    `off`, found a mapping", where 0.22 said "invalid type: map, expected a Value::Tagged enum";
+    and the error an indentation mistake gives, "unexpected content after document", as for a
+    key one space off its siblings, `-id: a` with no space after the `-` or an indented
+    top-level key, ends with "(check this line's indentation against the lines above)". A
+    scalar where a mapping goes is reported as "invalid type: non-mapping YAML value" in a
+    configuration with no `{{`, and a string there as "invalid type: string" in one with `{{`,
+    where 0.22 quoted the scalar. An error can also be reported at another place:
     ayaml checks a stream's syntax before it builds values, so a syntax error later in a file
     is reported before an earlier duplicate key or type error, and an error about an empty
     value, as `version:` with nothing after it, is reported where what follows starts (the next

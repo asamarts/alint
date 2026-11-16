@@ -114,9 +114,7 @@ impl Deviation {
     pub(crate) fn example_entry(&self) -> Entry {
         match self.id {
             "typed-decode-core-tags" | "negative-zero-in-an-unsigned-field" => Entry::Config,
-            "rule-keys-that-are-not-strings"
-            | "rule-that-is-null"
-            | "enum-as-a-one-entry-mapping" => Entry::Rule,
+            "rule-keys-that-are-not-strings" | "rule-that-is-null" => Entry::Rule,
             _ => Entry::Value,
         }
     }
@@ -790,28 +788,6 @@ pub(crate) const DEVIATIONS: &[Deviation] = &[
                  lacks, \"missing field `id`\"",
         reason: "both refuse the rule, and so the configuration; only the message differs",
         example: "version: 1\nrules:\n  -\n",
-    },
-    Deviation {
-        id: "enum-as-a-one-entry-mapping",
-        classes: &[Class::RejectedAtDifferentLocation],
-        trigger: Trigger::Narrow {
-            covers: |case| {
-                case.entry == Entry::Rule
-                    && ayaml_rejects(case, &["unknown variant"])
-                    && oracle_rejects(case, &["invalid type: map, expected a Value::Tagged enum"])
-            },
-            because: "ayaml's message names a variant it found as the key of a mapping where \
-                      the enum goes, and the oracle's says it refused that mapping, in the one \
-                      field both refuse",
-        },
-        ayaml: "reads a mapping of one entry where an enum goes, as a level with the rule's \
-                next lines indented under it, as serde's externally tagged form of a variant, \
-                its key the variant's name: `level:` with `paths: x` under it is the unknown \
-                variant `paths`",
-        oracle: "refuses any mapping where an enum goes, as \"invalid type: map, expected a \
-                 Value::Tagged enum\"",
-        reason: "both refuse the rule, and so the configuration; only the message differs",
-        example: "version: 1\nrules:\n  - id: a\n    kind: k\n    level:\n      paths: x\n",
     },
     Deviation {
         id: "global-tags",
