@@ -17,7 +17,9 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
 
-use alint_core::{AnalysisFailure, FixReport, FixStatus, Level, Report, RuleResult, Violation};
+use alint_core::{
+    AnalysisFailure, FixReport, FixStatus, Level, Report, RuleResult, SkipKind, Violation,
+};
 
 use crate::sanitize::{sanitize_terminal, sanitize_terminal_multiline};
 use crate::style::{self, GlyphSet, HumanOptions, write_hyperlink};
@@ -612,13 +614,16 @@ pub fn write_fix_human(
                         summary.clone(),
                     )
                 }
-                FixStatus::Skipped { reason, .. } => (
+                // A fix that ran but left its violation standing may have
+                // written a file, so it is never called skipped.
+                FixStatus::Skipped { reason, kind } => (
                     opts.glyphs.bullet,
                     format!("{dim}"),
                     format!("{dim:#}"),
                     format!(
-                        "{path_prefix}{} (skipped: {reason})",
-                        item.violation.message
+                        "{path_prefix}{} ({}: {reason})",
+                        item.violation.message,
+                        skip_label(*kind)
                     ),
                 ),
                 // Available but not applied (below the tier threshold, a
@@ -681,13 +686,19 @@ pub fn write_fix_human(
     }
 
     let applied = report.applied();
-    let skipped = report.skipped();
+    let unresolved = report.unresolved();
+    let skipped = report.skipped() - unresolved;
     let unfixable = report.unfixable();
     let suggested = report.suggested();
     let analysis_failures = report.total_analysis_failures();
     let ok = style::SUCCESS;
-    // Append `suggested` only when non-zero, so a run without suggestions is
-    // byte-identical to pre-tier output (the fix-*.stdout snapshots).
+    // Append `unresolved` and `suggested` only when non-zero, so a run without
+    // them is byte-identical to earlier output (the fix-*.stdout snapshots).
+    let unresolved_part = if unresolved > 0 {
+        format!(", {unresolved} unresolved")
+    } else {
+        String::new()
+    };
     let suggested_part = if suggested > 0 {
         format!(", {suggested} suggested")
     } else {
@@ -701,9 +712,18 @@ pub fn write_fix_human(
     };
     writeln!(
         w,
-        "\n{ok}{applied} applied{ok:#}, {skipped} skipped, {unfixable} unfixable{suggested_part}{failure_part}."
+        "\n{ok}{applied} applied{ok:#}, {skipped} skipped, {unfixable} unfixable{unresolved_part}{suggested_part}{failure_part}."
     )?;
     Ok(())
+}
+
+/// The label of a skipped fix item: `unresolved` for a fix that ran (and may
+/// have written a file) without resolving its violation, `skipped` otherwise.
+pub(crate) fn skip_label(kind: SkipKind) -> &'static str {
+    match kind {
+        SkipKind::Unresolved => "unresolved",
+        SkipKind::Declined | SkipKind::Errored | SkipKind::Baselined => "skipped",
+    }
 }
 
 // ---------------------------------------------------------------
@@ -1156,5 +1176,43 @@ mod tests {
         write_fix_human(&report, &mut buf, HumanOptions::default()).unwrap();
         let out = String::from_utf8(buf).unwrap();
         assert!(out.contains("suggested"), "suggested should render: {out}");
+    }
+
+    /// A fix that ran without resolving its violation may have written a file
+    /// (a `file_create` outside the root under `allow_out_of_root`), so it is
+    /// labelled and counted `unresolved`, never `skipped`.
+    #[test]
+    fn fix_human_never_calls_a_fix_that_ran_skipped() {
+        let item = |status| alint_core::FixItem {
+            violation: Violation::new("missing"),
+            status,
+        };
+        let report = FixReport {
+            non_convergent: false,
+            results: vec![alint_core::FixRuleResult {
+                rule_id: "own".into(),
+                level: Level::Warning,
+                items: vec![
+                    item(FixStatus::unresolved("fix ran (created ../x.txt)")),
+                    item(FixStatus::declined("x.txt is over the size limit")),
+                ],
+                analysis_failures: Vec::new(),
+            }],
+        };
+        let mut buf = Vec::new();
+        write_fix_human(&report, &mut buf, HumanOptions::default()).unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert!(
+            out.contains("(unresolved: fix ran (created ../x.txt))"),
+            "{out}"
+        );
+        assert!(
+            out.contains("(skipped: x.txt is over the size limit)"),
+            "{out}"
+        );
+        assert!(
+            out.contains(", 1 skipped, 0 unfixable, 1 unresolved."),
+            "{out}"
+        );
     }
 }

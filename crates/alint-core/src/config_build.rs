@@ -113,6 +113,13 @@ impl Config {
         self.environment_values = environment_values;
         self
     }
+
+    /// Sets [`Self::config_files`].
+    #[must_use]
+    pub fn with_config_files(mut self, config_files: Vec<PathBuf>) -> Self {
+        self.config_files = config_files;
+        self
+    }
 }
 
 impl RuleSpec {
@@ -132,6 +139,7 @@ impl RuleSpec {
             expect_matches: false,
             sensitive: false,
             sensitive_fields: BTreeSet::new(),
+            extended_source: false,
             fix: None,
             scope_filter: None,
             extra: crate::yaml::Mapping::new(),

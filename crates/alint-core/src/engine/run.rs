@@ -43,6 +43,7 @@ impl Engine {
             analysis_time_cache: Mutex::new(None),
             changed_paths: None,
             fix_baseline: None,
+            config_files: Vec::new(),
         }
     }
 
@@ -61,12 +62,24 @@ impl Engine {
             analysis_time_cache: Mutex::new(None),
             changed_paths: None,
             fix_baseline: None,
+            config_files: Vec::new(),
         }
     }
 
     #[must_use]
     pub fn with_fix_size_limit(mut self, limit: Option<u64>) -> Self {
         self.fix_size_limit = limit;
+        self
+    }
+
+    /// The resolved files the configuration came from
+    /// ([`Config::config_files`](crate::Config::config_files)). A fix of a rule
+    /// an `extends:`'d ruleset or a nested config contributed to never writes
+    /// one ([`FixContext::config_files`](crate::FixContext::config_files)), as
+    /// it never writes a file with a name configuration discovery accepts.
+    #[must_use]
+    pub fn with_config_files(mut self, config_files: Vec<PathBuf>) -> Self {
+        self.config_files = config_files;
         self
     }
 
@@ -346,6 +359,7 @@ impl Engine {
             analysis_time_cache: Mutex::new(None),
             changed_paths: self.changed_paths.clone(),
             fix_baseline: None,
+            config_files: self.config_files.clone(),
         };
         let sensitive_evidence = entry
             .spec

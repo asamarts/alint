@@ -296,6 +296,17 @@ impl Landing {
 /// Git runs commands from. Rules may still read one.
 #[must_use]
 pub fn names_git_directory(name: &str) -> bool {
+    opens_as(name, |file| {
+        file.eq_ignore_ascii_case(".git") || file.eq_ignore_ascii_case("git~1")
+    })
+}
+
+/// Whether a file system could open the entry `name` as a name `matches`
+/// accepts, reading it as Git's `is_ntfs_dotgit` and `is_hfs_dotgit` do (see
+/// [`names_git_directory`]): without the code points HFS+ ignores, each
+/// `\`-separated piece without its `:stream` suffix and trailing dots and
+/// spaces.
+fn opens_as(name: &str, matches: impl Fn(&str) -> bool) -> bool {
     const HFS_IGNORED: [std::ops::RangeInclusive<char>; 4] = [
         '\u{200c}'..='\u{200f}',
         '\u{202a}'..='\u{202e}',
@@ -312,7 +323,7 @@ pub fn names_git_directory(name: &str) -> bool {
             .next()
             .unwrap_or_default()
             .trim_end_matches(['.', ' ']);
-        file.eq_ignore_ascii_case(".git") || file.eq_ignore_ascii_case("git~1")
+        matches(file)
     })
 }
 
@@ -338,10 +349,111 @@ pub fn reaches_git_directory(root: &Path, path: &Path) -> bool {
     let Ok(root_real) = root.canonicalize() else {
         return false;
     };
-    resolve_existing_prefix(&root.join(path)).is_some_and(|real| {
-        real.strip_prefix(&root_real)
-            .is_ok_and(path_names_git_directory)
+    resolve_existing_prefix(&root.join(path))
+        .is_some_and(|real| in_git_directory(&root_real, &real))
+}
+
+/// Whether `real`, a resolved path, is inside a Git directory below
+/// `root_real`, the resolved root ([`path_names_git_directory`] on the part
+/// below it). A path outside the root is not.
+pub(crate) fn in_git_directory(root_real: &Path, real: &Path) -> bool {
+    real.strip_prefix(root_real)
+        .is_ok_and(path_names_git_directory)
+}
+
+/// Whether the walk follows a symlink that resolves to `target` from the
+/// root that resolves to `root_real`: one that stays inside the root and does
+/// not lead into a Git directory there. A link into `.git` (`evil.rs ->
+/// .git/config`, `gitdata -> .git`) would hand every rule, and every fix, the
+/// repository's own files under another name.
+pub(crate) fn walk_follows_symlink(root_real: &Path, target: &Path) -> bool {
+    target.starts_with(root_real) && !in_git_directory(root_real, target)
+}
+
+/// Why a fix declines a path in a Git directory, or one a symlink leads into
+/// ([`reaches_git_directory`]).
+#[doc(hidden)]
+#[must_use]
+pub fn git_directory_refusal(path: &Path) -> String {
+    format!(
+        "{} is in a Git directory; a fix never writes or reads there",
+        path.display()
+    )
+}
+
+/// The file names alint's configuration discovery accepts, in the order it
+/// tries them in each directory.
+pub const CONFIG_FILE_NAMES: [&str; 4] = [".alint.yml", ".alint.yaml", "alint.yml", "alint.yaml"];
+
+/// The directory beside the top-level configuration whose `*.yml` and
+/// `*.yaml` drop-ins load with it, with the same trust.
+pub const CONFIG_DROP_IN_DIRECTORY: &str = ".alint.d";
+
+/// Whether `path` names alint's own configuration: its last component is one
+/// a file system could open as a name configuration discovery accepts
+/// ([`CONFIG_FILE_NAMES`], at any depth, as a nested config or the
+/// configuration of a run from that directory loads there), or any component
+/// is one it could open as the drop-in directory (`.alint.d`). Spellings are
+/// read as [`names_git_directory`] reads them, and any case matches.
+#[must_use]
+pub fn path_names_alint_config(path: &Path) -> bool {
+    let names: Vec<String> = path
+        .components()
+        .filter_map(|component| match component {
+            Component::Normal(name) => Some(name.to_string_lossy().into_owned()),
+            _ => None,
+        })
+        .collect();
+    names.iter().any(|name| {
+        opens_as(name, |file| {
+            file.eq_ignore_ascii_case(CONFIG_DROP_IN_DIRECTORY)
+        })
+    }) || names.last().is_some_and(|name| {
+        opens_as(name, |file| {
+            CONFIG_FILE_NAMES
+                .iter()
+                .any(|config| file.eq_ignore_ascii_case(config))
+        })
     })
+}
+
+/// Whether `path`, relative to `root`, reaches alint's own configuration: it
+/// names some ([`path_names_alint_config`]), or the place it leads to once the
+/// OS follows the symlinks in it does (below `root`), or is one of
+/// `config_files`, the resolved files a loaded configuration came from (its
+/// top-level file, even one outside the root, and its local `extends:`
+/// targets). A configuration file runs the commands its rules name, so a fix
+/// from a source that may not run commands must not write one.
+#[must_use]
+pub fn reaches_alint_config(root: &Path, path: &Path, config_files: &[PathBuf]) -> bool {
+    if path_names_alint_config(path) {
+        return true;
+    }
+    let Some(real) = resolve_existing_prefix(&root.join(path)) else {
+        return false;
+    };
+    // Any case: on a case-insensitive file system `POLICY.yml` is `policy.yml`.
+    if config_files
+        .iter()
+        .any(|file| file.as_os_str().eq_ignore_ascii_case(real.as_os_str()))
+    {
+        return true;
+    }
+    root.canonicalize().is_ok_and(|root_real| {
+        real.strip_prefix(&root_real)
+            .is_ok_and(path_names_alint_config)
+    })
+}
+
+/// Why a fix from an `extends:`'d ruleset or a nested config declines a path
+/// that reaches alint's configuration ([`reaches_alint_config`]).
+#[doc(hidden)]
+#[must_use]
+pub fn alint_config_refusal(path: &Path) -> String {
+    format!(
+        "{} is an alint configuration file; a fix from an extended ruleset never writes one",
+        path.display()
+    )
 }
 
 /// Where a create of `path` lands once the OS resolves it, for the checks a
