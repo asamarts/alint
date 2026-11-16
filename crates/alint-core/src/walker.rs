@@ -214,6 +214,9 @@ pub struct FileIndex {
     escaping_symlinks: Vec<Arc<Path>>,
     path_set: OnceLock<SharedPathSet>,
     all_path_set: OnceLock<SharedPathSet>,
+    /// Whether `entries` are in path order, as [`walk`] leaves them: checked
+    /// once, on the first lookup that can use the order.
+    sorted: OnceLock<bool>,
     /// Exact file path → position in `entries`, shared with changed-file indexes
     /// when they need whole-tree exact-file lookups.
     file_entry_indices: OnceLock<SharedFileIndex>,
@@ -277,6 +280,7 @@ impl FileIndex {
             escaping_symlinks,
             path_set: OnceLock::new(),
             all_path_set: OnceLock::new(),
+            sorted: OnceLock::new(),
             file_entry_indices: OnceLock::new(),
             tree_files: OnceLock::new(),
             parent_to_children: OnceLock::new(),
@@ -563,6 +567,28 @@ impl FileIndex {
     /// references may legitimately target either kind.
     pub fn contains_path(&self, rel: &Path) -> bool {
         self.all_path_set_arc().contains(rel)
+    }
+
+    /// Whether `entries` are sorted by path (component by component, as
+    /// [`walk`] sorts them), so that the entries at and below a directory are
+    /// adjacent. An index built from entries in another order scans instead.
+    fn entries_sorted(&self) -> bool {
+        *self
+            .sorted
+            .get_or_init(|| self.entries.is_sorted_by(|a, b| a.path <= b.path))
+    }
+
+    /// The positions in [`Self::entries`] of `dir` and of every entry below it
+    /// (`Path::starts_with`, component by component), one range since sorted
+    /// entries keep them together. `None` when the entries are not sorted, so
+    /// the caller looks at all of them.
+    pub(crate) fn subtree(&self, dir: &Path) -> Option<std::ops::Range<usize>> {
+        if !self.entries_sorted() {
+            return None;
+        }
+        let start = self.entries.partition_point(|entry| *entry.path < *dir);
+        let len = self.entries[start..].partition_point(|entry| entry.path.starts_with(dir));
+        Some(start..start + len)
     }
 
     /// Find a file entry by its exact relative path in O(1) average time.
@@ -866,6 +892,14 @@ pub(crate) fn tracked_entries_ignore_files_hid<S: std::hash::BuildHasher>(
     let mut dirs: HashMap<PathBuf, bool> = HashMap::new();
     let mut entries = Vec::new();
     for path in tracked {
+        // Paths compare component by component, whatever the separator, so
+        // the lookup needs no copy with native separators. The path set is
+        // shared with the rules that look paths up later, and with a lookup
+        // per tracked path it costs fewer instructions than a binary search
+        // over the sorted entries, whose `Path` comparisons are slow.
+        if index.contains_path(path) {
+            continue;
+        }
         // Git lists relative paths; anything else (a Windows drive prefix such
         // as `C:x`) would join outside the root.
         if !path
@@ -876,9 +910,6 @@ pub(crate) fn tracked_entries_ignore_files_hid<S: std::hash::BuildHasher>(
         }
         // Native separators, as the walk's own entries have.
         let rel: PathBuf = path.components().collect();
-        if index.contains_path(&rel) {
-            continue;
-        }
         // The directories above it, outermost first: one that is left out
         // leaves out everything below it.
         let mut parents: Vec<&Path> = rel
@@ -891,19 +922,21 @@ pub(crate) fn tracked_entries_ignore_files_hid<S: std::hash::BuildHasher>(
             if index.contains_path(dir) {
                 return true;
             }
-            *dirs.entry(dir.to_path_buf()).or_insert_with(|| {
-                let shown = listings.spelled_as_listed(root, dir)
-                    && std::fs::metadata(root.join(dir)).is_ok_and(|m| m.is_dir())
-                    && !skips.skips(dir, true);
-                if shown {
-                    entries.push(FileEntry {
-                        path: Arc::from(dir),
-                        is_dir: true,
-                        size: 0,
-                    });
-                }
-                shown
-            })
+            if let Some(&shown) = dirs.get(dir) {
+                return shown;
+            }
+            let shown = listings.spelled_as_listed(root, dir)
+                && std::fs::metadata(root.join(dir)).is_ok_and(|m| m.is_dir())
+                && !skips.skips(dir, true);
+            if shown {
+                entries.push(FileEntry {
+                    path: Arc::from(dir),
+                    is_dir: true,
+                    size: 0,
+                });
+            }
+            dirs.insert(dir.to_path_buf(), shown);
+            shown
         });
         if !reachable || !listings.spelled_as_listed(root, &rel) {
             continue;
@@ -940,50 +973,59 @@ pub(crate) fn without_ignore_files(opts: &WalkOptions) -> WalkOptions {
     }
 }
 
-/// The names each directory below a root lists, read once per directory.
+/// The names each directory below a root lists, read once per directory. One
+/// value serves every lookup that sees the disk in the same state, such as
+/// the creates one `fix --dry-run` predicts.
 #[derive(Default)]
-struct Listings(HashMap<PathBuf, HashSet<std::ffi::OsString>>);
+pub(crate) struct Listings(HashMap<PathBuf, HashSet<std::ffi::OsString>>);
 
-/// Whether each component of `rel` (root-relative) that exists is spelled as
-/// its directory lists it. A filesystem that ignores case resolves `Docs/x.md`
-/// where the disk has `docs/`, but the walk reports the disk's spelling and the
-/// tracked view counts only a path spelled as listed, so a fix that creates
-/// `Docs/x.md` there does not give a rule `Docs/x.md`. The components that do
-/// not exist yet, which the fix creates, are spelled as written.
+/// [`Listings::existing_prefix_spelled_as_listed`] with listings of its own.
+#[cfg(test)]
 pub(crate) fn existing_prefix_spelled_as_listed(root: &Path, rel: &Path) -> bool {
-    let mut listings = Listings::default();
-    let mut prefix = PathBuf::new();
-    for component in rel.components() {
-        prefix.push(component);
-        if std::fs::symlink_metadata(root.join(&prefix)).is_err() {
-            return true;
-        }
-        if !listings.spelled_as_listed(root, &prefix) {
-            return false;
-        }
-    }
-    true
+    Listings::default().existing_prefix_spelled_as_listed(root, rel)
 }
 
 impl Listings {
+    /// Whether each component of `rel` (root-relative) that exists is spelled
+    /// as its directory lists it. A filesystem that ignores case resolves
+    /// `Docs/x.md` where the disk has `docs/`, but the walk reports the disk's
+    /// spelling and the tracked view counts only a path spelled as listed, so a
+    /// fix that creates `Docs/x.md` there does not give a rule `Docs/x.md`. The
+    /// components that do not exist yet, which the fix creates, are spelled as
+    /// written.
+    pub(crate) fn existing_prefix_spelled_as_listed(&mut self, root: &Path, rel: &Path) -> bool {
+        let mut prefix = PathBuf::new();
+        for component in rel.components() {
+            prefix.push(component);
+            if std::fs::symlink_metadata(root.join(&prefix)).is_err() {
+                return true;
+            }
+            if !self.spelled_as_listed(root, &prefix) {
+                return false;
+            }
+        }
+        true
+    }
+
     /// Whether the directory holding `rel` (root-relative) lists its name
     /// exactly as `rel` spells it.
     fn spelled_as_listed(&mut self, root: &Path, rel: &Path) -> bool {
         let (Some(parent), Some(name)) = (rel.parent(), rel.file_name()) else {
             return false;
         };
-        self.0
-            .entry(parent.to_path_buf())
-            .or_insert_with(|| {
-                std::fs::read_dir(root.join(parent))
-                    .map(|listing| {
-                        listing
-                            .filter_map(|entry| entry.ok().map(|entry| entry.file_name()))
-                            .collect()
-                    })
-                    .unwrap_or_default()
+        if let Some(names) = self.0.get(parent) {
+            return names.contains(name);
+        }
+        let names: HashSet<std::ffi::OsString> = std::fs::read_dir(root.join(parent))
+            .map(|listing| {
+                listing
+                    .filter_map(|entry| entry.ok().map(|entry| entry.file_name()))
+                    .collect()
             })
-            .contains(name)
+            .unwrap_or_default();
+        let listed = names.contains(name);
+        self.0.insert(parent.to_path_buf(), names);
+        listed
     }
 }
 

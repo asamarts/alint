@@ -1441,10 +1441,10 @@ impl NestedRuleSpec {
         acc
     }
 
-    /// Every string of this spec that an iteration renders: `paths`, `message`
-    /// and each string in its options, mapping keys included. An error from
-    /// a preparation build maps the values these render back to them
-    /// ([`crate::template::unrender_placeholders`]).
+    /// Every string of this spec that an iteration renders (`paths`, `message`,
+    /// each option string and mapping key), for alint's own crates: preparing a
+    /// nested rule reads them ([`crate::template::Preparation`]).
+    #[doc(hidden)]
     #[must_use]
     pub fn templates(&self) -> Vec<&str> {
         let mut out = Vec::new();

@@ -10,11 +10,13 @@ use crate::walker::FileIndex;
 use super::{Engine, RuleEntry};
 
 /// The exclusions a fix preview checks a create against: the walk's, and what
-/// a `git_tracked_only` rule's view still leaves out.
+/// a `git_tracked_only` rule's view still leaves out. With them, the directory
+/// listings the spelling check reads, each once for the pass.
 #[derive(Clone, Copy)]
 struct Skips<'s, 'a> {
     walk: &'s crate::walker::WalkSkips<'a>,
     tracked: &'s crate::walker::WalkSkips<'a>,
+    listings: &'s std::cell::RefCell<crate::walker::Listings>,
 }
 
 impl Engine {
@@ -83,9 +85,11 @@ impl Engine {
         // hide a tracked path from it (`walker::tracked_entries_ignore_files_hid`).
         let tracked_walk = crate::walker::without_ignore_files(walk_opts);
         let tracked_skips = crate::walker::WalkSkips::new(root, &tracked_walk, &[]);
+        let listings = std::cell::RefCell::default();
         let skips = Skips {
             walk: &skips,
             tracked: &tracked_skips,
+            listings: &listings,
         };
         for (result, item, entry, path, names, is_dir, _) in &creates {
             // A sensitive item's reason leaves the target out: its rule's
@@ -254,6 +258,7 @@ impl Engine {
                  tracked files"
             ));
         }
+        let listings = skips.listings;
         let skips = if entry.rule.git_tracked_mode() == crate::GitTrackedMode::Off {
             skips.walk
         } else {
@@ -272,7 +277,10 @@ impl Engine {
                 )
             });
         }
-        if !crate::walker::existing_prefix_spelled_as_listed(root, target) {
+        if !listings
+            .borrow_mut()
+            .existing_prefix_spelled_as_listed(root, target)
+        {
             Some(format!(
                 "{shown} exists on disk under another spelling (a filesystem that ignores \
                  case), so the walk would report that spelling and the rule would never see it"

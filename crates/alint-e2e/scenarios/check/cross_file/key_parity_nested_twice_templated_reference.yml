@@ -1,0 +1,37 @@
+test_version: 1
+name: key_parity nested two levels deep takes its reference's format from a path token
+tags: [check, key_parity, for_each_file, for_each_dir, cross_file, nested]
+
+# The outer rule's `{path}` reaches the inner `key_parity` through the
+# `for_each_dir` between them, so its format is known only per iteration.
+# The rules nested two deep are prepared from the templates the outer rule
+# wrote, which tell the token from its placeholder.
+
+given:
+  tree:
+    packages:
+      ui:
+        en.json: '{"a": 1, "b": 2}'
+        fr.json: '{"a": 1}'
+  config: |
+    version: 1
+    rules:
+      - id: package-locale-parity
+        kind: for_each_file
+        select: "packages/*/en.json"
+        level: error
+        require:
+          - kind: for_each_dir
+            select: "{dir}"
+            require:
+              - kind: key_parity
+                reference: "{path}"
+                peers: "{dir}/fr.{ext}"
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - {rule: package-locale-parity, level: error, path: packages/ui/fr.json, message: {regex: "missing key `b`"}}
+    analysis_failures: []
