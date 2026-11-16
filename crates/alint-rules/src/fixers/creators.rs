@@ -276,8 +276,10 @@ pub(crate) fn git_directory_refusal(rel: &Path) -> String {
 /// refuses it (a Git directory, or alint's own configuration for a rule an
 /// `extends:`'d ruleset shaped), and confined to the root as
 /// [`confine_fix_path`] confines it. Only the user's own rules honor
-/// `allow_out_of_root` here: the grant is the user's, for reads, and a ruleset
-/// they extend never writes outside the root with it.
+/// `allow_out_of_root` here: the grant is the user's, and a ruleset they
+/// extend never writes outside the root with it. Such a rule is told so,
+/// rather than to set the grant (the engine gives it none,
+/// `AllowOutOfRoot::allows_rule`).
 pub(crate) fn confine_fix_write(
     rel: &Path,
     ctx: &FixContext<'_>,
@@ -285,7 +287,7 @@ pub(crate) fn confine_fix_write(
     if let Some(reason) = ctx.write_refusal(rel) {
         return Err(reason);
     }
-    if ctx.allow_out_of_root && ctx.extended_source {
+    if ctx.extended_source {
         return confine_fix_path(rel, ctx.root, false).map_err(|_| {
             format!(
                 "{} escapes the repo root; a fix from an extended ruleset never writes \
@@ -307,7 +309,7 @@ pub(crate) fn confine_fix_read(
     rel: &Path,
     ctx: &FixContext<'_>,
 ) -> std::result::Result<PathBuf, String> {
-    if ctx.allow_out_of_root && ctx.extended_source {
+    if ctx.extended_source {
         return confine_fix_path(rel, ctx.root, false).map_err(|reason| {
             if confine_fix_path(rel, ctx.root, true).is_ok() {
                 format!(

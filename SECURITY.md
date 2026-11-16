@@ -157,8 +157,10 @@ treated as untrusted input. The defensive posture is:
   and the other discovery names, `.alint.d/`, or a file the configuration was
   loaded from), so it cannot add such a rule for the next run, and never
   writes or reads (`content_from`, `sync_from`) outside the repo root,
-  whatever `allow_out_of_root` says. The language server's code actions keep
-  the same limits.
+  whatever `allow_out_of_root` says. Such a rule's check reads nothing
+  outside the root either: `allow_out_of_root` grants the user's own
+  top-level rules only, even when the user's config overrides the rule by id
+  or names it. The language server's code actions keep the same limits.
 - **A local `extends:` file is part of your repository.** Unlike an
   `https://` ruleset not listed in `trusted_extends`, a local one may read
   `env.*` in its conditions and declare `ignore:`. Like every extended
@@ -169,9 +171,11 @@ treated as untrusted input. The defensive posture is:
   at the repository's top (the nearest directory holding a `.git` directory
   or file), so a `.alint.yml` above it, in a directory someone else may write
   (`/tmp`, a shared home), never governs it. Outside every repository,
-  discovery skips a config file another user owns and warns
-  (`skipping /tmp/.alint.yml: owned by another user`); on Windows, where
-  alint reads no owner, it does not.
+  discovery skips a config file another user owns in a directory above the
+  one alint runs in, and warns (`skipping /tmp/.alint.yml: owned by another
+  user`); a config in that directory itself is used whoever owns it (root in
+  a container, on a directory the host's user owns). On Windows, where alint
+  reads no owner, nothing is skipped.
 - **Git reads the repository alint names.** alint finds the repository
   itself (the nearest directory holding a `.git` directory or file) and
   names it to every Git command (`--git-dir`, `--work-tree`), so Git never

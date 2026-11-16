@@ -12,7 +12,8 @@ format in CI.
 It reads `.alint.yml` from the directory it checks, or from the nearest one
 above it up to the repository's top (the nearest directory holding `.git`; a
 config above that never governs the repository, and outside every repository a
-config another user owns is skipped with a warning), honours `.gitignore` while
+config another user owns in a directory above the checked one is skipped with a
+warning), honours `.gitignore` while
 walking, and never modifies a file: repairs are [`alint fix`](/docs/cli/fix/)'s
 job. `alint` with no subcommand runs the same check on the current directory.
 

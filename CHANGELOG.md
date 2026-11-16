@@ -204,19 +204,36 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   it (`/tmp/.alint.yml` over a checkout in `/tmp`, a shared home) governed the run, command rules
   included. Discovery now checks the repository's top (the nearest directory holding a `.git`
   directory or file) and stops there. Outside every repository it climbs as before but skips a
-  config file another user owns, with `alint: warning: skipping /tmp/.alint.yml: owned by another
-  user` on stderr (on Unix, a file whose owner is not the effective user id; Windows does not
-  check). This affects `alint check`, `fix`, `list`, `explain`, `validate-config`,
-  `export-agents-md` and every other command that discovers a config, and the language server,
-  in v0.1.0 to v0.22.1.
-- **An `extends:` URL's scheme is read in any case, and its credentials stay out of errors.**
-  `HTTPS://`, `Http://` and `ALINT://bundled/` were not recognized as remote, plain-HTTP and
-  bundled entries, so an upper-case `HTTPS://` entry was read as a path to a local file, with
-  no integrity hash required, and the error that named it printed the URL whole, a
+  config file another user owns in a directory above the one it starts from, with `alint:
+  warning: skipping /tmp/.alint.yml: owned by another user` on stderr (on Unix, a file whose
+  owner is not the effective user id; Windows does not check). A config in the starting
+  directory itself is used whoever owns it, so `alint check` as root in a container, on a
+  mounted directory the host's user owns, still finds that directory's config. This affects
+  `alint check`, `fix`, `list`, `explain`, `validate-config`, `export-agents-md` and every other
+  command that discovers a config, and the language server, in v0.1.0 to v0.22.1.
+- **An `extends:` URL's scheme is read in any case, any other scheme is refused, and its
+  credentials stay out of errors.** `HTTPS://`, `Http://` and `ALINT://bundled/` were not
+  recognized as remote, plain-HTTP and bundled entries, and `ftp://`, `file://`, `ssh://` or
+  `git+https://` were not recognized at all: each was read as a path to a local file, with no
+  integrity hash required, and the error that named it printed the URL whole, a
   `user:password@` and a `?token=` included. Schemes now match in any case: such an entry is
-  fetched and pinned like any `https://` one, a plain `http://` one is refused, and errors show
-  it without its userinfo, query and fragment. This affects configs with a non-lower-case
-  `extends:` scheme in v0.2.1 to v0.22.1.
+  fetched and pinned like any `https://` one, and a plain `http://` one is refused. An entry
+  with any other `<scheme>://` (two or more characters, so a Windows drive stays a path) is a
+  load error, `unsupported `extends:` scheme `ftp` (entry "ftp://host/x.yml"); use https://,
+  alint://bundled/ or a local path`. Errors show such an entry without its userinfo, query and
+  fragment. This affects configs with a non-lower-case or other `extends:` scheme in v0.2.1 to
+  v0.22.1.
+- **`allow_out_of_root` no longer lets an extended ruleset's rule read outside the repository
+  when it is checked.** The top-level grant covered every rule it named, so under `true`, a
+  `kinds:` list or a `rules:` list naming its id, a `json_schema_passes` (`schema_path`),
+  `pair_hash` (`target`) or `registry_paths_resolve` (`source`) rule from a ruleset reached
+  through `extends:` read a file outside the repository, and its findings told it apart
+  (`registry_paths_resolve` printed the entries it listed). The grant now covers the user's own
+  top-level rules only: a rule an extended ruleset or a nested config shaped (it declared the
+  rule, contributed a field to it, or defined its template, so a rule the user's config
+  overrides by id counts) reads only inside the root and reports `registry source
+  ../outside.json escapes the repo root`, in `alint check`, `alint fix` and the language server.
+  This affects configs with `allow_out_of_root` and an `extends:` ruleset in v0.12.0 to v0.22.1.
 - **A policy-test fixture copy is capped at 64 MiB.** `fixture:` copied a package's directory
   into the sandbox file by file, with no limit on the total, and a hard link was copied once per
   name, so a package of many hard links to one large file filled the disk. The runner now stops
@@ -250,7 +267,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   caller to warn about. **`alint_core::git::repository_top`**, the nearest directory at or above
   a path that holds a `.git` directory or file, and **`alint_core::git::owned_by_current_user`**.
   **`RuleEntry::fix_may_leave_root`**: whether a rule's fix may read or write outside the root
-  (its `allow_out_of_root`, never for a rule from an `extends:`'d ruleset). `alint-core` depends
+  (its `allow_out_of_root`, never for a rule from an `extends:`'d ruleset), and
+  **`AllowOutOfRoot::allows_rule`**: whether the grant covers an effective rule (never one an
+  extended ruleset or a nested config shaped; `allows` still answers by id and kind alone). `alint-core` depends
   on `rustix` on Unix, already in the dependency tree, for the effective user id.
 - **`--no-spawn`** (global flag): refuse a config whose rules, fixes or facts start a process,
   for linting a repository you do not trust with its own config. A rule of a spawning kind (at
@@ -345,7 +364,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a file, is a repository of its own. A repository without a config of its own now reports
   `no .alint.yml found` where a config above it used to govern it: move that config into the
   repository, or pass it with `--config`. Outside every repository, a config file another user
-  owns is skipped with a warning. Library users of `alint_dsl::discover` get the same stop and
+  owns in a directory above the starting one is skipped with a warning; one in the starting
+  directory is used. Library users of `alint_dsl::discover` get the same stop and
   skip; `alint_dsl::discover_config` also returns the skipped files.
 - **The language server lints each repository in a folder by its own config.** A workspace
   folder without a config of its own (a directory holding several repositories) was not linted.

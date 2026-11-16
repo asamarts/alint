@@ -17,6 +17,33 @@ fn allow_out_of_root_policy_resolves() {
     assert!(!AllowOutOfRoot::All.is_confined());
 }
 
+/// The grant covers the user's own rules only: never a rule an extended
+/// ruleset or a nested config shaped, by kind, by id, or under `true`.
+#[test]
+fn allow_out_of_root_never_covers_an_extended_rule() {
+    let mut spec: RuleSpec =
+        crate::yaml::from_str("id: my-rule\nkind: pair_hash\nlevel: error\n").unwrap();
+    let grants = [
+        AllowOutOfRoot::All,
+        AllowOutOfRoot::Selective {
+            kinds: ["pair_hash".to_string()].into_iter().collect(),
+            rules: std::collections::HashSet::new(),
+        },
+        AllowOutOfRoot::Selective {
+            kinds: std::collections::HashSet::new(),
+            rules: ["my-rule".to_string()].into_iter().collect(),
+        },
+    ];
+    for grant in &grants {
+        assert!(grant.allows_rule(&spec), "{grant:?}: the user's own rule");
+    }
+    spec.set_extended_source(true);
+    for grant in &grants {
+        assert!(!grant.allows_rule(&spec), "{grant:?}: an extended rule");
+    }
+    assert!(!AllowOutOfRoot::Confined.allows_rule(&spec));
+}
+
 #[test]
 fn allow_out_of_root_deserializes_bool_and_map() {
     let t: AllowOutOfRoot = crate::yaml::from_str("true").unwrap();

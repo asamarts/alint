@@ -565,6 +565,41 @@ fn an_upper_case_scheme_is_a_remote_entry() {
     assert!(!cfg.rules.is_empty());
 }
 
+/// An entry with any other `<scheme>://` is a load error naming the scheme,
+/// never a local path, and the error shows it without its userinfo, query
+/// and fragment.
+#[test]
+fn an_unsupported_scheme_is_a_load_error() {
+    let tmp = tempfile::tempdir().unwrap();
+    let config_path = tmp.path().join(".alint.yml");
+    for (entry, scheme) in [
+        ("ftp://user:pw@host/x.yml?t=1#frag", "ftp"),
+        ("FILE://user:pw@host/x.yml?t=1", "file"),
+        ("ssh://user:pw@host/x.yml?t=1", "ssh"),
+        ("git+https://user:pw@host/x.yml?t=1", "git+https"),
+        ("alint://user:pw@elsewhere/x.yml?t=1", "alint"),
+    ] {
+        std::fs::write(
+            &config_path,
+            format!("version: 1\nextends: [\"{entry}\"]\nrules: []\n"),
+        )
+        .unwrap();
+        let error = load(&config_path).unwrap_err().to_string();
+        assert!(
+            error.contains(&format!("unsupported `extends:` scheme `{scheme}`")),
+            "{error}"
+        );
+        assert!(
+            error.contains("use https://, alint://bundled/ or a local path"),
+            "{error}"
+        );
+        assert!(
+            !error.contains("pw") && !error.contains("t=1") && !error.contains("frag"),
+            "{error}"
+        );
+    }
+}
+
 #[test]
 fn w2_remote_security_positive_strip_is_not_demoted() {
     // `file_strip_bidi` / `file_strip_zero_width` are security-POSITIVE (they remove

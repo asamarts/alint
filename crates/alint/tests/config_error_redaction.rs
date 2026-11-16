@@ -800,3 +800,31 @@ fn a_custom_fact_that_prints_an_environment_value_shows_it_redacted() {
         assert_left_out(&args.join(" "), &output, &["canary-secret"]);
     }
 }
+
+/// An `extends:` entry with an unsupported `<scheme>://` fails to load with
+/// the scheme named, and no command prints its userinfo or query.
+#[test]
+fn an_unsupported_extends_scheme_fails_without_its_credentials() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(
+        root.path().join(".alint.yml"),
+        "version: 1\nextends: [\"ftp://user:pw@host/x.yml?t=1\"]\nrules: []\n",
+    )
+    .unwrap();
+    for args in [
+        &["check"][..],
+        &["validate-config"],
+        &["--format", "json", "check"],
+    ] {
+        let output = run(root.path(), args, &[]);
+        let surface = format!("{args:?}");
+        assert!(!output.status.success(), "{surface}");
+        assert_no_secret(&surface, &output, &["pw", "t=1"]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            format!("{stdout}{stderr}").contains("unsupported `extends:` scheme `ftp`"),
+            "{surface}: {stdout}{stderr}"
+        );
+    }
+}
