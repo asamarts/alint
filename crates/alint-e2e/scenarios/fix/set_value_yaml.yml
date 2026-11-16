@@ -2,7 +2,7 @@ test_version: 1
 name: set_value rewrites a YAML value in place, preserving comments and structure
 tags: [fix, yaml_path_equals, set_value, yaml]
 
-# The EIGHTH and final structured format, via saphyr's spanned MarkedYaml tree. A
+# The EIGHTH and final structured format, via saphyr's spanned parser events. A
 # YAML scalar edit is a span-splice (like JSON): the resolver returns the byte
 # range of just the `port` value, so the fixer rewrites `8080` -> `9090` and
 # touches nothing else -- the leading comment, the `server:` header, the sibling
