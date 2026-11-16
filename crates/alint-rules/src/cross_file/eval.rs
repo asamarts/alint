@@ -283,6 +283,12 @@ impl CrossFileRule {
             return;
         };
         let src = src.as_path();
+        // A name in a Git directory is refused at load; this one reaches one
+        // through a symlink.
+        if alint_core::reaches_git_directory(ctx.root, src) {
+            out.push(crate::pathsafe::git_directory_read_failure(src));
+            return;
+        }
         let src_bytes = match crate::io::read_capped(&ctx.root.join(src)) {
             Ok(b) => b,
             Err(crate::io::ReadCapError::TooLarge(n)) => {
@@ -315,6 +321,10 @@ impl CrossFileRule {
                 out.push(Self::violation(target, "target file escapes the repo root"));
                 continue;
             };
+            if alint_core::reaches_git_directory(ctx.root, &target) {
+                out.push(crate::pathsafe::git_directory_read_failure(&target));
+                continue;
+            }
             let tgt_bytes = match crate::io::read_capped(&ctx.root.join(&target)) {
                 Ok(b) => b,
                 Err(crate::io::ReadCapError::TooLarge(n)) => {

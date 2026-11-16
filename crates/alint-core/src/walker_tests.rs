@@ -104,6 +104,47 @@ fn walk_prunes_symlinks_that_escape_the_root() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn walk_prunes_symlinks_into_the_git_directory() {
+    // A committed symlink into `.git` (`src/evil.rs -> ../.git/config`, or a
+    // directory link `gitdata -> .git`) would index the repository's own files
+    // under another name, for a content fix to write through. Each is pruned
+    // and recorded for `no_symlinks`; a link to an ordinary file stays, and a
+    // link back to the root is a loop the walk does not descend.
+    use std::os::unix::fs::symlink;
+    let root = td();
+    touch(root.path(), ".git/config", b"[core]\n");
+    touch(root.path(), ".git/HEAD", b"ref: refs/heads/main\n");
+    touch(root.path(), "src/lib.rs", b"fn f() {}\n");
+    symlink("../.git/config", root.path().join("src/evil.rs")).unwrap();
+    symlink(".git", root.path().join("gitdata")).unwrap();
+    symlink("lib.rs", root.path().join("src/alias.rs")).unwrap();
+    symlink("..", root.path().join("src/up")).unwrap();
+
+    let idx = walk(root.path(), &WalkOptions::default()).unwrap();
+    let p = paths(&idx);
+    for pruned in ["src/evil.rs", "gitdata", "gitdata/config", "gitdata/HEAD"] {
+        assert!(
+            !p.iter().any(|x| x == pruned),
+            "{pruned} was indexed: {p:?}"
+        );
+    }
+    assert!(
+        !p.iter().any(|x| x.contains(".git")),
+        "a path through a link reached .git: {p:?}"
+    );
+    assert!(p.iter().any(|x| x == "src/alias.rs"), "{p:?}");
+    let esc: Vec<String> = idx
+        .escaping_symlinks()
+        .iter()
+        .map(|x| x.to_string_lossy().into_owned())
+        .collect();
+    assert!(esc.iter().any(|x| x == "src/evil.rs"), "{esc:?}");
+    assert!(esc.iter().any(|x| x == "gitdata"), "{esc:?}");
+    assert!(!esc.iter().any(|x| x == "src/alias.rs"), "{esc:?}");
+}
+
 #[test]
 fn fileindex_dirs_filters_files_out() {
     let idx = FileIndex::from_entries(vec![

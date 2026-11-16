@@ -1,11 +1,101 @@
-//! Reading and writing a file for a fix: the `fix_size_limit` guard, and the
-//! atomic write that keeps a file's mode and refuses one it cannot replace.
+//! Reading and writing a file for a fix: the paths no fix touches, the
+//! `fix_size_limit` guard, and the atomic write that keeps a file's mode and
+//! refuses one it cannot replace.
 
 use std::path::{Path, PathBuf};
 
 use crate::error::Result;
 
 use super::{FixContext, FixOutcome};
+
+impl FixContext<'_> {
+    /// Why a fix may not write, create, remove, rename or change the mode of
+    /// `path` (relative to the root, or absolute), or `None` when it may.
+    ///
+    /// Every fix refuses a path that reaches a Git directory, by name or through
+    /// a symlink ([`crate::reaches_git_directory`]): a file it puts there is
+    /// configuration Git runs commands from. A fix of an
+    /// [`extended_source`](Self::extended_source) rule also refuses alint's own
+    /// configuration ([`crate::reaches_alint_config`]), which may run commands
+    /// that source may not. The fixers ask before they touch a path, and
+    /// [`read_for_fix`] and [`Self::commit_write`] ask for every content edit, so
+    /// each reports the refusal as a skip.
+    #[must_use]
+    pub fn write_refusal(&self, path: &Path) -> Option<String> {
+        let path = path.strip_prefix(self.root).unwrap_or(path);
+        if crate::reaches_git_directory(self.root, path) {
+            return Some(crate::git_directory_refusal(path));
+        }
+        (self.extended_source && crate::reaches_alint_config(self.root, path, self.config_files))
+            .then(|| crate::alint_config_refusal(path))
+    }
+
+    /// Persist a whole-file write of `bytes` for the file whose absolute path
+    /// is `abs`. In compose mode the bytes are buffered for the engine's single
+    /// per-file flush; otherwise they are written atomically now, byte-for-byte
+    /// the same as a direct [`write_atomic`]. Content fixers call this instead
+    /// of `write_atomic` so the engine can unify the write path.
+    ///
+    /// The compose buffer is keyed by the *resolved write target*
+    /// (`resolve_write_target`): a symlink and its in-tree target coalesce to
+    /// one entry, so two fixers touching the same underlying file through
+    /// different paths compose (the second reads the first's buffered write)
+    /// exactly as they would when writing straight to disk.
+    ///
+    /// A path [`Self::write_refusal`] refuses is not written: the call fails
+    /// with `PermissionDenied` and the reason.
+    ///
+    /// # Errors
+    /// Propagates the underlying [`write_atomic`] I/O error in direct mode;
+    /// buffering in compose mode is infallible. A refused path fails either way.
+    pub fn commit_write(&self, abs: &Path, bytes: &[u8]) -> std::io::Result<()> {
+        // A dry run must write NOTHING: every fixer guards `if ctx.dry_run` before
+        // reaching here, and the fixpoint's cap-confirmation pass relies on that
+        // (it runs `fix_run(dry_run=true)` purely to test convergence). Assert the
+        // invariant at the choke point so a fixer that forgets the guard fails
+        // loudly in tests/debug rather than silently mutating the tree.
+        debug_assert!(
+            !self.dry_run,
+            "commit_write reached during a dry run; a fixer must check ctx.dry_run before writing"
+        );
+        // Release-safe backstop (the assert is compiled out in release): a dry run
+        // writes NOTHING, so a fixer that forgot its `ctx.dry_run` guard becomes a
+        // silent no-op here instead of mutating the tree during, e.g., the
+        // fixpoint's cap-confirmation pass.
+        if self.dry_run {
+            return Ok(());
+        }
+        // Backstop for a fixer that writes without first reading through
+        // `read_for_fix`, which reports the same refusal as a skip.
+        if let Some(reason) = self.write_refusal(abs) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                reason,
+            ));
+        }
+        match self.compose {
+            Some(buf) => {
+                buf.borrow_mut()
+                    .insert(resolve_write_target(abs), bytes.to_vec());
+                Ok(())
+            }
+            None => write_atomic(abs, bytes),
+        }
+    }
+
+    /// True when a content fixer earlier in this pass has already composed a
+    /// pending whole-file write for `abs` (coalesced by resolved target, so a
+    /// symlink and its target share the answer). A whole-file op (remove /
+    /// rename) MUST yield when this is true: the pending content write is
+    /// flushed *after* the fixer loop, so acting on the pre-edit file now would
+    /// let the flush resurrect the removed/renamed path or strand the composed
+    /// bytes at a vacated path (a file-duplication corruption). Returns `false`
+    /// when there is no compose buffer (a `--dry-run` pass composes nothing).
+    pub fn has_pending_write(&self, abs: &Path) -> bool {
+        self.compose
+            .is_some_and(|buf| buf.borrow().contains_key(&resolve_write_target(abs)))
+    }
+}
 
 /// Result of [`read_for_fix`] — either the bytes of the file,
 /// or a [`FixOutcome::Skipped`] the caller should return.
@@ -63,11 +153,39 @@ pub fn check_fix_size(
 /// files return `ReadForFix::Skipped(Outcome::Skipped(_))` and
 /// emit a one-line stderr warning; in-limit files return
 /// `ReadForFix::Bytes(...)`. Pass-through I/O errors propagate.
+///
+/// The file is one the fix will edit, so a path [`FixContext::write_refusal`]
+/// refuses is skipped with its reason before anything is read. For a file the
+/// fix only reads, use [`read_source_for_fix`].
 pub fn read_for_fix(
     abs: &Path,
     display_path: &std::path::Path,
     ctx: &FixContext<'_>,
 ) -> Result<ReadForFix> {
+    if let Some(reason) = ctx.write_refusal(abs) {
+        return Ok(ReadForFix::Skipped(FixOutcome::Skipped(reason)));
+    }
+    read_source_for_fix(abs, display_path, ctx)
+}
+
+/// [`read_for_fix`] for a file a fix reads but does not write (`sync_from`'s
+/// canonical source, a cross-file value's source): a path in a Git directory
+/// is still skipped, since a fix never reads there either, but alint's own
+/// configuration may be read.
+///
+/// # Errors
+/// Propagates an I/O error from the stat or the read, as [`read_for_fix`] does.
+pub fn read_source_for_fix(
+    abs: &Path,
+    display_path: &std::path::Path,
+    ctx: &FixContext<'_>,
+) -> Result<ReadForFix> {
+    let rel = abs.strip_prefix(ctx.root).unwrap_or(abs);
+    if crate::reaches_git_directory(ctx.root, rel) {
+        return Ok(ReadForFix::Skipped(FixOutcome::Skipped(
+            crate::git_directory_refusal(rel),
+        )));
+    }
     // In compose mode, an earlier fixer's write for this file lives in the
     // buffer, not on disk; read it back so fixers compose in config order.
     // Keyed by the resolved write target (matching `commit_write`), so a read

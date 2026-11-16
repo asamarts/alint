@@ -1403,6 +1403,7 @@ fn build_rule_with(spec: &RuleSpec, backslash_separates: bool) -> Result<KeyPari
     let reference = config_path(opts.reference.trim(), backslash_separates).ok_or_else(|| {
         Error::rule_config(&spec.id, "`reference` must be a confined repository path")
     })?;
+    crate::pathsafe::reject_git_directory_read(&spec.id, "reference", reference.as_str())?;
     let reference_written = as_written(&opts.reference, false, backslash_separates);
     if opts.peers.trim().is_empty() {
         return Err(Error::rule_config(&spec.id, "`peers` must not be empty"));
@@ -1571,6 +1572,7 @@ fn literal_peer(
             "a literal `peers` path must be a confined repository path",
         )
     })?;
+    crate::pathsafe::reject_git_directory_read(&spec.id, "peers", path.as_str())?;
     let written = as_written(&opts.peers, true, backslash_separates);
     if same_in_every_iteration((&path, &written), reference) {
         return Err(Error::rule_config(
