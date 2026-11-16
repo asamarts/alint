@@ -604,3 +604,41 @@ fn setup_git_drops_every_variable_but_the_runners() {
         .collect();
     assert_eq!(written, Vec::<std::ffi::OsString>::new());
 }
+
+/// SEC-15: a fixture file with hard links is copied once per link, so a
+/// package of one 1.1 MB file and 30 links filled 31 MB of the sandbox. A
+/// test's copies stop at the limit with an error naming the test and the
+/// limit (here scaled down to 4 KiB, so the fourth 1100-byte copy passes it).
+#[cfg(unix)]
+#[test]
+fn fixture_copies_stop_at_the_limit_whatever_the_hard_links() {
+    let package = tempfile::tempdir().unwrap();
+    let fixture = package.path().join("fx");
+    std::fs::create_dir(&fixture).unwrap();
+    std::fs::write(fixture.join("blob"), vec![b'x'; 1100]).unwrap();
+    for link in 0..30 {
+        std::fs::hard_link(fixture.join("blob"), fixture.join(format!("link{link}"))).unwrap();
+    }
+    let source = package.path().join("t.yml");
+    let yaml = "test_version: 1\nname: hard links\ngiven:\n  fixture: fx\n  config: |\n    \
+                version: 1\n    rules: []\nwhen: [check]\nexpect:\n  - exit: success\n";
+    std::fs::write(&source, yaml).unwrap();
+    let test = PolicyTest::from_yaml(yaml).unwrap();
+    let package_root = PackageRoot::for_policy_test(&source).unwrap();
+
+    let sandbox = tempfile::tempdir().unwrap();
+    let error = materialize_repository_within(&test, &package_root, sandbox.path(), 4096)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("test \"hard links\": its fixture copies more than 4096 bytes"),
+        "{error}"
+    );
+    let copied = std::fs::read_dir(sandbox.path()).unwrap().count();
+    assert_eq!(copied, 3, "the copy stops at the limit");
+
+    // A fixture within the limit copies whole.
+    let sandbox = tempfile::tempdir().unwrap();
+    materialize_repository_within(&test, &package_root, sandbox.path(), 31 * 1100).unwrap();
+    assert_eq!(std::fs::read_dir(sandbox.path()).unwrap().count(), 31);
+}

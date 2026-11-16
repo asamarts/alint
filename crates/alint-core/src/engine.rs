@@ -542,6 +542,19 @@ impl RuleEntry {
         self
     }
 
+    /// Whether this rule's fix may read or write outside the root: its
+    /// `allow_out_of_root:` permission, never for a rule an `extends:`'d
+    /// ruleset or a nested config shaped
+    /// ([`extended_source`](crate::config::RuleSpec::extended_source)).
+    #[must_use]
+    pub fn fix_may_leave_root(&self) -> bool {
+        self.allow_out_of_root
+            && !self
+                .spec
+                .as_deref()
+                .is_some_and(|spec| spec.extended_source)
+    }
+
     #[must_use]
     pub fn with_when(mut self, expr: WhenExpr) -> Self {
         self.when = Some(expr);

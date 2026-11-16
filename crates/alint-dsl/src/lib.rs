@@ -85,26 +85,75 @@ pub const CONFIG_SCHEMA_V1: &str = include_str!("../schemas/v1/config.json");
 /// writes a file with one of these names (`alint_core::reaches_alint_config`).
 pub(crate) const DEFAULT_CONFIG_NAMES: &[&str] = &alint_core::CONFIG_FILE_NAMES;
 
-/// Locate a config file starting at `start` and walking upward until one is
-/// found or the filesystem root is hit.
+/// Locate a config file starting at `start` and walking upward, as
+/// [`discover_config`] does, without the files it skipped.
 pub fn discover(start: &Path) -> Option<PathBuf> {
+    discover_config(start).path
+}
+
+/// What [`discover_config`] found.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Discovery {
+    /// The config file found, if any.
+    pub path: Option<PathBuf>,
+    /// Config files discovery passed over because another user owns them
+    /// (outside every repository only), nearest first. A caller warns about
+    /// each: `skipping <path>: owned by another user`.
+    pub skipped: Vec<PathBuf>,
+}
+
+/// Locate a config file starting at `start` and walking upward.
+///
+/// Inside a repository, the walk stops at the repository's top: the nearest
+/// directory at or above `start` that holds a `.git` directory or file, which
+/// it checks. A config above the repository, in a directory someone else may
+/// write (`/tmp`, a shared home), never governs it.
+///
+/// Outside every repository, the walk goes on to the file-system root, and
+/// skips a config file another user owns (on Unix, one whose owner is not the
+/// effective user id; root's files are root's own), listing it in
+/// [`Discovery::skipped`]. On Windows, where alint reads no owner, no file is
+/// skipped.
+#[must_use]
+pub fn discover_config(start: &Path) -> Discovery {
+    discover_config_with(start, &alint_core::git::owned_by_current_user)
+}
+
+/// [`discover_config`] with the ownership check given, so tests can stand
+/// in for another user.
+pub(crate) fn discover_config_with(
+    start: &Path,
+    owned_by_current_user: &dyn Fn(&Path) -> Option<bool>,
+) -> Discovery {
+    let mut discovery = Discovery::default();
     // Relative paths such as `.` have a lexical parent of the empty path, so
     // walking them directly stops after one directory. Make the start absolute
     // first so discovery from a nested working directory reaches every real
     // ancestor. `absolute` is lexical (it need not resolve symlinks or require
     // the path to exist), which keeps discovery predictable and inexpensive.
-    let start = std::path::absolute(start).ok()?;
-    let mut current = Some(start.as_path());
-    while let Some(dir) = current {
+    let Ok(start) = std::path::absolute(start) else {
+        return discovery;
+    };
+    let top = alint_core::git::repository_top(&start);
+    for dir in start.ancestors() {
         for name in DEFAULT_CONFIG_NAMES {
             let candidate = dir.join(name);
-            if candidate.is_file() {
-                return Some(candidate);
+            if !candidate.is_file() {
+                continue;
             }
+            if top.is_none() && owned_by_current_user(&candidate) == Some(false) {
+                discovery.skipped.push(candidate);
+                continue;
+            }
+            discovery.path = Some(candidate);
+            return discovery;
         }
-        current = dir.parent();
+        if top.as_deref() == Some(dir) {
+            break;
+        }
     }
-    None
+    discovery
 }
 
 /// Load without an injected catalog.

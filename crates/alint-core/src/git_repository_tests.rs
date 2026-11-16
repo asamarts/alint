@@ -1,0 +1,187 @@
+use super::*;
+
+/// A ceiling that keeps a search inside `dir`'s parent's subtree, so a stray
+/// repository above the temporary directory never answers.
+fn ceiling(dir: &Path) -> String {
+    canonical(dir).unwrap().to_string_lossy().into_owned()
+}
+
+#[test]
+fn the_nearest_git_directory_names_the_repository() {
+    let tmp = tempfile::tempdir().unwrap();
+    let top = tmp.path().join("repo");
+    std::fs::create_dir_all(top.join(".git")).unwrap();
+    std::fs::create_dir_all(top.join("a/b")).unwrap();
+    let fence = ceiling(tmp.path());
+    let found = find_repository(&top.join("a/b"), Some(&fence), None).unwrap();
+    let top = canonical(&top).unwrap();
+    assert_eq!(found.work_tree, top);
+    assert_eq!(found.git_dir, top.join(".git"));
+    let [git_dir, work_tree] = found.args();
+    assert_eq!(
+        git_dir,
+        OsString::from(format!("--git-dir={}", top.join(".git").display()))
+    );
+    assert_eq!(
+        work_tree,
+        OsString::from(format!("--work-tree={}", top.display()))
+    );
+}
+
+#[test]
+fn a_gitfile_names_the_git_directory_relative_to_itself() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(tmp.path().join("store/wt.git")).unwrap();
+    let top = tmp.path().join("checkout");
+    std::fs::create_dir_all(top.join("src")).unwrap();
+    std::fs::write(top.join(".git"), "gitdir: ../store/wt.git\r\n").unwrap();
+    let fence = ceiling(tmp.path());
+    let found = find_repository(&top.join("src"), Some(&fence), None).unwrap();
+    assert_eq!(found.work_tree, canonical(&top).unwrap());
+    assert_eq!(
+        found.git_dir,
+        canonical(&tmp.path().join("store/wt.git")).unwrap()
+    );
+
+    // Any other content is no gitfile, and no repository.
+    for text in ["", "gitdir:", "gitdir: \n", "ref: refs/heads/main\n"] {
+        std::fs::write(top.join(".git"), text).unwrap();
+        assert_eq!(find_repository(&top, Some(&fence), None), None, "{text:?}");
+    }
+}
+
+/// A directory shaped like a bare repository is content: no directory is
+/// ever taken as a repository itself, so the search goes on above it.
+#[test]
+fn a_bare_shaped_directory_is_never_a_repository() {
+    let tmp = tempfile::tempdir().unwrap();
+    let bare = tmp.path().join("outer/bare");
+    std::fs::create_dir_all(bare.join("objects")).unwrap();
+    std::fs::create_dir_all(bare.join("refs")).unwrap();
+    std::fs::write(bare.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+    std::fs::write(bare.join("config"), "[core]\n\tworktree = .\n").unwrap();
+    let fence = ceiling(tmp.path());
+    assert_eq!(find_repository(&bare, Some(&fence), None), None);
+
+    std::fs::create_dir_all(tmp.path().join("outer/.git")).unwrap();
+    let found = find_repository(&bare, Some(&fence), None).unwrap();
+    assert_eq!(
+        found.work_tree,
+        canonical(&tmp.path().join("outer")).unwrap()
+    );
+}
+
+/// As `GIT_CEILING_DIRECTORIES` reads: no directory at or above the deepest
+/// ceiling strictly above the start is read, and a relative entry is ignored.
+#[test]
+fn the_search_stops_below_the_ceiling() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+    let start = tmp.path().join("sandbox/repository");
+    std::fs::create_dir_all(&start).unwrap();
+    let sandbox = ceiling(&tmp.path().join("sandbox"));
+    let separator = if cfg!(windows) { ';' } else { ':' };
+    for ceilings in [
+        sandbox.clone(),
+        format!("relative{separator}{sandbox}"),
+        format!("{}{separator}{sandbox}", ceiling(tmp.path())),
+    ] {
+        assert_eq!(
+            find_repository(&start, Some(&ceilings), None),
+            None,
+            "{ceilings}"
+        );
+    }
+    // The start itself is read even when it is a ceiling.
+    std::fs::create_dir_all(start.join(".git")).unwrap();
+    let own = ceiling(&start);
+    assert!(find_repository(&start, Some(&own), None).is_some());
+    // Without a ceiling below it, the repository above is found.
+    std::fs::remove_dir(start.join(".git")).unwrap();
+    let above = ceiling(tmp.path().parent().unwrap());
+    assert_eq!(
+        find_repository(&start, Some(&above), None).map(|found| found.work_tree),
+        Some(canonical(tmp.path()).unwrap())
+    );
+}
+
+#[test]
+fn repository_top_is_the_nearest_directory_holding_git() {
+    let tmp = tempfile::tempdir().unwrap();
+    let top = tmp.path().join("repo");
+    std::fs::create_dir_all(top.join(".git")).unwrap();
+    let vendored = top.join("node_modules/pkg");
+    std::fs::create_dir_all(&vendored).unwrap();
+    assert_eq!(repository_top(&vendored), Some(top.clone()));
+    let submodule = top.join("sub");
+    std::fs::create_dir_all(&submodule).unwrap();
+    std::fs::write(submodule.join(".git"), "gitdir: ../.git/modules/sub\n").unwrap();
+    assert_eq!(repository_top(&submodule.join("x")), Some(submodule));
+}
+
+#[cfg(unix)]
+#[test]
+fn the_current_user_owns_what_it_creates() {
+    let tmp = tempfile::tempdir().unwrap();
+    assert_eq!(owned_by_current_user(tmp.path()), Some(true));
+    assert_eq!(
+        owned_by_current_user(&tmp.path().join("missing")),
+        Some(false)
+    );
+}
+
+/// An explicit `--git-dir` skips Git's check that the current user owns the
+/// repository (CVE-2022-24765), so for a repository another user owns, alint
+/// asks Git to discover exactly it and names it only when Git accepts it.
+/// `GIT_TEST_ASSUME_DIFFERENT_OWNER` makes Git take every repository as
+/// another user's.
+#[cfg(unix)]
+#[test]
+fn git_decides_on_a_repository_another_user_owns() {
+    let tmp = tempfile::tempdir().unwrap();
+    let top = tmp.path().join("repo");
+    std::fs::create_dir_all(&top).unwrap();
+    let init = Command::new("git")
+        .args(["init", "-q"])
+        .arg(&top)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .output()
+        .unwrap();
+    assert!(init.status.success(), "{init:?}");
+    let repository = Repository {
+        git_dir: canonical(&top.join(".git")).unwrap(),
+        work_tree: canonical(&top).unwrap(),
+    };
+    let safe = tmp.path().join("safe.gitconfig");
+    std::fs::write(&safe, "[safe]\n\tdirectory = *\n").unwrap();
+    let environment = |global: &Path, extra: &[(&str, &str)]| -> crate::git::ProcessEnvironment {
+        std::env::vars()
+            .filter(|(name, _)| !name.starts_with("GIT_"))
+            .chain([
+                ("GIT_CONFIG_NOSYSTEM".to_string(), "1".to_string()),
+                (
+                    "GIT_CONFIG_GLOBAL".to_string(),
+                    global.to_string_lossy().into_owned(),
+                ),
+            ])
+            .chain(
+                extra
+                    .iter()
+                    .map(|(k, v)| ((*k).to_string(), (*v).to_string())),
+            )
+            .collect()
+    };
+    let none = Path::new("/dev/null");
+    assert!(git_accepts(&repository, Some(&environment(none, &[]))));
+    let different = [("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")];
+    assert!(
+        !git_accepts(&repository, Some(&environment(none, &different))),
+        "Git refuses a repository another user owns"
+    );
+    // The user's own `safe.directory` lets it through, as for Git itself.
+    assert!(git_accepts(
+        &repository,
+        Some(&environment(&safe, &different))
+    ));
+}

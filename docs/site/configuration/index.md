@@ -392,9 +392,13 @@ Absent or `false` keeps the secure default (full confinement).
 
 **Security.** Like the spawning-rule trust gate, `allow_out_of_root:` is honored **only** from your own top-level config: any `extends:`'d ruleset that declares it is a load-time error, so adopting a published ruleset can never grant it out-of-tree reads. It currently applies to the read kinds `json_schema_passes` (`schema_path:`), `pair_hash` (`target:`), and `registry_paths_resolve` (`source:`); a permitted read emits an informational note so the escape is never silent. Resolve/index existence checks stay confined regardless.
 
-A fix of your own rules follows the option too (a `file_create` target or a `content_from:`
-source outside the root). A fix of a rule an `extends:`'d ruleset or a nested config shaped never
-writes outside the root, whatever the option says, and is reported skipped.
+The option also lets your own rules' fixes leave the root, for the rules it names: a
+`file_create` or `dir_create` target, a `content_from:` or `sync_from` source, and the other paths
+a fix names. A fix of a rule an `extends:`'d ruleset or a nested config shaped is always confined:
+it never writes or reads outside the root, whatever the option says, and is reported skipped. The
+check-time reads above follow the option for every rule it names, a rule from an `extends:`'d
+ruleset included, so when you extend a ruleset you do not control, name your own rules or kinds
+rather than setting `true`.
 
 ### `baseline`
 

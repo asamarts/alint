@@ -778,6 +778,95 @@ fn discover_recognises_alternate_config_names() {
     }
 }
 
+/// Inside a repository, discovery checks the repository's top (the nearest
+/// directory holding a `.git` directory or file) and stops: a config above
+/// it, in a directory someone else may write, never governs it.
+#[test]
+fn discover_stops_at_the_repository_top() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(tmp.path().join(".alint.yml"), "version: 1\nrules: []\n").unwrap();
+    let repo = tmp.path().join("repo");
+    let nested = repo.join("a/b");
+    std::fs::create_dir_all(&nested).unwrap();
+    for git in ["directory", "file"] {
+        if git == "directory" {
+            std::fs::create_dir(repo.join(".git")).unwrap();
+        } else {
+            std::fs::remove_dir(repo.join(".git")).unwrap();
+            std::fs::write(repo.join(".git"), "gitdir: ../elsewhere\n").unwrap();
+        }
+        assert_eq!(discover(&nested), None, ".git {git}");
+        assert_eq!(discover(&repo), None, ".git {git}");
+
+        // From a subdirectory, the repository's own config is found.
+        std::fs::write(repo.join(".alint.yml"), "version: 1\nrules: []\n").unwrap();
+        assert_eq!(
+            discover(&nested),
+            Some(repo.join(".alint.yml")),
+            ".git {git}"
+        );
+        std::fs::remove_file(repo.join(".alint.yml")).unwrap();
+    }
+    // A directory without `.git` (a vendored package) is no repository top.
+    let vendored = repo.join("node_modules/pkg");
+    std::fs::create_dir_all(&vendored).unwrap();
+    std::fs::write(repo.join(".alint.yml"), "version: 1\nrules: []\n").unwrap();
+    assert_eq!(discover(&vendored), Some(repo.join(".alint.yml")));
+}
+
+/// Outside every repository, discovery climbs as before but skips a config
+/// file another user owns (here through the ownership seam), listing it; one
+/// the current user owns is found, and so is any where no owner is read
+/// (Windows).
+#[test]
+fn discover_outside_a_repository_skips_another_users_config() {
+    let tmp = tempfile::tempdir().unwrap();
+    if alint_core::git::repository_top(tmp.path()).is_some() {
+        eprintln!("skipped: the temporary directory is inside a repository");
+        return;
+    }
+    let shared = tmp.path().join(".alint.yml");
+    std::fs::write(&shared, "version: 1\nrules: []\n").unwrap();
+    let mine = tmp.path().join("work");
+    let nested = mine.join("a/b");
+    std::fs::create_dir_all(&nested).unwrap();
+    let foreign = |path: &Path| Some(path != shared.as_path() && path != mine.join("alint.yml"));
+
+    let found = discover_config_with(&nested, &foreign);
+    assert_eq!(found.skipped, std::slice::from_ref(&shared));
+    assert!(
+        found
+            .path
+            .as_deref()
+            .is_none_or(|path| !path.starts_with(tmp.path())),
+        "{found:?}"
+    );
+
+    // The nearer config the user owns wins; the skipped one is a sibling name.
+    std::fs::write(mine.join("alint.yml"), "version: 1\nrules: []\n").unwrap();
+    std::fs::write(mine.join("alint.yaml"), "version: 1\nrules: []\n").unwrap();
+    let found = discover_config_with(&nested, &foreign);
+    assert_eq!(found.path, Some(mine.join("alint.yaml")));
+    assert_eq!(found.skipped, [mine.join("alint.yml")]);
+
+    // No owner read (Windows): nothing is skipped.
+    let found = discover_config_with(&nested, &|_| None);
+    assert_eq!(found.path, Some(mine.join("alint.yml")));
+    assert_eq!(found.skipped, Vec::<PathBuf>::new());
+
+    // The real check: the user's own file is found.
+    let found = discover_config(&nested);
+    assert_eq!(found.path, Some(mine.join("alint.yml")));
+    assert_eq!(found.skipped, Vec::<PathBuf>::new());
+
+    // Inside a repository, no file is skipped: the repository is the user's
+    // to vouch for, as before.
+    std::fs::create_dir(mine.join(".git")).unwrap();
+    let found = discover_config_with(&nested, &|_| Some(false));
+    assert_eq!(found.path, Some(mine.join("alint.yml")));
+    assert_eq!(found.skipped, Vec::<PathBuf>::new());
+}
+
 #[test]
 fn extends_diamond_inheritance_resolves_without_duplicate_rules() {
     // Diamond shape: root extends B + C, both extend D.

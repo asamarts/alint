@@ -61,7 +61,7 @@ impl Engine {
                     continue;
                 }
                 let (path, is_dir, content) =
-                    match fixer.created_file(&it.violation, root, entry.allow_out_of_root) {
+                    match fixer.created_file(&it.violation, root, entry.fix_may_leave_root()) {
                         Some((path, content)) => (path, false, Some(content)),
                         None => match fixer.created_dir() {
                             Some(dir) => (dir.to_path_buf(), true, None),
@@ -348,7 +348,7 @@ impl Engine {
                             result,
                             item,
                             fixer?,
-                            entry?.allow_out_of_root,
+                            entry?.fix_may_leave_root(),
                             &it.violation,
                         ))
                     })

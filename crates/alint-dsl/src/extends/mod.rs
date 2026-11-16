@@ -10,10 +10,12 @@
 //! to turn an `https://…#sha256-…` entry into a config body.
 
 pub mod cache;
+mod entry_kind;
 pub mod fetcher;
 pub mod sri;
 
 pub use cache::{Cache, CacheError};
+pub(crate) use entry_kind::EntryKind;
 pub use fetcher::{FetchError, Fetcher};
 pub use sri::{Algorithm, Sri, SriError};
 

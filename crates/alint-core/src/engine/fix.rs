@@ -598,11 +598,13 @@ impl Engine {
         let mut targets = HashSet::new();
         for result in &report.results {
             let fixer = self.fixer_for(&result.rule_id);
+            // A rule an `extends:`'d ruleset shaped reads no `content_from`
+            // outside the root, whatever `allow_out_of_root` says.
             let allow_out_of_root = self
                 .entries
                 .iter()
                 .find(|e| e.rule.id() == &*result.rule_id)
-                .is_some_and(|e| e.allow_out_of_root);
+                .is_some_and(RuleEntry::fix_may_leave_root);
             for item in &result.items {
                 if !item.violation.is_sensitive() {
                     continue;

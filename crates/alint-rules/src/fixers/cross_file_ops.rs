@@ -21,7 +21,7 @@ use alint_core::{
 
 use crate::cross_file::{Normalize, apply_normalize};
 use crate::fixers::StructuredFixer;
-use crate::fixers::creators::{confine_fix_path, confine_fix_write};
+use crate::fixers::creators::{confine_fix_path, confine_fix_read, confine_fix_write};
 
 /// Overwrites the violating (drifted) target with the bytes of the host rule's
 /// canonical `source:`, making the two byte-identical. A *content-injecting*
@@ -60,11 +60,15 @@ impl SyncFromFixer {
         // exfiltrate (`source: /etc/passwd`) or overwrite (`target: ../x`)
         // out-of-tree. Same gate the same-file content fixers use. The editor
         // (`ctx` is `None`) confines strictly.
-        let allow = ctx.is_some_and(|ctx| ctx.allow_out_of_root);
-        let source_abs = confine_fix_path(&self.source, root, allow)?;
-        let target_abs = match ctx {
-            Some(ctx) => confine_fix_write(target_rel, ctx)?,
-            None => confine_fix_path(target_rel, root, false)?,
+        let (source_abs, target_abs) = match ctx {
+            Some(ctx) => (
+                confine_fix_read(&self.source, ctx)?,
+                confine_fix_write(target_rel, ctx)?,
+            ),
+            None => (
+                confine_fix_path(&self.source, root, false)?,
+                confine_fix_path(target_rel, root, false)?,
+            ),
         };
         // A file is trivially identical to itself: never overwrite a target with
         // its own bytes (a no-op that would still churn the diff). Not reachable
@@ -285,7 +289,7 @@ impl CrossFileValueFixer {
     /// values, then require exactly one -- else there is nothing to propagate and
     /// the fixer Skips (consistent with what `check` already reported).
     fn source_scalar(&self, ctx: &FixContext<'_>) -> std::result::Result<String, String> {
-        let source_abs = confine_fix_path(&self.source_file, ctx.root, ctx.allow_out_of_root)?;
+        let source_abs = confine_fix_read(&self.source_file, ctx)?;
         let source_bytes = match read_source_for_fix(&source_abs, &self.source_file, ctx) {
             Ok(ReadForFix::Bytes(b)) => b,
             Ok(ReadForFix::Skipped(FixOutcome::Skipped(r) | FixOutcome::Applied(r))) => {
@@ -944,11 +948,7 @@ impl CreateAndRegisterFixer {
                 member.display()
             )));
         }
-        let content = match crate::fixers::creators::resolve_source_bytes(
-            source,
-            ctx.root,
-            ctx.allow_out_of_root,
-        ) {
+        let content = match crate::fixers::creators::resolve_fix_source_bytes(source, ctx) {
             Ok(bytes) => bytes,
             Err(skip) => return Ok(FixOutcome::Skipped(skip)),
         };

@@ -1415,6 +1415,131 @@ async fn code_action_labels_an_unsafe_fix_and_does_not_prefer_it() {
     );
 }
 
+/// The code actions the server offers on the last line of each of `files`
+/// under `root`'s config, for a `no-todo` and an `erase` finding there, as
+/// `<file>: <title>`.
+async fn offered_fix_actions(root: &Path, files: &[&str]) -> Vec<String> {
+    use tower_lsp::lsp_types::{
+        CodeActionContext, PartialResultParams, TextDocumentIdentifier, WorkDoneProgressParams,
+    };
+    let mut session = Some(build_session(root).unwrap().unwrap());
+    let (service, _socket) = LspService::new(test_backend);
+    let backend = service.inner();
+    let mut offered = Vec::new();
+    for file in files {
+        let uri = Url::from_file_path(root.join(file)).unwrap();
+        let text = std::fs::read_to_string(root.join(file)).unwrap();
+        let line = u32::try_from(text.lines().count() - 1).unwrap();
+        let range = Range::new(Position::new(line, 2), Position::new(line, 6));
+        let findings = [
+            ("no-todo", Some(line as usize + 1), Some(3)),
+            ("erase", None, None),
+        ]
+        .map(|(id, line, column)| Finding {
+            line,
+            column,
+            rule_id: id.to_string(),
+            range,
+            fixable: true,
+            ..finding(None)
+        });
+        {
+            let mut st = backend.state.lock();
+            if let Some(session) = session.take() {
+                install_session(&mut st, root, &uri, session);
+            } else {
+                let key = st.doc_config.values().next().unwrap().clone();
+                st.doc_config.insert(uri.clone(), key);
+            }
+            st.open.insert(uri.clone());
+            st.documents.insert(uri.clone(), text);
+            st.diagnostics.insert(uri.clone(), findings.to_vec());
+        }
+        let params = CodeActionParams {
+            text_document: TextDocumentIdentifier { uri },
+            range,
+            context: CodeActionContext {
+                diagnostics: vec![],
+                only: None,
+                trigger_kind: None,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        };
+        let actions = backend
+            .code_action(params)
+            .await
+            .unwrap()
+            .unwrap_or_default();
+        for action in actions {
+            let CodeActionOrCommand::CodeAction(action) = action else {
+                panic!("expected a CodeAction");
+            };
+            offered.push(format!("{file}: {}", action.title));
+        }
+    }
+    offered
+}
+
+/// A code action from a rule an `extends:`'d ruleset shaped never edits
+/// alint's configuration (a config file, anything under `.alint.d/`, a file
+/// the configuration came from), as `alint fix` never writes it for one; nor
+/// does any rule's action edit a Git directory. The same rule declared in the
+/// user's own config is offered on the config files (the positive control).
+#[tokio::test]
+async fn code_action_from_an_extended_rule_never_edits_alint_configuration() {
+    let rules = "version: 1\nrules:\n  - id: no-todo\n    kind: file_content_forbidden\n    \
+                 paths: \"**/*\"\n    pattern: \"TODO\"\n    level: error\n    \
+                 fix: { replace: { replacement: \"DONE\" } }\n  - id: erase\n    \
+                 kind: file_absent\n    paths: \"**/*.yml\"\n    level: error\n    \
+                 fix: { file_remove: {} }\n";
+    let files = [
+        ".alint.yml",
+        ".alint.d/extra.yml",
+        "rules.yml",
+        ".git/config.yml",
+        "notes.yml",
+    ];
+    for extended in [true, false] {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        if extended {
+            std::fs::write(root.join("rules.yml"), rules).unwrap();
+            std::fs::write(
+                root.join(".alint.yml"),
+                "version: 1\nextends: [./rules.yml]\n# TODO\n",
+            )
+            .unwrap();
+        } else {
+            std::fs::write(root.join(".alint.yml"), format!("{rules}# TODO\n")).unwrap();
+            std::fs::write(root.join("rules.yml"), "# TODO\n").unwrap();
+        }
+        std::fs::create_dir_all(root.join(".alint.d")).unwrap();
+        std::fs::write(root.join(".alint.d/extra.yml"), "# TODO\n").unwrap();
+        std::fs::write(root.join("notes.yml"), "# TODO\n").unwrap();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::write(root.join(".git/config.yml"), "# TODO\n").unwrap();
+        let offered = offered_fix_actions(root, &files).await;
+        if extended {
+            assert_eq!(
+                offered,
+                [
+                    "notes.yml: alint: fix `no-todo` (unsafe)",
+                    "notes.yml: alint: fix `erase` (unsafe)"
+                ],
+                "an extended rule edits no alint configuration"
+            );
+        } else {
+            // Every file but the Git directory's.
+            assert_eq!(offered.len(), 8, "the user's own rule: {offered:#?}");
+            assert!(
+                !offered.iter().any(|action| action.starts_with(".git/")),
+                "{offered:#?}"
+            );
+        }
+    }
+}
+
 #[test]
 fn located_lsp_path_maps_a_real_replace_fixer_to_utf16_text_edits() {
     // End-to-end for the located `code_action` path: a REAL `file_content_forbidden`

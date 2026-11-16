@@ -1195,6 +1195,17 @@ fn materialize_repository(
     package: &PackageRoot,
     repository: &Path,
 ) -> Result<()> {
+    materialize_repository_within(test, package, repository, MAX_FIXTURE_COPY_BYTES)
+}
+
+/// [`materialize_repository`] with `fixture_limit` in place of
+/// [`MAX_FIXTURE_COPY_BYTES`].
+fn materialize_repository_within(
+    test: &PolicyTest,
+    package: &PackageRoot,
+    repository: &Path,
+    fixture_limit: u64,
+) -> Result<()> {
     if let Some(tree) = &test.given.tree {
         materialize(tree, repository)?;
     } else {
@@ -1204,14 +1215,62 @@ fn materialize_repository(
             .as_deref()
             .ok_or_else(|| Error::runtime("validated test has no repository source"))?;
         let fixture = package.validate_fixture(relative).map_err(Error::from)?;
-        copy_fixture_dir(&fixture, &fixture, repository)?;
+        let mut budget = FixtureCopyBudget::new(&test.name, fixture_limit);
+        copy_fixture_dir(&fixture, &fixture, repository, &mut budget)?;
     }
     validate_repository_symlinks(repository).map_err(Error::from)
 }
 
+/// The most bytes one test copies from its fixture into its sandbox. A file
+/// with several hard links is copied once per link (linking the copies would
+/// tie the sandbox to the package), so a small package can name far more
+/// bytes than it holds. The largest policy-test package in this repository
+/// holds about 160 KB.
+const MAX_FIXTURE_COPY_BYTES: u64 = 64 * 1024 * 1024;
+
+/// What is left of one test's [`MAX_FIXTURE_COPY_BYTES`].
+struct FixtureCopyBudget<'a> {
+    test: &'a str,
+    limit: u64,
+    copied: u64,
+}
+
+impl<'a> FixtureCopyBudget<'a> {
+    fn new(test: &'a str, limit: u64) -> Self {
+        Self {
+            test,
+            limit,
+            copied: 0,
+        }
+    }
+
+    /// Take `bytes` for the copy of `path`, or refuse once the test's copies
+    /// would pass the limit.
+    fn take(&mut self, bytes: u64, path: &Path) -> Result<()> {
+        self.copied = self.copied.saturating_add(bytes);
+        if self.copied > self.limit {
+            return Err(Error::runtime(format!(
+                "test {:?}: its fixture copies more than {} bytes into the sandbox (at {}); \
+                 a test copies at most {} bytes, each hard link counted as a copy",
+                self.test,
+                self.limit,
+                normalized_path(path),
+                self.limit,
+            )));
+        }
+        Ok(())
+    }
+}
+
 /// Copy a validated fixture directory. Its symlinks are made after its other
-/// entries, so no copy follows one.
-fn copy_fixture_dir(fixture_root: &Path, source: &Path, destination: &Path) -> Result<()> {
+/// entries, so no copy follows one. Each file's size is taken from `budget`
+/// before it is copied.
+fn copy_fixture_dir(
+    fixture_root: &Path,
+    source: &Path,
+    destination: &Path,
+    budget: &mut FixtureCopyBudget<'_>,
+) -> Result<()> {
     let mut links = Vec::new();
     for entry in std::fs::read_dir(source).map_err(|source_error| Error::Io {
         path: source.to_path_buf(),
@@ -1232,7 +1291,7 @@ fn copy_fixture_dir(fixture_root: &Path, source: &Path, destination: &Path) -> R
                 path: to.clone(),
                 source: source_error,
             })?;
-            copy_fixture_dir(fixture_root, &from, &to)?;
+            copy_fixture_dir(fixture_root, &from, &to, budget)?;
         } else if metadata.file_type().is_file() {
             let canonical = from.canonicalize().map_err(|source_error| Error::Io {
                 path: from.clone(),
@@ -1243,6 +1302,8 @@ fn copy_fixture_dir(fixture_root: &Path, source: &Path, destination: &Path) -> R
                     path: normalized_path(&from),
                 }));
             }
+            let relative = from.strip_prefix(fixture_root).unwrap_or(&from);
+            budget.take(metadata.len(), relative)?;
             std::fs::copy(&from, &to).map_err(|source_error| Error::Io {
                 path: from.clone(),
                 source: source_error,
@@ -1394,6 +1455,14 @@ fn git(
     extra_environment: &[(&str, &str)],
     environment: &BTreeMap<String, String>,
 ) -> Result<()> {
+    // Every command names the repository (`init` the one it makes), so Git
+    // never discovers one: a fixture shaped like a bare repository stays
+    // content whatever the Git version (see alint-core's `git_command`).
+    let top = std::path::absolute(root).unwrap_or_else(|_| root.to_path_buf());
+    let mut git_dir = std::ffi::OsString::from("--git-dir=");
+    git_dir.push(top.join(".git"));
+    let mut work_tree = std::ffi::OsString::from("--work-tree=");
+    work_tree.push(&top);
     let mut command = Command::new("git");
     command
         .env_clear()
@@ -1404,9 +1473,9 @@ fn git(
         )
         .arg("--literal-pathspecs")
         .arg("--no-replace-objects")
-        // A fixture shaped like a bare repository must not become one (see
-        // alint-core's `git_command`).
         .args(["-c", "safe.bareRepository=explicit"])
+        .arg(git_dir)
+        .arg(work_tree)
         .arg("-C")
         .arg(root)
         .args(args);
