@@ -77,9 +77,10 @@ pub(crate) fn ayaml_from_str_seed<'de, S: serde::de::DeserializeSeed<'de>>(
 }
 
 /// The events of every document in `input`, from the compatibility reader
-/// [`from_str`] decodes with, under alint's parser limits. alint decodes one
-/// document; the `yaml_depth` tests read a whole stream with this.
-#[cfg(test)]
+/// [`from_str`] decodes with, under alint's parser limits, whatever parser the
+/// build chose. alint decodes one document; the `yaml_depth` tests read a
+/// whole stream with this, and `requires:` is checked on the first
+/// document's events.
 pub(crate) fn stream_events(input: &str) -> Result<Vec<ayaml::Event<'_>>, ayaml::Error> {
     ayaml::compat::parse_events_with_limits(input, &limits())
 }

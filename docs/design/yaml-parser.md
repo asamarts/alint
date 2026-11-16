@@ -101,7 +101,7 @@ alint and run before materialization:
 - 32 MiB structured-document input cap;
 - 128 flow-collection depth cap, the parser's own depth limit;
 - byte-weighted alias expansion allowance capped independently of parser dereference counting;
-- literal compatibility metadata checks through the Saphyr event stream;
+- literal compatibility metadata checks through ayaml's event stream, with a stack of their own;
 - depth/event checks for duplicate-aware YAML extraction;
 - extends-chain depth, memoization, remote-size, and source-confinement limits.
 
@@ -120,11 +120,17 @@ ayaml's defaults (#483). The guards and the parser do not refuse the same docume
   a name ayaml reads two ways, and after the byte-order mark that starts the text (see the lexer
   rules below). `MAX_YAML_FLOW_DEPTH` lists the valid documents this refuses.
 
-The guards stay as defense in depth (decided in #483): they refuse a bomb before any parser reads
-it, with alint's own error, whichever parser reads the text next. saphyr, which reads YAML for
-source spans and structured fixes, refuses a 256th level of flow nesting of its own (its flow level
-is a `u8`), but does not bound block nesting. The cost is one linear pass over text that holds a
-`[`, `{` or `*`, and a second parse of a document that uses an alias.
+The guards stay as defense in depth (decided in #483), with alint's own error. The flow guard
+reads the raw text itself, so it refuses a flow bomb before any parser reads it. The alias guard
+measures with ayaml, so it vouches only for a text ayaml reads whole: when ayaml refuses the text
+first (a syntax error, or a limit other than the alias budget), the guard's verdict is
+`Expansion::Unparsed`, not "within budget". A caller whose real parse is ayaml goes on, as that
+parse refuses the text; a caller that reads the text with saphyr refuses it, since saphyr accepts
+documents ayaml refuses (an alias to a collection that contains it among them), and its reading
+was never measured. saphyr, which reads YAML for source spans and structured fixes, refuses a 256th
+level of flow nesting of its own (its flow level is a `u8`), but does not bound block nesting. The
+cost is one linear pass over text that holds a `[`, `{` or `*`, and a second parse of a document
+that uses an alias.
 
 The pre-scanner's lexer began as a port of libyaml-rs 0.3.0's scanner, and #483 moved it to the
 token boundaries of ayaml's compatibility reader:

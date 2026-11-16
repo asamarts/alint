@@ -11,10 +11,15 @@
 //! was super-linear on deep flow nesting (a 40 KB `[`x20000 document took
 //! seconds) and which did not bound one anchor replayed many times. They stay
 //! as defense in depth (`docs/design/yaml-parser.md`,
-//! "Security and resource invariants"): a bomb is refused before any parser
-//! reads it, whichever parser that is. saphyr, which reads YAML for source spans
-//! and structured fixes, refuses a 256th level of flow nesting of its own (its
-//! flow level is a `u8`), but does not bound block nesting.
+//! "Security and resource invariants"). The flow guard reads the raw text
+//! itself, so it refuses a flow bomb before any parser reads it. The alias
+//! guard measures with ayaml, so it vouches only for a text ayaml reads: when
+//! ayaml refuses the text first, the guard says so ([`Expansion::Unparsed`]),
+//! and a caller that reads the text with another parser must refuse it too.
+//! saphyr, which reads YAML for source spans and structured fixes, refuses a
+//! 256th level of flow nesting of its own (its flow level is a `u8`), but does
+//! not bound block nesting, and accepts documents ayaml refuses, an alias to a
+//! collection that contains it among them.
 //!
 //! **The scan follows the parser's token boundaries** (`Lexer`), not a
 //! heuristic. Both guards are only as sound as the scanner's agreement with the
@@ -158,60 +163,112 @@ pub fn expansion_budget(len: usize) -> usize {
     MAX_YAML_EXPANSION_BYTES + len * YAML_EXPANSION_BYTES_PER_INPUT_BYTE
 }
 
-/// `true` when the YAML text's ALIAS expansion stays within its
-/// [`expansion_budget`]. Only a document that actually uses an alias
-/// (`*name`) can amplify, so alias-free text short-circuits to `true` at zero cost
-/// (its node count is ~linear in bytes, already bounded by the read cap). For
-/// alias-bearing text a cheap DISCARD-ONLY pass drives the parser's
-/// deserializer, which replays anchored events through the visitor -- so the
-/// expansion is charged ([`YAML_NODE_COST`] per node plus every scalar's bytes,
-/// exactly the copies the real parse would make) and the pass bails once the
-/// budget is exceeded (measured, release: both reported bombs -- 7.5M map
-/// nodes, and 4000 copies of a 1 MB scalar -- are rejected in well under a
-/// second without allocating). It builds NO value, so it cannot change the real
-/// parse's output; the caller runs the real parse only after this returns
-/// `true`. A non-budget deserialize error (malformed YAML, a parser limit other
-/// than the alias budget, such as the input cap, or an unusual node the counter
-/// doesn't model) is ignored -- only a genuine budget overflow returns `false`,
-/// and everything else falls through to the real parse, which produces the
-/// proper error. This is fail-safe: a real bomb is ordinary scalars /
-/// sequences / maps (and tagged nodes, via `visit_enum`) and is counted.
+/// What the alias-expansion guard found ([`expansion`], [`GuardScan::expansion`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Expansion {
+    /// The text holds no alias, or the guard read it whole and its alias
+    /// expansion fits the [`expansion_budget`].
+    WithinLimit,
+    /// The alias expansion exceeds the budget: refuse the text.
+    OverLimit,
+    /// The text holds an alias, but the parser the guard measures with
+    /// (ayaml, which alint decodes with) refused it before the expansion was
+    /// counted, for the reason this holds: a syntax error, or a limit other
+    /// than the alias budget, such as the input cap. The guard does not know
+    /// what the aliases expand to. A caller whose real parse is that same
+    /// parser may go on, as the parse refuses the text with the proper error;
+    /// a caller that reads the text with another parser (saphyr), which may
+    /// accept what ayaml refused, must refuse the text, or it reads aliases
+    /// nothing has bounded.
+    Unparsed(String),
+}
+
+impl Expansion {
+    /// `false` only for [`Expansion::OverLimit`]: the verdict for a caller
+    /// whose real parse is ayaml, which refuses an [`Expansion::Unparsed`]
+    /// text itself.
+    #[must_use]
+    pub const fn within_limit_for_ayaml(&self) -> bool {
+        !matches!(self, Self::OverLimit)
+    }
+}
+
+/// The alias-expansion verdict for `text` (see [`Expansion`]). Only a document
+/// that actually uses an alias (`*name`) can amplify, so alias-free text
+/// short-circuits to [`Expansion::WithinLimit`] at zero cost (its node count is
+/// ~linear in bytes, already bounded by the read cap). For alias-bearing text a
+/// cheap DISCARD-ONLY pass drives the parser's deserializer, which replays
+/// anchored events through the visitor -- so the expansion is charged
+/// ([`YAML_NODE_COST`] per node plus every scalar's bytes, exactly the copies
+/// the real parse would make) and the pass bails once the budget is exceeded
+/// (measured, release: both reported bombs -- 7.5M map nodes, and 4000 copies
+/// of a 1 MB scalar -- are rejected in well under a second without
+/// allocating). It builds NO value, so it cannot change the real parse's
+/// output. A document ayaml refuses for another reason (malformed YAML, a
+/// limit other than the alias budget) is [`Expansion::Unparsed`]: ayaml reads
+/// the whole document before the visitor sees a node, so after a syntax error
+/// anywhere nothing was counted, and the guard says so rather than vouch for
+/// it. A real bomb is ordinary scalars / sequences / maps (and tagged nodes,
+/// via `visit_enum`) and is counted.
+#[must_use]
+pub fn expansion(text: &str) -> Expansion {
+    expansion_with(text, expansion_budget(text.len()))
+}
+
+/// `true` unless [`expansion`] is [`Expansion::OverLimit`]: the guard for a
+/// caller whose real parse is ayaml, which refuses an [`Expansion::Unparsed`]
+/// text with the proper error. A caller that parses with anything else uses
+/// [`expansion`] and refuses [`Expansion::Unparsed`] too.
 #[must_use]
 pub fn expansion_within_limit(text: &str) -> bool {
-    expansion_within_limit_with(text, expansion_budget(text.len()))
+    expansion(text).within_limit_for_ayaml()
 }
 
-/// [`expansion_within_limit`] with an explicit byte budget, so tests can exercise
-/// the counting + bail + alias-gate logic with a small budget (fast) instead of
+/// [`expansion`] with an explicit byte budget, so tests can exercise the
+/// counting + bail + alias-gate logic with a small budget (fast) instead of
 /// materializing millions of nodes at the production ceiling.
-fn expansion_within_limit_with(text: &str, max: usize) -> bool {
-    !contains_alias(text) || expansion_budget_pass(text, max)
+fn expansion_with(text: &str, max: usize) -> Expansion {
+    if contains_alias(text) {
+        expansion_budget_pass(text, max)
+    } else {
+        Expansion::WithinLimit
+    }
 }
 
-/// The discard-only counting pass of [`expansion_within_limit`], for text that
-/// holds an alias.
-fn expansion_budget_pass(text: &str, max: usize) -> bool {
+/// [`expansion_within_limit`] with an explicit byte budget (see
+/// [`expansion_with`]).
+#[cfg(test)]
+fn expansion_within_limit_with(text: &str, max: usize) -> bool {
+    expansion_with(text, max).within_limit_for_ayaml()
+}
+
+/// The discard-only counting pass of [`expansion`], for text that holds an
+/// alias.
+fn expansion_budget_pass(text: &str, max: usize) -> Expansion {
     let remaining = std::cell::Cell::new(max);
     let exceeded = std::cell::Cell::new(false);
     let seed = NodeBudget {
         remaining: &remaining,
         exceeded: &exceeded,
     };
-    let result = crate::yaml::ayaml_from_str_seed(text, seed);
-    // D28: ayaml enforces its own alias budget before the visitor sees every
-    // node. Its alias-expansion limit error therefore means the document is
-    // over budget; treat it exactly like a NodeBudget overflow instead of
-    // letting the early error fall through as "within limit". Any other limit
-    // (the input cap, the document count) is not about aliases: it falls
-    // through, and the real parse reports it.
-    if result.is_err_and(|error| {
-        error
-            .limit()
-            .is_some_and(|limit| limit.kind() == ayaml::LimitKind::AliasExpansion)
-    }) {
-        exceeded.set(true);
+    match crate::yaml::ayaml_from_str_seed(text, seed) {
+        Ok(()) if !exceeded.get() => Expansion::WithinLimit,
+        Ok(()) => Expansion::OverLimit,
+        // D28: ayaml enforces its own alias budget before the visitor sees
+        // every node. Its alias-expansion limit error therefore means the
+        // document is over budget, exactly like a NodeBudget overflow.
+        Err(error)
+            if exceeded.get()
+                || error
+                    .limit()
+                    .is_some_and(|limit| limit.kind() == ayaml::LimitKind::AliasExpansion) =>
+        {
+            Expansion::OverLimit
+        }
+        // Any other refusal (a syntax error, the input cap, the document
+        // count) came before the expansion was counted.
+        Err(error) => Expansion::Unparsed(error.to_string()),
     }
-    !exceeded.get()
 }
 
 /// Both YAML guards from one lexer pass. Callers that checked
@@ -233,10 +290,23 @@ impl GuardScan {
         self.flow_within_limit
     }
 
-    /// Same verdict as [`expansion_within_limit`] for the scanned `text`.
+    /// Same verdict as [`expansion_within_limit`] for the scanned `text`: for
+    /// a caller whose real parse is ayaml.
     #[must_use]
     pub fn expansion_within_limit(&self, text: &str) -> bool {
-        !self.has_alias || expansion_budget_pass(text, expansion_budget(text.len()))
+        self.expansion(text).within_limit_for_ayaml()
+    }
+
+    /// Same verdict as [`expansion`] for the scanned `text`. A caller that
+    /// reads the text with a parser other than ayaml refuses
+    /// [`Expansion::Unparsed`] as well as [`Expansion::OverLimit`].
+    #[must_use]
+    pub fn expansion(&self, text: &str) -> Expansion {
+        if self.has_alias {
+            expansion_budget_pass(text, expansion_budget(text.len()))
+        } else {
+            Expansion::WithinLimit
+        }
     }
 }
 
@@ -293,108 +363,24 @@ fn contains_alias(text: &str) -> bool {
     found
 }
 
-#[derive(Clone, Copy)]
-struct LiteralScalarNode<'a> {
-    value: Option<&'a str>,
+/// One open collection of [`mapping_subtree_is_literal`]'s walk.
+struct LiteralFrame {
+    mapping: bool,
+    /// How many keys of the path led here, while they match (`None` once a
+    /// key does not); the path's length means inside the subtree.
+    candidate: Option<usize>,
+    /// The collection has an anchor or a tag.
     indirect: bool,
+    /// In a mapping, whether a key or a value comes next.
+    due: Due,
 }
 
-fn walk_literal_subtree<'event>(
-    events: &'event [(saphyr_parser::Event<'_>, saphyr_parser::Span)],
-    scalar_anchors: &std::collections::HashMap<usize, &'event str>,
-    index: &mut usize,
-    candidate_depth: Option<usize>,
-    target: &[&str],
-    literal: &mut bool,
-) -> Result<LiteralScalarNode<'event>, String> {
-    use saphyr_parser::Event;
-
-    let Some((event, _)) = events.get(*index) else {
-        return Err("unexpected end of YAML event stream".to_string());
-    };
-    let inside = candidate_depth == Some(target.len());
-    match event {
-        Event::Scalar(value, _, anchor, tag) => {
-            let indirect = *anchor != 0 || tag.is_some();
-            if inside && indirect {
-                *literal = false;
-            }
-            *index += 1;
-            Ok(LiteralScalarNode {
-                value: Some(value.as_ref()),
-                indirect,
-            })
-        }
-        Event::Alias(anchor) => {
-            if inside {
-                *literal = false;
-            }
-            *index += 1;
-            Ok(LiteralScalarNode {
-                value: scalar_anchors.get(anchor).copied(),
-                indirect: true,
-            })
-        }
-        Event::SequenceStart(anchor, tag) => {
-            let indirect = *anchor != 0 || tag.is_some();
-            if inside && indirect {
-                *literal = false;
-            }
-            *index += 1;
-            while !matches!(events.get(*index), Some((Event::SequenceEnd, _))) {
-                walk_literal_subtree(
-                    events,
-                    scalar_anchors,
-                    index,
-                    inside.then_some(target.len()),
-                    target,
-                    literal,
-                )?;
-            }
-            *index += 1;
-            Ok(LiteralScalarNode {
-                value: None,
-                indirect,
-            })
-        }
-        Event::MappingStart(anchor, tag) => {
-            let indirect = *anchor != 0 || tag.is_some();
-            if inside && indirect {
-                *literal = false;
-            }
-            *index += 1;
-            while !matches!(events.get(*index), Some((Event::MappingEnd, _))) {
-                let key = walk_literal_subtree(
-                    events,
-                    scalar_anchors,
-                    index,
-                    inside.then_some(target.len()),
-                    target,
-                    literal,
-                )?;
-                if inside && key.value == Some("<<") {
-                    *literal = false;
-                }
-                let child_depth = match candidate_depth {
-                    Some(depth) if depth == target.len() => Some(depth),
-                    Some(depth) if depth < target.len() && key.value == Some(target[depth]) => {
-                        if key.indirect {
-                            *literal = false;
-                        }
-                        Some(depth + 1)
-                    }
-                    _ => None,
-                };
-                walk_literal_subtree(events, scalar_anchors, index, child_depth, target, literal)?;
-            }
-            *index += 1;
-            Ok(LiteralScalarNode {
-                value: None,
-                indirect,
-            })
-        }
-        other => Err(format!("unexpected YAML event {other:?} inside a value")),
-    }
+/// What a mapping of [`mapping_subtree_is_literal`]'s walk reads next.
+#[derive(Clone, Copy)]
+enum Due {
+    Key,
+    /// A value, with its candidate depth (see [`LiteralFrame::candidate`]).
+    Value(Option<usize>),
 }
 
 /// Return whether the mapping value at `path` contains only direct YAML nodes.
@@ -402,43 +388,104 @@ fn walk_literal_subtree<'event>(
 /// Compatibility metadata uses this after the cheap complexity guards to reject
 /// anchors, aliases, explicit tags, and merge keys before typed deserialization.
 /// The rest of the document is not restricted. An absent path is literal.
+///
+/// It reads the text as alint decodes it (ayaml), so the verdict cannot depend
+/// on another parser's reading, and it walks the events with a stack of its own
+/// rather than recursion: a document nested deeper than
+/// [`MAX_YAML_FLOW_DEPTH`] is an error, never a deep native stack.
+///
+/// # Errors
+///
+/// When the text does not parse, or nests deeper than [`MAX_YAML_FLOW_DEPTH`].
 pub fn mapping_subtree_is_literal(text: &str, path: &[&str]) -> Result<bool, String> {
-    use saphyr_parser::{Event, Parser};
+    use ayaml::Event;
 
     if path.is_empty() {
         return Ok(true);
     }
-    let events = Parser::new_from_str(text)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string())?;
-    let scalar_anchors = events
-        .iter()
-        .filter_map(|(event, _)| match event {
-            Event::Scalar(value, _, anchor, _) if *anchor != 0 => Some((*anchor, value.as_ref())),
-            _ => None,
-        })
-        .collect::<std::collections::HashMap<_, _>>();
-    let Some(mut index) = events.iter().position(|(event, _)| {
-        matches!(
-            event,
-            Event::Scalar(..)
-                | Event::Alias(..)
-                | Event::SequenceStart(..)
-                | Event::MappingStart(..)
-        )
-    }) else {
-        return Ok(true);
-    };
+    let events = crate::yaml::stream_events(text).map_err(|error| error.to_string())?;
+    // Anchor names that name a scalar, so far: an alias key reads as its text.
+    let mut scalar_anchors = std::collections::HashMap::<&str, &str>::new();
+    let mut stack: Vec<LiteralFrame> = Vec::new();
     let mut literal = true;
-    walk_literal_subtree(
-        &events,
-        &scalar_anchors,
-        &mut index,
-        Some(0),
-        path,
-        &mut literal,
-    )?;
-    Ok(literal)
+    for event in &events {
+        let candidate = match stack.last() {
+            None => Some(0),
+            Some(frame) => match frame.due {
+                Due::Value(value) => value,
+                Due::Key => (frame.candidate == Some(path.len())).then_some(path.len()),
+            },
+        };
+        let inside = candidate == Some(path.len());
+        // The node just completed: its text (a scalar's, or the scalar an
+        // alias names) and whether it has an anchor, a tag, or is an alias.
+        let (value, indirect) = match event {
+            Event::Scalar {
+                value, anchor, tag, ..
+            } => {
+                if let Some(anchor) = anchor {
+                    scalar_anchors.insert(anchor.as_str(), value.as_ref());
+                }
+                (Some(value.as_ref()), anchor.is_some() || tag.is_some())
+            }
+            Event::Alias { anchor, .. } => {
+                literal &= !inside;
+                (scalar_anchors.get(anchor.as_str()).copied(), true)
+            }
+            Event::SequenceStart { anchor, tag, .. } | Event::MappingStart { anchor, tag, .. } => {
+                if let Some(anchor) = anchor {
+                    scalar_anchors.remove(anchor.as_str());
+                }
+                let indirect = anchor.is_some() || tag.is_some();
+                literal &= !(inside && indirect);
+                stack.push(LiteralFrame {
+                    mapping: matches!(event, Event::MappingStart { .. }),
+                    candidate,
+                    indirect,
+                    due: Due::Key,
+                });
+                if stack.len() > MAX_YAML_FLOW_DEPTH {
+                    return Err(format!(
+                        "YAML nesting exceeds the maximum supported depth ({MAX_YAML_FLOW_DEPTH})"
+                    ));
+                }
+                continue;
+            }
+            Event::SequenceEnd { .. } | Event::MappingEnd { .. } => {
+                let Some(frame) = stack.pop() else {
+                    return Err("unbalanced YAML event stream".to_string());
+                };
+                (None, frame.indirect)
+            }
+            _ => continue,
+        };
+        if matches!(event, Event::Scalar { .. }) {
+            literal &= !(inside && indirect);
+        }
+        let Some(parent) = stack.last_mut() else {
+            // The first document's root is complete.
+            return Ok(literal);
+        };
+        if !parent.mapping {
+            continue;
+        }
+        if matches!(std::mem::replace(&mut parent.due, Due::Key), Due::Value(_)) {
+            // That was a value; a key is due.
+            continue;
+        }
+        // That was a key: decide what its value is.
+        let parent_inside = parent.candidate == Some(path.len());
+        literal &= !(parent_inside && value == Some("<<"));
+        parent.due = Due::Value(match parent.candidate {
+            Some(depth) if depth == path.len() => Some(depth),
+            Some(depth) if depth < path.len() && value == Some(path[depth]) => {
+                literal &= !indirect;
+                Some(depth + 1)
+            }
+            _ => None,
+        });
+    }
+    Ok(true)
 }
 
 /// A structural event the [`Lexer`] reports to its consumer.

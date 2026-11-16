@@ -595,34 +595,41 @@ fn bom_prefixed_config_bombs_are_rejected_before_they_expand() {
     // Regression: the guards scan the RAW config text, and a leading BOM put
     // their lexer one column behind the parser v0.22 used on line 1, so
     // `\u{feff}--- '...` hid a flow bomb (7.7 s) or an alias bomb (3.5 GB)
-    // inside a phantom single-quoted scalar. Both reported repros, through the
-    // real loader, and a valid alias bomb behind a BOM.
+    // inside a phantom single-quoted scalar. One leading BOM is now dropped
+    // before the guards and the parser read the text, so both read `---` as a
+    // marker and the quoted text as one scalar: each reported repro is a config
+    // that is a string, refused at once. Unquoted, each bomb is refused.
     let tmp = tempfile::tempdir().unwrap();
     let cfg = tmp.path().join(".alint.yml");
     let n = 60_000;
     let flow = format!("\u{feff}--- 'x: {}1{}\n'\n", "[".repeat(n), "]".repeat(n));
-    std::fs::write(&cfg, flow).unwrap();
-    let err = load(&cfg).unwrap_err().to_string();
-    assert!(err.contains("flow nesting"), "BOM flow bomb; got: {err}");
     let alias = format!(
         "\u{feff}--- 'k: {{a: &a [{}], b: [{}], c: \"{{{{env.HOME}}}}\"}}\n'\n",
         "1,".repeat(1000),
         "*a,".repeat(50_000)
     );
-    // ayaml gives the BOM a column, so `---` is text and the quote on line 2
-    // never closes; it checks the stream's syntax before it replays an alias.
-    std::fs::write(&cfg, &alias).unwrap();
+    for text in [&flow, &alias] {
+        std::fs::write(&cfg, text).unwrap();
+        for err in [
+            load(&cfg).unwrap_err().to_string(),
+            crate::parse(text).unwrap_err().to_string(),
+        ] {
+            assert!(
+                err.contains("non-mapping YAML value"),
+                "BOM quoted shape; got: {err}"
+            );
+        }
+    }
+    let flow = format!("\u{feff}---\nx: {}1{}\n", "[".repeat(n), "]".repeat(n));
+    std::fs::write(&cfg, &flow).unwrap();
     for err in [
         load(&cfg).unwrap_err().to_string(),
-        crate::parse(&alias).unwrap_err().to_string(),
+        crate::parse(&flow).unwrap_err().to_string(),
     ] {
-        assert!(
-            err.contains("unterminated single-quoted scalar at line 2 column 1"),
-            "BOM alias shape; got: {err}"
-        );
+        assert!(err.contains("flow nesting"), "BOM flow bomb; got: {err}");
     }
-    // Before `...` the BOM takes no column, so this one is valid YAML: its
-    // aliases are charged against the expansion budget.
+    // A stream may start with `...` (after the dropped BOM), so this one is
+    // valid YAML: its aliases are charged against the expansion budget.
     let small = "\u{feff}...\na: &a [1]\nb: [*a, *a]\n";
     assert!(alint_core::yaml::from_str::<alint_core::yaml::Value>(small).is_ok());
     let valid = format!(

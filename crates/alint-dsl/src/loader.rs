@@ -133,6 +133,7 @@ pub(crate) fn parse_config_interpolated_with_environment(
     source: &Path,
     environment: &dyn crate::EnvironmentProvider,
 ) -> Result<RawConfig> {
+    let contents = crate::config_text(contents, &display_path(source))?;
     // Name the file in a YAML/typed error: in an `extends:` chain or a
     // `.alint.d/` drop-in, a bare "at line 2 column 1" reads as if the
     // top-level config were at fault.
@@ -144,6 +145,18 @@ pub(crate) fn parse_config_interpolated_with_environment(
             other => other,
         }
     })
+}
+
+/// The error for a config at `path` that could not be read: one past the size
+/// cap is a config error, in the words [`crate::config_text`] uses.
+pub(crate) fn config_read_error(path: &Path, source: std::io::Error) -> Error {
+    if source.kind() == std::io::ErrorKind::FileTooLarge {
+        return Error::Other(format!("{}: {source}", display_path(path)));
+    }
+    Error::Io {
+        path: path.to_path_buf(),
+        source,
+    }
 }
 
 /// `path` for a user-facing message, without the `\\?\` verbatim prefix that
@@ -258,9 +271,19 @@ fn remote_source_display(entry: &str) -> String {
     }
 }
 
-pub(crate) fn reject_nonliteral_requirement(contents: &str, source: &str) -> Result<()> {
-    let value: ayaml::Value = alint_core::yaml::from_str(contents)?;
+/// After `contents` failed to decode: the error a non-literal `requires:`
+/// earns, which names the cause better than the decode error does. That takes
+/// a second parse, so a text that does not spell `requires` (and so has no such
+/// key, unless one is spelled with escapes, which then gets the decode error:
+/// an error all the same) skips it.
+pub(crate) fn nonliteral_requirement_after_error(contents: &str, source: &str) -> Option<Error> {
+    if !contents.contains("requires") {
+        return None;
+    }
+    let value: ayaml::Value = alint_core::yaml::from_str(contents).ok()?;
     reject_nonliteral_requirement_in_value(contents, source, &value)
+        .err()
+        .filter(|error| matches!(error, Error::Other(_)))
 }
 
 fn reject_nonliteral_requirement_in_value(
@@ -316,12 +339,8 @@ fn deserialize_raw_config(contents: &str, source: &str) -> Result<RawConfig> {
             }
             Ok(config)
         }
-        Err(parse_error) => {
-            if let Err(error @ Error::Other(_)) = reject_nonliteral_requirement(contents, source) {
-                return Err(error);
-            }
-            Err(Error::Yaml(parse_error))
-        }
+        Err(parse_error) => Err(nonliteral_requirement_after_error(contents, source)
+            .unwrap_or(Error::Yaml(parse_error))),
     }
 }
 
@@ -644,10 +663,7 @@ pub(crate) fn load_recursive(
     let contents = opts
         .config_source
         .read_to_string(&canonical)
-        .map_err(|source| Error::Io {
-            path: canonical.clone(),
-            source,
-        })?;
+        .map_err(|source| config_read_error(&canonical, source))?;
     let mut config = parse_config_interpolated_with_environment(
         &contents,
         &canonical,
@@ -726,9 +742,9 @@ pub(crate) fn load_recursive(
             trusted,
             config.version,
         )?;
-        merged = merge(merged, parent);
+        merged = merge(merged, parent)?;
     }
-    merged = merge(merged, config);
+    merged = merge(merged, config)?;
     state.visiting.remove(&canonical);
     if let Some(key) = memo_key {
         state.remember(key, &merged);
@@ -970,6 +986,7 @@ fn load_remote(
     // resolution needs a deliberate decision.
     let body_str = std::str::from_utf8(&body)
         .map_err(|e| Error::Other(format!("remote body from {source} is not UTF-8: {e}")))?;
+    let body_str = crate::config_text(body_str, &format!("remote config at {source}"))?;
     // A remote body is untrusted input (SRI pins WHICH bytes, not that they are
     // benign), so it needs the same guards as a local config (written for the
     // parser v0.22 used, which hung on a deep-flow bomb, and kept as defense in

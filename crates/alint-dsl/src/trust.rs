@@ -472,7 +472,7 @@ fn visit_strings(value: &ayaml::Value, visit: &mut impl FnMut(&str)) {
 }
 
 /// One `vars.<NAME>` read in a `when` expression of an untrusted remote.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct UntrustedWhenVarRead {
     source: String,
     /// `rule` or `template`.
@@ -1560,7 +1560,9 @@ pub(crate) fn reject_env_expansion_in(
 /// and `kind: !x command` (a tagged VALUE) defeats `as_str()` the same way. A
 /// non-string key and a `<<` merge key have no meaning in the DSL either (merge
 /// keys are NOT applied to config), so all of them are refused here, for every
-/// source, before any gate runs: the gates and serde then see one shape.
+/// source, before any gate runs: the gates and serde then see one shape. So is
+/// an integer past 64 bits, which no rule field reads: here the error names the
+/// file and the field, where the merged rule's decode could name neither.
 ///
 /// The other top-level fields deserialize straight into typed structs, which
 /// the gates read after serde has resolved them, so only these two raw lists
@@ -1571,9 +1573,9 @@ pub(crate) fn reject_ambiguous_yaml_in(raw: &RawConfig, source: &str) -> Result<
             let mut path = format!("{section}[{i}]");
             if let Some(problem) = find_ambiguous_yaml_in_mapping(m, &mut path) {
                 return Err(Error::Other(format!(
-                    "{source}: {problem}; YAML tags, non-string keys, `<<` merge keys, and \
-                     `{INTERNAL_FIELD_PREFIX}*` fields are not supported in alint rules or \
-                     templates"
+                    "{source}: {problem}; YAML tags, non-string keys, `<<` merge keys, integers \
+                     past 64 bits, and `{INTERNAL_FIELD_PREFIX}*` fields are not supported in \
+                     alint rules or templates"
                 )));
             }
         }
@@ -1614,6 +1616,11 @@ fn find_ambiguous_yaml_in_value(v: &ayaml::Value, path: &mut String) -> Option<S
     use std::fmt::Write as _;
     match v {
         Value::Tagged(t) => Some(format!("`{path}` has the YAML tag `{}`", t.tag)),
+        // No rule field reads one, and decoding the rule would fail later,
+        // where neither the file nor the field is known any more.
+        Value::Number(n) if n.is_integer() && !n.is_i64() && !n.is_u64() => {
+            Some(format!("`{path}` is an integer past 64 bits"))
+        }
         Value::Mapping(m) => find_ambiguous_yaml_in_mapping(m, path),
         Value::Sequence(seq) => seq.iter().enumerate().find_map(|(i, item)| {
             let len = path.len();
