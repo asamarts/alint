@@ -660,6 +660,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   nested rule's `{dir}/*.json`) tests only the files under them, where it tested every file in
   the tree. Nested in `require:`, it did that in every iteration, so its cost grew with the
   number of iterations times the number of files.
+- **YAML files over 1 MiB share a budget of 32 MiB of input parsing at once** (ADR-0042). One
+  YAML parse at the 32 MiB input cap peaked at 4.5 to 6.2 GB, and every worker thread could run
+  one. A parse of a larger file now waits until its size is free in the budget, so at most one
+  file at the cap parses at a time; a file of 1 MiB or less never waits, and findings are
+  unchanged. The `yaml_path_*` rules, `json_schema_passes`, the cross-file rules' `extract:`,
+  `pinned_references` and the structured fixes all take from it, and so does
+  `alint_core::Format::parse`, which may now wait for another thread's YAML parse.
+- **YAML files of 10 KB and more cost more time and memory to read than in 0.22:** +9% to +54%
+  wall time and 1.3x to 2.9x peak memory. ayaml 0.1.2 holds about 65 bytes of heap per input byte
+  while it parses, where libyaml held 35 to 39 (asamarts/ayaml#163). The v0.23.0 release waits
+  for an ayaml release that brings its peak heap within 1.2x of libyaml's (ADR-0042).
 
 ### Fixed
 
