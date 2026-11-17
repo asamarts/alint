@@ -8,17 +8,26 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Security
 
+GitHub security advisory GHSA-78jj-xfpm-g6px, published with this release, describes the holes
+below in the policy-test sandbox and in the trust alint gives `extends:` rulesets, nested configs
+and editor workspaces ([ADR-0040](docs/adr/0040-the-v023-advisory-and-the-allowlist-approval.md),
+[ADR-0043](docs/adr/0043-trust-and-disclosure-decisions-from-the-post-v0221-audit.md)). No v0.22.x
+patch release follows: upgrade to v0.23.0. Until then, run `alint test` only on policy-test
+packages whose configurations and `given:` blocks you trust, and `alint fix` only with `extends:`
+rulesets you trust and, with a content fix, only on repositories you trust.
+
 - **The language server runs nothing a workspace's config could start until the editor trusts
   the workspace.** Since v0.11.0, opening a folder in an editor with alint's language server ran
   that repository's `.alint.yml` as `alint check` does: its command rules (`kind: command`,
   `generated_file_fresh`, `command_idempotent`) and `custom:` facts started processes, a remote
   `extends:` was fetched, and `{{env.*}}` and `env.*` in a `when:` read the editor's
   environment, so opening a cloned repository ran its commands. Until the client sends the
-  initialization option `{"trusted": true}`, the server now skips every rule that spawns (by
-  kind or by fix, at any `require:` depth) and every `custom:` fact, refuses a remote `extends:`
-  with a diagnostic on the config, and reads no environment value. Every other rule lints as
-  usual, and the server says what it turned off once, in an information message. The VS Code
-  extension sends VS Code's Workspace Trust state and restarts the server when trust is
+  initialization option `{"trusted": true}`, the server now skips every rule of a spawning kind
+  (at any `require:` depth) and every `custom:` fact, lints a rule whose fix alone spawns (such
+  as `file_absent` with `fix: git_untrack`) without offering that fix, refuses a remote
+  `extends:` with a diagnostic on the config, and reads no environment value. Every other rule
+  lints as usual, and the server says what it turned off once, in an information message. The
+  VS Code extension sends VS Code's Workspace Trust state and restarts the server when trust is
   granted, so a trusted VS Code workspace behaves as before; other editors opt in through their
   server settings ([editors](docs/site/integrations/editors.md#workspace-trust)). The JetBrains
   plugin does not send the option yet, so command rules do not run there.
@@ -27,16 +36,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   top-level config. A package under `node_modules/`, which the workspace's `.gitignore` excludes
   and `alint check` never reads, could ship one whose command rule ran when one of its files was
   opened, although a nested config may not declare command rules. Each workspace folder is now
-  linted by its own config, rooted at that config's directory, as `alint check` there; a deeper
-  config joins only under a folder config with `nested_configs: true`, and then as a nested
-  config.
+  linted by its own config, rooted at that config's directory, as `alint check` there. A folder
+  without a config of its own (a directory holding several repositories) lints each file with
+  the config at the top of the nearest repository above it inside the folder (the nearest
+  directory holding a `.git` directory or file), rooted there, as `alint check` in that
+  repository does; a directory without `.git`, such as a package under `node_modules/`, is never
+  such a top. A deeper config joins only under the governing config's `nested_configs: true`,
+  and then as a nested config.
 - **Reading `nested_configs` no longer resolves a config's `extends:`.** Since v0.18.0,
-  `alint_dsl::nested_configs_enabled` (and the language server, for every config between an
-  open file and its workspace folder, nested ones included) loaded the config in full to read
-  that one key: a remote `extends:` was fetched and `{{env.*}}` values were interpolated, so a
-  vendored config could send an environment variable to a host it named. It now reads the key
-  from the file and its `.alint.d/` drop-ins only (an extended config's `nested_configs` never
-  applied anyway).
+  `alint_dsl::nested_configs_enabled` (and `nested_configs_enabled_with` since v0.19.0, and the
+  language server, for every config between an open file and its workspace folder, nested ones
+  included) loaded the config in full to read that one key: a remote `extends:` was fetched and
+  `{{env.*}}` values were interpolated, so a vendored config could send an environment variable
+  to a host it named. Both now read the key from the file and its `.alint.d/` drop-ins only (an
+  extended config's `nested_configs` never applied anyway), so a config whose `extends:` would
+  fail to load still answers.
 - **`alint lsp` honours `--config` and `--no-gitignore`.** Since v0.11.0 the server accepted and
   silently ignored both, so `alint lsp -c my-policy.yml` linted with the repository's own config
   instead. `--config` now lints every workspace folder with that file, rooted at the folder,
@@ -47,20 +61,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   name or matched line in the message) could render an image the editor fetched
   (`![x](http://...)`), a link, or HTML. The message is now escaped, the rule id is a code span,
   and a policy URL is a link only when it is `http` or `https` (any other shows as text).
-
-- **`pinned_references` no longer hangs on a workflow whose merge keys refer to themselves.**
-  Since v0.19.0, the rule resolved a `<<` merge key in a GitHub Actions workflow or a GitLab CI
-  file by following every merge source again at each level, with no memo. A 16-byte workflow
-  (`a: &r` over `<<: [*r, *r]`) made `alint check` with `ci/github-actions@v1` spin until it was
-  killed. The YAML alias guard did not stop it: it measures with the parser alint decodes with,
-  and took that parser's refusal of the text (here of an alias to a collection that contains
-  it, or of anything before an alias bomb, such as an empty `!<>` tag) for "within budget",
-  while the rule reads the text with another parser, which accepts it. The guard's verdict now
-  says when the text could not be read, and the rule refuses such a file with an analysis
-  failure, as does `key_parity`'s YAML entry extraction. The rule also refuses an alias to a
-  collection that contains it, and holds merge-key lookups to a work budget, so a file the guard
-  passes cannot spin either. This affects every command that runs the rule, from v0.19.0 to
-  v0.22.1.
+- **Configuration discovery stops at the repository's top.** alint looked for `.alint.yml` from
+  the current directory up to the file-system root, so in a repository without a config of its
+  own, or from a directory below one, a `.alint.yml` that someone else wrote in a directory above
+  it (`/tmp/.alint.yml` over a checkout in `/tmp`, a shared home) governed the run, command rules
+  included. Discovery now checks the repository's top (the nearest directory holding a `.git`
+  directory or file) and stops there. Outside every repository it climbs as before but skips a
+  config file another user owns in a directory above the one it starts from, with `alint:
+  warning: skipping /tmp/.alint.yml: owned by another user` on stderr (on Unix, a file whose
+  owner is not the effective user id; Windows does not check). A config in the starting
+  directory itself is used whoever owns it, so `alint check` as root in a container, on a
+  mounted directory the host's user owns, still finds that directory's config. This affects
+  `alint check`, `fix`, `list`, `explain`, `validate-config`, `export-agents-md` and every other
+  command that discovers a config, and the language server, in v0.1.0 to v0.22.1.
 - **A repository's configuration can no longer make loading it crash, hang or exhaust memory.**
   A configuration is untrusted for what it costs to load, and a small one could:
   - overflow the stack, since v0.20.0: the `requires:` check walked the whole first document
@@ -86,74 +99,31 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   These affect every command that loads a configuration (`alint check`, `alint fix`, `alint
   test`, the language server and the others), from the version each item names to v0.22.1.
   Until v0.23.0, run alint on a repository you do not trust under a time and a memory limit.
-- **`given.env` in a policy test no longer reaches Git.** Since v0.20.0, `alint test` passed a
-  test's `given.env` to the Git commands it runs itself: the `given.git` fixture setup, and
-  alint's Git reads for rules such as `git_tracked_only`. A variable such as `GIT_CONFIG_*`
-  (naming an fsmonitor or filter command), `GIT_TRACE` or `LD_PRELOAD` could then run a command,
-  load a library or write a file without `capabilities: { spawn: true }` or `--allow-spawn`, and
-  the fixture setup ran before the capability check, so even a refused test could do it. Those
-  Git commands now run with a fixed environment (a sandboxed home, no system or global Git
-  configuration, `PATH` and the C locale), and `setup_git` drops any other variable it is given.
-  `given.env` reaches configuration interpolation, `when:` conditions and `${VAR}` expansions
-  (below), and granted commands, never Git, as the
-  [policy-test design](docs/design/v0.20/policy-tests.md) section 2.4 specifies. `alint check`
-  and `alint fix` were not affected: they read the invoking user's own environment.
-- **`alint test` now asks for the spawn capability for a spawning rule nested in another
-  rule's `require:`.** Since v0.20.0, a policy test could run a `command` rule nested in
-  `for_each_dir`, `for_each_file` or `every_matching_has` without `capabilities: { spawn: true }`
-  or `--allow-spawn`: the preflight read a nested rule only when it also had an `id` and a
-  `level`, which nested rules do not have. It now reads each `require:` entry by its `kind`, at
-  any depth, as the configuration trust gate does, and names it in the error
-  (`rule "per-dir" require[0] (command)`). Host-keyring kinds are checked the same way. A
-  spawning `fix:` operation on a nested rule counts too, although loading already refuses a
-  nested `fix:`. `alint check` and `alint fix` were not affected: a configuration's own rules may
-  spawn by design, and the trust gate already refuses spawning rules, nested ones included, from
-  `extends:`.
-- **A policy-test fixture shaped like a bare repository no longer runs a command through Git.**
-  Without `given.git`, a test's tree has no `.git`, and the Git reads alint makes for
-  `git_tracked_only` and the `git_*` rules discovered a repository from the fixture's root. A
-  tree with `HEAD`, `objects/`, `refs/` and `config` at its top was read as a bare repository, and
-  a `core.fsmonitor` in that `config` ran a command without `capabilities: { spawn: true }` or
-  `--allow-spawn`. alint now finds the repository itself (the nearest directory holding a `.git`
-  directory or file, never a directory taken as a bare repository) and names it to every Git
-  command with `--git-dir` and `--work-tree`, so Git discovers none, whatever its version:
-  `safe.bareRepository=explicit`, which alint also passes, does nothing before Git 2.38. With no
-  repository found, alint runs no Git command, and the runner runs Git only on the repository
-  `given.git` made. A repository the current user does not own is named only when Git, asked to
-  discover exactly it, accepts it, so Git's ownership check and `safe.directory` still apply.
-  That also covers `alint check` and `alint fix` in a directory without `.git` that holds such
-  files, which ran the command with a Git rule or `git_tracked_only` since v0.4.8, as `git status`
-  run there would. In a repository, alint still runs what its `.git/config` names, as Git does:
-  run alint in an unpacked archive's repository only as you would run `git status` there. The
-  runner also refuses fixture entries that
-  Windows or macOS open as `.git` (`.git.`, `.git `, `.git::$INDEX_ALLOCATION`, `GIT~1`, and
-  `.git` with a code point HFS+ ignores), as Git refuses them in a checkout.
-- **A policy test's `when:` conditions and `${VAR}` expansions no longer read the host's
-  environment.** `env.X` in a `when:` (top-level or nested in `require:`) and the legacy `${VAR}`
-  form of `git_commit_message`'s `since:` read the runner's own process environment, so a test
-  could tell a CI secret's characters apart through which of its rules fired, and could not see
-  its own `given.env`. Both now read the test's environment: `given.env` and the runner's sandbox
-  values (its home and Git settings), but none of the host's variables. The host's `PATH` and
-  Windows' system variables, which the runner passes a granted command, stay out of it, so
-  `when: 'env.PATH matches "^/home/"'` is never true. `alint check` and `alint fix` still read
-  the invoking user's environment.
-- **An inline `given.tree` symlink can no longer lead out of a policy test's sandbox.** Since
-  v0.20.0 the runner checked where a tree's symlink leads by reading `..` in its target as text,
-  but the file system follows a symlink before it steps up from it. With `a/c/t -> ../../b`, a
-  link `s -> a/c/t/../../../x` passed as `x` and led two levels above the repository root, and a
-  tree key under it (`s/f`) wrote there while the tree was written, before any capability check
-  and during preflight too. An executable named `git` written that way into a directory on `PATH`
-  ran when the runner ran Git, and `expect_tree` read host files through such a link. The runner
-  now resolves a link's target through the symlinks it reaches, refuses a tree entry under a
-  symlink, writes symlinks after every other entry, and checks where each written link leads.
-  That covers `given.fixture` too: a fixture link was checked where it resolves in the fixture,
-  but its text is copied as it is and resolves from the copy's place, so `../../../secret`, led
-  back into a deep fixture through the package, read a host file above the temporary directory
-  in `expect_tree` (section 2.3 of the design said the copy was checked; nothing checked it).
-- **A fix step can no longer move a symlink out of a policy test's repository.** Since v0.20.0,
-  a `relocate` fix (v0.17.0) could move an in-tree symlink to the root, where its relative text
-  led above the repository, and `expect_tree` then read a host file through it. The runner checks
-  where every link leads after each fix step and refuses the test when one leads outside.
+- **`pinned_references` no longer hangs on a workflow whose merge keys refer to themselves.**
+  Since v0.19.0, the rule resolved a `<<` merge key in a GitHub Actions workflow or a GitLab CI
+  file by following every merge source again at each level, with no memo. A 16-byte workflow
+  (`a: &r` over `<<: [*r, *r]`) made `alint check` with `ci/github-actions@v1` spin until it was
+  killed. The YAML alias guard did not stop it: it measures with the parser alint decodes with,
+  and took that parser's refusal of the text (here of an alias to a collection that contains
+  it, or of anything before an alias bomb, such as an empty `!<>` tag) for "within budget",
+  while the rule reads the text with another parser, which accepts it. The guard's verdict now
+  says when the text could not be read, and the rule refuses such a file with an analysis
+  failure, as does `key_parity`'s YAML entry extraction. The rule also refuses an alias to a
+  collection that contains it, and holds merge-key lookups to a work budget, so a file the guard
+  passes cannot spin either. This affects every command that runs the rule, from v0.19.0 to
+  v0.22.1.
+- **An `extends:` URL's scheme is read in any case, any other scheme is refused, and its
+  credentials stay out of errors.** `HTTPS://`, `Http://` and `ALINT://bundled/` were not
+  recognized as remote, plain-HTTP and bundled entries, and `ftp://`, `file://`, `ssh://` or
+  `git+https://` were not recognized at all: each was read as a path to a local file, with no
+  integrity hash required, and the error that named it printed the URL whole, a
+  `user:password@` and a `?token=` included. Schemes now match in any case: such an entry is
+  fetched and pinned like any `https://` one, and a plain `http://` one is refused. An entry
+  with any other `<scheme>://` (two or more characters, so a Windows drive stays a path) is a
+  load error, `unsupported `extends:` scheme `ftp` (entry "ftp://host/x.yml"); use https://,
+  alint://bundled/ or a local path`. Errors show such an entry without its userinfo, query and
+  fragment. This affects configs with a non-lower-case or other `extends:` scheme in v0.2.1 to
+  v0.22.1.
 - **A fix no longer writes or reads a Git directory.** A `file_create` could write `.git/HEAD`,
   `.git/config` with a `core.fsmonitor`, and `.git/objects/` and `.git/refs/` entries, a `.git`
   file naming another directory (`gitdir: gitdata`), or a `.git/commondir` pointing at one, and
@@ -236,31 +206,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   it, whatever `allow_out_of_root` says`; the `alint fix --dry-run` preview reads none either.
   The user's own rules keep the option. This affects `alint fix` with `allow_out_of_root` and an
   `extends:` ruleset in v0.14.0 to v0.22.1.
-- **Configuration discovery stops at the repository's top.** alint looked for `.alint.yml` from
-  the current directory up to the file-system root, so in a repository without a config of its
-  own, or from a directory below one, a `.alint.yml` that someone else wrote in a directory above
-  it (`/tmp/.alint.yml` over a checkout in `/tmp`, a shared home) governed the run, command rules
-  included. Discovery now checks the repository's top (the nearest directory holding a `.git`
-  directory or file) and stops there. Outside every repository it climbs as before but skips a
-  config file another user owns in a directory above the one it starts from, with `alint:
-  warning: skipping /tmp/.alint.yml: owned by another user` on stderr (on Unix, a file whose
-  owner is not the effective user id; Windows does not check). A config in the starting
-  directory itself is used whoever owns it, so `alint check` as root in a container, on a
-  mounted directory the host's user owns, still finds that directory's config. This affects
-  `alint check`, `fix`, `list`, `explain`, `validate-config`, `export-agents-md` and every other
-  command that discovers a config, and the language server, in v0.1.0 to v0.22.1.
-- **An `extends:` URL's scheme is read in any case, any other scheme is refused, and its
-  credentials stay out of errors.** `HTTPS://`, `Http://` and `ALINT://bundled/` were not
-  recognized as remote, plain-HTTP and bundled entries, and `ftp://`, `file://`, `ssh://` or
-  `git+https://` were not recognized at all: each was read as a path to a local file, with no
-  integrity hash required, and the error that named it printed the URL whole, a
-  `user:password@` and a `?token=` included. Schemes now match in any case: such an entry is
-  fetched and pinned like any `https://` one, and a plain `http://` one is refused. An entry
-  with any other `<scheme>://` (two or more characters, so a Windows drive stays a path) is a
-  load error, `unsupported `extends:` scheme `ftp` (entry "ftp://host/x.yml"); use https://,
-  alint://bundled/ or a local path`. Errors show such an entry without its userinfo, query and
-  fragment. This affects configs with a non-lower-case or other `extends:` scheme in v0.2.1 to
-  v0.22.1.
 - **`allow_out_of_root` no longer lets an extended ruleset's rule read outside the repository
   when it is checked.** The top-level grant covered every rule it named, so under `true`, a
   `kinds:` list or a `rules:` list naming its id, a `json_schema_passes` (`schema_path`),
@@ -272,6 +217,79 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   overrides by id counts) reads only inside the root and reports `registry source
   ../outside.json escapes the repo root`, in `alint check`, `alint fix` and the language server.
   This affects configs with `allow_out_of_root` and an `extends:` ruleset in v0.12.0 to v0.22.1.
+
+The fixes below are in the policy-test runner. Except where a bullet says otherwise, they affect
+`alint test` and the `alint_testkit::Runner` library in v0.20.0 to v0.22.1, and only for a
+policy-test package the user does not trust.
+
+- **`given.env` in a policy test no longer reaches Git.** Since v0.20.0, `alint test` passed a
+  test's `given.env` to the Git commands it runs itself: the `given.git` fixture setup, and
+  alint's Git reads for rules such as `git_tracked_only`. A variable such as `GIT_CONFIG_*`
+  (naming an fsmonitor or filter command), `GIT_TRACE` or `LD_PRELOAD` could then run a command,
+  load a library or write a file without `capabilities: { spawn: true }` or `--allow-spawn`, and
+  the fixture setup ran before the capability check, so even a refused test could do it. Those
+  Git commands now run with a fixed environment (a sandboxed home, no system or global Git
+  configuration, `PATH` and the C locale), and `setup_git` drops any other variable it is given.
+  `given.env` reaches configuration interpolation, `when:` conditions and `${VAR}` expansions
+  (below), and granted commands, never Git, as the
+  [policy-test design](docs/design/v0.20/policy-tests.md) section 2.4 specifies. `alint check`
+  and `alint fix` were not affected: they read the invoking user's own environment.
+- **`alint test` now asks for the spawn capability for a spawning rule nested in another
+  rule's `require:`.** Since v0.20.0, a policy test could run a `command` rule nested in
+  `for_each_dir`, `for_each_file` or `every_matching_has` without `capabilities: { spawn: true }`
+  or `--allow-spawn`: the preflight read a nested rule only when it also had an `id` and a
+  `level`, which nested rules do not have. It now reads each `require:` entry by its `kind`, at
+  any depth, as the configuration trust gate does, and names it in the error
+  (`rule "per-dir" require[0] (command)`). Host-keyring kinds are checked the same way. A
+  spawning `fix:` operation on a nested rule counts too, although loading already refuses a
+  nested `fix:`. `alint check` and `alint fix` were not affected: a configuration's own rules may
+  spawn by design, and the trust gate already refuses spawning rules, nested ones included, from
+  `extends:`.
+- **A policy-test fixture shaped like a bare repository no longer runs a command through Git.**
+  Without `given.git`, a test's tree has no `.git`, and the Git reads alint makes for
+  `git_tracked_only` and the `git_*` rules discovered a repository from the fixture's root. A
+  tree with `HEAD`, `objects/`, `refs/` and `config` at its top was read as a bare repository, and
+  a `core.fsmonitor` in that `config` ran a command without `capabilities: { spawn: true }` or
+  `--allow-spawn`. alint now finds the repository itself (the nearest directory holding a `.git`
+  directory or file, never a directory taken as a bare repository) and names it to every Git
+  command with `--git-dir` and `--work-tree`, so Git discovers none, whatever its version:
+  `safe.bareRepository=explicit`, which alint also passes, does nothing before Git 2.38. With no
+  repository found, alint runs no Git command, and the runner runs Git only on the repository
+  `given.git` made. A repository the current user does not own is named only when Git, asked to
+  discover exactly it, accepts it, so Git's ownership check and `safe.directory` still apply.
+  That also covers `alint check` and `alint fix` in a directory without `.git` that holds such
+  files, which ran the command with a Git rule or `git_tracked_only` since v0.4.8, as `git status`
+  run there would. In a repository, alint still runs what its `.git/config` names, as Git does:
+  run alint in an unpacked archive's repository only as you would run `git status` there. The
+  runner also refuses fixture entries that
+  Windows or macOS open as `.git` (`.git.`, `.git `, `.git::$INDEX_ALLOCATION`, `GIT~1`, and
+  `.git` with a code point HFS+ ignores), as Git refuses them in a checkout.
+- **A policy test's `when:` conditions and `${VAR}` expansions no longer read the host's
+  environment.** `env.X` in a `when:` (top-level or nested in `require:`) and the legacy `${VAR}`
+  form of `git_commit_message`'s `since:` read the runner's own process environment, so a test
+  could tell a CI secret's characters apart through which of its rules fired, and could not see
+  its own `given.env`. Both now read the test's environment: `given.env` and the runner's sandbox
+  values (its home and Git settings), but none of the host's variables. The host's `PATH` and
+  Windows' system variables, which the runner passes a granted command, stay out of it, so
+  `when: 'env.PATH matches "^/home/"'` is never true. `alint check` and `alint fix` still read
+  the invoking user's environment.
+- **An inline `given.tree` symlink can no longer lead out of a policy test's sandbox.** Since
+  v0.20.0 the runner checked where a tree's symlink leads by reading `..` in its target as text,
+  but the file system follows a symlink before it steps up from it. With `a/c/t -> ../../b`, a
+  link `s -> a/c/t/../../../x` passed as `x` and led two levels above the repository root, and a
+  tree key under it (`s/f`) wrote there while the tree was written, before any capability check
+  and during preflight too. An executable named `git` written that way into a directory on `PATH`
+  ran when the runner ran Git, and `expect_tree` read host files through such a link. The runner
+  now resolves a link's target through the symlinks it reaches, refuses a tree entry under a
+  symlink, writes symlinks after every other entry, and checks where each written link leads.
+  That covers `given.fixture` too: a fixture link was checked where it resolves in the fixture,
+  but its text is copied as it is and resolves from the copy's place, so `../../../secret`, led
+  back into a deep fixture through the package, read a host file above the temporary directory
+  in `expect_tree` (section 2.3 of the design said the copy was checked; nothing checked it).
+- **A fix step can no longer move a symlink out of a policy test's repository.** Since v0.20.0,
+  a `relocate` fix (v0.17.0) could move an in-tree symlink to the root, where its relative text
+  led above the repository, and `expect_tree` then read a host file through it. The runner checks
+  where every link leads after each fix step and refuses the test when one leads outside.
 - **A policy-test fixture copy is capped at 64 MiB.** `fixture:` copied a package's directory
   into the sandbox file by file, with no limit on the total, and a hard link was copied once per
   name, so a package of many hard links to one large file filled the disk. The runner now stops
@@ -291,11 +309,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and `GIT_CONFIG_GLOBAL` does not keep Git from its default global excludes and attributes files
   there (`~/.config/git/ignore`), so `check_changed` missed an untracked file the host's excludes
   listed. The runner's Git commands now get `XDG_CONFIG_HOME` in the sandbox.
-  Except where a bullet says otherwise, these affect `alint test` and the `alint_testkit::Runner`
-  library in v0.20.0 to v0.22.1, and only for a policy-test package the user does not trust. No
-  v0.22.x patch release follows: upgrade to v0.23.0, and until then run `alint test` only on
-  policy-test packages whose configurations and `given:` blocks you trust, and `alint fix` only
-  with `extends:` rulesets you trust and, with a content fix, only on repositories you trust.
+
 
 ### Added
 
@@ -306,8 +320,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   **`RuleEntry::fix_may_leave_root`**: whether a rule's fix may read or write outside the root
   (its `allow_out_of_root`, never for a rule from an `extends:`'d ruleset), and
   **`AllowOutOfRoot::allows_rule`**: whether the grant covers an effective rule (never one an
-  extended ruleset or a nested config shaped; `allows` still answers by id and kind alone). `alint-core` depends
-  on `rustix` on Unix, already in the dependency tree, for the effective user id.
+  extended ruleset or a nested config shaped; `allows` still answers by id and kind alone).
+  `alint-core` depends on `rustix` on Unix, already in the dependency tree, for the effective
+  user id.
 - **`--no-spawn`** (global flag): refuse a config whose rules, fixes or facts start a process,
   for linting a repository you do not trust with its own config. A rule of a spawning kind (at
   any `require:` depth), a spawning fix such as `git_untrack` or `command`, or a `custom:` fact
@@ -325,7 +340,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and the check `--no-spawn` runs.
 - **Language-server configuration errors are placed where they are.** A YAML syntax error in
   `.alint.yml` is shown on its line instead of on the first line of the file.
-
 - **`alint_core::yaml_depth::expansion`, `GuardScan::expansion` and `Expansion`** (library
   API): the alias guard's verdict on a text, as within the budget, over it, or not read, when
   ayaml refuses the text before the budget decides. A caller that reads the text with another
@@ -366,7 +380,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `SyncFromFixSpec`. `FixSpec`'s variants already held them, but they could not be named and had
   no documentation. `alint-core`, `alint-dsl` and `alint-testkit` now deny the
   `unnameable_types` lint, so every public type they reach has a name and a page.
-
 - **`WalkOptions::global_git_excludes`** (library API). With `false`
   (`with_global_git_excludes(false)`), a walk leaves out the user's global excludes file (Git's
   `core.excludesFile`, by default `$XDG_CONFIG_HOME/git/ignore`), which it finds through the
@@ -386,20 +399,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   workspace's tests that way (`ci/scripts/yaml-compare.sh`), and a gate fails if a build without
   the feature depends on `yaml_serde`.
 
-### Removed
-
-- **A baseline no longer matches the fingerprint v0.21 wrote for a hidden-path finding**
-  (ADR-0030 decision 1). A finding's path is hidden when a field that chooses files was read from
-  the environment. v0.22 gave such findings a fingerprint without the path and, for one minor
-  release, still matched the v0.21 form, which hashed the path. If your baseline file was last
-  written by v0.21 or earlier, `check --baseline` and `fix --baseline` now treat those findings as
-  new and their entries as stale, and the language server shows those findings again. Regenerate
-  the file once with `alint baseline --accept-new`; the flag is needed because the findings count
-  as new. A file written by v0.22 is unaffected.
-- **Breaking (library API):** `alint-core` drops `baseline::Fingerprints` and
-  `baseline::fingerprints`, which existed only to match the v0.21 form. `baseline::apply` takes a
-  fingerprinter that returns a `String` again, such as `baseline::fingerprint`.
-
 ### Changed
 
 - **Config discovery stops at the repository's top** (see Security). Run from a repository, or
@@ -411,15 +410,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   owns in a directory above the starting one is skipped with a warning; one in the starting
   directory is used. Library users of `alint_dsl::discover` get the same stop and
   skip; `alint_dsl::discover_config` also returns the skipped files.
-- **The language server lints each repository in a folder by its own config.** A workspace
-  folder without a config of its own (a directory holding several repositories) was not linted.
-  It now lints each open file with the config at the top of the nearest repository above it
-  inside the folder (the nearest directory holding a `.git` directory or file), rooted there, as
-  `alint check` in that repository does. A directory without `.git` (a package under
-  `node_modules/`) is never such a top, so its `.alint.yml` still governs nothing by itself.
-- **An untrusted language-server session keeps a rule whose fix alone spawns.** A rule such as
-  `file_absent` with `fix: git_untrack` was skipped whole in an untrusted workspace; it now
-  reports as usual and offers no fix until the workspace is trusted.
 - **Language-server code actions keep `alint fix`'s write limits.** A code action from a rule an
   `extends:`'d ruleset or a nested config shaped is no longer offered when it would edit alint's
   configuration (a config file at any depth, anything under `.alint.d/`, or a file the
@@ -427,14 +417,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **The language server treats a workspace as untrusted unless the editor says otherwise.**
   Editors other than VS Code now need the `trusted` initialization option for command rules,
   custom facts, remote `extends:` and environment values to take effect
-  ([editors](docs/site/integrations/editors.md#workspace-trust)). A workspace folder without a
-  config of its own is no longer linted by a config found further down, and the server drops a
-  re-evaluation that a newer edit superseded before it starts, and computes code actions off
-  the request thread.
-- **`alint_dsl::nested_configs_enabled` and `nested_configs_enabled_with` read only the key.**
-  They no longer resolve `extends:` or interpolate the environment, so a config whose
-  `extends:` would fail to load still answers.
-
+  ([editors](docs/site/integrations/editors.md#workspace-trust)); see Security.
+- The language server drops a re-evaluation that a newer edit superseded before it starts, and
+  computes code actions off the request thread.
 - **`alint fix` no longer writes into `.git` for the user's own rules either.** The Git-directory
   refusal (see Security) applies to every configuration, the top-level one included, so a
   user's own `file_create` of `.git/hooks/pre-commit`, which v0.22.0 created, is now reported
@@ -448,11 +433,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `0 applied, 0 skipped, 0 unfixable, 1 unresolved.`, with `unresolved` shown only when nonzero.
   The JSON report is unchanged (`status: "skipped"`, `skip_kind: "unresolved"`, and the
   summary's `skipped` still includes it), as is the exit code.
-- **Breaking (library API):** `WhenEnv::env` and `WhenEnv::with_env` take a
-  `BTreeMap<String, String>`, the type of the engine's process environment, instead of a
-  `HashMap`. The engine now passes its condition environment there whenever it has one (by
-  default its process environment), so `env.*` in a condition reads the environment the embedder
-  chose, not the host's (see Security).
+- **Breaking (library API):** the public field `WhenEnv::env` holds a `&BTreeMap<String, String>`,
+  and `WhenEnv::with_env` takes one, the type of the engine's process environment, instead of a
+  `HashMap`. The engine now passes its condition environment there whenever it has one (by default
+  its process environment), so `env.*` in a condition reads the environment the embedder chose,
+  not the host's (see Security).
 - **`git_tracked_only: true` sees tracked files that an ignore file excludes** (#503, ADR-0033
   decision 3). Under the default `respect_gitignore: true` the walk leaves out what `.gitignore`,
   `.ignore`, `.git/info/exclude` and the global excludes file list, and the tracked view was
@@ -478,7 +463,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Composer rules say an entry must exist and not be ignored. Their baseline keys are unchanged.
 - **alint parses YAML with ayaml 0.1.2, a pure-Rust parser, in place of `yaml_serde` and
   `libyaml-rs`** (#510, ADR-0035). Configurations, `extends:` sources, the `yaml_path_*` rules,
-  `json_schema_passes` on YAML, front matter and `alint test` packages all read through it. The
+  `json_schema_passes` on YAML and `alint test` packages all read through it. The
   depth limit is that of 0.22 (128 levels), and the 32 MiB size limit 0.22 set on data files now
   holds for configurations too: a configuration, `extends:` source or nested configuration past
   33,554,432 bytes fails with "input exceeds the maximum supported size for a structured document
@@ -492,7 +477,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
       Between tokens they are now an error;
     - a node with a global tag (`!<tag:...>`, a `%TAG` handle, or `!!` with a name outside the
       core schema, such as `!!binary`, `!!timestamp`, `!!merge` or `!!value`) keeps the tag in a
-      value, and where alint drops tags (`yaml_path_*`, `json_schema_passes`, front matter) its
+      value, and where alint drops tags (`yaml_path_*`, `json_schema_passes`) its
       scalar resolves as if untagged, so `!<tag:x,2000:y> 1` is the number 1 where 0.22 read the
       string `"1"`. A core tag on another kind of node, as in `!!map 1`, is ignored the same
       way, and an empty node tagged `!!null` is null, where 0.22 rejected it;
@@ -506,8 +491,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
       template of a configuration it is still an error, which names the file and the field
       (`rules[0].message`);
     - an anchor or alias name may hold any character but white space and the flow indicators,
-      so `&a: x` anchors `x` under the name `a:` where 0.22 read a mapping, and `[*a:b]` holds
-      an alias to `a:b` where 0.22 read `{*a: b}`;
+      where 0.22 took only letters, digits, `_` and `-` (`&a.b x` was an error). As in 0.22, a
+      name ends at a `?` before a character other than a flow indicator and, outside a flow
+      collection, at a `:` before a character other than white space, so `&a:b x` is still the
+      string `:b x`; but `&a: x` anchors `x` under the name `a:`, where 0.22 read a mapping, and
+      `[*a:b]` holds an alias to `a:b`, where 0.22 read `{*a: b}`;
     - in a flow sequence, a plain scalar that starts with `:` after properties is that scalar,
       so `[!!str :a]` holds the string `:a`, where 0.22 read the mapping `{"": a}`;
     - a byte-order mark that starts a configuration, an `extends:` source, a policy test or a
@@ -524,12 +512,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     1,024 characters or fewer that takes more than 1,024 bytes, such as 600 accented letters,
     which 0.22 measured in bytes; `#` inside a tag or a `%TAG` prefix, as in `!t#`; U+007F,
     U+0080 to U+009F other than U+0085, U+FFFE and U+FFFF inside a single- or double-quoted
-    scalar, where YAML 1.2 allows any JSON character; aliases that fan out, as ten aliases to a
-    node of ten aliases to a node of ten, within ayaml's alias-expansion allowance, where 0.22
-    stopped after 100 alias uses per event ("repetition limit exceeded"); and, in a
-    configuration, a quoted scalar tagged `!!int` where a number is expected, as in
+    scalar, where YAML 1.2 allows any JSON character; aliases that fan out four levels deep, as
+    ten aliases to a node of ten aliases to a node of ten aliases to a node of ten aliases to
+    `[x]`, within ayaml's alias-expansion allowance, where 0.22 stopped after 100 alias uses per
+    event ("repetition limit exceeded"); and, in a configuration, `-0` where an unsigned integer
+    is expected, as in `fix_size_limit: -0`, which 0.22 refused (``invalid type: integer `0`,
+    expected u64``), and a quoted scalar tagged `!!int` where a number is expected, as in
     `version: !!int '1'`. ayaml also accepts a block scalar header that is not indented past its
-    parent on the line after an anchor, or after a key with an anchor (asamarts/ayaml#132).
+    parent on the line after an anchor, or after a key with an anchor (asamarts/ayaml#132), or
+    after properties alone on their line (asamarts/ayaml#147), and a line that puts a flow
+    indicator right after an anchor name that ends in `:`, with the lines after it at any
+    indentation, so `&a:[: x` followed by `- y` reads as the mapping `{":[": "x - y"}`
+    (asamarts/ayaml#139).
   - **Now rejected:** a `#` directly after a token, as in `'x'#c` or `%YAML 1.2#`, which is not a
     comment; a quoted scalar's continuation line that is not indented past its parent; a block
     scalar whose header or content is not indented past its parent, as in `-` followed by `|2` on
@@ -547,31 +541,35 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     fact, an `extends:` entry or a policy test, and a `!!` tag outside the core schema where a
     configuration takes a number or a boolean, as in `version: !!timestamp 1`. The error names
     the field and the tag (`` `version` has the YAML tag `!!timestamp` ``). `vars:` and
-    `ignore:` still read their strings through any tag.
-  - **Errors.** Several parse errors are worded differently, in a `resource_parse` analysis
-    failure and in a configuration error. A stream of more than one document reports "more than
-    one document in stream at line 2 column 1" where 0.22 said "deserializing from YAML
-    containing more than one document is not supported", and an unclosed quoted scalar reports
-    "quoted scalar continuation must be indented more than its parent" at the first line after
-    it, where 0.22 said "found unexpected end of stream ... while scanning a quoted scalar".
-    Errors in what a file holds say more than 0.22's did. An option of the wrong type names its
-    field as well as what it found, as "pattern: invalid type: integer `1`, expected a string";
-    a value that is not one of an enum's, as a rule's `level`, a policy test's step or an option
-    such as `direction`, lists them, as "level: expected one of `error`, `warning`, `info`,
-    `off`, found a mapping", where 0.22 said "invalid type: map, expected a Value::Tagged enum";
-    and the error an indentation mistake gives, "unexpected content after document", as for a
-    key one space off its siblings, `-id: a` with no space after the `-` or an indented
-    top-level key, ends with "(check this line's indentation against the lines above)". A
-    scalar where a mapping goes is reported as "invalid type: non-mapping YAML value" in a
-    configuration with no `{{`, and a string there as "invalid type: string" in one with `{{`,
-    where 0.22 quoted the scalar. An error can also be reported at another place:
-    ayaml checks a stream's syntax before it builds values, so a syntax error later in a file
-    is reported before an earlier duplicate key or type error, and an error about an empty
-    value, as `version:` with nothing after it, is reported where what follows starts (the next
-    line's content or the end of the file), where 0.22 reported the place after the key. A
-    character YAML does not allow, such as a C0 control, is reported where it stands, where 0.22
-    reported line 1, column 1. After a byte-order mark, a character that cannot start a token is
-    reported without a line and column (asamarts/ayaml#133).
+    `ignore:` still read their strings through any tag. ayaml also rejects a top-level block
+    scalar whose only lines before a document marker are empty, one of them indented, as `|`, a
+    line of two spaces and `...`, which is valid YAML (asamarts/ayaml#146).
+  - **Errors.** Several parse errors are worded differently, in a `resource_parse` analysis failure
+    and in a configuration error. A stream of more than one document reports "more than one document
+    in stream at line 2 column 1" for `version: 1`, `---` and `version: 1` on three lines, where
+    0.22 said "deserializing from YAML containing more than one document is not supported", and an
+    unclosed quoted scalar reports "quoted scalar continuation must be indented more than its
+    parent" at the first line after it, where 0.22 said "found unexpected end of stream ... while
+    scanning a quoted scalar". Errors in what a file holds say more than 0.22's did. An option of
+    the wrong type names its field as well as what it found, as "pattern: invalid type: integer `1`,
+    expected a string"; a value that is not one of an enum's, as a rule's `level`, a policy test's
+    step or an option such as `direction`, lists them, as "level: expected one of `error`,
+    `warning`, `info`, `off`, found a mapping", where 0.22 said "invalid type: map, expected a
+    Value::Tagged enum"; and the error an indentation mistake gives, "unexpected content after
+    document", as for a key one space off its siblings, `-id: a` with no space after the `-` or an
+    indented top-level key, ends with "(check this line's indentation against the lines above)". A
+    configuration that is a scalar, not a mapping, is reported as "invalid type: non-mapping YAML
+    value, expected struct RawConfig" when it holds no `{{`, and as "invalid type: string" when it
+    does, where 0.22 quoted the scalar, or, with `{{`, gave only `<redacted>`. An error can also be
+    reported at another place: ayaml checks a stream's syntax before it builds values, so a syntax
+    error later in a file is reported before an earlier duplicate key or type error, and an error
+    about an empty value is reported where what follows starts (the next line's content or the end
+    of the file), where 0.22 reported the place after the key: `respect_gitignore:` with nothing
+    after it on line 2 is reported at line 3, column 1, where 0.22 said line 2, column 19. A
+    character YAML does not allow, such as a C0 control, is reported at its line and column, as
+    "non-printable character U+0001 is not allowed in YAML at line 3 column 4", where 0.22 gave a
+    byte offset ("control characters are not allowed at position 24"). After a byte-order mark, a
+    character that cannot start a token is reported without a line and column (asamarts/ayaml#133).
 
   Source spans and structured YAML fixes still use saphyr. The checks that refuse deep flow
   nesting and alias bombs before a parse now read YAML as ayaml does, and ayaml's own depth,
@@ -579,7 +577,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   owner's approval of the harness's documented differences qualifies the parser (ADR-0035).
 - **Breaking (library API): YAML values and errors are alint's own types** (#484, #516,
   ADR-0038). No public item of `alint-core`, `alint-dsl` or `alint-testkit` names a YAML parser
-  crate any more, so a later change of parser is not a breaking change. `alint_core::yaml` holds
+  crate any more, so a later change of parser is not a breaking change. The published crates
+  pin ayaml exactly (`=0.1.2`), since the differential harness qualifies one version: a project
+  that depends on them cannot use another ayaml 0.1.x beside them, and each ayaml release
+  reaches alint's library users only in an alint release. `alint_core::yaml` holds
   `Value`, `Mapping`, `Sequence`, their iterators (`SequenceIter`, `SequenceIterMut`,
   `SequenceIntoIter`, `MappingIter`, `MappingIterMut`, `MappingIntoIter`, `MappingKeys`,
   `MappingValues` and `MappingValuesMut`), `Error` and `Location`. Its functions are `from_str`,
@@ -623,8 +624,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
       one (`!t k: v`), is found by iterating. Indexing takes `&str`, `&String` or an integer,
       not a `Value` or an owned `String`.
     - `mapping["missing"]` is null, where `yaml_serde` panicked, and `mapping[key] = value` adds
-      a missing key, where it panicked. `Mapping::remove` keeps the order of the other keys,
-      where `yaml_serde`'s moved the last key into the removed one's place.
+      a missing key, where it panicked. Assigning a key on a tagged null makes a mapping with
+      that tag, where `yaml_serde` panicked (it made a mapping of an untagged null only).
+      `Mapping::remove` keeps the order of the other keys, where `yaml_serde`'s moved the last
+      key into the removed one's place.
     - `Mapping` has no `entry`, `retain`, `clear`, `with_capacity`, `reserve`, `capacity`,
       `shrink_to_fit`, `swap_remove`, `shift_remove` (its `remove` is one), `remove_entry` or
       the other `*_entry` removals, `into_keys` or `into_values`. Of the public types of
@@ -644,6 +647,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
       `IntoDeserializer`, so decode one with `from_value`. `{:?}` prints ayaml's form, such as
       `Number(Number(PosInt(1)))` where `yaml_serde` printed `Number(1)`.
     - `Error` has a message and a line and column, without the byte offset.
+    - `to_string` writes ayaml's layout: a string that needs quoting is double-quoted where
+      `yaml_serde` single-quoted it (`"1"`, `""`, `"x: y"`), and a tagged struct variant puts
+      its tag on a line of its own under the key (`e:`, then `!C` and `x: 2` indented), where
+      `yaml_serde` wrote `e: !C` with the fields under it.
   - `alint_core::template::render_mapping`, `render_value` and `render_nested_options` are no
     longer public, and neither are `alint_dsl::reject_command_rules_in`,
     `reject_fix_promotion_in`, `reject_fix_promotion_templates_in`,
@@ -673,6 +680,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   wall time and 1.3x to 2.9x peak memory. ayaml 0.1.2 holds about 65 bytes of heap per input byte
   while it parses, where libyaml held 35 to 39 (asamarts/ayaml#163). The v0.23.0 release waits
   for an ayaml release that brings its peak heap within 1.2x of libyaml's (ADR-0042).
+
+### Removed
+
+- **Breaking: a baseline no longer matches the fingerprint v0.21 wrote for a hidden-path finding**
+  (#500, ADR-0030 decision 1). A finding's path is hidden when a field that chooses files was read
+  from the environment. v0.22 gave such findings a fingerprint without the path and, for one minor
+  release, still matched the v0.21 form, which hashed the path. If your baseline file was last
+  written by v0.21 or earlier, `check --baseline` and `fix --baseline` now treat those findings as
+  new and their entries as stale, and the language server shows those findings again. Regenerate
+  the file once with `alint baseline --accept-new`; the flag is needed because the findings count
+  as new. A file written by v0.22 is unaffected.
+- **Breaking (library API):** `alint-core` drops `baseline::Fingerprints` and
+  `baseline::fingerprints`, which existed only to match the v0.21 form. `baseline::apply` takes a
+  fingerprinter that returns a `String` again, such as `baseline::fingerprint`.
 
 ### Fixed
 

@@ -11,6 +11,10 @@ decision-makers: asamarts
 Accepted (2026-11-15). Settles the security-advisory decision that phase 10 of the
 [v0.23 plan](../design/v0.23/README.md) names for item 13, and records phase 9's approval under
 [ADR-0035](0035-keep-the-early-ayaml-cutover.md) decision 2, with a condition.
+[ADR-0043](0043-trust-and-disclosure-decisions-from-the-post-v0221-audit.md) (2026-11-16) widens
+decision 1 to the holes the post-v0.22.1 audit found, and corrects its count: #527 fixed eight
+holes, not the three named here. It also widens decision 2's condition to an ayaml release with
+the fixes of every gap alint filed.
 
 ## Context
 
