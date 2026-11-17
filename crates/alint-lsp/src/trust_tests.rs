@@ -30,7 +30,8 @@ fn built_rules(session: &Session) -> Vec<String> {
 /// `require:` kind), a `custom:` fact that writes `sentinel`, and one plain
 /// rule.
 fn spawning_config(sentinel: &Path) -> String {
-    let touch = format!("[\"sh\", \"-c\", \"touch {}\"]", sentinel.display());
+    // Single-quoted, so a Windows path's backslashes are not YAML escapes.
+    let touch = format!("[\"sh\", \"-c\", 'touch {}']", sentinel.display());
     format!(
         "version: 1\nfacts:\n  - id: probe\n    custom:\n      argv: {touch}\nrules:\n  \
          - id: run\n    kind: command\n    paths: \"*.txt\"\n    command: {touch}\n    \
