@@ -119,9 +119,14 @@ Out of scope (report directly to upstream):
 ## Disclosure of past vulnerabilities
 
 Published advisories live at
-https://github.com/asamarts/alint/security/advisories.
+https://github.com/asamarts/alint/security/advisories. Each one is listed here
+too, with the release that fixes it:
 
-No advisories published as of the v0.22.1 release.
+- **GHSA-78jj-xfpm-g6px** (a draft until the 0.23.0 release, which fixes it and
+  publishes it): ways around the policy-test sandbox and the trust given to
+  `extends:` rulesets, nested configs and editor workspaces, in `alint test`,
+  `alint fix`, `alint check` and `alint lsp`. The 0.23.0 entry of the
+  [CHANGELOG](CHANGELOG.md) lists each one under Security.
 
 ## Threat model
 

@@ -299,7 +299,8 @@ superseding ADR-0039); the parser facade below uses it as its libyaml backend.
   allowlist.
 - **Another ayaml.** To qualify ayaml's main branch, point a `[patch.crates-io]` entry at it and
   run the long run. Cargo applies the patch only while main's version satisfies the workspace's
-  exact pin (`=0.1.2`); once main's version moves past it, change the pin as well.
+  exact pin (`=0.1.2`); once main's version moves past it, change the pin as well. A release
+  moves the pin as "Bumping ayaml" below describes.
 
 The documented differences fall into five groups; the report lists every entry.
 - **YAML 1.2 where libyaml follows YAML 1.1.** NEL, LS and PS are content; tabs separate. These are
@@ -328,7 +329,10 @@ The documented differences fall into five groups; the report lists every entry.
   their line (asamarts/ayaml#147), is accepted, where the oracle rejects it, or reads it as a second
   document when it is indented less than the root, past any directives and `---`; after a leading
   byte-order mark, an error has no location (asamarts/ayaml#133) and a quoted scalar's continuation
-  line under a nested parent is not checked against its indentation (asamarts/ayaml#137). One more
+  line under a nested parent is not checked against its indentation (asamarts/ayaml#137). An
+  anchor name that ends at a `:` before a flow indicator, as in `&a:[: x`, is read as the anchor
+  `a` on the key `:[`, but the line reader that decides indentation reads the anchor `a:` and an
+  unclosed `[`, so the value runs on to lines at any indentation (asamarts/ayaml#139). One more
   is in a valid document (asamarts/ayaml#146): a document marker after a top-level block scalar's
   empty lines, one of them indented, is taken for content and rejected, as in `|`, a line of two
   spaces and `...`.
@@ -346,8 +350,8 @@ The documented differences fall into five groups; the report lists every entry.
 
 [ADR-0041](../adr/0041-a-yaml-parser-facade-with-test-only-reference-parsers.md) puts the parser
 behind `alint_core::yaml`, so that alint's own suites can run on other parsers while ayaml is
-adopted and developed. It supersedes ADR-0039. This section is the design; the log below records
-each phase as it lands.
+adopted and developed. It supersedes ADR-0039. This section is the design; the re-evaluation log
+records what landed (2026-11-16: all three phases, in #530).
 
 - **Backends.** The two entry points that read text, `alint_core::yaml::from_str` and the JSON
   tree the structured-format rules query, send each parse to a backend
@@ -426,6 +430,48 @@ each phase as it lands.
   2. The harness through the backends, with saphyr's vote in its report, and an allowlist
      entry for each difference compare mode finds that the harness had not.
   3. The CI job, the release gate, the dogfood rule and the documents.
+
+## Bumping ayaml
+
+The workspace pins ayaml exactly (`=0.1.2` in `[workspace.dependencies]`), because the harness
+qualifies one version. The published crates carry the same pin, so a project that depends on
+them gets that ayaml and cannot use another 0.1.x beside it, and each ayaml release needs an alint
+release before alint's users get it. To move the pin (ADR-0040 decision 2):
+
+1. Change the pin and the lockfile entry, and refresh `AYAML_SYNTAX_MESSAGES` in
+   `yaml_differential_tests.rs` from the new release's scanner and parser sources, as its comment
+   says.
+2. Run the harness's long run with seeds 1 to 12 (`ALINT_YAML_DIFF_SEED`; see "Runs" above), the
+   depth guard's parity properties (`PROPTEST_CASES=2000000 cargo test --release -p alint-core
+   --lib yaml_depth::tests::scanner_never_misses`, three times), and the workspace's tests in
+   compare mode (`ci/scripts/yaml-compare.sh`). `yaml_depth` reads two of ayaml's quirks as
+   ayaml does (asamarts/ayaml#140 and #141); a release that fixes them fails the parity
+   properties until the guard follows.
+3. Remove each allowlist entry whose defect the release fixes, and narrow each entry that also
+   covered one; every entry's example must still be explained by its own entry
+   (`every_deviation_example_is_explained_by_its_own_entry`). Review what saphyr's vote explains
+   in compare mode and in the long runs' reports, since a defect ayaml shares with saphyr passes
+   the vote.
+4. Update the CHANGELOG's account of the cutover: the ayaml version it names, and each
+   difference the release removes or adds.
+5. Bring any difference the bump adds to the owner before the tag (ADR-0040 decision 2).
+
+**The bump v0.23.0 waits on** (ADR-0040, ADR-0043): a release with the fixes ayaml's main has for
+asamarts/ayaml#132, #133, #137, #139, #140, #141, #146 and #147 (ayaml's pull requests #152 and
+#154 to #159). Beside the steps above:
+- the CHANGELOG: drop the sentences on #132, #133, #139, #146 and #147 from the cutover's entry,
+  drop "Before v0.23.0 ships, the owner's approval of the harness's documented differences
+  qualifies the parser (ADR-0035)", and change "ayaml 0.1.2" and the `=0.1.2` pin it names to
+  the new version;
+- the allowlist: remove `block-scalar-under-an-anchor` (#132, #147),
+  `ayaml-error-without-a-place` (#133), `document-marker-after-indented-empty-lines` (#146) and
+  `anchor-name-before-a-colon-and-a-flow-indicator` (#139), and narrow
+  `byte-order-mark-starting-a-line`: drop the missed continuation check of #137 from what it
+  hides, and bring its account of a second leading mark (#140) to what the release reads;
+- this document's "ayaml defects" group, and the comments that name ayaml 0.1.2 in
+  `yaml_differential.rs`, `yaml_differential_tests.rs` and `yaml_differential/predicates.rs`;
+- the long runs with seeds 1 to 12 and the parity runs above, with the results in the v0.23
+  plan's status log.
 
 ## Migration and rollback
 
@@ -641,3 +687,27 @@ maintained libyaml fork is the lower-risk ownership boundary.
   rustdoc still leaves the impls out. A doc(hidden) item under a `__private` path is, by Rust's
   semver conventions, not public API, and nothing outside `ref_cast` can name the trait, so the
   impls are not a way to reach a parser type.
+- **2026-11-16: the parser facade (#530, ADR-0041).** All three phases of "Parser facade" landed
+  in one pull request: the backends, `ALINT_YAML_PARSER` and compare mode with saphyr's vote; the
+  harness through the backends, with the vote counted in its report apart from the allowlist;
+  and the YAML Compare CI job, `ci/scripts/yaml-reference-gate.sh` and the dogfood rule that keeps
+  `yaml_serde::` inside the facade and the harness.
+  - The workspace's tests pass in compare mode. The long runs' reports count no difference that
+    only saphyr's vote explains, so no allowlist entry is redundant yet.
+  - Compare mode found two shapes in the depth guard's tests that the harness's generator had not
+    made: a second leading byte-order mark, which both parsers read as content
+    (asamarts/ayaml#140), and an anchor name ended at a `:` before a flow indicator, whose value
+    ayaml runs on to lines at any indentation (asamarts/ayaml#139), now the entry
+    `anchor-name-before-a-colon-and-a-flow-indicator`.
+  - The same pull request fixed the review of #525: a location class explains two errors only
+    when no prefix of the input shows them to be two, a rewrite changes its construct only, and
+    two rule errors are one only when field and problem agree. It added the entries
+    `empty-flow-implicit-key`, `enum-as-a-one-entry-mapping`, `negative-zero-in-an-unsigned-field`,
+    `rule-that-is-null` and `document-marker-after-indented-empty-lines` (asamarts/ayaml#146),
+    and the class `verbatim-tag-that-names-nothing`: 39 deviations and 8 location classes.
+  - After the audit of everything since v0.22.1, neither libyaml mode nor compare mode lets
+    libyaml read an input past alint's limits, which libyaml lacks: alint's own guards check it
+    first. alint now refuses a one-entry mapping where an enum's name goes, as v0.22 did
+    (ADR-0043 decision 6), so `enum-as-a-one-entry-mapping` is gone: 38 deviations. The
+    "ayaml defects" group gained #139, and "Bumping ayaml" holds the steps the release that
+    fixes ayaml's defects needs.

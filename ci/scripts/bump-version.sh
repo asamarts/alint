@@ -94,10 +94,11 @@ cargo run -q -p xtask -- gen-facts
 #    commit-SHA Action pin select the matching binary without a network lookup;
 #    check-release-version.sh fails a tag whose value was not updated here.
 #    The version appears as `vX.Y.Z` (GHA ref, pre-commit rev, docker tag with
-#    'v'), `:X.Y.Z` (docker tag, bare semver), and once in the
-#    SECURITY.md sentence "as of the vX.Y.Z release". One sed
-#    handles all forms because the regex's `(v|:)` alternation
-#    plus a word boundary on the trailing side covers them.
+#    'v') and `:X.Y.Z` (docker tag, bare semver). One sed handles both
+#    forms because the regex's `(v|:)` alternation plus a word boundary
+#    on the trailing side covers them. SECURITY.md's advisory list names
+#    the fixing release as a bare `X.Y.Z`, which neither this sed nor
+#    check-version-pins.sh touches.
 SNIPPET_FILES=(
   action.yml
   README.md

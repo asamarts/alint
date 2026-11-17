@@ -12,6 +12,9 @@ Accepted (2026-11-14). Amends [ADR-0031](0031-v0221-owner-decisions.md) decision
 found in ayaml are filed as GitHub issues on asamarts/ayaml. adotenv gaps and alint-side work are
 filed as before. [ADR-0035](0035-keep-the-early-ayaml-cutover.md) stands: ayaml stays on `main` and
 is qualified before v0.23.0.
+[ADR-0041](0041-a-yaml-parser-facade-with-test-only-reference-parsers.md) (2026-11-15) amends
+decision 2: saphyr's span uses still leave in v0.24, but saphyr stays after that as a test-only
+reference parser behind `alint-core`'s `yaml-reference` feature.
 
 ## Context
 
