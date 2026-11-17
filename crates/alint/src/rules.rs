@@ -497,7 +497,7 @@ pub(crate) fn show(
             writeln!(out, "  aliases:    {}", aliases.join(", "))?;
         }
         writeln!(out, "  capabilities: {}", capability_summary(meta))?;
-        writeln!(out, "  selectors:    {}", selector_summary(meta))?;
+        writeln!(out, "  selector fields: {}", selector_summary(meta))?;
         writeln!(out, "  fix_ops:      {}", fix_op_summary(meta))?;
         writeln!(out, "  trace:        {}", trace_summary(meta))?;
         if show_docs && let Some(docs) = &docs {

@@ -4,6 +4,7 @@ use std::io::Write;
 use std::path::Path;
 use std::process::ExitCode;
 
+use alint_core::relation::plan::Plan;
 use alint_core::{Engine, WalkOptions, walk};
 use alint_output::{
     Format, sanitize_terminal as term, sanitize_terminal_multiline as term_multiline,
@@ -50,6 +51,13 @@ pub(super) fn cmd_list(category: Option<&str>, cli: &Cli) -> Result<ExitCode> {
             .retain(|e| rules::categories_for_kind(e.kind()).contains(&slug));
     }
 
+    // A version 2 config's named selectors and relations follow its rules.
+    // They have no kind, so no category: `--category` lists rules only.
+    let objects = match category {
+        None => loaded.relation_plan.as_deref(),
+        Some(_) => None,
+    };
+
     // `list` honours --format for machine consumers: `json` emits a
     // stable rule-inventory envelope (the effective rule set, post
     // extends/overrides). Any other machine format is an explicit
@@ -57,7 +65,7 @@ pub(super) fn cmd_list(category: Option<&str>, cli: &Cli) -> Result<ExitCode> {
     let format: Format = cli.format.parse().map_err(|e: String| anyhow::anyhow!(e))?;
     match format {
         Format::Human => {}
-        Format::Json => return list_json(&loaded),
+        Format::Json => return list_json(&loaded, objects),
         _ => bail!(
             "`alint list` supports only `--format human` or `--format json` (got {:?})",
             cli.format
@@ -72,6 +80,9 @@ pub(super) fn cmd_list(category: Option<&str>, cli: &Cli) -> Result<ExitCode> {
                 writeln!(out, "(no loaded rules are in category '{slug}')")?;
             }
             _ => writeln!(out, "(no rules loaded from config)")?,
+        }
+        if let Some(plan) = objects {
+            write_named_objects(&mut out, plan)?;
         }
         out.flush().ok();
         return Ok(ExitCode::SUCCESS);
@@ -120,8 +131,99 @@ pub(super) fn cmd_list(category: Option<&str>, cli: &Cli) -> Result<ExitCode> {
         }
         writeln!(out)?;
     }
+    if let Some(plan) = objects {
+        write_named_objects(&mut out, plan)?;
+    }
     out.flush().ok();
     Ok(ExitCode::SUCCESS)
+}
+
+/// Each named object of `plan`, selectors then relations, in load order:
+/// what it is, its source's display, and the aliases (`as:`) a consumer
+/// reaches that source through, each with the consumer's display.
+fn named_objects(plan: &Plan) -> Vec<NamedObject<'_>> {
+    let object = |what, name, source| {
+        let declared = plan.source(source);
+        NamedObject {
+            what,
+            name,
+            source: &declared.display,
+            aliases: plan
+                .aliases_of(source)
+                .map(|(consumer, alias)| (alias.name.as_str(), consumer.display.as_str()))
+                .collect(),
+        }
+    };
+    plan.selectors
+        .iter()
+        .map(|named| object("selector", named.name.as_str(), named.source))
+        .chain(
+            plan.relations
+                .iter()
+                .map(|named| object("relation", named.name.as_str(), named.source)),
+        )
+        .collect()
+}
+
+struct NamedObject<'p> {
+    what: &'static str,
+    name: &'p str,
+    source: &'p str,
+    /// Each alias, with the source that gives it.
+    aliases: Vec<(&'p str, &'p str)>,
+}
+
+/// The human `list` lines of a version 2 config's named selectors and
+/// relations, after a blank line: `selector manifests  rules/base.yml (as
+/// base in .alint.yml)`.
+fn write_named_objects(out: &mut impl Write, plan: &Plan) -> Result<()> {
+    use alint_output::style;
+
+    let objects = named_objects(plan);
+    if objects.is_empty() {
+        return Ok(());
+    }
+    let dim = style::DIM;
+    writeln!(out)?;
+    for object in objects {
+        write!(
+            out,
+            "{} {}  {dim}{}{dim:#}",
+            object.what,
+            term(object.name),
+            term(object.source)
+        )?;
+        if !object.aliases.is_empty() {
+            let aliases: Vec<String> = object
+                .aliases
+                .iter()
+                .map(|(alias, consumer)| format!("as {} in {}", term(alias), term(consumer)))
+                .collect();
+            write!(out, " {dim}({}){dim:#}", aliases.join(", "))?;
+        }
+        writeln!(out)?;
+    }
+    Ok(())
+}
+
+/// The `list --format json` entries of `plan`'s objects of one kind.
+fn named_objects_json(plan: &Plan, what: &str) -> Vec<serde_json::Value> {
+    named_objects(plan)
+        .into_iter()
+        .filter(|object| object.what == what)
+        .map(|object| {
+            let aliases: Vec<serde_json::Value> = object
+                .aliases
+                .iter()
+                .map(|(alias, consumer)| serde_json::json!({ "alias": alias, "in": consumer }))
+                .collect();
+            serde_json::json!({
+                "name": object.name,
+                "source": object.source,
+                "aliases": aliases,
+            })
+        })
+        .collect()
 }
 
 /// Stable machine-readable rule inventory for `alint list --format json`.
@@ -130,7 +232,11 @@ pub(super) fn cmd_list(category: Option<&str>, cli: &Cli) -> Result<ExitCode> {
 /// Shares the integer `schema_version: 1` with the other JSON envelopes but is
 /// a DISTINCT shape — the `kind` field discriminates so a consumer can tell a
 /// rule inventory from a rule definition or a check report.
-fn list_json(loaded: &LoadedConfig) -> Result<ExitCode> {
+///
+/// A version 2 config adds its named `selectors` and `relations` (`objects`),
+/// each with its source and the aliases that reach it; a version 1 config's
+/// document is unchanged.
+fn list_json(loaded: &LoadedConfig, objects: Option<&Plan>) -> Result<ExitCode> {
     let rules: Vec<serde_json::Value> = loaded
         .entries
         .iter()
@@ -153,7 +259,12 @@ fn list_json(loaded: &LoadedConfig) -> Result<ExitCode> {
             })
         })
         .collect();
-    let doc = serde_json::json!({ "schema_version": 1, "kind": "rule-inventory", "rules": rules });
+    let mut doc =
+        serde_json::json!({ "schema_version": 1, "kind": "rule-inventory", "rules": rules });
+    if let Some(plan) = objects {
+        doc["selectors"] = serde_json::Value::Array(named_objects_json(plan, "selector"));
+        doc["relations"] = serde_json::Value::Array(named_objects_json(plan, "relation"));
+    }
     let mut out = std::io::stdout().lock();
     writeln!(out, "{}", serde_json::to_string_pretty(&doc)?)?;
     out.flush().ok();
@@ -429,7 +540,7 @@ fn write_kind_explain(
         )?;
         writeln!(
             out,
-            "{dim}selectors:  {dim:#} {}",
+            "{dim}selector fields:{dim:#} {}",
             rules::selector_summary(kind_meta)
         )?;
         writeln!(

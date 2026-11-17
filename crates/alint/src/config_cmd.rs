@@ -89,6 +89,9 @@ pub(super) struct LoadedConfig {
     /// The resolved local files the configuration came from, which a fix from
     /// an `extends:`'d ruleset never writes.
     pub(super) config_files: Vec<PathBuf>,
+    /// A version 2 configuration's resolved selectors and relations (`None`
+    /// for version 1), which `list` shows after the rules.
+    pub(super) relation_plan: Option<std::sync::Arc<alint_core::relation::plan::Plan>>,
     /// The loaded top-level config file.
     config_path: PathBuf,
 }
@@ -522,6 +525,7 @@ pub(super) fn load_rules_for_explain(
         fix_size_limit: config.fix_size_limit,
         baseline: config.baseline,
         config_files: config.config_files,
+        relation_plan: config.relation_plan,
         config_path,
     })
 }

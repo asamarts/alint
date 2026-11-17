@@ -444,6 +444,10 @@ policy-test package the user does not trust.
     does, so a manifest `source:` stays inside the repository and out of `.git`.
   - Each selector and relation passes the trust gates of the file that declares it, with what it
     references, as an extended file's rules do.
+  - `alint list` lists a version 2 config's named selectors and relations after its rules, each
+    with the file that declares it and the aliases that reach that file; `list --format json`
+    adds `selectors` and `relations` for a version 2 config only, and `--category` lists rules
+    only.
   - Nothing reads selectors and relations yet: a version 2 config runs its rules as version 1
     would, and its selectors and relations check nothing until the `constraint` rule kind lands.
   - `facts.json` (format 7) gains `compatibility.experimental_config_versions: [2]`;
@@ -713,6 +717,9 @@ policy-test package the user does not trust.
   with a struct literal or a functional record update (`..other`). Build them with the
   constructors and setters listed under Added; the fields stay public to read and to assign, and
   a pattern that destructures one needs `..`.
+- **`explain` and `alint rules show` label a kind's selector fields `selector fields:`** in human
+  output (it was `selectors:`), so the line is not read as a version 2 config's named selectors.
+  The JSON key `selectors` is unchanged.
 
 ### Performance
 

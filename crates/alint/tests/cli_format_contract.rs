@@ -681,7 +681,7 @@ fn explain_surfaces_catalog_detail_for_every_kind() {
             human.contains(docs),
             "explain {id} human is missing its docs link:\n{human}"
         );
-        for label in ["capabilities:", "selectors:", "fix_ops:"] {
+        for label in ["capabilities:", "selector fields:", "fix_ops:"] {
             assert!(
                 human
                     .lines()
@@ -720,7 +720,7 @@ fn rules_show_and_search_over_summaries() {
             .into_owned();
     for expected in [
         "capabilities: spawn_user_command, env_export",
-        "selectors:    workdir (literal_path, rerootable), files_pattern (regex)",
+        "selector fields: workdir (literal_path, rerootable), files_pattern (regex)",
         "fix_ops:      none",
         "trace:        required=selection,assertion; optional=none; preview=false; nested=false",
     ] {
@@ -1334,4 +1334,72 @@ fn explain_redacts_secret_bearing_manifest_scope_values() {
         assert!(!rendered.contains(SECRET), "{rendered}");
         assert!(rendered.contains("<redacted:"), "{rendered}");
     }
+}
+
+// ─── list: a version 2 config's named objects follow its rules ─────
+//
+// Only a version 2 config's inventory gains `selectors` and `relations`: a
+// version 1 config's document keeps its three keys. Named objects have no
+// kind, so `--category` lists rules only.
+#[test]
+fn list_adds_named_objects_for_version_two_only() {
+    let keys = |list: &serde_json::Value| -> Vec<String> {
+        list.as_object()
+            .expect("an object")
+            .keys()
+            .cloned()
+            .collect()
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let rule = "rules:\n  - id: has-readme\n    kind: file_exists\n    paths: README.md\n    \
+                level: error\n";
+    std::fs::write(dir.path().join(".alint.yml"), format!("version: 1\n{rule}")).unwrap();
+    let list: serde_json::Value =
+        serde_json::from_slice(&run(dir.path(), &["list", "--format", "json"]).stdout)
+            .expect("list --format json must be JSON");
+    assert_eq!(keys(&list), ["kind", "rules", "schema_version"]);
+
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        format!("version: 2\nselectors:\n  docs: {{ paths: 'docs/**' }}\n{rule}"),
+    )
+    .unwrap();
+    let list: serde_json::Value =
+        serde_json::from_slice(&run(dir.path(), &["list", "--format", "json"]).stdout)
+            .expect("list --format json must be JSON");
+    assert_eq!(
+        keys(&list),
+        ["kind", "relations", "rules", "schema_version", "selectors"]
+    );
+    assert_eq!(
+        list["selectors"],
+        serde_json::json!([{ "name": "docs", "source": ".alint.yml", "aliases": [] }])
+    );
+    assert_eq!(list["relations"], serde_json::json!([]));
+
+    let by_category: serde_json::Value = serde_json::from_slice(
+        &run(
+            dir.path(),
+            &["list", "--format", "json", "--category", "existence"],
+        )
+        .stdout,
+    )
+    .expect("list --format json must be JSON");
+    assert_eq!(keys(&by_category), ["kind", "rules", "schema_version"]);
+    let human =
+        String::from_utf8_lossy(&run(dir.path(), &["list", "--category", "existence"]).stdout)
+            .into_owned();
+    assert_eq!(human, "error    has-readme  file_exists\n");
+
+    // A config without rules still lists its objects.
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        "version: 2\nselectors:\n  docs: { paths: 'docs/**' }\n",
+    )
+    .unwrap();
+    let human = String::from_utf8_lossy(&run(dir.path(), &["list"]).stdout).into_owned();
+    assert_eq!(
+        human,
+        "(no rules loaded from config)\n\nselector docs  .alint.yml\n"
+    );
 }
