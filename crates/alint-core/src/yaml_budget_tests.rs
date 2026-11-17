@@ -37,6 +37,16 @@ fn yaml_of_len(len: usize) -> String {
     text
 }
 
+/// A YAML mapping whose `b` holds `copies` aliases of one anchored string of
+/// `len` bytes.
+fn aliases_of(len: usize, copies: usize) -> String {
+    let mut text = format!("a: &a \"{}\"\nb:\n", "x".repeat(len));
+    for _ in 0..copies {
+        text.push_str("  - *a\n");
+    }
+    text
+}
+
 /// Wait until `condition` holds, failing after a minute: a thread that should
 /// not wait fails the test instead of hanging it.
 fn wait_until(what: &str, condition: impl Fn() -> bool) {
@@ -97,9 +107,12 @@ fn small_parses_never_touch_the_budget() {
     // The whole budget is held, so a parse that took any would wait forever.
     let held = with_budget(budget, || reserve(2 * MIB)).unwrap();
     let small = yaml_of_len(YAML_BUDGET_THRESHOLD_BYTES);
+    // Aliases whose expanded tree is a few times the file's length.
+    let anchored = aliases_of(1_000, 100);
     let taken = on_thread(budget, move || {
         assert!(reserve(small.len()).is_none());
         assert!(Format::Yaml.parse(&small).is_ok());
+        assert!(Format::Yaml.parse(&anchored).is_ok());
         assert!(extract_entry_rows(Format::Yaml, &small).is_ok());
         let key = [PathSeg::Key("key3".into())];
         assert!(resolve_value_span(Format::Yaml, small.as_bytes(), &key).is_some());
@@ -180,4 +193,87 @@ fn an_input_past_the_budget_takes_all_of_it() {
     let bytes = on_thread(budget, || reserve(3 * MIB).map(|held| held.bytes));
     assert_eq!(bytes, Some(2 * MIB));
     assert_eq!(counters(budget), (0, 0, 2 * MIB));
+}
+
+/// YML-8: a file under the threshold whose aliases expand far past its length
+/// costs its expanded tree, so parses of it wait for the budget like those of
+/// a large file. The budget charged the length alone, and sixteen files of
+/// 500 KB, each with 500 aliases of a string of 500 KB, peaked at 3.1 GB.
+#[test]
+fn alias_heavy_small_parses_wait_for_their_expanded_size() {
+    let budget = budget(2 * MIB);
+    let text: &'static str = Box::leak(aliases_of(100_000, 1_000).into_boxed_str());
+    let (_, expanded) = crate::yaml_depth::scan_guards(text).expansion_and_size(text);
+    let cost = parse_cost(text.len(), expanded);
+    assert!(
+        text.len() < YAML_BUDGET_THRESHOLD_BYTES && cost > MIB,
+        "{cost}"
+    );
+    let held = with_budget(budget, || reserve(2 * MIB)).unwrap();
+    let parses: Vec<_> = (0..2)
+        .map(|_| {
+            std::thread::spawn(move || {
+                with_budget(budget, || {
+                    let copies = Format::Yaml
+                        .parse(text)
+                        .map(|value| value["b"].as_array().map_or(0, Vec::len));
+                    (copies, reservations_on_this_thread())
+                })
+            })
+        })
+        .collect();
+    wait_until("both parses wait", || counters(budget).1 == 2);
+    assert!(parses.iter().all(|parse| !parse.is_finished()));
+    drop(held);
+    wait_until("both parses end", || {
+        parses.iter().all(JoinHandle::is_finished)
+    });
+    for parse in parses {
+        let (copies, taken) = parse.join().unwrap();
+        assert_eq!(copies, Ok(1_000));
+        assert_eq!(taken, 1);
+    }
+    assert_eq!(counters(budget), (0, 0, 2 * MIB));
+}
+
+/// A parse's cost is its length unless the expanded tree is more than
+/// [`EXPANSION_BYTES_PER_COST_BYTE`] times that.
+#[test]
+fn a_parse_costs_its_length_or_its_expansion_s_share() {
+    let per = EXPANSION_BYTES_PER_COST_BYTE;
+    assert_eq!(parse_cost(10, 0), 10);
+    assert_eq!(parse_cost(10, 10 * per), 10);
+    assert_eq!(parse_cost(10, 11 * per), 11);
+    // A document without aliases is not measured, and costs its length.
+    let plain = yaml_of_len(4096);
+    let scan = crate::yaml_depth::scan_guards(&plain);
+    assert_eq!(scan.expansion_and_size(&plain).1, 0);
+    // A few small aliases stay within the allowance.
+    let anchored = aliases_of(10, 20);
+    let (_, expanded) = crate::yaml_depth::scan_guards(&anchored).expansion_and_size(&anchored);
+    assert!(expanded > 0 && parse_cost(anchored.len(), expanded) == anchored.len());
+}
+
+/// A reservation grows by being given back and taken anew, so the thread waits
+/// holding nothing; one that holds enough is kept, and a nested one stays
+/// empty.
+#[test]
+fn a_reservation_grows_by_being_taken_anew() {
+    let budget = budget(4 * MIB);
+    let taken = on_thread(budget, move || {
+        let held = reserve(2 * MIB);
+        let kept = reserve_at_least(held, MIB).unwrap();
+        assert_eq!((kept.bytes, counters(budget).0), (2 * MIB, 2 * MIB));
+        let grown = reserve_at_least(Some(kept), 3 * MIB).unwrap();
+        assert_eq!((grown.bytes, counters(budget).0), (3 * MIB, 3 * MIB));
+        assert!(reserve_at_least(None, 3 * MIB).is_none());
+        assert!(reserve_at_least(None, 2 * MIB).is_none());
+        drop(grown);
+        let from_none = reserve_at_least(None, 2 * MIB).unwrap();
+        assert_eq!(from_none.bytes, 2 * MIB);
+        drop(from_none);
+        reservations_on_this_thread()
+    });
+    assert_eq!(taken, 3);
+    assert_eq!(counters(budget), (0, 0, 3 * MIB));
 }

@@ -229,7 +229,7 @@ pub fn expansion_within_limit(text: &str) -> bool {
 /// materializing millions of nodes at the production ceiling.
 fn expansion_with(text: &str, max: usize) -> Expansion {
     if contains_alias(text) {
-        expansion_budget_pass(text, max)
+        expansion_budget_pass(text, max).0
     } else {
         Expansion::WithinLimit
     }
@@ -243,16 +243,17 @@ fn expansion_within_limit_with(text: &str, max: usize) -> bool {
 }
 
 /// The discard-only counting pass of [`expansion`], for text that holds an
-/// alias.
-fn expansion_budget_pass(text: &str, max: usize) -> Expansion {
+/// alias, and the bytes it charged: the expanded tree's estimated size when
+/// it read the text whole, `0` otherwise.
+fn expansion_budget_pass(text: &str, max: usize) -> (Expansion, usize) {
     let remaining = std::cell::Cell::new(max);
     let exceeded = std::cell::Cell::new(false);
     let seed = NodeBudget {
         remaining: &remaining,
         exceeded: &exceeded,
     };
-    match crate::yaml::ayaml_from_str_seed(text, seed) {
-        Ok(()) if !exceeded.get() => Expansion::WithinLimit,
+    let expansion = match crate::yaml::ayaml_from_str_seed(text, seed) {
+        Ok(()) if !exceeded.get() => return (Expansion::WithinLimit, max - remaining.get()),
         Ok(()) => Expansion::OverLimit,
         // D28: ayaml enforces its own alias budget before the visitor sees
         // every node. Its alias-expansion limit error therefore means the
@@ -268,7 +269,8 @@ fn expansion_budget_pass(text: &str, max: usize) -> Expansion {
         // Any other refusal (a syntax error, the input cap, the document
         // count) came before the expansion was counted.
         Err(error) => Expansion::Unparsed(error.to_string()),
-    }
+    };
+    (expansion, 0)
 }
 
 /// Both YAML guards from one lexer pass. Callers that checked
@@ -302,10 +304,21 @@ impl GuardScan {
     /// [`Expansion::Unparsed`] as well as [`Expansion::OverLimit`].
     #[must_use]
     pub fn expansion(&self, text: &str) -> Expansion {
+        self.expansion_and_size(text).0
+    }
+
+    /// [`Self::expansion`], and the size its pass estimated for the tree the
+    /// aliases expand into: [`YAML_NODE_COST`] for each node and the bytes of
+    /// each string, every alias's replay included. `0` when the text holds no
+    /// alias, which the pass skips, and when the pass did not read the text
+    /// whole. The YAML parse budget charges a parse that materializes the
+    /// aliases by this size ([`crate::yaml_budget::parse_cost`]).
+    #[must_use]
+    pub fn expansion_and_size(&self, text: &str) -> (Expansion, usize) {
         if self.has_alias {
             expansion_budget_pass(text, expansion_budget(text.len()))
         } else {
-            Expansion::WithinLimit
+            (Expansion::WithinLimit, 0)
         }
     }
 }

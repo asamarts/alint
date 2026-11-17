@@ -3,10 +3,19 @@
 //! A YAML parse costs far more memory than its input: at the 32 MiB input cap
 //! ([`crate::MAX_STRUCTURED_BYTES`]) one parse measured 4.5 to 6.2 GB of peak
 //! RSS (ADR-0042), and the per-file rules parse in parallel. So every parse of
-//! repository YAML over [`YAML_BUDGET_THRESHOLD_BYTES`] first takes its input's
-//! length from a process-wide budget of [`YAML_PARSE_BUDGET_BYTES`], waiting
-//! until enough is free, and gives it back when the parse ends: at most one
-//! maximal file parses at a time, and a file of 1 MiB or less never waits.
+//! repository YAML whose cost is over [`YAML_BUDGET_THRESHOLD_BYTES`] first
+//! takes that cost from a process-wide budget of [`YAML_PARSE_BUDGET_BYTES`],
+//! waiting until enough is free, and gives it back when the parse ends: at
+//! most one maximal file parses at a time.
+//!
+//! A parse's cost is its input's length, but where the parse copies what
+//! aliases name into the value it builds ([`crate::Format::parse`]): there it
+//! is the larger of the length and the alias guard's estimate of the expanded
+//! tree, scaled to input bytes ([`parse_cost`]). A file of 500 KB with one
+//! anchored string of 500 KB and 500 aliases of it peaked at 269 MB, and
+//! sixteen of them at 3.1 GB, when the budget charged the length alone. A file
+//! of 1 MiB or less never waits unless the guard estimates its expanded tree
+//! at more than 64 MiB.
 //!
 //! The budget is held while the parser runs, not while the parsed value lives.
 //! A parse's peak is inside the parser, whose events and half-built tree come
@@ -19,8 +28,10 @@
 //!
 //! The entry points that parse repository YAML take a reservation:
 //! [`crate::Format::parse`], the entry rows of [`crate::extract`], the
-//! structured-fix span resolver and `pinned_references`. Configuration files
-//! are read one at a time and take none.
+//! structured-fix span resolver and `pinned_references`. Only the first copies
+//! what an alias names; the others keep an alias as one node, so their cost is
+//! their input's length. Configuration files are read one at a time and take
+//! none.
 
 use std::cell::Cell;
 use std::marker::PhantomData;
@@ -30,8 +41,19 @@ use std::sync::{Condvar, Mutex, PoisonError};
 /// structured-input cap.
 pub const YAML_PARSE_BUDGET_BYTES: usize = crate::MAX_STRUCTURED_BYTES;
 
-/// A YAML input of at most this many bytes parses without the budget.
+/// A YAML parse that costs at most this many bytes runs without the budget.
 pub const YAML_BUDGET_THRESHOLD_BYTES: usize = 1024 * 1024;
+
+/// The bytes of the alias guard's estimate of an expanded tree that cost as
+/// much as one byte of input: about what a byte of input costs a parse at its
+/// peak (ayaml's peak heap is about 65 bytes per input byte, ADR-0042). The
+/// estimate of a tree that copies what aliases name is close to the parse's
+/// peak, as the copies are most of it, so the trees of the parses in flight
+/// stay within this many times the budget, 2 GiB. The estimate of a document
+/// that holds an alias but replays little is far below its parse's peak (about
+/// 11 bytes per input byte for OpenAPI-shaped YAML), so its cost stays its
+/// length.
+pub const EXPANSION_BYTES_PER_COST_BYTE: usize = 64;
 
 /// The process's budget.
 static GLOBAL: Budget = Budget::new(YAML_PARSE_BUDGET_BYTES);
@@ -47,10 +69,11 @@ std::thread_local! {
     static TEST_BUDGET: Cell<Option<&'static Budget>> = const { Cell::new(None) };
 }
 
-/// Reserve `input_len` bytes of the process's budget for a parse of that much
-/// YAML, waiting until they are free. `None`, without waiting, for an input of
-/// at most [`YAML_BUDGET_THRESHOLD_BYTES`], and on a thread that already holds
-/// a reservation. An input longer than the budget takes all of it.
+/// Reserve `input_len` bytes of the process's budget for a parse that costs
+/// that much (see [`parse_cost`]), waiting until they are free. `None`,
+/// without waiting, for a cost of at most [`YAML_BUDGET_THRESHOLD_BYTES`], and
+/// on a thread that already holds a reservation. A cost past the budget takes
+/// all of it.
 ///
 /// Hold the result until the parser returns, and drop it on the thread that
 /// took it.
@@ -61,6 +84,38 @@ pub fn reserve(input_len: usize) -> Option<Reservation> {
         return budget.reserve(input_len);
     }
     GLOBAL.reserve(input_len)
+}
+
+/// What a parse of `input_len` bytes of YAML costs when it copies what the
+/// aliases name into its value: the input's length, or the alias guard's
+/// estimate of the expanded tree (`expanded`, see
+/// [`crate::yaml_depth::GuardScan::expansion_and_size`]) over
+/// [`EXPANSION_BYTES_PER_COST_BYTE`] when that is more.
+#[must_use]
+pub const fn parse_cost(input_len: usize, expanded: usize) -> usize {
+    let expansion = expanded / EXPANSION_BYTES_PER_COST_BYTE;
+    if expansion > input_len {
+        expansion
+    } else {
+        input_len
+    }
+}
+
+/// `held`, when it holds at least `bytes` (or all of the budget), and
+/// otherwise a reservation of `bytes` in its place, waiting until they are
+/// free: for a parse that learns it costs more than it reserved, once the
+/// alias guard has measured its input. `held` is given back first, so the
+/// thread waits holding nothing. `None` under the conditions of [`reserve`].
+#[must_use = "the reservation is given back when it is dropped"]
+pub fn reserve_at_least(held: Option<Reservation>, bytes: usize) -> Option<Reservation> {
+    if held
+        .as_ref()
+        .is_some_and(|held| held.bytes >= bytes.min(held.budget.capacity))
+    {
+        return held;
+    }
+    drop(held);
+    reserve(bytes)
 }
 
 /// How many reservations this thread has taken, for tests that check a parse
