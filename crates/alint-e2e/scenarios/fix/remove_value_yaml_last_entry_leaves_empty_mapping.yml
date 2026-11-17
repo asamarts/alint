@@ -1,0 +1,65 @@
+test_version: 1
+name: remove_value of a YAML block mapping's last entry leaves an empty mapping, not null
+tags: [fix, yaml_path_absent, remove_value, yaml]
+
+# Deleting the only entry of `deps` would leave `deps:` with no value, which
+# reads as null, where the same removal in JSON leaves `"deps": {}` and in
+# TOML the `[deps]` table. The entry becomes `{}` in place, so `deps` stays
+# an empty mapping. In `two.yaml`, two rules each remove one of the two
+# entries: each removal alone deletes a line, but together they would empty
+# the mapping, so the second rule's edit waits for the next pass, where it is
+# the last entry's and writes `{}`.
+
+given:
+  tree:
+    one.yaml: |
+      deps:
+        lodash: 1.0  # pinned
+      name: x
+    two.yaml: |
+      deps:
+        a: 1
+        b: 2
+      name: x
+  config: |
+    version: 1
+    rules:
+      - id: no-lodash
+        kind: yaml_path_absent
+        paths: "one.yaml"
+        path: "$['deps']['lodash']"
+        level: error
+        fix:
+          remove_value: { applicability: safe }
+      - id: no-a
+        kind: yaml_path_absent
+        paths: "two.yaml"
+        path: "$['deps']['a']"
+        level: error
+        fix:
+          remove_value: { applicability: safe }
+      - id: no-b
+        kind: yaml_path_absent
+        paths: "two.yaml"
+        path: "$['deps']['b']"
+        level: error
+        fix:
+          remove_value: { applicability: safe }
+
+when: [fix, check]
+
+expect:
+  - exit: success
+    applied: [no-lodash, no-a, no-b]
+  - exit: success
+    violations: []
+
+expect_tree:
+  one.yaml: |
+    deps:
+      {}  # pinned
+    name: x
+  two.yaml: |
+    deps:
+      {}
+    name: x

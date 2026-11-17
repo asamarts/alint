@@ -7,9 +7,10 @@ tags: [fix, yaml_path_equals, set_value, yaml, safety]
 # a splice over the `*d` reference would replace it with a literal `9`,
 # silently DE-ALIASING it (a semantic change). The resolver declines an alias,
 # so the fix is `skipped`, the violation survives, and `expect_tree` proves the
-# file (anchor + alias intact) is byte-for-byte unchanged. An anchor DEFINITION
-# value (`&d 5`) stays fixable, its set span past the anchor (see
-# `set_value_yaml_keeps_anchor.yml`): only the reference declines.
+# file (anchor + alias intact) is byte-for-byte unchanged. The anchor's own
+# value (`&d 5`) declines too while an alias names it, and an anchor no alias
+# names stays fixable, its set span past the anchor (see
+# `set_value_yaml_keeps_anchor.yml`).
 
 given:
   tree:

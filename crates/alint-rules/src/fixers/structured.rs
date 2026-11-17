@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use alint_core::structured_fix::{self, PathSeg};
+use alint_core::structured_fix::{self, Intent, PathSeg};
 use alint_core::{
     Applicability, CollectedEdit, EditVerifier, ExpectedValue, FixContext, FixEdit, FixOutcome,
     Fixer, Format, Result, Violation,
@@ -192,6 +192,14 @@ impl StructuredFixer {
     }
 }
 
+/// The intent of removing each of `paths`, for the whole-document check.
+fn removals(paths: &[Vec<PathSeg>]) -> Vec<(Vec<PathSeg>, Intent)> {
+    paths
+        .iter()
+        .map(|path| (path.clone(), Intent::Remove))
+        .collect()
+}
+
 /// Convert a resolved `JSONPath` location into the crate-neutral [`PathSeg`]
 /// list the span resolver navigates.
 pub(crate) fn to_segs(loc: &NormalizedPath<'_>) -> Vec<PathSeg> {
@@ -348,7 +356,15 @@ impl Fixer for StructuredFixer {
         // touching the SAME span still overlap -> the engine serializes them (a
         // genuinely conflicting config still oscillates to a loud exit 2).
         if structured_fix::uses_document_rewrite(self.format) {
-            let one = |doc: Vec<u8>, expect: Option<ExpectedValue>| {
+            // The rewrite must leave the tree changed exactly as intended, the
+            // check every whole-document format's edits pass (see
+            // `structured_fix::is_exact_edit`); otherwise nothing is emitted.
+            let one = |doc: Vec<u8>,
+                       expect: Option<ExpectedValue>,
+                       intents: &[(Vec<PathSeg>, Intent)]| {
+                if !structured_fix::is_exact_edit(self.format, &value, &doc, intents) {
+                    return Vec::new();
+                }
                 let (range, content) = structured_fix::minimal_replace(bytes, &doc);
                 if range.is_empty() && content.is_empty() {
                     return Vec::new(); // reserialize was byte-identical: no-op
@@ -386,7 +402,7 @@ impl Fixer for StructuredFixer {
                         else {
                             return Vec::new();
                         };
-                        return one(doc, None);
+                        return one(doc, None, &[(segs, Intent::Set(want.clone()))]);
                     }
                     if located.len() != 1 {
                         return Vec::new();
@@ -399,7 +415,11 @@ impl Fixer for StructuredFixer {
                     }
                     let segs = to_segs(node.location());
                     match structured_fix::document_set(self.format, bytes, &segs, want) {
-                        Some(doc) => one(doc, Some(ExpectedValue::Scalar(want.clone()))),
+                        Some(doc) => one(
+                            doc,
+                            Some(ExpectedValue::Scalar(want.clone())),
+                            &[(segs, Intent::Set(want.clone()))],
+                        ),
                         None => Vec::new(),
                     }
                 }
@@ -410,8 +430,9 @@ impl Fixer for StructuredFixer {
                     // path. `document_remove` returns None when NOTHING was removed.
                     let paths: Vec<Vec<PathSeg>> =
                         located.iter().map(|n| to_segs(n.location())).collect();
+                    let intents = removals(&paths);
                     match structured_fix::document_remove(self.format, bytes, &paths) {
-                        Some(doc) => one(doc, Some(ExpectedValue::Absent)),
+                        Some(doc) => one(doc, Some(ExpectedValue::Absent), &intents),
                         None => Vec::new(),
                     }
                 }
@@ -439,6 +460,9 @@ impl Fixer for StructuredFixer {
             let Some(doc) = structured_fix::document_remove(self.format, bytes, &paths) else {
                 return Vec::new();
             };
+            if !structured_fix::is_exact_edit(self.format, &value, &doc, &removals(&paths)) {
+                return Vec::new();
+            }
             let (range, content) = structured_fix::minimal_replace(bytes, &doc);
             if range.is_empty() && content.is_empty() {
                 return Vec::new();
@@ -461,9 +485,6 @@ impl Fixer for StructuredFixer {
                     if !self.set_value_is_statically_applicable(want) {
                         return Vec::new();
                     }
-                    let Some(content) = structured_fix::serialize_scalar(self.format, want) else {
-                        return Vec::new();
-                    };
                     let occurrence = self.selected_occurrence.unwrap_or(0);
                     return located
                         .iter()
@@ -482,14 +503,13 @@ impl Fixer for StructuredFixer {
                                         want,
                                     )?
                                 } else {
-                                    (
-                                        structured_fix::resolve_value_span(
-                                            self.format,
-                                            bytes,
-                                            &segs,
-                                        )?,
-                                        content,
+                                    structured_fix::checked_value_edits(
+                                        self.format,
+                                        bytes,
+                                        &value,
+                                        &[(segs.clone(), want.clone())],
                                     )
+                                    .pop()??
                                 };
                             Some(CollectedEdit {
                                 edit: FixEdit::ReplaceRange {
@@ -553,11 +573,17 @@ impl Fixer for StructuredFixer {
                         isolation_group: None,
                     }];
                 }
-                let Some(content) = structured_fix::serialize_scalar(self.format, want) else {
-                    return Vec::new(); // unreachable: the predicate proved serialization succeeds
-                };
-                let Some(range) = structured_fix::resolve_value_span(self.format, bytes, &segs)
-                else {
+                // The span, the serialized value (which the predicate proved
+                // exists), and for a whole-document format the check that the
+                // splice changes this node only (`checked_value_edits`).
+                let Some((range, content)) = structured_fix::checked_value_edits(
+                    self.format,
+                    bytes,
+                    &value,
+                    &[(segs, want.clone())],
+                )
+                .pop()
+                .flatten() else {
                     return Vec::new();
                 };
                 vec![CollectedEdit {
@@ -597,17 +623,19 @@ impl Fixer for StructuredFixer {
                 // re-runs the query on the whole post-edit file, so a PARTIAL
                 // removal (some node's span unresolved) fails verification and is
                 // demoted rather than written -- the removal is all-or-nothing.
-                // The spans resolve together, from one parse of the file.
+                // The spans resolve together, from one parse of the file, and
+                // a whole-document format's edits must together remove exactly
+                // these nodes (`checked_removal_edits`), or none is emitted.
                 let paths: Vec<Vec<PathSeg>> =
                     located.iter().map(|n| to_segs(n.location())).collect();
-                structured_fix::resolve_removal_spans(self.format, bytes, &paths)
+                structured_fix::checked_removal_edits(self.format, bytes, &value, &paths)
                     .into_iter()
                     .flatten()
-                    .map(|range| CollectedEdit {
+                    .map(|(range, content)| CollectedEdit {
                         edit: FixEdit::ReplaceRange {
                             path: file.to_path_buf(),
                             range,
-                            content: Vec::new(),
+                            content,
                         },
                         applicability: self.applicability,
                         verify: self.verifier(ExpectedValue::Absent),
@@ -691,17 +719,18 @@ impl Fixer for StructuredFixer {
                     .unzip();
                 // A verified-edit format (dotenv) consumes its editor's exact range
                 // and replacement per node; a span format resolves every node's
-                // span from one parse of the file.
-                let spans = if structured_fix::uses_verified_edits(self.format) {
-                    vec![None; paths.len()]
+                // span from one parse of the file, and a whole-document format's
+                // rewrites must together change these nodes only
+                // (`checked_value_edits`).
+                let sets: Vec<(Vec<PathSeg>, Value)> = paths.into_iter().zip(rewrites).collect();
+                let edits = if structured_fix::uses_verified_edits(self.format) {
+                    vec![None; sets.len()]
                 } else {
-                    structured_fix::resolve_value_spans(self.format, bytes, &paths)
+                    structured_fix::checked_value_edits(self.format, bytes, &value, &sets)
                 };
-                paths
-                    .into_iter()
-                    .zip(rewrites)
-                    .zip(spans)
-                    .filter_map(|((segs, rewritten), span)| {
+                sets.into_iter()
+                    .zip(edits)
+                    .filter_map(|((segs, rewritten), edit)| {
                         let (range, content) = if structured_fix::uses_verified_edits(self.format) {
                             structured_fix::verified_set_edit(
                                 self.format,
@@ -710,10 +739,7 @@ impl Fixer for StructuredFixer {
                                 &rewritten,
                             )?
                         } else {
-                            (
-                                span?,
-                                structured_fix::serialize_scalar(self.format, &rewritten)?,
-                            )
+                            edit?
                         };
                         Some(CollectedEdit {
                             edit: FixEdit::ReplaceRange {

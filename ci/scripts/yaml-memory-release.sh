@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # The release condition of ADR-0042: decoding a YAML document's JSON tree,
 # ayaml's peak heap is within 1.2x of libyaml's (`yaml_serde` 0.10.7, the parser
-# v0.22 used), measured by alint-core's `yaml_memory` test on generated OpenAPI
-# documents of about 37 KB and 1.1 MB. v0.23.0 waits for an ayaml release that
-# meets it.
+# v0.22 used), measured by alint-core's `yaml_memory` test on generated documents
+# of nine shapes: OpenAPI ones of about 37 KB, 1.1 MB and 4.4 MB, and block and
+# flow mappings and sequences of about 1 MB. v0.23.0 waits for an ayaml release
+# that meets it for every shape.
 #
 # The release preflight runs it. CI's `YAML Compare` job runs the same test
-# (yaml-compare.sh) against the regression bound, today's ratio and about 10%.
+# (yaml-compare.sh) against each shape's regression bound, its ratio with ayaml
+# 0.1.2 and about 10%.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"

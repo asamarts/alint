@@ -157,7 +157,7 @@ impl Format {
                 // Wait for this input's share of the YAML parse budget, held
                 // until the parse below ends, the guards' passes included
                 // (`yaml_budget`, ADR-0042).
-                let _budget = crate::yaml_budget::reserve(text.len());
+                let budget = crate::yaml_budget::reserve(text.len());
                 // Bound flow-nesting before any parser reads it (the parser v0.22
                 // used hung on a crafted `[[[…` file; ayaml stops at the same 128
                 // levels itself, counting block levels too) -- the YAML analogue
@@ -177,11 +177,19 @@ impl Format {
                 // this guard's is stricter than, and this guard stays as defense
                 // in depth (`yaml_depth`). Cheap discard-only pre-count;
                 // alias-free text short-circuits for free.
-                if !yaml_guards.expansion_within_limit(text) {
+                let (expansion, expanded) = yaml_guards.expansion_and_size(text);
+                if !expansion.within_limit_for_ayaml() {
                     return Err(
                         "YAML alias expansion exceeds the maximum supported size".to_string()
                     );
                 }
+                // The value copies what each alias names, so a small file of
+                // many aliases costs what its expanded tree does: its share of
+                // the budget grows to that before the parse.
+                let _budget = crate::yaml_budget::reserve_at_least(
+                    budget,
+                    crate::yaml_budget::parse_cost(text.len(), expanded),
+                );
                 yaml_value::yaml_to_value(text)
             }
             Self::Toml => toml::from_str(text).map_err(|e| e.to_string()),

@@ -259,6 +259,16 @@ fn places_follow_flow_collections_quotes_and_block_scalars() {
     // closing quote, the line is structure again.
     let found = places("'x\n%y' \n");
     assert!(found[3].quoted && !found[6].literal);
+    // Nor is a line that starts with `%` where it continues the root's
+    // plain scalar: the quote after it is the scalar's text, and the tab
+    // on the line after the comment is white space (seed 17 of the long
+    // run).
+    for input in ["1\n%\n\" #\n\t", "1\n%x\n'a #\n\t \n"] {
+        let found = places(input);
+        assert!(found[input.find('%').unwrap()].plain, "{input:?}");
+        let tab = input.find('\t').unwrap();
+        assert!(!found[tab].literal && !found[tab].quoted, "{input:?}");
+    }
     // A document marker is literal, and the white space after it is not.
     let found = places("--- x\n");
     assert!(found[2].literal && !found[3].literal);

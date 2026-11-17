@@ -1,18 +1,22 @@
 test_version: 1
-name: set_value on an anchored YAML scalar keeps the anchor its aliases name
+name: set_value keeps an anchor no alias names, and declines one an alias names
 tags: [fix, yaml_path_equals, set_value, yaml, safety]
 
 # saphyr's scalar span starts at the scalar's anchor, so a set replaced
-# `&d 5` whole with `9` and dropped the anchor: the `*d` alias after it then
-# named no anchor and the file no longer parsed. The set span starts past the
-# anchor, so `&d` survives and the alias reads the new value, which the last
-# `check` (no violations) and `expect_tree` show.
+# `&d 5` whole with `9` and dropped the anchor. The set span starts past the
+# anchor, so `&d` survives in `solo.yaml`. In `app.yaml` the alias `*d` reads
+# the anchored value too: a set there would change `use` as well, which the
+# rule did not ask for, so the set declines (`skipped`) and the file stays
+# byte-for-byte the same.
 
 given:
   tree:
     app.yaml: |
       defaults: &d 5  # shared
       use: *d
+    solo.yaml: |
+      defaults: &d 5  # kept
+      use: 5
   config: |
     version: 1
     rules:
@@ -31,12 +35,18 @@ expect:
   - exit: policy_failure
     violations:
       - {rule: defaults-nine, level: error, path: app.yaml}
-  - exit: success
+      - {rule: defaults-nine, level: error, path: solo.yaml}
+  - exit: policy_failure
     applied: [defaults-nine]
-  - exit: success
-    violations: []
+    skipped: [defaults-nine]
+  - exit: policy_failure
+    violations:
+      - {rule: defaults-nine, level: error, path: app.yaml}
 
 expect_tree:
   app.yaml: |
-    defaults: &d 9  # shared
+    defaults: &d 5  # shared
     use: *d
+  solo.yaml: |
+    defaults: &d 9  # kept
+    use: 5
