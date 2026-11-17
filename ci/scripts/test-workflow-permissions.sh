@@ -36,6 +36,7 @@ EXPECTED_TOP = {
     'kani.yml': {'contents': 'read'},
     'mutants.yml': {'contents': 'read'},
     'post-publish-smoke.yml': {'contents': 'read'},
+    'pull-request-title.yml': {'contents': 'read'},
     'release.yml': {},
     'yaml-differential.yml': {'contents': 'read'},
 }

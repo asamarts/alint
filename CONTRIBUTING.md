@@ -266,6 +266,8 @@ explained.
   `fix(engine): scope_filter must consult ctx.index`, `perf(core): #[inline] Scope::matches`
 - One logical change per PR. Refactors land separately from feature work.
 - The PR description goes in the body, not the title.
+- A squash merge writes the title and ` (#N)` as the commit subject on `main`, which must fit in
+  120 characters; the `Pull request title` check measures it.
 
 ### Branch protection
 
