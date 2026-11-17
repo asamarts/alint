@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 /// `alint ARGS` in `dir`, with `env` set, git's global config and the
 /// remote-ruleset cache kept in `home`.
 fn alint(dir: &Path, home: &Path, args: &[&str], env: &[(&str, &str)]) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_alint"));
+    let mut command = crate::hermetic::command(env!("CARGO_BIN_EXE_alint"));
     command
         .args(args)
         .current_dir(dir)

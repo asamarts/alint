@@ -94,6 +94,7 @@ fn an_untrusted_session_keeps_a_rule_whose_fix_alone_spawns() {
             .args(args)
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("XDG_CONFIG_HOME", "/dev/null")
             .output()
             .unwrap();
         assert!(output.status.success(), "{output:?}");
@@ -125,6 +126,7 @@ fn git(dir: &Path, args: &[&str]) {
         .args(args)
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("XDG_CONFIG_HOME", "/dev/null")
         .output()
         .unwrap();
     assert!(output.status.success(), "{output:?}");

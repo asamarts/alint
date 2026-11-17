@@ -203,12 +203,10 @@ fn an_untrusted_workspace_runs_no_command_rule_or_custom_fact() {
 
 /// Run `git` with the host's configuration left out, in `dir`.
 fn git(dir: &Path, args: &[&str]) {
-    let output = Command::new("git")
+    let output = crate::hermetic::git()
         .arg("-C")
         .arg(dir)
         .args(args)
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .output()
         .expect("run git");
     assert!(output.status.success(), "{output:?}");

@@ -16,6 +16,7 @@ fn git(dir: &Path, args: &[&str]) {
         .args(args)
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("XDG_CONFIG_HOME", "/dev/null")
         .output()
         .expect("run git");
     assert!(output.status.success(), "{output:?}");
