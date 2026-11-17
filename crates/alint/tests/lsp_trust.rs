@@ -336,6 +336,88 @@ fn a_vendored_config_never_governs_a_file() {
     server.shutdown();
 }
 
+/// (2) A workspace folder with no config of its own, holding two
+/// repositories with a config each: each file is linted by its own
+/// repository's config, as `alint check` run in that repository does.
+#[test]
+fn each_repository_in_a_folder_lints_by_its_own_config() {
+    let tmp = tempfile::tempdir().unwrap();
+    let folder = tmp.path().join("workspace");
+    let rule = |id: &str, word: &str| {
+        format!(
+            "version: 1\nrules:\n  - id: {id}\n    kind: file_content_forbidden\n    \
+             paths: \"**/*.txt\"\n    pattern: {word}\n    level: error\n"
+        )
+    };
+    let mut files = Vec::new();
+    for (repo, id, word) in [("a", "no-alpha", "ALPHA"), ("b", "no-beta", "BETA")] {
+        let top = folder.join(repo);
+        std::fs::create_dir_all(top.join(".git")).unwrap();
+        std::fs::create_dir_all(top.join("src")).unwrap();
+        std::fs::write(top.join(".alint.yml"), rule(id, word)).unwrap();
+        let file = top.join("src/notes.txt");
+        std::fs::write(&file, "ALPHA BETA\n").unwrap();
+        files.push(file);
+    }
+    // A worktree or submodule's `.git` is a file; it is a repository top too.
+    std::fs::remove_dir(folder.join("b/.git")).unwrap();
+    std::fs::write(folder.join("b/.git"), "gitdir: ../b.git\n").unwrap();
+
+    let mut server = start(&folder, &[], &[], Some(trusted()));
+    for file in &files {
+        open(&mut server, file);
+    }
+    let uris: Vec<String> = files.iter().map(|file| uri_of(file)).collect();
+    let seen = settle(&server, &[&uris[0], &uris[1]]);
+    assert_eq!(seen.codes(&uris[0]), ["no-alpha"]);
+    assert_eq!(seen.codes(&uris[1]), ["no-beta"]);
+    server.shutdown();
+}
+
+/// (2) The vendored-config repro in a folder with no config of its own: a
+/// directory without `.git` is never a repository top, so the package's
+/// `.alint.yml` governs nothing and its command rule never runs, whether the
+/// folder is a repository or holds one.
+#[test]
+fn a_vendored_config_never_governs_a_folder_without_one() {
+    for in_repository in [true, false] {
+        let tmp = tempfile::tempdir().unwrap();
+        let folder = tmp.path().join("workspace");
+        let canary = tmp.path().join("CANARY");
+        let top = if in_repository {
+            folder.clone()
+        } else {
+            folder.join("repo")
+        };
+        std::fs::create_dir_all(top.join(".git")).unwrap();
+        let package = top.join("node_modules/evil-pkg");
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::write(
+            package.join(".alint.yml"),
+            format!(
+                "version: 1\nrules:\n  - id: pwn\n    kind: command\n    paths: \"*.js\"\n    \
+                 command: {}\n    level: error\n",
+                touch(&canary)
+            ),
+        )
+        .unwrap();
+        let file = package.join("index.js");
+        std::fs::write(&file, "module.exports = 1;\n").unwrap();
+
+        let mut server = start(&folder, &[], &[], Some(trusted()));
+        open(&mut server, &file);
+        let seen = settle(&server, &[]);
+        assert!(
+            !canary.exists(),
+            "the vendored config's command rule ran (in_repository: {in_repository})"
+        );
+        if let Some(diagnostics) = seen.diagnostics.get(&uri_of(&file)) {
+            assert_eq!(diagnostics, &Vec::<Value>::new());
+        }
+        server.shutdown();
+    }
+}
+
 /// (3) Deciding which config governs a file under `vendor/pkg` resolved that
 /// nested config's `extends:` as if it were top-level: its `{{env.*}}` went
 /// into the URL and the server connected to the host it named.

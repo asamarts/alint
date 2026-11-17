@@ -53,10 +53,11 @@ fn an_untrusted_session_builds_no_spawning_rule_or_fact() {
     let session = build_session_with(dir.path(), &untrusted())
         .unwrap()
         .unwrap();
-    assert_eq!(built_rules(&session), ["readme"]);
+    // `untrack` spawns only through its fix, so it lints without one.
+    assert_eq!(built_rules(&session), ["readme", "untrack"]);
     assert!(session.withheld);
     let report = session.engine.run(&session.root, &session.index).unwrap();
-    assert_eq!(report.results.len(), 1);
+    assert_eq!(report.results.len(), 2);
     assert!(!sentinel.exists(), "an untrusted session ran a process");
 
     // Trusted, the same config builds every rule and runs the fact.
@@ -68,6 +69,49 @@ fn an_untrusted_session_builds_no_spawning_rule_or_fact() {
     assert!(!session.withheld);
     session.engine.run(&session.root, &session.index).unwrap();
     assert!(sentinel.exists(), "positive control: the trusted fact runs");
+}
+
+/// A rule whose fix alone spawns (`git_untrack`) keeps its check in an
+/// untrusted session and loses only the fix: it still reports a tracked
+/// file, without a fix to offer.
+#[test]
+#[cfg(unix)]
+fn an_untrusted_session_keeps_a_rule_whose_fix_alone_spawns() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        "version: 1\nrules:\n  - id: untrack\n    kind: file_absent\n    paths: \"*.log\"\n    \
+         git_tracked_only: true\n    fix:\n      git_untrack: {}\n    level: error\n",
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("build.log"), "x\n").unwrap();
+    for args in [&["init", "-q"][..], &["add", "--", "build.log"]] {
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir.path())
+            .args(args)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+    }
+    let fixable = |settings: &Settings| {
+        let session = build_session_with(dir.path(), settings).unwrap().unwrap();
+        let report = session.engine.run(&session.root, &session.index).unwrap();
+        report
+            .results
+            .iter()
+            .filter(|result| result.rule_id.as_ref() == "untrack" && !result.violations.is_empty())
+            .map(|result| result.is_fixable)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(fixable(&untrusted()), [false], "reports, without its fix");
+    assert_eq!(
+        fixable(&trusted()),
+        [true],
+        "positive control: trusted, fixable"
+    );
 }
 
 #[test]
@@ -193,6 +237,58 @@ fn the_workspace_folders_config_governs_a_vendored_file() {
     let fixed = bare.path().join("mine.yml");
     let key = session_key(&doc, &folders, Some(&fixed)).unwrap();
     assert_eq!((key.config, key.root), (fixed.clone(), root.to_path_buf()));
+}
+
+/// A folder with no config of its own lints a document with the config at
+/// the top of the nearest repository above it, inside the folder: the
+/// nearest directory holding a `.git` directory or file. A directory without
+/// `.git` (a vendored package) is never one, and a nearer repository without a
+/// config of its own lints nothing.
+#[test]
+fn a_folder_without_a_config_lints_by_each_repositorys_own() {
+    let tmp = tempfile::tempdir().unwrap();
+    let folder = tmp.path().join("workspace");
+    let folders = [folder.clone()];
+    if alint_dsl::discover(&folder.join("x")).is_some() {
+        eprintln!("skipped: a config above the temporary directory");
+        return;
+    }
+    let config = |dir: &Path| {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(dir.join(".alint.yml"), "version: 1\nrules: []\n").unwrap();
+        dir.join(".alint.yml")
+    };
+    let a = folder.join("a");
+    let a_config = config(&a);
+    std::fs::create_dir_all(a.join(".git")).unwrap();
+    let b = folder.join("b");
+    let b_config = config(&b);
+    std::fs::write(b.join(".git"), "gitdir: ../b.git\n").unwrap();
+    config(&a.join("node_modules/pkg"));
+    config(&folder.join("vendor/pkg"));
+    std::fs::create_dir_all(a.join("sub/.git")).unwrap();
+
+    let key = session_key(&a.join("src/x.txt"), &folders, None).unwrap();
+    assert_eq!((key.config, key.root), (a_config.clone(), a.clone()));
+    assert_eq!(
+        config_for_document(&a.join("node_modules/pkg/index.js"), &folders),
+        Some(a_config)
+    );
+    assert_eq!(
+        config_for_document(&b.join("deep/y.txt"), &folders),
+        Some(b_config)
+    );
+    for orphan in ["vendor/pkg/index.js", "loose.txt", "a/sub/y.txt"] {
+        assert_eq!(
+            config_for_document(&folder.join(orphan), &folders),
+            None,
+            "{orphan}"
+        );
+    }
+    // A repository above the folder is not the folder's to pick.
+    let inner = [a.join("src")];
+    std::fs::remove_file(a.join(".alint.yml")).unwrap();
+    assert_eq!(config_for_document(&a.join("src/x.txt"), &inner), None);
 }
 
 #[test]

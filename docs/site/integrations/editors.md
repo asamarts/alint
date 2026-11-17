@@ -82,13 +82,18 @@ diagnostics:
   further down (a package's, or one vendored under `node_modules/`)
   governs nothing by itself: under a folder config with
   `nested_configs: true`, files get that config's rules plus the nested
-  ones, as `alint check` from the workspace root does. Every workspace
-  folder of a multi-root workspace is linted; files outside all
-  workspace folders, and folders without a config of their own, are not.
+  ones, as `alint check` from the workspace root does. A folder without
+  a config of its own lints each file with the config at the top of its
+  repository (the nearest directory holding `.git`) inside the folder,
+  so a folder of several repositories lints each by its own config.
+  Every workspace folder of a multi-root workspace is linted; files
+  outside all workspace folders, and files with no config to govern
+  them, are not.
 - **Workspace trust.** Until the editor says the workspace is trusted,
   the server runs nothing the repository's config could start: command
-  rules and custom facts are skipped, a remote `extends:` is not
-  fetched, and environment values are left unset. Everything else lints.
+  rules and custom facts are skipped, a rule whose fix alone runs a
+  command lints without the fix, a remote `extends:` is not fetched, and
+  environment values are left unset. Everything else lints.
   See [Workspace trust](#workspace-trust) below.
 
 ## Configuration

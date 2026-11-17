@@ -265,6 +265,41 @@ fn allow_out_of_root_permits_an_out_of_root_source() {
     assert_eq!(read(&tmp, "copy.txt"), b"external canonical\n");
 }
 
+/// A rule an `extends:`'d ruleset shaped never reads a source outside the
+/// root, whatever `allow_out_of_root` says: `sync_from` would copy it into
+/// the repository. A value source is refused the same way.
+#[test]
+fn an_extended_rule_never_reads_an_out_of_root_source() {
+    let tmp = TempDir::new().unwrap();
+    let outside = TempDir::new().unwrap();
+    let src = outside.path().join("canon");
+    std::fs::write(&src, b"external canonical\n").unwrap();
+    write(&tmp, "copy.txt", b"stale\n");
+    let fix_ctx = FixContext::new(tmp.path(), false)
+        .with_allow_out_of_root(true)
+        .with_extended_source(true);
+    let out = SyncFromFixer::new(src.clone(), Applicability::Unsafe)
+        .apply(&viol("copy.txt"), &fix_ctx)
+        .unwrap();
+    assert!(
+        matches!(&out, FixOutcome::Skipped(reason) if reason.contains(
+            "escapes the repo root; a fix from an extended ruleset never reads outside it"
+        )),
+        "got {out:?}"
+    );
+    assert_eq!(read(&tmp, "copy.txt"), b"stale\n");
+
+    let fixer = CrossFileValueFixer::new(
+        src,
+        Extract::structured(Format::Json, "$.v".to_string()).unwrap(),
+        ValueTargets::Glob(Extract::structured(Format::Json, "$.v".to_string()).unwrap()),
+        Vec::new(),
+        Applicability::Unsafe,
+    );
+    let error = fixer.source_scalar(&fix_ctx).unwrap_err();
+    assert!(error.contains("never reads outside it"), "{error}");
+}
+
 #[test]
 fn fix_edit_sets_the_target_to_the_source_bytes() {
     // The editor / SARIF / agent form: a `SetContent` of the target with the

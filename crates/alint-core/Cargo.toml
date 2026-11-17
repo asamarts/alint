@@ -51,6 +51,9 @@ adotenv.workspace = true
 # `yaml-reference` feature, which no release build enables.
 yaml_serde = { workspace = true, optional = true }
 
+[target.'cfg(unix)'.dependencies]
+rustix.workspace = true
+
 [features]
 # libyaml and saphyr as reference parsers, and `ALINT_YAML_PARSER` to choose
 # one or to compare them with ayaml (ADR-0041). For alint's own tests only, and

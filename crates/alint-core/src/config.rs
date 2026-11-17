@@ -164,7 +164,21 @@ pub enum AllowOutOfRoot {
 }
 
 impl AllowOutOfRoot {
-    /// Whether a rule with this `id` / `kind` may read out of root.
+    /// Whether the effective rule `spec` may read, and its fix read or write,
+    /// outside the root: only a rule of the user's own top-level config the
+    /// grant names ([`Self::allows`]). A rule an `extends:`'d ruleset or a
+    /// nested config shaped ([`RuleSpec::extended_source`]: it declared the
+    /// rule, contributed a field to it, or defined its template) never may,
+    /// whatever the grant says, even when the user's config overrides it by
+    /// id or lists that id under `rules:`.
+    #[must_use]
+    pub fn allows_rule(&self, spec: &RuleSpec) -> bool {
+        !spec.extended_source && self.allows(&spec.id, &spec.kind)
+    }
+
+    /// Whether a rule with this `id` / `kind` may read out of root, by the
+    /// grant alone. A builder asks [`Self::allows_rule`], which also keeps a
+    /// rule from an `extends:`'d ruleset confined.
     #[must_use]
     pub fn allows(&self, id: &str, kind: &str) -> bool {
         match self {

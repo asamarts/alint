@@ -123,3 +123,64 @@ fn facts_from_a_subdirectory_evaluate_the_discovered_repository_root() {
     assert_eq!(body["facts"][0]["id"], "has_root_readme");
     assert_eq!(body["facts"][0]["value"], true);
 }
+
+/// Inside a repository, discovery stops at its top (the nearest directory
+/// holding a `.git` directory or file): a config above it, in a directory
+/// someone else may write (`/tmp`, a shared home), never governs it. Every
+/// command that discovers a config stops there. From a subdirectory, the
+/// repository's own config is still found.
+#[test]
+fn discovery_stops_at_the_repository_top() {
+    let tmp = tempfile::tempdir().unwrap();
+    let canary = tmp.path().join("canary");
+    std::fs::write(
+        tmp.path().join(".alint.yml"),
+        format!(
+            "version: 1\nrules:\n  - id: planted\n    kind: command\n    paths: \"*.txt\"\n    \
+             command: [\"sh\", \"-c\", \"touch '{}'\"]\n    level: error\n",
+            canary.display()
+        ),
+    )
+    .unwrap();
+    let repo = tmp.path().join("repo");
+    let nested = repo.join("src");
+    std::fs::create_dir_all(&nested).unwrap();
+    std::fs::create_dir(repo.join(".git")).unwrap();
+    std::fs::write(nested.join("a.txt"), "x\n").unwrap();
+
+    for args in [
+        &["check"][..],
+        &["fix"],
+        &["list"],
+        &["validate-config"],
+        &["export-agents-md"],
+    ] {
+        let output = Command::new(alint())
+            .args(args)
+            .current_dir(&nested)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success(), "{args:?}: {stderr}");
+        assert!(stderr.contains("no .alint.yml found"), "{args:?}: {stderr}");
+        assert!(!canary.exists(), "{args:?} ran the parent config's command");
+    }
+
+    std::fs::write(
+        repo.join(".alint.yml"),
+        "version: 1\nrules:\n  - id: has-a\n    kind: file_exists\n    paths: src/a.txt\n    \
+         level: error\n",
+    )
+    .unwrap();
+    let output = Command::new(alint())
+        .arg("check")
+        .current_dir(&nested)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!canary.exists());
+}

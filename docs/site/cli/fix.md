@@ -78,8 +78,9 @@ reported as a suggestion instead of being applied:
 alint fix --changed --base origin/main
 ```
 
-A fix never writes into a Git directory (`.git` in any spelling, or through a
-symlink to one), from any configuration, your own top-level one included. A
+A fix never writes into a Git directory (`.git` in the spellings Git's own
+checks name, such as `.GIT`, `.git.` and `git~1`, or through a symlink to
+one), from any configuration, your own top-level one included. A
 `file_create` of `.git/hooks/pre-commit` is reported skipped
 (`.git/hooks/pre-commit is in a Git directory; a fix never writes or reads
 there`); v0.22.0 created it. Keep hooks in a tracked directory and point
