@@ -1,0 +1,9 @@
+{
+  "waivers": [
+    {
+      "id": "GHSA-fc5q-39xc-vjpf",
+      "package": "picomatch",
+      "reason": "ReDoS on crafted extglobs, in picomatch <= 4.0.7, which every release is; no fixed version exists. It reaches only the packaging tools (@vscode/vsce and ovsx, through tinyglobby), which match the extension's own .vscodeignore globs, never input from elsewhere, and it is not in the shipped extension."
+    }
+  ]
+}
