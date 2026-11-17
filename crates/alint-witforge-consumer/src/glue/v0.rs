@@ -15,9 +15,9 @@ pub mod types {
 
         pub fn to_proto(value: &crate::plain::v0_1::types::RepoResource) -> crate::proto::v0::TypesRepoResource {
             crate::proto::v0::TypesRepoResource {
-                path: ::core::option::Option::Some((*&value.path).clone()),
-                indexed: ::core::option::Option::Some((*&value.indexed).clone()),
-                index: (&value.index).as_ref().map(|value| (*value).clone()),
+                path: ::core::option::Option::Some(::core::clone::Clone::clone(&value.path)),
+                indexed: ::core::option::Option::Some(value.indexed),
+                index: value.index,
             }
         }
 
@@ -25,7 +25,7 @@ pub mod types {
             Ok(crate::plain::v0_1::types::RepoResource {
                 path: match value.path { ::core::option::Option::Some(value) => value, ::core::option::Option::None => return ::core::result::Result::Err(GlueError::MissingField { field: "types/repo-resource.path" }), },
                 indexed: match value.indexed { ::core::option::Option::Some(value) => value, ::core::option::Option::None => return ::core::result::Result::Err(GlueError::MissingField { field: "types/repo-resource.indexed" }), },
-                index: value.index.map(|value| ::core::result::Result::Ok(value)).transpose()?,
+                index: value.index,
             })
         }
     }
@@ -38,12 +38,12 @@ pub mod types {
             crate::proto::v0::TypesNode {
                 witforge_value: ::core::option::Option::Some(match value {
                     crate::plain::v0_1::types::Node::Null => crate::proto::v0::types_node::WitforgeValue::Null(crate::proto::v0::Empty {}),
-                    crate::plain::v0_1::types::Node::Bool(payload) => crate::proto::v0::types_node::WitforgeValue::Bool((*payload).clone()),
-                    crate::plain::v0_1::types::Node::Number(payload) => crate::proto::v0::types_node::WitforgeValue::Number((*payload).clone()),
-                    crate::plain::v0_1::types::Node::String(payload) => crate::proto::v0::types_node::WitforgeValue::String((*payload).clone()),
-                    crate::plain::v0_1::types::Node::Bytes(payload) => crate::proto::v0::types_node::WitforgeValue::Bytes((*payload).clone()),
-                    crate::plain::v0_1::types::Node::Path(payload) => crate::proto::v0::types_node::WitforgeValue::Path((*payload).clone()),
-                    crate::plain::v0_1::types::Node::List(payload) => crate::proto::v0::types_node::WitforgeValue::List(crate::proto::v0::WitforgeListOfU32 { values: payload.iter().map(|item| (*item).clone()).collect() }),
+                    crate::plain::v0_1::types::Node::Bool(payload) => crate::proto::v0::types_node::WitforgeValue::Bool(*payload),
+                    crate::plain::v0_1::types::Node::Number(payload) => crate::proto::v0::types_node::WitforgeValue::Number(::core::clone::Clone::clone(payload)),
+                    crate::plain::v0_1::types::Node::String(payload) => crate::proto::v0::types_node::WitforgeValue::String(::core::clone::Clone::clone(payload)),
+                    crate::plain::v0_1::types::Node::Bytes(payload) => crate::proto::v0::types_node::WitforgeValue::Bytes(::core::clone::Clone::clone(payload)),
+                    crate::plain::v0_1::types::Node::Path(payload) => crate::proto::v0::types_node::WitforgeValue::Path(::core::clone::Clone::clone(payload)),
+                    crate::plain::v0_1::types::Node::List(payload) => crate::proto::v0::types_node::WitforgeValue::List(crate::proto::v0::WitforgeListOfU32 { values: ::core::clone::Clone::clone(payload) }),
                     crate::plain::v0_1::types::Node::Record(payload) => crate::proto::v0::types_node::WitforgeValue::Record(crate::proto::v0::WitforgeListOfTypesRecordField { values: payload.iter().map(|item| super::super::types::record_field::to_proto(item)).collect() }),
                 }),
             }
@@ -57,7 +57,7 @@ pub mod types {
                 ::core::option::Option::Some(crate::proto::v0::types_node::WitforgeValue::String(payload)) => ::core::result::Result::Ok(crate::plain::v0_1::types::Node::String(payload)),
                 ::core::option::Option::Some(crate::proto::v0::types_node::WitforgeValue::Bytes(payload)) => ::core::result::Result::Ok(crate::plain::v0_1::types::Node::Bytes(payload)),
                 ::core::option::Option::Some(crate::proto::v0::types_node::WitforgeValue::Path(payload)) => ::core::result::Result::Ok(crate::plain::v0_1::types::Node::Path(payload)),
-                ::core::option::Option::Some(crate::proto::v0::types_node::WitforgeValue::List(payload)) => ::core::result::Result::Ok(crate::plain::v0_1::types::Node::List(payload.values.into_iter().map(|item| ::core::result::Result::Ok(item)).collect::<::core::result::Result<::std::vec::Vec<_>, GlueError>>()?)),
+                ::core::option::Option::Some(crate::proto::v0::types_node::WitforgeValue::List(payload)) => ::core::result::Result::Ok(crate::plain::v0_1::types::Node::List(payload.values)),
                 ::core::option::Option::Some(crate::proto::v0::types_node::WitforgeValue::Record(payload)) => ::core::result::Result::Ok(crate::plain::v0_1::types::Node::Record(payload.values.into_iter().map(|item| ::core::result::Result::Ok(super::super::types::record_field::from_proto(item)?)).collect::<::core::result::Result<::std::vec::Vec<_>, GlueError>>()?)),
                 ::core::option::Option::None => ::core::result::Result::Err(GlueError::UnknownCase { message: "types/node" }),
             }
@@ -70,8 +70,8 @@ pub mod types {
 
         pub fn to_proto(value: &crate::plain::v0_1::types::RecordField) -> crate::proto::v0::TypesRecordField {
             crate::proto::v0::TypesRecordField {
-                name: ::core::option::Option::Some((*&value.name).clone()),
-                child: ::core::option::Option::Some((*&value.child).clone()),
+                name: ::core::option::Option::Some(::core::clone::Clone::clone(&value.name)),
+                child: ::core::option::Option::Some(value.child),
             }
         }
 
@@ -89,7 +89,7 @@ pub mod types {
 
         pub fn to_proto(value: &crate::plain::v0_1::types::FlatValue) -> crate::proto::v0::TypesFlatValue {
             crate::proto::v0::TypesFlatValue {
-                nodes: (&value.nodes).iter().map(|item| super::super::types::node::to_proto(item)).collect(),
+                nodes: value.nodes.iter().map(|item| super::super::types::node::to_proto(item)).collect(),
             }
         }
 
@@ -107,8 +107,8 @@ pub mod types {
         pub fn to_proto(value: &crate::plain::v0_1::types::PointerSegment) -> crate::proto::v0::TypesPointerSegment {
             crate::proto::v0::TypesPointerSegment {
                 witforge_value: ::core::option::Option::Some(match value {
-                    crate::plain::v0_1::types::PointerSegment::Key(payload) => crate::proto::v0::types_pointer_segment::WitforgeValue::Key((*payload).clone()),
-                    crate::plain::v0_1::types::PointerSegment::Index(payload) => crate::proto::v0::types_pointer_segment::WitforgeValue::Index((*payload).clone()),
+                    crate::plain::v0_1::types::PointerSegment::Key(payload) => crate::proto::v0::types_pointer_segment::WitforgeValue::Key(::core::clone::Clone::clone(payload)),
+                    crate::plain::v0_1::types::PointerSegment::Index(payload) => crate::proto::v0::types_pointer_segment::WitforgeValue::Index(*payload),
                 }),
             }
         }
@@ -132,7 +132,7 @@ pub mod types {
                     crate::plain::v0_1::types::RowState::Value(payload) => crate::proto::v0::types_row_state::WitforgeValue::Value(super::super::types::flat_value::to_proto(payload)),
                     crate::plain::v0_1::types::RowState::Key => crate::proto::v0::types_row_state::WitforgeValue::Key(crate::proto::v0::Empty {}),
                     crate::plain::v0_1::types::RowState::Missing => crate::proto::v0::types_row_state::WitforgeValue::Missing(crate::proto::v0::Empty {}),
-                    crate::plain::v0_1::types::RowState::Error(payload) => crate::proto::v0::types_row_state::WitforgeValue::Error((*payload).clone()),
+                    crate::plain::v0_1::types::RowState::Error(payload) => crate::proto::v0::types_row_state::WitforgeValue::Error(::core::clone::Clone::clone(payload)),
                 }),
             }
         }
@@ -155,13 +155,13 @@ pub mod types {
         pub fn to_proto(value: &crate::plain::v0_1::types::Row) -> crate::proto::v0::TypesRow {
             crate::proto::v0::TypesRow {
                 resource: ::core::option::Option::Some(super::super::types::repo_resource::to_proto(&value.resource)),
-                pointer: (&value.pointer).as_ref().map(|value| crate::proto::v0::WitforgeListOfTypesPointerSegment { values: value.iter().map(|item| super::super::types::pointer_segment::to_proto(item)).collect() }),
-                label: (&value.label).as_ref().map(|value| (*value).clone()),
-                ordinal: ::core::option::Option::Some((*&value.ordinal).clone()),
-                start: (&value.start).as_ref().map(|value| (*value).clone()),
-                end: (&value.end).as_ref().map(|value| (*value).clone()),
+                pointer: value.pointer.as_ref().map(|value| crate::proto::v0::WitforgeListOfTypesPointerSegment { values: value.iter().map(|item| super::super::types::pointer_segment::to_proto(item)).collect() }),
+                label: ::core::clone::Clone::clone(&value.label),
+                ordinal: ::core::option::Option::Some(value.ordinal),
+                start: value.start,
+                end: value.end,
                 state: ::core::option::Option::Some(super::super::types::row_state::to_proto(&value.state)),
-                original: (&value.original).as_ref().map(|value| super::super::types::flat_value::to_proto(value)),
+                original: value.original.as_ref().map(|value| super::super::types::flat_value::to_proto(value)),
             }
         }
 
@@ -169,10 +169,10 @@ pub mod types {
             Ok(crate::plain::v0_1::types::Row {
                 resource: match value.resource { ::core::option::Option::Some(value) => super::super::types::repo_resource::from_proto(value)?, ::core::option::Option::None => return ::core::result::Result::Err(GlueError::MissingField { field: "types/row.resource" }), },
                 pointer: value.pointer.map(|value| ::core::result::Result::Ok(value.values.into_iter().map(|item| ::core::result::Result::Ok(super::super::types::pointer_segment::from_proto(item)?)).collect::<::core::result::Result<::std::vec::Vec<_>, GlueError>>()?)).transpose()?,
-                label: value.label.map(|value| ::core::result::Result::Ok(value)).transpose()?,
+                label: value.label,
                 ordinal: match value.ordinal { ::core::option::Option::Some(value) => value, ::core::option::Option::None => return ::core::result::Result::Err(GlueError::MissingField { field: "types/row.ordinal" }), },
-                start: value.start.map(|value| ::core::result::Result::Ok(value)).transpose()?,
-                end: value.end.map(|value| ::core::result::Result::Ok(value)).transpose()?,
+                start: value.start,
+                end: value.end,
                 state: match value.state { ::core::option::Option::Some(value) => super::super::types::row_state::from_proto(value)?, ::core::option::Option::None => return ::core::result::Result::Err(GlueError::MissingField { field: "types/row.state" }), },
                 original: value.original.map(|value| ::core::result::Result::Ok(super::super::types::flat_value::from_proto(value)?)).transpose()?,
             })
@@ -185,17 +185,17 @@ pub mod types {
 
         pub fn to_proto(value: &crate::plain::v0_1::types::AdapterOutput) -> crate::proto::v0::TypesAdapterOutput {
             crate::proto::v0::TypesAdapterOutput {
-                rows: (&value.rows).iter().map(|item| super::super::types::row::to_proto(item)).collect(),
-                non_strings: (&value.non_strings).iter().map(|item| (*item).clone()).collect(),
-                notes: (&value.notes).iter().map(|item| (*item).clone()).collect(),
+                rows: value.rows.iter().map(|item| super::super::types::row::to_proto(item)).collect(),
+                non_strings: ::core::clone::Clone::clone(&value.non_strings),
+                notes: ::core::clone::Clone::clone(&value.notes),
             }
         }
 
         pub fn from_proto(value: crate::proto::v0::TypesAdapterOutput) -> ::core::result::Result<crate::plain::v0_1::types::AdapterOutput, GlueError> {
             Ok(crate::plain::v0_1::types::AdapterOutput {
                 rows: value.rows.into_iter().map(|item| ::core::result::Result::Ok(super::super::types::row::from_proto(item)?)).collect::<::core::result::Result<::std::vec::Vec<_>, GlueError>>()?,
-                non_strings: value.non_strings.into_iter().map(|item| ::core::result::Result::Ok(item)).collect::<::core::result::Result<::std::vec::Vec<_>, GlueError>>()?,
-                notes: value.notes.into_iter().map(|item| ::core::result::Result::Ok(item)).collect::<::core::result::Result<::std::vec::Vec<_>, GlueError>>()?,
+                non_strings: value.non_strings,
+                notes: value.notes,
             })
         }
     }
@@ -207,8 +207,8 @@ pub mod types {
         pub fn to_proto(value: &crate::plain::v0_1::types::AdapterInput) -> crate::proto::v0::TypesAdapterInput {
             crate::proto::v0::TypesAdapterInput {
                 resource: ::core::option::Option::Some(super::super::types::repo_resource::to_proto(&value.resource)),
-                bytes: ::core::option::Option::Some((*&value.bytes).clone()),
-                max_rows: ::core::option::Option::Some((*&value.max_rows).clone()),
+                bytes: ::core::option::Option::Some(::core::clone::Clone::clone(&value.bytes)),
+                max_rows: ::core::option::Option::Some(value.max_rows),
             }
         }
 
@@ -228,7 +228,7 @@ pub mod types {
         pub fn to_proto(value: &crate::plain::v0_1::types::AdapterError) -> crate::proto::v0::TypesAdapterError {
             crate::proto::v0::TypesAdapterError {
                 witforge_value: ::core::option::Option::Some(match value {
-                    crate::plain::v0_1::types::AdapterError::Parse(payload) => crate::proto::v0::types_adapter_error::WitforgeValue::Parse((*payload).clone()),
+                    crate::plain::v0_1::types::AdapterError::Parse(payload) => crate::proto::v0::types_adapter_error::WitforgeValue::Parse(::core::clone::Clone::clone(payload)),
                     crate::plain::v0_1::types::AdapterError::Limit(payload) => crate::proto::v0::types_adapter_error::WitforgeValue::Limit(super::super::types::limit_error::to_proto(payload)),
                 }),
             }
@@ -249,8 +249,8 @@ pub mod types {
 
         pub fn to_proto(value: &crate::plain::v0_1::types::LimitError) -> crate::proto::v0::TypesLimitError {
             crate::proto::v0::TypesLimitError {
-                limit: ::core::option::Option::Some((*&value.limit).clone()),
-                reached: ::core::option::Option::Some((*&value.reached).clone()),
+                limit: ::core::option::Option::Some(value.limit),
+                reached: ::core::option::Option::Some(value.reached),
             }
         }
 
@@ -268,10 +268,10 @@ pub mod types {
 
         pub fn to_proto(value: &crate::plain::v0_1::types::RelatedLocation) -> crate::proto::v0::TypesRelatedLocation {
             crate::proto::v0::TypesRelatedLocation {
-                path: ::core::option::Option::Some((*&value.path).clone()),
-                label: ::core::option::Option::Some((*&value.label).clone()),
-                line: (&value.line).as_ref().map(|value| (*value).clone()),
-                column: (&value.column).as_ref().map(|value| (*value).clone()),
+                path: ::core::option::Option::Some(::core::clone::Clone::clone(&value.path)),
+                label: ::core::option::Option::Some(::core::clone::Clone::clone(&value.label)),
+                line: value.line,
+                column: value.column,
             }
         }
 
@@ -279,8 +279,8 @@ pub mod types {
             Ok(crate::plain::v0_1::types::RelatedLocation {
                 path: match value.path { ::core::option::Option::Some(value) => value, ::core::option::Option::None => return ::core::result::Result::Err(GlueError::MissingField { field: "types/related-location.path" }), },
                 label: match value.label { ::core::option::Option::Some(value) => value, ::core::option::Option::None => return ::core::result::Result::Err(GlueError::MissingField { field: "types/related-location.label" }), },
-                line: value.line.map(|value| ::core::result::Result::Ok(value)).transpose()?,
-                column: value.column.map(|value| ::core::result::Result::Ok(value)).transpose()?,
+                line: value.line,
+                column: value.column,
             })
         }
     }
@@ -291,30 +291,30 @@ pub mod types {
 
         pub fn to_proto(value: &crate::plain::v0_1::types::Finding) -> crate::proto::v0::TypesFinding {
             crate::proto::v0::TypesFinding {
-                path: (&value.path).as_ref().map(|value| (*value).clone()),
-                message: ::core::option::Option::Some((*&value.message).clone()),
-                line: (&value.line).as_ref().map(|value| (*value).clone()),
-                column: (&value.column).as_ref().map(|value| (*value).clone()),
-                related: (&value.related).iter().map(|item| super::super::types::related_location::to_proto(item)).collect(),
-                baseline_key: (&value.baseline_key).as_ref().map(|value| (*value).clone()),
-                sensitive: ::core::option::Option::Some((*&value.sensitive).clone()),
-                analysis_failure: (&value.analysis_failure).as_ref().map(|value| (*value).clone()),
-                failure_kind: (&value.failure_kind).as_ref().map(|value| (*value).clone()),
-                not_fixable: ::core::option::Option::Some((*&value.not_fixable).clone()),
+                path: ::core::clone::Clone::clone(&value.path),
+                message: ::core::option::Option::Some(::core::clone::Clone::clone(&value.message)),
+                line: value.line,
+                column: value.column,
+                related: value.related.iter().map(|item| super::super::types::related_location::to_proto(item)).collect(),
+                baseline_key: ::core::clone::Clone::clone(&value.baseline_key),
+                sensitive: ::core::option::Option::Some(value.sensitive),
+                analysis_failure: ::core::clone::Clone::clone(&value.analysis_failure),
+                failure_kind: ::core::clone::Clone::clone(&value.failure_kind),
+                not_fixable: ::core::option::Option::Some(value.not_fixable),
             }
         }
 
         pub fn from_proto(value: crate::proto::v0::TypesFinding) -> ::core::result::Result<crate::plain::v0_1::types::Finding, GlueError> {
             Ok(crate::plain::v0_1::types::Finding {
-                path: value.path.map(|value| ::core::result::Result::Ok(value)).transpose()?,
+                path: value.path,
                 message: match value.message { ::core::option::Option::Some(value) => value, ::core::option::Option::None => return ::core::result::Result::Err(GlueError::MissingField { field: "types/finding.message" }), },
-                line: value.line.map(|value| ::core::result::Result::Ok(value)).transpose()?,
-                column: value.column.map(|value| ::core::result::Result::Ok(value)).transpose()?,
+                line: value.line,
+                column: value.column,
                 related: value.related.into_iter().map(|item| ::core::result::Result::Ok(super::super::types::related_location::from_proto(item)?)).collect::<::core::result::Result<::std::vec::Vec<_>, GlueError>>()?,
-                baseline_key: value.baseline_key.map(|value| ::core::result::Result::Ok(value)).transpose()?,
+                baseline_key: value.baseline_key,
                 sensitive: match value.sensitive { ::core::option::Option::Some(value) => value, ::core::option::Option::None => return ::core::result::Result::Err(GlueError::MissingField { field: "types/finding.sensitive" }), },
-                analysis_failure: value.analysis_failure.map(|value| ::core::result::Result::Ok(value)).transpose()?,
-                failure_kind: value.failure_kind.map(|value| ::core::result::Result::Ok(value)).transpose()?,
+                analysis_failure: value.analysis_failure,
+                failure_kind: value.failure_kind,
                 not_fixable: match value.not_fixable { ::core::option::Option::Some(value) => value, ::core::option::Option::None => return ::core::result::Result::Err(GlueError::MissingField { field: "types/finding.not-fixable" }), },
             })
         }
@@ -326,9 +326,9 @@ pub mod types {
 
         pub fn to_proto(value: &crate::plain::v0_1::types::AnalyzerInput) -> crate::proto::v0::TypesAnalyzerInput {
             crate::proto::v0::TypesAnalyzerInput {
-                rule_id: ::core::option::Option::Some((*&value.rule_id).clone()),
-                rows: (&value.rows).iter().map(|item| super::super::types::row::to_proto(item)).collect(),
-                max_findings: ::core::option::Option::Some((*&value.max_findings).clone()),
+                rule_id: ::core::option::Option::Some(::core::clone::Clone::clone(&value.rule_id)),
+                rows: value.rows.iter().map(|item| super::super::types::row::to_proto(item)).collect(),
+                max_findings: ::core::option::Option::Some(value.max_findings),
             }
         }
 
@@ -348,7 +348,7 @@ pub mod types {
         pub fn to_proto(value: &crate::plain::v0_1::types::AnalyzerError) -> crate::proto::v0::TypesAnalyzerError {
             crate::proto::v0::TypesAnalyzerError {
                 witforge_value: ::core::option::Option::Some(match value {
-                    crate::plain::v0_1::types::AnalyzerError::InvalidInput(payload) => crate::proto::v0::types_analyzer_error::WitforgeValue::InvalidInput((*payload).clone()),
+                    crate::plain::v0_1::types::AnalyzerError::InvalidInput(payload) => crate::proto::v0::types_analyzer_error::WitforgeValue::InvalidInput(::core::clone::Clone::clone(payload)),
                     crate::plain::v0_1::types::AnalyzerError::Limit(payload) => crate::proto::v0::types_analyzer_error::WitforgeValue::Limit(super::super::types::limit_error::to_proto(payload)),
                 }),
             }
@@ -369,8 +369,8 @@ pub mod types {
 
         pub fn to_proto(value: &crate::plain::v0_1::types::Capabilities) -> crate::proto::v0::TypesCapabilities {
             crate::proto::v0::TypesCapabilities {
-                spawn_user_command: ::core::option::Option::Some((*&value.spawn_user_command).clone()),
-                host_keyring: ::core::option::Option::Some((*&value.host_keyring).clone()),
+                spawn_user_command: ::core::option::Option::Some(value.spawn_user_command),
+                host_keyring: ::core::option::Option::Some(value.host_keyring),
             }
         }
 
@@ -388,9 +388,9 @@ pub mod types {
 
         pub fn to_proto(value: &crate::plain::v0_1::types::PluginInfo) -> crate::proto::v0::TypesPluginInfo {
             crate::proto::v0::TypesPluginInfo {
-                name: ::core::option::Option::Some((*&value.name).clone()),
-                version: ::core::option::Option::Some((*&value.version).clone()),
-                contract: ::core::option::Option::Some((*&value.contract).clone()),
+                name: ::core::option::Option::Some(::core::clone::Clone::clone(&value.name)),
+                version: ::core::option::Option::Some(::core::clone::Clone::clone(&value.version)),
+                contract: ::core::option::Option::Some(::core::clone::Clone::clone(&value.contract)),
                 capabilities: ::core::option::Option::Some(super::super::types::capabilities::to_proto(&value.capabilities)),
             }
         }
@@ -468,7 +468,7 @@ pub mod adapter_api {
 
             pub fn to_response(value: &::std::string::String) -> crate::proto::v0::AdapterApiIdResponse {
                 crate::proto::v0::AdapterApiIdResponse {
-                    result: ::core::option::Option::Some((*value).clone()),
+                    result: ::core::option::Option::Some(::core::clone::Clone::clone(value)),
                 }
             }
 
@@ -494,7 +494,7 @@ pub mod adapter_api {
 
             pub fn to_response(value: &bool) -> crate::proto::v0::AdapterApiRedactsByDefaultResponse {
                 crate::proto::v0::AdapterApiRedactsByDefaultResponse {
-                    result: ::core::option::Option::Some((*value).clone()),
+                    result: ::core::option::Option::Some(*value),
                 }
             }
 
@@ -601,7 +601,7 @@ pub mod analyzer_api {
 
             pub fn to_response(value: &::std::string::String) -> crate::proto::v0::AnalyzerApiIdResponse {
                 crate::proto::v0::AnalyzerApiIdResponse {
-                    result: ::core::option::Option::Some((*value).clone()),
+                    result: ::core::option::Option::Some(::core::clone::Clone::clone(value)),
                 }
             }
 
