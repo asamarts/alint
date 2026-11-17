@@ -509,6 +509,97 @@ fn w2_local_extends_content_fixer_is_not_demoted() {
     );
 }
 
+/// SEC-12: a URL scheme matches in any case. `HTTPS://` was read as a local
+/// path, so no SRI pin was required or checked, the entry kept none of a remote
+/// entry's limits, and the error for the missing file echoed its user,
+/// password and query.
+#[test]
+fn an_upper_case_scheme_is_a_remote_entry() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cache = extends::Cache::at(tmp.path().join("cache"));
+    let pinned = seed_remote(&cache, REMOTE_REPLACE);
+    let (_, sri) = pinned.split_once('#').unwrap();
+    let config_path = tmp.path().join(".alint.yml");
+    let load_entry = |entry: &str| {
+        std::fs::write(
+            &config_path,
+            format!("version: 1\nextends: [\"{entry}\"]\nrules: []\n"),
+        )
+        .unwrap();
+        load_with(&config_path, &LoadOptions::with_cache(cache.clone()))
+    };
+    let secret = "HTTPS://user:pw@example.invalid/remote.yml?token=t";
+
+    // Pinned: loaded from the pinned bytes as an untrusted remote, whose
+    // content fixer is demoted.
+    let cfg = load_entry(&format!("{secret}#{sri}")).unwrap();
+    let rule = cfg.rules.iter().find(|r| r.id == "no-todo").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion)
+    );
+
+    // Unpinned: refused as a remote entry, shown without its credentials and
+    // query.
+    let error = load_entry(secret).unwrap_err().to_string();
+    assert!(error.contains("no integrity hash"), "{error}");
+    assert!(
+        error.contains("HTTPS://example.invalid/remote.yml"),
+        "{error}"
+    );
+    assert!(
+        !error.contains("pw") && !error.contains("token=t"),
+        "{error}"
+    );
+
+    let error = load_entry("Http://user:pw@example.invalid/x.yml?token=t")
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("plain http:// is not allowed"), "{error}");
+    assert!(
+        !error.contains("pw") && !error.contains("token=t"),
+        "{error}"
+    );
+
+    let cfg = load_entry("ALINT://Bundled/oss-baseline@v1").unwrap();
+    assert!(!cfg.rules.is_empty());
+}
+
+/// An entry with any other `<scheme>://` is a load error naming the scheme,
+/// never a local path, and the error shows it without its userinfo, query
+/// and fragment.
+#[test]
+fn an_unsupported_scheme_is_a_load_error() {
+    let tmp = tempfile::tempdir().unwrap();
+    let config_path = tmp.path().join(".alint.yml");
+    for (entry, scheme) in [
+        ("ftp://user:pw@host/x.yml?t=1#frag", "ftp"),
+        ("FILE://user:pw@host/x.yml?t=1", "file"),
+        ("ssh://user:pw@host/x.yml?t=1", "ssh"),
+        ("git+https://user:pw@host/x.yml?t=1", "git+https"),
+        ("alint://user:pw@elsewhere/x.yml?t=1", "alint"),
+    ] {
+        std::fs::write(
+            &config_path,
+            format!("version: 1\nextends: [\"{entry}\"]\nrules: []\n"),
+        )
+        .unwrap();
+        let error = load(&config_path).unwrap_err().to_string();
+        assert!(
+            error.contains(&format!("unsupported `extends:` scheme `{scheme}`")),
+            "{error}"
+        );
+        assert!(
+            error.contains("use https://, alint://bundled/ or a local path"),
+            "{error}"
+        );
+        assert!(
+            !error.contains("pw") && !error.contains("t=1") && !error.contains("frag"),
+            "{error}"
+        );
+    }
+}
+
 #[test]
 fn w2_remote_security_positive_strip_is_not_demoted() {
     // `file_strip_bidi` / `file_strip_zero_width` are security-POSITIVE (they remove

@@ -9,14 +9,17 @@ command `alint lsp`, and findings from the workspace's `.alint.yml` appear as
 diagnostics as you open, edit and save files.
 
 Each workspace folder is linted by its own `.alint.yml`, rooted at that config's directory, as
-`alint check` run there would. A config further down (a package's, or one vendored under
-`node_modules/`) governs nothing by itself: the folder's config adds it only when it sets
-`nested_configs: true`, and then the file gets both configs' rules, matching `alint check` from the
-workspace root. A folder with no config of its own is not linted. Pass `--show-notes` (for example
-through your editor's `alint.serverArgs` setting) to list informational notes on the server's stderr
-after each check instead of a one-line count. Following the LSP specification, the server exits with
-code 0 after a `shutdown` request and `exit` notification, and with code 1 when `exit` arrives
-without `shutdown`.
+`alint check` run there would. A folder with no config of its own (a directory that holds several
+repositories) lints each file with the config at the top of the nearest repository above it inside
+the folder (the nearest directory holding a `.git` directory or file), as `alint check` run in that
+repository would; a file in no such repository, or in one without a config, is not linted. A config
+further down (a package's, or one vendored under `node_modules/`, which holds no `.git`) governs
+nothing by itself: the governing config adds it only when it sets `nested_configs: true`, and then
+the file gets both configs' rules, matching `alint check` from the root. Pass `--show-notes` (for
+example through your editor's `alint.serverArgs` setting) to list informational notes on the
+server's stderr after each check instead of a one-line count. Following the LSP specification, the
+server exits with code 0 after a `shutdown` request and `exit` notification, and with code 1 when
+`exit` arrives without `shutdown`.
 
 ## Workspace trust
 
@@ -25,7 +28,8 @@ trusted, the server lints with everything that could run a command or reach outs
 turned off:
 
 - rules that run a process (`kind: command`, `generated_file_fresh`, `command_idempotent`, at any
-  `require:` depth) and rules whose fix runs one (`git_untrack`, `command`) are skipped;
+  `require:` depth) are skipped, and a rule whose fix alone runs one (`git_untrack`, `command`)
+  lints without its fix;
 - `custom:` facts are skipped, so they read as unset;
 - a remote `extends:` is not fetched, and the config reports why instead of loading;
 - environment values read nothing: `{{env.NAME}}` takes its `default(...)` (or fails to load

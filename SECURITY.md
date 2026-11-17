@@ -140,9 +140,11 @@ treated as untrusted input. The defensive posture is:
   are SRI-pinned, so a swap on the upstream URL fails verification.
 - **Path-traversal hardened.** All paths are validated to stay within the
   repo root. Symlinks are honoured per the `no_symlinks` rule's verdict. A
-  fix never writes or reads a Git directory (`.git` in any spelling a file
-  system opens as one, or through a symlink to one): a file there would be
-  configuration Git runs commands from. The walk leaves out a symlink whose
+  fix never writes or reads a Git directory (`.git` in the spellings Git's
+  own checks name, such as `.GIT`, `.git.` and `git~1`, or through a symlink
+  to one): a file there would be configuration Git runs commands from. A
+  Windows short name Git's checks do not name (`GIT~2`, or a hashed one)
+  passes. The walk leaves out a symlink whose
   target is in a Git directory, so no content fix edits `.git/config` under
   another name. No rule reads a Git directory either, from any configuration:
   `.git/config` can hold credentials (the `http.<url>.extraheader` that
@@ -154,24 +156,59 @@ treated as untrusted input. The defensive posture is:
   nested config shaped never writes alint's own configuration (`.alint.yml`
   and the other discovery names, `.alint.d/`, or a file the configuration was
   loaded from), so it cannot add such a rule for the next run, and never
-  writes outside the repo root, whatever `allow_out_of_root` says.
+  writes or reads (`content_from`, `sync_from`) outside the repo root,
+  whatever `allow_out_of_root` says. Such a rule's check reads nothing
+  outside the root either: `allow_out_of_root` grants the user's own
+  top-level rules only, even when the user's config overrides the rule by id
+  or names it. The language server's code actions keep the same limits.
+- **A local `extends:` file is part of your repository.** Unlike an
+  `https://` ruleset not listed in `trusted_extends`, a local one may read
+  `env.*` in its conditions and declare `ignore:`. Like every extended
+  config, it never spawns a process, never has a fix write alint's
+  configuration or outside the root, and never reads a Git directory. Vendor
+  a ruleset only as you would vendor code, after reading it.
+- **The configuration is the repository's.** Configuration discovery stops
+  at the repository's top (the nearest directory holding a `.git` directory
+  or file), so a `.alint.yml` above it, in a directory someone else may write
+  (`/tmp`, a shared home), never governs it. Outside every repository,
+  discovery skips a config file another user owns in a directory above the
+  one alint runs in, and warns (`skipping /tmp/.alint.yml: owned by another
+  user`); a config in that directory itself is used whoever owns it (root in
+  a container, on a directory the host's user owns). On Windows, where alint
+  reads no owner, nothing is skipped.
+- **Git reads the repository alint names.** alint finds the repository
+  itself (the nearest directory holding a `.git` directory or file) and
+  names it to every Git command (`--git-dir`, `--work-tree`), so Git never
+  discovers one: a directory shaped like a bare repository, whose `config`
+  could name a command (`core.fsmonitor`), is never taken for one, whatever
+  the Git version (`safe.bareRepository=explicit`, which alint also sets,
+  exists from Git 2.38). A repository the current user does not own is
+  named only when Git, asked to discover exactly it, accepts it (its
+  ownership check and `safe.directory`). With no repository, alint runs no
+  Git command. Running alint in a repository whose `.git/config` someone
+  else wrote (an unpacked archive, a copied directory) runs whatever that
+  config tells Git to run, exactly as `git status` would there: Git's own
+  threat model applies.
 - **The language server waits for workspace trust.** Until the editor sends
   the initialization option `{"trusted": true}` (VS Code sends its Workspace
-  Trust state), `alint lsp` skips spawning rules and `custom:` facts, fetches
-  no remote `extends:` and reads no environment value; other rules lint as
-  usual. A nested or vendored `.alint.yml` never governs a file as a top-level
-  config: the workspace folder's config does, as for `alint check` from the
-  root, and adds nested configs only with `nested_configs: true`.
+  Trust state), `alint lsp` skips spawning rules and `custom:` facts (a rule
+  whose fix alone spawns lints without the fix), fetches no remote
+  `extends:` and reads no environment value; other rules lint as usual. A
+  nested or vendored `.alint.yml` never governs a file as a top-level config:
+  the workspace folder's config does, as for `alint check` from the root, or,
+  in a folder without one, the config at the top of the file's repository
+  (the nearest directory holding `.git`), and each adds nested configs only
+  with `nested_configs: true`.
 - **Policy tests start without host authority.** `alint test` runs a rule,
   fixer or custom fact that spawns a process, at any `require:` depth, or
   reads the host keyring, only when the test declares the capability and the
   command line grants it (`--allow-spawn`, `--allow-host-keyring`). A test's
   tree, fixture and fixes stay in its sandbox: every symlink in its
   repository leads inside it. The Git commands the runner runs itself get
-  none of `given.env` and read only the repository `given.git` makes: Git
-  takes no fixture directory for a repository, a fix cannot write one, and
-  discovery stops at the sandbox. A test's conditions read `given.env`, not
-  the host's environment.
+  none of `given.env` and read only the repository `given.git` makes, which
+  each names: Git takes no fixture directory for a repository, a fix cannot
+  write one, and without `given.git` no Git runs. A test's conditions read
+  `given.env` and the runner's sandbox values, not the host's environment.
 - **No telemetry.** alint sends nothing over the network except the
   user-explicit `extends:` URLs above.
 - **Reproducible builds.** `Cargo.lock` is committed. CI installs toolchains

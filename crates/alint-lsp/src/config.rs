@@ -1,6 +1,6 @@
 //! Config discovery, per-config sessions, trust, and baseline filtering.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -115,19 +115,27 @@ pub(crate) fn check_workspace(
     check
 }
 
-/// The session that governs `doc`: its workspace folder's (the deepest
+/// The session that governs `doc`, in its workspace folder (the deepest
 /// folder holding it). A document outside every workspace folder is not
 /// linted (`None`).
 ///
 /// The folder's own config governs every file in the folder, as `alint check`
-/// run from the folder does: the nearest `.alint.yml` found walking up from the
-/// folder, which may sit above it, so a client rooted at a subdirectory still
-/// finds the repository's config. A `.alint.yml` below that config (a
-/// package's, or one in a vendored or ignored directory) never governs a file
-/// as a top-level config; it contributes rules only through the governing
-/// config's `nested_configs: true`, with a nested config's limits. A folder
-/// without a config of its own is not linted. With `--config` (`fixed`), that
-/// config governs every folder, rooted at the folder.
+/// run from the folder does: the config discovery finds from the folder
+/// (`alint_dsl::discover`), which may sit above it inside the folder's
+/// repository, so a client rooted at a subdirectory still finds the
+/// repository's config.
+///
+/// A folder without a config of its own (a directory holding several
+/// repositories) lints a document with the config at the top of the nearest
+/// repository above it, inside the folder: the nearest directory holding a
+/// `.git` directory or file, as `alint check` run in that repository finds.
+///
+/// Either way, a `.alint.yml` below the governing config's directory (a
+/// package's, or one in a vendored or ignored directory, which holds no
+/// `.git`) never governs a file as a top-level config; it contributes rules
+/// only through the governing config's `nested_configs: true`, with a nested
+/// config's limits. With `--config` (`fixed`), that config governs every
+/// folder, rooted at the folder.
 pub(crate) fn session_key(
     doc: &Path,
     folders: &[PathBuf],
@@ -137,7 +145,21 @@ pub(crate) fn session_key(
         .iter()
         .filter(|f| doc.starts_with(f))
         .max_by_key(|f| f.components().count())?;
-    folder_key(folder, fixed)
+    folder_key(folder, fixed).or_else(|| repository_key(doc, folder))
+}
+
+/// The session of the repository `doc` is in, for a folder without a config
+/// of its own (see [`session_key`]): the config at the top of the nearest
+/// repository above `doc`, when that top is inside `folder`.
+fn repository_key(doc: &Path, folder: &Path) -> Option<SessionKey> {
+    let top = alint_core::git::repository_top(doc.parent()?)?;
+    if !top.starts_with(folder) {
+        return None;
+    }
+    // Discovery from a repository's top checks the top and stops there.
+    let config = alint_dsl::discover(&top)?;
+    let root = config.parent()?.to_path_buf();
+    Some(SessionKey { config, root })
 }
 
 /// The session a workspace folder's documents use (see [`session_key`]).
@@ -371,13 +393,16 @@ struct BuiltRules {
     entries: Vec<RuleEntry>,
     /// Each rule id's canonical kind, for hover.
     kinds: HashMap<String, String>,
-    /// Whether an untrusted session skipped a spawning rule or kept a
+    /// The ids of the rules an `extends:`'d ruleset or a nested config shaped.
+    extended: HashSet<String>,
+    /// Whether an untrusted session skipped a spawning rule or fix, or kept a
     /// `when:` that reads `env.*`.
     withheld: bool,
 }
 
 /// Build the engine entries for a config's enabled rules. An untrusted
-/// session skips every rule that spawns a process.
+/// session skips every rule that spawns a process, and keeps a rule whose
+/// fix alone spawns (`fix: git_untrack`) without its fix.
 fn build_entries(
     rules: &[alint_core::RuleSpec],
     allow_out_of_root: &alint_core::AllowOutOfRoot,
@@ -387,13 +412,25 @@ fn build_entries(
     let mut withheld = false;
     let mut entries: Vec<RuleEntry> = Vec::with_capacity(rules.len());
     let mut kinds: HashMap<String, String> = HashMap::new();
+    let mut extended: HashSet<String> = HashSet::new();
     for spec in rules {
         if matches!(spec.level, Level::Off) {
             continue;
         }
-        if !trusted && alint_dsl::rule_spawn_use(spec, registry.catalog()).is_some() {
+        let mut without_fix;
+        let spec = if !trusted && alint_dsl::rule_spawn_use(spec, registry.catalog()).is_some() {
             withheld = true;
-            continue;
+            without_fix = spec.clone();
+            without_fix.fix = None;
+            if alint_dsl::rule_spawn_use(&without_fix, registry.catalog()).is_some() {
+                continue;
+            }
+            &without_fix
+        } else {
+            spec
+        };
+        if spec.extended_source {
+            extended.insert(spec.id.clone());
         }
         let mut rule = registry
             .build(spec)
@@ -405,9 +442,10 @@ fn build_entries(
             .validate_nested(spec, rule.as_ref())
             .map_err(|error| format!("building rule {:?}: {error}", spec.id))?;
         // Apply the top-level `allow_out_of_root:` policy (top-level
-        // config only; never via `extends:`). No-op for kinds that
-        // don't honor the flag.
-        let allow_out_of_root = allow_out_of_root.allows(&spec.id, &spec.kind);
+        // config only; never via `extends:`) to the user's own rules: a
+        // rule an extended ruleset or a nested config shaped stays
+        // confined. No-op for kinds that don't honor the flag.
+        let allow_out_of_root = allow_out_of_root.allows_rule(spec);
         rule.set_allow_out_of_root(allow_out_of_root);
         let mut entry = RuleEntry::new(rule)
             .with_spec(std::sync::Arc::new(spec.clone()))
@@ -434,6 +472,7 @@ fn build_entries(
     Ok(BuiltRules {
         entries,
         kinds,
+        extended,
         withheld,
     })
 }
@@ -473,6 +512,7 @@ fn build_session_for_config(
     let BuiltRules {
         entries,
         kinds,
+        extended: extended_rules,
         withheld: rules_withheld,
     } = build_entries(&config.rules, &config.allow_out_of_root, trusted, registry)?;
     withheld |= rules_withheld;
@@ -533,6 +573,8 @@ fn build_session_for_config(
         pattern_hints,
         environment_values,
         withheld,
+        extended_rules,
+        config_files: config.config_files,
     })
 }
 

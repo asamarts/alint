@@ -16,7 +16,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::{AnalysisTime, AnalysisTimeUnavailable};
 
-type ProcessEnvironment = BTreeMap<String, String>;
+pub(crate) type ProcessEnvironment = BTreeMap<String, String>;
 type ScopedEnvironmentRegistry = Mutex<HashMap<PathBuf, Arc<ProcessEnvironment>>>;
 
 static SCOPED_PROCESS_ENVIRONMENTS: LazyLock<ScopedEnvironmentRegistry> =
@@ -91,7 +91,7 @@ const GIT_LOCAL_ENV_VARS: &[&str] = &[
 /// test` sets the sandbox's parent).
 const SCOPED_CEILING: &str = "GIT_CEILING_DIRECTORIES";
 
-fn clear_git_repository_env(
+pub(crate) fn clear_git_repository_env(
     command: &mut Command,
     scoped_environment: Option<&ProcessEnvironment>,
 ) {
@@ -113,8 +113,13 @@ fn clear_git_repository_env(
     }
 }
 
-fn git_command(root: &Path) -> Command {
-    let mut command = Command::new("git");
+/// A Git command for `root`, naming the repository alint found for it
+/// ([`repository::find_repository`]) with `--git-dir` and `--work-tree`, so
+/// Git discovers none: a directory shaped like a bare repository is content,
+/// never a repository, whatever the Git version. `None` when there is no
+/// repository to name; the caller then reads the result as Git's failure to
+/// find one, and no Git command runs.
+fn git_command(root: &Path) -> Option<Command> {
     let environment = SCOPED_PROCESS_ENVIRONMENTS
         .lock()
         .ok()
@@ -125,6 +130,14 @@ fn git_command(root: &Path) -> Command {
             let key = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
             environments.get(&key).cloned()
         });
+    // Only a scoped environment sets a ceiling (`alint test`'s sandbox); the
+    // host's is cleared below, as before.
+    let ceiling = environment
+        .as_deref()
+        .and_then(|environment| environment.get(SCOPED_CEILING))
+        .map(String::as_str);
+    let repository = repository::find_repository(root, ceiling, environment.as_deref())?;
+    let mut command = Command::new("git");
     if let Some(environment) = environment.as_deref() {
         command.env_clear().envs(environment);
     }
@@ -132,10 +145,8 @@ fn git_command(root: &Path) -> Command {
     // Repository paths are byte-exact inputs, never user-authored pathspecs;
     // replacement refs are clone-local state, never repository history; log
     // display preferences must not invoke signature verifiers or alter stdout.
-    // A directory found by discovery that is shaped like a bare repository is
-    // content, not a repository: its `config` could name a command to run
-    // (`core.fsmonitor`). Git honors this setting only from the command line
-    // and the user's own configuration, so a repository cannot turn it off.
+    // `safe.bareRepository` is moot with the repository named; it stays as
+    // defense in depth.
     command.args([
         "--literal-pathspecs",
         "--no-replace-objects",
@@ -144,14 +155,19 @@ fn git_command(root: &Path) -> Command {
         "-c",
         "safe.bareRepository=explicit",
     ]);
-    command
+    command.args(repository.args());
+    Some(command)
 }
+
 /// Resolve the current HEAD commit's committer timestamp.
 ///
 /// The command emits only `%ct`; raw Git stderr is deliberately excluded from
 /// the stable error returned to rule evaluation and machine formats.
 pub fn head_commit_time(root: &Path) -> Result<AnalysisTime, AnalysisTimeUnavailable> {
-    let mut command = git_command(root);
+    // No repository reads as Git's failure to find one.
+    let Some(mut command) = git_command(root) else {
+        return Err(AnalysisTimeUnavailable::HeadUnavailable);
+    };
     let output = command
         .arg("-C")
         .arg(root)
@@ -221,7 +237,7 @@ pub fn collect_tracked_paths(root: &Path) -> Option<HashSet<PathBuf>> {
     // exotic bytes round-trip correctly. `--full-name` would force
     // repo-root-relative paths, but we want CWD-relative — git's
     // default with `-C <dir>` already gives that.
-    let output = git_command(root)
+    let output = git_command(root)?
         .arg("-C")
         .arg(root)
         .args(["ls-files", "-z"])
@@ -293,7 +309,9 @@ pub fn untrack_path(root: &Path, rel_path: &Path, dry_run: bool) -> UntrackOutco
         Some(tracked) if !tracked.contains(rel_path) => return UntrackOutcome::NotTracked,
         Some(_) => {}
     }
-    let mut cmd = git_command(root);
+    let Some(mut cmd) = git_command(root) else {
+        return UntrackOutcome::NotAGitRepo;
+    };
     cmd.arg("-C").arg(root).args(["rm", "--cached", "--quiet"]);
     if dry_run {
         cmd.arg("--dry-run");
@@ -340,7 +358,7 @@ pub fn collect_changed_paths(root: &Path, base: Option<&str>) -> Option<HashSet<
         if base.starts_with('-') {
             return None;
         }
-        let output = git_command(root)
+        let output = git_command(root)?
             .arg("-C")
             .arg(root)
             .args(["diff", "--name-only", "--relative", "-z"])
@@ -366,7 +384,7 @@ pub fn collect_changed_paths(root: &Path, base: Option<&str>) -> Option<HashSet<
         // `ls-files` to finish, which is no slower than running them in turn.
         // `wait_with_output` then drains both pipes, so the child can't wedge,
         // and it is always reaped, even when `ls-files` fails to spawn.
-        let staged = git_command(root)
+        let staged = git_command(root)?
             .arg("-C")
             .arg(root)
             .args(["diff", "--cached", "--name-only", "--relative", "-z"])
@@ -375,7 +393,7 @@ pub fn collect_changed_paths(root: &Path, base: Option<&str>) -> Option<HashSet<
             .stderr(Stdio::piped())
             .spawn()
             .ok()?;
-        let working = git_command(root)
+        let working = git_command(root)?
             .arg("-C")
             .arg(root)
             .args([
@@ -445,7 +463,10 @@ fn diff_name_only(
 ) -> Result<Option<HashSet<PathBuf>>, CommitRangeError> {
     // Probe: are we in a git repo at all? If not, silent None —
     // matching the advisory posture of the rest of this module.
-    let Ok(probe) = git_command(root)
+    let Some(mut probe) = git_command(root) else {
+        return Ok(None);
+    };
+    let Ok(probe) = probe
         .arg("-C")
         .arg(root)
         .args(["rev-parse", "--git-dir"])
@@ -456,7 +477,9 @@ fn diff_name_only(
     if !probe.status.success() {
         return Ok(None);
     }
-    let mut cmd = git_command(root);
+    let Some(mut cmd) = git_command(root) else {
+        return Ok(None);
+    };
     cmd.arg("-C")
         .arg(root)
         .args(["diff", "--name-only", "--relative", "-z"]);
@@ -509,7 +532,7 @@ fn diff_name_only(
 /// unavailability before dispatch; `None` remains valid for an unborn HEAD or
 /// an operation-specific failure.
 pub fn head_commit_message(root: &Path) -> Option<String> {
-    let output = git_command(root)
+    let output = git_command(root)?
         .arg("-C")
         .arg(root)
         .args(["log", "-1", "--format=%B"])
@@ -542,7 +565,7 @@ pub fn head_commit_message(root: &Path) -> Option<String> {
 /// [`commit_messages_in_range`] so a single commit round-trips
 /// through the shared commit-log parser.
 pub fn head_commit_record(root: &Path) -> Option<CommitRecord> {
-    let output = git_command(root)
+    let output = git_command(root)?
         .arg("-C")
         .arg(root)
         .args([
@@ -635,7 +658,10 @@ pub fn commit_messages_in_range(
     // First check `git rev-parse` (no range syntax) confirms repository
     // availability. If it fails, return the distinct `Ok(None)` shape that
     // engine capability routing promotes before normal rule dispatch.
-    let probe = git_command(root)
+    let Some(mut probe) = git_command(root) else {
+        return Ok(None);
+    };
+    let probe = probe
         .arg("-C")
         .arg(root)
         .args(["rev-parse", "--git-dir"])
@@ -656,7 +682,9 @@ pub fn commit_messages_in_range(
         });
     }
     let range = format!("{since}..HEAD");
-    let mut cmd = git_command(root);
+    let Some(mut cmd) = git_command(root) else {
+        return Ok(None);
+    };
     cmd.arg("-C").arg(root).args([
         "log",
         "--reverse",
@@ -744,7 +772,7 @@ fn parse_commit_log(stdout: &[u8]) -> Vec<CommitRecord> {
 /// trust is the user's GPG config / `.git/allowed_signers`, not this
 /// rule's job.
 pub fn verify_commit(root: &Path, sha: &str) -> Option<bool> {
-    let output = git_command(root)
+    let output = git_command(root)?
         .arg("-C")
         .arg(root)
         .args(["verify-commit", sha])
@@ -800,7 +828,7 @@ fn blame_lines_with_ignore_revs(
     rel_path: &Path,
     use_default_ignore_revs: bool,
 ) -> Option<Vec<BlameLine>> {
-    let mut command = git_command(root);
+    let mut command = git_command(root)?;
     command
         // Clone-local/global ignore lists are ambient machine state. A command-line
         // empty file name clears their revisions before the repository convention
@@ -943,7 +971,10 @@ fn default_ignore_revs_is_tracked_regular(root: &Path) -> bool {
     {
         return false;
     }
-    git_command(root)
+    let Some(mut command) = git_command(root) else {
+        return false;
+    };
+    command
         .arg("-C")
         .arg(root)
         .args([
@@ -1032,6 +1063,10 @@ where
 {
     tracked.iter().any(|p| p.starts_with(dir_rel))
 }
+
+#[path = "git_repository.rs"]
+mod repository;
+pub use repository::{owned_by_current_user, repository_top};
 
 #[cfg(test)]
 #[path = "git_tests.rs"]

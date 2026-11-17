@@ -115,7 +115,7 @@ impl Fixer for FileCreateFixer {
         if let Some(reason) = self.blocked_directory(&abs, previewing) {
             return Ok(FixOutcome::Skipped(reason));
         }
-        let content = match resolve_source_bytes(&self.source, ctx.root, ctx.allow_out_of_root) {
+        let content = match resolve_fix_source_bytes(&self.source, ctx) {
             Ok(bytes) => bytes,
             Err(skip_msg) => return Ok(FixOutcome::Skipped(skip_msg)),
         };
@@ -273,8 +273,10 @@ pub(crate) fn git_directory_refusal(rel: &Path) -> String {
 /// refuses it (a Git directory, or alint's own configuration for a rule an
 /// `extends:`'d ruleset shaped), and confined to the root as
 /// [`confine_fix_path`] confines it. Only the user's own rules honor
-/// `allow_out_of_root` here: the grant is the user's, for reads, and a ruleset
-/// they extend never writes outside the root with it.
+/// `allow_out_of_root` here: the grant is the user's, and a ruleset they
+/// extend never writes outside the root with it. Such a rule is told so,
+/// rather than to set the grant (the engine gives it none,
+/// `AllowOutOfRoot::allows_rule`).
 pub(crate) fn confine_fix_write(
     rel: &Path,
     ctx: &FixContext<'_>,
@@ -282,7 +284,7 @@ pub(crate) fn confine_fix_write(
     if let Some(reason) = ctx.write_refusal(rel) {
         return Err(reason);
     }
-    if ctx.allow_out_of_root && ctx.extended_source {
+    if ctx.extended_source {
         return confine_fix_path(rel, ctx.root, false).map_err(|_| {
             format!(
                 "{} escapes the repo root; a fix from an extended ruleset never writes \
@@ -292,6 +294,41 @@ pub(crate) fn confine_fix_write(
         });
     }
     confine_fix_path(rel, ctx.root, ctx.allow_out_of_root)
+}
+
+/// Confine a path a fix reads (a `content_from` file, a `sync_from` or
+/// cross-file value's source) as [`confine_fix_path`] confines it. Only the
+/// user's own rules honor `allow_out_of_root` here: a rule an `extends:`'d
+/// ruleset shaped never reads outside the root with it, or it could copy an
+/// out-of-tree secret (`content_from: ../secret`) into a file of the
+/// repository, as it never writes outside the root ([`confine_fix_write`]).
+pub(crate) fn confine_fix_read(
+    rel: &Path,
+    ctx: &FixContext<'_>,
+) -> std::result::Result<PathBuf, String> {
+    if ctx.extended_source {
+        return confine_fix_path(rel, ctx.root, false).map_err(|reason| {
+            if confine_fix_path(rel, ctx.root, true).is_ok() {
+                format!(
+                    "{} escapes the repo root; a fix from an extended ruleset never reads \
+                     outside it, whatever `allow_out_of_root` says",
+                    rel.display()
+                )
+            } else {
+                reason
+            }
+        });
+    }
+    confine_fix_path(rel, ctx.root, ctx.allow_out_of_root)
+}
+
+/// Read a `ContentSourceSpec` for a fix's `apply`, its `content_from` file
+/// confined by [`confine_fix_read`] (see [`resolve_source_bytes`]).
+pub(crate) fn resolve_fix_source_bytes(
+    source: &ContentSourceSpec,
+    ctx: &FixContext<'_>,
+) -> std::result::Result<Vec<u8>, String> {
+    read_content_source(source, |rel| confine_fix_read(rel, ctx))
 }
 
 /// Read a `ContentSourceSpec` to bytes. Returns the raw payload
@@ -305,13 +342,24 @@ pub(crate) fn resolve_source_bytes(
     ctx_root: &std::path::Path,
     allow_out_of_root: bool,
 ) -> std::result::Result<Vec<u8>, String> {
+    read_content_source(source, |rel| {
+        confine_fix_path(rel, ctx_root, allow_out_of_root)
+    })
+}
+
+/// [`resolve_source_bytes`] with the confinement of a `content_from` path
+/// given as `confine`.
+fn read_content_source(
+    source: &ContentSourceSpec,
+    confine: impl FnOnce(&Path) -> std::result::Result<PathBuf, String>,
+) -> std::result::Result<Vec<u8>, String> {
     match source {
         ContentSourceSpec::Inline(s) => Ok(s.as_bytes().to_vec()),
         ContentSourceSpec::File(rel) => {
             // Confine the `content_from` read the same way rule reads are
             // confined, so an untrusted ruleset can't exfiltrate an out-of-tree
             // secret (`content_from: ../../secret`) into an in-repo file.
-            let abs = confine_fix_path(rel, ctx_root, allow_out_of_root)?;
+            let abs = confine(rel)?;
             // Read through the capped/regular-file helper, NOT raw `fs::read`: a
             // config-declared `content_from` is an attacker-reachable path, so a
             // planted in-tree FIFO would otherwise block the whole run forever
@@ -393,7 +441,7 @@ impl Fixer for FilePrependFixer {
             ));
         };
         let abs = ctx.root.join(path);
-        let prepend = match resolve_source_bytes(&self.source, ctx.root, ctx.allow_out_of_root) {
+        let prepend = match resolve_fix_source_bytes(&self.source, ctx) {
             Ok(b) => b,
             Err(skip_msg) => return Ok(FixOutcome::Skipped(skip_msg)),
         };
@@ -605,7 +653,7 @@ impl Fixer for InsertHeaderFixer {
             ));
         };
         let abs = ctx.root.join(path);
-        let header = match resolve_source_bytes(&self.source, ctx.root, ctx.allow_out_of_root) {
+        let header = match resolve_fix_source_bytes(&self.source, ctx) {
             Ok(b) => b,
             Err(skip_msg) => return Ok(FixOutcome::Skipped(skip_msg)),
         };
@@ -712,7 +760,7 @@ impl Fixer for FileAppendFixer {
             ));
         };
         let abs = ctx.root.join(path);
-        let payload = match resolve_source_bytes(&self.source, ctx.root, ctx.allow_out_of_root) {
+        let payload = match resolve_fix_source_bytes(&self.source, ctx) {
             Ok(b) => b,
             Err(skip_msg) => return Ok(FixOutcome::Skipped(skip_msg)),
         };
@@ -789,8 +837,8 @@ mod tests {
         FixContext::new(root, dry_run)
     }
 
-    /// A fix never writes or reads a Git directory, in any spelling a file
-    /// system opens as `.git`, even where `allow_out_of_root` lets it leave
+    /// A fix never writes or reads a Git directory, in a spelling Git's own
+    /// checks name, even where `allow_out_of_root` lets it leave
     /// the root: a `file_create` or a `content_from` there declines.
     #[test]
     fn fix_paths_in_a_git_directory_are_refused() {

@@ -176,10 +176,11 @@ pub struct WhenEnv<'a> {
     /// The environment behind the `env.*` namespace. `None` means the
     /// live process environment, read through `std::env::var` (it is
     /// constant during a run, so the eval-time read matches a
-    /// load-time snapshot). A run with its own child-process
-    /// environment (the engine's process environment, as `alint test`
-    /// sets it) passes that map, so a condition sees what a spawned
-    /// command would and nothing else of the host's. Tests inject a
+    /// load-time snapshot). A run with an environment of its own
+    /// passes that map, and a condition sees nothing else of the
+    /// host's: `alint test` passes `given.env` with its sandbox values,
+    /// which leave out the host's `PATH` that a spawned command gets
+    /// (and the host's home when the host keyring is granted). Tests inject a
     /// map via [`WhenEnv::with_env`] so they never touch the real
     /// environment (Rust 2024 marks `set_var` unsafe).
     pub env: Option<&'a BTreeMap<String, String>>,

@@ -114,10 +114,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `git_tracked_only` and the `git_*` rules discovered a repository from the fixture's root. A
   tree with `HEAD`, `objects/`, `refs/` and `config` at its top was read as a bare repository, and
   a `core.fsmonitor` in that `config` ran a command without `capabilities: { spawn: true }` or
-  `--allow-spawn`. Every Git command alint runs now sets `safe.bareRepository=explicit`, which
-  Git honors only from the command line and the user's own configuration, so discovery never
-  takes a directory for a bare repository. That also covers `alint check` and `alint fix` in a
-  directory without `.git` that holds such files. The runner also refuses fixture entries that
+  `--allow-spawn`. alint now finds the repository itself (the nearest directory holding a `.git`
+  directory or file, never a directory taken as a bare repository) and names it to every Git
+  command with `--git-dir` and `--work-tree`, so Git discovers none, whatever its version:
+  `safe.bareRepository=explicit`, which alint also passes, does nothing before Git 2.38. With no
+  repository found, alint runs no Git command, and the runner runs Git only on the repository
+  `given.git` made. A repository the current user does not own is named only when Git, asked to
+  discover exactly it, accepts it, so Git's ownership check and `safe.directory` still apply.
+  That also covers `alint check` and `alint fix` in a directory without `.git` that holds such
+  files, which ran the command with a Git rule or `git_tracked_only` since v0.4.8, as `git status`
+  run there would. In a repository, alint still runs what its `.git/config` names, as Git does:
+  run alint in an unpacked archive's repository only as you would run `git status` there. The
+  runner also refuses fixture entries that
   Windows or macOS open as `.git` (`.git.`, `.git `, `.git::$INDEX_ALLOCATION`, `GIT~1`, and
   `.git` with a code point HFS+ ignores), as Git refuses them in a checkout.
 - **A policy test's `when:` conditions and `${VAR}` expansions no longer read the host's
@@ -156,8 +164,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   sections included, into a worktree file. Every fixer path a
   configuration chooses (a `file_create` target and `content_from`, a `dir_create` target,
   `sync_from` and cross-file sources and targets, `create_and_register` members, `file_rename`
-  and `relocate` targets) now refuses a component that names a Git directory in any spelling a
-  file system opens as `.git` (`.GIT`, `.git.`, `git~1`), or that an in-repository symlink leads
+  and `relocate` targets) now refuses a component that names a Git directory in a spelling Git's
+  own checks name (`.GIT`, `.git.`, `git~1`; a short name such as `GIT~2` or a hashed one
+  passes), or that an in-repository symlink leads
   into one; no rule reads such a path either (below). This affects `alint fix` with a ruleset
   from `extends:` in v0.2.1 to v0.22.1 (`content_from` since v0.5.10), and `alint test` since
   v0.20.0.
@@ -166,7 +175,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (.*)' } }` and `relation: equals` against any file put the `AUTHORIZATION: basic ...` header
   that `actions/checkout` persists into its mismatch message, from any configuration, a remote
   ruleset pinned by its hash and not in `trusted_extends` included. A path a rule reads by name
-  that names a Git directory, in any spelling a file system opens as `.git`, is now a load
+  that names a Git directory, in a spelling Git's own checks name, is now a load
   error: `cross_file` `source.file` and `targets[].file`, `pair_hash` `target`,
   `json_schema_passes` `schema_path`, `registry_paths_resolve` `source`, `key_parity`
   `reference` and a literal `peers`, `generated_file_fresh` `file`, a `scope_filter` manifest
@@ -198,7 +207,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   rule an extended ruleset or a nested config shaped (it declared the rule, contributed a field to
   it, or defined its template) now never creates, edits, removes, renames, moves onto or changes
   the mode of a configuration file: `.alint.yml`, `.alint.yaml`, `alint.yml` or `alint.yaml` at
-  any depth and in any spelling a file system opens as one, anything under `.alint.d/`, or a file
+  any depth, in any case and with the trailing dots, spaces or stream suffix Windows drops,
+  anything under `.alint.d/`, or a file
   the configuration was loaded from (a `--config` file and local `extends:` targets included). It
   reports `.alint.yml is an alint configuration file; a fix from an extended ruleset never writes
   one`. The user's own rules still write configuration, and `trusted_extends` does not lift this
@@ -215,6 +225,61 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   extended ruleset never writes outside it, whatever `allow_out_of_root` says`. The user's own
   rules keep the option. This affects `alint fix` with `allow_out_of_root` and an `extends:`
   ruleset in v0.14.0 to v0.22.1 (before v0.14.0 no fix write was confined to the root).
+- **`allow_out_of_root` no longer lets an extended ruleset's fix read outside the repository.**
+  The same option lifted the confinement of a fix's sources, so a `file_create` in a ruleset
+  reached through `extends:` with `content_from: ../secret` copied a file from outside the
+  repository into it, and a `sync_from` or cross-file `source` read one. A fix of a rule an
+  extended ruleset or a nested config shaped now never reads a source outside the root (the
+  `content_from` of `file_create`, `file_prepend`, `file_append`, `insert_header` and
+  `create_and_register`, the `sync_from` source, and a cross-file fix's source file), and
+  reports `../secret escapes the repo root; a fix from an extended ruleset never reads outside
+  it, whatever `allow_out_of_root` says`; the `alint fix --dry-run` preview reads none either.
+  The user's own rules keep the option. This affects `alint fix` with `allow_out_of_root` and an
+  `extends:` ruleset in v0.14.0 to v0.22.1.
+- **Configuration discovery stops at the repository's top.** alint looked for `.alint.yml` from
+  the current directory up to the file-system root, so in a repository without a config of its
+  own, or from a directory below one, a `.alint.yml` that someone else wrote in a directory above
+  it (`/tmp/.alint.yml` over a checkout in `/tmp`, a shared home) governed the run, command rules
+  included. Discovery now checks the repository's top (the nearest directory holding a `.git`
+  directory or file) and stops there. Outside every repository it climbs as before but skips a
+  config file another user owns in a directory above the one it starts from, with `alint:
+  warning: skipping /tmp/.alint.yml: owned by another user` on stderr (on Unix, a file whose
+  owner is not the effective user id; Windows does not check). A config in the starting
+  directory itself is used whoever owns it, so `alint check` as root in a container, on a
+  mounted directory the host's user owns, still finds that directory's config. This affects
+  `alint check`, `fix`, `list`, `explain`, `validate-config`, `export-agents-md` and every other
+  command that discovers a config, and the language server, in v0.1.0 to v0.22.1.
+- **An `extends:` URL's scheme is read in any case, any other scheme is refused, and its
+  credentials stay out of errors.** `HTTPS://`, `Http://` and `ALINT://bundled/` were not
+  recognized as remote, plain-HTTP and bundled entries, and `ftp://`, `file://`, `ssh://` or
+  `git+https://` were not recognized at all: each was read as a path to a local file, with no
+  integrity hash required, and the error that named it printed the URL whole, a
+  `user:password@` and a `?token=` included. Schemes now match in any case: such an entry is
+  fetched and pinned like any `https://` one, and a plain `http://` one is refused. An entry
+  with any other `<scheme>://` (two or more characters, so a Windows drive stays a path) is a
+  load error, `unsupported `extends:` scheme `ftp` (entry "ftp://host/x.yml"); use https://,
+  alint://bundled/ or a local path`. Errors show such an entry without its userinfo, query and
+  fragment. This affects configs with a non-lower-case or other `extends:` scheme in v0.2.1 to
+  v0.22.1.
+- **`allow_out_of_root` no longer lets an extended ruleset's rule read outside the repository
+  when it is checked.** The top-level grant covered every rule it named, so under `true`, a
+  `kinds:` list or a `rules:` list naming its id, a `json_schema_passes` (`schema_path`),
+  `pair_hash` (`target`) or `registry_paths_resolve` (`source`) rule from a ruleset reached
+  through `extends:` read a file outside the repository, and its findings told it apart
+  (`registry_paths_resolve` printed the entries it listed). The grant now covers the user's own
+  top-level rules only: a rule an extended ruleset or a nested config shaped (it declared the
+  rule, contributed a field to it, or defined its template, so a rule the user's config
+  overrides by id counts) reads only inside the root and reports `registry source
+  ../outside.json escapes the repo root`, in `alint check`, `alint fix` and the language server.
+  This affects configs with `allow_out_of_root` and an `extends:` ruleset in v0.12.0 to v0.22.1.
+- **A policy-test fixture copy is capped at 64 MiB.** `fixture:` copied a package's directory
+  into the sandbox file by file, with no limit on the total, and a hard link was copied once per
+  name, so a package of many hard links to one large file filled the disk. The runner now stops
+  a copy past 64 MiB with `test "<name>": its fixture copies more than 67108864 bytes into the
+  sandbox (at <path>); a test copies at most 67108864 bytes, each hard link counted as a copy`.
+  Each name is still copied as a file of its own, never linked into the sandbox. The largest
+  policy-test package in alint's own repository is about 150 KiB. This affects `alint test` in
+  v0.20.0 to v0.22.1.
 - **A policy test's Git reads no longer find a repository above the sandbox.** Since v0.20.0,
   without `given.git` the test repository has no `.git`, and Git's discovery climbed to any
   repository the temporary directory was in: with `TMPDIR` inside a checkout, `git_commit_message`
@@ -234,6 +299,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`alint_dsl::discover_config` and `alint_dsl::Discovery`** (library API, see Security):
+  discovery's result with the config files it skipped because another user owns them, for a
+  caller to warn about. **`alint_core::git::repository_top`**, the nearest directory at or above
+  a path that holds a `.git` directory or file, and **`alint_core::git::owned_by_current_user`**.
+  **`RuleEntry::fix_may_leave_root`**: whether a rule's fix may read or write outside the root
+  (its `allow_out_of_root`, never for a rule from an `extends:`'d ruleset), and
+  **`AllowOutOfRoot::allows_rule`**: whether the grant covers an effective rule (never one an
+  extended ruleset or a nested config shaped; `allows` still answers by id and kind alone). `alint-core` depends
+  on `rustix` on Unix, already in the dependency tree, for the effective user id.
 - **`--no-spawn`** (global flag): refuse a config whose rules, fixes or facts start a process,
   for linting a repository you do not trust with its own config. A rule of a spawning kind (at
   any `require:` depth), a spawning fix such as `git_untrack` or `command`, or a `custom:` fact
@@ -259,7 +333,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that decodes with ayaml. `mapping_subtree_is_literal` now reads the text as ayaml does.
 - **`alint_core::names_git_directory`, `path_names_git_directory` and `reaches_git_directory`**
   (library API): whether a name, a path or a path below a root (through its symlinks) names a
-  Git directory in any spelling a file system opens as `.git`. Fixers refuse such paths (see
+  Git directory in a spelling Git's own checks name. Fixers refuse such paths (see
   Security).
 - **Where a fix may write** (library API, see Security): `FixContext::write_refusal`, the reason
   a fix may not write a path, with the `extended_source`, `config_files` and `index` fields and
@@ -328,6 +402,28 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Config discovery stops at the repository's top** (see Security). Run from a repository, or
+  from a directory below its top, alint uses only a config at or below the top (the nearest
+  directory holding a `.git` directory or file); a submodule or linked worktree, whose `.git` is
+  a file, is a repository of its own. A repository without a config of its own now reports
+  `no .alint.yml found` where a config above it used to govern it: move that config into the
+  repository, or pass it with `--config`. Outside every repository, a config file another user
+  owns in a directory above the starting one is skipped with a warning; one in the starting
+  directory is used. Library users of `alint_dsl::discover` get the same stop and
+  skip; `alint_dsl::discover_config` also returns the skipped files.
+- **The language server lints each repository in a folder by its own config.** A workspace
+  folder without a config of its own (a directory holding several repositories) was not linted.
+  It now lints each open file with the config at the top of the nearest repository above it
+  inside the folder (the nearest directory holding a `.git` directory or file), rooted there, as
+  `alint check` in that repository does. A directory without `.git` (a package under
+  `node_modules/`) is never such a top, so its `.alint.yml` still governs nothing by itself.
+- **An untrusted language-server session keeps a rule whose fix alone spawns.** A rule such as
+  `file_absent` with `fix: git_untrack` was skipped whole in an untrusted workspace; it now
+  reports as usual and offers no fix until the workspace is trusted.
+- **Language-server code actions keep `alint fix`'s write limits.** A code action from a rule an
+  `extends:`'d ruleset or a nested config shaped is no longer offered when it would edit alint's
+  configuration (a config file at any depth, anything under `.alint.d/`, or a file the
+  configuration was loaded from), and no rule's code action edits a path in a Git directory.
 - **The language server treats a workspace as untrusted unless the editor says otherwise.**
   Editors other than VS Code now need the `trusted` initialization option for command rules,
   custom facts, remote `extends:` and environment values to take effect

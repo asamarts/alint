@@ -82,6 +82,10 @@ extends:
 
 Bundled and HTTPS configs cannot themselves declare `extends:`, because relative-path resolution in a fetched body has no principled base. Nest extends locally instead.
 
+A scheme matches in any case (`HTTPS://` is an HTTPS entry). Plain `http://` is refused, and so is
+any other `<scheme>://` (`ftp://`, `file://`, `ssh://`, `git+https://`): it is a load error
+naming the scheme, never a local path. Errors show a URL without its userinfo, query and fragment.
+
 ### `ignore`
 
 Extra glob patterns to exclude from the walk, on top of `.gitignore`. Same gitignore-style syntax. Use this for repo-specific exclusions you don't want in `.gitignore` itself (because they're an alint concern, not a git concern):
@@ -392,9 +396,17 @@ Absent or `false` keeps the secure default (full confinement).
 
 **Security.** Like the spawning-rule trust gate, `allow_out_of_root:` is honored **only** from your own top-level config: any `extends:`'d ruleset that declares it is a load-time error, so adopting a published ruleset can never grant it out-of-tree reads. It currently applies to the read kinds `json_schema_passes` (`schema_path:`), `pair_hash` (`target:`), and `registry_paths_resolve` (`source:`); a permitted read emits an informational note so the escape is never silent. Resolve/index existence checks stay confined regardless.
 
-A fix of your own rules follows the option too (a `file_create` target or a `content_from:`
-source outside the root). A fix of a rule an `extends:`'d ruleset or a nested config shaped never
-writes outside the root, whatever the option says, and is reported skipped.
+The option grants your own rules only: the rules your top-level config (and its `.alint.d/`
+drop-ins) declares. A rule an `extends:`'d ruleset or a nested config shaped (it declared the rule,
+contributed a field to it, or defined its template) is always confined, whatever the option says:
+`true`, a `kinds:` list naming its kind, and a `rules:` list naming its id all leave it reading only
+inside the root, and overriding such a rule by id in your own config does not make it yours. Its
+check-time read of an out-of-root path reports that the path escapes the repo root.
+
+The option also lets your own rules' fixes leave the root, for the rules it names: a
+`file_create` or `dir_create` target, a `content_from:` or `sync_from` source, and the other paths
+a fix names. A fix of a rule an `extends:`'d ruleset or a nested config shaped never writes or
+reads outside the root, and is reported skipped.
 
 ### `baseline`
 
