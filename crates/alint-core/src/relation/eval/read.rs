@@ -289,11 +289,12 @@ impl Evaluator<'_> {
         }
     }
 
-    /// `resource`'s bytes, read inside the root and never in a Git
-    /// directory. A file the walk reached without a symlink is both by
-    /// construction (the walk enters no Git directory), so only its name is
-    /// checked; any other is read as a literal path, which the read cache
-    /// resolves and confines.
+    /// `resource`'s bytes, read as `cross_file` reads a file its glob
+    /// matched: as a literal path, which the read cache resolves to keep it
+    /// inside the root and out of a Git directory, and opens only when it is
+    /// a regular file (a FIFO would block the read, and a device never ends).
+    /// The walk's word on a file is not taken: it may have been swapped since
+    /// for a symlink into `.git` or a FIFO.
     fn bytes(
         &self,
         site: &Site,
@@ -301,18 +302,8 @@ impl Evaluator<'_> {
         failures: &mut Failures,
     ) -> Option<Arc<[u8]>> {
         let relative = resource.path().as_path();
-        let read = if crate::pathsafe::path_names_git_directory(relative) {
-            ResourceRead::Unreadable("path is in a Git directory; rules never read there".into())
-        } else if self.index.walked_without_symlink(relative) {
-            let walked_len = match resource.origin() {
-                Origin::Index(id) => self.index.entries.get(id.index()).map_or(0, |e| e.size),
-                Origin::Literal => 0,
-            };
-            Arc::unwrap_or_clone(self.reads.read_unretained(self.root, resource, walked_len))
-        } else {
-            let literal = Resource::literal(resource.path().clone());
-            Arc::unwrap_or_clone(self.reads.read_unretained(self.root, &literal, 0))
-        };
+        let literal = Resource::literal(resource.path().clone());
+        let read = Arc::unwrap_or_clone(self.reads.read_unretained(self.root, &literal, 0));
         let detail = match read {
             ResourceRead::Present(bytes) => return Some(bytes),
             ResourceRead::Missing => "file vanished after repository discovery".to_string(),

@@ -469,18 +469,19 @@ policy-test package the user does not trust.
     would, and its selectors and relations check nothing until the `constraint` rule kind lands.
   - alint can now evaluate a relation over a repository: an internal evaluator, which the
     `constraint` rule kind will call, reads the files a selector picks (as a rule's `paths:` and
-    `scope_filter:` pick them, inside the repository and never in `.git`), emits one row per
-    entry or extracted value with each field's file, key path and byte span, and applies
-    `union:`, `join:`, `transform:` and `where:`. Values are scalars compared by type and text (a
-    number by its lexeme, so `1.10` is not `1.1`). What a relation cannot hold, such as an
-    `entry.value` that is an object, a TOML date, a `bound:` path that does not match exactly
-    once, a repeated key on a join's `unique:` side or a comparison across types, is an analysis
-    failure naming the relation, the file and the key path, never a dropped row; so is reaching a
-    row, join or distinct-value limit, which is never truncation. A field the environment writes
-    to (`{{env.X}}` in its `where:` or `transform:`) is sensitive, and a relation whose selection
-    reads the environment shows no detail in its failures, nor does a relation that reads one,
-    as a join side or through a membership reference. Nothing calls the evaluator in this
-    build, so relations stay inert and a run whose rules read none reads nothing for them.
+    `scope_filter:` pick them, inside the repository, never in `.git` and only regular files, as
+    `cross_file` reads them), emits one row per entry or extracted value with each field's file,
+    key path and byte span, and applies `union:`, `join:`, `transform:` and `where:`. Values are
+    scalars compared by type and text (a number by its lexeme, so `1.10` is not `1.1`). What a
+    relation cannot hold, such as an `entry.value` that is an object, a TOML date, a `bound:` path
+    that does not match exactly once, a repeated key on a join's `unique:` side or a comparison
+    across types, is an analysis failure naming the relation, the file and the key path, never a
+    dropped row; so is reaching a row, join or distinct-value limit, which is never truncation. A
+    field the environment writes to (`{{env.X}}` in its `where:` or `transform:`) is sensitive,
+    and a relation whose selection reads the environment shows no detail in its failures, nor does
+    a relation that reads one, as a join side or through a membership reference. Nothing calls the
+    evaluator in this build, so relations stay inert and a run whose rules read none reads nothing
+    for them.
   - `facts.json` (format 7) gains `compatibility.experimental_config_versions: [2]`;
     `config_versions` stays `[1]`. `validate-config --format json` gains `config_version`, the
     loaded config's version, for every config.

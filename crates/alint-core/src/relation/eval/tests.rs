@@ -311,6 +311,50 @@ fn reads_never_reach_a_git_directory() {
     assert_eq!(read, ["ok.json"]);
 }
 
+/// The walk vouches for nothing at read time: a file swapped after it for a
+/// symlink into `.git` or for a FIFO is refused, without blocking, as
+/// `cross_file` refuses one its glob matched.
+#[cfg(unix)]
+#[test]
+fn a_file_swapped_after_the_walk_is_confined_and_never_blocks() {
+    let plan = plan(vec![named(
+        "configs",
+        read_json("*.json", "$.name"),
+        &[("name", FieldSource::Value)],
+    )]);
+    let tree = tree(&[
+        ("a.json", r#"{"name": "a"}"#),
+        ("b.json", r#"{"name": "b"}"#),
+        ("c.json", r#"{"name": "c"}"#),
+        (".git/config.json", r#"{"name": "secret"}"#),
+    ]);
+    let root = tree.dir.path();
+    std::fs::remove_file(root.join("a.json")).unwrap();
+    std::os::unix::fs::symlink(".git/config.json", root.join("a.json")).unwrap();
+    std::fs::remove_file(root.join("b.json")).unwrap();
+    let status = std::process::Command::new("mkfifo")
+        .arg(root.join("b.json"))
+        .status()
+        .expect("run mkfifo");
+    assert!(status.success(), "mkfifo failed");
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let outcome = run(&plan, 0, &tree, Limits::default());
+        let _ = sender.send((messages(&outcome), tree));
+    });
+    let (messages, _tree) = receiver
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("a FIFO must be refused before it can block the read");
+    assert_eq!(
+        messages,
+        [
+            "a.json: relation `configs` (.alint.yml): could not read file: path is in a Git \
+             directory; rules never read there",
+            "b.json: relation `configs` (.alint.yml): could not read file: not a regular file",
+        ]
+    );
+}
+
 #[test]
 fn a_relation_is_evaluated_once_per_run() {
     let plan = plan(vec![deps(), names()]);
