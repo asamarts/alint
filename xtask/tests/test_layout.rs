@@ -20,12 +20,20 @@ use serde_json::Value;
 /// Test targets that must be binaries of their own, as `(package, target,
 /// why)`. Each is declared with [[test]] and lives in a directory of `tests/`
 /// without a `mod.rs`, which the module scan skips.
-const OWN_BINARIES: &[(&str, &str, &str)] = &[(
-    "alint-core",
-    "yaml_memory",
-    "it installs a counting global allocator, which in `it` would count every other test's \
-     allocations (ADR-0042)",
-)];
+const OWN_BINARIES: &[(&str, &str, &str)] = &[
+    (
+        "alint-core",
+        "yaml_memory",
+        "it installs a counting global allocator, which in `it` would count every other test's \
+         allocations (ADR-0042)",
+    ),
+    (
+        "alint-core",
+        "relation_memory",
+        "it installs a counting global allocator, which in `it` would count every other test's \
+         allocations",
+    ),
+];
 
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

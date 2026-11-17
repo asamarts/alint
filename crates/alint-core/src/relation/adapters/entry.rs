@@ -1,9 +1,9 @@
 //! Key-only rows from the duplicate-aware structured entry extractor.
 
-use crate::extract::{EntryRowsError, StructuredEntryRow, extract_entry_rows_strict_yaml_bounded};
+use crate::extract::{EntryRowsError, entry_table};
 use crate::relation::adapter::{Adapter, AdapterError, AdapterOutput, check_row_count};
+use crate::relation::key_paths::{EntryTable, PathBudget};
 use crate::relation::limits::{LimitExceeded, LimitKind, Limits};
-use crate::relation::pointer::Pointer;
 use crate::relation::resource::Resource;
 use crate::relation::row::{Row, RowState};
 use crate::structured_format::Format;
@@ -80,31 +80,36 @@ impl Adapter for EntryRowsAdapter {
                 format_name(self.format)
             ))
         })?;
-        let entries = extract_entry_rows_strict_yaml_bounded(
-            self.format,
-            text,
-            limits.get(LimitKind::RowsPerExtractor),
-        )
-        .map_err(entry_error)?;
-        let mut rows = Vec::with_capacity(entries.len());
-        for (ordinal, entry) in entries.iter().enumerate() {
-            check_row_count(limits, rows.len() + 1)?;
-            rows.push(
-                Row::new(
-                    resource.clone(),
-                    Some(pointer(entry)),
-                    u32::try_from(ordinal).expect("the row limit is far below u32::MAX"),
-                    RowState::Key,
-                )
-                .with_span(entry.key_span),
-            );
-        }
-        Ok(AdapterOutput::new(rows))
+        let entries = entry_table(self.format, text, limits.get(LimitKind::RowsPerExtractor))
+            .map_err(entry_error)?;
+        Ok(AdapterOutput::new(key_rows(&entries, resource, limits)?))
     }
 }
 
-fn pointer(entry: &StructuredEntryRow) -> Pointer {
-    Pointer::from(entry)
+/// A key row per member of `entries`, in source order. Each row's key path
+/// is built as it is emitted, its bytes charged to the decode
+/// ([`PathBudget`]): a document deep and wide enough to hold more key-path
+/// bytes than the run may fails when it reaches them, not after.
+pub(crate) fn key_rows(
+    entries: &EntryTable,
+    resource: &Resource,
+    limits: &Limits,
+) -> Result<Vec<Row>, AdapterError> {
+    let mut budget = PathBudget::new(limits);
+    let mut rows = Vec::with_capacity(entries.rows.len());
+    for (ordinal, entry) in entries.rows.iter().enumerate() {
+        check_row_count(limits, rows.len() + 1)?;
+        rows.push(
+            Row::new(
+                resource.clone(),
+                Some(budget.pointer(&entries.paths, entry.path)?),
+                u32::try_from(ordinal).expect("the row limit is far below u32::MAX"),
+                RowState::Key,
+            )
+            .with_span(entry.key_span),
+        );
+    }
+    Ok(rows)
 }
 
 fn entry_error(error: EntryRowsError) -> AdapterError {
@@ -209,6 +214,24 @@ mod tests {
         assert_eq!(output.rows.len(), 2);
         assert_eq!(output.rows[0].pointer, output.rows[1].pointer);
         assert_ne!(output.rows[0].span, output.rows[1].span);
+    }
+
+    /// `key_parity` reads a block scalar key, which has no token span, as
+    /// a key where its text starts: it is never dropped.
+    #[test]
+    fn a_yaml_block_scalar_key_is_a_key_row() {
+        let text = "deps:\n  ? |\n    block\n  : 1\n  plain: 2\n";
+        let output = adapter(Format::Yaml)
+            .extract(&resource("a.yml"), text.as_bytes(), &Limits::default())
+            .unwrap();
+        let pointers: Vec<String> = output
+            .rows
+            .iter()
+            .map(|row| row.pointer.as_ref().unwrap().render())
+            .collect();
+        assert_eq!(pointers, ["deps", "deps.block\n", "deps.plain"]);
+        let block = output.rows[1].span.unwrap();
+        assert!(text[block.start..].starts_with("block"), "{block:?}");
     }
 
     #[test]

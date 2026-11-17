@@ -12,13 +12,14 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use super::failure::{Failures, at, key_path, located, type_name};
-use super::{Cell, Evaluator, FieldInfo, FieldRow, RelationRows, Site};
+use super::{Cell, Evaluator, FieldInfo, FieldRow, RelationNote, RelationRows, Site, Skipped};
+use crate::relation::RelPath;
 use crate::relation::limits::LimitKind;
 use crate::relation::plan::{
     FieldSource, JoinDef, JoinSide, Member, NamedRelation, Predicate, RelationDef, RelationId,
     Rows, Transform,
 };
-use crate::relation::pointer::Pointer;
+use crate::relation::pointer::{Pointer, Segment};
 use crate::relation::transform::StringTransform;
 use crate::relation::value::Value;
 use crate::rule::AnalysisFailureKind;
@@ -152,13 +153,37 @@ fn bare_type(value: &Value) -> &'static str {
     }
 }
 
-fn render_value(value: &Value) -> String {
+/// The most characters of a value a message quotes: a longer one is cut
+/// there and its length named, so a key of a megabyte never makes a message
+/// of one (or of six, escaped).
+const QUOTED_CHARS: usize = 64;
+
+pub(super) fn render_value(value: &Value) -> String {
     match value {
-        Value::String(text) => format!("{text:?}"),
-        Value::Number(number) => number.lexeme().to_string(),
+        Value::String(text) => quoted(text, true),
+        Value::Number(number) => quoted(number.lexeme(), false),
         Value::Bool(flag) => flag.to_string(),
         Value::Null => "null".to_string(),
-        other => format!("{other:?}"),
+        other => quoted(&format!("{other:?}"), false),
+    }
+}
+
+/// `text`, escaped and in quotes when `string`, or its first
+/// [`QUOTED_CHARS`] characters and its length: `"abc"... (1048576 bytes)`.
+fn quoted(text: &str, string: bool) -> String {
+    let (shown, cut) = match text.char_indices().nth(QUOTED_CHARS) {
+        Some((end, _)) => (&text[..end], true),
+        None => (text, false),
+    };
+    let shown = if string {
+        format!("{shown:?}")
+    } else {
+        shown.to_string()
+    };
+    if cut {
+        format!("{shown}... ({} bytes)", text.len())
+    } else {
+        shown
     }
 }
 
@@ -196,6 +221,21 @@ impl Evaluator<'_> {
         let tests = self.tests(site, &rows, &relation.filters, failures)?;
         if !failures.is_empty() {
             return None;
+        }
+        // A value a join's side, or a relation a list reads, skipped is a
+        // row the join lacks, or one the list lacks, so that a row it would
+        // have dropped is kept: their notes say so.
+        for read in reads(relation) {
+            if let Ok(read) = self.computed(read)
+                && let Err(limit) = self.inherit_notes(&mut rows, &read)
+            {
+                failures.push_limit(site.failure(
+                    AnalysisFailureKind::Evaluation,
+                    None,
+                    super::limit_reached(&limit),
+                ));
+                return None;
+            }
         }
         if tests.is_empty() {
             return Some(rows);
@@ -476,6 +516,32 @@ impl Evaluator<'_> {
             });
         }
         Some(out)
+    }
+
+    /// Add `from`'s notes to `rows`'s, their bytes taken from the run: each
+    /// that `rows` does not already hold, so that a relation read twice (a
+    /// join of a relation with itself, or with a join that read it) notes
+    /// each skip once.
+    fn inherit_notes(
+        &self,
+        rows: &mut RelationRows,
+        from: &RelationRows,
+    ) -> Result<(), crate::relation::LimitExceeded> {
+        let key = |note: &RelationNote| -> (RelPath, String, Option<u32>) {
+            let part = match &note.skipped {
+                Skipped::NonLiteral => None,
+                Skipped::NonString { part, .. } => Some(*part),
+            };
+            (note.resource.path().clone(), note.message.clone(), part)
+        };
+        let held: HashSet<_> = rows.notes.iter().map(key).collect();
+        for note in &from.notes {
+            if !held.contains(&key(note)) {
+                self.take_bytes(super::read::note_bytes(&note.skipped, &note.message))?;
+                rows.notes.push(note.clone());
+            }
+        }
+        Ok(())
     }
 
     /// One side of a join, or its failures as the join's.
@@ -838,6 +904,28 @@ fn render_key(key: &[Value]) -> String {
 /// that one's text.
 type Stripped = (Arc<Pointer>, Arc<Pointer>, Arc<str>);
 
+/// The most top-level keys a `strip-root` failure names; it counts the rest.
+const NAMED_ROOTS: usize = 3;
+
+/// `` `en`, `fr`, `de` and 2 more ``: the first keys of `count`.
+fn roots_named(named: &[&Segment], count: usize) -> String {
+    let shown = named
+        .iter()
+        .map(|segment| {
+            format!(
+                "`{}`",
+                Pointer::from_segments(vec![(*segment).clone()]).render()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    if count > named.len() {
+        format!("{shown} and {} more", count - named.len())
+    } else {
+        shown
+    }
+}
+
 impl Evaluator<'_> {
     /// `strip-root`: drop the first segment of an `entry.path` field, as
     /// `key_parity`'s `strip_root` does. Each resource must hold one
@@ -853,7 +941,8 @@ impl Evaluator<'_> {
         failures: &mut Failures,
     ) {
         let sensitive = rows.fields[position].sensitive || site.keys_sensitive;
-        let mut roots: BTreeMap<&str, Vec<&crate::relation::pointer::Segment>> = BTreeMap::new();
+        // Each resource's top-level keys: a set, and the first few to name.
+        let mut roots: BTreeMap<&str, (HashSet<&Segment>, Vec<&Segment>)> = BTreeMap::new();
         for row in &rows.rows {
             let cell = &row.cells[position];
             let Some(path) = &cell.path else {
@@ -868,27 +957,20 @@ impl Evaluator<'_> {
                 continue;
             };
             let resource = cell.at.resource.path().as_str();
-            let held = roots.entry(resource).or_default();
+            let (set, named) = roots.entry(resource).or_default();
             if let Some(first) = path.segments().first()
-                && !held.contains(&first)
+                && set.insert(first)
+                && named.len() < NAMED_ROOTS
             {
-                held.push(first);
+                named.push(first);
             }
         }
-        for (resource, held) in &roots {
-            if held.len() > 1 {
+        for (resource, (set, named)) in &roots {
+            if set.len() > 1 {
                 let shown = if sensitive {
-                    held.len().to_string()
+                    set.len().to_string()
                 } else {
-                    held.iter()
-                        .map(|segment| {
-                            format!(
-                                "`{}`",
-                                Pointer::from_segments(vec![(*segment).clone()]).render()
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                        .join(", ")
+                    roots_named(named, set.len())
                 };
                 failures.push(site.failure(
                     AnalysisFailureKind::Evaluation,

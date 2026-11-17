@@ -9,8 +9,8 @@ use super::*;
 use crate::relation::limits::LimitKind;
 use crate::relation::plan::{
     Entries, EntriesFormat, FieldDef, FieldSource, JoinDef, JoinSide, Member, NamedRelation, Part,
-    PlanSource, Predicate, Reached, Read, Reader, RelationDef, Rows, SelectorDef, SelectorRef,
-    SourceIndex, Transform,
+    PathToken, PlanSource, Predicate, Reached, Read, Reader, RelationDef, Rows, SelectorDef,
+    SelectorRef, SourceIndex, Transform,
 };
 use crate::{ConfigSourceClass, PathsSpec};
 
@@ -383,14 +383,23 @@ fn a_relation_is_evaluated_once_per_run() {
 
 #[test]
 fn a_failed_side_fails_the_join_with_its_failures() {
-    let plan = plan(vec![joined(), deps(), names()]);
-    let tree = tree(&[("a.json", r#"{"name": 1, "deps": {"b": 1}}"#)]);
+    // The right side reads a file that does not parse. (A value that is not
+    // a string is a note, not a failure.)
+    let names = named(
+        "names",
+        read_json("*.txt", "$.name"),
+        &[("name", FieldSource::Value)],
+    );
+    let plan = plan(vec![joined(), deps(), names]);
+    let tree = tree(&[
+        ("a.json", r#"{"deps": {"b": 1}}"#),
+        ("b.txt", r#"{"name": "#),
+    ]);
     assert_eq!(
         messages(&run(&plan, 0, &tree, Limits::default())),
         [
-            "a.json: relation `names` (.alint.yml): `read.json: $.name` matched non-string value(s) \
-          (number: 1); `read:` rows hold strings, so select string values, or read typed values \
-          with `entries:`"
+            "b.txt: relation `names` (.alint.yml): could not parse the file as JSON: EOF while \
+             parsing a value at line 1 column 9"
         ]
     );
 }
@@ -484,7 +493,7 @@ fn a_unions_rows_take_cells_as_each_part_builds_them() {
         messages(&run_with_memo(&plan, 0, &tree, limits, &memo)),
         [format!(
             "list.txt: relation `listed` (.alint.yml): relation limit `cells_per_run` (150) \
-             reached: 151 rows or values, {CELLS_EXHAUSTED}"
+             reached: 151 cells, {CELLS_EXHAUSTED}"
         )]
     );
     assert_eq!(memo.cells(), 151, "the union stopped at the cap");
@@ -511,8 +520,8 @@ fn every_field_of_every_row_takes_a_cell_and_so_do_a_joins_rows() {
     assert_eq!(
         messages(&run(&plan, 0, &tree, limit(LimitKind::CellsPerRun, 14))),
         [format!(
-            "relation `joined` (.alint.yml): relation limit `cells_per_run` (14) reached: 15 rows \
-             or values, {CELLS_EXHAUSTED}"
+            "relation `joined` (.alint.yml): relation limit `cells_per_run` (14) reached: 15 cells, \
+             {CELLS_EXHAUSTED}"
         )]
     );
     // Three fields, three cells a row: `a.json` and its 2 rows hold 7.
@@ -539,7 +548,7 @@ fn every_field_of_every_row_takes_a_cell_and_so_do_a_joins_rows() {
         messages(&run(&wide, 0, &one, limit(LimitKind::CellsPerRun, 6))),
         [format!(
             "a.json: relation `deps` (.alint.yml): relation limit `cells_per_run` (6) reached: 7 \
-             rows or values, {CELLS_EXHAUSTED}"
+             cells, {CELLS_EXHAUSTED}"
         )]
     );
     assert!(run(&wide, 0, &one, limit(LimitKind::CellsPerRun, 7)).is_ok());
@@ -551,7 +560,7 @@ fn every_field_of_every_row_takes_a_cell_and_so_do_a_joins_rows() {
         messages(&run_with_memo(&plan, 2, &tree, limits, &memo)),
         [format!(
             "b.json: relation `names` (.alint.yml): relation limit `cells_per_run` (7) reached: 8 \
-             rows or values, {CELLS_EXHAUSTED}"
+             cells, {CELLS_EXHAUSTED}"
         )]
     );
 }
@@ -593,7 +602,11 @@ fn held(memo: &RunMemo) -> usize {
                 rows.resources.len() * size_of::<Resource>(),
             );
         for note in &rows.notes {
-            total += size_of::<RelationNote>() + note.message.capacity();
+            let kinds = match &note.skipped {
+                Skipped::NonLiteral => 0,
+                Skipped::NonString { kinds, .. } => kinds.capacity() * size_of_val(&kinds[0]),
+            };
+            total += size_of::<RelationNote>() + note.message.capacity() + kinds;
         }
         for row in &rows.rows {
             total += row.cells.capacity() * size_of::<Cell>();
@@ -1018,4 +1031,349 @@ fn rows_that_share_a_key_path_share_what_strip_root_makes_of_it() {
     for row in &rows.rows {
         assert!(Arc::ptr_eq(first, row.cells[0].path.as_ref().unwrap()));
     }
+}
+
+/// A run with explicit caches, which the caller inspects.
+fn run_with_caches(
+    plan: &Arc<Plan>,
+    id: usize,
+    tree: &Tree,
+    limits: Limits,
+    (reads, decodes, memo): (&ReadCache, &DecodeCache, &RunMemo),
+) -> Outcome {
+    evaluate_with(
+        plan,
+        RelationId(id),
+        tree.dir.path(),
+        &tree.index,
+        limits,
+        reads,
+        decodes,
+        memo,
+    )
+}
+
+/// A part whose decode the run holds reads nothing: a `union:` of 30
+/// identical parts reads its file once, not once a part.
+#[test]
+fn a_part_whose_decode_is_held_reads_nothing() {
+    let tree = tree(&[("list.txt", "a\nb\n")]);
+    let plan = plan(vec![named(
+        "listed",
+        Rows::Union(vec![lines("list.txt"); 30]),
+        &[("line", FieldSource::Value)],
+    )]);
+    let limits = Limits::default();
+    let (reads, decodes) = (ReadCache::new(), DecodeCache::with_run_limits(&limits));
+    let memo = RunMemo::new(Arc::clone(&plan));
+    let rows = run_with_caches(&plan, 0, &tree, limits, (&reads, &decodes, &memo)).unwrap();
+    assert_eq!(rows.rows.len(), 60);
+    assert_eq!((reads.reads(), decodes.decodes()), (1, 1));
+}
+
+/// Past the run's decoded rows the relation stops, as it does past its
+/// cells: 50 files of one row each under `rows_per_run: 1` decode twice and
+/// fail once, and a later relation decodes nothing.
+#[test]
+fn the_run_row_limit_stops_the_relation_and_every_later_decode() {
+    let mut files: Vec<(String, String)> = (0..50)
+        .map(|file| (format!("f{file:02}.txt"), format!("l{file}\n")))
+        .collect();
+    files.push(("other.md".into(), "x\n".into()));
+    let files: Vec<(&str, &str)> = files
+        .iter()
+        .map(|(p, b)| (p.as_str(), b.as_str()))
+        .collect();
+    let tree = tree(&files);
+    let plan = plan(vec![
+        named(
+            "listed",
+            Rows::Part(lines("*.txt")),
+            &[("line", FieldSource::Value)],
+        ),
+        named(
+            "other",
+            Rows::Part(lines("*.md")),
+            &[("line", FieldSource::Value)],
+        ),
+    ]);
+    let limits = limit(LimitKind::RowsPerRun, 1);
+    let (reads, decodes) = (ReadCache::new(), DecodeCache::with_run_limits(&limits));
+    let memo = RunMemo::new(Arc::clone(&plan));
+    let caches = (&reads, &decodes, &memo);
+    let exhausted = "rows or values, so the relation is not evaluated rather than cut short; \
+                     narrow what it reads (its selector, or its `at:` paths)";
+    assert_eq!(
+        messages(&run_with_caches(&plan, 0, &tree, limits, caches)),
+        [format!(
+            "f01.txt: relation `listed` (.alint.yml): relation limit `rows_per_run` (1) reached: \
+             2 {exhausted}"
+        )]
+    );
+    assert_eq!((reads.reads(), decodes.decodes()), (2, 2));
+    // The budget never comes back, so the next relation's decode is refused
+    // without being made.
+    assert_eq!(
+        messages(&run_with_caches(&plan, 1, &tree, limits, caches)),
+        [format!(
+            "other.md: relation `other` (.alint.yml): relation limit `rows_per_run` (1) reached: \
+             2 {exhausted}"
+        )]
+    );
+    assert_eq!(decodes.decodes(), 2);
+}
+
+fn versions() -> NamedRelation {
+    named(
+        "versions",
+        Rows::Part(Part {
+            from: from("crates/*/Cargo.toml"),
+            reader: Reader::Read {
+                read: Read::Toml("$.package.version".into()),
+                optional: false,
+            },
+        }),
+        &[
+            ("version", FieldSource::Value),
+            ("manifest", FieldSource::Path(PathToken::Path)),
+        ],
+    )
+}
+
+const WORKSPACE_VERSIONS: [(&str, &str); 3] = [
+    ("crates/a/Cargo.toml", "[package]\nversion = \"1.0.0\"\n"),
+    (
+        "crates/b/Cargo.toml",
+        "[package]\nversion.workspace = true\n",
+    ),
+    ("crates/c/Cargo.toml", "[package]\nversion = \"3.0.0\"\n"),
+];
+
+/// A `read:` that matches a value that is not a string notes the resource
+/// once, naming the kinds, and keeps the other resources' rows, as
+/// `cross_file` does.
+#[test]
+fn a_non_string_match_is_one_note_and_the_other_files_keep_their_rows() {
+    let tree = tree(&WORKSPACE_VERSIONS);
+    let plan = plan(vec![versions()]);
+    let rows = run(&plan, 0, &tree, Limits::default()).unwrap();
+    let values: Vec<(String, String)> = rows
+        .rows
+        .iter()
+        .map(|row| {
+            let text = |cell: &Cell| match &cell.value {
+                Some(Value::String(text)) => text.to_string(),
+                Some(Value::Path(path)) => path.as_str().to_string(),
+                other => format!("{other:?}"),
+            };
+            (text(&row.cells[0]), text(&row.cells[1]))
+        })
+        .collect();
+    assert_eq!(
+        values,
+        [
+            ("1.0.0".to_string(), "crates/a/Cargo.toml".to_string()),
+            ("3.0.0".to_string(), "crates/c/Cargo.toml".to_string()),
+        ]
+    );
+    assert_eq!(
+        rows.notes,
+        [RelationNote {
+            resource: rows.resources[1].clone(),
+            skipped: Skipped::NonString {
+                part: 0,
+                kinds: vec![(crate::extract::NonStringValueKind::Object, 1)],
+            },
+            message: "`read.toml: $.package.version` matched non-string value(s) (object: 1); \
+                      `read:` rows hold strings, so select string values, or read typed values \
+                      with `entries:`"
+                .into(),
+        }]
+    );
+    assert_eq!(rows.resources[1].path().as_str(), "crates/b/Cargo.toml");
+    // A configuration that reads the environment does not name its `read:`.
+    let mut hidden = versions();
+    hidden.reads_environment = true;
+    let rows = run(&self::plan(vec![hidden]), 0, &tree, Limits::default()).unwrap();
+    assert_eq!(rows.rows.len(), 2);
+    assert!(
+        rows.notes[0]
+            .message
+            .starts_with("`read:` matched non-string value(s) (object: 1)"),
+        "{}",
+        rows.notes[0].message
+    );
+}
+
+/// A join and a `where:` list keep the notes of what they read: a value a
+/// side skipped is a row the join lacks.
+#[test]
+fn joins_and_where_lists_keep_the_notes_of_what_they_read() {
+    let tree = tree(&[
+        ("a.json", r#"{"name": "a", "deps": {"a": 1, "b": 1}}"#),
+        ("b.json", r#"{"name": "${NAME}", "deps": {}}"#),
+        ("c.json", r#"{"name": 1, "deps": {}}"#),
+    ]);
+    let mut filtered = deps();
+    filtered.relation.filters = vec![(
+        "name".into(),
+        vec![Predicate::NotIn(vec![Member::Relation {
+            relation: reached(2),
+            field: "name".into(),
+        }])],
+    )];
+    let plan = plan(vec![joined(), deps(), names(), filtered]);
+    let notes = |rows: &RelationRows| -> Vec<(String, String)> {
+        rows.notes
+            .iter()
+            .map(|note| (note.resource.path().to_string(), note.message.clone()))
+            .collect()
+    };
+    let read = run(&plan, 2, &tree, Limits::default()).unwrap();
+    assert_eq!(read.notes.len(), 2);
+    let joined = run(&plan, 0, &tree, Limits::default()).unwrap();
+    assert_eq!(joined.rows.len(), 1);
+    assert_eq!(notes(&joined), notes(&read));
+    let filtered = run(&plan, 3, &tree, Limits::default()).unwrap();
+    assert_eq!(filtered.rows.len(), 1, "`b` is not a name");
+    assert_eq!(notes(&filtered), notes(&read));
+    assert_eq!(
+        notes(&read),
+        [
+            (
+                "b.json".to_string(),
+                "skipped non-literal value \"${NAME}\"".to_string()
+            ),
+            (
+                "c.json".to_string(),
+                "`read.json: $.name` matched non-string value(s) (number: 1); `read:` rows hold \
+                 strings, so select string values, or read typed values with `entries:`"
+                    .to_string()
+            ),
+        ]
+    );
+}
+
+/// A `read:` row is its resource, its part and its ordinal: two lines of a
+/// file are two rows, and a line keeps its identity when a `where:` drops an
+/// earlier one.
+#[test]
+fn read_rows_are_told_apart_by_their_part_and_ordinal() {
+    let tree = tree(&[("list.txt", "x\ny\nz\n")]);
+    let line = &[("line", FieldSource::Value)];
+    let mut dropped = named("dropped", Rows::Part(lines("list.txt")), line);
+    dropped.relation.filters = vec![(
+        "line".into(),
+        vec![Predicate::NotIn(vec![Member::Literal(Value::String(
+            "x".into(),
+        ))])],
+    )];
+    let plan = plan(vec![
+        named("all", Rows::Part(lines("list.txt")), line),
+        dropped,
+        named(
+            "both",
+            Rows::Union(vec![lines("list.txt"), lines("list.txt")]),
+            line,
+        ),
+    ]);
+    let at = |id: usize| -> Vec<(u32, u32)> {
+        let rows = run(&plan, id, &tree, Limits::default()).unwrap();
+        rows.rows
+            .iter()
+            .map(|row| (row.cells[0].at.part, row.cells[0].at.ordinal))
+            .collect()
+    };
+    assert_eq!(at(0), [(0, 0), (0, 1), (0, 2)]);
+    assert_eq!(at(1), [(0, 1), (0, 2)]);
+    assert_eq!(at(2), [(0, 0), (0, 1), (0, 2), (1, 0), (1, 1), (1, 2)]);
+    let all = run(&plan, 0, &tree, Limits::default()).unwrap();
+    assert_ne!(all.rows[0].cells[0].at, all.rows[1].cells[0].at);
+}
+
+fn roots(sensitive: bool) -> NamedRelation {
+    let mut keys = named(
+        "keys",
+        Rows::Part(Part {
+            from: from("*.json"),
+            reader: Reader::Entries(Entries {
+                format: EntriesFormat::Json,
+                at: vec!["$".into()],
+                leaves: true,
+            }),
+        }),
+        &[("path", FieldSource::EntryPath)],
+    );
+    keys.relation.fields[0].1.sensitive = sensitive;
+    keys.relation.transforms = vec![("path".into(), vec![Transform::StripRoot])];
+    keys
+}
+
+/// `strip-root` over a file of 200,000 top-level keys fails at once with a
+/// message that names three of them.
+#[test]
+fn strip_root_over_many_roots_fails_fast_naming_a_few() {
+    let roots_in = |count: usize| {
+        let members: Vec<String> = (0..count)
+            .map(|root| format!("\"r{root}\":{{\"k\":1}}"))
+            .collect();
+        format!("{{{}}}", members.join(","))
+    };
+    let tree = tree(&[
+        ("many.json", &roots_in(200_000)),
+        ("two.json", &roots_in(2)),
+    ]);
+    let started = std::time::Instant::now();
+    let failures = messages(&run(&plan(vec![roots(false)]), 0, &tree, Limits::default()));
+    let elapsed = started.elapsed();
+    let fixed = "; read one top-level object per file, or drop `strip-root`";
+    assert_eq!(
+        failures,
+        [
+            format!(
+                "many.json: relation `keys` (.alint.yml): `strip-root` on `path` needs one \
+                 top-level key in each resource, but this one has `r0`, `r1`, `r2` and 199997 \
+                 more{fixed}"
+            ),
+            format!(
+                "two.json: relation `keys` (.alint.yml): `strip-root` on `path` needs one \
+                 top-level key in each resource, but this one has `r0`, `r1`{fixed}"
+            ),
+        ]
+    );
+    assert!(elapsed.as_secs() < 30, "{elapsed:?}");
+    // A sensitive field names none.
+    let failures = messages(&run(&plan(vec![roots(true)]), 0, &tree, Limits::default()));
+    assert!(
+        failures[0].contains("but this one has 200000;"),
+        "{}",
+        failures[0]
+    );
+}
+
+/// A repeated join key is quoted to a prefix and its length: a key of a
+/// megabyte never makes a message of one.
+#[test]
+fn a_repeated_join_key_is_quoted_to_a_prefix() {
+    let long = "k".repeat(1 << 20);
+    let manifest = format!(r#"{{"name": "{long}", "deps": {{}}}}"#);
+    let tree = tree(&[("a.json", manifest.as_str()), ("b.json", manifest.as_str())]);
+    let plan = plan(vec![joined(), deps(), names()]);
+    let failures = messages(&run(&plan, 0, &tree, Limits::default()));
+    let quoted = format!("\"{}\"... ({} bytes)", "k".repeat(64), 1 << 20);
+    assert_eq!(
+        failures,
+        [format!(
+            "b.json: relation `joined` (.alint.yml): the join's unique side (right, `names`) \
+             repeats the key {quoted}: a.json and b.json; `unique: right` needs each key once \
+             on that side, so make the key unique there, or name the other side unique"
+        )]
+    );
+    // A short key, and one of exactly the most characters quoted, are whole.
+    let render = |text: String| super::ops::render_value(&Value::String(text.into()));
+    assert_eq!(render("é".repeat(64)), format!("\"{}\"", "é".repeat(64)));
+    assert_eq!(
+        render("é".repeat(65)),
+        format!("\"{}\"... (130 bytes)", "é".repeat(64))
+    );
 }

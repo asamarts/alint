@@ -358,6 +358,7 @@ pub enum PathToken {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Transform {
     Trim,
+    /// Trims, then lowercases each character: not Unicode case folding.
     Lower,
     SemverMajor,
     SemverMinor,

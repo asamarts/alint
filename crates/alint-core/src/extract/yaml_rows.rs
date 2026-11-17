@@ -2,16 +2,15 @@
 //! events (see [`super::extract_entry_rows`]), with each row's value when a
 //! value-bearing relation asks for it ([`super::extract_entry_values_bounded`]).
 
-use super::{
-    ByteSpan, EntryPathSegment, EntryRowsError, EntryValue, StructuredEntryRow, entry_capacity,
-};
+use super::{ByteSpan, EntryAt, EntryRowsError, EntryTable, EntryValue, PathStack, entry_capacity};
+use crate::relation::Segment;
 
-pub(super) fn yaml_entry_rows(
+pub(super) fn yaml_entry_table(
     text: &str,
     reject_yaml_features: bool,
     max_rows: Option<usize>,
-    values: Option<&mut Vec<EntryValue>>,
-) -> std::result::Result<Vec<StructuredEntryRow>, EntryRowsError> {
+    values: bool,
+) -> std::result::Result<EntryTable, EntryRowsError> {
     use saphyr_parser::{Event, Parser};
 
     let stripped = text.trim_start_matches('\u{feff}');
@@ -100,22 +99,21 @@ pub(super) fn yaml_entry_rows(
             )
         })
         .unwrap_or(events.len());
-    let mut rows = Vec::new();
-    let mut parent = Vec::new();
+    let mut walk = YamlWalk {
+        events: &events,
+        byte_offsets: &byte_offsets,
+        offset,
+        text: stripped,
+        reject_yaml_features,
+        max_rows,
+        values,
+        table: EntryTable::default(),
+        stack: PathStack::default(),
+    };
     if index < events.len() {
-        let mut walk = YamlWalk {
-            events: &events,
-            byte_offsets: &byte_offsets,
-            offset,
-            text: stripped,
-            reject_yaml_features,
-            max_rows,
-            rows: &mut rows,
-            values,
-        };
-        walk.node(&mut index, &mut parent, true)?;
+        walk.node(&mut index, true)?;
     }
-    Ok(rows)
+    Ok(walk.table)
 }
 
 enum YamlByteOffsets {
@@ -210,6 +208,9 @@ impl YamlByteOffsets {
 struct YamlNode {
     scalar: Option<String>,
     span: Option<ByteSpan>,
+    /// Where the node's event starts: a key's location when it has no span
+    /// (a block scalar, or an empty key).
+    start: Option<usize>,
     style: Option<saphyr_parser::ScalarStyle>,
     /// What the node holds, when the walk records values.
     value: Option<EntryValue>,
@@ -224,8 +225,9 @@ struct YamlWalk<'w, 'e> {
     text: &'w str,
     reject_yaml_features: bool,
     max_rows: Option<usize>,
-    rows: &'w mut Vec<StructuredEntryRow>,
-    values: Option<&'w mut Vec<EntryValue>>,
+    values: bool,
+    table: EntryTable,
+    stack: PathStack,
 }
 
 /// What a scalar event holds, typed as saphyr's loader types it under the
@@ -260,7 +262,6 @@ impl YamlWalk<'_, '_> {
     fn node(
         &mut self,
         index: &mut usize,
-        parent: &mut Vec<EntryPathSegment>,
         emit: bool,
     ) -> std::result::Result<YamlNode, EntryRowsError> {
         use saphyr_parser::Event;
@@ -274,16 +275,19 @@ impl YamlWalk<'_, '_> {
                 "unexpected end of YAML event stream".to_string(),
             ));
         };
+        let event_start = byte_offsets
+            .byte(event_span.start.index())
+            .map(|start| start + offset);
         match event {
             Event::Scalar(value, style, _, tag) => {
                 *index += 1;
                 Ok(YamlNode {
                     scalar: Some(value.to_string()),
                     span: yaml_scalar_span(*event_span, *style, byte_offsets, offset, text),
+                    start: event_start,
                     style: Some(*style),
                     value: self
                         .values
-                        .is_some()
                         .then(|| scalar_value(value, *style, tag.as_ref())),
                 })
             }
@@ -297,6 +301,7 @@ impl YamlWalk<'_, '_> {
                 Ok(YamlNode {
                     scalar: None,
                     span: yaml_token_span(*event_span, byte_offsets, offset, text, false),
+                    start: event_start,
                     style: None,
                     value: Some(EntryValue::Unreadable),
                 })
@@ -306,9 +311,9 @@ impl YamlWalk<'_, '_> {
                 *index += 1;
                 let mut item = 0;
                 while !matches!(events.get(*index), Some((Event::SequenceEnd, _))) {
-                    parent.push(EntryPathSegment::Index(item));
-                    self.node(index, parent, emit)?;
-                    parent.pop();
+                    self.stack.enter(Segment::Index(item));
+                    self.node(index, emit)?;
+                    self.stack.leave();
                     item += 1;
                 }
                 let end = events[*index].1;
@@ -324,6 +329,7 @@ impl YamlWalk<'_, '_> {
                         b'[',
                         b']',
                     ),
+                    start: event_start,
                     style: None,
                     value: Some(EntryValue::Array),
                 })
@@ -332,7 +338,7 @@ impl YamlWalk<'_, '_> {
                 let start = *event_span;
                 *index += 1;
                 while !matches!(events.get(*index), Some((Event::MappingEnd, _))) {
-                    let key = self.node(index, parent, false)?;
+                    let key = self.node(index, false)?;
                     if let Some(key_text) = key.scalar {
                         if reject_yaml_features
                             && key_text == "<<"
@@ -342,34 +348,43 @@ impl YamlWalk<'_, '_> {
                                 "YAML merge keys are not supported for key extraction".to_string(),
                             ));
                         }
-                        if emit {
-                            entry_capacity(self.rows, max_rows)?;
-                        }
                         let row_index = if emit {
-                            key.span.map(|key_span| {
-                                self.rows.push(StructuredEntryRow {
-                                    parent: parent.clone(),
-                                    key: key_text.clone(),
-                                    key_span,
-                                    value_span: None,
-                                });
-                                if let Some(values) = self.values.as_deref_mut() {
-                                    values.push(EntryValue::Unreadable);
-                                }
-                                self.rows.len() - 1
-                            })
+                            entry_capacity(self.table.rows.len(), max_rows)?;
+                            // A block scalar key and an empty key have no
+                            // token span, so the row sits where the key
+                            // starts: a row without an exact span is better
+                            // than a key dropped without a word.
+                            let key_span = key.span.unwrap_or_else(|| {
+                                let start = key.start.unwrap_or(offset);
+                                ByteSpan::new(start, start)
+                            });
+                            let parent = self.stack.path(&mut self.table.paths);
+                            let path = self
+                                .table
+                                .paths
+                                .child(parent, Segment::Key(key_text.as_str().into()));
+                            self.table.rows.push(EntryAt {
+                                path,
+                                key_span,
+                                value_span: None,
+                            });
+                            if self.values {
+                                self.table.values.push(EntryValue::Unreadable);
+                            }
+                            self.stack.enter_path(path);
+                            Some(self.table.rows.len() - 1)
                         } else {
+                            self.stack.enter(Segment::Key(key_text.as_str().into()));
                             None
                         };
-                        parent.push(EntryPathSegment::Key(key_text));
-                        let value = self.node(index, parent, emit)?;
-                        parent.pop();
+                        let value = self.node(index, emit)?;
+                        self.stack.leave();
                         if let Some(row_index) = row_index {
-                            self.rows[row_index].value_span = value.span;
-                            if let (Some(values), Some(held)) =
-                                (self.values.as_deref_mut(), value.value)
+                            self.table.rows[row_index].value_span = value.span;
+                            if self.values
+                                && let Some(held) = value.value
                             {
-                                values[row_index] = held;
+                                self.table.values[row_index] = held;
                             }
                         }
                     } else if reject_yaml_features {
@@ -380,7 +395,7 @@ impl YamlWalk<'_, '_> {
                             .to_string(),
                     ));
                     } else {
-                        self.node(index, parent, emit)?;
+                        self.node(index, emit)?;
                     }
                 }
                 let end = events[*index].1;
@@ -396,6 +411,7 @@ impl YamlWalk<'_, '_> {
                         b'{',
                         b'}',
                     ),
+                    start: event_start,
                     style: None,
                     value: Some(EntryValue::Object),
                 })
