@@ -312,6 +312,9 @@ impl<'t> SpanIndex<'t> {
         // stripped length (the caller splices the raw file bytes, BOM included).
         let stripped = text.trim_start_matches('\u{feff}');
         READS.with(|reads| reads.set(reads.get() + 1));
+        // This input's share of the YAML parse budget, held while the parser
+        // runs (`yaml_budget`, ADR-0042).
+        let _budget = crate::yaml_budget::reserve(stripped.len());
         // The parser's event iterator, not saphyr's loader: the loader's `load`
         // recurses once per nesting level (a deep document overflows the
         // stack) and copies an anchored subtree for every alias (an alias bomb
