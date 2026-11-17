@@ -94,6 +94,7 @@ pub fn run(
         &alint_dsl::LoadOptions::with_catalog(registry.catalog()),
     )
     .with_context(|| format!("loading {}", resolved_config_path.display()))?;
+    crate::config_cmd::warn_if_experimental(&config, &resolved_config_path);
 
     let directives = collect_directives(&config, opts.include_info);
     let body = match opts.format {

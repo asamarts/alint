@@ -311,6 +311,46 @@ rules:
     assert!(!by_path[&config_path][0].fixable);
 }
 
+/// A `version: 2` config (experimental) lints as `alint check` runs it. The
+/// server says nothing about the version: the CLI's once-per-run warning is
+/// not a diagnostic, and the server writes nothing to stderr for it.
+#[test]
+fn a_version_two_config_lints_with_no_diagnostic_about_its_version() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join(".alint.yml");
+    std::fs::write(
+        &config_path,
+        r"version: 2
+selectors:
+  docs:
+    paths: 'docs/**'
+rules:
+  - id: has-readme
+    kind: file_exists
+    paths: README.md
+    level: error
+",
+    )
+    .unwrap();
+    let check = super::config::check_workspace(
+        &[dir.path().to_path_buf()],
+        &[],
+        &super::config::Settings::default(),
+        &alint_rules::builtin_registry(),
+    );
+    let [(_, run)] = &check.runs[..] else {
+        panic!("one config run: {:?}", check.runs.len());
+    };
+    let run = run.as_ref().expect("the config runs");
+    let rules: Vec<&str> = run
+        .by_path
+        .values()
+        .flatten()
+        .map(|finding| finding.rule_id.as_str())
+        .collect();
+    assert_eq!(rules, ["has-readme"], "{:?}", run.by_path);
+}
+
 #[test]
 fn pattern_hints_are_warnings_on_the_config_file() {
     let dir = tempfile::tempdir().unwrap();

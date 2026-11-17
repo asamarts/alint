@@ -194,17 +194,19 @@ pub(super) fn cmd_validate_config(
     // failures plumbed back as a Result for the validate handler
     // rather than aborting the run.
     match validate_config_inner(&config_path, cli) {
-        Ok((rule_count, hints)) => {
-            emit_validate_success(rule_count, &hints, &config_path, format, cli)
-        }
+        Ok(validated) => emit_validate_success(&validated, &config_path, format, cli),
         Err(e) => emit_validate_failure(&e, Some(&config_path), format),
     }
 }
 
-fn validate_config_inner(
-    config_path: &Path,
-    cli: &Cli,
-) -> Result<(usize, Vec<alint_core::pattern_hints::ConfigHint>)> {
+/// What `validate-config` reports about a valid config.
+struct Validated {
+    rule_count: usize,
+    hints: Vec<alint_core::pattern_hints::ConfigHint>,
+    config_version: u32,
+}
+
+fn validate_config_inner(config_path: &Path, cli: &Cli) -> Result<Validated> {
     let registry = cli.registry();
     let config = alint_dsl::load_with(
         config_path,
@@ -243,33 +245,51 @@ fn validate_config_inner(
         &config.facts,
         &config.environment_values,
     ));
-    Ok((count, hints))
+    Ok(Validated {
+        rule_count: count,
+        hints,
+        config_version: config.version,
+    })
 }
 
 fn emit_validate_success(
-    rule_count: usize,
-    hints: &[alint_core::pattern_hints::ConfigHint],
+    validated: &Validated,
     config_path: &Path,
     format: &str,
     cli: &Cli,
 ) -> Result<ExitCode> {
+    let Validated {
+        rule_count,
+        hints,
+        config_version,
+    } = validated;
+    let experimental = experimental_version_warning(*config_version, config_path);
     if format == "json" {
         // Pattern hints are advisory: the config is still valid.
         // A fact's id may be read from the environment.
-        let warnings: Vec<String> = hints
+        let warnings: Vec<String> = experimental
             .iter()
-            .map(|hint| redact_environment_values(&hint.to_string()).into_owned())
+            .cloned()
+            .chain(
+                hints
+                    .iter()
+                    .map(|hint| redact_environment_values(&hint.to_string()).into_owned()),
+            )
             .collect();
         let envelope = serde_json::json!({
             "valid": true,
             "rule_count": rule_count,
             "config_path": config_path.display().to_string(),
+            "config_version": config_version,
             "error": serde_json::Value::Null,
             "warnings": warnings,
         });
         print_stdout_line(&serde_json::to_string(&envelope)?)?;
     } else {
         // human format
+        if let Some(warning) = &experimental {
+            eprintln!("alint: warning: {}", term(warning));
+        }
         if !cli.quiet {
             for hint in hints {
                 eprintln!(
@@ -278,12 +298,45 @@ fn emit_validate_success(
                 );
             }
         }
+        // A version 1 config's line is unchanged; an experimental version is
+        // named on it.
+        let version = if experimental.is_some() {
+            format!(" (config version {config_version}, experimental)")
+        } else {
+            String::new()
+        };
         print_stdout_line(&format!(
-            "✓ Config valid: {rule_count} rule(s) loaded from {}",
+            "✓ Config valid: {rule_count} rule(s) loaded from {}{version}",
             term(&config_path.display().to_string())
         ))?;
     }
     Ok(ExitCode::SUCCESS)
+}
+
+/// The warning for a config of an experimental version (`version: 2` in
+/// v0.23), without the `alint: warning: ` prefix; `None` for a stable one.
+fn experimental_version_warning(version: u32, config_path: &Path) -> Option<String> {
+    alint_dsl::EXPERIMENTAL_CONFIG_VERSIONS
+        .contains(&version)
+        .then(|| {
+            format!(
+                "`version: {version}` is experimental; its syntax may change before a release \
+                 declares it stable, v0.24 at the earliest ({})",
+                config_path.display()
+            )
+        })
+}
+
+/// Print the experimental-version warning for the loaded config, once per
+/// run, whatever `--quiet` says: like the warning for a skipped config, it is
+/// about what was loaded, not a finding.
+pub(super) fn warn_if_experimental(config: &alint_core::Config, config_path: &Path) {
+    static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if let Some(warning) = experimental_version_warning(config.version, config_path)
+        && !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed)
+    {
+        eprintln!("alint: warning: {}", term(&warning));
+    }
 }
 
 fn emit_validate_failure(
@@ -417,6 +470,7 @@ pub(super) fn load_rules_for_explain(
         &alint_dsl::LoadOptions::with_catalog(registry.catalog()),
     )?;
     remember_environment_values(&config);
+    warn_if_experimental(&config, &config_path);
     refuse_spawning(&config, &registry, include_off_rule, cli)?;
 
     let mut entries: Vec<alint_core::RuleEntry> = Vec::with_capacity(config.rules.len());
@@ -486,5 +540,21 @@ mod tests {
         );
         let hostile = skipped_config_warning(Path::new("/tmp/\u{1b}]8;;x\u{7}/.alint.yml"));
         assert!(!hostile.contains('\u{1b}'), "{hostile:?}");
+    }
+
+    /// Only an experimental version warns, and the warning names the config.
+    #[test]
+    fn an_experimental_version_is_named_in_a_warning() {
+        assert_eq!(
+            experimental_version_warning(1, Path::new(".alint.yml")),
+            None
+        );
+        assert_eq!(
+            experimental_version_warning(2, Path::new(".alint.yml")).as_deref(),
+            Some(
+                "`version: 2` is experimental; its syntax may change before a release declares \
+                 it stable, v0.24 at the earliest (.alint.yml)"
+            )
+        );
     }
 }

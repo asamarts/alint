@@ -1194,9 +1194,19 @@ The JSON shape is stable:
   "valid": true,
   "rule_count": 70,
   "config_path": "examples/clap-rs-clap/.alint.yml",
-  "error": null
+  "config_version": 1,
+  "error": null,
+  "warnings": []
 }
 ```
+
+`config_version` (v0.23) is the loaded config's `version:`; an invalid config's envelope has no
+`config_version` and no `warnings`.
+
+**v2 (experimental).** A `version: 2` config validates like any other, with `"config_version": 2`
+and the experimental warning as the first entry of `warnings`. The human output prints the warning
+on stderr and ends the success line with `(config version 2, experimental)`. Version 2's syntax
+may change in any release until one declares it stable.
 
 Use this in a pre-commit hook to fail-fast on the way in, or wire it
 into your editor's LSP runner to surface errors without paying for the
