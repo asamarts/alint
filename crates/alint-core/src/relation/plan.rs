@@ -1,0 +1,539 @@
+//! The resolved form of a version 2 configuration's named selectors and
+//! relations (design `v0.23/selectors-and-constraints.md`, sections 4, 5, 8
+//! and 10): what the loader builds once every source has loaded and every
+//! name has resolved, carried on [`crate::Config::relation_plan`].
+//!
+//! Every reference here is resolved. A named selector or relation is an index
+//! into [`Plan::selectors`] or [`Plan::relations`], with the `extends:` alias
+//! a qualified reference went through ([`Reached`]). The loader has checked
+//! the plan before handing it over: every field a relation names exists,
+//! every part of a union binds every field, `strip-root` applies to an
+//! `entry.path` field, and no join or membership filter reads itself through
+//! other relations, so a reader may rely on those. Each object keeps the
+//! source that declared it, and the capabilities reading it needs.
+//!
+//! Version 2 is experimental (ADR-0034 decision 1), so this module is part of
+//! the hidden relation layer and promises no stability. It is public only so
+//! the CLI's `list` can show the objects, the relation engine can execute
+//! them, and the `constraint` kind can read its input.
+
+use std::path::PathBuf;
+
+use crate::{Capability, ConfigSourceClass, PathsSpec, ScopeFilterSpec};
+
+use super::Value;
+
+/// A version 2 configuration's named selectors and relations, resolved.
+#[derive(Debug, Clone, Default)]
+pub struct Plan {
+    /// Every version 2 source the configuration was loaded from, in load
+    /// order: the sources an `extends:` reaches before the config that
+    /// extends them, then the top-level config, then its `.alint.d`
+    /// fragments.
+    pub sources: Vec<PlanSource>,
+    /// Every named selector, source by source in load order, each source's in
+    /// the order written.
+    pub selectors: Vec<NamedSelector>,
+    /// Every named relation, in the same order.
+    pub relations: Vec<NamedRelation>,
+    /// The references each rule's fields make, resolved in the source that
+    /// wrote each field: none in v0.23, whose rule kinds reference no named
+    /// object (the `constraint` kind's `input:` will).
+    pub rules: Vec<RuleReferences>,
+}
+
+impl Plan {
+    #[must_use]
+    pub fn source(&self, index: SourceIndex) -> &PlanSource {
+        &self.sources[index.0]
+    }
+
+    #[must_use]
+    pub fn selector(&self, id: SelectorId) -> &NamedSelector {
+        &self.selectors[id.0]
+    }
+
+    #[must_use]
+    pub fn relation(&self, id: RelationId) -> &NamedRelation {
+        &self.relations[id.0]
+    }
+
+    /// The aliases other sources give `source` (`extends: [{ url, as }]`),
+    /// each with the source that wrote it, in load order: the names through
+    /// which a consumer reaches `source`'s objects.
+    pub fn aliases_of(
+        &self,
+        source: SourceIndex,
+    ) -> impl Iterator<Item = (&PlanSource, &PlanAlias)> + '_ {
+        self.sources.iter().flat_map(move |consumer| {
+            consumer
+                .aliases
+                .iter()
+                .filter(move |alias| alias.target == Some(source))
+                .map(move |alias| (consumer, alias))
+        })
+    }
+
+    /// The references rule `id` makes, if any.
+    #[must_use]
+    pub fn rule(&self, id: &str) -> Option<&RuleReferences> {
+        self.rules.iter().find(|rule| rule.rule == id)
+    }
+
+    /// What reading everything rule `id` references needs: the union of
+    /// those objects' capabilities. A rule's own capabilities are its kind's;
+    /// the trust gates judge the two together (design section 10).
+    #[must_use]
+    pub fn rule_capabilities(&self, id: &str) -> Capabilities {
+        let mut capabilities = Capabilities::default();
+        for reference in self.rule(id).map_or(&[][..], |rule| &rule.references) {
+            capabilities.add(&self.relation(reference.relation.id).capabilities);
+        }
+        capabilities
+    }
+}
+
+/// A version 2 source, as the objects it declares name it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlanSource {
+    /// How a message names the source, as the loader's errors do.
+    pub display: String,
+    /// The resolved file.
+    pub path: PathBuf,
+    pub class: ConfigSourceClass,
+    /// The aliases it gives the sources it extends, in the order written.
+    pub aliases: Vec<PlanAlias>,
+}
+
+/// An `extends:` entry's `as:`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlanAlias {
+    pub name: String,
+    /// The entry's URL, as written.
+    pub url: String,
+    /// The source it names, when that source is version 2 (a version 1
+    /// source declares no selector or relation).
+    pub target: Option<SourceIndex>,
+}
+
+/// An index into [`Plan::sources`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct SourceIndex(pub usize);
+
+/// An index into [`Plan::selectors`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct SelectorId(pub usize);
+
+/// An index into [`Plan::relations`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct RelationId(pub usize);
+
+/// A resolved reference: the object, and the `extends:` alias a qualified
+/// reference (`deps.ranges`) went through (`None` for a bare name, which
+/// resolves in the referencing source).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reached<Id> {
+    pub id: Id,
+    pub alias: Option<String>,
+}
+
+/// A named selector and the source that declared it.
+#[derive(Debug, Clone)]
+pub struct NamedSelector {
+    pub name: String,
+    pub source: SourceIndex,
+    pub selector: SelectorDef,
+    /// What reading the resources it picks needs.
+    pub capabilities: Capabilities,
+}
+
+/// A named relation and the source that declared it.
+#[derive(Debug, Clone)]
+pub struct NamedRelation {
+    pub name: String,
+    pub source: SourceIndex,
+    pub relation: RelationDef,
+    /// What reading its rows needs: its own reads, and those of every
+    /// selector and relation it references, transitively.
+    pub capabilities: Capabilities,
+}
+
+/// What reading an object makes alint do, as the trust gates judge it
+/// (design section 10). A rule's capabilities are its own plus those of
+/// everything it references.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Capabilities {
+    /// Reads the content of files: a relation reads the resources its
+    /// selectors pick, and a manifest-derived `scope_filter:` predicate reads
+    /// its manifest.
+    pub reads_content: bool,
+    /// Host capabilities, as rule kinds declare them. No selector or
+    /// relation has one in v0.23 (`changed_since`, which would need Git, is
+    /// refused in a selector).
+    pub host: Vec<Capability>,
+}
+
+impl Capabilities {
+    /// Add `other`'s capabilities to these.
+    pub fn add(&mut self, other: &Self) {
+        self.reads_content |= other.reads_content;
+        for capability in &other.host {
+            if !self.host.contains(capability) {
+                self.host.push(capability.clone());
+            }
+        }
+    }
+}
+
+/// A selector (section 4): a rule's `paths:` grammar and its `scope_filter:`
+/// predicates but `changed_since`.
+#[derive(Debug, Clone)]
+pub struct SelectorDef {
+    pub paths: PathsSpec,
+    pub scope_filter: Option<ScopeFilterSpec>,
+}
+
+/// Where a relation reads: a named selector, or an anonymous inline one.
+#[derive(Debug, Clone)]
+pub enum SelectorRef {
+    Named(Reached<SelectorId>),
+    Inline(Box<SelectorDef>),
+}
+
+/// A relation (section 5): a plan that reads rows and names their fields.
+#[derive(Debug, Clone)]
+pub struct RelationDef {
+    pub rows: Rows,
+    /// The fields, in the order written.
+    pub fields: Vec<(String, FieldDef)>,
+    /// Each field's transforms, applied in order before `filters`.
+    pub transforms: Vec<(String, Vec<Transform>)>,
+    /// `where:`: each field's predicates, all of which must hold.
+    pub filters: Vec<(String, Vec<Predicate>)>,
+}
+
+impl RelationDef {
+    /// The field `name`, if the relation declares one.
+    #[must_use]
+    pub fn field(&self, name: &str) -> Option<&FieldDef> {
+        self.fields
+            .iter()
+            .find(|(held, _)| held == name)
+            .map(|(_, field)| field)
+    }
+
+    /// The transforms of field `name`, in order (none when it has none).
+    #[must_use]
+    pub fn transforms_of(&self, name: &str) -> &[Transform] {
+        self.transforms
+            .iter()
+            .find(|(held, _)| held == name)
+            .map_or(&[], |(_, transforms)| transforms.as_slice())
+    }
+}
+
+/// Where a relation's rows come from: exactly one of `entries:`, `read:`,
+/// `union:` and `join:`.
+#[derive(Debug, Clone)]
+pub enum Rows {
+    Part(Part),
+    Union(Vec<Part>),
+    Join(JoinDef),
+}
+
+/// A selector and how its resources are read: a relation with `entries:` or
+/// `read:`, or one part of a `union:`.
+#[derive(Debug, Clone)]
+pub struct Part {
+    pub from: SelectorRef,
+    pub reader: Reader,
+}
+
+#[derive(Debug, Clone)]
+pub enum Reader {
+    Entries(Entries),
+    Read {
+        read: Read,
+        /// A `read:` that matches nothing yields no row instead of a missing
+        /// one.
+        optional: bool,
+    },
+}
+
+/// `entries:`: one row per member of each object `at` selects, or per leaf
+/// below it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Entries {
+    pub format: EntriesFormat,
+    pub at: Vec<String>,
+    pub leaves: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntriesFormat {
+    Json,
+    Yaml,
+    Toml,
+}
+
+/// `read:`: the extract forms `cross_file` has, limited in v0.23 to these.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Read {
+    Json(String),
+    Yaml(String),
+    Toml(String),
+    Regex(String),
+    Lines { comment: Option<String> },
+    WholeFile,
+}
+
+/// `join:` (section 8): an inner equality join of two relations, one side
+/// unique on the join key.
+#[derive(Debug, Clone)]
+pub struct JoinDef {
+    pub left: Reached<RelationId>,
+    pub right: Reached<RelationId>,
+    /// Each left field with the right field it must equal, in the order
+    /// written.
+    pub on: Vec<(String, String)>,
+    pub unique: JoinSide,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JoinSide {
+    Left,
+    Right,
+}
+
+/// A field: where its value comes from, and whether it is kept out of
+/// messages, the JSON report and baselines.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldDef {
+    pub source: FieldSource,
+    pub sensitive: bool,
+}
+
+/// The sources a field may take (section 5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FieldSource {
+    /// `path`, or a path token (`dir`, `basename`, `stem`, `ext`,
+    /// `parent_name`).
+    Path(PathToken),
+    EntryKey,
+    EntryValue,
+    EntryParent,
+    EntryRoot,
+    EntryPath,
+    /// `value`: a `read:` row's value.
+    Value,
+    /// `bound: <JSONPath>`: a value read once per resource.
+    Bound(String),
+    /// `left.F` or `right.F` in a join's output.
+    Side(JoinSide, String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PathToken {
+    Path,
+    Dir,
+    Basename,
+    Stem,
+    Ext,
+    ParentName,
+}
+
+/// The fixed transforms (ADR-0037 decision 2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Transform {
+    Trim,
+    Lower,
+    SemverMajor,
+    SemverMinor,
+    StripRoot,
+}
+
+/// A row filter's predicate (section 7).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Predicate {
+    In(Vec<Member>),
+    NotIn(Vec<Member>),
+    Matches(String),
+    NotMatches(String),
+}
+
+/// An item of an `in` or `not_in` list.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Member {
+    /// A scalar literal: a bool or a string (the loader refuses a null,
+    /// which is in no set, and a number, whose lexeme the configuration's
+    /// YAML does not keep).
+    Literal(Value),
+    /// `{ relation: R, field: F }`: every value of another relation's field.
+    Relation {
+        relation: Reached<RelationId>,
+        field: String,
+    },
+}
+
+/// The references one rule's fields make (phase 7's `constraint` kind):
+/// each field resolved in the source that wrote it, so a field an extended
+/// source wrote keeps naming that source's objects when a consumer overrides
+/// the rule's other fields by id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuleReferences {
+    pub rule: String,
+    pub references: Vec<RuleReference>,
+}
+
+/// A rule field that names a relation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuleReference {
+    /// The rule's top-level field (`input`).
+    pub field: String,
+    /// The source that wrote the field, in whose namespace it resolved.
+    pub source: SourceIndex,
+    pub relation: Reached<RelationId>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn source(display: &str, aliases: Vec<PlanAlias>) -> PlanSource {
+        PlanSource {
+            display: display.into(),
+            path: PathBuf::from(display),
+            class: ConfigSourceClass::Root,
+            aliases,
+        }
+    }
+
+    fn relation(name: &str, capabilities: Capabilities) -> NamedRelation {
+        NamedRelation {
+            name: name.into(),
+            source: SourceIndex(0),
+            relation: RelationDef {
+                rows: Rows::Part(Part {
+                    from: SelectorRef::Inline(Box::new(SelectorDef {
+                        paths: PathsSpec::Single("*.json".into()),
+                        scope_filter: None,
+                    })),
+                    reader: Reader::Read {
+                        read: Read::WholeFile,
+                        optional: false,
+                    },
+                }),
+                fields: vec![(
+                    "text".into(),
+                    FieldDef {
+                        source: FieldSource::Value,
+                        sensitive: false,
+                    },
+                )],
+                transforms: vec![("text".into(), vec![Transform::Trim])],
+                filters: Vec::new(),
+            },
+            capabilities,
+        }
+    }
+
+    #[test]
+    fn aliases_of_lists_each_consumer_alias() {
+        let alias = |name: &str, target: Option<usize>| PlanAlias {
+            name: name.into(),
+            url: format!("./{name}.yml"),
+            target: target.map(SourceIndex),
+        };
+        let plan = Plan {
+            sources: vec![
+                source("base.yml", Vec::new()),
+                source(
+                    ".alint.yml",
+                    vec![alias("base", Some(0)), alias("v1", None)],
+                ),
+                source(".alint.d/a.yml", vec![alias("b", Some(0))]),
+            ],
+            ..Plan::default()
+        };
+        let found: Vec<(&str, &str)> = plan
+            .aliases_of(SourceIndex(0))
+            .map(|(consumer, alias)| (consumer.display.as_str(), alias.name.as_str()))
+            .collect();
+        assert_eq!(found, [(".alint.yml", "base"), (".alint.d/a.yml", "b")]);
+        assert_eq!(plan.aliases_of(SourceIndex(1)).count(), 0);
+    }
+
+    #[test]
+    fn a_rule_has_the_capabilities_of_what_it_references() {
+        let spawns = Capabilities {
+            reads_content: false,
+            host: vec![Capability::SpawnUserCommand],
+        };
+        let reads = Capabilities {
+            reads_content: true,
+            host: Vec::new(),
+        };
+        let reference = |field: &str, id: usize| RuleReference {
+            field: field.into(),
+            source: SourceIndex(0),
+            relation: Reached {
+                id: RelationId(id),
+                alias: None,
+            },
+        };
+        let plan = Plan {
+            sources: vec![source(".alint.yml", Vec::new())],
+            relations: vec![relation("a", reads.clone()), relation("b", spawns)],
+            rules: vec![
+                RuleReferences {
+                    rule: "both".into(),
+                    references: vec![reference("input", 0), reference("other", 1)],
+                },
+                RuleReferences {
+                    rule: "one".into(),
+                    references: vec![reference("input", 0)],
+                },
+            ],
+            ..Plan::default()
+        };
+        assert_eq!(
+            plan.rule_capabilities("both"),
+            Capabilities {
+                reads_content: true,
+                host: vec![Capability::SpawnUserCommand],
+            }
+        );
+        assert_eq!(plan.rule_capabilities("one"), reads);
+        assert_eq!(plan.rule_capabilities("none"), Capabilities::default());
+        assert_eq!(plan.relation(RelationId(1)).name, "b");
+        assert_eq!(
+            plan.relation(RelationId(0)).relation.transforms_of("text"),
+            [Transform::Trim]
+        );
+        assert!(
+            plan.relation(RelationId(0))
+                .relation
+                .field("nope")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn adding_capabilities_keeps_each_once() {
+        let mut held = Capabilities {
+            reads_content: false,
+            host: vec![Capability::EnvRead],
+        };
+        held.add(&Capabilities {
+            reads_content: true,
+            host: vec![Capability::EnvRead, Capability::HostKeyring],
+        });
+        assert_eq!(
+            held,
+            Capabilities {
+                reads_content: true,
+                host: vec![Capability::EnvRead, Capability::HostKeyring],
+            }
+        );
+    }
+}

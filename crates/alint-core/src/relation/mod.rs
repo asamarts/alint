@@ -20,6 +20,7 @@ mod cache;
 mod contract;
 mod limits;
 mod path;
+pub mod plan;
 mod pointer;
 mod resource;
 mod row;
