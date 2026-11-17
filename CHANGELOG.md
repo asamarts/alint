@@ -808,6 +808,14 @@ policy-test package the user does not trust.
 
 ### Fixed
 
+- **An extended config is named by its path under the repository on every platform.** Under a
+  root reached through a symlink, from a relative `--config`, or on macOS (where `/var` is
+  `/private/var`), a config file an `extends:` entry reads was named by its file name alone
+  (`base.yml`) in messages; it is now named as a plain run names it (`rules/base.yml`).
+- **An unknown rule field's "did you mean" suggestion costs time and memory in proportion to the
+  key's length.** A long key holding backticks made the suggestion build a full edit-distance
+  table against itself (an 8,000-character key took half a second and 498 MB); the distance now
+  stops past two edits, and suggests the same fields.
 - **A `key_parity` rule nested in the `require:` of `for_each_file`, `for_each_dir` or
   `every_matching_has` compares its files.** It used to stop on every iteration with
   "internal error ... key_parity requires the relation read cache", unless another rule in the
