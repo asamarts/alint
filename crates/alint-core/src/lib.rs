@@ -52,6 +52,15 @@ pub mod yaml;
 mod yaml_backend;
 #[doc(hidden)]
 pub mod yaml_budget;
+/// The JSON tree [`Format::parse`] gives a YAML document, through ayaml and
+/// through libyaml whatever parser the build chose, for the test that measures
+/// the heap each takes (`tests/alloc/yaml_memory.rs`, ADR-0042). For alint's
+/// own tests, like the feature.
+#[cfg(feature = "yaml-reference")]
+#[doc(hidden)]
+pub mod yaml_reference {
+    pub use crate::yaml_backend::{ayaml_json_tree, libyaml_json_tree};
+}
 mod yaml_decode;
 pub mod yaml_depth;
 #[cfg(any(test, feature = "yaml-reference"))]

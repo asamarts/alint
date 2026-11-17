@@ -20,6 +20,7 @@
 //! but not gated (they false-positive on benign branch-pattern shifts). Design:
 //! `docs/design/deterministic-perf-gating.md`.
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use gungraun::{
@@ -78,6 +79,20 @@ rules:
     kind: file_exists
     paths: "Cargo.toml"
     git_tracked_only: true
+    level: error
+"#;
+
+// One YAML structured rule over mid-size OpenAPI documents, so the cell
+// measures parsing YAML into the tree the structured rules query (ADR-0042),
+// which the scenario cells above, without a YAML rule, never do.
+const YAML_OPENAPI: &str = r#"
+version: 1
+rules:
+  - id: openapi-version
+    kind: yaml_path_matches
+    paths: "specs/*.yaml"
+    path: "$.openapi"
+    matches: "^3\\."
     level: error
 "#;
 
@@ -189,6 +204,71 @@ fn commit_fixed(root: &Path, paths: &str) {
 fn materialize_committed(scenario: &str, config: &str, n: usize) {
     materialize(scenario, config, n);
     commit_fixed(&tree_path(scenario, n), ".");
+}
+
+/// setup for the `yaml` cell: `n` OpenAPI-shaped YAML documents of about 37 KB
+/// each under `specs/`, the same in every run, and the scenario config.
+fn materialize_yaml(scenario: &str, config: &str, n: usize) {
+    let dest = tree_path(scenario, n);
+    let _ = std::fs::remove_dir_all(&dest);
+    std::fs::create_dir_all(dest.join("specs")).unwrap();
+    for file in 0..n {
+        let path = dest.join(format!("specs/openapi{file:03}.yaml"));
+        std::fs::write(path, openapi_document(40, SEED + file as u64)).unwrap();
+    }
+    std::fs::write(dest.join(".alint.yml"), config).unwrap();
+}
+
+/// A fixed sequence of numbers for a seed (xorshift64*).
+struct Numbers(u64);
+
+impl Numbers {
+    fn below(&mut self, n: usize) -> usize {
+        self.0 ^= self.0 >> 12;
+        self.0 ^= self.0 << 25;
+        self.0 ^= self.0 >> 27;
+        usize::try_from(self.0.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 33).unwrap() % n
+    }
+
+    fn word(&mut self) -> &'static str {
+        const WORDS: [&str; 10] = [
+            "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota", "kappa",
+        ];
+        WORDS[self.below(WORDS.len())]
+    }
+}
+
+/// An OpenAPI-shaped document with `paths` path items (about 920 bytes each),
+/// each with a `get` and a `post` of three parameters, fixed by `seed`.
+fn openapi_document(paths: usize, seed: u64) -> String {
+    let mut numbers = Numbers(seed | 1);
+    let mut out = String::from("openapi: 3.0.0\ninfo:\n  title: big\n  version: 1.0.0\npaths:\n");
+    for i in 0..paths {
+        writeln!(out, "  /api/v1/{}/{i}:", numbers.word()).unwrap();
+        for verb in ["get", "post"] {
+            let summary: Vec<&str> = (0..6).map(|_| numbers.word()).collect();
+            writeln!(
+                out,
+                "    {verb}:\n      operationId: op{verb}{i}\n      summary: \"{}\"\n      \
+                 tags: [{}, {}]\n      parameters:",
+                summary.join(" "),
+                numbers.word(),
+                numbers.word()
+            )
+            .unwrap();
+            for p in 0..3 {
+                writeln!(
+                    out,
+                    "        - name: p{p}\n          in: query\n          \
+                     schema: {{type: string, maxLength: {}}}",
+                    1 + numbers.below(99)
+                )
+                .unwrap();
+            }
+            out += "      responses:\n        '200':\n          description: ok\n";
+        }
+    }
+    out
 }
 
 /// setup for the `fix` cell: like [`materialize`], then inject a trailing space
@@ -336,6 +416,21 @@ fn git_tracked(scenario: &str, config: &str, n: usize) -> Command {
 
 binary_benchmark_group!(name = git_tracked_grp, benchmarks = git_tracked);
 
+// `check` with one `yaml_path_matches` rule over 50 OpenAPI documents of about
+// 37 KB: instructions spent parsing YAML into the structured rules' tree. Its
+// own group, so the cells above keep their baselines.
+#[binary_benchmark(setup = materialize_yaml)]
+#[bench::yaml_openapi_50x37k("yaml-openapi", YAML_OPENAPI, 50)]
+fn yaml(scenario: &str, config: &str, n: usize) -> Command {
+    let _ = config; // consumed by `materialize_yaml` (setup)
+    Command::new(alint_bin())
+        .arg("check")
+        .arg(tree_path(scenario, n))
+        .build()
+}
+
+binary_benchmark_group!(name = yaml_grp, benchmarks = yaml);
+
 main!(
     config = BinaryBenchmarkConfig::default().tool(
         Callgrind::default()
@@ -353,6 +448,7 @@ main!(
         relation_grp,
         fix_grp,
         analysis_time_grp,
-        git_tracked_grp
+        git_tracked_grp,
+        yaml_grp
     ]
 );

@@ -81,6 +81,11 @@ proptest = "1"
 # which still use syn 2, so syn 3 is a second copy that only tests build.
 syn = { version = "3", features = ["full", "visit"] }
 proc-macro2 = "1"
+# Test-only: a counting global allocator for alint-core's YAML memory test
+# (ADR-0042), which cannot implement one itself under `unsafe_code = "forbid"`.
+# MIT OR Apache-2.0, no dependencies. It counts a reallocation by the bytes it
+# adds, as the allocator it wraps may grow a block in place.
+cap = { version = "0.1.2", features = ["stats"] }
 trycmd = "1"
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 sha2 = "0.11"

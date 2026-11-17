@@ -106,6 +106,9 @@ runs a script that is neither in `preflight.sh` nor in this list.
   `ci/scripts/test-witforge-consumer.sh`: the plugin contract, against a pinned witforge.
 - `ci/scripts/check-release-version.sh` and `ci/scripts/pin-release-toolchain.sh`: release only;
   the tag must match the workspace version, and the release builds with a pinned toolchain.
+- `ci/scripts/yaml-memory-release.sh`: release only; decoding YAML, ayaml's peak heap must be
+  within 1.2x of libyaml's (ADR-0042). CI runs the same test against today's ratio in
+  `yaml-compare.sh`.
 
 ### Private native macOS validation
 
