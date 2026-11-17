@@ -228,10 +228,8 @@ fn load_resolved(
                 &root_dir,
                 &canonical_root_cfg,
                 &raw,
-                opts.kind_catalog,
+                opts,
                 RunningVersion::current(),
-                opts.environment.as_ref(),
-                opts.global_git_excludes,
                 &mut field_source_names,
             )?;
         raw.field_source_names = field_source_names;

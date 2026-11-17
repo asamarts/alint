@@ -74,7 +74,8 @@ fn a_config_outside_the_root_is_named_by_its_path_from_it() {
         "{listed}"
     );
 
-    // An error in one names it so, in either version.
+    // A refusal names it as its `extends:` entry spells it, in either version
+    // and on every platform.
     for version in [1, 2] {
         write(
             tmp.path(),
@@ -95,6 +96,20 @@ fn a_config_outside_the_root_is_named_by_its_path_from_it() {
             ),
         );
         let error = stderr(&run(&repo, &["validate-config"], &[]));
-        assert!(error.contains(&b), "version {version}: {error}");
+        assert!(
+            error.contains("extended config (../b/rules.yml)"),
+            "version {version}: {error}"
+        );
     }
+    // A version 2 error found in it names it by its path from the root.
+    write(
+        tmp.path(),
+        "b/rules.yml",
+        "version: 2\nrules: []\nnot_a_field: 1\n",
+    );
+    let error = stderr(&run(&repo, &["validate-config"], &[]));
+    assert!(
+        error.contains(&format!("{b}: unknown key `not_a_field`")),
+        "{error}"
+    );
 }

@@ -443,21 +443,6 @@ fn marker_size(mapping: &Mapping, marker: &str) -> usize {
     template_budget::size_of_mapping(held)
 }
 
-/// A directory path of about 2.4 KB below a temporary directory (one of a
-/// hundred bytes on Windows, whose paths are short unless long paths are on).
-fn deep_dir() -> String {
-    let depth = if cfg!(windows) { 1 } else { 12 };
-    (0..depth)
-        .map(|level| {
-            format!(
-                "{}{level:02}",
-                "d".repeat(if cfg!(windows) { 98 } else { 198 })
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("/")
-}
-
 /// V2L-4: every field of a version 2 source's rules named the source by its
 /// whole path (20,000 rules at a 3.4 KB path peaked at 380 MB, against 94 MB
 /// as version 1), and every field of a rule an `extends:` entry brings in
@@ -476,8 +461,8 @@ fn a_rule_marker_does_not_grow_with_its_source_path() {
     };
     assert_eq!(origins_at("s"), origins_at(&deep_dir()));
 
-    // The entry's text, written as long as it may be, names an extended
-    // file's fields.
+    // The entry's text, written as long as the platform's paths allow, names
+    // an extended file's fields.
     let sources_of = |entry: &str| {
         let (_tmp, config) = repo(&[
             (".alint.yml", &format!("version: 1\nextends: ['{entry}']\n")),
@@ -492,7 +477,7 @@ fn a_rule_marker_does_not_grow_with_its_source_path() {
     };
     assert_eq!(
         sources_of("./base.yml"),
-        sources_of(&format!("{}base.yml", "./".repeat(1_500)))
+        sources_of(&format!("{}base.yml", "./".repeat(deep_dir().len() / 2)))
     );
 }
 

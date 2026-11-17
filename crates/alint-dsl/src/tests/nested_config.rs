@@ -1092,15 +1092,7 @@ fn a_template_placeholder_anywhere_in_an_applicability_is_refused() {
 /// sources now, the same size at any depth, which resolves to the path.
 #[test]
 fn a_nested_rule_marker_does_not_grow_with_its_path() {
-    let deep: String = (0..if cfg!(windows) { 1 } else { 12 })
-        .map(|level| {
-            format!(
-                "{}{level:02}",
-                "d".repeat(if cfg!(windows) { 98 } else { 198 })
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("/");
+    let deep = deep_dir();
     let marker_at = |dir: &str| {
         let tmp = tempfile::tempdir().unwrap();
         let root_cfg = tmp.path().join(".alint.yml");
@@ -1123,10 +1115,8 @@ fn a_nested_rule_marker_does_not_grow_with_its_path() {
             tmp.path(),
             &root_cfg.canonicalize().unwrap(),
             &root,
-            opts.kind_catalog,
+            &opts,
             RunningVersion::current(),
-            opts.environment.as_ref(),
-            opts.global_git_excludes,
             &mut names,
         )
         .unwrap();

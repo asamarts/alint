@@ -28,6 +28,30 @@ pub(crate) fn on_thread<T: Send + 'static>(
         .unwrap_or_else(|_| panic!("did not finish within {limit:?}"))
 }
 
+/// A directory path to put below a temporary directory, for a test that
+/// something does not grow with a path: about 2.4 KB, or 800 bytes on macOS,
+/// whose paths stop at 1,024 bytes, and 100 on Windows, whose paths are short
+/// unless long paths are on. Its length also bounds a long path written
+/// another way.
+fn deep_dir() -> String {
+    let depth = if cfg!(windows) {
+        1
+    } else if cfg!(target_os = "macos") {
+        4
+    } else {
+        12
+    };
+    (0..depth)
+        .map(|level| {
+            format!(
+                "{}{level:02}",
+                "d".repeat(if cfg!(windows) { 98 } else { 198 })
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 fn test_registry() -> &'static alint_core::RuleRegistry {
     static REGISTRY: std::sync::LazyLock<alint_core::RuleRegistry> =
         std::sync::LazyLock::new(|| {

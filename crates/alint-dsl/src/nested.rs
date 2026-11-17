@@ -85,14 +85,13 @@ pub(crate) fn discover_nested(
     root_dir: &Path,
     canonical_root_cfg: &Path,
     root: &RawConfig,
-    catalog: Option<KindCatalog<'_>>,
+    opts: &crate::LoadOptions<'_>,
     running_version: RunningVersion,
-    environment: &dyn crate::EnvironmentProvider,
-    global_git_excludes: bool,
     field_source_names: &mut Vec<String>,
 ) -> Result<NestedRules> {
+    let (catalog, environment) = (opts.kind_catalog, opts.environment.as_ref());
     let walk_opts = alint_core::WalkOptions::default()
-        .with_global_git_excludes(global_git_excludes)
+        .with_global_git_excludes(opts.global_git_excludes)
         .with_respect_gitignore(root.respect_gitignore.unwrap_or(true))
         .with_extra_ignores(root.ignore.clone());
     let index = alint_core::walk(root_dir, &walk_opts)?;
