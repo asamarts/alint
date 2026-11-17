@@ -23,6 +23,10 @@
 //! - **Order of work.** A relation evaluates once per run: the relations it
 //!   reads first, in an order where each comes after those it reads, then
 //!   its rows, its `transform:` and its `where:` (`eval/ops.rs`).
+//! - **Limits.** Every decode is bounded by its rows and the run's, and
+//!   every row a relation builds, by its fields, takes its cells from the
+//!   run's [`LimitKind::CellsPerRun`] before it is built, so a `union:` of
+//!   many parts over one decode, or a join, fails at the cap.
 //! - **Failures.** A relation with a problem has no rows: it fails with an
 //!   analysis failure per resource that shows one ([`RelationFailure`]), and
 //!   so does every relation that reads it.
@@ -32,12 +36,13 @@ mod ops;
 mod read;
 
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 pub use failure::RelationFailure;
 
 use super::cache::{DecodeCache, ReadCache};
-use super::limits::Limits;
+use super::limits::{LimitExceeded, LimitKind, Limits};
 use super::plan::{Plan, RelationId};
 use super::pointer::Pointer;
 use super::resource::Resource;
@@ -194,6 +199,9 @@ pub struct RunMemo {
     /// engine resolves rules' predicates under, resolved once per run when
     /// the engine has not.
     manifests: Mutex<std::collections::HashMap<String, read::ManifestOutcome>>,
+    /// The cells this memo's evaluations have built
+    /// ([`LimitKind::CellsPerRun`]); a failed take still counts.
+    cells: AtomicUsize,
 }
 
 impl RunMemo {
@@ -203,6 +211,7 @@ impl RunMemo {
             plan,
             outcomes,
             manifests: Mutex::default(),
+            cells: AtomicUsize::new(0),
         }
     }
 
@@ -210,10 +219,17 @@ impl RunMemo {
         &self.plan
     }
 
-    /// Whether the memo holds `id`'s outcome. Test/diagnostic only.
+    /// Whether the memo holds `id`'s outcome: an evaluation's order of work
+    /// leaves out a relation it holds.
     #[must_use]
     pub fn evaluated(&self, id: RelationId) -> bool {
         self.outcomes[id.0].get().is_some()
+    }
+
+    /// The cells taken so far. Test only.
+    #[cfg(test)]
+    pub(crate) fn cells(&self) -> usize {
+        self.cells.load(Ordering::Relaxed)
     }
 }
 
@@ -230,6 +246,18 @@ pub(crate) struct Evaluator<'a> {
 }
 
 impl Evaluator<'_> {
+    /// Take `cells` cells from the run's [`LimitKind::CellsPerRun`], before
+    /// building what holds them. A failed take still counts, so every later
+    /// take fails too.
+    fn take_cells(&self, cells: usize) -> Result<(), LimitExceeded> {
+        let total = self
+            .memo
+            .cells
+            .fetch_add(cells, Ordering::Relaxed)
+            .saturating_add(cells);
+        self.limits.check(LimitKind::CellsPerRun, total)
+    }
+
     /// `id`'s outcome, evaluating it and the relations it reads first when
     /// the memo does not hold it yet.
     fn relation(&self, id: RelationId) -> Outcome {
@@ -345,6 +373,16 @@ impl Evaluator<'_> {
             _ => Err(failures.into_vec().into()),
         }
     }
+}
+
+/// What a relation says when the run's cells run out
+/// ([`Evaluator::take_cells`]).
+fn cells_exhausted(limit: &LimitExceeded) -> String {
+    format!(
+        "{limit}, so the relation is not evaluated rather than cut short; a run's relations hold \
+         a cell per field of each row and one per file each part reads, so read fewer rows \
+         (narrow the selector, the `at:` paths or the parts) or bind fewer fields"
+    )
 }
 
 /// How one relation's failures read: their common prefix, whether its

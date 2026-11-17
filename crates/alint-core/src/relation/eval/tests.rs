@@ -429,3 +429,131 @@ fn failures_convert_to_analysis_failures_and_redact_when_sensitive() {
         hidden.message
     );
 }
+
+fn lines(paths: &str) -> Part {
+    Part {
+        from: from(paths),
+        reader: Reader::Read {
+            read: Read::Lines { comment: None },
+            optional: false,
+        },
+    }
+}
+
+fn run_with_memo(
+    plan: &Arc<Plan>,
+    id: usize,
+    tree: &Tree,
+    limits: Limits,
+    memo: &RunMemo,
+) -> Outcome {
+    evaluate_with(
+        plan,
+        RelationId(id),
+        tree.dir.path(),
+        &tree.index,
+        limits,
+        &ReadCache::new(),
+        &DecodeCache::with_run_limits(&limits),
+        memo,
+    )
+}
+
+const CELLS_EXHAUSTED: &str = "so the relation is not evaluated rather than cut short; a run's \
+    relations hold a cell per field of each row and one per file each part reads, so read fewer \
+    rows (narrow the selector, the `at:` paths or the parts) or bind fewer fields";
+
+/// A `union:` of identical parts decodes its file once, but each part's rows
+/// take cells from the run as they are built: the relation fails at the cap,
+/// not after building every part.
+#[test]
+fn a_unions_rows_take_cells_as_each_part_builds_them() {
+    let body = (0..100)
+        .map(|line| format!("l{line}\n"))
+        .collect::<Vec<_>>()
+        .concat();
+    let tree = tree(&[("list.txt", &body)]);
+    let parts = Rows::Union(vec![lines("list.txt"); 30]);
+    let plan = plan(vec![named(
+        "listed",
+        parts,
+        &[("line", FieldSource::Value)],
+    )]);
+    // Each part reads one file (a cell) and builds 100 one-field rows.
+    let memo = RunMemo::new(Arc::clone(&plan));
+    let limits = limit(LimitKind::CellsPerRun, 150);
+    assert_eq!(
+        messages(&run_with_memo(&plan, 0, &tree, limits, &memo)),
+        [format!(
+            "list.txt: relation `listed` (.alint.yml): relation limit `cells_per_run` (150) \
+             reached: 151 rows or values, {CELLS_EXHAUSTED}"
+        )]
+    );
+    assert_eq!(memo.cells(), 151, "the union stopped at the cap");
+    let all = 30 * 101;
+    assert!(run(&plan, 0, &tree, limit(LimitKind::CellsPerRun, all - 1)).is_err());
+    let rows = run(&plan, 0, &tree, limit(LimitKind::CellsPerRun, all)).unwrap();
+    assert_eq!(rows.rows.len(), 30 * 100);
+}
+
+/// A row of F fields is F cells, and a join's rows take theirs as it builds
+/// them; the run's relations share one count.
+#[test]
+fn every_field_of_every_row_takes_a_cell_and_so_do_a_joins_rows() {
+    let plan = plan(vec![joined(), deps(), names()]);
+    let tree = tree(&[
+        ("a.json", r#"{"name": "a", "deps": {"b": 1, "a": 1}}"#),
+        ("b.json", r#"{"name": "b", "deps": {"a": 1}}"#),
+    ]);
+    // `deps`: 2 files and 3 one-field rows; `names`: 2 files and 2 rows;
+    // `joined`: 3 rows of 2 fields.
+    let memo = RunMemo::new(Arc::clone(&plan));
+    assert!(run_with_memo(&plan, 0, &tree, limit(LimitKind::CellsPerRun, 15), &memo).is_ok());
+    assert_eq!(memo.cells(), 15);
+    assert_eq!(
+        messages(&run(&plan, 0, &tree, limit(LimitKind::CellsPerRun, 14))),
+        [format!(
+            "relation `joined` (.alint.yml): relation limit `cells_per_run` (14) reached: 15 rows \
+             or values, {CELLS_EXHAUSTED}"
+        )]
+    );
+    // Three fields, three cells a row: `a.json` and its 2 rows hold 7.
+    let mut wide = deps();
+    wide.relation.fields.extend([
+        (
+            "version".to_string(),
+            FieldDef {
+                source: FieldSource::EntryValue,
+                sensitive: false,
+            },
+        ),
+        (
+            "file".to_string(),
+            FieldDef {
+                source: FieldSource::Path(crate::relation::plan::PathToken::Path),
+                sensitive: false,
+            },
+        ),
+    ]);
+    let wide = self::plan(vec![wide]);
+    let one = self::tree(&[("a.json", r#"{"deps": {"b": 1, "a": 1}}"#)]);
+    assert_eq!(
+        messages(&run(&wide, 0, &one, limit(LimitKind::CellsPerRun, 6))),
+        [format!(
+            "a.json: relation `deps` (.alint.yml): relation limit `cells_per_run` (6) reached: 7 \
+             rows or values, {CELLS_EXHAUSTED}"
+        )]
+    );
+    assert!(run(&wide, 0, &one, limit(LimitKind::CellsPerRun, 7)).is_ok());
+    // The count is the run's: `deps`, evaluated first, leaves `names` 3.
+    let memo = RunMemo::new(Arc::clone(&plan));
+    let limits = limit(LimitKind::CellsPerRun, 7);
+    assert!(run_with_memo(&plan, 1, &tree, limits, &memo).is_ok());
+    assert_eq!(
+        messages(&run_with_memo(&plan, 2, &tree, limits, &memo)),
+        [format!(
+            "b.json: relation `names` (.alint.yml): relation limit `cells_per_run` (7) reached: 8 \
+             rows or values, {CELLS_EXHAUSTED}"
+        )]
+    );
+}

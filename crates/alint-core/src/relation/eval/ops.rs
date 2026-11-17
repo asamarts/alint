@@ -370,6 +370,9 @@ impl Evaluator<'_> {
         join: &JoinDef,
         failures: &mut Failures,
     ) -> Option<RelationRows> {
+        // Each side is a relation of its own, evaluated before the join, whose
+        // rows took their cells from the run as they were built: no side is
+        // built past the run's cap, and `JoinInputs` caps what one join takes.
         let left = self.side(join.left.id, failures)?;
         let right = self.side(join.right.id, failures)?;
         let sides = [
@@ -444,6 +447,14 @@ impl Evaluator<'_> {
                         "{limit}, so the relation is not evaluated rather than cut short; \
                          narrow its sides"
                     ),
+                ));
+                return None;
+            }
+            if let Err(limit) = self.take_cells(fields.len().max(1)) {
+                failures.push(site.failure(
+                    AnalysisFailureKind::Evaluation,
+                    None,
+                    super::cells_exhausted(&limit),
                 ));
                 return None;
             }

@@ -20,15 +20,25 @@ pub enum LimitKind {
     JoinInputs,
     /// Rows one equality join produces; the evaluator's join enforces it.
     JoinOutputs,
+    /// Cells the relation evaluator builds in one run: a row of a relation
+    /// with F fields holds F cells, and each file a part reads holds one.
+    /// The evaluator takes them from the run's count as it builds each row,
+    /// whether a part, a `union:`'s parts or a join builds it, so a union of
+    /// many parts over one decode fails at the cap rather than after. Every
+    /// relation a run evaluates stays in its memo for the run, and a row's
+    /// size grows with its fields, so it is the run's cells, not one
+    /// relation's rows, that bound what relations hold.
+    CellsPerRun,
 }
 
 impl LimitKind {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::RowsPerExtractor,
         Self::RowsPerRun,
         Self::DistinctValues,
         Self::JoinInputs,
         Self::JoinOutputs,
+        Self::CellsPerRun,
     ];
 
     #[must_use]
@@ -39,16 +49,19 @@ impl LimitKind {
             Self::DistinctValues => "distinct_values",
             Self::JoinInputs => "join_inputs",
             Self::JoinOutputs => "join_outputs",
+            Self::CellsPerRun => "cells_per_run",
         }
     }
 
     /// The default. Provisional until R2 measures real relations; each is far
     /// above what the v0.12 corpus needs and far below what exhausts memory.
+    /// A cell costs about what a decoded row does (100 to 150 bytes), so a run
+    /// may hold as many cells as it may decode rows.
     #[must_use]
     pub fn default_value(self) -> usize {
         match self {
             Self::RowsPerExtractor | Self::JoinInputs | Self::JoinOutputs => 1_000_000,
-            Self::RowsPerRun => 5_000_000,
+            Self::RowsPerRun | Self::CellsPerRun => 5_000_000,
             Self::DistinctValues => 100_000,
         }
     }
@@ -61,7 +74,7 @@ impl LimitKind {
             | Self::DistinctValues
             | Self::JoinInputs
             | Self::JoinOutputs => 10_000_000,
-            Self::RowsPerRun => 50_000_000,
+            Self::RowsPerRun | Self::CellsPerRun => 50_000_000,
         }
     }
 

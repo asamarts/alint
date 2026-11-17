@@ -556,6 +556,11 @@ rules:
   by default, 10M hard) bounds it, as `Relation::distinct_values` does today.
 - Grouping is bounded by the existing rows-per-run budget (5M), not by `JoinInputs`, so a relation
   of 100 locales with 20,000 keys each (2M rows) still works.
+- `CellsPerRun` (5M by default, 50M hard) caps the cells the relations of one run build: a row of
+  F fields is F cells and each file a part reads is one, taken as each row is built, so a `union:`
+  of many parts over one decode, or a join's output, fails at the cap. The run's memo keeps every
+  relation it evaluates, so the count is the run's. The locale relation above, with two fields,
+  holds 4M.
 - A hit is an analysis failure, never truncation.
 
 **No finding cap** (D5b). A `constraint` rule reports every finding, as every existing kind does,
