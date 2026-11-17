@@ -220,12 +220,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Git directory in any spelling a file system opens as `.git`. Fixers refuse such paths (see
   Security).
 - **Where a fix may write** (library API, see Security): `FixContext::write_refusal`, the reason
-  a fix may not write a path, with the `extended_source` and `config_files` fields and their
-  setters `with_extended_source` and `with_config_files`; `alint_core::read_source_for_fix`, for
-  a fix's read of a file it does not write; `alint_core::path_names_alint_config`,
-  `reaches_alint_config`, `CONFIG_FILE_NAMES` and `CONFIG_DROP_IN_DIRECTORY`; `Config::config_files`
-  and `Config::with_config_files`, the local files a configuration was loaded from, which
-  `Engine::with_config_files` hands the fixes; and `FixReport::unresolved`.
+  a fix may not write a path, with the `extended_source`, `config_files` and `index` fields and
+  their setters `with_extended_source`, `with_config_files` and `with_index` (the walk, which
+  spares a file it reached without a symlink any file system call for these checks);
+  `alint_core::read_source_for_fix`, for a fix's read of a file it does not write;
+  `alint_core::path_names_alint_config`, `reaches_alint_config`, `CONFIG_FILE_NAMES` and
+  `CONFIG_DROP_IN_DIRECTORY`; `Config::config_files` and `Config::with_config_files`, the local
+  files a configuration was loaded from, which `Engine::with_config_files` hands the fixes; and
+  `FixReport::unresolved`.
 - **`Engine::with_condition_environment` and `Context::condition_environment`** (library API,
   with `Context::with_condition_environment` and `Context::environment_for_conditions`): the
   environment `env.*` in a `when:` and a legacy `${VAR}` read, when it is not the process

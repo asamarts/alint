@@ -1342,3 +1342,83 @@ fn a_fix_run_that_lands_nothing_keeps_the_relation_caches() {
         );
     }
 }
+
+// ---- The walk vouches for paths only while the pass keeps the tree's shape ----
+
+/// A rule whose fixer records whether its context still carries the walk.
+#[derive(Debug)]
+struct IndexWitness {
+    id: String,
+    seen: Arc<std::sync::Mutex<Vec<(String, bool)>>>,
+}
+impl crate::rule::Fixer for IndexWitness {
+    fn describe(&self) -> String {
+        "index witness".to_string()
+    }
+    fn apply(&self, _v: &Violation, ctx: &FixContext<'_>) -> crate::error::Result<FixOutcome> {
+        let mut seen = self.seen.lock().unwrap();
+        seen.push((self.id.clone(), ctx.index.is_some()));
+        Ok(FixOutcome::Skipped("witnessed".to_string()))
+    }
+}
+impl Rule for IndexWitness {
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn level(&self) -> Level {
+        Level::Error
+    }
+    fn evaluate(&self, _ctx: &Context<'_>) -> crate::error::Result<Vec<Violation>> {
+        Ok(vec![
+            Violation::new("stands").with_path(PathBuf::from("x.txt")),
+        ])
+    }
+    fn fixer(&self) -> Option<&dyn crate::rule::Fixer> {
+        Some(self)
+    }
+}
+
+/// A writing pass checks fix paths against the walk ([`FixContext::index`])
+/// until a rule whose op may move or remove a file, or run a command, comes
+/// up: such an op can leave a symlink where the walk saw a file, so from it
+/// on the checks ask the disk. A dry run changes nothing and keeps the walk.
+#[test]
+fn a_writing_pass_stops_trusting_the_walk_at_the_first_op_that_may_move_a_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(tmp.path().join("x.txt"), b"x").unwrap();
+    for dry_run in [false, true] {
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let entries = [
+            ("edit", "file_trim_trailing_whitespace"),
+            ("move", "file_rename"),
+            ("after", "file_append_final_newline"),
+        ]
+        .map(|(id, op)| {
+            let spec: crate::RuleSpec = crate::yaml::from_str(&format!(
+                "id: {id}\nkind: witness\nlevel: error\nfix:\n  {op}: {{}}\n"
+            ))
+            .unwrap();
+            RuleEntry::new(Box::new(IndexWitness {
+                id: id.to_string(),
+                seen: Arc::clone(&seen),
+            }))
+            .with_spec(Arc::new(spec))
+        });
+        Engine::from_entries(entries.into(), RuleRegistry::new())
+            .fix(
+                tmp.path(),
+                &idx(&["x.txt"]),
+                &crate::WalkOptions::default(),
+                dry_run,
+                Applicability::Safe,
+            )
+            .unwrap();
+        let seen = seen.lock().unwrap().clone();
+        let expected = [("edit", true), ("move", dry_run), ("after", dry_run)];
+        assert_eq!(
+            seen,
+            expected.map(|(id, walk)| (id.to_string(), walk)).to_vec(),
+            "dry run: {dry_run}"
+        );
+    }
+}
