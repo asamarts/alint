@@ -13,7 +13,7 @@
 //! `Structured` arm is first exercised in production by the Phase-2
 //! `set_value` / `remove_value` ops.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
 use serde_json_path::JsonPath;
@@ -188,24 +188,32 @@ pub fn apply_file_edits(
     // deferred to a FUTURE op that actually uses isolation groups (a structured
     // op with isolation groups is not yet shipped), when it can be designed +
     // tested against a real grouped op.
+    //
+    // Each pass parses the spliced bytes once per format and answers a check the
+    // batch repeats once (see `Verifier`), so a pass over N edits costs one parse,
+    // not N: a `remove_value` over thousands of matches was quadratic.
     let mut result = splice(original, &accepted, &batch);
     loop {
-        let mut newly_demoted = false;
-        for &i in &accepted {
-            if outcome[i] != LocatedOutcome::Applied {
-                continue;
+        let newly_demoted = {
+            let mut verifier = Verifier::new(&result);
+            let mut demoted = false;
+            for &i in &accepted {
+                if outcome[i] != LocatedOutcome::Applied {
+                    continue;
+                }
+                if let EditVerifier::Structured {
+                    format,
+                    query,
+                    expect,
+                } = &batch[i].collected.verify
+                    && !verifier.check(*format, query, expect)
+                {
+                    outcome[i] = LocatedOutcome::Suggested;
+                    demoted = true;
+                }
             }
-            if let EditVerifier::Structured {
-                format,
-                query,
-                expect,
-            } = &batch[i].collected.verify
-                && !verify_structured(&result, *format, query, expect)
-            {
-                outcome[i] = LocatedOutcome::Suggested;
-                newly_demoted = true;
-            }
-        }
+            demoted
+        };
         if !newly_demoted {
             break;
         }
@@ -228,58 +236,153 @@ pub fn apply_file_edits(
 /// Splice the `ReplaceRange` edits named by `which` into `original`.
 /// `which` is in ascending total order (`(start, end, rule, violation)`)
 /// and its ranges are pairwise disjoint by construction (overlap-skip
-/// already ran). Applying them back-to-front (highest start first) keeps
-/// every earlier offset valid; iterating `which` in reverse also lands
-/// zero-width inserts that share a start in total order (the
-/// earliest-ordered insert ends up first in the file, because a later
-/// splice at the same offset pushes ahead of an earlier one).
+/// already ran), so one front-to-back pass copies each gap of `original`
+/// and then each edit's content: every byte is copied once, where a splice
+/// per edit moved the whole tail each time. Zero-width inserts that share a
+/// start land in total order (the earliest-ordered insert first in the
+/// file), and an insert at a replaced range's start or end lands before or
+/// after it, as the sort orders them.
 fn splice(original: &[u8], which: &[usize], batch: &[LocatedEdit]) -> Vec<u8> {
-    let mut out = original.to_vec();
-    for &i in which.iter().rev() {
+    let mut out = Vec::with_capacity(original.len());
+    let mut copied = 0;
+    for &i in which {
         if let FixEdit::ReplaceRange { range, content, .. } = &batch[i].collected.edit {
-            out.splice(range.clone(), content.iter().copied());
+            debug_assert!(
+                copied <= range.start,
+                "accepted ranges are disjoint and sorted"
+            );
+            out.extend_from_slice(&original[copied.min(range.start)..range.start]);
+            out.extend_from_slice(content);
+            copied = copied.max(range.end);
         }
     }
+    out.extend_from_slice(&original[copied..]);
     out
 }
 
-/// The localized-equivalence (`PutGet`) check: re-parse `bytes` in `format`
-/// (syntactic validity) and re-run the `JSONPath` source `query`, asserting
-/// the result matches `expect`. Any failure (invalid UTF-8, parse error,
-/// bad query, wrong or missing node) returns `false` so the engine demotes
-/// the edit rather than writing bytes that don't achieve the rule's goal.
-fn verify_structured(bytes: &[u8], format: Format, query: &str, expect: &ExpectedValue) -> bool {
-    let Ok(text) = std::str::from_utf8(bytes) else {
-        return false;
-    };
-    let Ok(value) = format.parse(text) else {
-        return false;
-    };
-    let Ok(path) = JsonPath::parse(query) else {
-        return false;
-    };
-    let nodes = path.query(&value);
-    match expect {
-        ExpectedValue::Absent => nodes.is_empty(),
-        ExpectedValue::Scalar(want) => nodes.at_most_one().ok().flatten() == Some(want),
-        ExpectedValue::Matches(re_src) => {
-            let Ok(re) = regex::Regex::new(re_src) else {
-                return false;
-            };
-            // EVERY node the query selects must now be a string matching the regex
-            // (a wildcard `path:` selects many; `*_path_matches` fires unless ALL of
-            // them satisfy `matches:`, so the fix's goal is all-match -- NOT
-            // `at_most_one`, which would demote every multi-match replace). Require
-            // at least one node: a query that now resolves to nothing did not
-            // achieve the rule's goal.
-            let mut any = false;
-            for v in nodes.iter() {
-                any = true;
-                if !v.as_str().is_some_and(|s| re.is_match(s)) {
+std::thread_local! {
+    /// How many times [`Verifier`] has parsed spliced bytes on this thread.
+    static VERIFY_PARSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many times [`apply_file_edits`] has parsed spliced bytes to verify
+/// edits on this thread. Test and diagnostic only: the located fixers' tests
+/// count with it that a batch is verified with one parse however many edits
+/// it holds.
+#[doc(hidden)]
+#[must_use]
+pub fn verify_parses() -> usize {
+    VERIFY_PARSES.with(std::cell::Cell::get)
+}
+
+/// What a check the batch can repeat asks of its query's nodes.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum Goal<'b> {
+    Absent,
+    Matches(&'b str),
+}
+
+/// The localized-equivalence (`PutGet`) checks of one spliced result: re-parse
+/// the bytes in each edit's format (syntactic validity) and re-run its
+/// `JSONPath` source `query`, asserting the result matches `expect`. Any failure
+/// (invalid UTF-8, parse error, bad query, wrong or missing node) fails the
+/// check, so the engine demotes the edit rather than writing bytes that don't
+/// achieve the rule's goal.
+///
+/// A check depends on nothing but the bytes, the format, the query and the
+/// expectation, so the verifier parses the bytes at most once per format and
+/// answers a check the batch repeats once: a `remove_value` batch shares one
+/// `Absent` query, and a `replace` batch one `matches:` pattern.
+struct Verifier<'r, 'b> {
+    bytes: &'r [u8],
+    /// Each format's reading of the bytes, `None` when they do not parse.
+    documents: Vec<(Format, Option<serde_json::Value>)>,
+    paths: HashMap<&'b str, Option<JsonPath>>,
+    patterns: HashMap<&'b str, Option<regex::Regex>>,
+    answers: HashMap<(usize, &'b str, Goal<'b>), bool>,
+}
+
+impl<'r, 'b> Verifier<'r, 'b> {
+    fn new(bytes: &'r [u8]) -> Self {
+        Self {
+            bytes,
+            documents: Vec::new(),
+            paths: HashMap::new(),
+            patterns: HashMap::new(),
+            answers: HashMap::new(),
+        }
+    }
+
+    /// Whether the bytes hold what `expect` asks of `query` in `format`.
+    fn check(&mut self, format: Format, query: &'b str, expect: &'b ExpectedValue) -> bool {
+        let document = self.document(format);
+        let goal = match expect {
+            ExpectedValue::Absent => Some(Goal::Absent),
+            ExpectedValue::Matches(re_src) => Some(Goal::Matches(re_src)),
+            ExpectedValue::Scalar(_) => None,
+        };
+        let Some(goal) = goal else {
+            return self.answer(document, query, expect);
+        };
+        if let Some(&answer) = self.answers.get(&(document, query, goal)) {
+            return answer;
+        }
+        let answer = self.answer(document, query, expect);
+        self.answers.insert((document, query, goal), answer);
+        answer
+    }
+
+    /// The index of `format`'s reading of the bytes, parsing them on first use.
+    fn document(&mut self, format: Format) -> usize {
+        if let Some(index) = self.documents.iter().position(|(f, _)| *f == format) {
+            return index;
+        }
+        VERIFY_PARSES.with(|parses| parses.set(parses.get() + 1));
+        let value = std::str::from_utf8(self.bytes)
+            .ok()
+            .and_then(|text| format.parse(text).ok());
+        self.documents.push((format, value));
+        self.documents.len() - 1
+    }
+
+    fn answer(&mut self, document: usize, query: &'b str, expect: &'b ExpectedValue) -> bool {
+        let Some(value) = &self.documents[document].1 else {
+            return false;
+        };
+        let Some(path) = self
+            .paths
+            .entry(query)
+            .or_insert_with(|| JsonPath::parse(query).ok())
+        else {
+            return false;
+        };
+        let nodes = path.query(value);
+        match expect {
+            ExpectedValue::Absent => nodes.is_empty(),
+            ExpectedValue::Scalar(want) => nodes.at_most_one().ok().flatten() == Some(want),
+            ExpectedValue::Matches(re_src) => {
+                let Some(re) = self
+                    .patterns
+                    .entry(re_src)
+                    .or_insert_with(|| regex::Regex::new(re_src).ok())
+                else {
                     return false;
+                };
+                // EVERY node the query selects must now be a string matching the regex
+                // (a wildcard `path:` selects many; `*_path_matches` fires unless ALL of
+                // them satisfy `matches:`, so the fix's goal is all-match -- NOT
+                // `at_most_one`, which would demote every multi-match replace). Require
+                // at least one node: a query that now resolves to nothing did not
+                // achieve the rule's goal.
+                let mut any = false;
+                for v in nodes.iter() {
+                    any = true;
+                    if !v.as_str().is_some_and(|s| re.is_match(s)) {
+                        return false;
+                    }
                 }
+                any
             }
-            any
         }
     }
 }
@@ -783,5 +886,111 @@ mod tests {
         assert_eq!(o[0].1, LocatedOutcome::Applied); // set_a verified
         assert_eq!(o[1].1, LocatedOutcome::Suggested); // set_b demoted
         assert_eq!(out, br#"{"a":1,"b":0}"#); // only a changed
+    }
+
+    /// ROB-7: each edit's verification re-parsed the whole result, so a batch
+    /// of N edits cost N parses. A pass parses the result once per format and
+    /// answers a check the batch repeats once.
+    #[test]
+    fn a_batch_is_verified_with_one_parse() {
+        const EDITS: usize = 20_000;
+        let src = "- y: 0\n  x: 1\n".repeat(EDITS);
+        let removals: Vec<LocatedEdit> = (0..EDITS)
+            .map(|i| {
+                let verify = EditVerifier::Structured {
+                    format: Format::Yaml,
+                    query: "$[*].x".to_string(),
+                    expect: ExpectedValue::Absent,
+                };
+                let line = 14 * i + 7;
+                edit(
+                    0,
+                    i,
+                    replace(line..line + 7, ""),
+                    Applicability::Safe,
+                    verify,
+                    None,
+                )
+            })
+            .collect();
+        let before = verify_parses();
+        let (out, o) = apply_file_edits(src.as_bytes(), removals, Applicability::Safe);
+        assert_eq!(verify_parses() - before, 1);
+        assert!(o.iter().all(|(_, o)| *o == LocatedOutcome::Applied));
+        assert_eq!(out, "- y: 0\n".repeat(EDITS).as_bytes());
+
+        // One query per edit, one shared pattern: still one parse.
+        let src = "- x: '1'\n".repeat(EDITS);
+        let rewrites: Vec<LocatedEdit> = (0..EDITS)
+            .map(|i| {
+                let verify = EditVerifier::Structured {
+                    format: Format::Yaml,
+                    query: format!("$[{i}]['x']"),
+                    expect: ExpectedValue::Matches("^v".to_string()),
+                };
+                let at = 9 * i + 5;
+                edit(
+                    0,
+                    i,
+                    replace(at..at + 3, "v1"),
+                    Applicability::Safe,
+                    verify,
+                    None,
+                )
+            })
+            .collect();
+        let before = verify_parses();
+        let (out, o) = apply_file_edits(src.as_bytes(), rewrites, Applicability::Safe);
+        assert_eq!(verify_parses() - before, 1);
+        assert!(o.iter().all(|(_, o)| *o == LocatedOutcome::Applied));
+        assert_eq!(out, "- x: v1\n".repeat(EDITS).as_bytes());
+    }
+
+    /// A shared check answered once is still a check of the final bytes: when
+    /// one edit is demoted, the next pass parses the survivors' splice afresh
+    /// and verifies them again.
+    #[test]
+    fn a_demotion_reverifies_the_survivors_against_their_own_splice() {
+        let absent = || EditVerifier::Structured {
+            format: Format::Json,
+            query: "$.a".to_string(),
+            expect: ExpectedValue::Absent,
+        };
+        let wrong = EditVerifier::Structured {
+            format: Format::Json,
+            query: "$.b".to_string(),
+            expect: ExpectedValue::Scalar(serde_json::json!(9)),
+        };
+        // {"a":0,"b":0}: drop `"a":0,` (verifies), set b to 2 (expects 9).
+        let drop_a = edit(0, 0, replace(1..7, ""), Applicability::Safe, absent(), None);
+        let set_b = edit(1, 0, replace(11..12, "2"), Applicability::Safe, wrong, None);
+        let before = verify_parses();
+        let (out, o) = apply_file_edits(
+            br#"{"a":0,"b":0}"#,
+            vec![drop_a, set_b],
+            Applicability::Safe,
+        );
+        assert_eq!(verify_parses() - before, 2, "one parse per pass");
+        assert_eq!(o[0].1, LocatedOutcome::Applied);
+        assert_eq!(o[1].1, LocatedOutcome::Suggested);
+        assert_eq!(out, br#"{"b":0}"#);
+    }
+
+    /// ROB-7: the splice moved the whole tail once per edit, so N edits on a
+    /// file of M bytes copied about N x M / 2 bytes (here 4 TB, minutes); it
+    /// copies each byte once now. A time bound with a wide margin either way.
+    #[test]
+    fn many_edits_splice_in_one_pass() {
+        const EDITS: usize = 200_000;
+        let original = vec![b'x'; 200 * EDITS];
+        let deletions = (0..EDITS).map(|i| safe(200 * i..200 * i + 1, "")).collect();
+        let started = std::time::Instant::now();
+        let (out, _) = apply_file_edits(&original, deletions, Applicability::Safe);
+        let elapsed = started.elapsed();
+        assert_eq!(out.len(), 199 * EDITS);
+        assert!(
+            elapsed < std::time::Duration::from_secs(10),
+            "{EDITS} edits took {elapsed:?}"
+        );
     }
 }

@@ -597,22 +597,21 @@ impl Fixer for StructuredFixer {
                 // re-runs the query on the whole post-edit file, so a PARTIAL
                 // removal (some node's span unresolved) fails verification and is
                 // demoted rather than written -- the removal is all-or-nothing.
-                located
-                    .iter()
-                    .filter_map(|node| {
-                        let segs = to_segs(node.location());
-                        let range =
-                            structured_fix::resolve_removal_span(self.format, bytes, &segs)?;
-                        Some(CollectedEdit {
-                            edit: FixEdit::ReplaceRange {
-                                path: file.to_path_buf(),
-                                range,
-                                content: Vec::new(),
-                            },
-                            applicability: self.applicability,
-                            verify: self.verifier(ExpectedValue::Absent),
-                            isolation_group: None,
-                        })
+                // The spans resolve together, from one parse of the file.
+                let paths: Vec<Vec<PathSeg>> =
+                    located.iter().map(|n| to_segs(n.location())).collect();
+                structured_fix::resolve_removal_spans(self.format, bytes, &paths)
+                    .into_iter()
+                    .flatten()
+                    .map(|range| CollectedEdit {
+                        edit: FixEdit::ReplaceRange {
+                            path: file.to_path_buf(),
+                            range,
+                            content: Vec::new(),
+                        },
+                        applicability: self.applicability,
+                        verify: self.verifier(ExpectedValue::Absent),
+                        isolation_group: None,
                     })
                     .collect()
             }
@@ -662,7 +661,7 @@ impl Fixer for StructuredFixer {
                 // grandfather bug: a baseline run always carries keys, so `live` is
                 // non-empty and the filter engages.
                 let correlate = !live.is_empty();
-                located
+                let (paths, rewrites): (Vec<Vec<PathSeg>>, Vec<Value>) = located
                     .iter()
                     .filter_map(|node| {
                         let current = node.node().as_str()?;
@@ -687,10 +686,23 @@ impl Fixer for StructuredFixer {
                             }
                         }
                         let rewritten = Value::String(rewritten.into_owned());
-                        let segs = to_segs(node.location());
+                        Some((to_segs(node.location()), rewritten))
+                    })
+                    .unzip();
+                // A verified-edit format (dotenv) consumes its editor's exact range
+                // and replacement per node; a span format resolves every node's
+                // span from one parse of the file.
+                let spans = if structured_fix::uses_verified_edits(self.format) {
+                    vec![None; paths.len()]
+                } else {
+                    structured_fix::resolve_value_spans(self.format, bytes, &paths)
+                };
+                paths
+                    .into_iter()
+                    .zip(rewrites)
+                    .zip(spans)
+                    .filter_map(|((segs, rewritten), span)| {
                         let (range, content) = if structured_fix::uses_verified_edits(self.format) {
-                            // Native verified edit (dotenv): consume the editor's
-                            // exact range and replacement.
                             structured_fix::verified_set_edit(
                                 self.format,
                                 bytes,
@@ -698,11 +710,10 @@ impl Fixer for StructuredFixer {
                                 &rewritten,
                             )?
                         } else {
-                            let content =
-                                structured_fix::serialize_scalar(self.format, &rewritten)?;
-                            let range =
-                                structured_fix::resolve_value_span(self.format, bytes, &segs)?;
-                            (range, content)
+                            (
+                                span?,
+                                structured_fix::serialize_scalar(self.format, &rewritten)?,
+                            )
                         };
                         Some(CollectedEdit {
                             edit: FixEdit::ReplaceRange {
@@ -1341,6 +1352,73 @@ mod tests {
             2,
             "both non-compliant nodes are rewritten (fix-all fallback)"
         );
+    }
+
+    /// ROB-7: a YAML fix over many matches parsed the whole file once per
+    /// match to resolve its span (`remove_value` on 5,000 matches took 25 s),
+    /// and the engine re-parsed it once per edit to verify. Each is one parse
+    /// per file now, for `remove_value` and for `replace`, at the most matches
+    /// a fix takes.
+    #[test]
+    fn a_yaml_fix_over_many_matches_parses_the_file_once_to_resolve_and_once_to_verify() {
+        use alint_core::located_fix::{
+            LocatedEdit, LocatedOutcome, apply_file_edits, verify_parses,
+        };
+        const MATCHES: usize = crate::cross_file::MAX_EXTRACTED_VALUES;
+        let apply = |src: &str, edits: Vec<CollectedEdit>| {
+            assert_eq!(edits.len(), MATCHES);
+            let batch = edits
+                .into_iter()
+                .enumerate()
+                .map(|(violation_index, collected)| LocatedEdit {
+                    rule_index: 0,
+                    violation_index,
+                    sensitive: false,
+                    collected,
+                })
+                .collect();
+            let parses = verify_parses();
+            let (out, outcomes) = apply_file_edits(src.as_bytes(), batch, Applicability::Unsafe);
+            assert_eq!(verify_parses() - parses, 1, "one parse verifies the batch");
+            assert!(outcomes.iter().all(|(_, o)| *o == LocatedOutcome::Applied));
+            String::from_utf8(out).unwrap()
+        };
+
+        let src = "- y: 0\n  x: 1\n".repeat(MATCHES);
+        let remove = StructuredFixer::remove(
+            Format::Yaml,
+            jp("$[*].x"),
+            "$[*].x".into(),
+            Applicability::Unsafe,
+        );
+        let reads = structured_fix::yaml_span_reads();
+        let edits = remove.collect_edits(&[], Path::new("a.yaml"), src.as_bytes(), Path::new("/r"));
+        assert_eq!(
+            structured_fix::yaml_span_reads() - reads,
+            1,
+            "one parse resolves every span"
+        );
+        assert_eq!(apply(&src, edits), "- y: 0\n".repeat(MATCHES));
+
+        let src = "- x: '1.0'\n".repeat(MATCHES);
+        let replace = StructuredFixer::replace(
+            Format::Yaml,
+            jp("$[*].x"),
+            "$[*].x".into(),
+            regex::Regex::new("^").unwrap(),
+            "v".into(),
+            "^v".into(),
+            Applicability::Unsafe,
+        );
+        let reads = structured_fix::yaml_span_reads();
+        let edits =
+            replace.collect_edits(&[], Path::new("a.yaml"), src.as_bytes(), Path::new("/r"));
+        assert_eq!(
+            structured_fix::yaml_span_reads() - reads,
+            1,
+            "one parse resolves every span"
+        );
+        assert_eq!(apply(&src, edits), "- x: \"v1.0\"\n".repeat(MATCHES));
     }
 
     #[test]
