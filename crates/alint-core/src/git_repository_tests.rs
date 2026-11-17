@@ -6,11 +6,33 @@ fn ceiling(dir: &Path) -> String {
     canonical(dir).unwrap().to_string_lossy().into_owned()
 }
 
+/// A repository Git made at `dir` (with `git init`; `args` go before the
+/// directory). On Windows, where alint reads no owner, alint asks Git about
+/// every repository it finds, and Git accepts only one it would discover
+/// itself, so a bare `.git` directory is not enough there.
+pub(in crate::git) fn init_repository(dir: &Path, args: &[&str]) {
+    std::fs::create_dir_all(dir).unwrap();
+    let init = Command::new("git")
+        .arg("init")
+        .arg("-q")
+        .args(args)
+        .arg(dir)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
+        .env_remove("GIT_CEILING_DIRECTORIES")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", dir.join(".no-global-config"))
+        .output()
+        .unwrap();
+    assert!(init.status.success(), "{init:?}");
+}
+
 #[test]
 fn the_nearest_git_directory_names_the_repository() {
     let tmp = tempfile::tempdir().unwrap();
     let top = tmp.path().join("repo");
-    std::fs::create_dir_all(top.join(".git")).unwrap();
+    init_repository(&top, &[]);
     std::fs::create_dir_all(top.join("a/b")).unwrap();
     let fence = ceiling(tmp.path());
     let found = find_repository(&top.join("a/b"), Some(&fence), None).unwrap();
@@ -31,8 +53,11 @@ fn the_nearest_git_directory_names_the_repository() {
 #[test]
 fn a_gitfile_names_the_git_directory_relative_to_itself() {
     let tmp = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(tmp.path().join("store/wt.git")).unwrap();
+    let store = tmp.path().join("store/wt.git");
     let top = tmp.path().join("checkout");
+    std::fs::create_dir_all(tmp.path().join("store")).unwrap();
+    let separate = format!("--separate-git-dir={}", store.display());
+    init_repository(&top, &[&separate]);
     std::fs::create_dir_all(top.join("src")).unwrap();
     std::fs::write(top.join(".git"), "gitdir: ../store/wt.git\r\n").unwrap();
     let fence = ceiling(tmp.path());
@@ -63,7 +88,7 @@ fn a_bare_shaped_directory_is_never_a_repository() {
     let fence = ceiling(tmp.path());
     assert_eq!(find_repository(&bare, Some(&fence), None), None);
 
-    std::fs::create_dir_all(tmp.path().join("outer/.git")).unwrap();
+    init_repository(&tmp.path().join("outer"), &[]);
     let found = find_repository(&bare, Some(&fence), None).unwrap();
     assert_eq!(
         found.work_tree,
@@ -76,7 +101,7 @@ fn a_bare_shaped_directory_is_never_a_repository() {
 #[test]
 fn the_search_stops_below_the_ceiling() {
     let tmp = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+    init_repository(tmp.path(), &[]);
     let start = tmp.path().join("sandbox/repository");
     std::fs::create_dir_all(&start).unwrap();
     let sandbox = ceiling(&tmp.path().join("sandbox"));
@@ -93,11 +118,11 @@ fn the_search_stops_below_the_ceiling() {
         );
     }
     // The start itself is read even when it is a ceiling.
-    std::fs::create_dir_all(start.join(".git")).unwrap();
+    init_repository(&start, &[]);
     let own = ceiling(&start);
     assert!(find_repository(&start, Some(&own), None).is_some());
     // Without a ceiling below it, the repository above is found.
-    std::fs::remove_dir(start.join(".git")).unwrap();
+    std::fs::remove_dir_all(start.join(".git")).unwrap();
     let above = ceiling(tmp.path().parent().unwrap());
     assert_eq!(
         find_repository(&start, Some(&above), None).map(|found| found.work_tree),

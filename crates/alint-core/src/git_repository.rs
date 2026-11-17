@@ -283,4 +283,4 @@ pub fn owned_by_current_user(path: &Path) -> Option<bool> {
 
 #[cfg(test)]
 #[path = "git_repository_tests.rs"]
-mod tests;
+pub(super) mod tests;
