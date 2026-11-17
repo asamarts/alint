@@ -1,0 +1,20 @@
+test_version: 1
+name: an extends alias in a version 1 config names the version it needs
+tags: [check, version_two]
+
+given:
+  tree: {}
+  config: |
+    version: 1
+    extends:
+      - url: ./support/version_two_base.yaml
+        as: base
+    rules: []
+
+when: [check]
+
+expect:
+  - exit: configuration_error
+    configuration_error:
+      message:
+        exact: ".an_alias_needs_version_two.inline.alint.yml: `extends[0].as` needs `version: 2`; this config is version 1"

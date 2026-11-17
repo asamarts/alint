@@ -1,0 +1,25 @@
+test_version: 1
+name: a relation's reference to a selector cannot read the environment
+tags: [check, version_two]
+
+given:
+  tree: {}
+  config: |
+    version: 2
+    selectors:
+      docs:
+        paths: "docs/**"
+    relations:
+      titles:
+        from: '{{env.ALINT_E2E_SELECTOR | default("docs")}}'
+        read: { regex: '^# (.*)' }
+        fields: { title: value }
+    rules: []
+
+when: [check]
+
+expect:
+  - exit: configuration_error
+    configuration_error:
+      message:
+        exact: ".a_name_cannot_be_interpolated.inline.alint.yml: `relations.titles.from`: `{{...}}` is not allowed in a name, alias or reference of a version 2 config, which must name the same thing in every environment; write it literally"

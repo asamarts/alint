@@ -1080,3 +1080,49 @@ fn the_literal_subtree_check_reads_as_alint_decodes_without_recursion() {
         );
     }
 }
+
+/// The top-level scalar the version dispatch reads: only a plain one without
+/// a tag or an anchor has text, the first key counts, a nested key of the same
+/// name does not, and a document with a duplicate key still has an answer.
+#[test]
+fn the_top_level_plain_scalar_is_read_as_written() {
+    let read = |doc: &str| top_level_plain_scalar(doc, "version");
+    let text = |doc: &str| read(doc).map(Option::flatten);
+    for (doc, written) in [
+        ("version: 2\n", "2"),
+        ("version: 2 # experimental\n", "2"),
+        ("version: +2\n", "+2"),
+        ("version: 0x2\n", "0x2"),
+        ("{rules: [], version: 02}\n", "02"),
+        ("%YAML 1.2\n---\nversion: 2.0\n", "2.0"),
+        ("rules: [{version: 1}]\nversion: 2\n", "2"),
+        ("? [a]\n: x\n? {b: c}\n: [y]\nversion: 2\n", "2"),
+        ("a: &x 1\nb: *x\nversion: 2\n", "2"),
+        ("version: 2\nversion: 3\n", "2"),
+        ("version: 2\nrules:\n  - {id: a, id: b}\n", "2"),
+    ] {
+        assert_eq!(text(doc), Ok(Some(written.to_string())), "{doc:?}");
+    }
+    for doc in [
+        "version: '2'\n",
+        "version: \"2\"\n",
+        "version: !!int 2\n",
+        "version: &v 2\n",
+        "a: &v 2\nversion: *v\n",
+        "version: |\n  2\n",
+        "version: [2]\n",
+        "version: {2: 2}\n",
+    ] {
+        assert_eq!(read(doc), Ok(Some(None)), "{doc:?}");
+    }
+    for doc in [
+        "rules: []\n",
+        "rules: {version: 2}\n",
+        "- version: 2\n",
+        "2\n",
+        "",
+    ] {
+        assert_eq!(read(doc), Ok(None), "{doc:?}");
+    }
+    assert!(read("version: [\n").is_err());
+}

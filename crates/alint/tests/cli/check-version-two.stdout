@@ -1,0 +1,7 @@
+─── Repository-level ───────────────────────────────────────────────────────────
+  ✗  error    has-readme
+              expected a file matching [README.md]
+
+Summary (1 violation):
+  ✗ 1 error
+  0 passing · 1 failing

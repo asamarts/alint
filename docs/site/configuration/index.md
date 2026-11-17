@@ -34,8 +34,10 @@ root version; if present, it must equal the root version.
 version: 1
 ```
 
-Each source is checked before it is merged. A future v2 consumer may read v1 or v2 sources; a v1
-consumer never accepts v2.
+Each source is checked before it is merged. `version: 2` is experimental: it adds named selectors
+and relations, and may change in any release until one declares it stable (see
+[Version 2 (experimental)](/docs/configuration/version-2/)). A version 2 config may extend version
+1 and version 2 files; a version 1 config never extends a version 2 one.
 
 ### `requires`
 

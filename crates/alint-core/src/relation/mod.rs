@@ -18,11 +18,16 @@ mod adapter;
 mod adapters;
 mod cache;
 mod contract;
+// Public, inside this hidden layer, for the `constraint` kind in
+// `alint-rules` (v0.23 phase 7), which evaluates a rule's relation.
+pub mod eval;
 mod limits;
 mod path;
+pub mod plan;
 mod pointer;
 mod resource;
 mod row;
+mod transform;
 mod value;
 
 pub use adapter::{Adapter, AdapterError, AdapterNote, AdapterOutput, check_row_count};
@@ -37,6 +42,7 @@ pub use path::RelPath;
 pub use pointer::{Pointer, Segment};
 pub use resource::{Origin, Resource, ResourceId, ResourceRead, Selection, Selector};
 pub use row::{Cardinality, CardinalityError, Relation, Row, RowState};
+pub use transform::StringTransform;
 pub use value::{ContractValueError, Number, Value};
 
 #[cfg(test)]

@@ -1,0 +1,9 @@
+version: 2
+selectors:
+  manifests:
+    paths: "**/package.json"
+relations:
+  ranges:
+    from: manifests
+    entries: { format: json, at: $.dependencies }
+    fields: { name: entry.key, range: entry.value }

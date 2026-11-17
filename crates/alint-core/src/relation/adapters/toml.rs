@@ -3,6 +3,7 @@
 use toml_edit::{Document, InlineTable, Item, Key, Table, Value};
 
 use crate::ByteSpan;
+use crate::extract::EntryValue;
 use crate::relation::adapter::{Adapter, AdapterError, AdapterOutput, check_row_count};
 use crate::relation::limits::Limits;
 use crate::relation::pointer::{Pointer, Segment};
@@ -38,115 +39,248 @@ impl Adapter for TomlRowsAdapter {
     ) -> Result<AdapterOutput, AdapterError> {
         let text = std::str::from_utf8(bytes)
             .map_err(|_| AdapterError::Parse("the TOML document is not valid UTF-8".to_string()))?;
-        let document = Document::parse(text).map_err(|error: toml_edit::TomlError| {
-            AdapterError::Parse(parse_error(text, &error))
-        })?;
-        let mut rows = Vec::new();
-        let mut parent = Vec::new();
-        collect_table(
-            document.as_table(),
+        let mut walk = Walk {
+            text,
             resource,
-            &mut parent,
-            &mut rows,
             limits,
-        )?;
-        Ok(AdapterOutput::new(rows))
+            rows: Vec::new(),
+            values: None,
+        };
+        walk.document()?;
+        Ok(AdapterOutput::new(walk.rows))
     }
 }
 
-fn collect_table(
-    table: &Table,
-    resource: &Resource,
-    parent: &mut Vec<Segment>,
-    rows: &mut Vec<Row>,
-    limits: &Limits,
-) -> Result<(), AdapterError> {
-    for key_text in table.iter().map(|(key, _)| key) {
-        let (key, item) = table
-            .get_key_value(key_text)
-            .unwrap_or_else(|| unreachable!("table.iter yielded a missing key"));
-        collect_item(key, item, resource, parent, rows, limits)?;
+impl TomlRowsAdapter {
+    /// The value mode (ADR-0034 decision 5): the key rows
+    /// [`extract`](Adapter::extract) emits, each with what its value holds
+    /// beside it (`values[i]` is `rows[i]`'s, with the value's byte range).
+    /// An integer or a float keeps its lexeme as written (`0x1F`, `1_000`,
+    /// `+inf`); a date or time is [`EntryValue::Datetime`].
+    pub(crate) fn values(
+        resource: &Resource,
+        text: &str,
+        limits: &Limits,
+    ) -> Result<(Vec<Row>, Vec<TomlValue>), AdapterError> {
+        let mut walk = Walk {
+            text,
+            resource,
+            limits,
+            rows: Vec::new(),
+            values: Some(Vec::new()),
+        };
+        walk.document()?;
+        Ok((walk.rows, walk.values.unwrap_or_default()))
     }
-    Ok(())
 }
 
-fn collect_item(
-    key: &Key,
-    item: &Item,
-    resource: &Resource,
-    parent: &mut Vec<Segment>,
-    rows: &mut Vec<Row>,
-    limits: &Limits,
-) -> Result<(), AdapterError> {
-    let key_text = key.get().to_string();
-    if matches!(item, Item::None) {
-        return Ok(());
-    }
-    let span = key
-        .span()
-        .or_else(|| item.span())
-        .ok_or_else(|| AdapterError::Parse(format!("the TOML key {key_text:?} has no span")))?;
-    let pointer = pointer_for(parent, &key_text);
-    push_row(resource, pointer, span, rows, limits)?;
+/// One TOML entry's value: what it holds, and its byte range.
+pub(crate) struct TomlValue {
+    pub(crate) value: EntryValue,
+    pub(crate) span: Option<ByteSpan>,
+}
 
-    match item {
-        Item::Table(table) => {
-            parent.push(Segment::Key(key_text.into()));
-            collect_table(table, resource, parent, rows, limits)?;
-            parent.pop();
+/// One walk over a document, emitting a key row per table member and, in the
+/// value mode, each member's value beside it.
+struct Walk<'w> {
+    text: &'w str,
+    resource: &'w Resource,
+    limits: &'w Limits,
+    rows: Vec<Row>,
+    values: Option<Vec<TomlValue>>,
+}
+
+impl Walk<'_> {
+    fn document(&mut self) -> Result<(), AdapterError> {
+        let document = Document::parse(self.text).map_err(|error: toml_edit::TomlError| {
+            AdapterError::Parse(parse_error(self.text, &error))
+        })?;
+        let mut parent = Vec::new();
+        self.table(document.as_table(), &mut parent)
+    }
+
+    fn table(&mut self, table: &Table, parent: &mut Vec<Segment>) -> Result<(), AdapterError> {
+        for key_text in table.iter().map(|(key, _)| key) {
+            let (key, item) = table
+                .get_key_value(key_text)
+                .unwrap_or_else(|| unreachable!("table.iter yielded a missing key"));
+            self.item(key, item, parent)?;
         }
-        Item::Value(Value::InlineTable(inline)) => {
-            collect_inline_table(inline, resource, parent, &key_text, rows, limits)?;
-        }
-        Item::None | Item::Value(_) | Item::ArrayOfTables(_) => {}
+        Ok(())
     }
-    Ok(())
-}
 
-/// Descend an inline table and every inline table nested in it, so
-/// `x = { a = { b = 1 } }` yields the same leaf `x.a.b` as `[x.a] b = 1`.
-/// The walk uses an explicit stack: nesting depth cannot exhaust the call
-/// stack, and the row limit bounds the work.
-fn collect_inline_table(
-    table: &InlineTable,
-    resource: &Resource,
-    parent: &[Segment],
-    table_key: &str,
-    rows: &mut Vec<Row>,
-    limits: &Limits,
-) -> Result<(), AdapterError> {
-    let mut root = parent.to_vec();
-    root.push(Segment::Key(table_key.into()));
-    let mut pending: Vec<(Vec<Segment>, &InlineTable)> = vec![(root, table)];
-    while let Some((prefix, table)) = pending.pop() {
-        let mut nested = Vec::new();
-        for (path, value) in table.get_values() {
-            let span = path
-                .iter()
-                .filter_map(|key| key.span())
-                .next_back()
-                .ok_or_else(|| {
-                    AdapterError::Parse("a TOML inline-table key has no span".to_string())
-                })?;
-            let mut segments = prefix.clone();
-            for key in path {
-                segments.push(Segment::Key(key.get().into()));
+    fn item(
+        &mut self,
+        key: &Key,
+        item: &Item,
+        parent: &mut Vec<Segment>,
+    ) -> Result<(), AdapterError> {
+        let key_text = key.get().to_string();
+        if matches!(item, Item::None) {
+            return Ok(());
+        }
+        let span = key
+            .span()
+            .or_else(|| item.span())
+            .ok_or_else(|| AdapterError::Parse(format!("the TOML key {key_text:?} has no span")))?;
+        let pointer = pointer_for(parent, &key_text);
+        self.push(pointer, span, || item_value(item, self.text))?;
+
+        match item {
+            Item::Table(table) => {
+                parent.push(Segment::Key(key_text.into()));
+                self.table(table, parent)?;
+                parent.pop();
             }
-            push_row(
-                resource,
-                Pointer::from_segments(segments.clone()),
-                span,
-                rows,
-                limits,
-            )?;
+            Item::Value(Value::InlineTable(inline)) => {
+                self.inline_table(inline, parent, &key_text)?;
+            }
+            Item::None | Item::Value(_) | Item::ArrayOfTables(_) => {}
+        }
+        Ok(())
+    }
+
+    fn push(
+        &mut self,
+        pointer: Pointer,
+        span: std::ops::Range<usize>,
+        value: impl FnOnce() -> TomlValue,
+    ) -> Result<(), AdapterError> {
+        push_row(self.resource, pointer, span, &mut self.rows, self.limits)?;
+        if let Some(values) = &mut self.values {
+            values.push(value());
+        }
+        Ok(())
+    }
+}
+
+/// What a table member's item holds.
+fn item_value(item: &Item, text: &str) -> TomlValue {
+    match item {
+        Item::Value(value) => value_of(value, text),
+        Item::Table(_) => TomlValue {
+            value: EntryValue::Object,
+            span: None,
+        },
+        Item::ArrayOfTables(_) => TomlValue {
+            value: EntryValue::Array,
+            span: None,
+        },
+        Item::None => unreachable!("a missing item has no row"),
+    }
+}
+
+/// What a TOML value holds; a number's lexeme is its source text.
+fn value_of(value: &Value, text: &str) -> TomlValue {
+    use crate::relation::{Number, Value as RowValue};
+
+    let span = value.span();
+    let lexeme = || span.clone().and_then(|span| text.get(span));
+    let held = match value {
+        Value::String(string) => {
+            EntryValue::Scalar(RowValue::String(string.value().as_str().into()))
+        }
+        Value::Integer(_) | Value::Float(_) => lexeme()
+            .and_then(Number::from_lexeme)
+            .map_or(EntryValue::Unreadable, |number| {
+                EntryValue::Scalar(RowValue::Number(number))
+            }),
+        Value::Boolean(flag) => EntryValue::Scalar(RowValue::Bool(*flag.value())),
+        Value::Datetime(_) => EntryValue::Datetime,
+        Value::Array(_) => EntryValue::Array,
+        Value::InlineTable(_) => EntryValue::Object,
+    };
+    TomlValue {
+        value: held,
+        span: span.map(|span| ByteSpan::new(span.start, span.end)),
+    }
+}
+
+impl Walk<'_> {
+    /// Descend an inline table and every inline table nested in it, so
+    /// `x = { a = { b = 1 } }` yields the same leaf `x.a.b` as `[x.a] b = 1`.
+    /// The walk uses an explicit stack: nesting depth cannot exhaust the call
+    /// stack, and the row limit bounds the work.
+    ///
+    /// The key rows (`key_parity`'s) keep what they have always held: a
+    /// dotted key inside an inline table (`x = { a.b = 1 }`) gives the row
+    /// `x.a.b` and none for `x.a`. The value mode reads such a key as the
+    /// table walk reads a dotted key in a table (`[x]` then `a.b = 1`), with
+    /// a row for `x.a` that holds an object, so its rows are those of the
+    /// same document written as JSON ([`Self::inline_members`]).
+    fn inline_table(
+        &mut self,
+        table: &InlineTable,
+        parent: &[Segment],
+        table_key: &str,
+    ) -> Result<(), AdapterError> {
+        let mut root = parent.to_vec();
+        root.push(Segment::Key(table_key.into()));
+        let mut pending: Vec<(Vec<Segment>, &InlineTable)> = vec![(root, table)];
+        while let Some((prefix, table)) = pending.pop() {
+            let mut nested = Vec::new();
+            if self.values.is_some() {
+                self.inline_members(&prefix, table, &mut nested)?;
+                pending.extend(nested.into_iter().rev());
+                continue;
+            }
+            for (path, value) in table.get_values() {
+                let span = path
+                    .iter()
+                    .filter_map(|key| key.span())
+                    .next_back()
+                    .ok_or_else(|| {
+                        AdapterError::Parse("a TOML inline-table key has no span".to_string())
+                    })?;
+                let mut segments = prefix.clone();
+                for key in path {
+                    segments.push(Segment::Key(key.get().into()));
+                }
+                let text = self.text;
+                self.push(Pointer::from_segments(segments.clone()), span, || {
+                    value_of(value, text)
+                })?;
+                if let Value::InlineTable(inner) = value {
+                    nested.push((segments, inner));
+                }
+            }
+            // Reverse so the stack visits nested tables in source order.
+            pending.extend(nested.into_iter().rev());
+        }
+        Ok(())
+    }
+
+    /// The value mode's rows for one inline table: a row per key it holds,
+    /// as [`Self::table`] reads a table, and each inline table among them,
+    /// a dotted key's included, in `nested` to descend next.
+    fn inline_members<'t>(
+        &mut self,
+        prefix: &[Segment],
+        table: &'t InlineTable,
+        nested: &mut Vec<(Vec<Segment>, &'t InlineTable)>,
+    ) -> Result<(), AdapterError> {
+        for (key_text, _) in table {
+            let (key, item) = table
+                .get_key_value(key_text)
+                .unwrap_or_else(|| unreachable!("table.iter yielded a missing key"));
+            let Item::Value(value) = item else {
+                unreachable!("an inline table holds values")
+            };
+            let span = key.span().or_else(|| value.span()).ok_or_else(|| {
+                AdapterError::Parse(format!("the TOML key {key_text:?} has no span"))
+            })?;
+            let mut segments = prefix.to_vec();
+            segments.push(Segment::Key(key_text.into()));
+            let text = self.text;
+            self.push(Pointer::from_segments(segments.clone()), span, || {
+                value_of(value, text)
+            })?;
             if let Value::InlineTable(inner) = value {
                 nested.push((segments, inner));
             }
         }
-        // Reverse so the stack visits nested tables in source order.
-        pending.extend(nested.into_iter().rev());
+        Ok(())
     }
-    Ok(())
 }
 
 /// A TOML parse error as its position and reason, without the source line
@@ -267,6 +401,90 @@ mod tests {
         assert_eq!(leaves(rendered(&inline)), leaves(rendered(&tables)));
         let deep = format!("x = {}1{}\n", "{ a = ".repeat(40), " }".repeat(40));
         assert_eq!(output(&deep).rows.len(), 41);
+    }
+
+    /// Each row as `pointer @ "the text its span covers"`.
+    fn located(text: &str, rows: &[Row]) -> Vec<String> {
+        rows.iter()
+            .map(|row| {
+                format!(
+                    "{} @ {:?}",
+                    row.pointer.as_ref().unwrap().render(),
+                    &text[row.span.unwrap().as_range()]
+                )
+            })
+            .collect()
+    }
+
+    /// `key_parity` reads these key rows: a dotted key in an inline table
+    /// gives no row for its middle key, and one in a table does. The value
+    /// mode's rows below must never change them.
+    #[test]
+    fn dotted_keys_keep_their_key_rows_in_inline_tables_and_tables() {
+        let inline = "[en]\nnav = { home.title = \"Home\", about = \"About\" }\n";
+        let output = output(inline);
+        assert!(output.rows.iter().all(Row::is_key));
+        assert_eq!(
+            located(inline, &output.rows),
+            [
+                "en @ \"en\"",
+                "en.nav @ \"nav\"",
+                "en.nav.home.title @ \"title\"",
+                "en.nav.about @ \"about\"",
+            ]
+        );
+        let ordinals: Vec<u32> = output.rows.iter().map(|row| row.ordinal).collect();
+        assert_eq!(ordinals, [0, 1, 2, 3]);
+        let table = "[en.nav]\nhome.title = \"Home\"\nabout = \"About\"\n";
+        assert_eq!(
+            located(table, &self::output(table).rows),
+            [
+                "en @ \"en\"",
+                "en.nav @ \"nav\"",
+                "en.nav.home @ \"home\"",
+                "en.nav.home.title @ \"title\"",
+                "en.nav.about @ \"about\"",
+            ]
+        );
+    }
+
+    /// The value mode reads a dotted key in an inline table as JSON's nested
+    /// object, with a row for the middle key holding an object.
+    #[test]
+    fn the_value_mode_gives_a_dotted_inline_key_its_middle_row() {
+        let text = "[en]\nnav = { home.title = \"Home\", home.sub = 1, about = \"About\" }\n";
+        let (rows, values) =
+            TomlRowsAdapter::values(&resource(), text, &Limits::default()).unwrap();
+        assert_eq!(
+            located(text, &rows),
+            [
+                "en @ \"en\"",
+                "en.nav @ \"nav\"",
+                "en.nav.home @ \"home\"",
+                "en.nav.about @ \"about\"",
+                "en.nav.home.title @ \"title\"",
+                "en.nav.home.sub @ \"sub\"",
+            ]
+        );
+        let held: Vec<String> = values
+            .iter()
+            .map(|value| match &value.value {
+                EntryValue::Scalar(scalar) => format!("{scalar:?}"),
+                EntryValue::Object => "object".into(),
+                other => format!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            held,
+            [
+                "object",
+                "object",
+                "object",
+                "String(\"About\")",
+                "String(\"Home\")",
+                "Number(1)"
+            ]
+        );
     }
 
     #[test]

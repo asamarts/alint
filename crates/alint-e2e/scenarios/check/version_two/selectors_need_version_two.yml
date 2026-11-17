@@ -1,0 +1,20 @@
+test_version: 1
+name: selectors in a version 1 config name the version they need
+tags: [check, version_two]
+
+given:
+  tree: {}
+  config: |
+    version: 1
+    selectors:
+      docs:
+        paths: "docs/**"
+    rules: []
+
+when: [check]
+
+expect:
+  - exit: configuration_error
+    configuration_error:
+      message:
+        exact: ".selectors_need_version_two.inline.alint.yml: `selectors:` needs `version: 2`; this config is version 1"

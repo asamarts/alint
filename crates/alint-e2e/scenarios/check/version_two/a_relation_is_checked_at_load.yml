@@ -1,0 +1,23 @@
+test_version: 1
+name: a relation's definition is checked when the config loads
+tags: [check, version_two]
+
+given:
+  tree: {}
+  config: |
+    version: 2
+    relations:
+      deps:
+        from: { paths: "**/package.json" }
+        entries: { format: json, at: "$.dependencies" }
+        read: { json: "$.name" }
+        fields: { name: entry.key }
+    rules: []
+
+when: [check]
+
+expect:
+  - exit: configuration_error
+    configuration_error:
+      message:
+        exact: ".a_relation_is_checked_at_load.inline.alint.yml: `relations.deps`: a relation needs exactly one of `entries:`, `read:`, `union:` and `join:`; it has `entries:` and `read:`"

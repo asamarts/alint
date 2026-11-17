@@ -58,12 +58,15 @@ impl Default for LoadState {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct SourceContext {
+pub(crate) struct SourceContext<'a> {
     source_class: ConfigSourceClass,
     consumer_version: Option<u32>,
+    /// How the config this one is read for is named, for an error about the
+    /// edge between the two (a version 1 config extending a version 2 one).
+    consumer_display: Option<&'a str>,
 }
 
-impl SourceContext {
+impl<'a> SourceContext<'a> {
     pub(crate) const fn new(
         source_class: ConfigSourceClass,
         consumer_version: Option<u32>,
@@ -71,7 +74,22 @@ impl SourceContext {
         Self {
             source_class,
             consumer_version,
+            consumer_display: None,
         }
+    }
+
+    const fn consumed_by(mut self, display: &'a str) -> Self {
+        self.consumer_display = Some(display);
+        self
+    }
+
+    /// The source at `display` read in this context, for the version dispatch.
+    fn origin<'d>(&self, display: &'d str) -> crate::v2::Origin<'d>
+    where
+        'a: 'd,
+    {
+        crate::v2::Origin::new(self.source_class, display)
+            .consumer(self.consumer_version, self.consumer_display)
     }
 }
 
@@ -134,29 +152,33 @@ impl MemoKey {
 /// bundled and remote `extends:` content is handled elsewhere and
 /// deliberately NOT interpolated against the consumer's environment.
 ///
+/// The top-level `version:` is read first and decides the language the rest
+/// decodes as ([`crate::v2::dispatch`]); `origin` says what may be version 2.
+///
 /// Gated on the presence of any `{{` marker: a config with no
-/// interpolation parses straight into `RawConfig`, which keeps the
-/// line/column-aware serde error messages (the `Value` round-trip
-/// loses span info) AND skips a redundant second parse. An interp
-/// failure is reported with the `source` path; a typed/YAML error
-/// propagates bare so the existing diagnostics are unchanged.
+/// interpolation decodes straight from the text into `RawConfig`, which
+/// keeps the line/column-aware serde error messages (the `Value`
+/// round-trip loses span info). An interp failure is reported with the
+/// `source` path; a typed/YAML error propagates bare so the existing
+/// diagnostics are unchanged.
 pub(crate) fn parse_config_interpolated_with_environment(
     contents: &str,
     source: &Path,
     environment: &dyn crate::EnvironmentProvider,
+    origin: &crate::v2::Origin<'_>,
 ) -> Result<RawConfig> {
     let contents = crate::config_text(contents, &display_path(source))?;
     // Name the file in a YAML/typed error: in an `extends:` chain or a
     // `.alint.d/` drop-in, a bare "at line 2 column 1" reads as if the
     // top-level config were at fault.
-    parse_config_interpolated_inner_with_environment(contents, source, environment).map_err(|e| {
-        match e {
+    parse_config_interpolated_inner_with_environment(contents, source, environment, origin).map_err(
+        |e| match e {
             Error::Yaml(e) => {
                 Error::Other(format!("{}: YAML parse error: {e}", display_path(source)))
             }
             other => other,
-        }
-    })
+        },
+    )
 }
 
 /// The error for a config at `path` that could not be read: one past the size
@@ -211,7 +233,10 @@ pub(crate) fn validate_source_compatibility(
             "{source}: drop-in config version {declared} must equal root config version {consumer}"
         )));
     }
-    if !alint_core::Config::supports_version(version) {
+    // A version 2 read any other way than as the literal `version: 2` (from the
+    // environment, say) was decoded as version 1, and is refused as today.
+    let experimental = version == crate::v2::VERSION && config.surface == crate::v2::Surface::V2;
+    if !alint_core::Config::supports_version(version) && !experimental {
         return Err(Error::Other(format!(
             "{source}: unsupported config version {version} (this build supports {} through {})",
             alint_core::Config::MIN_SUPPORTED_VERSION,
@@ -292,7 +317,7 @@ pub(crate) fn nonliteral_requirement_after_error(contents: &str, source: &str) -
     if !contents.contains("requires") {
         return None;
     }
-    let value: ayaml::Value = alint_core::yaml::from_str(contents).ok()?;
+    let value: ayaml::Value = decode_text(contents).ok()?;
     reject_nonliteral_requirement_in_value(contents, source, &value)
         .err()
         .filter(|error| matches!(error, Error::Other(_)))
@@ -342,60 +367,267 @@ fn yaml_value_contains_tag(value: &ayaml::Value) -> bool {
     }
 }
 
+/// Decode `contents`, a whole YAML document, as `T`. Every parse of a whole
+/// config the loader makes goes through here (a typed decode, or a parse to a
+/// value for the version dispatch), so the tests can count them: a version 1
+/// source parses once.
+pub(crate) fn decode_text<'de, T: serde::Deserialize<'de>>(
+    contents: &'de str,
+) -> std::result::Result<T, alint_core::yaml::Error> {
+    #[cfg(test)]
+    PARSES.with(|parses| parses.set(parses.get() + 1));
+    alint_core::yaml::from_str(contents)
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many whole documents [`decode_text`] has parsed on this thread.
+    pub(crate) static PARSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// `f`'s result, and how many whole documents it parsed.
+#[cfg(test)]
+pub(crate) fn parses_during<R>(f: impl FnOnce() -> R) -> (R, usize) {
+    let before = PARSES.with(std::cell::Cell::get);
+    let result = f();
+    (result, PARSES.with(std::cell::Cell::get) - before)
+}
+
 fn deserialize_raw_config(contents: &str, source: &str) -> Result<RawConfig> {
-    match alint_core::yaml::from_str(contents) {
-        Ok(config) => {
-            let config: RawConfig = config;
-            if config.requires.is_some() {
+    deserialize_document(contents, source, |config: &RawConfig| config)
+}
+
+/// Decode `contents` as `T`, whose v1 part `raw` reads: a [`RawConfig`], or a
+/// version 2 [`crate::v2::Document`].
+fn deserialize_document<T: serde::de::DeserializeOwned>(
+    contents: &str,
+    source: &str,
+    raw: impl Fn(&T) -> &RawConfig,
+) -> Result<T> {
+    match decode_text(contents) {
+        Ok(document) => {
+            if raw(&document).requires.is_some() {
                 reject_nonliteral_decoded_requirement(contents, source)?;
             }
-            Ok(config)
+            Ok(document)
         }
         Err(parse_error) => Err(nonliteral_requirement_after_error(contents, source)
             .unwrap_or(Error::Yaml(parse_error))),
     }
 }
 
+/// How the tests read a local config: as `alint_dsl::load` reads the
+/// top-level one.
+#[cfg(test)]
+pub(crate) const TEST_ROOT: crate::v2::Origin<'static> =
+    crate::v2::Origin::new(ConfigSourceClass::Root, ".alint.yml");
+
 #[cfg(test)]
 fn parse_config_interpolated_inner(contents: &str, source: &Path) -> Result<RawConfig> {
-    parse_config_interpolated_inner_with_environment(contents, source, &crate::HostEnvironment)
+    parse_config_interpolated_inner_with_environment(
+        contents,
+        source,
+        &crate::HostEnvironment,
+        &TEST_ROOT,
+    )
+}
+
+/// The v1 part of a decoded document, and the v2-only keys it took aside.
+type Decoded = (RawConfig, Vec<(String, ayaml::Value)>);
+
+/// A text decode made before the version is known: as version 1 reads the
+/// text, or as version 2 does.
+enum TextDecode {
+    AsV1(Result<RawConfig>),
+    AsV2(Result<crate::v2::Document>),
+}
+
+impl TextDecode {
+    /// The decode as `surface` reads the text: kept when it reads it the same
+    /// way (version 1's, or version 1's of a source with no v2-only key, which
+    /// fails it, as version 2's), and redone as `surface` reads it otherwise.
+    fn read_as(self, surface: crate::v2::Surface, contents: &str, source: &str) -> Result<Decoded> {
+        let as_v2 = |decoded: Result<crate::v2::Document>| {
+            decoded.map(|document| (document.config, document.v2_keys))
+        };
+        match (surface, self) {
+            (crate::v2::Surface::V1, Self::AsV1(decoded)) => Ok((decoded?, Vec::new())),
+            (crate::v2::Surface::V1, Self::AsV2(_)) => {
+                Ok((deserialize_raw_config(contents, source)?, Vec::new()))
+            }
+            (crate::v2::Surface::V2, Self::AsV1(Ok(config))) => Ok((config, Vec::new())),
+            (crate::v2::Surface::V2, Self::AsV1(Err(_))) => as_v2(deserialize_document(
+                contents,
+                source,
+                |document: &crate::v2::Document| &document.config,
+            )),
+            (crate::v2::Surface::V2, Self::AsV2(decoded)) => as_v2(decoded),
+        }
+    }
+}
+
+/// Insert `marker` with each entry's `marks` into the entry, where it has any.
+fn mark_entries(entries: &mut [Mapping], marker: &str, marks: Vec<Mapping>) {
+    for (entry, marks) in entries.iter_mut().zip(marks) {
+        if !marks.is_empty() {
+            entry.insert(marker.into(), marks.into());
+        }
+    }
+}
+
+/// `contents` parsed for the version dispatch ([`crate::v2::read_document`]).
+/// A text that opens with `version: 2` and does not parse fails with its own
+/// decode's error (`text_decode`, which reads version 2's keys as version 2
+/// does), which says why as version 1's decode would: a key written twice is
+/// a `duplicate field`, where the parse alone says `duplicate entry with
+/// key`.
+fn read_document(
+    contents: &str,
+    origin: &crate::v2::Origin<'_>,
+    text_decode: &mut Option<TextDecode>,
+) -> Result<Option<ayaml::Value>> {
+    match crate::v2::read_document(contents, origin) {
+        Err(Error::Yaml(parse_error)) => match text_decode.take() {
+            Some(TextDecode::AsV2(Err(error))) => Err(error),
+            _ => Err(Error::Yaml(parse_error)),
+        },
+        read => read,
+    }
+}
+
+/// Whether `contents` opens with `version: 2`: the cheap sign of a version 2
+/// source, whose text then decodes as version 2 reads it from the start, so a
+/// v2-only key does not fail a version 1 decode first. It saves a parse and
+/// decides nothing: the dispatch reads the version.
+fn opens_with_version_two(contents: &str) -> bool {
+    contents
+        .strip_prefix("version: 2")
+        .is_some_and(|rest| rest.starts_with(['\n', '\r', ' ']) || rest.is_empty())
+}
+
+/// Decode an interpolated `value` as `surface` reads it.
+fn decode_value(
+    value: ayaml::Value,
+    surface: crate::v2::Surface,
+) -> std::result::Result<Decoded, alint_core::yaml::Error> {
+    match surface {
+        crate::v2::Surface::V1 => {
+            crate::core_yaml::decode::<RawConfig>(value).map(|config| (config, Vec::new()))
+        }
+        crate::v2::Surface::V2 => crate::core_yaml::decode::<crate::v2::Document>(value)
+            .map(|document| (document.config, document.v2_keys)),
+    }
+}
+
+/// `error`, the decode error of an interpolated config, when the same document
+/// with every environment value masked (`masked`, `None` when it reads none)
+/// fails with the same message, so it cannot quote one; the redacted error
+/// otherwise.
+fn reproduce_or_redact(
+    error: alint_core::yaml::Error,
+    masked: Option<&ayaml::Value>,
+    environment: &dyn crate::EnvironmentProvider,
+    surface: crate::v2::Surface,
+    source: &str,
+) -> Error {
+    // Each masked value keeps the type interpolation gave the real one (a
+    // 12-digit id is a number), so an error in an unrelated field after it
+    // still recurs; numbers move both ways, as a rule's rerun does, for a
+    // value at the edge of its range.
+    let reproduced = masked.is_none_or(|masked| {
+        alint_core::NumberMask::BOTH.into_iter().any(|numbers| {
+            let mut masked = masked.clone();
+            crate::interp::interpolate_masked(&mut masked, &|name| environment.get(name), numbers)
+                .is_ok()
+                && decode_value(masked, surface)
+                    .err()
+                    .is_some_and(|masked_error| masked_error.to_string() == error.to_string())
+        })
+    });
+    if reproduced {
+        error.into()
+    } else {
+        redact_interpolated_error(source)
+    }
+}
+
+fn redact_interpolated_error(source: &str) -> Error {
+    Error::Other(format!(
+        "{source}: could not deserialize interpolated config: <redacted> (the error could quote \
+         a value read from the environment)"
+    ))
+}
+
+/// What a version 2 source's selectors and relations read from the
+/// environment, read off its raw document before interpolation erases the
+/// difference ([`crate::v2::Environment`]); `None` for a version 1 source or
+/// one that interpolates nothing.
+fn v2_environment_of(
+    surface: crate::v2::Surface,
+    contents: &str,
+    document: Option<&ayaml::Value>,
+) -> Option<crate::v2::Environment> {
+    if surface == crate::v2::Surface::V2 && contents.contains("{{") {
+        document.map(crate::v2::Environment::of)
+    } else {
+        None
+    }
 }
 
 fn parse_config_interpolated_inner_with_environment(
     contents: &str,
     source: &Path,
     environment: &dyn crate::EnvironmentProvider,
+    origin: &crate::v2::Origin<'_>,
 ) -> Result<RawConfig> {
-    fn redact_interpolated_error(source: &str) -> Error {
-        Error::Other(format!(
-            "{source}: could not deserialize interpolated config: <redacted> (the error \
-             could quote a value read from the environment)"
-        ))
-    }
-
-    // Reject a deeply-nested-flow config before any parser reads it (the parser
-    // v0.22 used hung on one) — a DoS reachable through an `extends:`'d ruleset.
-    let yaml_guards = alint_core::yaml_depth::scan_guards(contents);
-    if !yaml_guards.flow_within_limit() {
-        return Err(Error::Other(format!(
-            "{}: YAML flow nesting exceeds the maximum supported depth ({})",
-            source.display(),
-            alint_core::yaml_depth::MAX_YAML_FLOW_DEPTH
-        )));
-    }
-    // Reject an alias-expansion bomb (a single anchor referenced many times) the
-    // same way. The guard was written for the parser v0.22 used, whose limits
-    // missed it; ayaml charges an alias budget of its own, which the guard's
-    // is stricter than, and the guard stays as defense in depth (`yaml_depth`).
-    if !yaml_guards.expansion_within_limit(contents) {
-        return Err(Error::Other(format!(
-            "{}: YAML alias expansion exceeds the maximum supported size",
-            source.display(),
-        )));
-    }
+    reject_yaml_bombs(contents, source)?;
+    let source_path = source;
     let source = display_path(source);
-    let config: RawConfig = if contents.contains("{{") {
-        let mut value: ayaml::Value = alint_core::yaml::from_str(contents)?;
+    // A config that interpolates nothing decodes straight from the text. Most
+    // such configs are version 1 with nothing of version 2 in them, which that
+    // one decode proves: they need no second parse to read their `version:`,
+    // and decode once, as before version 2. One that opens with `version: 2`
+    // decodes as version 2 reads it, with the v2-only keys taken aside.
+    let text_decode = if contents.contains("{{") {
+        None
+    } else if opens_with_version_two(contents) {
+        Some(TextDecode::AsV2(deserialize_document(
+            contents,
+            &source,
+            |document: &crate::v2::Document| &document.config,
+        )))
+    } else {
+        let decoded = deserialize_raw_config(contents, &source);
+        if let Ok(config) = &decoded
+            && crate::v2::plainly_v1(config, origin)
+        {
+            crate::reject_ambiguous_yaml_in(config, &source)?;
+            return decoded;
+        }
+        Some(TextDecode::AsV1(decoded))
+    };
+    // The version decides the language before any typed decode (design section
+    // 3 item 1). A document that does not parse dispatches as version 1, whose
+    // decode reports the parse error as it always has, unless it declares
+    // version 2.
+    let mut text_decode = text_decode;
+    let document = read_document(contents, origin, &mut text_decode)?;
+    let surface = crate::v2::dispatch(document.as_ref(), contents, origin)?;
+    if surface == crate::v2::Surface::V2
+        && let Some(document) = &document
+    {
+        crate::v2::check_document(document, origin.display)?;
+    }
+    let v2_environment = v2_environment_of(surface, contents, document.as_ref());
+    let (mut config, v2_keys, masked) = if let Some(decoded) = text_decode {
+        let (config, v2_keys) = decoded.read_as(surface, contents, &source)?;
+        crate::reject_ambiguous_yaml_in(&config, &source)?;
+        (config, v2_keys, None)
+    } else {
+        let mut value: ayaml::Value = match document {
+            Some(document) => document,
+            None => decode_text(contents)?,
+        };
         let has_sensitive_interpolation = value_reads_environment(&value);
         reject_nonliteral_requirement_in_value(contents, &source, &value)?;
         // Which vars take their value from the environment, read off the RAW
@@ -430,32 +662,8 @@ fn parse_config_interpolated_inner_with_environment(
                 add_environment_values(&mut environment_values, std::slice::from_ref(value));
             }
         }
-        let mut config: RawConfig = crate::core_yaml::decode(value).map_err(|error| {
-            // Each masked value keeps the type interpolation gave the real one
-            // (a 12-digit id is a number), so an error in an unrelated field
-            // after it still recurs; numbers move both ways, as a rule's
-            // rerun does, for a value at the edge of its range.
-            let reproduced = masked.is_none_or(|masked| {
-                alint_core::NumberMask::BOTH.into_iter().any(|numbers| {
-                    let mut masked = masked.clone();
-                    crate::interp::interpolate_masked(
-                        &mut masked,
-                        &|name| environment.get(name),
-                        numbers,
-                    )
-                    .is_ok()
-                        && crate::core_yaml::decode::<RawConfig>(masked)
-                            .err()
-                            .is_some_and(|masked_error| {
-                                masked_error.to_string() == error.to_string()
-                            })
-                })
-            });
-            if reproduced {
-                error.into()
-            } else {
-                redact_interpolated_error(&source)
-            }
+        let (mut config, v2_keys) = decode_value(value, surface).map_err(|error| {
+            reproduce_or_redact(error, masked.as_ref(), environment, surface, &source)
         })?;
         // Reject user-authored private markers before adding the loader's own
         // env-provenance marker below.
@@ -463,28 +671,187 @@ fn parse_config_interpolated_inner_with_environment(
         config.env_vars = env_vars;
         config.environment_values = environment_values;
         config.extends_environment = extends_environment;
-        for (rule, marks) in config.rules.iter_mut().zip(rule_env_vars) {
-            if !marks.is_empty() {
-                rule.insert(crate::ENV_VARS_MARKER.into(), marks.into());
-            }
-        }
-        for (rule, marks) in config.rules.iter_mut().zip(rule_sensitive_fields) {
-            if !marks.is_empty() {
-                rule.insert(crate::SENSITIVE_FIELDS_MARKER.into(), marks.into());
-            }
-        }
-        for (template, marks) in config.templates.iter_mut().zip(template_sensitive_fields) {
-            if !marks.is_empty() {
-                template.insert(crate::SENSITIVE_FIELDS_MARKER.into(), marks.into());
-            }
-        }
-        config
-    } else {
-        let config = deserialize_raw_config(contents, &source)?;
-        crate::reject_ambiguous_yaml_in(&config, &source)?;
-        config
+        mark_entries(&mut config.rules, crate::ENV_VARS_MARKER, rule_env_vars);
+        mark_entries(
+            &mut config.rules,
+            crate::SENSITIVE_FIELDS_MARKER,
+            rule_sensitive_fields,
+        );
+        mark_entries(
+            &mut config.templates,
+            crate::SENSITIVE_FIELDS_MARKER,
+            template_sensitive_fields,
+        );
+        (config, v2_keys, masked)
     };
+    config.surface = surface;
+    if surface == crate::v2::Surface::V2 {
+        let masked = masked.as_ref().map(|document| Masked {
+            document,
+            environment,
+        });
+        attach_v2_objects(
+            &mut config,
+            &v2_keys,
+            origin,
+            source_path,
+            v2_environment.as_ref(),
+            masked.as_ref(),
+        )?;
+    }
     Ok(config)
+}
+
+/// Reject a config whose YAML would cost too much to read, before any parser
+/// reads it.
+fn reject_yaml_bombs(contents: &str, source: &Path) -> Result<()> {
+    // Reject a deeply-nested-flow config before any parser reads it (the parser
+    // v0.22 used hung on one) — a DoS reachable through an `extends:`'d ruleset.
+    let yaml_guards = alint_core::yaml_depth::scan_guards(contents);
+    if !yaml_guards.flow_within_limit() {
+        return Err(Error::Other(format!(
+            "{}: YAML flow nesting exceeds the maximum supported depth ({})",
+            source.display(),
+            alint_core::yaml_depth::MAX_YAML_FLOW_DEPTH
+        )));
+    }
+    // Reject an alias-expansion bomb (a single anchor referenced many times) the
+    // same way. The guard was written for the parser v0.22 used, whose limits
+    // missed it; ayaml charges an alias budget of its own, which the guard's
+    // is stricter than, and the guard stays as defense in depth (`yaml_depth`).
+    if !yaml_guards.expansion_within_limit(contents) {
+        return Err(Error::Other(format!(
+            "{}: YAML alias expansion exceeds the maximum supported size",
+            source.display(),
+        )));
+    }
+    Ok(())
+}
+
+/// Decode a version 2 source's selectors, relations and aliases onto
+/// `config`, with the source that declared them, and mark each field of its
+/// rules and templates as written by it. Every version 2 source is recorded,
+/// one that declares nothing too: its rules' references resolve in its
+/// (empty) namespace, and an alias may name it.
+fn attach_v2_objects(
+    config: &mut RawConfig,
+    v2_keys: &[(String, ayaml::Value)],
+    origin: &crate::v2::Origin<'_>,
+    source_path: &Path,
+    environment: Option<&crate::v2::Environment>,
+    masked: Option<&Masked<'_>>,
+) -> Result<()> {
+    let source = crate::v2::SourceId {
+        display: origin.display.to_string(),
+        path: source_path.to_path_buf(),
+        class: origin.class,
+    };
+    // An error may quote a value the environment supplied, or part of one (a
+    // JSONPath's hint rewrites the path it quotes). With each value removed
+    // as written, it stands only when the same source with every such value
+    // in the object it is about masked fails the same way, so it quotes none
+    // of them in another form. Only that object's values are masked: one
+    // masked elsewhere may be no valid value there (a `format:`) and fail
+    // first, where the error it is compared with never reached.
+    let mut objects = crate::v2::decode_objects(source.clone(), v2_keys, &config.extends).map_err(
+        |undecoded| {
+            let shown = alint_core::redact_environment_values_in_error(
+                undecoded.error,
+                &config.environment_values,
+            );
+            if masked.is_none_or(|masked| {
+                objects_error_recurs(&shown, masked, &source, &undecoded.locus)
+            }) {
+                shown
+            } else {
+                Error::Other(format!(
+                    "{}: `{}`: <redacted> (the error could quote a value read from the \
+                     environment)",
+                    origin.display, undecoded.object
+                ))
+            }
+        },
+    )?;
+    if let Some(environment) = environment {
+        environment.mark(&mut objects);
+        // A selector's or relation's error in the plan check, once every
+        // source has loaded, is rerun on its masked copies.
+        if let Some(masked) = masked {
+            crate::v2::decode_twins(
+                &mut objects,
+                |locus| environment.reads(locus),
+                |locus, numbers| masked.part(locus, numbers),
+            );
+        }
+    }
+    crate::v2::mark_field_origins(&mut config.rules, source_path);
+    crate::v2::mark_field_origins(&mut config.templates, source_path);
+    config.v2.sources.push(objects);
+    Ok(())
+}
+
+/// A source that reads the environment, as written (before interpolation),
+/// with the environment it reads: what a decode error or a plan-check error
+/// is rerun on, with the values it reads masked.
+struct Masked<'a> {
+    document: &'a ayaml::Value,
+    environment: &'a dyn crate::EnvironmentProvider,
+}
+
+impl Masked<'_> {
+    /// The source interpolated, with the values under `locus` masked (numbers
+    /// moved as `numbers` says) and every other value as the environment
+    /// gives it; `None` when `locus` is not in the document or it does not
+    /// interpolate.
+    fn twin(
+        &self,
+        locus: &crate::v2::Locus,
+        numbers: alint_core::NumberMask,
+    ) -> Option<ayaml::Value> {
+        let lookup = |name: &str| self.environment.get(name);
+        let mut document = self.document.clone();
+        let mut part = std::mem::replace(locus.find_mut(&mut document)?, ayaml::Value::Null);
+        crate::interp::interpolate_value(&mut document, &lookup).ok()?;
+        crate::interp::interpolate_masked(&mut part, &lookup, numbers).ok()?;
+        *locus.find_mut(&mut document)? = part;
+        Some(document)
+    }
+
+    /// The value under `locus` alone, interpolated with each environment
+    /// value masked.
+    fn part(
+        &self,
+        locus: &crate::v2::Locus,
+        numbers: alint_core::NumberMask,
+    ) -> Option<ayaml::Value> {
+        let mut part = locus.find(self.document)?.clone();
+        crate::interp::interpolate_masked(&mut part, &|name| self.environment.get(name), numbers)
+            .ok()?;
+        Some(part)
+    }
+}
+
+/// Whether `masked`, with every environment value in the object at `locus`
+/// masked (numbers moved either way, as [`reproduce_or_redact`] moves them),
+/// fails to decode its objects with `error`'s exact message, which therefore
+/// quotes none of them: a masked string reads `<redacted>`, as one removed
+/// from a message does.
+fn objects_error_recurs(
+    error: &Error,
+    masked: &Masked<'_>,
+    source: &crate::v2::SourceId,
+    locus: &crate::v2::Locus,
+) -> bool {
+    let message = error.to_string();
+    alint_core::NumberMask::BOTH.into_iter().any(|numbers| {
+        masked
+            .twin(locus, numbers)
+            .and_then(|document| decode_value(document, crate::v2::Surface::V2).ok())
+            .and_then(|(config, v2_keys)| {
+                crate::v2::decode_objects(source.clone(), &v2_keys, &config.extends).err()
+            })
+            .is_some_and(|undecoded| undecoded.error.to_string() == message)
+    })
 }
 
 /// The entries of a raw (pre-interpolation) `vars:` mapping whose value reads
@@ -628,7 +995,7 @@ pub(crate) fn load_recursive(
     // grant trust, so nested calls receive the top's list; `is_top` calls read
     // their OWN `trusted_extends:` and ignore this argument. (W2, auto-fix.md 5.5.)
     trusted: &[String],
-    context: SourceContext,
+    context: SourceContext<'_>,
 ) -> Result<RawConfig> {
     let canonical = opts
         .config_source
@@ -673,23 +1040,8 @@ pub(crate) fn load_recursive(
         )));
     }
 
-    let contents = opts
-        .config_source
-        .read_to_string(&canonical)
-        .map_err(|source| config_read_error(&canonical, source))?;
-    let mut config = parse_config_interpolated_with_environment(
-        &contents,
-        &canonical,
-        opts.environment.as_ref(),
-    )?;
-    add_environment_values(&mut state.environment_values, &config.environment_values);
-    validate_source_compatibility(
-        &mut config,
-        &local_source_display(&canonical, confine),
-        context.source_class,
-        context.consumer_version,
-        state.running_version,
-    )?;
+    let display = local_source_display(&canonical, confine);
+    let mut config = read_local_config(&canonical, &display, state, opts, context)?;
 
     // W2 (auto-fix.md 5.5): `trusted_extends:` is a top-level authority. An is_top
     // config (the user's own `.alint.yml` or a `.alint.d/` drop-in) owns the
@@ -708,7 +1060,7 @@ pub(crate) fn load_recursive(
     let extends = std::mem::take(&mut config.extends);
     let extends_environment = std::mem::take(&mut config.extends_environment);
     if extends.is_empty() {
-        visiting.remove(&canonical);
+        state.visiting.remove(&canonical);
         if let Some(key) = memo_key {
             state.remember(key, &config);
         }
@@ -746,15 +1098,19 @@ pub(crate) fn load_recursive(
     };
     for (index, entry) in extends.iter().enumerate() {
         let parent = load_extended_source(
-            entry,
+            &entry.entry,
             extends_environment.get(index).copied().unwrap_or(false),
             &source_dir,
             state,
             opts,
             confine,
             trusted,
-            config.version,
+            SourceContext::new(ConfigSourceClass::LocalExtend, config.version)
+                .consumed_by(&display),
         )?;
+        if config.v2.has_sources() {
+            record_extended(&mut config.v2, entry, &source_dir, opts);
+        }
         merged = merge(merged, parent)?;
     }
     merged = merge(merged, config)?;
@@ -765,10 +1121,62 @@ pub(crate) fn load_recursive(
     Ok(merged)
 }
 
+/// Record on a version 2 source's `objects` where its `extends:` `entry`
+/// leads, for qualified references to resolve. Only a version 2 source has
+/// objects to record it on, so only it pays to resolve a local target (which
+/// has just loaded, so it resolves); kept out of line for the same reason.
+#[inline(never)]
+fn record_extended(
+    objects: &mut crate::v2::Objects,
+    entry: &crate::v2::ExtendsEntry,
+    source_dir: &Path,
+    opts: &LoadOptions<'_>,
+) {
+    let url = entry.entry.url();
+    let target = (ExtendsEntryKind::of(url) == ExtendsEntryKind::Local)
+        .then(|| resolve_relative(source_dir, url))
+        .and_then(|target| opts.config_source.canonicalize(&target).ok());
+    objects.record_extended(entry.alias.as_deref(), target.as_deref());
+}
+
+/// Read, parse and check the local config at `canonical`, which errors name
+/// `display`.
+fn read_local_config(
+    canonical: &Path,
+    display: &str,
+    state: &mut LoadState,
+    opts: &LoadOptions<'_>,
+    context: SourceContext<'_>,
+) -> Result<RawConfig> {
+    let contents = opts
+        .config_source
+        .read_to_string(canonical)
+        .map_err(|source| config_read_error(canonical, source))?;
+    // Checked in place, and returned as parsed: a config is large to move.
+    let mut parsed = parse_config_interpolated_with_environment(
+        &contents,
+        canonical,
+        opts.environment.as_ref(),
+        &context.origin(display),
+    );
+    if let Ok(config) = &mut parsed {
+        add_environment_values(&mut state.environment_values, &config.environment_values);
+        validate_source_compatibility(
+            config,
+            display,
+            context.source_class,
+            context.consumer_version,
+            state.running_version,
+        )?;
+    }
+    parsed
+}
+
 /// `from_environment`: the entry read the environment, so it is also removed
 /// from errors in the forms the loader prints it in, which need not contain the
 /// value as written (a remote URL without its credentials, query and fragment;
-/// a local path joined, canonical, or relative to the root).
+/// a local path joined, canonical, or relative to the root). `context` is the
+/// local-target context, with the extending config's version and name.
 #[allow(clippy::too_many_arguments)]
 fn load_extended_source(
     entry: &alint_core::ExtendsEntry,
@@ -778,8 +1186,9 @@ fn load_extended_source(
     opts: &LoadOptions<'_>,
     confine: Option<&Path>,
     trusted: &[String],
-    consumer_version: Option<u32>,
+    context: SourceContext<'_>,
 ) -> Result<RawConfig> {
+    let consumer_version = context.consumer_version;
     let url = entry.url();
     let kind = ExtendsEntryKind::of(url);
     let source_display = if kind.is_url() {
@@ -852,15 +1261,7 @@ fn load_extended_source(
             add_environment_values(&mut state.environment_values, &normalized);
         }
         confine_extends_target(&target, url, confine, opts.config_source.as_ref())?;
-        load_recursive(
-            &target,
-            state,
-            opts,
-            confine,
-            false,
-            trusted,
-            SourceContext::new(ConfigSourceClass::LocalExtend, consumer_version),
-        )?
+        load_recursive(&target, state, opts, confine, false, trusted, context)?
     };
     gate_extended_source(&parent, &source_display, opts.kind_catalog)?;
     mark_extended_provenance(
@@ -1030,7 +1431,20 @@ fn load_remote(
             "remote config at {source}: YAML alias expansion exceeds the maximum supported size"
         )));
     }
-    let config = deserialize_raw_config(body_str, &source).map_err(|error| match error {
+    // A remote source must be version 1 (design section 3 item 6). One that
+    // decodes as plainly version 1 is; any other is dispatched, whose refusal
+    // of version 2 or a v2-only key comes before a decode error, which would
+    // misreport a v2 key.
+    let origin = crate::v2::Origin::new(ConfigSourceClass::Remote, &source);
+    let decoded = deserialize_raw_config(body_str, &source);
+    if !decoded
+        .as_ref()
+        .is_ok_and(|config| crate::v2::plainly_v1(config, &origin))
+    {
+        let document = crate::v2::read_document(body_str, &origin)?;
+        crate::v2::dispatch(document.as_ref(), body_str, &origin)?;
+    }
+    let config = decoded.map_err(|error| match error {
         Error::Yaml(error) => Error::Other(format!(
             "remote config at {source}: YAML parse error: {error}"
         )),
@@ -1086,31 +1500,50 @@ fn load_bundled(spec: &str) -> Result<RawConfig> {
             shipped.join(", "),
         ))
     })?;
+    decode_bundled(body, spec)
+}
 
+/// Decode the body of the bundled ruleset `spec`. Anything wrong with it is an
+/// alint bug, an internal error.
+fn decode_bundled(body: &str, spec: &str) -> Result<RawConfig> {
     // Bundled rulesets are compiled-in and trusted (byte-identical every build), so
     // these guards are defense-in-depth, not an attack surface -- but keeping the
-    // checks uniform with the remote/local paths means no `alint_core::yaml::from_str`
-    // in the loader is ever unguarded. A bundled ruleset tripping one is an alint bug.
+    // checks uniform with the remote/local paths means no parse in the loader is
+    // ever unguarded. A bundled ruleset tripping one is an alint bug.
     let yaml_guards = alint_core::yaml_depth::scan_guards(body);
     if !yaml_guards.flow_within_limit() || !yaml_guards.expansion_within_limit(body) {
         return Err(Error::internal(format!(
             "built-in ruleset '{spec}' exceeds a maximum supported YAML complexity limit"
         )));
     }
-    let config =
-        deserialize_raw_config(body, &format!("alint://bundled/{spec}")).map_err(|error| {
-            match error {
-                Error::Yaml(error) => {
-                    // A ruleset shipped *inside* the binary failing to parse is an
-                    // alint bug, not the user's config — Internal → CLI exit 3 (M11).
-                    Error::internal(format!(
-                        "built-in ruleset '{spec}' failed to parse: {error}"
-                    ))
-                }
-                other => Error::internal(other.to_string()),
+    // A bundled ruleset must be version 1 (design section 3 item 6), as the
+    // tests check of each; one that is not, or that uses a v2-only key, is an
+    // alint bug, like one that fails to parse. One that decodes as plainly
+    // version 1 needs no dispatch.
+    let display = format!("alint://bundled/{spec}");
+    let origin = crate::v2::Origin::new(ConfigSourceClass::Bundled, &display);
+    let decoded = deserialize_raw_config(body, &display);
+    if !decoded
+        .as_ref()
+        .is_ok_and(|config| crate::v2::plainly_v1(config, &origin))
+    {
+        crate::v2::read_document(body, &origin)
+            .and_then(|document| crate::v2::dispatch(document.as_ref(), body, &origin))
+            .map_err(|error| Error::internal(error.to_string()))?;
+    }
+    let config = decoded.map_err(|error| {
+        match error {
+            Error::Yaml(error) => {
+                // A ruleset shipped *inside* the binary failing to parse is an
+                // alint bug, not the user's config — Internal → CLI exit 3 (M11).
+                Error::internal(format!(
+                    "built-in ruleset '{spec}' failed to parse: {error}"
+                ))
             }
-        })?;
-    crate::reject_ambiguous_yaml_in(&config, &format!("alint://bundled/{spec}"))
+            other => Error::internal(other.to_string()),
+        }
+    })?;
+    crate::reject_ambiguous_yaml_in(&config, &display)
         .map_err(|e| Error::internal(e.to_string()))?;
     Ok(config)
 }

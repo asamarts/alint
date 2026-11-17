@@ -1,0 +1,1021 @@
+//! The evaluator over hand-built plans: limits through the test seam, the
+//! read confinement, and the run memo. The behaviour a configuration
+//! reaches is tested through the loader in `alint-dsl`
+//! (`src/tests/version_two_rows.rs`), which writes plans as users do.
+
+use std::path::PathBuf;
+
+use super::*;
+use crate::relation::limits::LimitKind;
+use crate::relation::plan::{
+    Entries, EntriesFormat, FieldDef, FieldSource, JoinDef, JoinSide, Member, NamedRelation, Part,
+    PlanSource, Predicate, Reached, Read, Reader, RelationDef, Rows, SelectorDef, SelectorRef,
+    SourceIndex, Transform,
+};
+use crate::{ConfigSourceClass, PathsSpec};
+
+fn plan(relations: Vec<NamedRelation>) -> Arc<Plan> {
+    Arc::new(Plan {
+        sources: vec![PlanSource {
+            display: ".alint.yml".into(),
+            path: PathBuf::from(".alint.yml"),
+            class: ConfigSourceClass::Root,
+            aliases: Vec::new(),
+        }],
+        selectors: Vec::new(),
+        relations,
+        rules: Vec::new(),
+    })
+}
+
+fn named(name: &str, rows: Rows, fields: &[(&str, FieldSource)]) -> NamedRelation {
+    NamedRelation {
+        name: name.into(),
+        source: SourceIndex(0),
+        relation: RelationDef {
+            rows,
+            fields: fields
+                .iter()
+                .map(|(name, source)| {
+                    (
+                        (*name).to_string(),
+                        FieldDef {
+                            source: source.clone(),
+                            sensitive: false,
+                        },
+                    )
+                })
+                .collect(),
+            transforms: Vec::new(),
+            filters: Vec::new(),
+        },
+        capabilities: crate::relation::plan::Capabilities::default(),
+        reads_environment: false,
+    }
+}
+
+fn from(paths: &str) -> SelectorRef {
+    SelectorRef::Inline(Box::new(SelectorDef {
+        paths: PathsSpec::Single(paths.into()),
+        scope_filter: None,
+    }))
+}
+
+fn entries(paths: &str, at: &str) -> Rows {
+    Rows::Part(Part {
+        from: from(paths),
+        reader: Reader::Entries(Entries {
+            format: EntriesFormat::Json,
+            at: vec![at.into()],
+            leaves: false,
+        }),
+    })
+}
+
+fn read_json(paths: &str, query: &str) -> Rows {
+    Rows::Part(Part {
+        from: from(paths),
+        reader: Reader::Read {
+            read: Read::Json(query.into()),
+            optional: false,
+        },
+    })
+}
+
+fn reached(id: usize) -> Reached<RelationId> {
+    Reached {
+        id: RelationId(id),
+        alias: None,
+    }
+}
+
+/// A tree of `files` under a temporary root, walked.
+struct Tree {
+    dir: tempfile::TempDir,
+    index: FileIndex,
+}
+
+fn tree(files: &[(&str, &str)]) -> Tree {
+    let dir = tempfile::tempdir().unwrap();
+    for (path, body) in files {
+        let path = dir.path().join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, body).unwrap();
+    }
+    let index = crate::walker::walk(dir.path(), &crate::walker::WalkOptions::default()).unwrap();
+    Tree { dir, index }
+}
+
+fn run(plan: &Arc<Plan>, id: usize, tree: &Tree, limits: Limits) -> Outcome {
+    let decodes = DecodeCache::with_run_limits(&limits);
+    evaluate_with(
+        plan,
+        RelationId(id),
+        tree.dir.path(),
+        &tree.index,
+        limits,
+        &ReadCache::new(),
+        &decodes,
+        &RunMemo::new(Arc::clone(plan)),
+    )
+}
+
+fn messages(outcome: &Outcome) -> Vec<String> {
+    outcome
+        .as_ref()
+        .expect_err("the relation fails")
+        .iter()
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn limit(kind: LimitKind, value: usize) -> Limits {
+    Limits::default().with(kind, value).unwrap()
+}
+
+fn deps() -> NamedRelation {
+    named(
+        "deps",
+        entries("*.json", "$.deps"),
+        &[("name", FieldSource::EntryKey)],
+    )
+}
+
+#[test]
+fn rows_per_extractor_is_an_analysis_failure() {
+    let plan = plan(vec![deps()]);
+    let tree = tree(&[("a.json", r#"{"deps": {"x": 1, "y": 2}}"#)]);
+    assert_eq!(
+        messages(&run(&plan, 0, &tree, limit(LimitKind::RowsPerExtractor, 2))),
+        [
+            "a.json: relation `deps` (.alint.yml): relation limit `rows_per_extractor` (2) reached: \
+          3 rows or values, so the relation is not evaluated rather than cut short; narrow what \
+          it reads (its selector, or its `at:` paths)"
+        ]
+    );
+    assert!(run(&plan, 0, &tree, limit(LimitKind::RowsPerExtractor, 3)).is_ok());
+}
+
+#[test]
+fn rows_per_run_is_an_analysis_failure() {
+    let plan = plan(vec![deps()]);
+    let tree = tree(&[
+        ("a.json", r#"{"deps": {"x": 1}}"#),
+        ("b.json", r#"{"deps": {"y": 2}}"#),
+    ]);
+    // Each decode emits one row; the second takes the run past one.
+    assert_eq!(
+        messages(&run(&plan, 0, &tree, limit(LimitKind::RowsPerRun, 1))),
+        [
+            "b.json: relation `deps` (.alint.yml): relation limit `rows_per_run` (1) reached: 2 rows \
+          or values, so the relation is not evaluated rather than cut short; narrow what it reads \
+          (its selector, or its `at:` paths)"
+        ]
+    );
+}
+
+fn names() -> NamedRelation {
+    named(
+        "names",
+        read_json("*.json", "$.name"),
+        &[("name", FieldSource::Value)],
+    )
+}
+
+#[test]
+fn a_semi_join_set_is_bounded_by_the_distinct_value_limit() {
+    let mut filtered = deps();
+    filtered.relation.filters = vec![(
+        "name".into(),
+        vec![Predicate::NotIn(vec![Member::Relation {
+            relation: reached(1),
+            field: "name".into(),
+        }])],
+    )];
+    let plan = plan(vec![filtered, names()]);
+    let tree = tree(&[
+        ("a.json", r#"{"name": "a", "deps": {"b": 1}}"#),
+        ("b.json", r#"{"name": "b", "deps": {}}"#),
+    ]);
+    assert_eq!(
+        messages(&run(&plan, 0, &tree, limit(LimitKind::DistinctValues, 1))),
+        [
+            "relation `deps` (.alint.yml): `where.name.not_in` reads `names.name`: relation limit \
+          `distinct_values` (1) reached: 2 rows or values, so the relation is not evaluated \
+          rather than cut short; narrow `names`"
+        ]
+    );
+    let rows = run(&plan, 0, &tree, limit(LimitKind::DistinctValues, 2)).unwrap();
+    assert!(rows.rows.is_empty(), "`b` is a workspace name");
+}
+
+fn joined() -> NamedRelation {
+    named(
+        "joined",
+        Rows::Join(JoinDef {
+            left: reached(1),
+            right: reached(2),
+            on: vec![("name".into(), "name".into())],
+            unique: JoinSide::Right,
+        }),
+        &[
+            (
+                "dependency",
+                FieldSource::Side(JoinSide::Left, "name".into()),
+            ),
+            (
+                "manifest",
+                FieldSource::Side(JoinSide::Right, "name".into()),
+            ),
+        ],
+    )
+}
+
+#[test]
+fn the_join_limits_bound_each_side_and_the_output() {
+    let plan = plan(vec![joined(), deps(), names()]);
+    let tree = tree(&[
+        ("a.json", r#"{"name": "a", "deps": {"b": 1, "a": 1}}"#),
+        ("b.json", r#"{"name": "b", "deps": {"a": 1}}"#),
+    ]);
+    assert_eq!(
+        messages(&run(&plan, 0, &tree, limit(LimitKind::JoinInputs, 2))),
+        [
+            "relation `joined` (.alint.yml): the join's left side (`deps`): relation limit \
+          `join_inputs` (2) reached: 3 rows or values, so the relation is not evaluated rather \
+          than cut short; narrow that side"
+        ]
+    );
+    assert_eq!(
+        messages(&run(&plan, 0, &tree, limit(LimitKind::JoinOutputs, 2))),
+        [
+            "relation `joined` (.alint.yml): relation limit `join_outputs` (2) reached: 3 rows or \
+          values, so the relation is not evaluated rather than cut short; narrow its sides"
+        ]
+    );
+    let rows = run(&plan, 0, &tree, Limits::default()).unwrap();
+    assert_eq!(rows.rows.len(), 3);
+}
+
+#[test]
+fn reads_never_reach_a_git_directory() {
+    let plan = plan(vec![named(
+        "configs",
+        read_json("**/*.json", "$.name"),
+        &[("name", FieldSource::Value)],
+    )]);
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+    std::fs::write(dir.path().join(".git/config.json"), r#"{"name": "secret"}"#).unwrap();
+    std::fs::write(dir.path().join("ok.json"), r#"{"name": "ok"}"#).unwrap();
+    // Where the platform makes symlinks, one into `.git` joins the index.
+    let linked: &[&str] = if cfg!(unix) { &["link.json"] } else { &[] };
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(".git/config.json", dir.path().join("link.json")).unwrap();
+    // An index built from entries vouches for nothing, so every read is
+    // confined as a literal path's is.
+    let index = FileIndex::from_entries(
+        [".git/config.json", "ok.json"]
+            .iter()
+            .chain(linked)
+            .map(|path| crate::walker::FileEntry {
+                path: Arc::from(std::path::Path::new(path)),
+                is_dir: false,
+                size: 20,
+            })
+            .collect(),
+    );
+    let tree = Tree { dir, index };
+    let expected: Vec<String> = [".git/config.json"]
+        .iter()
+        .chain(linked)
+        .map(|path| {
+            format!(
+                "{path}: relation `configs` (.alint.yml): could not read file: path is in a Git \
+                 directory; rules never read there"
+            )
+        })
+        .collect();
+    assert_eq!(messages(&run(&plan, 0, &tree, Limits::default())), expected);
+
+    // The walk leaves both out, so a walked tree reads only `ok.json`.
+    let walked = Tree {
+        index: crate::walker::walk(tree.dir.path(), &crate::walker::WalkOptions::default())
+            .unwrap(),
+        dir: tree.dir,
+    };
+    let rows = run(&plan, 0, &walked, Limits::default()).unwrap();
+    let read: Vec<&str> = rows.resources.iter().map(|r| r.path().as_str()).collect();
+    assert_eq!(read, ["ok.json"]);
+}
+
+/// The walk vouches for nothing at read time: a file swapped after it for a
+/// symlink into `.git` or for a FIFO is refused, without blocking, as
+/// `cross_file` refuses one its glob matched.
+#[cfg(unix)]
+#[test]
+fn a_file_swapped_after_the_walk_is_confined_and_never_blocks() {
+    let plan = plan(vec![named(
+        "configs",
+        read_json("*.json", "$.name"),
+        &[("name", FieldSource::Value)],
+    )]);
+    let tree = tree(&[
+        ("a.json", r#"{"name": "a"}"#),
+        ("b.json", r#"{"name": "b"}"#),
+        ("c.json", r#"{"name": "c"}"#),
+        (".git/config.json", r#"{"name": "secret"}"#),
+    ]);
+    let root = tree.dir.path();
+    std::fs::remove_file(root.join("a.json")).unwrap();
+    std::os::unix::fs::symlink(".git/config.json", root.join("a.json")).unwrap();
+    std::fs::remove_file(root.join("b.json")).unwrap();
+    let status = std::process::Command::new("mkfifo")
+        .arg(root.join("b.json"))
+        .status()
+        .expect("run mkfifo");
+    assert!(status.success(), "mkfifo failed");
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let outcome = run(&plan, 0, &tree, Limits::default());
+        let _ = sender.send((messages(&outcome), tree));
+    });
+    let (messages, _tree) = receiver
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("a FIFO must be refused before it can block the read");
+    assert_eq!(
+        messages,
+        [
+            "a.json: relation `configs` (.alint.yml): could not read file: path is in a Git \
+             directory; rules never read there",
+            "b.json: relation `configs` (.alint.yml): could not read file: not a regular file",
+        ]
+    );
+}
+
+#[test]
+fn a_relation_is_evaluated_once_per_run() {
+    let plan = plan(vec![deps(), names()]);
+    let tree = tree(&[("a.json", r#"{"name": "a", "deps": {"b": 1}}"#)]);
+    let ctx = Context::new(tree.dir.path(), &tree.index);
+    assert!(!tree.index.relation_memo_is_set());
+    let first = evaluate(&plan, RelationId(0), &ctx).unwrap();
+    let again = evaluate(&plan, RelationId(0), &ctx).unwrap();
+    assert!(Arc::ptr_eq(&first, &again));
+    assert!(tree.index.relation_memo_is_set());
+    let decodes = tree.index.decode_cache().unwrap().decodes();
+    assert_eq!(decodes, 1, "`names` was not read");
+    // Inside a nested rule's iteration the memo and caches are its own.
+    let inner = {
+        let _scope = crate::relation::IterationScope::enter();
+        evaluate(&plan, RelationId(0), &ctx).unwrap()
+    };
+    assert!(!Arc::ptr_eq(&first, &inner));
+    assert_eq!(first.rows, inner.rows);
+    assert_eq!(tree.index.decode_cache().unwrap().decodes(), 1);
+    // Another plan gets a memo of its own.
+    let other = Arc::new((*plan).clone());
+    assert!(evaluate(&other, RelationId(0), &ctx).is_ok());
+    // A fix that changes files forgets the memo with the caches.
+    tree.index.clear_relation_caches();
+    assert!(!tree.index.relation_memo_is_set());
+}
+
+#[test]
+fn a_failed_side_fails_the_join_with_its_failures() {
+    let plan = plan(vec![joined(), deps(), names()]);
+    let tree = tree(&[("a.json", r#"{"name": 1, "deps": {"b": 1}}"#)]);
+    assert_eq!(
+        messages(&run(&plan, 0, &tree, Limits::default())),
+        [
+            "a.json: relation `names` (.alint.yml): `read.json: $.name` matched non-string value(s) \
+          (number: 1); `read:` rows hold strings, so select string values, or read typed values \
+          with `entries:`"
+        ]
+    );
+}
+
+#[test]
+fn failures_convert_to_analysis_failures_and_redact_when_sensitive() {
+    let failure = RelationFailure {
+        kind: crate::rule::AnalysisFailureKind::Evaluation,
+        resource: Some(Arc::from(std::path::Path::new("a.json"))),
+        message: "relation `deps` (.alint.yml): detail".into(),
+        sensitive: false,
+    };
+    let violation = failure.to_violation("rule");
+    assert_eq!(
+        violation.message.as_ref(),
+        "relation `deps` (.alint.yml): detail"
+    );
+    assert_eq!(
+        violation.path.as_deref(),
+        Some(std::path::Path::new("a.json"))
+    );
+    assert_eq!(
+        violation.analysis_failure_kind(),
+        Some(crate::rule::AnalysisFailureKind::Evaluation)
+    );
+    let hidden = RelationFailure {
+        sensitive: true,
+        ..failure
+    }
+    .to_violation("rule");
+    assert!(
+        hidden.message.starts_with("sensitive evidence "),
+        "{}",
+        hidden.message
+    );
+}
+
+fn lines(paths: &str) -> Part {
+    Part {
+        from: from(paths),
+        reader: Reader::Read {
+            read: Read::Lines { comment: None },
+            optional: false,
+        },
+    }
+}
+
+fn run_with_memo(
+    plan: &Arc<Plan>,
+    id: usize,
+    tree: &Tree,
+    limits: Limits,
+    memo: &RunMemo,
+) -> Outcome {
+    evaluate_with(
+        plan,
+        RelationId(id),
+        tree.dir.path(),
+        &tree.index,
+        limits,
+        &ReadCache::new(),
+        &DecodeCache::with_run_limits(&limits),
+        memo,
+    )
+}
+
+const CELLS_EXHAUSTED: &str = "so the relation is not evaluated rather than cut short; a run's \
+    relations hold a cell per field of each row and one per file each part reads, so read fewer \
+    rows (narrow the selector, the `at:` paths or the parts) or bind fewer fields";
+
+/// A `union:` of identical parts decodes its file once, but each part's rows
+/// take cells from the run as they are built: the relation fails at the cap,
+/// not after building every part.
+#[test]
+fn a_unions_rows_take_cells_as_each_part_builds_them() {
+    let body = (0..100)
+        .map(|line| format!("l{line}\n"))
+        .collect::<Vec<_>>()
+        .concat();
+    let tree = tree(&[("list.txt", &body)]);
+    let parts = Rows::Union(vec![lines("list.txt"); 30]);
+    let plan = plan(vec![named(
+        "listed",
+        parts,
+        &[("line", FieldSource::Value)],
+    )]);
+    // Each part reads one file (a cell) and builds 100 one-field rows.
+    let memo = RunMemo::new(Arc::clone(&plan));
+    let limits = limit(LimitKind::CellsPerRun, 150);
+    assert_eq!(
+        messages(&run_with_memo(&plan, 0, &tree, limits, &memo)),
+        [format!(
+            "list.txt: relation `listed` (.alint.yml): relation limit `cells_per_run` (150) \
+             reached: 151 rows or values, {CELLS_EXHAUSTED}"
+        )]
+    );
+    assert_eq!(memo.cells(), 151, "the union stopped at the cap");
+    let all = 30 * 101;
+    assert!(run(&plan, 0, &tree, limit(LimitKind::CellsPerRun, all - 1)).is_err());
+    let rows = run(&plan, 0, &tree, limit(LimitKind::CellsPerRun, all)).unwrap();
+    assert_eq!(rows.rows.len(), 30 * 100);
+}
+
+/// A row of F fields is F cells, and a join's rows take theirs as it builds
+/// them; the run's relations share one count.
+#[test]
+fn every_field_of_every_row_takes_a_cell_and_so_do_a_joins_rows() {
+    let plan = plan(vec![joined(), deps(), names()]);
+    let tree = tree(&[
+        ("a.json", r#"{"name": "a", "deps": {"b": 1, "a": 1}}"#),
+        ("b.json", r#"{"name": "b", "deps": {"a": 1}}"#),
+    ]);
+    // `deps`: 2 files and 3 one-field rows; `names`: 2 files and 2 rows;
+    // `joined`: 3 rows of 2 fields.
+    let memo = RunMemo::new(Arc::clone(&plan));
+    assert!(run_with_memo(&plan, 0, &tree, limit(LimitKind::CellsPerRun, 15), &memo).is_ok());
+    assert_eq!(memo.cells(), 15);
+    assert_eq!(
+        messages(&run(&plan, 0, &tree, limit(LimitKind::CellsPerRun, 14))),
+        [format!(
+            "relation `joined` (.alint.yml): relation limit `cells_per_run` (14) reached: 15 rows \
+             or values, {CELLS_EXHAUSTED}"
+        )]
+    );
+    // Three fields, three cells a row: `a.json` and its 2 rows hold 7.
+    let mut wide = deps();
+    wide.relation.fields.extend([
+        (
+            "version".to_string(),
+            FieldDef {
+                source: FieldSource::EntryValue,
+                sensitive: false,
+            },
+        ),
+        (
+            "file".to_string(),
+            FieldDef {
+                source: FieldSource::Path(crate::relation::plan::PathToken::Path),
+                sensitive: false,
+            },
+        ),
+    ]);
+    let wide = self::plan(vec![wide]);
+    let one = self::tree(&[("a.json", r#"{"deps": {"b": 1, "a": 1}}"#)]);
+    assert_eq!(
+        messages(&run(&wide, 0, &one, limit(LimitKind::CellsPerRun, 6))),
+        [format!(
+            "a.json: relation `deps` (.alint.yml): relation limit `cells_per_run` (6) reached: 7 \
+             rows or values, {CELLS_EXHAUSTED}"
+        )]
+    );
+    assert!(run(&wide, 0, &one, limit(LimitKind::CellsPerRun, 7)).is_ok());
+    // The count is the run's: `deps`, evaluated first, leaves `names` 3.
+    let memo = RunMemo::new(Arc::clone(&plan));
+    let limits = limit(LimitKind::CellsPerRun, 7);
+    assert!(run_with_memo(&plan, 1, &tree, limits, &memo).is_ok());
+    assert_eq!(
+        messages(&run_with_memo(&plan, 2, &tree, limits, &memo)),
+        [format!(
+            "b.json: relation `names` (.alint.yml): relation limit `cells_per_run` (7) reached: 8 \
+             rows or values, {CELLS_EXHAUSTED}"
+        )]
+    );
+}
+
+/// The most a cell holds, its share of its row, provenance and resource list
+/// included: what the evaluator's docs promise per cell
+/// ([`LimitKind::CellsPerRun`]).
+const CELL_BYTES: usize = 256;
+
+/// What the memo's relations hold, each shared allocation once: their rows
+/// and cells, the text of each value, the key paths they keep, their
+/// resource lists, notes and failures. The fixed sizes are the types', so a
+/// type that grows shows here.
+fn held(memo: &RunMemo) -> usize {
+    use std::mem::size_of;
+    let mut seen = std::collections::HashSet::new();
+    let mut once = |at: *const u8, bytes: usize| {
+        if seen.insert(at as usize) { bytes } else { 0 }
+    };
+    let mut total = 0;
+    for outcome in memo.outcomes.iter().filter_map(OnceLock::get) {
+        let rows = match outcome {
+            Ok(rows) => rows,
+            Err(failures) => {
+                total += once(
+                    failures.as_ptr().cast(),
+                    failures.len() * size_of::<RelationFailure>(),
+                );
+                for failure in failures.iter() {
+                    total += once(failure.message.as_ptr(), failure.message.len());
+                }
+                continue;
+            }
+        };
+        total += size_of::<RelationRows>()
+            + rows.rows.capacity() * size_of::<FieldRow>()
+            + once(
+                rows.resources.as_ptr().cast(),
+                rows.resources.len() * size_of::<Resource>(),
+            );
+        for note in &rows.notes {
+            total += size_of::<RelationNote>() + note.message.capacity();
+        }
+        for row in &rows.rows {
+            total += row.cells.capacity() * size_of::<Cell>();
+            for cell in &row.cells {
+                let pointer = cell.at.pointer.as_ref();
+                total += once(
+                    Arc::as_ptr(&cell.at).cast(),
+                    size_of::<Provenance>() + pointer.map_or(0, Pointer::heap_bytes),
+                );
+                if let Some(path) = &cell.path {
+                    let bytes = size_of::<Pointer>() + path.heap_bytes();
+                    total += once(Arc::as_ptr(path).cast(), bytes);
+                }
+                total += match &cell.value {
+                    Some(Value::String(text)) => once(text.as_ptr(), text.len()),
+                    Some(Value::Number(number)) => {
+                        once(number.lexeme().as_ptr(), number.lexeme().len())
+                    }
+                    _ => 0,
+                };
+            }
+        }
+    }
+    total
+}
+
+/// The bound the evaluator's docs promise: what a run's relations hold is
+/// at most their cells at [`CELL_BYTES`] each, and the bytes they took.
+#[track_caller]
+fn assert_held_within_the_bound(memo: &RunMemo) {
+    let held = held(memo);
+    let bound = memo.cells() * CELL_BYTES + memo.bytes();
+    assert!(
+        held <= bound,
+        "the relations hold {held} bytes, more than their {} cells and {} bytes allow ({bound})",
+        memo.cells(),
+        memo.bytes()
+    );
+}
+
+/// The text of a string cell.
+fn text(cell: &Cell) -> &Arc<str> {
+    match &cell.value {
+        Some(Value::String(text)) => text,
+        other => panic!("not a string: {other:?}"),
+    }
+}
+
+const BYTES_EXHAUSTED: &str = "so the relation is not evaluated rather than cut short; a run's \
+    relations hold each file they decode and each key path, path token and transformed value \
+    they build, so read fewer or smaller files (narrow the selector or the `at:` paths) or bind \
+    fewer key and path fields";
+
+/// A value copied into many fields is held once: 64 `value` fields over one
+/// `whole_file` read take 65 cells and the decode's bytes, and no field
+/// copies the file's text.
+#[test]
+fn a_value_bound_to_many_fields_is_held_once() {
+    let body = "x".repeat(64 * 1024);
+    let tree = tree(&[("big.txt", body.as_str())]);
+    let names: Vec<String> = (0..64).map(|field| format!("f{field}")).collect();
+    let fields: Vec<(&str, FieldSource)> = names
+        .iter()
+        .map(|name| (name.as_str(), FieldSource::Value))
+        .collect();
+    let whole_file = Rows::Part(Part {
+        from: from("big.txt"),
+        reader: Reader::Read {
+            read: Read::WholeFile,
+            optional: false,
+        },
+    });
+    let plan = plan(vec![named("wide", whole_file, &fields)]);
+    // The decode holds the text and one row: a little more than the text.
+    let limits = limit(LimitKind::CellsPerRun, 65)
+        .with(LimitKind::BytesPerRun, body.len() + 1024)
+        .unwrap();
+    let memo = RunMemo::new(Arc::clone(&plan));
+    let rows = run_with_memo(&plan, 0, &tree, limits, &memo).unwrap();
+    assert_eq!((memo.cells(), rows.rows.len()), (65, 1));
+    assert_held_within_the_bound(&memo);
+    let first = text(&rows.rows[0].cells[0]);
+    assert_eq!(first.len(), body.len());
+    for cell in &rows.rows[0].cells {
+        assert!(Arc::ptr_eq(first, text(cell)), "a field copied the text");
+    }
+    // The decode alone takes more bytes than the text.
+    let short = limit(LimitKind::BytesPerRun, body.len());
+    assert_eq!(
+        messages(&run(&plan, 0, &tree, short)),
+        [format!(
+            "big.txt: relation `wide` (.alint.yml): relation limit `bytes_per_run` ({}) reached: \
+             {} bytes, {BYTES_EXHAUSTED}",
+            body.len(),
+            memo.bytes()
+        )]
+    );
+}
+
+/// A join copies its sides' cells without their text: 100 chained joins over
+/// a 64 KiB value hold the text once.
+#[test]
+fn a_chain_of_joins_copies_values_without_their_text() {
+    let body = "v".repeat(64 * 1024);
+    let tree = tree(&[("big.txt", body.as_str())]);
+    let whole_file = Rows::Part(Part {
+        from: from("big.txt"),
+        reader: Reader::Read {
+            read: Read::WholeFile,
+            optional: false,
+        },
+    });
+    let joins = 100;
+    let mut relations = vec![named("base", whole_file, &[("v", FieldSource::Value)])];
+    for join in 0..joins {
+        relations.push(named(
+            &format!("j{join}"),
+            Rows::Join(JoinDef {
+                left: reached(join),
+                right: reached(0),
+                on: vec![("v".into(), "v".into())],
+                unique: JoinSide::Right,
+            }),
+            &[("v", FieldSource::Side(JoinSide::Left, "v".into()))],
+        ));
+    }
+    let plan = plan(relations);
+    // The base reads one file into one row; each join builds one row.
+    let limits = limit(LimitKind::CellsPerRun, 2 + joins)
+        .with(LimitKind::BytesPerRun, body.len() + 1024)
+        .unwrap();
+    let memo = RunMemo::new(Arc::clone(&plan));
+    let last = run_with_memo(&plan, joins, &tree, limits, &memo).unwrap();
+    assert_held_within_the_bound(&memo);
+    let base = memo.outcomes[0].get().unwrap().as_ref().unwrap();
+    assert!(Arc::ptr_eq(
+        text(&base.rows[0].cells[0]),
+        text(&last.rows[0].cells[0])
+    ));
+}
+
+/// The `entry.*` fields of a row share what they copy: a long key bound to
+/// many fields, as `entry.key`, `entry.root` and `entry.path`, is built once
+/// per source, and a path token once per resource.
+#[test]
+fn a_rows_entry_fields_share_each_source_once() {
+    let key = "k".repeat(16 * 1024);
+    let body = format!(r#"{{"{key}": {{"a": 1, "b": 2}}}}"#);
+    let tree = tree(&[("a.json", body.as_str())]);
+    let sources = [
+        FieldSource::EntryKey,
+        FieldSource::EntryRoot,
+        FieldSource::EntryPath,
+        FieldSource::Path(crate::relation::plan::PathToken::Path),
+    ];
+    let names: Vec<String> = (0..64).map(|field| format!("f{field}")).collect();
+    let fields: Vec<(&str, FieldSource)> = names
+        .iter()
+        .enumerate()
+        .map(|(field, name)| (name.as_str(), sources[field % 4].clone()))
+        .collect();
+    let leaves = Rows::Part(Part {
+        from: from("a.json"),
+        reader: Reader::Entries(Entries {
+            format: EntriesFormat::Json,
+            at: vec!["$".into()],
+            leaves: true,
+        }),
+    });
+    let plan = plan(vec![named("keys", leaves, &fields)]);
+    // Two leaves under the long key: the decode holds the key in each
+    // row's key path, and each row its own copy of the key path, `entry.key`
+    // (one letter), `entry.root` and `entry.path`'s text and key path.
+    let limits = limit(LimitKind::CellsPerRun, 1 + 2 * 64)
+        .with(LimitKind::BytesPerRun, 12 * key.len())
+        .unwrap();
+    let memo = RunMemo::new(Arc::clone(&plan));
+    let rows = run_with_memo(&plan, 0, &tree, limits, &memo).unwrap();
+    assert_eq!(rows.rows.len(), 2);
+    assert_held_within_the_bound(&memo);
+    for row in &rows.rows {
+        for (field, cell) in row.cells.iter().enumerate() {
+            let shared = &row.cells[field % 4];
+            assert!(Arc::ptr_eq(text(shared), text(cell)), "field {field}");
+            assert_eq!(
+                shared.path.as_ref().map(Arc::as_ptr),
+                cell.path.as_ref().map(Arc::as_ptr)
+            );
+        }
+    }
+    assert_eq!(text(&rows.rows[1].cells[0]).as_ref(), "b");
+    assert_eq!(text(&rows.rows[1].cells[1]).as_ref(), key);
+    assert!(Arc::ptr_eq(
+        text(&rows.rows[0].cells[3]),
+        text(&rows.rows[1].cells[3])
+    ));
+}
+
+/// A union of 40 parts over 25 files and a chain of 1,000 joins over it: the
+/// union lists each file once, the joins share its list, and the run holds
+/// what its cells allow (as `cells_per_run` of 1,000, a cell per file each
+/// part reads, and next to no bytes, admit).
+#[test]
+fn a_chain_of_joins_shares_its_sides_resources() {
+    let files: Vec<String> = (0..25).map(|file| format!("f{file:02}.json")).collect();
+    let tree = tree(
+        &files
+            .iter()
+            .map(|path| (path.as_str(), "{}"))
+            .collect::<Vec<_>>(),
+    );
+    let part = Part {
+        from: from("*.json"),
+        reader: Reader::Entries(Entries {
+            format: EntriesFormat::Json,
+            at: vec!["$.nope".into()],
+            leaves: false,
+        }),
+    };
+    let joins = 1_000;
+    let mut relations = vec![named(
+        "base",
+        Rows::Union(vec![part; 40]),
+        &[("k", FieldSource::EntryKey)],
+    )];
+    for join in 0..joins {
+        relations.push(named(
+            &format!("j{join}"),
+            Rows::Join(JoinDef {
+                left: reached(join),
+                right: reached(0),
+                on: vec![("k".into(), "k".into())],
+                unique: JoinSide::Right,
+            }),
+            &[("k", FieldSource::Side(JoinSide::Left, "k".into()))],
+        ));
+    }
+    let plan = plan(relations);
+    let memo = RunMemo::new(Arc::clone(&plan));
+    let limits = limit(LimitKind::CellsPerRun, 40 * 25)
+        .with(LimitKind::BytesPerRun, 1)
+        .unwrap();
+    let last = run_with_memo(&plan, joins, &tree, limits, &memo).unwrap();
+    assert_held_within_the_bound(&memo);
+    let base = memo.outcomes[0].get().unwrap().as_ref().unwrap();
+    let listed: Vec<&str> = base.resources.iter().map(|r| r.path().as_str()).collect();
+    assert_eq!(listed, files, "each file once, in path order");
+    assert!(Arc::ptr_eq(&base.resources, &last.resources));
+}
+
+/// A chain of joins over a relation that fails shares its failures: each
+/// join fails with the base's list, not a copy, and the run takes the
+/// base's bytes once.
+#[test]
+fn a_chain_of_joins_over_a_failure_shares_its_failures() {
+    let files: Vec<String> = (0..25).map(|file| format!("f{file:02}.json")).collect();
+    let tree = tree(
+        &files
+            .iter()
+            .map(|path| (path.as_str(), "{"))
+            .collect::<Vec<_>>(),
+    );
+    let joins = 1_000;
+    let mut relations = vec![named(
+        "base",
+        entries("*.json", "$"),
+        &[("k", FieldSource::EntryKey)],
+    )];
+    for join in 0..joins {
+        relations.push(named(
+            &format!("j{join}"),
+            Rows::Join(JoinDef {
+                left: reached(join),
+                right: reached(0),
+                on: vec![("k".into(), "k".into())],
+                unique: JoinSide::Right,
+            }),
+            &[("k", FieldSource::Side(JoinSide::Left, "k".into()))],
+        ));
+    }
+    let plan = plan(relations);
+    // The base's failures, alone, take this many bytes.
+    let alone = RunMemo::new(Arc::clone(&plan));
+    let base = run_with_memo(&plan, 0, &tree, Limits::default(), &alone).unwrap_err();
+    assert_eq!(base.len(), 25);
+    let memo = RunMemo::new(Arc::clone(&plan));
+    let limits = limit(LimitKind::BytesPerRun, alone.bytes());
+    let last = run_with_memo(&plan, joins, &tree, limits, &memo).unwrap_err();
+    assert_held_within_the_bound(&memo);
+    assert_eq!(memo.bytes(), alone.bytes());
+    let base = memo.outcomes[0].get().unwrap().as_ref().unwrap_err();
+    assert!(
+        Arc::ptr_eq(base, &last),
+        "the last join copied the base's failures"
+    );
+    // A list the run has no bytes left for gives way to one failure that
+    // says so.
+    let short = limit(LimitKind::BytesPerRun, alone.bytes() - 1);
+    assert_eq!(
+        messages(&run(&plan, 0, &tree, short)),
+        [format!(
+            "relation `base` (.alint.yml): relation limit `bytes_per_run` ({}) reached: {} bytes, \
+             {BYTES_EXHAUSTED}",
+            alone.bytes() - 1,
+            alone.bytes()
+        )]
+    );
+}
+
+/// A transform changes each text once, however many rows share it, and a
+/// text it leaves as it was stays shared: 30 parts over one file lowered
+/// take the lowered lines' bytes once.
+#[test]
+fn rows_that_share_a_value_share_what_a_transform_makes_of_it() {
+    let body = (0..100)
+        .map(|line| format!("Line{line}\nl{line}\n"))
+        .collect::<Vec<_>>()
+        .concat();
+    let tree = tree(&[("list.txt", &body)]);
+    let listed = named(
+        "listed",
+        Rows::Union(vec![lines("list.txt"); 30]),
+        &[("line", FieldSource::Value)],
+    );
+    // Untransformed, the relation holds the decode's bytes.
+    let untransformed = RunMemo::new(plan(vec![listed.clone()]));
+    let as_read = Arc::clone(untransformed.plan());
+    run_with_memo(&as_read, 0, &tree, Limits::default(), &untransformed).unwrap();
+    let decode = untransformed.bytes();
+    // Lowered, it holds each of the 100 capitalized lines lowered once.
+    let mut lowering = listed;
+    lowering.relation.transforms = vec![("line".into(), vec![Transform::Lower])];
+    let plan = plan(vec![lowering]);
+    let lowered: usize = (0..100).map(|line| format!("line{line}").len()).sum();
+    let memo = RunMemo::new(Arc::clone(&plan));
+    let limits = limit(LimitKind::BytesPerRun, decode + lowered);
+    let rows = run_with_memo(&plan, 0, &tree, limits, &memo).unwrap();
+    assert_eq!(rows.rows.len(), 30 * 200);
+    assert_held_within_the_bound(&memo);
+    let (first, second) = (&rows.rows[0].cells[0], &rows.rows[200].cells[0]);
+    assert_eq!(text(first).as_ref(), "line0");
+    assert!(Arc::ptr_eq(text(first), text(second)), "lowered twice");
+    // `l0` was lower case already: the decode's text, shared.
+    assert!(Arc::ptr_eq(
+        text(&rows.rows[1].cells[0]),
+        text(&rows.rows[201].cells[0])
+    ));
+    assert_eq!(
+        messages(&run(
+            &plan,
+            0,
+            &tree,
+            limit(LimitKind::BytesPerRun, decode + lowered - 1)
+        )),
+        [format!(
+            "relation `listed` (.alint.yml): relation limit `bytes_per_run` ({}) reached: {} \
+             bytes, {BYTES_EXHAUSTED}",
+            decode + lowered - 1,
+            decode + lowered
+        )]
+    );
+}
+
+/// Rows a join gives one key path share what `strip-root` makes of it: 100
+/// rows matched to one entry strip its key path once.
+#[test]
+fn rows_that_share_a_key_path_share_what_strip_root_makes_of_it() {
+    let refs: String = "x\n".repeat(100);
+    let tree = tree(&[
+        ("en.json", r#"{"en": {"title": "x"}}"#),
+        ("refs.txt", &refs),
+    ]);
+    let keys = named(
+        "keys",
+        Rows::Part(Part {
+            from: from("en.json"),
+            reader: Reader::Entries(Entries {
+                format: EntriesFormat::Json,
+                at: vec!["$".into()],
+                leaves: true,
+            }),
+        }),
+        &[
+            ("path", FieldSource::EntryPath),
+            ("value", FieldSource::EntryValue),
+        ],
+    );
+    let refs = named(
+        "refs",
+        Rows::Part(lines("refs.txt")),
+        &[("value", FieldSource::Value)],
+    );
+    let mut used = named(
+        "used",
+        Rows::Join(JoinDef {
+            left: reached(2),
+            right: reached(1),
+            on: vec![("value".into(), "value".into())],
+            unique: JoinSide::Right,
+        }),
+        &[("path", FieldSource::Side(JoinSide::Right, "path".into()))],
+    );
+    let plan = plan(vec![used.clone(), keys, refs]);
+    // Unstripped, the run holds the decodes and the entry's key path.
+    let unstripped = RunMemo::new(Arc::clone(&plan));
+    run_with_memo(&plan, 0, &tree, Limits::default(), &unstripped).unwrap();
+    used.relation.transforms = vec![("path".into(), vec![Transform::StripRoot])];
+    let plan = self::plan(vec![
+        used,
+        plan.relations[1].clone(),
+        plan.relations[2].clone(),
+    ]);
+    let title = Pointer::root().key("title");
+    let stripped = super::shared_pointer_bytes(&title) + "title".len();
+    let memo = RunMemo::new(Arc::clone(&plan));
+    let limits = limit(LimitKind::BytesPerRun, unstripped.bytes() + stripped);
+    let rows = run_with_memo(&plan, 0, &tree, limits, &memo).unwrap();
+    assert_eq!(rows.rows.len(), 100);
+    assert_held_within_the_bound(&memo);
+    let first = rows.rows[0].cells[0].path.as_ref().unwrap();
+    assert_eq!(**first, title);
+    for row in &rows.rows {
+        assert!(Arc::ptr_eq(first, row.cells[0].path.as_ref().unwrap()));
+    }
+}

@@ -261,6 +261,11 @@ pub struct FileIndex {
     /// indexes share the full index's caches.
     reads: OnceLock<std::sync::Arc<crate::relation::ReadCache>>,
     decodes: OnceLock<std::sync::Arc<crate::relation::DecodeCache>>,
+    /// The relations a run evaluated ([`crate::relation::eval`]), set by the
+    /// first evaluation: a run that evaluates none allocates nothing. Not
+    /// shared with a filtered index, whose files select other rows, and
+    /// forgotten with the caches after a fix changes files.
+    relation_memo: std::sync::Mutex<Option<std::sync::Arc<crate::relation::eval::RunMemo>>>,
     /// The options [`walk`] built this index with; `None` for an index built
     /// from entries. `git_tracked_only` reads them to find the tracked files
     /// that ignore files hid ([`tracked_entries_ignore_files_hid`]).
@@ -299,6 +304,7 @@ impl FileIndex {
             facts: OnceLock::new(),
             reads: OnceLock::new(),
             decodes: OnceLock::new(),
+            relation_memo: std::sync::Mutex::new(None),
             walk_options: None,
         }
     }
@@ -376,10 +382,42 @@ impl FileIndex {
             .get_or_init(|| std::sync::Arc::new(crate::relation::DecodeCache::new()));
     }
 
+    /// This run's relation memo for `plan`, set on first use; `None` inside
+    /// a nested rule's iteration, as for [`read_cache`](Self::read_cache),
+    /// and for a plan other than the one the memo was set for.
+    pub(crate) fn relation_memo(
+        &self,
+        plan: &std::sync::Arc<crate::relation::plan::Plan>,
+    ) -> Option<std::sync::Arc<crate::relation::eval::RunMemo>> {
+        if crate::relation::in_iteration_scope() {
+            return None;
+        }
+        let mut slot = self.relation_memo.lock().expect("relation memo lock");
+        let memo = slot.get_or_insert_with(|| {
+            std::sync::Arc::new(crate::relation::eval::RunMemo::new(std::sync::Arc::clone(
+                plan,
+            )))
+        });
+        std::sync::Arc::ptr_eq(memo.plan(), plan).then(|| std::sync::Arc::clone(memo))
+    }
+
+    /// Whether a relation evaluation set this index's memo. Test/diagnostic
+    /// only: a run whose rules read no relation leaves it unset.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn relation_memo_is_set(&self) -> bool {
+        self.relation_memo
+            .lock()
+            .expect("relation memo lock")
+            .is_some()
+    }
+
     /// Clear both relation caches, if enabled, so later reads see the tree as
-    /// it is now. Filtered indexes share them, so they see it too.
+    /// it is now. Filtered indexes share them, so they see it too. The
+    /// relation memo goes with them.
     #[doc(hidden)]
     pub fn clear_relation_caches(&self) {
+        *self.relation_memo.lock().expect("relation memo lock") = None;
         if let Some(cache) = self.reads.get() {
             cache.clear();
         }

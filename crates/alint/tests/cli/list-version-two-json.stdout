@@ -1,0 +1,57 @@
+{
+  "kind": "rule-inventory",
+  "relations": [
+    {
+      "aliases": [
+        {
+          "alias": "deps",
+          "in": ".alint.yml"
+        }
+      ],
+      "name": "ranges",
+      "source": "deps.yml"
+    },
+    {
+      "aliases": [],
+      "name": "titles",
+      "source": ".alint.yml"
+    },
+    {
+      "aliases": [],
+      "name": "pinned",
+      "source": ".alint.yml"
+    }
+  ],
+  "rules": [
+    {
+      "categories": [
+        "existence"
+      ],
+      "conditional": false,
+      "expect_matches": false,
+      "fixable": false,
+      "id": "has-readme",
+      "kind": "file_exists",
+      "level": "error",
+      "policy_url": null
+    }
+  ],
+  "schema_version": 1,
+  "selectors": [
+    {
+      "aliases": [
+        {
+          "alias": "deps",
+          "in": ".alint.yml"
+        }
+      ],
+      "name": "manifests",
+      "source": "deps.yml"
+    },
+    {
+      "aliases": [],
+      "name": "docs",
+      "source": ".alint.yml"
+    }
+  ]
+}

@@ -620,6 +620,29 @@ fn help_wraps_to_narrow_terminal_width() {
     }
 }
 
+/// `validate-config --help` names every key of the JSON envelope it
+/// promises, on success and on failure.
+#[test]
+fn validate_config_help_lists_every_envelope_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let help = String::from_utf8(run(dir.path(), &["validate-config", "--help"]).stdout).unwrap();
+    for config in [
+        "version: 1\nrules: []\n",
+        "version: 2\nselectors:\n  s: { paths: a }\nrules: []\n",
+        "version: 1\nrules: [\n",
+    ] {
+        std::fs::write(dir.path().join(".alint.yml"), config).unwrap();
+        let output = run(dir.path(), &["validate-config", "--format", "json"]);
+        let envelope: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        for key in envelope.as_object().unwrap().keys() {
+            assert!(
+                help.contains(&format!("\"{key}\"")),
+                "`validate-config --help` does not name `{key}`:\n{help}"
+            );
+        }
+    }
+}
+
 // ─── Explain catalog detail for every kind (ADRs 0011, 0012; v0.19 W1) ─
 //
 // The generated per-kind bridges must yield a non-empty summary, docs deep
@@ -681,7 +704,7 @@ fn explain_surfaces_catalog_detail_for_every_kind() {
             human.contains(docs),
             "explain {id} human is missing its docs link:\n{human}"
         );
-        for label in ["capabilities:", "selectors:", "fix_ops:"] {
+        for label in ["capabilities:", "selector fields:", "fix_ops:"] {
             assert!(
                 human
                     .lines()
@@ -720,7 +743,7 @@ fn rules_show_and_search_over_summaries() {
             .into_owned();
     for expected in [
         "capabilities: spawn_user_command, env_export",
-        "selectors:    workdir (literal_path, rerootable), files_pattern (regex)",
+        "selector fields: workdir (literal_path, rerootable), files_pattern (regex)",
         "fix_ops:      none",
         "trace:        required=selection,assertion; optional=none; preview=false; nested=false",
     ] {
@@ -1333,5 +1356,125 @@ fn explain_redacts_secret_bearing_manifest_scope_values() {
         let rendered = String::from_utf8_lossy(&output.stdout);
         assert!(!rendered.contains(SECRET), "{rendered}");
         assert!(rendered.contains("<redacted:"), "{rendered}");
+    }
+}
+
+// ─── list: a version 2 config's named objects follow its rules ─────
+//
+// Only a version 2 config's inventory gains `selectors` and `relations`: a
+// version 1 config's document keeps its three keys. Named objects have no
+// kind, so `--category` lists rules only.
+#[test]
+fn list_adds_named_objects_for_version_two_only() {
+    let keys = |list: &serde_json::Value| -> Vec<String> {
+        list.as_object()
+            .expect("an object")
+            .keys()
+            .cloned()
+            .collect()
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let rule = "rules:\n  - id: has-readme\n    kind: file_exists\n    paths: README.md\n    \
+                level: error\n";
+    std::fs::write(dir.path().join(".alint.yml"), format!("version: 1\n{rule}")).unwrap();
+    let list: serde_json::Value =
+        serde_json::from_slice(&run(dir.path(), &["list", "--format", "json"]).stdout)
+            .expect("list --format json must be JSON");
+    assert_eq!(keys(&list), ["kind", "rules", "schema_version"]);
+
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        format!("version: 2\nselectors:\n  docs: {{ paths: 'docs/**' }}\n{rule}"),
+    )
+    .unwrap();
+    let list: serde_json::Value =
+        serde_json::from_slice(&run(dir.path(), &["list", "--format", "json"]).stdout)
+            .expect("list --format json must be JSON");
+    assert_eq!(
+        keys(&list),
+        ["kind", "relations", "rules", "schema_version", "selectors"]
+    );
+    assert_eq!(
+        list["selectors"],
+        serde_json::json!([{ "name": "docs", "source": ".alint.yml", "aliases": [] }])
+    );
+    assert_eq!(list["relations"], serde_json::json!([]));
+
+    let by_category: serde_json::Value = serde_json::from_slice(
+        &run(
+            dir.path(),
+            &["list", "--format", "json", "--category", "existence"],
+        )
+        .stdout,
+    )
+    .expect("list --format json must be JSON");
+    assert_eq!(keys(&by_category), ["kind", "rules", "schema_version"]);
+    let human =
+        String::from_utf8_lossy(&run(dir.path(), &["list", "--category", "existence"]).stdout)
+            .into_owned();
+    assert_eq!(human, "error    has-readme  file_exists\n");
+
+    // A config without rules still lists its objects.
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        "version: 2\nselectors:\n  docs: { paths: 'docs/**' }\n",
+    )
+    .unwrap();
+    let human = String::from_utf8_lossy(&run(dir.path(), &["list"]).stdout).into_owned();
+    assert_eq!(
+        human,
+        "(no rules loaded from config)\n\nselector docs  .alint.yml\n"
+    );
+}
+
+// `list` names each object's config by its path under the top-level config's
+// directory however that config is named: found from the working directory,
+// as a relative `--config`, or through a symlink to its directory. The loader
+// resolves each config's path, and named a config by its file name alone
+// wherever the directory's own path was not resolved too.
+#[test]
+fn list_names_each_config_by_its_path_under_the_root() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("repo");
+    for (relative, body) in [
+        (
+            "rules/base.yml",
+            "version: 2\nselectors:\n  base_docs: { paths: 'docs/**' }\n",
+        ),
+        (".alint.d/10.yml", "selectors:\n  frag: { paths: 'x/**' }\n"),
+        (
+            ".alint.yml",
+            "version: 2\nextends:\n  - url: ./rules/base.yml\n    as: base\nselectors:\n  \
+             own: { paths: 'y/**' }\nrules: []\n",
+        ),
+    ] {
+        let path = root.join(relative);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, body).unwrap();
+    }
+    let expected = format!(
+        "(no rules loaded from config)\n\nselector base_docs  {} (as base in .alint.yml)\n\
+         selector own  .alint.yml\nselector frag  {}\n",
+        Path::new("rules").join("base.yml").display(),
+        Path::new(".alint.d").join("10.yml").display()
+    );
+    let linked = dir.path().join("linked");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&root, &linked).unwrap();
+    // Without a symlink (Windows), the discovered config runs twice.
+    let through_link = cfg!(unix).then(|| linked.join(".alint.yml").display().to_string());
+    for config in [None, Some(".alint.yml".to_string()), through_link] {
+        let mut args = Vec::new();
+        if let Some(config) = &config {
+            args.extend(["-c", config.as_str()]);
+        }
+        args.push("list");
+        let output = run(&root, &args);
+        assert!(output.status.success(), "{config:?}: {output:?}");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            expected,
+            "{config:?}"
+        );
     }
 }

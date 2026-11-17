@@ -117,36 +117,73 @@ fn extract_expected_fields(msg: &str) -> Vec<&str> {
         .collect()
 }
 
-/// Standard Levenshtein edit distance. Linear in `a.len() * b.len()`;
-/// fine for field-name comparisons (≤ ~20 chars) and we only run this
-/// on the error path, not the hot path.
+/// Standard Levenshtein edit distance, which the tests check the bounded one
+/// against.
+#[cfg(test)]
 fn levenshtein(a: &str, b: &str) -> usize {
     let a: Vec<char> = a.chars().collect();
     let b: Vec<char> = b.chars().collect();
-    let n = a.len();
-    let m = b.len();
-    if n == 0 {
-        return m;
-    }
-    if m == 0 {
-        return n;
-    }
-    let mut dp: Vec<Vec<usize>> = vec![vec![0; m + 1]; n + 1];
-    for (i, row) in dp.iter_mut().enumerate().take(n + 1) {
-        row[0] = i;
-    }
-    for (j, cell) in dp[0].iter_mut().enumerate().take(m + 1) {
-        *cell = j;
-    }
-    for i in 1..=n {
-        for j in 1..=m {
-            let cost = usize::from(a[i - 1] != b[j - 1]);
-            dp[i][j] = (dp[i - 1][j] + 1)
-                .min(dp[i][j - 1] + 1)
-                .min(dp[i - 1][j - 1] + cost);
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut cur = vec![0; b.len() + 1];
+    for (i, ca) in a.iter().enumerate() {
+        cur[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            CELLS.with(|cells| cells.set(cells.get() + 1));
+            let cost = usize::from(ca != cb);
+            cur[j + 1] = (prev[j + 1] + 1).min(cur[j] + 1).min(prev[j] + cost);
         }
+        std::mem::swap(&mut prev, &mut cur);
     }
-    dp[n][m]
+    prev[b.len()]
+}
+
+/// The Levenshtein distance between `a` and `b` when it is at most `limit`,
+/// computing only the cells within `limit` of the table's diagonal (a path
+/// past them costs more than `limit`) and ending at the first row whose cells
+/// all exceed it. The unknown field is the key a config wrote, and the
+/// expected fields are read off the message, where a key holding backticks
+/// adds tokens of its own: a full table over a long key and a token as long
+/// cost their product (a 64 KB key, 8 GB), where this costs their length.
+fn levenshtein_within(a: &[char], b: &[char], limit: usize) -> Option<usize> {
+    if a.len().abs_diff(b.len()) > limit {
+        return None;
+    }
+    let over = limit + 1;
+    let mut prev: Vec<usize> = (0..=b.len()).map(|j| j.min(over)).collect();
+    let mut cur = vec![over; b.len() + 1];
+    for (i, ca) in a.iter().enumerate() {
+        let row = i + 1;
+        let low = row.saturating_sub(limit).max(1);
+        let high = (row + limit).min(b.len());
+        cur[0] = row.min(over);
+        if low > 1 {
+            cur[low - 1] = over;
+        }
+        let mut least = cur[low - 1];
+        for j in low..=high {
+            #[cfg(test)]
+            CELLS.with(|cells| cells.set(cells.get() + 1));
+            let cost = usize::from(*ca != b[j - 1]);
+            let cell = (prev[j] + 1)
+                .min(cur[j - 1] + 1)
+                .min(prev[j - 1] + cost)
+                .min(over);
+            cur[j] = cell;
+            least = least.min(cell);
+        }
+        if least > limit {
+            return None;
+        }
+        std::mem::swap(&mut prev, &mut cur);
+    }
+    Some(prev[b.len()]).filter(|distance| *distance <= limit)
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The cells [`levenshtein`] and [`levenshtein_within`] computed on this
+    /// thread.
+    static CELLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// Largest edit distance we ever surface as a "did you mean" suggestion.
@@ -158,16 +195,20 @@ const MAX_SUGGEST_DISTANCE: usize = 2;
 fn levenshtein_suggestion<'a>(wrong: &str, expected: &[&'a str]) -> Option<&'a str> {
     // Edit distance is >= the difference in length, and we only suggest within
     // `MAX_SUGGEST_DISTANCE`. So skip any candidate whose length differs by more
-    // than that *before* building the O(n*m) matrix (L9): this bounds the work
-    // on a hostile multi-kilobyte unknown-field name — every real field name is
-    // short, so a huge `wrong` matches nothing and no matrix is ever built.
-    let wrong_len = wrong.chars().count();
+    // than that before reading it further (L9): every real field name is short,
+    // so a huge `wrong` matches none of them. The rest cost their length each.
+    let wrong: Vec<char> = wrong.chars().collect();
     expected
         .iter()
-        .filter(|e| wrong_len.abs_diff(e.chars().count()) <= MAX_SUGGEST_DISTANCE)
-        .map(|&e| (e, levenshtein(wrong, e)))
+        .filter(|e| wrong.len().abs_diff(e.chars().count()) <= MAX_SUGGEST_DISTANCE)
+        .filter_map(|&e| {
+            let candidate: Vec<char> = e.chars().collect();
+            Some((
+                e,
+                levenshtein_within(&wrong, &candidate, MAX_SUGGEST_DISTANCE)?,
+            ))
+        })
         .min_by_key(|&(_, d)| d)
-        .filter(|&(_, d)| d <= MAX_SUGGEST_DISTANCE)
         .map(|(e, _)| e)
 }
 
@@ -388,6 +429,52 @@ mod tests {
         let msg = "unknown field `foo`, expected `bar`";
         let expected = extract_expected_fields(msg);
         assert_eq!(expected, vec!["bar"]);
+    }
+
+    /// The bounded distance is the distance wherever that is within the
+    /// limit: every pair of strings of up to five characters over a
+    /// three-letter alphabet, each limit up to three.
+    #[test]
+    fn the_bounded_distance_is_the_distance_within_its_limit() {
+        let mut words = vec![String::new()];
+        let mut last = vec![String::new()];
+        for _ in 0..5 {
+            last = last
+                .iter()
+                .flat_map(|word| ['a', 'b', 'é'].map(|c| format!("{word}{c}")))
+                .collect();
+            words.extend(last.iter().cloned());
+        }
+        for a in &words {
+            let a_chars: Vec<char> = a.chars().collect();
+            for b in &words {
+                let b_chars: Vec<char> = b.chars().collect();
+                let distance = levenshtein(a, b);
+                for limit in 0..=3 {
+                    assert_eq!(
+                        levenshtein_within(&a_chars, &b_chars, limit),
+                        (distance <= limit).then_some(distance),
+                        "{a:?} {b:?} {limit}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// A key holding backticks adds tokens to the expected fields serde's
+    /// message lists, one as long as the key: the suggestion weighs it in
+    /// work linear in its length, where a full table cost the product (a
+    /// 64 KB key took 8 GB).
+    #[test]
+    fn a_long_key_and_a_token_it_adds_cost_their_length() {
+        let key = "a".repeat(3_000);
+        let near = format!("{}b", "a".repeat(2_999));
+        let message = format!("unknown field `{key}` `{near}`, expected `pattern`");
+        CELLS.with(|cells| cells.set(0));
+        let out = enrich("file_content_forbidden", &message);
+        assert!(out.ends_with(&format!("did you mean: `{near}`?")), "{out}");
+        let cells = CELLS.with(std::cell::Cell::get);
+        assert!(cells <= 5 * key.len(), "{cells} cells");
     }
 
     #[test]

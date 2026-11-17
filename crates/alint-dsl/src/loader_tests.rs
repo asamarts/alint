@@ -435,6 +435,7 @@ rules:
 "#,
         Path::new(".alint.yml"),
         &SensitiveFieldEnvironment,
+        &TEST_ROOT,
     )
     .unwrap();
     let registry = alint_rules::builtin_registry();
@@ -455,6 +456,7 @@ fn sensitive_typed_and_builder_errors_never_echo_interpolated_values() {
         "version: 1\nrules:\n  - id: typed\n    kind: file_content_forbidden\n    paths: '**/*.txt'\n    pattern: x\n    expect_matches: '{{env.SECRET}}'\n    level: warning\n",
         Path::new(".alint.yml"),
         &SensitiveFieldEnvironment,
+        &TEST_ROOT,
     )
     .unwrap();
     let registry = alint_rules::builtin_registry();
@@ -469,6 +471,7 @@ fn sensitive_typed_and_builder_errors_never_echo_interpolated_values() {
         "version: 1\nrules:\n  - id: builder\n    kind: file_content_forbidden\n    paths: '**/*.txt'\n    pattern: '{{env.SECRET}}'\n    level: warning\n",
         Path::new(".alint.yml"),
         &InvalidRegexEnvironment,
+        &TEST_ROOT,
     )
     .unwrap();
     let config = raw.finalize(Some(registry.catalog())).unwrap();
@@ -481,17 +484,22 @@ fn sensitive_typed_and_builder_errors_never_echo_interpolated_values() {
 /// and building each rule with its nested rules, as `alint check` does.
 fn first_configuration_error(yaml: &str, environment: &dyn crate::EnvironmentProvider) -> String {
     let registry = alint_rules::builtin_registry();
-    parse_config_interpolated_inner_with_environment(yaml, Path::new(".alint.yml"), environment)
-        .and_then(|raw| raw.finalize(Some(registry.catalog())))
-        .and_then(|config| {
-            for spec in &config.rules {
-                let rule = registry.build(spec)?;
-                registry.validate_nested(spec, rule.as_ref())?;
-            }
-            Ok(())
-        })
-        .unwrap_err()
-        .to_string()
+    parse_config_interpolated_inner_with_environment(
+        yaml,
+        Path::new(".alint.yml"),
+        environment,
+        &TEST_ROOT,
+    )
+    .and_then(|raw| raw.finalize(Some(registry.catalog())))
+    .and_then(|config| {
+        for spec in &config.rules {
+            let rule = registry.build(spec)?;
+            registry.validate_nested(spec, rule.as_ref())?;
+        }
+        Ok(())
+    })
+    .unwrap_err()
+    .to_string()
 }
 
 #[test]
@@ -803,6 +811,7 @@ fn raw_config_type_errors_never_echo_interpolated_values() {
         "version: '{{env.SECRET}}'\nrules: []\n",
         Path::new(".alint.yml"),
         &SensitiveFieldEnvironment,
+        &TEST_ROOT,
     )
     .unwrap_err()
     .to_string();
@@ -848,4 +857,231 @@ rules:
     let rule = |id: &str| config.rules.iter().find(|rule| rule.id == id).unwrap();
     assert!(!rule("cleared").field_is_sensitive("pattern"));
     assert!(rule("tainted").field_is_sensitive("pattern"));
+}
+
+#[test]
+fn a_bundled_ruleset_must_be_version_one() {
+    assert!(decode_bundled("version: 1\nrules: []\n", "x@v1").is_ok());
+    for (body, expected) in [
+        (
+            "version: 2\nrules: []\n",
+            "alint://bundled/x@v1: a bundled ruleset must be `version: 1` in this build; \
+             `version: 2` is accepted only in local files (the top-level config, a local \
+             `extends:` target or an `.alint.d` fragment)",
+        ),
+        (
+            "version: 1\nselectors: {}\n",
+            "alint://bundled/x@v1: `selectors:` needs `version: 2`, which a bundled ruleset \
+             cannot use in this build: it must be `version: 1`",
+        ),
+        (
+            "version: 1\nextends:\n  - url: ./a.yml\n    as: a\n",
+            "alint://bundled/x@v1: `extends[0].as` needs `version: 2`, which a bundled ruleset \
+             cannot use in this build: it must be `version: 1`",
+        ),
+        (
+            "version: 2\nrules:\n  - {id: a, id: b}\n",
+            "alint://bundled/x@v1: a bundled ruleset must be `version: 1` in this build",
+        ),
+    ] {
+        let error = decode_bundled(body, "x@v1").unwrap_err();
+        assert!(matches!(error, Error::Internal(_)), "{error:?}");
+        assert!(error.to_string().contains(expected), "{error}");
+    }
+}
+
+/// Every ruleset this build ships is version 1 with nothing of version 2, and
+/// decodes once: the dispatch never needs to parse one to read its version.
+#[test]
+fn every_bundled_ruleset_is_plainly_version_one() {
+    for (name, rev) in crate::bundled::catalog() {
+        let spec = format!("{name}@{rev}");
+        let body = crate::bundled::resolve(&spec).unwrap();
+        let display = format!("alint://bundled/{spec}");
+        let config = deserialize_raw_config(body, &display).unwrap();
+        let origin = crate::v2::Origin::new(ConfigSourceClass::Bundled, &display);
+        assert!(crate::v2::plainly_v1(&config, &origin), "{spec}");
+        assert_eq!(
+            crate::v2::dispatch(decode_text(body).ok().as_ref(), body, &origin).unwrap(),
+            crate::v2::Surface::V1,
+            "{spec}"
+        );
+    }
+}
+
+/// A version 2 source's selectors and relations count toward the merged
+/// config's size, and the error says so.
+#[test]
+fn a_merged_config_counts_its_selectors_and_relations() {
+    let mut config = parse_config_interpolated_inner(
+        "version: 2\nselectors:\n  a: { paths: a }\nrelations:\n  r:\n    from: a\n    \
+         read: { json: $.x }\n    fields: { x: value }\nrules: []\n",
+        Path::new("/repo/.alint.yml"),
+    )
+    .unwrap();
+    config.ignore = (0..crate::MAX_MERGED_ENTRIES - 1)
+        .map(|i| i.to_string())
+        .collect();
+    let error = crate::merge(RawConfig::default(), config)
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        error,
+        format!(
+            "the merged config holds {} entries (rules, templates, facts, vars, `ignore:` \
+             patterns, selectors and relations), more than the {} supported; flatten the \
+             `extends:` chain or split the ruleset",
+            crate::MAX_MERGED_ENTRIES + 1,
+            crate::MAX_MERGED_ENTRIES
+        )
+    );
+}
+
+/// A `JSONPath` read from the environment: a dashed key the error's hint
+/// rewrites (`$['canary-secret']`), or one that is fine.
+#[derive(Debug)]
+struct JsonPathEnvironment;
+impl crate::EnvironmentProvider for JsonPathEnvironment {
+    fn get(&self, name: &str) -> Option<String> {
+        match name {
+            "AT" => Some("$.canary-secret".to_string()),
+            "FINE" => Some("$.fine".to_string()),
+            _ => None,
+        }
+    }
+}
+
+fn v2_error(yaml: &str) -> String {
+    parse_config_interpolated_inner_with_environment(
+        yaml,
+        Path::new(".alint.yml"),
+        &JsonPathEnvironment,
+        &TEST_ROOT,
+    )
+    .unwrap_err()
+    .to_string()
+}
+
+/// D3: a version 2 object's decode error stands only when the source with
+/// every environment value masked fails the same way; otherwise it is
+/// redacted, naming the object. A `JSONPath`'s hint quotes the path rewritten,
+/// which removing the value as written would miss.
+#[test]
+fn a_v2_object_error_that_could_quote_the_environment_is_redacted() {
+    let relation = |body: &str| {
+        format!(
+            "version: 2\nselectors:\n  docs: {{ paths: a.json }}\nrelations:\n  b:\n    from: \
+             docs\n{body}rules: []\n"
+        )
+    };
+    for body in [
+        "    entries: { format: json, at: '{{env.AT | default(\"$.x\")}}' }\n    fields: { k: \
+         entry.key }\n",
+        "    read: { json: '{{env.AT | default(\"$.x\")}}' }\n    fields: { v: value }\n",
+        "    read: { json: $.x }\n    fields: { v: value, n: 'bound: {{env.AT | \
+         default(\"$.x\")}}' }\n",
+    ] {
+        let error = v2_error(&relation(body));
+        assert_eq!(
+            error,
+            ".alint.yml: `relations.b`: <redacted> (the error could quote a value read from the \
+             environment)",
+            "{body}"
+        );
+    }
+
+    // An error the masked source repeats quotes no value: it stays readable.
+    let error = v2_error(&relation(
+        "    entries: { format: json, at: '{{env.FINE | default(\"$.x\")}}' }\n    fields: { k: \
+         entry.key }\n    colour: red\n",
+    ));
+    assert_eq!(
+        error,
+        ".alint.yml: `relations.b`: unknown key `colour` in a relation; expected one of `from`, \
+         `entries`, `read`, `optional`, `union`, `join`, `fields`, `transform`, `where`"
+    );
+    // And so does one that reads nothing from the environment.
+    let error = v2_error(&relation(
+        "    entries: { format: json, at: '$.canary-secret' }\n    fields: { k: entry.key }\n",
+    ));
+    assert_eq!(
+        error,
+        ".alint.yml: `relations.b.entries.at`: bad JSONPath \"$.canary-secret\": at position 8, \
+         parser error; JSONPath dot-notation requires identifier-shape keys (RFC 9535). For \
+         dashed keys, use bracket notation: `$['canary-secret']` instead of `$.canary-secret` (or \
+         `@['canary-secret']` instead of `@.canary-secret` inside a filter). See \
+         `docs/development/CONFIG-AUTHORING.md` § 10."
+    );
+}
+
+/// Values read from the environment that are valid where they are written and
+/// that a mask (`<redacted>`) is not: a format, a regex with a group, a join
+/// side and a transform.
+#[derive(Debug)]
+struct FieldEnvironment;
+impl crate::EnvironmentProvider for FieldEnvironment {
+    fn get(&self, name: &str) -> Option<String> {
+        match name {
+            "FORMAT" => Some("json".to_string()),
+            "PATTERN" => Some("x(.*)".to_string()),
+            "UNIQUE" => Some("left".to_string()),
+            "TRANSFORM" => Some("trim".to_string()),
+            "AT" => Some("$.canary-secret".to_string()),
+            _ => None,
+        }
+    }
+}
+
+fn v2_field_error(yaml: &str) -> String {
+    parse_config_interpolated_inner_with_environment(
+        yaml,
+        Path::new(".alint.yml"),
+        &FieldEnvironment,
+        &TEST_ROOT,
+    )
+    .unwrap_err()
+    .to_string()
+}
+
+/// The masked source a decode error is rerun on masks only the values of the
+/// object the error is about. An environment value in another object, where a
+/// mask is no valid value (a `format:`, a regex with a group, a join's
+/// `unique:`, a transform), fails that object first in a source masked
+/// whole, and redacted an error that quotes no value; it now reads as it
+/// would with no value read from the environment. An error about the object
+/// whose own value cannot be masked stays redacted.
+#[test]
+fn a_v2_object_error_beside_an_unmaskable_value_elsewhere_stays_readable() {
+    let typo = "  b:\n    from: s\n    read: { json: $.a }\n    fieldz: { v: value }\n";
+    let typo_message = ".alint.yml: `relations.b`: unknown key `fieldz` in a relation; expected \
+                        one of `from`, `entries`, `read`, `optional`, `union`, `join`, \
+                        `fields`, `transform`, `where`";
+    for elsewhere in [
+        "  a:\n    from: s\n    entries: { format: '{{env.FORMAT | default(\"x\")}}', at: $ }\n    \
+         fields: { k: entry.key }\n",
+        "  a:\n    from: s\n    read: { regex: '{{env.PATTERN | default(\"x\")}}' }\n    fields: \
+         { v: value }\n",
+        "  a:\n    from: s\n    read: { json: $.a }\n    fields: { v: value }\n    transform: { \
+         v: ['{{env.TRANSFORM | default(\"x\")}}'] }\n",
+        "  a:\n    from: s\n    read: { json: $.a }\n    fields: { v: value }\n  c:\n    from: \
+         s\n    read: { json: $.c }\n    fields: { w: value }\n  j:\n    join: { left: a, \
+         right: c, on: { v: w }, unique: '{{env.UNIQUE | default(\"x\")}}' }\n    fields: { x: \
+         left.v }\n",
+    ] {
+        let source = format!(
+            "version: 2\nselectors:\n  s: {{ paths: a.json }}\nrelations:\n{elsewhere}{typo}\
+             rules: []\n"
+        );
+        assert_eq!(v2_field_error(&source), typo_message, "{elsewhere}");
+    }
+    // The erroring object's own value: its masked copy fails elsewhere in it
+    // (no format is `<redacted>`), so the error is redacted.
+    let source = "version: 2\nselectors:\n  s: { paths: a.json }\nrelations:\n  b:\n    from: \
+                  s\n    entries: { format: '{{env.FORMAT | default(\"x\")}}', at: '{{env.AT | \
+                  default(\"$.x\")}}' }\n    fields: { k: entry.key }\nrules: []\n";
+    assert_eq!(
+        v2_field_error(source),
+        ".alint.yml: `relations.b`: <redacted> (the error could quote a value read from the \
+         environment)"
+    );
 }

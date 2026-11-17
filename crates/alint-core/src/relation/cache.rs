@@ -336,6 +336,19 @@ impl DecodeCache {
         bytes: &[u8],
         limits: &Limits,
     ) -> DecodeResult {
+        self.decode_fresh(adapter, resource, bytes, limits).0
+    }
+
+    /// [`decode`](Self::decode), and whether this call made the decode
+    /// rather than found it: the relation evaluator takes what a decode
+    /// holds from its run's bytes once, when it makes it.
+    pub(crate) fn decode_fresh(
+        &self,
+        adapter: &dyn Adapter,
+        resource: &Resource,
+        bytes: &[u8],
+        limits: &Limits,
+    ) -> (DecodeResult, bool) {
         let key = (adapter.id().to_string(), resource.path().clone(), *limits);
         let slot = {
             let mut slots = self.slots.lock().expect("decode cache lock");
@@ -344,13 +357,17 @@ impl DecodeCache {
                 .or_insert_with(|| Arc::new(OnceLock::new()))
                 .clone()
         };
-        slot.get_or_init(|| {
-            self.decodes.fetch_add(1, Ordering::Relaxed);
-            let output = adapter.extract(resource, bytes, limits)?;
-            self.budget.take(output.rows.len())?;
-            Ok(Arc::new(output))
-        })
-        .clone()
+        let mut fresh = false;
+        let result = slot
+            .get_or_init(|| {
+                fresh = true;
+                self.decodes.fetch_add(1, Ordering::Relaxed);
+                let output = adapter.extract(resource, bytes, limits)?;
+                self.budget.take(output.rows.len())?;
+                Ok(Arc::new(output))
+            })
+            .clone();
+        (result, fresh)
     }
 
     /// Forget every decode, with [`ReadCache::clear`]. The rows already taken

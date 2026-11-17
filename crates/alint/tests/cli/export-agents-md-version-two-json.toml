@@ -1,0 +1,3 @@
+bin.name = "alint"
+args = ["export-agents-md", "--format", "json"]
+fs.sandbox = true

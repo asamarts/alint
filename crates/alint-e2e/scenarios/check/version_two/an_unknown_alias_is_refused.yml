@@ -1,0 +1,28 @@
+test_version: 1
+name: a qualified reference through an alias the config does not give is refused
+tags: [check, version_two, extends]
+
+given:
+  tree: {}
+  config: |
+    version: 2
+    extends:
+      - url: ./support/version_two_base.yaml
+        as: base
+    relations:
+      deps:
+        from: { paths: "**/package.json" }
+        entries: { format: json, at: "$.dependencies" }
+        fields: { name: entry.key }
+      pinned:
+        join: { left: deps, right: bsae.pins, on: { name: name }, unique: right }
+        fields: { name: left.name }
+    rules: []
+
+when: [check]
+
+expect:
+  - exit: configuration_error
+    configuration_error:
+      message:
+        exact: ".an_unknown_alias_is_refused.inline.alint.yml: `relations.pinned.join.right`: no `extends:` alias `bsae` in this config (in `bsae.pins`); its aliases are `base`"

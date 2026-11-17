@@ -1,0 +1,23 @@
+test_version: 1
+name: every part of a union binds every field
+tags: [check, version_two]
+
+given:
+  tree: {}
+  config: |
+    version: 2
+    relations:
+      pins:
+        union:
+          - { from: { paths: .nvmrc }, read: { regex: '^v?(.*)' } }
+          - { from: { paths: package.json }, entries: { format: json, at: "$.engines" } }
+        fields: { file: path, version: value }
+    rules: []
+
+when: [check]
+
+expect:
+  - exit: configuration_error
+    configuration_error:
+      message:
+        exact: ".a_union_part_must_bind_every_field.inline.alint.yml: `relations.pins.fields.version`: every part of a union binds every field, and `union[1]` cannot bind `value`: `value` is a `read:` row's value; an `entries:` row has `entry.value`"

@@ -112,6 +112,15 @@ pub struct Config {
     /// one ([`crate::FixContext::config_files`]).
     #[serde(skip)]
     pub config_files: Vec<PathBuf>,
+    /// The resolved selectors and relations of a version 2 configuration
+    /// (`None` for version 1), recorded by the loader once every name has
+    /// resolved and the plan has been checked. Hidden from the documented
+    /// API because version 2 is experimental (ADR-0034 decision 1) and the
+    /// type belongs to the hidden relation layer; public so the CLI's `list`
+    /// and the rule kinds that read relations can reach it.
+    #[serde(skip)]
+    #[doc(hidden)]
+    pub relation_plan: Option<std::sync::Arc<crate::relation::plan::Plan>>,
 }
 
 // Returning `Option<u64>` (rather than bare `u64`) keeps the

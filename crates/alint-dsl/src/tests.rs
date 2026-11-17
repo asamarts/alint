@@ -5,7 +5,28 @@ mod loading;
 mod nested_config;
 mod remote_trust;
 mod resource_budgets;
+mod version_two;
+mod version_two_names;
+mod version_two_rows;
+mod version_two_schema;
 mod yaml_errors;
+
+/// Run `job` on a thread with a stack of `stack` bytes, and fail unless it
+/// returns within `limit` (a hang leaves the thread behind, but fails the test).
+pub(crate) fn on_thread<T: Send + 'static>(
+    stack: usize,
+    limit: std::time::Duration,
+    job: impl FnOnce() -> T + Send + 'static,
+) -> T {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .stack_size(stack)
+        .spawn(move || drop(sender.send(job())))
+        .unwrap();
+    receiver
+        .recv_timeout(limit)
+        .unwrap_or_else(|_| panic!("did not finish within {limit:?}"))
+}
 
 fn test_registry() -> &'static alint_core::RuleRegistry {
     static REGISTRY: std::sync::LazyLock<alint_core::RuleRegistry> =
@@ -163,4 +184,8 @@ fn config_new_matches_a_minimal_loaded_config() {
     );
     assert_eq!(built.baseline, loaded.baseline);
     assert!(built.environment_values.is_empty() && loaded.environment_values.is_empty());
+    assert!(
+        built.relation_plan.is_none() && loaded.relation_plan.is_none(),
+        "a version 1 config carries no plan"
+    );
 }

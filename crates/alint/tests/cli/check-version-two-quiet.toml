@@ -1,0 +1,4 @@
+# `--quiet` keeps the experimental-version warning: it is about what was loaded.
+bin.name = "alint"
+args = ["check", "--quiet", "."]
+fs.sandbox = true

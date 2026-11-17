@@ -2,15 +2,17 @@
 //! conversion to and from the plugin contract's flat form.
 
 use std::fmt;
+use std::sync::Arc;
 
 use super::path::RelPath;
 use crate::plugin_api::{FlatValue, Node};
 
 /// A number exactly as its source wrote it. YAML reads `1.10` as the float
 /// 1.1, and JSON and TOML have their own grammars, so comparison uses the
-/// lexeme unless a policy asks for a numeric transform.
+/// lexeme unless a policy asks for a numeric transform. The lexeme is shared,
+/// as a string value's text is ([`Value`]).
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Number(Box<str>);
+pub struct Number(Arc<str>);
 
 impl Number {
     /// A lexeme an adapter's parser already recognised as a number. `None`
@@ -35,12 +37,16 @@ impl fmt::Debug for Number {
 /// A row value. Domain scalars such as `semver` are added once several kinds
 /// consume them; inside alint that is additive, but in the WIT contract a new
 /// variant case is a breaking change and needs a new contract minor version.
+///
+/// A string's text, like a number's lexeme, is shared: a clone copies a
+/// pointer, so a relation that copies one value into many fields or through
+/// many joins holds its text once.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Value {
     Null,
     Bool(bool),
     Number(Number),
-    String(Box<str>),
+    String(Arc<str>),
     Bytes(Vec<u8>),
     Path(RelPath),
     List(Vec<Value>),
@@ -58,6 +64,38 @@ pub enum ContractValueError {
 }
 
 impl Value {
+    /// The bytes the value holds beyond its own size: a string's text, a
+    /// number's lexeme, and a list's or record's items. What the relation
+    /// evaluator charges to [`LimitKind::BytesPerRun`](super::LimitKind::BytesPerRun)
+    /// for a decoded value. Iterative, so value depth cannot exhaust the
+    /// stack.
+    pub(crate) fn heap_bytes(&self) -> usize {
+        let mut bytes = 0usize;
+        let mut pending = vec![self];
+        while let Some(value) = pending.pop() {
+            let held = match value {
+                Self::Null | Self::Bool(_) => 0,
+                Self::Number(number) => number.lexeme().len(),
+                Self::String(text) => text.len(),
+                Self::Bytes(bytes) => bytes.len(),
+                Self::Path(path) => path.as_str().len(),
+                Self::List(items) => {
+                    pending.extend(items);
+                    items.len() * std::mem::size_of::<Self>()
+                }
+                Self::Record(fields) => {
+                    pending.extend(fields.iter().map(|(_, item)| item));
+                    fields
+                        .iter()
+                        .map(|(name, _)| name.len() + std::mem::size_of::<(Box<str>, Self)>())
+                        .sum()
+                }
+            };
+            bytes = bytes.saturating_add(held);
+        }
+        bytes
+    }
+
     /// The value's contract form, in pre-order. Iterative, so value depth
     /// cannot exhaust the stack.
     #[must_use]

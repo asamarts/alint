@@ -830,3 +830,332 @@ fn an_unsupported_extends_scheme_fails_without_its_credentials() {
         );
     }
 }
+
+/// Every surface that loads a config, in each format that differs.
+const LOADING_SURFACES: [&[&str]; 8] = [
+    &["check"],
+    &["check", "--format", "json"],
+    &["validate-config"],
+    &["validate-config", "--format", "json"],
+    &["list"],
+    &["list", "--format", "json"],
+    &["export-agents-md"],
+    &["export-agents-md", "--format", "json"],
+];
+
+/// A version 2 relation's `JSONPath` read from the environment. The error's
+/// hint quotes the path rewritten (`$['canary-secret']`), which removing the
+/// value as written misses, so the error stands only when the config with the
+/// value masked fails the same way, and is redacted otherwise.
+#[test]
+fn a_v2_relation_error_read_from_the_environment_stays_redacted() {
+    let root = tempfile::tempdir().unwrap();
+    write(root.path(), "README.md", "hi\n");
+    let config = |body: &str| {
+        format!(
+            "version: 2\nselectors:\n  docs: {{ paths: a.json }}\nrelations:\n  b:\n    from: \
+             docs\n{body}rules: []\n"
+        )
+    };
+    let env = [("AT", "$.canary-secret")];
+    for body in [
+        "    entries: { format: json, at: '{{env.AT | default(\"$.x\")}}' }\n    fields: { k: \
+         entry.key }\n",
+        "    read: { json: '{{env.AT | default(\"$.x\")}}' }\n    fields: { v: value }\n",
+        "    read: { json: $.x }\n    fields: { v: value, n: 'bound: {{env.AT | \
+         default(\"$.x\")}}' }\n",
+    ] {
+        write(root.path(), ".alint.yml", &config(body));
+        for args in LOADING_SURFACES {
+            let output = run(root.path(), args, &env);
+            assert_redacted(&format!("{args:?} {body}"), &output, &["canary-secret"]);
+            // `validate-config --format json` reports it on stdout.
+            let text = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(
+                text.contains(
+                    ".alint.yml: `relations.b`: <redacted> (the error could quote a value read \
+                     from the environment)"
+                ),
+                "{args:?} {body}\n{text}"
+            );
+        }
+    }
+
+    // An error the masked config repeats stays readable beside the value.
+    write(
+        root.path(),
+        ".alint.yml",
+        &config(
+            "    entries: { format: json, at: '{{env.AT | default(\"$.x\")}}' }\n    fields: { \
+             k: entry.key }\n    colour: red\n",
+        ),
+    );
+    for args in LOADING_SURFACES {
+        let output = run(root.path(), args, &[("AT", "$.canary")]);
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(!output.status.success(), "{args:?}");
+        assert!(
+            text.contains(".alint.yml: `relations.b`: unknown key `colour` in a relation;"),
+            "{args:?}\n{text}"
+        );
+    }
+}
+
+/// A version 2 listing names the file that declares each selector and
+/// relation; one an `extends:` entry read from the environment loads is
+/// shown redacted, as an error naming it would be.
+#[test]
+fn a_v2_source_path_read_from_the_environment_stays_out_of_listings() {
+    let root = tempfile::tempdir().unwrap();
+    write(root.path(), "README.md", "hi\n");
+    write(
+        root.path(),
+        "canary-secret.yml",
+        "version: 2\nselectors:\n  docs: { paths: README.md }\nrules: []\n",
+    );
+    write(
+        root.path(),
+        ".alint.yml",
+        "version: 2\nextends:\n  - url: '{{env.EXTENDS | default(\"./x.yml\")}}'\n    as: \
+         deps\nselectors:\n  own: { paths: README.md }\nrules: []\n",
+    );
+    let env = [("EXTENDS", "./canary-secret.yml")];
+    for args in &LOADING_SURFACES[4..] {
+        let output = run(root.path(), args, &env);
+        assert!(
+            output.status.success(),
+            "{args:?}\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_left_out(&format!("{args:?}"), &output, &["canary-secret"]);
+    }
+    let stdout = String::from_utf8(run(root.path(), &["list"], &env).stdout).unwrap();
+    assert!(
+        stdout.ends_with(
+            "\nselector docs  <redacted> (as deps in .alint.yml)\nselector own  .alint.yml\n"
+        ),
+        "{stdout}"
+    );
+}
+
+/// Every position of a version 2 selector or relation that takes a value,
+/// with `{S}` where the value is read from the environment: what the decode
+/// checks, what the plan check compiles (globs, `scope_filter:` names and
+/// manifests), and what it quotes from a field (a `bound:` path, a join's
+/// copy of one, a literal).
+const V2_POSITIONS: &[&str] = &[
+    "selectors:\n  s:\n    paths: {S}\n",
+    "selectors:\n  s:\n    paths: [{S}]\n",
+    "selectors:\n  s:\n    paths: ['ok/**', {S}]\n",
+    "selectors:\n  s:\n    paths: { include: {S}, exclude: x }\n",
+    "selectors:\n  s:\n    paths: { include: x, exclude: {S} }\n",
+    "selectors:\n  s:\n    paths: 'pre/{T}/post'\n",
+    "selectors:\n  s:\n    paths: '*.json'\n    scope_filter: { has_ancestor: {S} }\n",
+    "selectors:\n  s:\n    paths: '*.json'\n    scope_filter: { has_ancestor: [{S}] }\n",
+    "selectors:\n  s:\n    paths: '*.json'\n    scope_filter: { has_ancestor: 'pre/{T}' }\n",
+    "selectors:\n  s:\n    paths: {S}\n    scope_filter: { has_ancestor: {S} }\n",
+    "selectors:\n  s:\n    paths: '*.json'\n    scope_filter: { include_manifest_paths: { source: \
+     {S}, at: $.w } }\n",
+    "selectors:\n  s:\n    paths: '*.json'\n    scope_filter: { include_manifest_paths: { source: \
+     a.json, at: {S} } }\n",
+    "selectors:\n  s:\n    paths: '*.json'\n    scope_filter: { exclude_manifest_paths: { source: \
+     {S}, at: $.w } }\n",
+    "selectors:\n  s:\n    paths: '*.json'\n    scope_filter: { exclude_manifest_paths: { source: \
+     a.json, at: $.w, format: {S} } }\n",
+    "{R}    entries: { format: {S}, at: $ }\n    fields: { k: entry.key }\n",
+    "{R}    entries: { format: json, at: {S} }\n    fields: { k: entry.key }\n",
+    "{R}    entries: { format: json, at: [$.a, {S}] }\n    fields: { k: entry.key }\n",
+    "{R}    entries: { format: json, at: '$.{T}' }\n    fields: { k: entry.key }\n",
+    "{R}    entries: { format: json, at: $, leaves: {S} }\n    fields: { k: entry.key }\n",
+    "{R}    read: { json: {S} }\n    fields: { v: value }\n",
+    "{R}    read: { json: '$.a.{T}' }\n    fields: { v: value }\n",
+    "{R}    read: { yaml: {S} }\n    fields: { v: value }\n",
+    "{R}    read: { toml: {S} }\n    fields: { v: value }\n",
+    "{R}    read: { regex: {S} }\n    fields: { v: value }\n",
+    "{R}    read: { regex: 'x({T})' }\n    fields: { v: value }\n",
+    "{R}    read: { lines: { comment: {S} } }\n    fields: { v: value }\n",
+    "{R}    read: { json: $.a }\n    optional: {S}\n    fields: { v: value }\n",
+    "{R}    read: { json: $.a }\n    fields: { v: value, b: 'bound: {T}' }\n",
+    "{R}    read: { json: $.a }\n    fields: { v: { source: value, sensitive: {S} } }\n",
+    "{R}    read: { json: $.a }\n    fields: { v: value }\n    transform: { v: [{S}] }\n",
+    "{R}    read: { json: $.a }\n    fields: { v: value }\n    where: { v: { matches: {S} } }\n",
+    "{R}    read: { json: $.a }\n    fields: { v: value }\n    where: { v: { not_matches: {S} } \
+     }\n",
+    "{R}    read: { json: $.a }\n    fields: { v: value }\n    where: { v: { in: [{S}] } }\n",
+    "{R}    read: { json: $.a }\n    fields: { v: path }\n    where: { v: { not_in: [{S}] } }\n",
+    "{R}    entries: { format: json, at: $ }\n    fields: { v: entry.value }\n    where: { v: { \
+     in: [{S}] } }\n",
+    "{R}    read: { json: $.a }\n    fields: { v: 'bound: {T}' }\n    transform: { v: \
+     [strip-root] }\n",
+    "{R}    read: { json: $.a }\n    fields: { v: 'bound: {T}' }\n    transform: { v: \
+     [semver-major] }\n",
+    "{R}    read: { regex: 'x(.*)' }\n    fields: { v: value, b: 'bound: {T}' }\n",
+    "relations:\n  r:\n    from: { paths: {S} }\n    read: { json: $.a }\n    fields: { v: value \
+     }\n",
+    "relations:\n  r:\n    from: { paths: '*.json', scope_filter: { has_ancestor: {S} } }\n    \
+     read: { json: $.a }\n    fields: { v: value }\n",
+    "selectors:\n  s:\n    paths: '*.json'\nrelations:\n  u:\n    union:\n      - { from: s, \
+     entries: { format: json, at: {S} } }\n      - { from: s, entries: { format: json, at: $.b } \
+     }\n    fields: { k: entry.key }\n",
+    "selectors:\n  s:\n    paths: '*.json'\nrelations:\n  u:\n    union:\n      - { from: s, read: \
+     { regex: {S} } }\n      - { from: s, read: { json: $.b } }\n    fields: { k: value }\n",
+    "relations:\n  u:\n    union:\n      - { from: { paths: '*.json', scope_filter: { \
+     has_ancestor: {S} } }, read: { json: $.a } }\n      - { from: { paths: {S} }, read: { json: \
+     $.b } }\n    fields: { k: value }\n",
+    "selectors:\n  s:\n    paths: '*.json'\nrelations:\n  u:\n    union:\n      - { from: s, read: \
+     { json: $.a } }\n      - { from: s, read: { regex: 'x(.*)' } }\n    fields: { v: 'bound: \
+     {T}' }\n",
+    "selectors:\n  s:\n    paths: '*.json'\nrelations:\n  a:\n    from: s\n    read: { json: $.a \
+     }\n    fields: { v: value, b: 'bound: {T}' }\n  c:\n    from: s\n    read: { json: $.b }\n    \
+     fields: { w: value }\n  j:\n    join: { left: a, right: c, on: { v: w }, unique: right }\n    \
+     fields: { x: left.b }\n    transform: { x: [strip-root] }\n",
+    "selectors:\n  s:\n    paths: '*.json'\nrelations:\n  a:\n    from: s\n    read: { json: $.a \
+     }\n    fields: { v: value }\n  c:\n    from: s\n    read: { json: $.b }\n    fields: { w: \
+     value }\n  j:\n    join: { left: a, right: c, on: { v: w }, unique: {S} }\n    fields: { x: \
+     left.v }\n",
+];
+
+/// Values that break each kind of value a position takes, long and short: a
+/// `JSONPath` whose dashed key a hint rewrites, a path whose basename a
+/// `has_ancestor:` hint quotes, a glob and a regex that do not compile, and
+/// values under the four characters the whole-value scrub removes. Each
+/// holds `canary`, or `QZ`, `Q/Z` or `$.Q`, which no output may print.
+const V2_CANARIES: &[&str] = &[
+    "$.canary-secret",
+    "../canary-secret.json",
+    "canary-secret/**/[",
+    "(?P<canary",
+    "[QZ",
+    "Q/Z",
+    "QZ",
+    "$.Q",
+];
+
+/// A version 2 value read from the environment reaches no output of any
+/// command, whole, cut or rewritten, wherever it is written and however it
+/// breaks the config: an error that could quote it is redacted unless the
+/// config with it masked fails the same way.
+#[test]
+fn a_v2_value_read_from_the_environment_reaches_no_output() {
+    let root = tempfile::tempdir().unwrap();
+    let cases: Vec<(usize, &str, &str)> = V2_POSITIONS
+        .iter()
+        .enumerate()
+        .flat_map(|(index, position)| {
+            V2_CANARIES
+                .iter()
+                .map(move |value| (index, *position, *value))
+        })
+        .collect();
+    for (index, position) in V2_POSITIONS.iter().enumerate() {
+        let dir = root.path().join(index.to_string());
+        let body = position
+            .replace(
+                "{R}",
+                "selectors:\n  s:\n    paths: '*.json'\nrelations:\n  r:\n    from: s\n",
+            )
+            .replace("{S}", "'{{env.S | default(\"x\")}}'")
+            .replace("{T}", "{{env.S | default(\"x\")}}");
+        write(
+            &dir,
+            ".alint.yml",
+            &format!("version: 2\n{body}rules: []\n"),
+        );
+        write(
+            &dir,
+            "a.json",
+            "{\"a\": \"x\", \"b\": \"y\", \"w\": [\"x\"]}\n",
+        );
+    }
+    let threads = std::thread::available_parallelism().map_or(4, |count| count.get().min(8));
+    let leaks: Vec<String> = std::thread::scope(|scope| {
+        let workers: Vec<_> = cases
+            .chunks(cases.len().div_ceil(threads))
+            .map(|chunk| {
+                let root = root.path();
+                scope.spawn(move || {
+                    let mut leaks = Vec::new();
+                    for &(index, position, value) in chunk {
+                        let dir = root.join(index.to_string());
+                        for args in LOADING_SURFACES {
+                            let output = run(&dir, args, &[("S", value)]);
+                            let text = format!(
+                                "{}{}",
+                                String::from_utf8_lossy(&output.stdout),
+                                String::from_utf8_lossy(&output.stderr)
+                            );
+                            let lower = text.to_lowercase();
+                            let leaked = ["anary", "ecret"].iter().any(|word| lower.contains(word))
+                                || ["QZ", "Q/Z", "$.Q"].iter().any(|word| text.contains(word));
+                            if leaked {
+                                leaks.push(format!("{position:?} S={value:?} {args:?}:\n{text}"));
+                            }
+                        }
+                    }
+                    leaks
+                })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .flat_map(|worker| worker.join().unwrap())
+            .collect()
+    });
+    assert!(
+        leaks.is_empty(),
+        "{} leaks:\n{}",
+        leaks.len(),
+        leaks.join("\n")
+    );
+}
+
+/// An error about one relation that quotes no value reads as written beside
+/// another relation that reads one where a mask is no valid value (a
+/// `format:`): the decode is rerun with only the erroring relation's values
+/// masked, and a plan-check error only with those of the relations its
+/// check reads.
+#[test]
+fn a_v2_error_beside_an_unmaskable_value_elsewhere_stays_readable() {
+    let root = tempfile::tempdir().unwrap();
+    write(root.path(), "a.json", "{\"a\": \"x\"}\n");
+    let config = |b: &str| {
+        format!(
+            "version: 2\nselectors:\n  s: {{ paths: a.json }}\nrelations:\n  a:\n    from: s\n    \
+             entries: {{ format: '{{{{env.FORMAT | default(\"x\")}}}}', at: $ }}\n    fields: {{ \
+             k: entry.key }}\n  b:\n    from: s\n    read: {{ json: $.a }}\n{b}rules: []\n"
+        )
+    };
+    for (b, message) in [
+        (
+            "    fieldz: { v: value }\n",
+            ".alint.yml: `relations.b`: unknown key `fieldz` in a relation; expected one of \
+             `from`, `entries`, `read`, `optional`, `union`, `join`, `fields`, `transform`, \
+             `where`",
+        ),
+        (
+            "    fields: { v: value }\n    transform: { vv: [trim] }\n",
+            ".alint.yml: `relations.b.transform.vv`: `vv` is not a field of relation `b`; its \
+             fields are `v`",
+        ),
+    ] {
+        write(root.path(), ".alint.yml", &config(b));
+        for args in LOADING_SURFACES {
+            let output = run(root.path(), args, &[("FORMAT", "json")]);
+            let text = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(!output.status.success(), "{args:?}");
+            assert!(text.contains(message), "{args:?}\n{text}");
+        }
+    }
+}

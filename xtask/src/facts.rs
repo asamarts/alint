@@ -25,7 +25,7 @@ use serde::Serialize;
 
 /// Bumped when the `facts.json` shape changes, so a downstream
 /// consumer (alint.org) can pin the schema it understands.
-const FORMAT_VERSION: u32 = 6;
+const FORMAT_VERSION: u32 = 7;
 
 static RULE_REGISTRY: LazyLock<alint_core::RuleRegistry> =
     LazyLock::new(alint_rules::builtin_registry);
@@ -71,8 +71,12 @@ struct Counts {
 }
 
 #[derive(Serialize)]
+#[allow(clippy::struct_field_names)] // The names are `facts.json` keys.
 struct Compatibility {
+    /// The stable config versions.
     config_versions: Vec<u32>,
+    /// The config versions a build loads as experimental (format v7).
+    experimental_config_versions: Vec<u32>,
     policy_test_versions: Vec<u32>,
 }
 
@@ -143,6 +147,7 @@ fn build_facts() -> Result<Facts> {
         config_versions: (alint_core::Config::MIN_SUPPORTED_VERSION
             ..=alint_core::Config::CURRENT_VERSION)
             .collect(),
+        experimental_config_versions: alint_dsl::EXPERIMENTAL_CONFIG_VERSIONS.to_vec(),
         policy_test_versions: vec![alint_testkit::POLICY_TEST_VERSION],
     };
     let rule_source_files = rule_source_files(&root)?;
@@ -661,11 +666,15 @@ mod tests {
     #[test]
     fn compatibility_inventory_comes_from_runtime_constants() {
         let facts = build_facts().expect("build facts");
-        assert_eq!(facts.format_version, 6);
+        assert_eq!(facts.format_version, 7);
         assert_eq!(
             facts.compatibility.config_versions,
             vec![alint_core::Config::CURRENT_VERSION]
         );
+        // `version: 2` is experimental in v0.23: listed apart, never among the
+        // stable versions.
+        assert_eq!(facts.compatibility.experimental_config_versions, vec![2]);
+        assert!(!facts.compatibility.config_versions.contains(&2));
         assert_eq!(
             facts.compatibility.policy_test_versions,
             vec![alint_testkit::POLICY_TEST_VERSION]

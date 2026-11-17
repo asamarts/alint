@@ -383,9 +383,153 @@ fn looks_like_typo(input: &str, target: &str) -> bool {
     levenshtein(input, target) <= 1
 }
 
-fn levenshtein(a: &str, b: &str) -> usize {
-    let a: Vec<char> = a.chars().collect();
-    let b: Vec<char> = b.chars().collect();
+/// `text`'s characters, which a [`Within`] weighs other names against:
+/// collected once however many names a suggestion weighs.
+pub(crate) fn chars_of(text: &str) -> Vec<char> {
+    let chars: Vec<char> = text.chars().collect();
+    #[cfg(test)]
+    DISTANCE_CHARS.with(|read| read.set(read.get() + chars.len()));
+    chars
+}
+
+/// The Levenshtein distance from `wanted` to a text fed to it a piece at a
+/// time, while that distance is at most `limit`. A distance within `limit`
+/// needs a path that stays within `limit` cells of the table's diagonal, so
+/// each character fed computes one row of `2 * limit + 1` cells, and a row
+/// whose cells all exceed `limit` ends the walk: no longer text comes back
+/// within it.
+///
+/// A config's names are untrusted, so a suggestion must cost neither the
+/// product of two long names nor a long name's length once per name it is
+/// weighed against: `wanted` is read once ([`chars_of`]); a name whose length
+/// cannot come within `limit` is skipped before a character of it is read
+/// ([`Within::may_reach`]); a name is read only as far as it can come within
+/// `limit`; and a prefix that many names share (an alias) is fed once, to a
+/// state each of them then continues from a clone of.
+#[derive(Debug, Clone)]
+pub(crate) struct Within<'w> {
+    wanted: &'w [char],
+    limit: usize,
+    /// The characters fed so far: the row `band` holds.
+    fed: usize,
+    /// Row `fed`'s cells for the columns `fed - limit ..= fed + limit`; a
+    /// column outside `0..=wanted.len()` holds `limit + 1`, as does any cell
+    /// past `limit`.
+    band: Vec<usize>,
+    /// The next row, as it is computed.
+    next: Vec<usize>,
+}
+
+impl<'w> Within<'w> {
+    pub(crate) fn new(wanted: &'w [char], limit: usize) -> Self {
+        let over = limit + 1;
+        // Row 0: column `j` holds `j`.
+        let band = (0..=2 * limit)
+            .map(|k| match k.checked_sub(limit) {
+                Some(column) if column <= wanted.len() => column.min(over),
+                _ => over,
+            })
+            .collect();
+        Self {
+            wanted,
+            limit,
+            fed: 0,
+            band,
+            next: vec![over; 2 * limit + 1],
+        }
+    }
+
+    /// Whether a text `bytes` long, fed next, could end within the limit: it
+    /// holds between a quarter of its bytes and all of them as characters.
+    pub(crate) fn may_reach(&self, bytes: usize) -> bool {
+        let wanted = self.wanted.len();
+        self.fed + bytes + self.limit >= wanted
+            && self.fed + bytes.div_ceil(4) <= wanted + self.limit
+    }
+
+    /// Feed `text`; `false` (and the text read no further) once no text that
+    /// starts with what has been fed can end within the limit.
+    pub(crate) fn feed(&mut self, text: &str) -> bool {
+        text.chars().all(|character| self.step(character))
+    }
+
+    /// The distance from `wanted` to the text fed, when it is within the
+    /// limit.
+    pub(crate) fn distance(&self) -> Option<usize> {
+        // Column `wanted.len()` of row `fed`.
+        let k = (self.wanted.len() + self.limit).checked_sub(self.fed)?;
+        self.band
+            .get(k)
+            .copied()
+            .filter(|distance| *distance <= self.limit)
+    }
+
+    /// Compute the row of one more character; `false` when none of its
+    /// cells is within the limit.
+    fn step(&mut self, character: char) -> bool {
+        #[cfg(test)]
+        DISTANCE_CHARS.with(|read| read.set(read.get() + 1));
+        let over = self.limit + 1;
+        let row = self.fed + 1;
+        let mut alive = false;
+        self.next.fill(over);
+        for k in 0..self.next.len() {
+            // Column `row - limit + k`; one left of column 0 holds `over`.
+            let Some(column) = (row + k).checked_sub(self.limit) else {
+                continue;
+            };
+            if column > self.wanted.len() {
+                break;
+            }
+            #[cfg(test)]
+            DISTANCE_CELLS.with(|cells| cells.set(cells.get() + 1));
+            let cell = if column == 0 {
+                row.min(over)
+            } else {
+                // Row `fed`'s band starts a column left of this one's, so the
+                // cell above-left is at `k` and the one above at `k + 1`.
+                let diagonal = self.band[k] + usize::from(self.wanted[column - 1] != character);
+                let above = self.band.get(k + 1).map_or(over, |cell| cell + 1);
+                let left = k.checked_sub(1).map_or(over, |left| self.next[left] + 1);
+                diagonal.min(above).min(left).min(over)
+            };
+            self.next[k] = cell;
+            alive |= cell <= self.limit;
+        }
+        std::mem::swap(&mut self.band, &mut self.next);
+        self.fed = row;
+        alive
+    }
+}
+
+/// The Levenshtein distance between `a` and `b` when it is at most `limit`
+/// ([`Within`]).
+#[cfg(test)]
+pub(crate) fn levenshtein_within(a: &str, b: &str, limit: usize) -> Option<usize> {
+    let a = chars_of(a);
+    let mut within = Within::new(&a, limit);
+    if !within.may_reach(b.len()) || !within.feed(b) {
+        return None;
+    }
+    within.distance()
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The edit-distance cells [`levenshtein`] and [`Within`] computed on
+    /// this thread: the tests bound the work a suggestion does.
+    pub(crate) static DISTANCE_CELLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// The characters [`chars_of`] collected and [`Within`] read on this
+    /// thread: a suggestion that copied or read a long name once per name it
+    /// weighs it against computes few cells, and this counts what it read.
+    pub(crate) static DISTANCE_CHARS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+pub(crate) fn levenshtein(a: &str, b: &str) -> usize {
+    let a = chars_of(a);
+    let b = chars_of(b);
+    #[cfg(test)]
+    DISTANCE_CELLS.with(|cells| cells.set(cells.get() + a.len() * b.len()));
     let mut prev: Vec<usize> = (0..=b.len()).collect();
     let mut cur = vec![0usize; b.len() + 1];
     for (i, ca) in a.iter().enumerate() {
@@ -742,5 +886,53 @@ mod tests {
         assert_eq!(levenshtein("en", "env"), 1);
         // `secrets` shares an `e` with `env`, so distance is 6 not 7.
         assert_eq!(levenshtein("secrets", "env"), 6);
+    }
+
+    /// The banded distance agrees with the full one wherever that is within
+    /// the limit, and is `None` past it: every pair of strings of up to five
+    /// characters over a three-letter alphabet, and some longer ones.
+    #[test]
+    fn the_bounded_distance_is_the_distance_within_its_limit() {
+        let mut words = vec![String::new()];
+        let mut last = vec![String::new()];
+        for _ in 0..5 {
+            last = last
+                .iter()
+                .flat_map(|word| ['a', 'b', 'é'].map(|c| format!("{word}{c}")))
+                .collect();
+            words.extend(last.iter().cloned());
+        }
+        for a in &words {
+            for b in &words {
+                let distance = levenshtein(a, b);
+                for limit in 0..=3 {
+                    let expected = (distance <= limit).then_some(distance);
+                    assert_eq!(
+                        levenshtein_within(a, b, limit),
+                        expected,
+                        "{a:?} {b:?} {limit}"
+                    );
+                }
+            }
+        }
+        let long = "selector-".repeat(30);
+        for other in [
+            format!("{long}x"),
+            format!("x{long}"),
+            format!("{}ab", &long[1..]),
+            format!("{}ab", &long[1..long.len() - 1]),
+            long.replacen("sel", "les", 1),
+            long.replacen("sel", "les", 2),
+            long.clone(),
+        ] {
+            let expected = Some(levenshtein(&long, &other)).filter(|distance| *distance <= 2);
+            assert_eq!(levenshtein_within(&long, &other, 2), expected, "{other}");
+            assert_eq!(levenshtein_within(&other, &long, 2), expected, "{other}");
+        }
+        assert_eq!(levenshtein_within(&long, &format!("x{long}"), 2), Some(1));
+        assert_eq!(
+            levenshtein_within(&long, &long.replacen("sel", "les", 2), 2),
+            None
+        );
     }
 }

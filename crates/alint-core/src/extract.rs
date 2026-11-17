@@ -15,6 +15,9 @@ use serde_json_path::JsonPath;
 
 use crate::structured_format::Format;
 
+mod yaml_rows;
+use yaml_rows::yaml_entry_rows;
+
 /// Runtime extraction mode, resolved from [`ExtractSpec`].
 #[derive(Clone)]
 pub enum Extract {
@@ -380,13 +383,50 @@ fn extract_entry_rows_with(
     max_rows: Option<usize>,
 ) -> std::result::Result<Vec<StructuredEntryRow>, EntryRowsError> {
     match format {
-        Format::Json => json_entry_rows(text, max_rows),
-        Format::Yaml => yaml_entry_rows(text, reject_yaml_features, max_rows),
+        Format::Json => json_entry_rows(text, max_rows, None),
+        Format::Yaml => yaml_entry_rows(text, reject_yaml_features, max_rows, None),
         Format::Dotenv => dotenv_entry_rows(text, max_rows),
         Format::Ini => ini_entry_rows(text, max_rows),
         Format::Properties => properties_entry_rows(text, max_rows),
         Format::Toml | Format::Xml | Format::Hcl => Err(EntryRowsError::UnsupportedFormat(format)),
     }
+}
+
+/// What one entry row's value holds, for a value-bearing relation's entry
+/// rows ([`extract_entry_values_bounded`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum EntryValue {
+    /// A scalar: null, a boolean, a number as the source wrote it, or a
+    /// string.
+    Scalar(crate::relation::Value),
+    Object,
+    Array,
+    /// A TOML date or time.
+    Datetime,
+    /// A YAML scalar whose core-schema tag cannot read it (`!!int abc`).
+    Unreadable,
+}
+
+/// [`extract_entry_rows_strict_yaml_bounded`] for JSON and YAML, with what
+/// each row's value holds beside it (`values[i]` is `rows[i]`'s value).
+///
+/// The number lexemes kept: JSON keeps every number as written (`1.10`,
+/// `1e3`, `-0`); YAML keeps every plain scalar the core schema reads as a
+/// number as written (`1.10`, `0x1F`, `0o17`, `+5`, `.inf`), and a quoted
+/// one is a string.
+pub(crate) fn extract_entry_values_bounded(
+    format: Format,
+    text: &str,
+    max_rows: usize,
+) -> std::result::Result<(Vec<StructuredEntryRow>, Vec<EntryValue>), EntryRowsError> {
+    let mut values = Vec::new();
+    let rows = match format {
+        Format::Json => json_entry_rows(text, Some(max_rows), Some(&mut values))?,
+        Format::Yaml => yaml_entry_rows(text, true, Some(max_rows), Some(&mut values))?,
+        _ => return Err(EntryRowsError::UnsupportedFormat(format)),
+    };
+    debug_assert_eq!(rows.len(), values.len());
+    Ok((rows, values))
 }
 
 pub(crate) fn json_parse_options() -> jsonc_parser::ParseOptions {
@@ -419,6 +459,7 @@ fn entry_capacity(
 fn json_entry_rows(
     text: &str,
     max_rows: Option<usize>,
+    mut values: Option<&mut Vec<EntryValue>>,
 ) -> std::result::Result<Vec<StructuredEntryRow>, EntryRowsError> {
     use jsonc_parser::{CollectOptions, CommentCollectionStrategy, parse_to_ast};
 
@@ -437,7 +478,14 @@ fn json_entry_rows(
     .map_err(|error| EntryRowsError::Parse(error.to_string()))?;
     let mut rows = Vec::new();
     if let Some(value) = ast.value.as_ref() {
-        collect_json_rows(value, &mut Vec::new(), offset, &mut rows, max_rows)?;
+        collect_json_rows(
+            value,
+            &mut Vec::new(),
+            offset,
+            &mut rows,
+            max_rows,
+            &mut values,
+        )?;
     }
     Ok(rows)
 }
@@ -448,6 +496,7 @@ fn collect_json_rows(
     offset: usize,
     rows: &mut Vec<StructuredEntryRow>,
     max_rows: Option<usize>,
+    values: &mut Option<&mut Vec<EntryValue>>,
 ) -> std::result::Result<(), EntryRowsError> {
     use jsonc_parser::ast::{ObjectPropName, Value};
     use jsonc_parser::common::Ranged as _;
@@ -470,15 +519,18 @@ fn collect_json_rows(
                         value_range.end + offset,
                     )),
                 });
+                if let Some(values) = values.as_deref_mut() {
+                    values.push(json_entry_value(&property.value));
+                }
                 parent.push(EntryPathSegment::Key(key));
-                collect_json_rows(&property.value, parent, offset, rows, max_rows)?;
+                collect_json_rows(&property.value, parent, offset, rows, max_rows, values)?;
                 parent.pop();
             }
         }
         Value::Array(array) => {
             for (index, element) in array.elements.iter().enumerate() {
                 parent.push(EntryPathSegment::Index(index));
-                collect_json_rows(element, parent, offset, rows, max_rows)?;
+                collect_json_rows(element, parent, offset, rows, max_rows, values)?;
                 parent.pop();
             }
         }
@@ -488,6 +540,27 @@ fn collect_json_rows(
         | Value::NullKeyword(_) => {}
     }
     Ok(())
+}
+
+/// What a JSON value holds; a number keeps its lexeme.
+fn json_entry_value(value: &jsonc_parser::ast::Value<'_>) -> EntryValue {
+    use crate::relation::{Number, Value as RowValue};
+    use jsonc_parser::ast::Value;
+
+    match value {
+        Value::Object(_) => EntryValue::Object,
+        Value::Array(_) => EntryValue::Array,
+        Value::StringLit(literal) => {
+            EntryValue::Scalar(RowValue::String(literal.value.as_ref().into()))
+        }
+        // The parser accepted it as a number, so the lexeme is not empty.
+        Value::NumberLit(literal) => Number::from_lexeme(literal.value)
+            .map_or(EntryValue::Unreadable, |number| {
+                EntryValue::Scalar(RowValue::Number(number))
+            }),
+        Value::BooleanLit(literal) => EntryValue::Scalar(RowValue::Bool(literal.value)),
+        Value::NullKeyword(_) => EntryValue::Scalar(RowValue::Null),
+    }
 }
 
 fn dotenv_entry_rows(
@@ -762,455 +835,6 @@ fn properties_physical_line(bytes: &[u8], start: usize) -> (usize, usize) {
         end
     };
     (end, next)
-}
-
-fn yaml_entry_rows(
-    text: &str,
-    reject_yaml_features: bool,
-    max_rows: Option<usize>,
-) -> std::result::Result<Vec<StructuredEntryRow>, EntryRowsError> {
-    use saphyr_parser::{Event, Parser};
-
-    let stripped = text.trim_start_matches('\u{feff}');
-    let offset = text.len() - stripped.len();
-    if stripped.len() > crate::structured_format::MAX_STRUCTURED_BYTES {
-        return Err(EntryRowsError::Parse(format!(
-            "input exceeds the maximum supported size for a structured document ({} bytes)",
-            crate::structured_format::MAX_STRUCTURED_BYTES
-        )));
-    }
-    // This input's share of the YAML parse budget, held until the rows are
-    // built (`yaml_budget`, ADR-0042).
-    let _budget = crate::yaml_budget::reserve(stripped.len());
-    // Keep the lexical flow guard ahead of saphyr's scanner, which refuses a
-    // 256th level of flow nesting of its own but does not bound block nesting
-    // (the event loop below bounds both): this one refuses flow nesting past
-    // 128, as the parser alint decodes with does.
-    let yaml_guards = crate::yaml_depth::scan_guards(stripped);
-    if !yaml_guards.flow_within_limit() {
-        return Err(EntryRowsError::Parse(
-            "YAML flow nesting exceeds the supported limit".to_string(),
-        ));
-    }
-
-    // Iterate the parser's non-recursive event interface rather than `load`,
-    // whose receiver walk recursively descends collections. This bounds block
-    // and flow collections, including compact `- -` / `- key:` forms, before
-    // this module performs any recursive traversal.
-    let mut events = Vec::new();
-    let mut collection_depth = 0usize;
-    for parsed in Parser::new_from_str(stripped) {
-        let (event, span) = parsed.map_err(|error| EntryRowsError::Parse(error.to_string()))?;
-        match &event {
-            Event::SequenceStart(..) | Event::MappingStart(..) => {
-                collection_depth += 1;
-                if collection_depth > crate::yaml_depth::MAX_YAML_FLOW_DEPTH {
-                    return Err(EntryRowsError::Parse(
-                        "YAML nesting exceeds the supported limit".to_string(),
-                    ));
-                }
-            }
-            Event::SequenceEnd | Event::MappingEnd => {
-                collection_depth = collection_depth.saturating_sub(1);
-            }
-            _ => {}
-        }
-        events.push((event, span));
-    }
-    let documents = events
-        .iter()
-        .filter(|(event, _)| matches!(event, Event::DocumentStart(_)))
-        .count();
-    if documents > 1 {
-        return Err(EntryRowsError::Parse(
-            "multi-document YAML is not supported for entry extraction".to_string(),
-        ));
-    }
-    // This guard drives a recursive discard-only deserializer when aliases are
-    // present, so run it only after collection depth is known safe and before
-    // traversing or materializing the parser result. saphyr reads what ayaml
-    // may refuse, so a text the guard could not read is refused too.
-    match yaml_guards.expansion(stripped) {
-        crate::yaml_depth::Expansion::WithinLimit => {}
-        crate::yaml_depth::Expansion::OverLimit => {
-            return Err(EntryRowsError::Parse(
-                "YAML alias expansion exceeds the maximum supported size".to_string(),
-            ));
-        }
-        crate::yaml_depth::Expansion::Unparsed(error) => {
-            return Err(EntryRowsError::Parse(format!(
-                "the YAML uses aliases, and their expansion cannot be bounded: {error}"
-            )));
-        }
-    }
-
-    let byte_offsets = YamlByteOffsets::new(stripped, &events);
-    let mut index = events
-        .iter()
-        .position(|(event, _)| {
-            matches!(
-                event,
-                Event::Scalar(..)
-                    | Event::SequenceStart(..)
-                    | Event::MappingStart(..)
-                    | Event::Alias(..)
-            )
-        })
-        .unwrap_or(events.len());
-    let mut rows = Vec::new();
-    let mut parent = Vec::new();
-    if index < events.len() {
-        parse_yaml_node(
-            &events,
-            &mut index,
-            &byte_offsets,
-            offset,
-            &mut parent,
-            &mut rows,
-            true,
-            stripped,
-            reject_yaml_features,
-            max_rows,
-        )?;
-    }
-    Ok(rows)
-}
-
-enum YamlByteOffsets {
-    Ascii(usize),
-    Utf8(Vec<(usize, usize)>),
-}
-
-impl YamlByteOffsets {
-    fn new(text: &str, events: &[(saphyr_parser::Event<'_>, saphyr_parser::Span)]) -> Self {
-        use saphyr_parser::Event;
-
-        // Delay endpoint allocation until the first non-ASCII character. Before
-        // that point character and byte indices are identical, so an all-ASCII
-        // document needs no mapping allocation and a UTF-8 document is still
-        // mapped in one pass over its source.
-        let mut endpoints: Option<Vec<(usize, usize)>> = None;
-        let mut needed = 0;
-        let mut character_len = 0;
-        for (character, (byte, value)) in text.char_indices().enumerate() {
-            if endpoints.is_none() && !value.is_ascii() {
-                let mut discovered = Vec::with_capacity(events.len() * 2);
-                for (event, span) in events {
-                    match event {
-                        Event::Scalar(
-                            _,
-                            saphyr_parser::ScalarStyle::Literal
-                            | saphyr_parser::ScalarStyle::Folded,
-                            ..,
-                        ) => {}
-                        Event::Scalar(..) | Event::Alias(..) => {
-                            discovered.push((span.start.index(), usize::MAX));
-                            discovered.push((span.end.index(), usize::MAX));
-                        }
-                        Event::SequenceStart(..) | Event::MappingStart(..) => {
-                            discovered.push((span.start.index(), usize::MAX));
-                        }
-                        Event::SequenceEnd | Event::MappingEnd => {
-                            discovered.push((span.end.index(), usize::MAX));
-                        }
-                        _ => {}
-                    }
-                }
-                discovered.sort_unstable_by_key(|(endpoint, _)| *endpoint);
-                discovered.dedup_by_key(|(endpoint, _)| *endpoint);
-                while discovered
-                    .get(needed)
-                    .is_some_and(|(endpoint, _)| *endpoint <= character)
-                {
-                    discovered[needed].1 = discovered[needed].0;
-                    needed += 1;
-                }
-                endpoints = Some(discovered);
-            }
-            if let Some(endpoints) = endpoints.as_mut() {
-                while endpoints
-                    .get(needed)
-                    .is_some_and(|(endpoint, _)| *endpoint == character)
-                {
-                    endpoints[needed].1 = byte;
-                    needed += 1;
-                }
-            }
-            character_len = character + 1;
-        }
-        let Some(mut endpoints) = endpoints else {
-            return Self::Ascii(text.len());
-        };
-        while endpoints
-            .get(needed)
-            .is_some_and(|(endpoint, _)| *endpoint == character_len)
-        {
-            endpoints[needed].1 = text.len();
-            needed += 1;
-        }
-        Self::Utf8(endpoints)
-    }
-
-    fn byte(&self, character: usize) -> Option<usize> {
-        match self {
-            Self::Ascii(len) => (character <= *len).then_some(character),
-            Self::Utf8(endpoints) => endpoints
-                .binary_search_by_key(&character, |(endpoint, _)| *endpoint)
-                .ok()
-                .and_then(|index| {
-                    let byte = endpoints[index].1;
-                    (byte != usize::MAX).then_some(byte)
-                }),
-        }
-    }
-}
-
-struct YamlNode {
-    scalar: Option<String>,
-    span: Option<ByteSpan>,
-    style: Option<saphyr_parser::ScalarStyle>,
-}
-
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
-fn parse_yaml_node(
-    events: &[(saphyr_parser::Event<'_>, saphyr_parser::Span)],
-    index: &mut usize,
-    byte_offsets: &YamlByteOffsets,
-    offset: usize,
-    parent: &mut Vec<EntryPathSegment>,
-    rows: &mut Vec<StructuredEntryRow>,
-    emit: bool,
-    text: &str,
-    reject_yaml_features: bool,
-    max_rows: Option<usize>,
-) -> std::result::Result<YamlNode, EntryRowsError> {
-    use saphyr_parser::Event;
-
-    let Some((event, event_span)) = events.get(*index) else {
-        return Err(EntryRowsError::Parse(
-            "unexpected end of YAML event stream".to_string(),
-        ));
-    };
-    match event {
-        Event::Scalar(value, style, ..) => {
-            *index += 1;
-            Ok(YamlNode {
-                scalar: Some(value.to_string()),
-                span: yaml_scalar_span(*event_span, *style, byte_offsets, offset, text),
-                style: Some(*style),
-            })
-        }
-        Event::Alias(_) => {
-            if reject_yaml_features {
-                return Err(EntryRowsError::Parse(
-                    "YAML aliases are not supported for key extraction".to_string(),
-                ));
-            }
-            *index += 1;
-            Ok(YamlNode {
-                scalar: None,
-                span: yaml_token_span(*event_span, byte_offsets, offset, text, false),
-                style: None,
-            })
-        }
-        Event::SequenceStart(..) => {
-            let start = *event_span;
-            *index += 1;
-            let mut item = 0;
-            while !matches!(events.get(*index), Some((Event::SequenceEnd, _))) {
-                parent.push(EntryPathSegment::Index(item));
-                parse_yaml_node(
-                    events,
-                    index,
-                    byte_offsets,
-                    offset,
-                    parent,
-                    rows,
-                    emit,
-                    text,
-                    reject_yaml_features,
-                    max_rows,
-                )?;
-                parent.pop();
-                item += 1;
-            }
-            let end = events[*index].1;
-            *index += 1;
-            Ok(YamlNode {
-                scalar: None,
-                span: yaml_flow_container_span(start, end, byte_offsets, offset, text, b'[', b']'),
-                style: None,
-            })
-        }
-        Event::MappingStart(..) => {
-            let start = *event_span;
-            *index += 1;
-            while !matches!(events.get(*index), Some((Event::MappingEnd, _))) {
-                let key = parse_yaml_node(
-                    events,
-                    index,
-                    byte_offsets,
-                    offset,
-                    parent,
-                    rows,
-                    false,
-                    text,
-                    reject_yaml_features,
-                    max_rows,
-                )?;
-                if let Some(key_text) = key.scalar {
-                    if reject_yaml_features
-                        && key_text == "<<"
-                        && key.style == Some(saphyr_parser::ScalarStyle::Plain)
-                    {
-                        return Err(EntryRowsError::Parse(
-                            "YAML merge keys are not supported for key extraction".to_string(),
-                        ));
-                    }
-                    if emit {
-                        entry_capacity(rows, max_rows)?;
-                    }
-                    let row_index = if emit {
-                        key.span.map(|key_span| {
-                            rows.push(StructuredEntryRow {
-                                parent: parent.clone(),
-                                key: key_text.clone(),
-                                key_span,
-                                value_span: None,
-                            });
-                            rows.len() - 1
-                        })
-                    } else {
-                        None
-                    };
-                    parent.push(EntryPathSegment::Key(key_text));
-                    let value = parse_yaml_node(
-                        events,
-                        index,
-                        byte_offsets,
-                        offset,
-                        parent,
-                        rows,
-                        emit,
-                        text,
-                        reject_yaml_features,
-                        max_rows,
-                    )?;
-                    parent.pop();
-                    if let Some(row_index) = row_index {
-                        rows[row_index].value_span = value.span;
-                    }
-                } else if reject_yaml_features {
-                    // A sequence or mapping key has no key path; reading its
-                    // value under the parent would invent keys there.
-                    return Err(EntryRowsError::Parse(
-                        "YAML complex (non-scalar) mapping keys are not supported for key extraction"
-                            .to_string(),
-                    ));
-                } else {
-                    parse_yaml_node(
-                        events,
-                        index,
-                        byte_offsets,
-                        offset,
-                        parent,
-                        rows,
-                        emit,
-                        text,
-                        reject_yaml_features,
-                        max_rows,
-                    )?;
-                }
-            }
-            let end = events[*index].1;
-            *index += 1;
-            Ok(YamlNode {
-                scalar: None,
-                span: yaml_flow_container_span(start, end, byte_offsets, offset, text, b'{', b'}'),
-                style: None,
-            })
-        }
-        _ => Err(EntryRowsError::Parse(format!(
-            "unexpected YAML event {event:?}"
-        ))),
-    }
-}
-
-fn yaml_flow_container_span(
-    start: saphyr_parser::Span,
-    end: saphyr_parser::Span,
-    byte_offsets: &YamlByteOffsets,
-    offset: usize,
-    text: &str,
-    open: u8,
-    close: u8,
-) -> Option<ByteSpan> {
-    let start = byte_offsets.byte(start.start.index())?;
-    if text.as_bytes().get(start) != Some(&open) {
-        // Block container event spans are token boundaries, not complete node
-        // spans (indentless sequences can even start after their first dash).
-        // Decline them rather than claiming a partial or whitespace-padded value.
-        return None;
-    }
-    let parser_end = byte_offsets.byte(end.end.index())?;
-    let close_at = text
-        .as_bytes()
-        .get(start..parser_end)?
-        .iter()
-        .rposition(|byte| *byte == close)?
-        + start;
-    if !text[close_at + 1..parser_end].trim().is_empty() {
-        return None;
-    }
-    Some(ByteSpan::new(start + offset, close_at + 1 + offset))
-}
-
-fn yaml_scalar_span(
-    span: saphyr_parser::Span,
-    style: saphyr_parser::ScalarStyle,
-    byte_offsets: &YamlByteOffsets,
-    offset: usize,
-    text: &str,
-) -> Option<ByteSpan> {
-    if matches!(
-        style,
-        saphyr_parser::ScalarStyle::Literal | saphyr_parser::ScalarStyle::Folded
-    ) {
-        // Saphyr's scalar event does not span the complete indicator plus body.
-        return None;
-    }
-    yaml_token_span(span, byte_offsets, offset, text, true)
-}
-
-fn yaml_token_span(
-    span: saphyr_parser::Span,
-    byte_offsets: &YamlByteOffsets,
-    offset: usize,
-    text: &str,
-    clamp_quoted: bool,
-) -> Option<ByteSpan> {
-    let start = byte_offsets.byte(span.start.index())?;
-    let mut end = byte_offsets.byte(span.end.index())?;
-    if start == end {
-        // Implicit empty mapping values are represented by a zero-width scalar
-        // event at the `:` boundary; that is not a value token.
-        return None;
-    }
-    if clamp_quoted && let Some(open @ (b'"' | b'\'')) = text.as_bytes().get(start).copied() {
-        let mut at = start + 1;
-        while at < end {
-            match text.as_bytes()[at] {
-                b'\\' if open == b'"' => at += 2,
-                b'\'' if open == b'\'' && text.as_bytes().get(at + 1) == Some(&b'\'') => at += 2,
-                byte if byte == open => {
-                    end = at + 1;
-                    break;
-                }
-                _ => at += 1,
-            }
-        }
-    }
-    Some(ByteSpan::new(start + offset, end + offset))
 }
 
 /// Extract values over `text`. Structured modes retain non-string match types

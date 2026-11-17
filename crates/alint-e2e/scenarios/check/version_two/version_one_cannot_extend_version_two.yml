@@ -1,0 +1,19 @@
+test_version: 1
+name: a version 1 config cannot extend a version 2 one
+tags: [check, version_two, extends]
+
+given:
+  tree: {}
+  config: |
+    version: 1
+    extends: [./support/version_two_target.yaml]
+    rules: []
+
+when: [check]
+
+expect:
+  - exit: configuration_error
+    configuration_error:
+      message:
+        # The target is shown with the host's path separator.
+        regex: '^support[/\\]version_two_target\.yaml: a version 1 config \(\.version_one_cannot_extend_version_two\.inline\.alint\.yml\) cannot extend this version 2 config; give \.version_one_cannot_extend_version_two\.inline\.alint\.yml `version: 2`, or make support[/\\]version_two_target\.yaml `version: 1`$'

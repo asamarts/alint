@@ -1,0 +1,25 @@
+# `export-agents-md --format json` adds `selectors` and `relations` for a
+# version 2 config, as `list --format json` does: each with the config that
+# declares it and the aliases that reach it.
+version: 2
+extends:
+  - url: ./deps.yml
+    as: deps
+selectors:
+  docs:
+    paths: "docs/**"
+relations:
+  titles:
+    from: docs
+    read: { regex: '^# (.*)' }
+    fields: { title: value }
+  pinned:
+    from: deps.manifests
+    read: { json: $.version }
+    fields: { version: value }
+rules:
+  - id: has-readme
+    kind: file_exists
+    paths: README.md
+    level: error
+    message: "Every repository has a README.md."

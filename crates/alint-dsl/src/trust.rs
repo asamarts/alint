@@ -1201,6 +1201,7 @@ pub(crate) fn merge_mapping_fields(existing: &mut Mapping, incoming: Mapping) {
         has_untrusted_fix_source(existing) || has_untrusted_fix_source(&incoming);
     merge_field_sources(existing, &incoming);
     merge_sensitive_fields(existing, &incoming);
+    crate::v2::merge_field_origins(existing, &incoming);
     union_provenance(existing, &incoming);
     // The env-derived mark describes the `vars:` it was recorded with; a later
     // `vars:` replaces the map wholesale, so it replaces (or drops) the mark too.
@@ -1215,6 +1216,7 @@ pub(crate) fn merge_mapping_fields(existing: &mut Mapping, incoming: Mapping) {
                     | PROVENANCE_MARKER
                     | FIELD_SOURCES_MARKER
                     | SENSITIVE_FIELDS_MARKER
+                    | crate::v2::FIELD_ORIGINS_MARKER
             )
         ) {
             existing.insert(key, value);

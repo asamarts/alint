@@ -41,6 +41,15 @@ mod loader;
 mod nested;
 mod template_budget;
 mod trust;
+mod v2;
+
+/// The config versions this build loads as experimental (`version: 2` in
+/// v0.23, ADR-0034 decision 1): a config of one loads, but its syntax may
+/// change before a release declares it stable. Hidden from the documented API
+/// because v2 is experimental; public only so the CLI can warn about a loaded
+/// config's version and `xtask gen-facts` can list it in `facts.json`.
+#[doc(hidden)]
+pub const EXPERIMENTAL_CONFIG_VERSIONS: &[u32] = &[v2::VERSION];
 
 pub(crate) use trust::{
     ENV_VARS_MARKER, FIELD_SOURCES_MARKER, PROVENANCE_MARKER, Provenance, SENSITIVE_FIELDS_MARKER,
@@ -225,8 +234,9 @@ fn load_resolved(
         loader::add_environment_values(&mut raw.environment_values, &discovered_environment_values);
     }
 
+    let surface = raw.surface;
     let merged = raw.finalize(opts.kind_catalog)?;
-    validate(&merged)?;
+    validate(&merged, surface)?;
     Ok(merged)
 }
 
@@ -280,7 +290,7 @@ fn nested_configs_key(path: &Path, source: &dyn ConfigSourceProvider) -> Result<
             path.display()
         )));
     }
-    let key: NestedConfigsKey = alint_core::yaml::from_str(&contents)
+    let key: NestedConfigsKey = loader::decode_text(&contents)
         .map_err(|error| Error::Other(format!("{}: YAML parse error: {error}", path.display())))?;
     Ok(key.nested_configs)
 }
@@ -311,6 +321,14 @@ fn resolve_top_level(
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+    // Resolved as each config's own path is, so a config is named by its path
+    // under this root (`.alint.d/10.yml`, `rules/base.yml`) wherever the root
+    // is reached through a symlink (`/var` is `/private/var` on macOS), a
+    // relative path or a Windows short name, and not by its file name alone.
+    let confine_root = opts
+        .config_source
+        .canonicalize(&confine_root)
+        .unwrap_or(confine_root);
     // `is_top: true` — the user's own top-level config may open the
     // `allow_out_of_root` escape hatch; an `extends:`'d ruleset may not (that
     // recursion passes `false`), so an untrusted ruleset can't lift confinement.
@@ -398,8 +416,9 @@ pub(crate) struct RawConfig {
     /// Source-local minimum binary requirement. Validated before composition.
     #[serde(default, deserialize_with = "deserialize_explicit")]
     requires: Option<ConfigRequirements>,
+    /// Each entry with the alias a version 2 source may give it (`as:`).
     #[serde(default)]
-    extends: Vec<alint_core::ExtendsEntry>,
+    extends: Vec<v2::ExtendsEntry>,
     #[serde(default)]
     ignore: Vec<String>,
     #[serde(default, deserialize_with = "deserialize_explicit")]
@@ -479,6 +498,18 @@ pub(crate) struct RawConfig {
     /// schema.
     #[serde(skip)]
     extends_environment: Vec<bool>,
+    /// The language this config was decoded as: version 2 only when its
+    /// top-level `version:` is the literal `2` (or it is a drop-in of a
+    /// version 2 root). Set by the local-config parser. Not part of the schema.
+    #[serde(skip)]
+    surface: v2::Surface,
+    /// The selectors, relations and `extends:` aliases of every version 2
+    /// source merged into this config, each with its source. `finalize`
+    /// resolves them into the checked plan it sets as the config's
+    /// `relation_plan`, which no rule reads until the `constraint` kind lands
+    /// (phase 7). Not part of the schema.
+    #[serde(skip)]
+    v2: v2::Objects,
 }
 
 const DEFAULT_FIX_SIZE_LIMIT: Option<u64> = Some(1 << 20);
@@ -606,6 +637,13 @@ impl RawConfig {
             .map(|(id, template)| (id.as_str(), template_budget::size_of_mapping(template)))
             .collect();
         let mut budget = template_budget::Budget::default();
+        // Version 2: every reference resolves in its source's namespace and
+        // the plan is checked before any rule is built (design sections 8
+        // and 10).
+        let mut resolved = match self.surface {
+            v2::Surface::V2 => Some(v2::resolve(&self.v2)?),
+            v2::Surface::V1 => None,
+        };
 
         let mut rules = Vec::with_capacity(self.rules.len());
         for m in &self.rules {
@@ -627,6 +665,12 @@ impl RawConfig {
                     expand_template(masked, templates, &mut budget).map(drop)
                 })
             })?;
+            // Which version 2 source wrote each field, for the fields that
+            // name a relation.
+            let origins = v2::take_field_origins(&mut expanded);
+            if let Some(resolved) = &mut resolved {
+                resolved.resolve_rule(&id_hint, &expanded, &origins)?;
+            }
             mark_sensitive_conditions(&mut expanded, &self.env_vars);
             expanded.remove(ENV_VARS_MARKER);
             // A nested-config rule is confined to its subtree here, on the effective
@@ -680,6 +724,9 @@ impl RawConfig {
                     ));
                 }
             }
+            if let Some(resolved) = &resolved {
+                resolved.judge_rule(&id_hint, provenance.extended.as_deref())?;
+            }
             if untrusted_fix_source {
                 demote_content_fixers_in_rule(&mut expanded, catalog);
                 // An untrusted rule may instantiate a TRUSTED template that promotes
@@ -693,7 +740,7 @@ impl RawConfig {
             spec.set_extended_source(extended_source);
             rules.push(spec);
         }
-        Ok(Config::new(self.version.unwrap_or(0), rules)
+        let mut config = Config::new(self.version.unwrap_or(0), rules)
             .with_requires(effective_requirements(&self.compatibility))
             .with_ignore(self.ignore)
             .with_respect_gitignore(self.respect_gitignore.unwrap_or(true))
@@ -705,7 +752,9 @@ impl RawConfig {
             .with_baseline(self.baseline)
             .with_compatibility(self.compatibility)
             .with_environment_values(self.environment_values)
-            .with_config_files(self.config_files))
+            .with_config_files(self.config_files);
+        config.relation_plan = resolved.map(|resolved| std::sync::Arc::new(resolved.plan));
+        Ok(config)
     }
 }
 
@@ -854,14 +903,20 @@ fn expand_template(
     mark_unattributed_field_sources(&mut expanded, &template_source);
     let template_field_sources = expanded.remove(FIELD_SOURCES_MARKER);
     let template_provenance = expanded.remove(PROVENANCE_MARKER);
+    let template_origins = expanded.remove(v2::FIELD_ORIGINS_MARKER);
     expanded = substitute_template_vars(expanded, &vars, budget).map_err(overrun)?;
     expanded.remove("id");
     if let Some(field_sources) = template_field_sources {
         expanded.insert(FIELD_SOURCES_MARKER.into(), field_sources);
     }
+    // A field the template supplies resolves in the template's source.
+    if let Some(origins) = template_origins {
+        expanded.insert(v2::FIELD_ORIGINS_MARKER.into(), origins);
+    }
 
     merge_field_sources(&mut expanded, rule);
     merge_sensitive_fields(&mut expanded, rule);
+    v2::merge_field_origins(&mut expanded, rule);
     for (k, v) in rule {
         let key = k.as_str().unwrap_or_default();
         if matches!(
@@ -872,6 +927,7 @@ fn expand_template(
                 | PROVENANCE_MARKER
                 | FIELD_SOURCES_MARKER
                 | SENSITIVE_FIELDS_MARKER
+                | v2::FIELD_ORIGINS_MARKER
         ) {
             continue;
         }
@@ -1343,7 +1399,20 @@ pub fn parse(yaml: &str) -> Result<Config> {
             "YAML alias expansion exceeds the maximum supported size".to_string(),
         ));
     }
-    let mut config: Config = match alint_core::yaml::from_str(yaml) {
+    // A string's config must be version 1 (design section 3 item 6). One that
+    // decodes with a `version:` other than 2 and no `extends:` (so no alias) is;
+    // any other is dispatched first, so `version: 2` or a v2-only key is
+    // reported as such rather than as a decode error.
+    let decoded: std::result::Result<Config, _> = loader::decode_text(yaml);
+    if !decoded
+        .as_ref()
+        .is_ok_and(|config| config.version != v2::VERSION && config.extends.is_empty())
+    {
+        let origin = v2::Origin::new(alint_core::ConfigSourceClass::Inline, "<inline>");
+        let document = v2::read_document(yaml, &origin)?;
+        v2::dispatch(document.as_ref(), yaml, &origin)?;
+    }
+    let mut config = match decoded {
         Ok(config) => config,
         Err(parse_error) => {
             return Err(loader::nonliteral_requirement_after_error(yaml, "<inline>")
@@ -1384,7 +1453,7 @@ pub fn parse(yaml: &str) -> Result<Config> {
         requires_alint: config.requires.map(|requirements| requirements.alint),
         consumer_version: None,
     });
-    validate(&config)?;
+    validate(&config, v2::Surface::V1)?;
     Ok(config)
 }
 
@@ -1529,10 +1598,11 @@ fn merge_facts(a: Vec<FactSpec>, b: Vec<FactSpec>) -> Vec<FactSpec> {
         .collect()
 }
 
-/// The most entries (rules, templates, facts, vars, `ignore:` patterns and
-/// recorded `when` reads) a config may hold once its `extends:` chain and
-/// drop-ins are merged. Real configs hold hundreds; an `extends:` diamond that
-/// lists one source twice per level once doubled the lists at each level.
+/// The most entries (rules, templates, facts, vars, `ignore:` patterns,
+/// recorded `when` reads, selectors and relations) a config may hold once its
+/// `extends:` chain and drop-ins are merged. Real configs hold hundreds; an
+/// `extends:` diamond that lists one source twice per level once doubled the
+/// lists at each level.
 pub(crate) const MAX_MERGED_ENTRIES: usize = 1 << 20;
 
 /// `items` without repeats, each kept where it first appears.
@@ -1547,17 +1617,24 @@ fn dedup_in_order<T: Eq + std::hash::Hash + Clone>(items: Vec<T>) -> Vec<T> {
 /// [`merge_unbounded`], refused past [`MAX_MERGED_ENTRIES`].
 pub(crate) fn merge(a: RawConfig, b: RawConfig) -> Result<RawConfig> {
     let merged = merge_unbounded(a, b);
+    let objects = merged.v2.object_count();
     let entries = merged.rules.len()
         + merged.templates.len()
         + merged.facts.len()
         + merged.vars.len()
         + merged.ignore.len()
-        + merged.untrusted_when_var_reads.len();
+        + merged.untrusted_when_var_reads.len()
+        + objects;
     if entries > MAX_MERGED_ENTRIES {
+        // A version 1 config's message is unchanged.
+        let held = if objects == 0 {
+            "rules, templates, facts, vars and `ignore:` patterns"
+        } else {
+            "rules, templates, facts, vars, `ignore:` patterns, selectors and relations"
+        };
         return Err(Error::Other(format!(
-            "the merged config holds {entries} entries (rules, templates, facts, vars and \
-             `ignore:` patterns), more than the {MAX_MERGED_ENTRIES} supported; flatten the \
-             `extends:` chain or split the ruleset"
+            "the merged config holds {entries} entries ({held}), more than the \
+             {MAX_MERGED_ENTRIES} supported; flatten the `extends:` chain or split the ruleset"
         )));
     }
     Ok(merged)
@@ -1696,11 +1773,17 @@ fn merge_unbounded(a: RawConfig, b: RawConfig) -> RawConfig {
         environment_values,
         config_files,
         extends_environment: Vec::new(),
+        // The language follows the version: the source that sets it decides.
+        surface: b.version.map_or(a.surface, |_| b.surface),
+        v2: a.v2.merged(b.v2),
     }
 }
 
-fn validate(config: &Config) -> Result<()> {
-    if !Config::supports_version(config.version) {
+/// `surface`: the language the top-level config was decoded as; version 2
+/// is valid only when it is version 2's.
+fn validate(config: &Config, surface: v2::Surface) -> Result<()> {
+    let experimental = surface == v2::Surface::V2 && config.version == v2::VERSION;
+    if !Config::supports_version(config.version) && !experimental {
         return Err(Error::Other(format!(
             "unsupported config version {} (this build supports {} through {})",
             config.version,

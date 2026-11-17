@@ -1,0 +1,25 @@
+test_version: 1
+name: a reference to a name the config does not declare is refused at load
+tags: [check, version_two]
+
+given:
+  tree: {}
+  config: |
+    version: 2
+    selectors:
+      docs:
+        paths: "docs/**"
+    relations:
+      titles:
+        from: doc
+        read: { regex: '^# (.*)' }
+        fields: { title: value }
+    rules: []
+
+when: [check]
+
+expect:
+  - exit: configuration_error
+    configuration_error:
+      message:
+        exact: ".an_unknown_name_is_refused.inline.alint.yml: `relations.titles.from`: no selector named `doc` in this config; the selectors it can reach are `docs`"

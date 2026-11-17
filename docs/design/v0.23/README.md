@@ -745,3 +745,30 @@ decided then.
     release build, so it compares ayaml with libyaml only through what alint reports; running
     it in compare mode as well is #549.
   - Next: the remaining audit branches, then phase 6.
+- 2026-11-17: the audit's fixes merged, and phase 6.
+  - The audit's branches merged as #538 to #543, #551 (the security follow-ups), #552 (the YAML
+    messages), #554 (the performance gates) and #556 (the documents). The draft advisory
+    GHSA-78jj-xfpm-g6px now lists all 21 items, the eight packages and the patches. Long runs of
+    the YAML harness then failed seeds 2, 3, 10 and 12 on main, where alint's own words for a tag
+    in a rule met the reference parser's; #557 pairs them, and seeds 1 to 12 pass. Pull requests
+    run seed 1 only, so a change to alint's YAML error wording needs seeds 1 to 12 as well.
+  - Phase 6, in one pull request: the version dispatch (section 3), named selectors and relations
+    with per-file namespaces and `extends:` aliases (sections 4, 5 and 10), the plan check at load
+    (section 8), a hidden relation evaluator for phase 7 (value-bearing entry rows, `read:`,
+    `union:`, the inner equality join, `transform:`, `where:`, limits), `list` and
+    `export-agents-md` for named objects, the draft schema `schemas/v2/config.json` and the page
+    `docs/site/configuration/version-2.md` (section 11). Relations stay inert until `constraint`.
+  - Three independent reviews (security and trust, semantics against this design, integration and
+    cost) found 23 defects, fixed in the same pull request with a gate each. The release blocker:
+    the dispatch parsed every version 1 config twice, +10% to +53% instructions to load and +44%
+    to +50% on the `dsl_extends` micro-benchmark, which the release gates at +3%; loading is now
+    within +0.7% of main. Also fixed: quadratic loads of a hostile version 2 config (minutes),
+    environment values leaking through a JSONPath hint, `list` and joins, TOML dotted keys in
+    inline tables, a `where:` result that depended on predicate order, and no cap on a relation's
+    cells (`CellsPerRun`, 5,000,000).
+  - Each open question took the stricter reading, which a later release can relax: an `.alint.d`
+    fragment has a namespace of its own (ADR-0022 is silent; section 10 says each source has one),
+    number and null literals in `in` and `not_in` are refused (YAML does not keep a number's
+    lexeme), `semver-*` does not apply to a path token, `strip-root` comes first and once, and
+    `as:` is refused on remote and bundled `extends:` entries.
+  - Next: phase 7, the `constraint` kind.

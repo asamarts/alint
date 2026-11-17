@@ -398,6 +398,114 @@ policy-test package the user does not trust.
   full, even one that ayaml refuses for its syntax. CI and the release preflight run the
   workspace's tests that way (`ci/scripts/yaml-compare.sh`), and a gate fails if a build without
   the feature depends on `yaml_serde`.
+- **`version: 2` configurations (experimental)**
+  ([ADR-0034](docs/adr/0034-v2-version-boundary-and-phase-3-design.md),
+  [ADR-0037](docs/adr/0037-phase-3-design-refinements.md)). A config whose top-level `version:`
+  is the plain integer `2` loads as version 2, which is experimental: its syntax may change in
+  any release until one declares it stable, v0.24 at the earliest, and this file lists each
+  change. Loading one prints a warning once per run, naming the file
+  (`` alint: warning: `version: 2` is experimental; ... ``); `validate-config` names the version on
+  its success line and puts the warning in its JSON `warnings`. The language server loads a v2
+  config without the warning.
+  - alint reads a config's `version:` before anything else in it and decodes the rest as that
+    version. A 2 written any other way than as the plain integer `2` (quoted, tagged, through a
+    YAML alias, or as `+2`, `0x2`, `0o2` or `2.0`) is an error that says to write `version: 2`;
+    a version read from the environment is version 1 and must equal 1, as before. An `.alint.d/`
+    fragment without `version:` is read as its root's version.
+  - Version 2 accepts every version 1 key and rule kind with its version 1 meaning, plus
+    top-level `selectors:` and `relations:` and an `as:` alias on a local `extends:` entry. Each
+    of those in a version 1 config is an error that names the version it needs
+    (`` `selectors:` needs `version: 2`; this config is version 1 ``), and an unknown key in a
+    version 2 config is reported with the version 2 keys.
+  - Selectors (`paths:`, `scope_filter:` without `changed_since`) and relations (`from:` with
+    `entries:` or `read:`, `union:`, `join:`, `fields:`, `transform:` and `where:`) are checked
+    when the config loads: every key, value type, field source, transform and predicate. Names,
+    aliases and references are literal: `{{...}}` in one is an error. A name is declared once
+    per config file, across selectors, relations and aliases. Selectors and relations count
+    toward the entries a merged config may hold.
+  - Only local files may be version 2: the top-level config, a local `extends:` target and an
+    `.alint.d/` fragment. A remote `extends:` source, a bundled ruleset, a nested config and the
+    string `alint_dsl::parse` reads must be version 1, and a version 1 config cannot extend a
+    version 2 one; each is an error that says so.
+  - Each config file has its own namespace. A bare name (`from:`, a join's `left:` and
+    `right:`, a `where:` filter's `{ relation, field }`) names an object the same file declares;
+    `alias.name` names an object the file an `extends:` entry gives `as: alias` declares itself,
+    with no re-export and no `a.b.c` chain. Nothing shadows, and an `.alint.d/` fragment's
+    namespace is its own too. A name or alias that does not resolve is an error naming the file
+    and key, with the names that file can reach or the nearest one
+    (`` `relations.titles.from`: no selector named `doc` in this config; the selectors it can
+    reach are `docs` ``).
+  - The relation plan is checked when the config loads, before any file is read: every field a
+    join's `on:`, a `left.F` or `right.F`, a `transform:` or a `where:` names exists; a relation's
+    rows bind each of its fields, so a `bound:` field needs `entries:` or a `read:` of JSON, YAML
+    or TOML; every part of a `union:` binds every field; `strip-root` applies first to an
+    `entry.path` field, or to a join's copy of one no transform has changed; `semver-major` and
+    `semver-minor` do not apply to a path, a path token (`dir`, `basename`, `stem`, `ext`,
+    `parent_name`) or an `entry.path`, nor to a join's copy of one; a regex compiles and a `read:`
+    regex has a capture group; a JSONPath parses; an `in` or `not_in` literal is not null or a
+    number, nor a boolean for a field that holds strings; and relations that read each other are
+    refused, naming the cycle
+    (`` relation `a` reads itself: `a` -> `b` -> `a` ``). A selector compiles as a rule's scope
+    does, so a manifest `source:` stays inside the repository and out of `.git`.
+  - Each selector and relation passes the trust gates of the file that declares it, with what it
+    references, as an extended file's rules do.
+  - A selector's or relation's error, when it decodes or compiles and in the checks across
+    objects, stands only when the same object with each value it reads from the environment
+    masked fails the same way (with the relations it joins masked too); otherwise it is redacted,
+    naming the object (`` `relations.deps`: <redacted> (the error could quote a value read from
+    the environment) ``), as a version 1 rule's is. So no error shows part of such a value: a
+    JSONPath's hint, which quotes the path rewritten, a `has_ancestor:` path's last segment, or a
+    value too short for the whole-value scrub.
+  - `alint list` lists a version 2 config's named selectors and relations after its rules, each
+    with the file that declares it and the aliases that reach that file; `list --format json`
+    adds `selectors` and `relations` for a version 2 config only, and `--category` lists rules
+    only. A file an `extends:` entry read from the environment loads is shown as `<redacted>`,
+    here and in `export-agents-md`.
+  - `alint export-agents-md` lists a version 2 config's named selectors and relations the same
+    way, after its rules, under `### Named selectors and relations`; `--format json` adds
+    `selectors` and `relations`, shaped as in `list --format json`, for a version 2 config only.
+    A version 1 config's output is unchanged. `init` still writes `version: 1`, and
+    `suggest --format yaml` still writes no `version:`, so its snippet can be added to a config
+    of either version.
+  - Nothing reads selectors and relations yet: a version 2 config runs its rules as version 1
+    would, and its selectors and relations check nothing until the `constraint` rule kind lands.
+  - alint can now evaluate a relation over a repository: an internal evaluator, which the
+    `constraint` rule kind will call, reads the files a selector picks (as a rule's `paths:` and
+    `scope_filter:` pick them, inside the repository, never in `.git` and only regular files, as
+    `cross_file` reads them), emits one row per entry or extracted value with each field's file, key
+    path and byte span, and applies `union:`, `join:`, `transform:` and `where:`. Values are scalars
+    compared by type and text (a number by its lexeme, so `1.10` is not `1.1`). What a relation
+    cannot hold, such as an `entry.value` that is an object, a TOML date, a `bound:` path that does
+    not match exactly once, a repeated key on a join's `unique:` side or a comparison across types,
+    is an analysis failure naming the relation, the file and the key path, never a dropped row; so
+    is reaching a row, cell, byte, join or distinct-value limit, which is never truncation (a run's
+    relations hold at most 5,000,000 cells, a cell per field of each row, and 1 GiB besides: a
+    value's text is held once however many fields, parts and joins copy it, and each decode, key
+    path and transformed value takes its bytes once). Every `where:` predicate
+    tests every row, so their order does not matter: a row that any predicate is false for is
+    dropped, even when another cannot test it. A field the environment writes to (`{{env.X}}` in its
+    `where:` or `transform:`) is sensitive, and a relation whose selection reads the environment
+    shows no detail in its failures, nor does a relation that reads one, as a join side or through a
+    membership reference. Nothing calls the evaluator in this build, so relations stay inert and a
+    run whose rules read none reads nothing for them.
+  - `facts.json` (format 7) gains `compatibility.experimental_config_versions: [2]`;
+    `config_versions` stays `[1]`. `validate-config --format json` gains `config_version`, the
+    loaded config's version, for every config.
+  - A draft JSON Schema for version 2, `schemas/v2/config.json`, with the `$id`
+    `https://raw.githubusercontent.com/asamarts/alint/v0.23.0/schemas/v2/config.json`. It is the
+    version 1 schema with `version: 2`, `selectors:`, `relations:` and `as:` added, and checks
+    what the loader checks of those when it decodes a file: every key, value type, name,
+    reference, field source, transform, `entries:` format, `read:` form and count. It leaves to
+    the loader what needs every source loaded (names that resolve, cycles, the relation plan),
+    regexes and JSONPaths, and a name declared twice. An editor uses it through a
+    `# yaml-language-server: $schema=` modeline in a version 2 file; the version 1 schema and its
+    `$id` are unchanged.
+  - A docs page, `docs/site/configuration/version-2.md`, describes version 2: the version
+    boundary, named selectors, relations (`entries:`, `read:`, `union:`, `join:`, fields,
+    `transform:` and `where:`), names, aliases and per-file namespaces, what the loader and the
+    draft schema check, trust, the limits of this release and the relation halves of the three
+    policies the `constraint` kind is designed against. A test loads and validates each of its
+    examples.
 
 ### Changed
 
@@ -662,6 +770,9 @@ policy-test package the user does not trust.
   with a struct literal or a functional record update (`..other`). Build them with the
   constructors and setters listed under Added; the fields stay public to read and to assign, and
   a pattern that destructures one needs `..`.
+- **`explain` and `alint rules show` label a kind's selector fields `selector fields:`** in human
+  output (it was `selectors:`), so the line is not read as a version 2 config's named selectors.
+  The JSON key `selectors` is unchanged.
 
 ### Performance
 
@@ -697,6 +808,14 @@ policy-test package the user does not trust.
 
 ### Fixed
 
+- **An extended config is named by its path under the repository on every platform.** Under a
+  root reached through a symlink, from a relative `--config`, or on macOS (where `/var` is
+  `/private/var`), a config file an `extends:` entry reads was named by its file name alone
+  (`base.yml`) in messages; it is now named as a plain run names it (`rules/base.yml`).
+- **An unknown rule field's "did you mean" suggestion costs time and memory in proportion to the
+  key's length.** A long key holding backticks made the suggestion build a full edit-distance
+  table against itself (an 8,000-character key took half a second and 498 MB); the distance now
+  stops past two edits, and suggests the same fields.
 - **A `key_parity` rule nested in the `require:` of `for_each_file`, `for_each_dir` or
   `every_matching_has` compares its files.** It used to stop on every iteration with
   "internal error ... key_parity requires the relation read cache", unless another rule in the

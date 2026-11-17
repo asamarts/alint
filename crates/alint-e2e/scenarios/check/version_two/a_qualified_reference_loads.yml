@@ -1,0 +1,39 @@
+test_version: 1
+name: a qualified reference reaches an extended config's relation through its alias
+tags: [check, version_two, extends]
+
+# `base.pins` names the relation `support/version_two_base.yaml` declares,
+# through the alias this config gives it, in a join and in a filter. The
+# config loads, and its rules run (nothing reads relations until the
+# `constraint` kind lands).
+
+given:
+  tree:
+    package.json: '{"dependencies": {"left-pad": "1.3.0"}}'
+  config: |
+    version: 2
+    extends:
+      - url: ./support/version_two_base.yaml
+        as: base
+    relations:
+      deps:
+        from: { paths: "**/package.json" }
+        entries: { format: json, at: "$.dependencies" }
+        fields: { name: entry.key, version: entry.value }
+        where:
+          name: { not_in: [{ relation: base.pins, field: name }] }
+      pinned:
+        join: { left: deps, right: base.pins, on: { name: name }, unique: right }
+        fields: { name: left.name, wanted: right.version }
+    rules:
+      - id: has-readme
+        kind: file_exists
+        paths: README.md
+        level: error
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - {rule: has-readme, level: error}

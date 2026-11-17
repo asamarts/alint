@@ -1,0 +1,16 @@
+# `version: 2` is experimental: loading it warns once per run. Its selectors
+# and relations check nothing yet, so its rules run as in version 1.
+version: 2
+selectors:
+  docs:
+    paths: "docs/**"
+relations:
+  titles:
+    from: docs
+    read: { regex: '^# (.*)' }
+    fields: { title: value }
+rules:
+  - id: has-readme
+    kind: file_exists
+    paths: README.md
+    level: error

@@ -15,25 +15,43 @@ pub enum LimitKind {
     /// [`Relation::distinct_values`](super::Relation::distinct_values)
     /// enforces it.
     DistinctValues,
-    /// Rows entering one equality join. Reserved: joins arrive in Phase 3,
-    /// and nothing in v0.21 joins relations.
+    /// Rows entering one equality join, on each side; the relation
+    /// evaluator's join enforces it.
     JoinInputs,
-    /// Rows one equality join produces. Reserved, like `JoinInputs`.
+    /// Rows one equality join produces; the evaluator's join enforces it.
     JoinOutputs,
+    /// Cells the relation evaluator builds in one run: a row of a relation
+    /// with F fields holds F cells, and each file a part reads holds one.
+    /// The evaluator takes them from the run's count as it builds each row,
+    /// whether a part, a `union:`'s parts or a join builds it, so a union of
+    /// many parts over one decode fails at the cap rather than after. Every
+    /// relation a run evaluates stays in its memo for the run, and a row's
+    /// size grows with its fields, so it is the run's cells, not one
+    /// relation's rows, that bound what relations hold, with
+    /// [`Self::BytesPerRun`] for what a cell holds beyond its size.
+    CellsPerRun,
+    /// Bytes the relation evaluator holds in one run beyond its cells: each
+    /// decode it reads, whole, once (its rows, values and key paths), and
+    /// each text it builds (a path token, an `entry.key`, `entry.parent`,
+    /// `entry.root` or `entry.path`, a key path a row keeps, a transformed
+    /// value, a note, a failure). A value's text is shared, never copied,
+    /// so a field or join that copies a value costs a cell and no bytes.
+    /// With [`Self::CellsPerRun`] it bounds what a run's relations hold,
+    /// whatever the input's shape; the evaluator takes the bytes as it
+    /// builds what holds them.
+    BytesPerRun,
 }
 
 impl LimitKind {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 7] = [
         Self::RowsPerExtractor,
         Self::RowsPerRun,
         Self::DistinctValues,
         Self::JoinInputs,
         Self::JoinOutputs,
+        Self::CellsPerRun,
+        Self::BytesPerRun,
     ];
-
-    /// The limits no code enforces yet, because what they bound does not
-    /// exist: equality joins arrive in Phase 3.
-    pub const RESERVED: [Self; 2] = [Self::JoinInputs, Self::JoinOutputs];
 
     #[must_use]
     pub fn name(self) -> &'static str {
@@ -43,17 +61,32 @@ impl LimitKind {
             Self::DistinctValues => "distinct_values",
             Self::JoinInputs => "join_inputs",
             Self::JoinOutputs => "join_outputs",
+            Self::CellsPerRun => "cells_per_run",
+            Self::BytesPerRun => "bytes_per_run",
+        }
+    }
+
+    /// What the limit counts, as [`LimitExceeded`] says it.
+    fn unit(self) -> &'static str {
+        match self {
+            Self::BytesPerRun => "bytes",
+            _ => "rows or values",
         }
     }
 
     /// The default. Provisional until R2 measures real relations; each is far
     /// above what the v0.12 corpus needs and far below what exhausts memory.
+    /// A cell costs about what a decoded row does (100 to 150 bytes, at most
+    /// 256 with its share of its row), so a run may hold as many cells as it
+    /// may decode rows; with 1 GiB of bytes, the relations of a run at the
+    /// defaults hold at most about 2.4 GB.
     #[must_use]
     pub fn default_value(self) -> usize {
         match self {
             Self::RowsPerExtractor | Self::JoinInputs | Self::JoinOutputs => 1_000_000,
-            Self::RowsPerRun => 5_000_000,
+            Self::RowsPerRun | Self::CellsPerRun => 5_000_000,
             Self::DistinctValues => 100_000,
+            Self::BytesPerRun => 1 << 30,
         }
     }
 
@@ -65,7 +98,9 @@ impl LimitKind {
             | Self::DistinctValues
             | Self::JoinInputs
             | Self::JoinOutputs => 10_000_000,
-            Self::RowsPerRun => 50_000_000,
+            Self::RowsPerRun | Self::CellsPerRun => 50_000_000,
+            // 16 GiB, or half of what a 32-bit `usize` holds.
+            Self::BytesPerRun => usize::try_from(16u64 << 30).unwrap_or(usize::MAX >> 1),
         }
     }
 
@@ -76,7 +111,7 @@ impl LimitKind {
 
 /// A limit was reached: the analysis is incomplete.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("relation limit `{}` ({limit}) reached: {reached} rows or values", kind.name())]
+#[error("relation limit `{}` ({limit}) reached: {reached} {}", kind.name(), kind.unit())]
 pub struct LimitExceeded {
     pub kind: LimitKind,
     pub limit: usize,
@@ -214,6 +249,34 @@ mod tests {
     }
 
     #[test]
+    fn a_reached_limit_names_what_it_counts() {
+        let reached = |kind| {
+            LimitExceeded {
+                kind,
+                limit: 3,
+                reached: 4,
+            }
+            .to_string()
+        };
+        assert_eq!(
+            reached(LimitKind::BytesPerRun),
+            "relation limit `bytes_per_run` (3) reached: 4 bytes"
+        );
+        for kind in LimitKind::ALL
+            .into_iter()
+            .filter(|kind| *kind != LimitKind::BytesPerRun)
+        {
+            assert_eq!(
+                reached(kind),
+                format!(
+                    "relation limit `{}` (3) reached: 4 rows or values",
+                    kind.name()
+                )
+            );
+        }
+    }
+
+    #[test]
     fn configured_limits_stay_within_one_and_the_hard_cap() {
         for kind in LimitKind::ALL {
             let cap = kind.hard_cap();
@@ -230,15 +293,17 @@ mod tests {
         }
     }
 
-    /// The join limits stay reserved until Phase 3 adds joins: a use of one
-    /// outside this module must come with the join that it bounds, and with
-    /// this test's update.
+    /// The join limits bound the relation evaluator's equality join and
+    /// nothing else: a use of one elsewhere must come with the join that it
+    /// bounds, and with this test's update.
     #[test]
-    fn the_join_limits_are_reserved_and_unused() {
-        assert_eq!(
-            LimitKind::RESERVED,
-            [LimitKind::JoinInputs, LimitKind::JoinOutputs]
-        );
+    fn the_join_limits_bound_only_the_evaluators_join() {
+        const JOIN_LIMITS: [LimitKind; 2] = [LimitKind::JoinInputs, LimitKind::JoinOutputs];
+        const ENFORCED_IN: [&str; 3] = [
+            "relation/limits.rs",
+            "relation/eval/ops.rs",
+            "relation/eval/tests.rs",
+        ];
         let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .expect("the workspace's crates directory");
@@ -254,14 +319,15 @@ mod tests {
                     }
                     continue;
                 }
-                if path.extension().is_none_or(|ext| ext != "rs")
-                    || path.ends_with("relation/limits.rs")
-                {
+                if path.extension().is_none_or(|ext| ext != "rs") {
                     continue;
                 }
                 scanned += 1;
+                if ENFORCED_IN.iter().any(|allowed| path.ends_with(allowed)) {
+                    continue;
+                }
                 let text = std::fs::read_to_string(&path).unwrap();
-                for kind in LimitKind::RESERVED {
+                for kind in JOIN_LIMITS {
                     if text.contains(&format!("{kind:?}")) {
                         uses.push(format!("{}: {kind:?}", path.display()));
                     }
@@ -275,7 +341,7 @@ mod tests {
         );
         assert!(
             uses.is_empty(),
-            "reserved join limits used:\n{}",
+            "join limits used outside the evaluator's join:\n{}",
             uses.join("\n")
         );
     }
