@@ -700,7 +700,8 @@ decided then.
     parser runs: `Format::parse`, `extract`'s entry rows, the structured-fix span resolver and
     `pinned_references`.
   - A kbench cell for wall time and RSS of mid-size YAML is not added: `bench-scale` records no
-    RSS, and a new scenario needs a results location the published history does not read.
+    RSS, and a new scenario needs a results location the published history does not read
+    (#550).
 - 2026-11-16: the audit of everything since v0.22.1.
   - Seven reviewers read #490 to #530, 37 commits, on `main` at e7bb08a57: the engine, templates
     and rules; YAML robustness; the library API; security; YAML as users meet it; the documents

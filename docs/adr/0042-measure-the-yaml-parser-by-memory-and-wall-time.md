@@ -88,7 +88,7 @@ memory condition is added. The rest of ADR-0035 stands.
   `unsafe_code = "forbid"` cannot implement one itself.
 - A kbench cell for wall time and peak RSS of mid-size YAML would need new code in
   `xtask bench-scale`, which records no RSS today, and a results location that the published
-  history does not read. It is left for a separate change.
+  history does not read. It is left for a separate change, #550.
 
 ## Considered Options
 
