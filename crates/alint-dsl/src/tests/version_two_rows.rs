@@ -108,7 +108,7 @@ fn strings(rows: &[&[&str]]) -> Vec<Vec<String>> {
 // Section 12's three policies, as written there less their `constraint`
 // rules (phase 7).
 
-const DEPENDENCY_RANGES: &str = r#"version: 2
+pub(super) const DEPENDENCY_RANGES: &str = r#"version: 2
 selectors:
   workspace-manifests:
     # yarnpkg-berry-01 leaves packages/docusaurus out
@@ -216,7 +216,7 @@ fn an_in_list_keeps_the_rows_another_relation_holds() {
     );
 }
 
-const LOCALE_KEYS: &str = r#"version: 2
+pub(super) const LOCALE_KEYS: &str = r#"version: 2
 selectors:
   locale-files: { paths: "config/locales/**/*.yml" }
 relations:
@@ -294,7 +294,7 @@ fn strip_root_needs_one_top_level_key_per_resource() {
     );
 }
 
-const NODE_PINS: &str = r#"version: 2
+pub(super) const NODE_PINS: &str = r#"version: 2
 relations:
   node-pins:
     union:

@@ -36,6 +36,11 @@ fn in_crate_rule_trace_schema_path() -> Result<PathBuf> {
     Ok(crate::workspace_root()?.join("crates/alint/schemas/experimental/rule-trace.json"))
 }
 
+/// The draft version 2 config schema (`gen_schema_v2`). No crate embeds it.
+fn v2_schema_path() -> Result<PathBuf> {
+    Ok(crate::workspace_root()?.join("schemas/v2/config.json"))
+}
+
 /// Build the generated schema in memory: the committed descriptive base with
 /// every canonical rule branch replaced by its schemars-derived equivalent.
 pub fn build_generated_schema() -> Result<Value> {
@@ -929,11 +934,12 @@ fn render(schema: &Value) -> Result<String> {
     Ok(rendered)
 }
 
-/// Write the generated schema to the root and in-crate copies, or (with `check`)
-/// fail if either is stale.
+/// Write the generated schema to the root and in-crate copies, and the draft
+/// version 2 schema derived from it, or (with `check`) fail if any is stale.
 pub fn run(check: bool) -> Result<()> {
     let generated = build_generated_schema()?;
     let rendered = render(&generated)?;
+    let v2_rendered = render(&crate::gen_schema_v2::build(&generated)?)?;
     let policy_test_rendered =
         alint_testkit::policy_test_schema_json().context("render policy-test schema")?;
     let policy_test_report_rendered = alint_testkit::policy_test_report_schema_json()
@@ -960,6 +966,9 @@ pub fn run(check: bool) -> Result<()> {
             .with_context(|| format!("read {}", rule_trace_path.display()))?;
         let in_crate_rule_trace = std::fs::read_to_string(&in_crate_rule_trace_path)
             .with_context(|| format!("read {}", in_crate_rule_trace_path.display()))?;
+        let v2_path = v2_schema_path()?;
+        let v2 = std::fs::read_to_string(&v2_path)
+            .with_context(|| format!("read {}", v2_path.display()))?;
         let stale: Vec<&str> = [
             (root != rendered).then_some("schemas/v1/config.json"),
             (in_crate != rendered).then_some("crates/alint-dsl/schemas/v1/config.json"),
@@ -969,6 +978,7 @@ pub fn run(check: bool) -> Result<()> {
             (rule_trace != rule_trace_rendered).then_some("schemas/experimental/rule-trace.json"),
             (in_crate_rule_trace != rule_trace_rendered)
                 .then_some("crates/alint/schemas/experimental/rule-trace.json"),
+            (v2 != v2_rendered).then_some("schemas/v2/config.json"),
         ]
         .into_iter()
         .flatten()
@@ -990,6 +1000,9 @@ pub fn run(check: bool) -> Result<()> {
     if let Some(parent) = in_crate_rule_trace_schema_path()?.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    if let Some(parent) = v2_schema_path()?.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     std::fs::write(root_schema_path()?, &rendered)?;
     std::fs::write(in_crate_schema_path()?, &rendered)?;
     std::fs::write(policy_test_schema_path()?, &policy_test_rendered)?;
@@ -999,9 +1012,10 @@ pub fn run(check: bool) -> Result<()> {
     )?;
     std::fs::write(rule_trace_schema_path()?, &rule_trace_rendered)?;
     std::fs::write(in_crate_rule_trace_schema_path()?, &rule_trace_rendered)?;
+    std::fs::write(v2_schema_path()?, &v2_rendered)?;
     println!(
-        "wrote config schema copies, schemas/v1 policy-test schemas, and \
-         experimental rule-trace schema copies"
+        "wrote config schema copies, schemas/v1 policy-test schemas, experimental \
+         rule-trace schema copies, and the draft schemas/v2/config.json"
     );
     Ok(())
 }

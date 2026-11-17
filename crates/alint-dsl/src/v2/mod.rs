@@ -26,6 +26,8 @@ mod model;
 mod origins;
 mod plan_check;
 mod resolve;
+#[cfg(test)]
+pub(crate) mod schema_parity;
 
 use alint_core::{ConfigSourceClass, Error, Result};
 use ayaml::Value;

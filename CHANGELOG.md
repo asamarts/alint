@@ -466,6 +466,15 @@ policy-test package the user does not trust.
   - `facts.json` (format 7) gains `compatibility.experimental_config_versions: [2]`;
     `config_versions` stays `[1]`. `validate-config --format json` gains `config_version`, the
     loaded config's version, for every config.
+  - A draft JSON Schema for version 2, `schemas/v2/config.json`, with the `$id`
+    `https://raw.githubusercontent.com/asamarts/alint/v0.23.0/schemas/v2/config.json`. It is the
+    version 1 schema with `version: 2`, `selectors:`, `relations:` and `as:` added, and checks
+    what the loader checks of those when it decodes a file: every key, value type, name,
+    reference, field source, transform, `entries:` format, `read:` form and count. It leaves to
+    the loader what needs every source loaded (names that resolve, cycles, the relation plan),
+    regexes and JSONPaths, and a name declared twice. An editor uses it through a
+    `# yaml-language-server: $schema=` modeline in a version 2 file; the version 1 schema and its
+    `$id` are unchanged.
 
 ### Changed
 

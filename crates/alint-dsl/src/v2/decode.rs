@@ -18,14 +18,17 @@ use super::model::{
     SourceObjects, Transform,
 };
 
-const SELECTOR_KEYS: &[&str] = &["paths", "scope_filter"];
+// The keys and values each part of a selector or relation takes. The draft
+// schema (`schemas/v2/config.json`) lists the same ones, which
+// `schema_parity` checks.
+pub(super) const SELECTOR_KEYS: &[&str] = &["paths", "scope_filter"];
 /// `scope_filter:` in a selector: a rule's predicates but `changed_since`.
-const SELECTOR_FILTER_KEYS: &[&str] = &[
+pub(super) const SELECTOR_FILTER_KEYS: &[&str] = &[
     "has_ancestor",
     "include_manifest_paths",
     "exclude_manifest_paths",
 ];
-const RELATION_KEYS: &[&str] = &[
+pub(super) const RELATION_KEYS: &[&str] = &[
     "from",
     "entries",
     "read",
@@ -37,22 +40,38 @@ const RELATION_KEYS: &[&str] = &[
     "where",
 ];
 /// A relation has exactly one of these.
-const ROW_SOURCES: &[&str] = &["entries", "read", "union", "join"];
-const PART_KEYS: &[&str] = &["from", "entries", "read", "optional"];
-const ENTRIES_KEYS: &[&str] = &["format", "at", "leaves"];
-const READ_KEYS: &[&str] = &["json", "yaml", "toml", "regex", "lines", "whole_file"];
+pub(super) const ROW_SOURCES: &[&str] = &["entries", "read", "union", "join"];
+pub(super) const PART_KEYS: &[&str] = &["from", "entries", "read", "optional"];
+pub(super) const ENTRIES_KEYS: &[&str] = &["format", "at", "leaves"];
+pub(super) const READ_KEYS: &[&str] = &["json", "yaml", "toml", "regex", "lines", "whole_file"];
 /// Extract forms `cross_file` has that a relation cannot read in v0.23.
 const UNREADABLE_FORMATS: &[&str] = &["xml", "dotenv", "properties", "ini", "hcl"];
-const JOIN_KEYS: &[&str] = &["left", "right", "on", "unique"];
-const FIELD_KEYS: &[&str] = &["source", "sensitive"];
-const PREDICATE_KEYS: &[&str] = &["in", "not_in", "matches", "not_matches"];
-const MEMBER_KEYS: &[&str] = &["relation", "field"];
-const TRANSFORMS: &[&str] = &[
+pub(super) const JOIN_KEYS: &[&str] = &["left", "right", "on", "unique"];
+pub(super) const FIELD_KEYS: &[&str] = &["source", "sensitive"];
+pub(super) const PREDICATE_KEYS: &[&str] = &["in", "not_in", "matches", "not_matches"];
+pub(super) const MEMBER_KEYS: &[&str] = &["relation", "field"];
+pub(super) const TRANSFORMS: &[&str] = &[
     "trim",
     "lower",
     "semver-major",
     "semver-minor",
     "strip-root",
+];
+/// The field sources written as a bare name; `bound:`, `left.` and `right.`
+/// take an argument.
+pub(super) const NAMED_FIELD_SOURCES: &[(&str, FieldSource)] = &[
+    ("path", FieldSource::Path(PathToken::Path)),
+    ("dir", FieldSource::Path(PathToken::Dir)),
+    ("basename", FieldSource::Path(PathToken::Basename)),
+    ("stem", FieldSource::Path(PathToken::Stem)),
+    ("ext", FieldSource::Path(PathToken::Ext)),
+    ("parent_name", FieldSource::Path(PathToken::ParentName)),
+    ("entry.key", FieldSource::EntryKey),
+    ("entry.value", FieldSource::EntryValue),
+    ("entry.parent", FieldSource::EntryParent),
+    ("entry.root", FieldSource::EntryRoot),
+    ("entry.path", FieldSource::EntryPath),
+    ("value", FieldSource::Value),
 ];
 const FIELD_SOURCES: &str = "`path`, a path token (`dir`, `basename`, `stem`, `ext`, \
      `parent_name`), `entry.key`, `entry.value`, `entry.parent`, `entry.root`, `entry.path`, \
@@ -119,6 +138,10 @@ pub(crate) fn source_objects(
             },
         ));
     }
+    // In this crate's unit tests, the draft schema must accept every source
+    // this decode accepts.
+    #[cfg(test)]
+    super::schema_parity::assert_accepts(v2_keys, extends);
     Ok(objects)
 }
 
@@ -861,46 +884,31 @@ impl Decoder<'_> {
     }
 
     fn field_source(&self, text: &str, path: &str) -> Result<FieldSource> {
-        Ok(match text {
-            "path" => FieldSource::Path(PathToken::Path),
-            "dir" => FieldSource::Path(PathToken::Dir),
-            "basename" => FieldSource::Path(PathToken::Basename),
-            "stem" => FieldSource::Path(PathToken::Stem),
-            "ext" => FieldSource::Path(PathToken::Ext),
-            "parent_name" => FieldSource::Path(PathToken::ParentName),
-            "entry.key" => FieldSource::EntryKey,
-            "entry.value" => FieldSource::EntryValue,
-            "entry.parent" => FieldSource::EntryParent,
-            "entry.root" => FieldSource::EntryRoot,
-            "entry.path" => FieldSource::EntryPath,
-            "value" => FieldSource::Value,
-            _ => {
-                if let Some(query) = text.strip_prefix("bound:") {
-                    let query = query.trim();
-                    if query.is_empty() {
-                        return Err(
-                            self.error(path, "`bound:` needs a JSONPath, as in `bound: $.name`")
-                        );
-                    }
-                    self.json_path(query, path)?;
-                    FieldSource::Bound(query.to_string())
-                } else if let Some((side, field)) = text
-                    .strip_prefix("left.")
-                    .map(|field| (JoinSide::Left, field))
-                    .or_else(|| {
-                        text.strip_prefix("right.")
-                            .map(|field| (JoinSide::Right, field))
-                    })
-                {
-                    self.name(field, path)?;
-                    FieldSource::Side(side, field.to_string())
-                } else {
-                    return Err(self.error(
-                        path,
-                        format!("`{text}` is not a field source; expected {FIELD_SOURCES}"),
-                    ));
-                }
+        if let Some((_, source)) = NAMED_FIELD_SOURCES.iter().find(|(name, _)| *name == text) {
+            return Ok(source.clone());
+        }
+        Ok(if let Some(query) = text.strip_prefix("bound:") {
+            let query = query.trim();
+            if query.is_empty() {
+                return Err(self.error(path, "`bound:` needs a JSONPath, as in `bound: $.name`"));
             }
+            self.json_path(query, path)?;
+            FieldSource::Bound(query.to_string())
+        } else if let Some((side, field)) = text
+            .strip_prefix("left.")
+            .map(|field| (JoinSide::Left, field))
+            .or_else(|| {
+                text.strip_prefix("right.")
+                    .map(|field| (JoinSide::Right, field))
+            })
+        {
+            self.name(field, path)?;
+            FieldSource::Side(side, field.to_string())
+        } else {
+            return Err(self.error(
+                path,
+                format!("`{text}` is not a field source; expected {FIELD_SOURCES}"),
+            ));
         })
     }
 

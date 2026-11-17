@@ -8,6 +8,7 @@ mod resource_budgets;
 mod version_two;
 mod version_two_names;
 mod version_two_rows;
+mod version_two_schema;
 mod yaml_errors;
 
 fn test_registry() -> &'static alint_core::RuleRegistry {

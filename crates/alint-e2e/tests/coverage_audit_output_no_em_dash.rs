@@ -13,7 +13,9 @@
 //!     and `*.stderr`), which capture alint's stdout/stderr byte-for-byte;
 //!   * both committed schema copies (`schemas/v1/config.json` and the
 //!     in-crate `crates/alint-dsl/schemas/v1/config.json`), whose
-//!     `description` strings derive from the rule-option doc-comments.
+//!     `description` strings derive from the rule-option doc-comments, and
+//!     the draft version 2 schema (`schemas/v2/config.json`), which adds its
+//!     own.
 //!
 //! Out of scope (kept as-is): code comments, rustdoc on non-schema items,
 //! test-only strings, `docs/rules.md`, the CHANGELOG, and intentional
@@ -67,6 +69,7 @@ fn config_schema_descriptions_have_no_em_dash() {
     for rel in [
         "schemas/v1/config.json",
         "crates/alint-dsl/schemas/v1/config.json",
+        "schemas/v2/config.json",
     ] {
         let path = workspace_root().join(rel);
         let text =

@@ -22,7 +22,8 @@
 //! - `gen-public-roadmap` — render the public roadmap from the canonical
 //!   `docs/design/ROADMAP.md` (also invoked internally by `docs-export`).
 //! - `gen-schema`         — regenerate config and policy-test schemas from
-//!   canonical Rust models; `--check` gates drift.
+//!   canonical Rust models, and the draft version 2 config schema from the
+//!   version 1 one; `--check` gates drift.
 //! - `gen-facts`          — regenerate `facts.json` (the surface-area contract)
 //!   from canonical sources; `--check` gates drift.
 //! - `gen-roadmap`        — regenerate `roadmap.json` (the public-roadmap
@@ -55,6 +56,7 @@ mod gen_mermaid;
 mod gen_model;
 mod gen_roadmap;
 mod gen_schema;
+mod gen_schema_v2;
 mod roadmap_generator;
 mod rule_options_table;
 

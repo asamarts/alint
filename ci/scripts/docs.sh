@@ -25,7 +25,9 @@ cargo run -q -p xtask -- docs-export --check
 # copy) and schemas/v1/policy-test.json from their canonical Rust models, then
 # applies KindMeta common-field restrictions to config and fails on type, registry,
 # metadata drift. This is the regenerate-and-diff gate for ADR-0001, v0.19 W1,
-# and ADR-0022. Run it after changing option metadata or a public schema model.
+# and ADR-0022. It also regenerates the draft schemas/v2/config.json (experimental
+# `version: 2`) from the version 1 schema. Run it after changing option metadata
+# or a public schema model.
 echo "==> Running xtask gen-schema --check"
 cargo run -q -p xtask -- gen-schema --check
 
