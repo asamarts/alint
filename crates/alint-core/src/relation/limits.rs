@@ -27,18 +27,30 @@ pub enum LimitKind {
     /// many parts over one decode fails at the cap rather than after. Every
     /// relation a run evaluates stays in its memo for the run, and a row's
     /// size grows with its fields, so it is the run's cells, not one
-    /// relation's rows, that bound what relations hold.
+    /// relation's rows, that bound what relations hold, with
+    /// [`Self::BytesPerRun`] for what a cell holds beyond its size.
     CellsPerRun,
+    /// Bytes the relation evaluator holds in one run beyond its cells: each
+    /// decode it reads, whole, once (its rows, values and key paths), and
+    /// each text it builds (a path token, an `entry.key`, `entry.parent`,
+    /// `entry.root` or `entry.path`, a key path a row keeps, a transformed
+    /// value, a note, a failure). A value's text is shared, never copied,
+    /// so a field or join that copies a value costs a cell and no bytes.
+    /// With [`Self::CellsPerRun`] it bounds what a run's relations hold,
+    /// whatever the input's shape; the evaluator takes the bytes as it
+    /// builds what holds them.
+    BytesPerRun,
 }
 
 impl LimitKind {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::RowsPerExtractor,
         Self::RowsPerRun,
         Self::DistinctValues,
         Self::JoinInputs,
         Self::JoinOutputs,
         Self::CellsPerRun,
+        Self::BytesPerRun,
     ];
 
     #[must_use]
@@ -50,19 +62,31 @@ impl LimitKind {
             Self::JoinInputs => "join_inputs",
             Self::JoinOutputs => "join_outputs",
             Self::CellsPerRun => "cells_per_run",
+            Self::BytesPerRun => "bytes_per_run",
+        }
+    }
+
+    /// What the limit counts, as [`LimitExceeded`] says it.
+    fn unit(self) -> &'static str {
+        match self {
+            Self::BytesPerRun => "bytes",
+            _ => "rows or values",
         }
     }
 
     /// The default. Provisional until R2 measures real relations; each is far
     /// above what the v0.12 corpus needs and far below what exhausts memory.
-    /// A cell costs about what a decoded row does (100 to 150 bytes), so a run
-    /// may hold as many cells as it may decode rows.
+    /// A cell costs about what a decoded row does (100 to 150 bytes, at most
+    /// 256 with its share of its row), so a run may hold as many cells as it
+    /// may decode rows; with 1 GiB of bytes, the relations of a run at the
+    /// defaults hold at most about 2.4 GB.
     #[must_use]
     pub fn default_value(self) -> usize {
         match self {
             Self::RowsPerExtractor | Self::JoinInputs | Self::JoinOutputs => 1_000_000,
             Self::RowsPerRun | Self::CellsPerRun => 5_000_000,
             Self::DistinctValues => 100_000,
+            Self::BytesPerRun => 1 << 30,
         }
     }
 
@@ -75,6 +99,8 @@ impl LimitKind {
             | Self::JoinInputs
             | Self::JoinOutputs => 10_000_000,
             Self::RowsPerRun | Self::CellsPerRun => 50_000_000,
+            // 16 GiB, or half of what a 32-bit `usize` holds.
+            Self::BytesPerRun => usize::try_from(16u64 << 30).unwrap_or(usize::MAX >> 1),
         }
     }
 
@@ -85,7 +111,7 @@ impl LimitKind {
 
 /// A limit was reached: the analysis is incomplete.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("relation limit `{}` ({limit}) reached: {reached} rows or values", kind.name())]
+#[error("relation limit `{}` ({limit}) reached: {reached} {}", kind.name(), kind.unit())]
 pub struct LimitExceeded {
     pub kind: LimitKind,
     pub limit: usize,
@@ -219,6 +245,34 @@ mod tests {
             for other in LimitKind::ALL.into_iter().filter(|o| *o != kind) {
                 assert_eq!(limits.get(other), other.default_value());
             }
+        }
+    }
+
+    #[test]
+    fn a_reached_limit_names_what_it_counts() {
+        let reached = |kind| {
+            LimitExceeded {
+                kind,
+                limit: 3,
+                reached: 4,
+            }
+            .to_string()
+        };
+        assert_eq!(
+            reached(LimitKind::BytesPerRun),
+            "relation limit `bytes_per_run` (3) reached: 4 bytes"
+        );
+        for kind in LimitKind::ALL
+            .into_iter()
+            .filter(|kind| *kind != LimitKind::BytesPerRun)
+        {
+            assert_eq!(
+                reached(kind),
+                format!(
+                    "relation limit `{}` (3) reached: 4 rows or values",
+                    kind.name()
+                )
+            );
         }
     }
 

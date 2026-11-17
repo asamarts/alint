@@ -90,6 +90,18 @@ impl Pointer {
         out
     }
 
+    /// The bytes the pointer holds beyond its own size: its segments and
+    /// their keys' text.
+    pub(crate) fn heap_bytes(&self) -> usize {
+        self.0.iter().fold(
+            self.0.len() * std::mem::size_of::<Segment>(),
+            |bytes, segment| match segment {
+                Segment::Key(key) => bytes.saturating_add(key.len()),
+                Segment::Index(_) => bytes,
+            },
+        )
+    }
+
     /// The `structured_fix` form, for span resolution.
     #[must_use]
     pub fn to_path_segs(&self) -> Vec<PathSeg> {

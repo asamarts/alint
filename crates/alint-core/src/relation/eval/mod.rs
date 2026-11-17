@@ -26,7 +26,20 @@
 //! - **Limits.** Every decode is bounded by its rows and the run's, and
 //!   every row a relation builds, by its fields, takes its cells from the
 //!   run's [`LimitKind::CellsPerRun`] before it is built, so a `union:` of
-//!   many parts over one decode, or a join, fails at the cap.
+//!   many parts over one decode, or a join, fails at the cap. What a cell
+//!   holds beyond its fixed size is shared or taken from the run's
+//!   [`LimitKind::BytesPerRun`]: a value's text is shared by every field and
+//!   join that copies it, a join shares its side's resources and a relation
+//!   the failures of the one it read them from, and each decode, key path,
+//!   path token, transformed value, note and failure the evaluator holds
+//!   takes its bytes once. A run's relations then hold at most
+//!   `cells_per_run` cells of at most 256 bytes each (a cell's share of its
+//!   row, provenance and resource list included) and `bytes_per_run` bytes,
+//!   whatever the input's shape; `eval/tests.rs` audits that bound. While
+//!   one relation is evaluated, a step holds more for its length: a file's
+//!   bytes, one decode before its bytes are taken, a join's key table
+//!   (`join_inputs`), a `where:` list's set (`distinct_values`) and a
+//!   transform's table of the texts it made (a row's worth each).
 //! - **Failures.** A relation with a problem has no rows: it fails with an
 //!   analysis failure per resource that shows one ([`RelationFailure`]), and
 //!   so does every relation that reads it.
@@ -38,6 +51,8 @@ mod read;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+
+use failure::Failures;
 
 pub use failure::RelationFailure;
 
@@ -58,10 +73,11 @@ pub struct RelationRows {
     /// cell for each, in this order.
     pub fields: Vec<FieldInfo>,
     pub rows: Vec<FieldRow>,
-    /// Every resource the relation's parts read, rows or not, in the order
-    /// read: a `set` grouped by path gives each a group. A join's are those
-    /// of its side that is not unique, whose order its rows follow.
-    pub resources: Vec<Resource>,
+    /// Every resource the relation's parts read, rows or not, once each, in
+    /// the order first read: a `set` grouped by path gives each a group. A
+    /// join's are those of its side that is not unique, whose order its rows
+    /// follow, shared with that side.
+    pub resources: Arc<[Resource]>,
     /// What a `read:` skipped: a computed value (`${VAR}`), one per value,
     /// in the order read.
     pub notes: Vec<RelationNote>,
@@ -110,7 +126,8 @@ pub struct Cell {
     /// For an `entry.path` field, the key path's segments, after
     /// `strip-root`, whose [`Pointer::render`] the value is (until a string
     /// transform such as `lower` changes the value; the segments stay).
-    pub path: Option<Pointer>,
+    /// Shared by the row's `entry.path` fields and their copies.
+    pub path: Option<Arc<Pointer>>,
 }
 
 /// Where a row's value came from.
@@ -202,6 +219,9 @@ pub struct RunMemo {
     /// The cells this memo's evaluations have built
     /// ([`LimitKind::CellsPerRun`]); a failed take still counts.
     cells: AtomicUsize,
+    /// The bytes they hold beyond their cells ([`LimitKind::BytesPerRun`]);
+    /// a failed take still counts.
+    bytes: AtomicUsize,
 }
 
 impl RunMemo {
@@ -212,6 +232,7 @@ impl RunMemo {
             outcomes,
             manifests: Mutex::default(),
             cells: AtomicUsize::new(0),
+            bytes: AtomicUsize::new(0),
         }
     }
 
@@ -230,6 +251,12 @@ impl RunMemo {
     #[cfg(test)]
     pub(crate) fn cells(&self) -> usize {
         self.cells.load(Ordering::Relaxed)
+    }
+
+    /// The bytes taken so far. Test only.
+    #[cfg(test)]
+    pub(crate) fn bytes(&self) -> usize {
+        self.bytes.load(Ordering::Relaxed)
     }
 }
 
@@ -250,12 +277,24 @@ impl Evaluator<'_> {
     /// building what holds them. A failed take still counts, so every later
     /// take fails too.
     fn take_cells(&self, cells: usize) -> Result<(), LimitExceeded> {
-        let total = self
-            .memo
-            .cells
-            .fetch_add(cells, Ordering::Relaxed)
-            .saturating_add(cells);
-        self.limits.check(LimitKind::CellsPerRun, total)
+        take(
+            &self.memo.cells,
+            cells,
+            &self.limits,
+            LimitKind::CellsPerRun,
+        )
+    }
+
+    /// Take `bytes` bytes from the run's [`LimitKind::BytesPerRun`] for what
+    /// a relation holds beyond its cells, as it builds it. A failed take
+    /// still counts, so every later take fails too.
+    fn take_bytes(&self, bytes: usize) -> Result<(), LimitExceeded> {
+        take(
+            &self.memo.bytes,
+            bytes,
+            &self.limits,
+            LimitKind::BytesPerRun,
+        )
     }
 
     /// `id`'s outcome, evaluating it and the relations it reads first when
@@ -348,7 +387,7 @@ impl Evaluator<'_> {
             sensitive: named.reads_environment,
             keys_sensitive: self.keys_sensitive(id),
         };
-        let mut failures = failure::Failures::default();
+        let mut failures = Failures::default();
         let rows = match &named.relation.rows {
             super::plan::Rows::Join(join) => self.join(&site, named, join, &mut failures),
             super::plan::Rows::Part(part) => {
@@ -368,21 +407,70 @@ impl Evaluator<'_> {
                     "the relation names a field its rows do not have; this is a bug in alint's \
                      plan check, so please report it",
                 ));
-                Err(failures.into_vec().into())
+                Err(self.held_failures(&site, failures))
             }
-            _ => Err(failures.into_vec().into()),
+            _ => Err(self.held_failures(&site, failures)),
+        }
+    }
+
+    /// The failures a relation keeps in the memo, their bytes taken from the
+    /// run: those of the one relation it read them from are shared and take
+    /// none. When the bytes run out, the relation keeps one failure that says
+    /// a limit was reached: its own, or this one.
+    fn held_failures(&self, site: &Site, failures: Failures) -> Arc<[RelationFailure]> {
+        match self.take_bytes(failures.bytes()) {
+            Ok(()) => failures.into_shared(),
+            Err(limit) => Arc::new([failures.into_limit().unwrap_or_else(|| {
+                site.failure(
+                    crate::rule::AnalysisFailureKind::Evaluation,
+                    None,
+                    limit_reached(&limit),
+                )
+            })]),
         }
     }
 }
 
-/// What a relation says when the run's cells run out
-/// ([`Evaluator::take_cells`]).
-fn cells_exhausted(limit: &LimitExceeded) -> String {
-    format!(
-        "{limit}, so the relation is not evaluated rather than cut short; a run's relations hold \
-         a cell per field of each row and one per file each part reads, so read fewer rows \
-         (narrow the selector, the `at:` paths or the parts) or bind fewer fields"
-    )
+/// What a key path held in an [`Arc`] holds: the [`Arc`]'s counts, the
+/// pointer and its segments.
+fn shared_pointer_bytes(pointer: &Pointer) -> usize {
+    2 * std::mem::size_of::<usize>() + std::mem::size_of::<Pointer>() + pointer.heap_bytes()
+}
+
+/// Add `amount` to `used`, failing once the total exceeds `kind`'s limit. A
+/// take of nothing holds nothing, so it never fails.
+fn take(
+    used: &AtomicUsize,
+    amount: usize,
+    limits: &Limits,
+    kind: LimitKind,
+) -> Result<(), LimitExceeded> {
+    if amount == 0 {
+        return Ok(());
+    }
+    let total = used
+        .fetch_add(amount, Ordering::Relaxed)
+        .saturating_add(amount);
+    limits.check(kind, total)
+}
+
+/// What a relation says when the run's cells or bytes run out
+/// ([`Evaluator::take_cells`], [`Evaluator::take_bytes`]).
+fn limit_reached(limit: &LimitExceeded) -> String {
+    if limit.kind == LimitKind::BytesPerRun {
+        format!(
+            "{limit}, so the relation is not evaluated rather than cut short; a run's relations \
+             hold each file they decode and each key path, path token and transformed value \
+             they build, so read fewer or smaller files (narrow the selector or the `at:` paths) \
+             or bind fewer key and path fields"
+        )
+    } else {
+        format!(
+            "{limit}, so the relation is not evaluated rather than cut short; a run's relations \
+             hold a cell per field of each row and one per file each part reads, so read fewer \
+             rows (narrow the selector, the `at:` paths or the parts) or bind fewer fields"
+        )
+    }
 }
 
 /// How one relation's failures read: their common prefix, whether its
@@ -417,7 +505,7 @@ impl Site {
         RelationFailure {
             kind,
             resource,
-            message,
+            message: message.into(),
             sensitive: self.sensitive,
         }
     }

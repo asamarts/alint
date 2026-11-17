@@ -478,8 +478,10 @@ policy-test package the user does not trust.
     cannot hold, such as an `entry.value` that is an object, a TOML date, a `bound:` path that does
     not match exactly once, a repeated key on a join's `unique:` side or a comparison across types,
     is an analysis failure naming the relation, the file and the key path, never a dropped row; so
-    is reaching a row, cell, join or distinct-value limit, which is never truncation (a run's
-    relations hold at most 5,000,000 cells, a cell per field of each row). Every `where:` predicate
+    is reaching a row, cell, byte, join or distinct-value limit, which is never truncation (a run's
+    relations hold at most 5,000,000 cells, a cell per field of each row, and 1 GiB besides: a
+    value's text is held once however many fields, parts and joins copy it, and each decode, key
+    path and transformed value takes its bytes once). Every `where:` predicate
     tests every row, so their order does not matter: a row that any predicate is false for is
     dropped, even when another cannot test it. A field the environment writes to (`{{env.X}}` in its
     `where:` or `transform:`) is sensitive, and a relation whose selection reads the environment

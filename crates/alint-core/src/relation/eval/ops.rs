@@ -187,7 +187,7 @@ impl Evaluator<'_> {
         for (field, transforms) in &relation.transforms {
             let position = rows.field(field)?;
             for transform in transforms {
-                transform_field(site, &mut rows, position, field, *transform, failures);
+                self.transform_field(site, &mut rows, position, field, *transform, failures);
             }
         }
         if !failures.is_empty() {
@@ -323,7 +323,7 @@ impl Evaluator<'_> {
                     let read = match self.computed(relation.id) {
                         Ok(rows) => rows,
                         Err(theirs) => {
-                            failures.extend(theirs.iter().cloned());
+                            failures.inherit(&theirs);
                             return None;
                         }
                     };
@@ -428,7 +428,9 @@ impl Evaluator<'_> {
         let fields = join_fields(named, &left, &right)?;
         let mut out = RelationRows {
             fields: fields.iter().map(|(info, _, _)| info.clone()).collect(),
-            resources: probe.resources.clone(),
+            // Shared with the side, never copied: a chain of joins holds one
+            // list.
+            resources: Arc::clone(&probe.resources),
             ..RelationRows::default()
         };
         for row in &probe.rows {
@@ -451,10 +453,10 @@ impl Evaluator<'_> {
                 return None;
             }
             if let Err(limit) = self.take_cells(fields.len().max(1)) {
-                failures.push(site.failure(
+                failures.push_limit(site.failure(
                     AnalysisFailureKind::Evaluation,
                     None,
-                    super::cells_exhausted(&limit),
+                    super::limit_reached(&limit),
                 ));
                 return None;
             }
@@ -462,6 +464,7 @@ impl Evaluator<'_> {
                 JoinSide::Left => (matched, row),
                 JoinSide::Right => (row, matched),
             };
+            // A cell's copy shares its value, provenance and key path.
             out.rows.push(FieldRow {
                 cells: fields
                     .iter()
@@ -480,8 +483,76 @@ impl Evaluator<'_> {
         match self.computed(id) {
             Ok(rows) => Some(rows),
             Err(theirs) => {
-                failures.extend(theirs.iter().cloned());
+                failures.inherit(&theirs);
                 None
+            }
+        }
+    }
+
+    /// Apply one transform to the field at `position` of every row. A value
+    /// it does not change stays shared, and rows that share a value share
+    /// what it becomes; each new text takes its bytes from the run.
+    fn transform_field(
+        &self,
+        site: &Site,
+        rows: &mut RelationRows,
+        position: usize,
+        field: &str,
+        transform: Transform,
+        failures: &mut Failures,
+    ) {
+        let string_transform = match transform {
+            Transform::StripRoot => {
+                self.strip_root(site, rows, position, field, failures);
+                return;
+            }
+            Transform::Trim => StringTransform::Trim,
+            Transform::Lower => StringTransform::Lower,
+            Transform::SemverMajor => StringTransform::SemverMajor,
+            Transform::SemverMinor => StringTransform::SemverMinor,
+        };
+        // Each text transformed, by the text it was, while the field is.
+        let mut done: HashMap<Arc<str>, Arc<str>> = HashMap::new();
+        for row in &mut rows.rows {
+            let cell = &mut row.cells[position];
+            match &cell.value {
+                None => {}
+                Some(Value::String(text)) => {
+                    let became = if let Some(became) = done.get(text) {
+                        Arc::clone(became)
+                    } else {
+                        let applied = string_transform.apply(text);
+                        let became: Arc<str> = if applied == **text {
+                            Arc::clone(text)
+                        } else {
+                            if let Err(limit) = self.take_bytes(applied.len()) {
+                                failures.push_limit(site.failure(
+                                    AnalysisFailureKind::Evaluation,
+                                    None,
+                                    super::limit_reached(&limit),
+                                ));
+                                return;
+                            }
+                            applied.into()
+                        };
+                        done.insert(Arc::clone(text), Arc::clone(&became));
+                        became
+                    };
+                    cell.value = Some(Value::String(became));
+                }
+                Some(other) => {
+                    failures.push(site.failure(
+                        AnalysisFailureKind::Evaluation,
+                        Some(resource_of(cell)),
+                        format!(
+                            "`transform.{field}` applies `{}` to {}{}, but the string transforms \
+                             apply to strings; transform a string field",
+                            string_transform.name(),
+                            type_name(other),
+                            at(cell, site.keys_sensitive)
+                        ),
+                    ));
+                }
             }
         }
     }
@@ -763,132 +834,121 @@ fn render_key(key: &[Value]) -> String {
     }
 }
 
-/// Apply one transform to the field at `position` of every row.
-fn transform_field(
-    site: &Site,
-    rows: &mut RelationRows,
-    position: usize,
-    field: &str,
-    transform: Transform,
-    failures: &mut Failures,
-) {
-    let string_transform = match transform {
-        Transform::StripRoot => {
-            strip_root(site, rows, position, field, failures);
-            return;
-        }
-        Transform::Trim => StringTransform::Trim,
-        Transform::Lower => StringTransform::Lower,
-        Transform::SemverMajor => StringTransform::SemverMajor,
-        Transform::SemverMinor => StringTransform::SemverMinor,
-    };
-    for row in &mut rows.rows {
-        let cell = &mut row.cells[position];
-        match &cell.value {
-            None => {}
-            Some(Value::String(text)) => {
-                cell.value = Some(Value::String(string_transform.apply(text).into()));
-            }
-            Some(other) => {
+/// A key path `strip-root` stripped: the one it was, the one it became, and
+/// that one's text.
+type Stripped = (Arc<Pointer>, Arc<Pointer>, Arc<str>);
+
+impl Evaluator<'_> {
+    /// `strip-root`: drop the first segment of an `entry.path` field, as
+    /// `key_parity`'s `strip_root` does. Each resource must hold one
+    /// top-level key among its rows, and every row's key path at least two
+    /// segments. Rows that share a key path share what it becomes, and each
+    /// new one takes its bytes from the run.
+    fn strip_root(
+        &self,
+        site: &Site,
+        rows: &mut RelationRows,
+        position: usize,
+        field: &str,
+        failures: &mut Failures,
+    ) {
+        let sensitive = rows.fields[position].sensitive || site.keys_sensitive;
+        let mut roots: BTreeMap<&str, Vec<&crate::relation::pointer::Segment>> = BTreeMap::new();
+        for row in &rows.rows {
+            let cell = &row.cells[position];
+            let Some(path) = &cell.path else {
                 failures.push(site.failure(
                     AnalysisFailureKind::Evaluation,
                     Some(resource_of(cell)),
                     format!(
-                        "`transform.{field}` applies `{}` to {}{}, but the string transforms \
-                         apply to strings; transform a string field",
-                        string_transform.name(),
-                        type_name(other),
-                        at(cell, site.keys_sensitive)
+                        "`strip-root` on `{field}` applies to an `entry.path` value, and this \
+                         row's is not one; bind `{field}` to `entry.path` in every part"
+                    ),
+                ));
+                continue;
+            };
+            let resource = cell.at.resource.path().as_str();
+            let held = roots.entry(resource).or_default();
+            if let Some(first) = path.segments().first()
+                && !held.contains(&first)
+            {
+                held.push(first);
+            }
+        }
+        for (resource, held) in &roots {
+            if held.len() > 1 {
+                let shown = if sensitive {
+                    held.len().to_string()
+                } else {
+                    held.iter()
+                        .map(|segment| {
+                            format!(
+                                "`{}`",
+                                Pointer::from_segments(vec![(*segment).clone()]).render()
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                };
+                failures.push(site.failure(
+                    AnalysisFailureKind::Evaluation,
+                    Some(Arc::from(std::path::Path::new(resource))),
+                    format!(
+                        "`strip-root` on `{field}` needs one top-level key in each resource, but \
+                         this one has {shown}; read one top-level object per file, or drop \
+                         `strip-root`"
                     ),
                 ));
             }
         }
-    }
-}
-
-/// `strip-root`: drop the first segment of an `entry.path` field, as
-/// `key_parity`'s `strip_root` does. Each resource must hold one top-level
-/// key among its rows, and every row's key path at least two segments.
-fn strip_root(
-    site: &Site,
-    rows: &mut RelationRows,
-    position: usize,
-    field: &str,
-    failures: &mut Failures,
-) {
-    let sensitive = rows.fields[position].sensitive || site.keys_sensitive;
-    let mut roots: BTreeMap<&str, Vec<&crate::relation::pointer::Segment>> = BTreeMap::new();
-    for row in &rows.rows {
-        let cell = &row.cells[position];
-        let Some(path) = &cell.path else {
-            failures.push(site.failure(
-                AnalysisFailureKind::Evaluation,
-                Some(resource_of(cell)),
-                format!(
-                    "`strip-root` on `{field}` applies to an `entry.path` value, and this row's \
-                     is not one; bind `{field}` to `entry.path` in every part"
-                ),
-            ));
-            continue;
-        };
-        let resource = cell.at.resource.path().as_str();
-        let held = roots.entry(resource).or_default();
-        if let Some(first) = path.segments().first()
-            && !held.contains(&first)
-        {
-            held.push(first);
-        }
-    }
-    for (resource, held) in &roots {
-        if held.len() > 1 {
-            let shown = if sensitive {
-                held.len().to_string()
-            } else {
-                held.iter()
-                    .map(|segment| {
-                        format!(
-                            "`{}`",
-                            Pointer::from_segments(vec![(*segment).clone()]).render()
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ")
+        // Each key path stripped, by the one it was, which the entry keeps
+        // alive (so its address names it) while the field is stripped.
+        let mut done: HashMap<*const Pointer, Stripped> = HashMap::new();
+        for row in &mut rows.rows {
+            let cell = &mut row.cells[position];
+            let Some(path) = &cell.path else {
+                continue;
             };
-            failures.push(site.failure(
-                AnalysisFailureKind::Evaluation,
-                Some(Arc::from(std::path::Path::new(resource))),
-                format!(
-                    "`strip-root` on `{field}` needs one top-level key in each resource, but this \
-                     one has {shown}; read one top-level object per file, or drop `strip-root`"
-                ),
-            ));
-        }
-    }
-    for row in &mut rows.rows {
-        let cell = &mut row.cells[position];
-        let Some(path) = &cell.path else {
-            continue;
-        };
-        if path.segments().len() < 2 {
-            let shown = if sensitive {
-                "a key path".to_string()
+            if path.segments().len() < 2 {
+                let shown = if sensitive {
+                    "a key path".to_string()
+                } else {
+                    format!("`{}`", path.render())
+                };
+                let resource = resource_of(cell);
+                failures.push(site.failure(
+                    AnalysisFailureKind::Evaluation,
+                    Some(resource),
+                    format!(
+                        "`strip-root` on `{field}` needs every key path to have at least two \
+                         segments, but {shown} has one; read the keys below the top-level key, \
+                         or drop `strip-root`"
+                    ),
+                ));
+                continue;
+            }
+            let (stripped, text) = if let Some((_, stripped, text)) = done.get(&Arc::as_ptr(path)) {
+                (Arc::clone(stripped), Arc::clone(text))
             } else {
-                format!("`{}`", path.render())
+                let stripped = Pointer::from_segments(path.segments()[1..].to_vec());
+                let text: Arc<str> = stripped.render().into();
+                if let Err(limit) =
+                    self.take_bytes(super::shared_pointer_bytes(&stripped) + text.len())
+                {
+                    failures.push_limit(site.failure(
+                        AnalysisFailureKind::Evaluation,
+                        None,
+                        super::limit_reached(&limit),
+                    ));
+                    return;
+                }
+                let stripped = Arc::new(stripped);
+                let entry = (Arc::clone(path), Arc::clone(&stripped), Arc::clone(&text));
+                done.insert(Arc::as_ptr(path), entry);
+                (stripped, text)
             };
-            let resource = resource_of(cell);
-            failures.push(site.failure(
-                AnalysisFailureKind::Evaluation,
-                Some(resource),
-                format!(
-                    "`strip-root` on `{field}` needs every key path to have at least two \
-                     segments, but {shown} has one; read the keys below the top-level key, or \
-                     drop `strip-root`"
-                ),
-            ));
-            continue;
+            cell.value = Some(Value::String(text));
+            cell.path = Some(stripped);
         }
-        let stripped = Pointer::from_segments(path.segments()[1..].to_vec());
-        cell.value = Some(Value::String(stripped.render().into()));
-        cell.path = Some(stripped);
     }
 }

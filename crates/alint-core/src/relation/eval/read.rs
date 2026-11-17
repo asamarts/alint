@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use super::failure::{Failures, place};
 use super::{Cell, Evaluator, FieldInfo, Provenance, RelationNote, RelationRows, Site};
+use crate::ByteSpan;
 use crate::extract::{Extract, LinesOpts};
 use crate::relation::adapter::{Adapter, AdapterError, AdapterNote, AdapterOutput};
 use crate::relation::adapters::{EntryValuesAdapter, ExtractAdapter, entry_values};
@@ -69,25 +70,32 @@ impl Evaluator<'_> {
                 .collect(),
             ..RelationRows::default()
         };
+        let mut resources = Vec::new();
         for part in parts {
             if self
-                .part(site, relation, part, &mut out, failures)
+                .part(site, relation, part, &mut out, &mut resources, failures)
                 .is_break()
             {
                 break;
             }
         }
+        // Each once: parts that read one file give it one group.
+        let mut seen = std::collections::HashSet::new();
+        resources.retain(|resource: &Resource| seen.insert(resource.clone()));
+        out.resources = resources.into();
         out
     }
 
-    /// One part's rows, added to `out`; `Break` once the run's cells ran
-    /// out, so no later part builds a row.
+    /// One part's rows, added to `out`, and the resources it reads, to
+    /// `resources`; `Break` once the run's cells or bytes ran out, so no
+    /// later part builds a row.
     fn part(
         &self,
         site: &Site,
         relation: &RelationDef,
         part: &Part,
         out: &mut RelationRows,
+        resources_read: &mut Vec<Resource>,
         failures: &mut Failures,
     ) -> ControlFlow<()> {
         let Some(resources) = self.select(site, &part.from, failures) else {
@@ -101,27 +109,27 @@ impl Evaluator<'_> {
                 return ControlFlow::Continue(());
             }
         };
-        let take_cells = |cells| self.take_cells(cells);
         for resource in resources {
             let failure_at = || -> Option<Arc<Path>> { Some(Arc::from(resource.path().as_path())) };
-            let cells_exhausted = |limit: &LimitExceeded| {
-                let detail = super::cells_exhausted(limit);
+            let limit_reached = |limit: &LimitExceeded| {
+                let detail = super::limit_reached(limit);
                 site.failure(AnalysisFailureKind::Evaluation, failure_at(), detail)
             };
             if let Err(limit) = self.take_cells(1) {
-                failures.push(cells_exhausted(&limit));
+                failures.push_limit(limit_reached(&limit));
                 return ControlFlow::Break(());
             }
-            out.resources.push(resource.clone());
+            resources_read.push(resource.clone());
             let Some(bytes) = self.bytes(site, &resource, failures) else {
                 continue;
             };
-            let decoded = self
-                .decodes
-                .decode(reader.adapter(), &resource, &bytes, &self.limits);
-            let output = match decoded {
+            let output = match self.decode(reader.adapter(), &resource, &bytes) {
                 Ok(output) => output,
-                Err(error) => {
+                Err(Stop::Limit(limit)) => {
+                    failures.push_limit(limit_reached(&limit));
+                    return ControlFlow::Break(());
+                }
+                Err(Stop::Detail(error)) => {
                     failures.push(decode_failure(site, &reader, failure_at(), &error));
                     continue;
                 }
@@ -132,24 +140,25 @@ impl Evaluator<'_> {
                 PartReader::Read {
                     bound: Some(adapter),
                     ..
-                } => match self
-                    .decodes
-                    .decode(adapter, &resource, &bytes, &self.limits)
-                {
+                } => match self.decode(adapter, &resource, &bytes) {
                     Ok(output) => Some(output),
-                    Err(error) => {
+                    Err(Stop::Limit(limit)) => {
+                        failures.push_limit(limit_reached(&limit));
+                        return ControlFlow::Break(());
+                    }
+                    Err(Stop::Detail(error)) => {
                         failures.push(decode_failure(site, &reader, failure_at(), &error));
                         continue;
                     }
                 },
                 _ => None,
             };
-            let rows = Rows {
-                hide_keys: site.keys_sensitive,
-                relation,
-                resource: &resource,
-                tokens: PathTokens::from_path(resource.path().as_path()),
-                take_cells: &take_cells,
+            let rows = match Rows::new(self, site, relation, &resource) {
+                Ok(rows) => rows,
+                Err(limit) => {
+                    failures.push_limit(limit_reached(&limit));
+                    return ControlFlow::Break(());
+                }
             };
             let result = match &reader {
                 PartReader::Entries(_) => rows.entries(&output, out),
@@ -174,13 +183,33 @@ impl Evaluator<'_> {
                     let kind = AnalysisFailureKind::Evaluation;
                     failures.push(site.failure(kind, failure_at(), detail));
                 }
-                Err(Stop::Cells(limit)) => {
-                    failures.push(cells_exhausted(&limit));
+                Err(Stop::Limit(limit)) => {
+                    failures.push_limit(limit_reached(&limit));
                     return ControlFlow::Break(());
                 }
             }
         }
         ControlFlow::Continue(())
+    }
+
+    /// `resource` decoded through the run's cache. A decode this call makes
+    /// takes what it holds from the run's bytes, once: each part, relation
+    /// and rule that reads it later shares it.
+    fn decode(
+        &self,
+        adapter: &dyn Adapter,
+        resource: &Resource,
+        bytes: &[u8],
+    ) -> Result<Arc<AdapterOutput>, Stop<AdapterError>> {
+        let (decoded, fresh) = self
+            .decodes
+            .decode_fresh(adapter, resource, bytes, &self.limits);
+        let output = decoded.map_err(Stop::Detail)?;
+        if fresh {
+            self.take_bytes(decode_bytes(&output))
+                .map_err(Stop::Limit)?;
+        }
+        Ok(output)
     }
 
     /// The resources `from` picks, in path order, as a rule's `paths:` and
@@ -490,24 +519,56 @@ fn decode_failure(
     }
 }
 
+/// What a decode holds: its rows, their values, labels and key paths, and
+/// its notes and non-string kinds.
+fn decode_bytes(output: &AdapterOutput) -> usize {
+    let rows = output.rows.iter().fold(
+        output.rows.capacity() * std::mem::size_of::<Row>(),
+        |bytes, row| {
+            let state = match &row.state {
+                RowState::Value(value) => value.heap_bytes(),
+                RowState::Error(kind) => kind.len(),
+                RowState::Key | RowState::Missing => 0,
+            };
+            bytes
+                .saturating_add(row.pointer.as_ref().map_or(0, Pointer::heap_bytes))
+                .saturating_add(row.label.as_ref().map_or(0, |label| label.len()))
+                .saturating_add(row.original.as_ref().map_or(0, Value::heap_bytes))
+                .saturating_add(state)
+        },
+    );
+    let notes = output.notes.iter().fold(
+        output.notes.capacity() * std::mem::size_of::<AdapterNote>(),
+        |bytes, note| {
+            let AdapterNote::NonLiteral { value } = note;
+            bytes.saturating_add(value.len())
+        },
+    );
+    rows.saturating_add(notes).saturating_add(
+        output.non_strings.capacity() * std::mem::size_of::<crate::extract::NonStringValueKind>(),
+    )
+}
+
 /// One resource's rows: the cells of each, by field.
 struct Rows<'r> {
+    /// Takes a row's cells and what it holds beyond them from the run.
+    evaluator: &'r Evaluator<'r>,
     /// Key paths are hidden from messages ([`super::failure::key_path`]).
     hide_keys: bool,
     relation: &'r RelationDef,
     resource: &'r Resource,
-    tokens: PathTokens,
-    /// Takes a row's cells from the run's count before the row is built.
-    take_cells: &'r dyn Fn(usize) -> Result<(), LimitExceeded>,
+    /// The path tokens the relation's fields bind, by [`token_slot`]: built
+    /// once for the resource and shared by its rows.
+    tokens: [Option<Value>; 6],
 }
 
 /// Why a resource's rows stop.
-enum Stop {
+enum Stop<D = String> {
     /// A problem in this resource: an analysis failure for it, and the next
     /// resource is read.
-    Detail(String),
-    /// The run's cells ran out: the relation builds no more rows.
-    Cells(LimitExceeded),
+    Detail(D),
+    /// The run's cells or bytes ran out: the relation builds no more rows.
+    Limit(LimitExceeded),
 }
 
 impl From<String> for Stop {
@@ -516,18 +577,87 @@ impl From<String> for Stop {
     }
 }
 
-impl Rows<'_> {
+/// A path token's slot in [`Rows::tokens`].
+const fn token_slot(token: PathToken) -> usize {
+    match token {
+        PathToken::Path => 0,
+        PathToken::Dir => 1,
+        PathToken::Basename => 2,
+        PathToken::Stem => 3,
+        PathToken::Ext => 4,
+        PathToken::ParentName => 5,
+    }
+}
+
+/// The cells a row's `entry.*` fields share, by source ([`KEY`] to
+/// [`VALUE`]): each is built once for the row, and every field bound to it
+/// copies it, sharing its value.
+type Derived = [Option<Cell>; 5];
+const KEY: usize = 0;
+const PARENT: usize = 1;
+const ROOT: usize = 2;
+const PATH: usize = 3;
+const VALUE: usize = 4;
+
+impl<'r> Rows<'r> {
+    /// `resource`'s rows for `relation`, its path tokens built and their
+    /// bytes taken from the run.
+    fn new(
+        evaluator: &'r Evaluator<'r>,
+        site: &Site,
+        relation: &'r RelationDef,
+        resource: &'r Resource,
+    ) -> Result<Self, LimitExceeded> {
+        let mut tokens: [Option<Value>; 6] = Default::default();
+        let mut paths = None;
+        for (_, field) in &relation.fields {
+            let FieldSource::Path(token) = field.source else {
+                continue;
+            };
+            let slot = &mut tokens[token_slot(token)];
+            if slot.is_some() {
+                continue;
+            }
+            let paths =
+                paths.get_or_insert_with(|| PathTokens::from_path(resource.path().as_path()));
+            let text = match token {
+                PathToken::Path => &paths.path,
+                PathToken::Dir => &paths.dir,
+                PathToken::Basename => &paths.basename,
+                PathToken::Stem => &paths.stem,
+                PathToken::Ext => &paths.ext,
+                PathToken::ParentName => &paths.parent_name,
+            };
+            evaluator.take_bytes(text.len())?;
+            *slot = Some(Value::String(text.as_str().into()));
+        }
+        Ok(Self {
+            evaluator,
+            hide_keys: site.keys_sensitive,
+            relation,
+            resource,
+            tokens,
+        })
+    }
+
     fn token(&self, token: PathToken) -> Value {
-        let tokens = &self.tokens;
-        let text = match token {
-            PathToken::Path => &tokens.path,
-            PathToken::Dir => &tokens.dir,
-            PathToken::Basename => &tokens.basename,
-            PathToken::Stem => &tokens.stem,
-            PathToken::Ext => &tokens.ext,
-            PathToken::ParentName => &tokens.parent_name,
-        };
-        Value::String(text.as_str().into())
+        self.tokens[token_slot(token)]
+            .clone()
+            .expect("a bound path token is built with the rows")
+    }
+
+    /// Take `bytes` from the run for what a row keeps beyond its cells.
+    fn take_bytes(&self, bytes: usize) -> Result<(), Stop> {
+        self.evaluator.take_bytes(bytes).map_err(Stop::Limit)
+    }
+
+    /// The provenance of a row at `pointer`, its key path's bytes taken.
+    fn provenance(&self, pointer: Option<Pointer>) -> Result<Arc<Provenance>, Stop> {
+        self.take_bytes(pointer.as_ref().map_or(0, Pointer::heap_bytes))?;
+        Ok(Arc::new(Provenance {
+            resource: self.resource.clone(),
+            pointer,
+        }))
     }
 
     fn sensitive(&self, name: &str) -> bool {
@@ -537,8 +667,9 @@ impl Rows<'_> {
     }
 
     /// Each `bound:` field's cell, by field position (`None` for other
-    /// fields), from the decode's rows labelled with its path.
-    fn bound_cells(&self, output: &AdapterOutput) -> Result<Vec<Option<Cell>>, String> {
+    /// fields), from the decode's rows labelled with its path: built once
+    /// for the resource and shared by its rows.
+    fn bound_cells(&self, output: &AdapterOutput) -> Result<Vec<Option<Cell>>, Stop> {
         let mut cells = Vec::with_capacity(self.relation.fields.len());
         for (name, field) in &self.relation.fields {
             let FieldSource::Bound(query) = &field.source else {
@@ -557,7 +688,8 @@ impl Rows<'_> {
                         "`{name}` (`bound: {query}`) matches nothing; a bound path matches exactly \
                          once in each resource the relation reads, so fix the path, or narrow \
                          the selector to the files that have it"
-                    ));
+                    )
+                    .into());
                 }
                 [one] => *one,
                 [first, second, ..] => {
@@ -567,7 +699,8 @@ impl Rows<'_> {
                          so make it select one value",
                         place(first.pointer.as_ref(), self.hide_keys),
                         place(second.pointer.as_ref(), self.hide_keys),
-                    ));
+                    )
+                    .into());
                 }
             };
             let value = match &row.state {
@@ -577,14 +710,16 @@ impl Rows<'_> {
                         "`{name}` (`bound: {query}`) selects {kind} {}, whose lexeme alint does \
                          not keep (`1.10` would read as `1.1`); bind an object member instead",
                         place(row.pointer.as_ref(), self.hide_keys)
-                    ));
+                    )
+                    .into());
                 }
                 RowState::Error(kind) => {
                     return Err(format!(
                         "`{name}` (`bound: {query}`) selects {kind} {}; a field holds a scalar \
                          (null, a boolean, a number or a string), so bind a path that selects one",
                         place(row.pointer.as_ref(), self.hide_keys)
-                    ));
+                    )
+                    .into());
                 }
                 RowState::Key | RowState::Missing => {
                     unreachable!("a bound row holds a value or an error")
@@ -592,10 +727,7 @@ impl Rows<'_> {
             };
             cells.push(Some(Cell {
                 value: Some(value),
-                at: Arc::new(Provenance {
-                    resource: self.resource.clone(),
-                    pointer: row.pointer.clone(),
-                }),
+                at: self.provenance(row.pointer.clone())?,
                 span: row.value_span.or(row.span),
                 path: None,
             }));
@@ -633,7 +765,9 @@ impl Rows<'_> {
 
     /// Take the cells of one row before it is built.
     fn take_row(&self) -> Result<(), Stop> {
-        (self.take_cells)(self.relation.fields.len().max(1)).map_err(Stop::Cells)
+        self.evaluator
+            .take_cells(self.relation.fields.len().max(1))
+            .map_err(Stop::Limit)
     }
 
     /// An `entries:` part's rows in one resource.
@@ -642,11 +776,12 @@ impl Rows<'_> {
         let bound = self.bound_cells(output)?;
         for row in output.rows.iter().filter(|row| row.label.is_none()) {
             self.take_row()?;
-            let pointer = row.pointer.clone().unwrap_or_default();
-            let provenance = Arc::new(Provenance {
-                resource: self.resource.clone(),
-                pointer: Some(pointer.clone()),
-            });
+            let provenance = self.provenance(Some(row.pointer.clone().unwrap_or_default()))?;
+            let pointer = provenance
+                .pointer
+                .as_ref()
+                .expect("an entry row's key path");
+            let mut derived = Derived::default();
             let mut cells = Vec::with_capacity(self.relation.fields.len());
             for (position, (name, field)) in self.relation.fields.iter().enumerate() {
                 let cell = |value: Value, span| Cell {
@@ -655,73 +790,114 @@ impl Rows<'_> {
                     span,
                     path: None,
                 };
-                cells.push(match &field.source {
-                    FieldSource::Path(token) => cell(self.token(*token), None),
-                    FieldSource::EntryKey => match pointer.segments().last() {
-                        Some(Segment::Key(key)) => cell(Value::String(key.clone()), row.span),
-                        _ => return Err(not_a_member(name, &pointer, self.hide_keys).into()),
-                    },
-                    FieldSource::EntryValue => match &row.state {
-                        RowState::Value(value) => cell(value.clone(), row.value_span.or(row.span)),
-                        RowState::Error(kind) => {
-                            return Err(format!(
-                                "`{name}` binds `entry.value`, which is {kind} {}; a field \
-                                 holds a scalar (null, a boolean, a number or a string), so \
-                                 select the members below it with `at:`, or bind only \
-                                 `entry.key`",
-                                place(Some(&pointer), self.hide_keys)
-                            )
-                            .into());
-                        }
-                        RowState::Key | RowState::Missing => {
-                            unreachable!("an entry row holds a value or an error")
-                        }
-                    },
-                    FieldSource::EntryParent => {
-                        let segments = pointer.segments();
-                        match segments
-                            .len()
-                            .checked_sub(2)
-                            .map(|holder| &segments[holder])
-                        {
-                            None => cell(Value::Null, row.span),
-                            Some(Segment::Key(key)) => cell(Value::String(key.clone()), row.span),
-                            Some(Segment::Index(_)) => {
-                                return Err(format!(
-                                    "`{name}` binds `entry.parent`, but the entry {} is a \
-                                     member of an array's element, which has no key; select \
-                                     objects outside arrays with `at:`",
-                                    place(Some(&pointer), self.hide_keys)
-                                )
-                                .into());
-                            }
-                        }
+                let (slot, source) = match &field.source {
+                    FieldSource::Path(token) => {
+                        cells.push(cell(self.token(*token), None));
+                        continue;
                     }
-                    FieldSource::EntryRoot => match pointer.segments().first() {
-                        Some(Segment::Key(key)) => cell(Value::String(key.clone()), row.span),
-                        _ => {
-                            return Err(format!(
-                                "`{name}` binds `entry.root`, but the entry {} starts in \
-                                 an array, whose elements have no key; select objects outside \
-                                 arrays with `at:`",
-                                place(Some(&pointer), self.hide_keys)
-                            )
-                            .into());
-                        }
-                    },
-                    FieldSource::EntryPath => Cell {
-                        path: Some(pointer.clone()),
-                        ..cell(Value::String(pointer.render().into()), row.span)
-                    },
-                    FieldSource::Bound(_) => bound[position].clone().expect("a bound field's cell"),
+                    FieldSource::Bound(_) => {
+                        cells.push(bound[position].clone().expect("a bound field's cell"));
+                        continue;
+                    }
                     FieldSource::Value | FieldSource::Side(..) => {
                         return Err(wrong_source(name, field, "an `entries:` row").into());
                     }
-                });
+                    FieldSource::EntryKey => (KEY, &field.source),
+                    FieldSource::EntryParent => (PARENT, &field.source),
+                    FieldSource::EntryRoot => (ROOT, &field.source),
+                    FieldSource::EntryPath => (PATH, &field.source),
+                    FieldSource::EntryValue => (VALUE, &field.source),
+                };
+                if derived[slot].is_none() {
+                    derived[slot] = Some(self.entry_cell(name, source, row, pointer, &cell)?);
+                }
+                cells.push(derived[slot].clone().expect("the cell was just built"));
             }
             out.rows.push(super::FieldRow { cells });
         }
         Ok(())
+    }
+
+    /// The cell of an `entry.*` source for one entry row at `pointer`, its
+    /// new text's bytes taken from the run. `cell` makes a cell of a value
+    /// and span at the row's provenance.
+    fn entry_cell(
+        &self,
+        name: &str,
+        source: &FieldSource,
+        row: &Row,
+        pointer: &Pointer,
+        cell: &dyn Fn(Value, Option<ByteSpan>) -> Cell,
+    ) -> Result<Cell, Stop> {
+        let key = |key: &str| -> Result<Value, Stop> {
+            self.take_bytes(key.len())?;
+            Ok(Value::String(key.into()))
+        };
+        Ok(match source {
+            FieldSource::EntryKey => match pointer.segments().last() {
+                Some(Segment::Key(name)) => cell(key(name)?, row.span),
+                _ => return Err(not_a_member(name, pointer, self.hide_keys).into()),
+            },
+            FieldSource::EntryValue => match &row.state {
+                // Shared with the decode, which took its bytes.
+                RowState::Value(value) => cell(value.clone(), row.value_span.or(row.span)),
+                RowState::Error(kind) => {
+                    return Err(format!(
+                        "`{name}` binds `entry.value`, which is {kind} {}; a field holds a \
+                         scalar (null, a boolean, a number or a string), so select the members \
+                         below it with `at:`, or bind only `entry.key`",
+                        place(Some(pointer), self.hide_keys)
+                    )
+                    .into());
+                }
+                RowState::Key | RowState::Missing => {
+                    unreachable!("an entry row holds a value or an error")
+                }
+            },
+            FieldSource::EntryParent => {
+                let segments = pointer.segments();
+                match segments
+                    .len()
+                    .checked_sub(2)
+                    .map(|holder| &segments[holder])
+                {
+                    None => cell(Value::Null, row.span),
+                    Some(Segment::Key(parent)) => cell(key(parent)?, row.span),
+                    Some(Segment::Index(_)) => {
+                        return Err(format!(
+                            "`{name}` binds `entry.parent`, but the entry {} is a member of an \
+                             array's element, which has no key; select objects outside arrays \
+                             with `at:`",
+                            place(Some(pointer), self.hide_keys)
+                        )
+                        .into());
+                    }
+                }
+            }
+            FieldSource::EntryRoot => match pointer.segments().first() {
+                Some(Segment::Key(root)) => cell(key(root)?, row.span),
+                _ => {
+                    return Err(format!(
+                        "`{name}` binds `entry.root`, but the entry {} starts in an array, whose \
+                         elements have no key; select objects outside arrays with `at:`",
+                        place(Some(pointer), self.hide_keys)
+                    )
+                    .into());
+                }
+            },
+            FieldSource::EntryPath => {
+                let text = pointer.render();
+                self.take_bytes(text.len() + super::shared_pointer_bytes(pointer))?;
+                Cell {
+                    path: Some(Arc::new(pointer.clone())),
+                    ..cell(Value::String(text.into()), row.span)
+                }
+            }
+            FieldSource::Path(_)
+            | FieldSource::Bound(_)
+            | FieldSource::Value
+            | FieldSource::Side(..) => unreachable!("an `entry.*` source"),
+        })
     }
 
     /// A `read:` part's rows in one resource: one per string it extracted,
@@ -750,13 +926,15 @@ impl Rows<'_> {
             .any(|(name, field)| field.source == FieldSource::Value && self.sensitive(name));
         for note in &output.notes {
             let AdapterNote::NonLiteral { value } = note;
+            let message = if value_sensitive {
+                "skipped a non-literal value".to_string()
+            } else {
+                format!("skipped non-literal value {value:?}")
+            };
+            self.take_bytes(std::mem::size_of::<RelationNote>() + message.len())?;
             out.notes.push(RelationNote {
                 resource: self.resource.clone(),
-                message: if value_sensitive {
-                    "skipped a non-literal value".to_string()
-                } else {
-                    format!("skipped non-literal value {value:?}")
-                },
+                message,
             });
         }
         let bound = match bound_output {
@@ -767,6 +945,7 @@ impl Rows<'_> {
             resource: self.resource.clone(),
             pointer: None,
         });
+        // Shared with the decode, which took their bytes.
         let values: Vec<Option<Value>> = if output.rows.is_empty() {
             if optional || !output.notes.is_empty() {
                 Vec::new()

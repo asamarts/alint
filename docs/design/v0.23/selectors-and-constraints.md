@@ -561,6 +561,15 @@ rules:
   of many parts over one decode, or a join's output, fails at the cap. The run's memo keeps every
   relation it evaluates, so the count is the run's. The locale relation above, with two fields,
   holds 4M.
+- `BytesPerRun` (1 GiB by default, 16 GiB hard) caps what those relations hold beyond their cells.
+  A cell shares its value's text, so a field, a `union:` part or a join that copies a value adds a
+  cell and no bytes; a join shares its side's resource list, and a relation that fails with the
+  failures of one it reads shares that list. What is new takes its bytes as it is built: each
+  decode once (its rows, values and key paths), each row's key path, each `entry.key`,
+  `entry.parent`, `entry.root`, `entry.path` and path token, each text a transform changes (once
+  for rows that share it), and each note and failure. A run's relations then hold at most 256
+  bytes a cell and `BytesPerRun` bytes, about 2.4 GB at the defaults, whatever the size of a value
+  or the number of fields and joins that copy it.
 - A hit is an analysis failure, never truncation.
 
 **No finding cap** (D5b). A `constraint` rule reports every finding, as every existing kind does,
