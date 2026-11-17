@@ -8,8 +8,8 @@
 //! - [`Entry::Value`]: a document decoded into a value tree, which every
 //!   option, `extends:` source and `alint test` package passes through;
 //! - [`Entry::Json`]: the `serde_json` tree the structured-format rules
-//!   (`yaml_path_*`, `json_schema_passes`, front matter) query, through alint's
-//!   own seed, which applies merge keys and drops custom tags;
+//!   (`yaml_path_*`, `json_schema_passes`) query, through alint's own seed,
+//!   which applies merge keys and drops custom tags;
 //! - [`Entry::Config`]: a typed decode into [`crate::Config`];
 //! - [`Entry::Rule`]: each entry of `rules:` decoded from its value tree into
 //!   a [`crate::RuleSpec`] with `from_value`, as alint's loader decodes rules,

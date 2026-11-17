@@ -1757,7 +1757,7 @@ After the port, in this order ([ADR-0030](https://github.com/asamarts/alint/blob
   share their lookups.
 
 ## v0.23: Selectors and a first constraint slice
-<!-- roadmap-public: blurb="The first part of version 2 of the config format, as an experimental opt-in: named file selections and a report-only constraint rule, enough to check that locale files, dependency versions and toolchain pins agree across a repository without a dedicated rule. Version 1 configs keep working unchanged. For library users, the last planned API break before 1.0." -->
+<!-- roadmap-public: blurb="The first part of version 2 of the config format, as an experimental opt-in: named file selections and a report-only constraint rule, enough to check that locale files, dependency versions and toolchain pins agree across a repository without a dedicated rule. Version 1 configs keep working, apart from a fix to tracked-file checks and the documented differences of the new YAML parser. For library users, the last planned API break before 1.0." -->
 
 Starts Phase 3 of
 [`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md)
@@ -1786,9 +1786,16 @@ and
 - **A `git_tracked_only` fix (#503).** A rule with `git_tracked_only: true` sees a file that git
   tracks but an ignore file excludes, as documented, so a configuration that uses it can gain or
   lose findings.
-- **Two `alint test` capability fixes.** A spawning rule nested in `require:` needs the spawn
-  capability (#515), and a test's `given.env` no longer reaches the runner's own Git commands.
-  v0.20.0 to v0.22.1 are affected, and both ship in v0.23.0 only.
+- **Security fixes, and their advisory.** v0.23.0 closes the ways around the policy-test sandbox
+  that #515, #519, #522 and #527 fixed, among them a spawning rule nested in `require:` that ran
+  without the spawn capability and a test's `given.env` that reached the runner's own Git
+  commands. It also closes the holes the audit after v0.22.1 found: a fix from an `extends:`
+  ruleset that wrote alint's configuration or `.git`, rules that read a Git directory,
+  configuration discovery above the repository, and a language server that ran a repository's
+  commands before the editor trusted the workspace. They ship in v0.23.0 only, with security
+  advisory GHSA-78jj-xfpm-g6px
+  ([ADR-0040](../adr/0040-the-v023-advisory-and-the-allowlist-approval.md),
+  [ADR-0043](../adr/0043-trust-and-disclosure-decisions-from-the-post-v0221-audit.md)).
 - **Library API breaks.** YAML parser types leave the public API of `alint-core`, `alint-dsl`
   and `alint-testkit` for alint's own (#484,
   [ADR-0038](https://github.com/asamarts/alint/blob/main/docs/adr/0038-owned-yaml-types-and-the-api-gate.md)).
@@ -1798,9 +1805,11 @@ and
   are removed.
 - **A pure-Rust YAML parser.** alint parses YAML with ayaml (#510). A differential harness
   compares it with the parser v0.22 used (#482), and the checks that refuse YAML bombs before a
-  parse now read YAML as ayaml does (#483). The release ships it once the owner approves the
-  differences the harness documents
-  ([ADR-0035](../adr/0035-keep-the-early-ayaml-cutover.md)).
+  parse now read YAML as ayaml does (#483). The owner approved the differences the harness
+  documents ([ADR-0035](../adr/0035-keep-the-early-ayaml-cutover.md),
+  [ADR-0040](../adr/0040-the-v023-advisory-and-the-allowlist-approval.md)), on condition that
+  v0.23.0 ships an ayaml release that fixes the defects alint filed
+  ([ADR-0043](../adr/0043-trust-and-disclosure-decisions-from-the-post-v0221-audit.md)).
 - **Baselines.** The v0.21 fingerprint of a hidden-path finding is no longer matched; re-run
   `alint baseline` before upgrading.
 
