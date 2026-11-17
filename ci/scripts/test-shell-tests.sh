@@ -167,12 +167,12 @@ suites="$TMP_ROOT/suites"
 mkdir -p "$suites"
 cat >"$suites/test-direct.sh" <<'SH'
 #!/usr/bin/env bash
-cargo test --workspace --locked
+cargo test --workspace --locked --no-fail-fast
 SH
 cat >"$suites/test-continued.sh" <<'SH'
 #!/usr/bin/env bash
 ALINT_YAML_PARSER=compare \
-  cargo test --workspace
+  cargo test --workspace --no-fail-fast
 SH
 cat >"$suites/test-nextest.sh" <<'SH'
 #!/usr/bin/env bash
@@ -223,7 +223,7 @@ cat >"$suites/test-heredoc.sh" <<'SH'
 #!/usr/bin/env bash
 tr a b <<<EOF
 bash -s -- --x <<-EOF
-	cargo test --workspace
+	cargo test --workspace --no-fail-fast
 	EOF
 SH
 # A here-document `bash` reads is code, and a here-string is not a document.

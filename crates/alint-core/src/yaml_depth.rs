@@ -271,32 +271,6 @@ fn expansion_budget_pass(text: &str, max: usize) -> Expansion {
     }
 }
 
-/// The pass of [`expansion_within_limit`] as libyaml reads `text`, for the
-/// test-only reference backend (ADR-0041): the same budget, charged as
-/// `yaml_serde` replays aliases. libyaml has no budget of its own, and reads
-/// some text differently from ayaml, so text ayaml refuses for its syntax can
-/// be an alias bomb to libyaml (a byte order mark before `---`). The error is
-/// libyaml's, once the budget is exceeded; any other error falls through, as
-/// in [`expansion_within_limit`].
-#[cfg(feature = "yaml-reference")]
-pub(crate) fn libyaml_expansion_within_limit(text: &str) -> Result<(), yaml_serde::Error> {
-    use serde::de::DeserializeSeed as _;
-    // Without a `*`, there is no alias to replay.
-    if !text.as_bytes().contains(&b'*') {
-        return Ok(());
-    }
-    let remaining = std::cell::Cell::new(expansion_budget(text.len()));
-    let exceeded = std::cell::Cell::new(false);
-    let seed = NodeBudget {
-        remaining: &remaining,
-        exceeded: &exceeded,
-    };
-    match seed.deserialize(yaml_serde::Deserializer::from_str(text)) {
-        Err(error) if exceeded.get() => Err(error),
-        _ => Ok(()),
-    }
-}
-
 /// Both YAML guards from one lexer pass. Callers that checked
 /// [`flow_depth_within_limit`] and then [`expansion_within_limit`] tokenized the
 /// whole document twice; this scans it once (skipping the scan entirely when
@@ -1224,9 +1198,9 @@ impl<'a> Lexer<'a> {
 /// [`expansion_within_limit`] to bound YAML alias expansion without materializing a
 /// value. `Copy` (it holds only shared `Cell` refs), so it seeds child nodes freely.
 #[derive(Clone, Copy)]
-struct NodeBudget<'a> {
-    remaining: &'a std::cell::Cell<usize>,
-    exceeded: &'a std::cell::Cell<bool>,
+pub(crate) struct NodeBudget<'a> {
+    pub(crate) remaining: &'a std::cell::Cell<usize>,
+    pub(crate) exceeded: &'a std::cell::Cell<bool>,
 }
 
 impl NodeBudget<'_> {

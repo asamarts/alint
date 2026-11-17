@@ -134,7 +134,7 @@ fn libyaml_json_tree(input: &str) -> Result<serde_json::Value, Error> {
 /// flow nesting, on which libyaml's tokenizer is super-linear; and the
 /// alias-expansion budget, charged as libyaml replays aliases, since libyaml
 /// reads some inputs differently from ayaml and would expand such a bomb in
-/// full (see [`crate::yaml_depth::libyaml_expansion_within_limit`]). The
+/// full (see [`libyaml_expansion_within_limit`]). The
 /// error is one of libyaml's, as a decode would give.
 #[cfg(feature = "yaml-reference")]
 pub(crate) fn libyaml_limits(input: &str) -> Result<(), Error> {
@@ -151,7 +151,33 @@ pub(crate) fn libyaml_limits(input: &str) -> Result<(), Error> {
             crate::yaml_depth::MAX_YAML_FLOW_DEPTH
         ))));
     }
-    crate::yaml_depth::libyaml_expansion_within_limit(input).map_err(Error::libyaml)
+    libyaml_expansion_within_limit(input).map_err(Error::libyaml)
+}
+
+/// The pass of [`crate::yaml_depth::expansion_within_limit`] as libyaml reads `text`, for the
+/// test-only reference backend (ADR-0041): the same budget, charged as
+/// `yaml_serde` replays aliases. libyaml has no budget of its own, and reads
+/// some text differently from ayaml, so text ayaml refuses for its syntax can
+/// be an alias bomb to libyaml (a byte order mark before `---`). The error is
+/// libyaml's, once the budget is exceeded; any other error falls through, as
+/// in [`crate::yaml_depth::expansion_within_limit`].
+#[cfg(feature = "yaml-reference")]
+fn libyaml_expansion_within_limit(text: &str) -> Result<(), yaml_serde::Error> {
+    use serde::de::DeserializeSeed as _;
+    // Without a `*`, there is no alias to replay.
+    if !text.as_bytes().contains(&b'*') {
+        return Ok(());
+    }
+    let remaining = std::cell::Cell::new(crate::yaml_depth::expansion_budget(text.len()));
+    let exceeded = std::cell::Cell::new(false);
+    let seed = crate::yaml_depth::NodeBudget {
+        remaining: &remaining,
+        exceeded: &exceeded,
+    };
+    match seed.deserialize(yaml_serde::Deserializer::from_str(text)) {
+        Err(error) if exceeded.get() => Err(error),
+        _ => Ok(()),
+    }
 }
 
 /// Called before every full decode through libyaml: the reference backend's
