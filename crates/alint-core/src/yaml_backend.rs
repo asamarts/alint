@@ -96,7 +96,8 @@ pub(crate) fn json_tree(input: &str) -> Result<serde_json::Value, Error> {
     }
 }
 
-fn ayaml_json_tree(input: &str) -> Result<serde_json::Value, Error> {
+/// The tree of `json_tree` through ayaml, whatever parser the build chose.
+pub fn ayaml_json_tree(input: &str) -> Result<serde_json::Value, Error> {
     crate::yaml::ayaml_from_str_seed(input, crate::structured_format::json_seed(input))
         .map_err(|error| Error::from_text(input, error))
 }
@@ -117,10 +118,10 @@ pub(crate) fn libyaml_decode<'de, T: Deserialize<'de>>(input: &'de str) -> Resul
     yaml_serde::from_str(input).map_err(Error::libyaml)
 }
 
-/// [`json_tree`] through libyaml, within the limits a decode through ayaml
-/// runs under.
+/// The tree of `json_tree` through libyaml, within the limits a decode
+/// through ayaml runs under.
 #[cfg(feature = "yaml-reference")]
-fn libyaml_json_tree(input: &str) -> Result<serde_json::Value, Error> {
+pub fn libyaml_json_tree(input: &str) -> Result<serde_json::Value, Error> {
     use serde::de::DeserializeSeed as _;
     libyaml_limits(input)?;
     before_libyaml_decode();

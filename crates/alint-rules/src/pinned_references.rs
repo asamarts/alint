@@ -391,6 +391,9 @@ struct ScalarRef<'a> {
 
 impl YamlDocument {
     fn parse(text: &str) -> std::result::Result<Option<Self>, String> {
+        // This input's share of the YAML parse budget, held until the document
+        // is built, the guards' passes included (ADR-0042).
+        let _budget = alint_core::yaml_budget::reserve(text.len());
         let yaml_guards = alint_core::yaml_depth::scan_guards(text);
         if !yaml_guards.flow_within_limit() {
             return Err("flow collection nesting exceeds the safety limit".to_owned());

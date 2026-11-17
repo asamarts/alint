@@ -17,6 +17,9 @@ decision 2 on where `yaml_serde` may be a dependency, and
 supersedes it, amends that again.
 [ADR-0040](0040-the-v023-advisory-and-the-allowlist-approval.md) (2026-11-15) records the owner's
 approval under decision 2, on condition of an ayaml release that fixes its defects.
+[ADR-0042](0042-measure-the-yaml-parser-by-memory-and-wall-time.md) (2026-11-16) amends Y-C4: the
+deterministic gate passing is not enough, and v0.23.0 also waits for ayaml's peak heap within 1.2x
+of libyaml's.
 
 ## Context
 

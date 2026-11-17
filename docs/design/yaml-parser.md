@@ -711,3 +711,12 @@ maintained libyaml fork is the lower-risk ownership boundary.
     (ADR-0043 decision 6), so `enum-as-a-one-entry-mapping` is gone: 38 deviations. The
     "ayaml defects" group gained #139, and "Bumping ayaml" holds the steps the release that
     fixes ayaml's defects needs.
+- **2026-11-16: memory, which no gate measured (ADR-0042).** A performance audit of `main`
+  against v0.22.1 found ayaml 0.1.2 slower and larger than libyaml on YAML files of 10 KB and up:
+  +9% to +54% wall time and 1.3x to 2.9x peak RSS, with instruction counts flat, so the
+  deterministic gate (Y-C4) did not see it. Decoding into the structured rules' JSON tree, ayaml
+  peaks at about 65 bytes of heap per input byte and libyaml at 35 to 39 (asamarts/ayaml#163).
+  The trigger "comparable representative performance" is not met on memory: v0.23.0 waits for an
+  ayaml release within 1.2x of libyaml's peak heap, which alint-core's `yaml_memory` test
+  measures (1.78 at 37 KB and 1.73 at 1.1 MB today). YAML parses over 1 MiB now share a budget
+  of 32 MiB of input in flight, as one parse at the input cap peaked at 4.5 to 6.2 GB.

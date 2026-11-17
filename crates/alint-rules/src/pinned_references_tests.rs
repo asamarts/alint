@@ -732,6 +732,27 @@ fn merge_aliases_ayaml_cannot_read_are_refused_promptly() {
     }
 }
 
+/// A document over 1 MiB takes its share of the YAML parse budget while it
+/// parses, as every parse of repository YAML does (ADR-0042); a smaller one
+/// takes none.
+#[test]
+fn a_large_document_takes_the_yaml_parse_budget() {
+    use alint_core::yaml_budget::{YAML_BUDGET_THRESHOLD_BYTES, reservations_on_this_thread};
+    use std::fmt::Write as _;
+    let mut large = String::from("jobs:\n");
+    for job in 0.. {
+        if large.len() > YAML_BUDGET_THRESHOLD_BYTES {
+            break;
+        }
+        let _ = writeln!(large, "  job{job}:\n    runs-on: ubuntu-latest");
+    }
+    let before = reservations_on_this_thread();
+    assert!(YamlDocument::parse("jobs: {}\n").unwrap().is_some());
+    assert_eq!(reservations_on_this_thread(), before);
+    assert!(YamlDocument::parse(&large).unwrap().is_some());
+    assert_eq!(reservations_on_this_thread(), before + 1);
+}
+
 /// Without the guard, the lookups bound themselves: an alias to a collection
 /// still open is refused while parsing, and merge work runs out of budget (a
 /// small one here, to keep a debug build fast: the production one is spent in
