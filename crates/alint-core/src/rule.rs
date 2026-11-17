@@ -1535,6 +1535,12 @@ pub struct FixContext<'a> {
     /// default; files with a name configuration discovery accepts are refused
     /// regardless.
     pub config_files: &'a [PathBuf],
+    /// The walk of [`Self::root`], while it still matches the tree: a file it
+    /// reached without a symlink needs no file system call to tell that a fix
+    /// stays out of a Git directory ([`Self::write_refusal`]). The engine sets
+    /// it for each pass and clears it at the first rule whose op may move or
+    /// remove a file. `None` checks each path on disk.
+    pub index: Option<&'a crate::walker::FileIndex>,
 }
 
 impl<'a> FixContext<'a> {
@@ -1555,6 +1561,7 @@ impl<'a> FixContext<'a> {
             paths_sensitive: false,
             extended_source: false,
             config_files: &[],
+            index: None,
         }
     }
 
@@ -1617,6 +1624,13 @@ impl<'a> FixContext<'a> {
     #[must_use]
     pub fn with_config_files(mut self, config_files: &'a [PathBuf]) -> Self {
         self.config_files = config_files;
+        self
+    }
+
+    /// Sets [`Self::index`].
+    #[must_use]
+    pub fn with_index(mut self, index: Option<&'a crate::walker::FileIndex>) -> Self {
+        self.index = index;
         self
     }
 

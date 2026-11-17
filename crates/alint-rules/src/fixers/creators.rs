@@ -250,9 +250,6 @@ pub(crate) fn confine_fix_path(
     root: &Path,
     allow: bool,
 ) -> std::result::Result<PathBuf, String> {
-    if alint_core::reaches_git_directory(root, rel) {
-        return Err(git_directory_refusal(rel));
-    }
     match crate::pathsafe::confine_read(rel, root, allow) {
         crate::pathsafe::Confined::In(p) | crate::pathsafe::Confined::AllowedEscape(p) => {
             Ok(root.join(p))

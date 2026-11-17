@@ -110,27 +110,33 @@ pub(crate) use alint_core::resolved_within_root;
 
 /// Like [`confine`] but filesystem-aware: a lexically-confined path can
 /// still escape the root through an in-repo symlink, so after the lexical
-/// check we resolve `root.join(path)` on disk and re-verify containment via
-/// [`resolved_within_root`]. Use this for every config-derived *read*; the
-/// bare lexical [`confine`] is symlink-blind. Same In/AllowedEscape/Denied
-/// verdict, honouring `allow_escape` for the symlink escape exactly as for
-/// the lexical one, and [`Confined::GitDirectory`] first for a path in a Git
-/// directory, which no rule reads.
+/// check we resolve `root.join(path)` on disk and re-verify containment, as
+/// [`resolved_within_root`] does ([`alint_core::resolve_named_read`]). Use
+/// this for every config-derived *read*; the bare lexical [`confine`] is
+/// symlink-blind. Same In/AllowedEscape/Denied verdict, honouring
+/// `allow_escape` for the symlink escape exactly as for the lexical one, and
+/// [`Confined::GitDirectory`] for a path in a Git directory, which no rule
+/// reads: by name before anything else, through a symlink from the same one
+/// resolution.
 pub(crate) fn confine_read(path: &Path, root: &Path, allow_escape: bool) -> Confined {
-    if alint_core::reaches_git_directory(root, path) {
+    use alint_core::NamedRead;
+    if alint_core::path_names_git_directory(path) {
         return Confined::GitDirectory;
     }
     match confine(path, allow_escape) {
         // Lexically in-tree — but the lexical check is symlink-blind, so
-        // re-verify on the filesystem before trusting it for a read.
-        Confined::In(p) => {
-            if resolved_within_root(&root.join(&p), root) {
-                Confined::In(p)
-            } else if allow_escape {
-                Confined::AllowedEscape(p)
-            } else {
-                Confined::Denied
-            }
+        // re-verify on the filesystem before trusting it for a read. The one
+        // resolution also tells whether a symlink leads into a Git directory.
+        Confined::In(p) => match alint_core::resolve_named_read(root, &p) {
+            NamedRead::InRoot => Confined::In(p),
+            NamedRead::GitDirectory => Confined::GitDirectory,
+            NamedRead::OutsideRoot if allow_escape => Confined::AllowedEscape(p),
+            NamedRead::OutsideRoot => Confined::Denied,
+        },
+        // A permitted lexical escape can still lead back into the root's Git
+        // directory through a symlink (`../repo/g/config`, `g -> .git`).
+        Confined::AllowedEscape(p) if alint_core::reaches_git_directory(root, &p) => {
+            Confined::GitDirectory
         }
         // Lexical escape already decided (permitted or denied) — pass through.
         other => other,
@@ -241,6 +247,44 @@ mod tests {
                 ),
                 "{path}"
             );
+        }
+    }
+
+    /// A named read resolves its path once, for both the root and the
+    /// Git-directory check: a second resolution per read cost the S3 bench
+    /// thousands of `stat` calls. A lexical escape is resolved only when the
+    /// rule may read it, and a name in a Git directory not at all.
+    #[test]
+    fn a_named_read_resolves_its_path_once() {
+        use super::{Confined, confine_read};
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("sub")).unwrap();
+        std::fs::write(root.path().join("sub/a.toml"), "x").unwrap();
+        for (path, allow, resolutions) in [
+            ("sub/a.toml", false, 1),
+            ("sub/missing.toml", false, 1),
+            ("../x", false, 0),
+            ("../x", true, 1),
+            (".git/config", true, 0),
+        ] {
+            let before = alint_core::path_check_costs();
+            let verdict = confine_read(Path::new(path), root.path(), allow);
+            let after = alint_core::path_check_costs();
+            assert_eq!(
+                (
+                    after.resolutions - before.resolutions,
+                    after.symlink_probes - before.symlink_probes
+                ),
+                (resolutions, 0),
+                "{path}"
+            );
+            let expected = match (path, allow) {
+                (".git/config", _) => matches!(verdict, Confined::GitDirectory),
+                ("../x", false) => matches!(verdict, Confined::Denied),
+                ("../x", true) => matches!(verdict, Confined::AllowedEscape(_)),
+                _ => matches!(verdict, Confined::In(_)),
+            };
+            assert!(expected, "{path}");
         }
     }
 
