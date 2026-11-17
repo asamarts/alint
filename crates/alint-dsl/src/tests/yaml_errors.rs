@@ -118,7 +118,7 @@ fn a_rule_option_of_the_wrong_type_is_named() {
          expected a string"
     );
     assert_eq!(
-        load_error("version: 1\nvars: {a: 1, b: '{{env.HOME}}'}\nrules: []\n"),
+        load_error("version: 1\nvars: {a: 1, b: '{{env.HOME | default(\"x\")}}'}\nrules: []\n"),
         "<config>: YAML parse error: vars.a: invalid type: integer `1`, expected a string"
     );
 }
