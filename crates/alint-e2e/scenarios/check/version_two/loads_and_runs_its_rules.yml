@@ -1,0 +1,41 @@
+test_version: 1
+name: a version 2 config loads and runs its version 1 rules
+tags: [check, version_two]
+
+# `version: 2` is experimental. Its selectors and relations are checked when
+# the config loads, but nothing reads them until the `constraint` kind lands,
+# so the config's rules run as they would in version 1.
+
+given:
+  tree:
+    package.json: '{"dependencies": {"left-pad": "1.3.0"}}'
+    stale.bak: ""
+  config: |
+    version: 2
+    extends:
+      - url: ./support/version_two_base.yaml
+        as: base
+    selectors:
+      manifests:
+        paths: "**/package.json"
+    relations:
+      deps:
+        from: manifests
+        entries: { format: json, at: "$.dependencies" }
+        fields: { name: entry.key, version: entry.value }
+      pinned:
+        join: { left: deps, right: base.pins, on: { name: name }, unique: right }
+        fields: { name: left.name, wanted: right.version }
+    rules:
+      - id: has-readme
+        kind: file_exists
+        paths: README.md
+        level: error
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - {rule: has-readme, level: error}
+      - {rule: no-bak, level: warning, path: stale.bak}

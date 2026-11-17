@@ -435,6 +435,7 @@ rules:
 "#,
         Path::new(".alint.yml"),
         &SensitiveFieldEnvironment,
+        &TEST_ROOT,
     )
     .unwrap();
     let registry = alint_rules::builtin_registry();
@@ -455,6 +456,7 @@ fn sensitive_typed_and_builder_errors_never_echo_interpolated_values() {
         "version: 1\nrules:\n  - id: typed\n    kind: file_content_forbidden\n    paths: '**/*.txt'\n    pattern: x\n    expect_matches: '{{env.SECRET}}'\n    level: warning\n",
         Path::new(".alint.yml"),
         &SensitiveFieldEnvironment,
+        &TEST_ROOT,
     )
     .unwrap();
     let registry = alint_rules::builtin_registry();
@@ -469,6 +471,7 @@ fn sensitive_typed_and_builder_errors_never_echo_interpolated_values() {
         "version: 1\nrules:\n  - id: builder\n    kind: file_content_forbidden\n    paths: '**/*.txt'\n    pattern: '{{env.SECRET}}'\n    level: warning\n",
         Path::new(".alint.yml"),
         &InvalidRegexEnvironment,
+        &TEST_ROOT,
     )
     .unwrap();
     let config = raw.finalize(Some(registry.catalog())).unwrap();
@@ -481,17 +484,22 @@ fn sensitive_typed_and_builder_errors_never_echo_interpolated_values() {
 /// and building each rule with its nested rules, as `alint check` does.
 fn first_configuration_error(yaml: &str, environment: &dyn crate::EnvironmentProvider) -> String {
     let registry = alint_rules::builtin_registry();
-    parse_config_interpolated_inner_with_environment(yaml, Path::new(".alint.yml"), environment)
-        .and_then(|raw| raw.finalize(Some(registry.catalog())))
-        .and_then(|config| {
-            for spec in &config.rules {
-                let rule = registry.build(spec)?;
-                registry.validate_nested(spec, rule.as_ref())?;
-            }
-            Ok(())
-        })
-        .unwrap_err()
-        .to_string()
+    parse_config_interpolated_inner_with_environment(
+        yaml,
+        Path::new(".alint.yml"),
+        environment,
+        &TEST_ROOT,
+    )
+    .and_then(|raw| raw.finalize(Some(registry.catalog())))
+    .and_then(|config| {
+        for spec in &config.rules {
+            let rule = registry.build(spec)?;
+            registry.validate_nested(spec, rule.as_ref())?;
+        }
+        Ok(())
+    })
+    .unwrap_err()
+    .to_string()
 }
 
 #[test]
@@ -803,6 +811,7 @@ fn raw_config_type_errors_never_echo_interpolated_values() {
         "version: '{{env.SECRET}}'\nrules: []\n",
         Path::new(".alint.yml"),
         &SensitiveFieldEnvironment,
+        &TEST_ROOT,
     )
     .unwrap_err()
     .to_string();
@@ -848,4 +857,27 @@ rules:
     let rule = |id: &str| config.rules.iter().find(|rule| rule.id == id).unwrap();
     assert!(!rule("cleared").field_is_sensitive("pattern"));
     assert!(rule("tainted").field_is_sensitive("pattern"));
+}
+
+#[test]
+fn a_bundled_ruleset_must_be_version_one() {
+    let display = "alint://bundled/x@v1";
+    assert!(refuse_bundled_v2("version: 1\nrules: []\n", display).is_ok());
+    for (body, expected) in [
+        (
+            "version: 2\nrules: []\n",
+            "alint://bundled/x@v1: a bundled ruleset must be `version: 1` in this build; \
+             `version: 2` is accepted only in local files (the top-level config, a local \
+             `extends:` target or an `.alint.d` fragment)",
+        ),
+        (
+            "version: 1\nselectors: {}\n",
+            "alint://bundled/x@v1: `selectors:` needs `version: 2`, which a bundled ruleset \
+             cannot use in this build: it must be `version: 1`",
+        ),
+    ] {
+        let error = refuse_bundled_v2(body, display).unwrap_err();
+        assert!(matches!(error, Error::Internal(_)), "{error:?}");
+        assert!(error.to_string().contains(expected), "{error}");
+    }
 }

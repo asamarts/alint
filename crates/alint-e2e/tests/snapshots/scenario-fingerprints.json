@@ -1638,6 +1638,30 @@
     "fingerprint": "fefe85fb1d9a51c5b26cef56263c9085501351f36150edab768883c2a3c182b1"
   },
   {
+    "scenario": "check/version_two/drop_in/a_fragment_inherits_version_two.yml",
+    "rule_id": "has-changelog",
+    "path": null,
+    "fingerprint": "c83d8f796e763bd3c79d1a8124b890f9249d2261f789452330d4083df9134e80"
+  },
+  {
+    "scenario": "check/version_two/drop_in/a_fragment_inherits_version_two.yml",
+    "rule_id": "has-readme",
+    "path": null,
+    "fingerprint": "a2f257d5622baf01fcbb21263a2c2484b6833897e6fbec169966d3edf6ca1037"
+  },
+  {
+    "scenario": "check/version_two/loads_and_runs_its_rules.yml",
+    "rule_id": "has-readme",
+    "path": null,
+    "fingerprint": "a2f257d5622baf01fcbb21263a2c2484b6833897e6fbec169966d3edf6ca1037"
+  },
+  {
+    "scenario": "check/version_two/loads_and_runs_its_rules.yml",
+    "rule_id": "no-bak",
+    "path": "stale.bak",
+    "fingerprint": "18a3c3cb5a51ba97b5d36cf508fcc3f35b4b228d0e4f9b0b5f502716a9020734"
+  },
+  {
     "scenario": "check/when_facts/when_gate_admits.yml",
     "rule_id": "rust-has-toolchain",
     "path": null,

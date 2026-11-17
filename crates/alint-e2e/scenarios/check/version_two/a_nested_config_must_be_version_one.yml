@@ -1,0 +1,22 @@
+test_version: 1
+name: a nested config must be version 1
+tags: [check, version_two, nested]
+
+given:
+  tree:
+    packages:
+      web:
+        ".alint.yml": |
+          version: 2
+          rules: []
+  config: |
+    version: 2
+    nested_configs: true
+
+when: [check]
+
+expect:
+  - exit: configuration_error
+    configuration_error:
+      message:
+        regex: ': a nested config \(`nested_configs:`\) must be `version: 1` in this build; `version: 2` is accepted only in local files \(the top-level config, a local `extends:` target or an `\.alint\.d` fragment\)$'

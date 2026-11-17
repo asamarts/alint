@@ -189,10 +189,15 @@ fn load_nested_config(
     // Route through the shared parse path so nested configs get the
     // same `{{env.X}}` interpolation as the top-level config and
     // drop-ins. Its errors already name the file.
+    // A nested config must be version 1 (design section 3 item 6); the parse
+    // reads its `version:` first and refuses a version 2 one.
+    let origin =
+        crate::v2::Origin::new(ConfigSourceClass::Nested, source).consumer(consumer_version, None);
     let config: RawConfig = crate::loader::parse_config_interpolated_with_environment(
         &contents,
         abs_path,
         environment,
+        &origin,
     )?;
     // A value the nested config's top-level fields read from the environment
     // (its `version:`) stays out of its errors, as the root config's does.

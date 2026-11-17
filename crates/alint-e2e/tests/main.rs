@@ -44,3 +44,4 @@ mod invariants;
 mod output_weird_paths;
 mod scenarios;
 mod unix_metadata;
+mod version_two;

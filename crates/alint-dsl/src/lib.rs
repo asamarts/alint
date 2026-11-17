@@ -41,6 +41,15 @@ mod loader;
 mod nested;
 mod template_budget;
 mod trust;
+mod v2;
+
+/// The config versions this build loads as experimental (`version: 2` in
+/// v0.23, ADR-0034 decision 1): a config of one loads, but its syntax may
+/// change before a release declares it stable. Hidden from the documented API
+/// because v2 is experimental; public only so the CLI can warn about a loaded
+/// config's version and `xtask gen-facts` can list it in `facts.json`.
+#[doc(hidden)]
+pub const EXPERIMENTAL_CONFIG_VERSIONS: &[u32] = &[v2::VERSION];
 
 pub(crate) use trust::{
     ENV_VARS_MARKER, FIELD_SOURCES_MARKER, PROVENANCE_MARKER, Provenance, SENSITIVE_FIELDS_MARKER,
@@ -225,8 +234,9 @@ fn load_resolved(
         loader::add_environment_values(&mut raw.environment_values, &discovered_environment_values);
     }
 
+    let surface = raw.surface;
     let merged = raw.finalize(opts.kind_catalog)?;
-    validate(&merged)?;
+    validate(&merged, surface)?;
     Ok(merged)
 }
 
@@ -398,8 +408,9 @@ pub(crate) struct RawConfig {
     /// Source-local minimum binary requirement. Validated before composition.
     #[serde(default, deserialize_with = "deserialize_explicit")]
     requires: Option<ConfigRequirements>,
+    /// Each entry with the alias a version 2 source may give it (`as:`).
     #[serde(default)]
-    extends: Vec<alint_core::ExtendsEntry>,
+    extends: Vec<v2::ExtendsEntry>,
     #[serde(default)]
     ignore: Vec<String>,
     #[serde(default, deserialize_with = "deserialize_explicit")]
@@ -479,6 +490,17 @@ pub(crate) struct RawConfig {
     /// schema.
     #[serde(skip)]
     extends_environment: Vec<bool>,
+    /// The language this config was decoded as: version 2 only when its
+    /// top-level `version:` is the literal `2` (or it is a drop-in of a
+    /// version 2 root). Set by the local-config parser. Not part of the schema.
+    #[serde(skip)]
+    surface: v2::Surface,
+    /// The selectors, relations and `extends:` aliases of every version 2
+    /// source merged into this config, each with its source. Inert until a
+    /// rule kind reads them (phase 7), so `finalize` drops them. Not part of
+    /// the schema.
+    #[serde(skip)]
+    v2: v2::Objects,
 }
 
 const DEFAULT_FIX_SIZE_LIMIT: Option<u64> = Some(1 << 20);
@@ -1343,6 +1365,14 @@ pub fn parse(yaml: &str) -> Result<Config> {
             "YAML alias expansion exceeds the maximum supported size".to_string(),
         ));
     }
+    // Read `version:` before the typed decode: a string's config must be
+    // version 1 (design section 3 item 6), and a v2-only key in it is reported
+    // as needing version 2 rather than as unknown.
+    v2::dispatch(
+        alint_core::yaml::from_str(yaml).ok().as_ref(),
+        yaml,
+        &v2::Origin::new(alint_core::ConfigSourceClass::Inline, "<inline>"),
+    )?;
     let mut config: Config = match alint_core::yaml::from_str(yaml) {
         Ok(config) => config,
         Err(parse_error) => {
@@ -1384,7 +1414,7 @@ pub fn parse(yaml: &str) -> Result<Config> {
         requires_alint: config.requires.map(|requirements| requirements.alint),
         consumer_version: None,
     });
-    validate(&config)?;
+    validate(&config, v2::Surface::V1)?;
     Ok(config)
 }
 
@@ -1696,11 +1726,17 @@ fn merge_unbounded(a: RawConfig, b: RawConfig) -> RawConfig {
         environment_values,
         config_files,
         extends_environment: Vec::new(),
+        // The language follows the version: the source that sets it decides.
+        surface: b.version.map_or(a.surface, |_| b.surface),
+        v2: a.v2.merged(b.v2),
     }
 }
 
-fn validate(config: &Config) -> Result<()> {
-    if !Config::supports_version(config.version) {
+/// `surface`: the language the top-level config was decoded as; version 2
+/// is valid only when it is version 2's.
+fn validate(config: &Config, surface: v2::Surface) -> Result<()> {
+    let experimental = surface == v2::Surface::V2 && config.version == v2::VERSION;
+    if !Config::supports_version(config.version) && !experimental {
         return Err(Error::Other(format!(
             "unsupported config version {} (this build supports {} through {})",
             config.version,

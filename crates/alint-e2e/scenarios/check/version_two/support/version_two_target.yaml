@@ -1,0 +1,6 @@
+# A version 2 config that a version 1 config may not extend.
+version: 2
+selectors:
+  docs:
+    paths: "docs/**"
+rules: []

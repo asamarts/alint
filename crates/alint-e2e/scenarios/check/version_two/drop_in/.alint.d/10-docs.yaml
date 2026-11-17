@@ -1,0 +1,10 @@
+# No `version:`: a fragment is read as its root's version. Each source has
+# its own namespace, so it may declare `docs` again.
+selectors:
+  docs:
+    paths: "docs/**/*.md"
+rules:
+  - id: has-changelog
+    kind: file_exists
+    paths: CHANGELOG.md
+    level: warning

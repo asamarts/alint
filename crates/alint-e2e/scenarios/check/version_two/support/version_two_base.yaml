@@ -1,0 +1,13 @@
+# A version 2 `extends:` target: its selectors and relations are reachable
+# from the extending config through its alias (`base.pins`).
+version: 2
+relations:
+  pins:
+    from: { paths: pins.json }
+    entries: { format: json, at: $ }
+    fields: { name: entry.key, version: entry.value }
+rules:
+  - id: no-bak
+    kind: file_absent
+    paths: "**/*.bak"
+    level: warning

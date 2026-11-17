@@ -1266,6 +1266,7 @@ fn raw_config_rerun_keeps_the_type_interpolation_gave_each_value() {
             document,
             Path::new(".alint.yml"),
             &TypedEnvironment,
+            &crate::loader::TEST_ROOT,
         )
         .map(|_| ())
         .unwrap_err()
@@ -1304,6 +1305,7 @@ fn an_extends_filter_read_from_the_environment_leaves_the_url_readable() {
          - url: './{{env.VALUE}}.yml'\n  - '{{env.VALUE}}'\n  - ./plain.yml\nrules: []\n",
         Path::new(".alint.yml"),
         &NamedEnvironment,
+        &crate::loader::TEST_ROOT,
     )
     .unwrap();
     assert_eq!(raw.extends_environment, [false, true, true, false]);
