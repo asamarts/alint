@@ -99,7 +99,7 @@
     "publish:ovsx": "ovsx publish"
   },
   "dependencies": {
-    "tar": "^7.5.22",
+    "tar": "^7.5.23",
     "vscode-languageclient": "^11.0.0"
   },
   "devDependencies": {
@@ -107,11 +107,11 @@
     "@types/node": "^18.19.0",
     "@types/vscode": "~1.91.0",
     "@vscode/test-electron": "^3.1.0",
-    "@vscode/vsce": "^4.1.0",
+    "@vscode/vsce": "^4.1.1",
     "esbuild": "^0.28.2",
-    "glob": "^14.0.4",
+    "glob": "^14.0.6",
     "mocha": "^11.8.0",
-    "ovsx": "^1.3.0",
+    "ovsx": "^1.4.0",
     "typescript": "^7.0.2"
   },
   "overrides": {
