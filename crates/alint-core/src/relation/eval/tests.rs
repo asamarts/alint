@@ -268,36 +268,34 @@ fn reads_never_reach_a_git_directory() {
     std::fs::create_dir_all(dir.path().join(".git")).unwrap();
     std::fs::write(dir.path().join(".git/config.json"), r#"{"name": "secret"}"#).unwrap();
     std::fs::write(dir.path().join("ok.json"), r#"{"name": "ok"}"#).unwrap();
-    let mut entries = vec![(".git/config.json", false), ("ok.json", false)];
+    // Where the platform makes symlinks, one into `.git` joins the index.
+    let linked: &[&str] = if cfg!(unix) { &["link.json"] } else { &[] };
     #[cfg(unix)]
-    {
-        std::os::unix::fs::symlink(".git/config.json", dir.path().join("link.json")).unwrap();
-        entries.push(("link.json", false));
-    }
+    std::os::unix::fs::symlink(".git/config.json", dir.path().join("link.json")).unwrap();
     // An index built from entries vouches for nothing, so every read is
     // confined as a literal path's is.
     let index = FileIndex::from_entries(
-        entries
+        [".git/config.json", "ok.json"]
             .iter()
-            .map(|(path, is_dir)| crate::walker::FileEntry {
+            .chain(linked)
+            .map(|path| crate::walker::FileEntry {
                 path: Arc::from(std::path::Path::new(path)),
-                is_dir: *is_dir,
+                is_dir: false,
                 size: 20,
             })
             .collect(),
     );
     let tree = Tree { dir, index };
-    let mut expected = vec![
-        ".git/config.json: relation `configs` (.alint.yml): could not read file: path is in a Git \
-         directory; rules never read there"
-            .to_string(),
-    ];
-    #[cfg(unix)]
-    expected.push(
-        "link.json: relation `configs` (.alint.yml): could not read file: path is in a Git \
-         directory; rules never read there"
-            .to_string(),
-    );
+    let expected: Vec<String> = [".git/config.json"]
+        .iter()
+        .chain(linked)
+        .map(|path| {
+            format!(
+                "{path}: relation `configs` (.alint.yml): could not read file: path is in a Git \
+                 directory; rules never read there"
+            )
+        })
+        .collect();
     assert_eq!(messages(&run(&plan, 0, &tree, Limits::default())), expected);
 
     // The walk leaves both out, so a walked tree reads only `ok.json`.
