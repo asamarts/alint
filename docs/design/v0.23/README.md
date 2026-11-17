@@ -682,4 +682,5 @@ decided then.
     parser runs: `Format::parse`, `extract`'s entry rows, the structured-fix span resolver and
     `pinned_references`.
   - A kbench cell for wall time and RSS of mid-size YAML is not added: `bench-scale` records no
-    RSS, and a new scenario needs a results location the published history does not read.
+    RSS, and a new scenario needs a results location the published history does not read
+    (#550).
