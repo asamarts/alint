@@ -720,3 +720,30 @@ maintained libyaml fork is the lower-risk ownership boundary.
   ayaml release within 1.2x of libyaml's peak heap, which alint-core's `yaml_memory` test
   measures (1.78 at 37 KB and 1.73 at 1.1 MB today). YAML parses over 1 MiB now share a budget
   of 32 MiB of input in flight, as one parse at the input cap peaked at 4.5 to 6.2 GB.
+- **2026-11-17: the second audit of the YAML work.** Four groups of findings, fixed together:
+  - **Structured fixes changed nodes they were not aimed at.** The engine's check of a located
+    edit re-runs the rule's query, so it saw the target and nothing else. A YAML line removal
+    could change a neighbour: the blank line after the removed line joined a block scalar kept
+    with `|+`, an explicit `?` key took the next entry's value or was left bare, and a block
+    mapping emptied by the removal read as null. A set or removal at an anchored node changed
+    every alias of it. Now a structured fix of YAML, JSON or TOML re-reads the whole document
+    after its edits and declines unless the tree is the original with exactly the intended
+    change; the engine checks the same across rules that edit one file, and demotes the later
+    rule, which a later pass retries. A set or removal at a node an alias or a merge names
+    declines, and removing a block mapping's last entry writes `{}`. A test applies edits to
+    the harness's generated documents and to documents built of these shapes, through the
+    engine, and requires each applied edit to change its target only.
+  - **The memory gate measured two shapes.** `yaml_memory` now measures nine, OpenAPI-shaped
+    documents of 37 KB, 1.1 MB and 4.4 MB and 1 MB documents of block and flow mappings, flow
+    sequences and block sequences, each in a process of its own. Each shape has a regression
+    bound of its ratio today and about 10%. ayaml 0.1.2's ratios are 1.73 to 2.05 on seven
+    shapes, 2.88 on a flow sequence of `1` and 3.06 on a block sequence of one word each. The
+    release bound of 1.2 applies to every shape.
+  - **The budget charged a parse its length.** A small document whose aliases expand far is
+    copied into the JSON tree once per alias, so parses that each fit under the threshold could
+    together take gigabytes. `Format::parse` now charges a parse the larger of its length and
+    the guard's estimate of its expanded size over 64, the most bytes of tree per byte the
+    budget lets through.
+  - **A harness false failure.** On a line that continues the root's plain scalar, a `%` in
+    column 0 is the scalar's text, not a directive; `places()` read it as a directive, which
+    seed 17 found. Seeds 1 to 20 at 100,000 inputs each pass.
