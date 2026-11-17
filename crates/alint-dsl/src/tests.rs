@@ -6,6 +6,7 @@ mod nested_config;
 mod remote_trust;
 mod resource_budgets;
 mod version_two;
+mod version_two_names;
 mod yaml_errors;
 
 fn test_registry() -> &'static alint_core::RuleRegistry {
@@ -164,4 +165,8 @@ fn config_new_matches_a_minimal_loaded_config() {
     );
     assert_eq!(built.baseline, loaded.baseline);
     assert!(built.environment_values.is_empty() && loaded.environment_values.is_empty());
+    assert!(
+        built.relation_plan.is_none() && loaded.relation_plan.is_none(),
+        "a version 1 config carries no plan"
+    );
 }

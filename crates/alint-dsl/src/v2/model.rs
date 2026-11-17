@@ -6,8 +6,9 @@
 //! type, and every name is literal and well formed. Nothing here is resolved.
 //! A reference keeps the name it was written with, so per-source resolution,
 //! the plan check (field existence, cycles, union parts binding every field)
-//! and the trust gates can run once every source is loaded. Until a rule
-//! kind reads them (`constraint`, phase 7), the objects are inert.
+//! and the trust gates can run once every source is loaded
+//! ([`super::resolve`]), which turns them into the plan the loaded config
+//! carries.
 //!
 //! Every type is crate-private: version 2 is experimental (ADR-0034 decision
 //! 1), so none of this is library API.
@@ -39,18 +40,17 @@ impl Objects {
         self
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
-        self.sources.iter().all(SourceObjects::is_empty)
-    }
-
-    /// Record where `alias` leads (nothing for an entry without one), once
-    /// the loader has read the source it names. Called on one source's
-    /// objects, before any merge.
-    pub(crate) fn set_alias_target(&mut self, alias: Option<&str>, target: Option<&Path>) {
-        let Some(alias) = alias else {
-            return;
-        };
+    /// Record that the source extends the local file `target`, through
+    /// `alias` when its entry has one, once the loader has read it. Called on
+    /// one source's objects, before any merge.
+    pub(crate) fn record_extended(&mut self, alias: Option<&str>, target: Option<&Path>) {
         for source in &mut self.sources {
+            if let Some(target) = target {
+                source.extended.push(target.to_path_buf());
+            }
+            let Some(alias) = alias else {
+                continue;
+            };
             for (name, held) in &mut source.aliases {
                 if name == alias {
                     held.target = target.map(Path::to_path_buf);
@@ -68,9 +68,14 @@ pub(crate) struct SourceObjects {
     pub(crate) selectors: Vec<(String, Selector)>,
     pub(crate) relations: Vec<(String, Relation)>,
     pub(crate) aliases: Vec<(String, Alias)>,
+    /// The resolved local files its `extends:` entries name, aliased or not,
+    /// in the order written: where a hint finds a name the source could reach
+    /// through an alias.
+    pub(crate) extended: Vec<PathBuf>,
 }
 
 impl SourceObjects {
+    #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
         self.selectors.is_empty() && self.relations.is_empty() && self.aliases.is_empty()
     }

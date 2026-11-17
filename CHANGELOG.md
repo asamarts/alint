@@ -425,6 +425,25 @@ policy-test package the user does not trust.
     `.alint.d/` fragment. A remote `extends:` source, a bundled ruleset, a nested config and the
     string `alint_dsl::parse` reads must be version 1, and a version 1 config cannot extend a
     version 2 one; each is an error that says so.
+  - Each config file has its own namespace. A bare name (`from:`, a join's `left:` and
+    `right:`, a `where:` filter's `{ relation, field }`) names an object the same file declares;
+    `alias.name` names an object the file an `extends:` entry gives `as: alias` declares itself,
+    with no re-export and no `a.b.c` chain. Nothing shadows, and an `.alint.d/` fragment's
+    namespace is its own too. A name or alias that does not resolve is an error naming the file
+    and key, with the names that file can reach or the nearest one
+    (`` `relations.titles.from`: no selector named `doc` in this config; the selectors it can
+    reach are `docs` ``).
+  - The relation plan is checked when the config loads, before any file is read: every field a
+    join's `on:`, a `left.F` or `right.F`, a `transform:` or a `where:` names exists; every part
+    of a `union:` binds every field; `strip-root` applies first to an `entry.path` field;
+    `semver-major` and `semver-minor` do not apply to a path, a directory, an extension or an
+    `entry.path`; a regex compiles and a `read:` regex has a capture group; a JSONPath parses; an
+    `in` or `not_in` literal is not null or a number, nor a boolean for a field that holds
+    strings; and relations that read each other are refused, naming the cycle
+    (`` relation `a` reads itself: `a` -> `b` -> `a` ``). A selector compiles as a rule's scope
+    does, so a manifest `source:` stays inside the repository and out of `.git`.
+  - Each selector and relation passes the trust gates of the file that declares it, with what it
+    references, as an extended file's rules do.
   - Nothing reads selectors and relations yet: a version 2 config runs its rules as version 1
     would, and its selectors and relations check nothing until the `constraint` rule kind lands.
   - `facts.json` (format 7) gains `compatibility.experimental_config_versions: [2]`;

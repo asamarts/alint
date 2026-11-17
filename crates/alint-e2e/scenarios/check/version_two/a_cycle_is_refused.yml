@@ -1,0 +1,28 @@
+test_version: 1
+name: relations that read each other are refused, naming the cycle
+tags: [check, version_two]
+
+given:
+  tree: {}
+  config: |
+    version: 2
+    relations:
+      names:
+        from: { paths: "**/package.json" }
+        read: { json: "$.name" }
+        fields: { name: value }
+      left:
+        join: { left: right, right: names, on: { name: name }, unique: right }
+        fields: { name: left.name }
+      right:
+        join: { left: left, right: names, on: { name: name }, unique: right }
+        fields: { name: left.name }
+    rules: []
+
+when: [check]
+
+expect:
+  - exit: configuration_error
+    configuration_error:
+      message:
+        exact: ".a_cycle_is_refused.inline.alint.yml: `relations.left.join.left`: relation `left` reads itself: `left` -> `right` -> `left` (a join's sides and a filter's `{ relation, field }` references cannot form a cycle); remove one of these references"

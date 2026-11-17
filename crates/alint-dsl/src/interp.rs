@@ -383,7 +383,7 @@ fn looks_like_typo(input: &str, target: &str) -> bool {
     levenshtein(input, target) <= 1
 }
 
-fn levenshtein(a: &str, b: &str) -> usize {
+pub(crate) fn levenshtein(a: &str, b: &str) -> usize {
     let a: Vec<char> = a.chars().collect();
     let b: Vec<char> = b.chars().collect();
     let mut prev: Vec<usize> = (0..=b.len()).collect();

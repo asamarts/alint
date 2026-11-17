@@ -40,11 +40,12 @@ fn load_error(path: &Path) -> String {
     load(path).expect_err("expected a load error").to_string()
 }
 
-/// The names each source declared, by its display.
+/// The names each source that declares any declared, by its display.
 fn declared(raw: &RawConfig) -> Vec<(String, ConfigSourceClass, Vec<String>)> {
     raw.v2
         .sources
         .iter()
+        .filter(|source| !source.is_empty())
         .map(|source| {
             let names = source
                 .selectors
@@ -555,9 +556,10 @@ fn a_parsed_string_must_be_version_one() {
 }
 
 #[test]
-fn objects_are_dropped_when_the_config_is_finalized() {
-    // Nothing reads selectors and relations before the `constraint` kind
-    // (phase 7): a v2 config's rules are its v1 rules.
+fn objects_ride_on_the_loaded_config_as_its_plan() {
+    // No rule kind reads selectors and relations before the `constraint`
+    // kind (phase 7): a v2 config's rules are its v1 rules, and its objects
+    // are carried, resolved, on the loaded config.
     let tmp = tempfile::tempdir().unwrap();
     let with = write(
         tmp.path(),
@@ -578,4 +580,13 @@ fn objects_are_dropped_when_the_config_is_finalized() {
             .map(|rule| &rule.id)
             .collect::<Vec<_>>()
     );
+    let plan = with
+        .relation_plan
+        .as_deref()
+        .expect("a version 2 config has a plan");
+    assert_eq!(plan.selectors[0].name, "manifests");
+    assert_eq!(plan.relations[0].name, "deps");
+    let empty = without.relation_plan.as_deref().expect("even an empty one");
+    assert!(empty.selectors.is_empty() && empty.relations.is_empty());
+    assert_eq!(empty.sources.len(), 1);
 }

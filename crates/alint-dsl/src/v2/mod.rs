@@ -11,18 +11,20 @@
 //! never extends a v2 one (ADR-0022's direction rule).
 //!
 //! The decoded selectors and relations ride on the loader's merged config
-//! with the source that declared each ([`Objects`]); nothing reads them yet.
-//! See `docs/design/v0.23/selectors-and-constraints.md`, sections 3 to 5, 8
-//! and 10.
+//! with the source that declared each ([`Objects`]). Once every source has
+//! loaded, finalize resolves every reference in its source's namespace
+//! ([`resolve`]), checks the plan ([`plan_check`]) and carries the result on
+//! the loaded `Config` (`relation_plan`). See
+//! `docs/design/v0.23/selectors-and-constraints.md`, sections 3 to 5, 8 and
+//! 10.
 
 mod decode;
 mod document;
 mod literal;
-// Name resolution (phase 6.2), the relation engine (6.3) and the `constraint`
-// kind (phase 7) read the decoded model; until then it is built, carried with
-// its source and dropped, so most of it is never read outside the tests.
-#[allow(dead_code)]
 mod model;
+mod origins;
+mod plan_check;
+mod resolve;
 
 use alint_core::{ConfigSourceClass, Error, Result};
 use ayaml::Value;
@@ -30,12 +32,16 @@ use ayaml::Value;
 pub(crate) use decode::source_objects;
 pub(crate) use document::{Document, ExtendsEntry};
 pub(crate) use literal::reject_interpolated_names;
-#[allow(unused_imports)] // What 6.2 and 6.3 resolve; only the tests read most now.
-pub(crate) use model::{
-    Alias, Entries, EntriesFormat, Field, FieldSource, Join, JoinSide, Member, Objects, Part,
-    PathToken, Predicate, Read, Reader, Reference, Relation, Rows, Selector, SelectorRef, SourceId,
-    SourceObjects, Transform,
+pub(crate) use model::{Objects, SourceId};
+pub(crate) use origins::{
+    FIELD_ORIGINS_MARKER, mark_field_origins, merge_field_origins, take_field_origins,
 };
+pub(crate) use resolve::resolve;
+
+#[cfg(test)]
+pub(crate) use model::{Read, Reader, Rows};
+#[cfg(test)]
+pub(crate) use origins::REFERENCE_STUB_KIND;
 
 /// The experimental configuration version.
 pub(crate) const VERSION: u32 = 2;

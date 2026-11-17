@@ -123,6 +123,7 @@ dependencies = [
  "ayaml",
  "directories",
  "jsonschema",
+ "regex",
  "serde",
  "serde_json",
  "sha2",

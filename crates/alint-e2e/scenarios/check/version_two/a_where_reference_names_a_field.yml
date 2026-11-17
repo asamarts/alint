@@ -1,0 +1,28 @@
+test_version: 1
+name: a filter's membership reference names a field of that relation
+tags: [check, version_two]
+
+given:
+  tree: {}
+  config: |
+    version: 2
+    relations:
+      allowed:
+        from: { paths: allowed.json }
+        entries: { format: json, at: $ }
+        fields: { name: entry.key }
+      deps:
+        from: { paths: "**/package.json" }
+        entries: { format: json, at: "$.dependencies" }
+        fields: { name: entry.key }
+        where:
+          name: { in: [{ relation: allowed, field: names }] }
+    rules: []
+
+when: [check]
+
+expect:
+  - exit: configuration_error
+    configuration_error:
+      message:
+        exact: ".a_where_reference_names_a_field.inline.alint.yml: `relations.deps.where.name.in[0].field`: `names` is not a field of `allowed`; its fields are `name`"

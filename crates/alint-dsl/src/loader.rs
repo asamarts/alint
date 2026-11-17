@@ -603,7 +603,10 @@ fn deserialize_text(contents: &str, source: &str, surface: crate::v2::Surface) -
 }
 
 /// Decode a version 2 source's selectors, relations and aliases onto
-/// `config`, with the source that declared them.
+/// `config`, with the source that declared them, and mark each field of its
+/// rules and templates as written by it. Every version 2 source is recorded,
+/// one that declares nothing too: its rules' references resolve in its
+/// (empty) namespace, and an alias may name it.
 fn attach_v2_objects(
     config: &mut RawConfig,
     v2_keys: &[(String, ayaml::Value)],
@@ -620,9 +623,9 @@ fn attach_v2_objects(
     let objects = crate::v2::source_objects(source, v2_keys, &config.extends).map_err(|error| {
         alint_core::redact_environment_values_in_error(error, &config.environment_values)
     })?;
-    if !objects.is_empty() {
-        config.v2.sources.push(objects);
-    }
+    crate::v2::mark_field_origins(&mut config.rules, source_path);
+    crate::v2::mark_field_origins(&mut config.templates, source_path);
+    config.v2.sources.push(objects);
     Ok(())
 }
 
@@ -883,7 +886,7 @@ pub(crate) fn load_recursive(
         // Where an alias leads, for qualified references to resolve.
         config
             .v2
-            .set_alias_target(entry.alias.as_deref(), target.as_deref());
+            .record_extended(entry.alias.as_deref(), target.as_deref());
         merged = merge(merged, parent)?;
     }
     merged = merge(merged, config)?;

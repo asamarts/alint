@@ -628,6 +628,13 @@ impl RawConfig {
             .map(|(id, template)| (id.as_str(), template_budget::size_of_mapping(template)))
             .collect();
         let mut budget = template_budget::Budget::default();
+        // Version 2: every reference resolves in its source's namespace and
+        // the plan is checked before any rule is built (design sections 8
+        // and 10).
+        let mut resolved = match self.surface {
+            v2::Surface::V2 => Some(v2::resolve(&self.v2)?),
+            v2::Surface::V1 => None,
+        };
 
         let mut rules = Vec::with_capacity(self.rules.len());
         for m in &self.rules {
@@ -649,6 +656,12 @@ impl RawConfig {
                     expand_template(masked, templates, &mut budget).map(drop)
                 })
             })?;
+            // Which version 2 source wrote each field, for the fields that
+            // name a relation.
+            let origins = v2::take_field_origins(&mut expanded);
+            if let Some(resolved) = &mut resolved {
+                resolved.resolve_rule(&id_hint, &expanded, &origins)?;
+            }
             mark_sensitive_conditions(&mut expanded, &self.env_vars);
             expanded.remove(ENV_VARS_MARKER);
             // A nested-config rule is confined to its subtree here, on the effective
@@ -702,6 +715,9 @@ impl RawConfig {
                     ));
                 }
             }
+            if let Some(resolved) = &resolved {
+                resolved.judge_rule(&id_hint, provenance.extended.as_deref())?;
+            }
             if untrusted_fix_source {
                 demote_content_fixers_in_rule(&mut expanded, catalog);
                 // An untrusted rule may instantiate a TRUSTED template that promotes
@@ -715,7 +731,7 @@ impl RawConfig {
             spec.set_extended_source(extended_source);
             rules.push(spec);
         }
-        Ok(Config::new(self.version.unwrap_or(0), rules)
+        let mut config = Config::new(self.version.unwrap_or(0), rules)
             .with_requires(effective_requirements(&self.compatibility))
             .with_ignore(self.ignore)
             .with_respect_gitignore(self.respect_gitignore.unwrap_or(true))
@@ -727,7 +743,9 @@ impl RawConfig {
             .with_baseline(self.baseline)
             .with_compatibility(self.compatibility)
             .with_environment_values(self.environment_values)
-            .with_config_files(self.config_files))
+            .with_config_files(self.config_files);
+        config.relation_plan = resolved.map(|resolved| std::sync::Arc::new(resolved.plan));
+        Ok(config)
     }
 }
 
@@ -876,14 +894,20 @@ fn expand_template(
     mark_unattributed_field_sources(&mut expanded, &template_source);
     let template_field_sources = expanded.remove(FIELD_SOURCES_MARKER);
     let template_provenance = expanded.remove(PROVENANCE_MARKER);
+    let template_origins = expanded.remove(v2::FIELD_ORIGINS_MARKER);
     expanded = substitute_template_vars(expanded, &vars, budget).map_err(overrun)?;
     expanded.remove("id");
     if let Some(field_sources) = template_field_sources {
         expanded.insert(FIELD_SOURCES_MARKER.into(), field_sources);
     }
+    // A field the template supplies resolves in the template's source.
+    if let Some(origins) = template_origins {
+        expanded.insert(v2::FIELD_ORIGINS_MARKER.into(), origins);
+    }
 
     merge_field_sources(&mut expanded, rule);
     merge_sensitive_fields(&mut expanded, rule);
+    v2::merge_field_origins(&mut expanded, rule);
     for (k, v) in rule {
         let key = k.as_str().unwrap_or_default();
         if matches!(
@@ -894,6 +918,7 @@ fn expand_template(
                 | PROVENANCE_MARKER
                 | FIELD_SOURCES_MARKER
                 | SENSITIVE_FIELDS_MARKER
+                | v2::FIELD_ORIGINS_MARKER
         ) {
             continue;
         }

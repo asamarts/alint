@@ -1,0 +1,11 @@
+# A version 2 config that extends `version_two_base.yaml` through its own
+# alias. A config that extends this one reaches only what it declares itself
+# (`own`), never what it reaches through its alias (`base.pins`).
+version: 2
+extends:
+  - url: ./version_two_base.yaml
+    as: base
+selectors:
+  own:
+    paths: "own/**"
+rules: []

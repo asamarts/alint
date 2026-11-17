@@ -857,3 +857,74 @@ fn a_yaml_tag_means_nothing_in_a_selector_or_relation() {
          relation; remove it"
     );
 }
+
+#[test]
+fn a_regex_compiles_and_reads_capture_group_one() {
+    let unclosed = String::from("(");
+    let invalid = regex::Regex::new(&unclosed).unwrap_err();
+    assert_eq!(
+        relation_error(
+            "{ from: s, read: { json: $ }, fields: { f: value }, where: { f: { matches: '(' } } }"
+        ),
+        format!("`relations.r.where.f.matches`: `(` is not a valid regex: {invalid}")
+    );
+    assert_eq!(
+        relation_error(
+            "{ from: s, read: { json: $ }, fields: { f: value }, where: { f: { not_matches: '(' } } }"
+        ),
+        format!("`relations.r.where.f.not_matches`: `(` is not a valid regex: {invalid}")
+    );
+    assert_eq!(
+        relation_error("{ from: s, read: { regex: '(' }, fields: { f: value } }"),
+        format!("`relations.r.read.regex`: `(` is not a valid regex: {invalid}")
+    );
+    assert_eq!(
+        relation_error("{ from: s, read: { regex: '^v.*' }, fields: { f: value } }"),
+        "`relations.r.read.regex`: a `read: { regex }` takes each value from capture group 1, \
+         and `^v.*` has no group; put the value in parentheses, as in `version: (.*)`"
+    );
+    decode("relations:\n  r: { from: s, read: { regex: '^v(.*)' }, fields: { f: value } }\n")
+        .expect("a group");
+    decode("relations:\n  r: { from: s, read: { regex: '^(?:v)?(.*)' }, fields: { f: value } }\n")
+        .expect("a group after a non-capturing one");
+}
+
+#[test]
+fn a_json_path_parses() {
+    let bad =
+        |query: &str| alint_core::Extract::structured(alint_core::Format::Json, query).unwrap_err();
+    assert_eq!(
+        relation_error("{ from: s, read: { json: '$.a[' }, fields: { f: value } }"),
+        format!("`relations.r.read.json`: {}", bad("$.a["))
+    );
+    assert_eq!(
+        relation_error("{ from: s, read: { toml: 'a' }, fields: { f: value } }"),
+        format!("`relations.r.read.toml`: {}", bad("a"))
+    );
+    assert_eq!(
+        relation_error("{ from: s, read: { yaml: $.dev-deps }, fields: { f: value } }"),
+        format!(
+            "`relations.r.read.yaml`: {}; JSONPath dot-notation requires identifier-shape keys \
+             (RFC 9535). For dashed keys, use bracket notation: `$['dev-deps']` instead of \
+             `$.dev-deps` (or `@['dev-deps']` instead of `@.dev-deps` inside a filter). See \
+             `docs/development/CONFIG-AUTHORING.md` § 10.",
+            bad("$.dev-deps")
+        )
+    );
+    assert_eq!(
+        relation_error(
+            "{ from: s, entries: { format: json, at: '$.a[' }, fields: { f: entry.key } }"
+        ),
+        format!("`relations.r.entries.at`: {}", bad("$.a["))
+    );
+    assert_eq!(
+        relation_error(
+            "{ from: s, entries: { format: json, at: [$.a, '$.b['] }, fields: { f: entry.key } }"
+        ),
+        format!("`relations.r.entries.at[1]`: {}", bad("$.b["))
+    );
+    assert_eq!(
+        relation_error("{ from: s, read: { json: $ }, fields: { f: 'bound: $.a[' } }"),
+        format!("`relations.r.fields.f`: {}", bad("$.a["))
+    );
+}

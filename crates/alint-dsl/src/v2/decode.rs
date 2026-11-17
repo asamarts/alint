@@ -73,6 +73,7 @@ pub(crate) fn source_objects(
         selectors: Vec::new(),
         relations: Vec::new(),
         aliases: Vec::new(),
+        extended: Vec::new(),
     };
     for (key, value) in v2_keys {
         decoder.untagged(value, key)?;
@@ -190,6 +191,34 @@ pub(crate) fn key_text(key: &Value) -> String {
     }
 }
 
+/// Read `text` as a reference: a name, or `alias.name`. The error says what
+/// to write instead.
+pub(crate) fn parse_reference(text: &str) -> std::result::Result<Reference, String> {
+    let parts: Vec<&str> = text.split('.').collect();
+    let valid = parts.len() <= 2 && parts.iter().all(|part| is_name(part));
+    if !valid {
+        let mut message = format!(
+            "`{text}` is not a valid reference: write a name, or `alias.name` for an \
+             object of a source this config extends with `as: alias`; a name starts with \
+             an ASCII letter or `_` and holds only ASCII letters, digits, `_` and `-`"
+        );
+        if parts.len() > 2 {
+            message.push_str(" (there is no chained name such as `a.b.c`)");
+        }
+        return Err(message);
+    }
+    Ok(match parts.as_slice() {
+        [alias, name] => Reference {
+            alias: Some((*alias).to_string()),
+            name: (*name).to_string(),
+        },
+        _ => Reference {
+            alias: None,
+            name: text.to_string(),
+        },
+    })
+}
+
 struct Decoder<'s> {
     source: &'s str,
 }
@@ -299,6 +328,25 @@ impl Decoder<'_> {
         Err(self.error(path, message))
     }
 
+    /// Refuse a `JSONPath` that does not parse, which would fail every
+    /// resource the relation reads.
+    fn json_path(&self, query: &str, path: &str) -> Result<()> {
+        alint_core::Extract::structured(alint_core::Format::Json, query)
+            .map(drop)
+            .map_err(|error| {
+                let hint = alint_core::jsonpath_diagnostics::diagnose_path(query)
+                    .map(|hint| format!("; {hint}"))
+                    .unwrap_or_default();
+                self.error(path, format!("{error}{hint}"))
+            })
+    }
+
+    /// Compile `pattern`, which a filter or a `read:` matches.
+    fn regex(&self, pattern: &str, path: &str) -> Result<regex::Regex> {
+        regex::Regex::new(pattern)
+            .map_err(|error| self.error(path, format!("`{pattern}` is not a valid regex: {error}")))
+    }
+
     /// A declared name: a map key under `selectors:` or `relations:`.
     fn declared_name(&self, key: &Value, path: &str) -> Result<String> {
         let text = key.as_str().unwrap_or_default();
@@ -316,29 +364,7 @@ impl Decoder<'_> {
     }
 
     fn reference(&self, text: &str, path: &str) -> Result<Reference> {
-        let parts: Vec<&str> = text.split('.').collect();
-        let valid = parts.len() <= 2 && parts.iter().all(|part| is_name(part));
-        if !valid {
-            let mut message = format!(
-                "`{text}` is not a valid reference: write a name, or `alias.name` for an \
-                 object of a source this config extends with `as: alias`; a name starts with \
-                 an ASCII letter or `_` and holds only ASCII letters, digits, `_` and `-`"
-            );
-            if parts.len() > 2 {
-                message.push_str(" (there is no chained name such as `a.b.c`)");
-            }
-            return Err(self.error(path, message));
-        }
-        Ok(match parts.as_slice() {
-            [alias, name] => Reference {
-                alias: Some((*alias).to_string()),
-                name: (*name).to_string(),
-            },
-            _ => Reference {
-                alias: None,
-                name: text.to_string(),
-            },
-        })
+        parse_reference(text).map_err(|message| self.error(path, message))
     }
 
     fn selector(&self, value: &Value, path: &str) -> Result<Selector> {
@@ -608,13 +634,18 @@ impl Decoder<'_> {
     fn paths_list(&self, value: &Value, path: &str) -> Result<Vec<String>> {
         let expected = "a JSONPath, or a non-empty list of them";
         match value {
-            Value::String(text) => Ok(vec![text.clone()]),
+            Value::String(text) => {
+                self.json_path(text, path)?;
+                Ok(vec![text.clone()])
+            }
             Value::Sequence(items) if !items.is_empty() => items
                 .iter()
                 .enumerate()
                 .map(|(index, item)| {
-                    self.string(item, &format!("{path}[{index}]"), "a JSONPath")
-                        .map(str::to_string)
+                    let item_path = format!("{path}[{index}]");
+                    let text = self.string(item, &item_path, "a JSONPath")?;
+                    self.json_path(text, &item_path)?;
+                    Ok(text.to_string())
                 })
                 .collect(),
             other => Err(self.error(
@@ -661,11 +692,30 @@ impl Decoder<'_> {
             self.string(option, &option_path, expected)
                 .map(str::to_string)
         };
+        let query = || {
+            let query = text("a JSONPath")?;
+            self.json_path(&query, &option_path)?;
+            Ok::<_, Error>(query)
+        };
         Ok(match form {
-            "json" => Read::Json(text("a JSONPath")?),
-            "yaml" => Read::Yaml(text("a JSONPath")?),
-            "toml" => Read::Toml(text("a JSONPath")?),
-            "regex" => Read::Regex(text("a regex whose capture group 1 is the value")?),
+            "json" => Read::Json(query()?),
+            "yaml" => Read::Yaml(query()?),
+            "toml" => Read::Toml(query()?),
+            "regex" => {
+                let pattern = text("a regex whose capture group 1 is the value")?;
+                let regex = self.regex(&pattern, &option_path)?;
+                if regex.captures_len() < 2 {
+                    return Err(self.error(
+                        &option_path,
+                        format!(
+                            "a `read: {{ regex }}` takes each value from capture group 1, and \
+                             `{pattern}` has no group; put the value in parentheses, as in \
+                             `version: (.*)`"
+                        ),
+                    ));
+                }
+                Read::Regex(pattern)
+            }
             "lines" => {
                 let lines =
                     self.mapping(option, &option_path, "a map: `{}` or `{ comment: \"#\" }`")?;
@@ -830,6 +880,7 @@ impl Decoder<'_> {
                             self.error(path, "`bound:` needs a JSONPath, as in `bound: $.name`")
                         );
                     }
+                    self.json_path(query, path)?;
                     FieldSource::Bound(query.to_string())
                 } else if let Some((side, field)) = text
                     .strip_prefix("left.")
@@ -966,12 +1017,16 @@ impl Decoder<'_> {
                 list.push(match predicate {
                     "in" => Predicate::In(self.members(operand, &operand_path)?),
                     "not_in" => Predicate::NotIn(self.members(operand, &operand_path)?),
-                    "matches" => Predicate::Matches(
-                        self.string(operand, &operand_path, "a regex")?.to_string(),
-                    ),
-                    _ => Predicate::NotMatches(
-                        self.string(operand, &operand_path, "a regex")?.to_string(),
-                    ),
+                    "matches" => {
+                        let pattern = self.string(operand, &operand_path, "a regex")?;
+                        self.regex(pattern, &operand_path)?;
+                        Predicate::Matches(pattern.to_string())
+                    }
+                    _ => {
+                        let pattern = self.string(operand, &operand_path, "a regex")?;
+                        self.regex(pattern, &operand_path)?;
+                        Predicate::NotMatches(pattern.to_string())
+                    }
                 });
             }
             out.push((field, list));
