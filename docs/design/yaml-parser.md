@@ -455,6 +455,11 @@ release before alint's users get it. To move the pin (ADR-0040 decision 2):
 4. Update the CHANGELOG's account of the cutover: the ayaml version it names, and each
    difference the release removes or adds.
 5. Bring any difference the bump adds to the owner before the tag (ADR-0040 decision 2).
+6. Measure memory (ADR-0042): run `ci/scripts/yaml-memory-release.sh`, which must pass before the
+   tag; lower each regression bound in `crates/alint-core/tests/alloc/yaml_memory.rs` to the new
+   release's ratio plus its margin, and update the comments that cite the old ratios; update the
+   CHANGELOG's memory and wall-time figures; and run the corpus replay against v0.22.1 (the
+   `corpus-replay.yml` workflow, by `workflow_dispatch`).
 
 **The bump v0.23.0 waits on** (ADR-0040, ADR-0043): a release with the fixes ayaml's main has for
 asamarts/ayaml#132, #133, #137, #139, #140, #141, #146 and #147 (ayaml's pull requests #152 and
@@ -472,6 +477,20 @@ asamarts/ayaml#132, #133, #137, #139, #140, #141, #146 and #147 (ayaml's pull re
   `yaml_differential.rs`, `yaml_differential_tests.rs` and `yaml_differential/predicates.rs`;
 - the long runs with seeds 1 to 12 and the parity runs above, with the results in the v0.23
   plan's status log.
+
+**A trial against ayaml's main** at d5c1cf7 (2026-11-17, unreleased, after 0.1.3) shows what the
+bump will need beside the steps above:
+- two API changes: `Span::start` returns a byte offset (`usize`), so `yaml_decode.rs` drops its
+  `.index()` call, and `compat::parse_events_with_limits` returns a lazy `EventStream`, so
+  `yaml::stream_events`, which returns a `Vec`, calls `compat::parse_events_eager_with_limits`;
+- 14 failing tests out of about 4,850: the harness's entries and examples for the defects the
+  release fixes (step 3), the depth guard's tests of ayaml's byte-order-mark nesting and of a
+  flow bomb behind a reader desync (asamarts/ayaml#140 and #141, step 2), alint-dsl's test of a
+  byte-order-mark config bomb, and the tests that pin messages ayaml's #168 rewords: the
+  indentation hint of ADR-0043 decision 7, which looks for "unexpected content after document",
+  and the message for a tag a typed field cannot read;
+- peak heap 1.29x libyaml's at 37 KB and 1.26x at 1.1 MB on the OpenAPI shape, down from about
+  1.75x on 0.1.2, so the memory condition (step 6) still fails (asamarts/ayaml#163).
 
 ## Migration and rollback
 
@@ -591,9 +610,9 @@ maintained libyaml fork is the lower-risk ownership boundary.
     found asamarts/ayaml#132 and asamarts/ayaml#133. Its first review round found
     asamarts/ayaml#137, a quoted scalar's continuation line under a nested parent that goes
     unchecked after a leading byte-order mark; asamarts/ayaml#138, a tab and then spaces on a quoted
-    scalar's continuation line, which both parsers accept; and #132 after a key with an anchor,
-    added as a comment there. The second round found no other; later reviews found
-    asamarts/ayaml#139, #140, #146 and #147.
+    scalar's continuation line, which both parsers accept (fixed on ayaml's main by its #156);
+    and #132 after a key with an anchor, added as a comment there. The second round found no
+    other; later reviews found asamarts/ayaml#139, #140, #146 and #147.
 - **2026-11-15: the owned types, corrected.** The 2026-11-14 entry on the public API overstated
   how close alint's YAML types came to those of `yaml_serde` 0.10.7: code that compiled against
   0.22 can fail now. The review of #520 added `Value::get_mut`, indexing by `&String`, index
