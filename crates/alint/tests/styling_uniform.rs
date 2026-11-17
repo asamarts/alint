@@ -20,7 +20,7 @@
 //! snapshots for that.
 
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use tempfile::TempDir;
 
@@ -75,7 +75,7 @@ rules:\n  \
 }
 
 fn run(args: &[&str], cwd: &Path) -> (Vec<u8>, Vec<u8>) {
-    let out = Command::new(ALINT)
+    let out = crate::hermetic::command(ALINT)
         .args(args)
         .current_dir(cwd)
         .stdin(Stdio::null())

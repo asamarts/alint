@@ -1,12 +1,12 @@
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
 fn alint() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_alint"))
 }
 
 fn run(root: &Path, args: &[&str]) -> Output {
-    Command::new(alint())
+    crate::hermetic::command(alint())
         .args(args)
         .current_dir(root)
         .env("NO_COLOR", "1")
@@ -383,7 +383,7 @@ fn operational_preflight_failure_uses_exit_three_without_marking_the_test_invali
         &passing_test("cannot allocate sandbox", "failure", None),
     );
     let missing_temp = root.path().join("missing-temp");
-    let output = Command::new(alint())
+    let output = crate::hermetic::command(alint())
         .args(["test", "--format", "json"])
         .current_dir(root.path())
         .env("NO_COLOR", "1")
@@ -519,7 +519,7 @@ file_absent\n        paths: \"secret-*.txt\"\n        level: error\nwhen: [check
 exit: policy_failure\n    violations:\n      - { rule: no-secret, path: secret-1.txt }\n",
     );
 
-    let output = Command::new(alint())
+    let output = crate::hermetic::command(alint())
         .args(["test"])
         .current_dir(root.path())
         .env("NO_COLOR", "1")

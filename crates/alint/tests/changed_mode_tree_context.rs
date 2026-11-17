@@ -9,14 +9,14 @@
 //! - `json_schema_passes` was skipped when only its schema changed.
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
 fn alint() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_alint"))
 }
 
 fn git(dir: &Path, args: &[&str]) {
-    let out = Command::new("git")
+    let out = crate::hermetic::git()
         .args(args)
         .current_dir(dir)
         .env("GIT_AUTHOR_NAME", "t")
@@ -42,7 +42,7 @@ fn commit_all(root: &Path) {
 }
 
 fn run(root: &Path, args: &[&str]) -> Output {
-    Command::new(alint())
+    crate::hermetic::command(alint())
         .args(args)
         .current_dir(root)
         .output()

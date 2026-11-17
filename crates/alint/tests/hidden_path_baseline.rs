@@ -6,7 +6,7 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
 use alint_core::baseline::{Baseline, BaselineEntry, violation_fingerprint};
 
@@ -25,7 +25,7 @@ fn tree(files: &[&str]) -> tempfile::TempDir {
 }
 
 fn alint(root: &Path, args: &[&str]) -> Output {
-    Command::new(PathBuf::from(env!("CARGO_BIN_EXE_alint")))
+    crate::hermetic::command(PathBuf::from(env!("CARGO_BIN_EXE_alint")))
         .args(args)
         .current_dir(root)
         .env("GLOB", "*.txt")

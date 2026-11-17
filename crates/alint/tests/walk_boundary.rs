@@ -23,7 +23,7 @@ fn write(root: &Path, relative: &str, contents: &str) {
 fn isolated_alint(home: &Path) -> Command {
     let config = home.join("gitconfig");
     std::fs::write(&config, "").unwrap();
-    let mut command = Command::new(alint());
+    let mut command = crate::hermetic::command(alint());
     command
         .env("GIT_CONFIG_GLOBAL", &config)
         .env("GIT_CONFIG_SYSTEM", &config)
@@ -123,7 +123,7 @@ fn a_bad_ignore_file_above_the_root_does_not_stop_the_run() {
 /// `git` in `dir`, with git's global and system config empty.
 fn git(dir: &Path, args: &[&str]) {
     let config = tempfile::NamedTempFile::new().unwrap();
-    let status = Command::new("git")
+    let status = crate::hermetic::git()
         .args([
             "-c",
             "commit.gpgsign=false",

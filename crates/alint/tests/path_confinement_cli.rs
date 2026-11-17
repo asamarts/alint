@@ -37,7 +37,7 @@ fn alint_bin() -> PathBuf {
 }
 
 fn run(dir: &Path, args: &[&str]) -> Output {
-    std::process::Command::new(alint_bin())
+    crate::hermetic::command(alint_bin())
         .args(args)
         .current_dir(dir)
         .output()
@@ -334,7 +334,7 @@ fn fixers_from_extends_never_reach_the_git_directory() {
     let canary = base.path().join("canary");
     std::fs::create_dir_all(repo.join("policy")).unwrap();
     std::fs::create_dir_all(&canary).unwrap();
-    let init = std::process::Command::new("git")
+    let init = crate::hermetic::git()
         .args(["init", "-q"])
         .arg(&repo)
         .env("GIT_CONFIG_NOSYSTEM", "1")

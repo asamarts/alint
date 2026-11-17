@@ -29,7 +29,6 @@
 
 use alint_output::Format;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 fn alint_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_alint"))
@@ -51,7 +50,7 @@ fn fixture() -> tempfile::TempDir {
 }
 
 fn run(dir: &Path, args: &[&str]) -> std::process::Output {
-    Command::new(alint_bin())
+    crate::hermetic::command(alint_bin())
         .args(args)
         .current_dir(dir)
         .output()
@@ -573,7 +572,7 @@ fn export_agents_md_keeps_scope_for_messageless_rule() {
 #[test]
 fn help_wraps_to_narrow_terminal_width() {
     let widest = |sub: &[&str]| -> (usize, String) {
-        let out = Command::new(alint_bin())
+        let out = crate::hermetic::command(alint_bin())
             .args(sub)
             .arg("--help")
             .env("COLUMNS", "40")
@@ -1253,7 +1252,7 @@ fn init_and_lsp_reject_a_non_human_format() {
 
     // `lsp` would otherwise block on stdio; the format check happens before it
     // starts serving, so it returns immediately.
-    let out = Command::new(alint_bin())
+    let out = crate::hermetic::command(alint_bin())
         .args(["lsp", "--format", "json"])
         .current_dir(dir.path())
         .stdin(std::process::Stdio::null())

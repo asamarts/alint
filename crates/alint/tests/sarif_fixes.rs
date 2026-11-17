@@ -7,14 +7,13 @@
 //! `engine.run` -> `attach_proposed_edits` -> `write_sarif`.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 fn alint_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_alint"))
 }
 
 fn check_sarif(dir: &Path) -> serde_json::Value {
-    let out = Command::new(alint_bin())
+    let out = crate::hermetic::command(alint_bin())
         .args(["--format", "sarif", "check", "."])
         .current_dir(dir)
         .output()
@@ -38,7 +37,7 @@ fn check_sarif(dir: &Path) -> serde_json::Value {
 fn check_json(dir: &Path, extra: &[&str]) -> serde_json::Value {
     let mut args: Vec<&str> = extra.to_vec();
     args.extend(["check", "."]);
-    let out = Command::new(alint_bin())
+    let out = crate::hermetic::command(alint_bin())
         .args(&args)
         .current_dir(dir)
         .output()
@@ -103,7 +102,7 @@ fn assert_fidelity(dir: &Path, file: &str, original: &[u8]) -> usize {
     let fixdir = tempfile::tempdir().unwrap();
     std::fs::copy(dir.join(".alint.yml"), fixdir.path().join(".alint.yml")).unwrap();
     std::fs::write(fixdir.path().join(file), original).unwrap();
-    let out = Command::new(alint_bin())
+    let out = crate::hermetic::command(alint_bin())
         .args(["fix", "."])
         .current_dir(fixdir.path())
         .output()
@@ -198,7 +197,7 @@ fn dotenv_sensitive_edits_still_apply_but_are_not_proposed() {
             result["fixes"].as_array().is_none_or(Vec::is_empty),
             "{sarif}"
         );
-        let fixed = Command::new(alint_bin())
+        let fixed = crate::hermetic::command(alint_bin())
             .args(["fix", "."])
             .current_dir(dir.path())
             .output()
@@ -301,7 +300,7 @@ rules:
         "{sarif}"
     );
 
-    let diff = Command::new(alint_bin())
+    let diff = crate::hermetic::command(alint_bin())
         .args(["fix", "--diff", "."])
         .current_dir(dir.path())
         .output()
@@ -348,7 +347,7 @@ fn assert_sensitive_reader_suppresses_edits(
         "{name}: {sarif}"
     );
 
-    let diff = Command::new(alint_bin())
+    let diff = crate::hermetic::command(alint_bin())
         .args(["fix", "--diff", "."])
         .current_dir(dir.path())
         .output()

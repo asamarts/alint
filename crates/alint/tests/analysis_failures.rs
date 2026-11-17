@@ -1,14 +1,14 @@
 //! End-to-end contracts for fail-loud analysis failures.
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
 fn alint_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_alint"))
 }
 
 fn run(root: &Path, args: &[&str]) -> Output {
-    Command::new(alint_bin())
+    crate::hermetic::command(alint_bin())
         .args(args)
         .current_dir(root)
         .env("NO_COLOR", "1")

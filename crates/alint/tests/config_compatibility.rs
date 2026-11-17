@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-use std::process::Command;
 
 fn alint() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_alint"))
@@ -25,7 +24,7 @@ fn every_config_consuming_cli_command_fails_on_requirements_before_evaluation() 
         (&["export-agents-md"], 2),
     ];
     for (args, expected_exit) in cases {
-        let output = Command::new(alint())
+        let output = crate::hermetic::command(alint())
             .args(*args)
             .current_dir(temp.path())
             .output()
@@ -71,7 +70,7 @@ fn a_nested_key_parity_with_a_templated_reference_loads_everywhere() {
         (&["explain", "locale-parity"], 0),
     ];
     for (args, expected_exit) in cases {
-        let output = Command::new(alint())
+        let output = crate::hermetic::command(alint())
             .args(*args)
             .current_dir(temp.path())
             .env("NO_COLOR", "1")

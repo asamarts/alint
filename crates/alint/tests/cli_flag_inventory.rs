@@ -17,7 +17,6 @@
 
 use std::fmt::Write as _;
 use std::path::PathBuf;
-use std::process::Command;
 
 const SUBCOMMANDS: &[&str] = &[
     "", // top-level
@@ -143,7 +142,7 @@ fn collect_inventory() -> String {
     out.push_str("# CLI flag inventory — see cli_flag_inventory.rs\n");
     out.push_str("# Run with UPDATE_SNAPSHOTS=1 to refresh after intentional flag changes.\n\n");
     for &sub in SUBCOMMANDS {
-        let mut cmd = Command::new(&bin);
+        let mut cmd = crate::hermetic::command(&bin);
         if !sub.is_empty() {
             cmd.arg(sub);
         }

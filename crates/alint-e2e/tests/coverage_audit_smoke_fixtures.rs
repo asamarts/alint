@@ -32,7 +32,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use alint_core::{Engine, RuleEntry, WalkOptions, walk};
+use alint_core::{Engine, RuleEntry, walk};
 use alint_rules::builtin_registry;
 
 use crate::support;
@@ -105,7 +105,7 @@ fn engine_for_fixture(scenario: &Path) -> Engine {
 /// Run the engine against `tree/` and return per-rule violation
 /// counts.
 fn count_violations(engine: &Engine, tree_root: &Path) -> BTreeMap<String, usize> {
-    let opts = WalkOptions::default();
+    let opts = support::walk_options();
     let index = walk(tree_root, &opts).expect("walk tree");
     let report = engine.run(tree_root, &index).expect("run engine");
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();

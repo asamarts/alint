@@ -249,15 +249,14 @@ if it's a content rule that fans out over `**/*.rs`.
 
 Tests create their repositories under the temporary directory, so `TMPDIR` must
 not point inside a Git work tree: a test that expects to run outside any
-repository would find that one and fail. The tests of alint-core and
-alint-rules run their own `git` commands without the host's system or global
-configuration and walk without the global excludes file (`GIT_CONFIG_NOSYSTEM`,
-`GIT_CONFIG_GLOBAL` and `XDG_CONFIG_HOME` on the command;
+repository would find that one and fail. Tests run `git` without the host's
+system or global configuration and walk without the global excludes file
+(`GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_GLOBAL` and `XDG_CONFIG_HOME` on the command;
 `with_global_git_excludes(false)` on the walk), so what they set up does not
-depend on the machine's Git setup. Follow the same pattern in a new test, unless
-it tests the global excludes file itself. The CLI's and alint-e2e's tests run
-`alint` as a user does, so a global excludes file that lists the files they
-write still fails them.
+depend on the machine's Git setup. The CLI's tests start every process, `alint`
+included, through `crates/alint/tests/hermetic.rs`, which also gives it an empty
+`HOME`. Follow the same pattern in a new test, unless it tests the global
+excludes file itself.
 
 A change to how alint reads YAML, or a bump of ayaml, also runs the workspace's
 tests in compare mode (ADR-0041), which checks every decode against libyaml and

@@ -9,14 +9,14 @@
 
 use std::path::Path;
 use std::path::PathBuf;
-use std::process::{Command, Output};
+use std::process::Output;
 
 fn alint() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_alint"))
 }
 
 fn run(dir: &Path, args: &[&str]) -> Output {
-    Command::new(alint())
+    crate::hermetic::command(alint())
         .args(args)
         .current_dir(dir)
         .output()
@@ -469,7 +469,7 @@ fn fix_baseline_skips_a_grandfathered_redacted_finding() {
         .unwrap();
         std::fs::write(root.join("a.txt"), "a  \nb\n").unwrap();
         let alint = |args: &[&str]| {
-            let mut command = Command::new(alint());
+            let mut command = crate::hermetic::command(alint());
             command.args(args).current_dir(root);
             if let Some((name, value)) = env {
                 command.env(name, value);

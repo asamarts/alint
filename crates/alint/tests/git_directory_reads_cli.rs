@@ -17,7 +17,7 @@ use std::process::{Command, Output};
 const SECRET: &str = "c2VjcmV0";
 
 fn isolated(program: &str, dir: &Path) -> Command {
-    let mut command = Command::new(program);
+    let mut command = crate::hermetic::command(program);
     command
         .current_dir(dir)
         .env("GIT_CONFIG_NOSYSTEM", "1")

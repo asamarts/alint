@@ -34,7 +34,7 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use alint_core::baseline::fingerprint;
-use alint_core::{Engine, RuleEntry, WalkOptions, walk};
+use alint_core::{Engine, RuleEntry, walk};
 use alint_rules::builtin_registry;
 use alint_testkit::{PolicyTest, Runner, RunnerOptions, TestStep};
 
@@ -234,7 +234,7 @@ fn collect_from_multi_fixtures(
             entries.push(RuleEntry::new(rule));
         }
         let engine = Engine::from_entries(entries, registry);
-        let index = walk(&tree, &WalkOptions::default()).expect("walk multi fixture");
+        let index = walk(&tree, &support::walk_options()).expect("walk multi fixture");
         let report = engine.run(&tree, &index).expect("run multi fixture");
         let mut findings = Vec::new();
         findings_of(&report, &id_kind, &tree, &mut findings);

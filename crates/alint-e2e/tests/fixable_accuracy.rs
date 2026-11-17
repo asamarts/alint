@@ -13,7 +13,7 @@
 
 use std::path::Path;
 
-use alint_core::{Engine, RuleEntry, WalkOptions, walk};
+use alint_core::{Engine, RuleEntry, walk};
 use alint_testkit::treespec::{TreeSpec, materialize};
 
 use crate::support;
@@ -47,7 +47,7 @@ fn run_check_with(root: &Path, config_yaml: &str) -> alint_core::Report {
         entries.push(RuleEntry::new(registry.build(spec).unwrap()));
     }
     let engine = Engine::from_entries(entries, registry);
-    let index = walk(root, &WalkOptions::default()).unwrap();
+    let index = walk(root, &support::walk_options()).unwrap();
     engine.run(root, &index).unwrap()
 }
 

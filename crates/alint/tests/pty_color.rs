@@ -80,6 +80,9 @@ fn color_auto_emits_ansi_when_stdout_is_a_tty() {
     let tmp = fixture_repo();
 
     let mut cmd = CommandBuilder::new(alint_bin);
+    for (name, value) in crate::hermetic::environment() {
+        cmd.env(name, value);
+    }
     cmd.arg("--color=auto");
     cmd.arg("check");
     cmd.arg(tmp.path());
@@ -146,6 +149,9 @@ fn color_never_strips_ansi_even_on_a_tty() {
     let tmp = fixture_repo();
 
     let mut cmd = CommandBuilder::new(alint_bin);
+    for (name, value) in crate::hermetic::environment() {
+        cmd.env(name, value);
+    }
     cmd.arg("--color=never");
     cmd.arg("check");
     cmd.arg(tmp.path());

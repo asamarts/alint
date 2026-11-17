@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-use std::process::Command;
 
 fn alint() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_alint"))
@@ -18,7 +17,7 @@ fn commands_discover_ancestor_config_and_use_its_directory_as_root() {
     )
     .unwrap();
 
-    let check = Command::new(alint())
+    let check = crate::hermetic::command(alint())
         .arg("check")
         .current_dir(&nested)
         .output()
@@ -29,7 +28,7 @@ fn commands_discover_ancestor_config_and_use_its_directory_as_root() {
         String::from_utf8_lossy(&check.stderr)
     );
 
-    let validate = Command::new(alint())
+    let validate = crate::hermetic::command(alint())
         .arg("validate-config")
         .current_dir(&nested)
         .output()
@@ -54,7 +53,7 @@ fn fix_from_a_subdirectory_mutates_the_discovered_repository_root() {
     )
     .unwrap();
 
-    let output = Command::new(alint())
+    let output = crate::hermetic::command(alint())
         .arg("fix")
         .current_dir(&nested)
         .output()
@@ -82,7 +81,7 @@ fn baseline_from_a_subdirectory_writes_to_the_discovered_repository_root() {
     )
     .unwrap();
 
-    let output = Command::new(alint())
+    let output = crate::hermetic::command(alint())
         .arg("baseline")
         .current_dir(&nested)
         .output()
@@ -109,7 +108,7 @@ fn facts_from_a_subdirectory_evaluate_the_discovered_repository_root() {
     )
     .unwrap();
 
-    let output = Command::new(alint())
+    let output = crate::hermetic::command(alint())
         .args(["facts", "--format", "json"])
         .current_dir(&nested)
         .output()
@@ -155,7 +154,7 @@ fn discovery_stops_at_the_repository_top() {
         &["validate-config"],
         &["export-agents-md"],
     ] {
-        let output = Command::new(alint())
+        let output = crate::hermetic::command(alint())
             .args(args)
             .current_dir(&nested)
             .output()
@@ -172,7 +171,7 @@ fn discovery_stops_at_the_repository_top() {
          level: error\n",
     )
     .unwrap();
-    let output = Command::new(alint())
+    let output = crate::hermetic::command(alint())
         .arg("check")
         .current_dir(&nested)
         .output()

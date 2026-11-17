@@ -5,7 +5,7 @@
 #![cfg(unix)]
 
 use std::io::{BufRead, BufReader};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 #[test]
 fn closed_stdout_is_a_quiet_exit_with_the_would_be_code() {
@@ -27,7 +27,7 @@ fn closed_stdout_is_a_quiet_exit_with_the_would_be_code() {
         (&["check", "--format", "sarif"][..], 1),
         (&["list"][..], 0),
     ] {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_alint"))
+        let mut child = crate::hermetic::command(env!("CARGO_BIN_EXE_alint"))
             .args(args)
             .current_dir(tmp.path())
             .stdout(Stdio::piped())
@@ -56,7 +56,7 @@ fn closed_stdout_is_a_quiet_exit_with_the_would_be_code() {
 fn run_into_closed_pipe(dir: &std::path::Path, args: &[&str]) -> std::process::Output {
     let (reader, writer) = std::io::pipe().unwrap();
     drop(reader);
-    Command::new(env!("CARGO_BIN_EXE_alint"))
+    crate::hermetic::command(env!("CARGO_BIN_EXE_alint"))
         .args(args)
         .current_dir(dir)
         .stdout(writer)

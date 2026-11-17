@@ -27,7 +27,6 @@
 //! unreadable file needs a runtime `chmod` no fixture tree can express.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 fn alint() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_alint"))
@@ -48,7 +47,7 @@ fn config(root: &Path, yaml: &str) {
 /// `alint check` exits 0 when the tree is clean, 1 when any violation remains.
 /// Robust convergence signal (counting `✗` glyphs double-counts the summary).
 fn check_is_clean(root: &Path) -> bool {
-    Command::new(alint())
+    crate::hermetic::command(alint())
         .args(["check", "."])
         .current_dir(root)
         .output()
@@ -59,7 +58,7 @@ fn check_is_clean(root: &Path) -> bool {
 }
 
 fn fix(root: &Path) -> std::process::Output {
-    Command::new(alint())
+    crate::hermetic::command(alint())
         .args(["fix", "."])
         .current_dir(root)
         .output()
@@ -251,7 +250,7 @@ fn phase4_content_fixers_skip_binary_so_check_and_fix_agree() {
     // check clean => no violations => nothing for any tier to apply; a bare fix and
     // an --unsafe-fixes fix both leave the binary byte-identical.
     fix(root);
-    Command::new(alint())
+    crate::hermetic::command(alint())
         .args(["fix", "--unsafe-fixes", "."])
         .current_dir(root)
         .output()
@@ -311,7 +310,7 @@ fn nonconvergent_config_hits_the_cap_and_exits_2() {
          \x20 - id: no-a\n    kind: file_content_forbidden\n    paths: \"*.txt\"\n    pattern: \"a\"\n    level: error\n    fix: { replace: { replacement: \"b\" } }\n\
          \x20 - id: no-b\n    kind: file_content_forbidden\n    paths: \"*.txt\"\n    pattern: \"b\"\n    level: error\n    fix: { replace: { replacement: \"a\" } }\n",
     );
-    let out = Command::new(alint())
+    let out = crate::hermetic::command(alint())
         .args(["fix", "--unsafe-fixes", "."])
         .current_dir(root)
         .output()
@@ -333,7 +332,7 @@ fn nonconvergent_config_hits_the_cap_and_exits_2() {
     // The same non-convergence must be visible STRUCTURALLY in the JSON summary
     // (the only machine signal of exit 2 -- the items are all `applied`, so
     // without it a capped run is indistinguishable from a clean one).
-    let json = Command::new(alint())
+    let json = crate::hermetic::command(alint())
         .args(["fix", "--unsafe-fixes", "--format", "json", "."])
         .current_dir(root)
         .output()
@@ -363,7 +362,7 @@ fn nonconvergent_fix_only_json_still_flags_non_convergence() {
          \x20 - id: no-a\n    kind: file_content_forbidden\n    paths: \"*.txt\"\n    pattern: \"a\"\n    level: error\n    fix: { replace: { replacement: \"b\" } }\n\
          \x20 - id: no-b\n    kind: file_content_forbidden\n    paths: \"*.txt\"\n    pattern: \"b\"\n    level: error\n    fix: { replace: { replacement: \"a\" } }\n",
     );
-    let json = Command::new(alint())
+    let json = crate::hermetic::command(alint())
         .args([
             "fix",
             "--fix-only",
@@ -402,7 +401,7 @@ fn nonconvergent_set_value_hits_the_cap_and_exits_2() {
          \x20 - id: a\n    kind: json_path_equals\n    paths: \"*.json\"\n    path: \"$.port\"\n    equals: 1\n    level: error\n    fix: { set_value: {} }\n\
          \x20 - id: b\n    kind: json_path_equals\n    paths: \"*.json\"\n    path: \"$.port\"\n    equals: 2\n    level: error\n    fix: { set_value: {} }\n",
     );
-    let out = Command::new(alint())
+    let out = crate::hermetic::command(alint())
         .args(["fix", "."])
         .current_dir(root)
         .output()
@@ -446,7 +445,7 @@ fn many_whole_doc_rules_on_one_file_converge_in_one_pass() {
     }
     write(root, "app.toml", toml.as_bytes());
     config(root, &cfg);
-    let out = Command::new(alint())
+    let out = crate::hermetic::command(alint())
         .args(["fix", "."])
         .current_dir(root)
         .output()
@@ -483,7 +482,7 @@ fn located_fix_over_size_limit_is_reported_not_dropped() {
         root,
         "version: 1\nrules:\n  - id: no-forbidden\n    kind: file_content_forbidden\n    paths: \"*.txt\"\n    pattern: \"FORBIDDEN\"\n    level: error\n    fix: { replace: { replacement: \"OK\" } }\n",
     );
-    let out = Command::new(alint())
+    let out = crate::hermetic::command(alint())
         .args(["fix", "--unsafe-fixes", "."])
         .current_dir(root)
         .output()
@@ -514,7 +513,7 @@ fn no_phantom_skip_for_a_file_another_rule_removed() {
         root,
         "version: 1\nrules:\n  - id: ntw\n    kind: no_trailing_whitespace\n    paths: \"*.txt\"\n    level: error\n    fix: { file_trim_trailing_whitespace: {} }\n  - id: drop-big\n    kind: file_absent\n    paths: \"big.txt\"\n    level: error\n    fix: { file_remove: {} }\n",
     );
-    let out = Command::new(alint())
+    let out = crate::hermetic::command(alint())
         .args(["fix", "--unsafe-fixes", "."])
         .current_dir(root)
         .output()
@@ -559,7 +558,7 @@ fn unreadable_file_fails_closed_in_both_check_and_fix() {
          \x20 - id: must-be-text\n    kind: file_is_text\n    paths: \"*.txt\"\n    level: error\n\
          \x20 - id: ntw\n    kind: no_trailing_whitespace\n    paths: \"*.txt\"\n    level: error\n",
     );
-    let out = Command::new(alint())
+    let out = crate::hermetic::command(alint())
         .args(["check", "."])
         .current_dir(root)
         .output()

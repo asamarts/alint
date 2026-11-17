@@ -3,14 +3,14 @@
 //! empty-set semantics are rejected at config load.
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
 fn alint() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_alint"))
 }
 
 fn run(root: &Path, args: &[&str]) -> Output {
-    Command::new(alint())
+    crate::hermetic::command(alint())
         .args(args)
         .current_dir(root)
         .output()
@@ -155,7 +155,7 @@ fn scope_filter_is_part_of_the_effective_scope() {
 }
 
 fn git(root: &Path, args: &[&str]) {
-    let status = Command::new("git")
+    let status = crate::hermetic::git()
         .args(args)
         .current_dir(root)
         .status()

@@ -4,10 +4,10 @@
 //! the rest of the CLI (applied to stderr).
 
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Output;
 
 fn run(dir: &Path, args: &[&str], envs: &[(&str, &str)]) -> Output {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_alint"));
+    let mut cmd = crate::hermetic::command(env!("CARGO_BIN_EXE_alint"));
     cmd.args(args)
         .current_dir(dir)
         .env("ALINT_LOG", "debug")

@@ -72,7 +72,7 @@ exec '{real}' "$@"
             std::iter::once(self.bin.clone()).chain(std::env::split_paths(&path)),
         )
         .unwrap();
-        Command::new(env!("CARGO_BIN_EXE_alint"))
+        crate::hermetic::command(env!("CARGO_BIN_EXE_alint"))
             .args(args)
             .current_dir(dir)
             .env("PATH", path)
@@ -111,7 +111,7 @@ fn text(out: &Output) -> String {
 
 /// The real Git, with the host's configuration left out.
 fn real_git(dir: &Path, args: &[&str]) {
-    let output = Command::new("git")
+    let output = crate::hermetic::git()
         .args(["-c", "user.name=t", "-c", "user.email=t@example.invalid"])
         .args(args)
         .current_dir(dir)

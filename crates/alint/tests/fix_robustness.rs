@@ -11,14 +11,14 @@
 #![cfg(unix)]
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
 fn alint() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_alint"))
 }
 
 fn run(dir: &Path, args: &[&str]) -> Output {
-    Command::new(alint())
+    crate::hermetic::command(alint())
         .args(args)
         .current_dir(dir)
         .output()

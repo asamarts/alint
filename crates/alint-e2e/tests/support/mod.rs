@@ -70,3 +70,10 @@ pub fn load_with(
     };
     alint_dsl::load_with(path, &options)
 }
+
+/// The walk options of an in-process run: without the user's global excludes
+/// file, so what a test's tree holds does not depend on the host's Git setup
+/// (a global excludes file that listed `*.yml` hid the files tests wrote).
+pub fn walk_options() -> alint_core::WalkOptions {
+    alint_core::WalkOptions::default().with_global_git_excludes(false)
+}
