@@ -340,10 +340,10 @@ fn run(mut cli: Cli) -> Result<ExitCode> {
              subcommand writes via `--output`)"
         );
     }
-    // `--no-spawn` refuses what a loaded config would run; a subcommand that
-    // runs no rule (or, like `test`, gates spawning itself) would silently
-    // ignore it.
-    if cli.no_spawn
+    // `--no-spawn` and `--untrusted` refuse what a loaded config would run; a
+    // subcommand that runs no rule (or, like `test`, gates spawning itself)
+    // would silently ignore them.
+    if let Some(flag) = cli.process_refusal()
         && matches!(
             command,
             Command::Init { .. }
@@ -353,9 +353,33 @@ fn run(mut cli: Cli) -> Result<ExitCode> {
         )
     {
         bail!(
-            "`--no-spawn` applies only to `check`, `fix`, `baseline`, `list`, `explain`, \
+            "`{flag}` applies only to `check`, `fix`, `baseline`, `list`, `explain`, \
              `facts`, `validate-config`, `test` and `lsp`; this subcommand runs no rule"
         );
+    }
+    if let Some(flag) = cli.process_refusal() {
+        // Git runs the commands a repository's own `.git/config` names, so a
+        // run that may not spawn runs no Git: `--changed` lists the changed
+        // files with Git, and nothing else here may run it either (a rule
+        // that needs Git is refused when the config loads). `alint test` runs
+        // Git only in the repository its sandbox makes.
+        if matches!(
+            command,
+            Command::Check { changed: true, .. }
+                | Command::Check { base: Some(_), .. }
+                | Command::Fix { changed: true, .. }
+                | Command::Fix { base: Some(_), .. }
+                | Command::Explain { changed: true, .. }
+                | Command::Explain { base: Some(_), .. }
+        ) {
+            bail!(
+                "`--changed` and `--base` list the changed files with Git, which runs the \
+                 commands a repository's Git configuration names; `{flag}` refuses them"
+            );
+        }
+        if !matches!(command, Command::Test { .. }) {
+            alint_core::git::deny_for_process();
+        }
     }
     if (cli.strict_baseline || cli.show_baselined) && !matches!(command, Command::Check { .. }) {
         bail!(
@@ -542,6 +566,7 @@ fn cmd_lsp(cli: &Cli) -> Result<ExitCode> {
         config,
         no_gitignore: cli.no_gitignore,
         no_spawn: cli.no_spawn,
+        untrusted: cli.untrusted,
     })
     .context("running language server")?;
     Ok(ExitCode::from(u8::try_from(code).unwrap_or(1)))

@@ -24,10 +24,10 @@
 ;; programming modes; extend it as needed.
 ;;
 ;; Until it is told the workspace is trusted, the server runs nothing the
-;; repository's config could start (command rules, custom facts), fetches
-;; no remote `extends:' and reads no environment value.  Set
-;; `alint-trusted' to t, before this package loads, to trust every
-;; workspace alint lints.
+;; repository's config could start (command rules, rules that run Git,
+;; custom facts), fetches no remote `extends:' and reads no environment
+;; value.  Set `alint-trusted' to t, before this package loads, to trust
+;; every workspace alint lints.
 
 ;;; Code:
 
@@ -61,8 +61,8 @@
 
 (defcustom alint-trusted nil
   "Non-nil to tell the alint server every workspace is trusted.
-A trusted workspace's config may run commands (command rules and
-custom facts), fetch a remote `extends:' and read environment
+A trusted workspace's config may run commands (command rules, rules
+that run Git and custom facts), fetch a remote `extends:' and read environment
 variables; an untrusted one lints without them.  Set it in your own
 init file, before this package loads, and only if you open
 repositories you trust."

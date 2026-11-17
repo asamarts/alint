@@ -154,17 +154,40 @@ impl Normalize {
 }
 
 /// `normalize:` accepts a single transform (`trim`) or an ordered
-/// list (`[trim, semver-minor]`), applied left-to-right. A scalar
-/// vs a sequence are structurally distinct, so an untagged enum
-/// decodes them unambiguously.
-#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
-#[serde(
-    untagged,
-    expecting = "a normalize transform (`none`, `trim`, `lower`, `semver-major`, or `semver-minor`), or a list of them"
-)]
+/// list (`[trim, semver-minor]`), applied left-to-right.
+// The schema describes it as an untagged enum; the decoder (`Deserialize`
+// below) picks the variant by the value's shape and takes a transform only as
+// its name.
+#[derive(Debug, Clone, schemars::JsonSchema)]
+#[serde(untagged)]
 pub(super) enum NormalizeSpec {
     One(Normalize),
     Many(Vec<Normalize>),
+}
+
+/// What a `normalize:` that is neither a string nor a list holds.
+const NORMALIZE_EXPECTING: &str = "a normalize transform (`none`, `trim`, `lower`, `semver-major`, \
+     or `semver-minor`), or a list of them";
+
+impl<'de> Deserialize<'de> for NormalizeSpec {
+    /// A string is one transform and a list several, each decoded through
+    /// alint's checked decoder. A serde `untagged` enum would read a transform
+    /// from serde's buffered copy of the value, which takes a one-entry map
+    /// (`{trim: ~}`) for `trim`.
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        use serde::de::Error as _;
+        let value = alint_core::yaml::Value::deserialize(deserializer)?;
+        let decoded = if value.as_str().is_some() {
+            alint_core::yaml::from_value(value).map(Self::One)
+        } else if value.as_sequence().is_some() {
+            alint_core::yaml::from_value(value).map(Self::Many)
+        } else {
+            return Err(D::Error::custom(NORMALIZE_EXPECTING));
+        };
+        decoded.map_err(D::Error::custom)
+    }
 }
 
 impl Default for NormalizeSpec {
@@ -495,6 +518,25 @@ mod tests {
             t.contains("{ files, extract }") && !t.contains("TargetsSpec"),
             "TargetsSpec: {t}"
         );
+    }
+
+    #[test]
+    fn a_normalize_transform_is_taken_only_as_a_string() {
+        // An untagged `NormalizeSpec` read a transform from serde's buffered
+        // copy of the value, which took `{trim: ~}` for `trim`.
+        for written in [
+            "{trim: ~}",
+            "[{trim: ~}]",
+            "!trim ~",
+            "[lower, {trim: null}]",
+        ] {
+            alint_core::yaml::from_str::<NormalizeSpec>(written).expect_err(written);
+        }
+        for (written, count) in [("trim", 1), ("[trim, semver-minor]", 2), ("none", 0)] {
+            let spec = alint_core::yaml::from_str::<NormalizeSpec>(written)
+                .unwrap_or_else(|error| panic!("{written}: {error}"));
+            assert_eq!(spec.into_list().len(), count, "{written}");
+        }
     }
 
     proptest! {

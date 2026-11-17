@@ -873,7 +873,7 @@ impl WalkOptions {
 }
 
 pub fn walk(root: &Path, opts: &WalkOptions) -> Result<FileIndex> {
-    let (builder, escaping, followed) = build_walk_builder(root, opts)?;
+    let (builder, escaping, followed, refused) = build_walk_builder(root, opts)?;
 
     // Per-thread accumulators land in `out_entries`; the first
     // error wins and stops the walk via `WalkState::Quit` (the
@@ -894,6 +894,9 @@ pub fn walk(root: &Path, opts: &WalkOptions) -> Result<FileIndex> {
 
     if let Some(err) = error_slot.lock().expect("walker error slot lock").take() {
         return Err(err);
+    }
+    if let Some(refused) = refused.lock().expect("walker refused-file lock").take() {
+        return Err(refused.into_error());
     }
 
     // Flatten the per-thread `Vec`s into one `Vec`. We deliberately
@@ -1136,11 +1139,8 @@ fn build_overrides(root: &Path, opts: &WalkOptions) -> Result<ignore::overrides:
 /// `gitdir:` resolving against the working directory. `None` when the walk
 /// would read no exclude file.
 fn git_exclude_file(dir: &Path) -> Option<PathBuf> {
-    use std::io::BufRead as _;
-    let first_line = |path: &Path| -> Option<String> {
-        let file = std::fs::File::open(path).ok()?;
-        std::io::BufReader::new(file).lines().next()?.ok()
-    };
+    // Each file is read only when it is a regular file within the cap.
+    let first_line = ignore_files::first_line;
     let dot_git = dir.join(".git");
     if !std::fs::metadata(&dot_git).is_ok_and(|meta| meta.is_file()) {
         return Some(dot_git.join("info/exclude"));
@@ -1239,11 +1239,11 @@ impl DirIgnores {
                 .as_ref()
                 .is_none_or(|names| names.contains(std::ffi::OsStr::new(name)))
         };
+        // Read only when a regular file within the cap: the walk refuses any
+        // other before `ignore` reads it (`ignore_files`).
         let load = |file: Option<PathBuf>| {
-            let file = file.filter(|file| file.is_file())?;
-            let mut builder = ignore::gitignore::GitignoreBuilder::new(dir);
-            builder.add(&file);
-            builder.build().ok()
+            let file = file?;
+            gitignore_from(dir, &file, &ignore_files::read(&file)?)
         };
         Self {
             dot_ignore: load(has(".ignore").then(|| dir.join(".ignore"))),
@@ -1382,7 +1382,8 @@ impl<'a> WalkSkips<'a> {
                 global: self
                     .opts
                     .uses_global_git_excludes()
-                    .then(|| ignore::gitignore::Gitignore::global().0),
+                    .then(ignore_files::global_excludes)
+                    .flatten(),
                 bounded,
             }
         })
@@ -1583,10 +1584,14 @@ impl<'a> WalkSkips<'a> {
     }
 }
 
+/// The first ignore file the walk refused to let `ignore` read
+/// (`ignore_files::refused_in`), which fails the walk.
+type RefusedSink = Arc<Mutex<Option<ignore_files::Refused>>>;
+
 fn build_walk_builder(
     root: &Path,
     opts: &WalkOptions,
-) -> Result<(WalkBuilder, EscapingSink, EscapingSink)> {
+) -> Result<(WalkBuilder, EscapingSink, EscapingSink, RefusedSink)> {
     let mut builder = WalkBuilder::new(root);
     builder
         .standard_filters(opts.respect_gitignore)
@@ -1602,6 +1607,13 @@ fn build_walk_builder(
     if opts.respect_gitignore {
         let bounded = in_repository(root);
         builder.require_git(bounded).parents(bounded);
+        // `ignore` reads these as the walk starts; a device or a FIFO among
+        // them would make that read unbounded.
+        if let Some(refused) =
+            ignore_files::refused_before_walk(root, opts.uses_global_git_excludes())
+        {
+            return Err(refused.into_error());
+        }
     }
 
     // Always exclude `.git/` — descending into git's internal
@@ -1636,9 +1648,26 @@ fn build_walk_builder(
     let followed: EscapingSink = Arc::new(Mutex::new(Vec::new()));
     let followed_filter = Arc::clone(&followed);
     let root_for_rel = root.to_path_buf();
+    let refused: RefusedSink = Arc::new(Mutex::new(None));
+    let refused_filter = Arc::clone(&refused);
+    let reads_ignore_files = opts.respect_gitignore;
     builder.filter_entry(move |entry| {
+        // A directory the walk enters has its ignore files read by `ignore`
+        // first; one it must not read stops the walk (`walk` reports it), and
+        // the directory is not entered.
+        let refuses_ignore_file = || {
+            let refusal = (reads_ignore_files && entry.file_type().is_some_and(|t| t.is_dir()))
+                .then(|| ignore_files::refused_in(entry.path()))
+                .flatten();
+            refusal.is_some_and(|refusal| {
+                if let Ok(mut slot) = refused_filter.lock() {
+                    slot.get_or_insert(refusal);
+                }
+                true
+            })
+        };
         if !entry.path_is_symlink() {
-            return true;
+            return !refuses_ignore_file();
         }
         // A symlink into a Git directory (`src/evil.rs -> ../.git/config`,
         // `gitdata -> .git`) is pruned the same way: the `.git` override above
@@ -1662,9 +1691,9 @@ fn build_walk_builder(
         {
             v.push(Arc::from(rel));
         }
-        keep
+        keep && !refuses_ignore_file()
     });
-    Ok((builder, escaping, followed))
+    Ok((builder, escaping, followed, refused))
 }
 
 /// Whether a walk error is a PER-ENTRY condition to skip (return `Ok(None)`)
@@ -1878,6 +1907,9 @@ impl<'s> ParallelVisitorBuilder<'s> for WalkVisitorBuilder {
         })
     }
 }
+
+#[path = "walker_ignore_files.rs"]
+mod ignore_files;
 
 #[cfg(test)]
 #[path = "walker_tests.rs"]

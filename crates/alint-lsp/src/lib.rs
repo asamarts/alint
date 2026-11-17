@@ -46,7 +46,7 @@
 //! Workspace trust: a workspace's config is the repository's, so until the
 //! client vouches for the workspace (the `trusted: true` initialization
 //! option; the VS Code extension sends its Workspace Trust state) the server
-//! builds no rule or fact that spawns a process, fetches no remote
+//! builds no rule or fact that spawns a process or runs Git, fetches no remote
 //! `extends:`, and reads nothing from the environment. Every other rule lints
 //! as usual, and the user is told once what was left out (see
 //! `config::Settings`).
@@ -99,6 +99,8 @@ use edits::{fix_edit_to_workspace_edit, located_edits_to_workspace_edit};
 use render::{render_finding, render_notes};
 
 /// Server options, set from the `alint lsp` command line.
+// Each bool is a command-line flag.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Default)]
 pub struct LspOptions {
     /// `--show-notes`: list every informational note on stderr after a
@@ -118,6 +120,9 @@ pub struct LspOptions {
     /// `--no-spawn`: a config with a rule, fix or fact that spawns a process
     /// fails to load, as with `alint check --no-spawn`.
     pub no_spawn: bool,
+    /// `--untrusted`: every workspace is untrusted, whatever the client says
+    /// and even with `--config`.
+    pub untrusted: bool,
 }
 
 impl LspOptions {
@@ -132,7 +137,7 @@ impl LspOptions {
     fn settings(&self, trusted: bool) -> Settings {
         Settings {
             analysis_time: self.analysis_time,
-            trusted: trusted || self.config.is_some(),
+            trusted: !self.untrusted && (trusted || self.config.is_some()),
             no_spawn: self.no_spawn,
             no_gitignore: self.no_gitignore,
             config: self.config.clone(),

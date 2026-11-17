@@ -13,7 +13,7 @@ use anyhow::{Context, Result, bail};
 use super::check::{
     ChangedMode, apply_only_filter, exclude_baseline_from_walk, load_baseline, require_directory,
 };
-use super::config_cmd::{load_rules, render_env, report_pattern_hints};
+use super::config_cmd::{load_rules, render_env, report_pattern_hints, with_run_settings};
 use super::{Cli, tolerate_broken_pipe};
 
 /// The boolean flags of `alint fix`, grouped so the command signature stays
@@ -81,9 +81,7 @@ pub(super) fn cmd_fix(
         .with_vars(loaded.vars)
         .with_fix_size_limit(loaded.fix_size_limit)
         .with_config_files(loaded.config_files);
-    if let Some(analysis_time) = cli.as_of {
-        engine = engine.with_analysis_time(analysis_time);
-    }
+    engine = with_run_settings(engine, cli);
     if let Some(set) = changed.resolve(&root)? {
         engine = engine.with_changed_paths(set);
     }
@@ -103,7 +101,9 @@ pub(super) fn cmd_fix(
     // grandfathered findings and resolve only NEW ones (mirrors `check --baseline`;
     // the artifact is excluded from the walk below). Classified in engine `fix_run`.
     if let Some(baseline_path) = &effective_baseline {
-        let baseline = load_baseline(baseline_path)?;
+        // A `baseline:` key is repository content: read only inside the root.
+        let baseline_root = cli.baseline.is_none().then_some(root.as_path());
+        let baseline = load_baseline(baseline_path, baseline_root)?;
         engine = engine.with_fix_baseline(baseline);
     }
     let mut extra_ignores = loaded.extra_ignores;

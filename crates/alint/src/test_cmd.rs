@@ -57,7 +57,7 @@ pub(crate) fn run(options: &RunOptions<'_>, cli: &Cli) -> Result<ExitCode> {
     };
     if discovered.is_empty() {
         let source = if options.paths.is_empty() {
-            "alint-tests"
+            alint_core::POLICY_TEST_DIRECTORY
         } else {
             "the requested paths"
         };
@@ -290,8 +290,10 @@ fn execute_selected(
 fn reject_incompatible_globals(cli: &Cli, allow_spawn: bool) -> Result<()> {
     // Policy tests refuse spawning unless a test declares it and
     // `--allow-spawn` grants it; `--no-spawn` keeps that refusal.
-    if cli.no_spawn && allow_spawn {
-        bail!("`--no-spawn` and `--allow-spawn` contradict each other; drop one");
+    if let Some(flag) = cli.process_refusal()
+        && allow_spawn
+    {
+        bail!("`{flag}` and `--allow-spawn` contradict each other; drop one");
     }
     let incompatible = if !cli.config.is_empty() {
         Some("--config")
@@ -330,7 +332,7 @@ fn discover(
 ) -> Result<Vec<DiscoveredTest>, Vec<PolicyTestIssue>> {
     let defaults;
     let roots = if paths.is_empty() {
-        defaults = vec![current.join("alint-tests")];
+        defaults = vec![current.join(alint_core::POLICY_TEST_DIRECTORY)];
         defaults.as_slice()
     } else {
         paths

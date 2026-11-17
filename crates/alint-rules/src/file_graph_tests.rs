@@ -16,6 +16,40 @@ fn require_spec_error_names_accepted_forms_not_internal_enum() {
     );
 }
 
+#[test]
+fn a_mode_name_is_taken_only_as_a_string() {
+    // serde writes a variant as a one-entry map or a tag; an untagged
+    // `RequireSpec` read the mode from serde's buffered copy, which took
+    // `{acyclic: ~}` for `acyclic`.
+    for written in [
+        "{acyclic: ~}",
+        "{no_dangling: null}",
+        "!acyclic ~",
+        "!acyclic acyclic",
+    ] {
+        let error = alint_core::yaml::from_str::<RequireSpec>(written)
+            .expect_err(written)
+            .to_string();
+        assert!(!error.is_empty(), "{written}");
+    }
+    // The map form's own fields still decode, and the names themselves.
+    for written in [
+        "acyclic",
+        "no_dangling",
+        "no_orphans",
+        "{no_orphans: {roots: [a]}}",
+    ] {
+        alint_core::yaml::from_str::<RequireSpec>(written)
+            .unwrap_or_else(|error| panic!("{written}: {error}"));
+    }
+    // A map's `fresh.hash` is an enum too.
+    let error =
+        alint_core::yaml::from_str::<RequireSpec>("{fresh: {hash: {sha256: ~}, marker: 'x(.*)'}}")
+            .expect_err("a one-entry map for `hash`")
+            .to_string();
+    assert!(error.contains("hash"), "{error}");
+}
+
 fn index(files: &[&str]) -> FileIndex {
     FileIndex::from_entries(
         files

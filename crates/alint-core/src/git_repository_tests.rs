@@ -144,6 +144,95 @@ fn repository_top_is_the_nearest_directory_holding_git() {
     assert_eq!(repository_top(&submodule.join("x")), Some(submodule));
 }
 
+/// Another user's `.git`, or a `.git` in a directory another user owns, is
+/// no top: the search goes on to the next one above.
+#[test]
+fn repository_top_takes_only_a_git_the_current_user_owns() {
+    let tmp = tempfile::tempdir().unwrap();
+    let outer = tmp.path().join("outer");
+    let inner = outer.join("inner");
+    std::fs::create_dir_all(outer.join(".git")).unwrap();
+    std::fs::create_dir_all(inner.join("src")).unwrap();
+    std::fs::write(inner.join(".git"), "").unwrap();
+    let start = inner.join("src");
+    let owned = |_: &Path| Some(true);
+    assert_eq!(repository_top_with(&start, &owned), Some(inner.clone()));
+    let foreign_entry = |path: &Path| Some(path != inner.join(".git"));
+    assert_eq!(
+        repository_top_with(&start, &foreign_entry),
+        Some(outer.clone())
+    );
+    let foreign_directory = |path: &Path| Some(path != inner);
+    assert_eq!(
+        repository_top_with(&start, &foreign_directory),
+        Some(outer.clone())
+    );
+    assert_eq!(repository_top_with(&start, &|_| Some(false)), None);
+    // No owner read (Windows): any `.git`.
+    assert_eq!(repository_top_with(&start, &|_| None), Some(inner));
+}
+
+/// The ownership check of [`trusted`]: a repository whose `.git`, work tree
+/// and Git directory the current user owns is named without asking Git; for
+/// one with any of the three another user's, Git decides (its ownership check
+/// and `safe.directory`). `GIT_TEST_ASSUME_DIFFERENT_OWNER` makes Git take
+/// every repository as another user's.
+#[cfg(unix)]
+#[test]
+fn trusted_asks_git_unless_the_current_user_owns_all_three() {
+    let tmp = tempfile::tempdir().unwrap();
+    let top = tmp.path().join("repo");
+    init_repository(&top, &[]);
+    let repository = Repository {
+        git_dir: canonical(&top.join(".git")).unwrap(),
+        work_tree: canonical(&top).unwrap(),
+    };
+    let entry = top.join(".git");
+    let safe = tmp.path().join("safe.gitconfig");
+    std::fs::write(&safe, "[safe]\n\tdirectory = *\n").unwrap();
+    let environment = |global: &Path| -> crate::git::ProcessEnvironment {
+        std::env::vars()
+            .filter(|(name, _)| !name.starts_with("GIT_"))
+            .chain([
+                ("GIT_CONFIG_NOSYSTEM".to_string(), "1".to_string()),
+                (
+                    "GIT_CONFIG_GLOBAL".to_string(),
+                    global.to_string_lossy().into_owned(),
+                ),
+                (
+                    "GIT_TEST_ASSUME_DIFFERENT_OWNER".to_string(),
+                    "1".to_string(),
+                ),
+            ])
+            .collect()
+    };
+    let refusing = environment(Path::new("/dev/null"));
+    let accepting = environment(&safe);
+    // Git's verdict is cached by Git directory; each case asks afresh.
+    let ask = |owned: &dyn Fn(&Path) -> Option<bool>, environment| {
+        VERDICTS.lock().unwrap().remove(&repository.git_dir);
+        trusted(&repository, &entry, Some(environment), owned)
+    };
+
+    // All three the current user's: named, though Git would refuse.
+    assert!(ask(&|_| Some(true), &refusing));
+    // Any one another user's: Git refuses, so it is not named...
+    for foreign in [
+        entry.as_path(),
+        repository.work_tree.as_path(),
+        repository.git_dir.as_path(),
+    ] {
+        let owned = |path: &Path| Some(path != foreign);
+        assert!(!ask(&owned, &refusing), "{}", foreign.display());
+        // ...unless the user's `safe.directory` lets it through.
+        assert!(ask(&owned, &accepting), "{}", foreign.display());
+    }
+    // No owner read (Windows): Git always decides.
+    assert!(!ask(&|_| None, &refusing));
+    assert!(ask(&|_| None, &accepting));
+    VERDICTS.lock().unwrap().remove(&repository.git_dir);
+}
+
 #[cfg(unix)]
 #[test]
 fn the_current_user_owns_what_it_creates() {

@@ -104,12 +104,24 @@ block.
 - **`--fail-on-warning`** turns warnings into a failing exit code.
 - **`--no-spawn`** refuses a config that would start a process: a rule of a
   spawning kind such as `kind: command` (at any `require:` depth), a spawning
-  fix such as `git_untrack`, or a `custom:` fact. The config fails to load,
-  naming the rule, before anything runs. A repository's own `.alint.yml` is
-  trusted like its `Makefile`, so lint a repository you do not trust with
-  `--no-spawn` or with your own config (`-c`). The flag is global: `fix`,
+  fix such as `git_untrack`, or a `custom:` fact. Git runs the commands a
+  repository's `.git/config` names, so a rule that runs Git (the `git_*`
+  kinds, `git_tracked_only`, `scope_filter.changed_since`) is refused too,
+  and so are `--changed` and `--base`; alint runs no Git. The config fails to
+  load, naming the rule, before anything runs. The flag is global: `fix`,
   `baseline`, `list`, `explain`, `facts`, `validate-config` and `lsp` take it
   too.
+- **`--untrusted`** lints a repository you do not trust. A repository's own
+  `.alint.yml` is trusted like its `Makefile`; this flag is the language
+  server's untrusted mode for the command line. It refuses everything
+  `--no-spawn` refuses, naming itself; refuses a remote `extends:` before
+  anything is fetched; and gives the config an empty environment, so
+  `{{env.NAME}}` takes its `default(...)` (or fails to load without one) and
+  `env.NAME` in a `when:` is unset. `--no-spawn` alone leaves those two open:
+  the config still fetches its remote `extends:` and reads the environment,
+  and an `extends:` URL built from environment values carries them to the
+  host it names. Use `--untrusted`, or your own config (`-c`), for a
+  repository you do not trust. The flag is global, like `--no-spawn`.
 - **`--as-of YYYY-MM-DD`** sets the UTC reference date for time-dependent
   rules; `ALINT_AS_OF` is the environment equivalent. Without either, alint
   uses the HEAD commit's committer timestamp, so repeated checks of one commit

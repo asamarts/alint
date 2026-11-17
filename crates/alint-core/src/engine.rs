@@ -667,7 +667,7 @@ impl RuleEntry {
                 {
                     requires |= meta.effective_capabilities().any(|capability| {
                         matches!(capability.capability, crate::Capability::Git { .. })
-                            && capability_condition_is_active(&capability.condition, spec)
+                            && capability.condition.holds_for(spec)
                     });
                 } else {
                     // `Engine::new` can receive rules without source specs. Keep
@@ -680,58 +680,6 @@ impl RuleEntry {
             },
         )?;
         Ok(requires)
-    }
-}
-
-fn option_value_is_set(value: &ayaml::Value) -> bool {
-    match value {
-        ayaml::Value::Null => false,
-        ayaml::Value::Bool(value) => *value,
-        ayaml::Value::String(value) => !value.is_empty(),
-        ayaml::Value::Sequence(value) => !value.is_empty(),
-        ayaml::Value::Mapping(value) => !value.is_empty(),
-        ayaml::Value::Number(_) => true,
-        ayaml::Value::Tagged(value) => option_value_is_set(&value.value),
-    }
-}
-
-fn capability_condition_is_active(
-    condition: &crate::CapabilityCondition,
-    spec: &crate::RuleSpec,
-) -> bool {
-    match condition {
-        crate::CapabilityCondition::Always => true,
-        crate::CapabilityCondition::OptionSet { option } => spec
-            .extra
-            .get(option.as_ref())
-            .is_some_and(|value| option_value_is_set(value.parser())),
-        crate::CapabilityCondition::OptionMatches { option, predicate } => {
-            let Some(value) = spec
-                .extra
-                .get(option.as_ref())
-                .and_then(|value| value.as_str())
-            else {
-                return false;
-            };
-            match predicate {
-                crate::OptionPredicate::ContainsLegacyEnvReference => value.contains("${"),
-            }
-        }
-        crate::CapabilityCondition::FixOpConfigured { op } => spec
-            .fix
-            .as_ref()
-            .is_some_and(|fix| fix.op_name() == op.as_ref()),
-        crate::CapabilityCondition::CommonFieldSet { field } => match field.as_ref() {
-            "scope_filter.changed_since" => spec
-                .scope_filter
-                .as_ref()
-                .and_then(|filter| filter.changed_since.as_ref())
-                .is_some(),
-            // Git currently has no other common-field condition. Keep unknown
-            // future fields inactive until their effective-value semantics are
-            // defined here rather than treating mere YAML presence as truth.
-            _ => false,
-        },
     }
 }
 

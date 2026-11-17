@@ -1,6 +1,6 @@
 //! `alint lsp` workspace trust, driving the real binary over stdio:
-//!   1. an untrusted workspace runs no command rule or custom fact, reads no
-//!      environment value and fetches no remote `extends:`, lints everything
+//!   1. an untrusted workspace runs no command rule, custom fact or Git, reads
+//!      no environment value and fetches no remote `extends:`, lints everything
 //!      else, and says so once (`window/showMessage`); a trusted one runs
 //!      them (the positive controls);
 //!   2. a nested or vendored `.alint.yml` never governs a file as a top-level
@@ -198,6 +198,97 @@ fn an_untrusted_workspace_runs_no_command_rule_or_custom_fact() {
             "{:?}",
             seen.messages
         );
+        server.shutdown();
+    }
+}
+
+/// Run `git` with the host's configuration left out, in `dir`.
+fn git(dir: &Path, args: &[&str]) {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .output()
+        .expect("run git");
+    assert!(output.status.success(), "{output:?}");
+}
+
+/// (1) Git runs the commands a repository's `.git/config` names
+/// (`core.fsmonitor`, when it reads the index), so a rule that runs Git does
+/// not run until the workspace is trusted, nor under `--no-spawn` at all.
+#[test]
+fn an_untrusted_workspace_runs_no_git() {
+    for (trusted_workspace, args) in [
+        (false, &[][..]),
+        (true, &["--no-spawn"][..]),
+        // `--untrusted` makes even a workspace the client trusts untrusted.
+        (true, &["--untrusted"][..]),
+        (true, &[][..]),
+    ] {
+        let refused = args.contains(&"--no-spawn");
+        let untrusted = !trusted_workspace || args.contains(&"--untrusted");
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let canary = root.join("GIT_RAN");
+        let file = root.join("a.txt");
+        std::fs::write(&file, "TODO\n").unwrap();
+        git(root, &["init", "-q"]);
+        git(root, &["add", "a.txt"]);
+        git(
+            root,
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.com",
+                "commit",
+                "-qm",
+                "init",
+            ],
+        );
+        git(
+            root,
+            &[
+                "config",
+                "core.fsmonitor",
+                &format!("printf ran > '{}'; false", canary.display()),
+            ],
+        );
+        let config = root.join(".alint.yml");
+        std::fs::write(
+            &config,
+            format!(
+                "version: 1\nrules:\n  - id: tracked\n    kind: file_exists\n    \
+                 paths: a.txt\n    git_tracked_only: true\n    level: error\n  \
+                 - id: denied\n    kind: git_no_denied_paths\n    denied: [\"*.secret\"]\n    \
+                 level: error\n{NO_TODO}"
+            ),
+        )
+        .unwrap();
+
+        let options = trusted_workspace.then(trusted);
+        let mut server = start(root, args, &[], options);
+        open(&mut server, &file);
+        if refused {
+            let seen = settle(&server, &[&uri_of(&config)]);
+            let text = seen.text(&uri_of(&config));
+            assert!(
+                text.contains(r#"rule \"tracked\" (git_tracked_only) runs Git"#),
+                "{text}"
+            );
+        } else {
+            let seen = settle(&server, &[&uri_of(&file)]);
+            assert!(
+                seen.codes(&uri_of(&file)).contains(&"no-todo".to_string()),
+                "{:?}",
+                seen.diagnostics
+            );
+            assert_eq!(seen.trust_notes(), usize::from(untrusted), "{args:?}");
+        }
+        let runs_git = !untrusted && !refused;
+        assert_eq!(canary.exists(), runs_git, "{trusted_workspace} {args:?}");
         server.shutdown();
     }
 }

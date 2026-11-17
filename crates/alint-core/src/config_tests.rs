@@ -327,6 +327,56 @@ fn fix_block_rejects_two_ops() {
 }
 
 #[test]
+fn every_fix_op_takes_applicability_only_as_a_tier_name() {
+    // A one-entry mapping or a tag is how serde writes an enum variant; an
+    // untagged `FixSpec` read the op's options from serde's buffered copy,
+    // which took `{safe: ~}` for `safe`, past the checked decoder and the
+    // trust gates that compare strings.
+    #[derive(Debug, Deserialize)]
+    struct Holder {
+        #[serde(default, deserialize_with = "deserialize_fix_spec")]
+        fix: Option<FixSpec>,
+    }
+    for op in FixSpec::ALL_OP_NAMES {
+        for written in ["{safe: ~}", "{safe: null}", "!safe ~", "[safe]"] {
+            let yaml = format!("fix:\n  {op}:\n    applicability: {written}\n");
+            let error = crate::yaml::from_str::<Holder>(&yaml)
+                .map(|holder| holder.fix.map(|fix| fix.op_name()))
+                .expect_err(&yaml)
+                .to_string();
+            assert!(
+                error.contains("applicability") || error.contains("YAML tag `!safe`"),
+                "{yaml}: {error}"
+            );
+        }
+        // The name itself still decodes, where the op has the field.
+        let yaml = format!("fix:\n  {op}:\n    applicability: never\n");
+        let error = crate::yaml::from_str::<Holder>(&yaml)
+            .err()
+            .map(|e| e.to_string());
+        assert!(
+            error.as_deref().is_none_or(|e| {
+                !e.contains("applicability") || e.contains("unknown field `applicability`")
+            }),
+            "{yaml}: {error:?}"
+        );
+    }
+}
+
+#[test]
+fn a_fix_op_error_names_the_op_and_the_field() {
+    let error = crate::yaml::from_str::<FixSpec>("replace:\n  pattern: x\n")
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("`replace`"), "{error}");
+    assert!(error.contains("replacement"), "{error}");
+    let error = crate::yaml::from_str::<FixSpec>("file_vanish: {}\n")
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("`file_vanish` is not a fix op"), "{error}");
+}
+
+#[test]
 fn resolve_content_source_inline_only() {
     let s = Some("hello".to_string());
     let resolved = resolve_content_source("r", "file_create", &s, &None).unwrap();

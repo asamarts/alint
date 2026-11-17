@@ -1251,6 +1251,10 @@ fn load_extended_source(
         }
         bundled
     } else {
+        // Decided on the text, before any file-system call reaches the path.
+        if confine.is_some() && names_a_path_of_its_own(url) {
+            return Err(path_of_its_own_refusal(&source_display));
+        }
         let target = resolve_relative(source_dir, url);
         if from_environment {
             let mut normalized = vec![display_path(&target)];
@@ -1581,6 +1585,38 @@ fn confine_extends_target(
         )));
     }
     Ok(())
+}
+
+/// Whether the local `extends:` entry `entry` names a path of its own rather
+/// than one relative to the config that names it: absolute or rooted (`/x`,
+/// `\x`, `C:\x`), drive-relative (`C:x`), or a Windows network or device path
+/// (`\\server\share\x`, `//server/share/x`, `\\?\UNC\...`). Read as text,
+/// alike on every platform, so it is decided before any file-system call: on
+/// Windows, resolving a network path, even only to canonicalize it, connects to
+/// that server and offers it the user's credentials.
+fn names_a_path_of_its_own(entry: &str) -> bool {
+    let path = Path::new(entry);
+    let drive = entry
+        .as_bytes()
+        .get(..2)
+        .is_some_and(|prefix| prefix[0].is_ascii_alphabetic() && prefix[1] == b':');
+    entry.starts_with(['/', '\\'])
+        || drive
+        || path.has_root()
+        || matches!(
+            path.components().next(),
+            Some(std::path::Component::Prefix(_))
+        )
+}
+
+/// Why a confined load refuses the local `extends:` entry `display`
+/// ([`names_a_path_of_its_own`]).
+fn path_of_its_own_refusal(display: &str) -> Error {
+    Error::Other(format!(
+        "`extends:` target {display:?} is an absolute, rooted or network path; a local \
+         `extends:` names a file relative to the config that extends it, within the linted \
+         tree. Set `allow_out_of_root: true` on the top-level config to name one elsewhere."
+    ))
 }
 
 fn resolve_relative(source_dir: &Path, entry: &str) -> PathBuf {

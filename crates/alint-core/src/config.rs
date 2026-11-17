@@ -510,11 +510,13 @@ pub struct RuleSpec {
 
 /// The `fix:` block on a rule. Exactly one op key must be present —
 /// alint errors at load time when the op and rule kind are incompatible.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(
-    untagged,
-    expecting = "a map with exactly one fix op (e.g. `file_create`, `file_remove`, `file_prepend`)"
-)]
+///
+/// Decoded by its op key ([`FixSpec::deserialize`]), not as a serde
+/// `untagged` enum: an untagged variant reads its options from serde's
+/// buffered copy of the value, which takes a one-entry mapping for an enum
+/// variant without data (`applicability: {safe: ~}` for `safe`), past the
+/// checked decoder that refuses one.
+#[derive(Debug, Clone)]
 pub enum FixSpec {
     FileCreate {
         file_create: FileCreateFixSpec,
@@ -597,11 +599,9 @@ pub enum FixSpec {
 }
 
 /// Deserialize a rule's `fix:` block, rejecting a block with more than one
-/// op key (R-TWOOP). [`FixSpec`] is `#[serde(untagged)]`, so serde silently
-/// picks the *first* matching variant and drops sibling keys (the inner
-/// structs' `deny_unknown_fields` does not apply across the fix-block map).
-/// A file-mutating feature must not inherit that latent footgun, so a
-/// two-op block is a hard config error rather than a silent first-wins.
+/// op key (R-TWOOP), naming the keys. A file-mutating feature must not pick
+/// one op and drop its siblings, so a two-op block is a hard config error
+/// rather than a silent first-wins.
 fn deserialize_fix_spec<'de, D>(deserializer: D) -> std::result::Result<Option<FixSpec>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -629,21 +629,6 @@ where
             keys.join(", ")
         )));
     }
-    // For a single-op block, name the op in any deserialize error. `FixSpec` is
-    // `#[serde(untagged)]`, so a variant that fails on a missing/unknown field is
-    // silently discarded and the enum falls to its generic `expecting` string --
-    // which misleadingly says "exactly one fix op" when the user HAS exactly one
-    // op that merely has a bad field (e.g. `replace:` without `replacement`, or an
-    // unknown key). Naming the op turns that into an actionable message without a
-    // second op-name SSOT (the name comes straight from the single key).
-    let single_op: Option<String> = match &value {
-        ayaml::Value::Mapping(m) => m
-            .iter()
-            .next()
-            .and_then(|(k, _)| k.as_str())
-            .map(str::to_owned),
-        _ => None,
-    };
     // Every op's options must be a mapping. The derived op structs would also
     // accept a YAML sequence (filling fields by position), and the DSL trust
     // gates -- which refuse an inherited `applicability: safe` promotion and
@@ -661,13 +646,132 @@ where
     }
     crate::yaml_decode::from_value(value)
         .map(Some)
-        .map_err(|e| match single_op {
-            Some(op) => D::Error::custom(format!(
-                "`{op}`: not a recognized fix op, or it has a missing or invalid field \
-             (a fix op's required fields must be present and unknown fields are rejected)"
-            )),
-            None => D::Error::custom(e),
+        .map_err(D::Error::custom)
+}
+
+/// What a `fix:` block that is not one op key holds.
+const FIX_SPEC_EXPECTING: &str =
+    "a map with exactly one fix op (e.g. `file_create`, `file_remove`, `file_prepend`)";
+
+impl<'de> Deserialize<'de> for FixSpec {
+    /// Read the block's one op key, then decode its options as that op's
+    /// struct through the checked decoder (`yaml_decode::from_value`),
+    /// so a field holding an enum takes only a variant's name, and an error
+    /// names the op and the field (`` `replace`: missing field `replacement` ``).
+    // One arm per fix op.
+    #[allow(clippy::too_many_lines)]
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        use serde::de::Error as _;
+        fn options<T: serde::de::DeserializeOwned, E: serde::de::Error>(
+            op: &str,
+            args: ayaml::Value,
+        ) -> std::result::Result<T, E> {
+            crate::yaml_decode::from_value(args)
+                .map_err(|error| E::custom(format!("`{op}`: {error}")))
+        }
+        let ayaml::Value::Mapping(mapping) = ayaml::Value::deserialize(deserializer)? else {
+            return Err(D::Error::custom(FIX_SPEC_EXPECTING));
+        };
+        let mut entries = mapping.into_iter();
+        let (Some((op, args)), None) = (entries.next(), entries.next()) else {
+            return Err(D::Error::custom(FIX_SPEC_EXPECTING));
+        };
+        let Some(op) = op.as_str() else {
+            return Err(D::Error::custom(FIX_SPEC_EXPECTING));
+        };
+        Ok(match op {
+            "file_create" => Self::FileCreate {
+                file_create: options(op, args)?,
+            },
+            "file_remove" => Self::FileRemove {
+                file_remove: options(op, args)?,
+            },
+            "file_prepend" => Self::FilePrepend {
+                file_prepend: options(op, args)?,
+            },
+            "file_append" => Self::FileAppend {
+                file_append: options(op, args)?,
+            },
+            "file_rename" => Self::FileRename {
+                file_rename: options(op, args)?,
+            },
+            "file_trim_trailing_whitespace" => Self::FileTrimTrailingWhitespace {
+                file_trim_trailing_whitespace: options(op, args)?,
+            },
+            "file_append_final_newline" => Self::FileAppendFinalNewline {
+                file_append_final_newline: options(op, args)?,
+            },
+            "file_normalize_line_endings" => Self::FileNormalizeLineEndings {
+                file_normalize_line_endings: options(op, args)?,
+            },
+            "file_strip_bidi" => Self::FileStripBidi {
+                file_strip_bidi: options(op, args)?,
+            },
+            "file_strip_zero_width" => Self::FileStripZeroWidth {
+                file_strip_zero_width: options(op, args)?,
+            },
+            "file_strip_bom" => Self::FileStripBom {
+                file_strip_bom: options(op, args)?,
+            },
+            "file_collapse_blank_lines" => Self::FileCollapseBlankLines {
+                file_collapse_blank_lines: options(op, args)?,
+            },
+            "replace" => Self::Replace {
+                replace: options(op, args)?,
+            },
+            "set_value" => Self::SetValue {
+                set_value: options(op, args)?,
+            },
+            "remove_value" => Self::RemoveValue {
+                remove_value: options(op, args)?,
+            },
+            "chmod" => Self::Chmod {
+                chmod: options(op, args)?,
+            },
+            "git_untrack" => Self::GitUntrack {
+                git_untrack: options(op, args)?,
+            },
+            "command" => Self::Command {
+                command: options(op, args)?,
+            },
+            "dir_create" => Self::DirCreate {
+                dir_create: options(op, args)?,
+            },
+            "sync_from" => Self::SyncFrom {
+                sync_from: options(op, args)?,
+            },
+            "relocate" => Self::Relocate {
+                relocate: options(op, args)?,
+            },
+            "create_and_register" => Self::CreateAndRegister {
+                create_and_register: options(op, args)?,
+            },
+            "sort" => Self::Sort {
+                sort: options(op, args)?,
+            },
+            "indent_style" => Self::IndentStyle {
+                indent_style: options(op, args)?,
+            },
+            "insert_line" => Self::InsertLine {
+                insert_line: options(op, args)?,
+            },
+            "insert_header" => Self::InsertHeader {
+                insert_header: options(op, args)?,
+            },
+            other => {
+                return Err(D::Error::custom(format!(
+                    "`{other}` is not a fix op (one of {})",
+                    Self::ALL_OP_NAMES
+                        .iter()
+                        .map(|name| format!("`{name}`"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )));
+            }
         })
+    }
 }
 
 impl FixSpec {

@@ -11,6 +11,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -113,13 +114,30 @@ pub(crate) fn clear_git_repository_env(
     }
 }
 
+/// Whether this process may run no Git command ([`deny_for_process`]).
+static DENIED: AtomicBool = AtomicBool::new(false);
+
+/// Run no Git command in this process from now on. Git runs the commands a
+/// repository's own `.git/config` names (`core.fsmonitor` when it reads the
+/// index, `gpg.program` to verify a signature), so `alint --no-spawn` and
+/// `--untrusted` call this before they read a config. Each helper in this module then reads as
+/// Git finding no repository: a rule that needs Git reports an analysis
+/// failure instead of running it.
+pub fn deny_for_process() {
+    DENIED.store(true, Ordering::Relaxed);
+}
+
 /// A Git command for `root`, naming the repository alint found for it
 /// ([`repository::find_repository`]) with `--git-dir` and `--work-tree`, so
 /// Git discovers none: a directory shaped like a bare repository is content,
 /// never a repository, whatever the Git version. `None` when there is no
 /// repository to name; the caller then reads the result as Git's failure to
-/// find one, and no Git command runs.
+/// find one, and no Git command runs; so it is after
+/// [`deny_for_process`].
 fn git_command(root: &Path) -> Option<Command> {
+    if DENIED.load(Ordering::Relaxed) {
+        return None;
+    }
     let environment = SCOPED_PROCESS_ENVIRONMENTS
         .lock()
         .ok()
@@ -1066,7 +1084,7 @@ where
 
 #[path = "git_repository.rs"]
 mod repository;
-pub use repository::{owned_by_current_user, repository_top};
+pub use repository::{owned_by_current_user, repository_top, repository_top_with};
 
 #[cfg(test)]
 #[path = "git_tests.rs"]

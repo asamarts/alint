@@ -91,9 +91,9 @@ diagnostics:
   them, are not.
 - **Workspace trust.** Until the editor says the workspace is trusted,
   the server runs nothing the repository's config could start: command
-  rules and custom facts are skipped, a rule whose fix alone runs a
-  command lints without the fix, a remote `extends:` is not fetched, and
-  environment values are left unset. Everything else lints.
+  rules, rules that run Git and custom facts are skipped, a rule whose fix
+  alone runs a command lints without the fix, a remote `extends:` is not
+  fetched, and environment values are left unset. Everything else lints.
   See [Workspace trust](#workspace-trust) below.
 
 ## Configuration
@@ -107,7 +107,8 @@ itself. The editor-side settings are:
   run.
 - **`alint.serverArgs`**: extra args to pass to `alint lsp` on launch,
   such as `--show-notes` (lists informational notes on the server's
-  stderr), `--no-spawn`, `--no-gitignore` or `-c <your config>`; see
+  stderr), `--no-spawn`, `--untrusted`, `--no-gitignore` or
+  `-c <your config>`; see
   [`alint lsp`](/docs/cli/lsp/#flags).
 - **Workspace trust**: the `trusted` initialization option, below.
 

@@ -23,11 +23,11 @@ pub(crate) struct Settings {
     pub(crate) analysis_time: Option<alint_core::AnalysisTime>,
     /// The client sent `trusted: true` (VS Code: a trusted workspace), or the
     /// config is the user's own (`--config`). Until then a session builds no
-    /// rule or fact that spawns a process, fetches no remote `extends:`, and
-    /// reads nothing from the environment.
+    /// rule or fact that spawns a process or runs Git, fetches no remote
+    /// `extends:`, and reads nothing from the environment.
     pub(crate) trusted: bool,
-    /// `--no-spawn`: a config with a spawning rule or fact fails to load, as
-    /// it does for `alint check --no-spawn`, trusted or not.
+    /// `--no-spawn`: a config with a spawning or Git rule, or a spawning fact,
+    /// fails to load, as it does for `alint check --no-spawn`, trusted or not.
     pub(crate) no_spawn: bool,
     /// `--no-gitignore`: walk without `.gitignore` handling.
     pub(crate) no_gitignore: bool,
@@ -70,8 +70,9 @@ impl From<String> for ConfigError {
 /// The note an untrusted workspace gets, once, when its config uses
 /// something the session left out.
 pub(crate) const UNTRUSTED_NOTE: &str = "alint: this workspace is not trusted, so command rules, \
-     custom facts, remote `extends:` and environment values (`{{env.*}}`, `env.*` in `when:`) \
-     are off; other rules lint as usual. To turn them on, trust the workspace: in VS Code, grant \
+     rules that run Git (`git_*` kinds, `git_tracked_only`, `changed_since`), custom facts, \
+     remote `extends:` and environment values (`{{env.*}}`, `env.*` in `when:`) are off; other \
+     rules lint as usual. To turn them on, trust the workspace: in VS Code, grant \
      Workspace Trust; in other editors, start the server with the initialization option \
      `\"trusted\": true`. See https://alint.org/docs/cli/lsp/#workspace-trust";
 
@@ -330,7 +331,12 @@ impl alint_dsl::EnvironmentProvider for UntrustedEnvironment {
 /// An error from another file of the chain (an `extends:` target, a drop-in)
 /// or from a later stage keeps the diagnostic at the file's start.
 fn yaml_error_range(config: &Path) -> Option<Range> {
-    let text = std::fs::read_to_string(config).ok()?;
+    use alint_dsl::ConfigSourceProvider as _;
+    // Read as the loader reads a config: only a regular file within the size
+    // cap, so a config refused for its size (or a FIFO) is not read whole here.
+    let text = alint_dsl::FilesystemConfigSource
+        .read_to_string(config)
+        .ok()?;
     let error = alint_core::yaml::from_str::<alint_core::yaml::Value>(&text).err()?;
     let location = error.location()?;
     let line_index = location.line().checked_sub(1)?;
@@ -395,13 +401,14 @@ struct BuiltRules {
     kinds: HashMap<String, String>,
     /// The ids of the rules an `extends:`'d ruleset or a nested config shaped.
     extended: HashSet<String>,
-    /// Whether an untrusted session skipped a spawning rule or fix, or kept a
-    /// `when:` that reads `env.*`.
+    /// Whether an untrusted session skipped a spawning or Git rule or fix, or
+    /// kept a `when:` that reads `env.*`.
     withheld: bool,
 }
 
 /// Build the engine entries for a config's enabled rules. An untrusted
-/// session skips every rule that spawns a process, and keeps a rule whose
+/// session skips every rule that spawns a process or runs Git (which runs
+/// the commands a repository's `.git/config` names), and keeps a rule whose
 /// fix alone spawns (`fix: git_untrack`) without its fix.
 fn build_entries(
     rules: &[alint_core::RuleSpec],
@@ -429,6 +436,10 @@ fn build_entries(
         } else {
             spec
         };
+        if !trusted && alint_dsl::rule_git_use(spec, registry.catalog()).is_some() {
+            withheld = true;
+            continue;
+        }
         if spec.extended_source {
             extended.insert(spec.id.clone());
         }
@@ -484,7 +495,8 @@ fn build_entries(
 ///
 /// An untrusted session ([`Settings::trusted`]) loads with an empty
 /// environment and refuses remote `extends:`, skips each rule and fact that
-/// spawns a process ([`alint_dsl::rule_spawn_use`], [`alint_dsl::fact_spawns`]),
+/// spawns a process ([`alint_dsl::rule_spawn_use`], [`alint_dsl::fact_spawns`])
+/// and each rule that runs Git ([`alint_dsl::rule_git_use`]),
 /// and gives `env.*` in a `when:` an empty environment. Everything else lints
 /// as it would trusted. [`Session::withheld`] records whether any of that
 /// changed what this config does.
@@ -547,7 +559,7 @@ fn build_session_for_config(
     // "suppress nothing".
     let baseline_path = config.baseline.as_ref().map(|b| effective_root.join(b));
     let baseline = match &baseline_path {
-        Some(path) => Some(load_baseline(path).map_err(redact)?),
+        Some(path) => Some(Baseline::load_file(path, Some(&effective_root)).map_err(redact)?),
         None => None,
     };
     let mut extra_ignores = config.ignore;
@@ -576,17 +588,6 @@ fn build_session_for_config(
         extended_rules,
         config_files: config.config_files,
     })
-}
-
-/// Read + parse a baseline file (same contract as `alint check`).
-fn load_baseline(path: &Path) -> Result<Baseline, String> {
-    let text = std::fs::read_to_string(path).map_err(|e| {
-        format!(
-            "reading baseline file {} (run `alint baseline` to create it): {e}",
-            path.display()
-        )
-    })?;
-    Baseline::load(&text).map_err(|e| format!("invalid baseline file {}: {e}", path.display()))
 }
 
 /// Drop baseline-grandfathered violations from `results` (no-op without
@@ -725,5 +726,56 @@ mod baseline_tests {
             let count: usize = left.iter().map(|result| result.violations.len()).sum();
             assert_eq!(count, live, "baseline records {recorded}");
         }
+    }
+
+    /// A `baseline:` key is repository content: the server reads its file
+    /// only when it is a regular file within the cap, inside the workspace's
+    /// root and outside any Git directory there, as `alint check` does. A
+    /// symlink to `/dev/zero` used to be read until memory ran out, and a FIFO
+    /// blocked the server.
+    #[cfg(unix)]
+    #[test]
+    fn the_baseline_key_names_a_regular_file_in_the_repository() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("repo");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        let valid = Baseline::from_fingerprints(None, Vec::new()).to_jsonl();
+        std::fs::write(dir.path().join("outside.jsonl"), &valid).unwrap();
+        std::fs::write(root.join(".git/base.jsonl"), &valid).unwrap();
+        std::fs::write(root.join("base.jsonl"), &valid).unwrap();
+        std::os::unix::fs::symlink("/dev/zero", root.join("zero.jsonl")).unwrap();
+        std::os::unix::fs::symlink("../outside.jsonl", root.join("link.jsonl")).unwrap();
+        std::fs::File::create(root.join("sparse.jsonl"))
+            .unwrap()
+            .set_len(1 << 40)
+            .unwrap();
+        let fifo = std::process::Command::new("mkfifo")
+            .arg(root.join("fifo.jsonl"))
+            .status()
+            .is_ok_and(|status| status.success());
+        let config = |baseline: &str| {
+            std::fs::write(
+                root.join(".alint.yml"),
+                format!("version: 1\nbaseline: {baseline}\nrules: []\n"),
+            )
+            .unwrap();
+        };
+        for (baseline, refusal) in [
+            ("zero.jsonl", "resolves outside the repository"),
+            ("../outside.jsonl", "resolves outside the repository"),
+            ("link.jsonl", "resolves outside the repository"),
+            (".git/base.jsonl", "is in a Git directory"),
+            ("sparse.jsonl", "larger than 256 MiB"),
+            ("fifo.jsonl", "not a regular file"),
+        ] {
+            if baseline == "fifo.jsonl" && !fifo {
+                continue;
+            }
+            config(baseline);
+            let error = build_session(&root).err().unwrap_or_default();
+            assert!(error.contains(refusal), "{baseline}: {error}");
+        }
+        config("base.jsonl");
+        assert!(build_session(&root).unwrap().unwrap().baseline.is_some());
     }
 }

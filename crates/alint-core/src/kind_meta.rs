@@ -152,6 +152,85 @@ pub enum CapabilityCondition {
     },
 }
 
+impl CapabilityCondition {
+    /// Whether this condition holds for the rule `spec` declares: the
+    /// option's effective value, not its mere presence. The engine reads it
+    /// to decide whether a rule uses a capability, and the trust gates to
+    /// decide whether a rule runs Git.
+    #[must_use]
+    pub fn holds_for(&self, spec: &crate::RuleSpec) -> bool {
+        match self {
+            Self::FixOpConfigured { op } => spec
+                .fix
+                .as_ref()
+                .is_some_and(|fix| fix.op_name() == op.as_ref()),
+            Self::CommonFieldSet { field } => match field.as_ref() {
+                "scope_filter.changed_since" => spec
+                    .scope_filter
+                    .as_ref()
+                    .and_then(|filter| filter.changed_since.as_ref())
+                    .is_some(),
+                // Git currently has no other common-field condition. Keep
+                // unknown future fields inactive until their effective-value
+                // semantics are defined here rather than treating mere YAML
+                // presence as truth.
+                _ => false,
+            },
+            _ => self.holds_for_options(&spec.extra),
+        }
+    }
+
+    /// [`Self::holds_for`] for a rule written as the mapping `options`, its
+    /// `fix:` and `scope_filter:` read from it too: a nested `require:` entry,
+    /// before it is built.
+    #[must_use]
+    pub fn holds_for_options(&self, options: &crate::yaml::Mapping) -> bool {
+        match self {
+            Self::Always => true,
+            Self::OptionSet { option } => options
+                .get(option.as_ref())
+                .is_some_and(|value| option_value_is_set(value.parser())),
+            Self::OptionMatches { option, predicate } => {
+                let Some(value) = options
+                    .get(option.as_ref())
+                    .and_then(|value| value.as_str())
+                else {
+                    return false;
+                };
+                match predicate {
+                    OptionPredicate::ContainsLegacyEnvReference => value.contains("${"),
+                }
+            }
+            Self::FixOpConfigured { op } => options
+                .get("fix")
+                .and_then(|fix| fix.as_mapping())
+                .is_some_and(|fix| fix.contains_key(op.as_ref())),
+            Self::CommonFieldSet { field } => match field.as_ref() {
+                "scope_filter.changed_since" => options
+                    .get("scope_filter")
+                    .and_then(|filter| filter.as_mapping())
+                    .and_then(|filter| filter.get("changed_since"))
+                    .is_some_and(|since| !since.is_null()),
+                _ => false,
+            },
+        }
+    }
+}
+
+/// Whether an option's value turns its capability on: `true`, or a value
+/// that is present and not empty.
+fn option_value_is_set(value: &ayaml::Value) -> bool {
+    match value {
+        ayaml::Value::Null => false,
+        ayaml::Value::Bool(value) => *value,
+        ayaml::Value::String(value) => !value.is_empty(),
+        ayaml::Value::Sequence(value) => !value.is_empty(),
+        ayaml::Value::Mapping(value) => !value.is_empty(),
+        ayaml::Value::Number(_) => true,
+        ayaml::Value::Tagged(value) => option_value_is_set(&value.value),
+    }
+}
+
 /// A capability and the condition under which a kind may use it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CapabilityMeta {

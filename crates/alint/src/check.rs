@@ -8,7 +8,7 @@ use alint_core::{Engine, WalkOptions, walk};
 use alint_output::{Format, sanitize_terminal as term};
 use anyhow::{Context, Result, bail};
 
-use super::config_cmd::{load_rules, render_env, report_pattern_hints};
+use super::config_cmd::{load_rules, render_env, report_pattern_hints, with_run_settings};
 use super::{Cli, reject_non_human_baseline_format, safe_write, tolerate_broken_pipe};
 
 /// Resolved `--changed` / `--base` state. `--base` implies
@@ -159,6 +159,9 @@ pub(super) fn cmd_check(
     // Resolved early (was below the walk) so the baseline file can be excluded
     // from the walk. The `--baseline` flag (used as given) overrides the key.
     let effective_baseline = cli.baseline.clone().or(config_baseline);
+    // A `baseline:` key is repository content: its file is read only inside
+    // the root.
+    let baseline_root = cli.baseline.is_none().then_some(root.as_path());
     let entries = apply_only_filter(loaded.entries, only)?;
     report_pattern_hints(&entries, &loaded.registry, &loaded.facts, cli);
     let rule_count = entries.len();
@@ -173,16 +176,14 @@ pub(super) fn cmd_check(
         .with_fix_size_limit(loaded.fix_size_limit)
         // ...and the same configuration files a fix from `extends:` never writes.
         .with_config_files(loaded.config_files.clone());
-    if let Some(analysis_time) = cli.as_of {
-        engine = engine.with_analysis_time(analysis_time);
-    }
+    engine = with_run_settings(engine, cli);
     // When a baseline is active, make the engine baseline-aware so the
     // `stage_fixes`-based proposed-edit derivation (for a fix-carrying format)
     // advertises fixes ONLY for the live (new) findings, never grandfathered ones.
     // Inert for `engine.run` (check uses no fix baseline), so a plain `check
     // --baseline` is unaffected.
     if let Some(bp) = &effective_baseline {
-        engine = engine.with_fix_baseline(load_baseline(bp)?);
+        engine = engine.with_fix_baseline(load_baseline(bp, baseline_root)?);
     }
     let changed_active = match changed.resolve(&root)? {
         Some(set) => {
@@ -218,7 +219,7 @@ pub(super) fn cmd_check(
     // GitLab or SARIF output's.
     let mut reader = FileReader::new(&root);
     let (mut report, baseline_marks) = if let Some(baseline_path) = &effective_baseline {
-        let baseline = load_baseline(baseline_path)?;
+        let baseline = load_baseline(baseline_path, baseline_root)?;
         let applied =
             alint_core::baseline::apply(&report, &baseline, |rid, v| reader.fingerprint(rid, v));
         // Stale-entry detection is only valid on a FULL run. When `--changed`
@@ -397,15 +398,15 @@ fn build_baseline_marks(
 
 /// Load + parse a baseline file. A missing file or a parse / schema
 /// error is a hard error (exit 2), never a silent "suppress nothing".
-pub(super) fn load_baseline(path: &Path) -> Result<alint_core::baseline::Baseline> {
-    let text = std::fs::read_to_string(path).with_context(|| {
-        format!(
-            "reading baseline file {} (run `alint baseline` to create it)",
-            path.display()
-        )
-    })?;
-    alint_core::baseline::Baseline::load(&text)
-        .map_err(|e| anyhow::anyhow!("invalid baseline file {}: {e}", path.display()))
+/// Read the baseline file at `path` ([`alint_core::baseline::Baseline::load_file`]).
+/// `repository_root` is `Some` when the path comes from the repository (the
+/// `baseline:` key or the default name) rather than the user's own flag, and
+/// confines the read to it.
+pub(super) fn load_baseline(
+    path: &Path,
+    repository_root: Option<&Path>,
+) -> Result<alint_core::baseline::Baseline> {
+    alint_core::baseline::Baseline::load_file(path, repository_root).map_err(anyhow::Error::msg)
 }
 
 /// Stderr summary for a baseline-applied run: the suppressed count (or
@@ -500,9 +501,7 @@ pub(super) fn cmd_baseline(
     let mut engine = Engine::from_entries(loaded.entries, loaded.registry)
         .with_facts(loaded.facts)
         .with_vars(loaded.vars);
-    if let Some(analysis_time) = cli.as_of {
-        engine = engine.with_analysis_time(analysis_time);
-    }
+    engine = with_run_settings(engine, cli);
     let mut extra_ignores = loaded.extra_ignores;
     exclude_baseline_from_walk(&mut extra_ignores, &root, Some(&out_path));
     let walk_opts = WalkOptions::default()
@@ -562,7 +561,7 @@ pub(super) fn cmd_baseline(
     // Regeneration guard: refuse to grandfather NEW debt without
     // --accept-new. Pruning stale entries is always allowed.
     if out_path.exists() && !accept_new {
-        let existing = load_baseline(&out_path)?;
+        let existing = load_baseline(&out_path, output.is_none().then_some(root.as_path()))?;
         // Compare by OCCURRENCE, not just fingerprint identity: a higher count
         // on an already-baselined finding is fresh debt too, and must not slip
         // in silently. Applying the existing file counts exactly that.

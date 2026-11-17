@@ -921,14 +921,83 @@ pub fn fact_spawns(fact: &alint_core::FactSpec) -> bool {
     matches!(fact.kind, alint_core::FactKind::Custom { .. })
 }
 
+/// What makes a loaded `rule` run Git, named for a message: its kind
+/// (`kind: git_commit_message`), an option that turns Git on
+/// (`git_tracked_only`, `since`), a fix operation (`fix: git_untrack`),
+/// `scope_filter.changed_since`, or one of these in a nested `require:`
+/// entry at any depth (`require[0] git_tracked_only`). `None` for a rule that
+/// runs no Git.
+///
+/// Git runs the commands a repository's own `.git/config` names
+/// (`core.fsmonitor` when it reads the index, `gpg.program` to verify a
+/// signature), so a run that may not spawn a process runs no Git either. The
+/// classification is the catalog's capability metadata
+/// ([`Capability::Git`] and the condition it is active under), as the engine
+/// reads it to decide whether to run Git.
+#[must_use]
+pub fn rule_git_use(rule: &alint_core::RuleSpec, catalog: KindCatalog<'_>) -> Option<String> {
+    if let Some(meta) = catalog.meta(&rule.kind)
+        && let Some(condition) = active_git_condition(meta, |condition| condition.holds_for(rule))
+    {
+        return Some(describe_git_use(&rule.kind, condition));
+    }
+    nested_git_use(&rule.extra, catalog, "")
+}
+
+/// The condition of the first Git capability of `meta` that `holds`.
+fn active_git_condition(
+    meta: &alint_core::KindMeta,
+    holds: impl Fn(&alint_core::CapabilityCondition) -> bool,
+) -> Option<&alint_core::CapabilityCondition> {
+    meta.effective_capabilities()
+        .find(|entry| matches!(entry.capability, Capability::Git { .. }) && holds(&entry.condition))
+        .map(|entry| &entry.condition)
+}
+
+/// What a rule of `kind` uses Git for, as its config writes it.
+fn describe_git_use(kind: &str, condition: &alint_core::CapabilityCondition) -> String {
+    use alint_core::CapabilityCondition;
+    match condition {
+        CapabilityCondition::Always => format!("kind: {kind}"),
+        CapabilityCondition::OptionSet { option }
+        | CapabilityCondition::OptionMatches { option, .. } => option.to_string(),
+        CapabilityCondition::FixOpConfigured { op } => format!("fix: {op}"),
+        CapabilityCondition::CommonFieldSet { field } => field.to_string(),
+    }
+}
+
+/// [`rule_git_use`] for the nested `require:` entries of a rule's options,
+/// read as [`nested_spawn_use`] reads them.
+fn nested_git_use(
+    options: &alint_core::yaml::Mapping,
+    catalog: KindCatalog<'_>,
+    prefix: &str,
+) -> Option<String> {
+    use alint_core::yaml::Value;
+    let nested = options.get("require").and_then(Value::as_sequence)?;
+    nested.iter().enumerate().find_map(|(index, entry)| {
+        let entry = entry.as_mapping()?;
+        let at = format!("{prefix}require[{index}] ");
+        if let Some(kind) = entry.get("kind").and_then(Value::as_str)
+            && let Some(meta) = catalog.meta(kind)
+            && let Some(condition) =
+                active_git_condition(meta, |condition| condition.holds_for_options(entry))
+        {
+            return Some(format!("{at}{}", describe_git_use(kind, condition)));
+        }
+        nested_git_use(entry, catalog, &at)
+    })
+}
+
 /// Refuse the first of `rules` and `facts` that starts a process
-/// ([`rule_spawn_use`], [`fact_spawns`]), naming it and `refused_by` (the
-/// option that refuses it, such as `--no-spawn`):
-/// `rule "x" (kind: command) spawns a process; --no-spawn refuses it`.
+/// ([`rule_spawn_use`], [`fact_spawns`]) or runs Git ([`rule_git_use`]),
+/// naming it and `refused_by` (the option that refuses it, such as
+/// `--no-spawn`): `rule "x" (kind: command) spawns a process; --no-spawn
+/// refuses it`.
 ///
 /// # Errors
 ///
-/// When a rule or fact spawns.
+/// When a rule or fact spawns, or a rule runs Git.
 pub fn refuse_spawning<'a>(
     rules: impl IntoIterator<Item = &'a alint_core::RuleSpec>,
     facts: &[alint_core::FactSpec],
@@ -939,6 +1008,13 @@ pub fn refuse_spawning<'a>(
         if let Some(what) = rule_spawn_use(rule, catalog) {
             return Err(Error::Other(format!(
                 "rule {:?} ({what}) spawns a process; {refused_by} refuses it",
+                rule.id
+            )));
+        }
+        if let Some(what) = rule_git_use(rule, catalog) {
+            return Err(Error::Other(format!(
+                "rule {:?} ({what}) runs Git, which runs the commands a repository's Git \
+                 configuration names; {refused_by} refuses it",
                 rule.id
             )));
         }
@@ -1030,6 +1106,20 @@ pub(crate) fn reject_fix_promotion_in(rules: &[Mapping], source: &str) -> Result
     Ok(())
 }
 
+/// Whether a fix op's `applicability` value promotes the fix, or may: `safe`,
+/// a `{{` placeholder (substituted after the gates run), or anything but a
+/// string or null. A tier is written as its name; a one-entry mapping
+/// (`{safe: ~}`) or a tag (`!safe ~`) is how serde writes a variant, and a
+/// gate that compared strings only would let one through.
+fn applicability_promotes(value: &ayaml::Value) -> bool {
+    // Matched, not read through accessors, which look through a tag.
+    match value {
+        ayaml::Value::Null => false,
+        ayaml::Value::String(tier) => tier.eq_ignore_ascii_case("safe") || tier.contains("{{"),
+        _ => true,
+    }
+}
+
 fn reject_fix_promotion_in_rule(rule: &Mapping, source: &str) -> Result<()> {
     if let Some(fix) = rule.get("fix").and_then(|v| v.as_mapping()) {
         for (op, args) in fix {
@@ -1037,25 +1127,32 @@ fn reject_fix_promotion_in_rule(rule: &Mapping, source: &str) -> Result<()> {
             // `fix:` deserializer requires every op's options to be a mapping, so
             // a sequence-shaped `[safe]` that this scan cannot see is refused
             // there instead of loading as a positional promotion.
-            let promotes = args
-                .as_mapping()
-                .and_then(|m| m.get("applicability"))
+            let Some(applicability) = args.as_mapping().and_then(|m| m.get("applicability")) else {
+                continue;
+            };
+            if !applicability_promotes(applicability) {
+                continue;
+            }
+            let id = rule
+                .get("id")
                 .and_then(|v| v.as_str())
-                .is_some_and(|a| a.eq_ignore_ascii_case("safe") || a.contains("{{"));
-            if promotes {
-                let id = rule
-                    .get("id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("(unknown)");
-                let op = op.as_str().unwrap_or("<fix>");
+                .unwrap_or("(unknown)");
+            let op = op.as_str().unwrap_or("<fix>");
+            if !matches!(applicability, ayaml::Value::String(_)) {
                 return Err(Error::Other(format!(
-                    "rule {id:?}: `fix.{op}.applicability: safe` promotes a fix to auto-apply and \
-                     is only allowed in your own top-level config; an extended config ({source}) \
-                     may not opt this repo into auto-applying a destructive fix (it may still \
-                     demote to `suggestion`/`never`). Declare the promotion in your top-level \
-                     `rules:`."
+                    "rule {id:?}: `fix.{op}.applicability` is not a tier name; an extended \
+                     config ({source}) may only demote a fix, to `suggestion` or `never`, \
+                     written as a string. Promoting a fix to auto-apply is only allowed in \
+                     your own top-level config."
                 )));
             }
+            return Err(Error::Other(format!(
+                "rule {id:?}: `fix.{op}.applicability: safe` promotes a fix to auto-apply and \
+                 is only allowed in your own top-level config; an extended config ({source}) \
+                 may not opt this repo into auto-applying a destructive fix (it may still \
+                 demote to `suggestion`/`never`). Declare the promotion in your top-level \
+                 `rules:`."
+            )));
         }
     }
     if let Some(require) = rule.get("require").and_then(|v| v.as_sequence()) {
@@ -1344,7 +1441,19 @@ pub(crate) fn find_spawning_kind<'a>(
 /// `fix.<op>.applicability`, at any `require:` depth) whose value contains a
 /// `{{` placeholder, named for the error message.
 pub(crate) fn find_template_placeholder_in_guarded_field(rule: &Mapping) -> Option<String> {
-    let has_placeholder = |v: &ayaml::Value| v.as_str().is_some_and(|s| s.contains("{{"));
+    // Anywhere in the value: a key of a one-entry mapping or the value of a
+    // tag is substituted as a scalar is.
+    fn has_placeholder(value: &ayaml::Value) -> bool {
+        match value {
+            ayaml::Value::String(text) => text.contains("{{"),
+            ayaml::Value::Sequence(items) => items.iter().any(has_placeholder),
+            ayaml::Value::Mapping(entries) => entries
+                .iter()
+                .any(|(key, value)| has_placeholder(key) || has_placeholder(value)),
+            ayaml::Value::Tagged(tagged) => has_placeholder(&tagged.value),
+            _ => false,
+        }
+    }
     if rule.get("kind").is_some_and(has_placeholder) {
         return Some("kind".to_string());
     }
@@ -1368,7 +1477,8 @@ pub(crate) fn find_template_placeholder_in_guarded_field(rule: &Mapping) -> Opti
         .find_map(find_template_placeholder_in_guarded_field)
 }
 
-/// Remove every explicit `applicability: safe` from `rule`'s fix ops (at every
+/// Remove every explicit `applicability: safe` (or a value that is not a tier
+/// name, [`applicability_promotes`]) from `rule`'s fix ops (at every
 /// `require:` depth) so each falls back to its op's default tier. Applied to an
 /// effective rule with untrusted provenance: such a rule may never carry a
 /// promotion, whoever authored the fix block it acquired.
@@ -1378,8 +1488,7 @@ pub(crate) fn strip_fix_promotions_in_rule(rule: &mut Mapping) {
             if let Some(args_map) = args.as_mapping_mut() {
                 let promotes = args_map
                     .get("applicability")
-                    .and_then(ayaml::Value::as_str)
-                    .is_some_and(|a| a.eq_ignore_ascii_case("safe"));
+                    .is_some_and(applicability_promotes);
                 if promotes {
                     args_map.remove("applicability");
                 }

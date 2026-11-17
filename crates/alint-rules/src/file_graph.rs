@@ -138,20 +138,41 @@ struct ForbiddenEdgeSpec {
 }
 
 /// `require:` is either a bare string (`acyclic`) or a map
-/// (`{ forbidden_edges: [...] }`). A scalar and a map are
-/// structurally distinct, so an untagged enum decodes them
-/// unambiguously (the proven `cross_file_value_equals` `targets:`
-/// pattern - not the externally-tagged-enum-from-map trap
-/// `crate::extract` documents).
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-#[serde(
-    untagged,
-    expecting = "a mode name (`acyclic`, `no_dangling`, or `no_orphans`), or a map of require options"
-)]
+/// (`{ forbidden_edges: [...] }`).
+// The schema describes it as an untagged enum; the decoder (`Deserialize`
+// below) picks the variant by the value's shape and takes a mode only as its
+// name.
+#[derive(Debug, schemars::JsonSchema)]
+#[serde(untagged)]
 #[schemars(rename = "FileGraphRequireSpec")]
 enum RequireSpec {
     Named(NamedRequire),
     Map(RequireMap),
+}
+
+/// What a `require:` that is neither a string nor a map holds.
+const REQUIRE_EXPECTING: &str =
+    "a mode name (`acyclic`, `no_dangling`, or `no_orphans`), or a map of require options";
+
+impl<'de> Deserialize<'de> for RequireSpec {
+    /// A string is a mode name and a map the map form, each decoded through
+    /// alint's checked decoder. A serde `untagged` enum would read the mode
+    /// name from serde's buffered copy of the value, which takes a one-entry
+    /// map (`{acyclic: ~}`) for `acyclic`.
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        use serde::de::Error as _;
+        let value = alint_core::yaml::Value::deserialize(deserializer)?;
+        let decoded = if value.as_str().is_some() {
+            alint_core::yaml::from_value(value).map(Self::Named)
+        } else if value.as_mapping().is_some() {
+            alint_core::yaml::from_value(value).map(Self::Map)
+        } else {
+            return Err(D::Error::custom(REQUIRE_EXPECTING));
+        };
+        decoded.map_err(D::Error::custom)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, schemars::JsonSchema)]

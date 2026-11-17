@@ -37,7 +37,7 @@ fn spawning_config(sentinel: &Path) -> String {
          - id: run\n    kind: command\n    paths: \"*.txt\"\n    command: {touch}\n    \
          level: error\n  \
          - id: untrack\n    kind: file_absent\n    paths: \"*.log\"\n    \
-         git_tracked_only: true\n    fix:\n      git_untrack: {{}}\n    level: error\n  \
+         fix:\n      git_untrack: {{}}\n    level: error\n  \
          - id: per-dir\n    kind: for_each_dir\n    select: \"*\"\n    require:\n      \
          - kind: command\n        paths: \"*.txt\"\n        command: {touch}\n    level: error\n  \
          - id: readme\n    kind: file_exists\n    paths: README.md\n    level: error\n"
@@ -74,8 +74,8 @@ fn an_untrusted_session_builds_no_spawning_rule_or_fact() {
 }
 
 /// A rule whose fix alone spawns (`git_untrack`) keeps its check in an
-/// untrusted session and loses only the fix: it still reports a tracked
-/// file, without a fix to offer.
+/// untrusted session and loses only the fix: it still reports the file,
+/// without a fix to offer.
 #[test]
 #[cfg(unix)]
 fn an_untrusted_session_keeps_a_rule_whose_fix_alone_spawns() {
@@ -83,7 +83,7 @@ fn an_untrusted_session_keeps_a_rule_whose_fix_alone_spawns() {
     std::fs::write(
         dir.path().join(".alint.yml"),
         "version: 1\nrules:\n  - id: untrack\n    kind: file_absent\n    paths: \"*.log\"\n    \
-         git_tracked_only: true\n    fix:\n      git_untrack: {}\n    level: error\n",
+         fix:\n      git_untrack: {}\n    level: error\n",
     )
     .unwrap();
     std::fs::write(dir.path().join("build.log"), "x\n").unwrap();
@@ -114,6 +114,118 @@ fn an_untrusted_session_keeps_a_rule_whose_fix_alone_spawns() {
         [true],
         "positive control: trusted, fixable"
     );
+}
+
+/// Run `git` with the host's configuration left out, in `dir`.
+#[cfg(unix)]
+fn git(dir: &Path, args: &[&str]) {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+}
+
+/// A repository with `a.txt` committed whose `.git/config` names a command
+/// (`core.fsmonitor`, which Git runs when it reads the index) that writes
+/// the returned canary, and a config whose every rule but `readme` runs Git:
+/// `git_tracked_only`, a `git_*` kind, `scope_filter.changed_since`, and one
+/// nested in `require:`.
+#[cfg(unix)]
+fn git_canary_repository(dir: &Path) -> PathBuf {
+    let canary = dir.join("CANARY");
+    std::fs::write(dir.join("a.txt"), "a\n").unwrap();
+    std::fs::create_dir(dir.join("sub")).unwrap();
+    std::fs::write(dir.join("sub/b.txt"), "b\n").unwrap();
+    git(dir, &["init", "-q"]);
+    git(dir, &["add", "a.txt", "sub/b.txt"]);
+    git(
+        dir,
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.com",
+            "commit",
+            "-qm",
+            "init",
+        ],
+    );
+    git(
+        dir,
+        &[
+            "config",
+            "core.fsmonitor",
+            &format!("printf ran > '{}'; false", canary.display()),
+        ],
+    );
+    std::fs::write(
+        dir.join(".alint.yml"),
+        "version: 1\nrules:\n  \
+         - id: tracked\n    kind: file_exists\n    paths: a.txt\n    \
+         git_tracked_only: true\n    level: error\n  \
+         - id: denied\n    kind: git_no_denied_paths\n    denied: [\"*.secret\"]\n    \
+         level: error\n  \
+         - id: changed\n    kind: file_max_size\n    paths: \"*.txt\"\n    max_bytes: 100\n    \
+         scope_filter:\n      changed_since: HEAD\n    level: error\n  \
+         - id: per-dir\n    kind: for_each_dir\n    select: sub\n    require:\n      \
+         - kind: file_max_size\n        paths: \"{path}/*.txt\"\n        max_bytes: 100\n        \
+         scope_filter:\n          changed_since: HEAD\n    level: error\n  \
+         - id: readme\n    kind: file_exists\n    paths: a.txt\n    level: error\n",
+    )
+    .unwrap();
+    canary
+}
+
+/// Git runs the commands a repository's `.git/config` names, so an untrusted
+/// session builds no rule that runs Git, and runs none.
+#[test]
+#[cfg(unix)]
+fn an_untrusted_session_runs_no_git() {
+    let dir = tempfile::tempdir().unwrap();
+    let canary = git_canary_repository(dir.path());
+
+    let session = build_session_with(dir.path(), &untrusted())
+        .unwrap()
+        .unwrap();
+    assert_eq!(built_rules(&session), ["readme"]);
+    assert!(session.withheld);
+    session.engine.run(&session.root, &session.index).unwrap();
+    assert!(!canary.exists(), "an untrusted session ran Git");
+
+    // Trusted, the same config builds every rule and runs Git.
+    let session = build_session(dir.path()).unwrap().unwrap();
+    assert_eq!(
+        built_rules(&session),
+        ["changed", "denied", "per-dir", "readme", "tracked"]
+    );
+    session.engine.run(&session.root, &session.index).unwrap();
+    assert!(
+        canary.exists(),
+        "positive control: a trusted session runs Git"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn no_spawn_refuses_a_git_rule_even_when_trusted() {
+    let dir = tempfile::tempdir().unwrap();
+    let canary = git_canary_repository(dir.path());
+    let settings = Settings {
+        no_spawn: true,
+        ..trusted()
+    };
+    let error = build_session_with(dir.path(), &settings).unwrap_err();
+    assert_eq!(
+        error,
+        "loading config: rule \"tracked\" (git_tracked_only) runs Git, which runs the commands \
+         a repository's Git configuration names; --no-spawn refuses it"
+    );
+    assert!(!canary.exists());
 }
 
 #[test]
@@ -426,6 +538,64 @@ fn a_config_syntax_error_is_placed_where_it_is() {
     assert_eq!(diagnostics[0].range.start, Position::new(0, 0));
 }
 
+/// The peak resident set of this process, in KiB (Linux's `VmHWM`).
+#[cfg(target_os = "linux")]
+fn peak_resident_kib() -> u64 {
+    std::fs::read_to_string("/proc/self/status")
+        .unwrap()
+        .lines()
+        .find_map(|line| line.strip_prefix("VmHWM:"))
+        .and_then(|value| value.trim().trim_end_matches("kB").trim().parse().ok())
+        .unwrap()
+}
+
+/// A config the loader refuses for its size, or for not being a regular file,
+/// is not read whole to place the error either: a sparse config past the cap
+/// used to be read into memory, and a FIFO blocked the server.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_config_refused_for_its_size_or_kind_is_not_read_to_place_the_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path().join(".alint.yml");
+    // Past the 32 MiB cap, and far past what this test process otherwise
+    // holds; sparse, so it takes no space on disk.
+    std::fs::File::create(&config)
+        .unwrap()
+        .set_len(2 << 30)
+        .unwrap();
+    let before = peak_resident_kib();
+    let error = build_session_with(dir.path(), &trusted())
+        .err()
+        .unwrap_or_default();
+    let grown = peak_resident_kib().saturating_sub(before);
+    assert!(error.contains("maximum supported size"), "{error}");
+    assert!(grown < 512 * 1024, "the peak grew by {grown} KiB");
+
+    let fifo = dir.path().join("fifo.yml");
+    let made = std::process::Command::new("mkfifo")
+        .arg(&fifo)
+        .status()
+        .is_ok_and(|status| status.success());
+    if !made {
+        eprintln!("mkfifo unavailable; skipping the FIFO case");
+        return;
+    }
+    let settings = Settings {
+        config: Some(fifo),
+        ..trusted()
+    };
+    let root = dir.path().to_path_buf();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = sender.send(build_session_with(&root, &settings).err());
+    });
+    let error = receiver
+        .recv_timeout(std::time::Duration::from_secs(30))
+        .expect("the session build returns")
+        .unwrap_or_default();
+    assert!(error.contains("not a regular file"), "{error}");
+}
+
 #[test]
 fn the_untrusted_note_is_shown_once_per_server() {
     let dir = tempfile::tempdir().unwrap();
@@ -487,4 +657,11 @@ fn a_fixed_config_is_trusted_whatever_the_client_says() {
     assert!(options.settings(false).trusted);
     assert!(!LspOptions::default().settings(false).trusted);
     assert!(LspOptions::default().settings(true).trusted);
+    // `--untrusted` overrides both the client and `--config`.
+    let untrusted = LspOptions {
+        untrusted: true,
+        ..options
+    };
+    assert!(!untrusted.settings(true).trusted);
+    assert!(!untrusted.settings(false).trusted);
 }
