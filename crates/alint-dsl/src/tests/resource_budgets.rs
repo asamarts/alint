@@ -359,6 +359,38 @@ fn each_source_of_a_version_one_config_parses_once() {
     }
 }
 
+/// A version 1 config that fails to decode was parsed a second time, to read
+/// its `version:` for the dispatch, whose answer for such a text is version 1
+/// and the same error. It parses once now, unless its text could hold
+/// something of version 2, and the error is the one it was.
+#[test]
+fn a_version_one_config_that_fails_to_decode_parses_once() {
+    for (body, parses, error) in [
+        ("version: 1\nnope: 1\n", 1, "unknown field `nope`"),
+        (
+            "version: 1\nrules:\n  - id: a\n    kind: file_exists\n    paths: [\n",
+            1,
+            "",
+        ),
+        (
+            "version: '2'\nnope: 1\n",
+            2,
+            "`version:` is 2 written other than as the plain integer `2`",
+        ),
+        (
+            "version: 1\nselectors: {}\nnope: 1\n",
+            2,
+            "`selectors:` needs `version: 2`",
+        ),
+    ] {
+        let (_tmp, config) = repo(&[(".alint.yml", body)]);
+        let (loaded, counted) = crate::loader::parses_during(|| load(&config));
+        let shown = loaded.unwrap_err().to_string();
+        assert!(shown.contains(error), "{body:?}: {shown}");
+        assert_eq!(counted, parses, "{body:?}: {shown}");
+    }
+}
+
 /// No code in the loader parses a whole document but through the counted
 /// `decode_text`, so the test above sees every parse. (`interp.rs` re-types
 /// one interpolated scalar.)
@@ -394,4 +426,283 @@ fn every_whole_document_parse_goes_through_the_counted_decode() {
     }
     found.sort();
     assert_eq!(found, ["interp.rs", "loader.rs"]);
+}
+
+/// The top-level config at `path` with its `extends:` chain and fragments
+/// merged, before `finalize`: the rules and templates with their markers.
+fn raw_at(path: &std::path::Path) -> RawConfig {
+    load_top_level_raw(path, &LoadOptions::with_catalog(test_catalog())).expect("loads")
+}
+
+/// The estimated size of `mapping`'s `marker`, as the template budget counts.
+fn marker_size(mapping: &Mapping, marker: &str) -> usize {
+    let held = mapping
+        .get(marker)
+        .and_then(ayaml::Value::as_mapping)
+        .unwrap_or_else(|| panic!("no {marker} on {mapping:?}"));
+    template_budget::size_of_mapping(held)
+}
+
+/// A directory path of about 2.4 KB below a temporary directory (one of a
+/// hundred bytes on Windows, whose paths are short unless long paths are on).
+fn deep_dir() -> String {
+    let depth = if cfg!(windows) { 1 } else { 12 };
+    (0..depth)
+        .map(|level| {
+            format!(
+                "{}{level:02}",
+                "d".repeat(if cfg!(windows) { 98 } else { 198 })
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// V2L-4: every field of a version 2 source's rules named the source by its
+/// whole path (20,000 rules at a 3.4 KB path peaked at 380 MB, against 94 MB
+/// as version 1), and every field of a rule an `extends:` entry brings in
+/// named the entry by its whole text. Each marker names its source by an
+/// index now, the same size whatever the path.
+#[test]
+fn a_rule_marker_does_not_grow_with_its_source_path() {
+    const RULE: &str = "rules:\n  - {id: r, kind: file_exists, paths: x, level: error, \
+                        message: m}\n";
+    let origins_at = |dir: &str| {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path().join(dir).join(".alint.yml");
+        std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+        std::fs::write(&config, format!("version: 2\n{RULE}")).unwrap();
+        marker_size(&raw_at(&config).rules[0], crate::v2::FIELD_ORIGINS_MARKER)
+    };
+    assert_eq!(origins_at("s"), origins_at(&deep_dir()));
+
+    // The entry's text, written as long as it may be, names an extended
+    // file's fields.
+    let sources_of = |entry: &str| {
+        let (_tmp, config) = repo(&[
+            (".alint.yml", &format!("version: 1\nextends: ['{entry}']\n")),
+            ("base.yml", &format!("version: 1\n{RULE}")),
+        ]);
+        let raw = raw_at(&config);
+        // Its text is still what an error about a field quotes.
+        let mut rule = raw.rules[0].clone();
+        crate::trust::name_field_sources(&mut rule, &raw.field_source_names);
+        assert_eq!(configured_field_source(&rule, "paths"), Some(entry));
+        marker_size(&raw.rules[0], FIELD_SOURCES_MARKER)
+    };
+    assert_eq!(
+        sources_of("./base.yml"),
+        sources_of(&format!("{}base.yml", "./".repeat(1_500)))
+    );
+}
+
+/// V2L-5: the template budget counted the loader's private markers, so a
+/// template a version 2 source declares (each of its fields marked with the
+/// source's path) cost more than the same template in version 1, and a config
+/// that loaded as version 1 overran the budget as version 2. A template costs
+/// its body alone.
+#[test]
+fn a_template_costs_the_same_in_either_version_and_from_any_source() {
+    const TEMPLATE: &str = "templates:\n  - {id: t, kind: file_exists, paths: x, level: error, \
+                            message: m}\nrules: []\n";
+    let size = |files: &[(&str, &str)]| {
+        let (_tmp, config) = repo(files);
+        template_budget::size_of_template(&raw_at(&config).templates[0])
+    };
+    let one = size(&[(".alint.yml", &format!("version: 1\n{TEMPLATE}"))]);
+    assert_eq!(
+        one,
+        size(&[(".alint.yml", &format!("version: 2\n{TEMPLATE}"))])
+    );
+    // Extended, with its provenance and field sources marked.
+    assert_eq!(
+        one,
+        size(&[
+            (".alint.yml", "version: 1\nextends: [./base.yml]\n"),
+            ("base.yml", &format!("version: 1\n{TEMPLATE}")),
+        ])
+    );
+    let bare: Mapping = alint_core::yaml::from_str(
+        "{id: t, kind: file_exists, paths: x, level: error, message: m}",
+    )
+    .unwrap();
+    assert_eq!(one, template_budget::size_of_mapping(&bare));
+}
+
+/// V2L-5, as reported: a template expanded by its instances to within the
+/// budget loads as version 2 too, from a deep path.
+#[test]
+fn a_template_within_the_budget_loads_in_either_version() {
+    use std::fmt::Write as _;
+
+    // About 62 KB an instance, 1,000 of them: 62 MB of the 64 MiB budget.
+    let mut body = format!(
+        "templates:\n  - id: t\n    kind: file_exists\n    paths: x\n    level: error\n    \
+         message: \"{}\"\nrules:\n",
+        "m".repeat(62_000)
+    );
+    for instance in 0..1_000 {
+        writeln!(body, "  - {{id: r{instance}, extends_template: t}}").unwrap();
+    }
+    for version in [1, 2] {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path().join(deep_dir()).join(".alint.yml");
+        std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+        std::fs::write(&config, format!("version: {version}\n{body}")).unwrap();
+        let loaded = on_thread(8 << 20, Duration::from_secs(60), move || {
+            load(&config)
+                .map(|config| config.rules.len())
+                .map_err(|e| e.to_string())
+        });
+        assert_eq!(loaded, Ok(1_000), "version {version}");
+    }
+}
+
+/// `config` loaded as `load` loads its chain (without its fragments), with the
+/// work its `extends:` merges were charged, in entries.
+fn merged_with_charge(config: &std::path::Path) -> (RawConfig, usize) {
+    let mut state = loader::LoadState::default();
+    let opts = LoadOptions::with_catalog(test_catalog());
+    let raw = loader::load_recursive(
+        config,
+        &mut state,
+        &opts,
+        config.parent(),
+        true,
+        &[],
+        loader::SourceContext::new(alint_core::ConfigSourceClass::Root, None),
+    )
+    .expect("loads");
+    (raw, state.extends_entries)
+}
+
+/// A ruleset of `count` rules `<prefix>N`, each at `level`.
+fn ruleset(prefix: &str, count: usize, level: &str) -> String {
+    let rules = (0..count)
+        .map(|index| {
+            format!("  - {{id: {prefix}{index}, kind: file_exists, paths: x, level: {level}}}\n")
+        })
+        .collect::<Vec<_>>()
+        .concat();
+    format!("version: 1\nrules:\n{rules}")
+}
+
+/// Two thousand `extends:` entries of one ruleset of two thousand rules
+/// loaded, gated and merged it two thousand times (152 seconds). An entry
+/// that names a source an earlier entry of its list loaded reuses it, and one
+/// that repeats the entry before it merges nothing; the merges' work is
+/// charged against a budget ([`an_extends_merge_budget_bounds_a_load`]).
+#[test]
+fn an_extends_list_that_repeats_a_source_loads_it_once() {
+    let list = |entries: &[&str], times: usize| {
+        let entries = entries
+            .iter()
+            .map(|entry| format!("  - {entry}\n"))
+            .collect::<Vec<_>>()
+            .concat()
+            .repeat(times);
+        format!("version: 1\nextends:\n{entries}")
+    };
+    let a = ruleset("a", 50, "error");
+    let b = ruleset("b", 50, "error");
+    // Each merge is charged what was merged so far and what it brings in.
+    for (entries, times, parses, charged, rules) in [
+        (&["./a.yml"][..], 1_000, 2, 50, 50),
+        (
+            &["./a.yml", "./b.yml"][..],
+            500,
+            3,
+            50 + (50 + 50) + 998 * (100 + 50),
+            100,
+        ),
+        // A filter makes another source of the same file.
+        (
+            &["./a.yml", "{url: ./a.yml, only: [a1]}"][..],
+            500,
+            3,
+            50 + (50 + 1) + 499 * (50 + 50) + 499 * (50 + 1),
+            50,
+        ),
+    ] {
+        let root = list(entries, times);
+        let (_tmp, config) = repo(&[(".alint.yml", &root), ("a.yml", &a), ("b.yml", &b)]);
+        let ((raw, charge), parsed) = crate::loader::parses_during(|| merged_with_charge(&config));
+        assert_eq!(parsed, parses, "{entries:?}: the root and each file once");
+        assert_eq!(charge, charged, "{entries:?}");
+        assert_eq!(raw.rules.len(), rules, "{entries:?}");
+    }
+}
+
+/// A source an entry repeats still overrides what came between, as when it
+/// was loaded again: the last entry to set a field wins, and rules keep the
+/// order they first appear in.
+#[test]
+fn a_repeated_extends_entry_still_overrides_the_entries_before_it() {
+    let shared = |level: &str| {
+        format!(
+            "version: 1\nrules:\n  - {{id: r, kind: file_exists, paths: x, level: {level}}}\n  \
+             - {{id: {level}-only, kind: file_exists, paths: x, level: info}}\n"
+        )
+    };
+    for (entries, level, order) in [
+        (
+            "[./a.yml, ./b.yml, ./a.yml]",
+            "error",
+            ["r", "error-only", "warning-only"],
+        ),
+        (
+            "[./a.yml, ./b.yml, ./b.yml]",
+            "warning",
+            ["r", "error-only", "warning-only"],
+        ),
+        (
+            "[./b.yml, ./a.yml, ./a.yml, ./b.yml]",
+            "warning",
+            ["r", "warning-only", "error-only"],
+        ),
+    ] {
+        let (_tmp, config) = repo(&[
+            (".alint.yml", &format!("version: 1\nextends: {entries}\n")),
+            ("a.yml", &shared("error")),
+            ("b.yml", &shared("warning")),
+        ]);
+        let loaded = load(&config).unwrap();
+        let ids: Vec<&str> = loaded.rules.iter().map(|rule| rule.id.as_str()).collect();
+        assert_eq!(ids, order, "{entries}");
+        assert_eq!(loaded.rules[0].level.as_str(), level, "{entries}");
+    }
+}
+
+/// What the `extends:` merges of one load handle, in all, is held to a
+/// budget, so a list that alternates two sources, or follows a large one with
+/// many small ones, cannot merge without end. (The loader charges every merge
+/// of a list: [`an_extends_list_that_repeats_a_source_loads_it_once`].)
+#[test]
+fn an_extends_merge_budget_bounds_a_load() {
+    let entries = |count: usize| RawConfig {
+        ignore: (0..count).map(|i| i.to_string()).collect(),
+        ..RawConfig::default()
+    };
+    let mut state = loader::LoadState::default();
+    let large = entries(loader::MAX_EXTENDS_MERGE_WORK / 2);
+    state
+        .charge_extends(&RawConfig::default(), &large)
+        .expect("half the budget");
+    // What the merge rebuilds counts, however little it brings in.
+    state
+        .charge_extends(&large, &RawConfig::default())
+        .expect("all of it");
+    assert_eq!(
+        state
+            .charge_extends(&RawConfig::default(), &entries(1))
+            .unwrap_err()
+            .to_string(),
+        format!(
+            "the `extends:` merges of this config handle more than {} entries in all (rules, \
+             templates, facts, vars and `ignore:` patterns, counted at each merge, both what \
+             was merged so far and what the entry brings in); list each source once, or \
+             flatten the `extends:` chain",
+            loader::MAX_EXTENDS_MERGE_WORK
+        )
+    );
 }

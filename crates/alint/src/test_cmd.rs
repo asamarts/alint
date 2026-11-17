@@ -174,7 +174,12 @@ fn collect_preflight_issues(
     let mut issues: Vec<Vec<PolicyTestIssue>> = (0..candidates.len()).map(|_| Vec::new()).collect();
     preflight_snapshot_targets(candidates, &mut issues);
     for (index, candidate) in candidates.iter().enumerate() {
-        if let Err(error) = runner.preflight(&candidate.test, &candidate.path) {
+        let preflight = runner.preflight(&candidate.test, &candidate.path);
+        // Once a run, naming the first test whose config is experimental.
+        if let Some(version) = runner.experimental_config_version() {
+            crate::config_cmd::warn_if_experimental_version(version, Path::new(&candidate.source));
+        }
+        if let Err(error) = preflight {
             if runner_error_is_operational(&error) {
                 operational_issues.extend(runner_issues(&error, &candidate.path).into_iter().map(
                     |mut issue| {

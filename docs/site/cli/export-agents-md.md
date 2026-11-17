@@ -22,6 +22,15 @@ Keep `AGENTS.md` in sync between the `alint:start` / `alint:end` markers:
 alint export-agents-md --inline --output AGENTS.md
 ```
 
+## Version 2 selectors and relations
+
+For an [experimental version 2 config](/docs/configuration/version-2/), the section also lists
+each named selector and relation with the config file that declares it, followed by the
+`extends:` aliases that reach those files, once per file. `--format json` adds the same
+`sources`, `selectors` and `relations` lists as
+[`alint list --format json`](/docs/cli/list/#version-2-selectors-and-relations).
+
 ## See also
 
 - [The agent surface](/docs/concepts/agents/the-agent-surface/)
+- [Version 2 (experimental)](/docs/configuration/version-2/)

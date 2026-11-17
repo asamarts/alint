@@ -42,10 +42,10 @@ fn source(display: &str, class: ConfigSourceClass, yaml: &str) -> SourceObjects 
     let mut one = Objects {
         sources: vec![decoded],
     };
-    for entry in &extends {
+    for (index, entry) in extends.iter().enumerate() {
         let url = entry.entry.url();
         let target = file(url.trim_start_matches("./"));
-        one.record_extended(entry.alias.as_deref(), Some(&target));
+        one.record_extended(index, Some(&target));
     }
     one.sources.remove(0)
 }
@@ -148,9 +148,9 @@ relations:
             target: Some(SourceIndex(0)),
         }]
     );
-    let consumers: Vec<_> = plan
-        .aliases_of(SourceIndex(0))
-        .map(|(source, alias)| (source.display.as_str(), alias.name.as_str()))
+    let consumers: Vec<_> = plan.aliases_by_source()[0]
+        .iter()
+        .map(|(source, alias)| (plan.source(*source).display.as_str(), alias.name.as_str()))
         .collect();
     assert_eq!(consumers, [(".alint.yml", "base")]);
 }
@@ -614,8 +614,15 @@ fn stub_rule(yaml: &str) -> ayaml::Mapping {
         .clone()
 }
 
-fn origin(field: &str, display: &str) -> (String, PathBuf) {
-    (field.to_string(), file(display))
+/// The files the configuration of these tests was loaded from.
+fn files() -> Vec<PathBuf> {
+    vec![file("base.yml"), file(".alint.yml")]
+}
+
+/// `field` written by the source `display`, by its index among [`files`].
+fn origin(field: &str, display: &str) -> (String, usize) {
+    let index = files().iter().position(|held| *held == file(display));
+    (field.to_string(), index.expect("one of the files"))
 }
 
 #[test]
@@ -633,12 +640,12 @@ fn a_rule_field_resolves_in_the_source_that_wrote_it() {
     let rule = stub_rule(&format!("id: r\nkind: {REFERENCE_STUB}\ninput: deps\n"));
     // `input: deps` written by base.yml names base's own relation ...
     resolved
-        .resolve_rule("r", &rule, &[origin("input", "base.yml")])
+        .resolve_rule("r", &rule, &[origin("input", "base.yml")], &files())
         .expect("resolves in base.yml");
     // ... and the same text written by the root names nothing there.
     assert_eq!(
         resolved
-            .resolve_rule("r2", &rule, &[origin("input", ".alint.yml")])
+            .resolve_rule("r2", &rule, &[origin("input", ".alint.yml")], &files())
             .unwrap_err()
             .to_string(),
         "rule \"r2\": `input` (written by .alint.yml): no relation named `deps` in this config; \
@@ -649,7 +656,7 @@ fn a_rule_field_resolves_in_the_source_that_wrote_it() {
         "id: r3\nkind: {REFERENCE_STUB}\ninput: base.deps\n"
     ));
     resolved
-        .resolve_rule("r3", &rule, &[origin("input", ".alint.yml")])
+        .resolve_rule("r3", &rule, &[origin("input", ".alint.yml")], &files())
         .expect("resolves through the alias");
     assert_eq!(
         resolved.plan.rules,
@@ -683,7 +690,7 @@ fn a_rule_field_no_version_two_source_wrote_names_nothing() {
     let rule = stub_rule(&format!("id: r\nkind: {REFERENCE_STUB}\ninput: titles\n"));
     assert_eq!(
         resolved
-            .resolve_rule("r", &rule, &[])
+            .resolve_rule("r", &rule, &[], &files())
             .unwrap_err()
             .to_string(),
         "rule \"r\": `input` names a relation, but a version 1 config wrote it; only a version 2 \
@@ -692,7 +699,7 @@ fn a_rule_field_no_version_two_source_wrote_names_nothing() {
     let rule = stub_rule(&format!("id: r\nkind: {REFERENCE_STUB}\ninput: [titles]\n"));
     assert_eq!(
         resolved
-            .resolve_rule("r", &rule, &[origin("input", ".alint.yml")])
+            .resolve_rule("r", &rule, &[origin("input", ".alint.yml")], &files())
             .unwrap_err()
             .to_string(),
         "rule \"r\": `input` (written by .alint.yml): expected a relation name, found a list"
@@ -700,7 +707,7 @@ fn a_rule_field_no_version_two_source_wrote_names_nothing() {
     let rule = stub_rule(&format!("id: r\nkind: {REFERENCE_STUB}\ninput: a.b.c\n"));
     assert_eq!(
         resolved
-            .resolve_rule("r", &rule, &[origin("input", ".alint.yml")])
+            .resolve_rule("r", &rule, &[origin("input", ".alint.yml")], &files())
             .unwrap_err()
             .to_string(),
         "rule \"r\": `input` (written by .alint.yml): `a.b.c` is not a valid reference: write a \
@@ -714,6 +721,7 @@ fn a_rule_field_no_version_two_source_wrote_names_nothing() {
             "plain",
             &stub_rule("id: plain\nkind: file_exists\ninput: x\n"),
             &[],
+            &files(),
         )
         .expect("no reference field");
     assert_eq!(resolved.plan.rules, Vec::new());
@@ -727,7 +735,7 @@ fn a_rule_an_extended_source_shapes_is_judged_with_what_it_references() {
     let mut resolved = resolve(&objects).expect("resolves");
     let rule = stub_rule(&format!("id: r\nkind: {REFERENCE_STUB}\ninput: titles\n"));
     resolved
-        .resolve_rule("r", &rule, &[origin("input", ".alint.yml")])
+        .resolve_rule("r", &rule, &[origin("input", ".alint.yml")], &files())
         .expect("resolves");
     resolved
         .judge_rule("r", Some("base.yml"))
@@ -856,4 +864,88 @@ fn the_nearest_name_through_aliases_is_the_nearest_written_one() {
             );
         }
     }
+}
+
+/// Recording where each `extends:` entry of a source leads finds the entry's
+/// alias by its index: a source of many aliases records them all looking at
+/// a logarithm of them per entry, not each of them per entry (80,000 aliased
+/// entries once took a minute here).
+#[test]
+fn recording_many_aliases_looks_at_few_of_them() {
+    use super::super::model::{ALIAS_PROBES, Alias};
+
+    const ENTRIES: usize = 200_000;
+    let target = |entry: usize| PathBuf::from(format!("/repo/p{}.yml", entry % 7));
+    // Every other entry has an alias.
+    let aliases = (0..ENTRIES)
+        .step_by(2)
+        .map(|entry| {
+            let alias = Alias {
+                url: "./p.yml".into(),
+                entry,
+                target: None,
+            };
+            (format!("a{entry}"), alias)
+        })
+        .collect();
+    let mut objects = Objects {
+        sources: vec![SourceObjects {
+            source: SourceId {
+                display: ".alint.yml".into(),
+                path: file(".alint.yml"),
+                class: ConfigSourceClass::Root,
+            },
+            selectors: Vec::new(),
+            relations: Vec::new(),
+            aliases,
+            extended: Vec::new(),
+        }],
+    };
+    ALIAS_PROBES.with(|probes| probes.set(0));
+    for entry in 0..ENTRIES {
+        objects.record_extended(entry, Some(&target(entry)));
+    }
+    let probes = ALIAS_PROBES.with(std::cell::Cell::get);
+    // A binary search of 100,000 aliases looks at about 18 of them; looking
+    // at each would be 100,000.
+    assert!(probes <= ENTRIES * 20, "{probes} aliases looked at");
+    let source = &objects.sources[0];
+    assert_eq!(source.extended.len(), ENTRIES);
+    for (name, alias) in &source.aliases {
+        assert_eq!(name, &format!("a{}", alias.entry));
+        assert_eq!(alias.target, Some(target(alias.entry)), "{name}");
+    }
+}
+
+/// A bare name nothing declares is weighed against each config the source
+/// reaches through an alias once, under its first alias, and the count says
+/// how many objects there are: 1,000 aliases of one config of 1,000
+/// selectors are 1,000 selectors, not a million pairs.
+#[test]
+fn an_unknown_name_weighs_each_aliased_config_once() {
+    let names = (0..1_000)
+        .map(|index| format!("  s{index}: {{ paths: x }}\n"))
+        .collect::<Vec<_>>()
+        .concat();
+    let base = extended("base.yml", &format!("selectors:\n{names}"));
+    let entries = (0..1_000)
+        .map(|index| format!("  - {{ url: ./base.yml, as: b{index} }}\n"))
+        .collect::<Vec<_>>()
+        .concat();
+    let consumer = root(&format!(
+        "extends:\n{entries}selectors:\n  own: {{ paths: y }}\nrelations:\n  r: {{ from: nope, \
+         read: {{ whole_file: {{}} }}, fields: {{ f: value }} }}\n"
+    ));
+    assert_eq!(
+        refused(vec![base.clone(), consumer]),
+        ".alint.yml: `relations.r.from`: no selector named `nope` in this config; there are \
+         1001 selectors it can reach, none named like `nope`"
+    );
+    // A name the aliased config declares is named through the first alias.
+    let declared = root(&format!(
+        "extends:\n{entries}relations:\n  r: {{ from: s7, read: {{ whole_file: {{}} }}, \
+         fields: {{ f: value }} }}\n"
+    ));
+    let error = refused(vec![base, declared]);
+    assert!(error.contains("write `b0.s7`"), "{error}");
 }

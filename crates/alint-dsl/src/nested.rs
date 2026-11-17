@@ -317,7 +317,7 @@ fn nested_config_rules(
     // SILENT auto-apply, matching this module's stated "as untrusted as an
     // `extends:`'d ruleset" trust model (audit: nested-config HIGH).
     crate::demote_content_fixers_in(&mut config.rules, catalog);
-    crate::mark_field_sources_in(&mut config.rules, source);
+    crate::mark_field_sources_in(&mut config.rules, &source.into());
     // Preserve that source trust through root-template expansion. Without this
     // marker a nested rule with `extends_template:` could acquire a root template's
     // content fixer only after the source-local demotion above had already run.

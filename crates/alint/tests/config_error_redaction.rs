@@ -940,10 +940,63 @@ fn a_v2_source_path_read_from_the_environment_stays_out_of_listings() {
     let stdout = String::from_utf8(run(root.path(), &["list"], &env).stdout).unwrap();
     assert!(
         stdout.ends_with(
-            "\nselector docs  <redacted> (as deps in .alint.yml)\nselector own  .alint.yml\n"
+            "\nselector docs  <redacted>\nselector own  .alint.yml\naliases <redacted>  as deps \
+             in .alint.yml\n"
         ),
         "{stdout}"
     );
+}
+
+/// A source an `extends:` entry read from the environment loads tells where
+/// the environment points, and so does every source it extends in turn:
+/// `p.yml`'s own `extends: ./q.yml` was listed, and named in errors, as
+/// `secret-dir/q.yml`. Each is `<redacted>`.
+#[test]
+fn a_source_below_an_extends_entry_read_from_the_environment_stays_out_of_output() {
+    let root = tempfile::tempdir().unwrap();
+    write(root.path(), "README.md", "hi\n");
+    write(
+        root.path(),
+        "secret-dir/p.yml",
+        "version: 2\nextends:\n  - url: ./q.yml\n    as: q\nselectors:\n  own: { paths: \
+         README.md }\nrules: []\n",
+    );
+    write(
+        root.path(),
+        "secret-dir/q.yml",
+        "version: 2\nselectors:\n  docs: { paths: README.md }\nrules: []\n",
+    );
+    write(
+        root.path(),
+        ".alint.yml",
+        "version: 2\nextends:\n  - url: '{{env.POLICY}}'\n    as: p\nrules: []\n",
+    );
+    let env = [("POLICY", "./secret-dir/p.yml")];
+    let listed = run(root.path(), &["list"], &env);
+    assert!(listed.status.success(), "{listed:?}");
+    assert_left_out("list", &listed, &["secret-dir"]);
+    let stdout = String::from_utf8(listed.stdout).unwrap();
+    assert!(
+        stdout.ends_with(
+            "\nselector docs  <redacted>\nselector own  <redacted>\naliases <redacted>  as q in \
+             <redacted>\naliases <redacted>  as p in .alint.yml\n"
+        ),
+        "{stdout}"
+    );
+    let listed = run(root.path(), &["list", "--format", "json"], &env);
+    assert!(listed.status.success(), "{listed:?}");
+    assert_left_out("list --format json", &listed, &["secret-dir"]);
+
+    // An error in q.yml names it so too.
+    write(
+        root.path(),
+        "secret-dir/q.yml",
+        "version: 2\nselectors:\n  docs: { paths: README.md, colour: red }\nrules: []\n",
+    );
+    for args in LOADING_SURFACES {
+        let output = run(root.path(), args, &env);
+        assert_redacted(&format!("{args:?}"), &output, &["secret-dir"]);
+    }
 }
 
 /// Every position of a version 2 selector or relation that takes a value,

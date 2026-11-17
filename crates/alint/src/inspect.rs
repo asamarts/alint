@@ -140,105 +140,185 @@ pub(super) fn cmd_list(category: Option<&str>, cli: &Cli) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-/// Each named object of `plan`, selectors then relations, in load order:
-/// what it is, its source's display, and the aliases (`as:`) a consumer
-/// reaches that source through, each with the consumer's display. `list` and
-/// `export-agents-md` show these. A source's display can be an `extends:`
-/// path read from the environment, so each is shown as `redact` leaves it:
-/// without the environment values of the config.
-pub(super) fn named_objects<'p>(plan: &'p Plan, redact: Redact<'_>) -> Vec<NamedObject<'p>> {
-    let object = |what, name, source| {
-        let declared = plan.source(source);
-        NamedObject {
-            what,
-            name,
-            source: redact(&declared.display),
-            aliases: plan
-                .aliases_of(source)
-                .map(|(consumer, alias)| (alias.name.as_str(), redact(&consumer.display)))
-                .collect(),
-        }
-    };
-    plan.selectors
-        .iter()
-        .map(|named| object("selector", named.name.as_str(), named.source))
-        .chain(
-            plan.relations
-                .iter()
-                .map(|named| object("relation", named.name.as_str(), named.source)),
-        )
-        .collect()
+/// A version 2 config's named selectors and relations, as `list` and
+/// `export-agents-md` show them: every version 2 source with the aliases
+/// (`as:`) a consumer reaches it through, and each object with the source that
+/// declares it. A source's aliases are held once, not once per object it
+/// declares, so what is shown grows with the objects plus the aliases, never
+/// with their product. A source's display can be an `extends:` path read from
+/// the environment, or a file reached through one, so each is shown as
+/// `redact` leaves it: without the environment values of the config.
+pub(super) struct NamedObjects<'p> {
+    /// Every version 2 source, indexed as [`Plan::sources`] is.
+    pub(super) sources: Vec<NamedSource<'p>>,
+    /// The selectors, then the relations, each in load order.
+    pub(super) objects: Vec<NamedObject<'p>>,
 }
 
-/// Text without the environment values of a config.
-pub(super) type Redact<'r> = &'r dyn for<'t> Fn(&'t str) -> std::borrow::Cow<'t, str>;
+/// A version 2 source, as [`NamedObjects`] shows it.
+pub(super) struct NamedSource<'p> {
+    /// The display of the config file.
+    pub(super) display: std::borrow::Cow<'p, str>,
+    /// Each alias another source gives it, with that source's index.
+    pub(super) aliases: Vec<(&'p str, usize)>,
+    /// Whether it declares a selector or a relation.
+    pub(super) declares: bool,
+}
 
 pub(super) struct NamedObject<'p> {
     /// `selector` or `relation`.
     pub(super) what: &'static str,
     pub(super) name: &'p str,
-    /// The display of the config file that declares it.
-    pub(super) source: std::borrow::Cow<'p, str>,
-    /// Each alias, with the source that gives it.
-    pub(super) aliases: Vec<(&'p str, std::borrow::Cow<'p, str>)>,
+    /// The index of the source that declares it.
+    pub(super) source: usize,
 }
 
+impl<'p> NamedObjects<'p> {
+    pub(super) fn of(plan: &'p Plan, redact: Redact<'_>) -> Self {
+        let mut sources: Vec<NamedSource<'p>> = plan
+            .sources
+            .iter()
+            .zip(plan.aliases_by_source())
+            .map(|(source, aliases)| NamedSource {
+                display: redact(&source.display),
+                aliases: aliases
+                    .into_iter()
+                    .map(|(consumer, alias)| (alias.name.as_str(), consumer.0))
+                    .collect(),
+                declares: false,
+            })
+            .collect();
+        let objects: Vec<NamedObject<'p>> = plan
+            .selectors
+            .iter()
+            .map(|named| ("selector", named.name.as_str(), named.source))
+            .chain(
+                plan.relations
+                    .iter()
+                    .map(|named| ("relation", named.name.as_str(), named.source)),
+            )
+            .map(|(what, name, source)| NamedObject {
+                what,
+                name,
+                source: source.0,
+            })
+            .collect();
+        for object in &objects {
+            if let Some(source) = sources.get_mut(object.source) {
+                source.declares = true;
+            }
+        }
+        Self { sources, objects }
+    }
+
+    pub(super) fn is_empty(&self) -> bool {
+        self.objects.is_empty()
+    }
+
+    /// The display of source `index`.
+    pub(super) fn display(&self, index: usize) -> &str {
+        self.sources
+            .get(index)
+            .map_or("<unknown>", |source| &source.display)
+    }
+
+    /// The sources that declare an object and that an alias reaches, each
+    /// with its aliases as `(alias, display of the source that gives it)`:
+    /// the one line per source after the objects.
+    pub(super) fn aliased(&self) -> impl Iterator<Item = (&str, Vec<(&str, &str)>)> + '_ {
+        self.sources
+            .iter()
+            .filter(|source| source.declares && !source.aliases.is_empty())
+            .map(|source| {
+                let aliases = source
+                    .aliases
+                    .iter()
+                    .map(|&(alias, consumer)| (alias, self.display(consumer)))
+                    .collect();
+                (&*source.display, aliases)
+            })
+    }
+}
+
+/// Text without the environment values of a config.
+pub(super) type Redact<'r> = &'r dyn for<'t> Fn(&'t str) -> std::borrow::Cow<'t, str>;
+
 /// The human `list` lines of a version 2 config's named selectors and
-/// relations, after a blank line: `selector manifests  rules/base.yml (as
-/// base in .alint.yml)`.
+/// relations, after a blank line: `selector manifests  rules/base.yml`, then
+/// one line for each declaring source an alias reaches, `aliases
+/// rules/base.yml  as base in .alint.yml`.
 fn write_named_objects(out: &mut impl Write, plan: &Plan) -> Result<()> {
     use alint_output::style;
 
-    let objects = named_objects(plan, &super::redact_environment_values);
-    if objects.is_empty() {
+    let named = NamedObjects::of(plan, &super::redact_environment_values);
+    if named.is_empty() {
         return Ok(());
     }
     let dim = style::DIM;
     writeln!(out)?;
-    for object in objects {
-        write!(
+    for object in &named.objects {
+        writeln!(
             out,
             "{} {}  {dim}{}{dim:#}",
             object.what,
             term(object.name),
-            term(&object.source)
+            term(named.display(object.source))
         )?;
-        if !object.aliases.is_empty() {
-            let aliases: Vec<String> = object
-                .aliases
-                .iter()
-                .map(|(alias, consumer)| format!("as {} in {}", term(alias), term(consumer)))
-                .collect();
-            write!(out, " {dim}({}){dim:#}", aliases.join(", "))?;
-        }
-        writeln!(out)?;
+    }
+    for (source, aliases) in named.aliased() {
+        let aliases: Vec<String> = aliases
+            .iter()
+            .map(|(alias, consumer)| format!("as {} in {}", term(alias), term(consumer)))
+            .collect();
+        writeln!(
+            out,
+            "aliases {}  {dim}{}{dim:#}",
+            term(source),
+            aliases.join(", ")
+        )?;
     }
     Ok(())
 }
 
-/// The `list --format json` entries of `plan`'s objects of one kind, which
-/// `export-agents-md --format json` shares.
-pub(super) fn named_objects_json(
-    plan: &Plan,
-    what: &str,
-    redact: Redact<'_>,
-) -> Vec<serde_json::Value> {
-    named_objects(plan, redact)
-        .into_iter()
-        .filter(|object| object.what == what)
-        .map(|object| {
-            let aliases: Vec<serde_json::Value> = object
+/// The `list --format json` members of `plan` (`sources`, `selectors` and
+/// `relations`), which `export-agents-md --format json` shares. Each object
+/// names its source by its index in `sources`, and each alias the source that
+/// gives it the same way.
+pub(super) fn named_objects_json(plan: &Plan, redact: Redact<'_>) -> NamedObjectsJson {
+    let named = NamedObjects::of(plan, redact);
+    let sources = named
+        .sources
+        .iter()
+        .map(|source| {
+            let aliases: Vec<serde_json::Value> = source
                 .aliases
                 .iter()
                 .map(|(alias, consumer)| serde_json::json!({ "alias": alias, "in": consumer }))
                 .collect();
-            serde_json::json!({
-                "name": object.name,
-                "source": object.source,
-                "aliases": aliases,
-            })
+            serde_json::json!({ "path": source.display, "aliases": aliases })
         })
-        .collect()
+        .collect();
+    let of = |what: &str| -> Vec<serde_json::Value> {
+        named
+            .objects
+            .iter()
+            .filter(|object| object.what == what)
+            .map(|object| serde_json::json!({ "name": object.name, "source": object.source }))
+            .collect()
+    };
+    NamedObjectsJson {
+        selectors: of("selector"),
+        relations: of("relation"),
+        sources,
+    }
+}
+
+/// [`named_objects_json`]'s members.
+#[derive(serde::Serialize)]
+pub(super) struct NamedObjectsJson {
+    pub(super) sources: Vec<serde_json::Value>,
+    pub(super) selectors: Vec<serde_json::Value>,
+    pub(super) relations: Vec<serde_json::Value>,
 }
 
 /// Stable machine-readable rule inventory for `alint list --format json`.
@@ -248,9 +328,9 @@ pub(super) fn named_objects_json(
 /// a DISTINCT shape — the `kind` field discriminates so a consumer can tell a
 /// rule inventory from a rule definition or a check report.
 ///
-/// A version 2 config adds its named `selectors` and `relations` (`objects`),
-/// each with its source and the aliases that reach it; a version 1 config's
-/// document is unchanged.
+/// A version 2 config adds its version 2 `sources`, each with the aliases that
+/// reach it, and its named `selectors` and `relations` (`objects`), each with
+/// the index of its source; a version 1 config's document is unchanged.
 fn list_json(loaded: &LoadedConfig, objects: Option<&Plan>) -> Result<ExitCode> {
     let rules: Vec<serde_json::Value> = loaded
         .entries
@@ -277,9 +357,10 @@ fn list_json(loaded: &LoadedConfig, objects: Option<&Plan>) -> Result<ExitCode> 
     let mut doc =
         serde_json::json!({ "schema_version": 1, "kind": "rule-inventory", "rules": rules });
     if let Some(plan) = objects {
-        let redact = &super::redact_environment_values;
-        doc["selectors"] = serde_json::Value::Array(named_objects_json(plan, "selector", redact));
-        doc["relations"] = serde_json::Value::Array(named_objects_json(plan, "relation", redact));
+        let named = named_objects_json(plan, &super::redact_environment_values);
+        doc["sources"] = serde_json::Value::Array(named.sources);
+        doc["selectors"] = serde_json::Value::Array(named.selectors);
+        doc["relations"] = serde_json::Value::Array(named.relations);
     }
     let mut out = std::io::stdout().lock();
     writeln!(out, "{}", serde_json::to_string_pretty(&doc)?)?;
@@ -1255,3 +1336,7 @@ fn explain_json(
     out.flush().ok();
     Ok(ExitCode::SUCCESS)
 }
+
+#[cfg(test)]
+#[path = "inspect_tests.rs"]
+mod tests;

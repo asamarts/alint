@@ -13,7 +13,7 @@
 use alint_core::Level;
 
 use super::Directive;
-use crate::inspect::NamedObject;
+use crate::inspect::NamedObjects;
 
 /// Markers that delimit the alint-managed region inside an
 /// `AGENTS.md`. Public so tests can match against the same
@@ -26,7 +26,7 @@ pub const END_MARKER: &str = "<!-- alint:end -->";
 /// named selectors and relations (`objects`; `None` for version 1).
 pub fn render(
     directives: &[Directive],
-    objects: Option<&[NamedObject<'_>]>,
+    objects: Option<&NamedObjects<'_>>,
     section_title: &str,
 ) -> String {
     use std::fmt::Write;
@@ -91,33 +91,38 @@ fn write_severity_sections(out: &mut String, directives: &[Directive]) {
 }
 
 /// A version 2 config's named selectors and relations, as `alint list`
-/// shows them: each with the config file that declares it and the aliases
-/// (`as:`) that reach that file.
-fn write_named_objects(out: &mut String, objects: &[NamedObject<'_>]) {
+/// shows them: each with the config file that declares it, then one line for
+/// each such file the `extends:` aliases (`as:`) reach, with those aliases.
+fn write_named_objects(out: &mut String, named: &NamedObjects<'_>) {
     out.push_str("### Named selectors and relations\n\n");
     out.push_str(
         "Declared by this `version: 2` config (experimental), each with the config file \
-         that declares it and the `extends:` aliases that reach that file.\n\n",
+         that declares it.\n\n",
     );
-    for object in objects {
+    for object in &named.objects {
         out.push_str("- ");
         out.push_str(object.what);
         out.push(' ');
         out.push_str(&code_span(object.name));
         out.push_str(": ");
-        out.push_str(&code_span(&object.source));
-        if !object.aliases.is_empty() {
-            let aliases: Vec<String> = object
-                .aliases
-                .iter()
-                .map(|(alias, consumer)| {
-                    format!("as {} in {}", code_span(alias), code_span(consumer))
-                })
-                .collect();
-            out.push_str(" (");
-            out.push_str(&aliases.join(", "));
-            out.push(')');
-        }
+        out.push_str(&code_span(named.display(object.source)));
+        out.push('\n');
+    }
+    out.push('\n');
+    let mut reached = named.aliased().peekable();
+    if reached.peek().is_none() {
+        return;
+    }
+    out.push_str("The `extends:` aliases that reach those files:\n\n");
+    for (source, aliases) in reached {
+        let shown: Vec<String> = aliases
+            .iter()
+            .map(|(alias, consumer)| format!("as {} in {}", code_span(alias), code_span(consumer)))
+            .collect();
+        out.push_str("- ");
+        out.push_str(&code_span(source));
+        out.push_str(": ");
+        out.push_str(&shown.join(", "));
         out.push('\n');
     }
     out.push('\n');
@@ -162,6 +167,7 @@ fn write_bullets(out: &mut String, bullets: &[&Directive]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::inspect::{NamedObject, NamedSource};
 
     fn d(id: &str, sev: Level, msg: &str) -> Directive {
         Directive {
@@ -242,51 +248,66 @@ mod tests {
         assert!(out.ends_with('\n'));
     }
 
-    fn object<'p>(
-        what: &'static str,
-        name: &'p str,
-        source: &'p str,
-        aliases: Vec<(&'p str, &'p str)>,
-    ) -> NamedObject<'p> {
-        NamedObject {
-            what,
-            name,
-            source: source.into(),
-            aliases: aliases
+    /// The objects `(what, name, source index)` of `sources`, each a display
+    /// with its aliases as `(alias, index of the source giving it)`.
+    fn named<'p>(
+        sources: Vec<(&'p str, Vec<(&'p str, usize)>)>,
+        objects: Vec<(&'static str, &'p str, usize)>,
+    ) -> NamedObjects<'p> {
+        let mut sources: Vec<NamedSource<'p>> = sources
+            .into_iter()
+            .map(|(display, aliases)| NamedSource {
+                display: display.into(),
+                aliases,
+                declares: false,
+            })
+            .collect();
+        for &(_, _, source) in &objects {
+            sources[source].declares = true;
+        }
+        NamedObjects {
+            sources,
+            objects: objects
                 .into_iter()
-                .map(|(alias, consumer)| (alias, consumer.into()))
+                .map(|(what, name, source)| NamedObject { what, name, source })
                 .collect(),
         }
     }
 
     #[test]
-    fn named_objects_follow_the_rules_with_their_source_and_aliases() {
+    fn named_objects_follow_the_rules_with_their_source_then_its_aliases() {
         let dirs = vec![d("err", Level::Error, "x")];
-        let objects = [
-            object(
-                "selector",
-                "manifests",
-                "deps.yml",
-                vec![("deps", ".alint.yml"), ("d", "rules/b.yml")],
-            ),
-            object("relation", "titles", ".alint.yml", vec![]),
-        ];
+        let objects = named(
+            vec![
+                ("deps.yml", vec![("deps", 1), ("d", 2)]),
+                (".alint.yml", vec![]),
+                ("rules/b.yml", vec![]),
+                // Aliased, but declares nothing: no line.
+                ("empty.yml", vec![("e", 1)]),
+            ],
+            vec![
+                ("selector", "manifests", 0),
+                ("relation", "ranges", 0),
+                ("relation", "titles", 1),
+            ],
+        );
         let out = render(&dirs, Some(&objects), "Lint rules");
         let expected = "### Errors (commit will fail)\n\n- **`err`**: x\n\n\
                         ### Named selectors and relations\n\n\
                         Declared by this `version: 2` config (experimental), each with the \
-                        config file that declares it and the `extends:` aliases that reach \
-                        that file.\n\n\
-                        - selector `manifests`: `deps.yml` (as `deps` in `.alint.yml`, as `d` \
-                        in `rules/b.yml`)\n\
+                        config file that declares it.\n\n\
+                        - selector `manifests`: `deps.yml`\n\
+                        - relation `ranges`: `deps.yml`\n\
                         - relation `titles`: `.alint.yml`\n\n\
+                        The `extends:` aliases that reach those files:\n\n\
+                        - `deps.yml`: as `deps` in `.alint.yml`, as `d` in `rules/b.yml`\n\n\
                         <!-- alint:end -->\n";
         assert!(out.ends_with(expected), "{out}");
     }
 
     #[test]
     fn named_objects_show_without_rules_and_not_when_there_are_none() {
-        let objects = [object("selector", "docs", ".alint.yml", vec![])];
+        let objects = named(vec![(".alint.yml", vec![])], vec![("selector", "docs", 0)]);
         let out = render(&[], Some(&objects), "Lint rules");
         assert!(
             out.contains(
@@ -295,11 +316,14 @@ mod tests {
             ),
             "{out}"
         );
-        assert!(out.contains("- selector `docs`: `.alint.yml`\n"), "{out}");
+        assert!(
+            out.ends_with("- selector `docs`: `.alint.yml`\n\n<!-- alint:end -->\n"),
+            "{out}"
+        );
         // A version 2 config without named objects, and a version 1 config,
         // render as before.
         assert_eq!(
-            render(&[], Some(&[]), "Lint rules"),
+            render(&[], Some(&named(vec![], vec![])), "Lint rules"),
             render(&[], None, "Lint rules")
         );
     }

@@ -21,7 +21,7 @@
 //! source has loaded (references, cycles, the plan check) stays the loader's.
 
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use alint_core::{ConfigSourceClass, Error, Result};
@@ -36,25 +36,54 @@ use super::decode::{
 use super::document::{EXTENDS_ENTRY_KEYS, V2_ONLY_KEYS, v1_keys};
 use super::model::SourceId;
 
-/// The committed draft, read from the workspace when a test first needs it.
-pub(crate) fn schema() -> &'static Json {
-    static SCHEMA: OnceLock<Json> = OnceLock::new();
-    SCHEMA.get_or_init(|| {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../schemas/v2/config.json");
-        let text = std::fs::read_to_string(&path).unwrap_or_else(|error| {
-            panic!(
-                "read {}: {error}; run `cargo run -p xtask -- gen-schema`",
-                path.display()
-            )
-        });
-        serde_json::from_str(&text).expect("schemas/v2/config.json is JSON")
-    })
+/// The committed draft's text for the crate at `crate_dir`: the workspace's
+/// `schemas/v2/config.json`, two directories up. `None` when it is absent
+/// and the crate is not in its workspace (no `Cargo.lock` there either): a
+/// packaged crate, as crates.io serves it, holds no schema, and its tests
+/// skip the checks against it. Absent inside the workspace, or unreadable,
+/// it is an error, which a test reports.
+fn draft_at(crate_dir: &Path) -> std::result::Result<Option<String>, String> {
+    let workspace = crate_dir.join("..").join("..");
+    let path = workspace.join("schemas").join("v2").join("config.json");
+    match std::fs::read_to_string(&path) {
+        Ok(text) => Ok(Some(text)),
+        Err(error)
+            if error.kind() == std::io::ErrorKind::NotFound
+                && !workspace.join("Cargo.lock").exists() =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(format!(
+            "read {}: {error}; run `cargo run -p xtask -- gen-schema`",
+            path.display()
+        )),
+    }
+}
+
+/// The committed draft, read from the workspace when a test first needs it;
+/// `None` outside the workspace ([`draft_at`]).
+pub(crate) fn schema() -> Option<&'static Json> {
+    static SCHEMA: OnceLock<Option<Json>> = OnceLock::new();
+    SCHEMA
+        .get_or_init(|| {
+            let text = draft_at(Path::new(env!("CARGO_MANIFEST_DIR")))
+                .unwrap_or_else(|error| panic!("{error}"))?;
+            Some(serde_json::from_str(&text).expect("schemas/v2/config.json is JSON"))
+        })
+        .as_ref()
+}
+
+/// Whether the draft is here to check against: a test of it returns early
+/// when it is not.
+pub(crate) fn has_schema() -> bool {
+    schema().is_some()
 }
 
 fn validator() -> &'static jsonschema::Validator {
     static VALIDATOR: OnceLock<jsonschema::Validator> = OnceLock::new();
     VALIDATOR.get_or_init(|| {
-        jsonschema::validator_for(schema()).expect("schemas/v2/config.json compiles")
+        let schema = schema().expect("a test of the schema checks `has_schema` first");
+        jsonschema::validator_for(schema).expect("schemas/v2/config.json compiles")
     })
 }
 
@@ -100,6 +129,9 @@ pub(crate) fn decode_stage(yaml: &str) -> Result<()> {
 /// `selectors:` and `relations:` as decoded (after interpolation) and its
 /// `extends:` entries, under `version: 2`.
 pub(super) fn assert_accepts(v2_keys: &[(String, ayaml::Value)], extends: &[ExtendsEntry]) {
+    if !has_schema() {
+        return;
+    }
     let mut document = serde_json::Map::new();
     document.insert("version".into(), Json::from(2));
     for (key, value) in v2_keys {
@@ -152,7 +184,7 @@ fn extends_json(entry: &ExtendsEntry) -> Json {
 }
 
 fn def(name: &str) -> &'static Json {
-    let def = &schema()["$defs"][name];
+    let def = &schema().expect("the draft")["$defs"][name];
     assert!(!def.is_null(), "the schema has no `$defs/{name}`");
     def
 }
@@ -186,8 +218,11 @@ fn constants(def: &Json) -> BTreeSet<&str> {
 
 #[test]
 fn every_object_has_the_keys_the_decode_reads() {
+    if !has_schema() {
+        return;
+    }
     let top: BTreeSet<&str> = v1_keys().iter().chain(V2_ONLY_KEYS).copied().collect();
-    assert_eq!(keys(schema()), top);
+    assert_eq!(keys(schema().expect("the draft")), top);
     let extends_mapping = def("v2_extends_entry")["oneOf"]
         .as_array()
         .unwrap()
@@ -226,6 +261,9 @@ fn every_object_has_the_keys_the_decode_reads() {
 
 #[test]
 fn the_schema_lists_the_values_the_decode_takes() {
+    if !has_schema() {
+        return;
+    }
     let transforms = &def("v2_transforms")["additionalProperties"]["items"];
     assert_eq!(constants(transforms), set(TRANSFORMS));
     let named: BTreeSet<&str> = ["v2_source_path_token", "v2_source_entry", "v2_source_value"]
@@ -270,6 +308,9 @@ const ROWS: &[&str] = &[
 
 #[test]
 fn the_decode_and_the_schema_agree_on_each_field_source() {
+    if !has_schema() {
+        return;
+    }
     let mut sources: Vec<String> = NAMED_FIELD_SOURCES
         .iter()
         .map(|(name, _)| (*name).to_string())
@@ -308,6 +349,9 @@ fn the_decode_and_the_schema_agree_on_each_field_source() {
 
 #[test]
 fn the_decode_and_the_schema_agree_on_each_transform() {
+    if !has_schema() {
+        return;
+    }
     let mut transforms: Vec<&str> = TRANSFORMS.to_vec();
     transforms.extend(["cldr-plurals", "upper", "Trim", "semver"]);
     agree(transforms.into_iter().map(|transform| {
@@ -322,6 +366,9 @@ fn the_decode_and_the_schema_agree_on_each_transform() {
 
 #[test]
 fn the_decode_and_the_schema_agree_on_formats_forms_and_sides() {
+    if !has_schema() {
+        return;
+    }
     let formats = ["json", "yaml", "toml", "xml", "JSON", "ini"].map(|format| {
         relation(
             &format!("from: s\n    entries: {{ format: {format}, at: $ }}"),
@@ -364,6 +411,9 @@ fn the_decode_and_the_schema_agree_on_formats_forms_and_sides() {
 
 #[test]
 fn the_decode_and_the_schema_agree_on_names_and_references() {
+    if !has_schema() {
+        return;
+    }
     let names = [
         "a", "_a", "a-b_c9", "Deps", "x1", "9a", "-a", "a.b", "'a b'", "naïve", "a/b", "''",
     ];
@@ -399,4 +449,25 @@ fn the_decode_and_the_schema_agree_on_names_and_references() {
             .chain(from)
             .chain(sides),
     );
+}
+
+/// The draft is read from the workspace; a packaged crate, with no
+/// workspace around it, skips the checks against it, and a workspace without
+/// the draft fails them.
+#[test]
+fn the_draft_is_required_in_the_workspace_and_skipped_outside_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    let crate_dir = tmp.path().join("crates").join("alint-dsl");
+    std::fs::create_dir_all(&crate_dir).unwrap();
+    assert_eq!(draft_at(&crate_dir), Ok(None), "a packaged crate");
+    std::fs::write(tmp.path().join("Cargo.lock"), "").unwrap();
+    let error = draft_at(&crate_dir).unwrap_err();
+    assert!(
+        error.contains("run `cargo run -p xtask -- gen-schema`"),
+        "{error}"
+    );
+    let schemas = tmp.path().join("schemas").join("v2");
+    std::fs::create_dir_all(&schemas).unwrap();
+    std::fs::write(schemas.join("config.json"), "{}").unwrap();
+    assert_eq!(draft_at(&crate_dir), Ok(Some("{}".to_string())));
 }

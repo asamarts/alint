@@ -102,8 +102,10 @@ enum Declared {
     OtherTwo,
     /// An integer other than 2, as written.
     Integer(String),
-    /// Anything else: read from the environment, a string, a collection, or
-    /// not an integer.
+    /// Read from the environment (`{{env.V}}`): version 1, whatever it reads.
+    Environment,
+    /// Anything else: null, a string, a collection, or a number that is not
+    /// an integer.
     NonLiteral,
     /// No `version:` key.
     Absent,
@@ -123,15 +125,49 @@ fn declared_version(document: Option<&Value>, contents: &str) -> Declared {
             Value::Number(number) if version.is_u64() || version.is_i64() => {
                 Declared::Integer(number.to_string())
             }
+            Value::String(text) if text.contains("{{") => Declared::Environment,
             _ => Declared::NonLiteral,
         };
     }
     // Only a 2 written as itself, a plain scalar without a tag or an anchor,
     // selects v2; the value cannot tell `2` from `+2` or `0x2`, the text can.
+    // A decimal that only rounds to 2 (`1.9999999999999999`) is no 2.
     match alint_core::yaml_depth::top_level_plain_scalar(contents, "version") {
         Ok(Some(Some(text))) if text == "2" => Declared::Two,
+        Ok(Some(Some(text)))
+            if matches!(version, Value::Number(_))
+                && !(version.is_u64() || version.is_i64())
+                && decimal(&text).is_some_and(|exact| exact != ("2".to_string(), 0)) =>
+        {
+            Declared::NonLiteral
+        }
         _ => Declared::OtherTwo,
     }
+}
+
+/// A plain decimal number's exact value, as its significant digits and the
+/// power of ten they are scaled by (`20e-1` and `2.0` are `("2", 0)`); `None`
+/// for any other text (`0x2`, `.inf`).
+fn decimal(text: &str) -> Option<(String, i64)> {
+    let unsigned = text.strip_prefix(['+', '-']).unwrap_or(text);
+    let (mantissa, exponent) = match unsigned.split_once(['e', 'E']) {
+        Some((mantissa, exponent)) => (mantissa, exponent.parse::<i64>().ok()?),
+        None => (unsigned, 0),
+    };
+    let (whole, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+    let digits = format!("{whole}{fraction}");
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let scale = exponent.checked_sub(i64::try_from(fraction.len()).ok()?)?;
+    let significant = digits.trim_start_matches('0');
+    let trimmed = significant.trim_end_matches('0');
+    if trimmed.is_empty() {
+        return Some((String::new(), 0));
+    }
+    let zeros = i64::try_from(significant.len() - trimmed.len()).ok()?;
+    let sign = if text.starts_with('-') { "-" } else { "" };
+    Some((format!("{sign}{trimmed}"), scale.checked_add(zeros)?))
 }
 
 /// Whether `version` is 2 in any spelling: a number equal to 2 or a string
@@ -213,6 +249,101 @@ pub(crate) fn plainly_v1(config: &crate::RawConfig, origin: &Origin<'_>) -> bool
     version_one && config.extends.iter().all(|entry| entry.alias.is_none())
 }
 
+/// Why this build refuses a config of `version`, after the source's name: a
+/// version other than 1 and 2 is unsupported, and names version 2 as the
+/// experiment it is; a 2 that reaches the check was not read as version 2
+/// (read from the environment, or in a source that must be version 1), and
+/// must be written as the plain `version: 2` in a local config file.
+pub(crate) fn unsupported_version(version: u32) -> String {
+    if version == VERSION {
+        "unsupported config version 2 as written: only a literal `version: 2` in a local config \
+         file selects the experimental version 2 (a version read from the environment is \
+         version 1)"
+            .to_string()
+    } else {
+        format!(
+            "unsupported config version {version} (this build supports version 1, and version 2 \
+             as an experiment)"
+        )
+    }
+}
+
+/// Whether the dispatch could read a source whose version 1 decode failed as
+/// anything but version 1 (version 2, or an error about version 2): it
+/// inherits version 2, or its text could hold a v2-only key or a `version:`
+/// that is 2 in some spelling. A text that cannot keeps its version 1 decode
+/// error without the parse the dispatch reads. Written out, each of those
+/// needs a word the text holds (`selectors`, `relations`, `extends` with an
+/// `as`, or a `version` whose value is not a plain decimal integer other than
+/// 2); an escape in a double-quoted scalar can spell any key, an anchor lets
+/// an alias repeat one, and an explicit key (`? `) can be a block scalar, so a
+/// text with any of those is parsed too.
+pub(crate) fn may_select_version_two(contents: &str, origin: &Origin<'_>) -> bool {
+    inherits_two(origin)
+        || contents.contains('&')
+        || contents.contains("selectors")
+        || contents.contains("relations")
+        || (contents.contains("extends") && words(contents, "as").next().is_some())
+        || has_escape(contents)
+        || has_explicit_key(contents)
+        || words(contents, "version").any(|after| version_may_be_two(&contents[after..]))
+}
+
+/// The byte offsets just past each occurrence of `word` in `text` that is no
+/// part of a longer name (`subversion`, `min_version`, `version-x`).
+fn words<'t>(text: &'t str, word: &'t str) -> impl Iterator<Item = usize> + 't {
+    let name = |c: char| c.is_alphanumeric() || c == '_' || c == '-';
+    text.match_indices(word).filter_map(move |(at, _)| {
+        let end = at + word.len();
+        let before = text[..at].chars().next_back().is_some_and(name);
+        let after = text[end..].chars().next().is_some_and(name);
+        (!before && !after).then_some(end)
+    })
+}
+
+/// A double-quoted scalar's escape that writes a character by its code, or an
+/// escaped line break, which joins two lines into one word.
+fn has_escape(text: &str) -> bool {
+    text.match_indices('\\').any(|(at, _)| {
+        matches!(
+            text[at + 1..].chars().next(),
+            Some('x' | 'u' | 'U' | '\n' | '\r')
+        )
+    })
+}
+
+/// An explicit-key indicator: a `?` followed by a blank or the end.
+fn has_explicit_key(text: &str) -> bool {
+    text.match_indices('?').any(|(at, _)| {
+        text[at + 1..]
+            .chars()
+            .next()
+            .is_none_or(|next| matches!(next, ' ' | '\t' | '\n' | '\r'))
+    })
+}
+
+/// Whether the text after a word `version` could make it a key whose value is
+/// 2: it is followed (past a closing quote and any blanks or line breaks) by
+/// a `:` whose value is not a plain decimal integer other than 2 on the same
+/// line. A `version` that no `:` follows is no key; a value on a later line,
+/// quoted, tagged, anchored, aliased or written another way (`+2`, `2.0`,
+/// `0x2`) may be 2.
+fn version_may_be_two(after: &str) -> bool {
+    let after = after.strip_prefix(['"', '\'']).unwrap_or(after);
+    let Some(value) = after.trim_start().strip_prefix(':') else {
+        return false;
+    };
+    let value = value.trim_start_matches([' ', '\t']);
+    let token = value
+        .split(|c: char| c.is_whitespace() || matches!(c, ',' | '}' | ']' | '#'))
+        .next()
+        .unwrap_or_default();
+    let plain_integer = !token.is_empty()
+        && token.bytes().all(|byte| byte.is_ascii_digit())
+        && (token == "0" || !token.starts_with('0'));
+    !plain_integer || token == "2"
+}
+
 /// Read `document`'s top-level `version:` (`document` is `contents` parsed,
 /// or `None` when it does not parse) and decide which language it decodes
 /// as, refusing a version 2 source where one may not be, a 2 written other
@@ -278,9 +409,18 @@ fn refuse_v2_edge(origin: &Origin<'_>) -> Result<()> {
 }
 
 /// The first v2-only key of `document`, in document order, as a message
-/// names it: `selectors:`, `relations:` or an `extends:` entry's `as:`.
+/// names it: `selectors:`, `relations:` or an `extends:` entry's `as:`. A key
+/// neither version knows before it is reported first, by the version 1
+/// decode, so this is `None` then.
 fn v2_only_key(document: Option<&Value>) -> Option<String> {
+    let v1_keys = document::v1_keys();
     for (key, value) in document?.as_mapping()? {
+        let known = key
+            .as_str()
+            .is_some_and(|key| v1_keys.contains(&key) || document::V2_ONLY_KEYS.contains(&key));
+        if !known {
+            return None;
+        }
         match key.as_str() {
             Some(key @ ("selectors" | "relations")) => return Some(format!("`{key}:`")),
             Some("extends") => {
@@ -311,10 +451,11 @@ fn needs_v2(origin: &Origin<'_>, declared: &Declared, key: &str) -> Error {
                 origin.consumer_version.unwrap_or(1)
             ),
             Declared::Absent => "; this config declares no `version:`".to_string(),
+            Declared::Environment => "; this config's `version:` is not the integer `2` (a \
+                                       version read from the environment is version 1)"
+                .to_string(),
             Declared::NonLiteral | Declared::Two | Declared::OtherTwo | Declared::Unreadable => {
-                "; this config's `version:` is not the integer `2` (a version read from the \
-                 environment is version 1)"
-                    .to_string()
+                "; this config's `version:` is not the integer `2`".to_string()
             }
         }
     } else {

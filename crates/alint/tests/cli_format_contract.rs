@@ -1391,11 +1391,22 @@ fn list_adds_named_objects_for_version_two_only() {
             .expect("list --format json must be JSON");
     assert_eq!(
         keys(&list),
-        ["kind", "relations", "rules", "schema_version", "selectors"]
+        [
+            "kind",
+            "relations",
+            "rules",
+            "schema_version",
+            "selectors",
+            "sources"
+        ]
+    );
+    assert_eq!(
+        list["sources"],
+        serde_json::json!([{ "path": ".alint.yml", "aliases": [] }])
     );
     assert_eq!(
         list["selectors"],
-        serde_json::json!([{ "name": "docs", "source": ".alint.yml", "aliases": [] }])
+        serde_json::json!([{ "name": "docs", "source": 0 }])
     );
     assert_eq!(list["relations"], serde_json::json!([]));
 
@@ -1451,11 +1462,13 @@ fn list_names_each_config_by_its_path_under_the_root() {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, body).unwrap();
     }
+    let base = Path::new("rules").join("base.yml");
     let expected = format!(
-        "(no rules loaded from config)\n\nselector base_docs  {} (as base in .alint.yml)\n\
-         selector own  .alint.yml\nselector frag  {}\n",
-        Path::new("rules").join("base.yml").display(),
-        Path::new(".alint.d").join("10.yml").display()
+        "(no rules loaded from config)\n\nselector base_docs  {}\nselector own  .alint.yml\n\
+         selector frag  {}\naliases {}  as base in .alint.yml\n",
+        base.display(),
+        Path::new(".alint.d").join("10.yml").display(),
+        base.display(),
     );
     let linked = dir.path().join("linked");
     #[cfg(unix)]

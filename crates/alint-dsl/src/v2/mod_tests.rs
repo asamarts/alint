@@ -49,12 +49,15 @@ fn only_a_plain_integer_two_declares_version_two() {
         // A string to the parser, as `'02'` is.
         "version: 02\n",
         "version: 1.5\n",
-        "version: '{{env.V | default(\"2\")}}'\n",
         "version: [2]\n",
         "version: ~\n",
     ] {
         assert_eq!(declared(non_literal), Declared::NonLiteral, "{non_literal}");
     }
+    assert_eq!(
+        declared("version: '{{env.V | default(\"2\")}}'\n"),
+        Declared::Environment
+    );
     assert_eq!(declared("- 2\n"), Declared::Unreadable);
     assert_eq!(declared("version: [\n"), Declared::Unreadable);
 }
@@ -185,7 +188,7 @@ fn version_two_keys_in_a_version_one_config_name_the_version_they_need() {
         (
             "version: '1'\nselectors: {}\n",
             ".alint.yml: `selectors:` needs `version: 2`; this config's `version:` is not the \
-             integer `2` (a version read from the environment is version 1)",
+             integer `2`",
         ),
         // An `extends:` that is not a list does not hide a later key.
         (
@@ -487,4 +490,147 @@ rules:
     paths: '{{env.R | default("README.md")}}'
 "#;
     assert!(reject_interpolated_names(&document(yaml).unwrap(), ".alint.yml").is_ok());
+}
+
+/// A text the pre-check lets keep its version 1 decode error is one the
+/// dispatch reads as version 1: every spelling of a 2, a v2-only key, an
+/// alias to one or an escape in one makes the loader parse it.
+#[test]
+fn a_text_kept_from_the_dispatch_parse_dispatches_as_version_one() {
+    let fragment = Origin {
+        consumer_version: Some(VERSION),
+        ..Origin::new(ConfigSourceClass::DropIn, ".alint.d/a.yml")
+    };
+    let texts = [
+        "version: 1\nnope: 1\n",
+        "version: 1\nrules: 3\n",
+        "version: 3\nnope: 1\n",
+        "version: 10\nnope: 1\n",
+        "version: 1 # 2\nnope: 1\n",
+        "{version: 1, nope: 1}\n",
+        "version: 1\nrules:\n  - {id: a, kind: b, message: \"bump the version first\"}\n",
+        "version: 1\nrules:\n  - {id: a, kind: b, message: such as that}\n",
+        "version: 1\nnope:\n\tx\n",
+        "nope: 1\n",
+        // Prose that reads like a key costs a parse, and no more.
+        "version: 1\nrules:\n  - {id: a, kind: b, message: \"bump the version: 2 now\"}\n",
+        "version: 2\nnope: 1\n",
+        "# 2\nversion: 2\nnope: 1\n",
+        "version: '2'\nnope: 1\n",
+        "version: \"2\"\nnope: 1\n",
+        "version: 2.0\nnope: 1\n",
+        "version: +2\nnope: 1\n",
+        "version: 0x2\nnope: 1\n",
+        "version: 0o2\nnope: 1\n",
+        "version: 02\nnope: 1\n",
+        "version: 2e0\nnope: 1\n",
+        "version: !!int 2\nnope: 1\n",
+        "version:\n  2\nnope: 1\n",
+        "\"version\": 2\nnope: 1\n",
+        "'version' : 2\nnope: 1\n",
+        "{version\n: 2, nope: 1}\n",
+        "? version\n: 2\nnope: 1\n",
+        "? |-\n  version\n: 2\nnope: 1\n",
+        "\"versio\\x6e\": 2\nnope: 1\n",
+        "\"versio\\u006e\": 2\nnope: 1\n",
+        "\"versi\\\n  on\": 2\nnope: 1\n",
+        "vars: {a: &v 2}\nversion: *v\nnope: 1\n",
+        "vars: {a: &k version}\n*k : 2\nnope: 1\n",
+        "version: 1\nselectors: {}\nnope: 1\n",
+        "version: 1\nrelations: {}\nnope: 1\n",
+        "version: 1\nextends:\n  - {url: ./a.yml, as: a}\nnope: 1\n",
+        "version: 1\nextends:\n  - {url: ./a.yml, \"as\": a}\nnope: 1\n",
+        "version: 1\n\"selector\\x73\": {}\nnope: 1\n",
+    ];
+    for origin in [root(), fragment] {
+        for text in texts {
+            if may_select_version_two(text, &origin) {
+                continue;
+            }
+            let read = read_document(text, &origin);
+            assert!(
+                matches!(&read, Ok(document)
+                    if dispatch(document.as_ref(), text, &origin).is_ok_and(|surface| surface == Surface::V1)),
+                "{text:?} ({:?}) skips the parse, but dispatches as {:?}",
+                origin.class,
+                read.map(|document| dispatch(document.as_ref(), text, &origin))
+            );
+        }
+    }
+    // The texts a version 1 config is likely to fail with skip it.
+    for text in &texts[..10] {
+        assert!(!may_select_version_two(text, &root()), "{text:?}");
+    }
+    // A fragment of a version 2 root is version 2 without a word.
+    assert!(may_select_version_two("nope: 1\n", &fragment));
+}
+
+/// V2L-9 (a): a null `version:` beside a v2-only key was told a version read
+/// from the environment is version 1, which it is not; only one read from
+/// the environment is told so.
+#[test]
+fn only_a_version_from_the_environment_is_told_about_the_environment() {
+    for (version, why) in [
+        ("~", "; this config's `version:` is not the integer `2`"),
+        ("null", "; this config's `version:` is not the integer `2`"),
+        ("[2]", "; this config's `version:` is not the integer `2`"),
+        (
+            "'{{env.V}}'",
+            "; this config's `version:` is not the integer `2` (a version read from the \
+             environment is version 1)",
+        ),
+    ] {
+        assert_eq!(
+            message(dispatched(
+                &format!("version: {version}\nselectors: {{}}\n"),
+                &root()
+            )),
+            format!(".alint.yml: `selectors:` needs `version: 2`{why}"),
+            "{version}"
+        );
+    }
+}
+
+/// V2L-9 (b): a decimal that rounds to 2 as a float (`1.9999999999999999`)
+/// was refused as "2 written other than as the plain integer"; it is no 2,
+/// and is version 1's to refuse, as `1.5` is. A decimal that is exactly 2 is
+/// still a 2 written another way.
+#[test]
+fn a_decimal_is_two_only_when_it_is_exactly_two() {
+    let declared = |yaml: &str| declared_version(document(yaml).as_ref(), yaml);
+    for near in [
+        "1.9999999999999999",
+        "2.0000000000000001",
+        "19999999999999999e-16",
+    ] {
+        assert_eq!(
+            declared(&format!("version: {near}\n")),
+            Declared::NonLiteral,
+            "{near}"
+        );
+    }
+    for two in ["2.0", "2e0", "20e-1", "0.2e1", "+2.000", "2.", "0002.0"] {
+        assert_eq!(
+            declared(&format!("version: {two}\n")),
+            Declared::OtherTwo,
+            "{two}"
+        );
+    }
+    assert_eq!(decimal("-0.0"), Some((String::new(), 0)));
+    assert_eq!(decimal("0x2"), None);
+    assert_eq!(decimal(".inf"), None);
+}
+
+/// V2L-9 (e): a v2-only key was reported before an unknown key written
+/// before it; the dispatch leaves the earlier one to the version 1 decode.
+#[test]
+fn an_unknown_key_before_a_v2_only_key_is_reported_first() {
+    assert_eq!(
+        dispatched("version: 1\nnope: 1\nselectors: {}\n", &root()).unwrap(),
+        Surface::V1
+    );
+    assert_eq!(
+        message(dispatched("version: 1\nselectors: {}\nnope: 1\n", &root())),
+        ".alint.yml: `selectors:` needs `version: 2`; this config is version 1"
+    );
 }

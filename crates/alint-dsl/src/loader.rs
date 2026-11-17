@@ -43,6 +43,15 @@ pub(crate) struct LoadState {
     /// Every local file loaded so far, resolved: the top-level config, its
     /// drop-ins and each local `extends:` target, once each.
     pub(crate) config_files: Vec<PathBuf>,
+    /// The `extends:` sources the rules' field-source markers name.
+    pub(crate) field_source_names: crate::trust::FieldSourceNames,
+    /// The work of every `extends:` merge so far, in entries
+    /// ([`LoadState::charge_extends`]).
+    pub(crate) extends_entries: usize,
+    /// The top-level config's directory, resolved, which a local config is
+    /// named relative to ([`local_source_display`]), also where
+    /// `allow_out_of_root: true` lifts the confinement to it.
+    pub(crate) display_root: Option<PathBuf>,
 }
 
 impl Default for LoadState {
@@ -53,6 +62,9 @@ impl Default for LoadState {
             running_version: RunningVersion::current(),
             environment_values: Vec::new(),
             config_files: Vec::new(),
+            field_source_names: crate::trust::FieldSourceNames::default(),
+            extends_entries: 0,
+            display_root: None,
         }
     }
 }
@@ -64,6 +76,11 @@ pub(crate) struct SourceContext<'a> {
     /// How the config this one is read for is named, for an error about the
     /// edge between the two (a version 1 config extending a version 2 one).
     consumer_display: Option<&'a str>,
+    /// Whether an `extends:` entry read from the environment chose this
+    /// source or one it is read for: where it lies tells what the
+    /// environment holds, so every local source below such an entry is
+    /// named `<redacted>`, as the entry's own target is.
+    environment_chosen: bool,
 }
 
 impl<'a> SourceContext<'a> {
@@ -75,11 +92,18 @@ impl<'a> SourceContext<'a> {
             source_class,
             consumer_version,
             consumer_display: None,
+            environment_chosen: false,
         }
     }
 
     const fn consumed_by(mut self, display: &'a str) -> Self {
         self.consumer_display = Some(display);
+        self
+    }
+
+    /// This context, chosen by the environment too when `chosen` is.
+    const fn chosen_by_environment(mut self, chosen: bool) -> Self {
+        self.environment_chosen |= chosen;
         self
     }
 
@@ -100,14 +124,42 @@ struct MemoKey {
     trusted: Vec<String>,
     consumer_version: Option<u32>,
     source_class: ConfigSourceClass,
+    /// A source loaded below an entry read from the environment records how
+    /// its own `extends:` targets are named, which another load of it skips.
+    environment_chosen: bool,
 }
 
 impl LoadState {
-    /// Note `canonical` among the files the configuration came from.
-    fn record_config_file(&mut self, canonical: &Path) {
-        if !self.config_files.iter().any(|file| file == canonical) {
-            self.config_files.push(canonical.to_path_buf());
+    /// Note `canonical` among the files the configuration came from: its
+    /// index there.
+    fn record_config_file(&mut self, canonical: &Path) -> usize {
+        self.config_files
+            .iter()
+            .position(|file| file == canonical)
+            .unwrap_or_else(|| {
+                self.config_files.push(canonical.to_path_buf());
+                self.config_files.len() - 1
+            })
+    }
+
+    /// Charge an `extends:` merge of `source` onto `merged` (what the list
+    /// merged so far) with its work, the entries of both: a merge rebuilds
+    /// what it merges onto. One load's merges may do
+    /// [`MAX_EXTENDS_MERGE_WORK`] in all, so they are bounded however its
+    /// lists repeat a source (`[a, b, a, b, ...]`) or follow a large one with
+    /// many small ones.
+    pub(crate) fn charge_extends(&mut self, merged: &RawConfig, source: &RawConfig) -> Result<()> {
+        let work = merged.entry_count().saturating_add(source.entry_count());
+        self.extends_entries = self.extends_entries.saturating_add(work);
+        if self.extends_entries > MAX_EXTENDS_MERGE_WORK {
+            return Err(Error::Other(format!(
+                "the `extends:` merges of this config handle more than {MAX_EXTENDS_MERGE_WORK} \
+                 entries in all (rules, templates, facts, vars and `ignore:` patterns, counted \
+                 at each merge, both what was merged so far and what the entry brings in); \
+                 list each source once, or flatten the `extends:` chain"
+            )));
         }
+        Ok(())
     }
 
     fn remember(&mut self, key: MemoKey, config: &RawConfig) {
@@ -131,15 +183,15 @@ impl MemoKey {
         path: &Path,
         confine: Option<&Path>,
         trusted: &[String],
-        consumer_version: Option<u32>,
-        source_class: ConfigSourceClass,
+        context: &SourceContext<'_>,
     ) -> Self {
         Self {
             path: path.to_path_buf(),
             confine: confine.map(Path::to_path_buf),
             trusted: trusted.to_vec(),
-            consumer_version,
-            source_class,
+            consumer_version: context.consumer_version,
+            source_class: context.source_class,
+            environment_chosen: context.environment_chosen,
         }
     }
 }
@@ -238,9 +290,8 @@ pub(crate) fn validate_source_compatibility(
     let experimental = version == crate::v2::VERSION && config.surface == crate::v2::Surface::V2;
     if !alint_core::Config::supports_version(version) && !experimental {
         return Err(Error::Other(format!(
-            "{source}: unsupported config version {version} (this build supports {} through {})",
-            alint_core::Config::MIN_SUPPORTED_VERSION,
-            alint_core::Config::CURRENT_VERSION
+            "{source}: {}",
+            crate::v2::unsupported_version(version)
         )));
     }
     if let Some(consumer) = consumer_version
@@ -273,9 +324,13 @@ pub(crate) fn source_version_allowed(consumer: u32, source: u32) -> bool {
     source <= consumer
 }
 
-fn local_source_display(path: &Path, confine: Option<&Path>) -> String {
-    confine
-        .and_then(|root| path.strip_prefix(root).ok())
+/// How errors and listings name the local config at `path` (resolved): by
+/// its path relative to `root` (the top-level config's directory, resolved),
+/// `../`-relative when it lies outside (`allow_out_of_root: true` lets an
+/// `extends:` chain leave the root). Without a root, or on another Windows
+/// drive, by its file name.
+fn local_source_display(path: &Path, root: Option<&Path>) -> String {
+    root.and_then(|root| relative_to(path, root))
         .filter(|relative| !relative.as_os_str().is_empty())
         .map_or_else(
             || {
@@ -284,8 +339,41 @@ fn local_source_display(path: &Path, confine: Option<&Path>) -> String {
                     |name| name.to_string_lossy().into_owned(),
                 )
             },
-            display_path,
+            |relative| display_path(&relative),
         )
+}
+
+/// `path` relative to `root`, with a `..` for each of `root`'s components
+/// past the two's common prefix; `None` when they share no root.
+fn relative_to(path: &Path, root: &Path) -> Option<PathBuf> {
+    if let Ok(inside) = path.strip_prefix(root) {
+        return Some(inside.to_path_buf());
+    }
+    let mut path_parts = path.components().peekable();
+    let mut root_parts = root.components().peekable();
+    let mut shared = 0;
+    while let (Some(a), Some(b)) = (path_parts.peek(), root_parts.peek()) {
+        if a != b {
+            break;
+        }
+        path_parts.next();
+        root_parts.next();
+        shared += 1;
+    }
+    // Two paths with no common prefix, or only a Windows prefix (`C:`) with
+    // no root, have no relative path between them.
+    let rooted = path
+        .components()
+        .take(shared)
+        .any(|part| matches!(part, std::path::Component::RootDir));
+    if !rooted {
+        return None;
+    }
+    let mut relative: PathBuf = root_parts
+        .map(|_| std::path::Component::ParentDir)
+        .collect();
+    relative.extend(path_parts);
+    Some(relative)
 }
 
 fn remote_source_display(entry: &str) -> String {
@@ -537,8 +625,13 @@ fn reproduce_or_redact(
     let reproduced = masked.is_none_or(|masked| {
         alint_core::NumberMask::BOTH.into_iter().any(|numbers| {
             let mut masked = masked.clone();
-            crate::interp::interpolate_masked(&mut masked, &|name| environment.get(name), numbers)
-                .is_ok()
+            crate::interp::interpolate_masked(
+                &mut masked,
+                &|name| environment.get(name),
+                numbers,
+                crate::interp::Scope::Document,
+            )
+            .is_ok()
                 && decode_value(masked, surface)
                     .err()
                     .is_some_and(|masked_error| masked_error.to_string() == error.to_string())
@@ -574,6 +667,44 @@ fn v2_environment_of(
     }
 }
 
+/// The decode of `contents` made before its version is known, or the config
+/// itself when that decode settles it (`Break`). A config that interpolates
+/// nothing decodes straight from the text. Most such configs are version 1
+/// with nothing of version 2 in them, which that one decode proves: they need
+/// no second parse to read their `version:`, and decode once, as before
+/// version 2. One that opens with `version: 2` decodes as version 2 reads it,
+/// with the v2-only keys taken aside.
+fn decode_from_text(
+    contents: &str,
+    source: &str,
+    origin: &crate::v2::Origin<'_>,
+) -> std::ops::ControlFlow<Result<RawConfig>, Option<TextDecode>> {
+    use std::ops::ControlFlow::{Break, Continue};
+
+    if contents.contains("{{") {
+        return Continue(None);
+    }
+    if opens_with_version_two(contents) {
+        return Continue(Some(TextDecode::AsV2(deserialize_document(
+            contents,
+            source,
+            |document: &crate::v2::Document| &document.config,
+        ))));
+    }
+    let decoded = deserialize_raw_config(contents, source);
+    if let Ok(config) = &decoded
+        && crate::v2::plainly_v1(config, origin)
+    {
+        return Break(crate::reject_ambiguous_yaml_in(config, source).and(decoded));
+    }
+    // A version 1 decode error stands as it is, without the parse that reads
+    // the version, unless the text could be something else.
+    if decoded.is_err() && !crate::v2::may_select_version_two(contents, origin) {
+        return Break(decoded);
+    }
+    Continue(Some(TextDecode::AsV1(decoded)))
+}
+
 fn parse_config_interpolated_inner_with_environment(
     contents: &str,
     source: &Path,
@@ -583,28 +714,9 @@ fn parse_config_interpolated_inner_with_environment(
     reject_yaml_bombs(contents, source)?;
     let source_path = source;
     let source = display_path(source);
-    // A config that interpolates nothing decodes straight from the text. Most
-    // such configs are version 1 with nothing of version 2 in them, which that
-    // one decode proves: they need no second parse to read their `version:`,
-    // and decode once, as before version 2. One that opens with `version: 2`
-    // decodes as version 2 reads it, with the v2-only keys taken aside.
-    let text_decode = if contents.contains("{{") {
-        None
-    } else if opens_with_version_two(contents) {
-        Some(TextDecode::AsV2(deserialize_document(
-            contents,
-            &source,
-            |document: &crate::v2::Document| &document.config,
-        )))
-    } else {
-        let decoded = deserialize_raw_config(contents, &source);
-        if let Ok(config) = &decoded
-            && crate::v2::plainly_v1(config, origin)
-        {
-            crate::reject_ambiguous_yaml_in(config, &source)?;
-            return decoded;
-        }
-        Some(TextDecode::AsV1(decoded))
+    let text_decode = match decode_from_text(contents, &source, origin) {
+        std::ops::ControlFlow::Break(settled) => return settled,
+        std::ops::ControlFlow::Continue(text_decode) => text_decode,
     };
     // The version decides the language before any typed decode (design section
     // 3 item 1). A document that does not parse dispatches as version 1, whose
@@ -729,10 +841,9 @@ fn reject_yaml_bombs(contents: &str, source: &Path) -> Result<()> {
 }
 
 /// Decode a version 2 source's selectors, relations and aliases onto
-/// `config`, with the source that declared them, and mark each field of its
-/// rules and templates as written by it. Every version 2 source is recorded,
-/// one that declares nothing too: its rules' references resolve in its
-/// (empty) namespace, and an alias may name it.
+/// `config`, with the source that declared them. Every version 2 source is
+/// recorded, one that declares nothing too: its rules' references resolve in
+/// its (empty) namespace, and an alias may name it.
 fn attach_v2_objects(
     config: &mut RawConfig,
     v2_keys: &[(String, ayaml::Value)],
@@ -784,8 +895,6 @@ fn attach_v2_objects(
             );
         }
     }
-    crate::v2::mark_field_origins(&mut config.rules, source_path);
-    crate::v2::mark_field_origins(&mut config.templates, source_path);
     config.v2.sources.push(objects);
     Ok(())
 }
@@ -812,7 +921,7 @@ impl Masked<'_> {
         let mut document = self.document.clone();
         let mut part = std::mem::replace(locus.find_mut(&mut document)?, ayaml::Value::Null);
         crate::interp::interpolate_value(&mut document, &lookup).ok()?;
-        crate::interp::interpolate_masked(&mut part, &lookup, numbers).ok()?;
+        crate::interp::interpolate_masked(&mut part, &lookup, numbers, locus.scope()).ok()?;
         *locus.find_mut(&mut document)? = part;
         Some(document)
     }
@@ -825,8 +934,8 @@ impl Masked<'_> {
         numbers: alint_core::NumberMask,
     ) -> Option<ayaml::Value> {
         let mut part = locus.find(self.document)?.clone();
-        crate::interp::interpolate_masked(&mut part, &|name| self.environment.get(name), numbers)
-            .ok()?;
+        let lookup = |name: &str| self.environment.get(name);
+        crate::interp::interpolate_masked(&mut part, &lookup, numbers, locus.scope()).ok()?;
         Some(part)
     }
 }
@@ -1006,16 +1115,8 @@ pub(crate) fn load_recursive(
         })?;
     // Diamond chains reload a shared file once per DAG path (2^depth); a
     // non-top-level load is a pure function of its `MemoKey`, so reuse it.
-    let memo_key = (!is_top).then(|| {
-        MemoKey::new(
-            &canonical,
-            confine,
-            trusted,
-            context.consumer_version,
-            context.source_class,
-        )
-    });
-    state.record_config_file(&canonical);
+    let memo_key = (!is_top).then(|| MemoKey::new(&canonical, confine, trusted, &context));
+    let file = state.record_config_file(&canonical);
     if let Some(cached) = state.cached(memo_key.as_ref()) {
         return Ok(cached);
     }
@@ -1040,8 +1141,8 @@ pub(crate) fn load_recursive(
         )));
     }
 
-    let display = local_source_display(&canonical, confine);
-    let mut config = read_local_config(&canonical, &display, state, opts, context)?;
+    let display = local_source_display(&canonical, confine.or(state.display_root.as_deref()));
+    let mut config = read_local_config(&canonical, file, &display, state, opts, context)?;
 
     // W2 (auto-fix.md 5.5): `trusted_extends:` is a top-level authority. An is_top
     // config (the user's own `.alint.yml` or a `.alint.d/` drop-in) owns the
@@ -1096,21 +1197,43 @@ pub(crate) fn load_recursive(
         version: config.version,
         ..RawConfig::default()
     };
+    let keys: Vec<EntryKey<'_>> = extends
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| {
+            let from_environment = extends_environment.get(index).copied().unwrap_or(false);
+            EntryKey::of(&entry.entry, from_environment)
+        })
+        .collect();
+    let mut repeats = Repeats::of(&keys);
     for (index, entry) in extends.iter().enumerate() {
-        let parent = load_extended_source(
-            &entry.entry,
-            extends_environment.get(index).copied().unwrap_or(false),
-            &source_dir,
-            state,
-            opts,
-            confine,
-            trusted,
-            SourceContext::new(ConfigSourceClass::LocalExtend, config.version)
-                .consumed_by(&display),
-        )?;
+        let key = &keys[index];
+        let parent = match repeats.take(key) {
+            Some(parent) => parent,
+            None => load_extended_source(
+                &entry.entry,
+                key.from_environment,
+                &source_dir,
+                state,
+                opts,
+                confine,
+                trusted,
+                SourceContext::new(ConfigSourceClass::LocalExtend, config.version)
+                    .consumed_by(&display)
+                    .chosen_by_environment(context.environment_chosen),
+            )?,
+        };
         if config.v2.has_sources() {
-            record_extended(&mut config.v2, entry, &source_dir, opts);
+            record_extended(&mut config.v2, index, entry, &source_dir, opts);
         }
+        // An entry that repeats the one before it merges the same source onto
+        // itself, which changes nothing.
+        if index > 0 && keys[index - 1] == *key {
+            repeats.hold(key, parent);
+            continue;
+        }
+        let parent = repeats.hold_copy(key, parent);
+        state.charge_extends(&merged, &parent)?;
         merged = merge(merged, parent)?;
     }
     merged = merge(merged, config)?;
@@ -1121,13 +1244,89 @@ pub(crate) fn load_recursive(
     Ok(merged)
 }
 
-/// Record on a version 2 source's `objects` where its `extends:` `entry`
-/// leads, for qualified references to resolve. Only a version 2 source has
-/// objects to record it on, so only it pays to resolve a local target (which
-/// has just loaded, so it resolves); kept out of line for the same reason.
+/// The entries one load's `extends:` merges may handle, in all
+/// ([`LoadState::charge_extends`]): four merged configs of the largest size.
+/// A config that extends 80 rulesets of a thousand rules each spends about
+/// three quarters of it.
+pub(crate) const MAX_EXTENDS_MERGE_WORK: usize = 4 * crate::MAX_MERGED_ENTRIES;
+
+/// What makes two entries of one `extends:` list load the same source, gated
+/// and filtered the same way: the entry, and whether it read the environment.
+#[derive(PartialEq, Eq, Hash)]
+struct EntryKey<'e> {
+    url: &'e str,
+    only: Option<&'e [String]>,
+    except: Option<&'e [String]>,
+    from_environment: bool,
+}
+
+impl<'e> EntryKey<'e> {
+    fn of(entry: &'e alint_core::ExtendsEntry, from_environment: bool) -> Self {
+        Self {
+            url: entry.url(),
+            only: entry.only(),
+            except: entry.except(),
+            from_environment,
+        }
+    }
+}
+
+/// The sources an `extends:` list names more than once: each is loaded, gated
+/// and filtered for its first entry and reused by the later ones, and dropped
+/// after its last. Two thousand entries of one ruleset of two thousand rules
+/// otherwise loaded it two thousand times (152 seconds).
+struct Repeats<'k, 'e> {
+    /// Each key's entries after the current one.
+    left: std::collections::HashMap<&'k EntryKey<'e>, usize>,
+    /// The source of each key with entries left.
+    held: std::collections::HashMap<&'k EntryKey<'e>, RawConfig>,
+}
+
+impl<'k, 'e> Repeats<'k, 'e> {
+    fn of(keys: &'k [EntryKey<'e>]) -> Self {
+        let mut left = std::collections::HashMap::new();
+        for key in keys {
+            left.entry(key).and_modify(|count| *count += 1).or_insert(0);
+        }
+        Self {
+            left,
+            held: std::collections::HashMap::new(),
+        }
+    }
+
+    /// The source of `key`'s entry, if an earlier entry loaded it.
+    fn take(&mut self, key: &'k EntryKey<'e>) -> Option<RawConfig> {
+        self.held.remove(key)
+    }
+
+    /// Keep `source` for `key`'s later entries, if it has any.
+    fn hold(&mut self, key: &'k EntryKey<'e>, source: RawConfig) {
+        if let Some(left) = self.left.get_mut(key)
+            && *left > 0
+        {
+            *left -= 1;
+            self.held.insert(key, source);
+        }
+    }
+
+    /// `source`, after keeping a copy for `key`'s later entries, if it has any.
+    fn hold_copy(&mut self, key: &'k EntryKey<'e>, source: RawConfig) -> RawConfig {
+        if self.left.get(key).is_some_and(|left| *left > 0) {
+            self.hold(key, source.clone());
+        }
+        source
+    }
+}
+
+/// Record on a version 2 source's `objects` where its `extends:` `entry` (at
+/// `index`) leads, for qualified references to resolve. Only a version 2
+/// source has objects to record it on, so only it pays to resolve a local
+/// target (which has just loaded, so it resolves); kept out of line for the
+/// same reason.
 #[inline(never)]
 fn record_extended(
     objects: &mut crate::v2::Objects,
+    index: usize,
     entry: &crate::v2::ExtendsEntry,
     source_dir: &Path,
     opts: &LoadOptions<'_>,
@@ -1136,13 +1335,14 @@ fn record_extended(
     let target = (ExtendsEntryKind::of(url) == ExtendsEntryKind::Local)
         .then(|| resolve_relative(source_dir, url))
         .and_then(|target| opts.config_source.canonicalize(&target).ok());
-    objects.record_extended(entry.alias.as_deref(), target.as_deref());
+    objects.record_extended(index, target.as_deref());
 }
 
-/// Read, parse and check the local config at `canonical`, which errors name
-/// `display`.
+/// Read, parse and check the local config at `canonical`, the configuration's
+/// file `file` (its index), which errors name `display`.
 fn read_local_config(
     canonical: &Path,
+    file: usize,
     display: &str,
     state: &mut LoadState,
     opts: &LoadOptions<'_>,
@@ -1168,6 +1368,12 @@ fn read_local_config(
             context.consumer_version,
             state.running_version,
         )?;
+        // Each field of a version 2 source's rules and templates is written
+        // by it, for a field that names a relation to resolve there.
+        if config.surface == crate::v2::Surface::V2 {
+            crate::v2::mark_field_origins(&mut config.rules, file);
+            crate::v2::mark_field_origins(&mut config.templates, file);
+        }
     }
     parsed
 }
@@ -1256,10 +1462,15 @@ fn load_extended_source(
             return Err(path_of_its_own_refusal(&source_display));
         }
         let target = resolve_relative(source_dir, url);
-        if from_environment {
+        // A target the environment chose, or one a source it chose extends,
+        // is named `<redacted>` wherever it is named, so the forms the
+        // loader names it in are recorded with the environment's values.
+        let context = context.chosen_by_environment(from_environment);
+        if context.environment_chosen {
             let mut normalized = vec![display_path(&target)];
             if let Ok(canonical) = opts.config_source.canonicalize(&target) {
-                normalized.push(local_source_display(&canonical, confine));
+                let root = confine.or(state.display_root.as_deref());
+                normalized.push(local_source_display(&canonical, root));
                 normalized.push(display_path(&canonical));
             }
             add_environment_values(&mut state.environment_values, &normalized);
@@ -1268,9 +1479,11 @@ fn load_extended_source(
         load_recursive(&target, state, opts, confine, false, trusted, context)?
     };
     gate_extended_source(&parent, &source_display, opts.kind_catalog)?;
+    let field_source = state.field_source_names.intern(&source_display);
     mark_extended_provenance(
         &mut parent,
         &source_display,
+        &field_source,
         kind == ExtendsEntryKind::Https,
     );
     parent.drop_top_level_settings(&alint_core::redact_environment_values(
@@ -1291,15 +1504,20 @@ fn load_extended_source(
 /// `parent`'s rules / templates, so `finalize` can judge the EFFECTIVE rule
 /// after the id-based field-merge has blurred where each field came from (e.g.
 /// refuse any contribution to a spawning rule, or a remote-assembled `${` env
-/// reference).
-fn mark_extended_provenance(parent: &mut RawConfig, url: &str, remote: bool) {
+/// reference). `field_source` names `url` in the field-source marker.
+fn mark_extended_provenance(
+    parent: &mut RawConfig,
+    url: &str,
+    field_source: &ayaml::Value,
+    remote: bool,
+) {
     let classes: &[crate::SourceClass] = if remote {
         &[crate::SourceClass::Extended, crate::SourceClass::Remote]
     } else {
         &[crate::SourceClass::Extended]
     };
-    crate::trust::mark_extended_source_in(&mut parent.rules, url, classes);
-    crate::trust::mark_extended_source_in(&mut parent.templates, url, classes);
+    crate::trust::mark_extended_source_in(&mut parent.rules, url, field_source, classes);
+    crate::trust::mark_extended_source_in(&mut parent.templates, url, field_source, classes);
 }
 
 /// Apply the restrictions on a remote `extends:` the user has NOT listed in

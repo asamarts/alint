@@ -58,20 +58,23 @@ impl Plan {
         &self.relations[id.0]
     }
 
-    /// The aliases other sources give `source` (`extends: [{ url, as }]`),
-    /// each with the source that wrote it, in load order: the names through
-    /// which a consumer reaches `source`'s objects.
-    pub fn aliases_of(
-        &self,
-        source: SourceIndex,
-    ) -> impl Iterator<Item = (&PlanSource, &PlanAlias)> + '_ {
-        self.sources.iter().flat_map(move |consumer| {
-            consumer
-                .aliases
-                .iter()
-                .filter(move |alias| alias.target == Some(source))
-                .map(move |alias| (consumer, alias))
-        })
+    /// The aliases other sources give each source (`extends: [{ url, as }]`),
+    /// indexed by [`SourceIndex`], each with the source that wrote it, in load
+    /// order: the names through which a consumer reaches a source's objects.
+    /// Built in one pass over every alias, so a caller that wants the aliases
+    /// of every source looks each source's up instead of reading every alias
+    /// once per source.
+    #[must_use]
+    pub fn aliases_by_source(&self) -> Vec<Vec<(SourceIndex, &PlanAlias)>> {
+        let mut by_source = vec![Vec::new(); self.sources.len()];
+        for (consumer, source) in self.sources.iter().enumerate() {
+            for alias in &source.aliases {
+                if let Some(aliases) = alias.target.and_then(|target| by_source.get_mut(target.0)) {
+                    aliases.push((SourceIndex(consumer), alias));
+                }
+            }
+        }
+        by_source
     }
 
     /// The references rule `id` makes, if any.
@@ -109,7 +112,7 @@ pub struct PlanSource {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlanAlias {
     pub name: String,
-    /// The entry's URL, as written.
+    /// The entry's URL, after `{{env.X}}` interpolation.
     pub url: String,
     /// The source it names, when that source is version 2 (a version 1
     /// source declares no selector or relation).
@@ -452,7 +455,7 @@ mod tests {
     }
 
     #[test]
-    fn aliases_of_lists_each_consumer_alias() {
+    fn aliases_by_source_lists_each_consumer_alias() {
         let alias = |name: &str, target: Option<usize>| PlanAlias {
             name: name.into(),
             url: format!("./{name}.yml"),
@@ -469,12 +472,17 @@ mod tests {
             ],
             ..Plan::default()
         };
-        let found: Vec<(&str, &str)> = plan
-            .aliases_of(SourceIndex(0))
-            .map(|(consumer, alias)| (consumer.display.as_str(), alias.name.as_str()))
+        let by_source = plan.aliases_by_source();
+        let found: Vec<(&str, &str)> = by_source[0]
+            .iter()
+            .map(|(consumer, alias)| {
+                let consumer = plan.source(*consumer).display.as_str();
+                (consumer, alias.name.as_str())
+            })
             .collect();
         assert_eq!(found, [(".alint.yml", "base"), (".alint.d/a.yml", "b")]);
-        assert_eq!(plan.aliases_of(SourceIndex(1)).count(), 0);
+        assert!(by_source[1].is_empty() && by_source[2].is_empty());
+        assert_eq!(by_source.len(), 3);
     }
 
     #[test]

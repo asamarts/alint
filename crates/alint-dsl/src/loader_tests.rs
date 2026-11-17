@@ -166,8 +166,7 @@ fn memo_clones_a_config_only_once_it_is_seen_twice() {
             Path::new("/repo/base.yml"),
             Some(Path::new("/repo")),
             &[],
-            Some(1),
-            ConfigSourceClass::LocalExtend,
+            &SourceContext::new(ConfigSourceClass::LocalExtend, Some(1)),
         )
     };
     let config = RawConfig {
@@ -186,21 +185,17 @@ fn memo_clones_a_config_only_once_it_is_seen_twice() {
 #[test]
 fn memoization_separates_consumer_versions() {
     let path = Path::new("/repo/base.yml");
-    let v1 = MemoKey::new(
-        path,
-        Some(Path::new("/repo")),
-        &[],
-        Some(1),
-        ConfigSourceClass::LocalExtend,
-    );
-    let v2 = MemoKey::new(
-        path,
-        Some(Path::new("/repo")),
-        &[],
-        Some(2),
-        ConfigSourceClass::LocalExtend,
-    );
+    let key =
+        |context: SourceContext<'_>| MemoKey::new(path, Some(Path::new("/repo")), &[], &context);
+    let v1 = key(SourceContext::new(ConfigSourceClass::LocalExtend, Some(1)));
+    let v2 = key(SourceContext::new(ConfigSourceClass::LocalExtend, Some(2)));
     assert!(v1 != v2);
+    // A source the environment chose names its own targets `<redacted>`,
+    // which a load of it that the environment did not choose skipped.
+    let chosen = key(
+        SourceContext::new(ConfigSourceClass::LocalExtend, Some(1)).chosen_by_environment(true)
+    );
+    assert!(v1 != chosen);
 }
 
 #[test]
@@ -1184,4 +1179,29 @@ fn a_v2_object_error_beside_an_unmaskable_value_elsewhere_stays_readable() {
         ".alint.yml: `relations.b`: <redacted> (the error could quote a value read from the \
          environment)"
     );
+}
+
+/// A config is named by its path from the root, `../`-relative outside it,
+/// and by its file name only when the two share no root.
+#[test]
+fn a_config_is_named_relative_to_the_root_inside_it_or_not() {
+    let top = Path::new(if cfg!(windows) { "C:\\" } else { "/" }).join("r");
+    let root = top.join("repo");
+    let shown = |parts: &[&str]| -> String { display_path(&parts.iter().collect::<PathBuf>()) };
+    let named = |path: PathBuf| local_source_display(&path, Some(&root));
+    assert_eq!(
+        named(root.join("rules").join("base.yml")),
+        shown(&["rules", "base.yml"])
+    );
+    assert_eq!(
+        named(top.join("a").join("rules.yml")),
+        shown(&["..", "a", "rules.yml"])
+    );
+    assert_eq!(
+        named(top.parent().unwrap().join("x").join("rules.yml")),
+        shown(&["..", "..", "x", "rules.yml"])
+    );
+    // A relative path shares no root with the root.
+    assert_eq!(named(Path::new("a").join("rules.yml")), "rules.yml");
+    assert_eq!(local_source_display(&root.join("a.yml"), None), "a.yml");
 }

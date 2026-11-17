@@ -334,8 +334,14 @@ fn experimental_version_warning(version: u32, config_path: &Path) -> Option<Stri
 /// run, whatever `--quiet` says: like the warning for a skipped config, it is
 /// about what was loaded, not a finding.
 pub(super) fn warn_if_experimental(config: &alint_core::Config, config_path: &Path) {
+    warn_if_experimental_version(config.version, config_path);
+}
+
+/// [`warn_if_experimental`] for a config of `version` at `config_path` (for
+/// `alint test`, the policy test that holds it).
+pub(super) fn warn_if_experimental_version(version: u32, config_path: &Path) {
     static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    if let Some(warning) = experimental_version_warning(config.version, config_path)
+    if let Some(warning) = experimental_version_warning(version, config_path)
         && !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed)
     {
         eprintln!("alint: warning: {}", term(&warning));

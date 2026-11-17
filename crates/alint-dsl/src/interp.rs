@@ -34,6 +34,48 @@ const SKIP_KEYS: &[&str] = &["id", "kind", "level"];
 /// one turns on [`SKIP_KEYS`] suppression for the whole subtree.
 const RULE_BEARING_KEYS: &[&str] = &["rules", "templates"];
 
+/// A version 2 config's top-level keys whose values are selectors and
+/// relations: a value substituted there stays a string ([`Scope::Objects`]).
+const OBJECT_KEYS: &[&str] = &["selectors", "relations"];
+
+/// Where in a config a value sits, which decides the keys that stay literal
+/// and whether a value that took a substitution is re-typed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Scope {
+    /// A whole config document: each top-level key decides the scope of its
+    /// value.
+    Document,
+    /// Outside a rule (`vars:`, `facts:`, `extends:`, ...): a value that took
+    /// a substitution and reads as a number or a bool is re-typed.
+    Plain,
+    /// Inside a rule or template entry (a [`RULE_BEARING_KEYS`] key, at any
+    /// depth): [`SKIP_KEYS`] stay literal, and a value is re-typed as in
+    /// [`Scope::Plain`]. Nested rules (a `for_each_dir`'s `require:`) inherit
+    /// it.
+    Rule,
+    /// Inside version 2's `selectors:` or `relations:`: a substituted value
+    /// stays a string, as every value there that can read the environment
+    /// (a glob, a `JSONPath`, a pattern, a value to compare) is text: an
+    /// `in: ["{{env.NODE_MAJOR}}"]` compares with `18`, not the number 18.
+    Objects,
+}
+
+impl Scope {
+    /// The scope of the value under `key` of a mapping in this scope.
+    fn below(self, key: Option<&str>) -> Self {
+        match self {
+            Self::Rule | Self::Objects => self,
+            Self::Document if key.is_some_and(|key| OBJECT_KEYS.contains(&key)) => Self::Objects,
+            Self::Document | Self::Plain
+                if key.is_some_and(|key| RULE_BEARING_KEYS.contains(&key)) =>
+            {
+                Self::Rule
+            }
+            Self::Document | Self::Plain => Self::Plain,
+        }
+    }
+}
+
 /// An interpolation failure, carried back to the loader which maps it
 /// onto [`alint_core::Error`] with the offending config site prepended.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,36 +135,35 @@ pub(crate) fn interpolate_value<F>(value: &mut Value, env: &F) -> Result<(), Int
 where
     F: Fn(&str) -> Option<String>,
 {
-    walk(value, env, false, None, None)
+    walk(value, env, Scope::Document, None, None)
 }
 
-/// [`interpolate_value`], then every scalar that took a substitution replaced
-/// by one of the same type that differs from it
-/// ([`alint_core::mask_configuration_field`], numbers moved as `numbers`
-/// names): the copy a load error is rerun on. An error that recurs on it
-/// cannot quote an environment value, and one about an unrelated field still
-/// recurs, because each masked value keeps the type interpolation gave it.
+/// [`interpolate_value`] of `value`, which sits in `scope` of a config, then
+/// every scalar that took a substitution replaced by one of the same type
+/// that differs from it ([`alint_core::mask_configuration_field`], numbers
+/// moved as `numbers` names): the copy a load error is rerun on. An error
+/// that recurs on it cannot quote an environment value, and one about an
+/// unrelated field still recurs, because each masked value keeps the type
+/// interpolation gave it.
 pub(crate) fn interpolate_masked<F>(
     value: &mut Value,
     env: &F,
     numbers: alint_core::NumberMask,
+    scope: Scope,
 ) -> Result<(), InterpError>
 where
     F: Fn(&str) -> Option<String>,
 {
-    walk(value, env, false, Some(numbers), None)
+    walk(value, env, scope, Some(numbers), None)
 }
 
-/// `in_rule_scope` is `true` while descending through a rule / template
-/// entry (anything under a top-level [`RULE_BEARING_KEYS`] key), where
-/// [`SKIP_KEYS`] must stay literal. It latches on: once inside a rule,
-/// nested rules (e.g. a `for_each_dir`'s `require:` list) inherit it.
-/// `field` is the key a value inside a rule sits under, which decides how it
-/// is masked ([`alint_core::mask_configuration_field`]).
+/// `scope` is where `value` sits ([`Scope`]). `field` is the key a value
+/// inside a rule sits under, which decides how it is masked
+/// ([`alint_core::mask_configuration_field`]).
 fn walk<F>(
     value: &mut Value,
     env: &F,
-    in_rule_scope: bool,
+    scope: Scope,
     mask: Option<alint_core::NumberMask>,
     field: Option<&str>,
 ) -> Result<(), InterpError>
@@ -138,7 +179,8 @@ where
             // substituted something — so an interpolated integer-field
             // value validates as a number rather than a string, while
             // pre-existing literal strings are never silently re-typed.
-            if result.substituted && !result.text.contains("{{") {
+            // A selector's or relation's value stays text.
+            if result.substituted && !result.text.contains("{{") && scope != Scope::Objects {
                 *value = retype_scalar(result.text);
             } else {
                 *s = result.text;
@@ -153,22 +195,23 @@ where
             Ok(())
         }
         Value::Sequence(seq) => {
+            // A document that is a list holds no top-level keys.
+            let scope = scope.below(None);
             for v in seq.iter_mut() {
-                walk(v, env, in_rule_scope, mask, None)?;
+                walk(v, env, scope, mask, None)?;
             }
             Ok(())
         }
         Value::Mapping(map) => {
             for (k, v) in &mut *map {
                 let key = k.as_str();
-                if in_rule_scope && key.is_some_and(|kk| SKIP_KEYS.contains(&kk)) {
+                if scope == Scope::Rule && key.is_some_and(|kk| SKIP_KEYS.contains(&kk)) {
                     continue;
                 }
-                // A top-level `rules:` / `templates:` key turns the
-                // skip on for its subtree; once on, it stays on.
-                let child_scope =
-                    in_rule_scope || key.is_some_and(|kk| RULE_BEARING_KEYS.contains(&kk));
-                walk(v, env, child_scope, mask, key.filter(|_| child_scope))?;
+                // A `rules:` / `templates:` key turns the skip on for its
+                // subtree; once on, it stays on.
+                let below = scope.below(key);
+                walk(v, env, below, mask, key.filter(|_| below == Scope::Rule))?;
             }
             Ok(())
         }

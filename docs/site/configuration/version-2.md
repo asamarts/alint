@@ -25,7 +25,8 @@ and relations are loaded and checked when the config loads, and do nothing else.
 > ```
 >
 > `alint validate-config` names the version on its success line and, with `--format json`, puts
-> the warning in `warnings` and the version in `config_version`. The language server loads a
+> the warning in `warnings` and the version in `config_version`. `alint test` prints it once per
+> run, naming the first policy test whose config is version 2. The language server loads a
 > version 2 config without the warning.
 
 ## The version boundary
@@ -275,8 +276,10 @@ A name, an alias and a field name start with an ASCII letter or `_` and hold onl
 digits, `_` and `-`. A config file declares each name once, across its selectors, relations and
 aliases. Names, aliases and references are literal: `{{...}}` in one is an error, since it must
 name the same thing in every environment. Other values interpolate `{{env.X}}` as in version 1,
-and an error that could quote a value read from the environment is redacted to the selector or
-relation it is about, as a version 1 rule's is.
+except that a value substituted in a selector or relation stays text: with `NODE_MAJOR=18`,
+`in: ["{{env.NODE_MAJOR}}"]` compares with the text `18`, where a rule's value re-types as a
+number. An error that could quote a value read from the environment is redacted to the selector
+or relation it is about, as a version 1 rule's is.
 
 Each config file has its own namespace:
 
@@ -345,7 +348,11 @@ file can reach or the nearest one:
 ```
 
 `alint list` shows each named selector and relation after the rules, with the file that declares
-it and the aliases that reach that file; `alint export-agents-md` lists them the same way.
+it, then one line per file an alias reaches, with every alias that reaches it;
+`alint export-agents-md` lists them the same way. A file is named by its path from the top-level
+config's directory, `../`-relative when `allow_out_of_root: true` lets an `extends:` chain leave
+it. A file an `extends:` entry read from the environment chooses, and every file it extends in
+turn, is named `<redacted>`.
 
 ## What the loader checks
 
@@ -486,4 +493,8 @@ reference, field source, transform, format, `read:` form and count. It cannot ch
 - regexes, a `read:` regex's capture group and JSONPaths;
 - which files may be version 2, and that a version 1 config does not extend a version 2 one;
 - YAML tags, and a key YAML reads as a boolean or null (`true:`), which an editor reads as text;
-- that `only:` and `except:` are not both set on one `extends:` entry, as in version 1.
+- a `version:` of 2 written as another number (`2.0`, `+2`, `0x2`, `0o2`, `2e0`), which JSON
+  reads as the number 2 and alint refuses;
+- as in version 1: that `only:` and `except:` are not both set on one `extends:` entry, a glob
+  that does not compile (`paths: "a["`), a `has_ancestor:` that is a path or a glob (`a/b`,
+  `*.json`), and a plain `http://` `extends:` entry.

@@ -43,6 +43,10 @@ pub struct RunnerOptions {
 pub struct Runner {
     options: RunnerOptions,
     registry: alint_core::RuleRegistry,
+    /// The first experimental config version a test's config loaded as, for
+    /// the host to warn about once ([`Runner::experimental_config_version`]);
+    /// shared with the runner's clones.
+    experimental: Arc<std::sync::OnceLock<u32>>,
 }
 
 struct ExecutionContext<'a> {
@@ -92,7 +96,16 @@ impl Runner {
         Self {
             options,
             registry: alint_rules::builtin_registry(),
+            experimental: Arc::default(),
         }
+    }
+
+    /// The first experimental config version (`version: 2` in v0.23) any
+    /// test's config loaded as on this runner or its clones, so far: a host
+    /// warns that its syntax may change, as `alint check` does.
+    #[must_use]
+    pub fn experimental_config_version(&self) -> Option<u32> {
+        self.experimental.get().copied()
     }
 
     /// Replace the built-in rule registry, e.g. for a host that adds plugin
@@ -350,6 +363,20 @@ impl Runner {
         }
     }
 
+    /// Load the config under test, noting an experimental version
+    /// ([`Runner::experimental_config_version`]).
+    fn load_config(
+        &self,
+        path: &Path,
+        options: &alint_dsl::LoadOptions<'_>,
+    ) -> alint_core::Result<alint_core::Config> {
+        let config = alint_dsl::load_with(path, options)?;
+        if alint_dsl::EXPERIMENTAL_CONFIG_VERSIONS.contains(&config.version) {
+            let _ = self.experimental.set(config.version);
+        }
+        Ok(config)
+    }
+
     #[allow(clippy::too_many_lines)]
     fn prepare_step(&self, step: TestStep, context: &ExecutionContext<'_>) -> Result<PreparedStep> {
         let registry = self.registry.clone();
@@ -363,7 +390,7 @@ impl Runner {
             repository_root: Some(context.repository.to_path_buf()),
             global_git_excludes: false,
         };
-        let config = match alint_dsl::load_with(context.config_path, &options) {
+        let config = match self.load_config(context.config_path, &options) {
             Ok(config) => config,
             Err(error) => {
                 return Ok(prepared_configuration_error(&error.to_string(), context));

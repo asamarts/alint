@@ -637,3 +637,44 @@ expect:
         );
     }
 }
+
+/// A policy test whose config is `version: 2` ran it with no word that
+/// version 2 is experimental, where `alint check` on the same config warns.
+/// `alint test` warns once a run, naming the first such test.
+#[test]
+fn a_version_two_config_under_test_warns_once_a_run() {
+    let root = tempfile::tempdir().unwrap();
+    let v2 = |name: &str| {
+        passing_test(name, "fast", None).replace(
+            "    version: 1\n    rules:",
+            "    version: 2\n    selectors:\n      docs: { paths: README.md }\n    rules:",
+        )
+    };
+    write(
+        root.path(),
+        "alint-tests/a.yml",
+        &passing_test("alpha", "fast", None),
+    );
+    write(root.path(), "alint-tests/b.yml", &v2("beta"));
+    write(root.path(), "alint-tests/c.yml", &v2("gamma"));
+    for args in [&["test"][..], &["test", "--format", "json"]] {
+        let output = run(root.path(), args);
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert_eq!(
+            stderr,
+            "alint: warning: `version: 2` is experimental; its syntax may change before a \
+             release declares it stable, v0.24 at the earliest (alint-tests/b.yml)\n",
+            "{args:?}"
+        );
+    }
+    // A run with only version 1 configs says nothing.
+    let output = run(root.path(), &["test", "--filter", "alpha"]);
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(String::from_utf8(output.stderr).unwrap(), "");
+}

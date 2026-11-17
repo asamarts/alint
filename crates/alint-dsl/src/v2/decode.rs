@@ -151,6 +151,15 @@ impl Locus {
         }
     }
 
+    /// Where the value at this locus sits, for its interpolation: a
+    /// selector's or relation's values stay text.
+    pub(crate) fn scope(&self) -> crate::interp::Scope {
+        match self {
+            Self::Key(_) | Self::Entry { .. } => crate::interp::Scope::Objects,
+            Self::Extends(_) => crate::interp::Scope::Plain,
+        }
+    }
+
     /// [`Locus::find`], to change.
     pub(crate) fn find_mut<'d>(&self, document: &'d mut Value) -> Option<&'d mut Value> {
         match self {
@@ -238,6 +247,7 @@ pub(crate) fn decode_objects(
             alias.clone(),
             Alias {
                 url: url.to_string(),
+                entry: index,
                 target: None,
             },
         ));

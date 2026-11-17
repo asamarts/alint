@@ -11,19 +11,17 @@
 //! same last-wins field merge and template expansion, and is taken off before
 //! the rule is deserialized. A version 1 source writes no origin, so a field
 //! it overrides loses the one it had: a version 1 field names no relation.
-
-use std::path::{Path, PathBuf};
+//!
+//! A source is named by its index among the files the configuration was
+//! loaded from (`Config::config_files`, in load order), not by its path: every
+//! field of every rule carries the marker, and a copy of a deep path in each
+//! cost several times the config.
 
 use ayaml::{Mapping, Value};
 
-/// The private marker: a mapping from each top-level field to the resolved
-/// file of the version 2 source that wrote it.
+/// The private marker: a mapping from each top-level field to the index,
+/// among the configuration's files, of the version 2 source that wrote it.
 pub(crate) const FIELD_ORIGINS_MARKER: &str = "__alint_internal_v2_field_origins";
-
-/// The marker's text for `source`.
-fn origin_key(source: &Path) -> String {
-    source.to_string_lossy().into_owned()
-}
 
 fn is_internal(key: &Value) -> bool {
     key.as_str()
@@ -31,13 +29,13 @@ fn is_internal(key: &Value) -> bool {
 }
 
 /// Mark every field of each of `mappings` (the rules or templates of the
-/// version 2 source at `source`) as written by it.
-pub(crate) fn mark_field_origins(mappings: &mut [Mapping], source: &Path) {
-    let key = origin_key(source);
+/// version 2 source that is the configuration's file `source`) as written by
+/// it.
+pub(crate) fn mark_field_origins(mappings: &mut [Mapping], source: usize) {
     for mapping in mappings {
         let mut origins = Mapping::new();
         for field in mapping.keys().filter(|field| !is_internal(field)) {
-            origins.insert(field.clone(), Value::from(key.as_str()));
+            origins.insert(field.clone(), Value::from(source));
         }
         if !origins.is_empty() {
             mapping.insert(FIELD_ORIGINS_MARKER.into(), origins.into());
@@ -75,15 +73,17 @@ pub(crate) fn merge_field_origins(existing: &mut Mapping, incoming: &Mapping) {
     }
 }
 
-/// Take the marker off `mapping`: the file that wrote each field it records.
-pub(crate) fn take_field_origins(mapping: &mut Mapping) -> Vec<(String, PathBuf)> {
+/// Take the marker off `mapping`: the index, among the configuration's
+/// files, of the file that wrote each field it records.
+pub(crate) fn take_field_origins(mapping: &mut Mapping) -> Vec<(String, usize)> {
     mapping
         .remove(FIELD_ORIGINS_MARKER)
         .and_then(|value| value.as_mapping().cloned())
         .into_iter()
         .flatten()
         .filter_map(|(field, origin)| {
-            Some((field.as_str()?.to_string(), PathBuf::from(origin.as_str()?)))
+            let origin = usize::try_from(origin.as_u64()?).ok()?;
+            Some((field.as_str()?.to_string(), origin))
         })
         .collect()
 }

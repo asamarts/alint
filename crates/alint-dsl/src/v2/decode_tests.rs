@@ -115,6 +115,7 @@ fn every_form_keeps_its_source_selectors_and_aliases() {
             "base".to_string(),
             Alias {
                 url: "./base.yml".into(),
+                entry: 0,
                 target: None
             }
         )]

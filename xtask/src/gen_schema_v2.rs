@@ -336,9 +336,10 @@ fn add_properties(properties: &mut Map<String, Value>) -> Result<()> {
         "version".into(),
         json!({
             "const": 2,
-            "description": "Config language version: the literal integer `2` (a version read \
-                from the environment, quoted or written as a YAML alias is version 1). Version \
-                2 is experimental.",
+            "description": "Config language version: the plain integer `2`. Version 2 is \
+                experimental. A 2 written any other way (quoted, tagged, through a YAML alias, \
+                or as `2.0`, `+2`, `0x2`, `0o2` or `2e0`) is an error, and a version read from \
+                the environment is version 1.",
         }),
     );
     let extends = properties["extends"]
