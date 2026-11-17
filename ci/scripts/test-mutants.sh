@@ -6,7 +6,8 @@
 #   - a usage error, failing baseline tests or a diff that does not match the
 #     tree fail, since then nothing was tested;
 #   - the pinned cargo-mutants is installed when the runner has another version;
-#   - only a diff file or a crate name reaches cargo mutants.
+#   - only a diff file or a crate name reaches cargo mutants, and every mutant is tested
+#     by the workspace's tests with alint-core's `yaml-reference` feature.
 #   - cargo mutants runs with each process's address space capped and no core files,
 #     and, where sudo and systemd-run work, in a transient scope whose MemoryMax is
 #     the cap and whose OOMPolicy is `continue`, as the invoking user with the
@@ -104,18 +105,19 @@ if [[ "$rc" -eq 0 ]] && summarised '3 caught, 2 missed, 0 timed out' &&
 else
   bad "missed mutants must pass and be reported"
 fi
-if logged "^cargo mutants --workspace --in-diff $sandbox/pr.diff --in-place --no-shuffle --output target/mutants$" &&
+tested_with="--test-workspace=true --features alint-core/yaml-reference"
+if logged "^cargo mutants --workspace --in-diff $sandbox/pr.diff $tested_with --in-place --no-shuffle --output target/mutants$" &&
    ! logged '^cargo install'; then
-  ok "--in-diff reaches cargo mutants over the whole workspace; the pinned version is not reinstalled"
+  ok "--in-diff reaches cargo mutants over the whole workspace, tested by its tests; the pinned version is not reinstalled"
 else
-  bad "expected 'cargo mutants --workspace --in-diff <file> --in-place --no-shuffle --output target/mutants'"
+  bad "expected 'cargo mutants --workspace --in-diff <file> $tested_with --in-place --no-shuffle --output target/mutants'"
 fi
 
 run STUB_RC=3 STUB_CAUGHT='c1\n' STUB_TIMEOUT='crates/a/src/lib.rs:7:1: replace `loop` body\n' -- --package alint-output
 if [[ "$rc" -eq 0 ]] && summarised '1 caught, 0 missed, 1 timed out' && summarised 'Timed out' &&
    summarised '- `` crates/a/src/lib.rs:7:1: replace `loop` body ``' &&
-   logged '^cargo mutants --package alint-output --in-place'; then
-  ok "timed-out mutants pass and are reported; --package reaches cargo mutants"
+   logged "^cargo mutants --package alint-output $tested_with --in-place"; then
+  ok "timed-out mutants pass and are reported; --package reaches cargo mutants, tested by the workspace's tests"
 else
   bad "a timed-out mutant must pass and be reported"
 fi
@@ -226,7 +228,7 @@ scope_args+=" --uid=$uid --gid=$gid"
 run STUB_SUDO=ok HOME="$sandbox/home" CARGO_HOME="$sandbox/cargo" RUSTUP_HOME="$sandbox/rustup" \
   STUB_RC=0 -- --in-diff "$sandbox/pr.diff"
 if [[ "$rc" -eq 0 ]] && logged "^sudo -n systemd-run $scope_args -- true$" &&
-   logged "^systemd-run $scope_args -- env -i .* timeout --signal=INT --kill-after=60 5400 cargo mutants --workspace --in-diff $sandbox/pr.diff --in-place --no-shuffle --output target/mutants$" &&
+   logged "^systemd-run $scope_args -- env -i .* timeout --signal=INT --kill-after=60 5400 cargo mutants --workspace --in-diff $sandbox/pr.diff $tested_with --in-place --no-shuffle --output target/mutants$" &&
    logged '^limits 12582912 0$' &&
    logged "^env HOME=$sandbox/home CARGO_HOME=$sandbox/cargo RUSTUP_HOME=$sandbox/rustup RUSTFLAGS=$" &&
    said 'in a transient scope with MemoryMax=12582912K, no swap, OOMPolicy=continue' &&

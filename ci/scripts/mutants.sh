@@ -9,8 +9,13 @@
 # Advisory: a missed or timed-out mutant is reported, never failed. The report goes to
 # $GITHUB_STEP_SUMMARY (when set), as a warning on the line of each of the first 10
 # missed mutants (GitHub keeps 10 warnings per step), and to target/mutants/mutants.out.
-# cargo-mutants runs the mutated crate's own tests, so a mutant another crate's tests
-# would catch is still reported as missed. cargo-mutants' exit codes (upstream src/exit_code.rs):
+# Each mutant is tested against the whole workspace's tests (`--test-workspace`), not only
+# its own crate's: a mutant in alint-core that only the CLI's or the e2e scenarios' tests
+# catch counts as caught. They are built with alint-core's `yaml-reference` feature, as
+# ci/scripts/yaml-compare.sh builds them, so the tests that compare ayaml's reading with the
+# reference parsers' (and yaml_memory, which needs the feature) run too. That costs time per
+# mutant, so a large change ends at the budget sooner, with a partial report.
+# cargo-mutants' exit codes (upstream src/exit_code.rs):
 #   0  every mutant caught, or none to test (an empty diff, or no Rust in it)  reported
 #   2  some mutants missed                                                     reported
 #   3  some mutants timed out (often a mutant that loops forever)              reported
@@ -83,12 +88,13 @@ fi
 # leaves an unused value, and failing its build would hide whether tests catch it.
 rm -rf "$OUTPUT"
 mkdir -p "$OUTPUT"
-echo "==> cargo mutants ${filter[*]} (budget ${BUDGET_SECONDS} s)"
+tests=(--test-workspace=true --features alint-core/yaml-reference)
+echo "==> cargo mutants ${filter[*]} ${tests[*]} (budget ${BUDGET_SECONDS} s)"
 ulimit -v "$MEMORY_LIMIT_KIB"
 ulimit -c 0
 export RUSTFLAGS=''
 run=(timeout --signal=INT --kill-after=60 "$BUDGET_SECONDS"
-  cargo mutants "${filter[@]}" --in-place --no-shuffle --output "$OUTPUT")
+  cargo mutants "${filter[@]}" "${tests[@]}" --in-place --no-shuffle --output "$OUTPUT")
 cgroup=(sudo -n systemd-run --scope --quiet --collect -p "MemoryMax=${MEMORY_LIMIT_KIB}K"
   -p MemorySwapMax=0 -p OOMPolicy=continue --uid="$(id -u)" --gid="$(id -g)")
 if "${cgroup[@]}" -- true >/dev/null 2>&1; then
@@ -132,7 +138,7 @@ summary="${GITHUB_STEP_SUMMARY:-/dev/null}"
     echo "Mutants in ${scope}: ${caught} caught, ${missed} missed, ${timeouts} timed out, ${unviable} did not build (${status})."
     if (( missed > 0 )); then
       echo
-      echo "Each missed mutant is a change to the code that none of its crate's tests noticed:"
+      echo "Each missed mutant is a change to the code that none of the workspace's tests noticed:"
       echo
       # shellcheck disable=SC2016 # literal backticks: each line becomes inline code,
       # fenced with two so a single backtick in the text (`replace `a` with`) cannot
