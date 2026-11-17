@@ -830,3 +830,118 @@ fn an_unsupported_extends_scheme_fails_without_its_credentials() {
         );
     }
 }
+
+/// Every surface that loads a config, in each format that differs.
+const LOADING_SURFACES: [&[&str]; 8] = [
+    &["check"],
+    &["check", "--format", "json"],
+    &["validate-config"],
+    &["validate-config", "--format", "json"],
+    &["list"],
+    &["list", "--format", "json"],
+    &["export-agents-md"],
+    &["export-agents-md", "--format", "json"],
+];
+
+/// A version 2 relation's `JSONPath` read from the environment. The error's
+/// hint quotes the path rewritten (`$['canary-secret']`), which removing the
+/// value as written misses, so the error stands only when the config with the
+/// value masked fails the same way, and is redacted otherwise.
+#[test]
+fn a_v2_relation_error_read_from_the_environment_stays_redacted() {
+    let root = tempfile::tempdir().unwrap();
+    write(root.path(), "README.md", "hi\n");
+    let config = |body: &str| {
+        format!(
+            "version: 2\nselectors:\n  docs: {{ paths: a.json }}\nrelations:\n  b:\n    from: \
+             docs\n{body}rules: []\n"
+        )
+    };
+    let env = [("AT", "$.canary-secret")];
+    for body in [
+        "    entries: { format: json, at: '{{env.AT | default(\"$.x\")}}' }\n    fields: { k: \
+         entry.key }\n",
+        "    read: { json: '{{env.AT | default(\"$.x\")}}' }\n    fields: { v: value }\n",
+        "    read: { json: $.x }\n    fields: { v: value, n: 'bound: {{env.AT | \
+         default(\"$.x\")}}' }\n",
+    ] {
+        write(root.path(), ".alint.yml", &config(body));
+        for args in LOADING_SURFACES {
+            let output = run(root.path(), args, &env);
+            assert_redacted(&format!("{args:?} {body}"), &output, &["canary-secret"]);
+            // `validate-config --format json` reports it on stdout.
+            let text = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(
+                text.contains(
+                    ".alint.yml: `relations.b`: <redacted> (the error could quote a value read \
+                     from the environment)"
+                ),
+                "{args:?} {body}\n{text}"
+            );
+        }
+    }
+
+    // An error the masked config repeats stays readable beside the value.
+    write(
+        root.path(),
+        ".alint.yml",
+        &config(
+            "    entries: { format: json, at: '{{env.AT | default(\"$.x\")}}' }\n    fields: { \
+             k: entry.key }\n    colour: red\n",
+        ),
+    );
+    for args in LOADING_SURFACES {
+        let output = run(root.path(), args, &[("AT", "$.canary")]);
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(!output.status.success(), "{args:?}");
+        assert!(
+            text.contains(".alint.yml: `relations.b`: unknown key `colour` in a relation;"),
+            "{args:?}\n{text}"
+        );
+    }
+}
+
+/// A version 2 listing names the file that declares each selector and
+/// relation; one an `extends:` entry read from the environment loads is
+/// shown redacted, as an error naming it would be.
+#[test]
+fn a_v2_source_path_read_from_the_environment_stays_out_of_listings() {
+    let root = tempfile::tempdir().unwrap();
+    write(root.path(), "README.md", "hi\n");
+    write(
+        root.path(),
+        "canary-secret.yml",
+        "version: 2\nselectors:\n  docs: { paths: README.md }\nrules: []\n",
+    );
+    write(
+        root.path(),
+        ".alint.yml",
+        "version: 2\nextends:\n  - url: '{{env.EXTENDS | default(\"./x.yml\")}}'\n    as: \
+         deps\nselectors:\n  own: { paths: README.md }\nrules: []\n",
+    );
+    let env = [("EXTENDS", "./canary-secret.yml")];
+    for args in &LOADING_SURFACES[4..] {
+        let output = run(root.path(), args, &env);
+        assert!(
+            output.status.success(),
+            "{args:?}\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_left_out(&format!("{args:?}"), &output, &["canary-secret"]);
+    }
+    let stdout = String::from_utf8(run(root.path(), &["list"], &env).stdout).unwrap();
+    assert!(
+        stdout.ends_with(
+            "\nselector docs  <redacted> (as deps in .alint.yml)\nselector own  .alint.yml\n"
+        ),
+        "{stdout}"
+    );
+}

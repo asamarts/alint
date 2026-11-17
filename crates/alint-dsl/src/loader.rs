@@ -598,10 +598,10 @@ fn parse_config_interpolated_inner_with_environment(
         crate::v2::check_document(document, origin.display)?;
     }
     let v2_environment = v2_environment_of(surface, contents, document.as_ref());
-    let (mut config, v2_keys) = if let Some(decoded) = text_decode {
-        let decoded = decoded.read_as(surface, contents, &source)?;
-        crate::reject_ambiguous_yaml_in(&decoded.0, &source)?;
-        decoded
+    let (mut config, v2_keys, masked) = if let Some(decoded) = text_decode {
+        let (config, v2_keys) = decoded.read_as(surface, contents, &source)?;
+        crate::reject_ambiguous_yaml_in(&config, &source)?;
+        (config, v2_keys, None)
     } else {
         let mut value: ayaml::Value = match document {
             Some(document) => document,
@@ -661,16 +661,21 @@ fn parse_config_interpolated_inner_with_environment(
             crate::SENSITIVE_FIELDS_MARKER,
             template_sensitive_fields,
         );
-        (config, v2_keys)
+        (config, v2_keys, masked)
     };
     config.surface = surface;
     if surface == crate::v2::Surface::V2 {
+        let masked = masked.as_ref().map(|document| Masked {
+            document,
+            environment,
+        });
         attach_v2_objects(
             &mut config,
             &v2_keys,
             origin,
             source_path,
             v2_environment.as_ref(),
+            masked.as_ref(),
         )?;
     }
     Ok(config)
@@ -713,18 +718,34 @@ fn attach_v2_objects(
     origin: &crate::v2::Origin<'_>,
     source_path: &Path,
     environment: Option<&crate::v2::Environment>,
+    masked: Option<&Masked<'_>>,
 ) -> Result<()> {
     let source = crate::v2::SourceId {
         display: origin.display.to_string(),
         path: source_path.to_path_buf(),
         class: origin.class,
     };
-    // An error may quote a value the environment supplied, as a v1 top-level
-    // field's can; scrub those as the embedder would.
-    let mut objects =
-        crate::v2::source_objects(source, v2_keys, &config.extends).map_err(|error| {
-            alint_core::redact_environment_values_in_error(error, &config.environment_values)
-        })?;
+    // An error may quote a value the environment supplied, or part of one (a
+    // JSONPath's hint rewrites the path it quotes). With each value removed
+    // as written, it stands only when the same source with every such value
+    // masked fails the same way, so it quotes none of them in another form.
+    let mut objects = crate::v2::decode_objects(source.clone(), v2_keys, &config.extends).map_err(
+        |undecoded| {
+            let shown = alint_core::redact_environment_values_in_error(
+                undecoded.error,
+                &config.environment_values,
+            );
+            if masked.is_none_or(|masked| objects_error_recurs(&shown, masked, &source)) {
+                shown
+            } else {
+                Error::Other(format!(
+                    "{}: `{}`: <redacted> (the error could quote a value read from the \
+                     environment)",
+                    origin.display, undecoded.object
+                ))
+            }
+        },
+    )?;
     if let Some(environment) = environment {
         environment.mark(&mut objects);
     }
@@ -732,6 +753,37 @@ fn attach_v2_objects(
     crate::v2::mark_field_origins(&mut config.templates, source_path);
     config.v2.sources.push(objects);
     Ok(())
+}
+
+/// A source that reads the environment, as written (before interpolation),
+/// with the environment it reads: what a decode error is rerun on, with every
+/// value it reads masked.
+struct Masked<'a> {
+    document: &'a ayaml::Value,
+    environment: &'a dyn crate::EnvironmentProvider,
+}
+
+/// Whether the objects of `masked`, with every environment value masked
+/// (numbers moved either way, as [`reproduce_or_redact`] moves them), fail to
+/// decode with `error`'s exact message, which therefore quotes none of them:
+/// a masked string reads `<redacted>`, as one removed from a message does.
+fn objects_error_recurs(error: &Error, masked: &Masked<'_>, source: &crate::v2::SourceId) -> bool {
+    let message = error.to_string();
+    alint_core::NumberMask::BOTH.into_iter().any(|numbers| {
+        let mut document = masked.document.clone();
+        crate::interp::interpolate_masked(
+            &mut document,
+            &|name| masked.environment.get(name),
+            numbers,
+        )
+        .is_ok()
+            && decode_value(document, crate::v2::Surface::V2)
+                .ok()
+                .and_then(|(config, v2_keys)| {
+                    crate::v2::decode_objects(source.clone(), &v2_keys, &config.extends).err()
+                })
+                .is_some_and(|undecoded| undecoded.error.to_string() == message)
+    })
 }
 
 /// The entries of a raw (pre-interpolation) `vars:` mapping whose value reads

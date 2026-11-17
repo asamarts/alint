@@ -162,9 +162,11 @@ pub struct NamedRelation {
     pub capabilities: Capabilities,
     /// Whether its definition, outside its fields' `where:` and `transform:`
     /// entries (which make those fields sensitive instead), or a named
-    /// selector it reads takes a value from the environment (`{{env.X}}`):
-    /// then no analysis failure of it shows its detail, which could echo the
-    /// value (a key path an `at:` from the environment selected, say).
+    /// selector it reads takes a value from the environment (`{{env.X}}`), or
+    /// a relation it reads (a join side, a membership reference) does,
+    /// transitively: then no analysis failure of it shows its detail, which
+    /// could echo the value (a key path an `at:` from the environment
+    /// selected, say).
     pub reads_environment: bool,
 }
 

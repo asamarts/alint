@@ -105,7 +105,7 @@ fn write_named_objects(out: &mut String, objects: &[NamedObject<'_>]) {
         out.push(' ');
         out.push_str(&code_span(object.name));
         out.push_str(": ");
-        out.push_str(&code_span(object.source));
+        out.push_str(&code_span(&object.source));
         if !object.aliases.is_empty() {
             let aliases: Vec<String> = object
                 .aliases
@@ -251,8 +251,11 @@ mod tests {
         NamedObject {
             what,
             name,
-            source,
-            aliases,
+            source: source.into(),
+            aliases: aliases
+                .into_iter()
+                .map(|(alias, consumer)| (alias, consumer.into()))
+                .collect(),
         }
     }
 

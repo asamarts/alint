@@ -141,17 +141,19 @@ pub(super) fn cmd_list(category: Option<&str>, cli: &Cli) -> Result<ExitCode> {
 /// Each named object of `plan`, selectors then relations, in load order:
 /// what it is, its source's display, and the aliases (`as:`) a consumer
 /// reaches that source through, each with the consumer's display. `list` and
-/// `export-agents-md` show these.
-pub(super) fn named_objects(plan: &Plan) -> Vec<NamedObject<'_>> {
+/// `export-agents-md` show these. A source's display can be an `extends:`
+/// path read from the environment, so each is shown as `redact` leaves it:
+/// without the environment values of the config.
+pub(super) fn named_objects<'p>(plan: &'p Plan, redact: Redact<'_>) -> Vec<NamedObject<'p>> {
     let object = |what, name, source| {
         let declared = plan.source(source);
         NamedObject {
             what,
             name,
-            source: &declared.display,
+            source: redact(&declared.display),
             aliases: plan
                 .aliases_of(source)
-                .map(|(consumer, alias)| (alias.name.as_str(), consumer.display.as_str()))
+                .map(|(consumer, alias)| (alias.name.as_str(), redact(&consumer.display)))
                 .collect(),
         }
     };
@@ -166,14 +168,17 @@ pub(super) fn named_objects(plan: &Plan) -> Vec<NamedObject<'_>> {
         .collect()
 }
 
+/// Text without the environment values of a config.
+pub(super) type Redact<'r> = &'r dyn for<'t> Fn(&'t str) -> std::borrow::Cow<'t, str>;
+
 pub(super) struct NamedObject<'p> {
     /// `selector` or `relation`.
     pub(super) what: &'static str,
     pub(super) name: &'p str,
     /// The display of the config file that declares it.
-    pub(super) source: &'p str,
+    pub(super) source: std::borrow::Cow<'p, str>,
     /// Each alias, with the source that gives it.
-    pub(super) aliases: Vec<(&'p str, &'p str)>,
+    pub(super) aliases: Vec<(&'p str, std::borrow::Cow<'p, str>)>,
 }
 
 /// The human `list` lines of a version 2 config's named selectors and
@@ -182,7 +187,7 @@ pub(super) struct NamedObject<'p> {
 fn write_named_objects(out: &mut impl Write, plan: &Plan) -> Result<()> {
     use alint_output::style;
 
-    let objects = named_objects(plan);
+    let objects = named_objects(plan, &super::redact_environment_values);
     if objects.is_empty() {
         return Ok(());
     }
@@ -194,7 +199,7 @@ fn write_named_objects(out: &mut impl Write, plan: &Plan) -> Result<()> {
             "{} {}  {dim}{}{dim:#}",
             object.what,
             term(object.name),
-            term(object.source)
+            term(&object.source)
         )?;
         if !object.aliases.is_empty() {
             let aliases: Vec<String> = object
@@ -211,8 +216,12 @@ fn write_named_objects(out: &mut impl Write, plan: &Plan) -> Result<()> {
 
 /// The `list --format json` entries of `plan`'s objects of one kind, which
 /// `export-agents-md --format json` shares.
-pub(super) fn named_objects_json(plan: &Plan, what: &str) -> Vec<serde_json::Value> {
-    named_objects(plan)
+pub(super) fn named_objects_json(
+    plan: &Plan,
+    what: &str,
+    redact: Redact<'_>,
+) -> Vec<serde_json::Value> {
+    named_objects(plan, redact)
         .into_iter()
         .filter(|object| object.what == what)
         .map(|object| {
@@ -266,8 +275,9 @@ fn list_json(loaded: &LoadedConfig, objects: Option<&Plan>) -> Result<ExitCode> 
     let mut doc =
         serde_json::json!({ "schema_version": 1, "kind": "rule-inventory", "rules": rules });
     if let Some(plan) = objects {
-        doc["selectors"] = serde_json::Value::Array(named_objects_json(plan, "selector"));
-        doc["relations"] = serde_json::Value::Array(named_objects_json(plan, "relation"));
+        let redact = &super::redact_environment_values;
+        doc["selectors"] = serde_json::Value::Array(named_objects_json(plan, "selector", redact));
+        doc["relations"] = serde_json::Value::Array(named_objects_json(plan, "relation", redact));
     }
     let mut out = std::io::stdout().lock();
     writeln!(out, "{}", serde_json::to_string_pretty(&doc)?)?;

@@ -936,3 +936,80 @@ fn a_merged_config_counts_its_selectors_and_relations() {
         )
     );
 }
+
+/// A `JSONPath` read from the environment: a dashed key the error's hint
+/// rewrites (`$['canary-secret']`), or one that is fine.
+#[derive(Debug)]
+struct JsonPathEnvironment;
+impl crate::EnvironmentProvider for JsonPathEnvironment {
+    fn get(&self, name: &str) -> Option<String> {
+        match name {
+            "AT" => Some("$.canary-secret".to_string()),
+            "FINE" => Some("$.fine".to_string()),
+            _ => None,
+        }
+    }
+}
+
+fn v2_error(yaml: &str) -> String {
+    parse_config_interpolated_inner_with_environment(
+        yaml,
+        Path::new(".alint.yml"),
+        &JsonPathEnvironment,
+        &TEST_ROOT,
+    )
+    .unwrap_err()
+    .to_string()
+}
+
+/// D3: a version 2 object's decode error stands only when the source with
+/// every environment value masked fails the same way; otherwise it is
+/// redacted, naming the object. A `JSONPath`'s hint quotes the path rewritten,
+/// which removing the value as written would miss.
+#[test]
+fn a_v2_object_error_that_could_quote_the_environment_is_redacted() {
+    let relation = |body: &str| {
+        format!(
+            "version: 2\nselectors:\n  docs: {{ paths: a.json }}\nrelations:\n  b:\n    from: \
+             docs\n{body}rules: []\n"
+        )
+    };
+    for body in [
+        "    entries: { format: json, at: '{{env.AT | default(\"$.x\")}}' }\n    fields: { k: \
+         entry.key }\n",
+        "    read: { json: '{{env.AT | default(\"$.x\")}}' }\n    fields: { v: value }\n",
+        "    read: { json: $.x }\n    fields: { v: value, n: 'bound: {{env.AT | \
+         default(\"$.x\")}}' }\n",
+    ] {
+        let error = v2_error(&relation(body));
+        assert_eq!(
+            error,
+            ".alint.yml: `relations.b`: <redacted> (the error could quote a value read from the \
+             environment)",
+            "{body}"
+        );
+    }
+
+    // An error the masked source repeats quotes no value: it stays readable.
+    let error = v2_error(&relation(
+        "    entries: { format: json, at: '{{env.FINE | default(\"$.x\")}}' }\n    fields: { k: \
+         entry.key }\n    colour: red\n",
+    ));
+    assert_eq!(
+        error,
+        ".alint.yml: `relations.b`: unknown key `colour` in a relation; expected one of `from`, \
+         `entries`, `read`, `optional`, `union`, `join`, `fields`, `transform`, `where`"
+    );
+    // And so does one that reads nothing from the environment.
+    let error = v2_error(&relation(
+        "    entries: { format: json, at: '$.canary-secret' }\n    fields: { k: entry.key }\n",
+    ));
+    assert_eq!(
+        error,
+        ".alint.yml: `relations.b.entries.at`: bad JSONPath \"$.canary-secret\": at position 8, \
+         parser error; JSONPath dot-notation requires identifier-shape keys (RFC 9535). For \
+         dashed keys, use bracket notation: `$['canary-secret']` instead of `$.canary-secret` (or \
+         `@['canary-secret']` instead of `@.canary-secret` inside a filter). See \
+         `docs/development/CONFIG-AUTHORING.md` § 10."
+    );
+}

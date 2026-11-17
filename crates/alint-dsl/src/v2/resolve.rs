@@ -746,8 +746,12 @@ fn selector_capabilities(selector: &Selector) -> Capabilities {
 }
 
 /// Give each relation its capabilities: its own reads, and those of every
-/// selector and relation it references. `order` lists every relation after
-/// the relations it reads (the plan check's topological order).
+/// selector and relation it references; and mark it as reading the
+/// environment when a relation it references (a join side, a membership
+/// reference) does, since its failures can echo what that relation read (a
+/// key a join repeats, a value whose type clashes). `order` lists every
+/// relation after the relations it reads (the plan check's topological
+/// order), so each is complete when a relation that reads it is reached.
 fn add_capabilities(plan: &mut Plan, order: &[RelationId]) {
     for &id in order {
         let relation = &plan.relations[id.0].relation;
@@ -789,10 +793,13 @@ fn add_capabilities(plan: &mut Plan, order: &[RelationId]) {
                 }
             }
         }
+        let mut reads_environment = false;
         for other in read {
             capabilities.add(&plan.relations[other.0].capabilities);
+            reads_environment |= plan.relations[other.0].reads_environment;
         }
         plan.relations[id.0].capabilities = capabilities;
+        plan.relations[id.0].reads_environment |= reads_environment;
     }
 }
 

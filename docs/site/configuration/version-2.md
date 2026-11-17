@@ -258,7 +258,9 @@ rules: []
 A name, an alias and a field name start with an ASCII letter or `_` and hold only ASCII letters,
 digits, `_` and `-`. A config file declares each name once, across its selectors, relations and
 aliases. Names, aliases and references are literal: `{{...}}` in one is an error, since it must
-name the same thing in every environment. Other values interpolate `{{env.X}}` as in version 1.
+name the same thing in every environment. Other values interpolate `{{env.X}}` as in version 1,
+and an error that could quote a value read from the environment is redacted to the selector or
+relation it is about, as a version 1 rule's is.
 
 Each config file has its own namespace:
 

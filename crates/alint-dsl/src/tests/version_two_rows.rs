@@ -920,3 +920,64 @@ fn the_plan_records_what_the_environment_writes() {
         ]
     );
 }
+
+/// A relation that reads one whose selection the environment writes, as a
+/// join side or through a membership reference, shows no detail of its own
+/// failures either: a repeated join key or a clashing value is what the
+/// environment selected.
+#[test]
+fn a_relation_reading_one_the_environment_selects_shows_no_detail() {
+    let tree = setup(
+        "version: 2\nrelations:\n  secret:\n    from: { paths: b.json }\n    entries: { format: \
+         json, at: '{{env.ALINT_V2_ROWS_UNSET | default(\"$.area\")}}' }\n    fields: { k: \
+         entry.value }\n  plain:\n    from: { paths: c.json }\n    entries: { format: json, at: \
+         $ }\n    fields: { k: entry.value }\n  joined:\n    join: { left: plain, right: secret, \
+         on: { k: k }, unique: right }\n    fields: { k: left.k }\n  member:\n    from: { paths: \
+         c.json }\n    entries: { format: json, at: $ }\n    fields: { v: entry.value }\n    \
+         where: { v: { in: [ { relation: numbers, field: n } ] } }\n  numbers:\n    from: { \
+         paths: d.json }\n    entries: { format: json, at: '{{env.ALINT_V2_ROWS_UNSET | \
+         default(\"$.area\")}}' }\n    fields: { n: entry.value }\n  open:\n    join: { left: \
+         plain, right: plain, on: { k: k }, unique: right }\n    fields: { k: left.k }\nrules: \
+         []\n",
+        &[
+            ("b.json", r#"{"area": {"p": "1", "q": "1"}}"#),
+            ("c.json", r#"{"x": "1", "y": "1"}"#),
+            ("d.json", r#"{"area": {"n": 5}}"#),
+        ],
+    );
+    let plan = tree.config.relation_plan.as_ref().unwrap();
+    let reads: Vec<(&str, bool)> = plan
+        .relations
+        .iter()
+        .map(|named| (named.name.as_str(), named.reads_environment))
+        .collect();
+    assert_eq!(
+        reads,
+        [
+            ("secret", true),
+            ("plain", false),
+            ("joined", true),
+            ("member", true),
+            ("numbers", true),
+            ("open", false)
+        ]
+    );
+    for (relation, file) in [("joined", "b.json"), ("member", "c.json")] {
+        assert_eq!(
+            tree.failures(relation),
+            [format!(
+                "{file}: relation `{relation}` (.alint.yml): this relation's configuration reads \
+                 the environment, so the detail of its analysis failure is not shown"
+            )],
+        );
+    }
+    // A relation that reads none of them still shows its detail.
+    assert_eq!(
+        tree.failures("open"),
+        [
+            "c.json: relation `open` (.alint.yml): the join's unique side (right, `plain`) repeats \
+             the key \"1\": `x` in c.json and `y` in c.json; `unique: right` needs each key once \
+             on that side, so make the key unique there, or name the other side unique"
+        ]
+    );
+}

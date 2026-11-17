@@ -32,6 +32,8 @@ pub(crate) mod schema_parity;
 use alint_core::{ConfigSourceClass, Error, Result};
 use ayaml::Value;
 
+pub(crate) use decode::decode_objects;
+#[cfg(test)]
 pub(crate) use decode::source_objects;
 pub(crate) use document::{Document, ExtendsEntry};
 pub(crate) use environment::Environment;

@@ -79,13 +79,39 @@ const FIELD_SOURCES: &str = "`path`, a path token (`dir`, `basename`, `stem`, `e
 
 /// Decode one source's objects: its `selectors:` and `relations:` (the values
 /// the document decode took aside) and its `extends:` aliases.
+#[cfg(test)]
 pub(crate) fn source_objects(
     source: SourceId,
     v2_keys: &[(String, Value)],
     extends: &[super::ExtendsEntry],
 ) -> Result<SourceObjects> {
+    decode_objects(source, v2_keys, extends).map_err(|undecoded| undecoded.error)
+}
+
+/// The error a source's objects failed to decode with, and the object it is
+/// about: `relations.titles`, `extends[0].as`, or `selectors` or `relations`
+/// as a whole. The object's key path is written in the config as map keys,
+/// which interpolation leaves as written, so it never holds a value read from
+/// the environment, and a redacted error can still say where it was.
+pub(crate) struct Undecoded {
+    pub(crate) object: String,
+    pub(crate) error: Error,
+}
+
+/// Decode one source's objects: its `selectors:` and `relations:` (the values
+/// the document decode took aside) and its `extends:` aliases, failing with
+/// the object the error is about.
+pub(crate) fn decode_objects(
+    source: SourceId,
+    v2_keys: &[(String, Value)],
+    extends: &[super::ExtendsEntry],
+) -> std::result::Result<SourceObjects, Box<Undecoded>> {
     let display = source.display.clone();
     let decoder = Decoder { source: &display };
+    let about = |object: &str| {
+        let object = object.to_string();
+        move |error| Box::new(Undecoded { object, error })
+    };
     let mut names = Names::default();
     let mut objects = SourceObjects {
         source,
@@ -95,17 +121,22 @@ pub(crate) fn source_objects(
         extended: Vec::new(),
     };
     for (key, value) in v2_keys {
-        decoder.untagged(value, key)?;
-        let map = decoder.mapping(value, key, "a map from each name to its definition")?;
+        decoder.untagged(value, key).map_err(about(key))?;
+        let map = decoder
+            .mapping(value, key, "a map from each name to its definition")
+            .map_err(about(key))?;
         for (name, definition) in map {
-            let path = decoder.child_key(key, name, "a name")?;
-            let name = decoder.declared_name(name, &path)?;
-            names.declare(&decoder, &name, &path)?;
+            let path = decoder.child_key(key, name, "a name").map_err(about(key))?;
+            let declared = decoder.declared_name(name, &path).and_then(|name| {
+                names.declare(&decoder, &name, &path)?;
+                Ok(name)
+            });
+            let name = declared.map_err(about(&path))?;
             if key == "selectors" {
-                let selector = decoder.selector(definition, &path)?;
+                let selector = decoder.selector(definition, &path).map_err(about(&path))?;
                 objects.selectors.push((name, selector));
             } else {
-                let relation = decoder.relation(definition, &path)?;
+                let relation = decoder.relation(definition, &path).map_err(about(&path))?;
                 objects.relations.push((name, relation));
             }
         }
@@ -115,20 +146,22 @@ pub(crate) fn source_objects(
             continue;
         };
         let path = format!("extends[{index}].as");
-        decoder.name(alias, &path)?;
-        names.declare(&decoder, alias, &path)?;
+        decoder
+            .name(alias, &path)
+            .and_then(|()| names.declare(&decoder, alias, &path))
+            .map_err(about(&path))?;
         let url = extends.entry.url();
         // An entry with a refused scheme gets the loader's error for that.
         if matches!(
             crate::extends::EntryKind::of(url),
             crate::extends::EntryKind::Https | crate::extends::EntryKind::Bundled(_)
         ) {
-            return Err(decoder.error(
+            return Err(about(&path)(decoder.error(
                 &path,
                 "an alias names a local `extends:` source, whose selectors and relations \
                  the config can then reach as `alias.name`; a bundled or remote source must \
                  be `version: 1` and declares none, so remove `as:` from this entry",
-            ));
+            )));
         }
         objects.aliases.push((
             alias.clone(),

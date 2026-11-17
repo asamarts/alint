@@ -446,10 +446,16 @@ policy-test package the user does not trust.
     does, so a manifest `source:` stays inside the repository and out of `.git`.
   - Each selector and relation passes the trust gates of the file that declares it, with what it
     references, as an extended file's rules do.
+  - A selector's or relation's error stands only when the config with every value read from the
+    environment masked fails the same way; otherwise it is redacted, naming the object
+    (`` `relations.deps`: <redacted> (the error could quote a value read from the environment)
+    ``), as a version 1 rule's is. A JSONPath's hint, which quotes the path rewritten, no longer
+    shows part of a value read from the environment.
   - `alint list` lists a version 2 config's named selectors and relations after its rules, each
     with the file that declares it and the aliases that reach that file; `list --format json`
     adds `selectors` and `relations` for a version 2 config only, and `--category` lists rules
-    only.
+    only. A file an `extends:` entry read from the environment loads is shown as `<redacted>`,
+    here and in `export-agents-md`.
   - `alint export-agents-md` lists a version 2 config's named selectors and relations the same
     way, after its rules, under `### Named selectors and relations`; `--format json` adds
     `selectors` and `relations`, shaped as in `list --format json`, for a version 2 config only.
@@ -469,7 +475,8 @@ policy-test package the user does not trust.
     failure naming the relation, the file and the key path, never a dropped row; so is reaching a
     row, join or distinct-value limit, which is never truncation. A field the environment writes
     to (`{{env.X}}` in its `where:` or `transform:`) is sensitive, and a relation whose selection
-    reads the environment shows no detail in its failures. Nothing calls the evaluator in this
+    reads the environment shows no detail in its failures, nor does a relation that reads one,
+    as a join side or through a membership reference. Nothing calls the evaluator in this
     build, so relations stay inert and a run whose rules read none reads nothing for them.
   - `facts.json` (format 7) gains `compatibility.experimental_config_versions: [2]`;
     `config_versions` stays `[1]`. `validate-config --format json` gains `config_version`, the

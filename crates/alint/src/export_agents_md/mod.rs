@@ -100,12 +100,16 @@ pub fn run(
     // A version 2 config's named selectors and relations follow its rules,
     // as in `list`; a version 1 config has none and its output is unchanged.
     let plan = config.relation_plan.as_deref();
+    // A source's display can be an `extends:` path read from the environment.
+    let values = &config.environment_values;
+    let redact: crate::inspect::Redact<'_> =
+        &|text| alint_core::redact_environment_values(text, values);
     let body = match opts.format {
         OutputFormat::Markdown => {
-            let objects = plan.map(crate::inspect::named_objects);
+            let objects = plan.map(|plan| crate::inspect::named_objects(plan, redact));
             markdown::render(&directives, objects.as_deref(), &opts.section_title)
         }
-        OutputFormat::Json => render_json(&directives, plan, &opts.section_title)?,
+        OutputFormat::Json => render_json(&directives, plan, redact, &opts.section_title)?,
     };
 
     write_output(&body, opts)?;
@@ -204,6 +208,7 @@ struct JsonDirective<'a> {
 fn render_json(
     directives: &[Directive],
     plan: Option<&alint_core::relation::plan::Plan>,
+    redact: crate::inspect::Redact<'_>,
     section_title: &str,
 ) -> Result<String> {
     let report = JsonReport {
@@ -220,8 +225,8 @@ fn render_json(
                 policy_url: d.policy_url.as_deref(),
             })
             .collect(),
-        selectors: plan.map(|plan| crate::inspect::named_objects_json(plan, "selector")),
-        relations: plan.map(|plan| crate::inspect::named_objects_json(plan, "relation")),
+        selectors: plan.map(|plan| crate::inspect::named_objects_json(plan, "selector", redact)),
+        relations: plan.map(|plan| crate::inspect::named_objects_json(plan, "relation", redact)),
     };
     let mut s = serde_json::to_string_pretty(&report).context("encoding json")?;
     s.push('\n');
@@ -432,7 +437,13 @@ mod tests {
             directive: "no debugger statements".into(),
             policy_url: None,
         }];
-        let s = render_json(&directives, None, "Lint rules enforced by alint").unwrap();
+        let s = render_json(
+            &directives,
+            None,
+            &|text| std::borrow::Cow::Borrowed(text),
+            "Lint rules enforced by alint",
+        )
+        .unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&s).unwrap();
         assert_eq!(parsed["schema_version"], 1);
         assert_eq!(parsed["format"], "agents-md");
