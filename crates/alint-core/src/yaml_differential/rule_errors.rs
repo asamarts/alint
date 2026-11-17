@@ -18,12 +18,74 @@ pub(super) fn same_rule_error(case: &Case<'_>) -> bool {
     let (Err(ayaml), Err(oracle)) = (&case.ayaml, &case.oracle) else {
         return false;
     };
+    if let Some(field) = tag_refusal_field(&ayaml.message) {
+        return oracle_reads_a_tag(&oracle.message)
+            && oracle_error_is_in(case.input, case.rule, field, oracle);
+    }
     let (field, ayaml_problem) = ayaml_path(&ayaml.message)
         .map_or((None, ayaml.message.as_str()), |(field, problem)| {
             (Some(field), problem)
         });
-    problem(ayaml_problem) == problem(&oracle.message)
+    (problem(ayaml_problem) == problem(&oracle.message)
+        || tag_as_variant(ayaml_problem, &oracle.message))
         && field.is_none_or(|field| oracle_error_is_in(case.input, case.rule, field, oracle))
+}
+
+/// The rule's field that alint's tag error names, as `command` in
+/// `` `command` has the YAML tag `!t`; YAML tags are not supported here ``
+/// (see [`crate::yaml_decode`]), which puts the path in backticks in front.
+/// The field is the path's first step.
+fn tag_refusal_field(message: &str) -> Option<&str> {
+    let path = message
+        .strip_prefix('`')?
+        .strip_suffix("`; YAML tags are not supported here")?
+        .split_once("` has the YAML tag `")?
+        .0;
+    ayaml_path(&format!("{path}: x"))?;
+    Some(&path[..name_len(path)])
+}
+
+/// Whether the oracle's error is its own for a tagged value where a value
+/// with no tag goes: it reads a tag as an enum's, so it refuses one where an
+/// untagged enum goes (a string or a list, as `command:` takes), or names
+/// an enum as the type it found.
+fn oracle_reads_a_tag(message: &str) -> bool {
+    message == "untagged and internally tagged enums do not support enum input"
+        || message.starts_with("invalid type: enum, expected ")
+}
+
+/// Whether alint's error for a tagged value where an enum's name goes, as
+/// ``expected one of `a`, `b`, found a value with the YAML tag `!t` ``, and
+/// the oracle's error are one: the oracle reads the local tag `!t` as the
+/// name of a variant, `` unknown variant `t`, expected one of `a`, `b` ``,
+/// with the same variants expected.
+fn tag_as_variant(ayaml: &str, oracle: &str) -> bool {
+    let Some((expected, tag)) = ayaml
+        .strip_prefix("expected ")
+        .and_then(|rest| rest.strip_suffix('`'))
+        .and_then(|rest| rest.split_once(", found a value with the YAML tag `"))
+    else {
+        return false;
+    };
+    let Some(name) = tag
+        .strip_prefix('!')
+        .filter(|name| !name.starts_with(['!', '<']))
+    else {
+        return false;
+    };
+    oracle == format!("unknown variant `{name}`, expected {expected}")
+}
+
+/// The length of the name at the start of `text`: a letter or `_`, then
+/// letters, digits, `_` and `-`; 0 when `text` starts with none.
+fn name_len(text: &str) -> usize {
+    let mut chars = text.char_indices();
+    match chars.next() {
+        Some((_, first)) if first.is_ascii_alphabetic() || first == '_' => chars
+            .find(|(_, next)| !(next.is_ascii_alphanumeric() || matches!(next, '_' | '-')))
+            .map_or(text.len(), |(at, _)| at),
+        _ => 0,
+    }
 }
 
 /// ayaml's `message` split into the first step of the path in front of it,
@@ -33,15 +95,7 @@ pub(super) fn same_rule_error(case: &Case<'_>) -> bool {
 /// and it ends at `: `; a problem starts with words and spaces, as
 /// `invalid type: `, so none reads as a path.
 fn ayaml_path(message: &str) -> Option<(&str, &str)> {
-    let name = |text: &str| {
-        let mut chars = text.char_indices();
-        match chars.next() {
-            Some((_, first)) if first.is_ascii_alphabetic() || first == '_' => chars
-                .find(|(_, next)| !(next.is_ascii_alphanumeric() || matches!(next, '_' | '-')))
-                .map_or(text.len(), |(at, _)| at),
-            _ => 0,
-        }
-    };
+    let name = name_len;
     let first = name(message);
     if first == 0 {
         return None;
@@ -227,5 +281,101 @@ mod tests {
             problem("invalid type: unit value, expected a Value::Tagged enum"),
             problem("invalid type: unit value, expected a string")
         );
+    }
+
+    #[test]
+    fn a_tag_refusal_names_the_first_step_of_its_path() {
+        let refused = |path: &str| {
+            format!("`{path}` has the YAML tag `!t`; YAML tags are not supported here")
+        };
+        assert_eq!(tag_refusal_field(&refused("command")), Some("command"));
+        assert_eq!(tag_refusal_field(&refused("paths[0]")), Some("paths"));
+        assert_eq!(
+            tag_refusal_field(&refused("scope_filter.has_ancestor")),
+            Some("scope_filter")
+        );
+        for message in [
+            refused("1a"),
+            refused(""),
+            "command has the YAML tag `!t`; YAML tags are not supported here".to_string(),
+            "`command` has the YAML tag `!t`".to_string(),
+            "level: expected one of `a`, found a value with the YAML tag `!t`".to_string(),
+        ] {
+            assert_eq!(tag_refusal_field(&message), None, "{message:?}");
+        }
+        assert!(oracle_reads_a_tag(
+            "untagged and internally tagged enums do not support enum input"
+        ));
+        assert!(oracle_reads_a_tag("invalid type: enum, expected a string"));
+        assert!(!oracle_reads_a_tag(
+            "invalid type: integer `1`, expected a string"
+        ));
+        assert!(!oracle_reads_a_tag(
+            "unknown variant `t`, expected `a` or `b`"
+        ));
+    }
+
+    #[test]
+    fn a_local_tag_where_an_enum_goes_is_the_oracles_unknown_variant() {
+        let ayaml = "expected one of `error`, `warning`, found a value with the YAML tag `!t`";
+        assert!(tag_as_variant(
+            ayaml,
+            "unknown variant `t`, expected one of `error`, `warning`"
+        ));
+        assert!(tag_as_variant(
+            "expected `a` or `b`, found a value with the YAML tag `!x-y`",
+            "unknown variant `x-y`, expected `a` or `b`"
+        ));
+        // Another variant, other variants expected, or a tag that is not a
+        // local one's name are not the same error.
+        assert!(!tag_as_variant(
+            ayaml,
+            "unknown variant `u`, expected one of `error`, `warning`"
+        ));
+        assert!(!tag_as_variant(
+            ayaml,
+            "unknown variant `t`, expected one of `error`"
+        ));
+        assert!(!tag_as_variant(
+            "expected `a`, found a value with the YAML tag `!!str`",
+            "unknown variant `!str`, expected `a`"
+        ));
+        assert!(!tag_as_variant(
+            "expected `a`, found a mapping",
+            "unknown variant `t`, expected `a`"
+        ));
+    }
+
+    /// The cases the long runs of seeds 2, 3, 10 and 12 found once alint
+    /// named a tag in its own words: a tag on a value where an untagged enum
+    /// goes, on an element of one, and on a level.
+    #[test]
+    fn a_tagged_value_in_a_rule_is_one_error() {
+        for (rule, field) in [
+            (
+                "{id: a, kind: command, command: !t [x], paths: a, level: error}",
+                "command",
+            ),
+            (
+                "{id: a, kind: file_exists, paths: [a, !t b], level: error}",
+                "paths[1]",
+            ),
+            (
+                "{id: a, kind: file_exists, paths: a, level: !t error}",
+                "level",
+            ),
+        ] {
+            let input = format!("version: 1\nrules:\n  - {rule}\n");
+            let (case, _) = super::super::compare_at(&input, super::super::Entry::Rule, 0);
+            assert_eq!(
+                case.class,
+                super::super::Class::RejectedAtSameLocation,
+                "{case:?}"
+            );
+            assert!(
+                case.ayaml.as_ref().unwrap_err().message.contains(field),
+                "{case:?}"
+            );
+        }
     }
 }
