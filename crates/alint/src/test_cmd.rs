@@ -42,7 +42,7 @@ struct SelectedTest {
 }
 
 pub(crate) fn run(options: &RunOptions<'_>, cli: &Cli) -> Result<ExitCode> {
-    reject_incompatible_globals(cli)?;
+    reject_incompatible_globals(cli, options.allow_spawn)?;
     let current = std::env::current_dir()?;
     let current = current.canonicalize()?;
     let discovered = match discover(options.paths, &current) {
@@ -287,7 +287,12 @@ fn execute_selected(
     })
 }
 
-fn reject_incompatible_globals(cli: &Cli) -> Result<()> {
+fn reject_incompatible_globals(cli: &Cli, allow_spawn: bool) -> Result<()> {
+    // Policy tests refuse spawning unless a test declares it and
+    // `--allow-spawn` grants it; `--no-spawn` keeps that refusal.
+    if cli.no_spawn && allow_spawn {
+        bail!("`--no-spawn` and `--allow-spawn` contradict each other; drop one");
+    }
     let incompatible = if !cli.config.is_empty() {
         Some("--config")
     } else if cli.no_gitignore {

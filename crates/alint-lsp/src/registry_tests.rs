@@ -76,7 +76,12 @@ fn a_session_runs_kinds_and_resolves_aliases_from_the_injected_registry() {
     )
     .unwrap();
 
-    let check = super::config::check_workspace(&[dir.path().to_path_buf()], &[], None, &registry);
+    let check = super::config::check_workspace(
+        &[dir.path().to_path_buf()],
+        &[],
+        &super::config::Settings::default(),
+        &registry,
+    );
     let [(_, run)] = &check.runs[..] else {
         panic!("one config run: {:?}", check.runs.len());
     };
@@ -107,7 +112,7 @@ fn a_session_runs_kinds_and_resolves_aliases_from_the_injected_registry() {
     let builtin = super::config::check_workspace(
         &[dir.path().to_path_buf()],
         &[],
-        None,
+        &super::config::Settings::default(),
         &alint_rules::builtin_registry(),
     );
     let [(_, run)] = &builtin.runs[..] else {

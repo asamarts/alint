@@ -16,10 +16,12 @@ fn test_backend(client: Client) -> Backend {
 /// Wire a built session into the state as the governing config of `uri`.
 fn install_session(st: &mut State, root: &Path, uri: &Url, session: Session) {
     st.folders = vec![root.to_path_buf()];
-    st.doc_config
-        .insert(uri.clone(), session.config_path.clone());
-    st.sessions
-        .insert(session.config_path.clone(), Arc::new(session));
+    let key = SessionKey {
+        config: session.config_path.clone(),
+        root: session.root.clone(),
+    };
+    st.doc_config.insert(uri.clone(), key.clone());
+    st.sessions.insert(key, Arc::new(session));
 }
 
 fn violation(line: Option<usize>, column: Option<usize>) -> Violation {
@@ -335,7 +337,7 @@ rules:
     let check = super::config::check_workspace(
         &[dir.path().to_path_buf()],
         &[],
-        None,
+        &super::config::Settings::default(),
         &alint_rules::builtin_registry(),
     );
     let [(_, run)] = &check.runs[..] else {
@@ -540,15 +542,21 @@ fn a_run_error_leaves_out_a_top_level_value_read_from_the_environment() {
          rules:\n  - id: readme\n    kind: file_exists\n    paths: README.md\n    level: error\n",
     )
     .unwrap();
+    // Trusted: an untrusted session reads nothing from the environment.
+    let settings = super::config::Settings {
+        trusted: true,
+        ..super::config::Settings::default()
+    };
     let check = check_workspace(
         &[dir.path().to_path_buf()],
         &[],
-        None,
+        &settings,
         &alint_rules::builtin_registry(),
     );
     let [(_, Err(error))] = check.runs.as_slice() else {
         panic!("expected one failed run");
     };
+    let error = &error.message;
     assert!(error.starts_with("running rules: "), "{error}");
     assert!(error.contains("<redacted>["), "{error}");
     assert!(!error.contains(&value), "{error}");

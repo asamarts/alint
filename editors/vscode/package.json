@@ -31,6 +31,16 @@
   "activationEvents": [
     "workspaceContains:**/.alint.yml"
   ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "In Restricted Mode, alint lints the workspace without running anything its config could start: command rules and custom facts are skipped, remote `extends:` are not fetched, and `{{env.*}}` values are left empty. The workspace's own `alint.path` and `alint.serverArgs` settings are ignored, and **alint: Show effective rules** is off. Trust the workspace to lint with all of them.",
+      "restrictedConfigurations": [
+        "alint.path",
+        "alint.serverArgs"
+      ]
+    }
+  },
   "contributes": {
     "configuration": {
       "title": "alint",

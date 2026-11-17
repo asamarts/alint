@@ -58,8 +58,9 @@ pub(crate) use trust::{
     union_provenance,
 };
 pub use trust::{
-    SPAWNING_FIX_OPS, SPAWNING_RULE_KINDS, reject_allow_out_of_root_in, reject_baseline_in,
-    reject_trusted_extends_in, reject_untrusted_ignore_in,
+    SPAWNING_FIX_OPS, SPAWNING_RULE_KINDS, fact_spawns, refuse_spawning,
+    reject_allow_out_of_root_in, reject_baseline_in, reject_trusted_extends_in,
+    reject_untrusted_ignore_in, rule_spawn_use,
 };
 
 use alint_core::{
@@ -175,18 +176,59 @@ fn load_resolved(
     Ok(merged)
 }
 
-/// Whether the config at `path` (with its `extends:` chain and
-/// `.alint.d/` drop-ins, exactly as [`load`] resolves them) turns on
-/// `nested_configs:`. Skips the nested-config walk itself, so it is cheap
-/// enough for an embedder (the LSP) to ask which ancestor config governs
-/// a file.
+/// Whether the config at `path` turns on `nested_configs:`, as [`load`]
+/// reads the setting: from the file itself and its `.alint.d/` drop-ins (the
+/// last one that sets it wins), never from an `extends:`'d config, whose
+/// top-level settings `load` drops.
+///
+/// Only that key is read. Nothing is resolved: no `extends:` entry is loaded
+/// or fetched and no `{{env.*}}` value is interpolated, so an embedder may ask
+/// about a config it does not trust, such as a nested `.alint.yml` in a
+/// vendored directory. A file that is not YAML, or whose `nested_configs` is
+/// not a boolean, is an error; the rest of the config is not validated.
 pub fn nested_configs_enabled(path: &Path) -> Result<bool> {
     nested_configs_enabled_with(path, &LoadOptions::default())
 }
 
-/// [`nested_configs_enabled`] with explicit loader options.
+/// [`nested_configs_enabled`] with explicit loader options. Only
+/// [`LoadOptions::config_source`] is consulted.
 pub fn nested_configs_enabled_with(path: &Path, opts: &LoadOptions<'_>) -> Result<bool> {
-    Ok(load_top_level_raw(path, opts)?.nested_configs == Some(true))
+    let source = opts.config_source.as_ref();
+    let mut enabled = nested_configs_key(path, source)?;
+    let drop_in_dir = path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(".alint.d");
+    for drop_in in collect_drop_ins(&drop_in_dir, source)? {
+        if let Some(value) = nested_configs_key(&drop_in, source)? {
+            enabled = Some(value);
+        }
+    }
+    Ok(enabled == Some(true))
+}
+
+/// The `nested_configs` value one config file sets, read without resolving
+/// anything else in it.
+fn nested_configs_key(path: &Path, source: &dyn ConfigSourceProvider) -> Result<Option<bool>> {
+    #[derive(Deserialize)]
+    struct NestedConfigsKey {
+        #[serde(default)]
+        nested_configs: Option<bool>,
+    }
+    let contents = source.read_to_string(path).map_err(|source| Error::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let guards = alint_core::yaml_depth::scan_guards(&contents);
+    if !guards.flow_within_limit() || !guards.expansion_within_limit(&contents) {
+        return Err(Error::Other(format!(
+            "{}: YAML nesting or alias expansion exceeds the supported limits",
+            path.display()
+        )));
+    }
+    let key: NestedConfigsKey = alint_core::yaml::from_str(&contents)
+        .map_err(|error| Error::Other(format!("{}: YAML parse error: {error}", path.display())))?;
+    Ok(key.nested_configs)
 }
 
 /// The top-level config plus its `extends:` chain and `.alint.d/`

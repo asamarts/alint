@@ -22,6 +22,12 @@
 ;; alint lints every file, but Eglot attaches per major mode — there is
 ;; no "all files" wildcard.  `alint-modes' lists a broad set of common
 ;; programming modes; extend it as needed.
+;;
+;; Until it is told the workspace is trusted, the server runs nothing the
+;; repository's config could start (command rules, custom facts), fetches
+;; no remote `extends:' and reads no environment value.  Set
+;; `alint-trusted' to t, before this package loads, to trust every
+;; workspace alint lints.
 
 ;;; Code:
 
@@ -53,11 +59,25 @@
   :type '(repeat symbol)
   :group 'alint)
 
+(defcustom alint-trusted nil
+  "Non-nil to tell the alint server every workspace is trusted.
+A trusted workspace's config may run commands (command rules and
+custom facts), fetch a remote `extends:' and read environment
+variables; an untrusted one lints without them.  Set it in your own
+init file, before this package loads, and only if you open
+repositories you trust."
+  :type 'boolean
+  :group 'alint)
+
 ;;;###autoload
 (defun alint-setup ()
   "Register the alint language server with Eglot for `alint-modes'."
   (add-to-list 'eglot-server-programs
-               (cons alint-modes alint-command)))
+               (cons alint-modes
+                     (if alint-trusted
+                         (append alint-command
+                                 '(:initializationOptions (:trusted t)))
+                       alint-command))))
 
 ;;;###autoload
 (with-eval-after-load 'eglot

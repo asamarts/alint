@@ -18,6 +18,25 @@ Zed from the server.
 You can also install alint yourself via Homebrew, `cargo install alint`,
 `npm i -g @asamarts/alint`, Docker, or the install script.
 
+## Workspace trust
+
+Until the server is told a workspace is trusted, it runs nothing the
+repository's `.alint.yml` could start: command rules and `custom:` facts
+are skipped, a remote `extends:` is not fetched, and `{{env.*}}` values
+are left unset. Every other rule lints. See
+[Workspace trust](https://alint.org/docs/cli/lsp/#workspace-trust).
+
+To turn them on, add this to your user `settings.json`:
+
+```json
+"lsp": { "alint": { "initialization_options": { "trusted": true } } }
+```
+
+Set it in your user-level config, never in a file a repository can
+supply, and only if you open repositories you trust: it trusts every
+workspace alint lints.
+A repository's `.zed/settings.json` must not be the place.
+
 ## Known limitation
 
 Zed attaches language servers per-language; there is no "all files"

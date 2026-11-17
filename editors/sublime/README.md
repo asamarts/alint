@@ -18,6 +18,21 @@ Requires the `alint` binary on `PATH` (Homebrew, `cargo install alint`,
 
 The client runs `alint lsp` and attaches to the scopes in `selector`.
 
+## Workspace trust
+
+Until the server is told a workspace is trusted, it runs nothing the
+repository's `.alint.yml` could start: command rules and `custom:` facts
+are skipped, a remote `extends:` is not fetched, and `{{env.*}}` values
+are left unset. Every other rule lints. See
+[Workspace trust](https://alint.org/docs/cli/lsp/#workspace-trust).
+
+To turn them on, set `"trusted": true` in the client's
+`initializationOptions` (the snippet ships it as `false`).
+Set it in your user-level config, never in a file a repository can
+supply, and only if you open repositories you trust: it trusts every
+workspace alint lints.
+A `.sublime-project` from a repository must not be the place.
+
 ## Known limitation
 
 Sublime's `LSP` attaches by **scope selector**, with no "all files"

@@ -340,6 +340,23 @@ fn run(mut cli: Cli) -> Result<ExitCode> {
              subcommand writes via `--output`)"
         );
     }
+    // `--no-spawn` refuses what a loaded config would run; a subcommand that
+    // runs no rule (or, like `test`, gates spawning itself) would silently
+    // ignore it.
+    if cli.no_spawn
+        && matches!(
+            command,
+            Command::Init { .. }
+                | Command::Suggest { .. }
+                | Command::ExportAgentsMd { .. }
+                | Command::Rules { .. }
+        )
+    {
+        bail!(
+            "`--no-spawn` applies only to `check`, `fix`, `baseline`, `list`, `explain`, \
+             `facts`, `validate-config`, `test` and `lsp`; this subcommand runs no rule"
+        );
+    }
     if (cli.strict_baseline || cli.show_baselined) && !matches!(command, Command::Check { .. }) {
         bail!(
             "`--strict-baseline` and `--show-baselined` apply only to `check` \
@@ -465,7 +482,7 @@ fn run(mut cli: Cli) -> Result<ExitCode> {
         Command::ValidateConfig { path, format } => cmd_validate_config(path, &format, &cli),
         Command::Lsp => {
             reject_non_human_format(&cli, "lsp")?;
-            cmd_lsp(cli.show_notes, cli.as_of, cli.registry())
+            cmd_lsp(&cli)
         }
         Command::Rules { command } => rules::run(&command, &cli),
     }
@@ -500,16 +517,31 @@ fn reject_non_human_baseline_format(cli: &Cli) -> anyhow::Result<()> {
 /// runtime inside `alint-lsp`) until the client sends `exit` or
 /// disconnects; exits `0` after a clean `shutdown` + `exit`, `1` for an
 /// `exit` without `shutdown` (per the LSP specification).
-/// `--show-notes` lists informational notes on stderr after each check.
-fn cmd_lsp(
-    show_notes: bool,
-    analysis_time: Option<alint_core::AnalysisTime>,
-    registry: alint_core::RuleRegistry,
-) -> Result<ExitCode> {
+/// `--show-notes` lists informational notes on stderr after each check;
+/// `--config` lints every workspace folder with that config (trusted, as the
+/// user's own), `--no-gitignore` and `--no-spawn` apply as in `check`.
+fn cmd_lsp(cli: &Cli) -> Result<ExitCode> {
+    let config = match cli.config.first() {
+        Some(path) => {
+            // Resolved now, against the directory the editor started the
+            // server in, and checked, so a typo fails at startup rather than
+            // as a diagnostic on a file that does not exist.
+            let path = std::path::absolute(path)
+                .with_context(|| format!("resolving config path {}", path.display()))?;
+            if !path.is_file() {
+                bail!("config file not found: {}", path.display());
+            }
+            Some(path)
+        }
+        None => None,
+    };
     let code = alint_lsp::run_stdio(alint_lsp::LspOptions {
-        show_notes,
-        analysis_time,
-        registry: Some(registry),
+        show_notes: cli.show_notes,
+        analysis_time: cli.as_of,
+        registry: Some(cli.registry()),
+        config,
+        no_gitignore: cli.no_gitignore,
+        no_spawn: cli.no_spawn,
     })
     .context("running language server")?;
     Ok(ExitCode::from(u8::try_from(code).unwrap_or(1)))

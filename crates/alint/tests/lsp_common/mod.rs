@@ -138,8 +138,15 @@ pub fn spawn_server(root: &Path) -> Server {
 
 /// [`spawn_server`] with `env` added to the server's environment.
 pub fn spawn_server_with_env(root: &Path, env: &[(&str, &str)]) -> Server {
+    spawn_server_with(root, &[], env)
+}
+
+/// [`spawn_server`] with `args` after `alint lsp` and `env` added to the
+/// server's environment.
+pub fn spawn_server_with(root: &Path, args: &[&str], env: &[(&str, &str)]) -> Server {
     let child = Command::new(env!("CARGO_BIN_EXE_alint"))
         .arg("lsp")
+        .args(args)
         .current_dir(root)
         .envs(env.iter().copied())
         .stdin(Stdio::piped())

@@ -8,6 +8,46 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Security
 
+- **The language server runs nothing a workspace's config could start until the editor trusts
+  the workspace.** Since v0.11.0, opening a folder in an editor with alint's language server ran
+  that repository's `.alint.yml` as `alint check` does: its command rules (`kind: command`,
+  `generated_file_fresh`, `command_idempotent`) and `custom:` facts started processes, a remote
+  `extends:` was fetched, and `{{env.*}}` and `env.*` in a `when:` read the editor's
+  environment, so opening a cloned repository ran its commands. Until the client sends the
+  initialization option `{"trusted": true}`, the server now skips every rule that spawns (by
+  kind or by fix, at any `require:` depth) and every `custom:` fact, refuses a remote `extends:`
+  with a diagnostic on the config, and reads no environment value. Every other rule lints as
+  usual, and the server says what it turned off once, in an information message. The VS Code
+  extension sends VS Code's Workspace Trust state and restarts the server when trust is
+  granted, so a trusted VS Code workspace behaves as before; other editors opt in through their
+  server settings ([editors](docs/site/integrations/editors.md#workspace-trust)). The JetBrains
+  plugin does not send the option yet, so command rules do not run there.
+- **A nested or vendored `.alint.yml` no longer governs files in the language server.** Since
+  v0.18.0, the server linted each open file with the nearest `.alint.yml` above it as a
+  top-level config. A package under `node_modules/`, which the workspace's `.gitignore` excludes
+  and `alint check` never reads, could ship one whose command rule ran when one of its files was
+  opened, although a nested config may not declare command rules. Each workspace folder is now
+  linted by its own config, rooted at that config's directory, as `alint check` there; a deeper
+  config joins only under a folder config with `nested_configs: true`, and then as a nested
+  config.
+- **Reading `nested_configs` no longer resolves a config's `extends:`.** Since v0.18.0,
+  `alint_dsl::nested_configs_enabled` (and the language server, for every config between an
+  open file and its workspace folder, nested ones included) loaded the config in full to read
+  that one key: a remote `extends:` was fetched and `{{env.*}}` values were interpolated, so a
+  vendored config could send an environment variable to a host it named. It now reads the key
+  from the file and its `.alint.d/` drop-ins only (an extended config's `nested_configs` never
+  applied anyway).
+- **`alint lsp` honours `--config` and `--no-gitignore`.** Since v0.11.0 the server accepted and
+  silently ignored both, so `alint lsp -c my-policy.yml` linted with the repository's own config
+  instead. `--config` now lints every workspace folder with that file, rooted at the folder,
+  and counts as trust as `alint check -c` does; the file must exist when the server starts.
+  `--no-gitignore` lints the files `.gitignore` excludes.
+- **Hover text no longer renders a finding as Markdown.** Since v0.11.0, the hover showed a
+  finding's message, rule id and policy URL as Markdown, so text from the repository (a file
+  name or matched line in the message) could render an image the editor fetched
+  (`![x](http://...)`), a link, or HTML. The message is now escaped, the rule id is a code span,
+  and a policy URL is a link only when it is `http` or `https` (any other shows as text).
+
 - **`given.env` in a policy test no longer reaches Git.** Since v0.20.0, `alint test` passed a
   test's `given.env` to the Git commands it runs itself: the `given.git` fixture setup, and
   alint's Git reads for rules such as `git_tracked_only`. A variable such as `GIT_CONFIG_*`
@@ -102,6 +142,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`--no-spawn`** (global flag): refuse a config whose rules, fixes or facts start a process,
+  for linting a repository you do not trust with its own config. A rule of a spawning kind (at
+  any `require:` depth), a spawning fix such as `git_untrack` or `command`, or a `custom:` fact
+  fails the load before anything runs, naming it:
+  `rule "x" (kind: command) spawns a process; --no-spawn refuses it`. It applies to `check`,
+  `fix`, `baseline`, `list`, `explain`, `facts`, `validate-config` and `lsp`; `test` rejects it
+  beside `--allow-spawn`, and the commands that run no rule reject it. It does not refuse a
+  remote `extends:` or environment values.
+- **The language server's `trusted` initialization option** (`{"trusted": true}`): until the
+  editor sends it, `alint lsp` runs no command rule or custom fact, fetches no remote
+  `extends:` and reads no environment value (see Security). The VS Code extension sends VS
+  Code's Workspace Trust state and declares limited support for untrusted workspaces.
+- **`alint_dsl::rule_spawn_use`, `fact_spawns` and `refuse_spawning`** (library API): what in a
+  rule spawns a process (its kind, its fix, or a nested `require:` kind), whether a fact does,
+  and the check `--no-spawn` runs.
+- **Language-server configuration errors are placed where they are.** A YAML syntax error in
+  `.alint.yml` is shown on its line instead of on the first line of the file.
+
 - **`alint_core::names_git_directory`, `path_names_git_directory` and `reaches_git_directory`**
   (library API): whether a name, a path or a path below a root (through its symlinks) names a
   Git directory in any spelling a file system opens as `.git`. Fixers refuse such paths (see
@@ -163,6 +221,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   fingerprinter that returns a `String` again, such as `baseline::fingerprint`.
 
 ### Changed
+
+- **The language server treats a workspace as untrusted unless the editor says otherwise.**
+  Editors other than VS Code now need the `trusted` initialization option for command rules,
+  custom facts, remote `extends:` and environment values to take effect
+  ([editors](docs/site/integrations/editors.md#workspace-trust)). A workspace folder without a
+  config of its own is no longer linted by a config found further down, and the server drops a
+  re-evaluation that a newer edit superseded before it starts, and computes code actions off
+  the request thread.
+- **`alint_dsl::nested_configs_enabled` and `nested_configs_enabled_with` read only the key.**
+  They no longer resolve `extends:` or interpolate the environment, so a config whose
+  `extends:` would fail to load still answers.
 
 - **Breaking (library API):** `WhenEnv::env` and `WhenEnv::with_env` take a
   `BTreeMap<String, String>`, the type of the engine's process environment, instead of a
