@@ -395,6 +395,7 @@ impl Decoder<'_> {
         Ok(Selector {
             paths,
             scope_filter,
+            reads_environment: false,
         })
     }
 
@@ -511,6 +512,7 @@ impl Decoder<'_> {
             fields,
             transforms,
             filters,
+            reads_environment: false,
         })
     }
 

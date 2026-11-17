@@ -20,6 +20,7 @@
 
 mod decode;
 mod document;
+mod environment;
 mod literal;
 mod model;
 mod origins;
@@ -31,6 +32,7 @@ use ayaml::Value;
 
 pub(crate) use decode::source_objects;
 pub(crate) use document::{Document, ExtendsEntry};
+pub(crate) use environment::Environment;
 pub(crate) use literal::reject_interpolated_names;
 pub(crate) use model::{Objects, SourceId};
 pub(crate) use origins::{

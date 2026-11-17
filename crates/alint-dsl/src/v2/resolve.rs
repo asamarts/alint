@@ -471,24 +471,41 @@ pub(crate) fn resolve(objects: &Objects) -> Result<Resolved<'_>> {
             source,
             selector: selector_def(selector),
             capabilities: selector_capabilities(selector),
-            reads_environment: false,
+            reads_environment: selector.reads_environment,
         });
     }
     for &(source, local) in &namespaces.relations {
         let (name, relation) = &objects.sources[source.0].relations[local];
+        let reads_environment = relation.reads_environment;
         let relation = relation_def(&namespaces, source, name, relation)?;
+        // A named selector it reads that takes a value from the environment
+        // makes its failures show no detail too.
+        let selectors_read_environment = parts_of(&relation.rows).iter().any(|part| {
+            matches!(&part.from, plan::SelectorRef::Named(reached)
+                if plan.selectors[reached.id.0].reads_environment)
+        });
         plan.relations.push(NamedRelation {
             name: name.clone(),
             source,
             relation,
             capabilities: Capabilities::default(),
-            reads_environment: false,
+            reads_environment: reads_environment || selectors_read_environment,
         });
     }
     let order = super::plan_check::check(&plan)?;
     add_capabilities(&mut plan, &order);
     gate_objects(&plan)?;
     Ok(Resolved { plan, namespaces })
+}
+
+/// The parts a relation reads with: its one part, a union's, or none for a
+/// join.
+fn parts_of(rows: &plan::Rows) -> &[plan::Part] {
+    match rows {
+        plan::Rows::Part(part) => std::slice::from_ref(part),
+        plan::Rows::Union(parts) => parts,
+        plan::Rows::Join(_) => &[],
+    }
 }
 
 fn selector_def(selector: &Selector) -> plan::SelectorDef {
@@ -743,6 +760,7 @@ fn add_capabilities(plan: &mut Plan, order: &[RelationId]) {
                 capabilities.add(&selector_capabilities(&Selector {
                     paths: selector.paths.clone(),
                     scope_filter: selector.scope_filter.clone(),
+                    reads_environment: false,
                 }));
             }
         };

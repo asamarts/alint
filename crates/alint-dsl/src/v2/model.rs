@@ -117,6 +117,9 @@ pub(crate) struct Reference {
 pub(crate) struct Selector {
     pub(crate) paths: alint_core::PathsSpec,
     pub(crate) scope_filter: Option<alint_core::ScopeFilterSpec>,
+    /// Its definition takes a value from the environment
+    /// ([`super::Environment`]).
+    pub(crate) reads_environment: bool,
 }
 
 /// Where a selector is referenced: a name, or an anonymous inline selector.
@@ -136,6 +139,9 @@ pub(crate) struct Relation {
     pub(crate) transforms: Vec<(String, Vec<Transform>)>,
     /// `where:`: each field's predicates, all of which must hold.
     pub(crate) filters: Vec<(String, Vec<Predicate>)>,
+    /// Its definition takes a value from the environment outside its
+    /// fields' `where:` and `transform:` entries ([`super::Environment`]).
+    pub(crate) reads_environment: bool,
 }
 
 /// Where a relation's rows come from: exactly one of `entries:`, `read:`,

@@ -436,19 +436,35 @@ fn decode_value(
     }
 }
 
+fn redact_interpolated_error(source: &str) -> Error {
+    Error::Other(format!(
+        "{source}: could not deserialize interpolated config: <redacted> (the error could quote \
+         a value read from the environment)"
+    ))
+}
+
+/// What a version 2 source's selectors and relations read from the
+/// environment, read off its raw document before interpolation erases the
+/// difference ([`crate::v2::Environment`]); `None` for a version 1 source or
+/// one that interpolates nothing.
+fn v2_environment_of(
+    surface: crate::v2::Surface,
+    contents: &str,
+    document: Option<&ayaml::Value>,
+) -> Option<crate::v2::Environment> {
+    if surface == crate::v2::Surface::V2 && contents.contains("{{") {
+        document.map(crate::v2::Environment::of)
+    } else {
+        None
+    }
+}
+
 fn parse_config_interpolated_inner_with_environment(
     contents: &str,
     source: &Path,
     environment: &dyn crate::EnvironmentProvider,
     origin: &crate::v2::Origin<'_>,
 ) -> Result<RawConfig> {
-    fn redact_interpolated_error(source: &str) -> Error {
-        Error::Other(format!(
-            "{source}: could not deserialize interpolated config: <redacted> (the error \
-             could quote a value read from the environment)"
-        ))
-    }
-
     reject_yaml_bombs(contents, source)?;
     let source_path = source;
     let source = display_path(source);
@@ -462,6 +478,7 @@ fn parse_config_interpolated_inner_with_environment(
     {
         crate::v2::check_document(document, origin.display)?;
     }
+    let v2_environment = v2_environment_of(surface, contents, document.as_ref());
     let (mut config, v2_keys) = if contents.contains("{{") {
         let mut value: ayaml::Value = match document {
             Some(document) => document,
@@ -557,7 +574,13 @@ fn parse_config_interpolated_inner_with_environment(
     };
     config.surface = surface;
     if surface == crate::v2::Surface::V2 {
-        attach_v2_objects(&mut config, &v2_keys, origin, source_path)?;
+        attach_v2_objects(
+            &mut config,
+            &v2_keys,
+            origin,
+            source_path,
+            v2_environment.as_ref(),
+        )?;
     }
     Ok(config)
 }
@@ -612,6 +635,7 @@ fn attach_v2_objects(
     v2_keys: &[(String, ayaml::Value)],
     origin: &crate::v2::Origin<'_>,
     source_path: &Path,
+    environment: Option<&crate::v2::Environment>,
 ) -> Result<()> {
     let source = crate::v2::SourceId {
         display: origin.display.to_string(),
@@ -620,9 +644,13 @@ fn attach_v2_objects(
     };
     // An error may quote a value the environment supplied, as a v1 top-level
     // field's can; scrub those as the embedder would.
-    let objects = crate::v2::source_objects(source, v2_keys, &config.extends).map_err(|error| {
-        alint_core::redact_environment_values_in_error(error, &config.environment_values)
-    })?;
+    let mut objects =
+        crate::v2::source_objects(source, v2_keys, &config.extends).map_err(|error| {
+            alint_core::redact_environment_values_in_error(error, &config.environment_values)
+        })?;
+    if let Some(environment) = environment {
+        environment.mark(&mut objects);
+    }
     crate::v2::mark_field_origins(&mut config.rules, source_path);
     crate::v2::mark_field_origins(&mut config.templates, source_path);
     config.v2.sources.push(objects);
