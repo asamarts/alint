@@ -140,8 +140,9 @@ pub(super) fn cmd_list(category: Option<&str>, cli: &Cli) -> Result<ExitCode> {
 
 /// Each named object of `plan`, selectors then relations, in load order:
 /// what it is, its source's display, and the aliases (`as:`) a consumer
-/// reaches that source through, each with the consumer's display.
-fn named_objects(plan: &Plan) -> Vec<NamedObject<'_>> {
+/// reaches that source through, each with the consumer's display. `list` and
+/// `export-agents-md` show these.
+pub(super) fn named_objects(plan: &Plan) -> Vec<NamedObject<'_>> {
     let object = |what, name, source| {
         let declared = plan.source(source);
         NamedObject {
@@ -165,12 +166,14 @@ fn named_objects(plan: &Plan) -> Vec<NamedObject<'_>> {
         .collect()
 }
 
-struct NamedObject<'p> {
-    what: &'static str,
-    name: &'p str,
-    source: &'p str,
+pub(super) struct NamedObject<'p> {
+    /// `selector` or `relation`.
+    pub(super) what: &'static str,
+    pub(super) name: &'p str,
+    /// The display of the config file that declares it.
+    pub(super) source: &'p str,
     /// Each alias, with the source that gives it.
-    aliases: Vec<(&'p str, &'p str)>,
+    pub(super) aliases: Vec<(&'p str, &'p str)>,
 }
 
 /// The human `list` lines of a version 2 config's named selectors and
@@ -206,8 +209,9 @@ fn write_named_objects(out: &mut impl Write, plan: &Plan) -> Result<()> {
     Ok(())
 }
 
-/// The `list --format json` entries of `plan`'s objects of one kind.
-fn named_objects_json(plan: &Plan, what: &str) -> Vec<serde_json::Value> {
+/// The `list --format json` entries of `plan`'s objects of one kind, which
+/// `export-agents-md --format json` shares.
+pub(super) fn named_objects_json(plan: &Plan, what: &str) -> Vec<serde_json::Value> {
     named_objects(plan)
         .into_iter()
         .filter(|object| object.what == what)

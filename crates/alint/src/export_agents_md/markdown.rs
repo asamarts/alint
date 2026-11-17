@@ -13,6 +13,7 @@
 use alint_core::Level;
 
 use super::Directive;
+use crate::inspect::NamedObject;
 
 /// Markers that delimit the alint-managed region inside an
 /// `AGENTS.md`. Public so tests can match against the same
@@ -21,7 +22,13 @@ use super::Directive;
 pub const START_MARKER: &str = "<!-- alint:start -->";
 pub const END_MARKER: &str = "<!-- alint:end -->";
 
-pub fn render(directives: &[Directive], section_title: &str) -> String {
+/// The managed section: `directives` by severity, then a version 2 config's
+/// named selectors and relations (`objects`; `None` for version 1).
+pub fn render(
+    directives: &[Directive],
+    objects: Option<&[NamedObject<'_>]>,
+    section_title: &str,
+) -> String {
     use std::fmt::Write;
     let mut out = String::with_capacity(1024);
     out.push_str(START_MARKER);
@@ -40,11 +47,19 @@ pub fn render(directives: &[Directive], section_title: &str) -> String {
     if directives.is_empty() {
         out.push_str("_No rules at the configured severity threshold._\n");
         out.push('\n');
-        out.push_str(END_MARKER);
-        out.push('\n');
-        return out;
+    } else {
+        write_severity_sections(&mut out, directives);
+    }
+    if let Some(objects) = objects.filter(|objects| !objects.is_empty()) {
+        write_named_objects(&mut out, objects);
     }
 
+    out.push_str(END_MARKER);
+    out.push('\n');
+    out
+}
+
+fn write_severity_sections(out: &mut String, directives: &[Directive]) {
     let errors: Vec<&Directive> = directives
         .iter()
         .filter(|d| matches!(d.severity, Level::Error))
@@ -60,23 +75,73 @@ pub fn render(directives: &[Directive], section_title: &str) -> String {
 
     if !errors.is_empty() {
         out.push_str("### Errors (commit will fail)\n\n");
-        write_bullets(&mut out, &errors);
+        write_bullets(out, &errors);
         out.push('\n');
     }
     if !warnings.is_empty() {
         out.push_str("### Warnings (review before merge)\n\n");
-        write_bullets(&mut out, &warnings);
+        write_bullets(out, &warnings);
         out.push('\n');
     }
     if !infos.is_empty() {
         out.push_str("### Info (informational nudges)\n\n");
-        write_bullets(&mut out, &infos);
+        write_bullets(out, &infos);
         out.push('\n');
     }
+}
 
-    out.push_str(END_MARKER);
+/// A version 2 config's named selectors and relations, as `alint list`
+/// shows them: each with the config file that declares it and the aliases
+/// (`as:`) that reach that file.
+fn write_named_objects(out: &mut String, objects: &[NamedObject<'_>]) {
+    out.push_str("### Named selectors and relations\n\n");
+    out.push_str(
+        "Declared by this `version: 2` config (experimental), each with the config file \
+         that declares it and the `extends:` aliases that reach that file.\n\n",
+    );
+    for object in objects {
+        out.push_str("- ");
+        out.push_str(object.what);
+        out.push(' ');
+        out.push_str(&code_span(object.name));
+        out.push_str(": ");
+        out.push_str(&code_span(object.source));
+        if !object.aliases.is_empty() {
+            let aliases: Vec<String> = object
+                .aliases
+                .iter()
+                .map(|(alias, consumer)| {
+                    format!("as {} in {}", code_span(alias), code_span(consumer))
+                })
+                .collect();
+            out.push_str(" (");
+            out.push_str(&aliases.join(", "));
+            out.push(')');
+        }
+        out.push('\n');
+    }
     out.push('\n');
-    out
+}
+
+/// `text` as a Markdown code span: delimited by one backtick more than its
+/// longest backtick run, and padded with a space when it starts or ends with
+/// a backtick, so a file name cannot close the span early (as in
+/// `alint-lsp`'s `render::code_span`). A line break shows as a space.
+fn code_span(text: &str) -> String {
+    let mut longest = 0;
+    let mut run = 0;
+    for c in text.chars() {
+        run = if c == '`' { run + 1 } else { 0 };
+        longest = longest.max(run);
+    }
+    let fence = "`".repeat(longest + 1);
+    let pad = if text.starts_with('`') || text.ends_with('`') {
+        " "
+    } else {
+        ""
+    };
+    let text = text.replace(['\n', '\r'], " ");
+    format!("{fence}{pad}{text}{pad}{fence}")
 }
 
 fn write_bullets(out: &mut String, bullets: &[&Directive]) {
@@ -123,7 +188,7 @@ mod tests {
             d("warn1", Level::Warning, "avoid"),
             d("info1", Level::Info, "fyi"),
         ];
-        let out = render(&dirs, "Lint rules enforced by alint");
+        let out = render(&dirs, None, "Lint rules enforced by alint");
         assert!(out.contains(START_MARKER));
         assert!(out.contains(END_MARKER));
         assert!(out.contains("## Lint rules enforced by alint"));
@@ -138,7 +203,7 @@ mod tests {
     #[test]
     fn omits_empty_severity_sections() {
         let dirs = vec![d("err", Level::Error, "x")];
-        let out = render(&dirs, "Lint rules");
+        let out = render(&dirs, None, "Lint rules");
         assert!(out.contains("### Errors"));
         assert!(!out.contains("### Warnings"));
         assert!(!out.contains("### Info"));
@@ -146,7 +211,7 @@ mod tests {
 
     #[test]
     fn empty_set_produces_minimal_section() {
-        let out = render(&[], "Lint rules");
+        let out = render(&[], None, "Lint rules");
         assert!(out.contains(START_MARKER));
         assert!(out.contains(END_MARKER));
         assert!(out.contains("_No rules at the configured severity threshold._"));
@@ -160,21 +225,88 @@ mod tests {
             "do not",
             "https://example.com/policy",
         )];
-        let out = render(&dirs, "Title");
+        let out = render(&dirs, None, "Title");
         assert!(out.contains("[policy](https://example.com/policy)"));
     }
 
     #[test]
     fn output_uses_lf_line_endings_only() {
         let dirs = vec![d("x", Level::Warning, "hi")];
-        let out = render(&dirs, "Title");
+        let out = render(&dirs, None, "Title");
         assert!(!out.contains("\r\n"), "rendered output must use LF only");
     }
 
     #[test]
     fn output_ends_with_trailing_newline() {
-        let out = render(&[], "Title");
+        let out = render(&[], None, "Title");
         assert!(out.ends_with('\n'));
+    }
+
+    fn object<'p>(
+        what: &'static str,
+        name: &'p str,
+        source: &'p str,
+        aliases: Vec<(&'p str, &'p str)>,
+    ) -> NamedObject<'p> {
+        NamedObject {
+            what,
+            name,
+            source,
+            aliases,
+        }
+    }
+
+    #[test]
+    fn named_objects_follow_the_rules_with_their_source_and_aliases() {
+        let dirs = vec![d("err", Level::Error, "x")];
+        let objects = [
+            object(
+                "selector",
+                "manifests",
+                "deps.yml",
+                vec![("deps", ".alint.yml"), ("d", "rules/b.yml")],
+            ),
+            object("relation", "titles", ".alint.yml", vec![]),
+        ];
+        let out = render(&dirs, Some(&objects), "Lint rules");
+        let expected = "### Errors (commit will fail)\n\n- **`err`**: x\n\n\
+                        ### Named selectors and relations\n\n\
+                        Declared by this `version: 2` config (experimental), each with the \
+                        config file that declares it and the `extends:` aliases that reach \
+                        that file.\n\n\
+                        - selector `manifests`: `deps.yml` (as `deps` in `.alint.yml`, as `d` \
+                        in `rules/b.yml`)\n\
+                        - relation `titles`: `.alint.yml`\n\n\
+                        <!-- alint:end -->\n";
+        assert!(out.ends_with(expected), "{out}");
+    }
+
+    #[test]
+    fn named_objects_show_without_rules_and_not_when_there_are_none() {
+        let objects = [object("selector", "docs", ".alint.yml", vec![])];
+        let out = render(&[], Some(&objects), "Lint rules");
+        assert!(
+            out.contains(
+                "_No rules at the configured severity threshold._\n\n\
+                 ### Named selectors and relations\n"
+            ),
+            "{out}"
+        );
+        assert!(out.contains("- selector `docs`: `.alint.yml`\n"), "{out}");
+        // A version 2 config without named objects, and a version 1 config,
+        // render as before.
+        assert_eq!(
+            render(&[], Some(&[]), "Lint rules"),
+            render(&[], None, "Lint rules")
+        );
+    }
+
+    #[test]
+    fn a_file_name_cannot_close_its_code_span() {
+        assert_eq!(code_span("a.yml"), "`a.yml`");
+        assert_eq!(code_span("a`b.yml"), "``a`b.yml``");
+        assert_eq!(code_span("`a``.yml"), "``` `a``.yml ```");
+        assert_eq!(code_span("a\nb"), "`a b`");
     }
 
     #[test]
@@ -183,8 +315,8 @@ mod tests {
         // byte-identical output. This is the property
         // `--inline` round-trip identity hinges on.
         let dirs = vec![d("a", Level::Error, "1"), d("b", Level::Warning, "2")];
-        let first = render(&dirs, "Lint rules");
-        let second = render(&dirs, "Lint rules");
+        let first = render(&dirs, None, "Lint rules");
+        let second = render(&dirs, None, "Lint rules");
         assert_eq!(first, second);
     }
 }

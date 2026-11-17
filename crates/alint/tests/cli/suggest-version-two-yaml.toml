@@ -1,0 +1,3 @@
+bin.name = "alint"
+args = ["suggest", "--quiet", "--format=yaml", "."]
+fs.sandbox = true

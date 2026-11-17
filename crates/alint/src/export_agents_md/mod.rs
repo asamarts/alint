@@ -97,9 +97,15 @@ pub fn run(
     crate::config_cmd::warn_if_experimental(&config, &resolved_config_path);
 
     let directives = collect_directives(&config, opts.include_info);
+    // A version 2 config's named selectors and relations follow its rules,
+    // as in `list`; a version 1 config has none and its output is unchanged.
+    let plan = config.relation_plan.as_deref();
     let body = match opts.format {
-        OutputFormat::Markdown => markdown::render(&directives, &opts.section_title),
-        OutputFormat::Json => render_json(&directives, &opts.section_title)?,
+        OutputFormat::Markdown => {
+            let objects = plan.map(crate::inspect::named_objects);
+            markdown::render(&directives, objects.as_deref(), &opts.section_title)
+        }
+        OutputFormat::Json => render_json(&directives, plan, &opts.section_title)?,
     };
 
     write_output(&body, opts)?;
@@ -178,6 +184,13 @@ struct JsonReport<'a> {
     section_title: &'a str,
     generated_at: String,
     directives: Vec<JsonDirective<'a>>,
+    /// A version 2 config's named selectors, as `list --format json` shows
+    /// them; absent for version 1.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    selectors: Option<Vec<serde_json::Value>>,
+    /// A version 2 config's named relations; absent for version 1.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    relations: Option<Vec<serde_json::Value>>,
 }
 
 #[derive(Serialize)]
@@ -188,7 +201,11 @@ struct JsonDirective<'a> {
     policy_url: Option<&'a str>,
 }
 
-fn render_json(directives: &[Directive], section_title: &str) -> Result<String> {
+fn render_json(
+    directives: &[Directive],
+    plan: Option<&alint_core::relation::plan::Plan>,
+    section_title: &str,
+) -> Result<String> {
     let report = JsonReport {
         schema_version: 1,
         format: "agents-md",
@@ -203,6 +220,8 @@ fn render_json(directives: &[Directive], section_title: &str) -> Result<String> 
                 policy_url: d.policy_url.as_deref(),
             })
             .collect(),
+        selectors: plan.map(|plan| crate::inspect::named_objects_json(plan, "selector")),
+        relations: plan.map(|plan| crate::inspect::named_objects_json(plan, "relation")),
     };
     let mut s = serde_json::to_string_pretty(&report).context("encoding json")?;
     s.push('\n');
@@ -413,11 +432,23 @@ mod tests {
             directive: "no debugger statements".into(),
             policy_url: None,
         }];
-        let s = render_json(&directives, "Lint rules enforced by alint").unwrap();
+        let s = render_json(&directives, None, "Lint rules enforced by alint").unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&s).unwrap();
         assert_eq!(parsed["schema_version"], 1);
         assert_eq!(parsed["format"], "agents-md");
         assert_eq!(parsed["directives"][0]["rule_id"], "no-debugger");
         assert_eq!(parsed["directives"][0]["severity"], "error");
+        // A version 1 config has no named selectors or relations.
+        let keys: Vec<&String> = parsed.as_object().unwrap().keys().collect();
+        assert_eq!(
+            keys,
+            [
+                "directives",
+                "format",
+                "generated_at",
+                "schema_version",
+                "section_title"
+            ]
+        );
     }
 }

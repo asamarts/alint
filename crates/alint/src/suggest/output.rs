@@ -401,6 +401,46 @@ mod tests {
     }
 
     #[test]
+    fn yaml_writes_no_version_and_loads_under_either_version() {
+        // `suggest` proposes extends and rules for the user to add to a config;
+        // it writes no `version:`, so its output means the same under the
+        // `version: 1` that `init` writes and under an experimental
+        // `version: 2`.
+        let readme = Proposal {
+            id: "has-readme".into(),
+            kind: ProposalKind::Rule {
+                kind: "file_exists".into(),
+                yaml: "- id: has-readme\n  kind: file_exists\n  paths: README.md\n  \
+                       level: warning\n"
+                    .into(),
+            },
+            confidence: Confidence::High,
+            evidence: Vec::new(),
+            summary: "No README.".into(),
+        };
+        let mut buf = Vec::new();
+        render_yaml(&[bundled_proposal(), readme], &mut buf).unwrap();
+        let yaml = String::from_utf8(buf).unwrap();
+        assert!(
+            !yaml.lines().any(|line| line.starts_with("version")),
+            "{yaml}"
+        );
+        let registry = alint_rules::builtin_registry();
+        for version in [1, 2] {
+            let tmp = tempfile::tempdir().unwrap();
+            let path = tmp.path().join(".alint.yml");
+            std::fs::write(&path, format!("version: {version}\n{yaml}")).unwrap();
+            let loaded = alint_dsl::load_with(
+                &path,
+                &alint_dsl::LoadOptions::with_catalog(registry.catalog()),
+            )
+            .unwrap_or_else(|error| panic!("version {version}: {error}"));
+            assert_eq!(loaded.version, version);
+            assert!(loaded.rules.iter().any(|rule| rule.id == "has-readme"));
+        }
+    }
+
+    #[test]
     fn json_emits_stable_envelope() {
         let proposals = vec![bundled_proposal(), rule_proposal()];
         let mut buf = Vec::new();

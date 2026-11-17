@@ -1,0 +1,10 @@
+# `suggest` reads an existing version 2 config's `extends:` as it reads a
+# version 1 one, leaving out what it already extends, and writes no
+# `version:`.
+version: 2
+extends:
+  - alint://bundled/oss-baseline@v1
+selectors:
+  manifests:
+    paths: Cargo.toml
+rules: []

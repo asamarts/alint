@@ -448,6 +448,12 @@ policy-test package the user does not trust.
     with the file that declares it and the aliases that reach that file; `list --format json`
     adds `selectors` and `relations` for a version 2 config only, and `--category` lists rules
     only.
+  - `alint export-agents-md` lists a version 2 config's named selectors and relations the same
+    way, after its rules, under `### Named selectors and relations`; `--format json` adds
+    `selectors` and `relations`, shaped as in `list --format json`, for a version 2 config only.
+    A version 1 config's output is unchanged. `init` still writes `version: 1`, and
+    `suggest --format yaml` still writes no `version:`, so its snippet can be added to a config
+    of either version.
   - Nothing reads selectors and relations yet: a version 2 config runs its rules as version 1
     would, and its selectors and relations check nothing until the `constraint` rule kind lands.
   - alint can now evaluate a relation over a repository: an internal evaluator, which the

@@ -1,0 +1,21 @@
+<!-- alint:start -->
+
+## Lint rules enforced by alint
+
+Generated from `.alint.yml` by `alint export-agents-md`. Re-run after editing the lint config - these directives must stay in sync with what alint blocks at commit time. Manual edits inside this section are overwritten.
+
+### Errors (commit will fail)
+
+- **`has-readme`**: Every repository has a README.md.
+
+### Named selectors and relations
+
+Declared by this `version: 2` config (experimental), each with the config file that declares it and the `extends:` aliases that reach that file.
+
+- selector `manifests`: `deps.yml` (as `deps` in `.alint.yml`)
+- selector `docs`: `.alint.yml`
+- relation `ranges`: `deps.yml` (as `deps` in `.alint.yml`)
+- relation `titles`: `.alint.yml`
+- relation `pinned`: `.alint.yml`
+
+<!-- alint:end -->

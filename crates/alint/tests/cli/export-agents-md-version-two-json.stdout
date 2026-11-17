@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "format": "agents-md",
+  "section_title": "Lint rules enforced by alint",
+  "generated_at": "[..]",
+  "directives": [
+    {
+      "rule_id": "has-readme",
+      "severity": "error",
+      "directive": "Every repository has a README.md.",
+      "policy_url": null
+    }
+  ],
+  "selectors": [
+    {
+      "aliases": [
+        {
+          "alias": "deps",
+          "in": ".alint.yml"
+        }
+      ],
+      "name": "manifests",
+      "source": "deps.yml"
+    },
+    {
+      "aliases": [],
+      "name": "docs",
+      "source": ".alint.yml"
+    }
+  ],
+  "relations": [
+    {
+      "aliases": [
+        {
+          "alias": "deps",
+          "in": ".alint.yml"
+        }
+      ],
+      "name": "ranges",
+      "source": "deps.yml"
+    },
+    {
+      "aliases": [],
+      "name": "titles",
+      "source": ".alint.yml"
+    },
+    {
+      "aliases": [],
+      "name": "pinned",
+      "source": ".alint.yml"
+    }
+  ]
+}
