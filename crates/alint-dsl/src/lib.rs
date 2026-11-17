@@ -722,7 +722,7 @@ fn deserialize_effective_rule(
     let deserialize = |mut mapping: Mapping| {
         mapping.remove(FIELD_SOURCES_MARKER);
         let sensitive_fields = take_sensitive_fields(&mut mapping);
-        ayaml::from_value::<alint_core::RuleSpec>(ayaml::Value::Mapping(mapping))
+        crate::core_yaml::decode::<alint_core::RuleSpec>(ayaml::Value::Mapping(mapping))
             .map(|spec| (spec, sensitive_fields))
             .map_err(|error| {
                 Error::rule_config(

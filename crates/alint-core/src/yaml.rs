@@ -55,17 +55,29 @@ fn limits() -> ayaml::Limits {
 /// alint-core must not enable it, as the variable then chooses the parser for
 /// the whole process.
 ///
+/// An enum's variant without data takes only its name, a string, not the
+/// one-entry mapping or the tag that serde's externally tagged form gives a
+/// variant with data.
+///
 /// # Errors
 ///
 /// When the input is not one valid YAML document, exceeds a limit, or does
-/// not decode into `T`.
+/// not decode into `T`. A value of the wrong type is named, as ``integer `1` ``,
+/// and so is a YAML tag a field cannot read. A parse error that is likely an
+/// indentation mistake ends with a hint to check the line's indentation.
 pub fn from_str<'de, T: Deserialize<'de>>(input: &'de str) -> Result<T, Error> {
     crate::yaml_backend::from_str(input)
 }
 
-/// [`from_str`] through ayaml, whatever parser the build chose.
+/// [`from_str`] through ayaml, whatever parser the build chose, and through
+/// alint's own decoding layer (see [`crate::yaml_decode`]).
 pub(crate) fn ayaml_from_str<'de, T: Deserialize<'de>>(input: &'de str) -> Result<T, Error> {
-    ayaml::compat::from_str_with_limits(input, &limits()).map_err(Error::ayaml)
+    ayaml::compat::from_str_seed_with_limits(
+        input,
+        &limits(),
+        crate::yaml_decode::TextSeed::<T>::new(),
+    )
+    .map_err(|error| Error::from_text(input, crate::yaml_decode::finish(error)))
 }
 
 /// Decode one YAML document through `seed` with ayaml, under alint's parser
@@ -87,13 +99,15 @@ pub(crate) fn stream_events(input: &str) -> Result<Vec<ayaml::Event<'_>>, ayaml:
     ayaml::compat::parse_events_with_limits(input, &limits())
 }
 
-/// Decode `value` into `T`.
+/// Decode `value` into `T`, as [`from_str`] decodes a document's value, except
+/// that a string target takes only a string (or a tagged one), where a
+/// document's scalar is read by its text.
 ///
 /// # Errors
 ///
 /// When `value` does not decode into `T`.
 pub fn from_value<T: serde::de::DeserializeOwned>(value: Value) -> Result<T, Error> {
-    ayaml::from_value(value.0).map_err(Error::ayaml)
+    crate::yaml_decode::from_value(value.0).map_err(Error::ayaml)
 }
 
 /// The YAML value of `value`.
@@ -1007,6 +1021,11 @@ pub struct Error(ErrorRepr);
 /// The error of the parser that failed (see [`crate::yaml_backend`]).
 enum ErrorRepr {
     Ayaml(ayaml::Error),
+    /// ayaml's, with [`crate::yaml_decode::INDENTATION_HINT`], and its
+    /// message with the hint. `Display` puts the hint after the location.
+    /// Boxed, so the error is no larger than ayaml's: the loader holds many
+    /// on the stack of its `extends:` recursion.
+    Hinted(Box<(ayaml::Error, String)>),
     /// libyaml's, through `yaml_serde`, with its message without the
     /// locations its `Display` adds.
     #[cfg(feature = "yaml-reference")]
@@ -1016,6 +1035,21 @@ enum ErrorRepr {
 impl Error {
     pub(crate) fn ayaml(error: ayaml::Error) -> Self {
         Self(ErrorRepr::Ayaml(error))
+    }
+
+    /// ayaml's error from decoding `input`, with a hint when it is likely an
+    /// indentation mistake (see [`crate::yaml_decode::indentation_hint`]).
+    pub(crate) fn from_text(input: &str, error: ayaml::Error) -> Self {
+        if crate::yaml_decode::indentation_hint(input, &error) {
+            let message = format!(
+                "{} {}",
+                error.message(),
+                crate::yaml_decode::INDENTATION_HINT
+            );
+            Self(ErrorRepr::Hinted(Box::new((error, message))))
+        } else {
+            Self::ayaml(error)
+        }
     }
 
     #[cfg(feature = "yaml-reference")]
@@ -1032,17 +1066,21 @@ impl Error {
     /// The kind of limit ayaml's error is about, if it is about one.
     #[cfg(feature = "yaml-reference")]
     pub(crate) fn limit(&self) -> Option<ayaml::LimitKind> {
-        match &self.0 {
-            ErrorRepr::Ayaml(error) => error.limit().map(ayaml::LimitExceeded::kind),
-            ErrorRepr::Libyaml(..) => None,
-        }
+        let error = match &self.0 {
+            ErrorRepr::Ayaml(error) => error,
+            ErrorRepr::Hinted(hinted) => &hinted.0,
+            ErrorRepr::Libyaml(..) => return None,
+        };
+        error.limit().map(ayaml::LimitExceeded::kind)
     }
 
-    /// ayaml's error; a caller that reads one decodes with ayaml.
+    /// ayaml's error, without a hint alint added; a caller that reads one
+    /// decodes with ayaml.
     #[cfg(any(test, feature = "yaml-reference"))]
     pub(crate) fn into_parser(self) -> ayaml::Error {
         match self.0 {
             ErrorRepr::Ayaml(error) => error,
+            ErrorRepr::Hinted(hinted) => hinted.0,
             #[cfg(feature = "yaml-reference")]
             ErrorRepr::Libyaml(error, _) => panic!("a libyaml error, not ayaml's: {error}"),
         }
@@ -1050,11 +1088,13 @@ impl Error {
 
     /// The message, without the error's own location, which `Display` puts
     /// after the problem. The message can still name another place, such as
-    /// where the collection that failed began.
+    /// where the collection that failed began, and it ends with any hint,
+    /// which `Display` puts after the location.
     #[must_use]
     pub fn message(&self) -> &str {
         match &self.0 {
             ErrorRepr::Ayaml(error) => error.message(),
+            ErrorRepr::Hinted(hinted) => &hinted.1,
             #[cfg(feature = "yaml-reference")]
             ErrorRepr::Libyaml(_, message) => message,
         }
@@ -1063,11 +1103,15 @@ impl Error {
     /// Where in the document the error is, if it has a place there.
     #[must_use]
     pub fn location(&self) -> Option<Location> {
-        match &self.0 {
-            ErrorRepr::Ayaml(error) => error.location().map(|location| Location {
+        let ayaml = |error: &ayaml::Error| {
+            error.location().map(|location| Location {
                 line: location.line(),
                 column: location.column(),
-            }),
+            })
+        };
+        match &self.0 {
+            ErrorRepr::Ayaml(error) => ayaml(error),
+            ErrorRepr::Hinted(hinted) => ayaml(&hinted.0),
             #[cfg(feature = "yaml-reference")]
             ErrorRepr::Libyaml(error, _) => error.location().map(|location| Location {
                 line: location.line(),
@@ -1081,6 +1125,7 @@ impl fmt::Debug for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.0 {
             ErrorRepr::Ayaml(error) => error.fmt(f),
+            ErrorRepr::Hinted(hinted) => hinted.0.fmt(f),
             #[cfg(feature = "yaml-reference")]
             ErrorRepr::Libyaml(error, _) => error.fmt(f),
         }
@@ -1091,6 +1136,9 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.0 {
             ErrorRepr::Ayaml(error) => error.fmt(f),
+            ErrorRepr::Hinted(hinted) => {
+                write!(f, "{} {}", hinted.0, crate::yaml_decode::INDENTATION_HINT)
+            }
             #[cfg(feature = "yaml-reference")]
             ErrorRepr::Libyaml(error, _) => error.fmt(f),
         }
@@ -1101,6 +1149,7 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match &self.0 {
             ErrorRepr::Ayaml(error) => error.source(),
+            ErrorRepr::Hinted(hinted) => hinted.0.source(),
             #[cfg(feature = "yaml-reference")]
             ErrorRepr::Libyaml(error, _) => error.source(),
         }

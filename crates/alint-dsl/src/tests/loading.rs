@@ -610,15 +610,20 @@ fn bom_prefixed_config_bombs_are_rejected_before_they_expand() {
     );
     for text in [&flow, &alias] {
         std::fs::write(&cfg, text).unwrap();
-        for err in [
-            load(&cfg).unwrap_err().to_string(),
-            crate::parse(text).unwrap_err().to_string(),
-        ] {
-            assert!(
-                err.contains("non-mapping YAML value"),
-                "BOM quoted shape; got: {err}"
-            );
-        }
+        // A configuration with an interpolation is decoded from its value,
+        // where a string in a struct's place is named.
+        let found = if text.contains("{{") {
+            "invalid type: string, expected struct RawConfig"
+        } else {
+            "non-mapping YAML value"
+        };
+        let err = load(&cfg).unwrap_err().to_string();
+        assert!(err.contains(found), "BOM quoted shape; got: {err}");
+        let err = crate::parse(text).unwrap_err().to_string();
+        assert!(
+            err.contains("non-mapping YAML value"),
+            "BOM quoted shape; got: {err}"
+        );
     }
     let flow = format!("\u{feff}---\nx: {}1{}\n", "[".repeat(n), "]".repeat(n));
     std::fs::write(&cfg, &flow).unwrap();
