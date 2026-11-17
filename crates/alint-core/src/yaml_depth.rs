@@ -488,6 +488,75 @@ pub fn mapping_subtree_is_literal(text: &str, path: &[&str]) -> Result<bool, Str
     Ok(true)
 }
 
+/// How the first document's top-level `key` is written: `Ok(None)` when the
+/// document's root is not a mapping or has no such key, `Ok(Some(None))` when
+/// its value is anything but a plain scalar without a tag or an anchor (a
+/// quoted or block scalar, an alias, a collection), and `Ok(Some(Some(text)))`
+/// with that plain scalar's text (as written, without the space before a
+/// comment). The first such key counts.
+///
+/// The config loader's version dispatch reads it: a parsed value cannot tell a
+/// plain `2` from `+2`, `0x2` or `0o2`, and a document a duplicate key keeps
+/// from parsing to a value still has events. Hidden from the documented API
+/// because that dispatch is experimental (`version: 2`, ADR-0034 decision 1);
+/// public only so alint-dsl can call it.
+///
+/// # Errors
+///
+/// When the text does not parse into YAML events.
+#[doc(hidden)]
+pub fn top_level_plain_scalar(text: &str, key: &str) -> Result<Option<Option<String>>, String> {
+    use ayaml::{Event, ScalarStyle};
+
+    let events = crate::yaml::stream_events(text).map_err(|error| error.to_string())?;
+    let mut events = events.iter().filter(|event| {
+        !matches!(
+            event,
+            Event::StreamStart { .. } | Event::DocumentStart { .. } | Event::Directive { .. }
+        )
+    });
+    if !matches!(events.next(), Some(Event::MappingStart { .. })) {
+        return Ok(None);
+    }
+    // How deep below the root mapping the walk is, whether the root's next
+    // node is a key, and whether the key just read is `key`.
+    let mut depth = 0_usize;
+    let mut at_key = true;
+    let mut found = false;
+    for event in events {
+        if depth == 0 && found {
+            return Ok(Some(match event {
+                Event::Scalar {
+                    value,
+                    style: ScalarStyle::Plain,
+                    tag: None,
+                    anchor: None,
+                    ..
+                } => Some(value.to_string()),
+                _ => None,
+            }));
+        }
+        match event {
+            Event::MappingStart { .. } | Event::SequenceStart { .. } => depth += 1,
+            Event::MappingEnd { .. } | Event::SequenceEnd { .. } => {
+                // The root mapping ended without the key.
+                let Some(inner) = depth.checked_sub(1) else {
+                    return Ok(None);
+                };
+                depth = inner;
+                at_key ^= depth == 0;
+            }
+            Event::Scalar { value, .. } if depth == 0 => {
+                found = at_key && value.as_ref() == key;
+                at_key = !at_key;
+            }
+            Event::Alias { .. } if depth == 0 => at_key = !at_key,
+            _ => {}
+        }
+    }
+    Ok(None)
+}
+
 /// A structural event the [`Lexer`] reports to its consumer.
 #[derive(Debug, Clone, Copy)]
 enum Tok {

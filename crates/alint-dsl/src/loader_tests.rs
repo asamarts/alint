@@ -861,8 +861,7 @@ rules:
 
 #[test]
 fn a_bundled_ruleset_must_be_version_one() {
-    let display = "alint://bundled/x@v1";
-    assert!(refuse_bundled_v2("version: 1\nrules: []\n", display).is_ok());
+    assert!(decode_bundled("version: 1\nrules: []\n", "x@v1").is_ok());
     for (body, expected) in [
         (
             "version: 2\nrules: []\n",
@@ -875,9 +874,37 @@ fn a_bundled_ruleset_must_be_version_one() {
             "alint://bundled/x@v1: `selectors:` needs `version: 2`, which a bundled ruleset \
              cannot use in this build: it must be `version: 1`",
         ),
+        (
+            "version: 1\nextends:\n  - url: ./a.yml\n    as: a\n",
+            "alint://bundled/x@v1: `extends[0].as` needs `version: 2`, which a bundled ruleset \
+             cannot use in this build: it must be `version: 1`",
+        ),
+        (
+            "version: 2\nrules:\n  - {id: a, id: b}\n",
+            "alint://bundled/x@v1: a bundled ruleset must be `version: 1` in this build",
+        ),
     ] {
-        let error = refuse_bundled_v2(body, display).unwrap_err();
+        let error = decode_bundled(body, "x@v1").unwrap_err();
         assert!(matches!(error, Error::Internal(_)), "{error:?}");
         assert!(error.to_string().contains(expected), "{error}");
+    }
+}
+
+/// Every ruleset this build ships is version 1 with nothing of version 2, and
+/// decodes once: the dispatch never needs to parse one to read its version.
+#[test]
+fn every_bundled_ruleset_is_plainly_version_one() {
+    for (name, rev) in crate::bundled::catalog() {
+        let spec = format!("{name}@{rev}");
+        let body = crate::bundled::resolve(&spec).unwrap();
+        let display = format!("alint://bundled/{spec}");
+        let config = deserialize_raw_config(body, &display).unwrap();
+        let origin = crate::v2::Origin::new(ConfigSourceClass::Bundled, &display);
+        assert!(crate::v2::plainly_v1(&config, &origin), "{spec}");
+        assert_eq!(
+            crate::v2::dispatch(decode_text(body).ok().as_ref(), body, &origin).unwrap(),
+            crate::v2::Surface::V1,
+            "{spec}"
+        );
     }
 }

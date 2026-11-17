@@ -11,7 +11,7 @@
 
 use std::cell::RefCell;
 
-use serde::de::{self, DeserializeSeed, Deserializer, IntoDeserializer as _, MapAccess, Visitor};
+use serde::de::{self, DeserializeSeed, Deserializer, MapAccess, Visitor};
 use serde::{Deserialize, forward_to_deserialize_any};
 
 use crate::RawConfig;
@@ -120,17 +120,20 @@ impl<'de, A: MapAccess<'de>> MapAccess<'de> for TakeMap<'_, A> {
         &mut self,
         seed: K,
     ) -> Result<Option<K::Value>, Self::Error> {
-        // The dispatch checked every top-level key of a v2 document before
-        // this decode, so each one reads as a string.
-        while let Some(key) = self.inner.next_key::<String>()? {
-            if V2_ONLY_KEYS.contains(&key.as_str()) {
-                let value: ayaml::Value = self.inner.next_value()?;
-                self.taken.borrow_mut().push((key, value));
-                continue;
+        // Each key is read borrowed, and handed on as it was read unless it
+        // is a v2-only one: a version 1 document, which the loader decodes
+        // this way first, costs no allocation per key.
+        let mut seed = Some(seed);
+        loop {
+            match self.inner.next_key_seed(KeySeed(&mut seed))? {
+                None => return Ok(None),
+                Some(Key::Passed(key)) => return Ok(Some(key)),
+                Some(Key::Taken(name)) => {
+                    let value: ayaml::Value = self.inner.next_value()?;
+                    self.taken.borrow_mut().push((name.to_string(), value));
+                }
             }
-            return seed.deserialize(key.into_deserializer()).map(Some);
         }
-        Ok(None)
     }
 
     fn next_value_seed<S: DeserializeSeed<'de>>(
@@ -142,6 +145,45 @@ impl<'de, A: MapAccess<'de>> MapAccess<'de> for TakeMap<'_, A> {
 
     fn size_hint(&self) -> Option<usize> {
         self.inner.size_hint()
+    }
+}
+
+/// A top-level key: handed on to `RawConfig`'s seed, or one of
+/// [`V2_ONLY_KEYS`], taken aside.
+enum Key<T> {
+    Passed(T),
+    Taken(&'static str),
+}
+
+/// Reads a key as a string and hands it to the seed it holds, unless it is a
+/// v2-only key. The seed is handed on once, with the key that is not.
+struct KeySeed<'s, K>(&'s mut Option<K>);
+
+impl<'de, K: DeserializeSeed<'de>> DeserializeSeed<'de> for KeySeed<'_, K> {
+    type Value = Key<K::Value>;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
+        deserializer.deserialize_str(self)
+    }
+}
+
+impl<'de, K: DeserializeSeed<'de>> Visitor<'de> for KeySeed<'_, K> {
+    type Value = Key<K::Value>;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("a string")
+    }
+
+    fn visit_str<E: de::Error>(self, key: &str) -> Result<Self::Value, E> {
+        if let Some(name) = V2_ONLY_KEYS.iter().find(|name| **name == key) {
+            return Ok(Key::Taken(name));
+        }
+        let seed = self
+            .0
+            .take()
+            .ok_or_else(|| E::custom("a top-level key was read twice"))?;
+        seed.deserialize(de::value::StrDeserializer::<E>::new(key))
+            .map(Key::Passed)
     }
 }
 
@@ -170,7 +212,11 @@ impl<'de> Deserialize<'de> for ExtendsEntry {
             },
             _ => None,
         };
-        let entry = alint_core::ExtendsEntry::deserialize(value).map_err(de::Error::custom)?;
+        // A string is a URL, as `alint_core::ExtendsEntry` reads one.
+        let entry = match value {
+            ayaml::Value::String(url) => alint_core::ExtendsEntry::Url(url),
+            value => alint_core::ExtendsEntry::deserialize(value).map_err(de::Error::custom)?,
+        };
         Ok(Self { entry, alias })
     }
 }

@@ -317,7 +317,7 @@ pub(crate) fn nonliteral_requirement_after_error(contents: &str, source: &str) -
     if !contents.contains("requires") {
         return None;
     }
-    let value: ayaml::Value = alint_core::yaml::from_str(contents).ok()?;
+    let value: ayaml::Value = decode_text(contents).ok()?;
     reject_nonliteral_requirement_in_value(contents, source, &value)
         .err()
         .filter(|error| matches!(error, Error::Other(_)))
@@ -367,6 +367,32 @@ fn yaml_value_contains_tag(value: &ayaml::Value) -> bool {
     }
 }
 
+/// Decode `contents`, a whole YAML document, as `T`. Every parse of a whole
+/// config the loader makes goes through here (a typed decode, or a parse to a
+/// value for the version dispatch), so the tests can count them: a version 1
+/// source parses once.
+pub(crate) fn decode_text<'de, T: serde::Deserialize<'de>>(
+    contents: &'de str,
+) -> std::result::Result<T, alint_core::yaml::Error> {
+    #[cfg(test)]
+    PARSES.with(|parses| parses.set(parses.get() + 1));
+    alint_core::yaml::from_str(contents)
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many whole documents [`decode_text`] has parsed on this thread.
+    pub(crate) static PARSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// `f`'s result, and how many whole documents it parsed.
+#[cfg(test)]
+pub(crate) fn parses_during<R>(f: impl FnOnce() -> R) -> (R, usize) {
+    let before = PARSES.with(std::cell::Cell::get);
+    let result = f();
+    (result, PARSES.with(std::cell::Cell::get) - before)
+}
+
 fn deserialize_raw_config(contents: &str, source: &str) -> Result<RawConfig> {
     deserialize_document(contents, source, |config: &RawConfig| config)
 }
@@ -378,7 +404,7 @@ fn deserialize_document<T: serde::de::DeserializeOwned>(
     source: &str,
     raw: impl Fn(&T) -> &RawConfig,
 ) -> Result<T> {
-    match alint_core::yaml::from_str(contents) {
+    match decode_text(contents) {
         Ok(document) => {
             if raw(&document).requires.is_some() {
                 reject_nonliteral_decoded_requirement(contents, source)?;
@@ -406,21 +432,58 @@ fn parse_config_interpolated_inner(contents: &str, source: &Path) -> Result<RawC
     )
 }
 
-/// A bundled ruleset must be version 1 (design section 3 item 6): one that is
-/// not, or that uses a v2-only key, is an alint bug, like one that fails to
-/// parse.
-fn refuse_bundled_v2(body: &str, display: &str) -> Result<()> {
-    crate::v2::dispatch(
-        alint_core::yaml::from_str(body).ok().as_ref(),
-        body,
-        &crate::v2::Origin::new(ConfigSourceClass::Bundled, display),
-    )
-    .map(drop)
-    .map_err(|error| Error::internal(error.to_string()))
-}
-
 /// The v1 part of a decoded document, and the v2-only keys it took aside.
 type Decoded = (RawConfig, Vec<(String, ayaml::Value)>);
+
+/// A text decode made before the version is known: as version 1 reads the
+/// text, or as version 2 does.
+enum TextDecode {
+    AsV1(Result<RawConfig>),
+    AsV2(Result<crate::v2::Document>),
+}
+
+impl TextDecode {
+    /// The decode as `surface` reads the text: kept when it reads it the same
+    /// way (version 1's, or version 1's of a source with no v2-only key, which
+    /// fails it, as version 2's), and redone as `surface` reads it otherwise.
+    fn read_as(self, surface: crate::v2::Surface, contents: &str, source: &str) -> Result<Decoded> {
+        let as_v2 = |decoded: Result<crate::v2::Document>| {
+            decoded.map(|document| (document.config, document.v2_keys))
+        };
+        match (surface, self) {
+            (crate::v2::Surface::V1, Self::AsV1(decoded)) => Ok((decoded?, Vec::new())),
+            (crate::v2::Surface::V1, Self::AsV2(_)) => {
+                Ok((deserialize_raw_config(contents, source)?, Vec::new()))
+            }
+            (crate::v2::Surface::V2, Self::AsV1(Ok(config))) => Ok((config, Vec::new())),
+            (crate::v2::Surface::V2, Self::AsV1(Err(_))) => as_v2(deserialize_document(
+                contents,
+                source,
+                |document: &crate::v2::Document| &document.config,
+            )),
+            (crate::v2::Surface::V2, Self::AsV2(decoded)) => as_v2(decoded),
+        }
+    }
+}
+
+/// Insert `marker` with each entry's `marks` into the entry, where it has any.
+fn mark_entries(entries: &mut [Mapping], marker: &str, marks: Vec<Mapping>) {
+    for (entry, marks) in entries.iter_mut().zip(marks) {
+        if !marks.is_empty() {
+            entry.insert(marker.into(), marks.into());
+        }
+    }
+}
+
+/// Whether `contents` opens with `version: 2`: the cheap sign of a version 2
+/// source, whose text then decodes as version 2 reads it from the start, so a
+/// v2-only key does not fail a version 1 decode first. It saves a parse and
+/// decides nothing: the dispatch reads the version.
+fn opens_with_version_two(contents: &str) -> bool {
+    contents
+        .strip_prefix("version: 2")
+        .is_some_and(|rest| rest.starts_with(['\n', '\r', ' ']) || rest.is_empty())
+}
 
 /// Decode an interpolated `value` as `surface` reads it.
 fn decode_value(
@@ -433,6 +496,38 @@ fn decode_value(
         }
         crate::v2::Surface::V2 => crate::core_yaml::decode::<crate::v2::Document>(value)
             .map(|document| (document.config, document.v2_keys)),
+    }
+}
+
+/// `error`, the decode error of an interpolated config, when the same document
+/// with every environment value masked (`masked`, `None` when it reads none)
+/// fails with the same message, so it cannot quote one; the redacted error
+/// otherwise.
+fn reproduce_or_redact(
+    error: alint_core::yaml::Error,
+    masked: Option<&ayaml::Value>,
+    environment: &dyn crate::EnvironmentProvider,
+    surface: crate::v2::Surface,
+    source: &str,
+) -> Error {
+    // Each masked value keeps the type interpolation gave the real one (a
+    // 12-digit id is a number), so an error in an unrelated field after it
+    // still recurs; numbers move both ways, as a rule's rerun does, for a
+    // value at the edge of its range.
+    let reproduced = masked.is_none_or(|masked| {
+        alint_core::NumberMask::BOTH.into_iter().any(|numbers| {
+            let mut masked = masked.clone();
+            crate::interp::interpolate_masked(&mut masked, &|name| environment.get(name), numbers)
+                .is_ok()
+                && decode_value(masked, surface)
+                    .err()
+                    .is_some_and(|masked_error| masked_error.to_string() == error.to_string())
+        })
+    });
+    if reproduced {
+        error.into()
+    } else {
+        redact_interpolated_error(source)
     }
 }
 
@@ -468,10 +563,34 @@ fn parse_config_interpolated_inner_with_environment(
     reject_yaml_bombs(contents, source)?;
     let source_path = source;
     let source = display_path(source);
+    // A config that interpolates nothing decodes straight from the text. Most
+    // such configs are version 1 with nothing of version 2 in them, which that
+    // one decode proves: they need no second parse to read their `version:`,
+    // and decode once, as before version 2. One that opens with `version: 2`
+    // decodes as version 2 reads it, with the v2-only keys taken aside.
+    let text_decode = if contents.contains("{{") {
+        None
+    } else if opens_with_version_two(contents) {
+        Some(TextDecode::AsV2(deserialize_document(
+            contents,
+            &source,
+            |document: &crate::v2::Document| &document.config,
+        )))
+    } else {
+        let decoded = deserialize_raw_config(contents, &source);
+        if let Ok(config) = &decoded
+            && crate::v2::plainly_v1(config, origin)
+        {
+            crate::reject_ambiguous_yaml_in(config, &source)?;
+            return decoded;
+        }
+        Some(TextDecode::AsV1(decoded))
+    };
     // The version decides the language before any typed decode (design section
     // 3 item 1). A document that does not parse dispatches as version 1, whose
-    // decode reports the parse error as it always has.
-    let document: Option<ayaml::Value> = alint_core::yaml::from_str(contents).ok();
+    // decode reports the parse error as it always has, unless it declares
+    // version 2.
+    let document = crate::v2::read_document(contents, origin)?;
     let surface = crate::v2::dispatch(document.as_ref(), contents, origin)?;
     if surface == crate::v2::Surface::V2
         && let Some(document) = &document
@@ -479,10 +598,14 @@ fn parse_config_interpolated_inner_with_environment(
         crate::v2::check_document(document, origin.display)?;
     }
     let v2_environment = v2_environment_of(surface, contents, document.as_ref());
-    let (mut config, v2_keys) = if contents.contains("{{") {
+    let (mut config, v2_keys) = if let Some(decoded) = text_decode {
+        let decoded = decoded.read_as(surface, contents, &source)?;
+        crate::reject_ambiguous_yaml_in(&decoded.0, &source)?;
+        decoded
+    } else {
         let mut value: ayaml::Value = match document {
             Some(document) => document,
-            None => alint_core::yaml::from_str(contents)?,
+            None => decode_text(contents)?,
         };
         let has_sensitive_interpolation = value_reads_environment(&value);
         reject_nonliteral_requirement_in_value(contents, &source, &value)?;
@@ -519,31 +642,7 @@ fn parse_config_interpolated_inner_with_environment(
             }
         }
         let (mut config, v2_keys) = decode_value(value, surface).map_err(|error| {
-            // Each masked value keeps the type interpolation gave the real one
-            // (a 12-digit id is a number), so an error in an unrelated field
-            // after it still recurs; numbers move both ways, as a rule's
-            // rerun does, for a value at the edge of its range.
-            let reproduced = masked.is_none_or(|masked| {
-                alint_core::NumberMask::BOTH.into_iter().any(|numbers| {
-                    let mut masked = masked.clone();
-                    crate::interp::interpolate_masked(
-                        &mut masked,
-                        &|name| environment.get(name),
-                        numbers,
-                    )
-                    .is_ok()
-                        && decode_value(masked, surface)
-                            .err()
-                            .is_some_and(|masked_error| {
-                                masked_error.to_string() == error.to_string()
-                            })
-                })
-            });
-            if reproduced {
-                error.into()
-            } else {
-                redact_interpolated_error(&source)
-            }
+            reproduce_or_redact(error, masked.as_ref(), environment, surface, &source)
         })?;
         // Reject user-authored private markers before adding the loader's own
         // env-provenance marker below.
@@ -551,26 +650,18 @@ fn parse_config_interpolated_inner_with_environment(
         config.env_vars = env_vars;
         config.environment_values = environment_values;
         config.extends_environment = extends_environment;
-        for (rule, marks) in config.rules.iter_mut().zip(rule_env_vars) {
-            if !marks.is_empty() {
-                rule.insert(crate::ENV_VARS_MARKER.into(), marks.into());
-            }
-        }
-        for (rule, marks) in config.rules.iter_mut().zip(rule_sensitive_fields) {
-            if !marks.is_empty() {
-                rule.insert(crate::SENSITIVE_FIELDS_MARKER.into(), marks.into());
-            }
-        }
-        for (template, marks) in config.templates.iter_mut().zip(template_sensitive_fields) {
-            if !marks.is_empty() {
-                template.insert(crate::SENSITIVE_FIELDS_MARKER.into(), marks.into());
-            }
-        }
+        mark_entries(&mut config.rules, crate::ENV_VARS_MARKER, rule_env_vars);
+        mark_entries(
+            &mut config.rules,
+            crate::SENSITIVE_FIELDS_MARKER,
+            rule_sensitive_fields,
+        );
+        mark_entries(
+            &mut config.templates,
+            crate::SENSITIVE_FIELDS_MARKER,
+            template_sensitive_fields,
+        );
         (config, v2_keys)
-    } else {
-        let decoded = deserialize_text(contents, &source, surface)?;
-        crate::reject_ambiguous_yaml_in(&decoded.0, &source)?;
-        decoded
     };
     config.surface = surface;
     if surface == crate::v2::Surface::V2 {
@@ -609,20 +700,6 @@ fn reject_yaml_bombs(contents: &str, source: &Path) -> Result<()> {
         )));
     }
     Ok(())
-}
-
-/// Decode `contents`, which interpolates nothing, as `surface` reads it.
-fn deserialize_text(contents: &str, source: &str, surface: crate::v2::Surface) -> Result<Decoded> {
-    Ok(match surface {
-        crate::v2::Surface::V1 => (deserialize_raw_config(contents, source)?, Vec::new()),
-        crate::v2::Surface::V2 => {
-            let document =
-                deserialize_document(contents, source, |document: &crate::v2::Document| {
-                    &document.config
-                })?;
-            (document.config, document.v2_keys)
-        }
-    })
 }
 
 /// Decode a version 2 source's selectors, relations and aliases onto
@@ -900,7 +977,7 @@ pub(crate) fn load_recursive(
         ..RawConfig::default()
     };
     for (index, entry) in extends.iter().enumerate() {
-        let (parent, target) = load_extended_source(
+        let parent = load_extended_source(
             &entry.entry,
             extends_environment.get(index).copied().unwrap_or(false),
             &source_dir,
@@ -911,10 +988,9 @@ pub(crate) fn load_recursive(
             SourceContext::new(ConfigSourceClass::LocalExtend, config.version)
                 .consumed_by(&display),
         )?;
-        // Where an alias leads, for qualified references to resolve.
-        config
-            .v2
-            .record_extended(entry.alias.as_deref(), target.as_deref());
+        if config.v2.has_sources() {
+            record_extended(&mut config.v2, entry, &source_dir, opts);
+        }
         merged = merge(merged, parent)?;
     }
     merged = merge(merged, config)?;
@@ -923,6 +999,24 @@ pub(crate) fn load_recursive(
         state.remember(key, &merged);
     }
     Ok(merged)
+}
+
+/// Record on a version 2 source's `objects` where its `extends:` `entry`
+/// leads, for qualified references to resolve. Only a version 2 source has
+/// objects to record it on, so only it pays to resolve a local target (which
+/// has just loaded, so it resolves); kept out of line for the same reason.
+#[inline(never)]
+fn record_extended(
+    objects: &mut crate::v2::Objects,
+    entry: &crate::v2::ExtendsEntry,
+    source_dir: &Path,
+    opts: &LoadOptions<'_>,
+) {
+    let url = entry.entry.url();
+    let target = (ExtendsEntryKind::of(url) == ExtendsEntryKind::Local)
+        .then(|| resolve_relative(source_dir, url))
+        .and_then(|target| opts.config_source.canonicalize(&target).ok());
+    objects.record_extended(entry.alias.as_deref(), target.as_deref());
 }
 
 /// Read, parse and check the local config at `canonical`, which errors name
@@ -938,21 +1032,24 @@ fn read_local_config(
         .config_source
         .read_to_string(canonical)
         .map_err(|source| config_read_error(canonical, source))?;
-    let mut config = parse_config_interpolated_with_environment(
+    // Checked in place, and returned as parsed: a config is large to move.
+    let mut parsed = parse_config_interpolated_with_environment(
         &contents,
         canonical,
         opts.environment.as_ref(),
         &context.origin(display),
-    )?;
-    add_environment_values(&mut state.environment_values, &config.environment_values);
-    validate_source_compatibility(
-        &mut config,
-        display,
-        context.source_class,
-        context.consumer_version,
-        state.running_version,
-    )?;
-    Ok(config)
+    );
+    if let Ok(config) = &mut parsed {
+        add_environment_values(&mut state.environment_values, &config.environment_values);
+        validate_source_compatibility(
+            config,
+            display,
+            context.source_class,
+            context.consumer_version,
+            state.running_version,
+        )?;
+    }
+    parsed
 }
 
 /// `from_environment`: the entry read the environment, so it is also removed
@@ -960,8 +1057,6 @@ fn read_local_config(
 /// value as written (a remote URL without its credentials, query and fragment;
 /// a local path joined, canonical, or relative to the root). `context` is the
 /// local-target context, with the extending config's version and name.
-///
-/// Returns the extended config and, for a local target, its resolved file.
 #[allow(clippy::too_many_arguments)]
 fn load_extended_source(
     entry: &alint_core::ExtendsEntry,
@@ -972,7 +1067,7 @@ fn load_extended_source(
     confine: Option<&Path>,
     trusted: &[String],
     context: SourceContext<'_>,
-) -> Result<(RawConfig, Option<PathBuf>)> {
+) -> Result<RawConfig> {
     let consumer_version = context.consumer_version;
     let url = entry.url();
     let kind = ExtendsEntryKind::of(url);
@@ -987,7 +1082,6 @@ fn load_extended_source(
             std::slice::from_ref(&source_display),
         );
     }
-    let mut target_file = None;
     let mut parent = if kind == ExtendsEntryKind::PlainHttp {
         return Err(Error::Other(format!(
             "plain http:// is not allowed in `extends:` (entry {source_display:?}); \
@@ -1047,9 +1141,7 @@ fn load_extended_source(
             add_environment_values(&mut state.environment_values, &normalized);
         }
         confine_extends_target(&target, url, confine, opts.config_source.as_ref())?;
-        let parent = load_recursive(&target, state, opts, confine, false, trusted, context)?;
-        target_file = opts.config_source.canonicalize(&target).ok();
-        parent
+        load_recursive(&target, state, opts, confine, false, trusted, context)?
     };
     gate_extended_source(&parent, &source_display, opts.kind_catalog)?;
     mark_extended_provenance(
@@ -1068,7 +1160,7 @@ fn load_extended_source(
             cap_untrusted_remote(&mut parent, &source_display, opts.kind_catalog)?;
         }
     }
-    Ok((parent, target_file))
+    Ok(parent)
 }
 
 /// Record that the `extends:` source `url` (fetched when `remote`) shaped
@@ -1219,14 +1311,20 @@ fn load_remote(
             "remote config at {source}: YAML alias expansion exceeds the maximum supported size"
         )));
     }
-    // A remote source must be version 1 (design section 3 item 6): read its
-    // `version:` before the typed decode, which would misreport a v2 key.
-    crate::v2::dispatch(
-        alint_core::yaml::from_str(body_str).ok().as_ref(),
-        body_str,
-        &crate::v2::Origin::new(ConfigSourceClass::Remote, &source),
-    )?;
-    let config = deserialize_raw_config(body_str, &source).map_err(|error| match error {
+    // A remote source must be version 1 (design section 3 item 6). One that
+    // decodes as plainly version 1 is; any other is dispatched, whose refusal
+    // of version 2 or a v2-only key comes before a decode error, which would
+    // misreport a v2 key.
+    let origin = crate::v2::Origin::new(ConfigSourceClass::Remote, &source);
+    let decoded = deserialize_raw_config(body_str, &source);
+    if !decoded
+        .as_ref()
+        .is_ok_and(|config| crate::v2::plainly_v1(config, &origin))
+    {
+        let document = crate::v2::read_document(body_str, &origin)?;
+        crate::v2::dispatch(document.as_ref(), body_str, &origin)?;
+    }
+    let config = decoded.map_err(|error| match error {
         Error::Yaml(error) => Error::Other(format!(
             "remote config at {source}: YAML parse error: {error}"
         )),
@@ -1282,32 +1380,50 @@ fn load_bundled(spec: &str) -> Result<RawConfig> {
             shipped.join(", "),
         ))
     })?;
+    decode_bundled(body, spec)
+}
 
+/// Decode the body of the bundled ruleset `spec`. Anything wrong with it is an
+/// alint bug, an internal error.
+fn decode_bundled(body: &str, spec: &str) -> Result<RawConfig> {
     // Bundled rulesets are compiled-in and trusted (byte-identical every build), so
     // these guards are defense-in-depth, not an attack surface -- but keeping the
-    // checks uniform with the remote/local paths means no `alint_core::yaml::from_str`
-    // in the loader is ever unguarded. A bundled ruleset tripping one is an alint bug.
+    // checks uniform with the remote/local paths means no parse in the loader is
+    // ever unguarded. A bundled ruleset tripping one is an alint bug.
     let yaml_guards = alint_core::yaml_depth::scan_guards(body);
     if !yaml_guards.flow_within_limit() || !yaml_guards.expansion_within_limit(body) {
         return Err(Error::internal(format!(
             "built-in ruleset '{spec}' exceeds a maximum supported YAML complexity limit"
         )));
     }
-    refuse_bundled_v2(body, &format!("alint://bundled/{spec}"))?;
-    let config =
-        deserialize_raw_config(body, &format!("alint://bundled/{spec}")).map_err(|error| {
-            match error {
-                Error::Yaml(error) => {
-                    // A ruleset shipped *inside* the binary failing to parse is an
-                    // alint bug, not the user's config — Internal → CLI exit 3 (M11).
-                    Error::internal(format!(
-                        "built-in ruleset '{spec}' failed to parse: {error}"
-                    ))
-                }
-                other => Error::internal(other.to_string()),
+    // A bundled ruleset must be version 1 (design section 3 item 6), as the
+    // tests check of each; one that is not, or that uses a v2-only key, is an
+    // alint bug, like one that fails to parse. One that decodes as plainly
+    // version 1 needs no dispatch.
+    let display = format!("alint://bundled/{spec}");
+    let origin = crate::v2::Origin::new(ConfigSourceClass::Bundled, &display);
+    let decoded = deserialize_raw_config(body, &display);
+    if !decoded
+        .as_ref()
+        .is_ok_and(|config| crate::v2::plainly_v1(config, &origin))
+    {
+        crate::v2::read_document(body, &origin)
+            .and_then(|document| crate::v2::dispatch(document.as_ref(), body, &origin))
+            .map_err(|error| Error::internal(error.to_string()))?;
+    }
+    let config = decoded.map_err(|error| {
+        match error {
+            Error::Yaml(error) => {
+                // A ruleset shipped *inside* the binary failing to parse is an
+                // alint bug, not the user's config — Internal → CLI exit 3 (M11).
+                Error::internal(format!(
+                    "built-in ruleset '{spec}' failed to parse: {error}"
+                ))
             }
-        })?;
-    crate::reject_ambiguous_yaml_in(&config, &format!("alint://bundled/{spec}"))
+            other => Error::internal(other.to_string()),
+        }
+    })?;
+    crate::reject_ambiguous_yaml_in(&config, &display)
         .map_err(|e| Error::internal(e.to_string()))?;
     Ok(config)
 }

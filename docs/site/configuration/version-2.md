@@ -33,9 +33,9 @@ and relations are loaded and checked when the config loads, and do nothing else.
 alint reads a config's `version:` before anything else in it and decodes the rest as that
 version.
 
-- Only the literal integer `2` selects version 2. A version written any other way (from the
-  environment, quoted as `'2'`, tagged, or as a YAML alias) is version 1 and must equal 1, as
-  before.
+- Only the plain integer `2` selects version 2. A 2 written any other way (quoted as `'2'`,
+  tagged, through a YAML alias, or as `+2`, `0x2`, `0o2` or `2.0`) is an error that says to write
+  `version: 2`. A version read from the environment is version 1 and must equal 1, as before.
 - A version 2 config accepts every version 1 key and rule kind with its version 1 meaning. A
   rule's `paths:` keeps its version 1 form; only relations read selectors.
 - `selectors:`, `relations:` and `as:` in a version 1 config are errors that name the version

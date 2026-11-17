@@ -93,11 +93,14 @@ impl<'a> Origin<'a> {
 /// How a source writes its top-level `version:`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Declared {
-    /// The literal integer 2.
+    /// The plain integer `2`, written as itself.
     Two,
+    /// 2 written any other way: quoted, tagged, through an alias, or as `+2`,
+    /// `0x2`, `0o2` or `2.0`.
+    OtherTwo,
     /// An integer other than 2, as written.
     Integer(String),
-    /// Anything else: read from the environment, quoted, tagged, an alias, or
+    /// Anything else: read from the environment, a string, a collection, or
     /// not an integer.
     NonLiteral,
     /// No `version:` key.
@@ -113,21 +116,32 @@ fn declared_version(document: Option<&Value>, contents: &str) -> Declared {
     let Some(version) = map.get("version") else {
         return Declared::Absent;
     };
-    let Value::Number(number) = version else {
-        return Declared::NonLiteral;
-    };
-    if !(version.is_u64() || version.is_i64()) {
-        return Declared::NonLiteral;
+    if !denotes_two(version) {
+        return match version {
+            Value::Number(number) if version.is_u64() || version.is_i64() => {
+                Declared::Integer(number.to_string())
+            }
+            _ => Declared::NonLiteral,
+        };
     }
-    if version.as_u64() != Some(u64::from(VERSION)) {
-        return Declared::Integer(number.to_string());
+    // Only a 2 written as itself, a plain scalar without a tag or an anchor,
+    // selects v2; the value cannot tell `2` from `+2` or `0x2`, the text can.
+    match alint_core::yaml_depth::top_level_plain_scalar(contents, "version") {
+        Ok(Some(Some(text))) if text == "2" => Declared::Two,
+        _ => Declared::OtherTwo,
     }
-    // Only a 2 written as itself selects v2: not an alias of one, nor a
-    // tagged one (a quoted `'2'` is a string, and `{{env.V}}` is one too).
-    if alint_core::yaml_depth::mapping_subtree_is_literal(contents, &["version"]) == Ok(true) {
-        Declared::Two
-    } else {
-        Declared::NonLiteral
+}
+
+/// Whether `version` is 2 in any spelling: a number equal to 2 or a string
+/// that reads `2`, tagged or not.
+fn denotes_two(version: &Value) -> bool {
+    match version {
+        Value::Tagged(tagged) => denotes_two(&tagged.value),
+        Value::Number(number) => number
+            .as_f64()
+            .is_some_and(|number| (number - f64::from(VERSION)).abs() < f64::EPSILON),
+        Value::String(text) => text.trim() == "2",
+        _ => false,
     }
 }
 
@@ -152,22 +166,74 @@ fn v1_only_class(class: ConfigSourceClass) -> &'static str {
     }
 }
 
+/// `contents` parsed, for the dispatch to read its `version:` from, or `None`
+/// when it does not parse: the version 1 decode then reports the parse error
+/// as it always has. A source that declares version 2 (or inherits it) and
+/// does not parse gets the parse error here, refused first if it may not be
+/// version 2, rather than the version 1 decode's misreading of its version 2
+/// keys.
+pub(crate) fn read_document(contents: &str, origin: &Origin<'_>) -> Result<Option<Value>> {
+    match crate::loader::decode_text::<Value>(contents) {
+        Ok(document) => Ok(Some(document)),
+        Err(parse_error) => {
+            let declared = alint_core::yaml_depth::top_level_plain_scalar(contents, "version");
+            let two = match declared {
+                Ok(Some(Some(text))) => text == "2",
+                Ok(None) => inherits_two(origin),
+                Ok(Some(None)) | Err(_) => false,
+            };
+            if !two {
+                return Ok(None);
+            }
+            refuse_v2_edge(origin)?;
+            Err(Error::Yaml(parse_error))
+        }
+    }
+}
+
+/// Whether a source with no `version:` is version 2: a fragment of a version 2
+/// root.
+fn inherits_two(origin: &Origin<'_>) -> bool {
+    origin.class == ConfigSourceClass::DropIn && origin.consumer_version == Some(VERSION)
+}
+
+/// Whether a source that decoded as `config`, with no v2-only key taken aside,
+/// is version 1 for certain, so the dispatch would read it as version 1 without
+/// a word: no `extends:` entry has an alias and its `version:`, as it decoded,
+/// is not 2 (a 2 in any spelling decodes as 2, or does not decode), nor absent
+/// in a fragment of a version 2 root. The loader then needs no second parse to
+/// read the version (a version 1 config parses once, as before version 2).
+pub(crate) fn plainly_v1(config: &crate::RawConfig, origin: &Origin<'_>) -> bool {
+    let version_one = match config.version {
+        Some(version) => version != VERSION,
+        None => !inherits_two(origin),
+    };
+    version_one && config.extends.iter().all(|entry| entry.alias.is_none())
+}
+
 /// Read `document`'s top-level `version:` (`document` is `contents` parsed,
 /// or `None` when it does not parse) and decide which language it decodes
-/// as, refusing a version 2 source where one may not be and v2-only keys in a
-/// version 1 source.
+/// as, refusing a version 2 source where one may not be, a 2 written other
+/// than as the plain integer, and v2-only keys in a version 1 source.
 pub(crate) fn dispatch(
     document: Option<&Value>,
     contents: &str,
     origin: &Origin<'_>,
 ) -> Result<Surface> {
     let declared = declared_version(document, contents);
-    let inherits_two = declared == Declared::Absent
-        && origin.class == ConfigSourceClass::DropIn
-        && origin.consumer_version == Some(VERSION);
+    let inherits_two = declared == Declared::Absent && inherits_two(origin);
     if declared == Declared::Two || inherits_two {
         refuse_v2_edge(origin)?;
         return Ok(Surface::V2);
+    }
+    if declared == Declared::OtherTwo {
+        refuse_v2_edge(origin)?;
+        return Err(Error::Other(format!(
+            "{}: `version:` is 2 written other than as the plain integer `2` (quoted, tagged, \
+             through an alias, or as `+2`, `0x2` or `2.0`); write `version: 2` to select \
+             version 2",
+            origin.display
+        )));
     }
     if let Some(key) = v2_only_key(document) {
         return Err(needs_v2(origin, &declared, &key));
@@ -216,10 +282,13 @@ fn v2_only_key(document: Option<&Value>) -> Option<String> {
         match key.as_str() {
             Some(key @ ("selectors" | "relations")) => return Some(format!("`{key}:`")),
             Some("extends") => {
-                let aliased = value
-                    .as_sequence()?
-                    .iter()
-                    .position(|entry| entry.as_mapping().is_some_and(|m| m.contains_key("as")));
+                // An `extends:` that is not a list has no alias; the keys
+                // after it are still read.
+                let aliased = value.as_sequence().and_then(|entries| {
+                    entries
+                        .iter()
+                        .position(|entry| entry.as_mapping().is_some_and(|m| m.contains_key("as")))
+                });
                 if let Some(index) = aliased {
                     return Some(format!("`extends[{index}].as`"));
                 }
@@ -240,9 +309,9 @@ fn needs_v2(origin: &Origin<'_>, declared: &Declared, key: &str) -> Error {
                 origin.consumer_version.unwrap_or(1)
             ),
             Declared::Absent => "; this config declares no `version:`".to_string(),
-            Declared::NonLiteral | Declared::Two | Declared::Unreadable => {
-                "; this config's `version:` is not the literal integer `2` (a version read \
-                 from the environment, quoted, tagged or written as an alias is version 1)"
+            Declared::NonLiteral | Declared::Two | Declared::OtherTwo | Declared::Unreadable => {
+                "; this config's `version:` is not the integer `2` (a version read from the \
+                 environment is version 1)"
                     .to_string()
             }
         }

@@ -28,6 +28,9 @@ impl Objects {
     /// `self`'s sources, then those of `other` that `self` does not hold yet:
     /// a file an `extends:` diamond reaches twice declares its objects once.
     pub(crate) fn merged(mut self, other: Self) -> Self {
+        if other.sources.is_empty() {
+            return self;
+        }
         for source in other.sources {
             if !self
                 .sources
@@ -38,6 +41,11 @@ impl Objects {
             }
         }
         self
+    }
+
+    /// Whether any version 2 source is recorded.
+    pub(crate) fn has_sources(&self) -> bool {
+        !self.sources.is_empty()
     }
 
     /// Record that the source extends the local file `target`, through

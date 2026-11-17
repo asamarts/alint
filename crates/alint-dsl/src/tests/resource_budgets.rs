@@ -300,3 +300,104 @@ fn an_integer_past_64_bits_in_a_rule_names_the_file_and_the_field() {
         assert!(error.contains(&format!("`rules[0].{field}`")), "{error}");
     }
 }
+
+/// Loading a version 1 config parses each of its sources once: the version
+/// dispatch reads `version:` from the one typed decode rather than parsing
+/// the document a second time (which cost a v1 load a quarter more
+/// instructions and a third more memory). That holds for the top-level
+/// config, a fragment, a local `extends:` target that reads the environment,
+/// a bundled ruleset, a remote one and a string, and a version 2 source still
+/// parses at most twice.
+#[test]
+fn each_source_of_a_version_one_config_parses_once() {
+    let (_tmp, config) = repo(&[
+        (
+            ".alint.yml",
+            "version: 1\nextends:\n  - ./base.yml\n  - alint://bundled/hygiene/lockfiles@v1\n\
+             rules:\n  - id: readme\n    kind: file_exists\n    paths: README.md\n    \
+             level: info\n",
+        ),
+        (
+            "base.yml",
+            "version: 1\nrules:\n  - id: notice\n    kind: file_exists\n    paths: NOTICE\n    \
+             level: info\n    message: \"{{env.ALINT_PARSE_COUNT | default('x')}}\"\n",
+        ),
+    ]);
+    let drop_ins = config.parent().unwrap().join(".alint.d");
+    std::fs::create_dir(&drop_ins).unwrap();
+    std::fs::write(drop_ins.join("10.yml"), "rules: []\n").unwrap();
+    let (loaded, parses) = crate::loader::parses_during(|| load(&config));
+    assert!(loaded.is_ok(), "{loaded:?}");
+    assert_eq!(
+        parses, 4,
+        "the root, its fragment, base.yml and the bundled ruleset"
+    );
+
+    let (_, parses) =
+        crate::loader::parses_during(|| load_extending("version: 1\nrules: []\n", ""));
+    assert_eq!(parses, 2, "the root and the remote");
+    let (inline, parses) = crate::loader::parses_during(|| parse("version: 1\nrules: []\n"));
+    assert!(inline.is_ok(), "{inline:?}");
+    assert_eq!(parses, 1);
+
+    // A version 2 source's `version:` needs the parsed document.
+    let (_tmp, config) = repo(&[(
+        ".alint.yml",
+        "version: 2\nselectors:\n  docs:\n    paths: docs/**\nrules: []\n",
+    )]);
+    let (loaded, parses) = crate::loader::parses_during(|| load(&config));
+    assert!(loaded.is_ok(), "{loaded:?}");
+    assert_eq!(parses, 2);
+
+    // One that does not open with `version: 2` decodes as version 1 reads it
+    // first: that decode is kept when the source holds no v2-only key, and one
+    // that does fails it and costs a parse more. Each loads as written.
+    for (body, expected, selectors) in [
+        ("# v2\nversion: 2\nrules: []\n", 2, 0),
+        (
+            "# v2\nversion: 2\nselectors:\n  docs:\n    paths: docs/**\nrules: []\n",
+            3,
+            1,
+        ),
+    ] {
+        let (_tmp, config) = repo(&[(".alint.yml", body)]);
+        let (loaded, parses) = crate::loader::parses_during(|| load(&config));
+        let plan = loaded.unwrap().relation_plan.expect("a version 2 plan");
+        assert_eq!(plan.selectors.len(), selectors, "{body}");
+        assert_eq!(parses, expected, "{body}");
+    }
+}
+
+/// No code in the loader parses a whole document but through the counted
+/// `decode_text`, so the test above sees every parse. (`interp.rs` re-types
+/// one interpolated scalar.)
+#[test]
+fn every_whole_document_parse_goes_through_the_counted_decode() {
+    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut found = Vec::new();
+    let mut pending = vec![src.clone()];
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            if path.is_dir() {
+                if name != "tests" {
+                    pending.push(path);
+                }
+                continue;
+            }
+            if name.ends_with("_tests.rs") || name == "tests.rs" || name == "schema_parity.rs" {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            // The crate's own code, before any inline test module.
+            let code = text.split("\n#[cfg(test)]\nmod tests").next().unwrap();
+            for _ in code.matches("alint_core::yaml::from_str") {
+                let relative = path.strip_prefix(&src).unwrap().to_string_lossy();
+                found.push(relative.replace('\\', "/"));
+            }
+        }
+    }
+    found.sort();
+    assert_eq!(found, ["interp.rs", "loader.rs"]);
+}

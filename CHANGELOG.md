@@ -401,15 +401,16 @@ policy-test package the user does not trust.
 - **`version: 2` configurations (experimental)**
   ([ADR-0034](docs/adr/0034-v2-version-boundary-and-phase-3-design.md),
   [ADR-0037](docs/adr/0037-phase-3-design-refinements.md)). A config whose top-level `version:`
-  is the literal integer `2` loads as version 2, which is experimental: its syntax may change in
+  is the plain integer `2` loads as version 2, which is experimental: its syntax may change in
   any release until one declares it stable, v0.24 at the earliest, and this file lists each
   change. Loading one prints a warning once per run, naming the file
   (`` alint: warning: `version: 2` is experimental; ... ``); `validate-config` names the version on
   its success line and puts the warning in its JSON `warnings`. The language server loads a v2
   config without the warning.
   - alint reads a config's `version:` before anything else in it and decodes the rest as that
-    version. A version written any other way than as the literal `2` (from the environment,
-    quoted, tagged or as a YAML alias) is version 1 and must equal 1, as before. An `.alint.d/`
+    version. A 2 written any other way than as the plain integer `2` (quoted, tagged, through a
+    YAML alias, or as `+2`, `0x2`, `0o2` or `2.0`) is an error that says to write `version: 2`;
+    a version read from the environment is version 1 and must equal 1, as before. An `.alint.d/`
     fragment without `version:` is read as its root's version.
   - Version 2 accepts every version 1 key and rule kind with its version 1 meaning, plus
     top-level `selectors:` and `relations:` and an `as:` alias on a local `extends:` entry. Each

@@ -20,19 +20,35 @@ fn message(result: Result<impl std::fmt::Debug>) -> String {
 }
 
 #[test]
-fn only_a_literal_integer_two_declares_version_two() {
+fn only_a_plain_integer_two_declares_version_two() {
     let declared = |yaml: &str| declared_version(document(yaml).as_ref(), yaml);
     assert_eq!(declared("version: 2\n"), Declared::Two);
     assert_eq!(declared("version: 2 # experimental\n"), Declared::Two);
+    assert_eq!(declared("{rules: [], version: 2}\n"), Declared::Two);
     assert_eq!(declared("version: 1\n"), Declared::Integer("1".into()));
     assert_eq!(declared("version: 3\n"), Declared::Integer("3".into()));
     assert_eq!(declared("rules: []\n"), Declared::Absent);
-    for non_literal in [
+    for other_two in [
         "version: '2'\n",
         "version: \"2\"\n",
         "version: 2.0\n",
+        "version: +2\n",
+        "version: 0x2\n",
+        "version: 0o2\n",
         "version: !!int 2\n",
+        "version: !!str 2\n",
+        "version: !custom 2\n",
+        "version: &v 2\n",
         "anchor: &v 2\nversion: *v\n",
+        "version: |\n  2\n",
+    ] {
+        assert_eq!(declared(other_two), Declared::OtherTwo, "{other_two}");
+    }
+    for non_literal in [
+        "version: '1'\n",
+        // A string to the parser, as `'02'` is.
+        "version: 02\n",
+        "version: 1.5\n",
         "version: '{{env.V | default(\"2\")}}'\n",
         "version: [2]\n",
         "version: ~\n",
@@ -41,6 +57,69 @@ fn only_a_literal_integer_two_declares_version_two() {
     }
     assert_eq!(declared("- 2\n"), Declared::Unreadable);
     assert_eq!(declared("version: [\n"), Declared::Unreadable);
+}
+
+/// A 2 written other than as the plain integer is an error that says what to
+/// write, rather than a version 1 config of an unsupported version.
+#[test]
+fn another_spelling_of_two_says_to_write_a_plain_two() {
+    for yaml in [
+        "version: '2'\nrules: []\n",
+        "version: 0x2\nselectors: {}\n",
+        "version: +2\n",
+        "version: !!int 2\n",
+        "v: &v 2\nversion: *v\n",
+    ] {
+        assert_eq!(
+            message(dispatched(yaml, &root())),
+            ".alint.yml: `version:` is 2 written other than as the plain integer `2` (quoted, \
+             tagged, through an alias, or as `+2`, `0x2` or `2.0`); write `version: 2` to select \
+             version 2",
+            "{yaml}"
+        );
+    }
+    // Where version 2 may not be, that is the error.
+    let remote = Origin::new(ConfigSourceClass::Remote, "https://example.invalid/r.yml");
+    assert_eq!(
+        message(dispatched("version: 0x2\n", &remote)),
+        "https://example.invalid/r.yml: a remote `extends:` source must be `version: 1` in this \
+         build; `version: 2` is accepted only in local files (the top-level config, a local \
+         `extends:` target or an `.alint.d` fragment)"
+    );
+}
+
+/// A version 2 source that does not parse (a duplicate key in a rule) reports
+/// the parse error, not the version 1 decode's reading of its version 2 keys;
+/// a version 1 one is left to the version 1 decode, as before.
+#[test]
+fn a_version_two_source_that_does_not_parse_reports_the_parse_error() {
+    let duplicate = "version: 2\nselectors: {}\nrules:\n  - {id: a, id: b}\n";
+    let error = read_document(duplicate, &root()).unwrap_err();
+    assert!(matches!(error, Error::Yaml(_)), "{error:?}");
+    assert!(error.to_string().contains("duplicate"), "{error}");
+    let fragment =
+        Origin::new(ConfigSourceClass::DropIn, ".alint.d/10.yml").consumer(Some(2), None);
+    let inherited = "selectors: {}\nrules:\n  - {id: a, id: b}\n";
+    assert!(matches!(
+        read_document(inherited, &fragment),
+        Err(Error::Yaml(_))
+    ));
+    for version_one in [
+        "version: 1\nselectors: {}\nrules:\n  - {id: a, id: b}\n",
+        "selectors: {}\nrules:\n  - {id: a, id: b}\n",
+        "version: 0x2\nrules:\n  - {id: a, id: b}\n",
+        "version: [\n",
+    ] {
+        assert!(
+            read_document(version_one, &root()).unwrap().is_none(),
+            "{version_one}"
+        );
+    }
+    let remote = Origin::new(ConfigSourceClass::Remote, "https://example.invalid/r.yml");
+    assert!(
+        message(read_document(duplicate, &remote))
+            .contains("a remote `extends:` source must be `version: 1`")
+    );
 }
 
 #[test]
@@ -104,10 +183,18 @@ fn version_two_keys_in_a_version_one_config_name_the_version_they_need() {
             ".alint.yml: `selectors:` needs `version: 2`; this config declares no `version:`",
         ),
         (
-            "version: '2'\nselectors: {}\n",
+            "version: '1'\nselectors: {}\n",
             ".alint.yml: `selectors:` needs `version: 2`; this config's `version:` is not the \
-             literal integer `2` (a version read from the environment, quoted, tagged or written \
-             as an alias is version 1)",
+             integer `2` (a version read from the environment is version 1)",
+        ),
+        // An `extends:` that is not a list does not hide a later key.
+        (
+            "version: 1\nextends:\nselectors: {}\n",
+            ".alint.yml: `selectors:` needs `version: 2`; this config is version 1",
+        ),
+        (
+            "version: 1\nextends: ./a.yml\nrelations: {}\n",
+            ".alint.yml: `relations:` needs `version: 2`; this config is version 1",
         ),
         (
             "version: 3\nrelations: {}\n",

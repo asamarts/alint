@@ -180,8 +180,7 @@ fn a_version_read_from_the_environment_is_version_one() {
     assert_eq!(
         load_error(&path),
         ".alint.yml: `selectors:` needs `version: 2`; this config's `version:` is not the \
-         literal integer `2` (a version read from the environment, quoted, tagged or written \
-         as an alias is version 1)"
+         integer `2` (a version read from the environment is version 1)"
     );
 }
 

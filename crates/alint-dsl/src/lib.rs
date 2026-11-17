@@ -290,7 +290,7 @@ fn nested_configs_key(path: &Path, source: &dyn ConfigSourceProvider) -> Result<
             path.display()
         )));
     }
-    let key: NestedConfigsKey = alint_core::yaml::from_str(&contents)
+    let key: NestedConfigsKey = loader::decode_text(&contents)
         .map_err(|error| Error::Other(format!("{}: YAML parse error: {error}", path.display())))?;
     Ok(key.nested_configs)
 }
@@ -1390,15 +1390,20 @@ pub fn parse(yaml: &str) -> Result<Config> {
             "YAML alias expansion exceeds the maximum supported size".to_string(),
         ));
     }
-    // Read `version:` before the typed decode: a string's config must be
-    // version 1 (design section 3 item 6), and a v2-only key in it is reported
-    // as needing version 2 rather than as unknown.
-    v2::dispatch(
-        alint_core::yaml::from_str(yaml).ok().as_ref(),
-        yaml,
-        &v2::Origin::new(alint_core::ConfigSourceClass::Inline, "<inline>"),
-    )?;
-    let mut config: Config = match alint_core::yaml::from_str(yaml) {
+    // A string's config must be version 1 (design section 3 item 6). One that
+    // decodes with a `version:` other than 2 and no `extends:` (so no alias) is;
+    // any other is dispatched first, so `version: 2` or a v2-only key is
+    // reported as such rather than as a decode error.
+    let decoded: std::result::Result<Config, _> = loader::decode_text(yaml);
+    if !decoded
+        .as_ref()
+        .is_ok_and(|config| config.version != v2::VERSION && config.extends.is_empty())
+    {
+        let origin = v2::Origin::new(alint_core::ConfigSourceClass::Inline, "<inline>");
+        let document = v2::read_document(yaml, &origin)?;
+        v2::dispatch(document.as_ref(), yaml, &origin)?;
+    }
+    let mut config = match decoded {
         Ok(config) => config,
         Err(parse_error) => {
             return Err(loader::nonliteral_requirement_after_error(yaml, "<inline>")
