@@ -53,7 +53,10 @@ pub(crate) const ARRAY_TABLE: &str = "a table in an array of tables";
 /// A path that selects something other than an object emits one row labelled
 /// `at:<path>` at what it selected, whose error state names it (`an array`,
 /// `a string`); so does one that selects a TOML table in an array of tables,
-/// whose members the TOML walk does not read ([`ARRAY_TABLE`]). Each
+/// whose members the TOML walk does not read ([`ARRAY_TABLE`]). A null
+/// document (YAML that holds only comments, `---`, `~` or `null`; JSON
+/// `null`) is read as an empty one is: a path that selects its root emits
+/// nothing, as `key_parity` reads such a file as a peer with no keys. Each
 /// `bound:` path emits a row labelled `bound:<path>` per match, at most two
 /// (one match is what a bound field needs; a second is enough to name both
 /// in the failure).
@@ -165,6 +168,11 @@ impl Adapter for EntryValuesAdapter {
             let label = format!("{AT_LABEL}{query}");
             for node in path.query_located(&tree) {
                 let pointer = pointer_of(node.location());
+                if pointer.segments().is_empty() && node.node().is_null() {
+                    // A null document (a YAML file of only comments, `---`
+                    // or `~`) has no entries, as an empty file has none.
+                    continue;
+                }
                 let kind = non_object(self.format, node.node()).or_else(|| {
                     // Arrays are values, so the TOML walk emits no member of a
                     // table in an array of tables.

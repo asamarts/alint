@@ -270,3 +270,94 @@ fn the_id_holds_the_specification() {
     assert_ne!(one.id(), leaves.id());
     assert!(EntryValuesAdapter::new(Format::Dotenv, &[], false, &[]).is_err());
 }
+
+/// Each row as `(label, pointer, state)` with the spans left out, for
+/// comparing formats.
+fn shapes(
+    format: Format,
+    at: &[&str],
+    leaves: bool,
+    text: &str,
+) -> Vec<(Option<String>, String, RowState)> {
+    rows(&run(format, at, leaves, &[], text).unwrap())
+}
+
+#[test]
+fn a_dotted_key_in_a_toml_inline_table_reads_as_json_s_nested_object() {
+    let toml = "[en]\nnav = { home.title = \"Home\", about = \"About\" }\n";
+    let json = r#"{"en": {"nav": {"home": {"title": "Home"}, "about": "About"}}}"#;
+    for (at, leaves) in [
+        ("$", true),
+        ("$", false),
+        ("$.en.nav", false),
+        ("$.en.nav.home", false),
+    ] {
+        assert_eq!(
+            shapes(Format::Toml, &[at], leaves, toml),
+            shapes(Format::Json, &[at], leaves, json),
+            "at {at}, leaves {leaves}"
+        );
+    }
+    assert_eq!(
+        shapes(Format::Toml, &["$"], true, toml),
+        [
+            (None, "en.nav.home.title".into(), string("Home")),
+            (None, "en.nav.about".into(), string("About")),
+        ]
+    );
+    assert_eq!(
+        shapes(Format::Toml, &["$.en.nav"], false, toml),
+        [
+            (None, "en.nav.home".into(), error(OBJECT)),
+            (None, "en.nav.about".into(), string("About")),
+        ]
+    );
+    // A dotted key's table is a table, not one in an array of tables, and the
+    // key above it is not a leaf.
+    let dotted = "a = { b.c = \"x\" }\n";
+    let nested = r#"{"a": {"b": {"c": "x"}}}"#;
+    for (at, leaves) in [("$.a", false), ("$", true), ("$.a.b", false)] {
+        assert_eq!(
+            shapes(Format::Toml, &[at], leaves, dotted),
+            shapes(Format::Json, &[at], leaves, nested),
+            "at {at}, leaves {leaves}"
+        );
+    }
+    assert_eq!(
+        shapes(Format::Toml, &["$.a"], false, dotted),
+        [(None, "a.b".into(), error(OBJECT))]
+    );
+    // The middle key's span is its own.
+    let output = run(Format::Toml, &["$.en.nav"], false, &[], toml).unwrap();
+    assert_eq!(&toml[output.rows[0].span.unwrap().as_range()], "home");
+}
+
+#[test]
+fn a_null_document_has_no_entries_and_a_scalar_one_fails() {
+    for text in [
+        "",
+        "# only a comment\n",
+        "---\n",
+        "~\n",
+        "null\n",
+        "--- # c\n...\n",
+    ] {
+        for leaves in [false, true] {
+            assert_eq!(
+                shapes(Format::Yaml, &["$"], leaves, text),
+                [],
+                "{text:?}, leaves {leaves}"
+            );
+        }
+    }
+    assert_eq!(shapes(Format::Json, &["$"], false, "null"), []);
+    assert_eq!(
+        shapes(Format::Yaml, &["$"], false, "hello\n"),
+        [(Some("at:$".into()), String::new(), error("a string"))]
+    );
+    // A null below the root is selected, and is not an object.
+    assert_eq!(
+        shapes(Format::Yaml, &["$.fr"], false, "fr:\n"),
+        [(Some("at:$.fr".into()), "fr".into(), error("null"))]
+    );
+}

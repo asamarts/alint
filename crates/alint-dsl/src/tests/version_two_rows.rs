@@ -1027,3 +1027,111 @@ fn strip_root_applies_to_a_join_copy_of_an_entry_path() {
         strings(&[&["home", "nav.home"], &["about", "nav.about"]])
     );
 }
+
+// The relation evaluator's review fixes (phase 6).
+
+/// One relation `keys` over `file`, read with `entries:` in `format`.
+fn keys_over(file: &str, format: &str, at: &str, leaves: bool, fields: &str) -> String {
+    format!(
+        "version: 2\nrelations:\n  keys:\n    from: {{ paths: \"{file}\" }}\n    entries: {{ \
+         format: {format}, at: \"{at}\", leaves: {leaves} }}\n    fields: {fields}\n"
+    )
+}
+
+#[test]
+fn toml_dotted_keys_in_inline_tables_give_the_rows_json_gives() {
+    let toml = "[en]\nnav = { home.title = \"Home\", about = \"About\" }\n";
+    let json = r#"{"en": {"nav": {"home": {"title": "Home"}, "about": "About"}}}"#;
+    let fields = "{ locale: entry.root, key: entry.path }";
+    let read = |file: &str, format: &str, body: &str, at: &str, leaves: bool| {
+        table(
+            &setup(
+                &keys_over(file, format, at, leaves, fields),
+                &[(file, body)],
+            )
+            .rows("keys"),
+        )
+    };
+    assert_eq!(
+        read("en.toml", "toml", toml, "$", true),
+        strings(&[&["en", "en.nav.home.title"], &["en", "en.nav.about"]])
+    );
+    assert_eq!(
+        read("en.toml", "toml", toml, "$.en.nav", false),
+        strings(&[&["en", "en.nav.home"], &["en", "en.nav.about"]])
+    );
+    for (at, leaves) in [
+        ("$", true),
+        ("$", false),
+        ("$.en", true),
+        ("$.en.nav", false),
+    ] {
+        assert_eq!(
+            read("en.toml", "toml", toml, at, leaves),
+            read("en.json", "json", json, at, leaves),
+            "at {at}, leaves {leaves}"
+        );
+    }
+    // The dotted key's table is a table of its own, not one in an array of
+    // tables, and its key is no leaf.
+    let dotted = "a = { b.c = \"x\" }\n";
+    let members = setup(
+        &keys_over("x.toml", "toml", "$.a", false, "{ key: entry.key }"),
+        &[("x.toml", dotted)],
+    );
+    assert_eq!(table(&members.rows("keys")), strings(&[&["b"]]));
+    let leaves = setup(
+        &keys_over(
+            "x.toml",
+            "toml",
+            "$",
+            true,
+            "{ key: entry.path, value: entry.value }",
+        ),
+        &[("x.toml", dotted)],
+    );
+    assert_eq!(table(&leaves.rows("keys")), strings(&[&["a.b.c", "x"]]));
+}
+
+const LOCALES: &str = r#"version: 2
+relations:
+  keys:
+    from: { paths: "locales/*.yml" }
+    entries: { format: yaml, at: "$", leaves: true }
+    fields: { locale: entry.root, key: entry.path }
+    transform: { key: [strip-root] }
+"#;
+
+#[test]
+fn a_yaml_document_of_only_comments_or_null_reads_as_an_empty_one() {
+    let tree = setup(
+        LOCALES,
+        &[
+            ("locales/en.yml", "en:\n  title: Title\n"),
+            ("locales/de.yml", "---\n"),
+            ("locales/es.yml", "~\n"),
+            ("locales/fr.yml", "# nothing translated yet\n"),
+            ("locales/it.yml", ""),
+            ("locales/pt.yml", "null\n"),
+        ],
+    );
+    let keys = tree.rows("keys");
+    assert_eq!(table(&keys), strings(&[&["en", "title"]]));
+    assert_eq!(keys.resources.len(), 6);
+    // A scalar document is not an empty one.
+    let tree = setup(
+        LOCALES,
+        &[
+            ("locales/en.yml", "en:\n  title: Title\n"),
+            ("locales/fr.yml", "bonjour\n"),
+        ],
+    );
+    assert_eq!(
+        tree.failures("keys"),
+        [
+            "locales/fr.yml: relation `keys` (.alint.yml): `at: $` selects a string at the \
+             document root; `at:` selects objects, whose members become rows, so select an \
+             object (read an array's or a scalar's values with `read:`)"
+        ]
+    );
+}
