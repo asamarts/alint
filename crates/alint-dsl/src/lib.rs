@@ -1589,10 +1589,11 @@ fn merge_facts(a: Vec<FactSpec>, b: Vec<FactSpec>) -> Vec<FactSpec> {
         .collect()
 }
 
-/// The most entries (rules, templates, facts, vars, `ignore:` patterns and
-/// recorded `when` reads) a config may hold once its `extends:` chain and
-/// drop-ins are merged. Real configs hold hundreds; an `extends:` diamond that
-/// lists one source twice per level once doubled the lists at each level.
+/// The most entries (rules, templates, facts, vars, `ignore:` patterns,
+/// recorded `when` reads, selectors and relations) a config may hold once its
+/// `extends:` chain and drop-ins are merged. Real configs hold hundreds; an
+/// `extends:` diamond that lists one source twice per level once doubled the
+/// lists at each level.
 pub(crate) const MAX_MERGED_ENTRIES: usize = 1 << 20;
 
 /// `items` without repeats, each kept where it first appears.
@@ -1607,17 +1608,24 @@ fn dedup_in_order<T: Eq + std::hash::Hash + Clone>(items: Vec<T>) -> Vec<T> {
 /// [`merge_unbounded`], refused past [`MAX_MERGED_ENTRIES`].
 pub(crate) fn merge(a: RawConfig, b: RawConfig) -> Result<RawConfig> {
     let merged = merge_unbounded(a, b);
+    let objects = merged.v2.object_count();
     let entries = merged.rules.len()
         + merged.templates.len()
         + merged.facts.len()
         + merged.vars.len()
         + merged.ignore.len()
-        + merged.untrusted_when_var_reads.len();
+        + merged.untrusted_when_var_reads.len()
+        + objects;
     if entries > MAX_MERGED_ENTRIES {
+        // A version 1 config's message is unchanged.
+        let held = if objects == 0 {
+            "rules, templates, facts, vars and `ignore:` patterns"
+        } else {
+            "rules, templates, facts, vars, `ignore:` patterns, selectors and relations"
+        };
         return Err(Error::Other(format!(
-            "the merged config holds {entries} entries (rules, templates, facts, vars and \
-             `ignore:` patterns), more than the {MAX_MERGED_ENTRIES} supported; flatten the \
-             `extends:` chain or split the ruleset"
+            "the merged config holds {entries} entries ({held}), more than the \
+             {MAX_MERGED_ENTRIES} supported; flatten the `extends:` chain or split the ruleset"
         )));
     }
     Ok(merged)

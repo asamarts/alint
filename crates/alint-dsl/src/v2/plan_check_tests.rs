@@ -342,3 +342,171 @@ fn a_literal_that_can_never_match_is_refused() {
          a string; quote it (`'true'`) to match that text"
     );
 }
+
+/// A plan of one top-level source holding the selector `docs` and `relations`.
+fn plan_of(relations: Vec<(&str, RelationDef)>) -> Plan {
+    use alint_core::relation::plan::{
+        Capabilities, NamedRelation, NamedSelector, PlanSource, SourceIndex,
+    };
+    Plan {
+        sources: vec![PlanSource {
+            display: ".alint.yml".into(),
+            path: PathBuf::from("/repo/.alint.yml"),
+            class: ConfigSourceClass::Root,
+            aliases: Vec::new(),
+        }],
+        selectors: vec![NamedSelector {
+            name: "docs".into(),
+            source: SourceIndex(0),
+            selector: SelectorDef {
+                paths: alint_core::PathsSpec::Single("*.json".into()),
+                scope_filter: None,
+            },
+            capabilities: Capabilities::default(),
+            reads_environment: false,
+        }],
+        relations: relations
+            .into_iter()
+            .map(|(name, relation)| NamedRelation {
+                name: name.into(),
+                source: SourceIndex(0),
+                relation,
+                capabilities: Capabilities::default(),
+                reads_environment: false,
+            })
+            .collect(),
+        rules: Vec::new(),
+    }
+}
+
+/// A part reading the selector `docs` with `read: { json: $.a }`.
+fn json_part() -> alint_core::relation::plan::Part {
+    alint_core::relation::plan::Part {
+        from: SelectorRef::Named(Reached {
+            id: alint_core::relation::plan::SelectorId(0),
+            alias: None,
+        }),
+        reader: Reader::Read {
+            read: alint_core::relation::plan::Read::Json("$.a".into()),
+            optional: false,
+        },
+    }
+}
+
+/// `count` fields named `f0`, `f1`, ..., each bound to `value`.
+fn value_fields(count: usize) -> Vec<(String, FieldDef)> {
+    (0..count)
+        .map(|index| {
+            let field = FieldDef {
+                source: FieldSource::Value,
+                sensitive: false,
+            };
+            (format!("f{index}"), field)
+        })
+        .collect()
+}
+
+/// Each name a check looks up is one lookup: a relation of a hundred
+/// thousand fields, each transformed and filtered, and a join over it that
+/// copies every field, check in a moment, where a scan of the fields per
+/// name took minutes.
+#[test]
+fn a_relation_of_many_fields_checks_in_time_linear_in_them() {
+    let outcome = crate::tests::on_thread(8 << 20, std::time::Duration::from_secs(20), || {
+        let fields = value_fields(100_000);
+        let wide = RelationDef {
+            rows: Rows::Part(json_part()),
+            transforms: fields
+                .iter()
+                .map(|(name, _)| (name.clone(), vec![Transform::Trim]))
+                .collect(),
+            filters: fields
+                .iter()
+                .map(|(name, _)| {
+                    let member = Member::Literal(alint_core::relation::Value::String("x".into()));
+                    (name.clone(), vec![Predicate::In(vec![member])])
+                })
+                .collect(),
+            fields,
+        };
+        let wide_side = || Reached {
+            id: RelationId(0),
+            alias: None,
+        };
+        let joined = RelationDef {
+            rows: Rows::Join(alint_core::relation::plan::JoinDef {
+                left: wide_side(),
+                right: wide_side(),
+                on: vec![("f0".into(), "f0".into())],
+                unique: JoinSide::Right,
+            }),
+            fields: (0..100_000)
+                .map(|index| {
+                    let field = FieldDef {
+                        source: FieldSource::Side(JoinSide::Left, format!("f{index}")),
+                        sensitive: false,
+                    };
+                    (format!("g{index}"), field)
+                })
+                .collect(),
+            transforms: Vec::new(),
+            filters: Vec::new(),
+        };
+        check(&plan_of(vec![("wide", wide), ("joined", joined)])).map_err(|e| e.to_string())
+    });
+    assert_eq!(outcome, Ok(vec![RelationId(0), RelationId(1)]));
+}
+
+/// A union's parts are weighed against its fields by what each part reads,
+/// not one by one: fifty thousand parts binding fifty thousand fields check
+/// in a moment, where every part was checked against every field.
+#[test]
+fn a_union_of_many_parts_checks_in_time_linear_in_them() {
+    let outcome = crate::tests::on_thread(8 << 20, std::time::Duration::from_secs(20), || {
+        let union = RelationDef {
+            rows: Rows::Union((0..50_000).map(|_| json_part()).collect()),
+            fields: value_fields(50_000),
+            transforms: Vec::new(),
+            filters: Vec::new(),
+        };
+        check(&plan_of(vec![("union", union)])).map_err(|e| e.to_string())
+    });
+    assert_eq!(outcome, Ok(vec![RelationId(0)]));
+}
+
+/// What a field holds is found once per field of a join chain: a boolean
+/// literal in each of three thousand filters on the end of a chain of three
+/// hundred joins walks the chain once, where each literal walked all of it.
+#[test]
+fn a_join_chain_is_walked_once_for_every_literal_on_it() {
+    let (joins, literals) = (300, 3000);
+    let mut yaml = String::from(
+        "relations:\n  r0:\n    from: { paths: a.json }\n    entries: { format: json, at: $ \
+         }\n    fields: { x: entry.value }\n",
+    );
+    let mut previous = "r0".to_string();
+    for index in 1..=joins {
+        write!(
+            yaml,
+            "  j{index}:\n    join: {{ left: {previous}, right: r0, on: {{ x: x }}, unique: \
+             right }}\n    fields: {{ x: left.x }}\n"
+        )
+        .unwrap();
+        previous = format!("j{index}");
+    }
+    write!(
+        yaml,
+        "  t:\n    join: {{ left: {previous}, right: r0, on: {{ x: x }}, unique: right }}\n    \
+         fields: {{ x: left.x }}\n    where:\n      x:\n        in:\n"
+    )
+    .unwrap();
+    for _ in 0..literals {
+        yaml.push_str("          - true\n");
+    }
+    HOLDS_STEPS.with(|steps| steps.set(0));
+    assert!(check_root(&yaml).is_ok());
+    let steps = HOLDS_STEPS.with(std::cell::Cell::get);
+    // `t.x`, then each join's `x`, then `r0.x`: once each, in each of the two
+    // checks `check_root` runs (the resolve's, then its own).
+    assert_eq!(steps, 2 * (joins + 2));
+}

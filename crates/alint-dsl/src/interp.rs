@@ -383,9 +383,65 @@ fn looks_like_typo(input: &str, target: &str) -> bool {
     levenshtein(input, target) <= 1
 }
 
+/// The Levenshtein distance between `a` and `b` when it is at most `limit`,
+/// in time linear in their length: a distance within `limit` needs lengths
+/// within `limit` of each other and a path that stays within `limit` cells of
+/// the diagonal, and a row whose cells all exceed `limit` ends the walk. A
+/// config's names are untrusted, so a suggestion must not cost the product of
+/// two long ones.
+pub(crate) fn levenshtein_within(a: &str, b: &str, limit: usize) -> Option<usize> {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    if a.len().abs_diff(b.len()) > limit {
+        return None;
+    }
+    #[cfg(test)]
+    DISTANCE_CELLS.with(|cells| cells.set(cells.get() + 1));
+    // `over` stands for any distance past `limit`. The cell left of a row's
+    // band is set to it; the cells right of it were never written (the band
+    // moves right a cell a row) and hold it from the start.
+    let over = limit + 1;
+    let mut prev: Vec<usize> = (0..=b.len()).map(|j| j.min(over)).collect();
+    let mut cur = vec![over; b.len() + 1];
+    for (i, ca) in a.iter().enumerate() {
+        let row = i + 1;
+        let low = row.saturating_sub(limit).max(1);
+        let high = (row + limit).min(b.len());
+        cur[0] = row.min(over);
+        cur[low - 1] = if low == 1 { cur[0] } else { over };
+        let mut least = cur[low - 1];
+        for j in low..=high {
+            #[cfg(test)]
+            DISTANCE_CELLS.with(|cells| cells.set(cells.get() + 1));
+            let cost = usize::from(*ca != b[j - 1]);
+            let cell = (prev[j] + 1)
+                .min(cur[j - 1] + 1)
+                .min(prev[j - 1] + cost)
+                .min(over);
+            cur[j] = cell;
+            least = least.min(cell);
+        }
+        if least > limit {
+            return None;
+        }
+        std::mem::swap(&mut prev, &mut cur);
+    }
+    Some(prev[b.len()]).filter(|distance| *distance <= limit)
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The edit-distance cells [`levenshtein`] and [`levenshtein_within`]
+    /// computed on this thread (and one per call of the latter): the tests
+    /// bound the work a suggestion does.
+    pub(crate) static DISTANCE_CELLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 pub(crate) fn levenshtein(a: &str, b: &str) -> usize {
     let a: Vec<char> = a.chars().collect();
     let b: Vec<char> = b.chars().collect();
+    #[cfg(test)]
+    DISTANCE_CELLS.with(|cells| cells.set(cells.get() + a.len() * b.len()));
     let mut prev: Vec<usize> = (0..=b.len()).collect();
     let mut cur = vec![0usize; b.len() + 1];
     for (i, ca) in a.iter().enumerate() {
@@ -742,5 +798,53 @@ mod tests {
         assert_eq!(levenshtein("en", "env"), 1);
         // `secrets` shares an `e` with `env`, so distance is 6 not 7.
         assert_eq!(levenshtein("secrets", "env"), 6);
+    }
+
+    /// The banded distance agrees with the full one wherever that is within
+    /// the limit, and is `None` past it: every pair of strings of up to five
+    /// characters over a three-letter alphabet, and some longer ones.
+    #[test]
+    fn the_bounded_distance_is_the_distance_within_its_limit() {
+        let mut words = vec![String::new()];
+        let mut last = vec![String::new()];
+        for _ in 0..5 {
+            last = last
+                .iter()
+                .flat_map(|word| ['a', 'b', 'é'].map(|c| format!("{word}{c}")))
+                .collect();
+            words.extend(last.iter().cloned());
+        }
+        for a in &words {
+            for b in &words {
+                let distance = levenshtein(a, b);
+                for limit in 0..=3 {
+                    let expected = (distance <= limit).then_some(distance);
+                    assert_eq!(
+                        levenshtein_within(a, b, limit),
+                        expected,
+                        "{a:?} {b:?} {limit}"
+                    );
+                }
+            }
+        }
+        let long = "selector-".repeat(30);
+        for other in [
+            format!("{long}x"),
+            format!("x{long}"),
+            format!("{}ab", &long[1..]),
+            format!("{}ab", &long[1..long.len() - 1]),
+            long.replacen("sel", "les", 1),
+            long.replacen("sel", "les", 2),
+            long.clone(),
+        ] {
+            let expected = Some(levenshtein(&long, &other)).filter(|distance| *distance <= 2);
+            assert_eq!(levenshtein_within(&long, &other, 2), expected, "{other}");
+            assert_eq!(levenshtein_within(&other, &long, 2), expected, "{other}");
+        }
+        assert_eq!(levenshtein_within(&long, &format!("x{long}"), 2), Some(1));
+        assert_eq!(
+            levenshtein_within(&long, &long.replacen("sel", "les", 2), 2),
+            None
+        );
     }
 }

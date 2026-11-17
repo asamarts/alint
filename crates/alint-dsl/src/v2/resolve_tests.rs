@@ -746,3 +746,34 @@ fn a_rule_an_extended_source_shapes_is_judged_with_what_it_references() {
 }
 
 use super::super::origins::REFERENCE_STUB_KIND as REFERENCE_STUB;
+
+/// A suggestion for a name nothing declares weighs it against every name it
+/// could mean, each only near the diagonal of its edit distance and not at
+/// all past a length two edits cannot reach: work linear in the names, not
+/// the product of two long ones a hostile config can write.
+#[test]
+fn a_suggestion_does_work_linear_in_the_names_it_weighs() {
+    let weighed = |wanted: &str, names: &[String]| {
+        crate::interp::DISTANCE_CELLS.with(|cells| cells.set(0));
+        let message = suggest(wanted, names, "its names are", "names");
+        (
+            message,
+            crate::interp::DISTANCE_CELLS.with(std::cell::Cell::get),
+        )
+    };
+    let stem = "n".repeat(398);
+    let mut names: Vec<String> = (0..64).map(|index| format!("{stem}{index:02}")).collect();
+    names[40] = format!("{stem}nx");
+    let (message, work) = weighed(&format!("{stem}nn"), &names);
+    assert_eq!(message, format!("did you mean `{stem}nx`?"));
+    // At most five cells a character for each name, and one for the call.
+    assert!(work <= names.len() * (5 * 400 + 1), "{work} cells");
+
+    let long = "w".repeat(50_000);
+    let (message, work) = weighed(&long, &names);
+    assert_eq!(
+        message,
+        format!("there are 64 names, none named like `{long}`")
+    );
+    assert_eq!(work, 0);
+}

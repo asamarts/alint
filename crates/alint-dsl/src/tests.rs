@@ -11,6 +11,23 @@ mod version_two_rows;
 mod version_two_schema;
 mod yaml_errors;
 
+/// Run `job` on a thread with a stack of `stack` bytes, and fail unless it
+/// returns within `limit` (a hang leaves the thread behind, but fails the test).
+pub(crate) fn on_thread<T: Send + 'static>(
+    stack: usize,
+    limit: std::time::Duration,
+    job: impl FnOnce() -> T + Send + 'static,
+) -> T {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .stack_size(stack)
+        .spawn(move || drop(sender.send(job())))
+        .unwrap();
+    receiver
+        .recv_timeout(limit)
+        .unwrap_or_else(|_| panic!("did not finish within {limit:?}"))
+}
+
 fn test_registry() -> &'static alint_core::RuleRegistry {
     static REGISTRY: std::sync::LazyLock<alint_core::RuleRegistry> =
         std::sync::LazyLock::new(|| {

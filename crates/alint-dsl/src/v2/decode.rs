@@ -148,23 +148,27 @@ pub(crate) fn source_objects(
 /// The names one source has declared so far, each with the key path that
 /// declared it. Selectors, relations and `extends:` aliases share one
 /// namespace per source, so `deps` cannot be both an alias and a relation.
+/// Held by name: a source of many names declares each in constant time.
 #[derive(Default)]
-struct Names(Vec<(String, String)>);
+struct Names(std::collections::HashMap<String, String>);
 
 impl Names {
     fn declare(&mut self, decoder: &Decoder<'_>, name: &str, path: &str) -> Result<()> {
-        if let Some((_, first)) = self.0.iter().find(|(held, _)| held == name) {
-            return Err(decoder.error(
+        match self.0.entry(name.to_string()) {
+            std::collections::hash_map::Entry::Occupied(first) => Err(decoder.error(
                 path,
                 format!(
-                    "`{name}` is already declared at `{first}`; a name or alias is declared \
-                     once in a config (selectors, relations and `extends:` aliases share one \
-                     namespace), so rename one of them"
+                    "`{name}` is already declared at `{}`; a name or alias is declared once in \
+                     a config (selectors, relations and `extends:` aliases share one \
+                     namespace), so rename one of them",
+                    first.get()
                 ),
-            ));
+            )),
+            std::collections::hash_map::Entry::Vacant(slot) => {
+                slot.insert(path.to_string());
+                Ok(())
+            }
         }
-        self.0.push((name.to_string(), path.to_string()));
-        Ok(())
     }
 }
 

@@ -43,6 +43,14 @@ impl Objects {
         self
     }
 
+    /// How many selectors and relations the sources declare.
+    pub(crate) fn object_count(&self) -> usize {
+        self.sources
+            .iter()
+            .map(|source| source.selectors.len() + source.relations.len())
+            .sum()
+    }
+
     /// Whether any version 2 source is recorded.
     pub(crate) fn has_sources(&self) -> bool {
         !self.sources.is_empty()

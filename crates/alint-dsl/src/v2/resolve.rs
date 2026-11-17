@@ -60,12 +60,12 @@ pub(super) fn suggest(wanted: &str, names: &[String], what: &str, noun: &str) ->
     }
 }
 
-/// The name in `names` closest to `wanted`, within two edits.
+/// The name in `names` closest to `wanted`, within two edits (the first of
+/// the closest), in time linear in their total length.
 fn nearest<'n>(wanted: &str, names: &'n [String]) -> Option<&'n str> {
     names
         .iter()
-        .map(|name| (crate::interp::levenshtein(wanted, name), name))
-        .filter(|(distance, _)| *distance <= 2)
+        .filter_map(|name| Some((crate::interp::levenshtein_within(wanted, name, 2)?, name)))
         .min_by_key(|(distance, _)| *distance)
         .map(|(_, name)| name.as_str())
 }

@@ -25,10 +25,13 @@
 //! `constraint` rule's `key:`, `determines:`, `group_by:`, `field:`, `to:` and
 //! `message:` are phase 7's.
 
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
+
 use alint_core::relation::Value;
 use alint_core::relation::plan::{
-    FieldSource, JoinSide, Member, PathToken, Plan, Predicate, Reached, Reader, RelationDef,
-    RelationId, Rows, SelectorDef, SelectorRef, Transform,
+    FieldDef, FieldSource, JoinSide, Member, PathToken, Plan, Predicate, Reached, Reader,
+    RelationDef, RelationId, Rows, SelectorDef, SelectorRef, Transform,
 };
 use alint_core::{Error, Result};
 
@@ -39,10 +42,124 @@ use super::resolve::{located, suggest};
 pub(super) fn check(plan: &Plan) -> Result<Vec<RelationId>> {
     check_selectors(plan)?;
     let order = order(plan)?;
+    let fields = Fields::new(plan);
     for index in 0..plan.relations.len() {
-        check_relation(plan, RelationId(index))?;
+        check_relation(&fields, RelationId(index))?;
     }
     Ok(order)
+}
+
+/// Each relation's fields by name, and what each field holds once found, so
+/// the checks cost one lookup per name a config writes however many fields a
+/// relation declares, and however long a chain of joins a field follows.
+struct Fields<'p> {
+    plan: &'p Plan,
+    /// Each relation's fields, the first of each name.
+    declared: Vec<HashMap<&'p str, &'p FieldDef>>,
+    /// Each relation's fields with at least one transform.
+    transformed: Vec<HashSet<&'p str>>,
+    /// What [`Fields::holds`] found, by relation and field.
+    holds: RefCell<HashMap<(usize, &'p str), Holds>>,
+}
+
+impl<'p> Fields<'p> {
+    fn new(plan: &'p Plan) -> Self {
+        let mut declared = Vec::with_capacity(plan.relations.len());
+        let mut transformed = Vec::with_capacity(plan.relations.len());
+        for named in &plan.relations {
+            let relation = &named.relation;
+            let mut fields = HashMap::with_capacity(relation.fields.len());
+            for (name, field) in &relation.fields {
+                fields.entry(name.as_str()).or_insert(field);
+            }
+            declared.push(fields);
+            // `transforms_of` reads the first entry of a name.
+            let mut seen = HashSet::new();
+            transformed.push(
+                relation
+                    .transforms
+                    .iter()
+                    .filter(|(name, _)| seen.insert(name.as_str()))
+                    .filter(|(_, transforms)| !transforms.is_empty())
+                    .map(|(name, _)| name.as_str())
+                    .collect(),
+            );
+        }
+        Self {
+            plan,
+            declared,
+            transformed,
+            holds: RefCell::default(),
+        }
+    }
+
+    /// Field `name` of relation `id`, as [`RelationDef::field`] finds it.
+    fn field(&self, id: RelationId, name: &str) -> Option<&'p FieldDef> {
+        self.declared[id.0].get(name).copied()
+    }
+
+    /// What field `field` of relation `id` holds once its transforms have
+    /// run, following a join's `left.F`/`right.F` to the side's field. Each
+    /// field a chain passes is found once, and remembered.
+    fn holds(&self, id: RelationId, field: &'p str) -> Holds {
+        let mut known = self.holds.borrow_mut();
+        let mut walked = Vec::new();
+        let mut at = (id.0, field);
+        // What a field holds when nothing narrower is found (and when a chain
+        // outruns the bound, which an acyclic plan never does).
+        let mut found = Holds::Any;
+        for _ in 0..=self.plan.relations.len() {
+            if let Some(&held) = known.get(&at) {
+                found = held;
+                break;
+            }
+            #[cfg(test)]
+            HOLDS_STEPS.with(|steps| steps.set(steps.get() + 1));
+            walked.push(at);
+            if self.transformed[at.0].contains(at.1) {
+                found = Holds::Strings;
+                break;
+            }
+            let Some(definition) = self.field(RelationId(at.0), at.1) else {
+                break;
+            };
+            let (side, name) = match &definition.source {
+                FieldSource::Path(_)
+                | FieldSource::EntryKey
+                | FieldSource::EntryRoot
+                | FieldSource::EntryPath
+                | FieldSource::Value => {
+                    found = Holds::Strings;
+                    break;
+                }
+                FieldSource::EntryParent => {
+                    found = Holds::StringsOrNull;
+                    break;
+                }
+                FieldSource::EntryValue | FieldSource::Bound(_) => break,
+                FieldSource::Side(side, name) => (side, name),
+            };
+            let Rows::Join(join) = &self.plan.relations[at.0].relation.rows else {
+                break;
+            };
+            let next = match side {
+                JoinSide::Left => join.left.id,
+                JoinSide::Right => join.right.id,
+            };
+            at = (next.0, name.as_str());
+        }
+        for step in walked {
+            known.insert(step, found);
+        }
+        found
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The fields [`Fields::holds`] has looked at on this thread, each step
+    /// of a join chain one: the tests bound them.
+    static HOLDS_STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 fn check_selectors(plan: &Plan) -> Result<()> {
@@ -213,42 +330,6 @@ enum Holds {
     Any,
 }
 
-/// What field `field` of relation `id` holds once its transforms have run,
-/// following a join's `left.F`/`right.F` to the side's field.
-fn holds(plan: &Plan, id: RelationId, field: &str) -> Holds {
-    let mut at = (id, field.to_string());
-    // The plan is acyclic, so the chain ends; the bound guards it anyway.
-    for _ in 0..=plan.relations.len() {
-        let relation = &plan.relation(at.0).relation;
-        if !relation.transforms_of(&at.1).is_empty() {
-            return Holds::Strings;
-        }
-        let Some(definition) = relation.field(&at.1) else {
-            return Holds::Any;
-        };
-        match &definition.source {
-            FieldSource::Path(_)
-            | FieldSource::EntryKey
-            | FieldSource::EntryRoot
-            | FieldSource::EntryPath
-            | FieldSource::Value => return Holds::Strings,
-            FieldSource::EntryParent => return Holds::StringsOrNull,
-            FieldSource::EntryValue | FieldSource::Bound(_) => return Holds::Any,
-            FieldSource::Side(side, name) => {
-                let Rows::Join(join) = &relation.rows else {
-                    return Holds::Any;
-                };
-                let next = match side {
-                    JoinSide::Left => join.left.id,
-                    JoinSide::Right => join.right.id,
-                };
-                at = (next, name.clone());
-            }
-        }
-    }
-    Holds::Any
-}
-
 /// A field source as a config writes it.
 fn source_text(source: &FieldSource) -> String {
     match source {
@@ -341,25 +422,41 @@ impl At<'_> {
     }
 }
 
-fn check_relation(plan: &Plan, id: RelationId) -> Result<()> {
+fn check_relation(fields: &Fields<'_>, id: RelationId) -> Result<()> {
+    let plan = fields.plan;
     let named = plan.relation(id);
     let at = At {
         display: &plan.source(named.source).display,
         path: format!("relations.{}", named.name),
     };
-    check_rows(plan, &named.relation, &at)?;
-    check_transforms(&named.name, &named.relation, &at)?;
-    check_filters(plan, id, &at)
+    check_rows(fields, &named.relation, &at)?;
+    check_transforms(fields, id, &at)?;
+    check_filters(fields, id, &at)
 }
 
 /// A union's parts bind every field; a join's `on:` and `left.F`/`right.F`
 /// name fields of its sides.
-fn check_rows(plan: &Plan, relation: &RelationDef, at: &At<'_>) -> Result<()> {
+fn check_rows(fields: &Fields<'_>, relation: &RelationDef, at: &At<'_>) -> Result<()> {
+    let plan = fields.plan;
     match &relation.rows {
         Rows::Union(parts) => {
+            // A part binds a field unless its reader is of the other kind, so
+            // the first part of each kind is the first a field can fail on.
+            let mut firsts: Vec<usize> = [
+                parts
+                    .iter()
+                    .position(|part| matches!(part.reader, Reader::Entries(_))),
+                parts
+                    .iter()
+                    .position(|part| matches!(part.reader, Reader::Read { .. })),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
+            firsts.sort_unstable();
             for (name, field) in &relation.fields {
-                for (index, part) in parts.iter().enumerate() {
-                    if let Some(why) = unbound(&part.reader, &field.source) {
+                for &index in &firsts {
+                    if let Some(why) = unbound(&parts[index].reader, &field.source) {
                         return Err(at.fail(
                             &format!(".fields.{name}"),
                             format!(
@@ -377,11 +474,11 @@ fn check_rows(plan: &Plan, relation: &RelationDef, at: &At<'_>) -> Result<()> {
             let right = &plan.relation(join.right.id).relation;
             for (left_field, right_field) in &join.on {
                 let under = format!(".join.on.{left_field}");
-                if left.field(left_field).is_none() {
+                if fields.field(join.left.id, left_field).is_none() {
                     let of = format!("`{}`, the join's left side", written(plan, &join.left));
                     return Err(at.fail(&under, not_a_field(left_field, &of, left)));
                 }
-                if right.field(right_field).is_none() {
+                if fields.field(join.right.id, right_field).is_none() {
                     let of = format!("`{}`, the join's right side", written(plan, &join.right));
                     return Err(at.fail(&under, not_a_field(right_field, &of, right)));
                 }
@@ -395,7 +492,7 @@ fn check_rows(plan: &Plan, relation: &RelationDef, at: &At<'_>) -> Result<()> {
                     JoinSide::Right => (&join.right, "right"),
                 };
                 let of_side = &plan.relation(reached.id).relation;
-                if of_side.field(side_field).is_none() {
+                if fields.field(reached.id, side_field).is_none() {
                     return Err(at.fail(
                         &format!(".fields.{name}"),
                         format!(
@@ -419,12 +516,14 @@ fn check_rows(plan: &Plan, relation: &RelationDef, at: &At<'_>) -> Result<()> {
 }
 
 /// Each transformed field exists, and its transforms fit its source.
-fn check_transforms(name: &str, relation: &RelationDef, at: &At<'_>) -> Result<()> {
+fn check_transforms(fields: &Fields<'_>, id: RelationId, at: &At<'_>) -> Result<()> {
+    let named = fields.plan.relation(id);
+    let relation = &named.relation;
     for (field_name, transforms) in &relation.transforms {
-        let Some(field) = relation.field(field_name) else {
+        let Some(field) = fields.field(id, field_name) else {
             return Err(at.fail(
                 &format!(".transform.{field_name}"),
-                not_a_field(field_name, &format!("relation `{name}`"), relation),
+                not_a_field(field_name, &format!("relation `{}`", named.name), relation),
             ));
         };
         for (index, transform) in transforms.iter().enumerate() {
@@ -466,11 +565,12 @@ fn check_transforms(name: &str, relation: &RelationDef, at: &At<'_>) -> Result<(
 
 /// Each filtered field exists, each membership reference names a field of
 /// its relation, and each literal can match.
-fn check_filters(plan: &Plan, id: RelationId, at: &At<'_>) -> Result<()> {
+fn check_filters(fields: &Fields<'_>, id: RelationId, at: &At<'_>) -> Result<()> {
+    let plan = fields.plan;
     let named = plan.relation(id);
     let relation = &named.relation;
     for (name, predicates) in &relation.filters {
-        if relation.field(name).is_none() {
+        if fields.field(id, name).is_none() {
             return Err(at.fail(
                 &format!(".where.{name}"),
                 not_a_field(name, &format!("relation `{}`", named.name), relation),
@@ -490,7 +590,7 @@ fn check_filters(plan: &Plan, id: RelationId, at: &At<'_>) -> Result<()> {
                         field,
                     } => {
                         let other = &plan.relation(reached.id).relation;
-                        if other.field(field).is_none() {
+                        if fields.field(reached.id, field).is_none() {
                             let of = format!("`{}`", written(plan, reached));
                             return Err(
                                 at.fail(&format!("{under}.field"), not_a_field(field, &of, other))
@@ -498,7 +598,7 @@ fn check_filters(plan: &Plan, id: RelationId, at: &At<'_>) -> Result<()> {
                         }
                     }
                     Member::Literal(value) => {
-                        if let Some(problem) = literal_problem(value, plan, id, name) {
+                        if let Some(problem) = literal_problem(value, fields, id, name) {
                             return Err(at.fail(&under, problem));
                         }
                     }
@@ -511,7 +611,12 @@ fn check_filters(plan: &Plan, id: RelationId, at: &At<'_>) -> Result<()> {
 
 /// Why literal `value` in an `in`/`not_in` list of field `field` can never
 /// match as written.
-fn literal_problem(value: &Value, plan: &Plan, id: RelationId, field: &str) -> Option<String> {
+fn literal_problem<'p>(
+    value: &Value,
+    fields: &Fields<'p>,
+    id: RelationId,
+    field: &'p str,
+) -> Option<String> {
     match value {
         Value::Null => Some(
             "null is in no set, so it never matches `in` and never fails `not_in`; remove it"
@@ -523,7 +628,7 @@ fn literal_problem(value: &Value, plan: &Plan, id: RelationId, field: &str) -> O
              it as a string (`'1.10'`) to match a string value"
                 .to_string(),
         ),
-        Value::Bool(flag) if holds(plan, id, field) != Holds::Any => Some(format!(
+        Value::Bool(flag) if fields.holds(id, field) != Holds::Any => Some(format!(
             "`{field}` holds strings, and a boolean never equals a string; quote it (`'{flag}'`) \
              to match that text"
         )),

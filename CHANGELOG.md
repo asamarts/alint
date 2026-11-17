@@ -421,7 +421,8 @@ policy-test package the user does not trust.
     `entries:` or `read:`, `union:`, `join:`, `fields:`, `transform:` and `where:`) are checked
     when the config loads: every key, value type, field source, transform and predicate. Names,
     aliases and references are literal: `{{...}}` in one is an error. A name is declared once
-    per config file, across selectors, relations and aliases.
+    per config file, across selectors, relations and aliases. Selectors and relations count
+    toward the entries a merged config may hold.
   - Only local files may be version 2: the top-level config, a local `extends:` target and an
     `.alint.d/` fragment. A remote `extends:` source, a bundled ruleset, a nested config and the
     string `alint_dsl::parse` reads must be version 1, and a version 1 config cannot extend a

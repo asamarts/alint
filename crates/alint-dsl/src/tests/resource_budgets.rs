@@ -5,23 +5,6 @@ use std::time::Duration;
 
 use super::*;
 
-/// Run `job` on a thread with a stack of `stack` bytes, and fail unless it
-/// returns within `limit` (a hang leaves the thread behind, but fails the test).
-fn on_thread<T: Send + 'static>(
-    stack: usize,
-    limit: Duration,
-    job: impl FnOnce() -> T + Send + 'static,
-) -> T {
-    let (sender, receiver) = std::sync::mpsc::channel();
-    std::thread::Builder::new()
-        .stack_size(stack)
-        .spawn(move || drop(sender.send(job())))
-        .unwrap();
-    receiver
-        .recv_timeout(limit)
-        .unwrap_or_else(|_| panic!("did not finish within {limit:?}"))
-}
-
 /// A tempdir holding `files`, kept alive with the path of its `.alint.yml`.
 fn repo(files: &[(&str, &str)]) -> (tempfile::TempDir, std::path::PathBuf) {
     let tmp = tempfile::tempdir().unwrap();
@@ -136,7 +119,15 @@ fn a_merged_config_is_held_to_a_size() {
         ..RawConfig::default()
     };
     let error = merge(RawConfig::default(), big).unwrap_err().to_string();
-    assert!(error.contains("the merged config holds"), "{error}");
+    assert_eq!(
+        error,
+        format!(
+            "the merged config holds {} entries (rules, templates, facts, vars and `ignore:` \
+             patterns), more than the {MAX_MERGED_ENTRIES} supported; flatten the `extends:` \
+             chain or split the ruleset",
+            MAX_MERGED_ENTRIES + 1
+        )
+    );
 }
 
 /// ROB-6: a template copied by every instance, and a var rendered at every

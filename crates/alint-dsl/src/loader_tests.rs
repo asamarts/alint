@@ -908,3 +908,31 @@ fn every_bundled_ruleset_is_plainly_version_one() {
         );
     }
 }
+
+/// A version 2 source's selectors and relations count toward the merged
+/// config's size, and the error says so.
+#[test]
+fn a_merged_config_counts_its_selectors_and_relations() {
+    let mut config = parse_config_interpolated_inner(
+        "version: 2\nselectors:\n  a: { paths: a }\nrelations:\n  r:\n    from: a\n    \
+         read: { json: $.x }\n    fields: { x: value }\nrules: []\n",
+        Path::new("/repo/.alint.yml"),
+    )
+    .unwrap();
+    config.ignore = (0..crate::MAX_MERGED_ENTRIES - 1)
+        .map(|i| i.to_string())
+        .collect();
+    let error = crate::merge(RawConfig::default(), config)
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        error,
+        format!(
+            "the merged config holds {} entries (rules, templates, facts, vars, `ignore:` \
+             patterns, selectors and relations), more than the {} supported; flatten the \
+             `extends:` chain or split the ruleset",
+            crate::MAX_MERGED_ENTRIES + 1,
+            crate::MAX_MERGED_ENTRIES
+        )
+    );
+}

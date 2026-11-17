@@ -12,15 +12,18 @@
 //!   reads it makes the relation's analysis failures show no detail: an
 //!   `at:` path from the environment would echo in the key path it selects.
 
+use std::collections::{HashMap, HashSet};
+
 use ayaml::Value;
 
 use super::model::SourceObjects;
 
-/// What one source's selectors and relations read from the environment.
+/// What one source's selectors and relations read from the environment, by
+/// name, so marking a source of many objects costs one lookup per object.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Environment {
-    selectors: Vec<String>,
-    relations: Vec<(String, RelationEnvironment)>,
+    selectors: HashSet<String>,
+    relations: HashMap<String, RelationEnvironment>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -29,7 +32,7 @@ struct RelationEnvironment {
     /// `where:` and `transform:` entries.
     reading: bool,
     /// The fields whose `where:` or `transform:` entry reads it.
-    fields: Vec<String>,
+    fields: HashSet<String>,
 }
 
 impl Environment {
@@ -46,7 +49,7 @@ impl Environment {
         };
         for (name, definition) in named("selectors") {
             if reads_environment(definition) {
-                environment.selectors.push(name.to_string());
+                environment.selectors.insert(name.to_string());
             }
         }
         for (name, definition) in named("relations") {
@@ -58,7 +61,7 @@ impl Environment {
                             if reads_environment(entry)
                                 && let Some(field) = field.as_str()
                             {
-                                relation.fields.push(field.to_string());
+                                relation.fields.insert(field.to_string());
                             }
                         }
                     }
@@ -66,7 +69,7 @@ impl Environment {
                 }
             }
             if relation.reading || !relation.fields.is_empty() {
-                environment.relations.push((name.to_string(), relation));
+                environment.relations.insert(name.to_string(), relation);
             }
         }
         environment
@@ -78,8 +81,7 @@ impl Environment {
             selector.reads_environment = self.selectors.contains(name);
         }
         for (name, relation) in &mut objects.relations {
-            let Some((_, environment)) = self.relations.iter().find(|(held, _)| held == name)
-            else {
+            let Some(environment) = self.relations.get(name) else {
                 continue;
             };
             relation.reads_environment = environment.reading;

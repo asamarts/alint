@@ -928,3 +928,113 @@ fn a_json_path_parses() {
         format!("`relations.r.fields.f`: {}", bad("$.a["))
     );
 }
+
+/// A source declares each name in constant time, held by name: two hundred
+/// thousand of them declare in a moment, where a scan of the names before
+/// each took minutes. A repeat is still refused, naming the first.
+#[test]
+fn declaring_many_names_takes_time_linear_in_them() {
+    let error = crate::tests::on_thread(8 << 20, std::time::Duration::from_secs(20), || {
+        let decoder = Decoder {
+            source: ".alint.yml",
+        };
+        let mut names = Names::default();
+        for index in 0..200_000 {
+            let name = format!("s{index}");
+            names
+                .declare(&decoder, &name, &format!("selectors.{name}"))
+                .unwrap();
+        }
+        names
+            .declare(&decoder, "s7", "relations.s7")
+            .unwrap_err()
+            .to_string()
+    });
+    assert_eq!(
+        error,
+        ".alint.yml: `relations.s7`: `s7` is already declared at `selectors.s7`; a name or \
+         alias is declared once in a config (selectors, relations and `extends:` aliases share \
+         one namespace), so rename one of them"
+    );
+}
+
+/// Marking what a source's selectors and relations read from the
+/// environment looks each up by name: two hundred thousand selectors and a
+/// hundred thousand relations mark in a moment, where a scan per object took
+/// minutes.
+#[test]
+fn marking_many_objects_takes_time_linear_in_them() {
+    use crate::v2::model::{self, Selector};
+
+    let marked = crate::tests::on_thread(8 << 20, std::time::Duration::from_secs(20), || {
+        let mut selectors = ayaml::Mapping::new();
+        let mut relations = ayaml::Mapping::new();
+        let mut objects = SourceObjects {
+            source: SourceId {
+                display: ".alint.yml".into(),
+                path: "/repo/.alint.yml".into(),
+                class: alint_core::ConfigSourceClass::Root,
+            },
+            selectors: Vec::new(),
+            relations: Vec::new(),
+            aliases: Vec::new(),
+            extended: Vec::new(),
+        };
+        let selector = Selector {
+            paths: alint_core::PathsSpec::Single("a.json".into()),
+            scope_filter: None,
+            reads_environment: false,
+        };
+        let relation = model::Relation {
+            rows: model::Rows::Part(model::Part {
+                from: model::SelectorRef::Named(model::Reference {
+                    alias: None,
+                    name: "s0".into(),
+                }),
+                reader: model::Reader::Read {
+                    read: model::Read::Json("$.x".into()),
+                    optional: false,
+                },
+            }),
+            fields: vec![(
+                "x".into(),
+                model::Field {
+                    source: model::FieldSource::Value,
+                    sensitive: false,
+                },
+            )],
+            transforms: Vec::new(),
+            filters: Vec::new(),
+            reads_environment: false,
+        };
+        let reading: Value =
+            alint_core::yaml::from_str("{paths: \"{{env.X | default('a')}}\"}").unwrap();
+        let filtered: Value = alint_core::yaml::from_str(
+            "{from: s0, read: {json: $.x}, fields: {x: value}, where: {x: {in: \
+             [\"{{env.Y | default('b')}}\"]}}}",
+        )
+        .unwrap();
+        for index in 0..200_000 {
+            let name = format!("s{index}");
+            selectors.insert(Value::from(name.as_str()), reading.clone());
+            objects.selectors.push((name, selector.clone()));
+        }
+        for index in 0..100_000 {
+            let name = format!("r{index}");
+            relations.insert(Value::from(name.as_str()), filtered.clone());
+            objects.relations.push((name, relation.clone()));
+        }
+        let mut document = ayaml::Mapping::new();
+        document.insert("selectors".into(), Value::Mapping(selectors));
+        document.insert("relations".into(), Value::Mapping(relations));
+        crate::v2::Environment::of(&Value::Mapping(document)).mark(&mut objects);
+        objects
+    });
+    assert!(marked.selectors.iter().all(|(_, s)| s.reads_environment));
+    assert!(
+        marked
+            .relations
+            .iter()
+            .all(|(_, relation)| { !relation.reads_environment && relation.fields[0].1.sensitive })
+    );
+}
