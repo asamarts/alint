@@ -13,7 +13,16 @@ issues, and the saphyr exit in v0.24);
 [ADR-0037](../../adr/0037-phase-3-design-refinements.md) (row-level `equal`, CLDR plurals in
 `set`, and the corrections to ADR-0034 after an audit);
 [ADR-0038](../../adr/0038-owned-yaml-types-and-the-api-gate.md) (the owned YAML types, the
-public-API gate, and a sealed `alint_core::Error`).
+public-API gate, and a sealed `alint_core::Error`);
+[ADR-0039](../../adr/0039-the-yaml-oracle-as-a-dev-dependency-of-alint-core.md) (the harness's
+oracle as a dev-dependency, superseded by ADR-0041);
+[ADR-0040](../../adr/0040-the-v023-advisory-and-the-allowlist-approval.md) (the security
+advisory, and the allowlist approved on ayaml's fixes);
+[ADR-0041](../../adr/0041-a-yaml-parser-facade-with-test-only-reference-parsers.md) (the parser
+facade with test-only reference parsers);
+ADR-0042 (measuring YAML memory and wall time, after the audit);
+[ADR-0043](../../adr/0043-trust-and-disclosure-decisions-from-the-post-v0221-audit.md) (the
+trust and disclosure decisions of the audit after v0.22.1).
 
 v0.23 starts Phase 3 of [`general-linter.md`](../general-linter.md) (section 11.6), which v0.22.0
 unblocked by meeting all three gates of Phase 2 (section 11.1, "v0.22 gate results"). Phase 3 is
@@ -95,18 +104,21 @@ Also in v0.23:
     ignored" where they said "on disk", and the bundled `java@v1` and `php@v1` rules that these
     changes touch reword their messages to match. This is the one exception to section 3's "v1 is
     unchanged". Done in #509.
-13. **Seven sandbox fixes.** v0.20.0 to v0.22.1 ran a spawning rule nested in `require:`
+13. **The sandbox and trust fixes.** v0.20.0 to v0.22.1 ran a spawning rule nested in `require:`
     without the spawn capability (#515), and passed a test's `given.env` to the Git commands the
     runner runs itself, so `GIT_CONFIG_*` or `LD_PRELOAD` could run code without it (#519). Both
     ship in v0.23.0 only, with no v0.22.2 (the owner's decision, 2026-11-14). The same releases
     read a fixture shaped like a bare repository as one, so a `core.fsmonitor` in it ran a
     command, and let a test's `when:` conditions and `${VAR}` expansions read the host's
-    environment (#522). The review of #522 and its fix found three more (#527): a chain of
-    `given.tree` symlinks wrote outside the sandbox, a fixture symlink read a host file from the
-    copy, and a fixer could write `.git`, so Git ran a command from a configuration it wrote, in
-    `alint test` and, from a ruleset `extends:` reads from the local tree, in `alint fix` since
-    v0.2.1. All seven ship in v0.23.0, fixed in public pull requests, with no v0.22.2, and a
-    security advisory for all seven, drafted now, is published with v0.23.0 (ADR-0040).
+    environment (#522). The review of #522 and its fix found eight more (#527), among them a
+    chain of `given.tree` symlinks that wrote outside the sandbox, a fixture symlink that read a
+    host file from the copy, and a fixer that could write `.git`, so Git ran a command from a
+    configuration it wrote, in `alint test` and, from a ruleset `extends:` reads from the local
+    tree, in `alint fix` since v0.2.1. ADR-0040 counted three of the eight. The audit after
+    v0.22.1 found 13 more, in the language server, fixes, rule reads, configuration discovery
+    and loading (status log, 2026-11-16). All ship in v0.23.0, fixed in public pull requests,
+    with no v0.22.2. Security advisory GHSA-78jj-xfpm-g6px, a private draft now, covers every
+    one and is published with v0.23.0 (ADR-0040, widened by ADR-0043).
 
 Out of scope:
 - **v0.24 or later:** the remaining assertion families (reference, cardinality, group, bounded
@@ -165,12 +177,17 @@ it must respect:
 - **v1 is unchanged.** A v1 configuration keeps its findings, messages, fingerprints and exit
   codes (section 7.1 rule 10). Evidence:
   - the e2e suite;
-  - the corpus replay against v0.22.1, with zero differences.
+  - the corpus replay against v0.22.1, with no difference that the CHANGELOG does not explain.
 
   Item 7 does not change what alint writes, only which old baseline entries it matches. Item 12 is
-  the one exception (ADR-0033 decision 3): a configuration that uses `git_tracked_only` can gain
-  or lose findings, three kinds and six bundled rules reword a message, the CHANGELOG lists the
-  change, and every difference in the replay must come from it.
+  one exception (ADR-0033 decision 3): a configuration that uses `git_tracked_only` can gain or
+  lose findings, three kinds and six bundled rules reword a message, and the CHANGELOG lists the
+  change. The ayaml cutover (phase 9) is the other: it reads some YAML differently and words
+  parse errors differently, and the CHANGELOG lists each difference (ADR-0035 decision 5). Every
+  difference in the replay must come from one of them. The replay of `main` at e7bb08a57 against
+  v0.22.1 (run 43927008138) found three: item 12's reworded `java-no-tracked-build` message in
+  gradle/gradle and quarkusio/quarkus, and the reworded message for a stream of more than one
+  document in istio/istio.
 - **The version boundary of ADR-0022 holds.** A v2 source may extend v1 sources, never the
   reverse, at any recursive edge.
 - **Trust is no weaker than v1** (section 7.1 rules 9, 11 and 12):
@@ -246,8 +263,8 @@ next. Phases 1, 4 and 5 do not depend on the design and can run alongside phases
 | 6 | The version dispatch, named selectors and relations, per-source namespaces with `extends:` aliases, value-bearing entry rows, the equality join, the draft v2 schema, and `validate-config`, `list`, `explain` and `export-agents-md` for v2 | v2 only |
 | 7 | The `constraint` kind: equality (with row-level `equal`), unique/key and set (with `plurals: cldr`), report-only, and the related-location gate over JSON, SARIF and the language server | v2 only |
 | 8 | The three conformance policies with `alint test` cases, and the section 12.1 measurements | v2 only |
-| 9 | Qualify the cutover that #510 made: #483, and the #482 harness's verdict with an approved allowlist. Otherwise the owner holds the release or reverts #510 (ADR-0035). Approved on 2026-11-15, on condition that v0.23.0 is tagged on an ayaml release that fixes asamarts/ayaml#132, #133 and #137 (ADR-0040) | yes (parser) |
-| 10 | Documentation, the CHANGELOG (re-run `alint baseline`; the library migration; the `git_tracked_only` change; the affected versions of item 13's fixes), facts, publishing the security advisory drafted for item 13 (GHSA-78jj-xfpm-g6px, a private draft; ADR-0040), and the release check | no |
+| 9 | Qualify the cutover that #510 made: #483, and the #482 harness's verdict with an approved allowlist. Otherwise the owner holds the release or reverts #510 (ADR-0035). Approved on 2026-11-15, on condition that v0.23.0 is tagged on an ayaml release that fixes asamarts/ayaml#132, #133 and #137 (ADR-0040). Since 2026-11-16 the condition is an ayaml release with the fixes ayaml's main has for every gap alint filed, #132, #133, #137, #139, #140, #141, #146 and #147, and ADR-0042's condition on memory (ADR-0043). The bump follows `yaml-parser.md`'s "Bumping ayaml" | yes (parser) |
+| 10 | Documentation, the CHANGELOG (re-run `alint baseline`; the library migration; the `git_tracked_only` change; the affected versions of item 13's fixes), facts, publishing the security advisory drafted for item 13 (GHSA-78jj-xfpm-g6px, a private draft; ADR-0040, widened by ADR-0043; step 5 of RELEASING.md's documentation checklist), and the release check | no |
 
 The #503 fix (item 12) is its own pull request, with `add -f` e2e scenarios for `file_absent`,
 `dir_absent`, `file_exists` and `dir_exists`, and does not depend on the design. It merged as #509
@@ -258,8 +275,9 @@ decided then.
 
 ## 5. Release acceptance
 
-- **v1 is unchanged** apart from item 12. The e2e suite passes, and the corpus replay against
-  v0.22.1 shows no differences other than those item 12 explains (ADR-0033 decision 3).
+- **v1 is unchanged** apart from item 12 and the ayaml cutover. The e2e suite passes, and the
+  corpus replay against v0.22.1 shows no difference that the CHANGELOG does not explain: item
+  12's (ADR-0033 decision 3) and the cutover's (ADR-0035 decision 5).
 - **The stratum is scored** and recorded in `general-linter.md` section 12, with the bucket shares
   before and after the slice. Phase 8 re-scores it with the shipped slice and compares the result
   with ADR-0033's projections.
@@ -659,3 +677,46 @@ decided then.
     now take 9.4M instructions in place of 47.5M (Callgrind, bench profile), and `det_check`
     gains that cell. Looking walked paths up by a binary search over the sorted entries, in
     place of the path set the search builds, doubled its instructions, so it keeps the set.
+- 2026-11-16: the audit of everything since v0.22.1.
+  - Seven reviewers read #490 to #530, 37 commits, on `main` at e7bb08a57: the engine, templates
+    and rules; YAML robustness; the library API; security; YAML as users meet it; the documents
+    and release records; and performance. They found 80 problems, 10 of them high: 17 in the
+    documents, 16 in user-facing YAML, 15 in security (13 holes, and the draft advisory's
+    mistakes), 12 in robustness, 8 in the engine, 6 in the API and 6 in performance.
+  - The fixes: #538 (the API gate and compare mode) and #539 (the engine, templates and rules,
+    the entry above), merged; #540 (structured YAML fixes' spans), #541 (fixes and rule reads
+    kept out of `.git` and alint's configuration), #542 (the language server's workspace trust
+    and `--no-spawn`) and #543 (YAML guards, `pinned_references` and configuration loading
+    against hostile input); then the security follow-ups (Git named by `--git-dir`, discovery
+    stopped at the repository's top, extended rules' reads, `extends:` schemes), the YAML
+    messages, the performance gates and the documents.
+  - Deferred, as alint issues: #545 (the JetBrains plugin passes the IDE's trusted-project state
+    to the server), #546 (`java-no-tracked-build` reports Java source packages named `build`),
+    #547 (a hint to regenerate a baseline written before v0.22), #548 (parse each structured
+    file once per run, for v0.24) and #549 (run the corpus replay in YAML compare mode).
+  - The decisions: ADR-0043 records the advisory widened to the new holes, a repository's own
+    configuration trusted like a Makefile, `--no-spawn` and the server's trust state, no rule
+    reading a Git directory, discovery that stops at the repository's top, what extended
+    rulesets may not do, the one-entry mapping refused where an enum's name goes, and the YAML
+    messages; it also corrects ADR-0040's count of seven holes and widens phase 9's ayaml
+    condition. ADR-0042 records YAML memory and wall time.
+  - Filed with ayaml: asamarts/ayaml#160 (an indentation mistake reported as unexpected content),
+    #161 (an unclosed quote's error does not say where it opened), #162 (a type error does not
+    name the value), #163 (peak heap per input byte), #164 (a mapping lookup by `&str`
+    allocates) and #165 (depth refused only after the whole event stream, and a flow implicit
+    key's scan that grows with depth times length).
+  - ayaml's main closed every gap alint had filed against the compatibility reader, #132, #133,
+    #137, #139, #140, #141, #146 and #147, in its pull requests #152 and #154 to #159, none
+    released yet. Phase 9's condition is now a release with all of them (ADR-0043), with the
+    checklist in `yaml-parser.md` ("Bumping ayaml").
+  - The corpus replay of e7bb08a57 against v0.22.1 (run 43927008138): of 130 repositories, 123
+    replayed, 4 skipped because their configurations fail to load in both versions
+    (facebook/react, gin-gonic/gin, neovim/neovim, spring-projects/spring-boot), none crashed,
+    and 3 differ. gradle/gradle and quarkusio/quarkus report `java-no-tracked-build`'s reworded
+    message (item 12). istio/istio's two release-notes rules report "more than one document in
+    stream at line 10 column 1" where v0.22.1 said "deserializing from YAML containing more
+    than one document is not supported", which the CHANGELOG lists. Section 3 and section 5 now
+    accept the differences the CHANGELOG explains, not only item 12's. The replay runs the
+    release build, so it compares ayaml with libyaml only through what alint reports; running
+    it in compare mode as well is #549.
+  - Next: the remaining audit branches, then phase 6.

@@ -13,6 +13,8 @@ whose path alint hides, and public structs that break downstream code when they 
 the order of v0.22's work. The relation-layer gates of
 [ADR-0025](0025-v021-pre-release-decisions.md) decision 3, as
 [ADR-0026](0026-measuring-the-v022-simplicity-gate.md) measures them, are unchanged.
+[ADR-0032](0032-v023-owner-decisions.md) (2026-11-12) moves the sealing of the other public
+`alint-core` structs, which decision 2 left as a pre-v1.0 roadmap item, into v0.23.
 
 ## Context
 

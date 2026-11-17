@@ -11,6 +11,12 @@ decision-makers: asamarts
 Accepted (2026-11-14). Amends [ADR-0031](0031-v0221-owner-decisions.md) decision 1 and
 [ADR-0032](0032-v023-owner-decisions.md) decision 2 on when the ayaml cutover merges. The criteria
 of [`v0.22.1/README.md`](../design/v0.22.1/README.md) section 2.2 (Y-C1 to Y-C7) are unchanged.
+[ADR-0039](0039-the-yaml-oracle-as-a-dev-dependency-of-alint-core.md) (2026-11-15) amended
+decision 2 on where `yaml_serde` may be a dependency, and
+[ADR-0041](0041-a-yaml-parser-facade-with-test-only-reference-parsers.md) (2026-11-15), which
+supersedes it, amends that again.
+[ADR-0040](0040-the-v023-advisory-and-the-allowlist-approval.md) (2026-11-15) records the owner's
+approval under decision 2, on condition of an ayaml release that fixes its defects.
 
 ## Context
 

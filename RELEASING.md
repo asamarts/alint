@@ -225,11 +225,26 @@ checklist so the release-gated pieces land and nothing drifts:
    follow-up also refreshes alint.org's published snippets without waiting for
    another release.
 
-5. **Reconcile the trackers.** Bump `alint.org`'s pins (the five version-pin
+5. **Publish the release's security advisories.** For each draft advisory the
+   release fixes (for v0.23.0, GHSA-78jj-xfpm-g6px, ADR-0040 and ADR-0043),
+   once the release is out: check that the advisory's description matches the
+   CHANGELOG's Security section, and set its patched versions to the released
+   ones, in the advisory's page or its API. Then publish it:
+
+   ```sh
+   gh api -X PATCH repos/asamarts/alint/security-advisories/GHSA-78jj-xfpm-g6px \
+     -f state=published
+   ```
+
+   In the same follow-up commit as step 4, update SECURITY.md's "Disclosure of
+   past vulnerabilities" list: link the advisory and replace "a draft until" with
+   the release that published it. Name the release as a bare `X.Y.Z`, never
+   `vX.Y.Z`, which the version-pin gate would read as a stale install pin.
+6. **Reconcile the trackers.** Bump `alint.org`'s pins (the five version-pin
    sites its `scripts/check-version-pins.sh` checks, plus prose claims), and
    reconcile `alint.org` `marketing/STATE.md` to the new version and counts so
    it never drifts weeks behind again (P5.2).
-6. **Confirm the gates are green.** `gen-schema` / `gen-facts` / `docs-export`
+7. **Confirm the gates are green.** `gen-schema` / `gen-facts` / `docs-export`
    `--check` and the `docs/adr@v1` dogfood here; the `check-counts.mjs` count
    gate and `check-version-pins.sh` pin gate on the alint.org side.
 
