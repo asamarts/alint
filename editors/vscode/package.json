@@ -88,7 +88,7 @@
   "scripts": {
     "vscode:prepublish": "npm run build",
     "build": "node esbuild.js --production",
-    "audit": "npm audit --audit-level=moderate",
+    "audit": "bash ../../ci/scripts/npm-audit.sh",
     "watch": "node esbuild.js --watch",
     "check-types": "tsc --noEmit",
     "test": "tsc --noEmit",
