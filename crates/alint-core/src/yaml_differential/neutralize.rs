@@ -623,7 +623,9 @@ pub(super) fn tab_in_content(input: &str, places: &[Place], at: usize) -> bool {
 /// line in a flow collection, [`flow_line_tabs`]' construct, but on a line
 /// ayaml exempts (see [`exempt_flow_line`]), and one ayaml rejects (see
 /// [`tabs_ayaml_rejects`]), which it does not read as white space, but in
-/// a last variant, where it does once the others are spaces.
+/// a variant where it does once the others are spaces; and a last one with
+/// only the tabs up to the oracle's error as spaces, where that changes
+/// what ayaml makes of the input (see [`spaced_up_to_the_oracles_error`]).
 pub(super) fn tabs(input: &str) -> Vec<String> {
     if !input.contains('\t') {
         return Vec::new();
@@ -679,12 +681,33 @@ pub(super) fn tabs(input: &str) -> Vec<String> {
         .into_iter()
         .chain(leading_out(input, &white))
         .chain(Some(spaced(input, &freed, 1)))
+        .chain(spaced_up_to_the_oracles_error(input, &white))
     {
         if !rewrites.contains(&rewrite) {
             rewrites.push(rewrite);
         }
     }
     rewrites
+}
+
+/// `input` with the tabs at the byte offsets `white`, which are white space,
+/// as spaces up to the oracle's error and as they are past it, where ayaml's
+/// result then differs from the one with all of them as spaces. The oracle
+/// reads nothing past its error, so a tab there is no cause of it, and a
+/// space for it can change what ayaml reads: a line that a tab and `%`
+/// start, where ayaml's scanner rejects the `%`, is the text of a plain
+/// scalar above it once the tab is a space, and a parser error before it,
+/// which the scanner's error hid, shows.
+fn spaced_up_to_the_oracles_error(input: &str, white: &[usize]) -> Option<String> {
+    let (oracle, _) = super::guarded(|| super::run_oracle(input, super::Entry::Value, 0));
+    let error = super::oracle_error_offset(input, &oracle)?;
+    let read: Vec<usize> = white.iter().copied().filter(|&at| at <= error).collect();
+    if read.is_empty() || read.len() == white.len() {
+        return None;
+    }
+    let ayaml = |input: &str| super::guarded(|| super::run_ayaml(input, super::Entry::Value, 0)).0;
+    let rewrite = spaced(input, &read, 1);
+    (ayaml(&rewrite) != ayaml(&spaced(input, white, 1))).then_some(rewrite)
 }
 
 /// Whether the tab at byte `at` of `input` starts a flow collection's line

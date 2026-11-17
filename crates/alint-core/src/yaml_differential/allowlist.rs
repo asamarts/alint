@@ -1150,10 +1150,12 @@ pub(crate) const LOCATIONS: &[Location] = &[
             "non-printable character",
             "a tag must be followed by whitespace or a line break",
             "a verbatim tag may only hold URI characters",
+            "in block scalar header",
         ],
         places: Some(errors_about_one_character),
         ayaml: "the character YAML does not allow, or, where it ends a tag or stands in a \
-                verbatim tag, its error about the tag",
+                verbatim tag, its error about the tag, and where it follows a block scalar's \
+                indicators, the header's, which names it",
         oracle: "line 1, column 1, with the character's byte offset in its message, since \
                  its reader checks each character before the scanner reads it",
         example: ("a: x\u{1}y\n", Entry::Value),

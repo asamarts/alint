@@ -718,13 +718,16 @@ fn a_tab_ayaml_rejects_only_after_another_goes_with_it() {
         tabs(input).first().map(String::as_str),
         Some("a: >-\n  x\n \n  - >-\n\t\n    y\n")
     );
-    // The variants before the last keep it, as the one with the tabs before
+    // The variants before that one keep it, as the one with the tabs before
     // it as content (`x`), after which ayaml still rejects it (seed 2).
     let input = "- >+\n  line 0\n\t\n  line 1\n # c\n- [a b,\n- |2\n  line 0\n\t\n  \
                  line 1\n\t\n    line 2\n";
     let rewrites = tabs(input);
     assert!(rewrites[0].ends_with("\n\t\n    line 2\n"), "{rewrites:?}");
-    assert!(!rewrites.last().unwrap().contains('\t'), "{rewrites:?}");
+    assert!(
+        rewrites.iter().any(|rewrite| !rewrite.contains('\t')),
+        "{rewrites:?}"
+    );
     // A tab ayaml rejects whatever the others are stays.
     let input = "a: >-\n  x\n\t\nb:\n\t- c\n";
     let rewrites = tabs(input);
@@ -764,13 +767,34 @@ fn block_scalar_headers_under_an_anchor_move_past_the_line_before() {
 /// where the content would then start the line as a marker.
 #[test]
 fn a_variant_leaves_out_a_leading_tab_with_the_white_space_after_it() {
-    assert_eq!(
-        tabs("-\t# c\n- |\n   x\n\t  'q'\n")
-            .last()
-            .map(String::as_str),
-        Some("- # c\n- |\n   x\n'q'\n")
+    let rewrites = tabs("-\t# c\n- |\n   x\n\t  'q'\n");
+    assert!(
+        rewrites.contains(&"- # c\n- |\n   x\n'q'\n".to_string()),
+        "{rewrites:?}"
     );
     assert_eq!(tabs("a\n\t---\n").len(), 3);
+}
+
+/// The oracle reads nothing past its error, and a last variant leaves the
+/// tabs there as they are where a space for them changes what ayaml makes
+/// of the input: one before `%` would make the line the text of the plain
+/// scalar above it, and ayaml's error at the `%` would go (seed 8). Not
+/// where ayaml reads the input alike either way.
+#[test]
+fn a_last_variant_leaves_the_tabs_past_the_oracles_error() {
+    for (input, rewritten) in [
+        ("\tx\n: a\n\t%Y\n", " x\n: a\n\t%Y\n"),
+        ("-\tx\n: a\n\t%Y\n", "- x\n: a\n\t%Y\n"),
+    ] {
+        let rewrites = tabs(input);
+        assert_eq!(rewrites[0], rewritten.replace('\t', " "), "{input:?}");
+        assert_eq!(
+            rewrites.last().map(String::as_str),
+            Some(rewritten),
+            "{input:?}"
+        );
+    }
+    assert_eq!(tabs("\tx\n\ty\n"), [" x\n y\n", "x\ny\n", "xx\nxy\n"]);
 }
 
 /// That variant leaves a tab out with the white space after it up to the
