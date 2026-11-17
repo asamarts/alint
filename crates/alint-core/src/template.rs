@@ -676,14 +676,19 @@ pub(crate) fn render_nested_options(
 }
 
 /// [`render_nested_options`] for a nested spec's `extra`, without the string
-/// keys in `parent_fields`, which the nested spec takes from its parent.
+/// keys in `parent_fields`, which the nested spec takes from its parent. With
+/// no `tokens` (an enclosing iteration rendered the spec) the values are kept
+/// as they are.
 pub(crate) fn render_nested_extra(
     kind: &str,
     extra: &crate::yaml::Mapping,
-    tokens: &PathTokens,
+    tokens: Option<&PathTokens>,
     parent_fields: &[&str],
 ) -> crate::yaml::Mapping {
-    let rendered = render_nested_options(kind, extra.parser().clone(), tokens);
+    let rendered = match tokens {
+        Some(tokens) => render_nested_options(kind, extra.parser().clone(), tokens),
+        None => extra.parser().clone(),
+    };
     crate::yaml::Mapping::from_parser(
         rendered
             .into_iter()

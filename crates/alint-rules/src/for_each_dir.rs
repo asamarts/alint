@@ -225,7 +225,9 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
 /// place new cross-file iteration rules thread their require
 /// list through.
 /// The parent's `require:` may hold a secret when `parent` reports it
-/// sensitive ([`RuleSpec::field_is_sensitive`]).
+/// sensitive ([`RuleSpec::field_is_sensitive`]). When an iteration built
+/// `parent` ([`RuleSpec::rendered`]), it rendered this list too, and the
+/// parent's own iterations instantiate it as it is.
 pub(crate) fn compile_nested_require(
     parent: &RuleSpec,
     require: Vec<NestedRuleSpec>,
@@ -237,6 +239,7 @@ pub(crate) fn compile_nested_require(
         .map(|(idx, spec)| {
             let mut compiled = CompiledNestedSpec::compile(spec, &parent.id, idx)?;
             compiled.sensitive_configuration = sensitive_configuration;
+            compiled.rendered = parent.rendered;
             Ok(compiled)
         })
         .collect()

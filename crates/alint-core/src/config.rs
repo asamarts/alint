@@ -428,6 +428,7 @@ where
 /// YAML-level description of a rule before it is instantiated into a `Box<dyn Rule>`
 /// by a [`RuleBuilder`](crate::registry::RuleBuilder). Code builds one with
 /// [`RuleSpec::new`] and the `with_*` setters; its public fields can be assigned.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Deserialize)]
 #[non_exhaustive]
 pub struct RuleSpec {
@@ -469,6 +470,15 @@ pub struct RuleSpec {
     #[serde(skip)]
     #[doc(hidden)]
     pub extended_source: bool,
+    /// Whether an iteration rendered this spec ([`NestedRuleSpec::instantiate`]):
+    /// every path token in it, including in the `require:` lists of the rules
+    /// nested inside it, holds that iteration's value. Those lists are then
+    /// compiled already rendered ([`CompiledNestedSpec::rendered`]), so a
+    /// token spelled in a value (a directory named `x{stem}`) stays text. Set
+    /// only by instantiation; never deserialized from user input.
+    #[serde(skip)]
+    #[doc(hidden)]
+    pub rendered: bool,
     /// Optional mechanical-fix strategy. Rules whose builders understand
     /// the chosen op attach a [`Fixer`](crate::Fixer) to the built rule;
     /// rules whose kind is incompatible with the op return a config error
@@ -1547,6 +1557,13 @@ pub struct CompiledNestedSpec {
     /// field such a value reached is not recorded, so
     /// [`Self::instantiate`] treats every field of the nested rule as one.
     pub sensitive_configuration: bool,
+    /// Whether the enclosing iteration already rendered this spec's strings:
+    /// it is nested two or more levels deep, and the outermost iteration
+    /// renders every level below it with its own values ([`RuleSpec::rendered`]
+    /// on the parent). [`Self::instantiate`] then leaves them as they are, so
+    /// a value is never rendered twice: a `{stem}` that came from a file name
+    /// is text, not a token.
+    pub rendered: bool,
 }
 
 impl CompiledNestedSpec {
@@ -1574,6 +1591,7 @@ impl CompiledNestedSpec {
             spec,
             when,
             sensitive_configuration: false,
+            rendered: false,
         })
     }
 
@@ -1612,8 +1630,13 @@ impl CompiledNestedSpec {
         } else {
             std::collections::BTreeSet::new()
         };
-        self.spec
-            .instantiate_with(parent_id, idx, level, tokens, sensitive_fields)
+        self.spec.instantiate_with(
+            parent_id,
+            idx,
+            level,
+            (!self.rendered).then_some(tokens),
+            sensitive_fields,
+        )
     }
 }
 
@@ -1698,32 +1721,34 @@ impl NestedRuleSpec {
             parent_id,
             idx,
             level,
-            tokens,
+            Some(tokens),
             std::collections::BTreeSet::new(),
         )
     }
 
-    /// [`Self::instantiate`] with `sensitive_fields` set on the result.
+    /// [`Self::instantiate`] with `sensitive_fields` set on the result. With
+    /// no `tokens` the strings are taken as they are: an enclosing iteration
+    /// rendered them ([`CompiledNestedSpec::rendered`]).
     fn instantiate_with(
         &self,
         parent_id: &str,
         idx: usize,
         level: Level,
-        tokens: &crate::template::PathTokens,
+        tokens: Option<&crate::template::PathTokens>,
         sensitive_fields: std::collections::BTreeSet<String>,
     ) -> RuleSpec {
         RuleSpec {
             id: format!("{parent_id}.require[{idx}]"),
             kind: self.kind.clone(),
             level,
-            paths: self
-                .paths
-                .as_ref()
-                .map(|p| crate::template::render_paths_spec(p, tokens)),
-            message: self
-                .message
-                .as_deref()
-                .map(|m| crate::template::render_path(m, tokens)),
+            paths: self.paths.as_ref().map(|p| match tokens {
+                Some(tokens) => crate::template::render_paths_spec(p, tokens),
+                None => p.clone(),
+            }),
+            message: self.message.as_deref().map(|m| match tokens {
+                Some(tokens) => crate::template::render_path(m, tokens),
+                None => m.to_owned(),
+            }),
             policy_url: self.policy_url.clone(),
             when: self.when.clone(),
             expect_matches: self.expect_matches,
@@ -1731,6 +1756,8 @@ impl NestedRuleSpec {
             sensitive_fields,
             // A nested rule has no fix of its own.
             extended_source: false,
+            // This iteration renders the `require:` lists inside the spec too.
+            rendered: true,
             fix: None,
             // `git_tracked_only` and `respect_gitignore` are both kind-specific
             // options now (ADR-0008), stripped from the nested `extra` via

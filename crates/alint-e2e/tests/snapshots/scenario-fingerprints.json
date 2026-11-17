@@ -588,6 +588,12 @@
     "fingerprint": "22848d1fe6207492f3f85640b54346f31a9449300ad81143b54df74407ad849d"
   },
   {
+    "scenario": "check/cross_file/for_each_nested_twice_message_token_spelled_in_a_name.yml",
+    "rule_id": "package-readme",
+    "path": "packages/x{stem}",
+    "fingerprint": "d7135392af5d9fff8d2ae42173aa5dd378ab57eceb7eae9043d9d4db8784c14d"
+  },
+  {
     "scenario": "check/cross_file/key_parity_android_fires.yml",
     "rule_id": "android-strings-match",
     "path": "values-fr/strings.xml",
@@ -694,6 +700,12 @@
     "rule_id": "package-locale-parity",
     "path": "packages/ui/fr.json",
     "fingerprint": "764fe1cdb927354c7d550271166d91128ee13aeb37c68c5de501b47a449049a6"
+  },
+  {
+    "scenario": "check/cross_file/key_parity_nested_twice_token_spelled_in_a_name.yml",
+    "rule_id": "package-locale-parity",
+    "path": "packages/x{stem}/fr.json",
+    "fingerprint": "510fb9993dddb8e07cf0f899fd6d88b7b0451764227a4906830f365544e016a2"
   },
   {
     "scenario": "check/cross_file/key_parity_properties_dotted_fires.yml",

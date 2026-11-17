@@ -1,0 +1,38 @@
+test_version: 1
+name: key_parity nested two levels deep reads a directory whose name spells a path token
+tags: [check, key_parity, for_each_file, for_each_dir, cross_file, nested]
+
+# The outer rule renders `{path}` in the inner `key_parity` as
+# `packages/x{stem}/en.json`. The `for_each_dir` between them must not render
+# that value again: the `{stem}` in it is part of the directory's name, not a
+# token, so the reference stays `packages/x{stem}/en.json` (it became
+# `packages/xx{stem}/en.json`, a missing reference, before the fix).
+
+given:
+  tree:
+    packages:
+      "x{stem}":
+        en.json: '{"a": 1, "b": 2}'
+        fr.json: '{"a": 1}'
+  config: |
+    version: 1
+    rules:
+      - id: package-locale-parity
+        kind: for_each_file
+        select: "packages/*/en.json"
+        level: error
+        require:
+          - kind: for_each_dir
+            select: "{dir}"
+            require:
+              - kind: key_parity
+                reference: "{path}"
+                peers: "{dir}/fr.{ext}"
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - {rule: package-locale-parity, level: error, path: "packages/x{stem}/fr.json", message: {regex: "missing key `b`"}}
+    analysis_failures: []

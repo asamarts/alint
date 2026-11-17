@@ -855,6 +855,7 @@ mod tests {
             sensitive: false,
             sensitive_fields: std::collections::BTreeSet::new(),
             extended_source: false,
+            rendered: false,
             fix: None,
             scope_filter: None,
             extra: crate::yaml::Mapping::new(),
