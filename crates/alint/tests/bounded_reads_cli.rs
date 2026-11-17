@@ -9,7 +9,9 @@
 //! until the run died, and one to a FIFO blocked it. The baseline file was read
 //! the same way, wherever a config's `baseline:` key led.
 //!
-//! Each run here has a memory limit and a deadline.
+//! Each run here has a deadline and, on Linux, a memory limit: macOS refuses
+//! to set one (`ulimit -v` fails with "Invalid argument"), so there a run has
+//! only its deadline.
 
 #![cfg(unix)]
 
@@ -59,15 +61,18 @@ fn check(root: &Path, home: &Path, gitconfig: &Path) -> Option<(Option<i32>, Str
     run(root, &["check", "--format", "json"], home, gitconfig)
 }
 
-/// `alint ARGS` in `root` under the memory limit, with git's global config at
-/// `gitconfig` and the excludes files `ignore` falls back to in an empty
-/// `home`: its exit code and stderr, or `None` past the deadline.
+/// `alint ARGS` in `root` under the memory limit (on Linux), with git's
+/// global config at `gitconfig` and the excludes files `ignore` falls back to
+/// in an empty `home`: its exit code and stderr, or `None` past the deadline.
 fn run(root: &Path, args: &[&str], home: &Path, gitconfig: &Path) -> Option<(Option<i32>, String)> {
+    let limit = if cfg!(target_os = "linux") {
+        format!("ulimit -v {MEMORY_LIMIT_KIB} && ")
+    } else {
+        String::new()
+    };
     let mut child = Command::new("sh")
         .arg("-c")
-        .arg(format!(
-            "ulimit -v {MEMORY_LIMIT_KIB} && exec \"$0\" \"$@\""
-        ))
+        .arg(format!("{limit}exec \"$0\" \"$@\""))
         .arg(alint())
         .args(args)
         .current_dir(root)
