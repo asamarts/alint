@@ -10,7 +10,17 @@ fn load_error(text: &str) -> String {
     let config = tmp.path().join(".alint.yml");
     std::fs::write(&config, text).unwrap();
     let error = load(&config).unwrap_err().to_string();
-    error.replace(&config.display().to_string(), "<config>")
+    // A configuration the loader reads through `extends:` handling is named by
+    // its canonical path (`/private/var/...` on macOS, the long form of a
+    // Windows short name, without `\\?\`), others as given: replace both.
+    let canonical = std::fs::canonicalize(&config)
+        .unwrap()
+        .display()
+        .to_string();
+    let canonical = canonical.strip_prefix(r"\\?\").unwrap_or(&canonical);
+    error
+        .replace(canonical, "<config>")
+        .replace(&config.display().to_string(), "<config>")
 }
 
 /// The error from building the only rule of `text`, which loads.
