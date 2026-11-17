@@ -236,6 +236,10 @@ A literal in `in` or `not_in` is a string or, for a field that may hold one, a b
 numbers are refused: null is in no set, and a number compares by the text it is written with
 (`1.10` is not `1.1`), which the config's YAML does not keep.
 
+Every predicate tests every row, so the order they are written in does not matter. A row that any
+predicate is false for is dropped. A row that none is false for, but that one cannot test (a
+pattern on a number, a list of another type), is an analysis failure.
+
 ```yaml
 version: 2
 selectors:

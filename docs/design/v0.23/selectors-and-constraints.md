@@ -446,7 +446,10 @@ metadata keys, plus these. `assert:` holds exactly one of `equal`, `unique` and 
     predicate of each name per field, which is why literals and references share a list;
   - `matches` and `not_matches`: a regex, on strings only.
 - **Order.** A relation applies `transform:`, then `where:`. The locale policy's prefix filter
-  therefore matches after `strip-root` has removed the locale key.
+  therefore matches after `strip-root` has removed the locale key. Every predicate of `where:`
+  tests every row, so their written order does not matter: a row that any predicate is false for
+  is dropped, and a row that none is false for, but that one cannot test (section 6: a pattern on
+  a non-string, a list of another type), is an analysis failure.
 - **What the policies need.** These predicates suffice at the stratum's pins: jest-23 exempts
   `@types/node`, trpc-05 skips `catalog:`, `npm:` and `workspace:` specifiers, and
   yarnpkg-berry-01 exempts dependencies on workspace packages. yarnpkg-berry-01 exempts only

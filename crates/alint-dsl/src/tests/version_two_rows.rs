@@ -1135,3 +1135,72 @@ fn a_yaml_document_of_only_comments_or_null_reads_as_an_empty_one() {
         ]
     );
 }
+
+/// One relation `r` over the members of `$.a` in `x.json`, filtered.
+fn filtered(fields: &str, filters: &str) -> String {
+    format!(
+        "version: 2\nrelations:\n  r:\n    from: {{ paths: x.json }}\n    entries: {{ format: \
+         json, at: \"$.a\" }}\n    fields: {fields}\n    where: {filters}\n"
+    )
+}
+
+#[test]
+fn where_drops_a_row_any_predicate_is_false_for_whatever_their_order() {
+    let files = &[("x.json", r#"{"a": {"keep": "1.0", "drop": null}}"#)];
+    let fields = "{ k: entry.key, v: entry.value }";
+    // `matches` cannot test `drop`'s null, but `in` drops the row.
+    for filters in [
+        "{ k: { in: [keep] }, v: { matches: \"^1\" } }",
+        "{ v: { matches: \"^1\" }, k: { in: [keep] } }",
+    ] {
+        let tree = setup(&filtered(fields, filters), files);
+        assert_eq!(
+            table(&tree.rows("r")),
+            strings(&[&["keep", "1.0"]]),
+            "{filters}"
+        );
+    }
+    // A row no predicate drops fails on the type error, in either order.
+    for filters in [
+        "{ k: { in: [keep, drop] }, v: { matches: \"^1\" } }",
+        "{ v: { matches: \"^1\" }, k: { in: [keep, drop] } }",
+    ] {
+        let tree = setup(&filtered(fields, filters), files);
+        assert_eq!(
+            tree.failures("r"),
+            [
+                "x.json: relation `r` (.alint.yml): `where.v.matches` tests null at `a.drop`, but \
+                 a pattern tests strings; filter a string field, or transform this one"
+            ],
+            "{filters}"
+        );
+    }
+}
+
+#[test]
+fn a_membership_type_clash_fails_only_on_a_row_no_predicate_drops() {
+    let files = &[("x.json", r#"{"a": {"p": 1, "q": "1"}}"#)];
+    let fields = "{ k: entry.key, v: entry.value }";
+    for filters in [
+        "{ k: { not_in: [p] }, v: { in: ['1'] } }",
+        "{ v: { in: ['1'] }, k: { not_in: [p] } }",
+    ] {
+        let tree = setup(&filtered(fields, filters), files);
+        assert_eq!(table(&tree.rows("r")), strings(&[&["q", "1"]]), "{filters}");
+    }
+    let clash = "x.json: relation `r` (.alint.yml): `where.v.in` compares a number at `a.p` in \
+                 x.json with the literal \"1\"; a value is in a list only beside values of its \
+                 own type, so compare values of one type (transform the field, or change the list)";
+    let tree = setup(&filtered(fields, "{ v: { in: ['1'] } }"), files);
+    assert_eq!(tree.failures("r"), [clash]);
+    // A row two predicates cannot test reports the first field's error,
+    // whichever is written first; `q` matches no `x`, so it is dropped.
+    let fields = "{ k: entry.key, v: entry.value, w: entry.value }";
+    for filters in [
+        "{ w: { matches: x }, v: { in: ['1'] } }",
+        "{ v: { in: ['1'] }, w: { matches: x } }",
+    ] {
+        let tree = setup(&filtered(fields, filters), files);
+        assert_eq!(tree.failures("r"), [clash], "{filters}");
+    }
+}

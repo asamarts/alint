@@ -5,7 +5,8 @@
 //! text (a number by its lexeme, so `1.0` is not `1`); null matches nothing
 //! and is in no set, and so is a missing value; and a membership or join
 //! comparison between two types is an analysis failure naming both sides,
-//! never a silent non-match.
+//! never a silent non-match (in `where:`, unless another predicate drops the
+//! row, which no answer would keep: `Evaluator::refine`).
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -163,6 +164,15 @@ fn render_value(value: &Value) -> String {
 
 impl Evaluator<'_> {
     /// Apply `relation`'s transforms, then its filters, to `rows`.
+    ///
+    /// Every predicate of `where:` tests every row, so the order they are
+    /// written in changes nothing. A row that some predicate is false for is
+    /// dropped, whatever the others say of it: a type error on it (a pattern
+    /// on a number, a list of another type) is no failure, since no answer
+    /// would keep the row. A row that no predicate is false for is kept, or,
+    /// when a predicate cannot test it, fails the relation with that type
+    /// error, the first in the order of the relation's fields and then of
+    /// `in`, `not_in`, `matches`, `not_matches`.
     pub(super) fn refine(
         &self,
         site: &Site,
@@ -183,110 +193,107 @@ impl Evaluator<'_> {
         if !failures.is_empty() {
             return None;
         }
-        for (field, predicates) in &relation.filters {
-            let position = rows.field(field)?;
-            let sensitive = rows.fields[position].sensitive;
-            for predicate in predicates {
-                let keep =
-                    self.filter(site, &rows, position, field, sensitive, predicate, failures);
-                if !failures.is_empty() {
-                    return None;
+        let tests = self.tests(site, &rows, &relation.filters, failures)?;
+        if !failures.is_empty() {
+            return None;
+        }
+        if tests.is_empty() {
+            return Some(rows);
+        }
+        let mut kept = Vec::with_capacity(rows.rows.len());
+        // The resources a type error was reported for: one failure each.
+        let mut reported = HashSet::new();
+        for row in std::mem::take(&mut rows.rows) {
+            let mut error = None;
+            let mut dropped = false;
+            for test in &tests {
+                match test.verdict(&row.cells[test.position]) {
+                    Verdict::Pass => {}
+                    Verdict::Fail => {
+                        dropped = true;
+                        break;
+                    }
+                    Verdict::TypeError => {
+                        error.get_or_insert(test);
+                    }
                 }
-                let mut keep = keep.into_iter();
-                rows.rows.retain(|_| keep.next().unwrap_or(false));
+            }
+            match error {
+                _ if dropped => {}
+                None => kept.push(row),
+                Some(test) => {
+                    let cell = &row.cells[test.position];
+                    if !reported.contains(cell.at.resource.path()) {
+                        reported.insert(cell.at.resource.path().clone());
+                        failures.push(test.type_error(site, cell));
+                    }
+                }
             }
         }
+        if !failures.is_empty() {
+            return None;
+        }
+        rows.rows = kept;
         Some(rows)
     }
 
-    /// Whether each row passes `predicate` on the field at `position`.
-    #[allow(clippy::too_many_arguments)]
-    fn filter(
+    /// Each `where:` predicate, ready to test a row, in the order
+    /// [`refine`](Self::refine) reports type errors in: a pattern that does
+    /// not compile, or a list whose relation failed or holds too many
+    /// values, fails the relation whatever its rows.
+    fn tests<'r>(
         &self,
         site: &Site,
         rows: &RelationRows,
-        position: usize,
-        field: &str,
-        sensitive: bool,
-        predicate: &Predicate,
+        filters: &'r [(String, Vec<Predicate>)],
         failures: &mut Failures,
-    ) -> Vec<bool> {
-        let cells = rows.rows.iter().map(|row| &row.cells[position]);
-        match predicate {
-            Predicate::Matches(pattern) | Predicate::NotMatches(pattern) => {
-                let (name, wanted) = match predicate {
-                    Predicate::Matches(_) => ("matches", true),
-                    _ => ("not_matches", false),
+    ) -> Option<Vec<Test<'r>>> {
+        let mut tests = Vec::new();
+        for (field, predicates) in filters {
+            let position = rows.field(field)?;
+            let sensitive = rows.fields[position].sensitive;
+            for predicate in predicates {
+                let (name, wanted, rank) = match predicate {
+                    Predicate::In(_) => ("in", true, 0),
+                    Predicate::NotIn(_) => ("not_in", false, 1),
+                    Predicate::Matches(_) => ("matches", true, 2),
+                    Predicate::NotMatches(_) => ("not_matches", false, 3),
                 };
-                let regex = match regex::Regex::new(pattern) {
-                    Ok(regex) => regex,
-                    Err(error) => {
-                        failures.push(site.failure(
-                            AnalysisFailureKind::Evaluation,
-                            None,
-                            format!("`where.{field}.{name}` does not compile: {error}"),
-                        ));
-                        return Vec::new();
+                let check = match predicate {
+                    Predicate::Matches(pattern) | Predicate::NotMatches(pattern) => {
+                        match regex::Regex::new(pattern) {
+                            Ok(regex) => Check::Pattern(regex),
+                            Err(error) => {
+                                failures.push(site.failure(
+                                    AnalysisFailureKind::Evaluation,
+                                    None,
+                                    format!("`where.{field}.{name}` does not compile: {error}"),
+                                ));
+                                continue;
+                            }
+                        }
+                    }
+                    Predicate::In(members) | Predicate::NotIn(members) => {
+                        match self.member_set(site, field, name, members, failures) {
+                            Some(set) => Check::Member(set),
+                            None => continue,
+                        }
                     }
                 };
-                cells
-                    .map(|cell| match &cell.value {
-                        // A missing value matches no pattern.
-                        None => !wanted,
-                        Some(Value::String(text)) => regex.is_match(text) == wanted,
-                        Some(other) => {
-                            failures.push(site.failure(
-                                AnalysisFailureKind::Evaluation,
-                                Some(resource_of(cell)),
-                                format!(
-                                    "`where.{field}.{name}` tests {}{}, but a pattern tests \
-                                     strings; filter a string field, or transform this one",
-                                    type_name(other),
-                                    at(cell, site.keys_sensitive)
-                                ),
-                            ));
-                            false
-                        }
-                    })
-                    .collect()
-            }
-            Predicate::In(members) | Predicate::NotIn(members) => {
-                let (name, wanted) = match predicate {
-                    Predicate::In(_) => ("in", true),
-                    _ => ("not_in", false),
-                };
-                let Some(set) = self.member_set(site, field, name, members, failures) else {
-                    return Vec::new();
-                };
-                let mut probes = Kinds::default();
-                for cell in rows.rows.iter().map(|row| &row.cells[position]) {
-                    probes.add(cell);
-                }
-                if let Some((probe, member)) = probes.clash(&set.kinds) {
-                    let Witness::Row(cell) = probe else {
-                        unreachable!("a probe is a row")
-                    };
-                    failures.push(site.failure(
-                        AnalysisFailureKind::Evaluation,
-                        Some(resource_of(cell)),
-                        format!(
-                            "`where.{field}.{name}` compares {} with {}; a value is in a list \
-                             only beside values of its own type, so compare values of one type \
-                             (transform the field, or change the list)",
-                            probe.describe(sensitive, site.keys_sensitive),
-                            member.describe(sensitive, site.keys_sensitive),
-                        ),
-                    ));
-                    return Vec::new();
-                }
-                cells
-                    .map(|cell| {
-                        let held = comparable(cell).is_some_and(|value| set.values.contains(value));
-                        held == wanted
-                    })
-                    .collect()
+                tests.push(Test {
+                    field,
+                    position,
+                    sensitive,
+                    hide_keys: site.keys_sensitive,
+                    name,
+                    wanted,
+                    rank,
+                    check,
+                });
             }
         }
+        tests.sort_by_key(|test| (test.position, test.rank));
+        Some(tests)
     }
 
     /// The set an `in` or `not_in` list stands for: its literals, and every
@@ -623,6 +630,110 @@ fn join_fields(
 struct MemberSet {
     values: HashSet<Value>,
     kinds: Kinds,
+}
+
+impl MemberSet {
+    /// The first member whose type is not `kind`: a value of `kind` compared
+    /// with the list would meet it.
+    fn other_than(&self, kind: Kind) -> Option<&Witness> {
+        self.kinds
+            .0
+            .iter()
+            .find(|(held, _)| **held != kind)
+            .map(|(_, witness)| witness)
+    }
+}
+
+/// One `where:` predicate on one field, ready to test rows.
+struct Test<'r> {
+    field: &'r str,
+    position: usize,
+    /// The field is sensitive: a message shows no literal of its list.
+    sensitive: bool,
+    /// Key paths are hidden ([`Site`]).
+    hide_keys: bool,
+    /// `in`, `not_in`, `matches` or `not_matches`.
+    name: &'static str,
+    /// Whether a row passes when the value is in the list or matches.
+    wanted: bool,
+    /// Its place among one field's predicates, for the order of type errors.
+    rank: u8,
+    check: Check,
+}
+
+enum Check {
+    Pattern(regex::Regex),
+    Member(MemberSet),
+}
+
+/// What one predicate says of one row.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Verdict {
+    Pass,
+    Fail,
+    /// The predicate cannot test the row's value: a pattern on a value that
+    /// is not a string, or a list holding another type.
+    TypeError,
+}
+
+impl Verdict {
+    fn of(passes: bool) -> Self {
+        if passes { Self::Pass } else { Self::Fail }
+    }
+}
+
+impl Test<'_> {
+    fn verdict(&self, cell: &Cell) -> Verdict {
+        match &self.check {
+            Check::Pattern(regex) => match &cell.value {
+                // A missing value matches no pattern.
+                None => Verdict::of(!self.wanted),
+                Some(Value::String(text)) => Verdict::of(regex.is_match(text) == self.wanted),
+                Some(_) => Verdict::TypeError,
+            },
+            // Null and a missing value are in no list.
+            Check::Member(set) => match comparable(cell) {
+                None => Verdict::of(!self.wanted),
+                Some(value) if set.other_than(kind(value)).is_some() => Verdict::TypeError,
+                Some(value) => Verdict::of(set.values.contains(value) == self.wanted),
+            },
+        }
+    }
+
+    /// The analysis failure for a row this predicate cannot test.
+    fn type_error(&self, site: &Site, cell: &Cell) -> super::RelationFailure {
+        let (field, name) = (self.field, self.name);
+        let detail = match &self.check {
+            Check::Pattern(_) => format!(
+                "`where.{field}.{name}` tests {}{}, but a pattern tests strings; filter a string \
+                 field, or transform this one",
+                type_name(
+                    cell.value
+                        .as_ref()
+                        .expect("a missing value matches no pattern")
+                ),
+                at(cell, self.hide_keys)
+            ),
+            Check::Member(set) => {
+                let probe = Witness::Row(cell.clone());
+                let member = set
+                    .other_than(kind(probe.value()))
+                    .expect("a type error has a member of another type");
+                format!(
+                    "`where.{field}.{name}` compares {} with {}; a value is in a list only beside \
+                     values of its own type, so compare values of one type (transform the field, \
+                     or change the list)",
+                    probe.describe(self.sensitive, self.hide_keys),
+                    member.describe(self.sensitive, self.hide_keys),
+                )
+            }
+        };
+        site.failure(
+            AnalysisFailureKind::Evaluation,
+            Some(resource_of(cell)),
+            detail,
+        )
+    }
 }
 
 fn resource_of(cell: &Cell) -> Arc<std::path::Path> {
