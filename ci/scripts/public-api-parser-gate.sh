@@ -107,14 +107,19 @@ CANARY_FEATURE=public-api-gate-canary
 # them; a kind listed that nothing hides fails.
 PLATFORM_ALLOWLIST=(
   # Statements in a function's body that call the platform's file-system or
-  # process API (file modes, symlinks, process groups, a path's bytes) or keep
-  # Windows' system variables: they declare no impl or other item, and name no
-  # parser type. Some import the platform's extension trait for the call
-  # (`use`), or format an argument or an error message (`format!`).
+  # process API (file modes, symlinks, process groups, a path's bytes, a file's
+  # device or owner, Windows' verbatim path prefix) or keep Windows' system
+  # variables: they declare no impl or other item, and name no parser type.
+  # Some import the platform's extension trait for the call (`use`), or format
+  # an argument or an error message (`format!`).
   "crates/alint-core/src/engine/fix.rs|cfg(not(unix))|in fn stage_fixes"
   "crates/alint-core/src/engine/fix.rs|cfg(unix)|in fn stage_fixes|use"
   "crates/alint-core/src/git.rs|cfg(not(unix))|in fn path_from_git_chunk"
   "crates/alint-core/src/git.rs|cfg(unix)|in fn path_from_git_chunk|use"
+  "crates/alint-core/src/git_repository.rs|cfg(not(unix))|in fn owned_by_current_user"
+  "crates/alint-core/src/git_repository.rs|cfg(unix)|in fn find_repository|use"
+  "crates/alint-core/src/git_repository.rs|cfg(unix)|in fn owned_by_current_user|use"
+  "crates/alint-core/src/git_repository.rs|cfg(windows)|in fn canonical|format!"
   "crates/alint-core/src/process.rs|cfg(not(unix))|in fn kill_group"
   "crates/alint-core/src/process.rs|cfg(unix)|in fn kill_group|format!"
   "crates/alint-core/src/process.rs|cfg(unix)|in fn run_bounded_in|use"
