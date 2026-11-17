@@ -142,11 +142,16 @@ impl PathTokens {
     /// as `_stem_`). No token renders empty or like another, each value is as
     /// wide as the token it stands for, and the value is ASCII word characters,
     /// so a regex, glob or `JSONPath` that is valid for an ordinary name is valid
-    /// for it too. Inside a [`Preparation`], [`has_placeholder`] tells these
-    /// values from text the configuration wrote, and [`unrender_placeholders`]
-    /// turns them back into tokens for an error message. A check that depends
-    /// on the value a token will take, such as a format inferred from an
+    /// for it too. Inside a [`Preparation`], [`templates_rendering`] finds the
+    /// templates a value was rendered from, so a builder can tell a token from
+    /// text the configuration wrote, and [`unrender_placeholders`] turns the
+    /// values back into tokens for an error message. A check that depends on
+    /// the value a token will take, such as a format inferred from an
     /// extension, belongs to each iteration's own build.
+    ///
+    /// For alint's own crates, which prepare nested rules with it; hidden from
+    /// the documentation like [`Preparation`], outside which it means nothing.
+    #[doc(hidden)]
     #[must_use]
     pub fn placeholder() -> Self {
         let token = |name: &str| format!("_{name}_");
@@ -161,35 +166,54 @@ impl PathTokens {
     }
 }
 
-/// The path tokens' names, as a template spells them between braces. Longest
-/// first, so a scan tries `parent_name` before any shorter name.
-const TOKEN_NAMES: [&str; 6] = ["parent_name", "basename", "path", "stem", "dir", "ext"];
-
 std::thread_local! {
-    static PREPARATIONS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    /// The templates of each [`Preparation`] open on this thread, outermost
+    /// first. Only the outermost one's are kept: see [`Preparation`].
+    static PREPARATIONS: std::cell::RefCell<Vec<Vec<String>>> =
+        const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// A nested rule's preparation build on this thread, open until the guard
-/// drops. While one is open, [`has_placeholder`] recognises the values
-/// [`PathTokens::placeholder`] renders. Outside one, every rendered value
-/// comes from a real path (an iteration's build) or from the configuration
-/// (a top-level rule), so nothing is taken for a placeholder, even a file
-/// named `_stem_`.
+/// drops. While one is open, [`templates_rendering`] finds the templates a
+/// value was rendered from with [`PathTokens::placeholder`], so a builder
+/// tells a token from text the configuration wrote, even text spelled like a
+/// placeholder (`data/_stem_`). Outside one, every rendered value comes from a
+/// real path (an iteration's build) or from the configuration (a top-level
+/// rule), so no part of it is taken for a token.
 ///
-/// A thread-local rather than a field on the spec: the build runs on the
-/// thread that opens the scope, and `RuleSpec` gains no field before v0.23
-/// seals it.
+/// Only the outermost open preparation's templates count. They are those of a
+/// nested rule that a top-level rule declares, as the configuration wrote
+/// them, and they hold every string of the rules nested inside it. A deeper
+/// rule's own templates are renderings of those (its parent was built from
+/// the placeholders), which cannot tell a token from its spelling, so a
+/// caller keeps its guard open while it prepares the rules nested inside.
+///
+/// For alint's own crates, which prepare nested rules with it. A thread-local
+/// rather than a field or an argument: the build runs on the thread that
+/// opens the scope, and a field on the sealed `RuleSpec` (or a parameter of
+/// the registry's build functions) would add public API for state that only
+/// alint's own builders read while one nested rule is prepared.
 #[doc(hidden)]
 #[derive(Debug)]
 #[must_use = "the preparation ends when the guard drops"]
 pub struct Preparation {
-    /// Keeps the guard on the thread whose counter it raised.
+    /// Keeps the guard on the thread whose stack it pushed.
     _not_send: std::marker::PhantomData<*const ()>,
 }
 
 impl Preparation {
-    pub fn enter() -> Self {
-        PREPARATIONS.with(|open| open.set(open.get() + 1));
+    /// Open a preparation of a nested rule whose spec renders `templates`
+    /// ([`NestedRuleSpec::templates`](crate::NestedRuleSpec::templates)).
+    pub fn enter<'t>(templates: impl IntoIterator<Item = &'t str>) -> Self {
+        PREPARATIONS.with(|open| {
+            let mut open = open.borrow_mut();
+            let kept = if open.is_empty() {
+                templates.into_iter().map(str::to_owned).collect()
+            } else {
+                Vec::new()
+            };
+            open.push(kept);
+        });
         Self {
             _not_send: std::marker::PhantomData,
         }
@@ -198,57 +222,38 @@ impl Preparation {
 
 impl Drop for Preparation {
     fn drop(&mut self) {
-        PREPARATIONS.with(|open| open.set(open.get() - 1));
+        PREPARATIONS.with(|open| {
+            open.borrow_mut().pop();
+        });
     }
 }
 
-fn preparing() -> bool {
-    PREPARATIONS.with(|open| open.get() > 0)
-}
-
-/// The name of the token whose placeholder value starts `text`.
-fn placeholder_name(text: &str) -> Option<&'static str> {
-    let rest = text.strip_prefix('_')?;
-    TOKEN_NAMES.into_iter().find(|name| {
-        rest.strip_prefix(name)
-            .is_some_and(|after| after.starts_with('_'))
-    })
-}
-
-/// The byte offset of the first value [`PathTokens::placeholder`] rendered in
-/// `rendered`, inside a [`Preparation`]. Always `None` outside one.
+/// Inside a [`Preparation`], the templates of the outermost open one that
+/// render as `rendered` with [`PathTokens::placeholder`], each once. A glob
+/// option renders the same way, since no placeholder needs escaping. Empty
+/// outside one, where no value has a token, and for a value no template
+/// renders. Several templates are found only when the configuration spells a
+/// placeholder in one string and writes the token in another, as
+/// `data/_stem_` and `data/{stem}`, so a caller deciding on them decides what
+/// holds for each.
+///
+/// For alint's own crates; hidden like [`Preparation`].
+#[doc(hidden)]
 #[must_use]
-pub fn first_placeholder(rendered: &str) -> Option<usize> {
-    if !preparing() {
-        return None;
-    }
-    rendered
-        .match_indices('_')
-        .map(|(at, _)| at)
-        .find(|&at| placeholder_name(&rendered[at..]).is_some())
-}
-
-/// Whether `rendered` holds a value that [`PathTokens::placeholder`] rendered,
-/// inside a [`Preparation`]: part of it comes from a path token whose value is
-/// known only per iteration. Always `false` outside one.
-#[must_use]
-pub fn has_placeholder(rendered: &str) -> bool {
-    first_placeholder(rendered).is_some()
-}
-
-/// Whether two rendered paths name the same path in every iteration: they are
-/// equal, or, inside a [`Preparation`], equal once a `{path}` placeholder is
-/// spelled `{dir}/{basename}`.
-#[must_use]
-pub fn same_iteration_path(a: &str, b: &str) -> bool {
-    if a == b {
-        return true;
-    }
-    if !preparing() {
-        return false;
-    }
-    let spelled_out = |text: &str| text.replace("_path_", "_dir_/_basename_");
-    spelled_out(a) == spelled_out(b)
+pub fn templates_rendering(rendered: &str) -> Vec<String> {
+    let tokens = PathTokens::placeholder();
+    let mut found: Vec<String> = PREPARATIONS.with(|open| {
+        open.borrow().first().map_or_else(Vec::new, |templates| {
+            templates
+                .iter()
+                .filter(|template| render_path(template, &tokens) == rendered)
+                .cloned()
+                .collect()
+        })
+    });
+    found.sort_unstable();
+    found.dedup();
+    found
 }
 
 /// `text`, an error message from a preparation build, with each value that
@@ -260,6 +265,9 @@ pub fn same_iteration_path(a: &str, b: &str) -> bool {
 /// `json_path_equals`, a rule id such as `pkg_dir_layout`, or a literal name.
 /// A value and its template are equally wide, so a column a message points at
 /// still lines up.
+///
+/// For alint's own crates; hidden like [`Preparation`].
+#[doc(hidden)]
 #[must_use]
 pub fn unrender_placeholders<'t>(
     text: &str,
@@ -808,14 +816,17 @@ where
 mod tests {
     use super::*;
 
+    /// The path tokens' names, as a template spells them between braces.
+    const TOKEN_NAMES: [&str; 6] = ["parent_name", "basename", "path", "stem", "dir", "ext"];
+
     /// The preparation build's tokens: none renders empty or like another, each
-    /// is as wide as its token, and each is recognisable after rendering, alone
-    /// or inside a path, only inside a preparation (#504).
+    /// is as wide as its token, and inside a preparation each value, alone or
+    /// inside a path, leads back to the template that rendered it (#504).
     #[test]
-    fn placeholder_tokens_are_distinct_non_empty_and_recognisable() {
+    fn placeholder_tokens_are_distinct_non_empty_and_traceable() {
         let tokens = PathTokens::placeholder();
         // Exhaustive, so a new token field fails to compile here until
-        // `TOKEN_NAMES` (which the recognition reads) lists it.
+        // `TOKEN_NAMES` lists it.
         let PathTokens {
             path,
             dir,
@@ -833,23 +844,24 @@ mod tests {
         rendered.sort();
         assert_eq!(fields.to_vec(), rendered, "every field is a known token");
 
-        let _preparing = Preparation::enter();
         for name in TOKEN_NAMES {
             let template = format!("{{{name}}}");
+            let in_path = format!("a/{template}.json");
+            let glob = format!("{template}/*.json");
+            let _preparing = Preparation::enter([template.as_str(), &in_path, &glob]);
             let value = render_path(&template, &tokens);
             assert_eq!(value, format!("_{name}_"));
             assert_eq!(value.len(), template.len(), "{name}");
             assert_ne!(TokenSet::of(&template), TokenSet::NONE, "{name}");
-            assert!(has_placeholder(&value), "{name}");
+            assert_eq!(templates_rendering(&value), std::slice::from_ref(&template));
             assert_eq!(unrender_placeholders(&value, [template.as_str()]), template);
             assert_eq!(
-                first_placeholder(&render_path(&format!("a/{template}.json"), &tokens)),
-                Some(2),
-                "{name}"
+                templates_rendering(&render_path(&in_path, &tokens)),
+                std::slice::from_ref(&in_path)
             );
-            assert!(
-                has_placeholder(&render_path_glob(&format!("{template}/*.json"), &tokens)),
-                "{name}"
+            assert_eq!(
+                templates_rendering(&render_path_glob(&glob, &tokens)),
+                std::slice::from_ref(&glob)
             );
         }
         let mut unique = rendered.clone();
@@ -857,37 +869,46 @@ mod tests {
         assert_eq!(unique.len(), TOKEN_NAMES.len(), "{rendered:?}");
         // A lone `{dir}` keeps its value rather than collapsing as an empty one does.
         assert_eq!(render_path("{dir}/en.json", &tokens), "_dir_/en.json");
-        for plain in [
-            "", "en.json", "{path}", "_", "_other_", "a_dir", "_dir", "dir_",
-        ] {
-            assert!(!has_placeholder(plain), "{plain:?}");
-        }
     }
 
-    /// Outside a preparation, text that looks like a placeholder is a real
-    /// name: a file called `_stem_.json`, or a top-level rule that wrote it.
+    /// A value leads back to the templates of the outermost open preparation
+    /// that render it, and to nothing outside one: a file called `_stem_.json`,
+    /// or a top-level rule that wrote that name, has no template.
     #[test]
-    fn placeholders_are_recognised_only_while_preparing() {
-        assert!(!has_placeholder("_stem_.json"));
-        assert!(!same_iteration_path("_path_", "_dir_/_basename_"));
+    fn templates_are_found_only_while_preparing() {
+        const NONE: [&str; 0] = [];
+        assert_eq!(templates_rendering("_stem_.json"), NONE);
         {
-            let _outer = Preparation::enter();
+            let _outer = Preparation::enter(["{stem}.json", "_dir_/x", "{dir}/x", "plain"]);
+            assert_eq!(templates_rendering("_stem_.json"), ["{stem}.json"]);
+            // Text spelled like a placeholder is found as written, beside
+            // a template with the token that renders the same.
+            assert_eq!(templates_rendering("_dir_/x"), ["_dir_/x", "{dir}/x"]);
+            assert_eq!(templates_rendering("plain"), ["plain"]);
+            assert_eq!(templates_rendering("_stem_"), NONE, "no such template");
             {
-                let _inner = Preparation::enter();
-                assert!(has_placeholder("_stem_.json"));
+                // An inner rule's templates are the outer's renderings: only
+                // the outermost preparation's count.
+                let _inner = Preparation::enter(["_stem_.json", "{basename}"]);
+                assert_eq!(templates_rendering("_stem_.json"), ["{stem}.json"]);
+                assert_eq!(templates_rendering("_basename_"), NONE);
             }
-            assert!(
-                has_placeholder("_stem_.json"),
+            assert_eq!(
+                templates_rendering("_stem_.json"),
+                ["{stem}.json"],
                 "the outer one is still open"
             );
-            assert!(same_iteration_path("_path_", "_dir_/_basename_"));
-            assert!(same_iteration_path("_path_.bak", "_dir_/_basename_.bak"));
-            assert!(!same_iteration_path("_path_", "_dir_/_stem_"));
-            std::thread::spawn(|| assert!(!has_placeholder("_stem_")))
+            std::thread::spawn(|| assert_eq!(templates_rendering("_stem_.json"), NONE))
                 .join()
                 .unwrap();
         }
-        assert!(!has_placeholder("_stem_.json"), "closed on drop");
+        assert_eq!(templates_rendering("_stem_.json"), NONE, "closed on drop");
+        let _next = Preparation::enter(["{ext}"]);
+        assert_eq!(
+            templates_rendering("_ext_"),
+            ["{ext}"],
+            "a new outermost one"
+        );
     }
 
     /// Error messages show the template the configuration wrote, and only

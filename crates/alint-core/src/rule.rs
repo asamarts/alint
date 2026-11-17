@@ -1085,10 +1085,11 @@ pub trait Rule: Send + Sync + std::fmt::Debug {
 
     /// Whether this rule reads resources through the relation layer.
     ///
-    /// The engine enables the run-scoped read/decode cache only when an active
-    /// rule opts in, so a configuration without relation rules keeps the
-    /// direct per-file read path unchanged. A nested `require:` rule counts
-    /// too. `key_parity`, `cross_file` (for every relation but `identical`)
+    /// The engine enables the run-scoped read/decode cache only when a
+    /// top-level rule that is not off opts in, so a configuration without
+    /// relation rules keeps the direct per-file read path unchanged. A nested
+    /// `require:` rule does not count: each iteration reads through caches of
+    /// its own. `key_parity`, `cross_file` (for every relation but `identical`)
     /// and the R2 test-only relation consumer override this.
     fn uses_relations(&self) -> bool {
         false

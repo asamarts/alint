@@ -1,0 +1,33 @@
+test_version: 1
+name: a nested key_parity whose literal peer names its templated reference fails each iteration
+tags: [check, key_parity, for_each_file, cross_file, nested]
+
+# `peers: "{dir}/en.json"` and `reference: "{path}"` name the same file. The
+# load-time check cannot tell (`{path}` need not end in `en.json`), so each
+# iteration's build reports it. `{path}` renders with the OS separator
+# (`web\en.json` on Windows); key_parity reads it as the index spells it, so
+# the two paths are equal on every OS.
+
+given:
+  tree:
+    web:
+      en.json: '{"a": 1}'
+  config: |
+    version: 1
+    rules:
+      - id: locale-parity
+        kind: for_each_file
+        select: "*/en.json"
+        level: error
+        require:
+          - kind: key_parity
+            reference: "{path}"
+            peers: "{dir}/en.json"
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations: []
+    analysis_failures:
+      - {rule: locale-parity, kind: nested_rule_build, path: web/en.json, message: {regex: '`peers` must select at least one file other than the reference'}}
