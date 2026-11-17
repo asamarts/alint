@@ -3,6 +3,7 @@
 use toml_edit::{Document, InlineTable, Item, Key, Table, Value};
 
 use crate::ByteSpan;
+use crate::extract::EntryValue;
 use crate::relation::adapter::{Adapter, AdapterError, AdapterOutput, check_row_count};
 use crate::relation::limits::Limits;
 use crate::relation::pointer::{Pointer, Segment};
@@ -38,115 +39,204 @@ impl Adapter for TomlRowsAdapter {
     ) -> Result<AdapterOutput, AdapterError> {
         let text = std::str::from_utf8(bytes)
             .map_err(|_| AdapterError::Parse("the TOML document is not valid UTF-8".to_string()))?;
-        let document = Document::parse(text).map_err(|error: toml_edit::TomlError| {
-            AdapterError::Parse(parse_error(text, &error))
-        })?;
-        let mut rows = Vec::new();
-        let mut parent = Vec::new();
-        collect_table(
-            document.as_table(),
+        let mut walk = Walk {
+            text,
             resource,
-            &mut parent,
-            &mut rows,
             limits,
-        )?;
-        Ok(AdapterOutput::new(rows))
+            rows: Vec::new(),
+            values: None,
+        };
+        walk.document()?;
+        Ok(AdapterOutput::new(walk.rows))
     }
 }
 
-fn collect_table(
-    table: &Table,
-    resource: &Resource,
-    parent: &mut Vec<Segment>,
-    rows: &mut Vec<Row>,
-    limits: &Limits,
-) -> Result<(), AdapterError> {
-    for key_text in table.iter().map(|(key, _)| key) {
-        let (key, item) = table
-            .get_key_value(key_text)
-            .unwrap_or_else(|| unreachable!("table.iter yielded a missing key"));
-        collect_item(key, item, resource, parent, rows, limits)?;
+impl TomlRowsAdapter {
+    /// The value mode (ADR-0034 decision 5): the key rows
+    /// [`extract`](Adapter::extract) emits, each with what its value holds
+    /// beside it (`values[i]` is `rows[i]`'s, with the value's byte range).
+    /// An integer or a float keeps its lexeme as written (`0x1F`, `1_000`,
+    /// `+inf`); a date or time is [`EntryValue::Datetime`].
+    pub(crate) fn values(
+        resource: &Resource,
+        text: &str,
+        limits: &Limits,
+    ) -> Result<(Vec<Row>, Vec<TomlValue>), AdapterError> {
+        let mut walk = Walk {
+            text,
+            resource,
+            limits,
+            rows: Vec::new(),
+            values: Some(Vec::new()),
+        };
+        walk.document()?;
+        Ok((walk.rows, walk.values.unwrap_or_default()))
     }
-    Ok(())
 }
 
-fn collect_item(
-    key: &Key,
-    item: &Item,
-    resource: &Resource,
-    parent: &mut Vec<Segment>,
-    rows: &mut Vec<Row>,
-    limits: &Limits,
-) -> Result<(), AdapterError> {
-    let key_text = key.get().to_string();
-    if matches!(item, Item::None) {
-        return Ok(());
-    }
-    let span = key
-        .span()
-        .or_else(|| item.span())
-        .ok_or_else(|| AdapterError::Parse(format!("the TOML key {key_text:?} has no span")))?;
-    let pointer = pointer_for(parent, &key_text);
-    push_row(resource, pointer, span, rows, limits)?;
+/// One TOML entry's value: what it holds, and its byte range.
+pub(crate) struct TomlValue {
+    pub(crate) value: EntryValue,
+    pub(crate) span: Option<ByteSpan>,
+}
 
+/// One walk over a document, emitting a key row per table member and, in the
+/// value mode, each member's value beside it.
+struct Walk<'w> {
+    text: &'w str,
+    resource: &'w Resource,
+    limits: &'w Limits,
+    rows: Vec<Row>,
+    values: Option<Vec<TomlValue>>,
+}
+
+impl Walk<'_> {
+    fn document(&mut self) -> Result<(), AdapterError> {
+        let document = Document::parse(self.text).map_err(|error: toml_edit::TomlError| {
+            AdapterError::Parse(parse_error(self.text, &error))
+        })?;
+        let mut parent = Vec::new();
+        self.table(document.as_table(), &mut parent)
+    }
+
+    fn table(&mut self, table: &Table, parent: &mut Vec<Segment>) -> Result<(), AdapterError> {
+        for key_text in table.iter().map(|(key, _)| key) {
+            let (key, item) = table
+                .get_key_value(key_text)
+                .unwrap_or_else(|| unreachable!("table.iter yielded a missing key"));
+            self.item(key, item, parent)?;
+        }
+        Ok(())
+    }
+
+    fn item(
+        &mut self,
+        key: &Key,
+        item: &Item,
+        parent: &mut Vec<Segment>,
+    ) -> Result<(), AdapterError> {
+        let key_text = key.get().to_string();
+        if matches!(item, Item::None) {
+            return Ok(());
+        }
+        let span = key
+            .span()
+            .or_else(|| item.span())
+            .ok_or_else(|| AdapterError::Parse(format!("the TOML key {key_text:?} has no span")))?;
+        let pointer = pointer_for(parent, &key_text);
+        self.push(pointer, span, || item_value(item, self.text))?;
+
+        match item {
+            Item::Table(table) => {
+                parent.push(Segment::Key(key_text.into()));
+                self.table(table, parent)?;
+                parent.pop();
+            }
+            Item::Value(Value::InlineTable(inline)) => {
+                self.inline_table(inline, parent, &key_text)?;
+            }
+            Item::None | Item::Value(_) | Item::ArrayOfTables(_) => {}
+        }
+        Ok(())
+    }
+
+    fn push(
+        &mut self,
+        pointer: Pointer,
+        span: std::ops::Range<usize>,
+        value: impl FnOnce() -> TomlValue,
+    ) -> Result<(), AdapterError> {
+        push_row(self.resource, pointer, span, &mut self.rows, self.limits)?;
+        if let Some(values) = &mut self.values {
+            values.push(value());
+        }
+        Ok(())
+    }
+}
+
+/// What a table member's item holds.
+fn item_value(item: &Item, text: &str) -> TomlValue {
     match item {
-        Item::Table(table) => {
-            parent.push(Segment::Key(key_text.into()));
-            collect_table(table, resource, parent, rows, limits)?;
-            parent.pop();
-        }
-        Item::Value(Value::InlineTable(inline)) => {
-            collect_inline_table(inline, resource, parent, &key_text, rows, limits)?;
-        }
-        Item::None | Item::Value(_) | Item::ArrayOfTables(_) => {}
+        Item::Value(value) => value_of(value, text),
+        Item::Table(_) => TomlValue {
+            value: EntryValue::Object,
+            span: None,
+        },
+        Item::ArrayOfTables(_) => TomlValue {
+            value: EntryValue::Array,
+            span: None,
+        },
+        Item::None => unreachable!("a missing item has no row"),
     }
-    Ok(())
 }
 
-/// Descend an inline table and every inline table nested in it, so
-/// `x = { a = { b = 1 } }` yields the same leaf `x.a.b` as `[x.a] b = 1`.
-/// The walk uses an explicit stack: nesting depth cannot exhaust the call
-/// stack, and the row limit bounds the work.
-fn collect_inline_table(
-    table: &InlineTable,
-    resource: &Resource,
-    parent: &[Segment],
-    table_key: &str,
-    rows: &mut Vec<Row>,
-    limits: &Limits,
-) -> Result<(), AdapterError> {
-    let mut root = parent.to_vec();
-    root.push(Segment::Key(table_key.into()));
-    let mut pending: Vec<(Vec<Segment>, &InlineTable)> = vec![(root, table)];
-    while let Some((prefix, table)) = pending.pop() {
-        let mut nested = Vec::new();
-        for (path, value) in table.get_values() {
-            let span = path
-                .iter()
-                .filter_map(|key| key.span())
-                .next_back()
-                .ok_or_else(|| {
-                    AdapterError::Parse("a TOML inline-table key has no span".to_string())
-                })?;
-            let mut segments = prefix.clone();
-            for key in path {
-                segments.push(Segment::Key(key.get().into()));
-            }
-            push_row(
-                resource,
-                Pointer::from_segments(segments.clone()),
-                span,
-                rows,
-                limits,
-            )?;
-            if let Value::InlineTable(inner) = value {
-                nested.push((segments, inner));
-            }
+/// What a TOML value holds; a number's lexeme is its source text.
+fn value_of(value: &Value, text: &str) -> TomlValue {
+    use crate::relation::{Number, Value as RowValue};
+
+    let span = value.span();
+    let lexeme = || span.clone().and_then(|span| text.get(span));
+    let held = match value {
+        Value::String(string) => {
+            EntryValue::Scalar(RowValue::String(string.value().as_str().into()))
         }
-        // Reverse so the stack visits nested tables in source order.
-        pending.extend(nested.into_iter().rev());
+        Value::Integer(_) | Value::Float(_) => lexeme()
+            .and_then(Number::from_lexeme)
+            .map_or(EntryValue::Unreadable, |number| {
+                EntryValue::Scalar(RowValue::Number(number))
+            }),
+        Value::Boolean(flag) => EntryValue::Scalar(RowValue::Bool(*flag.value())),
+        Value::Datetime(_) => EntryValue::Datetime,
+        Value::Array(_) => EntryValue::Array,
+        Value::InlineTable(_) => EntryValue::Object,
+    };
+    TomlValue {
+        value: held,
+        span: span.map(|span| ByteSpan::new(span.start, span.end)),
     }
-    Ok(())
+}
+
+impl Walk<'_> {
+    /// Descend an inline table and every inline table nested in it, so
+    /// `x = { a = { b = 1 } }` yields the same leaf `x.a.b` as `[x.a] b = 1`.
+    /// The walk uses an explicit stack: nesting depth cannot exhaust the call
+    /// stack, and the row limit bounds the work.
+    fn inline_table(
+        &mut self,
+        table: &InlineTable,
+        parent: &[Segment],
+        table_key: &str,
+    ) -> Result<(), AdapterError> {
+        let mut root = parent.to_vec();
+        root.push(Segment::Key(table_key.into()));
+        let mut pending: Vec<(Vec<Segment>, &InlineTable)> = vec![(root, table)];
+        while let Some((prefix, table)) = pending.pop() {
+            let mut nested = Vec::new();
+            for (path, value) in table.get_values() {
+                let span = path
+                    .iter()
+                    .filter_map(|key| key.span())
+                    .next_back()
+                    .ok_or_else(|| {
+                        AdapterError::Parse("a TOML inline-table key has no span".to_string())
+                    })?;
+                let mut segments = prefix.clone();
+                for key in path {
+                    segments.push(Segment::Key(key.get().into()));
+                }
+                let text = self.text;
+                self.push(Pointer::from_segments(segments.clone()), span, || {
+                    value_of(value, text)
+                })?;
+                if let Value::InlineTable(inner) = value {
+                    nested.push((segments, inner));
+                }
+            }
+            // Reverse so the stack visits nested tables in source order.
+            pending.extend(nested.into_iter().rev());
+        }
+        Ok(())
+    }
 }
 
 /// A TOML parse error as its position and reason, without the source line

@@ -15,10 +15,10 @@ pub enum LimitKind {
     /// [`Relation::distinct_values`](super::Relation::distinct_values)
     /// enforces it.
     DistinctValues,
-    /// Rows entering one equality join. Reserved: joins arrive in Phase 3,
-    /// and nothing in v0.21 joins relations.
+    /// Rows entering one equality join, on each side; the relation
+    /// evaluator's join enforces it.
     JoinInputs,
-    /// Rows one equality join produces. Reserved, like `JoinInputs`.
+    /// Rows one equality join produces; the evaluator's join enforces it.
     JoinOutputs,
 }
 
@@ -30,10 +30,6 @@ impl LimitKind {
         Self::JoinInputs,
         Self::JoinOutputs,
     ];
-
-    /// The limits no code enforces yet, because what they bound does not
-    /// exist: equality joins arrive in Phase 3.
-    pub const RESERVED: [Self; 2] = [Self::JoinInputs, Self::JoinOutputs];
 
     #[must_use]
     pub fn name(self) -> &'static str {
@@ -230,15 +226,17 @@ mod tests {
         }
     }
 
-    /// The join limits stay reserved until Phase 3 adds joins: a use of one
-    /// outside this module must come with the join that it bounds, and with
-    /// this test's update.
+    /// The join limits bound the relation evaluator's equality join and
+    /// nothing else: a use of one elsewhere must come with the join that it
+    /// bounds, and with this test's update.
     #[test]
-    fn the_join_limits_are_reserved_and_unused() {
-        assert_eq!(
-            LimitKind::RESERVED,
-            [LimitKind::JoinInputs, LimitKind::JoinOutputs]
-        );
+    fn the_join_limits_bound_only_the_evaluators_join() {
+        const JOIN_LIMITS: [LimitKind; 2] = [LimitKind::JoinInputs, LimitKind::JoinOutputs];
+        const ENFORCED_IN: [&str; 3] = [
+            "relation/limits.rs",
+            "relation/eval/ops.rs",
+            "relation/eval/tests.rs",
+        ];
         let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .expect("the workspace's crates directory");
@@ -254,14 +252,15 @@ mod tests {
                     }
                     continue;
                 }
-                if path.extension().is_none_or(|ext| ext != "rs")
-                    || path.ends_with("relation/limits.rs")
-                {
+                if path.extension().is_none_or(|ext| ext != "rs") {
                     continue;
                 }
                 scanned += 1;
+                if ENFORCED_IN.iter().any(|allowed| path.ends_with(allowed)) {
+                    continue;
+                }
                 let text = std::fs::read_to_string(&path).unwrap();
-                for kind in LimitKind::RESERVED {
+                for kind in JOIN_LIMITS {
                     if text.contains(&format!("{kind:?}")) {
                         uses.push(format!("{}: {kind:?}", path.display()));
                     }
@@ -275,7 +274,7 @@ mod tests {
         );
         assert!(
             uses.is_empty(),
-            "reserved join limits used:\n{}",
+            "join limits used outside the evaluator's join:\n{}",
             uses.join("\n")
         );
     }

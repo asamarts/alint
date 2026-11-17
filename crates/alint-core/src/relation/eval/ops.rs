@@ -1,0 +1,772 @@
+//! What a relation does with rows once it has them: a `join:` of two
+//! relations, then `transform:`, then `where:` (design sections 6 to 8).
+//!
+//! Every comparison follows section 6: a value compares by its type and its
+//! text (a number by its lexeme, so `1.0` is not `1`); null matches nothing
+//! and is in no set, and so is a missing value; and a membership or join
+//! comparison between two types is an analysis failure naming both sides,
+//! never a silent non-match.
+
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
+
+use super::failure::{Failures, at, key_path, located, type_name};
+use super::{Cell, Evaluator, FieldInfo, FieldRow, RelationRows, Site};
+use crate::relation::limits::LimitKind;
+use crate::relation::plan::{
+    FieldSource, JoinDef, JoinSide, Member, NamedRelation, Predicate, RelationDef, RelationId,
+    Rows, Transform,
+};
+use crate::relation::pointer::Pointer;
+use crate::relation::transform::StringTransform;
+use crate::relation::value::Value;
+use crate::rule::AnalysisFailureKind;
+
+/// The relations `relation` reads: a join's sides, then its filters'
+/// `{ relation, field }` references, in the order written.
+pub(super) fn reads(relation: &RelationDef) -> Vec<RelationId> {
+    let mut reads = Vec::new();
+    if let Rows::Join(join) = &relation.rows {
+        reads.extend([join.left.id, join.right.id]);
+    }
+    for (_, predicates) in &relation.filters {
+        for predicate in predicates {
+            if let Predicate::In(members) | Predicate::NotIn(members) = predicate {
+                for member in members {
+                    if let Member::Relation { relation, .. } = member {
+                        reads.push(relation.id);
+                    }
+                }
+            }
+        }
+    }
+    reads
+}
+
+/// The kind of a value, as comparisons keep types apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+enum Kind {
+    Bool,
+    Number,
+    String,
+    Other,
+}
+
+fn kind(value: &Value) -> Kind {
+    match value {
+        Value::Bool(_) => Kind::Bool,
+        Value::Number(_) => Kind::Number,
+        Value::String(_) | Value::Path(_) => Kind::String,
+        _ => Kind::Other,
+    }
+}
+
+/// A value that can match: neither null nor missing.
+fn comparable(cell: &Cell) -> Option<&Value> {
+    cell.value
+        .as_ref()
+        .filter(|value| !matches!(value, Value::Null))
+}
+
+/// What holds a value a comparison meets: a row's cell, or a literal of a
+/// `where:` list.
+#[derive(Debug, Clone)]
+enum Witness {
+    Row(Cell),
+    Literal(Value),
+}
+
+impl Witness {
+    fn value(&self) -> &Value {
+        match self {
+            Self::Row(cell) => comparable(cell).expect("a witness holds a comparable value"),
+            Self::Literal(value) => value,
+        }
+    }
+
+    /// `a string at `a.b` in x.json`, or `the literal "x"` (`a literal
+    /// string` when the field is sensitive). `hide_keys` hides a row's key
+    /// path ([`key_path`](super::failure::key_path)).
+    fn describe(&self, sensitive: bool, hide_keys: bool) -> String {
+        match self {
+            Self::Row(cell) => {
+                let resource = cell.at.resource.path().as_str();
+                match &cell.at.pointer {
+                    Some(pointer) if !pointer.segments().is_empty() => format!(
+                        "{} at {} in {resource}",
+                        type_name(self.value()),
+                        key_path(pointer, hide_keys)
+                    ),
+                    _ => format!("{} in {resource}", type_name(self.value())),
+                }
+            }
+            Self::Literal(value) if sensitive => format!("a literal {}", bare_type(value)),
+            Self::Literal(value) => format!("the literal {}", render_value(value)),
+        }
+    }
+}
+
+/// The first value of each type, in the order seen: what a message names
+/// when two types meet.
+#[derive(Default)]
+struct Kinds(BTreeMap<Kind, Witness>);
+
+impl Kinds {
+    fn add(&mut self, cell: &Cell) {
+        if let Some(value) = comparable(cell) {
+            self.0
+                .entry(kind(value))
+                .or_insert_with(|| Witness::Row(cell.clone()));
+        }
+    }
+
+    fn add_literal(&mut self, value: &Value) {
+        if !matches!(value, Value::Null) {
+            self.0
+                .entry(kind(value))
+                .or_insert_with(|| Witness::Literal(value.clone()));
+        }
+    }
+
+    /// A value of `self` and one of `other` whose types differ: some
+    /// comparison between the two would cross types.
+    fn clash<'k>(&'k self, other: &'k Self) -> Option<(&'k Witness, &'k Witness)> {
+        self.0.iter().find_map(|(mine, witness)| {
+            other
+                .0
+                .iter()
+                .find(|(theirs, _)| theirs != &mine)
+                .map(|(_, theirs)| (witness, theirs))
+        })
+    }
+}
+
+/// `string`, `number`: a type without its article, after `a literal`.
+fn bare_type(value: &Value) -> &'static str {
+    match kind(value) {
+        Kind::Bool => "boolean",
+        Kind::Number => "number",
+        Kind::String => "string",
+        Kind::Other => "value",
+    }
+}
+
+fn render_value(value: &Value) -> String {
+    match value {
+        Value::String(text) => format!("{text:?}"),
+        Value::Number(number) => number.lexeme().to_string(),
+        Value::Bool(flag) => flag.to_string(),
+        Value::Null => "null".to_string(),
+        other => format!("{other:?}"),
+    }
+}
+
+impl Evaluator<'_> {
+    /// Apply `relation`'s transforms, then its filters, to `rows`.
+    pub(super) fn refine(
+        &self,
+        site: &Site,
+        named: &NamedRelation,
+        mut rows: RelationRows,
+        failures: &mut Failures,
+    ) -> Option<RelationRows> {
+        if !failures.is_empty() {
+            return None;
+        }
+        let relation = &named.relation;
+        for (field, transforms) in &relation.transforms {
+            let position = rows.field(field)?;
+            for transform in transforms {
+                transform_field(site, &mut rows, position, field, *transform, failures);
+            }
+        }
+        if !failures.is_empty() {
+            return None;
+        }
+        for (field, predicates) in &relation.filters {
+            let position = rows.field(field)?;
+            let sensitive = rows.fields[position].sensitive;
+            for predicate in predicates {
+                let keep =
+                    self.filter(site, &rows, position, field, sensitive, predicate, failures);
+                if !failures.is_empty() {
+                    return None;
+                }
+                let mut keep = keep.into_iter();
+                rows.rows.retain(|_| keep.next().unwrap_or(false));
+            }
+        }
+        Some(rows)
+    }
+
+    /// Whether each row passes `predicate` on the field at `position`.
+    #[allow(clippy::too_many_arguments)]
+    fn filter(
+        &self,
+        site: &Site,
+        rows: &RelationRows,
+        position: usize,
+        field: &str,
+        sensitive: bool,
+        predicate: &Predicate,
+        failures: &mut Failures,
+    ) -> Vec<bool> {
+        let cells = rows.rows.iter().map(|row| &row.cells[position]);
+        match predicate {
+            Predicate::Matches(pattern) | Predicate::NotMatches(pattern) => {
+                let (name, wanted) = match predicate {
+                    Predicate::Matches(_) => ("matches", true),
+                    _ => ("not_matches", false),
+                };
+                let regex = match regex::Regex::new(pattern) {
+                    Ok(regex) => regex,
+                    Err(error) => {
+                        failures.push(site.failure(
+                            AnalysisFailureKind::Evaluation,
+                            None,
+                            format!("`where.{field}.{name}` does not compile: {error}"),
+                        ));
+                        return Vec::new();
+                    }
+                };
+                cells
+                    .map(|cell| match &cell.value {
+                        // A missing value matches no pattern.
+                        None => !wanted,
+                        Some(Value::String(text)) => regex.is_match(text) == wanted,
+                        Some(other) => {
+                            failures.push(site.failure(
+                                AnalysisFailureKind::Evaluation,
+                                Some(resource_of(cell)),
+                                format!(
+                                    "`where.{field}.{name}` tests {}{}, but a pattern tests \
+                                     strings; filter a string field, or transform this one",
+                                    type_name(other),
+                                    at(cell, site.keys_sensitive)
+                                ),
+                            ));
+                            false
+                        }
+                    })
+                    .collect()
+            }
+            Predicate::In(members) | Predicate::NotIn(members) => {
+                let (name, wanted) = match predicate {
+                    Predicate::In(_) => ("in", true),
+                    _ => ("not_in", false),
+                };
+                let Some(set) = self.member_set(site, field, name, members, failures) else {
+                    return Vec::new();
+                };
+                let mut probes = Kinds::default();
+                for cell in rows.rows.iter().map(|row| &row.cells[position]) {
+                    probes.add(cell);
+                }
+                if let Some((probe, member)) = probes.clash(&set.kinds) {
+                    let Witness::Row(cell) = probe else {
+                        unreachable!("a probe is a row")
+                    };
+                    failures.push(site.failure(
+                        AnalysisFailureKind::Evaluation,
+                        Some(resource_of(cell)),
+                        format!(
+                            "`where.{field}.{name}` compares {} with {}; a value is in a list \
+                             only beside values of its own type, so compare values of one type \
+                             (transform the field, or change the list)",
+                            probe.describe(sensitive, site.keys_sensitive),
+                            member.describe(sensitive, site.keys_sensitive),
+                        ),
+                    ));
+                    return Vec::new();
+                }
+                cells
+                    .map(|cell| {
+                        let held = comparable(cell).is_some_and(|value| set.values.contains(value));
+                        held == wanted
+                    })
+                    .collect()
+            }
+        }
+    }
+
+    /// The set an `in` or `not_in` list stands for: its literals, and every
+    /// value of each referenced relation's field, which the distinct-value
+    /// limit bounds.
+    fn member_set(
+        &self,
+        site: &Site,
+        field: &str,
+        name: &str,
+        members: &[Member],
+        failures: &mut Failures,
+    ) -> Option<MemberSet> {
+        let mut set = MemberSet::default();
+        for member in members {
+            match member {
+                Member::Literal(value) => {
+                    set.kinds.add_literal(value);
+                    if !matches!(value, Value::Null) {
+                        set.values.insert(value.clone());
+                    }
+                }
+                Member::Relation {
+                    relation,
+                    field: of,
+                } => {
+                    let read = match self.computed(relation.id) {
+                        Ok(rows) => rows,
+                        Err(theirs) => {
+                            failures.extend(theirs.iter().cloned());
+                            return None;
+                        }
+                    };
+                    let Some(position) = read.field(of) else {
+                        unreachable!("the plan check names a field of the relation")
+                    };
+                    for row in &read.rows {
+                        let cell = &row.cells[position];
+                        let Some(value) = comparable(cell) else {
+                            continue;
+                        };
+                        if set.values.insert(value.clone())
+                            && let Err(limit) = self
+                                .limits
+                                .check(LimitKind::DistinctValues, set.values.len())
+                        {
+                            let relation = &self.plan.relation(relation.id).name;
+                            failures.push(site.failure(
+                                AnalysisFailureKind::Evaluation,
+                                None,
+                                format!(
+                                    "`where.{field}.{name}` reads `{relation}.{of}`: {limit}, so \
+                                     the relation is not evaluated rather than cut short; narrow \
+                                     `{relation}`"
+                                ),
+                            ));
+                            return None;
+                        }
+                        set.kinds.add(cell);
+                    }
+                }
+            }
+        }
+        Some(set)
+    }
+
+    /// A `join:` relation's rows: for each row of the side that is not
+    /// unique, in its order, the row of the unique side whose `on:` fields
+    /// equal its own, when there is one.
+    pub(super) fn join(
+        &self,
+        site: &Site,
+        named: &NamedRelation,
+        join: &JoinDef,
+        failures: &mut Failures,
+    ) -> Option<RelationRows> {
+        let left = self.side(join.left.id, failures)?;
+        let right = self.side(join.right.id, failures)?;
+        let sides = [
+            ("left", &join.left.id, &left),
+            ("right", &join.right.id, &right),
+        ];
+        for (word, id, rows) in sides {
+            if let Err(limit) = self.limits.check(LimitKind::JoinInputs, rows.rows.len()) {
+                failures.push(site.failure(
+                    AnalysisFailureKind::Evaluation,
+                    None,
+                    format!(
+                        "the join's {word} side (`{}`): {limit}, so the relation is not \
+                         evaluated rather than cut short; narrow that side",
+                        self.plan.relation(*id).name
+                    ),
+                ));
+                return None;
+            }
+        }
+        let (unique, probe) = match join.unique {
+            JoinSide::Left => (&left, &right),
+            JoinSide::Right => (&right, &left),
+        };
+        // Each `on:` pair's positions, on the unique side and the other.
+        let mut keys = Vec::with_capacity(join.on.len());
+        for (left_field, right_field) in &join.on {
+            let (left_at, right_at) = (left.field(left_field)?, right.field(right_field)?);
+            let (unique_at, probe_at) = match join.unique {
+                JoinSide::Left => (left_at, right_at),
+                JoinSide::Right => (right_at, left_at),
+            };
+            keys.push(JoinKey {
+                left_field,
+                right_field,
+                unique_at,
+                probe_at,
+                sensitive: left.fields[left_at].sensitive || right.fields[right_at].sensitive,
+            });
+        }
+        if let Some(failure) = key_type_clash(site, join.unique, &keys, unique, probe) {
+            failures.push(failure);
+            return None;
+        }
+        let unique_name = match join.unique {
+            JoinSide::Left => &self.plan.relation(join.left.id).name,
+            JoinSide::Right => &self.plan.relation(join.right.id).name,
+        };
+        let table = unique_table(site, join.unique, unique_name, &keys, unique, failures);
+        if !failures.is_empty() {
+            return None;
+        }
+        let fields = join_fields(named, &left, &right)?;
+        let mut out = RelationRows {
+            fields: fields.iter().map(|(info, _, _)| info.clone()).collect(),
+            resources: probe.resources.clone(),
+            ..RelationRows::default()
+        };
+        for row in &probe.rows {
+            let Some(found) = key_of(&keys, row, false).and_then(|key| table.get(&key)) else {
+                continue;
+            };
+            let matched = &unique.rows[*found];
+            if let Err(limit) = self
+                .limits
+                .check(LimitKind::JoinOutputs, out.rows.len() + 1)
+            {
+                failures.push(site.failure(
+                    AnalysisFailureKind::Evaluation,
+                    None,
+                    format!(
+                        "{limit}, so the relation is not evaluated rather than cut short; \
+                         narrow its sides"
+                    ),
+                ));
+                return None;
+            }
+            let (left_row, right_row) = match join.unique {
+                JoinSide::Left => (matched, row),
+                JoinSide::Right => (row, matched),
+            };
+            out.rows.push(FieldRow {
+                cells: fields
+                    .iter()
+                    .map(|(_, side, position)| match side {
+                        JoinSide::Left => left_row.cells[*position].clone(),
+                        JoinSide::Right => right_row.cells[*position].clone(),
+                    })
+                    .collect(),
+            });
+        }
+        Some(out)
+    }
+
+    /// One side of a join, or its failures as the join's.
+    fn side(&self, id: RelationId, failures: &mut Failures) -> Option<Arc<RelationRows>> {
+        match self.computed(id) {
+            Ok(rows) => Some(rows),
+            Err(theirs) => {
+                failures.extend(theirs.iter().cloned());
+                None
+            }
+        }
+    }
+}
+
+/// One `on:` pair of a join: its fields, and their positions on the unique
+/// side and on the other.
+struct JoinKey<'k> {
+    left_field: &'k str,
+    right_field: &'k str,
+    unique_at: usize,
+    probe_at: usize,
+    /// Either field is sensitive, so a message shows no key.
+    sensitive: bool,
+}
+
+/// A row's join key, or `None` when a field is null or missing, which joins
+/// nothing.
+fn key_of(keys: &[JoinKey<'_>], row: &FieldRow, unique_side: bool) -> Option<Vec<Value>> {
+    keys.iter()
+        .map(|key| {
+            let at = if unique_side {
+                key.unique_at
+            } else {
+                key.probe_at
+            };
+            comparable(&row.cells[at]).cloned()
+        })
+        .collect()
+}
+
+/// A key compared with a key of another type is a failure, whichever rows
+/// meet: the types each side's keys hold must agree.
+fn key_type_clash(
+    site: &Site,
+    unique_side: JoinSide,
+    keys: &[JoinKey<'_>],
+    unique: &RelationRows,
+    probe: &RelationRows,
+) -> Option<super::RelationFailure> {
+    for key in keys {
+        let mut unique_kinds = Kinds::default();
+        for row in &unique.rows {
+            unique_kinds.add(&row.cells[key.unique_at]);
+        }
+        let mut probe_kinds = Kinds::default();
+        for row in &probe.rows {
+            probe_kinds.add(&row.cells[key.probe_at]);
+        }
+        let Some((mine, theirs)) = probe_kinds.clash(&unique_kinds) else {
+            continue;
+        };
+        let (left_side, right_side) = match unique_side {
+            JoinSide::Left => (theirs, mine),
+            JoinSide::Right => (mine, theirs),
+        };
+        let Witness::Row(left_cell) = left_side else {
+            unreachable!("a join side holds rows")
+        };
+        return Some(site.failure(
+            AnalysisFailureKind::Evaluation,
+            Some(resource_of(left_cell)),
+            format!(
+                "the join compares `{}`, {}, with `{}`, {}; join keys compare within one type, \
+                 so transform one side, or join on fields of one type",
+                key.left_field,
+                left_side.describe(false, site.keys_sensitive),
+                key.right_field,
+                right_side.describe(false, site.keys_sensitive),
+            ),
+        ));
+    }
+    None
+}
+
+/// The unique side's rows by key, checked while built: a key seen twice is
+/// a failure naming both rows.
+fn unique_table(
+    site: &Site,
+    unique_side: JoinSide,
+    unique_name: &str,
+    keys: &[JoinKey<'_>],
+    unique: &RelationRows,
+    failures: &mut Failures,
+) -> HashMap<Vec<Value>, usize> {
+    let word = match unique_side {
+        JoinSide::Left => "left",
+        JoinSide::Right => "right",
+    };
+    let mut table: HashMap<Vec<Value>, usize> = HashMap::with_capacity(unique.rows.len());
+    for (index, row) in unique.rows.iter().enumerate() {
+        let Some(key) = key_of(keys, row, true) else {
+            continue;
+        };
+        let Some(&first) = table.get(&key) else {
+            table.insert(key, index);
+            continue;
+        };
+        let shown = if keys.iter().any(|key| key.sensitive) {
+            "a key".to_string()
+        } else {
+            format!("the key {}", render_key(&key))
+        };
+        let at = keys[0].unique_at;
+        let earlier = &unique.rows[first].cells[at];
+        let later = &row.cells[at];
+        failures.push(site.failure(
+            AnalysisFailureKind::Evaluation,
+            Some(resource_of(later)),
+            format!(
+                "the join's unique side ({word}, `{unique_name}`) repeats {shown}: {} and {}; \
+                 `unique: {word}` needs each key once on that side, so make the key unique \
+                 there, or name the other side unique",
+                located(earlier, site.keys_sensitive),
+                located(later, site.keys_sensitive),
+            ),
+        ));
+    }
+    table
+}
+
+/// A join's fields: each `left.F` or `right.F`, with the side and the
+/// position it copies. A copy of a sensitive field is sensitive.
+fn join_fields(
+    named: &NamedRelation,
+    left: &RelationRows,
+    right: &RelationRows,
+) -> Option<Vec<(FieldInfo, JoinSide, usize)>> {
+    named
+        .relation
+        .fields
+        .iter()
+        .map(|(name, field)| {
+            let FieldSource::Side(side, of) = &field.source else {
+                return None;
+            };
+            let rows = match side {
+                JoinSide::Left => left,
+                JoinSide::Right => right,
+            };
+            let position = rows.field(of)?;
+            Some((
+                FieldInfo {
+                    name: name.clone(),
+                    sensitive: field.sensitive || rows.fields[position].sensitive,
+                },
+                *side,
+                position,
+            ))
+        })
+        .collect()
+}
+
+/// An `in`/`not_in` list's values, and the first value of each type for a
+/// message.
+#[derive(Default)]
+struct MemberSet {
+    values: HashSet<Value>,
+    kinds: Kinds,
+}
+
+fn resource_of(cell: &Cell) -> Arc<std::path::Path> {
+    Arc::from(cell.at.resource.path().as_path())
+}
+
+/// A join key as a message shows it: `"react"`, or `("a", 1)` for several
+/// fields.
+fn render_key(key: &[Value]) -> String {
+    match key {
+        [single] => render_value(single),
+        _ => format!(
+            "({})",
+            key.iter().map(render_value).collect::<Vec<_>>().join(", ")
+        ),
+    }
+}
+
+/// Apply one transform to the field at `position` of every row.
+fn transform_field(
+    site: &Site,
+    rows: &mut RelationRows,
+    position: usize,
+    field: &str,
+    transform: Transform,
+    failures: &mut Failures,
+) {
+    let string_transform = match transform {
+        Transform::StripRoot => {
+            strip_root(site, rows, position, field, failures);
+            return;
+        }
+        Transform::Trim => StringTransform::Trim,
+        Transform::Lower => StringTransform::Lower,
+        Transform::SemverMajor => StringTransform::SemverMajor,
+        Transform::SemverMinor => StringTransform::SemverMinor,
+    };
+    for row in &mut rows.rows {
+        let cell = &mut row.cells[position];
+        match &cell.value {
+            None => {}
+            Some(Value::String(text)) => {
+                cell.value = Some(Value::String(string_transform.apply(text).into()));
+            }
+            Some(other) => {
+                failures.push(site.failure(
+                    AnalysisFailureKind::Evaluation,
+                    Some(resource_of(cell)),
+                    format!(
+                        "`transform.{field}` applies `{}` to {}{}, but the string transforms \
+                         apply to strings; transform a string field",
+                        string_transform.name(),
+                        type_name(other),
+                        at(cell, site.keys_sensitive)
+                    ),
+                ));
+            }
+        }
+    }
+}
+
+/// `strip-root`: drop the first segment of an `entry.path` field, as
+/// `key_parity`'s `strip_root` does. Each resource must hold one top-level
+/// key among its rows, and every row's key path at least two segments.
+fn strip_root(
+    site: &Site,
+    rows: &mut RelationRows,
+    position: usize,
+    field: &str,
+    failures: &mut Failures,
+) {
+    let sensitive = rows.fields[position].sensitive || site.keys_sensitive;
+    let mut roots: BTreeMap<&str, Vec<&crate::relation::pointer::Segment>> = BTreeMap::new();
+    for row in &rows.rows {
+        let cell = &row.cells[position];
+        let Some(path) = &cell.path else {
+            failures.push(site.failure(
+                AnalysisFailureKind::Evaluation,
+                Some(resource_of(cell)),
+                format!(
+                    "`strip-root` on `{field}` applies to an `entry.path` value, and this row's \
+                     is not one; bind `{field}` to `entry.path` in every part"
+                ),
+            ));
+            continue;
+        };
+        let resource = cell.at.resource.path().as_str();
+        let held = roots.entry(resource).or_default();
+        if let Some(first) = path.segments().first()
+            && !held.contains(&first)
+        {
+            held.push(first);
+        }
+    }
+    for (resource, held) in &roots {
+        if held.len() > 1 {
+            let shown = if sensitive {
+                held.len().to_string()
+            } else {
+                held.iter()
+                    .map(|segment| {
+                        format!(
+                            "`{}`",
+                            Pointer::from_segments(vec![(*segment).clone()]).render()
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            failures.push(site.failure(
+                AnalysisFailureKind::Evaluation,
+                Some(Arc::from(std::path::Path::new(resource))),
+                format!(
+                    "`strip-root` on `{field}` needs one top-level key in each resource, but this \
+                     one has {shown}; read one top-level object per file, or drop `strip-root`"
+                ),
+            ));
+        }
+    }
+    for row in &mut rows.rows {
+        let cell = &mut row.cells[position];
+        let Some(path) = &cell.path else {
+            continue;
+        };
+        if path.segments().len() < 2 {
+            let shown = if sensitive {
+                "a key path".to_string()
+            } else {
+                format!("`{}`", path.render())
+            };
+            let resource = resource_of(cell);
+            failures.push(site.failure(
+                AnalysisFailureKind::Evaluation,
+                Some(resource),
+                format!(
+                    "`strip-root` on `{field}` needs every key path to have at least two \
+                     segments, but {shown} has one; read the keys below the top-level key, or \
+                     drop `strip-root`"
+                ),
+            ));
+            continue;
+        }
+        let stripped = Pointer::from_segments(path.segments()[1..].to_vec());
+        cell.value = Some(Value::String(stripped.render().into()));
+        cell.path = Some(stripped);
+    }
+}

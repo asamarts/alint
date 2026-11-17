@@ -144,6 +144,14 @@ impl Scope {
         }
     }
 
+    /// This scope with `filter` as its `scope_filter:`: a relation's selector
+    /// compiles its `paths:` and `scope_filter:` into one scope, as a rule's
+    /// [`from_spec`](Self::from_spec) does.
+    pub(crate) fn with_scope_filter(mut self, filter: ScopeFilter) -> Self {
+        self.scope_filter = Some(filter);
+        self
+    }
+
     /// Borrow the optional [`ScopeFilter`] this scope carries.
     /// Used by dispatch sites (e.g. `for_each_dir`'s literal-
     /// path bypass) that already have a `&Scope` in hand and

@@ -324,6 +324,16 @@ impl ManifestPredicate {
         self.extract.redacts_by_default()
     }
 
+    /// Whether a file this predicate's set does (`in_set`) or does not hold
+    /// stays in scope: an include keeps the set's files, an exclude drops
+    /// them.
+    pub(crate) fn keeps(&self, in_set: bool) -> bool {
+        match self.sense {
+            ManifestSense::Include => in_set,
+            ManifestSense::Exclude => !in_set,
+        }
+    }
+
     /// True for an `include_manifest_paths:` predicate that wants a non-empty
     /// set — the engine warns when its resolved set is empty.
     pub(crate) fn warns_on_empty(&self) -> bool {

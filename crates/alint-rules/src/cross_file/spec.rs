@@ -138,50 +138,18 @@ pub(crate) enum Normalize {
 }
 
 impl Normalize {
+    /// The shared transform (`alint_core::relation::StringTransform`), so a
+    /// relation's `transform:` and this `normalize:` cannot drift.
     fn apply(self, v: &str) -> String {
-        match self {
-            Self::None => v.to_string(),
-            Self::Trim => v.trim().to_string(),
-            Self::Lower => v.trim().to_lowercase(),
-            // Leading `.`-token, leading non-digits stripped. The trailing
-            // `trim_end` keeps normalisation idempotent: `trim()` runs before
-            // the split, so the pre-`.` token can still carry trailing
-            // whitespace (e.g. `"0 ."` -> token `"0 "`) that a second pass
-            // would strip — found by `normalize_transforms_are_idempotent`.
-            // (Trailing non-whitespace like `-dev` is intentionally kept, so
-            // released behaviour is unchanged for real version strings.)
-            Self::SemverMajor => v
-                .trim()
-                .split('.')
-                .next()
-                .unwrap_or("")
-                .trim_start_matches(|c: char| !c.is_ascii_digit())
-                .trim_end()
-                .to_string(),
-            Self::SemverMinor => semver_minor(v),
-        }
-    }
-}
-
-/// Leading digits of a semver token after stripping a non-digit
-/// prefix (`pnpm@11` → `11`, `>=22` → `22`, `36-dev` → `36`).
-fn token_digits(tok: &str) -> String {
-    tok.trim_start_matches(|c: char| !c.is_ascii_digit())
-        .chars()
-        .take_while(char::is_ascii_digit)
-        .collect()
-}
-
-/// The `MAJOR.MINOR` band of a version string.
-fn semver_minor(v: &str) -> String {
-    let mut it = v.trim().split('.');
-    let major = token_digits(it.next().unwrap_or(""));
-    if major.is_empty() {
-        return String::new();
-    }
-    match it.next().map(token_digits).filter(|m| !m.is_empty()) {
-        Some(minor) => format!("{major}.{minor}"),
-        None => major,
+        use alint_core::relation::StringTransform;
+        let transform = match self {
+            Self::None => return v.to_string(),
+            Self::Trim => StringTransform::Trim,
+            Self::Lower => StringTransform::Lower,
+            Self::SemverMajor => StringTransform::SemverMajor,
+            Self::SemverMinor => StringTransform::SemverMinor,
+        };
+        transform.apply(v)
     }
 }
 
@@ -573,6 +541,11 @@ mod tests {
                 prop_assert!(parts.next().is_none(), "at most MAJOR.MINOR");
             }
         }
+    }
+
+    /// The band `semver-minor` keeps (the shared transform's).
+    fn semver_minor(value: &str) -> String {
+        Normalize::SemverMinor.apply(value)
     }
 
     #[test]

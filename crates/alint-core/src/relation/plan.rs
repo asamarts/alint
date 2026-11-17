@@ -145,6 +145,10 @@ pub struct NamedSelector {
     pub selector: SelectorDef,
     /// What reading the resources it picks needs.
     pub capabilities: Capabilities,
+    /// Whether its definition takes a value from the environment
+    /// (`{{env.X}}`): a relation that reads it then shows no detail of its
+    /// analysis failures.
+    pub reads_environment: bool,
 }
 
 /// A named relation and the source that declared it.
@@ -156,6 +160,12 @@ pub struct NamedRelation {
     /// What reading its rows needs: its own reads, and those of every
     /// selector and relation it references, transitively.
     pub capabilities: Capabilities,
+    /// Whether its definition, outside its fields' `where:` and `transform:`
+    /// entries (which make those fields sensitive instead), or a named
+    /// selector it reads takes a value from the environment (`{{env.X}}`):
+    /// then no analysis failure of it shows its detail, which could echo the
+    /// value (a key path an `at:` from the environment selected, say).
+    pub reads_environment: bool,
 }
 
 /// What reading an object makes alint do, as the trust gates judge it
@@ -434,6 +444,7 @@ mod tests {
                 filters: Vec::new(),
             },
             capabilities,
+            reads_environment: false,
         }
     }
 

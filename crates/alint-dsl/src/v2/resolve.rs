@@ -471,6 +471,7 @@ pub(crate) fn resolve(objects: &Objects) -> Result<Resolved<'_>> {
             source,
             selector: selector_def(selector),
             capabilities: selector_capabilities(selector),
+            reads_environment: false,
         });
     }
     for &(source, local) in &namespaces.relations {
@@ -481,6 +482,7 @@ pub(crate) fn resolve(objects: &Objects) -> Result<Resolved<'_>> {
             source,
             relation,
             capabilities: Capabilities::default(),
+            reads_environment: false,
         });
     }
     let order = super::plan_check::check(&plan)?;

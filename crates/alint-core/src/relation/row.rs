@@ -41,6 +41,12 @@ pub struct Row {
     pub ordinal: u32,
     /// Byte range of the value when the adapter knows it.
     pub span: Option<ByteSpan>,
+    /// For a value-bearing entry row (a relation's `entries:` part), whose
+    /// `span` is its key's: the byte range of its value. `None` for every
+    /// other row, for a YAML literal or folded block scalar, and when the
+    /// adapter cannot tell. It never crosses the plugin contract: no plugin
+    /// emits value-bearing entry rows.
+    pub value_span: Option<ByteSpan>,
     pub state: RowState,
     /// The value as the source wrote it, when a transform (a `normalize:`
     /// list) changed it; messages quote both.
@@ -61,6 +67,7 @@ impl Row {
             label: None,
             ordinal,
             span: None,
+            value_span: None,
             state,
             original: None,
         }
@@ -116,6 +123,7 @@ impl Row {
             .then_with(|| self.state.cmp(&other.state))
             .then_with(|| self.resource.origin().cmp(&other.resource.origin()))
             .then_with(|| self.original.cmp(&other.original))
+            .then_with(|| self.value_span.cmp(&other.value_span))
     }
 }
 
