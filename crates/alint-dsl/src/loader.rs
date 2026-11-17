@@ -1438,9 +1438,23 @@ mod tests {
             };
             std::fs::write(tmp.path().join(format!("c{i}.yml")), body).unwrap();
         }
-        let err = crate::load(&tmp.path().join("c0.yml"))
-            .unwrap_err()
-            .to_string();
+        // Loading recurses once per level, so run it on a stack of a set size
+        // rather than the test thread's 2 MiB: in a release build, 1 MiB (a
+        // Windows main thread, the smallest a user runs alint on; the chain
+        // needs about 330 KiB); in a debug build, whose frames are about six
+        // times larger, 4 MiB (it needs about 2 MiB).
+        let stack = if cfg!(debug_assertions) {
+            4 << 20
+        } else {
+            1 << 20
+        };
+        let root = tmp.path().join("c0.yml");
+        let err = std::thread::Builder::new()
+            .stack_size(stack)
+            .spawn(move || crate::load(&root).unwrap_err().to_string())
+            .unwrap()
+            .join()
+            .unwrap();
         assert!(err.contains("maximum depth"), "{err}");
     }
 
