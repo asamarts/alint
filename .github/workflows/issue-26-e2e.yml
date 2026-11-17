@@ -178,11 +178,14 @@ jobs:
           echo "✓ Env-var default fallback (\${VAR:-HEAD^1}) resolves cleanly"
 
   # Job 2: real PR shape. Runs only on pull_request events so the
-  # job has a real base.sha + the real synthetic-merge HEAD that
-  # actions/checkout produces. Validates that on a real
-  # `pull_request` trigger, the rule walks the PR's own commits
-  # (which all start with `feat:` / `fix:` / etc. per project
-  # commit-message conventions) instead of HEAD.
+  # job has the real synthetic-merge HEAD that actions/checkout
+  # produces. Validates that on a real `pull_request` trigger, the
+  # rule walks the PR's own commits (which all start with `feat:` /
+  # `fix:` / etc. per project commit-message conventions) instead of
+  # HEAD. The range starts at the merge's first parent, the base
+  # branch as merged: the event's `pull_request.base.sha` stays where
+  # the base was when the PR was opened, so once main moves on, a
+  # range from it takes in main's newer commits too.
   real-pr-shape:
     name: range mode (real pull_request shape)
     if: github.event_name == 'pull_request'
@@ -200,6 +203,7 @@ jobs:
             echo "::warning::HEAD is not a Merge commit; this PR may be in an unusual state, skipping real-PR assertion"
             echo "SKIP=1" >> "$GITHUB_ENV"
           fi
+          echo "PR_BASE=$(git rev-parse HEAD^1)" >> "$GITHUB_ENV"
 
       - name: Build alint from this branch
         if: env.SKIP != '1'
@@ -208,7 +212,7 @@ jobs:
       - name: Validate PR commits via range mode
         if: env.SKIP != '1'
         env:
-          ALINT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          ALINT_BASE_SHA: ${{ env.PR_BASE }}
         run: |
           set -euxo pipefail
           cat > /tmp/pr-validation.yml <<'YAML'

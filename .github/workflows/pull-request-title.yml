@@ -1,0 +1,31 @@
+name: Pull request title
+
+# A squash merge writes the pull request's title and " (#N)" as the commit
+# subject on main. issue-26-e2e.yml's range-mode job checks a branch's own
+# commits; this checks the subject the merge will write, against the same rule,
+# and runs again when the title is edited.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  squash-subject:
+    name: squash subject
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: The title makes a conventional subject of at most 120 characters
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: ci/scripts/squash-subject.sh "$PR_TITLE" "$PR_NUMBER"
