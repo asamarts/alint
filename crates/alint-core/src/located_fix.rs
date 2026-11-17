@@ -16,9 +16,10 @@
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
-use serde_json_path::JsonPath;
+use serde_json_path::{JsonPath, PathElement};
 
 use crate::rule::{Applicability, CollectedEdit, EditVerifier, ExpectedValue, FixEdit, GroupId};
+use crate::structured_fix::{self, Intent, PathSeg};
 use crate::structured_format::Format;
 
 /// One located edit plus the provenance the total-order sort needs. The
@@ -83,7 +84,10 @@ fn edit_range(edit: &FixEdit) -> Option<Range<usize>> {
 /// with an already-accepted edit is a `SkippedConflict` even when
 /// byte-disjoint); splice; then verify — each accepted `Structured` edit
 /// is checked against the spliced bytes and demoted to `Suggested` on
-/// failure, after which the survivors are re-spliced.
+/// failure, after which the survivors are re-spliced. Where the edits of
+/// more than one rule change a document checked as a whole (see
+/// [`structured_fix::checks_whole_document`]), the survivors must together
+/// leave it changed at their targets only, or the later rules are demoted.
 #[must_use]
 pub fn apply_file_edits(
     original: &[u8],
@@ -214,7 +218,11 @@ pub fn apply_file_edits(
             }
             demoted
         };
-        if !newly_demoted {
+        // Once each edit verifies on its own, the whole document: a removal
+        // that is right alone can change a neighbour beside another rule's
+        // (the two last entries of a block mapping, each removed by a rule of
+        // its own, leave the mapping empty, which reads as null).
+        if !newly_demoted && !demote_collateral(original, &accepted, &batch, &mut outcome) {
             break;
         }
         let survivors: Vec<usize> = accepted
@@ -258,6 +266,156 @@ fn splice(original: &[u8], which: &[usize], batch: &[LocatedEdit]) -> Vec<u8> {
     }
     out.extend_from_slice(&original[copied..]);
     out
+}
+
+/// Demote the edits [`collateral`] names among the applied ones of
+/// `accepted`; whether there was any.
+fn demote_collateral(
+    original: &[u8],
+    accepted: &[usize],
+    batch: &[LocatedEdit],
+    outcome: &mut [LocatedOutcome],
+) -> bool {
+    let applied: Vec<usize> = accepted
+        .iter()
+        .copied()
+        .filter(|&i| outcome[i] == LocatedOutcome::Applied)
+        .collect();
+    let culprits = collateral(original, &applied, batch);
+    for &i in &culprits {
+        outcome[i] = LocatedOutcome::Suggested;
+    }
+    !culprits.is_empty()
+}
+
+/// The edits among `applied` (in total order) to demote so that each document
+/// checked as a whole changes at the applied edits' targets only. Each
+/// fixer checks its own edits together (`structured_fix::checked_value_edits`
+/// and its siblings), so this looks only where edits of more than one rule
+/// meet in one format, and only when every applied edit is one of them: the
+/// check could not tell a free-form edit's change from a stray one. The
+/// edits' targets are what their queries select in the original, with the
+/// change their expectation names: removed for `Absent`, the value for
+/// `Scalar`, and for `Matches` what the edited document holds there, which
+/// the per-edit verify checked. When the edits together change more, the
+/// rules are added one at a time in their order, and a rule whose edits
+/// would make the result change more is demoted whole.
+fn collateral(original: &[u8], applied: &[usize], batch: &[LocatedEdit]) -> Vec<usize> {
+    let structured = |i: usize| match &batch[i].collected.verify {
+        EditVerifier::Structured { format, .. } => Some(*format),
+        EditVerifier::None => None,
+    };
+    let Some(format) = applied.first().and_then(|&i| structured(i)) else {
+        return Vec::new();
+    };
+    let one_format = applied.iter().all(|&i| structured(i) == Some(format));
+    let rules = applied
+        .iter()
+        .any(|&i| batch[i].rule_index != batch[applied[0]].rule_index);
+    if !structured_fix::checks_whole_document(format) || !one_format || !rules {
+        return Vec::new();
+    }
+    let read = |bytes: &[u8]| {
+        std::str::from_utf8(bytes)
+            .ok()
+            .and_then(|text| format.parse(text).ok())
+    };
+    let Some(before) = read(original) else {
+        return Vec::new();
+    };
+    let exact = |edits: &[usize]| {
+        let bytes = splice(original, edits, batch);
+        read(&bytes).is_some_and(|after| {
+            // One query's targets once, however many edits share it (a
+            // removal batch shares the rule's query).
+            let mut seen: HashMap<&str, Vec<&ExpectedValue>> = HashMap::new();
+            let mut intents = Vec::new();
+            for &i in edits {
+                let EditVerifier::Structured { query, expect, .. } = &batch[i].collected.verify
+                else {
+                    continue;
+                };
+                let expects = seen.entry(query.as_str()).or_default();
+                if expects.contains(&expect) {
+                    continue;
+                }
+                expects.push(expect);
+                let Some(found) = targets(&before, &after, query, expect) else {
+                    return false;
+                };
+                intents.extend(found);
+            }
+            structured_fix::intended(&before, &intents).as_ref() == Some(&after)
+        })
+    };
+    if exact(applied) {
+        return Vec::new();
+    }
+    let mut rules: Vec<usize> = applied.iter().map(|&i| batch[i].rule_index).collect();
+    rules.sort_unstable();
+    rules.dedup();
+    let mut kept = vec![false; batch.len()];
+    let mut culprits = Vec::new();
+    for rule in rules {
+        let candidate: Vec<usize> = applied
+            .iter()
+            .copied()
+            .filter(|&i| kept[i] || batch[i].rule_index == rule)
+            .collect();
+        if exact(&candidate) {
+            for i in candidate {
+                kept[i] = true;
+            }
+        } else {
+            culprits.extend(
+                applied
+                    .iter()
+                    .copied()
+                    .filter(|&i| batch[i].rule_index == rule),
+            );
+        }
+    }
+    culprits
+}
+
+/// The targets of an edit's verifier, `query` and `expect`, in `before`, each
+/// with its intended change (see [`collateral`]); `None` when the query does
+/// not parse or a `Matches` target is gone from `after`.
+fn targets(
+    before: &serde_json::Value,
+    after: &serde_json::Value,
+    query: &str,
+    expect: &ExpectedValue,
+) -> Option<Vec<(Vec<PathSeg>, Intent)>> {
+    let path = JsonPath::parse(query).ok()?;
+    path.query_located(before)
+        .iter()
+        .map(|node| {
+            let segs: Vec<PathSeg> = node
+                .location()
+                .iter()
+                .map(|element| match element {
+                    PathElement::Name(name) => PathSeg::Key((*name).to_string()),
+                    PathElement::Index(i) => PathSeg::Index(*i),
+                })
+                .collect();
+            let intent = match expect {
+                ExpectedValue::Absent => Intent::Remove,
+                ExpectedValue::Scalar(value) => Intent::Set(value.clone()),
+                ExpectedValue::Matches(_) => {
+                    let mut node = after;
+                    for seg in &segs {
+                        node = match seg {
+                            PathSeg::Key(key) => node.get(key.as_str())?,
+                            PathSeg::Index(i) => node.get(*i)?,
+                        };
+                    }
+                    Intent::Set(node.clone())
+                }
+            };
+            Some((segs, intent))
+        })
+        .collect()
 }
 
 std::thread_local! {
@@ -974,6 +1132,74 @@ mod tests {
         assert_eq!(o[0].1, LocatedOutcome::Applied);
         assert_eq!(o[1].1, LocatedOutcome::Suggested);
         assert_eq!(out, br#"{"b":0}"#);
+    }
+
+    /// YML-4 across rules: each rule's removal is exact alone (its mapping
+    /// keeps the other entry), but together the two empty `deps`, which then
+    /// reads as null. The rules are taken in order: the first applies, the
+    /// second is demoted, and a later pass removes the last entry as `{}`.
+    /// Edits that together change their targets only all apply.
+    #[test]
+    fn edits_of_two_rules_that_together_change_another_node_demote_the_later_rule() {
+        let absent = |query: &str| EditVerifier::Structured {
+            format: Format::Yaml,
+            query: query.to_string(),
+            expect: ExpectedValue::Absent,
+        };
+        let src = "deps:\n  a: 1\n  b: 2\nname: x\n";
+        let batch = || {
+            vec![
+                edit(
+                    0,
+                    0,
+                    replace(6..13, ""),
+                    Applicability::Safe,
+                    absent("$.deps.a"),
+                    None,
+                ),
+                edit(
+                    1,
+                    0,
+                    replace(13..20, ""),
+                    Applicability::Safe,
+                    absent("$.deps.b"),
+                    None,
+                ),
+            ]
+        };
+        let (out, o) = apply_file_edits(src.as_bytes(), batch(), Applicability::Safe);
+        assert_eq!(o[0].1, LocatedOutcome::Applied);
+        assert_eq!(o[1].1, LocatedOutcome::Suggested);
+        assert_eq!(out, b"deps:\n  b: 2\nname: x\n");
+
+        // One rule's edits are its fixer's to check together; the engine
+        // leaves them be.
+        let mut one_rule = batch();
+        one_rule[1].rule_index = 0;
+        let (out, o) = apply_file_edits(src.as_bytes(), one_rule, Applicability::Safe);
+        assert!(o.iter().all(|(_, o)| *o == LocatedOutcome::Applied));
+        assert_eq!(out, b"deps:\nname: x\n");
+
+        // A removal and a set by two rules, each at its own target.
+        let set = EditVerifier::Structured {
+            format: Format::Yaml,
+            query: "$.name".to_string(),
+            expect: ExpectedValue::Scalar(serde_json::json!("y")),
+        };
+        let both = vec![
+            edit(
+                0,
+                0,
+                replace(6..13, ""),
+                Applicability::Safe,
+                absent("$.deps.a"),
+                None,
+            ),
+            edit(1, 0, replace(26..27, "y"), Applicability::Safe, set, None),
+        ];
+        let (out, o) = apply_file_edits(src.as_bytes(), both, Applicability::Safe);
+        assert!(o.iter().all(|(_, o)| *o == LocatedOutcome::Applied));
+        assert_eq!(out, b"deps:\n  b: 2\nname: y\n");
     }
 
     /// ROB-7: the splice moved the whole tail once per edit, so N edits on a

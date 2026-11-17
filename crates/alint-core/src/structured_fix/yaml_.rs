@@ -3,7 +3,7 @@ use saphyr::{Scalar, ScalarOwned};
 use saphyr_parser::{Event, Parser, ScalarStyle, Span, Tag};
 use std::borrow::Cow;
 use std::cell::Cell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
 /// The deepest collection nesting the resolver reads, block and flow levels
@@ -36,7 +36,9 @@ pub(super) fn yaml_value_spans(text: &str, paths: &[Vec<PathSeg>]) -> Vec<Option
 }
 
 /// The byte range `remove_value` deletes for the block-mapping entry at `path`
-/// (see [`SpanIndex::removal_span`]).
+/// (see [`SpanIndex::removal`]). `None` for a block mapping's only entry,
+/// which a removal replaces with `{}` rather than deletes (see
+/// [`yaml_removal_edits`]).
 pub(super) fn yaml_removal_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
     SpanIndex::read(text)?.removal_span(path)
 }
@@ -46,6 +48,20 @@ pub(super) fn yaml_removal_spans(text: &str, paths: &[Vec<PathSeg>]) -> Vec<Opti
     SpanIndex::read(text).map_or_else(
         || vec![None; paths.len()],
         |index| paths.iter().map(|path| index.removal_span(path)).collect(),
+    )
+}
+
+/// The edit `remove_value` makes for each of `paths`, from one parse of
+/// `text`: the entry's line deleted, but where the paths remove every entry
+/// of a block mapping, whose last entry becomes `{}` so the mapping stays one
+/// (an empty block mapping reads as null; JSON keeps `{}`, TOML the table).
+pub(super) fn yaml_removal_edits(
+    text: &str,
+    paths: &[Vec<PathSeg>],
+) -> Vec<Option<(Range<usize>, &'static str)>> {
+    SpanIndex::read(text).map_or_else(
+        || vec![None; paths.len()],
+        |index| index.removal_edits(paths),
     )
 }
 
@@ -83,6 +99,11 @@ enum Node {
     /// a sequence.
     Mapping {
         plain: bool,
+        /// How many entries it holds, whatever their keys.
+        entries: usize,
+        /// The character where its start event's span ends: past the `{` of
+        /// a flow mapping.
+        opened: usize,
     },
 }
 
@@ -105,6 +126,17 @@ struct ScalarNode {
     tagged: bool,
 }
 
+/// One block-mapping entry a removal deletes ([`SpanIndex::removal`]), in
+/// bytes of [`SpanIndex::text`].
+struct Removal {
+    parent: usize,
+    key: usize,
+    /// The entry's whole line, through its line break.
+    line: Range<usize>,
+    /// The entry itself, from its key's properties to its value's end.
+    entry: Range<usize>,
+}
+
 /// One open collection of the walk.
 struct Frame {
     node: usize,
@@ -120,6 +152,8 @@ struct Walk {
     stack: Vec<Frame>,
     keys: HashMap<(usize, ScalarOwned), (usize, usize)>,
     anchors: HashMap<usize, usize>,
+    /// The nodes an alias names (see [`SpanIndex::referenced`]).
+    referenced: HashSet<usize>,
     documents: usize,
     root: Option<usize>,
 }
@@ -161,6 +195,16 @@ impl Walk {
             }
             Event::Alias(anchor) => {
                 let target = self.anchors.get(&anchor).copied();
+                // An alias inside the collection its anchor names (which
+                // ayaml refuses) names a node still open.
+                let named = target.or_else(|| {
+                    self.stack
+                        .iter()
+                        .rev()
+                        .find(|frame| frame.anchor == anchor)
+                        .map(|frame| frame.node)
+                });
+                self.referenced.extend(named);
                 let node = self.push(Node::Alias {
                     span: chars,
                     target,
@@ -179,7 +223,14 @@ impl Walk {
             }
             Event::MappingStart(anchor, tag) => {
                 let plain = plain_collection(tag.as_ref());
-                self.open(Node::Mapping { plain }, anchor)?;
+                self.open(
+                    Node::Mapping {
+                        plain,
+                        entries: 0,
+                        opened: chars.end,
+                    },
+                    anchor,
+                )?;
             }
             Event::SequenceEnd | Event::MappingEnd => {
                 let frame = self.stack.pop()?;
@@ -226,6 +277,9 @@ impl Walk {
             frame.key = Some(node);
             return Some(());
         };
+        if let Node::Mapping { entries, .. } = &mut self.nodes[parent] {
+            *entries += 1;
+        }
         // A mapping that repeats a key declines the document, as saphyr's
         // loader refused it: which entry the check side reads is not this
         // resolver's to guess. Keys compare as saphyr's loader compared them,
@@ -290,6 +344,9 @@ struct SpanIndex<'t> {
     /// Each mapping's scalar entries, `(key node, value node)` by `(mapping
     /// node, key)`.
     keys: HashMap<(usize, ScalarOwned), (usize, usize)>,
+    /// The nodes an alias or a merge names: an edit at one, or inside one,
+    /// changes every alias of it as well, so none is edited.
+    referenced: HashSet<usize>,
     root: usize,
 }
 
@@ -331,6 +388,7 @@ impl<'t> SpanIndex<'t> {
             offsets: CharOffsets::new(stripped),
             nodes: walk.nodes,
             keys: walk.keys,
+            referenced: walk.referenced,
             root: walk.root?,
         })
     }
@@ -339,12 +397,17 @@ impl<'t> SpanIndex<'t> {
     /// through an alias declines (saphyr's loader would follow a copy of the
     /// anchored node, whose spans point at the anchor's definition, so an edit
     /// there would change every alias of it), as does one through a non-string
-    /// key or a collection under a tag outside the core schema.
+    /// key or a collection under a tag outside the core schema. So does a path
+    /// to or through a node an alias or a merge names, where the edit would
+    /// change what each of them reads as well.
     fn find(&self, path: &[PathSeg]) -> Option<usize> {
         let mut node = self.root;
         for seg in path {
+            if self.referenced.contains(&node) {
+                return None;
+            }
             node = match (seg, &self.nodes[node]) {
-                (PathSeg::Key(key), Node::Mapping { plain: true }) => {
+                (PathSeg::Key(key), Node::Mapping { plain: true, .. }) => {
                     self.keys.get(&(node, ScalarOwned::String(key.clone())))?.1
                 }
                 (
@@ -357,7 +420,7 @@ impl<'t> SpanIndex<'t> {
                 _ => return None,
             };
         }
-        Some(node)
+        (!self.referenced.contains(&node)).then_some(node)
     }
 
     /// The byte range `set_value` replaces for the scalar at `path`: the scalar
@@ -448,10 +511,77 @@ impl<'t> SpanIndex<'t> {
         fits.then_some((start, at))
     }
 
-    /// The byte range `remove_value` deletes for the block-mapping entry at `path`:
-    /// the target key's WHOLE physical line (through its trailing newline), so the
-    /// splice is a clean line removal. `saphyr` is read-only (no edit CST), so this
-    /// is a hand-rolled line scan -- CONSERVATIVE to stay provably minimal (the
+    /// The edit `remove_value` makes for each of `paths` (see [`Self::removal`]):
+    /// the entry's line deleted, or, for the last of the entries when the
+    /// paths remove every entry of a block mapping, the entry replaced with
+    /// `{}`, which keeps the mapping a mapping where deleting each line would
+    /// leave an empty value, null. Ranges in the caller's bytes (BOM
+    /// included).
+    fn removal_edits(&self, paths: &[Vec<PathSeg>]) -> Vec<Option<(Range<usize>, &'static str)>> {
+        let removals: Vec<Option<Removal>> = paths.iter().map(|path| self.removal(path)).collect();
+        // Each mapping's removed keys, and the line of the last of them.
+        let mut removed: HashMap<usize, (HashSet<usize>, usize, usize)> = HashMap::new();
+        for removal in removals.iter().flatten() {
+            let (keys, last_line, last_key) =
+                removed
+                    .entry(removal.parent)
+                    .or_insert((HashSet::new(), 0, removal.key));
+            keys.insert(removal.key);
+            if removal.line.start >= *last_line {
+                *last_line = removal.line.start;
+                *last_key = removal.key;
+            }
+        }
+        let emptied: HashSet<usize> = removed
+            .into_iter()
+            .filter(|(parent, (keys, ..))| match self.nodes[*parent] {
+                Node::Mapping {
+                    entries, opened, ..
+                } => keys.len() == entries && !self.opens_flow(opened),
+                _ => false,
+            })
+            .map(|(_, (_, _, last_key))| last_key)
+            .collect();
+        let shift = |range: Range<usize>| range.start + self.bom_len..range.end + self.bom_len;
+        removals
+            .into_iter()
+            .map(|removal| {
+                let removal = removal?;
+                Some(if emptied.contains(&removal.key) {
+                    (shift(removal.entry), "{}")
+                } else {
+                    (shift(removal.line), "")
+                })
+            })
+            .collect()
+    }
+
+    /// The range [`Self::removal`] deletes for `path` alone, in the caller's
+    /// bytes: `None` for a block mapping's only entry, which becomes `{}`.
+    fn removal_span(&self, path: &[PathSeg]) -> Option<Range<usize>> {
+        let removal = self.removal(path)?;
+        if let Node::Mapping {
+            entries: 1, opened, ..
+        } = self.nodes[removal.parent]
+            && !self.opens_flow(opened)
+        {
+            return None;
+        }
+        Some(removal.line.start + self.bom_len..removal.line.end + self.bom_len)
+    }
+
+    /// Whether a mapping whose start event's span ends at character `opened`
+    /// is a flow mapping, whose `{` that span ends with.
+    fn opens_flow(&self, opened: usize) -> bool {
+        self.offsets
+            .byte(self.text, opened)
+            .is_some_and(|at| self.text[..at].ends_with('{'))
+    }
+
+    /// The block-mapping entry `remove_value` deletes at `path`: the target
+    /// key's WHOLE physical line (through its trailing newline), so the splice
+    /// is a clean line removal. `saphyr` is read-only (no edit CST), so this is
+    /// a hand-rolled line scan -- CONSERVATIVE to stay provably minimal (the
     /// over-deletion class): resolves ONLY when
     ///   - the last path segment is a mapping KEY (sequence-element removal declines);
     ///   - the value is a single-line SCALAR, or an alias of one (a block `|`/`>` or
@@ -459,32 +589,41 @@ impl<'t> SpanIndex<'t> {
     ///     delete would orphan the continuation);
     ///   - the KEY OWNS its line (only indentation precedes it) -- so a FLOW-mapping
     ///     member (`x: {a: 1, b: 2}`, key not at line start) declines rather than
-    ///     delete the whole `x:` line and eat its siblings.
+    ///     delete the whole `x:` line and eat its siblings;
+    ///   - no alias or merge names the key, the value or a node on the path to
+    ///     them, whose aliases the removal would change too.
     ///
     /// Deleting exactly that one line removes exactly the one entry (block mappings
-    /// are one entry per line); a trailing `# comment` on the line goes with it. The
-    /// `Absent` re-verify catches any residual syntax breakage (e.g. a now-dangling
-    /// anchor alias).
-    fn removal_span(&self, path: &[PathSeg]) -> Option<Range<usize>> {
+    /// are one entry per line); a trailing `# comment` on the line goes with it.
+    /// What the line scan cannot see, a neighbour the deletion changes (a line
+    /// after it that joins a block scalar kept with `|+`, an explicit `?` key
+    /// that takes the next entry's value), the fixer's check of the whole
+    /// document after the edit declines (`structured_fix::checked_removal_edits`).
+    fn removal(&self, path: &[PathSeg]) -> Option<Removal> {
         // The last segment must be a mapping KEY (sequence-element removal deferred).
         let (PathSeg::Key(target), parents) = path.split_last()? else {
             return None;
         };
         let parent = self.find(parents)?;
-        let Node::Mapping { plain: true } = self.nodes[parent] else {
+        let Node::Mapping { plain: true, .. } = self.nodes[parent] else {
             return None;
         };
         let (key, value) = *self
             .keys
             .get(&(parent, ScalarOwned::String(target.clone())))?;
+        if self.referenced.contains(&key) || self.referenced.contains(&value) {
+            return None;
+        }
         // The value must be a SCALAR (a mapping/sequence value is multi-line); an
         // alias of an anchored scalar removes with its line like the scalar.
-        let value_end = match &self.nodes[value] {
-            Node::Scalar(scalar) if scalar.value => scalar.span.end,
+        let (value_span, scalar) = match &self.nodes[value] {
+            Node::Scalar(scalar) if scalar.value => (&scalar.span, Some(scalar)),
             Node::Alias {
                 span,
                 target: Some(target),
-            } if matches!(&self.nodes[*target], Node::Scalar(scalar) if scalar.value) => span.end,
+            } if matches!(&self.nodes[*target], Node::Scalar(scalar) if scalar.value) => {
+                (span, None)
+            }
             _ => return None,
         };
         let key_start = match &self.nodes[key] {
@@ -494,7 +633,7 @@ impl<'t> SpanIndex<'t> {
         };
         let text = self.text;
         // The entry, from the key start to the value end, must be single-line.
-        let entry = self.bytes(&(key_start..value_end))?;
+        let entry = self.bytes(&(key_start..value_span.end))?;
         if text.get(entry.clone())?.contains('\n') {
             return None;
         }
@@ -524,7 +663,28 @@ impl<'t> SpanIndex<'t> {
         if !(tail.is_empty() || tail.starts_with('#')) {
             return None;
         }
-        Some(line_start + self.bom_len..line_end + self.bom_len)
+        // A quoted value's span runs over the comment after it; the entry ends
+        // at its closing quote, past the value's properties.
+        let entry_end = match scalar {
+            Some(scalar) => {
+                let raw = self.bytes(value_span)?;
+                let content = self
+                    .past_properties(scalar, raw.clone())
+                    .map_or(raw.start, |(_, content)| content);
+                if content < raw.end {
+                    clamp_quoted_scalar_span(text, content..raw.end).end
+                } else {
+                    raw.end
+                }
+            }
+            None => entry.end,
+        };
+        Some(Removal {
+            parent,
+            key,
+            line: line_start..line_end,
+            entry: entry.start..entry_end,
+        })
     }
 
     /// A character span as a byte range of [`Self::text`].

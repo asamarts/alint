@@ -151,9 +151,10 @@ fn an_alias_bomb_is_read_in_one_pass_over_its_events() {
 }
 
 /// YAML-14: saphyr's scalar span starts at the anchor, so a set replaced
-/// `&x 1` whole and dropped the anchor, breaking every `*x` after it. The set
-/// span starts past the anchor; a core-schema tag goes with the value (the
-/// serialized value carries its own type).
+/// `&x 1` whole and dropped the anchor. The set span starts past the anchor;
+/// a core-schema tag goes with the value (the serialized value carries its
+/// own type). An anchor that an alias names declines the set (see
+/// [`an_edit_at_a_node_an_alias_names_declines`]).
 #[test]
 fn a_set_keeps_the_anchor() {
     let set = |src: &str, path: &[PathSeg], to: &str| -> Option<String> {
@@ -162,28 +163,23 @@ fn a_set_keeps_the_anchor() {
         out.replace_range(span, to);
         Some(out)
     };
-    let src = "a: &x 1\nb: *x\n";
+    let src = "a: &x 1\nb: 2\n";
     let out = set(src, &[key("a")], "5").unwrap();
-    assert_eq!(out, "a: &x 5\nb: *x\n");
-    // The edited file re-parses with the anchor in place: the alias reads the
-    // new value.
+    assert_eq!(out, "a: &x 5\nb: 2\n");
     let value = Format::Yaml.parse(&out).unwrap();
-    assert_eq!(
-        (value["a"].clone(), value["b"].clone()),
-        (5.into(), 5.into())
-    );
+    assert_eq!(value["a"], 5);
 
     let cases = [
         // A core tag after the anchor is replaced, the anchor kept.
-        ("a: &x !!str 5\nb: *x\n", "a: &x 6\nb: *x\n"),
+        ("a: &x !!str 5\n", "a: &x 6\n"),
         // A core tag alone is replaced, as before.
         ("a: !!str 5\n", "a: 6\n"),
         // A quoted scalar with an anchor clamps at its closing quote, so the
         // comment stays (the span ran to the end of the line).
-        ("a: &x \"q\"  # keep\nb: *x\n", "a: &x 6  # keep\nb: *x\n"),
+        ("a: &x \"q\"  # keep\n", "a: &x 6  # keep\n"),
         ("a: &x 'it''s'  # keep\n", "a: &x 6  # keep\n"),
         // In a flow sequence, and with anchor names saphyr reads past a `:`.
-        ("s: [&x 1, *x]\n", "s: [&x 6, *x]\n"),
+        ("s: [&x 1, 2]\n", "s: [&x 6, 2]\n"),
         // In a BOM file, with tabs after the anchor.
         ("\u{feff}a: &x\t\t1\n", "\u{feff}a: &x\t\t6\n"),
     ];
@@ -239,9 +235,16 @@ fn a_path_through_an_alias_declines() {
         resolve_removal_span(Format::Yaml, block.as_bytes(), &[key("a"), key("b")]),
         None
     );
-    // The anchored node itself stays editable.
-    let span = resolve_value_span(Format::Yaml, block.as_bytes(), &[key("x"), key("b")]).unwrap();
-    assert_eq!(&block[span], "1");
+    // So does the anchored node itself, which the alias reads (see
+    // `an_edit_at_a_node_an_alias_names_declines`); with no alias, it stays
+    // editable.
+    assert_eq!(
+        resolve_value_span(Format::Yaml, block.as_bytes(), &[key("x"), key("b")]),
+        None
+    );
+    let unnamed = "x: &x\n  b: 1\na: 2\n";
+    let span = resolve_value_span(Format::Yaml, unnamed.as_bytes(), &[key("x"), key("b")]).unwrap();
+    assert_eq!(&unnamed[span], "1");
     // A removal whose value is an alias of a scalar removes the line, as
     // before; a merge key leaves the explicit keys beside it reachable.
     let alias_value = "y: &y 1\nx: 1\na: *y\n";
@@ -465,6 +468,19 @@ mod reference {
             span,
             through_alias,
         }
+    }
+
+    /// How many entries the mapping that holds the last key of `path` has.
+    /// (The old resolver removed no member of the generator's flow mappings,
+    /// whose members never own their lines, so any such mapping is a block
+    /// one.)
+    pub(super) fn parent(stripped: &str, doc: &MarkedYaml<'_>, path: &[PathSeg]) -> Option<usize> {
+        let (_, parents) = path.split_last()?;
+        let node = walk(stripped, doc, parents, &mut false)?;
+        let YamlData::Mapping(m) = &node.data else {
+            return None;
+        };
+        Some(m.len())
     }
 
     pub(super) fn get_key<'a, 'i>(
@@ -791,6 +807,11 @@ proptest::proptest! {
         paths.extend([vec![key("a"), key("zz")], vec![idx(7)]]);
         let values = resolve_value_spans(Format::Yaml, src.as_bytes(), &paths);
         let removals = resolve_removal_spans(Format::Yaml, src.as_bytes(), &paths);
+        // An alias names an anchored node, at which the new resolver declines
+        // an edit (see `an_edit_at_a_node_an_alias_names_declines`); the
+        // generator writes `*` in aliases only.
+        let aliased = src.contains('*');
+        let doc = reference::load(stripped);
         for (path, (value, removal)) in paths.iter().zip(values.into_iter().zip(removals)) {
             proptest::prop_assert_eq!(
                 &value,
@@ -807,12 +828,24 @@ proptest::proptest! {
                 } else {
                     expected_value_span(&src, old_span)
                 };
-                proptest::prop_assert_eq!(&value, &want, "set {:?} in {:?}", path, src);
+                proptest::prop_assert!(
+                    value == want || (value.is_none() && aliased),
+                    "set {:?} in {:?}: {:?}, not {:?}", path, src, value, want
+                );
             }
             let old = reference::removal_span(&src, path);
             if let Some(old_span) = old.span {
-                let want = (!old.through_alias).then_some(old_span);
-                proptest::prop_assert_eq!(&removal, &want, "remove {:?} in {:?}", path, src);
+                // The only entry of a block mapping becomes `{}`, not a
+                // deleted line.
+                let only = doc
+                    .as_ref()
+                    .and_then(|doc| reference::parent(stripped, doc, path))
+                    .is_some_and(|entries| entries == 1);
+                let want = (!old.through_alias && !only).then_some(old_span);
+                proptest::prop_assert!(
+                    removal == want || (removal.is_none() && aliased),
+                    "remove {:?} in {:?}: {:?}, not {:?}", path, src, removal, want
+                );
             }
         }
     }

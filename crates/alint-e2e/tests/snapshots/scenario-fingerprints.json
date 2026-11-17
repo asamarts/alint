@@ -2418,6 +2418,30 @@
     "fingerprint": "cb361760edb881c1c2d12f54cf7588a89eb243ee9d17502432e71b0d9db85c8e"
   },
   {
+    "scenario": "fix/remove_value_yaml_keep_chomp_declined.yml",
+    "rule_id": "no-debug",
+    "path": "app.yaml",
+    "fingerprint": "1fc62b146e44751d397b6680fc48fd105539d5f8ecac5e96c70f36190cdea2a8"
+  },
+  {
+    "scenario": "fix/remove_value_yaml_last_entry_leaves_empty_mapping.yml",
+    "rule_id": "no-a",
+    "path": "two.yaml",
+    "fingerprint": "1ac0df76c653cff7cb20d4d6a139833e47234071a0e43f59a53177fae69e2c4e"
+  },
+  {
+    "scenario": "fix/remove_value_yaml_last_entry_leaves_empty_mapping.yml",
+    "rule_id": "no-b",
+    "path": "two.yaml",
+    "fingerprint": "0564a3edaace051834412bfc98faa53d7f8d32bc7746ec53f9c1bf9c6deb2453"
+  },
+  {
+    "scenario": "fix/remove_value_yaml_last_entry_leaves_empty_mapping.yml",
+    "rule_id": "no-lodash",
+    "path": "one.yaml",
+    "fingerprint": "3679eddf981513c12bda6599bd1bab465fe3d778cb8d0e75684bfd3327ded178"
+  },
+  {
     "scenario": "fix/replace.yml",
     "rule_id": "no-console",
     "path": "app.js",
@@ -2614,6 +2638,12 @@
     "rule_id": "defaults-nine",
     "path": "app.yaml",
     "fingerprint": "3f4223c1b27c709b4905580e035d813f7509395f9ce0e6c8aebb9e114762fa7f"
+  },
+  {
+    "scenario": "fix/set_value_yaml_keeps_anchor.yml",
+    "rule_id": "defaults-nine",
+    "path": "solo.yaml",
+    "fingerprint": "9ad3a79154fafeac74f427149e624edf0f8dc6bbe5d58dbb2f6c83ae1519c8f7"
   },
   {
     "scenario": "fix/set_value_yaml_quoted_preserves_comment.yml",

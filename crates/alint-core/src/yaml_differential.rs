@@ -38,7 +38,7 @@ mod allowlist;
 #[cfg(test)]
 mod configuration;
 #[cfg(test)]
-mod generate;
+pub(crate) mod generate;
 mod neutralize;
 mod predicates;
 mod rule_errors;

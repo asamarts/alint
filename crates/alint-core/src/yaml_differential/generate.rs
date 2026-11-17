@@ -1,6 +1,6 @@
 //! The harness's inputs: seeded token soup, generated documents, generated
 //! configurations, and mutations of a document. The same seed always gives
-//! the same inputs.
+//! the same inputs. The structured fixes' tests edit the documents too.
 
 use std::fmt::Write as _;
 
@@ -8,10 +8,10 @@ pub(super) use super::configuration::configuration;
 
 /// `SplitMix64`: small, fast and deterministic, which is all an input generator
 /// needs.
-pub(super) struct Rng(u64);
+pub(crate) struct Rng(u64);
 
 impl Rng {
-    pub(super) fn new(seed: u64) -> Self {
+    pub(crate) fn new(seed: u64) -> Self {
         Self(seed)
     }
 
@@ -25,7 +25,7 @@ impl Rng {
 
     /// A number in `0..bound`; `bound` must not be zero.
     #[allow(clippy::cast_possible_truncation)]
-    pub(super) fn below(&mut self, bound: usize) -> usize {
+    pub(crate) fn below(&mut self, bound: usize) -> usize {
         (self.next_u64() % bound as u64) as usize
     }
 
@@ -205,7 +205,7 @@ pub(super) fn token_soup(rng: &mut Rng, specials: bool) -> String {
 /// are valid YAML; the specials, when set, land inside scalars and comments.
 /// A few are aliases that fan out, which only the oracle's count of alias
 /// uses refuses.
-pub(super) fn document(rng: &mut Rng, specials: bool) -> String {
+pub(crate) fn document(rng: &mut Rng, specials: bool) -> String {
     if rng.chance(1, 40) {
         return fan_out(rng);
     }
@@ -589,7 +589,7 @@ impl Writer<'_> {
 
 /// `text` with one random edit: a line dropped, repeated, re-indented or cut
 /// short, a token inserted, or two lines swapped.
-pub(super) fn mutate(rng: &mut Rng, text: &str, specials: bool) -> String {
+pub(crate) fn mutate(rng: &mut Rng, text: &str, specials: bool) -> String {
     let mut lines: Vec<String> = text.split_inclusive('\n').map(str::to_string).collect();
     if lines.is_empty() {
         return token_soup(rng, specials);

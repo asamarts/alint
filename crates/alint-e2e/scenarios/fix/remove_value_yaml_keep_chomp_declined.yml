@@ -1,0 +1,49 @@
+test_version: 1
+name: remove_value declines a YAML line removal that would change a block scalar kept with |+
+tags: [fix, yaml_path_absent, remove_value, yaml, safety]
+
+# Deleting the `debug` line leaves the blank line after it right after the
+# `notes` block scalar, whose `+` keeps trailing blank lines: `notes` would
+# read "Keep this.\n\n", not "Keep this.\n". The removal's own target is gone
+# either way, so a check of `$.debug` alone passed it. The fixer re-reads
+# the whole document after the edit, sees `notes` change, and declines:
+# the fix is `skipped` and the file stays byte-for-byte the same.
+
+given:
+  tree:
+    app.yaml: |+
+      notes: |+
+        Keep this.
+      debug: true
+
+      other: 1
+  config: |
+    version: 1
+    rules:
+      - id: no-debug
+        kind: yaml_path_absent
+        paths: "**/*.yaml"
+        path: "$['debug']"
+        level: error
+        fix:
+          remove_value: { applicability: safe }
+
+when: [check, fix, check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - {rule: no-debug, level: error, path: app.yaml}
+  - exit: policy_failure
+    skipped: [no-debug]
+  - exit: policy_failure
+    violations:
+      - {rule: no-debug, level: error, path: app.yaml}
+
+expect_tree:
+  app.yaml: |+
+    notes: |+
+      Keep this.
+    debug: true
+
+    other: 1

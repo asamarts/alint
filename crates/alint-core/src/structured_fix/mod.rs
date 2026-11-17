@@ -30,6 +30,12 @@
 use crate::structured_format::Format;
 use std::ops::Range;
 
+mod exact;
+pub use exact::{
+    Intent, checked_removal_edits, checked_value_edits, checks_whole_document, intended,
+    is_exact_edit,
+};
+
 /// One concrete step of a resolved `JSONPath` location: an object key or an
 /// array index. The `alint-rules` fixer converts a
 /// `serde_json_path::NormalizedPath` into a `Vec<PathSeg>` so this crate need
@@ -66,7 +72,9 @@ pub fn resolve_value_span(format: Format, bytes: &[u8], path: &[PathSeg]) -> Opt
 /// The byte range `remove_value` deletes for the node at `path` -- the node and
 /// its format-specific separator (for HCL, the whole `key = value` line
 /// including its trailing newline). `None` under the same conditions as
-/// [`resolve_value_span`].
+/// [`resolve_value_span`], and for the only entry of a YAML block mapping,
+/// which a removal replaces with `{}` rather than deletes (see
+/// [`resolve_removal_edits`]).
 #[must_use]
 pub fn resolve_removal_span(
     format: Format,
@@ -106,7 +114,11 @@ pub fn resolve_value_spans(
 }
 
 /// [`resolve_removal_span`] for each of `paths`, in order, with one parse of a
-/// YAML document for all of them (see [`resolve_value_spans`]).
+/// YAML document for all of them (see [`resolve_value_spans`]). Each range is
+/// the path's alone: where the paths remove every entry of a YAML block
+/// mapping, deleting all their ranges leaves the mapping's key with no value,
+/// which reads as null, and [`resolve_removal_edits`] gives the edits that
+/// keep it a mapping.
 #[must_use]
 pub fn resolve_removal_spans(
     format: Format,
@@ -118,6 +130,31 @@ pub fn resolve_removal_spans(
         _ => paths
             .iter()
             .map(|path| resolve_removal_span(format, bytes, path))
+            .collect(),
+    }
+}
+
+/// The edit `remove_value` makes for each of `paths`, in order: the range it
+/// replaces and what it puts there. That is [`resolve_removal_span`]'s range,
+/// deleted, but in YAML, where the paths remove every entry of a block
+/// mapping: that mapping's last entry becomes `{}`, which keeps it a mapping,
+/// as JSON's `{}` and TOML's table are, where an empty block mapping reads as
+/// null. The fixer checks the result against the whole document
+/// ([`checked_removal_edits`]).
+#[must_use]
+pub fn resolve_removal_edits(
+    format: Format,
+    bytes: &[u8],
+    paths: &[Vec<PathSeg>],
+) -> Vec<Option<(Range<usize>, Vec<u8>)>> {
+    match (format, std::str::from_utf8(bytes)) {
+        (Format::Yaml, Ok(text)) => yaml_::yaml_removal_edits(text, paths)
+            .into_iter()
+            .map(|edit| edit.map(|(range, with)| (range, with.as_bytes().to_vec())))
+            .collect(),
+        _ => resolve_removal_spans(format, bytes, paths)
+            .into_iter()
+            .map(|range| range.map(|range| (range, Vec::new())))
             .collect(),
     }
 }
