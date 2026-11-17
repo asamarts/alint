@@ -604,7 +604,7 @@ fn bom_prefixed_config_bombs_are_rejected_before_they_expand() {
     let n = 60_000;
     let flow = format!("\u{feff}--- 'x: {}1{}\n'\n", "[".repeat(n), "]".repeat(n));
     let alias = format!(
-        "\u{feff}--- 'k: {{a: &a [{}], b: [{}], c: \"{{{{env.HOME}}}}\"}}\n'\n",
+        "\u{feff}--- 'k: {{a: &a [{}], b: [{}], c: \"{{{{env.HOME | default(\"x\")}}}}\"}}\n'\n",
         "1,".repeat(1000),
         "*a,".repeat(50_000)
     );
