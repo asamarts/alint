@@ -30,7 +30,7 @@ use std::collections::{HashMap, HashSet};
 
 use alint_core::relation::Value;
 use alint_core::relation::plan::{
-    FieldDef, FieldSource, JoinSide, Member, PathToken, Plan, Predicate, Reached, Reader,
+    FieldDef, FieldSource, JoinSide, Member, PathToken, Plan, Predicate, Reached, Read, Reader,
     RelationDef, RelationId, Rows, SelectorDef, SelectorRef, Transform,
 };
 use alint_core::{Error, Result};
@@ -60,6 +60,8 @@ struct Fields<'p> {
     transformed: Vec<HashSet<&'p str>>,
     /// What [`Fields::holds`] found, by relation and field.
     holds: RefCell<HashMap<(usize, &'p str), Holds>>,
+    /// What [`Fields::copied`] found, by relation and field.
+    copied: RefCell<HashMap<(usize, &'p str), Option<&'p FieldSource>>>,
 }
 
 impl<'p> Fields<'p> {
@@ -90,7 +92,49 @@ impl<'p> Fields<'p> {
             declared,
             transformed,
             holds: RefCell::default(),
+            copied: RefCell::default(),
         }
+    }
+
+    /// The source field `field` of relation `id` takes its value from before
+    /// its own transforms run: its own source, or for a join's `left.F` or
+    /// `right.F` the source of the side's field it copies, followed while no
+    /// field it copies is transformed (`None` once one is, or when a field
+    /// is missing). Each field a chain passes is found once, and remembered.
+    fn copied(&self, id: RelationId, field: &'p str) -> Option<&'p FieldSource> {
+        let mut known = self.copied.borrow_mut();
+        let mut walked = Vec::new();
+        let mut at = (id.0, field);
+        let mut found = None;
+        for _ in 0..=self.plan.relations.len() {
+            if let Some(&held) = known.get(&at) {
+                found = held;
+                break;
+            }
+            walked.push(at);
+            let Some(definition) = self.field(RelationId(at.0), at.1) else {
+                break;
+            };
+            let FieldSource::Side(side, name) = &definition.source else {
+                found = Some(&definition.source);
+                break;
+            };
+            let Rows::Join(join) = &self.plan.relations[at.0].relation.rows else {
+                break;
+            };
+            let next = match side {
+                JoinSide::Left => join.left.id,
+                JoinSide::Right => join.right.id,
+            };
+            if self.transformed[next.0].contains(name.as_str()) {
+                break;
+            }
+            at = (next.0, name.as_str());
+        }
+        for step in walked {
+            known.insert(step, found);
+        }
+        found
     }
 
     /// Field `name` of relation `id`, as [`RelationDef::field`] finds it.
@@ -390,7 +434,7 @@ fn not_a_field(field: &str, of: &str, relation: &RelationDef) -> String {
 }
 
 /// Why a union part reading with `reader` cannot bind a field from `source`.
-fn unbound(reader: &Reader, source: &FieldSource) -> Option<&'static str> {
+fn unbound(reader: &Reader, source: &FieldSource) -> Option<String> {
     let entry = matches!(
         source,
         FieldSource::EntryKey
@@ -400,13 +444,50 @@ fn unbound(reader: &Reader, source: &FieldSource) -> Option<&'static str> {
             | FieldSource::EntryPath
     );
     match reader {
-        Reader::Entries(_) if *source == FieldSource::Value => {
-            Some("`value` is a `read:` row's value; an `entries:` row has `entry.value`")
-        }
+        Reader::Entries(_) if *source == FieldSource::Value => Some(
+            "`value` is a `read:` row's value; an `entries:` row has `entry.value`".to_string(),
+        ),
         Reader::Read { .. } if entry => {
-            Some("`entry.*` sources need `entries:`; a `read:` row has `value`")
+            Some("`entry.*` sources need `entries:`; a `read:` row has `value`".to_string())
+        }
+        Reader::Read { read, .. } if matches!(source, FieldSource::Bound(_)) => {
+            unstructured_form(read).map(super::decode::unbound_by)
         }
         _ => None,
+    }
+}
+
+/// What a part binds, by its reader: the parts of one kind bind the same
+/// fields ([`unbound`]).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ReaderKind {
+    Entries,
+    /// A `read:` of a JSON, YAML or TOML document.
+    Document,
+    /// A `read:` of the file as text.
+    Text,
+}
+
+impl ReaderKind {
+    const ALL: [Self; 3] = [Self::Entries, Self::Document, Self::Text];
+
+    const fn of(reader: &Reader) -> Self {
+        match reader {
+            Reader::Entries(_) => Self::Entries,
+            Reader::Read { read, .. } if unstructured_form(read).is_none() => Self::Document,
+            Reader::Read { .. } => Self::Text,
+        }
+    }
+}
+
+/// The key of a `read:` form that reads the file as text (`regex`, `lines`,
+/// `whole_file`), and so binds no `bound:` field; `None` for a document.
+const fn unstructured_form(read: &Read) -> Option<&'static str> {
+    match read {
+        Read::Json(_) | Read::Yaml(_) | Read::Toml(_) => None,
+        Read::Regex(_) => Some("regex"),
+        Read::Lines { .. } => Some("lines"),
+        Read::WholeFile => Some("whole_file"),
     }
 }
 
@@ -440,19 +521,16 @@ fn check_rows(fields: &Fields<'_>, relation: &RelationDef, at: &At<'_>) -> Resul
     let plan = fields.plan;
     match &relation.rows {
         Rows::Union(parts) => {
-            // A part binds a field unless its reader is of the other kind, so
-            // the first part of each kind is the first a field can fail on.
-            let mut firsts: Vec<usize> = [
-                parts
-                    .iter()
-                    .position(|part| matches!(part.reader, Reader::Entries(_))),
-                parts
-                    .iter()
-                    .position(|part| matches!(part.reader, Reader::Read { .. })),
-            ]
-            .into_iter()
-            .flatten()
-            .collect();
+            // Whether a part binds a field depends only on its reader's kind,
+            // so the first part of each kind is the first a field can fail on.
+            let mut firsts: Vec<usize> = ReaderKind::ALL
+                .into_iter()
+                .filter_map(|kind| {
+                    parts
+                        .iter()
+                        .position(|part| ReaderKind::of(&part.reader) == kind)
+                })
+                .collect();
             firsts.sort_unstable();
             for (name, field) in &relation.fields {
                 for &index in &firsts {
@@ -526,12 +604,26 @@ fn check_transforms(fields: &Fields<'_>, id: RelationId, at: &At<'_>) -> Result<
                 not_a_field(field_name, &format!("relation `{}`", named.name), relation),
             ));
         };
+        // A join's output field holds what the side's field it copies held.
+        let origin = fields.copied(id, field_name);
+        let bound_to = match (&field.source, origin) {
+            (FieldSource::Side(..), Some(origin)) => format!(
+                "`{}`, a copy of `{}`",
+                source_text(&field.source),
+                source_text(origin)
+            ),
+            (FieldSource::Side(..), None) => format!(
+                "`{}`, a copy of a transformed field",
+                source_text(&field.source)
+            ),
+            (source, _) => format!("`{}`", source_text(source)),
+        };
         for (index, transform) in transforms.iter().enumerate() {
             let problem = match transform {
-                Transform::StripRoot if field.source != FieldSource::EntryPath => Some(format!(
+                Transform::StripRoot if origin != Some(&FieldSource::EntryPath) => Some(format!(
                     "`strip-root` drops the first segment of a key path, so it applies only to a \
-                     field bound to `entry.path`; `{field_name}` is bound to `{}`",
-                    source_text(&field.source)
+                     field bound to `entry.path`, or to a join's copy of one no transform has \
+                     changed; `{field_name}` is bound to {bound_to}"
                 )),
                 Transform::StripRoot if index > 0 => Some(format!(
                     "`strip-root` reads the segments of the key path `entry.path` binds, so it \
@@ -540,17 +632,13 @@ fn check_transforms(fields: &Fields<'_>, id: RelationId, at: &At<'_>) -> Result<
                     transform_text(transforms[index - 1])
                 )),
                 Transform::SemverMajor | Transform::SemverMinor
-                    if matches!(
-                        field.source,
-                        FieldSource::Path(PathToken::Path | PathToken::Dir | PathToken::Ext)
-                            | FieldSource::EntryPath
-                    ) =>
+                    if matches!(origin, Some(FieldSource::Path(_) | FieldSource::EntryPath)) =>
                 {
                     Some(format!(
-                        "`{}` reads a version, and `{field_name}` is bound to `{}`, which never \
-                         holds one; apply it to the field that holds the version",
+                        "`{}` reads a version, and `{field_name}` is bound to {bound_to}, which \
+                         names where a value is, not a version; apply it to the field that holds \
+                         the version",
                         transform_text(*transform),
-                        source_text(&field.source)
                     ))
                 }
                 _ => None,

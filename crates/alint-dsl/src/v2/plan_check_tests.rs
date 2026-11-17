@@ -165,6 +165,52 @@ fn every_part_of_a_union_binds_every_field() {
     .expect("both parts bind `path` and `value`");
 }
 
+/// A `bound:` field reads a JSON, YAML or TOML document, so a union part
+/// that reads the file as text cannot bind it, wherever it stands.
+#[test]
+fn a_union_part_that_reads_text_binds_no_bound_field() {
+    for (first, second, index, form) in [
+        (
+            "read: { json: $.v }",
+            "read: { regex: 'v(.*)' }",
+            1,
+            "regex",
+        ),
+        ("read: { lines: {} }", "read: { yaml: $.v }", 0, "lines"),
+        (
+            "entries: { format: toml, at: $ }",
+            "read: { whole_file: {} }",
+            1,
+            "whole_file",
+        ),
+    ] {
+        let fields = if first.starts_with("entries") {
+            "{ name: 'bound: $.name' }"
+        } else {
+            "{ name: 'bound: $.name', v: value }"
+        };
+        assert_eq!(
+            problem(&format!(
+                "relations:\n  r:\n    union:\n      - {{ from: {{ paths: a }}, {first} }}\n      \
+                 - {{ from: {{ paths: b }}, {second} }}\n    fields: {fields}\n"
+            )),
+            format!(
+                ".alint.yml: `relations.r.fields.name`: every part of a union binds every field, \
+                 and `union[{index}]` cannot bind `bound: $.name`: a `bound:` field reads a value \
+                 from a JSON, YAML or TOML document, and a `read:` with `{form}:` reads the file \
+                 as text"
+            ),
+            "{first} {second}"
+        );
+    }
+    check_root(
+        "relations:\n  r:\n    union:\n      - { from: { paths: a }, read: { json: $.v } }\n      - \
+         { from: { paths: b }, read: { toml: $.v } }\n      - { from: { paths: c }, entries: { \
+         format: yaml, at: $ } }\n    fields: { name: 'bound: $.name', file: path }\n",
+    )
+    .expect("a document part and an `entries:` part bind `bound:`");
+}
+
 /// A join of `a` with `b` (one field, `id`), with `rest` appended.
 fn join(on: &str, fields: &str) -> String {
     format!(
@@ -256,7 +302,8 @@ fn strip_root_applies_first_to_an_entry_path() {
     assert_eq!(
         problem(&transformed("entry.key", "strip-root")),
         ".alint.yml: `relations.r.transform.f[0]`: `strip-root` drops the first segment of a key \
-         path, so it applies only to a field bound to `entry.path`; `f` is bound to `entry.key`"
+         path, so it applies only to a field bound to `entry.path`, or to a join's copy of one no \
+         transform has changed; `f` is bound to `entry.key`"
     );
     assert_eq!(
         problem(&transformed("entry.path", "lower, strip-root")),
@@ -272,25 +319,105 @@ fn strip_root_applies_first_to_an_entry_path() {
     );
 }
 
+/// Relation `r` reading `entries:`, with field `p` from `source` and
+/// `side_transforms` on it, and `j` joining `r` with itself, its field `f`
+/// copying `p` (through `k`, a second join, when `twice`) with `transforms`.
+fn copied(source: &str, side_transforms: &str, twice: bool, transforms: &str) -> String {
+    let (from, copy) = if twice {
+        ("k", "left.q")
+    } else {
+        ("r", "left.p")
+    };
+    let mut yaml = format!(
+        "relations:\n  r:\n    from: {{ paths: '*.json' }}\n    entries: {{ format: json, at: \
+         $, leaves: true }}\n    fields: {{ p: {source}, id: entry.value }}\n"
+    );
+    if !side_transforms.is_empty() {
+        writeln!(yaml, "    transform: {{ p: [{side_transforms}] }}").unwrap();
+    }
+    if twice {
+        yaml.push_str(
+            "  k:\n    join: { left: r, right: r, on: { id: id }, unique: right }\n    fields: { \
+             q: left.p, id: left.id }\n",
+        );
+    }
+    write!(
+        yaml,
+        "  j:\n    join: {{ left: {from}, right: r, on: {{ id: id }}, unique: right }}\n    \
+         fields: {{ f: {copy} }}\n    transform: {{ f: [{transforms}] }}\n"
+    )
+    .unwrap();
+    yaml
+}
+
+/// The evaluator keeps an `entry.path` value's segments through a join, so
+/// a join's copy of one takes `strip-root` while no transform has made it a
+/// plain string.
+#[test]
+fn strip_root_applies_to_a_join_copy_of_an_entry_path() {
+    check_root(&copied("entry.path", "", false, "strip-root, lower")).expect("checks");
+    check_root(&copied("entry.path", "", true, "strip-root")).expect("checks");
+    for (source, side_transforms, twice, bound_to) in [
+        ("entry.key", "", false, "`left.p`, a copy of `entry.key`"),
+        (
+            "entry.path",
+            "lower",
+            false,
+            "`left.p`, a copy of a transformed field",
+        ),
+        (
+            "entry.path",
+            "strip-root",
+            true,
+            "`left.q`, a copy of a transformed field",
+        ),
+        ("basename", "", true, "`left.q`, a copy of `basename`"),
+    ] {
+        assert_eq!(
+            problem(&copied(source, side_transforms, twice, "strip-root")),
+            format!(
+                ".alint.yml: `relations.j.transform.f[0]`: `strip-root` drops the first segment \
+                 of a key path, so it applies only to a field bound to `entry.path`, or to a \
+                 join's copy of one no transform has changed; `f` is bound to {bound_to}"
+            ),
+            "{source} [{side_transforms}] {twice}"
+        );
+    }
+}
+
+/// A path, a path token and a key path name where a value is, never a
+/// version a file holds, so a version transform refuses each of them, and a
+/// join's copy of one.
 #[test]
 fn a_version_transform_applies_to_a_field_that_may_hold_a_version() {
     check_root(&transformed("entry.value", "trim, semver-major")).expect("checks");
-    check_root(&transformed("basename", "semver-minor")).expect("a file name may be a version");
+    check_root(&copied("entry.value", "", true, "semver-minor")).expect("checks");
     for (source, transform) in [
         ("path", "semver-major"),
         ("dir", "semver-minor"),
+        ("basename", "semver-major"),
+        ("stem", "semver-minor"),
         ("ext", "semver-major"),
+        ("parent_name", "semver-minor"),
         ("entry.path", "semver-minor"),
     ] {
         assert_eq!(
             problem(&transformed(source, transform)),
             format!(
                 ".alint.yml: `relations.r.transform.f[0]`: `{transform}` reads a version, and \
-                 `f` is bound to `{source}`, which never holds one; apply it to the field that \
-                 holds the version"
+                 `f` is bound to `{source}`, which names where a value is, not a version; apply \
+                 it to the field that holds the version"
             )
         );
     }
+    assert_eq!(
+        problem(&copied("stem", "", true, "semver-major")),
+        ".alint.yml: `relations.j.transform.f[0]`: `semver-major` reads a version, and `f` is \
+         bound to `left.q`, a copy of `stem`, which names where a value is, not a version; apply \
+         it to the field that holds the version"
+    );
+    // A transform before the copy leaves a string that may hold one.
+    check_root(&copied("stem", "lower", true, "semver-major")).expect("checks");
 }
 
 /// Relation `r`, field `f` from `source`, filtered by `in: [literal]`.

@@ -202,12 +202,14 @@ rules: []
 | `entry.root` | `entries:` | the first key of its key path (`en` for `en.nav.home`) |
 | `entry.path` | `entries:` | its key path from the top (`nav.home`) |
 | `value` | `read:` | the extracted value |
-| `bound: <JSONPath>` | `entries:`, `read:` | a value read once per file (a manifest's `$.name`) |
+| `bound: <JSONPath>` | `entries:`, a document `read:` | a value read once per file (`$.name`) |
 | `left.<field>`, `right.<field>` | `join:` | a field of the matched row on that side |
 
-In a `union:`, a part binds `entry.*` only with `entries:` and `value` only with `read:`. A
-`bound:` path must match exactly once in each file. `sensitive: true` keeps a field's values out
-of messages, the JSON report and baselines.
+A document `read:` is one with `json:`, `yaml:` or `toml:`; one with `regex:`, `lines:` or
+`whole_file:` reads the file as text and binds no `bound:` field. In a `union:`, a part binds
+`entry.*` only with `entries:`, `value` only with `read:`, and `bound:` as a relation of its one
+part would. A `bound:` path must match exactly once in each file. `sensitive: true` keeps a
+field's values out of messages, the JSON report and baselines.
 
 ### `transform:`
 
@@ -216,9 +218,11 @@ of messages, the JSON report and baselines.
 - `trim` and `lower`, on strings;
 - `semver-major` and `semver-minor`, which keep the major, or the major and minor, part of a
   version (`^18.2.0` becomes `18` or `18.2`), as `cross_file`'s `normalize` does. They do not
-  apply to a path, a path token or an `entry.path`;
+  apply to a path, a path token or an `entry.path`, which name where a value is, nor to a join's
+  copy of one;
 - `strip-root`, which drops the first segment of an `entry.path` field (`en.nav.home` becomes
-  `nav.home`). It comes first in its list, and each file must have one top-level key.
+  `nav.home`), or of a join's copy of one that no transform has changed. It comes first in its
+  list, and each file must have one top-level key.
 
 ### `where:`
 
@@ -339,9 +343,10 @@ The whole relation plan is checked when the config loads, before any file is rea
 - every name and alias resolves, and relations that read each other are refused, naming the cycle
   (`` relation `a` reads itself: `a` -> `b` -> `a` ``);
 - every field a join's `on:`, a `left.<field>` or `right.<field>`, a `transform:` or a `where:`
-  names exists, and every part of a `union:` binds every field;
-- `strip-root` comes first on an `entry.path` field, and the version transforms are not applied
-  to a path, a path token or an `entry.path`;
+  names exists, a relation's rows bind each of its fields (no `bound:` field on a text `read:`),
+  and every part of a `union:` binds every field;
+- `strip-root` comes first on an `entry.path` field or a join's copy of one, and the version
+  transforms are not applied to a path, a path token or an `entry.path`;
 - each regex compiles, a `read:` regex has a capture group, and each JSONPath parses;
 - the literals in `in` and `not_in` can match.
 

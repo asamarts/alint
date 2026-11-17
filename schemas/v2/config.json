@@ -7532,6 +7532,31 @@
         }
       ]
     },
+    "v2_field_read_text": {
+      "description": "A field: its source, or a `{ source, sensitive }` map.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/v2_field_source_read_text"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "sensitive": {
+              "default": false,
+              "description": "Keep this field's values out of messages, the JSON report and baselines.",
+              "type": "boolean"
+            },
+            "source": {
+              "$ref": "#/$defs/v2_field_source_read_text"
+            }
+          },
+          "required": [
+            "source"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "v2_field_source_entries": {
       "anyOf": [
         {
@@ -7563,7 +7588,18 @@
           "$ref": "#/$defs/v2_source_bound"
         }
       ],
-      "description": "A field source of a `read:` relation: a path token, `value` or `bound: <JSONPath>`."
+      "description": "A field source of a `read:` relation of a JSON, YAML or TOML document: a path token, `value` or `bound: <JSONPath>`."
+    },
+    "v2_field_source_read_text": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/v2_source_path_token"
+        },
+        {
+          "$ref": "#/$defs/v2_source_value"
+        }
+      ],
+      "description": "A field source of a `read:` relation that reads the file as text (`regex:`, `lines:` or `whole_file:`): a path token or `value`. A `bound:` field reads a JSON, YAML or TOML document."
     },
     "v2_field_source_union": {
       "anyOf": [
@@ -7834,6 +7870,78 @@
               "additionalProperties": {
                 "$ref": "#/$defs/v2_field_read"
               }
+            },
+            "read": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "regex"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "lines"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "whole_file"
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          "required": [
+            "read",
+            "from"
+          ]
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "entries"
+                ]
+              },
+              {
+                "required": [
+                  "union"
+                ]
+              },
+              {
+                "required": [
+                  "join"
+                ]
+              }
+            ]
+          },
+          "properties": {
+            "fields": {
+              "additionalProperties": {
+                "$ref": "#/$defs/v2_field_read_text"
+              }
+            },
+            "read": {
+              "anyOf": [
+                {
+                  "required": [
+                    "regex"
+                  ]
+                },
+                {
+                  "required": [
+                    "lines"
+                  ]
+                },
+                {
+                  "required": [
+                    "whole_file"
+                  ]
+                }
+              ]
             }
           },
           "required": [
@@ -8139,7 +8247,7 @@
             },
             {
               "const": "strip-root",
-              "description": "Drop the first segment of an `entry.path` field (`en.nav.home` becomes `nav.home`). It applies to an `entry.path` field, first."
+              "description": "Drop the first segment of an `entry.path` field (`en.nav.home` becomes `nav.home`). It applies to an `entry.path` field, or a join's copy of one no transform has changed, first."
             }
           ],
           "type": "string"

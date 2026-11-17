@@ -496,9 +496,10 @@ pub(crate) struct RawConfig {
     #[serde(skip)]
     surface: v2::Surface,
     /// The selectors, relations and `extends:` aliases of every version 2
-    /// source merged into this config, each with its source. Inert until a
-    /// rule kind reads them (phase 7), so `finalize` drops them. Not part of
-    /// the schema.
+    /// source merged into this config, each with its source. `finalize`
+    /// resolves them into the checked plan it sets as the config's
+    /// `relation_plan`, which no rule reads until the `constraint` kind lands
+    /// (phase 7). Not part of the schema.
     #[serde(skip)]
     v2: v2::Objects,
 }

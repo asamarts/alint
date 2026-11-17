@@ -492,7 +492,9 @@ pub(crate) enum Command {
         /// Output format. `human` prints a one-line success or a
         /// rich error trace; `json` emits a stable
         /// `{"valid": bool, "rule_count": N, "config_path": ...,
-        /// "error": "...?"}` envelope for editor / CI consumption.
+        /// "config_version": N, "error": "...?", "warnings": [...]}`
+        /// envelope for editor / CI consumption (a failure carries no
+        /// `config_version` or `warnings`).
         #[arg(
             long,
             short = 'f',

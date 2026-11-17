@@ -417,6 +417,30 @@ fn shape_refusals() -> Vec<(&'static str, String)> {
             rel("{ from: s, entries: { format: json, at: $ }, fields: { f: value } }"),
         ),
         (
+            "`bound:` on a `read:` of text",
+            rel("{ from: s, read: { regex: 'v(.*)' }, fields: { f: 'bound: $.a' } }"),
+        ),
+        (
+            "an empty selector filter",
+            doc("selectors:\n  s: { paths: a, scope_filter: {} }\n"),
+        ),
+        (
+            "an empty `has_ancestor:` list",
+            doc("selectors:\n  s: { paths: a, scope_filter: { has_ancestor: [] } }\n"),
+        ),
+        (
+            "an empty `has_ancestor:` name",
+            doc("selectors:\n  s: { paths: a, scope_filter: { has_ancestor: [a, ''] } }\n"),
+        ),
+        (
+            "`bound:` on a `read:` of text",
+            rel("{ from: s, read: { lines: {} }, fields: { f: { source: 'bound: $.a' } } }"),
+        ),
+        (
+            "`bound:` on a `read:` of text",
+            rel("{ from: s, read: { whole_file: {} }, fields: { f: 'bound: $.a' } }"),
+        ),
+        (
             "a side outside a join",
             rel("{ from: s, read: { json: $ }, fields: { f: left.f } }"),
         ),

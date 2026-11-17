@@ -436,12 +436,15 @@ policy-test package the user does not trust.
     (`` `relations.titles.from`: no selector named `doc` in this config; the selectors it can
     reach are `docs` ``).
   - The relation plan is checked when the config loads, before any file is read: every field a
-    join's `on:`, a `left.F` or `right.F`, a `transform:` or a `where:` names exists; every part
-    of a `union:` binds every field; `strip-root` applies first to an `entry.path` field;
-    `semver-major` and `semver-minor` do not apply to a path, a directory, an extension or an
-    `entry.path`; a regex compiles and a `read:` regex has a capture group; a JSONPath parses; an
-    `in` or `not_in` literal is not null or a number, nor a boolean for a field that holds
-    strings; and relations that read each other are refused, naming the cycle
+    join's `on:`, a `left.F` or `right.F`, a `transform:` or a `where:` names exists; a relation's
+    rows bind each of its fields, so a `bound:` field needs `entries:` or a `read:` of JSON, YAML
+    or TOML; every part of a `union:` binds every field; `strip-root` applies first to an
+    `entry.path` field, or to a join's copy of one no transform has changed; `semver-major` and
+    `semver-minor` do not apply to a path, a path token (`dir`, `basename`, `stem`, `ext`,
+    `parent_name`) or an `entry.path`, nor to a join's copy of one; a regex compiles and a `read:`
+    regex has a capture group; a JSONPath parses; an `in` or `not_in` literal is not null or a
+    number, nor a boolean for a field that holds strings; and relations that read each other are
+    refused, naming the cycle
     (`` relation `a` reads itself: `a` -> `b` -> `a` ``). A selector compiles as a rule's scope
     does, so a manifest `source:` stays inside the repository and out of `.git`.
   - Each selector and relation passes the trust gates of the file that declares it, with what it

@@ -44,11 +44,14 @@ pub(crate) fn reject_interpolated_names(document: &Value, display: &str) -> Resu
                     }
                 }
             }
+            // Every rule and template, whatever its `kind:`: an override by
+            // id and a template's instance write none, and a later override
+            // can make a rule a `constraint`, so any of them can end up one.
+            // No version 1 kind has an `input:` or `assert:` field, so this
+            // refuses nothing a version 1 kind reads.
             Some(section @ ("rules" | "templates")) => {
                 for (index, rule) in sequence(value).iter().enumerate() {
-                    if rule.get("kind").and_then(Value::as_str) == Some("constraint") {
-                        check.constraint(rule, &format!("{section}[{index}]"))?;
-                    }
+                    check.constraint(rule, &format!("{section}[{index}]"))?;
                 }
             }
             _ => {}
@@ -198,8 +201,8 @@ impl Check<'_> {
         Ok(())
     }
 
-    /// A `constraint` rule (phase 7): its `input:`, and the names its
-    /// `assert:` holds.
+    /// A rule as a `constraint` (phase 7) reads it: its `input:`, and the
+    /// names its `assert:` holds.
     fn constraint(&self, rule: &Value, path: &str) -> Result<()> {
         match rule.get("input") {
             Some(input @ Value::String(_)) => self.value(input, &format!("{path}.input"))?,

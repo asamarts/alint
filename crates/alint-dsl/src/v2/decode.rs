@@ -77,6 +77,26 @@ const FIELD_SOURCES: &str = "`path`, a path token (`dir`, `basename`, `stem`, `e
      `parent_name`), `entry.key`, `entry.value`, `entry.parent`, `entry.root`, `entry.path`, \
      `value`, `bound: <JSONPath>`, or in a join's output `left.<field>` or `right.<field>`";
 
+/// The key of a `read:` form that reads no JSON, YAML or TOML document, which
+/// a `bound:` field reads its value from; `None` for one that does.
+const fn unstructured_form(read: &Read) -> Option<&'static str> {
+    match read {
+        Read::Json(_) | Read::Yaml(_) | Read::Toml(_) => None,
+        Read::Regex(_) => Some("regex"),
+        Read::Lines { .. } => Some("lines"),
+        Read::WholeFile => Some("whole_file"),
+    }
+}
+
+/// Why a `read:` with `form` (`regex`, `lines` or `whole_file`) binds no
+/// `bound:` field. The plan check says the same of a union's part.
+pub(super) fn unbound_by(form: &str) -> String {
+    format!(
+        "a `bound:` field reads a value from a JSON, YAML or TOML document, and a `read:` with \
+         `{form}:` reads the file as text"
+    )
+}
+
 /// Decode one source's objects: its `selectors:` and `relations:` (the values
 /// the document decode took aside) and its `extends:` aliases.
 #[cfg(test)]
@@ -476,8 +496,34 @@ impl Decoder<'_> {
             "a selector's `scope_filter:`",
             SELECTOR_FILTER_KEYS,
         )?;
-        crate::core_yaml::decode::<alint_core::ScopeFilterSpec>(value.clone())
-            .map_err(|error| self.error(path, error))
+        let spec = crate::core_yaml::decode::<alint_core::ScopeFilterSpec>(value.clone())
+            .map_err(|error| self.error(path, error))?;
+        // What a rule's filter may also hold (`changed_since:`) is refused
+        // above, so these are a selector's own words for an empty filter.
+        if spec.has_ancestor.is_none()
+            && spec.include_manifest_paths.is_none()
+            && spec.exclude_manifest_paths.is_none()
+        {
+            return Err(self.error(
+                path,
+                "a selector's `scope_filter:` sets at least one of `has_ancestor:`, \
+                 `include_manifest_paths:` and `exclude_manifest_paths:`; set one, or remove \
+                 `scope_filter:`",
+            ));
+        }
+        match spec.has_ancestor.as_deref() {
+            Some([]) => Err(self.error(
+                &format!("{path}.has_ancestor"),
+                "`has_ancestor:` lists no file name; list at least one, as in `has_ancestor: \
+                 package.json`, or remove it",
+            )),
+            Some(names) if names.iter().any(String::is_empty) => Err(self.error(
+                &format!("{path}.has_ancestor"),
+                "`has_ancestor:` names a file with an empty string; write the file's name, as \
+                 in `has_ancestor: package.json`",
+            )),
+            _ => Ok(spec),
+        }
     }
 
     fn selector_ref(&self, value: &Value, path: &str) -> Result<SelectorRef> {
@@ -976,6 +1022,25 @@ impl Decoder<'_> {
             }
             (Rows::Part(part), _) if entry && matches!(part.reader, Reader::Read { .. }) => {
                 Some("`entry.*` sources need `entries:`; a `read:` row has `value`")
+            }
+            (
+                Rows::Part(Part {
+                    reader: Reader::Read { read, .. },
+                    ..
+                }),
+                FieldSource::Bound(_),
+            ) => {
+                if let Some(form) = unstructured_form(read) {
+                    return Err(self.error(
+                        path,
+                        format!(
+                            "{}; read the file with `entries:`, or with `read:` and `json:`, \
+                             `yaml:` or `toml:`",
+                            unbound_by(form)
+                        ),
+                    ));
+                }
+                None
             }
             _ => None,
         };

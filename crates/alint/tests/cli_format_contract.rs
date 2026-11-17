@@ -620,6 +620,29 @@ fn help_wraps_to_narrow_terminal_width() {
     }
 }
 
+/// `validate-config --help` names every key of the JSON envelope it
+/// promises, on success and on failure.
+#[test]
+fn validate_config_help_lists_every_envelope_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let help = String::from_utf8(run(dir.path(), &["validate-config", "--help"]).stdout).unwrap();
+    for config in [
+        "version: 1\nrules: []\n",
+        "version: 2\nselectors:\n  s: { paths: a }\nrules: []\n",
+        "version: 1\nrules: [\n",
+    ] {
+        std::fs::write(dir.path().join(".alint.yml"), config).unwrap();
+        let output = run(dir.path(), &["validate-config", "--format", "json"]);
+        let envelope: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        for key in envelope.as_object().unwrap().keys() {
+            assert!(
+                help.contains(&format!("\"{key}\"")),
+                "`validate-config --help` does not name `{key}`:\n{help}"
+            );
+        }
+    }
+}
+
 // ─── Explain catalog detail for every kind (ADRs 0011, 0012; v0.19 W1) ─
 //
 // The generated per-kind bridges must yield a non-empty summary, docs deep

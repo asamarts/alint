@@ -98,40 +98,64 @@ const TRANSFORMS: &[(&str, &str)] = &[
     (
         "strip-root",
         "Drop the first segment of an `entry.path` field (`en.nav.home` becomes \
-         `nav.home`). It applies to an `entry.path` field, first.",
+         `nav.home`). It applies to an `entry.path` field, or a join's copy of one no \
+         transform has changed, first.",
     ),
 ];
 
 /// The rows a relation's fields are read from, each with the field sources it
 /// takes (`decode.rs` `field_fits_rows`): a join's fields name a side, an
-/// `entries:` row has `entry.*`, a `read:` row has `value`, and which part of
-/// a `union:` binds which field is the plan check's.
+/// `entries:` row has `entry.*`, a `read:` row has `value`, a `read:` of the
+/// file as text has no `bound:` field, and which part of a `union:` binds
+/// which field is the plan check's.
 #[derive(Clone, Copy)]
 enum RowsKind {
     Entries,
+    /// A `read:` of a JSON, YAML or TOML document.
     Read,
+    /// A `read:` of the file as text: `regex:`, `lines:` or `whole_file:`.
+    ReadText,
     Union,
     Join,
 }
 
-impl RowsKind {
-    const ALL: [Self; 4] = [Self::Entries, Self::Read, Self::Union, Self::Join];
+/// The `read:` forms that read the file as text, which bind no `bound:`
+/// field.
+const TEXT_READS: [&str; 3] = ["regex", "lines", "whole_file"];
 
+impl RowsKind {
+    const ALL: [Self; 5] = [
+        Self::Entries,
+        Self::Read,
+        Self::ReadText,
+        Self::Union,
+        Self::Join,
+    ];
+
+    /// The key that gives a relation these rows.
     const fn key(self) -> &'static str {
         match self {
             Self::Entries => "entries",
-            Self::Read => "read",
+            Self::Read | Self::ReadText => "read",
             Self::Union => "union",
             Self::Join => "join",
         }
     }
 
+    /// The name of these rows' definitions.
+    const fn name(self) -> &'static str {
+        match self {
+            Self::ReadText => "read_text",
+            other => other.key(),
+        }
+    }
+
     fn field_def(self) -> String {
-        format!("v2_field_{}", self.key())
+        format!("v2_field_{}", self.name())
     }
 
     fn source_def(self) -> String {
-        format!("v2_field_source_{}", self.key())
+        format!("v2_field_source_{}", self.name())
     }
 
     /// The field sources a relation with these rows takes.
@@ -147,9 +171,15 @@ impl RowsKind {
                 vec![path_tokens, entry, bound],
             ),
             Self::Read => (
-                "A field source of a `read:` relation: a path token, `value` or `bound: \
-                 <JSONPath>`.",
+                "A field source of a `read:` relation of a JSON, YAML or TOML document: a path \
+                 token, `value` or `bound: <JSONPath>`.",
                 vec![path_tokens, value, bound],
+            ),
+            Self::ReadText => (
+                "A field source of a `read:` relation that reads the file as text (`regex:`, \
+                 `lines:` or `whole_file:`): a path token or `value`. A `bound:` field reads a \
+                 JSON, YAML or TOML document.",
+                vec![path_tokens, value],
             ),
             Self::Union => (
                 "A field source of a `union:` relation: a path token, an `entry.*` source, \
@@ -178,26 +208,36 @@ impl RowsKind {
             .map(|kind| kind.key())
             .filter(|key| *key != self.key())
             .collect();
+        excluded.dedup();
         match self {
             Self::Entries => {
                 required.push("from");
                 excluded.push("optional");
             }
-            Self::Read => required.push("from"),
+            Self::Read | Self::ReadText => required.push("from"),
             Self::Union | Self::Join => excluded.extend(["from", "optional"]),
         }
         let excluded: Vec<Value> = excluded
             .into_iter()
             .map(|key| json!({ "required": [key] }))
             .collect();
+        let fields = json!({
+            "additionalProperties": { "$ref": format!("#/$defs/{}", self.field_def()) }
+        });
+        // `v2_read` holds exactly one form, so a `read:` is of one kind.
+        let text: Vec<Value> = TEXT_READS
+            .iter()
+            .map(|form| json!({ "required": [form] }))
+            .collect();
+        let properties = match self {
+            Self::Read => json!({ "read": { "not": { "anyOf": text } }, "fields": fields }),
+            Self::ReadText => json!({ "read": { "anyOf": text }, "fields": fields }),
+            _ => json!({ "fields": fields }),
+        };
         json!({
             "required": required,
             "not": { "anyOf": excluded },
-            "properties": {
-                "fields": {
-                    "additionalProperties": { "$ref": format!("#/$defs/{}", self.field_def()) }
-                }
-            }
+            "properties": properties,
         })
     }
 }

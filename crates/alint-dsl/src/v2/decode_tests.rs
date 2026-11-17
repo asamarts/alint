@@ -1038,3 +1038,87 @@ fn marking_many_objects_takes_time_linear_in_them() {
             .all(|(_, relation)| { !relation.reads_environment && relation.fields[0].1.sensitive })
     );
 }
+
+/// A `bound:` field reads a JSON, YAML or TOML document, so a relation that
+/// reads the file as text cannot have one: refused when it loads, not at
+/// every evaluation.
+#[test]
+fn a_relation_that_reads_text_has_no_bound_field() {
+    for (read, form) in [
+        ("{ regex: 'v(.*)' }", "regex"),
+        ("{ lines: {} }", "lines"),
+        ("{ whole_file: {} }", "whole_file"),
+    ] {
+        assert_eq!(
+            problem(&format!(
+                "relations:\n  r:\n    from: {{ paths: a }}\n    read: {read}\n    fields: {{ \
+                 v: value, name: 'bound: $.name' }}\n"
+            )),
+            format!(
+                "`relations.r.fields.name`: a `bound:` field reads a value from a JSON, YAML or \
+                 TOML document, and a `read:` with `{form}:` reads the file as text; read the \
+                 file with `entries:`, or with `read:` and `json:`, `yaml:` or `toml:`"
+            ),
+        );
+    }
+    for read in ["{ json: $.v }", "{ yaml: $.v }", "{ toml: $.v }"] {
+        decode(&format!(
+            "relations:\n  r:\n    from: {{ paths: a }}\n    read: {read}\n    fields: {{ v: \
+             value, name: 'bound: $.name' }}\n"
+        ))
+        .unwrap();
+    }
+}
+
+/// An empty selector filter is refused in a selector's own words, without
+/// the `changed_since:` a selector cannot use; so are an empty
+/// `has_ancestor:` and an empty file name, which the draft schema refuses
+/// too.
+#[test]
+fn an_empty_selector_filter_is_refused_in_a_selectors_words() {
+    for (filter, at, message) in [
+        (
+            "{}",
+            "selectors.s.scope_filter",
+            "a selector's `scope_filter:` sets at least one of `has_ancestor:`, \
+             `include_manifest_paths:` and `exclude_manifest_paths:`; set one, or remove \
+             `scope_filter:`",
+        ),
+        (
+            "{ has_ancestor: [] }",
+            "selectors.s.scope_filter.has_ancestor",
+            "`has_ancestor:` lists no file name; list at least one, as in `has_ancestor: \
+             package.json`, or remove it",
+        ),
+        (
+            "{ has_ancestor: '' }",
+            "selectors.s.scope_filter.has_ancestor",
+            "`has_ancestor:` names a file with an empty string; write the file's name, as in \
+             `has_ancestor: package.json`",
+        ),
+        (
+            "{ has_ancestor: [Cargo.toml, ''] }",
+            "selectors.s.scope_filter.has_ancestor",
+            "`has_ancestor:` names a file with an empty string; write the file's name, as in \
+             `has_ancestor: package.json`",
+        ),
+    ] {
+        assert_eq!(
+            problem(&format!(
+                "selectors:\n  s: {{ paths: a, scope_filter: {filter} }}\n"
+            )),
+            format!("`{at}`: {message}"),
+            "{filter}"
+        );
+    }
+    // An inline selector's filter too.
+    assert_eq!(
+        problem(
+            "relations:\n  r:\n    from: { paths: a, scope_filter: {} }\n    read: { json: $ \
+             }\n    fields: { v: value }\n"
+        ),
+        "`relations.r.from.scope_filter`: a selector's `scope_filter:` sets at least one of \
+         `has_ancestor:`, `include_manifest_paths:` and `exclude_manifest_paths:`; set one, or \
+         remove `scope_filter:`"
+    );
+}

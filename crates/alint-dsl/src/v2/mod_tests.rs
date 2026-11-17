@@ -432,6 +432,28 @@ fn a_name_alias_or_reference_must_be_literal() {
             ),
             "rules[0].assert.unique.group_by[1]".to_string(),
         ),
+        // A rule mapping without `kind:` (an override by id, a template's
+        // instance), or with one the environment or a later override sets,
+        // can end up a `constraint`.
+        (
+            format!("rules:\n  - id: c\n    input: {env}\n"),
+            "rules[0].input".to_string(),
+        ),
+        (
+            format!(
+                "rules:\n  - id: c\n    extends_template: t\n    input: r\n    assert:\n      \
+                 unique: {{ key: [{env}] }}\n"
+            ),
+            "rules[0].assert.unique.key[0]".to_string(),
+        ),
+        (
+            format!("rules:\n  - id: c\n    kind: {env}\n    input: {env}\n"),
+            "rules[0].input".to_string(),
+        ),
+        (
+            format!("templates:\n  - id: c\n    kind: file_exists\n    input: {env}\n"),
+            "templates[0].input".to_string(),
+        ),
     ];
     for (body, path) in cases {
         let yaml = format!("version: 2\n{body}");

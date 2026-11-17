@@ -305,7 +305,19 @@ relations:
     fields: { source: path, version: value }
 "#;
 
+/// A tree the policy passes: every pin is `.nvmrc`'s version.
 const PINNED: &[(&str, &str)] = &[
+    (".nvmrc", "v20.11.1\n"),
+    (
+        "package.json",
+        r#"{"engines": {"node": "20.11.1"}, "devEngines": {"runtime": {"name": "node",
+           "version": "20.11.1"}}, "volta": {"node": "20.11.1"}}"#,
+    ),
+];
+
+/// A tree the policy fails twice: `engines.node` is a range, not the pinned
+/// version, and `devEngines.runtime.version` is missing.
+const DRIFTED: &[(&str, &str)] = &[
     (".nvmrc", "v20.11.1\n"),
     (
         "package.json",
@@ -314,8 +326,22 @@ const PINNED: &[(&str, &str)] = &[
 ];
 
 #[test]
-fn toolchain_pins_union_a_regex_read_and_json_reads_with_a_missing_row() {
+fn toolchain_pins_that_agree_hold_one_version_in_every_row() {
     let tree = setup(NODE_PINS, PINNED);
+    assert_eq!(
+        table(&tree.rows("node-pins")),
+        strings(&[
+            &[".nvmrc", "20.11.1"],
+            &["package.json", "20.11.1"],
+            &["package.json", "20.11.1"],
+            &["package.json", "20.11.1"],
+        ])
+    );
+}
+
+#[test]
+fn toolchain_pins_union_a_regex_read_and_json_reads_with_a_missing_row() {
+    let tree = setup(NODE_PINS, DRIFTED);
     let pins = tree.rows("node-pins");
     assert_eq!(
         table(&pins),
@@ -338,7 +364,7 @@ fn an_optional_part_that_matches_nothing_gives_no_row() {
         r#"read: { json: "$.devEngines.runtime.version" } }"#,
         r#"read: { json: "$.devEngines.runtime.version" }, optional: true }"#,
     );
-    let tree = setup(&config, PINNED);
+    let tree = setup(&config, DRIFTED);
     assert_eq!(
         table(&tree.rows("node-pins")),
         strings(&[
@@ -979,5 +1005,25 @@ fn a_relation_reading_one_the_environment_selects_shows_no_detail() {
              the key \"1\": `x` in c.json and `y` in c.json; `unique: right` needs each key once \
              on that side, so make the key unique there, or name the other side unique"
         ]
+    );
+}
+
+/// A join's copy of an `entry.path` field keeps its key path's segments, so
+/// `strip-root` applies to it as to the field it copies.
+#[test]
+fn strip_root_applies_to_a_join_copy_of_an_entry_path() {
+    let tree = setup(
+        "version: 2\nrelations:\n  keys:\n    from: { paths: '*.json' }\n    entries: { format: \
+         json, at: $, leaves: true }\n    fields: { key: entry.key, path: entry.path }\n  \
+         joined:\n    join: { left: keys, right: keys, on: { key: key }, unique: right }\n    \
+         fields: { key: left.key, path: left.path }\n    transform: { path: [strip-root] }\n",
+        &[(
+            "en.json",
+            r#"{"en": {"nav": {"home": "Home", "about": "About"}}}"#,
+        )],
+    );
+    assert_eq!(
+        table(&tree.rows("joined")),
+        strings(&[&["home", "nav.home"], &["about", "nav.about"]])
     );
 }
