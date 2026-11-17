@@ -7,7 +7,9 @@
 //!
 //! - A field whose `where:` or `transform:` entry reads the environment is
 //!   sensitive: its values never reach a message, the JSON report or a
-//!   baseline, nor do the literals it is compared with.
+//!   baseline, nor do the literals it is compared with. So is every field
+//!   that shows its value ([`family`]): a filter on an entry's key would
+//!   echo in its path, its parent's and its root.
 //! - Any other part of a relation's definition, or of a named selector, that
 //!   reads it makes the relation's analysis failures show no detail: an
 //!   `at:` path from the environment would echo in the key path it selects.
@@ -17,7 +19,7 @@ use std::collections::{HashMap, HashSet};
 use ayaml::Value;
 
 use super::decode::Locus;
-use super::model::SourceObjects;
+use super::model::{FieldSource, JoinSide, SourceObjects};
 
 /// What one source's selectors and relations read from the environment, by
 /// name, so marking a source of many objects costs one lookup per object.
@@ -96,12 +98,52 @@ impl Environment {
                 continue;
             };
             relation.reads_environment = environment.reading;
-            for (field, definition) in &mut relation.fields {
-                if environment.fields.contains(field) {
-                    definition.sensitive = true;
-                }
+            let marked: HashSet<Family<'_>> = relation
+                .fields
+                .iter()
+                .filter(|(field, _)| environment.fields.contains(field))
+                .map(|(_, definition)| family(&definition.source))
+                .collect();
+            let shows: Vec<bool> = relation
+                .fields
+                .iter()
+                .map(|(field, definition)| {
+                    environment.fields.contains(field)
+                        || marked.contains(&family(&definition.source))
+                })
+                .collect();
+            for ((_, definition), shows) in relation.fields.iter_mut().zip(shows) {
+                definition.sensitive |= shows;
             }
         }
+    }
+}
+
+/// The fields whose values show one another's, so that one the environment
+/// filters makes all of its family sensitive: an entry's key, path, parent,
+/// root and value (a key is in its path, its parent's and its root, and a
+/// value is read at its key); a resource's path and its tokens; and fields
+/// bound to one value, one `bound:` path or one side's field.
+#[derive(Debug, PartialEq, Eq, Hash)]
+enum Family<'a> {
+    Entry,
+    Path,
+    Value,
+    Bound(&'a str),
+    Side(bool, &'a str),
+}
+
+fn family(source: &FieldSource) -> Family<'_> {
+    match source {
+        FieldSource::EntryKey
+        | FieldSource::EntryValue
+        | FieldSource::EntryParent
+        | FieldSource::EntryRoot
+        | FieldSource::EntryPath => Family::Entry,
+        FieldSource::Path(_) => Family::Path,
+        FieldSource::Value => Family::Value,
+        FieldSource::Bound(query) => Family::Bound(query),
+        FieldSource::Side(side, field) => Family::Side(*side == JoinSide::Left, field),
     }
 }
 

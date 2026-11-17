@@ -70,6 +70,7 @@ impl LimitKind {
     fn unit(self) -> &'static str {
         match self {
             Self::BytesPerRun => "bytes",
+            Self::CellsPerRun => "cells",
             _ => "rows or values",
         }
     }
@@ -206,6 +207,20 @@ impl RunBudget {
         Ok(())
     }
 
+    /// Fail when a take has already exceeded the budget, so every later
+    /// take would fail too: a decode then need not be made to fail.
+    pub fn spent(&self) -> Result<(), LimitExceeded> {
+        let used = self.used();
+        if used > self.limit {
+            return Err(LimitExceeded {
+                kind: LimitKind::RowsPerRun,
+                limit: self.limit,
+                reached: used,
+            });
+        }
+        Ok(())
+    }
+
     #[must_use]
     pub fn used(&self) -> usize {
         self.used.load(Ordering::Relaxed)
@@ -262,9 +277,13 @@ mod tests {
             reached(LimitKind::BytesPerRun),
             "relation limit `bytes_per_run` (3) reached: 4 bytes"
         );
+        assert_eq!(
+            reached(LimitKind::CellsPerRun),
+            "relation limit `cells_per_run` (3) reached: 4 cells"
+        );
         for kind in LimitKind::ALL
             .into_iter()
-            .filter(|kind| *kind != LimitKind::BytesPerRun)
+            .filter(|kind| !matches!(kind, LimitKind::BytesPerRun | LimitKind::CellsPerRun))
         {
             assert_eq!(
                 reached(kind),

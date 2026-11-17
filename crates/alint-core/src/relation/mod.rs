@@ -21,6 +21,7 @@ mod contract;
 // Public, inside this hidden layer, for the `constraint` kind in
 // `alint-rules` (v0.23 phase 7), which evaluates a rule's relation.
 pub mod eval;
+pub(crate) mod key_paths;
 mod limits;
 mod path;
 pub mod plan;

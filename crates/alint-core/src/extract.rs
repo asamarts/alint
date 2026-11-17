@@ -13,10 +13,12 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json_path::JsonPath;
 
+use crate::relation::Segment;
+use crate::relation::key_paths::{EntryAt, EntryTable, PathId, PathStack};
 use crate::structured_format::Format;
 
 mod yaml_rows;
-use yaml_rows::yaml_entry_rows;
+use yaml_rows::yaml_entry_table;
 
 /// Runtime extraction mode, resolved from [`ExtractSpec`].
 #[derive(Clone)]
@@ -383,12 +385,100 @@ fn extract_entry_rows_with(
     max_rows: Option<usize>,
 ) -> std::result::Result<Vec<StructuredEntryRow>, EntryRowsError> {
     match format {
-        Format::Json => json_entry_rows(text, max_rows, None),
-        Format::Yaml => yaml_entry_rows(text, reject_yaml_features, max_rows, None),
+        Format::Json | Format::Yaml => Ok(structured_rows(&nested_entry_table(
+            format,
+            text,
+            reject_yaml_features,
+            max_rows,
+            false,
+        )?)),
         Format::Dotenv => dotenv_entry_rows(text, max_rows),
         Format::Ini => ini_entry_rows(text, max_rows),
         Format::Properties => properties_entry_rows(text, max_rows),
         Format::Toml | Format::Xml | Format::Hcl => Err(EntryRowsError::UnsupportedFormat(format)),
+    }
+}
+
+/// [`extract_entry_rows_strict_yaml_bounded`]'s members as an [`EntryTable`],
+/// each key path held once, for the relation adapters: a row holds its own
+/// key and spans, never a copy of its parent's path.
+pub(crate) fn entry_table(
+    format: Format,
+    text: &str,
+    max_rows: usize,
+) -> std::result::Result<EntryTable, EntryRowsError> {
+    match format {
+        Format::Json | Format::Yaml => {
+            nested_entry_table(format, text, true, Some(max_rows), false)
+        }
+        Format::Dotenv | Format::Ini | Format::Properties => {
+            // A flat format's rows are at most one section deep.
+            let rows = extract_entry_rows_with(format, text, true, Some(max_rows))?;
+            let mut table = EntryTable::default();
+            for row in rows {
+                let parent = row.parent.iter().fold(PathId::ROOT, |at, segment| {
+                    table.paths.child(at, entry_segment(segment))
+                });
+                let path = table.paths.child(parent, Segment::Key(row.key.into()));
+                table.rows.push(EntryAt {
+                    path,
+                    key_span: row.key_span,
+                    value_span: row.value_span,
+                });
+            }
+            Ok(table)
+        }
+        Format::Toml | Format::Xml | Format::Hcl => Err(EntryRowsError::UnsupportedFormat(format)),
+    }
+}
+
+/// A JSON or YAML document's members, and their values when `values`.
+fn nested_entry_table(
+    format: Format,
+    text: &str,
+    reject_yaml_features: bool,
+    max_rows: Option<usize>,
+    values: bool,
+) -> std::result::Result<EntryTable, EntryRowsError> {
+    match format {
+        Format::Json => json_entry_table(text, max_rows, values),
+        Format::Yaml => yaml_entry_table(text, reject_yaml_features, max_rows, values),
+        _ => Err(EntryRowsError::UnsupportedFormat(format)),
+    }
+}
+
+/// The public rows of a table: each copies its parent's path, as the public
+/// functions always have.
+fn structured_rows(table: &EntryTable) -> Vec<StructuredEntryRow> {
+    table
+        .rows
+        .iter()
+        .map(|row| {
+            let mut segments = table.paths.segments(row.path);
+            let key = match segments.pop() {
+                Some(Segment::Key(key)) => key.to_string(),
+                _ => unreachable!("an entry's path ends in its key"),
+            };
+            StructuredEntryRow {
+                parent: segments
+                    .into_iter()
+                    .map(|segment| match segment {
+                        Segment::Key(key) => EntryPathSegment::Key(key.to_string()),
+                        Segment::Index(index) => EntryPathSegment::Index(*index),
+                    })
+                    .collect(),
+                key,
+                key_span: row.key_span,
+                value_span: row.value_span,
+            }
+        })
+        .collect()
+}
+
+fn entry_segment(segment: &EntryPathSegment) -> Segment {
+    match segment {
+        EntryPathSegment::Key(key) => Segment::Key(key.as_str().into()),
+        EntryPathSegment::Index(index) => Segment::Index(*index),
     }
 }
 
@@ -407,8 +497,8 @@ pub(crate) enum EntryValue {
     Unreadable,
 }
 
-/// [`extract_entry_rows_strict_yaml_bounded`] for JSON and YAML, with what
-/// each row's value holds beside it (`values[i]` is `rows[i]`'s value).
+/// [`entry_table`] for JSON and YAML, with what each row's value holds
+/// beside it (`values[i]` is `rows[i]`'s value).
 ///
 /// The number lexemes kept: JSON keeps every number as written (`1.10`,
 /// `1e3`, `-0`); YAML keeps every plain scalar the core schema reads as a
@@ -418,15 +508,10 @@ pub(crate) fn extract_entry_values_bounded(
     format: Format,
     text: &str,
     max_rows: usize,
-) -> std::result::Result<(Vec<StructuredEntryRow>, Vec<EntryValue>), EntryRowsError> {
-    let mut values = Vec::new();
-    let rows = match format {
-        Format::Json => json_entry_rows(text, Some(max_rows), Some(&mut values))?,
-        Format::Yaml => yaml_entry_rows(text, true, Some(max_rows), Some(&mut values))?,
-        _ => return Err(EntryRowsError::UnsupportedFormat(format)),
-    };
-    debug_assert_eq!(rows.len(), values.len());
-    Ok((rows, values))
+) -> std::result::Result<EntryTable, EntryRowsError> {
+    let table = nested_entry_table(format, text, true, Some(max_rows), true)?;
+    debug_assert_eq!(table.rows.len(), table.values.len());
+    Ok(table)
 }
 
 pub(crate) fn json_parse_options() -> jsonc_parser::ParseOptions {
@@ -444,23 +529,20 @@ pub(crate) fn json_parse_options() -> jsonc_parser::ParseOptions {
     }
 }
 
-fn entry_capacity(
-    rows: &[StructuredEntryRow],
-    max_rows: Option<usize>,
-) -> std::result::Result<(), EntryRowsError> {
+fn entry_capacity(rows: usize, max_rows: Option<usize>) -> std::result::Result<(), EntryRowsError> {
     if let Some(limit) = max_rows
-        && rows.len() >= limit
+        && rows >= limit
     {
         return Err(EntryRowsError::Limit { limit });
     }
     Ok(())
 }
 
-fn json_entry_rows(
+fn json_entry_table(
     text: &str,
     max_rows: Option<usize>,
-    mut values: Option<&mut Vec<EntryValue>>,
-) -> std::result::Result<Vec<StructuredEntryRow>, EntryRowsError> {
+    values: bool,
+) -> std::result::Result<EntryTable, EntryRowsError> {
     use jsonc_parser::{CollectOptions, CommentCollectionStrategy, parse_to_ast};
 
     // Reuse the check-side size/depth/dialect guards before the lossless pass.
@@ -476,70 +558,80 @@ fn json_entry_rows(
         &json_parse_options(),
     )
     .map_err(|error| EntryRowsError::Parse(error.to_string()))?;
-    let mut rows = Vec::new();
+    let mut walk = JsonWalk {
+        offset,
+        max_rows,
+        values,
+        table: EntryTable::default(),
+        stack: PathStack::default(),
+    };
     if let Some(value) = ast.value.as_ref() {
-        collect_json_rows(
-            value,
-            &mut Vec::new(),
-            offset,
-            &mut rows,
-            max_rows,
-            &mut values,
-        )?;
+        walk.value(value)?;
     }
-    Ok(rows)
+    Ok(walk.table)
 }
 
-fn collect_json_rows(
-    value: &jsonc_parser::ast::Value<'_>,
-    parent: &mut Vec<EntryPathSegment>,
+/// One walk over a JSON document's syntax tree, a row per object member.
+struct JsonWalk {
     offset: usize,
-    rows: &mut Vec<StructuredEntryRow>,
     max_rows: Option<usize>,
-    values: &mut Option<&mut Vec<EntryValue>>,
-) -> std::result::Result<(), EntryRowsError> {
-    use jsonc_parser::ast::{ObjectPropName, Value};
-    use jsonc_parser::common::Ranged as _;
+    values: bool,
+    table: EntryTable,
+    stack: PathStack,
+}
 
-    match value {
-        Value::Object(object) => {
-            for property in &object.properties {
-                let (key, range) = match &property.name {
-                    ObjectPropName::String(literal) => (literal.value.to_string(), literal.range()),
-                    ObjectPropName::Word(literal) => (literal.value.to_string(), literal.range()),
-                };
-                entry_capacity(rows, max_rows)?;
-                let value_range = property.value.range();
-                rows.push(StructuredEntryRow {
-                    parent: parent.clone(),
-                    key: key.clone(),
-                    key_span: ByteSpan::new(range.start + offset, range.end + offset),
-                    value_span: Some(ByteSpan::new(
-                        value_range.start + offset,
-                        value_range.end + offset,
-                    )),
-                });
-                if let Some(values) = values.as_deref_mut() {
-                    values.push(json_entry_value(&property.value));
+impl JsonWalk {
+    fn value(
+        &mut self,
+        value: &jsonc_parser::ast::Value<'_>,
+    ) -> std::result::Result<(), EntryRowsError> {
+        use jsonc_parser::ast::{ObjectPropName, Value};
+        use jsonc_parser::common::Ranged as _;
+
+        let offset = self.offset;
+        match value {
+            Value::Object(object) => {
+                for property in &object.properties {
+                    let (key, range) = match &property.name {
+                        ObjectPropName::String(literal) => {
+                            (literal.value.as_ref(), literal.range())
+                        }
+                        ObjectPropName::Word(literal) => (literal.value, literal.range()),
+                    };
+                    entry_capacity(self.table.rows.len(), self.max_rows)?;
+                    let value_range = property.value.range();
+                    let parent = self.stack.path(&mut self.table.paths);
+                    let path = self.table.paths.child(parent, Segment::Key(key.into()));
+                    self.table.rows.push(EntryAt {
+                        path,
+                        key_span: ByteSpan::new(range.start + offset, range.end + offset),
+                        value_span: Some(ByteSpan::new(
+                            value_range.start + offset,
+                            value_range.end + offset,
+                        )),
+                    });
+                    if self.values {
+                        self.table.values.push(json_entry_value(&property.value));
+                    }
+                    self.stack.enter_path(path);
+                    self.value(&property.value)?;
+                    self.stack.leave();
                 }
-                parent.push(EntryPathSegment::Key(key));
-                collect_json_rows(&property.value, parent, offset, rows, max_rows, values)?;
-                parent.pop();
             }
-        }
-        Value::Array(array) => {
-            for (index, element) in array.elements.iter().enumerate() {
-                parent.push(EntryPathSegment::Index(index));
-                collect_json_rows(element, parent, offset, rows, max_rows, values)?;
-                parent.pop();
+            Value::Array(array) => {
+                for (index, element) in array.elements.iter().enumerate() {
+                    self.stack.enter(Segment::Index(index));
+                    self.value(element)?;
+                    self.stack.leave();
+                }
             }
+            Value::StringLit(_)
+            | Value::NumberLit(_)
+            | Value::BooleanLit(_)
+            | Value::NullKeyword(_) => {}
         }
-        Value::StringLit(_)
-        | Value::NumberLit(_)
-        | Value::BooleanLit(_)
-        | Value::NullKeyword(_) => {}
+        Ok(())
     }
-    Ok(())
 }
 
 /// What a JSON value holds; a number keeps its lexeme.
@@ -570,7 +662,7 @@ fn dotenv_entry_rows(
     let (document, offset) = crate::dotenv::parse_document(text).map_err(EntryRowsError::Parse)?;
     let mut rows = Vec::new();
     for entry in document.entries() {
-        entry_capacity(&rows, max_rows)?;
+        entry_capacity(rows.len(), max_rows)?;
         let key = entry.key().to_string();
         let key_span = entry.key_span();
         rows.push(StructuredEntryRow {
@@ -649,7 +741,7 @@ fn ini_entry_rows(
             let value = after.trim();
             let key_start = base + at + trim_start + key_lead;
             let value_start = base + at + trim_start + separator + 1 + value_lead;
-            entry_capacity(&rows, max_rows)?;
+            entry_capacity(rows.len(), max_rows)?;
             rows.push(StructuredEntryRow {
                 parent: section.iter().cloned().map(EntryPathSegment::Key).collect(),
                 key: key.to_string(),
@@ -749,7 +841,7 @@ fn properties_entry_rows(
         let key = decoded.next().ok_or_else(|| {
             EntryRowsError::Parse("properties entry/span count diverged".to_string())
         })?;
-        entry_capacity(&rows, max_rows)?;
+        entry_capacity(rows.len(), max_rows)?;
         rows.push(StructuredEntryRow {
             parent: Vec::new(),
             key,
@@ -1488,6 +1580,30 @@ mod tests {
             1,
             "the alias must not invent a second nested row"
         );
+    }
+
+    /// A key with no token span (a block scalar's, or an empty one) is a row
+    /// at where its text starts, never a dropped one: `key_parity` and a
+    /// relation would otherwise miss it without a word.
+    #[test]
+    fn yaml_keys_without_a_token_span_are_rows_where_they_start() {
+        let text = "deps:\n  ? |\n    block\n  : 1\n  plain: 2\n  ? >\n    folded\n  : 3\n";
+        let rows = extract_entry_rows_strict_yaml(Format::Yaml, text).unwrap();
+        assert_eq!(
+            rows.iter().map(|row| row.key.as_str()).collect::<Vec<_>>(),
+            ["deps", "block\n", "plain", "folded\n"]
+        );
+        for (row, written) in [(&rows[1], "block"), (&rows[3], "folded")] {
+            assert_eq!(row.parent, [EntryPathSegment::Key("deps".into())]);
+            assert!(row.key_span.is_empty(), "{row:?}");
+            assert!(text[row.key_span.start..].starts_with(written), "{row:?}");
+        }
+        let empty = extract_entry_rows_strict_yaml(Format::Yaml, "? \n: 1\nb: 2\n").unwrap();
+        assert_eq!(
+            empty.iter().map(|row| row.key.as_str()).collect::<Vec<_>>(),
+            ["", "b"]
+        );
+        assert!(empty[0].key_span.is_empty());
     }
 
     #[test]

@@ -5,10 +5,10 @@ use toml_edit::{Document, InlineTable, Item, Key, Table, Value};
 use crate::ByteSpan;
 use crate::extract::EntryValue;
 use crate::relation::adapter::{Adapter, AdapterError, AdapterOutput, check_row_count};
+use crate::relation::key_paths::{EntryAt, EntryTable, PathId};
 use crate::relation::limits::Limits;
-use crate::relation::pointer::{Pointer, Segment};
+use crate::relation::pointer::Segment;
 use crate::relation::resource::Resource;
-use crate::relation::row::{Row, RowState};
 
 /// Emits one key row per TOML table member.
 ///
@@ -41,53 +41,50 @@ impl Adapter for TomlRowsAdapter {
             .map_err(|_| AdapterError::Parse("the TOML document is not valid UTF-8".to_string()))?;
         let mut walk = Walk {
             text,
-            resource,
             limits,
-            rows: Vec::new(),
-            values: None,
+            values: false,
+            entries: EntryTable::default(),
         };
         walk.document()?;
-        Ok(AdapterOutput::new(walk.rows))
+        Ok(AdapterOutput::new(super::entry::key_rows(
+            &walk.entries,
+            resource,
+            limits,
+        )?))
     }
 }
 
 impl TomlRowsAdapter {
-    /// The value mode (ADR-0034 decision 5): the key rows
-    /// [`extract`](Adapter::extract) emits, each with what its value holds
-    /// beside it (`values[i]` is `rows[i]`'s, with the value's byte range).
-    /// An integer or a float keeps its lexeme as written (`0x1F`, `1_000`,
-    /// `+inf`); a date or time is [`EntryValue::Datetime`].
-    pub(crate) fn values(
-        resource: &Resource,
-        text: &str,
-        limits: &Limits,
-    ) -> Result<(Vec<Row>, Vec<TomlValue>), AdapterError> {
+    /// The value mode (ADR-0034 decision 5): the members
+    /// [`extract`](Adapter::extract) emits rows for, each with what its value
+    /// holds beside it (`values[i]` is `rows[i]`'s) and the value's byte
+    /// range. An integer or a float keeps its lexeme as written (`0x1F`,
+    /// `1_000`, `+inf`); a date or time is [`EntryValue::Datetime`].
+    pub(crate) fn values(text: &str, limits: &Limits) -> Result<EntryTable, AdapterError> {
         let mut walk = Walk {
             text,
-            resource,
             limits,
-            rows: Vec::new(),
-            values: Some(Vec::new()),
+            values: true,
+            entries: EntryTable::default(),
         };
         walk.document()?;
-        Ok((walk.rows, walk.values.unwrap_or_default()))
+        Ok(walk.entries)
     }
 }
 
 /// One TOML entry's value: what it holds, and its byte range.
-pub(crate) struct TomlValue {
-    pub(crate) value: EntryValue,
-    pub(crate) span: Option<ByteSpan>,
+struct TomlValue {
+    value: EntryValue,
+    span: Option<ByteSpan>,
 }
 
-/// One walk over a document, emitting a key row per table member and, in the
-/// value mode, each member's value beside it.
+/// One walk over a document, a member per table member and, in the value
+/// mode, each member's value beside it.
 struct Walk<'w> {
     text: &'w str,
-    resource: &'w Resource,
     limits: &'w Limits,
-    rows: Vec<Row>,
-    values: Option<Vec<TomlValue>>,
+    values: bool,
+    entries: EntryTable,
 }
 
 impl Walk<'_> {
@@ -95,11 +92,10 @@ impl Walk<'_> {
         let document = Document::parse(self.text).map_err(|error: toml_edit::TomlError| {
             AdapterError::Parse(parse_error(self.text, &error))
         })?;
-        let mut parent = Vec::new();
-        self.table(document.as_table(), &mut parent)
+        self.table(document.as_table(), PathId::ROOT)
     }
 
-    fn table(&mut self, table: &Table, parent: &mut Vec<Segment>) -> Result<(), AdapterError> {
+    fn table(&mut self, table: &Table, parent: PathId) -> Result<(), AdapterError> {
         for key_text in table.iter().map(|(key, _)| key) {
             let (key, item) = table
                 .get_key_value(key_text)
@@ -109,13 +105,8 @@ impl Walk<'_> {
         Ok(())
     }
 
-    fn item(
-        &mut self,
-        key: &Key,
-        item: &Item,
-        parent: &mut Vec<Segment>,
-    ) -> Result<(), AdapterError> {
-        let key_text = key.get().to_string();
+    fn item(&mut self, key: &Key, item: &Item, parent: PathId) -> Result<(), AdapterError> {
+        let key_text = key.get();
         if matches!(item, Item::None) {
             return Ok(());
         }
@@ -123,18 +114,16 @@ impl Walk<'_> {
             .span()
             .or_else(|| item.span())
             .ok_or_else(|| AdapterError::Parse(format!("the TOML key {key_text:?} has no span")))?;
-        let pointer = pointer_for(parent, &key_text);
-        self.push(pointer, span, || item_value(item, self.text))?;
+        let path = self
+            .entries
+            .paths
+            .child(parent, Segment::Key(key_text.into()));
+        let text = self.text;
+        self.push(path, span, || item_value(item, text))?;
 
         match item {
-            Item::Table(table) => {
-                parent.push(Segment::Key(key_text.into()));
-                self.table(table, parent)?;
-                parent.pop();
-            }
-            Item::Value(Value::InlineTable(inline)) => {
-                self.inline_table(inline, parent, &key_text)?;
-            }
+            Item::Table(table) => self.table(table, path)?,
+            Item::Value(Value::InlineTable(inline)) => self.inline_table(inline, path)?,
             Item::None | Item::Value(_) | Item::ArrayOfTables(_) => {}
         }
         Ok(())
@@ -142,14 +131,23 @@ impl Walk<'_> {
 
     fn push(
         &mut self,
-        pointer: Pointer,
+        path: PathId,
         span: std::ops::Range<usize>,
         value: impl FnOnce() -> TomlValue,
     ) -> Result<(), AdapterError> {
-        push_row(self.resource, pointer, span, &mut self.rows, self.limits)?;
-        if let Some(values) = &mut self.values {
-            values.push(value());
-        }
+        check_row_count(self.limits, self.entries.rows.len() + 1)?;
+        let value_span = if self.values {
+            let held = value();
+            self.entries.values.push(held.value);
+            held.span
+        } else {
+            None
+        };
+        self.entries.rows.push(EntryAt {
+            path,
+            key_span: ByteSpan::new(span.start, span.end),
+            value_span,
+        });
         Ok(())
     }
 }
@@ -208,19 +206,12 @@ impl Walk<'_> {
     /// table walk reads a dotted key in a table (`[x]` then `a.b = 1`), with
     /// a row for `x.a` that holds an object, so its rows are those of the
     /// same document written as JSON ([`Self::inline_members`]).
-    fn inline_table(
-        &mut self,
-        table: &InlineTable,
-        parent: &[Segment],
-        table_key: &str,
-    ) -> Result<(), AdapterError> {
-        let mut root = parent.to_vec();
-        root.push(Segment::Key(table_key.into()));
-        let mut pending: Vec<(Vec<Segment>, &InlineTable)> = vec![(root, table)];
+    fn inline_table(&mut self, table: &InlineTable, at: PathId) -> Result<(), AdapterError> {
+        let mut pending: Vec<(PathId, &InlineTable)> = vec![(at, table)];
         while let Some((prefix, table)) = pending.pop() {
             let mut nested = Vec::new();
-            if self.values.is_some() {
-                self.inline_members(&prefix, table, &mut nested)?;
+            if self.values {
+                self.inline_members(prefix, table, &mut nested)?;
                 pending.extend(nested.into_iter().rev());
                 continue;
             }
@@ -232,16 +223,13 @@ impl Walk<'_> {
                     .ok_or_else(|| {
                         AdapterError::Parse("a TOML inline-table key has no span".to_string())
                     })?;
-                let mut segments = prefix.clone();
-                for key in path {
-                    segments.push(Segment::Key(key.get().into()));
-                }
+                let at = path.iter().fold(prefix, |at, key| {
+                    self.entries.paths.child(at, Segment::Key(key.get().into()))
+                });
                 let text = self.text;
-                self.push(Pointer::from_segments(segments.clone()), span, || {
-                    value_of(value, text)
-                })?;
+                self.push(at, span, || value_of(value, text))?;
                 if let Value::InlineTable(inner) = value {
-                    nested.push((segments, inner));
+                    nested.push((at, inner));
                 }
             }
             // Reverse so the stack visits nested tables in source order.
@@ -255,9 +243,9 @@ impl Walk<'_> {
     /// a dotted key's included, in `nested` to descend next.
     fn inline_members<'t>(
         &mut self,
-        prefix: &[Segment],
+        prefix: PathId,
         table: &'t InlineTable,
-        nested: &mut Vec<(Vec<Segment>, &'t InlineTable)>,
+        nested: &mut Vec<(PathId, &'t InlineTable)>,
     ) -> Result<(), AdapterError> {
         for (key_text, _) in table {
             let (key, item) = table
@@ -269,14 +257,14 @@ impl Walk<'_> {
             let span = key.span().or_else(|| value.span()).ok_or_else(|| {
                 AdapterError::Parse(format!("the TOML key {key_text:?} has no span"))
             })?;
-            let mut segments = prefix.to_vec();
-            segments.push(Segment::Key(key_text.into()));
+            let at = self
+                .entries
+                .paths
+                .child(prefix, Segment::Key(key_text.into()));
             let text = self.text;
-            self.push(Pointer::from_segments(segments.clone()), span, || {
-                value_of(value, text)
-            })?;
+            self.push(at, span, || value_of(value, text))?;
             if let Value::InlineTable(inner) = value {
-                nested.push((segments, inner));
+                nested.push((at, inner));
             }
         }
         Ok(())
@@ -308,35 +296,10 @@ fn parse_error(text: &str, error: &toml_edit::TomlError) -> String {
     format!("TOML parse error at line {line}, column {column}: {reason}")
 }
 
-fn pointer_for(parent: &[Segment], key: &str) -> Pointer {
-    let mut segments = parent.to_vec();
-    segments.push(Segment::Key(key.into()));
-    Pointer::from_segments(segments)
-}
-
-fn push_row(
-    resource: &Resource,
-    pointer: Pointer,
-    span: std::ops::Range<usize>,
-    rows: &mut Vec<Row>,
-    limits: &Limits,
-) -> Result<(), AdapterError> {
-    check_row_count(limits, rows.len() + 1)?;
-    rows.push(
-        Row::new(
-            resource.clone(),
-            Some(pointer),
-            u32::try_from(rows.len()).expect("the row limit is far below u32::MAX"),
-            RowState::Key,
-        )
-        .with_span(ByteSpan::new(span.start, span.end)),
-    );
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::relation::row::Row;
 
     fn resource() -> Resource {
         Resource::for_test(0, "Cargo.toml")
@@ -453,8 +416,8 @@ mod tests {
     #[test]
     fn the_value_mode_gives_a_dotted_inline_key_its_middle_row() {
         let text = "[en]\nnav = { home.title = \"Home\", home.sub = 1, about = \"About\" }\n";
-        let (rows, values) =
-            TomlRowsAdapter::values(&resource(), text, &Limits::default()).unwrap();
+        let table = TomlRowsAdapter::values(text, &Limits::default()).unwrap();
+        let rows = super::super::entry::key_rows(&table, &resource(), &Limits::default()).unwrap();
         assert_eq!(
             located(text, &rows),
             [
@@ -466,9 +429,10 @@ mod tests {
                 "en.nav.home.sub @ \"sub\"",
             ]
         );
-        let held: Vec<String> = values
+        let held: Vec<String> = table
+            .values
             .iter()
-            .map(|value| match &value.value {
+            .map(|value| match value {
                 EntryValue::Scalar(scalar) => format!("{scalar:?}"),
                 EntryValue::Object => "object".into(),
                 other => format!("{other:?}"),

@@ -78,8 +78,12 @@ pub struct RelationRows {
     /// join's are those of its side that is not unique, whose order its rows
     /// follow, shared with that side.
     pub resources: Arc<[Resource]>,
-    /// What a `read:` skipped: a computed value (`${VAR}`), one per value,
-    /// in the order read.
+    /// What a `read:` skipped, in the order read: a computed value
+    /// (`${VAR}`), one per value, and the values it matched that are not
+    /// strings, one per resource and part, whose strings are still rows. A
+    /// join keeps its sides' notes, and a relation those of the relations
+    /// its `where:` lists read, since a value they skipped is a row they
+    /// lack.
     pub notes: Vec<RelationNote>,
 }
 
@@ -130,21 +134,49 @@ pub struct Cell {
     pub path: Option<Arc<Pointer>>,
 }
 
-/// Where a row's value came from.
+/// Where a row's value came from. A row is its resource and its pointer,
+/// or, for a `read:` row, which has no pointer, its resource, its part and
+/// its ordinal (design section 6, "Identity").
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Provenance {
     pub resource: Resource,
     /// The entry's key path, or a `bound:` value's; none for a `read:` row.
     pub pointer: Option<Pointer>,
+    /// The index of the part that read the row in its relation: its place
+    /// in a `union:`, or 0.
+    pub part: u32,
+    /// The row's place among those the part's adapter emitted for the
+    /// resource: the value's among the values a `read:` extracted, which a
+    /// `where:` that drops other rows does not change (0 for a missing
+    /// row).
+    pub ordinal: u32,
 }
 
 /// What a `read:` skipped in one resource.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RelationNote {
     pub resource: Resource,
+    pub skipped: Skipped,
     /// `skipped non-literal value "${VAR}"`, without the value when the
-    /// field is sensitive.
+    /// field is sensitive; ``matched non-string value(s) (object: 1)`` with
+    /// the `read:`, without it when the relation's configuration reads the
+    /// environment. It holds no value that is not a string.
     pub message: String,
+}
+
+/// What a [`RelationNote`] says a `read:` skipped.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Skipped {
+    /// A computed value (`${VAR}`).
+    NonLiteral,
+    /// The values the part at `part` (its place in a `union:`, or 0)
+    /// matched that are not strings: each kind and how many times, null
+    /// first, then booleans, numbers, arrays and objects. A rule reports
+    /// them as one finding for the resource, as `cross_file` does.
+    NonString {
+        part: u32,
+        kinds: Vec<(crate::extract::NonStringValueKind, usize)>,
+    },
 }
 
 /// What evaluating one relation gave: its rows, or every analysis failure
@@ -455,21 +487,25 @@ fn take(
 }
 
 /// What a relation says when the run's cells or bytes run out
-/// ([`Evaluator::take_cells`], [`Evaluator::take_bytes`]).
+/// ([`Evaluator::take_cells`], [`Evaluator::take_bytes`]), or a decode's or
+/// the run's decoded rows do.
 fn limit_reached(limit: &LimitExceeded) -> String {
-    if limit.kind == LimitKind::BytesPerRun {
-        format!(
+    match limit.kind {
+        LimitKind::BytesPerRun => format!(
             "{limit}, so the relation is not evaluated rather than cut short; a run's relations \
              hold each file they decode and each key path, path token and transformed value \
              they build, so read fewer or smaller files (narrow the selector or the `at:` paths) \
              or bind fewer key and path fields"
-        )
-    } else {
-        format!(
+        ),
+        LimitKind::CellsPerRun => format!(
             "{limit}, so the relation is not evaluated rather than cut short; a run's relations \
              hold a cell per field of each row and one per file each part reads, so read fewer \
              rows (narrow the selector, the `at:` paths or the parts) or bind fewer fields"
-        )
+        ),
+        _ => format!(
+            "{limit}, so the relation is not evaluated rather than cut short; narrow what it \
+             reads (its selector, or its `at:` paths)"
+        ),
     }
 }
 

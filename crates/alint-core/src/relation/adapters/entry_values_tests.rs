@@ -1,6 +1,12 @@
 use super::*;
 use crate::relation::Value;
 
+std::thread_local! {
+    /// How many member rows `Document::members` has yielded on this
+    /// thread: the work an `at:` walk does.
+    pub(super) static MEMBER_STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 fn resource(path: &str) -> Resource {
     Resource::for_test(0, path)
 }
@@ -359,5 +365,111 @@ fn a_null_document_has_no_entries_and_a_scalar_one_fails() {
     assert_eq!(
         shapes(Format::Yaml, &["$.fr"], false, "fr:\n"),
         [(Some("at:$.fr".into()), "fr".into(), error("null"))]
+    );
+}
+
+/// The tree holds an object's members in key order; an `at:` path that
+/// selects several objects visits them in the document's.
+#[test]
+fn selected_objects_are_visited_in_document_order() {
+    let documents = [
+        (
+            Format::Json,
+            r#"{"z": {"a": 1}, "b": {"c": 2}, "m": {"d": 3}}"#,
+        ),
+        (Format::Yaml, "z:\n  a: 1\nb:\n  c: 2\nm:\n  d: 3\n"),
+        (Format::Toml, "[z]\na = 1\n[b]\nc = 2\n[m]\nd = 3\n"),
+    ];
+    for (format, text) in documents {
+        let pointers = |at: &str, leaves: bool| -> Vec<String> {
+            shapes(format, &[at], leaves, text)
+                .into_iter()
+                .map(|row| row.1)
+                .collect()
+        };
+        assert_eq!(pointers("$.*", false), ["z.a", "b.c", "m.d"], "{format:?}");
+        assert_eq!(pointers("$", true), ["z.a", "b.c", "m.d"], "{format:?}");
+    }
+    // An array's elements keep their order, and an object in one sits where
+    // the array does.
+    let text = r#"{"z": [{"y": 1}, {"x": 2}], "b": {"c": 3}}"#;
+    let pointers: Vec<String> = shapes(Format::Json, &["$.z[*]", "$.b"], false, text)
+        .into_iter()
+        .map(|row| row.1)
+        .collect();
+    assert_eq!(pointers, ["z[0].y", "z[1].x", "b.c"]);
+    // A `bound:` path's matches, the first two of which are rows, too.
+    let text = r#"{"z": {"v": 1}, "b": {"v": 2}, "m": {"v": 3}}"#;
+    let bound = run(Format::Json, &[], false, &["$.*.v"], text).unwrap();
+    let pointers: Vec<String> = rows(&bound).into_iter().map(|row| row.1).collect();
+    assert_eq!(pointers, ["z.v", "b.v"]);
+}
+
+/// `$..*` with `leaves: true` selects every object of a document 127 levels
+/// deep and 50,000 keys wide, each inside the last: each is walked once, not
+/// once per object it is inside.
+#[test]
+fn a_leaves_walk_visits_each_member_once_however_many_paths_select_it() {
+    let (depth, width) = (125, 50_000);
+    let mut text = "{\"a\":".repeat(depth);
+    text.push('{');
+    let leaves: Vec<String> = (0..width).map(|key| format!("\"k{key}\":{{}}")).collect();
+    text.push_str(&leaves.join(","));
+    text.push_str(&"}".repeat(depth + 1));
+    MEMBER_STEPS.with(|steps| steps.set(0));
+    let output = run(Format::Json, &["$..*"], true, &[], &text).unwrap();
+    let steps = MEMBER_STEPS.with(std::cell::Cell::get);
+    assert_eq!(output.rows.len(), width);
+    let entries = depth + width;
+    assert!(
+        steps <= 2 * entries,
+        "{steps} member steps for {entries} entries"
+    );
+}
+
+/// Only the rows an adapter emits build a key path, and each one's bytes
+/// are charged as it is built: a deep, wide document fails at the run's
+/// bytes when its leaves are emitted, and costs nothing when no `at:` path
+/// selects them.
+#[test]
+fn emitted_rows_charge_their_key_paths_as_they_are_built() {
+    let mut text = "{\"a\":".repeat(100);
+    text.push('{');
+    let leaves: Vec<String> = (0..2_000).map(|key| format!("\"k{key}\":0")).collect();
+    text.push_str(&leaves.join(","));
+    text.push_str(&"}".repeat(101));
+    let limits = Limits::default()
+        .with(LimitKind::BytesPerRun, 256 * 1024)
+        .unwrap();
+    let extract = |at: &str, leaves: bool| {
+        EntryValuesAdapter::new(Format::Json, &[at.into()], leaves, &[])
+            .unwrap()
+            .extract(&resource("doc"), text.as_bytes(), &limits)
+    };
+    let Err(AdapterError::Limit(limit)) = extract("$", true) else {
+        panic!("the leaves' key paths were not charged");
+    };
+    assert_eq!(limit.kind, LimitKind::BytesPerRun);
+    assert!(limit.reached <= 2 * 256 * 1024, "{limit}");
+    assert_eq!(extract("$.version", false).unwrap().rows.len(), 0);
+}
+
+/// A block scalar key has no token span: its row sits where its text
+/// starts rather than being dropped.
+#[test]
+fn a_yaml_block_scalar_key_is_a_row() {
+    let text = "deps:\n  ? |\n    block\n  : 1\n  plain: 2\n";
+    let output = run(Format::Yaml, &["$.deps"], false, &[], text).unwrap();
+    assert_eq!(
+        rows(&output),
+        [
+            (None, "deps.block\n".into(), number("1")),
+            (None, "deps.plain".into(), number("2")),
+        ]
+    );
+    let block = output.rows[0].span.unwrap();
+    assert!(
+        block.is_empty() && text[block.start..].starts_with("block"),
+        "{block:?}"
     );
 }

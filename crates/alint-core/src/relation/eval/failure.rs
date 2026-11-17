@@ -18,8 +18,9 @@ pub struct RelationFailure {
     /// Shared by every relation that reads this one and fails with it.
     pub message: Arc<str>,
     /// The message holds nothing of the relation's configuration or what it
-    /// selected, because its configuration reads the environment; report it
-    /// redacted ([`Self::to_violation`]).
+    /// selected, because its configuration reads the environment, nor what
+    /// a file whose values are redacted by default says; report it redacted
+    /// ([`Self::to_violation`]).
     pub sensitive: bool,
 }
 

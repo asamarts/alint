@@ -779,7 +779,8 @@ fn a_filter_the_environment_writes_makes_its_field_sensitive() {
         .iter()
         .map(|field| (field.name.as_str(), field.sensitive))
         .collect();
-    assert_eq!(shown, [("name", false), ("version", true)]);
+    // An entry's value is read at its key, so the key is sensitive too.
+    assert_eq!(shown, [("name", true), ("version", true)]);
 }
 
 #[test]
@@ -898,6 +899,29 @@ fn a_manifest_the_selector_cannot_read_fails() {
     );
 }
 
+/// A dotenv manifest's values are redacted by default, and its reader's
+/// message may quote one: the failure leaves the reason out and is
+/// sensitive, as the engine's gate redacts it.
+#[test]
+fn a_redacted_manifest_the_selector_cannot_read_hides_why() {
+    let config = SCOPED.replace(
+        "source: package.json\n        extract: { json: \"$.workspaces[*]\" }",
+        "source: .env\n        extract: { dotenv: \"$.MEMBERS\" }",
+    );
+    assert_ne!(config, SCOPED);
+    let tree = setup(&config, &[(".env", "MEMBERS='hunter2-secret\n")]);
+    let outcome = tree.evaluate("member-names");
+    let failures = outcome.expect_err("the relation fails");
+    assert_eq!(failures.len(), 1);
+    assert!(failures[0].sensitive);
+    assert_eq!(
+        failures[0].to_string(),
+        ".env: relation `member-names` (.alint.yml): selector `members`'s `scope_filter:` reads \
+         `.env`: it could not be read as a manifest, and the reason is not shown, since the file's \
+         values are redacted by default; fix `.env`, or change the selector's `scope_filter:`"
+    );
+}
+
 #[test]
 fn the_plan_records_what_the_environment_writes() {
     let env = |default: &str| format!("'{{{{env.ALINT_V2_ROWS_UNSET | default(\"{default}\")}}}}'");
@@ -943,6 +967,46 @@ fn the_plan_records_what_the_environment_writes() {
             ("by-read", true, vec![false]),
             ("by-filter", false, vec![true, false]),
             ("untouched", false, vec![false]),
+        ]
+    );
+}
+
+/// A field the environment filters makes every field that shows its value
+/// sensitive: an entry's key is in its path, its parent's and its root, so
+/// a filter on any of an entry's fields hides all five, and a path token
+/// hides the others, as two fields bound to one value hide each other.
+#[test]
+fn a_filter_from_the_environment_hides_every_field_that_shows_its_value() {
+    let env = "'{{env.ALINT_V2_ROWS_UNSET | default(\"a\")}}'";
+    let config = format!(
+        "version: 2\nrelations:\n  entries:\n    from: {{ paths: a.json }}\n    entries: {{ \
+         format: json, at: $ }}\n    fields: {{ key: entry.key, path: entry.path, root: \
+         entry.root, parent: entry.parent, value: entry.value, file: path }}\n    where: {{ key: \
+         {{ in: [{env}] }} }}\n  tokens:\n    from: {{ paths: a.json }}\n    read: {{ json: $.a \
+         }}\n    fields: {{ stem: stem, path: path, v: value, w: value }}\n    where: {{ stem: \
+         {{ in: [{env}] }}, w: {{ in: [{env}] }} }}\n  plain:\n    from: {{ paths: a.json }}\n    \
+         entries: {{ format: json, at: $ }}\n    fields: {{ key: entry.key, path: entry.path }}\n"
+    );
+    let tree = setup(&config, &[]);
+    let plan = tree.config.relation_plan.as_deref().unwrap();
+    let sensitive: Vec<Vec<bool>> = plan
+        .relations
+        .iter()
+        .map(|named| {
+            named
+                .relation
+                .fields
+                .iter()
+                .map(|(_, field)| field.sensitive)
+                .collect()
+        })
+        .collect();
+    assert_eq!(
+        sensitive,
+        [
+            vec![true, true, true, true, true, false],
+            vec![true, true, true, true],
+            vec![false, false],
         ]
     );
 }

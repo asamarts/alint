@@ -126,7 +126,10 @@ rules: []
 - `whole_file: {}`, the file's content as one value.
 
 A `read:` row's value is a string. A file where the read matches nothing gives one row without a
-value, unless the relation sets `optional: true`, which gives none. `read:` cannot take `xml`,
+value, unless the relation sets `optional: true`, which gives none. As in `cross_file`, a value
+written as `${VAR}` is skipped with a note, and a match that is not a string (a table, a number)
+gives one note for the file naming its kinds, while the file's strings are still rows. A join, or
+a `where:` list that reads the relation, keeps these notes. `read:` cannot take `xml`,
 `ini`, `hcl`, `dotenv` or `properties` in this build: dotenv and properties values stay redacted,
 and the others have no value rows yet.
 
@@ -215,7 +218,8 @@ field's values out of messages, the JSON report and baselines.
 
 `transform:` maps a field to a list of transforms, applied in order before `where:`:
 
-- `trim` and `lower`, on strings;
+- `trim` and `lower`, on strings. `lower` trims too, and lowercases character by character, which
+  is not Unicode case folding (`STRASSE` and `straße` stay different);
 - `semver-major` and `semver-minor`, which keep the major, or the major and minor, part of a
   version (`^18.2.0` becomes `18` or `18.2`), as `cross_file`'s `normalize` does. They do not
   apply to a path, a path token or an `entry.path`, which name where a value is, nor to a join's
@@ -239,6 +243,10 @@ numbers are refused: null is in no set, and a number compares by the text it is 
 Every predicate tests every row, so the order they are written in does not matter. A row that any
 predicate is false for is dropped. A row that none is false for, but that one cannot test (a
 pattern on a number, a list of another type), is an analysis failure.
+
+`in`, `not_in` and a join's `on:` compare the exact text of the values after their transforms.
+Nothing normalizes Unicode, so an `é` written as one code point is not one written as `e` and a
+combining accent, and only `lower` changes case.
 
 ```yaml
 version: 2
@@ -367,7 +375,9 @@ distinct-value limit, which is never truncation.
 - Only local files may be version 2 (see [the version boundary](#the-version-boundary)).
 - A selector cannot use `changed_since`.
 - Values are scalars: null, booleans, numbers (compared by the text they are written with) and
-  strings. An `entry.value` that is an object, an array or a TOML date is an analysis failure.
+  strings. An `entry.value` that is an object, an array or a TOML date is an analysis failure,
+  and it fails before `where:` runs, so no predicate can drop its row: narrow `at:` to the
+  objects of scalars, or read the leaves with `leaves: true`.
 - `entries:` reads JSON, YAML and TOML. `read:` reads JSON, YAML and TOML values, a regex, lines
   or a whole file; XML, INI, HCL, dotenv and properties are not readable.
 - A join is inner, and one side must be unique on the join key: there is no many-to-many join.

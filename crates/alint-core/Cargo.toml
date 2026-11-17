@@ -26,6 +26,12 @@ name = "yaml_memory"
 path = "tests/alloc/yaml_memory.rs"
 required-features = ["yaml-reference"]
 
+# The same for the relation layer's entry extraction: the heap a deep, wide
+# document takes, against a parse of it to a tree.
+[[test]]
+name = "relation_memory"
+path = "tests/alloc/relation_memory.rs"
+
 [dependencies]
 thiserror.workspace = true
 serde.workspace = true

@@ -6,12 +6,12 @@ use std::path::Path;
 use std::sync::Arc;
 
 use super::failure::{Failures, place};
-use super::{Cell, Evaluator, FieldInfo, Provenance, RelationNote, RelationRows, Site};
+use super::{Cell, Evaluator, FieldInfo, Provenance, RelationNote, RelationRows, Site, Skipped};
 use crate::ByteSpan;
 use crate::extract::{Extract, LinesOpts};
 use crate::relation::adapter::{Adapter, AdapterError, AdapterNote, AdapterOutput};
 use crate::relation::adapters::{EntryValuesAdapter, ExtractAdapter, entry_values};
-use crate::relation::limits::LimitExceeded;
+use crate::relation::limits::{LimitExceeded, LimitKind};
 use crate::relation::path::RelPath;
 use crate::relation::plan::{
     Entries, EntriesFormat, FieldDef, FieldSource, NamedRelation, Part, PathToken, Read, Reader,
@@ -71,9 +71,17 @@ impl Evaluator<'_> {
             ..RelationRows::default()
         };
         let mut resources = Vec::new();
-        for part in parts {
+        for (index, part) in parts.iter().enumerate() {
+            let index = u32::try_from(index).expect("a relation has fewer than 2^32 parts");
             if self
-                .part(site, relation, part, &mut out, &mut resources, failures)
+                .part(
+                    site,
+                    relation,
+                    (index, part),
+                    &mut out,
+                    &mut resources,
+                    failures,
+                )
                 .is_break()
             {
                 break;
@@ -87,13 +95,13 @@ impl Evaluator<'_> {
     }
 
     /// One part's rows, added to `out`, and the resources it reads, to
-    /// `resources`; `Break` once the run's cells or bytes ran out, so no
-    /// later part builds a row.
+    /// `resources`; `Break` once the run's cells, bytes or decoded rows ran
+    /// out, so no later part builds a row or decodes a file.
     fn part(
         &self,
         site: &Site,
         relation: &RelationDef,
-        part: &Part,
+        (index, part): (u32, &Part),
         out: &mut RelationRows,
         resources_read: &mut Vec<Resource>,
         failures: &mut Failures,
@@ -120,11 +128,13 @@ impl Evaluator<'_> {
                 return ControlFlow::Break(());
             }
             resources_read.push(resource.clone());
-            let Some(bytes) = self.bytes(site, &resource, failures) else {
-                continue;
-            };
-            let output = match self.decode(reader.adapter(), &resource, &bytes) {
-                Ok(output) => output,
+            // Read when a decode needs the bytes: a decode the run holds
+            // needs none.
+            let mut bytes = Bytes::Unread;
+            let output = match self.decode(site, reader.adapter(), &resource, &mut bytes, failures)
+            {
+                Ok(Some(output)) => output,
+                Ok(None) => continue,
                 Err(Stop::Limit(limit)) => {
                     failures.push_limit(limit_reached(&limit));
                     return ControlFlow::Break(());
@@ -140,8 +150,9 @@ impl Evaluator<'_> {
                 PartReader::Read {
                     bound: Some(adapter),
                     ..
-                } => match self.decode(adapter, &resource, &bytes) {
-                    Ok(output) => Some(output),
+                } => match self.decode(site, adapter, &resource, &mut bytes, failures) {
+                    Ok(Some(output)) => Some(output),
+                    Ok(None) => continue,
                     Err(Stop::Limit(limit)) => {
                         failures.push_limit(limit_reached(&limit));
                         return ControlFlow::Break(());
@@ -153,7 +164,7 @@ impl Evaluator<'_> {
                 },
                 _ => None,
             };
-            let rows = match Rows::new(self, site, relation, &resource) {
+            let rows = match Rows::new(self, site, relation, index, &resource) {
                 Ok(rows) => rows,
                 Err(limit) => {
                     failures.push_limit(limit_reached(&limit));
@@ -192,24 +203,51 @@ impl Evaluator<'_> {
         ControlFlow::Continue(())
     }
 
-    /// `resource` decoded through the run's cache. A decode this call makes
+    /// `resource` decoded through the run's cache, reading its bytes into
+    /// `bytes` first when the cache does not hold the decode; `None` when
+    /// they cannot be read (a failure says why). A decode this call makes
     /// takes what it holds from the run's bytes, once: each part, relation
-    /// and rule that reads it later shares it.
+    /// and rule that reads it later shares it. The run's decoded rows
+    /// running out ([`LimitKind::RowsPerRun`]), or one decode's key paths
+    /// passing the run's bytes, stops the relation, as its cells and bytes
+    /// running out does; past the run's rows the cache decodes nothing more.
     fn decode(
         &self,
+        site: &Site,
         adapter: &dyn Adapter,
         resource: &Resource,
-        bytes: &[u8],
-    ) -> Result<Arc<AdapterOutput>, Stop<AdapterError>> {
-        let (decoded, fresh) = self
-            .decodes
-            .decode_fresh(adapter, resource, bytes, &self.limits);
-        let output = decoded.map_err(Stop::Detail)?;
+        bytes: &mut Bytes,
+        failures: &mut Failures,
+    ) -> Result<Option<Arc<AdapterOutput>>, Stop<AdapterError>> {
+        let (decoded, fresh) =
+            if let Some(decoded) = self.decodes.cached(adapter, resource, &self.limits) {
+                (decoded, false)
+            } else {
+                if matches!(bytes, Bytes::Unread) {
+                    *bytes = self
+                        .bytes(site, resource, failures)
+                        .map_or(Bytes::Unreadable, Bytes::Read);
+                }
+                let Bytes::Read(read) = bytes else {
+                    return Ok(None);
+                };
+                self.decodes
+                    .decode_fresh(adapter, resource, read, &self.limits)
+            };
+        let output = decoded.map_err(|error| match error {
+            // Run-wide: no later decode or row can be held either.
+            AdapterError::Limit(limit)
+                if matches!(limit.kind, LimitKind::RowsPerRun | LimitKind::BytesPerRun) =>
+            {
+                Stop::Limit(limit)
+            }
+            error => Stop::Detail(error),
+        })?;
         if fresh {
             self.take_bytes(decode_bytes(&output))
                 .map_err(Stop::Limit)?;
         }
-        Ok(output)
+        Ok(Some(output))
     }
 
     /// The resources `from` picks, in path order, as a rule's `paths:` and
@@ -272,16 +310,27 @@ impl Evaluator<'_> {
                 Ok(set) => sets.push((predicate, set)),
                 Err(failure) => {
                     let source = predicate.source();
-                    failures.push(site.failure(
+                    // A dotenv or properties manifest's values are redacted
+                    // by default (ADR-0019 decision 3), and its reader's
+                    // message may quote one, as the engine's gate knows.
+                    let redacts = predicate.redacts_by_default();
+                    let reason = if redacts {
+                        "it could not be read as a manifest, and the reason is not shown, since \
+                         the file's values are redacted by default"
+                    } else {
+                        failure.message.as_str()
+                    };
+                    let mut failure = site.failure(
                         failure.kind,
                         Some(Arc::from(source)),
                         format!(
-                            "{name}'s `scope_filter:` reads `{source}`: {}; fix `{source}`, or \
-                             change the selector's `scope_filter:`",
-                            failure.message,
+                            "{name}'s `scope_filter:` reads `{source}`: {reason}; fix `{source}`, \
+                             or change the selector's `scope_filter:`",
                             source = source.display(),
                         ),
-                    ));
+                    );
+                    failure.sensitive |= redacts;
+                    failures.push(failure);
                     return None;
                 }
             }
@@ -511,10 +560,7 @@ fn decode_failure(
         AdapterError::Limit(limit) => site.failure(
             AnalysisFailureKind::Evaluation,
             resource,
-            format!(
-                "{limit}, so the relation is not evaluated rather than cut short; narrow what \
-                 it reads (its selector, or its `at:` paths)"
-            ),
+            super::limit_reached(limit),
         ),
     }
 }
@@ -555,11 +601,24 @@ struct Rows<'r> {
     evaluator: &'r Evaluator<'r>,
     /// Key paths are hidden from messages ([`super::failure::key_path`]).
     hide_keys: bool,
+    /// The relation's configuration reads the environment, so a message
+    /// names nothing it selects ([`Site`]).
+    hide_config: bool,
     relation: &'r RelationDef,
+    /// The part's index in the relation.
+    part: u32,
     resource: &'r Resource,
     /// The path tokens the relation's fields bind, by [`token_slot`]: built
     /// once for the resource and shared by its rows.
     tokens: [Option<Value>; 6],
+}
+
+/// A resource's bytes, read when a decode first needs them.
+enum Bytes {
+    Unread,
+    Read(Arc<[u8]>),
+    /// The read failed, and a failure says why.
+    Unreadable,
 }
 
 /// Why a resource's rows stop.
@@ -567,7 +626,8 @@ enum Stop<D = String> {
     /// A problem in this resource: an analysis failure for it, and the next
     /// resource is read.
     Detail(D),
-    /// The run's cells or bytes ran out: the relation builds no more rows.
+    /// The run's cells, bytes or decoded rows ran out: the relation builds
+    /// no more rows.
     Limit(LimitExceeded),
 }
 
@@ -606,6 +666,7 @@ impl<'r> Rows<'r> {
         evaluator: &'r Evaluator<'r>,
         site: &Site,
         relation: &'r RelationDef,
+        part: u32,
         resource: &'r Resource,
     ) -> Result<Self, LimitExceeded> {
         let mut tokens: [Option<Value>; 6] = Default::default();
@@ -634,7 +695,9 @@ impl<'r> Rows<'r> {
         Ok(Self {
             evaluator,
             hide_keys: site.keys_sensitive,
+            hide_config: site.sensitive,
             relation,
+            part,
             resource,
             tokens,
         })
@@ -651,12 +714,15 @@ impl<'r> Rows<'r> {
         self.evaluator.take_bytes(bytes).map_err(Stop::Limit)
     }
 
-    /// The provenance of a row at `pointer`, its key path's bytes taken.
-    fn provenance(&self, pointer: Option<Pointer>) -> Result<Arc<Provenance>, Stop> {
+    /// The provenance of the row the part's adapter emitted `ordinal`th, at
+    /// `pointer`, its key path's bytes taken.
+    fn provenance(&self, pointer: Option<Pointer>, ordinal: u32) -> Result<Arc<Provenance>, Stop> {
         self.take_bytes(pointer.as_ref().map_or(0, Pointer::heap_bytes))?;
         Ok(Arc::new(Provenance {
             resource: self.resource.clone(),
             pointer,
+            part: self.part,
+            ordinal,
         }))
     }
 
@@ -727,7 +793,7 @@ impl<'r> Rows<'r> {
             };
             cells.push(Some(Cell {
                 value: Some(value),
-                at: self.provenance(row.pointer.clone())?,
+                at: self.provenance(row.pointer.clone(), row.ordinal)?,
                 span: row.value_span.or(row.span),
                 path: None,
             }));
@@ -776,7 +842,8 @@ impl<'r> Rows<'r> {
         let bound = self.bound_cells(output)?;
         for row in output.rows.iter().filter(|row| row.label.is_none()) {
             self.take_row()?;
-            let provenance = self.provenance(Some(row.pointer.clone().unwrap_or_default()))?;
+            let provenance =
+                self.provenance(Some(row.pointer.clone().unwrap_or_default()), row.ordinal)?;
             let pointer = provenance
                 .pointer
                 .as_ref()
@@ -901,7 +968,9 @@ impl<'r> Rows<'r> {
     }
 
     /// A `read:` part's rows in one resource: one per string it extracted,
-    /// or one missing row when it extracted nothing (unless `optional`).
+    /// or one missing row when it extracted nothing (unless `optional`, or
+    /// it skipped a value or matched one that is not a string, which a note
+    /// says instead). Each row is its own, for its ordinal.
     fn read(
         &self,
         read: &Read,
@@ -911,13 +980,31 @@ impl<'r> Rows<'r> {
         out: &mut RelationRows,
     ) -> Result<(), Stop> {
         if !output.non_strings.is_empty() {
-            return Err(format!(
-                "`{}` matched non-string value(s) ({}); `read:` rows hold strings, so select \
-                 string values, or read typed values with `entries:`",
-                read_text(read),
-                non_string_summary(output)
-            )
-            .into());
+            let kinds = non_string_kinds(output);
+            let summary = kinds
+                .iter()
+                .map(|(kind, count)| format!("{}: {count}", kind.as_str()))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let read = if self.hide_config {
+                "`read:`".to_string()
+            } else {
+                format!("`{}`", read_text(read))
+            };
+            let message = format!(
+                "{read} matched non-string value(s) ({summary}); `read:` rows hold strings, so \
+                 select string values, or read typed values with `entries:`"
+            );
+            let skipped = Skipped::NonString {
+                part: self.part,
+                kinds,
+            };
+            self.take_bytes(note_bytes(&skipped, &message))?;
+            out.notes.push(RelationNote {
+                resource: self.resource.clone(),
+                skipped,
+                message,
+            });
         }
         let value_sensitive = self
             .relation
@@ -931,9 +1018,10 @@ impl<'r> Rows<'r> {
             } else {
                 format!("skipped non-literal value {value:?}")
             };
-            self.take_bytes(std::mem::size_of::<RelationNote>() + message.len())?;
+            self.take_bytes(note_bytes(&Skipped::NonLiteral, &message))?;
             out.notes.push(RelationNote {
                 resource: self.resource.clone(),
+                skipped: Skipped::NonLiteral,
                 message,
             });
         }
@@ -941,22 +1029,23 @@ impl<'r> Rows<'r> {
             Some(output) => self.bound_cells(output)?,
             None => vec![None; self.relation.fields.len()],
         };
-        let provenance = Arc::new(Provenance {
-            resource: self.resource.clone(),
-            pointer: None,
-        });
         // Shared with the decode, which took their bytes.
-        let values: Vec<Option<Value>> = if output.rows.is_empty() {
-            if optional || !output.notes.is_empty() {
+        let values: Vec<(Option<Value>, u32)> = if output.rows.is_empty() {
+            if optional || !output.notes.is_empty() || !output.non_strings.is_empty() {
                 Vec::new()
             } else {
-                vec![None]
+                vec![(None, 0)]
             }
         } else {
-            output.rows.iter().map(|row| row.value().cloned()).collect()
+            output
+                .rows
+                .iter()
+                .map(|row| (row.value().cloned(), row.ordinal))
+                .collect()
         };
-        for value in values {
+        for (value, ordinal) in values {
             self.take_row()?;
+            let provenance = self.provenance(None, ordinal)?;
             let mut cells = Vec::with_capacity(self.relation.fields.len());
             for (position, (name, field)) in self.relation.fields.iter().enumerate() {
                 let (value, span) = match &field.source {
@@ -1003,8 +1092,19 @@ fn wrong_source(name: &str, field: &FieldDef, row: &str) -> String {
     )
 }
 
-/// `null: 1, number: 2`, counting each kind of non-string match.
-fn non_string_summary(output: &AdapterOutput) -> String {
+/// What a note with `message` holds.
+pub(super) fn note_bytes(skipped: &Skipped, message: &str) -> usize {
+    let kinds = match skipped {
+        Skipped::NonLiteral => 0,
+        Skipped::NonString { kinds, .. } => {
+            kinds.len() * std::mem::size_of::<(crate::extract::NonStringValueKind, usize)>()
+        }
+    };
+    std::mem::size_of::<RelationNote>() + message.len() + kinds
+}
+
+/// Each kind of non-string match and how many times, in a fixed order.
+fn non_string_kinds(output: &AdapterOutput) -> Vec<(crate::extract::NonStringValueKind, usize)> {
     use crate::extract::NonStringValueKind as Kind;
     [
         Kind::Null,
@@ -1020,8 +1120,7 @@ fn non_string_summary(output: &AdapterOutput) -> String {
             .iter()
             .filter(|held| **held == kind)
             .count();
-        (count > 0).then(|| format!("{}: {count}", kind.as_str()))
+        (count > 0).then_some((kind, count))
     })
-    .collect::<Vec<_>>()
-    .join(", ")
+    .collect()
 }

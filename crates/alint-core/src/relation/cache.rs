@@ -342,6 +342,10 @@ impl DecodeCache {
     /// [`decode`](Self::decode), and whether this call made the decode
     /// rather than found it: the relation evaluator takes what a decode
     /// holds from its run's bytes once, when it makes it.
+    ///
+    /// Once the run's rows are spent, a decode the cache does not hold
+    /// fails at once, without reading the resource's rows: the budget never
+    /// comes back within a run, so any decode would fail after the work.
     pub(crate) fn decode_fresh(
         &self,
         adapter: &dyn Adapter,
@@ -361,6 +365,7 @@ impl DecodeCache {
         let result = slot
             .get_or_init(|| {
                 fresh = true;
+                self.budget.spent()?;
                 self.decodes.fetch_add(1, Ordering::Relaxed);
                 let output = adapter.extract(resource, bytes, limits)?;
                 self.budget.take(output.rows.len())?;
@@ -368,6 +373,24 @@ impl DecodeCache {
             })
             .clone();
         (result, fresh)
+    }
+
+    /// The decode of `resource` through `adapter` under `limits`, when the
+    /// cache holds it: a consumer that finds it needs not read the resource.
+    pub(crate) fn cached(
+        &self,
+        adapter: &dyn Adapter,
+        resource: &Resource,
+        limits: &Limits,
+    ) -> Option<DecodeResult> {
+        let key = (adapter.id().to_string(), resource.path().clone(), *limits);
+        let slot = self
+            .slots
+            .lock()
+            .expect("decode cache lock")
+            .get(&key)
+            .cloned()?;
+        slot.get().cloned()
     }
 
     /// Forget every decode, with [`ReadCache::clear`]. The rows already taken
@@ -841,14 +864,20 @@ mod tests {
                 .unwrap_err(),
             over
         );
-        assert!(matches!(
-            cache.decode(&adapter, &literal("c.txt"), b"e\n", &limits),
-            Err(AdapterError::Limit(crate::relation::LimitExceeded {
-                kind: LimitKind::RowsPerRun,
-                ..
-            }))
-        ));
-        assert_eq!(cache.decodes(), 3);
+        // A spent budget refuses a fresh decode without making it.
+        assert_eq!(
+            cache
+                .decode(&adapter, &literal("c.txt"), b"e\n", &limits)
+                .unwrap_err(),
+            over
+        );
+        assert_eq!(cache.decodes(), 2);
+        assert!(
+            cache
+                .cached(&adapter, &literal("a.txt"), &limits)
+                .is_some_and(|held| held.is_ok())
+        );
+        assert!(cache.cached(&adapter, &literal("d.txt"), &limits).is_none());
     }
 
     #[test]
