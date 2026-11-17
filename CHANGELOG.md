@@ -398,6 +398,38 @@ policy-test package the user does not trust.
   full, even one that ayaml refuses for its syntax. CI and the release preflight run the
   workspace's tests that way (`ci/scripts/yaml-compare.sh`), and a gate fails if a build without
   the feature depends on `yaml_serde`.
+- **`version: 2` configurations (experimental)**
+  ([ADR-0034](docs/adr/0034-v2-version-boundary-and-phase-3-design.md),
+  [ADR-0037](docs/adr/0037-phase-3-design-refinements.md)). A config whose top-level `version:`
+  is the literal integer `2` loads as version 2, which is experimental: its syntax may change in
+  any release until one declares it stable, v0.24 at the earliest, and this file lists each
+  change. Loading one prints a warning once per run, naming the file
+  (`` alint: warning: `version: 2` is experimental; ... ``); `validate-config` names the version on
+  its success line and puts the warning in its JSON `warnings`. The language server loads a v2
+  config without the warning.
+  - alint reads a config's `version:` before anything else in it and decodes the rest as that
+    version. A version written any other way than as the literal `2` (from the environment,
+    quoted, tagged or as a YAML alias) is version 1 and must equal 1, as before. An `.alint.d/`
+    fragment without `version:` is read as its root's version.
+  - Version 2 accepts every version 1 key and rule kind with its version 1 meaning, plus
+    top-level `selectors:` and `relations:` and an `as:` alias on a local `extends:` entry. Each
+    of those in a version 1 config is an error that names the version it needs
+    (`` `selectors:` needs `version: 2`; this config is version 1 ``), and an unknown key in a
+    version 2 config is reported with the version 2 keys.
+  - Selectors (`paths:`, `scope_filter:` without `changed_since`) and relations (`from:` with
+    `entries:` or `read:`, `union:`, `join:`, `fields:`, `transform:` and `where:`) are checked
+    when the config loads: every key, value type, field source, transform and predicate. Names,
+    aliases and references are literal: `{{...}}` in one is an error. A name is declared once
+    per config file, across selectors, relations and aliases.
+  - Only local files may be version 2: the top-level config, a local `extends:` target and an
+    `.alint.d/` fragment. A remote `extends:` source, a bundled ruleset, a nested config and the
+    string `alint_dsl::parse` reads must be version 1, and a version 1 config cannot extend a
+    version 2 one; each is an error that says so.
+  - Nothing reads selectors and relations yet: a version 2 config runs its rules as version 1
+    would, and its selectors and relations check nothing until the `constraint` rule kind lands.
+  - `facts.json` (format 7) gains `compatibility.experimental_config_versions: [2]`;
+    `config_versions` stays `[1]`. `validate-config --format json` gains `config_version`, the
+    loaded config's version, for every config.
 
 ### Changed
 

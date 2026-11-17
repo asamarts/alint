@@ -1,5 +1,5 @@
 {
-  "format_version": 6,
+  "format_version": 7,
   "alint_version": "0.22.1",
   "counts": {
     "rule_kinds": 103,
@@ -6119,6 +6119,9 @@
   "compatibility": {
     "config_versions": [
       1
+    ],
+    "experimental_config_versions": [
+      2
     ],
     "policy_test_versions": [
       1

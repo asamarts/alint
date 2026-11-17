@@ -42,7 +42,7 @@ volatile fields, so it is committed and content-diff gated like the schema.
 
 ```json
 {
-  "format_version": 6,
+  "format_version": 7,
   "alint_version": "0.19.0",
   "counts": {
     "rule_kinds": 102,
@@ -78,6 +78,7 @@ volatile fields, so it is committed and content-diff gated like the schema.
   },
   "compatibility": {
     "config_versions": [1],
+    "experimental_config_versions": [2],
     "policy_test_versions": [1]
   },
   "bundled_rulesets": ["apache/governance", "go", "rust", "..."],
@@ -97,7 +98,9 @@ list-backed counts equal their list lengths; `auto_fix_ops` is count-only.
 `facts.json` ships alongside the volatile build-time `manifest.json`. Format v4 added the
 `kind_meta` inventory. Format v5 added `compatibility`, derived from the config and policy-test
 runtime constants. Format v6 adds each canonical kind's allowed/required trace stages, preview
-capability, and nested-evaluation capability to that same inventory. The alint.org facts loader
+capability, and nested-evaluation capability to that same inventory. Format v7 adds
+`compatibility.experimental_config_versions`, the versions a build loads but does not yet call
+stable (`[2]` in v0.23); `config_versions` stays the stable list. The alint.org facts loader
 ignores unknown keys; its supported-version checks apply to the separate bundle manifest.
 
 ## 3. Semantics
@@ -112,6 +115,7 @@ uses, so `facts.json` can never disagree with the README:
 | `rule_aliases` (count and map) | `ALIAS_TO_CANONICAL` in the generated category bridge |
 | `kind_meta` | canonical `KindMeta` records in the built-in `RuleRegistry`; aliases resolve through `rule_aliases` |
 | `compatibility.config_versions` | `Config::{MIN_SUPPORTED_VERSION,CURRENT_VERSION}` |
+| `compatibility.experimental_config_versions` | `alint_dsl::EXPERIMENTAL_CONFIG_VERSIONS` |
 | `compatibility.policy_test_versions` | `alint_testkit::POLICY_TEST_VERSION` |
 | `rule_kinds` (list) | accepted `kind:` values in `crates/alint-dsl/tests/fixtures/all_kinds.yaml`, aliases included |
 | `families` | non-meta `## ` headings in `docs/rules.md` |
