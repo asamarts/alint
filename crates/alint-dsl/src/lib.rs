@@ -222,6 +222,7 @@ fn load_resolved(
                     path: path.to_path_buf(),
                     source,
                 })?;
+        let mut field_source_names = std::mem::take(&mut raw.field_source_names);
         let (discovered_rules, discovered_compatibility, discovered_environment_values) =
             nested::discover_nested(
                 &root_dir,
@@ -231,7 +232,9 @@ fn load_resolved(
                 RunningVersion::current(),
                 opts.environment.as_ref(),
                 opts.global_git_excludes,
+                &mut field_source_names,
             )?;
+        raw.field_source_names = field_source_names;
         raw.rules.extend(discovered_rules);
         extend_compatibility(&mut raw.compatibility, discovered_compatibility);
         loader::add_environment_values(environment_values, &discovered_environment_values);

@@ -34,10 +34,6 @@ const SKIP_KEYS: &[&str] = &["id", "kind", "level"];
 /// one turns on [`SKIP_KEYS`] suppression for the whole subtree.
 const RULE_BEARING_KEYS: &[&str] = &["rules", "templates"];
 
-/// A version 2 config's top-level keys whose values are selectors and
-/// relations: a value substituted there stays a string ([`Scope::Objects`]).
-const OBJECT_KEYS: &[&str] = &["selectors", "relations"];
-
 /// Where in a config a value sits, which decides the keys that stay literal
 /// and whether a value that took a substitution is re-typed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,19 +49,24 @@ pub(crate) enum Scope {
     /// [`Scope::Plain`]. Nested rules (a `for_each_dir`'s `require:`) inherit
     /// it.
     Rule,
-    /// Inside version 2's `selectors:` or `relations:`: a substituted value
-    /// stays a string, as every value there that can read the environment
-    /// (a glob, a `JSONPath`, a pattern, a value to compare) is text: an
-    /// `in: ["{{env.NODE_MAJOR}}"]` compares with `18`, not the number 18.
-    Objects,
+    /// Inside version 2's `selectors:` or `relations:`, at this position: a
+    /// substituted value stays text (a glob, a `JSONPath`, a pattern, a value
+    /// to compare: `in: ["{{env.NODE_MAJOR}}"]` compares with `18`, not the
+    /// number 18), but in a field that takes a boolean
+    /// ([`crate::v2::Position`]), where one that spells a boolean reads as
+    /// one (`optional: "{{env.OPTIONAL}}"`).
+    Objects(crate::v2::Position),
 }
 
 impl Scope {
     /// The scope of the value under `key` of a mapping in this scope.
     fn below(self, key: Option<&str>) -> Self {
+        use crate::v2::Position;
         match self {
-            Self::Rule | Self::Objects => self,
-            Self::Document if key.is_some_and(|key| OBJECT_KEYS.contains(&key)) => Self::Objects,
+            Self::Rule => self,
+            Self::Objects(position) => Self::Objects(position.below(key)),
+            Self::Document if key == Some("relations") => Self::Objects(Position::Relations),
+            Self::Document if key == Some("selectors") => Self::Objects(Position::Text),
             Self::Document | Self::Plain
                 if key.is_some_and(|key| RULE_BEARING_KEYS.contains(&key)) =>
             {
@@ -157,9 +158,9 @@ where
     walk(value, env, scope, Some(numbers), None)
 }
 
-/// `scope` is where `value` sits ([`Scope`]). `field` is the key a value
-/// inside a rule sits under, which decides how it is masked
-/// ([`alint_core::mask_configuration_field`]).
+/// `scope` is where `value` sits ([`Scope`]). `field` is the key it sits
+/// under (`None` for a list's item); inside a rule, it decides how the value
+/// is masked ([`alint_core::mask_configuration_field`]).
 fn walk<F>(
     value: &mut Value,
     env: &F,
@@ -179,13 +180,20 @@ where
             // substituted something — so an interpolated integer-field
             // value validates as a number rather than a string, while
             // pre-existing literal strings are never silently re-typed.
-            // A selector's or relation's value stays text.
-            if result.substituted && !result.text.contains("{{") && scope != Scope::Objects {
-                *value = retype_scalar(result.text);
-            } else {
+            // A selector's or relation's value stays text, but in a field
+            // that takes a boolean.
+            if !result.substituted || result.text.contains("{{") {
                 *s = result.text;
+            } else {
+                *value = match scope {
+                    Scope::Objects(crate::v2::Position::Boolean) => retype_boolean(result.text),
+                    Scope::Objects(_) => Value::String(result.text),
+                    Scope::Document | Scope::Plain | Scope::Rule => retype_scalar(result.text),
+                };
             }
             if let (true, Some(numbers)) = (substituted, mask) {
+                // A rule's field decides how its value is masked.
+                let field = field.filter(|_| scope == Scope::Rule);
                 crate::core_yaml::mask_configuration_field(
                     field.unwrap_or_default(),
                     value,
@@ -210,8 +218,7 @@ where
                 }
                 // A `rules:` / `templates:` key turns the skip on for its
                 // subtree; once on, it stays on.
-                let below = scope.below(key);
-                walk(v, env, below, mask, key.filter(|_| below == Scope::Rule))?;
+                walk(v, env, scope.below(key), mask, key)?;
             }
             Ok(())
         }
@@ -412,6 +419,16 @@ fn retype_scalar(text: String) -> Value {
     }
     match alint_core::yaml::from_str::<Value>(&text) {
         Ok(v @ (Value::Number(_) | Value::Bool(_))) => v,
+        _ => Value::String(text),
+    }
+}
+
+/// [`retype_scalar`] for a version 2 field that takes a boolean: a value
+/// that spells one reads as one, and anything else (a number too) stays the
+/// text it is, for the decode to refuse as the boolean it is not.
+fn retype_boolean(text: String) -> Value {
+    match retype_scalar(text.clone()) {
+        boolean @ Value::Bool(_) => boolean,
         _ => Value::String(text),
     }
 }

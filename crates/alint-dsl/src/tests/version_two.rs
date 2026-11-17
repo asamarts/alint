@@ -225,6 +225,79 @@ fn a_version_read_from_the_environment_is_version_one() {
     );
 }
 
+/// A value substituted into a selector or relation stayed text in every field
+/// (V2L-7), so `optional: "{{env.B}}"` with `B=true` failed ("expected `true`
+/// or `false`"). In a field that takes a boolean (a relation's or a union
+/// part's `optional:`, `entries:`'s `leaves:`, a field's `sensitive:`) a value
+/// that spells one reads as one; a number stays text there, and so does a
+/// value that spells a boolean in any other field, even one named like those.
+#[test]
+fn a_value_from_the_environment_is_a_boolean_where_the_field_takes_one() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = write(
+        tmp.path(),
+        ".alint.yml",
+        "version: 2\nrelations:\n  r:\n    from: { paths: '*.json' }\n    read: { json: $.a }\n    \
+         optional: '{{env.B}}'\n    fields: { v: { source: value, sensitive: '{{env.B}}' } }\n  \
+         e:\n    from: { paths: '*.json' }\n    entries: { format: json, at: $, leaves: \
+         '{{env.B}}' }\n    fields: { k: entry.key }\n  u:\n    union:\n      - { from: { paths: \
+         a.json }, read: { json: $.a }, optional: '{{env.B}}' }\n      - { from: { paths: b.json \
+         }, read: { json: $.b } }\n    fields: { v: value }\nrules: []\n",
+    );
+    for (value, bound) in [("true", "true"), ("false", "false")] {
+        let environment: &'static [(&str, &str)] = if value == "true" {
+            &[("B", "true")]
+        } else {
+            &[("B", "false")]
+        };
+        load_in(&path, environment).unwrap();
+        let raw = load_top_level_raw(
+            &path,
+            &LoadOptions {
+                environment: std::sync::Arc::new(Environment(environment)),
+                ..options()
+            },
+        )
+        .unwrap();
+        // What each relation decoded to, without its masked copies.
+        let shown = raw.v2.sources[0]
+            .relations
+            .iter()
+            .map(|(_, relation)| format!("{:?} {:?}\n", relation.rows, relation.fields))
+            .collect::<Vec<_>>()
+            .concat();
+        for field in ["optional", "leaves", "sensitive"] {
+            let bound_here = format!("{field}: {bound}");
+            assert!(shown.contains(&bound_here), "{bound_here} in {shown}");
+        }
+        // The relation's `optional`, and the union's first part's (its second
+        // part's is `false` unset).
+        let parts = if bound == "true" { 2 } else { 3 };
+        assert_eq!(
+            shown.matches(&format!("optional: {bound}")).count(),
+            parts,
+            "{shown}"
+        );
+    }
+    // A number is no boolean.
+    let error = load_in(&path, &[("B", "1")]).unwrap_err().to_string();
+    assert!(
+        error.contains("expected `true` or `false`, found a string"),
+        "{error}"
+    );
+    // `where:` names a field `optional`, whose predicates are no boolean:
+    // the value stays text, as the error says.
+    let path = write(
+        tmp.path(),
+        ".alint.yml",
+        "version: 2\nrelations:\n  r:\n    from: { paths: '*.json' }\n    read: { json: $.a }\n    \
+         fields: { optional: value }\n    where: { optional: '{{env.B}}' }\nrules: []\n",
+    );
+    let error = load_in(&path, &[("B", "true")]).unwrap_err().to_string();
+    assert!(error.contains("`relations.r.where.optional`"), "{error}");
+    assert!(error.ends_with("found a string"), "{error}");
+}
+
 /// What a 2 the loader did not read as version 2 is refused with.
 const TWO_AS_WRITTEN: &str = "unsupported config version 2 as written: only a literal \
                               `version: 2` in a local config file selects the experimental \

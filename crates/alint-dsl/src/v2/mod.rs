@@ -34,7 +34,7 @@ use ayaml::Value;
 
 #[cfg(test)]
 pub(crate) use decode::source_objects;
-pub(crate) use decode::{Locus, decode_objects, decode_twins};
+pub(crate) use decode::{Locus, Position, decode_objects, decode_twins};
 pub(crate) use document::{Document, ExtendsEntry};
 pub(crate) use environment::Environment;
 pub(crate) use literal::reject_interpolated_names;

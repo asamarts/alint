@@ -49,6 +49,60 @@ const UNREADABLE_FORMATS: &[&str] = &["xml", "dotenv", "properties", "ini", "hcl
 pub(super) const JOIN_KEYS: &[&str] = &["left", "right", "on", "unique"];
 pub(super) const FIELD_KEYS: &[&str] = &["source", "sensitive"];
 pub(super) const PREDICATE_KEYS: &[&str] = &["in", "not_in", "matches", "not_matches"];
+
+/// Where a value sits in a version 2 `selectors:` or `relations:` value, as
+/// far as its interpolation needs to know: whether it lands in a field that
+/// takes a boolean ([`BOOLEAN_FIELDS`]), where a value substituted from the
+/// environment reads as one. Everywhere else it stays text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Position {
+    /// The value of `relations:`.
+    Relations,
+    /// A relation's definition.
+    Relation,
+    /// A union's list of parts.
+    Union,
+    /// A union's part.
+    Part,
+    /// A relation's or a part's `entries:`.
+    Entries,
+    /// A relation's `fields:`.
+    Fields,
+    /// One field's definition.
+    Field,
+    /// A field that takes a boolean.
+    Boolean,
+    /// Anywhere else, all of `selectors:` too: text, or lists and maps of it.
+    Text,
+}
+
+impl Position {
+    /// The position of the value under `key` (`None` for a list's item) of
+    /// the value at this one.
+    pub(crate) fn below(self, key: Option<&str>) -> Self {
+        match (self, key) {
+            (_, Some(key)) if BOOLEAN_FIELDS.contains(&(self, key)) => Self::Boolean,
+            (Self::Relations, Some(_)) => Self::Relation,
+            (Self::Relation, Some("union")) => Self::Union,
+            (Self::Union, None) => Self::Part,
+            (Self::Relation | Self::Part, Some("entries")) => Self::Entries,
+            (Self::Relation, Some("fields")) => Self::Fields,
+            (Self::Fields, Some(_)) => Self::Field,
+            _ => Self::Text,
+        }
+    }
+}
+
+/// Each field of a selector or relation that takes a boolean, with where it
+/// sits; the decode reads each with `boolean()`. No field takes a number, and
+/// every other one takes text (or a list or map of it), as an `in:` list's
+/// members compare as text.
+pub(crate) const BOOLEAN_FIELDS: &[(Position, &str)] = &[
+    (Position::Relation, "optional"),
+    (Position::Part, "optional"),
+    (Position::Entries, "leaves"),
+    (Position::Field, "sensitive"),
+];
 pub(super) const MEMBER_KEYS: &[&str] = &["relation", "field"];
 pub(super) const TRANSFORMS: &[&str] = &[
     "trim",
@@ -152,11 +206,15 @@ impl Locus {
     }
 
     /// Where the value at this locus sits, for its interpolation: a
-    /// selector's or relation's values stay text.
+    /// selector's or relation's values stay text, but in a field that takes a
+    /// boolean ([`Position`]).
     pub(crate) fn scope(&self) -> crate::interp::Scope {
+        use crate::interp::Scope;
         match self {
-            Self::Key(_) | Self::Entry { .. } => crate::interp::Scope::Objects,
-            Self::Extends(_) => crate::interp::Scope::Plain,
+            Self::Key(key) if key == "relations" => Scope::Objects(Position::Relations),
+            Self::Entry { key, .. } if key == "relations" => Scope::Objects(Position::Relation),
+            Self::Key(_) | Self::Entry { .. } => Scope::Objects(Position::Text),
+            Self::Extends(_) => Scope::Plain,
         }
     }
 

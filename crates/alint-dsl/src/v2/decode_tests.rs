@@ -1125,3 +1125,37 @@ fn an_empty_selector_filter_is_refused_in_a_selectors_words() {
          remove `scope_filter:`"
     );
 }
+
+/// The fields a value substituted from the environment reads as a boolean in
+/// ([`BOOLEAN_FIELDS`]) are the ones the decode reads as a boolean, and the
+/// decode reads no number: a field that takes one would need its value
+/// re-typed too (`interp.rs`, `Scope::Objects`).
+#[test]
+fn the_boolean_fields_are_the_ones_the_decode_reads_as_booleans() {
+    let source = include_str!("decode.rs").replace("\r\n", "\n");
+    let code = source.split("\n#[cfg(test)]\n#[path").next().unwrap();
+    let read: std::collections::BTreeSet<&str> = code
+        .match_indices("self.boolean(value, &format!(\"{path}.")
+        .map(|(at, call)| {
+            let rest = &code[at + call.len()..];
+            &rest[..rest.find('"').unwrap()]
+        })
+        .collect();
+    assert_eq!(
+        code.matches(".boolean(").count(),
+        code.matches("self.boolean(value, &format!(\"{path}.")
+            .count(),
+        "every boolean the decode reads is named by its key"
+    );
+    let typed: std::collections::BTreeSet<&str> =
+        BOOLEAN_FIELDS.iter().map(|(_, key)| *key).collect();
+    assert_eq!(read, typed);
+    for number in [
+        "as_u64(", "as_i64(", "as_f64(", "is_u64(", "is_i64(", "is_f64(",
+    ] {
+        assert!(
+            !code.contains(number),
+            "the decode reads a number ({number})"
+        );
+    }
+}

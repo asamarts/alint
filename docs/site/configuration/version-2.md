@@ -278,8 +278,9 @@ aliases. Names, aliases and references are literal: `{{...}}` in one is an error
 name the same thing in every environment. Other values interpolate `{{env.X}}` as in version 1,
 except that a value substituted in a selector or relation stays text: with `NODE_MAJOR=18`,
 `in: ["{{env.NODE_MAJOR}}"]` compares with the text `18`, where a rule's value re-types as a
-number. An error that could quote a value read from the environment is redacted to the selector
-or relation it is about, as a version 1 rule's is.
+number. Only the fields that take a boolean (`optional:`, `leaves:` and a field's `sensitive:`)
+read a substituted `true` or `false` as one. An error that could quote a value read from the
+environment is redacted to the selector or relation it is about, as a version 1 rule's is.
 
 Each config file has its own namespace:
 

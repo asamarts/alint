@@ -1086,3 +1086,61 @@ fn a_template_placeholder_anywhere_in_an_applicability_is_refused() {
         Some("fix.file_remove.applicability")
     );
 }
+
+/// Every field of a nested config's rules named the config by its whole path
+/// (its field-source marker). It names it by an index among the root's field
+/// sources now, the same size at any depth, which resolves to the path.
+#[test]
+fn a_nested_rule_marker_does_not_grow_with_its_path() {
+    let deep: String = (0..if cfg!(windows) { 1 } else { 12 })
+        .map(|level| {
+            format!(
+                "{}{level:02}",
+                "d".repeat(if cfg!(windows) { 98 } else { 198 })
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("/");
+    let marker_at = |dir: &str| {
+        let tmp = tempfile::tempdir().unwrap();
+        let root_cfg = tmp.path().join(".alint.yml");
+        std::fs::write(&root_cfg, "version: 1\nnested_configs: true\nrules: []\n").unwrap();
+        let nested = tmp.path().join(dir);
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(
+            nested.join(".alint.yml"),
+            "version: 1\nrules:\n  - {id: r, kind: file_exists, paths: x, level: error, \
+             message: m}\n",
+        )
+        .unwrap();
+        let root = RawConfig {
+            version: Some(1),
+            ..RawConfig::default()
+        };
+        let opts = LoadOptions::with_catalog(test_catalog());
+        let mut names = vec!["an extends: entry".to_string()];
+        let (rules, _, _) = nested::discover_nested(
+            tmp.path(),
+            &root_cfg.canonicalize().unwrap(),
+            &root,
+            opts.kind_catalog,
+            RunningVersion::current(),
+            opts.environment.as_ref(),
+            opts.global_git_excludes,
+            &mut names,
+        )
+        .unwrap();
+        let source = format!("{dir}/.alint.yml");
+        assert_eq!(names, ["an extends: entry".to_string(), source.clone()]);
+        // It still names the config's path once resolved.
+        let mut resolved = rules[0].clone();
+        crate::trust::name_field_sources(&mut resolved, &names);
+        assert_eq!(
+            configured_field_source(&resolved, "paths"),
+            Some(source.as_str())
+        );
+        let marker = rules[0][FIELD_SOURCES_MARKER].as_mapping().unwrap();
+        template_budget::size_of_mapping(marker)
+    };
+    assert_eq!(marker_at("a"), marker_at(&deep));
+}
