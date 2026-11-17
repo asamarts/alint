@@ -704,6 +704,11 @@ fn two_errors_at_two_places_are_explained_each_on_its_own() {
             "quoted-only-characters",
             &["quoted-only-characters"],
         ),
+        (
+            "a: |2\n   0\n  - |\n\t\n 1\n",
+            "tab-as-white-space",
+            &["tab-as-white-space"],
+        ),
     ] {
         let (case, _) = compare(input, Entry::Value);
         assert_eq!(case.class, Class::RejectedAtDifferentLocation, "{case:?}");

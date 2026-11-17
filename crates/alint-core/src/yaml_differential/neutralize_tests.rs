@@ -269,6 +269,17 @@ fn places_follow_flow_collections_quotes_and_block_scalars() {
     // A block scalar's content is indented past its key, not its line.
     let input = "  - id: |-\n    : r2\n";
     assert!(!places(input)[input.find(": r2").unwrap()].literal);
+    // An indentation indicator sets the content's indentation past the
+    // parent's column: a line at that column is content after a more
+    // indented first line, so `- |` there opens no block scalar, and a line
+    // of a tab short of it is indentation (seed 60 of the long run).
+    let input = "a: |2\n   0\n  - |\n\t\n 1\n";
+    let found = places(input);
+    assert!(found[input.find("- |").unwrap()].literal);
+    assert!(found[input.find('\t').unwrap()].indentation);
+    for input in ["- a: |1-\n    x\n   y\n", "a: >+2\n   x\n  y\n"] {
+        assert!(places(input)[input.find('y').unwrap()].literal, "{input:?}");
+    }
     // A node on the line after `- ` belongs to the `-`, so the line after
     // it continues a plain scalar there.
     let input = "- \n  ~,\n  'q]]\n:\n";

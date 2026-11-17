@@ -108,14 +108,15 @@ pub(super) struct Place {
     /// end too, which [`places`] cannot tell apart from what follows.
     pub(super) plain: bool,
     /// Whether it is white space at the start of a block scalar's line, short
-    /// of the content's indentation once a line set it: libyaml takes a tab
-    /// there for indentation, and ayaml for content. Before then, libyaml
-    /// rejects a tab, and ayaml makes a line with one the first line of
-    /// content, with its spaces as the indentation, when they are past the
-    /// parent's column, as they always are under a top-level header, and
-    /// otherwise ends the scalar before the line and reads it as white space
-    /// (YAML 1.2, section 8.1.1.1). A line of tabs alone, from its start, it
-    /// rejects, as libyaml does, but under a top-level header.
+    /// of the content's indentation once the header's indentation indicator
+    /// or a line set it: libyaml takes a tab there for indentation, and ayaml
+    /// for content. Before then, libyaml rejects a tab, and ayaml makes a
+    /// line with one the first line of content, with its spaces as the
+    /// indentation, when they are past the parent's column, as they always
+    /// are under a top-level header, and otherwise ends the scalar before the
+    /// line and reads it as white space (YAML 1.2, section 8.1.1.1). A line
+    /// of tabs alone, from its start, it rejects, as libyaml does, but under
+    /// a top-level header.
     pub(super) indentation: bool,
 }
 
@@ -162,7 +163,8 @@ pub(super) fn places(input: &str) -> Vec<Place> {
     let mut flow = Flow::Start;
     let mut quote: Option<char> = None;
     // The column a block scalar's content is indented past, while it lasts,
-    // and its content's indentation, once a line with content set it.
+    // and its content's indentation, once its header's indentation indicator
+    // or a line with content set it.
     let mut header: Option<usize> = None;
     let mut content: Option<usize> = None;
     // Whether that block scalar is the document's root node, whose content
@@ -312,7 +314,16 @@ pub(super) fn places(input: &str) -> Vec<Place> {
                         '#' => comment = true,
                         '|' | '>' => {
                             header = Some(owner);
-                            content = None;
+                            // An indentation indicator sets the content's
+                            // indentation past the parent's column, which
+                            // both parsers take as 0 for the root (YAML 1.2,
+                            // section 8.1.1.1): `a: |2` keeps `   x` and then
+                            // `  - |` as content, with no second header.
+                            content = line[offset + 1..]
+                                .chars()
+                                .take_while(|next| matches!(next, '+' | '-' | '1'..='9'))
+                                .find_map(|next| next.to_digit(10))
+                                .map(|digit| owner + digit as usize);
                             root_scalar = !nested;
                             comment = true;
                         }
