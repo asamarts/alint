@@ -147,6 +147,11 @@ impl Rule for PairHashRule {
                         .with_path(std::sync::Arc::<Path>::from(target_path)),
                     ]);
                 }
+                crate::pathsafe::Confined::GitDirectory => {
+                    return Ok(vec![crate::pathsafe::git_directory_read_failure(
+                        target_path,
+                    )]);
+                }
             };
         let b_bytes = match crate::io::read_capped(&ctx.root.join(&target_rel)) {
             Ok(b) => b,
@@ -353,6 +358,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
             "pair_hash `target` (the file that must carry the digest) must not be empty",
         ));
     }
+    crate::pathsafe::reject_git_directory_read(&spec.id, "target", Path::new(&opts.target))?;
     if spec.fix.is_some() {
         return Err(Error::rule_config(
             &spec.id,

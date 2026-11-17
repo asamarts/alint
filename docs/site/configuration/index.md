@@ -392,6 +392,10 @@ Absent or `false` keeps the secure default (full confinement).
 
 **Security.** Like the spawning-rule trust gate, `allow_out_of_root:` is honored **only** from your own top-level config: any `extends:`'d ruleset that declares it is a load-time error, so adopting a published ruleset can never grant it out-of-tree reads. It currently applies to the read kinds `json_schema_passes` (`schema_path:`), `pair_hash` (`target:`), and `registry_paths_resolve` (`source:`); a permitted read emits an informational note so the escape is never silent. Resolve/index existence checks stay confined regardless.
 
+A fix of your own rules follows the option too (a `file_create` target or a `content_from:`
+source outside the root). A fix of a rule an `extends:`'d ruleset or a nested config shaped never
+writes outside the root, whatever the option says, and is reported skipped.
+
 ### `baseline`
 
 Path to a committed baseline file that grandfathers pre-existing violations, so `alint check` reports and gates on only *new* findings. Persisting it here means CI need not pass `--baseline` on every run.

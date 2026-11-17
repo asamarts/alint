@@ -221,8 +221,20 @@ fn read_once(root: &Path, relative: &Path, size_hint: u64, literal: bool) -> Res
     let absolute = root.join(relative);
     let mut size_hint = size_hint;
     if literal {
-        if !crate::pathsafe::resolved_within_root(&absolute, root) {
-            return ResourceRead::Unreadable("path escapes the repo root".to_string());
+        // One resolution answers both checks. A literal the configuration names
+        // is refused at load when it names a Git directory; this one can reach
+        // one through a symlink (`cfg -> .git/config`), and a file there can
+        // hold credentials.
+        match crate::pathsafe::resolve_named_read(root, relative) {
+            crate::pathsafe::NamedRead::InRoot => {}
+            crate::pathsafe::NamedRead::OutsideRoot => {
+                return ResourceRead::Unreadable("path escapes the repo root".to_string());
+            }
+            crate::pathsafe::NamedRead::GitDirectory => {
+                return ResourceRead::Unreadable(
+                    "path is in a Git directory; rules never read there".to_string(),
+                );
+            }
         }
         // A literal resource is config-derived and may name a FIFO, socket, or
         // device. Opening a FIFO `O_RDONLY` blocks until a writer appears, so
@@ -630,6 +642,60 @@ mod tests {
         index.clear_relation_caches();
         assert_eq!(value(), Some(Value::String("new".into())));
         assert_eq!((reads.reads(), decodes.decodes()), (2, 2));
+    }
+
+    /// A literal that reaches a Git directory through a symlink is never read:
+    /// `.git/config` can hold credentials. Ordinary literals still read.
+    #[cfg(unix)]
+    #[test]
+    fn a_literal_through_a_symlink_into_the_git_directory_is_not_read() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        std::fs::write(dir.path().join(".git/config"), "extraheader = secret\n").unwrap();
+        std::fs::write(dir.path().join("real.ini"), "x = 1\n").unwrap();
+        std::os::unix::fs::symlink(".git/config", dir.path().join("cfg.ini")).unwrap();
+        std::os::unix::fs::symlink(".git", dir.path().join("g")).unwrap();
+        std::os::unix::fs::symlink("real.ini", dir.path().join("alias.ini")).unwrap();
+        let cache = ReadCache::new();
+        for path in ["cfg.ini", "g/config", ".git/config"] {
+            assert_eq!(
+                cache.read(dir.path(), &literal(path), 0).as_ref(),
+                &ResourceRead::Unreadable(
+                    "path is in a Git directory; rules never read there".to_string()
+                ),
+                "{path}"
+            );
+        }
+        for path in ["real.ini", "alias.ini"] {
+            assert!(
+                matches!(
+                    cache.read(dir.path(), &literal(path), 0).as_ref(),
+                    ResourceRead::Present(_)
+                ),
+                "{path}"
+            );
+        }
+    }
+
+    /// A literal read resolves its path once, for both the root and the
+    /// Git-directory check: a second resolution cost S3 thousands of `stat`
+    /// calls.
+    #[test]
+    fn a_literal_read_resolves_its_path_once() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        std::fs::write(dir.path().join("sub/real.ini"), "x = 1\n").unwrap();
+        let before = crate::pathsafe::path_check_costs();
+        let read = ReadCache::new().read(dir.path(), &literal("sub/real.ini"), 0);
+        let after = crate::pathsafe::path_check_costs();
+        assert!(matches!(read.as_ref(), ResourceRead::Present(_)));
+        assert_eq!(
+            (
+                after.resolutions - before.resolutions,
+                after.symlink_probes - before.symlink_probes
+            ),
+            (1, 0)
+        );
     }
 
     #[test]

@@ -371,11 +371,18 @@ fn unreadable(path: &Path, message: &str) -> Violation {
 /// Lexically confine `rel`, then verify it doesn't escape the root through
 /// an in-repo symlink once joined - `normalize_confined` is symlink-blind,
 /// so `link/secret` (with `link -> /etc`) would otherwise read out of the
-/// tree. `None` on either escape; the caller reports "escapes the repo
-/// root". Used by every cross-file *read* path.
-pub(super) fn confined_rel(ctx: &Context<'_>, rel: &Path) -> Option<PathBuf> {
-    let p = crate::pathsafe::normalize_confined(rel)?;
-    crate::pathsafe::resolved_within_root(&ctx.root.join(&p), ctx.root).then_some(p)
+/// tree. The same resolution refuses a path in a Git directory
+/// ([`confine_read`](crate::pathsafe::confine_read)). The refusal on an
+/// escape or a Git directory; the caller reports it. Used by every cross-file
+/// *read* path.
+pub(super) fn confined_rel(
+    ctx: &Context<'_>,
+    rel: &Path,
+) -> Result<PathBuf, crate::pathsafe::Confined> {
+    match crate::pathsafe::confine_read(rel, ctx.root, false) {
+        crate::pathsafe::Confined::In(p) => Ok(p),
+        refused => Err(refused),
+    }
 }
 
 /// A failed decode in a finding's words: the per-extract value limit as the

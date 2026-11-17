@@ -10,7 +10,8 @@ use crate::error::{Error, Result};
 
 /// Shared, thread-safe sink for the walk's escaping-symlink side-list (M4):
 /// `filter_entry` (parallel) pushes each pruned escaping symlink's relative
-/// path; `walk` drains it into the [`FileIndex`].
+/// path; `walk` drains it into the [`FileIndex`]. A second one collects the
+/// symlinks it follows.
 type EscapingSink = Arc<Mutex<Vec<Arc<Path>>>>;
 
 /// Hard cap on a single whole-file read by the per-file engine/rule loops
@@ -207,11 +208,17 @@ type SharedPathSet = Arc<HashSet<Arc<Path>>>;
 #[derive(Debug, Default)]
 pub struct FileIndex {
     pub entries: Vec<FileEntry>,
-    /// Symlinks whose target ESCAPES the repo root. Pruned from `entries` by the
-    /// walk (so no content rule can `root.join()` through them to read out-of-
-    /// tree bytes) but recorded here so `no_symlinks` can still flag them (M4).
+    /// Symlinks whose target ESCAPES the repo root, or leads into a Git directory
+    /// in it. Pruned from `entries` by the walk (so no content rule can
+    /// `root.join()` through them to read out-of-tree bytes, and no fix can write
+    /// through them into `.git`) but recorded here so `no_symlinks` can still
+    /// flag them (M4).
     /// Relative paths, sorted + deduped. Empty for a fixture-built index.
     escaping_symlinks: Vec<Arc<Path>>,
+    /// The symlinks the walk followed, sorted: with `escaping_symlinks`, every
+    /// symlink it met. `None` for an index built from entries, which cannot
+    /// say ([`Self::walked_without_symlink`]).
+    followed_symlinks: Option<Vec<Arc<Path>>>,
     path_set: OnceLock<SharedPathSet>,
     all_path_set: OnceLock<SharedPathSet>,
     /// Whether `entries` are in path order, as [`walk`] leaves them: checked
@@ -278,6 +285,7 @@ impl FileIndex {
         Self {
             entries,
             escaping_symlinks,
+            followed_symlinks: None,
             path_set: OnceLock::new(),
             all_path_set: OnceLock::new(),
             sorted: OnceLock::new(),
@@ -294,12 +302,29 @@ impl FileIndex {
         }
     }
 
-    /// Symlinks whose target escapes the repo root — pruned from `entries` (so no
-    /// content rule reads through them) but surfaced here for `no_symlinks` (M4).
-    /// Relative paths.
+    /// Symlinks whose target escapes the repo root or leads into a Git directory
+    /// in it: pruned from `entries` (so no content rule reads through them) but
+    /// surfaced here for `no_symlinks` (M4). Relative paths.
     #[must_use]
     pub fn escaping_symlinks(&self) -> &[Arc<Path>] {
         &self.escaping_symlinks
+    }
+
+    /// Whether the walk vouches that the OS reaches the file `rel` (relative to
+    /// the root) without following a symlink: the walk indexed it as a file and
+    /// followed no symlink at it or at a directory above it. The walk sees every
+    /// entry it indexes, symlink or not, so a check that a path stays out of a
+    /// Git directory needs no file system call for such a file. `false` when
+    /// the index cannot say: one built from entries, or a path the walk did not
+    /// index (a gitignored file, one a fix created since).
+    pub(crate) fn walked_without_symlink(&self, rel: &Path) -> bool {
+        let Some(symlinks) = &self.followed_symlinks else {
+            return false;
+        };
+        self.contains_file(rel)
+            && !rel
+                .ancestors()
+                .any(|at| symlinks.binary_search_by(|link| (**link).cmp(at)).is_ok())
     }
 
     /// The cached evaluated `facts:` values, if [`set_facts`](Self::set_facts)
@@ -809,7 +834,7 @@ impl WalkOptions {
 }
 
 pub fn walk(root: &Path, opts: &WalkOptions) -> Result<FileIndex> {
-    let (builder, escaping) = build_walk_builder(root, opts)?;
+    let (builder, escaping, followed) = build_walk_builder(root, opts)?;
 
     // Per-thread accumulators land in `out_entries`; the first
     // error wins and stops the walk via `WalkState::Quit` (the
@@ -855,6 +880,14 @@ pub fn walk(root: &Path, opts: &WalkOptions) -> Result<FileIndex> {
     escaping_symlinks.sort_unstable();
     escaping_symlinks.dedup();
     let mut index = FileIndex::from_entries_with_escaping(entries, escaping_symlinks);
+    let mut followed: Vec<Arc<Path>> = followed
+        .lock()
+        .expect("walker followed-symlink lock")
+        .drain(..)
+        .collect();
+    followed.sort_unstable();
+    followed.dedup();
+    index.followed_symlinks = Some(followed);
     index.walk_options = Some(opts.clone());
     Ok(index)
 }
@@ -1340,8 +1373,9 @@ impl<'a> WalkSkips<'a> {
     /// Whether the walk stops at a symlink on the way to `parts` (root-relative)
     /// or at `parts` itself: one that leads back to a directory on its own path,
     /// a loop `ignore` reports and does not descend, or one that is broken or
-    /// leads out of the root, which the walk prunes (`build_walk_builder`). Only
-    /// paths that exist count; one that does not exist yet cannot be a symlink.
+    /// leads out of the root or into a Git directory, which the walk prunes
+    /// (`build_walk_builder`). Only paths that exist count; one that does not
+    /// exist yet cannot be a symlink.
     fn symlink_stops_the_walk(&self, parts: &[std::path::Component<'_>]) -> bool {
         // The directories the walk has entered on the way, canonical.
         let mut entered: Vec<PathBuf> = self
@@ -1392,7 +1426,7 @@ impl<'a> WalkSkips<'a> {
             };
             if self
                 .canonical_root()
-                .is_none_or(|root| !target.starts_with(root))
+                .is_none_or(|root| !crate::pathsafe::walk_follows_symlink(root, target))
                 || entered.contains(target)
             {
                 return Reach::Stops;
@@ -1510,7 +1544,10 @@ impl<'a> WalkSkips<'a> {
     }
 }
 
-fn build_walk_builder(root: &Path, opts: &WalkOptions) -> Result<(WalkBuilder, EscapingSink)> {
+fn build_walk_builder(
+    root: &Path,
+    opts: &WalkOptions,
+) -> Result<(WalkBuilder, EscapingSink, EscapingSink)> {
     let mut builder = WalkBuilder::new(root);
     builder
         .standard_filters(opts.respect_gitignore)
@@ -1549,32 +1586,46 @@ fn build_walk_builder(root: &Path, opts: &WalkOptions) -> Result<(WalkBuilder, E
     // syscall; the common non-symlink path is a bare `true`, so the
     // walk's cost is unchanged for trees without symlinks.
     let canonical_root = root.canonicalize().ok();
-    // M4 side-list: escaping/broken symlinks are pruned from `entries` (below,
-    // via the `false` return) so no content rule reads through them, but their
-    // relative paths are recorded here so `no_symlinks` can still flag them.
+    // M4 side-list: escaping/broken symlinks, and those into a Git directory,
+    // are pruned from `entries` (below, via the `false` return) so no content
+    // rule reads through them, but their relative paths are recorded here so
+    // `no_symlinks` can still flag them.
     let escaping: Arc<Mutex<Vec<Arc<Path>>>> = Arc::new(Mutex::new(Vec::new()));
     let escaping_filter = Arc::clone(&escaping);
+    // The symlinks the walk follows, so a later check knows which indexed paths
+    // the OS reaches through one (`FileIndex::walked_without_symlink`).
+    let followed: EscapingSink = Arc::new(Mutex::new(Vec::new()));
+    let followed_filter = Arc::clone(&followed);
     let root_for_rel = root.to_path_buf();
     builder.filter_entry(move |entry| {
         if !entry.path_is_symlink() {
             return true;
         }
+        // A symlink into a Git directory (`src/evil.rs -> ../.git/config`,
+        // `gitdata -> .git`) is pruned the same way: the `.git` override above
+        // leaves out only a component literally named `.git`, so without this
+        // the walk would index the repository's own files under the link's
+        // name, for every rule to read and every content fix to write through.
         let keep = match (&canonical_root, entry.path().canonicalize()) {
-            (Some(root), Ok(target)) => target.starts_with(root),
+            (Some(root), Ok(target)) => crate::pathsafe::walk_follows_symlink(root, &target),
             // Broken / unresolvable symlink (or an un-canonicalisable
             // root) — can't be safely read anyway; prune it.
             _ => false,
         };
-        if !keep
-            && let Ok(rel) = entry.path().strip_prefix(&root_for_rel)
+        let sink = if keep {
+            &followed_filter
+        } else {
+            &escaping_filter
+        };
+        if let Ok(rel) = entry.path().strip_prefix(&root_for_rel)
             && !rel.as_os_str().is_empty()
-            && let Ok(mut v) = escaping_filter.lock()
+            && let Ok(mut v) = sink.lock()
         {
             v.push(Arc::from(rel));
         }
         keep
     });
-    Ok((builder, escaping))
+    Ok((builder, escaping, followed))
 }
 
 /// Whether a walk error is a PER-ENTRY condition to skip (return `Ok(None)`)

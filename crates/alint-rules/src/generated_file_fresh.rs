@@ -204,6 +204,11 @@ impl GeneratedFileFreshRule {
         let Some(file_rel) = crate::pathsafe::normalize_confined(file) else {
             return vec![self.violation(file, "escapes the repo root")];
         };
+        // A `file` naming a Git directory is refused at load; this one reaches
+        // one through a symlink.
+        if alint_core::reaches_git_directory(ctx.root, &file_rel) {
+            return vec![crate::pathsafe::git_directory_read_failure(file)];
+        }
         let (status, stdout, stderr) = match self.run(ctx) {
             crate::spawn::SpawnOutcome::Exited {
                 status,
@@ -618,6 +623,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
                     "generated_file_fresh `file` must not be empty",
                 ));
             }
+            crate::pathsafe::reject_git_directory_read(&spec.id, "file", Path::new(&f))?;
             Mode::Stdout { file: f }
         }
         (None, Some(o)) => {
@@ -729,6 +735,25 @@ mod tests {
             "{}",
             v[0].message
         );
+    }
+
+    /// No rule reads a Git directory: a `file` that reaches one through a
+    /// symlink is refused before the generator runs or the file is read.
+    #[cfg(unix)]
+    #[test]
+    fn stdout_file_in_a_git_directory_is_never_read() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        std::fs::write(dir.path().join(".git/config"), "secret\n").unwrap();
+        std::os::unix::fs::symlink(".git/config", dir.path().join("out.txt")).unwrap();
+        let r = stdout_rule("out.txt", &["sh", "-c", "touch ran"], Normalize::None);
+        let v = eval_in(&r, dir.path());
+        assert_eq!(v.len(), 1, "{v:?}");
+        assert_eq!(
+            v[0].message,
+            "out.txt is in a Git directory; rules never read there"
+        );
+        assert!(!dir.path().join("ran").exists());
     }
 
     // ─── stdout mode (unchanged) ─────────────────────────────────

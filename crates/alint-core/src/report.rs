@@ -243,6 +243,24 @@ impl FixReport {
             .count()
     }
 
+    /// Count of fixes that ran (or, under `--dry-run`, would run) but left
+    /// their violation standing ([`SkipKind::Unresolved`]): a file such a fix
+    /// wrote is on disk, so the human and Markdown reports count it apart from
+    /// the skips. [`Self::skipped`], the JSON summary's `skipped`, includes it.
+    pub fn unresolved(&self) -> usize {
+        self.items()
+            .filter(|i| {
+                matches!(
+                    i.status,
+                    FixStatus::Skipped {
+                        kind: SkipKind::Unresolved,
+                        ..
+                    }
+                )
+            })
+            .count()
+    }
+
     /// Count of fixes that are available but were not applied (below the
     /// tier threshold, `Suggestion` tier, or verification-demoted). Each
     /// leaves its violation standing.

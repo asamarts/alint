@@ -142,10 +142,19 @@ treated as untrusted input. The defensive posture is:
   repo root. Symlinks are honoured per the `no_symlinks` rule's verdict. A
   fix never writes or reads a Git directory (`.git` in any spelling a file
   system opens as one, or through a symlink to one): a file there would be
-  configuration Git runs commands from.
+  configuration Git runs commands from. The walk leaves out a symlink whose
+  target is in a Git directory, so no content fix edits `.git/config` under
+  another name. No rule reads a Git directory either, from any configuration:
+  `.git/config` can hold credentials (the `http.<url>.extraheader` that
+  `actions/checkout` persists). A path a rule names there is a load error, and
+  one a symlink leads into is refused when it is read.
 - **Plugin trust gating.** The `command` rule kind shells out to external
   CLIs; it's gated to the user's top-level config (extends'd configs cannot
-  introduce a `command` rule).
+  introduce a `command` rule). A fix of a rule an `extends:`'d ruleset or a
+  nested config shaped never writes alint's own configuration (`.alint.yml`
+  and the other discovery names, `.alint.d/`, or a file the configuration was
+  loaded from), so it cannot add such a rule for the next run, and never
+  writes outside the repo root, whatever `allow_out_of_root` says.
 - **The language server waits for workspace trust.** Until the editor sends
   the initialization option `{"trusted": true}` (VS Code sends its Workspace
   Trust state), `alint lsp` skips spawning rules and `custom:` facts, fetches

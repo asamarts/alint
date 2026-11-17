@@ -105,7 +105,8 @@ pub fn write_fix_markdown(report: &FixReport, w: &mut dyn Write) -> std::io::Res
     writeln!(w)?;
 
     let applied = report.applied();
-    let skipped = report.skipped();
+    let unresolved = report.unresolved();
+    let skipped = report.skipped() - unresolved;
     let unfixable = report.unfixable();
     let suggested = report.suggested();
     let analysis_failures = report.total_analysis_failures();
@@ -116,8 +117,13 @@ pub fn write_fix_markdown(report: &FixReport, w: &mut dyn Write) -> std::io::Res
     // not a clean tree. Always print the honest summary counts, matching the
     // human and JSON formatters (which have no emptiness special-case).
 
-    // `suggested` is appended only when non-zero so a run with no suggestions
-    // renders byte-identically to before the tier machinery existed.
+    // `unresolved` and `suggested` are appended only when non-zero so a run
+    // without them renders byte-identically to earlier releases.
+    let unresolved_part = if unresolved > 0 {
+        format!(", **{unresolved} unresolved**")
+    } else {
+        String::new()
+    };
     let suggested_part = if suggested > 0 {
         format!(", **{suggested} suggested**")
     } else {
@@ -130,7 +136,7 @@ pub fn write_fix_markdown(report: &FixReport, w: &mut dyn Write) -> std::io::Res
     };
     writeln!(
         w,
-        "**{applied} applied**, **{skipped} skipped**, **{unfixable} unfixable**{suggested_part}{failure_part}.",
+        "**{applied} applied**, **{skipped} skipped**, **{unfixable} unfixable**{unresolved_part}{suggested_part}{failure_part}.",
     )?;
     writeln!(w)?;
 
@@ -146,9 +152,14 @@ pub fn write_fix_markdown(report: &FixReport, w: &mut dyn Write) -> std::io::Res
             // prefix only on the message-based skipped / unfixable lines.
             let (status_label, show_path) = match &item.status {
                 FixStatus::Applied(msg) => (format!("**applied** - {}", md_escape(msg)), false),
-                FixStatus::Skipped { reason: msg, .. } => {
-                    (format!("**skipped** - {}", md_escape(msg)), true)
-                }
+                FixStatus::Skipped { reason: msg, kind } => (
+                    format!(
+                        "**{}** - {}",
+                        crate::human::skip_label(*kind),
+                        md_escape(msg)
+                    ),
+                    true,
+                ),
                 FixStatus::Suggested { summary, .. } => {
                     (format!("**suggested** - {}", md_escape(summary)), true)
                 }
@@ -775,6 +786,35 @@ mod tests {
         assert!(
             !out.contains('\u{2014}'),
             "markdown fix report must not contain an em-dash: {out}"
+        );
+    }
+
+    /// A fix that ran without resolving its violation is `unresolved`, never
+    /// `skipped`: it may have written a file.
+    #[test]
+    fn fix_report_never_calls_a_fix_that_ran_skipped() {
+        let item = |status| FixItem {
+            violation: Violation::new("missing").with_path(Path::new("x.txt")),
+            status,
+        };
+        let report = FixReport {
+            non_convergent: false,
+            results: vec![FixRuleResult {
+                rule_id: "own".into(),
+                level: Level::Warning,
+                items: vec![
+                    item(FixStatus::unresolved("fix ran (created ../x.txt)")),
+                    item(FixStatus::declined("over the size limit")),
+                ],
+                analysis_failures: Vec::new(),
+            }],
+        };
+        let out = render_fix(&report);
+        assert!(out.contains("**unresolved** - fix ran \\(created"), "{out}");
+        assert!(out.contains("**skipped** - over the size limit"), "{out}");
+        assert!(
+            out.contains("**0 applied**, **1 skipped**, **0 unfixable**, **1 unresolved**."),
+            "{out}"
         );
     }
 }

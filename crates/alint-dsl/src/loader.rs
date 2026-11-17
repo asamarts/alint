@@ -39,6 +39,9 @@ pub(crate) struct LoadState {
     /// resolution returns before the configs merge (an unreadable `extends:`
     /// target named by the environment) can still be scrubbed of them.
     pub(crate) environment_values: Vec<String>,
+    /// Every local file loaded so far, resolved: the top-level config, its
+    /// drop-ins and each local `extends:` target, once each.
+    pub(crate) config_files: Vec<PathBuf>,
 }
 
 impl Default for LoadState {
@@ -48,6 +51,7 @@ impl Default for LoadState {
             memo: std::collections::HashMap::new(),
             running_version: RunningVersion::current(),
             environment_values: Vec::new(),
+            config_files: Vec::new(),
         }
     }
 }
@@ -80,6 +84,13 @@ struct MemoKey {
 }
 
 impl LoadState {
+    /// Note `canonical` among the files the configuration came from.
+    fn record_config_file(&mut self, canonical: &Path) {
+        if !self.config_files.iter().any(|file| file == canonical) {
+            self.config_files.push(canonical.to_path_buf());
+        }
+    }
+
     fn remember(&mut self, key: MemoKey, config: &RawConfig) {
         match self.memo.entry(key) {
             std::collections::hash_map::Entry::Vacant(seen_once) => {
@@ -617,6 +628,7 @@ pub(crate) fn load_recursive(
             context.source_class,
         )
     });
+    state.record_config_file(&canonical);
     if let Some(cached) = state.cached(memo_key.as_ref()) {
         return Ok(cached);
     }

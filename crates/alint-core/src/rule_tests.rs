@@ -607,6 +607,173 @@ fn check_fix_size_skips_over_limit_files() {
     }
 }
 
+/// A content fix's read of the file it edits is where it learns it may not
+/// edit it: a symlink into `.git` (which the walk no longer indexes, but a
+/// rule may still name) is skipped with the creators' reason, and the write
+/// backstop refuses it too, in compose mode and out.
+#[cfg(unix)]
+#[test]
+fn a_content_fix_never_edits_through_a_symlink_into_the_git_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join(".git")).unwrap();
+    std::fs::write(root.join(".git/config"), b"[core]\n").unwrap();
+    std::fs::create_dir(root.join("src")).unwrap();
+    std::os::unix::fs::symlink("../.git/config", root.join("src/evil.rs")).unwrap();
+    std::fs::write(root.join("src/real.rs"), b"x\n").unwrap();
+    std::os::unix::fs::symlink("real.rs", root.join("src/alias.rs")).unwrap();
+    let evil = root.join("src/evil.rs");
+    let buffer = std::cell::RefCell::new(std::collections::BTreeMap::new());
+    // The walk does not index `evil.rs`, so it cannot vouch for it.
+    let index = crate::walker::walk(root, &crate::walker::WalkOptions::default()).unwrap();
+    for ctx in [
+        FixContext::new(root, false),
+        FixContext::new(root, false).with_compose(Some(&buffer)),
+        FixContext::new(root, false).with_index(Some(&index)),
+    ] {
+        match read_for_fix(&evil, Path::new("src/evil.rs"), &ctx).unwrap() {
+            ReadForFix::Skipped(FixOutcome::Skipped(reason)) => assert_eq!(
+                reason,
+                "src/evil.rs is in a Git directory; a fix never writes or reads there"
+            ),
+            other => panic!("expected the Git-directory skip, got {other:?}"),
+        }
+        let error = ctx.commit_write(&evil, b"# SPDX\n").unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        // A link to an ordinary file is still edited through.
+        let alias = root.join("src/alias.rs");
+        assert!(matches!(
+            read_for_fix(&alias, Path::new("src/alias.rs"), &ctx).unwrap(),
+            ReadForFix::Bytes(_)
+        ));
+        ctx.commit_write(&alias, b"y\n").unwrap();
+    }
+    assert!(
+        buffer
+            .borrow()
+            .keys()
+            .all(|key| !key.starts_with(root.join(".git")))
+    );
+    assert_eq!(
+        std::fs::read(root.join(".git/config")).unwrap(),
+        b"[core]\n"
+    );
+    assert_eq!(std::fs::read(root.join("src/real.rs")).unwrap(), b"y\n");
+}
+
+/// A fix asks its path checks about a file the walk reached without a symlink
+/// by name alone, and about any other without resolving it unless a symlink is
+/// on the way. Resolving every file a fix edits made `alint fix` make several
+/// times the `stat`-family calls it made before.
+#[test]
+fn a_fix_resolves_no_path_without_a_symlink_on_the_way() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src/deep")).unwrap();
+    std::fs::write(root.join("src/deep/a.rs"), b"x \n").unwrap();
+    std::fs::write(root.join(".alint.yml"), b"version: 1\n").unwrap();
+    let config = vec![root.join(".alint.yml").canonicalize().unwrap()];
+    let index = crate::walker::walk(root, &crate::walker::WalkOptions::default()).unwrap();
+    let file = root.join("src/deep/a.rs");
+    // (resolutions, symlink probes) of reading, then writing, the file.
+    let cost = |ctx: &FixContext<'_>| {
+        let before = crate::pathsafe::path_check_costs();
+        assert!(matches!(
+            read_for_fix(&file, Path::new("src/deep/a.rs"), ctx).unwrap(),
+            ReadForFix::Bytes(_)
+        ));
+        ctx.commit_write(&file, b"x\n").unwrap();
+        let after = crate::pathsafe::path_check_costs();
+        (
+            after.resolutions - before.resolutions,
+            after.symlink_probes - before.symlink_probes,
+        )
+    };
+    let buffer = std::cell::RefCell::new(std::collections::BTreeMap::new());
+    for extended in [false, true] {
+        let ctx = FixContext::new(root, false)
+            .with_compose(Some(&buffer))
+            .with_extended_source(extended)
+            .with_config_files(&config);
+        assert_eq!(cost(&ctx.with_index(Some(&index))), (0, 0), "{extended}");
+        let ctx = FixContext::new(root, false)
+            .with_extended_source(extended)
+            .with_config_files(&config);
+        let (resolutions, probes) = cost(&ctx);
+        assert_eq!(resolutions, 0, "{extended}");
+        assert!(probes > 0, "{extended}");
+    }
+}
+
+/// A fix of a rule an `extends:`'d ruleset shaped never writes alint's own
+/// configuration: a name discovery accepts at any depth, anything under
+/// `.alint.d/`, a file the configuration came from, or one a symlink leads to.
+/// The user's own rules still may, and anyone may read one.
+#[cfg(unix)]
+#[test]
+fn a_fix_from_an_extended_rule_never_writes_alint_configuration() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("vendor")).unwrap();
+    std::fs::create_dir(root.join(".alint.d")).unwrap();
+    std::fs::write(root.join(".alint.yml"), b"version: 1\n").unwrap();
+    std::fs::write(root.join("vendor/policy.yml"), b"version: 1\n").unwrap();
+    std::os::unix::fs::symlink(".alint.yml", root.join("link.yml")).unwrap();
+    std::os::unix::fs::symlink(".alint.d", root.join("dropins")).unwrap();
+    let files = [root.join("vendor/policy.yml").canonicalize().unwrap()];
+    let own = FixContext::new(root, false).with_config_files(&files);
+    let extended = FixContext::new(root, false)
+        .with_config_files(&files)
+        .with_extended_source(true);
+    for path in [
+        ".alint.yml",
+        "alint.yaml",
+        "sub/.alint.yaml",
+        ".ALINT.YML",
+        ".alint.yml.",
+        ".alint.d/housekeeping.yml",
+        ".alint.d",
+        "vendor/policy.yml",
+        "link.yml",
+        "dropins/x.yml",
+    ] {
+        assert_eq!(
+            extended.write_refusal(Path::new(path)).as_deref(),
+            Some(
+                format!(
+                    "{path} is an alint configuration file; a fix from an extended ruleset \
+                     never writes one"
+                )
+                .as_str()
+            ),
+            "{path}"
+        );
+        assert_eq!(own.write_refusal(Path::new(path)), None, "{path}");
+    }
+    for path in [
+        "README.md",
+        "vendor/other.yml",
+        ".alint/templates/x",
+        "alint.yml.bak",
+    ] {
+        assert_eq!(extended.write_refusal(Path::new(path)), None, "{path}");
+    }
+    let config = root.join(".alint.yml");
+    let error = extended.commit_write(&config, b"rules: []\n").unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+    assert!(matches!(
+        read_for_fix(&config, Path::new(".alint.yml"), &extended).unwrap(),
+        ReadForFix::Skipped(FixOutcome::Skipped(_))
+    ));
+    assert!(matches!(
+        read_source_for_fix(&config, Path::new(".alint.yml"), &extended).unwrap(),
+        ReadForFix::Bytes(_)
+    ));
+    own.commit_write(&config, b"version: 1\nrules: []\n")
+        .unwrap();
+    assert_eq!(std::fs::read(&config).unwrap(), b"version: 1\nrules: []\n");
+}
+
 #[test]
 fn read_for_fix_returns_bytes_when_in_limit() {
     let dir = tempfile::tempdir().unwrap();

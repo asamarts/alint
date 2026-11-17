@@ -41,6 +41,9 @@ impl Fixer for FileRemoveFixer {
                 "violation did not carry a path".to_string(),
             ));
         };
+        if let Some(reason) = ctx.write_refusal(path) {
+            return Ok(FixOutcome::Skipped(reason));
+        }
         let abs = ctx.root.join(path);
         if !abs.exists() {
             return Ok(FixOutcome::Skipped(format!(
@@ -226,6 +229,14 @@ impl Fixer for FileRenameFixer {
             Ok(target) => target,
             Err(reason) => return Ok(FixOutcome::Skipped(reason)),
         };
+        // Neither name may reach a Git directory (through a symlink too), or,
+        // for a rule an `extends:`'d ruleset shaped, alint's configuration.
+        if let Some(reason) = ctx
+            .write_refusal(path)
+            .or_else(|| ctx.write_refusal(&new_path))
+        {
+            return Ok(FixOutcome::Skipped(reason));
+        }
 
         let abs_from = ctx.root.join(path);
         let abs_to = ctx.root.join(&new_path);
@@ -437,6 +448,12 @@ impl Fixer for RelocateFixer {
             Ok(target) => target,
             Err(reason) => return Ok(FixOutcome::Skipped(reason)),
         };
+        if let Some(reason) = ctx
+            .write_refusal(path)
+            .or_else(|| ctx.write_refusal(&new_path))
+        {
+            return Ok(FixOutcome::Skipped(reason));
+        }
 
         let abs_from = ctx.root.join(path);
         let abs_to = ctx.root.join(&new_path);
@@ -602,6 +619,10 @@ impl Fixer for ChmodFixer {
                 "violation did not carry a path".to_string(),
             ));
         };
+        // `set_permissions` follows a symlink, so ask where it leads too.
+        if let Some(reason) = ctx.write_refusal(path) {
+            return Ok(FixOutcome::Skipped(reason));
+        }
         let abs = ctx.root.join(path);
         let Ok(meta) = std::fs::metadata(&abs) else {
             return Ok(FixOutcome::Skipped(format!(
@@ -705,11 +726,7 @@ impl Fixer for DirCreateFixer {
         // ROOT -- and because `dir_create` is fixed-behavior it is honored from any
         // source, so even an untrusted `extends:`'d ruleset could do it on a bare
         // `alint fix` (audit C1, CRITICAL).
-        let abs = match crate::fixers::creators::confine_fix_path(
-            &self.dir,
-            ctx.root,
-            ctx.allow_out_of_root,
-        ) {
+        let abs = match crate::fixers::creators::confine_fix_write(&self.dir, ctx) {
             Ok(p) => p,
             Err(reason) => return Ok(FixOutcome::Skipped(reason)),
         };
@@ -793,6 +810,75 @@ mod tests {
 
     fn make_ctx(tmp: &TempDir, dry_run: bool) -> FixContext<'_> {
         FixContext::new(tmp.path(), dry_run)
+    }
+
+    /// A whole-file op never changes the mode of, removes, renames or moves a
+    /// file in `.git` (through a symlink: `set_permissions` follows one), nor,
+    /// for a rule an `extends:`'d ruleset shaped, alint's configuration.
+    #[cfg(unix)]
+    #[test]
+    fn whole_file_ops_never_touch_the_git_directory_or_extended_configuration() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".git/hooks")).unwrap();
+        std::fs::write(root.join(".git/hooks/pre-commit"), "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(
+            root.join(".git/hooks/pre-commit"),
+            PermissionsExt::from_mode(0o644),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(".git/hooks/pre-commit", root.join("hook.sh")).unwrap();
+        std::fs::create_dir(root.join("sub")).unwrap();
+        for name in [".alint.yml", "Alint.yml", "sub/.alint.yml"] {
+            std::fs::write(root.join(name), "version: 1\n").unwrap();
+        }
+        let at = |path: &str| Violation::new("x").with_path(PathBuf::from(path));
+        let refused = |outcome: Result<FixOutcome>, why: &str| {
+            assert!(
+                matches!(&outcome, Ok(FixOutcome::Skipped(reason)) if reason.contains(why)),
+                "{outcome:?}"
+            );
+        };
+        let ctx = make_ctx(&tmp, false);
+        refused(
+            ChmodFixer::new(true, Applicability::Safe).apply(&at("hook.sh"), &ctx),
+            "Git directory",
+        );
+        refused(
+            FileRemoveFixer::new(Applicability::Safe).apply(&at("hook.sh"), &ctx),
+            "Git directory",
+        );
+        let mode = std::fs::metadata(root.join(".git/hooks/pre-commit"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o644);
+        let extended = make_ctx(&tmp, false).with_extended_source(true);
+        let configuration = "an alint configuration file";
+        refused(
+            FileRemoveFixer::new(Applicability::Safe).apply(&at(".alint.yml"), &extended),
+            configuration,
+        );
+        refused(
+            FileRenameFixer::new(CaseConvention::Lower).apply(&at("Alint.yml"), &extended),
+            configuration,
+        );
+        refused(
+            RelocateFixer::new(Applicability::Safe).apply(&at("sub/.alint.yml"), &extended),
+            configuration,
+        );
+        refused(
+            DirCreateFixer::new(".alint.d".into(), Applicability::Safe).apply(&at("x"), &extended),
+            configuration,
+        );
+        for name in [".alint.yml", "Alint.yml", "sub/.alint.yml"] {
+            assert!(root.join(name).is_file(), "{name}");
+        }
+        assert!(!root.join(".alint.d").exists());
+        // The user's own rule still renames one.
+        let outcome = FileRenameFixer::new(CaseConvention::Lower).apply(&at("Alint.yml"), &ctx);
+        assert!(matches!(outcome, Ok(FixOutcome::Applied(_))), "{outcome:?}");
     }
 
     #[cfg(unix)]

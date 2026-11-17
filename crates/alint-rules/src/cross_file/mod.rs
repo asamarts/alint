@@ -795,7 +795,7 @@ fn build_sync_from_fixer(
                     }
                     Some(match (inline, from) {
                         (Some(s), None) => alint_core::ContentSourceSpec::Inline(s.clone()),
-                        (None, Some(p)) => alint_core::ContentSourceSpec::File(p.clone()),
+                        (None, Some(p)) => create_content_from(p, cfg)?,
                         _ => unreachable!("XOR checked above"),
                     })
                 }
@@ -810,6 +810,18 @@ fn build_sync_from_fixer(
             "fix.{} is not compatible with cross_file (only `sync_from` and `create_and_register`)",
             other.op_name()
         ))),
+    }
+}
+
+/// A `create_and_register` `content_from`, refused when it names a Git
+/// directory: no rule reads there.
+fn create_content_from(
+    path: &Path,
+    cfg: &impl Fn(String) -> Error,
+) -> Result<alint_core::ContentSourceSpec> {
+    match crate::pathsafe::git_directory_read_option("fix.create_and_register.content_from", path) {
+        Some(message) => Err(cfg(message)),
+        None => Ok(alint_core::ContentSourceSpec::File(path.to_path_buf())),
     }
 }
 
@@ -1020,6 +1032,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
             if f.trim().is_empty() {
                 return Err(cfg("`source.file` must not be empty".into()));
             }
+            crate::pathsafe::reject_git_directory_read(&spec.id, "source.file", Path::new(&f))?;
             (f, None)
         }
         (None, Some(g)) => {

@@ -14,6 +14,7 @@ use alint_core::{Context, Extract, RelatedLocation, Violation, unreadable_file_v
 use super::CrossFileRule;
 use super::spec::{Relation, Targets, apply_normalize};
 use super::values::confined_rel;
+use crate::pathsafe::Confined;
 
 impl CrossFileRule {
     /// Dispatch to the per-relation check. Called by the `Rule::evaluate` shim in
@@ -275,12 +276,19 @@ impl CrossFileRule {
     /// dropping `skip_header_lines` leading lines) must equal the
     /// source file's. Binary-accurate; `normalize` does not apply.
     fn check_identical(&self, ctx: &Context<'_>, out: &mut Vec<Violation>) {
-        let Some(src) = confined_rel(ctx, Path::new(&self.source_file)) else {
-            out.push(Self::violation(
-                Path::new(&self.source_file),
-                "source file escapes the repo root",
-            ));
-            return;
+        let source = Path::new(&self.source_file);
+        let src = match confined_rel(ctx, source) {
+            Ok(src) => src,
+            // A name in a Git directory is refused at load; this one reaches
+            // one through a symlink.
+            Err(Confined::GitDirectory) => {
+                out.push(crate::pathsafe::git_directory_read_failure(source));
+                return;
+            }
+            Err(_) => {
+                out.push(Self::violation(source, "source file escapes the repo root"));
+                return;
+            }
         };
         let src = src.as_path();
         let src_bytes = match crate::io::read_capped(&ctx.root.join(src)) {
@@ -311,9 +319,16 @@ impl CrossFileRule {
             return;
         }
         for target in &paths {
-            let Some(target) = confined_rel(ctx, target) else {
-                out.push(Self::violation(target, "target file escapes the repo root"));
-                continue;
+            let target = match confined_rel(ctx, target) {
+                Ok(confined) => confined,
+                Err(Confined::GitDirectory) => {
+                    out.push(crate::pathsafe::git_directory_read_failure(target));
+                    continue;
+                }
+                Err(_) => {
+                    out.push(Self::violation(target, "target file escapes the repo root"));
+                    continue;
+                }
             };
             let tgt_bytes = match crate::io::read_capped(&ctx.root.join(&target)) {
                 Ok(b) => b,

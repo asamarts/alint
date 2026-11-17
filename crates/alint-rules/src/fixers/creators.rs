@@ -71,7 +71,7 @@ impl Fixer for FileCreateFixer {
         // the owning rule's `allow_out_of_root`), so a `file_create.path` like
         // `../../x` from an untrusted `extends:`'d ruleset can't write outside
         // the tree on `alint fix`. Refuse (skip loudly) when it escapes.
-        let abs = match confine_fix_path(&self.path, ctx.root, ctx.allow_out_of_root) {
+        let abs = match confine_fix_write(&self.path, ctx) {
             Ok(p) => p,
             Err(reason) => return Ok(FixOutcome::Skipped(reason)),
         };
@@ -231,29 +231,25 @@ pub(crate) fn blocking_ancestor(dir: &Path) -> Option<&Path> {
         .filter(|ancestor| !ancestor.is_dir())
 }
 
-/// Confine a config-declared fixer path (a `file_create.path` write target or a
-/// `content_from` read source) to the repo root, honoring the owning rule's
-/// `allow_out_of_root`. Returns the joinable absolute path, or `Err(reason)`
-/// when it escapes and isn't permitted — the write/read is then refused. This is
-/// the fixer-side counterpart of the read rules' `confine_read` gate; without it
-/// an untrusted `extends:`'d ruleset's fixer could write or exfiltrate
-/// out-of-tree on `alint fix`. Shared with `DirCreateFixer` (see
-/// `crate::fixers::file_ops`), which must confine its `dir_create` target the
-/// same way.
+/// Confine a config-declared fixer path (a `content_from` read source, or, in
+/// an editor's `fix_edit`, a write target) to the repo root, honoring `allow`.
+/// Returns the joinable absolute path, or `Err(reason)` when it escapes and
+/// isn't permitted, which refuses the write or read. This is the fixer-side
+/// counterpart of the read rules' `confine_read` gate; without it an untrusted
+/// `extends:`'d ruleset's fixer could write or exfiltrate out-of-tree on
+/// `alint fix`. A fix's own writes go through [`confine_fix_write`], which
+/// adds the refusals that depend on the rule's provenance.
 ///
 /// A path in a Git directory is refused too, whatever `allow` says, as is one
 /// an in-repo symlink leads into one: a file a fix puts there (`.git/config`,
 /// `.git/commondir`, a `.git` file) is configuration Git runs commands from
 /// (`core.fsmonitor`), and one it reads there (`.git/config`) can hold
-/// credentials. Rules may still read such a path.
+/// credentials. No rule reads one either (`crate::pathsafe::confine_read`).
 pub(crate) fn confine_fix_path(
     rel: &Path,
     root: &Path,
     allow: bool,
 ) -> std::result::Result<PathBuf, String> {
-    if alint_core::reaches_git_directory(root, rel) {
-        return Err(git_directory_refusal(rel));
-    }
     match crate::pathsafe::confine_read(rel, root, allow) {
         crate::pathsafe::Confined::In(p) | crate::pathsafe::Confined::AllowedEscape(p) => {
             Ok(root.join(p))
@@ -262,15 +258,40 @@ pub(crate) fn confine_fix_path(
             "{} escapes the repo root (set a top-level `allow_out_of_root` to permit)",
             rel.display()
         )),
+        crate::pathsafe::Confined::GitDirectory => Err(git_directory_refusal(rel)),
     }
 }
 
 /// Why a fix declines a path in a Git directory (see [`confine_fix_path`]).
 pub(crate) fn git_directory_refusal(rel: &Path) -> String {
-    format!(
-        "{} is in a Git directory; a fix never writes or reads there",
-        rel.display()
-    )
+    alint_core::git_directory_refusal(rel)
+}
+
+/// Confine a path a fix writes, creates or removes (a `file_create` or
+/// `dir_create` target, a `sync_from` or cross-file target, a
+/// `create_and_register` member): refused when [`FixContext::write_refusal`]
+/// refuses it (a Git directory, or alint's own configuration for a rule an
+/// `extends:`'d ruleset shaped), and confined to the root as
+/// [`confine_fix_path`] confines it. Only the user's own rules honor
+/// `allow_out_of_root` here: the grant is the user's, for reads, and a ruleset
+/// they extend never writes outside the root with it.
+pub(crate) fn confine_fix_write(
+    rel: &Path,
+    ctx: &FixContext<'_>,
+) -> std::result::Result<PathBuf, String> {
+    if let Some(reason) = ctx.write_refusal(rel) {
+        return Err(reason);
+    }
+    if ctx.allow_out_of_root && ctx.extended_source {
+        return confine_fix_path(rel, ctx.root, false).map_err(|_| {
+            format!(
+                "{} escapes the repo root; a fix from an extended ruleset never writes \
+                 outside it, whatever `allow_out_of_root` says",
+                rel.display()
+            )
+        });
+    }
+    confine_fix_path(rel, ctx.root, ctx.allow_out_of_root)
 }
 
 /// Read a `ContentSourceSpec` to bytes. Returns the raw payload
@@ -828,6 +849,119 @@ mod tests {
         std::os::unix::fs::symlink(".git", tmp.path().join("g")).unwrap();
         let reason = confine_fix_path(Path::new("g/commondir"), tmp.path(), false).unwrap_err();
         assert!(reason.contains("Git directory"), "{reason}");
+    }
+
+    /// A content fix reached through a symlink into `.git` (a rule may name
+    /// one the walk leaves out) declines with the creators' reason, so a
+    /// `content_from` the repository supplies never lands in `.git/config`. A
+    /// link to an ordinary file is still fixed through.
+    #[cfg(unix)]
+    #[test]
+    fn content_fixes_never_edit_through_a_symlink_into_the_git_directory() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::write(root.join(".git/config"), "[core]\n").unwrap();
+        std::fs::create_dir(root.join("src")).unwrap();
+        std::os::unix::fs::symlink("../.git/config", root.join("src/evil.rs")).unwrap();
+        std::fs::write(root.join("src/real.rs"), "fn f() {}\n").unwrap();
+        std::os::unix::fs::symlink("real.rs", root.join("src/alias.rs")).unwrap();
+        std::fs::write(root.join("HEADER.txt"), "[core]\n\tfsmonitor = x\n# SPDX\n").unwrap();
+        let header = || ContentSourceSpec::File(PathBuf::from("HEADER.txt"));
+        let fixers: [Box<dyn Fixer>; 3] = [
+            Box::new(FilePrependFixer::new(header())),
+            Box::new(FileAppendFixer::new(header())),
+            Box::new(InsertHeaderFixer::new(header())),
+        ];
+        for fixer in &fixers {
+            let outcome = fixer
+                .apply(
+                    &Violation::new("no header").with_path(Path::new("src/evil.rs")),
+                    &make_ctx(&tmp, false),
+                )
+                .unwrap();
+            assert!(
+                matches!(&outcome, FixOutcome::Skipped(reason) if reason
+                    == "src/evil.rs is in a Git directory; a fix never writes or reads there"),
+                "{}: {outcome:?}",
+                fixer.describe()
+            );
+        }
+        assert_eq!(
+            std::fs::read_to_string(root.join(".git/config")).unwrap(),
+            "[core]\n"
+        );
+        let outcome = FilePrependFixer::new(header())
+            .apply(
+                &Violation::new("no header").with_path(Path::new("src/alias.rs")),
+                &make_ctx(&tmp, false),
+            )
+            .unwrap();
+        assert!(matches!(outcome, FixOutcome::Applied(_)), "{outcome:?}");
+        assert!(
+            std::fs::symlink_metadata(root.join("src/alias.rs"))
+                .unwrap()
+                .is_symlink()
+        );
+        assert!(
+            std::fs::read_to_string(root.join("src/real.rs"))
+                .unwrap()
+                .contains("# SPDX")
+        );
+    }
+
+    /// A fix of a rule an `extends:`'d ruleset shaped never creates or edits
+    /// alint's configuration (it could add a `kind: command` rule that ruleset
+    /// may not declare), nor writes outside the root under the user's
+    /// `allow_out_of_root`. The user's own rules still do both.
+    #[test]
+    fn fixes_from_an_extended_rule_never_write_configuration_or_leave_the_root() {
+        let base = TempDir::new().unwrap();
+        let root = base.path().join("repo");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join(".alint.yml"), "version: 1\n").unwrap();
+        let extended = || {
+            make_ctx_at(&root, false)
+                .with_extended_source(true)
+                .with_allow_out_of_root(true)
+        };
+        let own = || make_ctx_at(&root, false).with_allow_out_of_root(true);
+        let drop_in = || FileCreateFixer::new(".alint.d/x.yml".into(), "rules: []\n".into(), true);
+        let outcome = drop_in()
+            .apply(&Violation::new("missing"), &extended())
+            .unwrap();
+        assert!(
+            matches!(&outcome, FixOutcome::Skipped(reason) if reason == ".alint.d/x.yml is an \
+                alint configuration file; a fix from an extended ruleset never writes one"),
+            "{outcome:?}"
+        );
+        assert!(!root.join(".alint.d").exists());
+        let config = Violation::new("no match").with_path(Path::new(".alint.yml"));
+        let outcome = FileAppendFixer::new("rules: []\n".into())
+            .apply(&config, &extended())
+            .unwrap();
+        assert!(matches!(outcome, FixOutcome::Skipped(_)), "{outcome:?}");
+        assert_eq!(
+            std::fs::read_to_string(root.join(".alint.yml")).unwrap(),
+            "version: 1\n"
+        );
+        let outside = || FileCreateFixer::new("../planted.sh".into(), "x\n".into(), true);
+        let outcome = outside()
+            .apply(&Violation::new("missing"), &extended())
+            .unwrap();
+        assert!(
+            matches!(&outcome, FixOutcome::Skipped(reason) if reason.contains("escapes the repo \
+                root; a fix from an extended ruleset never writes outside it")),
+            "{outcome:?}"
+        );
+        assert!(!base.path().join("planted.sh").exists());
+
+        let outcome = drop_in().apply(&Violation::new("missing"), &own()).unwrap();
+        assert!(matches!(outcome, FixOutcome::Applied(_)), "{outcome:?}");
+        assert!(root.join(".alint.d/x.yml").is_file());
+        let outcome = outside().apply(&Violation::new("missing"), &own()).unwrap();
+        assert!(matches!(outcome, FixOutcome::Applied(_)), "{outcome:?}");
+        assert!(base.path().join("planted.sh").is_file());
     }
 
     #[test]
