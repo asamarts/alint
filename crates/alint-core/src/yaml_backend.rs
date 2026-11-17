@@ -98,7 +98,7 @@ pub(crate) fn json_tree(input: &str) -> Result<serde_json::Value, Error> {
 
 fn ayaml_json_tree(input: &str) -> Result<serde_json::Value, Error> {
     crate::yaml::ayaml_from_str_seed(input, crate::structured_format::json_seed(input))
-        .map_err(Error::ayaml)
+        .map_err(|error| Error::from_text(input, error))
 }
 
 /// [`from_str`] through libyaml, within the limits a decode through ayaml
