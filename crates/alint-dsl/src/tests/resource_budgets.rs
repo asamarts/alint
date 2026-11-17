@@ -380,7 +380,10 @@ fn every_whole_document_parse_goes_through_the_counted_decode() {
             if name.ends_with("_tests.rs") || name == "tests.rs" || name == "schema_parity.rs" {
                 continue;
             }
-            let text = std::fs::read_to_string(&path).unwrap();
+            // A Windows checkout may end its lines with CRLF.
+            let text = std::fs::read_to_string(&path)
+                .unwrap()
+                .replace("\r\n", "\n");
             // The crate's own code, before any inline test module.
             let code = text.split("\n#[cfg(test)]\nmod tests").next().unwrap();
             for _ in code.matches("alint_core::yaml::from_str") {
