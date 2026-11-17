@@ -103,13 +103,15 @@ pub(super) fn refused_in(dir: &Path) -> Option<Refused> {
 /// those of the root ([`refused_in`]) and of every directory above it, which
 /// `ignore` reads whether or not it applies them (ADR-0029), and the global
 /// excludes file when the walk uses one (`ignore` reads it only when it is a
-/// regular file).
-pub(super) fn refused_before_walk(root: &Path, global_excludes: bool) -> Option<Refused> {
+/// regular file). `canonical_root` is `root` canonicalized, which the walk
+/// already holds.
+pub(super) fn refused_before_walk(
+    root: &Path,
+    canonical_root: Option<&Path>,
+    global_excludes: bool,
+) -> Option<Refused> {
     refused_in(root)
-        .or_else(|| {
-            let canonical = root.canonicalize().ok()?;
-            canonical.ancestors().skip(1).find_map(refused_in)
-        })
+        .or_else(|| canonical_root?.ancestors().skip(1).find_map(refused_in))
         .or_else(|| {
             let path = global_excludes
                 .then(ignore::gitignore::gitconfig_excludes_path)

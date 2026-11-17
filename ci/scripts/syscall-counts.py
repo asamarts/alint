@@ -6,14 +6,19 @@ the first one is a spawned child (`git`, `true`), whose calls vary by host, so
 its lines are skipped. The resumed half of an interrupted call (`<... read
 resumed>`) was already counted where it started.
 
+A stat-family call on a file named `.git`, `.jj`, `.gitignore` or `.ignore` is
+a `probe`, not a `stat`: the names the walk looks for in each directory it
+checks for ignore files and repository markers (ADR-0045).
+
 A log that cannot be a measurement fails (exit 1) rather than counting zero:
-no syscall lines, no initial `execve` of the traced program, or a family with
-no calls at all (every alint run reads, stats, opens, and lists directories).
+no syscall lines, no initial `execve` of the traced program, or a family other
+than `probe` with no calls at all (every alint run reads, stats, opens, and
+lists directories).
 
     syscall-counts.py --syscalls   print the strace `-e trace=` list
     syscall-counts.py LOG          print `family count` lines for LOG
 
-Used by reference-perf-gate.sh (ADR-0023, V21-6).
+Used by reference-perf-gate.sh (ADR-0023, V21-6; ADR-0045).
 """
 
 import re
@@ -29,12 +34,19 @@ FAMILIES = {
     "open": {"openat", "openat2", "open"},
     "dents": {"getdents64", "getdents"},
 }
+PROBED_NAMES = {".git", ".jj", ".gitignore", ".ignore"}
 # `?` tells strace to ignore a name this architecture does not have.
 TRACED = ["execve"] + sorted("?" + name for name in set().union(*FAMILIES.values()))
 
 
 class NotAMeasurement(Exception):
     pass
+
+
+def probed_name(arguments):
+    """Whether a call's first path argument names a file in `PROBED_NAMES`."""
+    path = re.search(r'"((?:[^"\\]|\\.)*)"', arguments)
+    return path is not None and path.group(1).rsplit("/", 1)[-1] in PROBED_NAMES
 
 
 def count(lines):
@@ -50,6 +62,7 @@ def count(lines):
         if " execve(" in row and row.split(" ", 1)[0] != main
     }
     totals = {family: 0 for family in FAMILIES}
+    totals["probe"] = 0
     for row in rows:
         pid, rest = row.split(" ", 1)
         rest = rest.lstrip()
@@ -58,10 +71,12 @@ def count(lines):
         call = re.match(r"(\w+)\(", rest)
         if not call:
             continue
-        for family, names in FAMILIES.items():
-            if call.group(1) in names:
-                totals[family] += 1
-    empty = [family for family, total in totals.items() if total == 0]
+        family = next((family for family, names in FAMILIES.items() if call.group(1) in names), None)
+        if family == "stat" and probed_name(rest[call.end():]):
+            family = "probe"
+        if family:
+            totals[family] += 1
+    empty = [family for family, total in totals.items() if total == 0 and family != "probe"]
     if empty:
         raise NotAMeasurement(f"no {', '.join(empty)} calls: the run did not do its work")
     return totals

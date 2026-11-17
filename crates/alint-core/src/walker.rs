@@ -1598,6 +1598,7 @@ fn build_walk_builder(
         .git_global(opts.uses_global_git_excludes())
         .hidden(false)
         .follow_links(true);
+    let canonical_root = root.canonicalize().ok();
     // Ignore files stop at the repository boundary, as git's do (ADR-0028). In
     // a repository, `require_git` makes `.gitignore` and `info/exclude` stop at
     // the nearest directory holding one (the repository's top, or a nested
@@ -1609,9 +1610,11 @@ fn build_walk_builder(
         builder.require_git(bounded).parents(bounded);
         // `ignore` reads these as the walk starts; a device or a FIFO among
         // them would make that read unbounded.
-        if let Some(refused) =
-            ignore_files::refused_before_walk(root, opts.uses_global_git_excludes())
-        {
+        if let Some(refused) = ignore_files::refused_before_walk(
+            root,
+            canonical_root.as_deref(),
+            opts.uses_global_git_excludes(),
+        ) {
             return Err(refused.into_error());
         }
     }
@@ -1636,7 +1639,6 @@ fn build_walk_builder(
     // `/private/tmp`). Only symlink entries pay the `canonicalize`
     // syscall; the common non-symlink path is a bare `true`, so the
     // walk's cost is unchanged for trees without symlinks.
-    let canonical_root = root.canonicalize().ok();
     // M4 side-list: escaping/broken symlinks, and those into a Git directory,
     // are pruned from `entries` (below, via the `false` return) so no content
     // rule reads through them, but their relative paths are recorded here so

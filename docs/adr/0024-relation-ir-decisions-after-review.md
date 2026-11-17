@@ -13,6 +13,8 @@ Decision 6 relaxes how ADR-0019 DEC-13's budget is measured, and the decision-ma
 the other decisions correct or complete ADR-0023 without changing what was chosen.
 Decision 4's single rendering of every key is partly superseded by
 [ADR-0025](0025-v021-pre-release-decisions.md) (2026-10-30).
+Decision 6's syscall allowance is amended by
+[ADR-0045](0045-count-the-walks-per-directory-probes-in-the-reference-gate.md) (2026-11-17).
 
 ## Context
 
