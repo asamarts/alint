@@ -30,9 +30,8 @@ impl Rule for NoSymlinksRule {
     }
 
     fn scope_matches_any(&self, index: &alint_core::FileIndex) -> bool {
-        index
-            .entries
-            .iter()
+        self.scope
+            .candidates(index)
             .map(|entry| entry.path.as_ref())
             .chain(index.escaping_symlinks().iter().map(AsRef::as_ref))
             .any(|path| self.scope.matches(path, index))
@@ -47,7 +46,7 @@ impl Rule for NoSymlinksRule {
         // it), so a `files()`-only scan silently missed dir symlinks (M4). The
         // per-entry `symlink_metadata` re-stat below is what actually decides —
         // a regular directory is never flagged.
-        for entry in &ctx.index.entries {
+        for entry in self.scope.candidates(ctx.index) {
             if !self.scope.matches(&entry.path, ctx.index) {
                 continue;
             }

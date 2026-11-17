@@ -5,7 +5,7 @@ use globset::{Candidate, Glob, GlobBuilder, GlobSet, GlobSetBuilder};
 use crate::config::{PathsSpec, RuleSpec};
 use crate::error::{Error, Result};
 use crate::scope_filter::ScopeFilter;
-use crate::walker::FileIndex;
+use crate::walker::{FileEntry, FileIndex};
 
 /// Compiled include/exclude matcher built from a [`PathsSpec`] or raw pattern list,
 /// optionally bundled with a [`ScopeFilter`] ancestor-manifest gate.
@@ -39,6 +39,11 @@ pub struct Scope {
     /// A sole literal include pattern, matched by comparing the path's bytes
     /// instead of through `include` (see [`Scope::from_patterns`]).
     literal: Option<Box<[u8]>>,
+    /// The directories every path the include patterns can match lies under,
+    /// one per include ([`literal_dir_prefix`]): only the entries at and below
+    /// them can match ([`Scope::candidates`]). `None` when an include starts
+    /// with no literal directory, or there is no include.
+    within: Option<Box<[Box<Path>]>>,
     // The field name `scope_filter` is intentional — the public
     // accessor and the spec field share it, so renaming to
     // `filter` would cost more clarity than it saves.
@@ -72,6 +77,7 @@ impl Scope {
                 exclude: GlobSet::empty(),
                 has_include: true,
                 literal: Some(literal.into_bytes().into_boxed_slice()),
+                within: include_dirs(patterns),
                 scope_filter: None,
             });
         }
@@ -97,6 +103,7 @@ impl Scope {
             })?,
             has_include,
             literal: None,
+            within: include_dirs(patterns),
             scope_filter: None,
         })
     }
@@ -140,6 +147,7 @@ impl Scope {
             exclude: GlobSet::empty(),
             has_include: true,
             literal: None,
+            within: None,
             scope_filter: None,
         }
     }
@@ -193,6 +201,8 @@ impl Scope {
     /// without the hint).
     #[inline]
     pub fn matches(&self, path: &Path, index: &FileIndex) -> bool {
+        #[cfg(debug_assertions)]
+        MATCH_TESTS.with(|count| count.set(count.get() + 1));
         if !self.path_matches(path) {
             return false;
         }
@@ -217,6 +227,104 @@ impl Scope {
             .as_ref()
             .is_none_or(|filter| filter.matches_without_manifest(path, index))
     }
+
+    /// The entries of `index`, directories and files, that this scope can
+    /// match, in index order: those at and below the directories its include
+    /// patterns start with (`locales/*.json`, or a nested rule's
+    /// `{path}/*.md` once rendered), or every entry when a pattern starts with
+    /// no literal directory or the index is not in path order. The caller
+    /// still tests each one with [`Self::matches`]: an entry left out can never
+    /// match, so the two select what testing every entry selects, in the same
+    /// order. A rule built once per iteration of a nested `require:` block
+    /// then reads its own directory rather than the whole tree (an O(D x N)
+    /// run over D iterations and N entries otherwise).
+    pub fn candidates<'i>(
+        &self,
+        index: &'i FileIndex,
+    ) -> impl Iterator<Item = &'i FileEntry> + use<'i> {
+        self.candidate_ranges(index)
+            .into_iter()
+            .flat_map(move |range| &index.entries[range])
+    }
+
+    /// The files among [`Self::candidates`].
+    pub fn candidate_files<'i>(
+        &self,
+        index: &'i FileIndex,
+    ) -> impl Iterator<Item = &'i FileEntry> + use<'i> {
+        self.candidates(index).filter(|entry| !entry.is_dir)
+    }
+
+    /// The directories among [`Self::candidates`].
+    pub fn candidate_dirs<'i>(
+        &self,
+        index: &'i FileIndex,
+    ) -> impl Iterator<Item = &'i FileEntry> + use<'i> {
+        self.candidates(index).filter(|entry| entry.is_dir)
+    }
+
+    /// The positions in [`FileIndex::entries`] of [`Self::candidates`]:
+    /// ascending, disjoint ranges (one directory may lie below another).
+    pub(crate) fn candidate_ranges(&self, index: &FileIndex) -> Vec<std::ops::Range<usize>> {
+        let every_entry = || std::iter::once(0..index.entries.len()).collect();
+        let Some(dirs) = &self.within else {
+            return every_entry();
+        };
+        let mut ranges = Vec::with_capacity(dirs.len());
+        for dir in dirs {
+            let Some(range) = index.subtree(dir) else {
+                return every_entry();
+            };
+            if !range.is_empty() {
+                ranges.push(range);
+            }
+        }
+        ranges.sort_unstable_by_key(|range| range.start);
+        let mut merged: Vec<std::ops::Range<usize>> = Vec::with_capacity(ranges.len());
+        for range in ranges {
+            match merged.last_mut() {
+                Some(last) if range.start <= last.end => last.end = last.end.max(range.end),
+                _ => merged.push(range),
+            }
+        }
+        merged
+    }
+}
+
+#[cfg(debug_assertions)]
+std::thread_local! {
+    /// How many paths [`Scope::matches`] tested on this thread.
+    static MATCH_TESTS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// How many paths [`Scope::matches`] has tested on the calling thread, in a
+/// build with debug assertions (`None` without them, where nothing counts).
+/// Test only: a rule that tests every entry of the index once per iteration
+/// of a nested `require:` block gives the same findings as one that tests
+/// only its candidates ([`Scope::candidates`]), and only this count tells the
+/// two apart.
+#[doc(hidden)]
+#[must_use]
+pub fn scope_match_count() -> Option<u64> {
+    #[cfg(debug_assertions)]
+    {
+        Some(MATCH_TESTS.with(std::cell::Cell::get))
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        None
+    }
+}
+
+/// The directory each include pattern of `patterns` starts with
+/// ([`literal_dir_prefix`]), or `None` when one starts with none or every
+/// pattern is an exclude (a match-all scope).
+fn include_dirs(patterns: &[String]) -> Option<Box<[Box<Path>]>> {
+    let mut dirs = Vec::new();
+    for pattern in patterns.iter().filter(|pattern| !pattern.starts_with('!')) {
+        dirs.push(Box::from(Path::new(&literal_dir_prefix(pattern)?)));
+    }
+    (!dirs.is_empty()).then(|| dirs.into_boxed_slice())
 }
 
 impl Scope {
@@ -549,6 +657,93 @@ mod tests {
         assert!(scope.matches(Path::new("src/main.rs"), &idx));
         assert!(scope.matches(Path::new("src/Cargo.toml"), &idx));
         assert!(!scope.matches(Path::new("src/README.md"), &idx));
+    }
+
+    /// A scope's candidates are the entries under each include's literal
+    /// directory, merged in index order (a directory below another, a
+    /// pattern given twice), and every entry when an include starts with no
+    /// literal directory, when only excludes are given, for the match-all
+    /// scope, and for an index out of path order. Testing only them selects
+    /// what testing every entry selects (ENG-4 of the second post-v0.22.1
+    /// audit: a nested rule's glob scanned the whole index per iteration).
+    #[test]
+    fn candidates_cover_every_include_and_select_what_a_full_scan_selects() {
+        use crate::walker::FileEntry;
+        const ALL: &[&str] = &[
+            "a", "a/b", "a/b/y.md", "a/c.md", "a/x.md", "b", "b/z.md", "c.md", "d", "d/w.md",
+        ];
+        let index = |sorted: bool| {
+            let mut paths = ALL.to_vec();
+            if !sorted {
+                paths.reverse();
+            }
+            FileIndex::from_entries(
+                paths
+                    .into_iter()
+                    .map(|path| FileEntry {
+                        path: Path::new(path).into(),
+                        is_dir: !path.contains('.'),
+                        size: 1,
+                    })
+                    .collect(),
+            )
+        };
+        let a: &[&str] = &["a", "a/b", "a/b/y.md", "a/c.md", "a/x.md"];
+        for (patterns, candidates) in [
+            (&["a/*.md"][..], a),
+            (&["a/b/*.md", "a/*.md"][..], a),
+            (&["a/*.md", "a/*.md"][..], a),
+            (
+                &["d/*.md", "a/b/*.md"][..],
+                &["a/b", "a/b/y.md", "d", "d/w.md"][..],
+            ),
+            (&["a/*.md", "!a/c.md"][..], a),
+            (&["a/c.md"][..], a),
+            (&["missing/*.md"][..], &[][..]),
+            (&["a/*.md", "*.md"][..], ALL),
+            (&["a/*.md", "**/*.md"][..], ALL),
+            (&["!a/*.md"][..], ALL),
+            (&[][..], ALL),
+        ] {
+            let scope = s(patterns);
+            for sorted in [true, false] {
+                let index = index(sorted);
+                let tested: Vec<&str> = scope
+                    .candidates(&index)
+                    .map(|entry| entry.path.to_str().unwrap())
+                    .collect();
+                let mut expected = if sorted {
+                    candidates.to_vec()
+                } else {
+                    ALL.to_vec()
+                };
+                if !sorted {
+                    expected.reverse();
+                }
+                assert_eq!(tested, expected, "{patterns:?} sorted: {sorted}");
+                let matching = |entries: &mut dyn Iterator<Item = &FileEntry>| -> Vec<String> {
+                    entries
+                        .filter(|entry| scope.matches(&entry.path, &index))
+                        .map(|entry| entry.path.display().to_string())
+                        .collect()
+                };
+                assert_eq!(
+                    matching(&mut scope.candidates(&index)),
+                    matching(&mut index.entries.iter()),
+                    "{patterns:?} sorted: {sorted}"
+                );
+                assert!(scope.candidate_files(&index).all(|entry| !entry.is_dir));
+                assert!(scope.candidate_dirs(&index).all(|entry| entry.is_dir));
+                assert_eq!(
+                    scope.candidate_files(&index).count() + scope.candidate_dirs(&index).count(),
+                    tested.len()
+                );
+            }
+        }
+        assert_eq!(
+            Scope::match_all().candidates(&index(true)).count(),
+            ALL.len()
+        );
     }
 
     #[test]

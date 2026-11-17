@@ -93,14 +93,14 @@ impl Rule for MarkdownLinksResolveRule {
     }
 
     fn scope_matches_any(&self, index: &alint_core::FileIndex) -> bool {
-        index
-            .files()
+        self.scope
+            .candidate_files(index)
             .any(|entry| self.scope.matches(&entry.path, index))
     }
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
-        for entry in ctx.index.files() {
+        for entry in self.scope.candidate_files(ctx.index) {
             if !self.scope.matches(&entry.path, ctx.index) {
                 continue;
             }

@@ -373,9 +373,8 @@ impl RegistryPathsResolveRule {
     fn registry_files(&self, ctx: &Context<'_>) -> Vec<PathBuf> {
         match &self.registry_scope {
             None => vec![PathBuf::from(&self.source)],
-            Some(scope) => ctx
-                .index
-                .files()
+            Some(scope) => scope
+                .candidate_files(ctx.index)
                 .filter(|e| scope.matches(&e.path, ctx.index))
                 .map(|e| e.path.to_path_buf())
                 .collect(),
@@ -435,11 +434,10 @@ impl RegistryPathsResolveRule {
         // Ordered collection keeps findings deterministic even though the
         // file index's internal representation is not part of this contract.
         let mut candidates: BTreeSet<PathBuf> = BTreeSet::new();
-        for path in ctx
-            .index
-            .files()
+        for path in space
+            .candidate_files(ctx.index)
+            .chain(space.candidate_dirs(ctx.index))
             .map(|entry| &entry.path)
-            .chain(ctx.index.dirs().map(|entry| &entry.path))
         {
             if space.matches(path, ctx.index) {
                 candidates.insert(path.to_path_buf());
@@ -487,8 +485,8 @@ impl RegistryPathsResolveRule {
         let Ok(scope) = Scope::from_patterns(&[pat]) else {
             return Vec::new();
         };
-        ctx.index
-            .files()
+        scope
+            .candidate_files(ctx.index)
             .filter(|e| scope.matches(&e.path, ctx.index))
             .map(|e| e.path.to_path_buf())
             .chain(

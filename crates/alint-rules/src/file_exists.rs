@@ -191,7 +191,7 @@ impl Rule for FileExistsRule {
             // per-entry `is_git_tracked` check that lived here
             // pre-v0.9.11 is no longer needed — `ctx.index.files()`
             // already iterates only tracked files.
-            ctx.index.files().any(|entry| {
+            self.scope.candidate_files(ctx.index).any(|entry| {
                 if self.root_only && entry.path.components().count() != 1 {
                     return false;
                 }

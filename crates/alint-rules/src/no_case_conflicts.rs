@@ -44,7 +44,7 @@ impl Rule for NoCaseConflictsRule {
         // comparing full file paths alone (`Docs/a.md` vs `docs/b.md`) misses
         // them. Keyed by the actual path so a shared directory counts once.
         let mut entities: BTreeMap<String, std::sync::Arc<std::path::Path>> = BTreeMap::new();
-        for entry in ctx.index.files() {
+        for entry in self.scope.candidate_files(ctx.index) {
             if !self.scope.matches(&entry.path, ctx.index) {
                 continue;
             }

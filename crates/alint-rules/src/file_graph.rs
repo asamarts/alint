@@ -351,7 +351,7 @@ impl Rule for FileGraphRule {
         if !explicit && !implicit && !manifest_sensitive {
             return;
         }
-        for entry in ctx.index.files() {
+        for entry in self.nodes.candidate_files(ctx.index) {
             if !self.nodes.matches(&entry.path, ctx.index) {
                 continue;
             }
@@ -369,9 +369,9 @@ impl Rule for FileGraphRule {
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         // Stable node ordering → byte-identical violation output
         // (the snapshot discipline the parallel walker upholds).
-        let mut nodes: Vec<PathBuf> = ctx
-            .index
-            .files()
+        let mut nodes: Vec<PathBuf> = self
+            .nodes
+            .candidate_files(ctx.index)
             .filter(|e| self.nodes.matches(&e.path, ctx.index))
             .map(|e| e.path.to_path_buf())
             .collect();

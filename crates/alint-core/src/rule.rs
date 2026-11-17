@@ -1223,7 +1223,11 @@ pub trait Rule: Send + Sync + std::fmt::Debug {
         let scope = self
             .path_scope()
             .or_else(|| self.as_per_file().map(PerFileRule::path_scope));
-        scope.is_some_and(|scope| index.files().any(|entry| scope.matches(&entry.path, index)))
+        scope.is_some_and(|scope| {
+            scope
+                .candidate_files(index)
+                .any(|entry| scope.matches(&entry.path, index))
+        })
     }
 
     /// Whether every file selected by this rule's path scope is secret-bearing
@@ -1262,7 +1266,7 @@ pub trait Rule: Send + Sync + std::fmt::Debug {
             return;
         }
         if let Some(scope) = scope {
-            for entry in ctx.index.files() {
+            for entry in scope.candidate_files(ctx.index) {
                 if scope.matches(&entry.path, ctx.index) {
                     visit(&entry.path);
                 }
@@ -1423,8 +1427,9 @@ pub fn eval_per_file<R: PerFileRule + ?Sized>(
     ctx: &Context<'_>,
 ) -> Result<Vec<Violation>> {
     let mut violations = Vec::new();
-    for entry in ctx.index.files() {
-        if !rule.path_scope().matches(&entry.path, ctx.index) {
+    let scope = rule.path_scope();
+    for entry in scope.candidate_files(ctx.index) {
+        if !scope.matches(&entry.path, ctx.index) {
             continue;
         }
         let full = ctx.root.join(&entry.path);

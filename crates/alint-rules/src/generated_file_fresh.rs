@@ -278,7 +278,7 @@ impl GeneratedFileFreshRule {
         // the originals for an explicit, error-reporting restore after the
         // diff. Its Drop fallback also restores on early return or panic.
         let mut restorer = OutputRestorer::new(ctx.root);
-        for entry in ctx.index.files() {
+        for entry in outputs.candidate_files(ctx.index) {
             if outputs.matches(&entry.path, ctx.index) {
                 match crate::io::read_capped(&ctx.root.join(&entry.path)) {
                     Ok(bytes) => restorer.snapshot(entry.path.clone(), bytes),
@@ -358,7 +358,7 @@ impl GeneratedFileFreshRule {
         let walk_opts = WalkOptions::default();
         match walk(ctx.root, &walk_opts) {
             Ok(after_index) => {
-                for entry in after_index.files() {
+                for entry in outputs.candidate_files(&after_index) {
                     if outputs.matches(&entry.path, &after_index) && !restorer.has(&entry.path) {
                         restorer.register_new(entry.path.clone());
                         if generator_succeeded {

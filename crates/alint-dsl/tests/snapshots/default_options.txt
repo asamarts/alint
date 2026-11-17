@@ -1655,9 +1655,6 @@ KeyParityRule {
     peers: "locales/*.json",
     peers_selector: Selector {
         scope: Scope { ... },
-        within: Some(
-            "locales",
-        ),
     },
     literal_peer: None,
     scope: Scope { ... },

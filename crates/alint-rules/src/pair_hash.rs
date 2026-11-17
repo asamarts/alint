@@ -166,8 +166,8 @@ impl Rule for PairHashRule {
                 let finding = Violation::new(msg)
                     .with_path(std::sync::Arc::<Path>::from(target_path))
                     .with_related_locations(
-                        ctx.index
-                            .files()
+                        self.source_scope
+                            .candidate_files(ctx.index)
                             .filter(|entry| self.source_scope.matches(&entry.path, ctx.index))
                             .map(|entry| {
                                 RelatedLocation::new(entry.path.as_ref(), "digest source")
@@ -184,7 +184,7 @@ impl Rule for PairHashRule {
         let b_text = String::from_utf8_lossy(&b_bytes);
         let b_lower = b_text.to_ascii_lowercase();
 
-        for entry in ctx.index.files() {
+        for entry in self.source_scope.candidate_files(ctx.index) {
             if !self.source_scope.matches(&entry.path, ctx.index) {
                 continue;
             }

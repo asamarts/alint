@@ -326,15 +326,15 @@ impl Rule for EditorconfigConformsRule {
     }
 
     fn scope_matches_any(&self, index: &alint_core::FileIndex) -> bool {
-        index
-            .files()
+        self.scope
+            .candidate_files(index)
             .any(|entry| self.scope.matches(&entry.path, index))
     }
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
-        let selected: Vec<_> = ctx
-            .index
-            .files()
+        let selected: Vec<_> = self
+            .scope
+            .candidate_files(ctx.index)
             .filter(|entry| self.scope.matches(&entry.path, ctx.index))
             .collect();
         let mut policies = HashMap::new();

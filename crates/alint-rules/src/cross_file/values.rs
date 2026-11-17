@@ -88,7 +88,7 @@ impl CrossFileRule {
             // union the values into one set (the set relations only).
             let mut all = Vec::new();
             let mut matched = 0usize;
-            for entry in ctx.index.files() {
+            for entry in scope.candidate_files(ctx.index) {
                 if scope.matches(&entry.path, ctx.index) {
                     matched += 1;
                     if let Some(vals) = self.read_values(
@@ -145,7 +145,7 @@ impl CrossFileRule {
             }) => {
                 let adapter = ExtractAdapter::new(extract.clone());
                 let mut matched = 0usize;
-                for e in ctx.index.files() {
+                for e in scope.candidate_files(ctx.index) {
                     if !scope.matches(&e.path, ctx.index) {
                         continue;
                     }

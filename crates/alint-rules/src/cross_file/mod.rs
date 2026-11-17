@@ -633,7 +633,7 @@ impl Rule for CrossFileRule {
                 .is_some_and(Extract::redacts_by_default);
         if source_sensitive {
             if let Some(scope) = &self.source_glob {
-                for entry in ctx.index.files() {
+                for entry in scope.candidate_files(ctx.index) {
                     if scope.matches(&entry.path, ctx.index) {
                         visit(&entry.path);
                     }
@@ -647,7 +647,7 @@ impl Rule for CrossFileRule {
             Some(Targets::Glob { scope, extract, .. })
                 if explicit || extract.as_ref().is_some_and(Extract::redacts_by_default) =>
             {
-                for entry in ctx.index.files() {
+                for entry in scope.candidate_files(ctx.index) {
                     if scope.matches(&entry.path, ctx.index) {
                         visit(&entry.path);
                     }

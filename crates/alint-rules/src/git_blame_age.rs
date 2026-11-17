@@ -79,7 +79,7 @@ impl Rule for GitBlameAgeRule {
         let Some(blame_cache) = ctx.git_blame else {
             return Ok(violations);
         };
-        for entry in ctx.index.files() {
+        for entry in self.scope.candidate_files(ctx.index) {
             if !self.scope.matches(&entry.path, ctx.index) {
                 continue;
             }

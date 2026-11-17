@@ -17,8 +17,8 @@ impl CrossFileRule {
     ) {
         if let Some(scope) = &self.source_glob {
             finding.set_related_locations(
-                ctx.index
-                    .files()
+                scope
+                    .candidate_files(ctx.index)
                     .filter(|entry| scope.matches(&entry.path, ctx.index))
                     .map(|entry| RelatedLocation::new(entry.path.as_ref(), label)),
             );

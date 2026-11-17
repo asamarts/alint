@@ -260,7 +260,7 @@ impl Rule for StructuredPathRule {
             }
             return;
         }
-        for entry in ctx.index.files() {
+        for entry in self.scope.candidate_files(ctx.index) {
             if self.scope.matches(&entry.path, ctx.index) {
                 visit(&entry.path);
             }
@@ -302,7 +302,7 @@ impl Rule for StructuredPathRule {
                 violations.extend(self.evaluate_file(ctx, literal, &bytes)?);
             }
         } else {
-            for entry in ctx.index.files() {
+            for entry in self.scope.candidate_files(ctx.index) {
                 if !self.scope.matches(&entry.path, ctx.index) {
                     continue;
                 }
