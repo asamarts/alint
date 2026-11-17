@@ -255,7 +255,7 @@ fn scoped_process_environment_filters_repository_redirectors() {
         ("SAFE_VALUE".to_string(), "retained".to_string()),
     ]);
     let _guard = scoped_process_environment(root.path(), environment);
-    std::fs::create_dir(root.path().join(".git")).unwrap();
+    repository::tests::init_repository(root.path(), &[]);
 
     let command = git_command(root.path()).expect("a repository to name");
     let git_dir = command
@@ -311,7 +311,7 @@ fn a_scoped_ceiling_reaches_git_and_stops_discovery() {
     );
     assert_eq!(collect_tracked_paths(&root), None);
 
-    std::fs::create_dir(root.join(".git")).unwrap();
+    repository::tests::init_repository(&root, &[]);
     let command = git_command(&root).expect("the sandbox's repository");
     assert_eq!(
         command
