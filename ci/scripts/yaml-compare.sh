@@ -5,9 +5,9 @@
 # difference neither saphyr's reading nor the differential harness's allowlist
 # explains panics in the test that made it. First, check that no release build
 # holds a reference parser. The tests include alint-core's `yaml_memory`, which
-# compares ayaml's peak heap with libyaml's against the regression bound
-# (ADR-0042); the release preflight applies the release bound with
-# yaml-memory-release.sh.
+# compares ayaml's peak heap with libyaml's against each document shape's
+# regression bound (ADR-0042); the release preflight applies the release bound
+# with yaml-memory-release.sh.
 #
 # CI's `YAML Compare` job and the release preflight run it. Its name has no
 # `test-` prefix, as shell-tests.sh runs every ci/scripts/test-*.sh, and
