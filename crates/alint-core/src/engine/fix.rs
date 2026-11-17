@@ -890,7 +890,8 @@ impl Engine {
             .with_compose(compose_buf.as_ref())
             .with_stage_ops(stage_ops)
             .with_process_environment(self.process_environment.as_ref())
-            .with_config_files(&self.config_files);
+            .with_config_files(&self.config_files)
+            .with_index(Some(index));
 
         // Same dependency resolution as `run`, so a fix pass respects per-rule
         // diff and manifest scoping without touching false `when:` rules.
@@ -1236,6 +1237,20 @@ impl Engine {
                 .spec
                 .as_deref()
                 .is_some_and(|spec| spec.extended_source);
+            // The walk answers which paths a symlink is on only while the tree
+            // keeps its shape: from the first rule of a writing pass that may
+            // move or remove a file, the path checks ask the disk instead.
+            if fixer.is_some()
+                && !dry_run
+                && stage_ops.is_none()
+                && !entry
+                    .spec
+                    .as_deref()
+                    .and_then(|spec| spec.fix.as_ref())
+                    .is_some_and(crate::config::FixSpec::keeps_paths_in_place)
+            {
+                fix_ctx.index = None;
+            }
             // Located-edit fixers (Phase 1+) route through the batched
             // located_fix path instead of `apply`: collect their byte-range
             // edits per file (size-guarded via read_for_fix -- invariant 4 on
@@ -1671,7 +1686,11 @@ impl Engine {
                     .as_deref()
                     .and_then(|real| target.strip_prefix(real).ok())
                     .unwrap_or(target);
-                let written = if crate::reaches_git_directory(root, below_root) {
+                let written = if crate::pathsafe::reaches_git_directory_walked(
+                    root,
+                    below_root,
+                    fix_ctx.index,
+                ) {
                     Err(std::io::Error::new(
                         std::io::ErrorKind::PermissionDenied,
                         crate::git_directory_refusal(below_root),

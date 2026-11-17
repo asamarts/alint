@@ -624,9 +624,12 @@ fn a_content_fix_never_edits_through_a_symlink_into_the_git_directory() {
     std::os::unix::fs::symlink("real.rs", root.join("src/alias.rs")).unwrap();
     let evil = root.join("src/evil.rs");
     let buffer = std::cell::RefCell::new(std::collections::BTreeMap::new());
+    // The walk does not index `evil.rs`, so it cannot vouch for it.
+    let index = crate::walker::walk(root, &crate::walker::WalkOptions::default()).unwrap();
     for ctx in [
         FixContext::new(root, false),
         FixContext::new(root, false).with_compose(Some(&buffer)),
+        FixContext::new(root, false).with_index(Some(&index)),
     ] {
         match read_for_fix(&evil, Path::new("src/evil.rs"), &ctx).unwrap() {
             ReadForFix::Skipped(FixOutcome::Skipped(reason)) => assert_eq!(
@@ -656,6 +659,50 @@ fn a_content_fix_never_edits_through_a_symlink_into_the_git_directory() {
         b"[core]\n"
     );
     assert_eq!(std::fs::read(root.join("src/real.rs")).unwrap(), b"y\n");
+}
+
+/// A fix asks its path checks about a file the walk reached without a symlink
+/// by name alone, and about any other without resolving it unless a symlink is
+/// on the way. Resolving every file a fix edits made `alint fix` make several
+/// times the `stat`-family calls it made before.
+#[test]
+fn a_fix_resolves_no_path_without_a_symlink_on_the_way() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src/deep")).unwrap();
+    std::fs::write(root.join("src/deep/a.rs"), b"x \n").unwrap();
+    std::fs::write(root.join(".alint.yml"), b"version: 1\n").unwrap();
+    let config = vec![root.join(".alint.yml").canonicalize().unwrap()];
+    let index = crate::walker::walk(root, &crate::walker::WalkOptions::default()).unwrap();
+    let file = root.join("src/deep/a.rs");
+    // (resolutions, symlink probes) of reading, then writing, the file.
+    let cost = |ctx: &FixContext<'_>| {
+        let before = crate::pathsafe::path_check_costs();
+        assert!(matches!(
+            read_for_fix(&file, Path::new("src/deep/a.rs"), ctx).unwrap(),
+            ReadForFix::Bytes(_)
+        ));
+        ctx.commit_write(&file, b"x\n").unwrap();
+        let after = crate::pathsafe::path_check_costs();
+        (
+            after.resolutions - before.resolutions,
+            after.symlink_probes - before.symlink_probes,
+        )
+    };
+    let buffer = std::cell::RefCell::new(std::collections::BTreeMap::new());
+    for extended in [false, true] {
+        let ctx = FixContext::new(root, false)
+            .with_compose(Some(&buffer))
+            .with_extended_source(extended)
+            .with_config_files(&config);
+        assert_eq!(cost(&ctx.with_index(Some(&index))), (0, 0), "{extended}");
+        let ctx = FixContext::new(root, false)
+            .with_extended_source(extended)
+            .with_config_files(&config);
+        let (resolutions, probes) = cost(&ctx);
+        assert_eq!(resolutions, 0, "{extended}");
+        assert!(probes > 0, "{extended}");
+    }
 }
 
 /// A fix of a rule an `extends:`'d ruleset shaped never writes alint's own

@@ -91,6 +91,7 @@ fn is_confined(p: &Path) -> bool {
 /// would let the two read paths diverge.
 #[must_use]
 pub fn resolved_within_root(candidate: &Path, root: &Path) -> bool {
+    count_check_cost(|costs| costs.resolutions += 1);
     let Ok(root_real) = root.canonicalize() else {
         return false;
     };
@@ -344,16 +345,140 @@ pub fn path_names_git_directory(path: &Path) -> bool {
 /// of it names one ([`path_names_git_directory`]), or the place it leads to
 /// once the OS follows the symlinks in it (an in-repo `g -> .git`) is inside
 /// one below `root`.
+///
+/// Only a path with a symlink on the way pays for resolving it; any other
+/// costs one `lstat` per component, until one does not exist.
 #[must_use]
 pub fn reaches_git_directory(root: &Path, path: &Path) -> bool {
+    reaches_git_directory_walked(root, path, None)
+}
+
+/// [`reaches_git_directory`], asking `index`, the walk of `root`, first: a file
+/// it reached without a symlink is in a Git directory only by name, which
+/// needs no file system call to tell.
+pub(crate) fn reaches_git_directory_walked(
+    root: &Path,
+    path: &Path,
+    index: Option<&crate::walker::FileIndex>,
+) -> bool {
     if path_names_git_directory(path) {
         return true;
     }
+    if follows_no_symlink(root, path, index) {
+        return false;
+    }
+    count_check_cost(|costs| costs.resolutions += 1);
     let Ok(root_real) = root.canonicalize() else {
         return false;
     };
     resolve_existing_prefix(&root.join(path))
         .is_some_and(|real| in_git_directory(&root_real, &real))
+}
+
+/// Whether the OS reaches `path`, relative to `root`, without following a
+/// symlink below `root`, so that it lands at `path` itself below the real
+/// root: `index`, the walk of `root`, indexed it that way
+/// ([`FileIndex::walked_without_symlink`](crate::walker::FileIndex)), or no
+/// component of it is a symlink, asked from the root down with one `lstat`
+/// each until one does not exist (nothing below it does either). A path with
+/// a component other than a name (`..`, an absolute one) gets no answer.
+pub(crate) fn follows_no_symlink(
+    root: &Path,
+    path: &Path,
+    index: Option<&crate::walker::FileIndex>,
+) -> bool {
+    if !path
+        .components()
+        .all(|component| matches!(component, Component::Normal(_)))
+    {
+        return false;
+    }
+    if index.is_some_and(|index| index.walked_without_symlink(path)) {
+        return true;
+    }
+    count_check_cost(|costs| costs.symlink_probes += 1);
+    let mut at = root.to_path_buf();
+    for component in path.components() {
+        at.push(component);
+        match std::fs::symlink_metadata(&at) {
+            Ok(metadata) if !metadata.file_type().is_symlink() => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return true,
+            _ => return false,
+        }
+    }
+    true
+}
+
+/// What the path checks in this module cost the calling thread so far: how
+/// many paths they resolved through their symlinks (a `canonicalize` of the
+/// root and of the path, one call per component of each), and how many they
+/// probed for a symlink below the root (`follows_no_symlink`). Test and
+/// diagnostic only: a check that resolves every path it is asked about makes
+/// thousands of calls a run, which only a count shows.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PathCheckCosts {
+    /// Paths resolved through their symlinks.
+    pub resolutions: usize,
+    /// Paths probed for a symlink, one `lstat` per component.
+    pub symlink_probes: usize,
+}
+
+thread_local! {
+    static CHECK_COSTS: std::cell::Cell<PathCheckCosts> =
+        const { std::cell::Cell::new(PathCheckCosts { resolutions: 0, symlink_probes: 0 }) };
+}
+
+fn count_check_cost(add: impl FnOnce(&mut PathCheckCosts)) {
+    CHECK_COSTS.with(|cell| {
+        let mut costs = cell.get();
+        add(&mut costs);
+        cell.set(costs);
+    });
+}
+
+/// [`PathCheckCosts`] for the calling thread.
+#[doc(hidden)]
+#[must_use]
+pub fn path_check_costs() -> PathCheckCosts {
+    CHECK_COSTS.with(std::cell::Cell::get)
+}
+
+/// Where a rule's read of `path`, relative to `root`, lands once the OS
+/// follows the symlinks in it ([`resolve_named_read`]).
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NamedRead {
+    /// Inside the root, and outside any Git directory there.
+    InRoot,
+    /// Inside a Git directory below the root, by name or through a symlink:
+    /// no rule reads there ([`git_directory_read_refusal`]).
+    GitDirectory,
+    /// Outside the root, or the root does not resolve.
+    OutsideRoot,
+}
+
+/// Resolve a path a rule reads by name once, for both checks a named read
+/// makes: that it stays in the root ([`resolved_within_root`]) and out of a
+/// Git directory there ([`reaches_git_directory`]). One resolution answers
+/// both, so the Git-directory check costs a named read nothing more.
+#[doc(hidden)]
+#[must_use]
+pub fn resolve_named_read(root: &Path, path: &Path) -> NamedRead {
+    count_check_cost(|costs| costs.resolutions += 1);
+    let Ok(root_real) = root.canonicalize() else {
+        return NamedRead::OutsideRoot;
+    };
+    match resolve_existing_prefix(&root.join(path)) {
+        Some(real) if real.starts_with(&root_real) => {
+            if path_names_git_directory(path) || in_git_directory(&root_real, &real) {
+                NamedRead::GitDirectory
+            } else {
+                NamedRead::InRoot
+            }
+        }
+        _ => NamedRead::OutsideRoot,
+    }
 }
 
 /// Whether `real`, a resolved path, is inside a Git directory below
@@ -442,9 +567,33 @@ pub fn path_names_alint_config(path: &Path) -> bool {
 /// from a source that may not run commands must not write one.
 #[must_use]
 pub fn reaches_alint_config(root: &Path, path: &Path, config_files: &[PathBuf]) -> bool {
+    reaches_alint_config_walked(root, path, config_files, None)
+}
+
+/// [`reaches_alint_config`], asking `index`, the walk of `root`, first. A path
+/// reached without a symlink ([`follows_no_symlink`]) lands at itself below
+/// the real root, where its name is the whole answer unless a loaded file ends
+/// in the same names; only then, or with a symlink on the way, is it resolved.
+pub(crate) fn reaches_alint_config_walked(
+    root: &Path,
+    path: &Path,
+    config_files: &[PathBuf],
+    index: Option<&crate::walker::FileIndex>,
+) -> bool {
     if path_names_alint_config(path) {
         return true;
     }
+    let ends_in_path = |file: &PathBuf| {
+        let mut file = file.components().rev();
+        path.components().rev().all(|component| {
+            file.next()
+                .is_some_and(|name| name.as_os_str().eq_ignore_ascii_case(component))
+        })
+    };
+    if follows_no_symlink(root, path, index) && !config_files.iter().any(ends_in_path) {
+        return false;
+    }
+    count_check_cost(|costs| costs.resolutions += 1);
     let Some(real) = resolve_existing_prefix(&root.join(path)) else {
         return false;
     };
@@ -934,6 +1083,119 @@ mod tests {
         assert!(reaches_git_directory(root, Path::new(".git/commondir")));
         assert!(!reaches_git_directory(root, Path::new("src/config")));
         assert!(!reaches_git_directory(root, Path::new("new/config")));
+    }
+
+    /// The Git-directory and configuration checks resolve a path through its
+    /// symlinks only when one is on the way: otherwise they cost an `lstat` per
+    /// component, and nothing for a file the walk reached without one. Resolving
+    /// every path made the S3 bench run thousands more `stat` calls and
+    /// `alint fix` several times as many; the counts show such a resolution.
+    #[test]
+    #[cfg(unix)]
+    fn only_a_symlink_on_the_way_makes_a_path_check_resolve() {
+        use super::{
+            NamedRead, path_check_costs, reaches_alint_config, reaches_alint_config_walked,
+            reaches_git_directory, reaches_git_directory_walked, resolve_named_read,
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::create_dir_all(root.join("src/deep")).unwrap();
+        std::fs::write(root.join("src/deep/a.rs"), "").unwrap();
+        std::fs::write(root.join("policy.yml"), "").unwrap();
+        std::fs::write(root.join(".gitignore"), "hidden.rs\n").unwrap();
+        std::fs::write(root.join("hidden.rs"), "").unwrap();
+        std::os::unix::fs::symlink(".git", root.join("g")).unwrap();
+        std::os::unix::fs::symlink("src", root.join("lnk")).unwrap();
+        std::os::unix::fs::symlink("src/deep/a.rs", root.join("alias.rs")).unwrap();
+        let config = vec![root.canonicalize().unwrap().join("policy.yml")];
+        let index = crate::walker::walk(root, &crate::walker::WalkOptions::default()).unwrap();
+        // (answer, resolutions, symlink probes) of one check.
+        let cost = |check: &dyn Fn() -> bool| {
+            let before = path_check_costs();
+            let answer = check();
+            let after = path_check_costs();
+            (
+                answer,
+                after.resolutions - before.resolutions,
+                after.symlink_probes - before.symlink_probes,
+            )
+        };
+        let p = Path::new;
+        // No symlink on the way: one probe, whether the path exists or not.
+        for path in ["src/deep/a.rs", "new/dir/x"] {
+            assert_eq!(
+                cost(&|| reaches_git_directory(root, p(path))),
+                (false, 0, 1)
+            );
+        }
+        assert_eq!(
+            cost(&|| reaches_alint_config(root, p("src/deep/a.rs"), &config)),
+            (false, 0, 1)
+        );
+        // A file the walk reached without one: no file system call at all.
+        let walked = Some(&index);
+        assert!(index.walked_without_symlink(p("src/deep/a.rs")));
+        assert_eq!(
+            cost(&|| reaches_git_directory_walked(root, p("src/deep/a.rs"), walked)),
+            (false, 0, 0)
+        );
+        assert_eq!(
+            cost(&|| reaches_alint_config_walked(root, p("src/deep/a.rs"), &config, walked)),
+            (false, 0, 0)
+        );
+        // The walk cannot vouch for a path through a symlink it followed, one
+        // it did not index, or an index built from entries.
+        for path in [
+            "lnk/deep/a.rs",
+            "alias.rs",
+            "hidden.rs",
+            "new.rs",
+            "src/deep",
+        ] {
+            assert!(!index.walked_without_symlink(p(path)), "{path}");
+        }
+        let built = crate::walker::FileIndex::from_entries(index.entries.clone());
+        assert!(!built.walked_without_symlink(p("src/deep/a.rs")));
+        // A symlink on the way, or a loaded file that could be the path, is
+        // resolved; a name decides first, for nothing.
+        assert_eq!(
+            cost(&|| reaches_git_directory(root, p("g/config"))),
+            (true, 1, 1)
+        );
+        assert_eq!(
+            cost(&|| reaches_git_directory_walked(root, p("lnk/deep/a.rs"), walked)),
+            (false, 1, 1)
+        );
+        assert_eq!(
+            cost(&|| reaches_git_directory(root, p("a/../g/x"))),
+            (true, 1, 0)
+        );
+        assert_eq!(
+            cost(&|| reaches_alint_config(root, p("POLICY.yml"), &config)),
+            (true, 1, 1)
+        );
+        assert_eq!(
+            cost(&|| reaches_git_directory(root, p(".git/x"))),
+            (true, 0, 0)
+        );
+        // A named read resolves once for both of its checks.
+        for (path, landing) in [
+            ("src/deep/a.rs", NamedRead::InRoot),
+            ("g/config", NamedRead::GitDirectory),
+            ("../x", NamedRead::OutsideRoot),
+        ] {
+            let before = path_check_costs();
+            assert_eq!(resolve_named_read(root, p(path)), landing, "{path}");
+            let after = path_check_costs();
+            assert_eq!(
+                (
+                    after.resolutions - before.resolutions,
+                    after.symlink_probes - before.symlink_probes
+                ),
+                (1, 0)
+            );
+        }
     }
 
     #[test]

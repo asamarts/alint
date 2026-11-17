@@ -20,14 +20,23 @@ impl FixContext<'_> {
     /// that source may not. The fixers ask before they touch a path, and
     /// [`read_for_fix`] and [`Self::commit_write`] ask for every content edit, so
     /// each reports the refusal as a skip.
+    ///
+    /// A file [`Self::index`] reached without a symlink is checked by name
+    /// alone; any other path is checked on disk.
     #[must_use]
     pub fn write_refusal(&self, path: &Path) -> Option<String> {
         let path = path.strip_prefix(self.root).unwrap_or(path);
-        if crate::reaches_git_directory(self.root, path) {
+        if crate::pathsafe::reaches_git_directory_walked(self.root, path, self.index) {
             return Some(crate::git_directory_refusal(path));
         }
-        (self.extended_source && crate::reaches_alint_config(self.root, path, self.config_files))
-            .then(|| crate::alint_config_refusal(path))
+        (self.extended_source
+            && crate::pathsafe::reaches_alint_config_walked(
+                self.root,
+                path,
+                self.config_files,
+                self.index,
+            ))
+        .then(|| crate::alint_config_refusal(path))
     }
 
     /// Persist a whole-file write of `bytes` for the file whose absolute path
@@ -165,7 +174,7 @@ pub fn read_for_fix(
     if let Some(reason) = ctx.write_refusal(abs) {
         return Ok(ReadForFix::Skipped(FixOutcome::Skipped(reason)));
     }
-    read_source_for_fix(abs, display_path, ctx)
+    read_checked_for_fix(abs, display_path, ctx)
 }
 
 /// [`read_for_fix`] for a file a fix reads but does not write (`sync_from`'s
@@ -181,11 +190,20 @@ pub fn read_source_for_fix(
     ctx: &FixContext<'_>,
 ) -> Result<ReadForFix> {
     let rel = abs.strip_prefix(ctx.root).unwrap_or(abs);
-    if crate::reaches_git_directory(ctx.root, rel) {
+    if crate::pathsafe::reaches_git_directory_walked(ctx.root, rel, ctx.index) {
         return Ok(ReadForFix::Skipped(FixOutcome::Skipped(
             crate::git_directory_refusal(rel),
         )));
     }
+    read_checked_for_fix(abs, display_path, ctx)
+}
+
+/// [`read_for_fix`] and [`read_source_for_fix`] once their path checks passed.
+fn read_checked_for_fix(
+    abs: &Path,
+    display_path: &std::path::Path,
+    ctx: &FixContext<'_>,
+) -> Result<ReadForFix> {
     // In compose mode, an earlier fixer's write for this file lives in the
     // buffer, not on disk; read it back so fixers compose in config order.
     // Keyed by the resolved write target (matching `commit_write`), so a read

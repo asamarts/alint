@@ -710,6 +710,43 @@ impl FixSpec {
             Self::InsertHeader { .. } => "insert_header",
         }
     }
+
+    /// Whether the op leaves every path that exists the kind of node it was:
+    /// it edits, creates or changes the mode of files and makes directories,
+    /// but never moves or removes a file or runs a command, any of which can
+    /// leave a symlink where the walk saw a file. Until a pass applies an op
+    /// that may, the walk still answers which paths a symlink is on
+    /// ([`FixContext::index`](crate::FixContext::index)). A new op decides here.
+    pub(crate) fn keeps_paths_in_place(&self) -> bool {
+        match self {
+            Self::FileRemove { .. }
+            | Self::FileRename { .. }
+            | Self::Relocate { .. }
+            | Self::GitUntrack { .. }
+            | Self::Command { .. } => false,
+            Self::FileCreate { .. }
+            | Self::FilePrepend { .. }
+            | Self::FileAppend { .. }
+            | Self::FileTrimTrailingWhitespace { .. }
+            | Self::FileAppendFinalNewline { .. }
+            | Self::FileNormalizeLineEndings { .. }
+            | Self::FileStripBidi { .. }
+            | Self::FileStripZeroWidth { .. }
+            | Self::FileStripBom { .. }
+            | Self::FileCollapseBlankLines { .. }
+            | Self::Replace { .. }
+            | Self::SetValue { .. }
+            | Self::RemoveValue { .. }
+            | Self::Chmod { .. }
+            | Self::DirCreate { .. }
+            | Self::SyncFrom { .. }
+            | Self::CreateAndRegister { .. }
+            | Self::Sort { .. }
+            | Self::IndentStyle { .. }
+            | Self::InsertLine { .. }
+            | Self::InsertHeader { .. } => true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

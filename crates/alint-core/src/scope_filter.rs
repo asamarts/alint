@@ -703,8 +703,11 @@ pub(crate) fn read_manifest_confined(
         ));
     }
     // A `source` naming a Git directory is refused at load; this one reaches
-    // one through a symlink, and a file there can hold credentials.
-    if crate::pathsafe::reaches_git_directory(root, rel) {
+    // one through a symlink, and a file there can hold credentials. Both paths
+    // are resolved already.
+    if crate::pathsafe::path_names_git_directory(rel)
+        || crate::pathsafe::in_git_directory(&croot, &cabs)
+    {
         return Err(ManifestFailure::read(
             "scope manifest is in a Git directory; rules never read there",
         ));
