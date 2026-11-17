@@ -77,6 +77,15 @@ discovers one: a fixture shaped like a bare repository stays content whatever
 the Git version, and a test without `given.git` runs no Git at all, so it never
 reads a repository the host's temporary directory is in.
 
+The walk that lists a test's tree reads no global excludes file, so the host's Git setup never
+hides a file from a test.
+
+<!-- alint:since=0.23 -->
+Neither does the walk that finds `nested_configs:` files (nor a `~/.gitconfig` that names an
+excludes file), so the host's Git setup never hides a nested config from a test either.
+`alint check` still honours the user's global excludes file in both walks.
+<!-- /alint:since -->
+
 ## Exit codes
 
 | Code | Meaning |

@@ -230,6 +230,7 @@ fn load_resolved(
                 opts.kind_catalog,
                 RunningVersion::current(),
                 opts.environment.as_ref(),
+                opts.global_git_excludes,
             )?;
         raw.rules.extend(discovered_rules);
         extend_compatibility(&mut raw.compatibility, discovered_compatibility);
@@ -1317,6 +1318,11 @@ pub struct LoadOptions<'catalog> {
     /// Repository root used by nested-config discovery. When absent, the
     /// top-level config directory remains the repository root.
     pub repository_root: Option<PathBuf>,
+    /// Whether nested-config discovery reads the user's global Git excludes
+    /// file (and the global Git configuration that can name one), as a
+    /// check's walk does. A policy runner turns it off, as its own walk does,
+    /// so the host's Git setup cannot hide a nested config from a test.
+    pub global_git_excludes: bool,
 }
 
 impl Default for LoadOptions<'_> {
@@ -1329,6 +1335,7 @@ impl Default for LoadOptions<'_> {
             config_source: std::sync::Arc::new(FilesystemConfigSource),
             remote_policy: RemotePolicy::Allow,
             repository_root: None,
+            global_git_excludes: true,
         }
     }
 }
