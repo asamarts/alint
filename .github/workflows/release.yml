@@ -98,6 +98,10 @@ jobs:
         run: ci/scripts/test.sh
       - name: test (YAML compare mode, ADR-0041)
         run: ci/scripts/yaml-compare.sh
+      # The release condition of ADR-0042: ayaml's peak heap within 1.2x of
+      # libyaml's. It fails until an ayaml release meets it.
+      - name: YAML memory (ayaml's peak heap within 1.2x of libyaml's, ADR-0042)
+        run: ci/scripts/yaml-memory-release.sh
       - name: build (cargo build --workspace --locked)
         run: ci/scripts/build.sh
       - name: docs (cargo doc with -D warnings)

@@ -277,7 +277,10 @@ decided then.
 - **Performance holds:**
   - the deterministic gate for v1 against v0.18.2;
   - bench-record against v0.22.1;
-  - for the v2 policies, wall-clock and instructions against the v1 spellings they re-express.
+  - for the v2 policies, wall-clock and instructions against the v1 spellings they re-express;
+  - YAML memory (ADR-0042): decoding a YAML document into the structured rules' tree, ayaml's
+    peak heap is within 1.2x of libyaml's on documents of 37 KB to 11 MB. The release
+    preflight's `yaml-memory-release.sh` measures it, and fails until an ayaml release meets it.
 
 ## 6. Risks
 
@@ -659,3 +662,25 @@ decided then.
     now take 9.4M instructions in place of 47.5M (Callgrind, bench profile), and `det_check`
     gains that cell. Looking walked paths up by a binary search over the sorted entries, in
     place of the path set the search builds, doubled its instructions, so it keeps the set.
+- 2026-11-16: the audit of the changes since v0.22.1: YAML memory and the performance gates
+  (ADR-0042).
+  - **ayaml costs more than libyaml on files of 10 KB and up.** On the quiet benchmark host,
+    `main` took +9% to +54% wall time and 1.3x to 2.9x peak RSS against v0.22.1, with instruction
+    counts flat, so the deterministic gate, Y-C4's measure, did not see it. ayaml 0.1.2 peaks at
+    about 65 bytes of heap per input byte, libyaml at 35 to 39 (asamarts/ayaml#163). The owner
+    decided that v0.23.0 waits for an ayaml release within 1.2x of libyaml's peak heap; section 5
+    lists it.
+  - **The gates.** alint-core's `yaml_memory` test, a binary of its own with a counting
+    allocator, decodes OpenAPI documents of 37 KB and 1.1 MB through both parsers: ayaml peaks
+    at 67.1 and 64.5 bytes per input byte, libyaml at 37.8 and 37.4, ratios 1.78 and 1.73. CI's
+    YAML Compare job holds it to 1.95, and the release preflight to 1.2, which fails today.
+    `det_check` gains `yaml_openapi_50x37k`, one `yaml_path_matches` rule over 50 such documents
+    of 37 KB: 941.2M instructions (release binary; about 20 s under Callgrind).
+  - **A budget for large YAML parses.** One YAML parse at the 32 MiB input cap peaked at 4.5 to
+    6.2 GB, not the "~1 GB" the cap's documentation claimed, and the per-file rules parse in
+    parallel. Parses over 1 MiB now share a budget of 32 MiB of input in flight, held while the
+    parser runs: `Format::parse`, `extract`'s entry rows, the structured-fix span resolver and
+    `pinned_references`.
+  - A kbench cell for wall time and RSS of mid-size YAML is not added: `bench-scale` records no
+    RSS, and a new scenario needs a results location the published history does not read
+    (#550).

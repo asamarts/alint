@@ -11,6 +11,9 @@ decision-makers: asamarts
 Accepted (2026-11-14). Amends [ADR-0031](0031-v0221-owner-decisions.md) decision 1 and
 [ADR-0032](0032-v023-owner-decisions.md) decision 2 on when the ayaml cutover merges. The criteria
 of [`v0.22.1/README.md`](../design/v0.22.1/README.md) section 2.2 (Y-C1 to Y-C7) are unchanged.
+[ADR-0042](0042-measure-the-yaml-parser-by-memory-and-wall-time.md) (2026-11-16) amends Y-C4: the
+deterministic gate passing is not enough, and v0.23.0 also waits for ayaml's peak heap within 1.2x
+of libyaml's.
 
 ## Context
 

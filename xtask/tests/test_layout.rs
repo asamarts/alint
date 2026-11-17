@@ -17,6 +17,16 @@ use std::process::Command;
 use regex::Regex;
 use serde_json::Value;
 
+/// Test targets that must be binaries of their own, as `(package, target,
+/// why)`. Each is declared with [[test]] and lives in a directory of `tests/`
+/// without a `mod.rs`, which the module scan skips.
+const OWN_BINARIES: &[(&str, &str, &str)] = &[(
+    "alint-core",
+    "yaml_memory",
+    "it installs a counting global allocator, which in `it` would count every other test's \
+     allocations (ADR-0042)",
+)];
+
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -357,6 +367,7 @@ fn every_crate_builds_its_integration_tests_as_one_binary() {
     let root = workspace_root();
     let mut problems = Vec::new();
     let mut checked = 0;
+    let mut own_binaries = BTreeSet::new();
     for package in workspace_packages(&root) {
         let name = package["name"].as_str().unwrap();
         let manifest = PathBuf::from(package["manifest_path"].as_str().unwrap());
@@ -371,6 +382,16 @@ fn every_crate_builds_its_integration_tests_as_one_binary() {
                 target["kind"]
                     .as_array()
                     .is_some_and(|kinds| kinds.iter().any(|kind| kind == "test"))
+            })
+            .filter(|target| {
+                let target_name = target["name"].as_str().unwrap();
+                let own = OWN_BINARIES.iter().any(|&(own_package, own_target, _)| {
+                    own_package == name && own_target == target_name
+                });
+                if own {
+                    own_binaries.insert((name.to_string(), target_name.to_string()));
+                }
+                !own
             })
             .collect();
         if top.modules.is_empty() && top.problems.is_empty() && test_targets.is_empty() {
@@ -409,6 +430,13 @@ fn every_crate_builds_its_integration_tests_as_one_binary() {
             problems.push(format!("{name}: the `it` target sets `test = false`"));
         }
         check_module_root(name, &main_rs, &tests_dir, "tests", &mut problems);
+    }
+    for &(package, target, _) in OWN_BINARIES {
+        if !own_binaries.contains(&(package.to_string(), target.to_string())) {
+            problems.push(format!(
+                "OWN_BINARIES names {package}'s test target `{target}`, which does not exist"
+            ));
+        }
     }
     assert!(
         checked >= 8,

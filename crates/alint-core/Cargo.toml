@@ -18,6 +18,14 @@ autotests = false
 name = "it"
 path = "tests/main.rs"
 
+# The one exception: this test installs a counting global allocator, which in
+# `it` would count every other test's allocations. It compares ayaml's heap with
+# libyaml's, so it needs the reference parser (ADR-0042).
+[[test]]
+name = "yaml_memory"
+path = "tests/alloc/yaml_memory.rs"
+required-features = ["yaml-reference"]
+
 [dependencies]
 thiserror.workspace = true
 serde.workspace = true
@@ -68,6 +76,7 @@ yaml_serde.workspace = true
 proptest.workspace = true
 syn.workspace = true
 proc-macro2.workspace = true
+cap.workspace = true
 
 [lints]
 workspace = true
