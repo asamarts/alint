@@ -9,7 +9,9 @@
 //!   it too (its shape) or leaves it to the loader;
 //! - the version 2 files those tests extend or add as `.alint.d` fragments;
 //! - the version 2 configs of the CLI snapshots (`crates/alint/tests/cli`),
-//!   which the schema accepts exactly when they load.
+//!   which the schema accepts exactly when they load;
+//! - every example of the version 2 docs page
+//!   (`docs/site/configuration/version-2.md`), which loads and validates.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -308,4 +310,63 @@ fn the_version_two_cli_snapshots_validate_as_they_load() {
         }
     }
     assert!(checked >= 6, "{checked} version 2 CLI configs");
+}
+
+/// The fenced `yaml` blocks of `markdown`, each with the line it starts on.
+fn yaml_blocks(markdown: &str) -> Vec<(usize, String)> {
+    let mut blocks = Vec::new();
+    let mut lines = markdown.lines().enumerate();
+    while let Some((number, line)) = lines.next() {
+        if line.trim() != "```yaml" {
+            continue;
+        }
+        let mut body = String::new();
+        for (_, line) in lines.by_ref() {
+            if line.trim() == "```" {
+                break;
+            }
+            body.push_str(line);
+            body.push('\n');
+        }
+        blocks.push((number + 1, body));
+    }
+    blocks
+}
+
+/// Every `yaml` example of the version 2 page loads and validates against
+/// the draft schema. A block whose first line is `# file: <path>` is a file
+/// the others extend (or an `.alint.d/` fragment): it is written there, beside
+/// the `.alint.yml` each other block is loaded as.
+#[test]
+fn the_version_two_page_examples_load_and_validate() {
+    let page = workspace().join("docs/site/configuration/version-2.md");
+    let text = std::fs::read_to_string(&page).unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let (files, configs): (Vec<_>, Vec<_>) = yaml_blocks(&text)
+        .into_iter()
+        .partition(|(_, body)| body.starts_with("# file: "));
+    for (line, body) in &files {
+        let relative = body.lines().next().unwrap().trim_start_matches("# file: ");
+        let path = tmp.path().join(relative);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, body).unwrap();
+        let mut config = json_of(body);
+        if relative.starts_with(".alint.d/") && config.get("version").is_none() {
+            config["version"] = Json::from(2);
+        }
+        let errors = schema_errors(&config);
+        assert!(errors.is_empty(), "line {line}:\n{}", errors.join("\n"));
+    }
+    let root = tmp.path().join(".alint.yml");
+    for (line, body) in &configs {
+        std::fs::write(&root, body).unwrap();
+        if let Err(error) = support::load(&root) {
+            panic!("the example at line {line} does not load: {error}\n{body}");
+        }
+        let config = json_of(body);
+        assert_eq!(config["version"], 2, "line {line}");
+        let errors = schema_errors(&config);
+        assert!(errors.is_empty(), "line {line}:\n{}", errors.join("\n"));
+    }
+    assert_eq!((files.len(), configs.len()), (2, 10));
 }

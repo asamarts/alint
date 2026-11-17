@@ -481,6 +481,12 @@ policy-test package the user does not trust.
     regexes and JSONPaths, and a name declared twice. An editor uses it through a
     `# yaml-language-server: $schema=` modeline in a version 2 file; the version 1 schema and its
     `$id` are unchanged.
+  - A docs page, `docs/site/configuration/version-2.md`, describes version 2: the version
+    boundary, named selectors, relations (`entries:`, `read:`, `union:`, `join:`, fields,
+    `transform:` and `where:`), names, aliases and per-file namespaces, what the loader and the
+    draft schema check, trust, the limits of this release and the relation halves of the three
+    policies the `constraint` kind is designed against. A test loads and validates each of its
+    examples.
 
 ### Changed
 

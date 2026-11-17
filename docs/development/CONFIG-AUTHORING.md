@@ -1207,6 +1207,9 @@ The JSON shape is stable:
 and the experimental warning as the first entry of `warnings`. The human output prints the warning
 on stderr and ends the success line with `(config version 2, experimental)`. Version 2's syntax
 may change in any release until one declares it stable.
+[Version 2 (experimental)](../site/configuration/version-2.md) describes what a version 2 config
+adds (named selectors and relations, aliases on `extends:` entries), what the loader checks of
+it, and its limits in this release.
 
 Use this in a pre-commit hook to fail-fast on the way in, or wire it
 into your editor's LSP runner to surface errors without paying for the
@@ -1237,6 +1240,24 @@ extends:
 
 All 20 case studies under `examples/*/.alint.yml` ship with this line
 as a working reference.
+
+A `version: 2` config (experimental) needs the draft version 2 schema,
+[`schemas/v2/config.json`](../../schemas/v2/config.json), instead. Its `$id` names the release
+that ships it, and the version 1 schema refuses a version 2 config, so a version 2 file names the
+draft in its own modeline:
+
+```yaml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/v0.23.0/schemas/v2/config.json
+version: 2
+selectors:
+  docs: { paths: "docs/**/*.md" }
+rules: []
+```
+
+The draft checks what the loader checks of one file; names that resolve, cycles and the relation
+plan stay the loader's. The
+[version 2 page](../site/configuration/version-2.md#editor-support-the-draft-schema) lists what it
+cannot check.
 
 ### What the schema catches at edit time
 
