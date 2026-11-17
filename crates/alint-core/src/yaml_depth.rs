@@ -1151,9 +1151,9 @@ impl<'a> Lexer<'a> {
 /// [`expansion_within_limit`] to bound YAML alias expansion without materializing a
 /// value. `Copy` (it holds only shared `Cell` refs), so it seeds child nodes freely.
 #[derive(Clone, Copy)]
-struct NodeBudget<'a> {
-    remaining: &'a std::cell::Cell<usize>,
-    exceeded: &'a std::cell::Cell<bool>,
+pub(crate) struct NodeBudget<'a> {
+    pub(crate) remaining: &'a std::cell::Cell<usize>,
+    pub(crate) exceeded: &'a std::cell::Cell<bool>,
 }
 
 impl NodeBudget<'_> {

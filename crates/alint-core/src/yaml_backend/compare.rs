@@ -13,8 +13,14 @@
 //! cause the allowlist documents (`typed-decode-core-tags`), and the log
 //! says the cause is unchecked; with no core tag, the decode panics.
 //!
+//! An input past a limit is not compared: one ayaml refuses for a limit, and
+//! one whose reading by libyaml exceeds the limits ayaml decodes under, which
+//! libyaml has none of (see [`super::libyaml_limits`]). libyaml expands an
+//! alias bomb in full, even one that ayaml refuses for its syntax.
+//!
 //! With `ALINT_YAML_COMPARE_LOG` naming a file, each explained difference
-//! appends one JSON line to it, for a report.
+//! appends one JSON line to it, for a report, and so does each input left
+//! uncompared.
 
 use std::any::type_name;
 use std::io::Write as _;
@@ -30,7 +36,10 @@ pub(crate) const LOG_VARIABLE: &str = "ALINT_YAML_COMPARE_LOG";
 /// [`crate::yaml::from_str`] in compare mode.
 pub(super) fn from_str<'de, T: Deserialize<'de>>(input: &'de str) -> Result<T, Error> {
     let result = crate::yaml::ayaml_from_str::<T>(input);
-    let libyaml = super::libyaml_from_str::<T>(input).is_ok();
+    if uncompared(input, Entry::Value, result.as_ref().err()) {
+        return result;
+    }
+    let libyaml = super::libyaml_decode::<T>(input).is_ok();
     let trees_differ = check(input, Entry::Value);
     if !trees_differ && result.is_ok() != libyaml {
         typed_difference::<T>(input, result.is_ok());
@@ -41,8 +50,31 @@ pub(super) fn from_str<'de, T: Deserialize<'de>>(input: &'de str) -> Result<T, E
 /// [`super::json_tree`] in compare mode.
 pub(super) fn json_tree(input: &str) -> Result<serde_json::Value, Error> {
     let result = super::ayaml_json_tree(input);
-    check(input, Entry::Json);
+    if !uncompared(input, Entry::Json, result.as_ref().err()) {
+        check(input, Entry::Json);
+    }
     result
+}
+
+/// Whether `input` is left uncompared at `entry`, which the log then says:
+/// when ayaml's error (`ayaml`) is about a limit, or when libyaml's reading of
+/// the input exceeds the limits ayaml decodes under. Neither reference parser
+/// then reads it.
+fn uncompared(input: &str, entry: Entry, ayaml: Option<&Error>) -> bool {
+    let reason = match ayaml.and_then(Error::limit) {
+        Some(limit) => format!("ayaml refuses it for its {limit} limit"),
+        None => match super::libyaml_limits(input) {
+            Ok(()) => return false,
+            Err(error) => format!(
+                "libyaml's reading of it is past a limit: {}",
+                error.message()
+            ),
+        },
+    };
+    if let Some(path) = std::env::var_os(LOG_VARIABLE) {
+        append_uncompared(std::path::Path::new(&path), input, entry, &reason);
+    }
+    true
 }
 
 /// Check `input` at `entry`, and whether its results differ, explained.
@@ -110,14 +142,35 @@ fn log(case: &Case<'_>, verdict: &str, ids: &[&str]) {
 
 /// Append a line about an explained `case` to the file at `path`.
 fn append(path: &std::path::Path, case: &Case<'_>, verdict: &str, ids: &[&str]) {
-    let mut line = serde_json::json!({
-        "verdict": verdict,
-        "entry": format!("{:?}", case.entry),
-        "class": format!("{:?}", case.class),
-        "ids": ids,
-        "input": harness::shortened(case.input),
-    })
-    .to_string();
+    append_line(
+        path,
+        &serde_json::json!({
+            "verdict": verdict,
+            "entry": format!("{:?}", case.entry),
+            "class": format!("{:?}", case.class),
+            "ids": ids,
+            "input": harness::shortened(case.input),
+        }),
+    );
+}
+
+/// Append a line about an `input` left uncompared at `entry`, and why, to
+/// the file at `path`.
+fn append_uncompared(path: &std::path::Path, input: &str, entry: Entry, reason: &str) {
+    append_line(
+        path,
+        &serde_json::json!({
+            "verdict": "not compared",
+            "entry": format!("{entry:?}"),
+            "reason": reason,
+            "input": harness::shortened(input),
+        }),
+    );
+}
+
+/// Append `line` to the file at `path`.
+fn append_line(path: &std::path::Path, line: &serde_json::Value) {
+    let mut line = line.to_string();
     line.push('\n');
     // One write of one short line, to a file opened to append, so that the
     // processes of a test run do not interleave their lines.
@@ -200,6 +253,7 @@ mod tests {
             assert_eq!(std::env::var_os(LOG_VARIABLE), Some(path));
             assert!(check(NEL, Entry::Value));
             assert!(!check("a: 1\n", Entry::Value));
+            assert!(uncompared(&"[".repeat(200), Entry::Json, None));
             return;
         }
         let dir = tempfile::tempdir().unwrap();
@@ -221,8 +275,23 @@ mod tests {
             String::from_utf8_lossy(&output.stderr)
         );
         let text = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(text.lines().count(), 1, "{text}");
+        assert_eq!(text.lines().count(), 2, "{text}");
         assert!(text.contains("\"entry\":\"Value\""), "{text}");
+        assert!(text.contains("\"verdict\":\"not compared\""), "{text}");
+    }
+
+    #[test]
+    fn an_input_past_a_limit_is_not_compared() {
+        let deep = format!("{}1{}", "[".repeat(200), "]".repeat(200));
+        let error = crate::yaml::ayaml_from_str::<crate::yaml::Value>(&deep).unwrap_err();
+        assert!(uncompared(&deep, Entry::Value, Some(&error)));
+        // libyaml's reading past a limit, where ayaml's error is not about one.
+        let error = crate::yaml::ayaml_from_str::<crate::yaml::Value>("a: [1\n").unwrap_err();
+        assert!(uncompared(&deep, Entry::Value, Some(&error)));
+        assert!(uncompared(&deep, Entry::Json, None));
+        // Within the limits, an input is compared, whatever ayaml's result.
+        assert!(!uncompared("a: [1\n", Entry::Value, Some(&error)));
+        assert!(!uncompared("a: &a [1]\nb: *a\n", Entry::Value, None));
     }
 
     #[test]
@@ -297,6 +366,18 @@ mod tests {
         assert_eq!(lines[0]["ids"], serde_json::json!(["yaml-1.2-line-breaks"]));
         assert_eq!(lines[0]["input"], "\"a: x\\u{85}y\\n\"");
         assert_eq!(lines[1]["verdict"], "saphyr");
+        append_uncompared(&path, "a: [[1]]\n", Entry::Json, "the reason");
+        let text = std::fs::read_to_string(&path).unwrap();
+        let line: serde_json::Value = serde_json::from_str(text.lines().nth(2).unwrap()).unwrap();
+        assert_eq!(
+            line,
+            serde_json::json!({
+                "verdict": "not compared",
+                "entry": "Json",
+                "reason": "the reason",
+                "input": "\"a: [[1]]\\n\"",
+            })
+        );
         // A log that cannot be written fails the run, not the line.
         let payload = std::panic::catch_unwind(|| {
             append(dir.path(), &case, "saphyr", &[]);

@@ -97,7 +97,7 @@ jobs:
       - name: test
         run: ci/scripts/test.sh
       - name: test (YAML compare mode, ADR-0041)
-        run: ci/scripts/test-yaml-compare.sh
+        run: ci/scripts/yaml-compare.sh
       - name: build (cargo build --workspace --locked)
         run: ci/scripts/build.sh
       - name: docs (cargo doc with -D warnings)

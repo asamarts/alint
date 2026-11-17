@@ -349,11 +349,21 @@ each phase as it lands.
   backend and compare mode, and makes `yaml_serde` an optional dependency. No release build
   enables it. `ci/scripts/yaml-reference-gate.sh` checks that no workspace crate depends on
   `yaml_serde` with default features, on any target, other than as a dev-dependency, and that
-  the same query finds it with the feature.
+  the same query finds it with the feature. The feature is for alint's own tests, and a crate
+  that depends on alint-core must not enable it: `ALINT_YAML_PARSER` then chooses the parser of
+  every decode in the process, for every crate in it.
 - **Choosing a backend.** With the feature, `ALINT_YAML_PARSER` is read once per process:
   `ayaml` (or unset), `libyaml`, or `compare`. Any other value panics with the accepted ones,
   so a misspelled CI setting cannot fall back to ayaml unnoticed. Without the feature, the
   variable is not read.
+- **libyaml's limits.** libyaml has none of the limits ayaml decodes under, and expands an alias
+  bomb in full, even one that ayaml refuses for its syntax: after a byte order mark, libyaml
+  reads `--- 'k: {a: &a [...], b: [*a, ...]}` as a mapping, where ayaml reads an unterminated
+  quoted scalar. So before libyaml reads an input, alint's own guards check it: the input cap,
+  flow nesting, and the alias-expansion budget, charged as libyaml replays aliases
+  (`yaml_depth::libyaml_expansion_within_limit`). libyaml mode refuses an input past them with
+  libyaml's error, and compare mode leaves it uncompared, as it does an input that ayaml
+  refuses for a limit.
 - **Compare mode** (`yaml_backend/compare.rs`). ayaml decodes, and its result is what the caller
   gets. The harness also compares the input's value tree, or for the structured-format rules
   its JSON tree, as ayaml and libyaml read it, and libyaml runs the same typed decode. Then:
@@ -371,10 +381,13 @@ each phase as it lands.
   A defect ayaml shares with saphyr passes the vote, so the counts and examples of what the vote
   explains are reviewed on each ayaml bump. With `ALINT_YAML_COMPARE_LOG` set to a file, each
   explained difference appends a JSON line naming the verdict, the entry point, the class and
-  the entries, for a report.
+  the entries, for a report, and each input left uncompared appends one with the verdict
+  `not compared` and the reason.
 - **Where it runs.** A CI job runs `cargo test --workspace --features alint-core/yaml-reference`
-  with `ALINT_YAML_PARSER=compare`: the unit tests, the end-to-end tests that run the `alint`
-  binary, the policy tests and the dogfood check all read their YAML through the vote. The
+  with `ALINT_YAML_PARSER=compare` (`ci/scripts/yaml-compare.sh`, which the release preflight
+  runs too; it has no `test-` prefix, so the Shell Tests job does not run it a second time):
+  the unit tests, the end-to-end tests that run the `alint` binary, the policy tests and the
+  dogfood check all read their YAML through the vote. The
   harness's own runs add the vote to their report: per entry, the differences it also explains,
   and the ones only the vote explains, with examples. An entry the vote makes redundant can go
   on review; the first long runs found none, so the allowlist stays the source of the

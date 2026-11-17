@@ -68,6 +68,8 @@ Under the hood it runs:
 ```sh
 ci/scripts/fmt.sh                          # cargo fmt --check
 ci/scripts/clippy.sh                       # cargo clippy --workspace --all-targets -- -D warnings
+                                           #   + cargo clippy -p alint-core --all-targets
+                                           #     --features yaml-reference -- -D warnings
 ci/scripts/test.sh                         # cargo test --workspace + bash CLI tests
 ci/scripts/docs.sh                         # cargo doc -D warnings + public-api-parser-gate
                                            #   + docs-export/gen-schema/gen-facts/gen-categories/
@@ -80,9 +82,30 @@ ci/scripts/check-workspace-dep-floors.sh   # [workspace.dependencies] floors <= 
 ci/scripts/dogfood.sh                      # cargo build --release + alint check on this repo
 ```
 
-Not in `preflight.sh` (slower; CI's `MSRV` job and the release preflight run
-it): `ci/scripts/msrv.sh` compiles the workspace with the exact toolchain named
-by `[workspace.package].rust-version`, so the MSRV is never hand-copied into CI.
+Not in `preflight.sh`: the release preflight (`release.yml`) runs these as well, and CI runs
+all but the release-only ones. Each is slower, needs the network or a tool a laptop may lack, or
+checks a release. `ci/scripts/test-release-preflight-parity.sh` fails when the release preflight
+runs a script that is neither in `preflight.sh` nor in this list.
+
+- `ci/scripts/yaml-compare.sh`: the workspace's tests again, in YAML compare mode (ADR-0041),
+  which checks every decode against libyaml and saphyr. Run it when a change touches how alint
+  reads YAML (see [Testing requirements](#testing-requirements)).
+- `ci/scripts/msrv.sh`: compiles the workspace with the exact toolchain named by
+  `[workspace.package].rust-version`, so the MSRV is never hand-copied into CI.
+- `ci/scripts/shell-tests.sh`: every `ci/scripts/test-*.sh` harness, about 3 minutes. Run it when
+  you change a script under `ci/scripts/`.
+- `ci/scripts/build.sh`: `cargo build --workspace --locked`, which `test.sh` mostly covers.
+- `ci/scripts/deny.sh` and `ci/scripts/audit.sh`: the advisory gates, which need the network (see
+  [Dependency advisories](#dependency-advisories)).
+- `ci/scripts/examples-validate.sh`: every `examples/*/.alint.yml` against the schema.
+- `ci/scripts/demo-drift.sh`: the README demo against the release binary.
+- `ci/scripts/packaging-check.sh` and `ci/scripts/test-npm-install.sh`: the installer, the npm
+  shim, the Dockerfile and the pre-commit hooks, and an install of the npm packages from a local
+  registry.
+- `ci/scripts/install-witforge.sh`, `ci/scripts/witforge-consumer.sh` and
+  `ci/scripts/test-witforge-consumer.sh`: the plugin contract, against a pinned witforge.
+- `ci/scripts/check-release-version.sh` and `ci/scripts/pin-release-toolchain.sh`: release only;
+  the tag must match the workspace version, and the release builds with a pinned toolchain.
 
 ### Private native macOS validation
 
@@ -226,7 +249,7 @@ tests in compare mode (ADR-0041), which checks every decode against libyaml and
 saphyr. CI's `YAML compare` job and the release preflight run it; locally:
 
 ```sh
-ci/scripts/test-yaml-compare.sh   # ALINT_YAML_PARSER=compare + the yaml-reference feature
+ci/scripts/yaml-compare.sh   # ALINT_YAML_PARSER=compare + the yaml-reference feature
 ```
 
 A difference it reports is either ayaml's to fix or a deviation to document in

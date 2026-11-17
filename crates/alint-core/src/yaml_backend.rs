@@ -9,7 +9,14 @@
 //!   and saphyr; a difference that nothing explains panics (see `compare`).
 //!
 //! Any other value panics, so that a misspelled setting cannot fall back to
-//! ayaml unnoticed. Without the feature, the variable is not read.
+//! ayaml unnoticed. Without the feature, the variable is not read. The
+//! feature is for alint's own tests, and a crate that depends on alint-core
+//! must not enable it: the variable then chooses the parser of every decode
+//! in the process, for every crate in it.
+//!
+//! libyaml has none of the limits ayaml decodes under, and expands an alias
+//! bomb in full, so neither mode lets it read an input past them (see
+//! [`libyaml_limits`]).
 //!
 //! Only decoding from text goes through a backend: [`crate::yaml::from_value`],
 //! [`crate::yaml::to_value`] and [`crate::yaml::to_string`] work on ayaml's
@@ -94,19 +101,102 @@ fn ayaml_json_tree(input: &str) -> Result<serde_json::Value, Error> {
         .map_err(Error::ayaml)
 }
 
-/// [`from_str`] through libyaml.
+/// [`from_str`] through libyaml, within the limits a decode through ayaml
+/// runs under (see [`libyaml_limits`]).
 #[cfg(feature = "yaml-reference")]
 pub(crate) fn libyaml_from_str<'de, T: Deserialize<'de>>(input: &'de str) -> Result<T, Error> {
+    libyaml_limits(input)?;
+    libyaml_decode(input)
+}
+
+/// [`from_str`] through libyaml, with no limit checked first: for compare
+/// mode, which checks them itself.
+#[cfg(feature = "yaml-reference")]
+pub(crate) fn libyaml_decode<'de, T: Deserialize<'de>>(input: &'de str) -> Result<T, Error> {
+    before_libyaml_decode();
     yaml_serde::from_str(input).map_err(Error::libyaml)
 }
 
-/// [`json_tree`] through libyaml.
+/// [`json_tree`] through libyaml, within the limits a decode through ayaml
+/// runs under.
 #[cfg(feature = "yaml-reference")]
 fn libyaml_json_tree(input: &str) -> Result<serde_json::Value, Error> {
     use serde::de::DeserializeSeed as _;
+    libyaml_limits(input)?;
+    before_libyaml_decode();
     crate::structured_format::json_seed(input)
         .deserialize(yaml_serde::Deserializer::from_str(input))
         .map_err(Error::libyaml)
+}
+
+/// Whether libyaml may read `input`: the limits ayaml decodes under, which
+/// libyaml has none of, checked first with alint's own guards. The input cap;
+/// flow nesting, on which libyaml's tokenizer is super-linear; and the
+/// alias-expansion budget, charged as libyaml replays aliases, since libyaml
+/// reads some inputs differently from ayaml and would expand such a bomb in
+/// full (see [`libyaml_expansion_within_limit`]). The
+/// error is one of libyaml's, as a decode would give.
+#[cfg(feature = "yaml-reference")]
+pub(crate) fn libyaml_limits(input: &str) -> Result<(), Error> {
+    use serde::de::Error as _;
+    if input.len() > crate::MAX_STRUCTURED_BYTES {
+        return Err(Error::libyaml(yaml_serde::Error::custom(format!(
+            "the input is longer than the {} bytes alint reads",
+            crate::MAX_STRUCTURED_BYTES
+        ))));
+    }
+    if !crate::yaml_depth::flow_depth_within_limit(input) {
+        return Err(Error::libyaml(yaml_serde::Error::custom(format!(
+            "YAML flow nesting exceeds the maximum supported depth ({})",
+            crate::yaml_depth::MAX_YAML_FLOW_DEPTH
+        ))));
+    }
+    libyaml_expansion_within_limit(input).map_err(Error::libyaml)
+}
+
+/// The pass of [`crate::yaml_depth::expansion_within_limit`] as libyaml reads `text`, for the
+/// test-only reference backend (ADR-0041): the same budget, charged as
+/// `yaml_serde` replays aliases. libyaml has no budget of its own, and reads
+/// some text differently from ayaml, so text ayaml refuses for its syntax can
+/// be an alias bomb to libyaml (a byte order mark before `---`). The error is
+/// libyaml's, once the budget is exceeded; any other error falls through, as
+/// in [`crate::yaml_depth::expansion_within_limit`].
+#[cfg(feature = "yaml-reference")]
+fn libyaml_expansion_within_limit(text: &str) -> Result<(), yaml_serde::Error> {
+    use serde::de::DeserializeSeed as _;
+    // Without a `*`, there is no alias to replay.
+    if !text.as_bytes().contains(&b'*') {
+        return Ok(());
+    }
+    let remaining = std::cell::Cell::new(crate::yaml_depth::expansion_budget(text.len()));
+    let exceeded = std::cell::Cell::new(false);
+    let seed = crate::yaml_depth::NodeBudget {
+        remaining: &remaining,
+        exceeded: &exceeded,
+    };
+    match seed.deserialize(yaml_serde::Deserializer::from_str(text)) {
+        Err(error) if exceeded.get() => Err(error),
+        _ => Ok(()),
+    }
+}
+
+/// Called before every full decode through libyaml: the reference backend's
+/// and the differential harness's. A test can forbid one on its thread, to
+/// show that an input never reaches libyaml without waiting for libyaml to
+/// expand it.
+#[cfg(any(test, feature = "yaml-reference"))]
+pub(crate) fn before_libyaml_decode() {
+    #[cfg(test)]
+    assert!(
+        !LIBYAML_FORBIDDEN.with(std::cell::Cell::get),
+        "a full decode through libyaml, which this test forbids"
+    );
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Whether this thread's test forbids a full decode through libyaml.
+    static LIBYAML_FORBIDDEN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// `message` without each ` at line L column C` and ` at position P` that
@@ -204,6 +294,83 @@ mod tests {
         let ayaml: crate::yaml::Value = crate::yaml::ayaml_from_str(nel).unwrap();
         assert_eq!(ayaml["a"].as_str(), Some("x\u{85}y"));
         assert!(libyaml_from_str::<crate::yaml::Value>(nel).is_err());
+    }
+
+    /// Run `f` with a full decode through libyaml forbidden on this thread.
+    #[cfg(feature = "yaml-reference")]
+    fn forbidding_libyaml<R>(f: impl FnOnce() -> R) -> R {
+        struct Allow;
+        impl Drop for Allow {
+            fn drop(&mut self) {
+                LIBYAML_FORBIDDEN.with(|forbidden| forbidden.set(false));
+            }
+        }
+        LIBYAML_FORBIDDEN.with(|forbidden| forbidden.set(true));
+        let _allow = Allow;
+        f()
+    }
+
+    /// Inputs past a limit, each with what libyaml mode's error says. The
+    /// first is the alias bomb of alint-dsl's
+    /// `bom_prefixed_config_bombs_are_rejected_before_they_expand`: ayaml
+    /// refuses it for its syntax (the byte order mark takes a column, so the
+    /// quote on line 2 never closes), while libyaml reads line 1 as a mapping
+    /// whose 50,000 aliases each replay a 1,000-entry sequence, which took 3.6
+    /// GB and minutes in compare mode. ayaml refuses the others for its alias
+    /// budget, its depth and its input cap.
+    #[cfg(feature = "yaml-reference")]
+    fn past_a_limit() -> Vec<(String, &'static str)> {
+        let entries = "1,".repeat(1000);
+        let aliases = "*a,".repeat(50_000);
+        vec![
+            (
+                format!(
+                    "\u{feff}--- 'k: {{a: &a [{entries}], b: [{aliases}], \
+                     c: \"{{{{env.HOME}}}}\"}}\n'\n"
+                ),
+                "alias expansion exceeds",
+            ),
+            (
+                format!("a: &a [{entries}]\nb: [{aliases}]\n"),
+                "alias expansion exceeds",
+            ),
+            (
+                format!("a: {}1{}\n", "[".repeat(5000), "]".repeat(5000)),
+                "flow nesting exceeds",
+            ),
+            (
+                "#".repeat(crate::MAX_STRUCTURED_BYTES + 1),
+                "longer than the 33554432 bytes",
+            ),
+        ]
+    }
+
+    /// Neither compare mode nor libyaml mode lets libyaml decode an input past
+    /// a limit: a full decode panics here, before libyaml expands anything.
+    #[cfg(feature = "yaml-reference")]
+    #[test]
+    fn no_input_past_a_limit_reaches_libyaml() {
+        for (input, refusal) in past_a_limit() {
+            forbidding_libyaml(|| {
+                // Compare mode returns ayaml's error, and compares nothing.
+                assert!(compare::from_str::<crate::yaml::Value>(&input).is_err());
+                assert!(compare::json_tree(&input).is_err());
+                // libyaml mode refuses it, as ayaml's limits would.
+                let error = libyaml_from_str::<crate::yaml::Value>(&input).unwrap_err();
+                assert!(error.message().contains(refusal), "{error}");
+                let error = libyaml_json_tree(&input).unwrap_err();
+                assert!(error.message().contains(refusal), "{error}");
+            });
+        }
+        // Within the limits, both read as before.
+        let input = "a: &a [1, 2]\nb: [*a, *a]\n";
+        let value: crate::yaml::Value = libyaml_from_str(input).unwrap();
+        assert_eq!(
+            value["b"].as_sequence().map(crate::yaml::Sequence::len),
+            Some(2)
+        );
+        assert!(libyaml_json_tree(input).is_ok());
+        assert!(libyaml_limits(input).is_ok());
     }
 
     #[cfg(feature = "yaml-reference")]
