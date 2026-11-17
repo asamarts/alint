@@ -1426,3 +1426,55 @@ fn list_adds_named_objects_for_version_two_only() {
         "(no rules loaded from config)\n\nselector docs  .alint.yml\n"
     );
 }
+
+// `list` names each object's config by its path under the top-level config's
+// directory however that config is named: found from the working directory,
+// as a relative `--config`, or through a symlink to its directory. The loader
+// resolves each config's path, and named a config by its file name alone
+// wherever the directory's own path was not resolved too.
+#[test]
+fn list_names_each_config_by_its_path_under_the_root() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("repo");
+    for (relative, body) in [
+        (
+            "rules/base.yml",
+            "version: 2\nselectors:\n  base_docs: { paths: 'docs/**' }\n",
+        ),
+        (".alint.d/10.yml", "selectors:\n  frag: { paths: 'x/**' }\n"),
+        (
+            ".alint.yml",
+            "version: 2\nextends:\n  - url: ./rules/base.yml\n    as: base\nselectors:\n  \
+             own: { paths: 'y/**' }\nrules: []\n",
+        ),
+    ] {
+        let path = root.join(relative);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, body).unwrap();
+    }
+    let expected = format!(
+        "(no rules loaded from config)\n\nselector base_docs  {} (as base in .alint.yml)\n\
+         selector own  .alint.yml\nselector frag  {}\n",
+        Path::new("rules").join("base.yml").display(),
+        Path::new(".alint.d").join("10.yml").display()
+    );
+    let linked = dir.path().join("linked");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&root, &linked).unwrap();
+    // Without a symlink (Windows), the discovered config runs twice.
+    let through_link = cfg!(unix).then(|| linked.join(".alint.yml").display().to_string());
+    for config in [None, Some(".alint.yml".to_string()), through_link] {
+        let mut args = Vec::new();
+        if let Some(config) = &config {
+            args.extend(["-c", config.as_str()]);
+        }
+        args.push("list");
+        let output = run(&root, &args);
+        assert!(output.status.success(), "{config:?}: {output:?}");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            expected,
+            "{config:?}"
+        );
+    }
+}

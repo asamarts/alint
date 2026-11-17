@@ -475,6 +475,26 @@ fn mark_entries(entries: &mut [Mapping], marker: &str, marks: Vec<Mapping>) {
     }
 }
 
+/// `contents` parsed for the version dispatch ([`crate::v2::read_document`]).
+/// A text that opens with `version: 2` and does not parse fails with its own
+/// decode's error (`text_decode`, which reads version 2's keys as version 2
+/// does), which says why as version 1's decode would: a key written twice is
+/// a `duplicate field`, where the parse alone says `duplicate entry with
+/// key`.
+fn read_document(
+    contents: &str,
+    origin: &crate::v2::Origin<'_>,
+    text_decode: &mut Option<TextDecode>,
+) -> Result<Option<ayaml::Value>> {
+    match crate::v2::read_document(contents, origin) {
+        Err(Error::Yaml(parse_error)) => match text_decode.take() {
+            Some(TextDecode::AsV2(Err(error))) => Err(error),
+            _ => Err(Error::Yaml(parse_error)),
+        },
+        read => read,
+    }
+}
+
 /// Whether `contents` opens with `version: 2`: the cheap sign of a version 2
 /// source, whose text then decodes as version 2 reads it from the start, so a
 /// v2-only key does not fail a version 1 decode first. It saves a parse and
@@ -590,7 +610,8 @@ fn parse_config_interpolated_inner_with_environment(
     // 3 item 1). A document that does not parse dispatches as version 1, whose
     // decode reports the parse error as it always has, unless it declares
     // version 2.
-    let document = crate::v2::read_document(contents, origin)?;
+    let mut text_decode = text_decode;
+    let document = read_document(contents, origin, &mut text_decode)?;
     let surface = crate::v2::dispatch(document.as_ref(), contents, origin)?;
     if surface == crate::v2::Surface::V2
         && let Some(document) = &document
@@ -728,14 +749,19 @@ fn attach_v2_objects(
     // An error may quote a value the environment supplied, or part of one (a
     // JSONPath's hint rewrites the path it quotes). With each value removed
     // as written, it stands only when the same source with every such value
-    // masked fails the same way, so it quotes none of them in another form.
+    // in the object it is about masked fails the same way, so it quotes none
+    // of them in another form. Only that object's values are masked: one
+    // masked elsewhere may be no valid value there (a `format:`) and fail
+    // first, where the error it is compared with never reached.
     let mut objects = crate::v2::decode_objects(source.clone(), v2_keys, &config.extends).map_err(
         |undecoded| {
             let shown = alint_core::redact_environment_values_in_error(
                 undecoded.error,
                 &config.environment_values,
             );
-            if masked.is_none_or(|masked| objects_error_recurs(&shown, masked, &source)) {
+            if masked.is_none_or(|masked| {
+                objects_error_recurs(&shown, masked, &source, &undecoded.locus)
+            }) {
                 shown
             } else {
                 Error::Other(format!(
@@ -748,6 +774,15 @@ fn attach_v2_objects(
     )?;
     if let Some(environment) = environment {
         environment.mark(&mut objects);
+        // A selector's or relation's error in the plan check, once every
+        // source has loaded, is rerun on its masked copies.
+        if let Some(masked) = masked {
+            crate::v2::decode_twins(
+                &mut objects,
+                |locus| environment.reads(locus),
+                |locus, numbers| masked.part(locus, numbers),
+            );
+        }
     }
     crate::v2::mark_field_origins(&mut config.rules, source_path);
     crate::v2::mark_field_origins(&mut config.templates, source_path);
@@ -756,33 +791,66 @@ fn attach_v2_objects(
 }
 
 /// A source that reads the environment, as written (before interpolation),
-/// with the environment it reads: what a decode error is rerun on, with every
-/// value it reads masked.
+/// with the environment it reads: what a decode error or a plan-check error
+/// is rerun on, with the values it reads masked.
 struct Masked<'a> {
     document: &'a ayaml::Value,
     environment: &'a dyn crate::EnvironmentProvider,
 }
 
-/// Whether the objects of `masked`, with every environment value masked
-/// (numbers moved either way, as [`reproduce_or_redact`] moves them), fail to
-/// decode with `error`'s exact message, which therefore quotes none of them:
-/// a masked string reads `<redacted>`, as one removed from a message does.
-fn objects_error_recurs(error: &Error, masked: &Masked<'_>, source: &crate::v2::SourceId) -> bool {
+impl Masked<'_> {
+    /// The source interpolated, with the values under `locus` masked (numbers
+    /// moved as `numbers` says) and every other value as the environment
+    /// gives it; `None` when `locus` is not in the document or it does not
+    /// interpolate.
+    fn twin(
+        &self,
+        locus: &crate::v2::Locus,
+        numbers: alint_core::NumberMask,
+    ) -> Option<ayaml::Value> {
+        let lookup = |name: &str| self.environment.get(name);
+        let mut document = self.document.clone();
+        let mut part = std::mem::replace(locus.find_mut(&mut document)?, ayaml::Value::Null);
+        crate::interp::interpolate_value(&mut document, &lookup).ok()?;
+        crate::interp::interpolate_masked(&mut part, &lookup, numbers).ok()?;
+        *locus.find_mut(&mut document)? = part;
+        Some(document)
+    }
+
+    /// The value under `locus` alone, interpolated with each environment
+    /// value masked.
+    fn part(
+        &self,
+        locus: &crate::v2::Locus,
+        numbers: alint_core::NumberMask,
+    ) -> Option<ayaml::Value> {
+        let mut part = locus.find(self.document)?.clone();
+        crate::interp::interpolate_masked(&mut part, &|name| self.environment.get(name), numbers)
+            .ok()?;
+        Some(part)
+    }
+}
+
+/// Whether `masked`, with every environment value in the object at `locus`
+/// masked (numbers moved either way, as [`reproduce_or_redact`] moves them),
+/// fails to decode its objects with `error`'s exact message, which therefore
+/// quotes none of them: a masked string reads `<redacted>`, as one removed
+/// from a message does.
+fn objects_error_recurs(
+    error: &Error,
+    masked: &Masked<'_>,
+    source: &crate::v2::SourceId,
+    locus: &crate::v2::Locus,
+) -> bool {
     let message = error.to_string();
     alint_core::NumberMask::BOTH.into_iter().any(|numbers| {
-        let mut document = masked.document.clone();
-        crate::interp::interpolate_masked(
-            &mut document,
-            &|name| masked.environment.get(name),
-            numbers,
-        )
-        .is_ok()
-            && decode_value(document, crate::v2::Surface::V2)
-                .ok()
-                .and_then(|(config, v2_keys)| {
-                    crate::v2::decode_objects(source.clone(), &v2_keys, &config.extends).err()
-                })
-                .is_some_and(|undecoded| undecoded.error.to_string() == message)
+        masked
+            .twin(locus, numbers)
+            .and_then(|document| decode_value(document, crate::v2::Surface::V2).ok())
+            .and_then(|(config, v2_keys)| {
+                crate::v2::decode_objects(source.clone(), &v2_keys, &config.extends).err()
+            })
+            .is_some_and(|undecoded| undecoded.error.to_string() == message)
     })
 }
 

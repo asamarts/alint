@@ -984,6 +984,7 @@ fn marking_many_objects_takes_time_linear_in_them() {
             paths: alint_core::PathsSpec::Single("a.json".into()),
             scope_filter: None,
             reads_environment: false,
+            twins: model::Twins::Unneeded,
         };
         let relation = model::Relation {
             rows: model::Rows::Part(model::Part {
@@ -1006,6 +1007,7 @@ fn marking_many_objects_takes_time_linear_in_them() {
             transforms: Vec::new(),
             filters: Vec::new(),
             reads_environment: false,
+            twins: model::Twins::Unneeded,
         };
         let reading: Value =
             alint_core::yaml::from_str("{paths: \"{{env.X | default('a')}}\"}").unwrap();

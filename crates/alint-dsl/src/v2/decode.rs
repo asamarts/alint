@@ -15,7 +15,7 @@ use ayaml::{Mapping, Value};
 use super::model::{
     Alias, Entries, EntriesFormat, Field, FieldSource, Join, JoinSide, Member, Part, PathToken,
     Predicate, Read, Reader, Reference, Relation, Rows, Selector, SelectorRef, SourceId,
-    SourceObjects, Transform,
+    SourceObjects, Transform, Twins,
 };
 
 // The keys and values each part of a selector or relation takes. The draft
@@ -115,7 +115,58 @@ pub(crate) fn source_objects(
 /// the environment, and a redacted error can still say where it was.
 pub(crate) struct Undecoded {
     pub(crate) object: String,
+    /// Where the object is in the source, for the loader to rerun the decode
+    /// with its values alone masked.
+    pub(crate) locus: Locus,
     pub(crate) error: Error,
+}
+
+/// Where an object is in a source's document: what the loader masks the
+/// environment's values in, to rerun a decode or a plan check on. Its keys
+/// are written in the config, which interpolation leaves as written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Locus {
+    /// The whole value of a top-level key: `selectors:` or `relations:`.
+    Key(String),
+    /// The definition of the selector or relation `name` under `key`.
+    Entry { key: String, name: String },
+    /// The `extends:` entry at this index.
+    Extends(usize),
+}
+
+impl Locus {
+    fn entry(key: &str, name: &str) -> Self {
+        Self::Entry {
+            key: key.to_string(),
+            name: name.to_string(),
+        }
+    }
+
+    /// The value at this locus of `document`, a source's whole document.
+    pub(crate) fn find<'d>(&self, document: &'d Value) -> Option<&'d Value> {
+        match self {
+            Self::Key(key) => document.get(key.as_str()),
+            Self::Entry { key, name } => document.get(key.as_str())?.get(name.as_str()),
+            Self::Extends(index) => document.get("extends")?.get(*index),
+        }
+    }
+
+    /// [`Locus::find`], to change.
+    pub(crate) fn find_mut<'d>(&self, document: &'d mut Value) -> Option<&'d mut Value> {
+        match self {
+            Self::Key(key) => document.get_mut(key.as_str()),
+            Self::Entry { key, name } => document.get_mut(key.as_str())?.get_mut(name.as_str()),
+            Self::Extends(index) => document.get_mut("extends")?.get_mut(*index),
+        }
+    }
+}
+
+fn undecoded(object: &str, locus: Locus, error: Error) -> Box<Undecoded> {
+    Box::new(Undecoded {
+        object: object.to_string(),
+        locus,
+        error,
+    })
 }
 
 /// Decode one source's objects: its `selectors:` and `relations:` (the values
@@ -128,10 +179,6 @@ pub(crate) fn decode_objects(
 ) -> std::result::Result<SourceObjects, Box<Undecoded>> {
     let display = source.display.clone();
     let decoder = Decoder { source: &display };
-    let about = |object: &str| {
-        let object = object.to_string();
-        move |error| Box::new(Undecoded { object, error })
-    };
     let mut names = Names::default();
     let mut objects = SourceObjects {
         source,
@@ -141,22 +188,25 @@ pub(crate) fn decode_objects(
         extended: Vec::new(),
     };
     for (key, value) in v2_keys {
-        decoder.untagged(value, key).map_err(about(key))?;
+        let whole = |error| undecoded(key, Locus::Key(key.clone()), error);
+        decoder.untagged(value, key).map_err(whole)?;
         let map = decoder
             .mapping(value, key, "a map from each name to its definition")
-            .map_err(about(key))?;
+            .map_err(whole)?;
         for (name, definition) in map {
-            let path = decoder.child_key(key, name, "a name").map_err(about(key))?;
+            let path = decoder.child_key(key, name, "a name").map_err(whole)?;
+            let text = name.as_str().unwrap_or_default();
+            let entry = |error| undecoded(&path, Locus::entry(key, text), error);
             let declared = decoder.declared_name(name, &path).and_then(|name| {
                 names.declare(&decoder, &name, &path)?;
                 Ok(name)
             });
-            let name = declared.map_err(about(&path))?;
+            let name = declared.map_err(entry)?;
             if key == "selectors" {
-                let selector = decoder.selector(definition, &path).map_err(about(&path))?;
+                let selector = decoder.selector(definition, &path).map_err(entry)?;
                 objects.selectors.push((name, selector));
             } else {
-                let relation = decoder.relation(definition, &path).map_err(about(&path))?;
+                let relation = decoder.relation(definition, &path).map_err(entry)?;
                 objects.relations.push((name, relation));
             }
         }
@@ -166,17 +216,18 @@ pub(crate) fn decode_objects(
             continue;
         };
         let path = format!("extends[{index}].as");
+        let about = |error| undecoded(&path, Locus::Extends(index), error);
         decoder
             .name(alias, &path)
             .and_then(|()| names.declare(&decoder, alias, &path))
-            .map_err(about(&path))?;
+            .map_err(about)?;
         let url = extends.entry.url();
         // An entry with a refused scheme gets the loader's error for that.
         if matches!(
             crate::extends::EntryKind::of(url),
             crate::extends::EntryKind::Https | crate::extends::EntryKind::Bundled(_)
         ) {
-            return Err(about(&path)(decoder.error(
+            return Err(about(decoder.error(
                 &path,
                 "an alias names a local `extends:` source, whose selectors and relations \
                  the config can then reach as `alias.name`; a bundled or remote source must \
@@ -196,6 +247,41 @@ pub(crate) fn decode_objects(
     #[cfg(test)]
     super::schema_parity::assert_accepts(v2_keys, extends);
     Ok(objects)
+}
+
+/// Give each of `objects`' selectors and relations whose definition takes a
+/// value from the environment (`reads`) the copies a plan-check error about
+/// it is rerun on ([`Twins`]): its definition as `masked` gives it, with each
+/// such value masked and numbers moved each way, decoded as it was. Each
+/// object is decoded once more for each direction, alone, so the work is
+/// linear in the objects.
+pub(crate) fn decode_twins(
+    objects: &mut SourceObjects,
+    reads: impl Fn(&Locus) -> bool,
+    masked: impl Fn(&Locus, alint_core::NumberMask) -> Option<Value>,
+) {
+    let display = objects.source.display.clone();
+    let decoder = Decoder { source: &display };
+    for (name, selector) in &mut objects.selectors {
+        let locus = Locus::entry("selectors", name);
+        if reads(&locus) {
+            let path = format!("selectors.{name}");
+            selector.twins = Twins::Masked(alint_core::NumberMask::BOTH.map(|numbers| {
+                let definition = masked(&locus, numbers)?;
+                decoder.selector(&definition, &path).ok().map(Box::new)
+            }));
+        }
+    }
+    for (name, relation) in &mut objects.relations {
+        let locus = Locus::entry("relations", name);
+        if reads(&locus) {
+            let path = format!("relations.{name}");
+            relation.twins = Twins::Masked(alint_core::NumberMask::BOTH.map(|numbers| {
+                let definition = masked(&locus, numbers)?;
+                decoder.relation(&definition, &path).ok().map(Box::new)
+            }));
+        }
+    }
 }
 
 /// The names one source has declared so far, each with the key path that
@@ -476,6 +562,7 @@ impl Decoder<'_> {
             paths,
             scope_filter,
             reads_environment: false,
+            twins: Twins::Unneeded,
         })
     }
 
@@ -619,6 +706,7 @@ impl Decoder<'_> {
             transforms,
             filters,
             reads_environment: false,
+            twins: Twins::Unneeded,
         })
     }
 

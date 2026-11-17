@@ -136,6 +136,25 @@ pub(crate) struct Selector {
     /// Its definition takes a value from the environment
     /// ([`super::Environment`]).
     pub(crate) reads_environment: bool,
+    /// What a plan-check error about it is rerun on.
+    pub(crate) twins: Twins<Self>,
+}
+
+/// The copies of a named selector or relation that a plan-check error about
+/// it is rerun on, as a rule's error is rerun on its masked configuration:
+/// the error stands only when a copy fails with the same message, so it
+/// quotes no value the environment supplied.
+#[derive(Debug, Clone, Default)]
+pub(crate) enum Twins<T> {
+    /// Its definition takes no value from the environment.
+    #[default]
+    Unneeded,
+    /// Its definition with each value the environment supplied masked,
+    /// numbers moved up and then down ([`alint_core::NumberMask::BOTH`]),
+    /// decoded as it was: `None` where that copy does not decode (a mask can
+    /// be no valid `format:`), and an error with no copy to rerun on is
+    /// redacted.
+    Masked([Option<Box<T>>; 2]),
 }
 
 /// Where a selector is referenced: a name, or an anonymous inline selector.
@@ -158,6 +177,8 @@ pub(crate) struct Relation {
     /// Its definition takes a value from the environment outside its
     /// fields' `where:` and `transform:` entries ([`super::Environment`]).
     pub(crate) reads_environment: bool,
+    /// What a plan-check error about it is rerun on.
+    pub(crate) twins: Twins<Self>,
 }
 
 /// Where a relation's rows come from: exactly one of `entries:`, `read:`,

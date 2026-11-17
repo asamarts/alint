@@ -305,3 +305,55 @@ fn a_version_one_config_records_no_reference() {
     let config = load_stub(&path).expect("version 1 resolves nothing");
     assert!(config.relation_plan.is_none());
 }
+
+/// The suggestion for an unknown name reads that name once, however many
+/// names a config declares and however long the unknown one is, as a value
+/// can be (no YAML key limit applies): two thousand selectors and a `from:`
+/// two hundred thousand characters long, which a suggestion that copied the
+/// unknown name once per selector read four hundred million characters of.
+/// An alias a long unknown name is weighed against is read as far as it can
+/// come within two edits, once for all the names it prefixes.
+#[test]
+fn an_unknown_name_is_read_once_however_many_names_it_is_weighed_against() {
+    use std::fmt::Write as _;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let mut selectors = String::from("version: 2\nselectors:\n");
+    for index in 0..2_000 {
+        writeln!(selectors, "  s{index}: {{ paths: a }}").unwrap();
+    }
+    write(tmp.path(), "base.yml", &selectors);
+    let wanted = format!("z{}", "y".repeat(200_000));
+    let relation = format!(
+        "relations:\n  r:\n    from: {wanted}\n    read: {{ whole_file: {{}} }}\n    fields: {{ \
+         v: value }}\nrules: []\n"
+    );
+    let alias = "a".repeat(200_000);
+    for (config, reach) in [
+        (format!("{selectors}{relation}"), "selectors it can reach"),
+        (
+            format!("version: 2\nextends:\n  - url: ./base.yml\n    as: {alias}\n{relation}"),
+            "selectors it can reach",
+        ),
+    ] {
+        let path = write(tmp.path(), ".alint.yml", &config);
+        let (error, read) =
+            crate::tests::on_thread(8 << 20, std::time::Duration::from_secs(20), move || {
+                crate::interp::DISTANCE_CHARS.with(|read| read.set(0));
+                let error = load_error(&path);
+                (
+                    error,
+                    crate::interp::DISTANCE_CHARS.with(std::cell::Cell::get),
+                )
+            });
+        assert!(
+            error.ends_with(&format!(
+                "no selector named `{wanted}` in this config; there are 2000 {reach}, none \
+                 named like `{wanted}`"
+            )),
+            "{}",
+            error.chars().take(300).collect::<String>()
+        );
+        assert!(read <= wanted.len() + 3, "{read} characters read");
+    }
+}

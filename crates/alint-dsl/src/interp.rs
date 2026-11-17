@@ -383,63 +383,151 @@ fn looks_like_typo(input: &str, target: &str) -> bool {
     levenshtein(input, target) <= 1
 }
 
-/// The Levenshtein distance between `a` and `b` when it is at most `limit`,
-/// in time linear in their length: a distance within `limit` needs lengths
-/// within `limit` of each other and a path that stays within `limit` cells of
-/// the diagonal, and a row whose cells all exceed `limit` ends the walk. A
-/// config's names are untrusted, so a suggestion must not cost the product of
-/// two long ones.
-pub(crate) fn levenshtein_within(a: &str, b: &str, limit: usize) -> Option<usize> {
-    let a: Vec<char> = a.chars().collect();
-    let b: Vec<char> = b.chars().collect();
-    if a.len().abs_diff(b.len()) > limit {
-        return None;
-    }
+/// `text`'s characters, which a [`Within`] weighs other names against:
+/// collected once however many names a suggestion weighs.
+pub(crate) fn chars_of(text: &str) -> Vec<char> {
+    let chars: Vec<char> = text.chars().collect();
     #[cfg(test)]
-    DISTANCE_CELLS.with(|cells| cells.set(cells.get() + 1));
-    // `over` stands for any distance past `limit`. The cell left of a row's
-    // band is set to it; the cells right of it were never written (the band
-    // moves right a cell a row) and hold it from the start.
-    let over = limit + 1;
-    let mut prev: Vec<usize> = (0..=b.len()).map(|j| j.min(over)).collect();
-    let mut cur = vec![over; b.len() + 1];
-    for (i, ca) in a.iter().enumerate() {
-        let row = i + 1;
-        let low = row.saturating_sub(limit).max(1);
-        let high = (row + limit).min(b.len());
-        cur[0] = row.min(over);
-        cur[low - 1] = if low == 1 { cur[0] } else { over };
-        let mut least = cur[low - 1];
-        for j in low..=high {
+    DISTANCE_CHARS.with(|read| read.set(read.get() + chars.len()));
+    chars
+}
+
+/// The Levenshtein distance from `wanted` to a text fed to it a piece at a
+/// time, while that distance is at most `limit`. A distance within `limit`
+/// needs a path that stays within `limit` cells of the table's diagonal, so
+/// each character fed computes one row of `2 * limit + 1` cells, and a row
+/// whose cells all exceed `limit` ends the walk: no longer text comes back
+/// within it.
+///
+/// A config's names are untrusted, so a suggestion must cost neither the
+/// product of two long names nor a long name's length once per name it is
+/// weighed against: `wanted` is read once ([`chars_of`]); a name whose length
+/// cannot come within `limit` is skipped before a character of it is read
+/// ([`Within::may_reach`]); a name is read only as far as it can come within
+/// `limit`; and a prefix that many names share (an alias) is fed once, to a
+/// state each of them then continues from a clone of.
+#[derive(Debug, Clone)]
+pub(crate) struct Within<'w> {
+    wanted: &'w [char],
+    limit: usize,
+    /// The characters fed so far: the row `band` holds.
+    fed: usize,
+    /// Row `fed`'s cells for the columns `fed - limit ..= fed + limit`; a
+    /// column outside `0..=wanted.len()` holds `limit + 1`, as does any cell
+    /// past `limit`.
+    band: Vec<usize>,
+    /// The next row, as it is computed.
+    next: Vec<usize>,
+}
+
+impl<'w> Within<'w> {
+    pub(crate) fn new(wanted: &'w [char], limit: usize) -> Self {
+        let over = limit + 1;
+        // Row 0: column `j` holds `j`.
+        let band = (0..=2 * limit)
+            .map(|k| match k.checked_sub(limit) {
+                Some(column) if column <= wanted.len() => column.min(over),
+                _ => over,
+            })
+            .collect();
+        Self {
+            wanted,
+            limit,
+            fed: 0,
+            band,
+            next: vec![over; 2 * limit + 1],
+        }
+    }
+
+    /// Whether a text `bytes` long, fed next, could end within the limit: it
+    /// holds between a quarter of its bytes and all of them as characters.
+    pub(crate) fn may_reach(&self, bytes: usize) -> bool {
+        let wanted = self.wanted.len();
+        self.fed + bytes + self.limit >= wanted
+            && self.fed + bytes.div_ceil(4) <= wanted + self.limit
+    }
+
+    /// Feed `text`; `false` (and the text read no further) once no text that
+    /// starts with what has been fed can end within the limit.
+    pub(crate) fn feed(&mut self, text: &str) -> bool {
+        text.chars().all(|character| self.step(character))
+    }
+
+    /// The distance from `wanted` to the text fed, when it is within the
+    /// limit.
+    pub(crate) fn distance(&self) -> Option<usize> {
+        // Column `wanted.len()` of row `fed`.
+        let k = (self.wanted.len() + self.limit).checked_sub(self.fed)?;
+        self.band
+            .get(k)
+            .copied()
+            .filter(|distance| *distance <= self.limit)
+    }
+
+    /// Compute the row of one more character; `false` when none of its
+    /// cells is within the limit.
+    fn step(&mut self, character: char) -> bool {
+        #[cfg(test)]
+        DISTANCE_CHARS.with(|read| read.set(read.get() + 1));
+        let over = self.limit + 1;
+        let row = self.fed + 1;
+        let mut alive = false;
+        self.next.fill(over);
+        for k in 0..self.next.len() {
+            // Column `row - limit + k`; one left of column 0 holds `over`.
+            let Some(column) = (row + k).checked_sub(self.limit) else {
+                continue;
+            };
+            if column > self.wanted.len() {
+                break;
+            }
             #[cfg(test)]
             DISTANCE_CELLS.with(|cells| cells.set(cells.get() + 1));
-            let cost = usize::from(*ca != b[j - 1]);
-            let cell = (prev[j] + 1)
-                .min(cur[j - 1] + 1)
-                .min(prev[j - 1] + cost)
-                .min(over);
-            cur[j] = cell;
-            least = least.min(cell);
+            let cell = if column == 0 {
+                row.min(over)
+            } else {
+                // Row `fed`'s band starts a column left of this one's, so the
+                // cell above-left is at `k` and the one above at `k + 1`.
+                let diagonal = self.band[k] + usize::from(self.wanted[column - 1] != character);
+                let above = self.band.get(k + 1).map_or(over, |cell| cell + 1);
+                let left = k.checked_sub(1).map_or(over, |left| self.next[left] + 1);
+                diagonal.min(above).min(left).min(over)
+            };
+            self.next[k] = cell;
+            alive |= cell <= self.limit;
         }
-        if least > limit {
-            return None;
-        }
-        std::mem::swap(&mut prev, &mut cur);
+        std::mem::swap(&mut self.band, &mut self.next);
+        self.fed = row;
+        alive
     }
-    Some(prev[b.len()]).filter(|distance| *distance <= limit)
+}
+
+/// The Levenshtein distance between `a` and `b` when it is at most `limit`
+/// ([`Within`]).
+#[cfg(test)]
+pub(crate) fn levenshtein_within(a: &str, b: &str, limit: usize) -> Option<usize> {
+    let a = chars_of(a);
+    let mut within = Within::new(&a, limit);
+    if !within.may_reach(b.len()) || !within.feed(b) {
+        return None;
+    }
+    within.distance()
 }
 
 #[cfg(test)]
 thread_local! {
-    /// The edit-distance cells [`levenshtein`] and [`levenshtein_within`]
-    /// computed on this thread (and one per call of the latter): the tests
-    /// bound the work a suggestion does.
+    /// The edit-distance cells [`levenshtein`] and [`Within`] computed on
+    /// this thread: the tests bound the work a suggestion does.
     pub(crate) static DISTANCE_CELLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// The characters [`chars_of`] collected and [`Within`] read on this
+    /// thread: a suggestion that copied or read a long name once per name it
+    /// weighs it against computes few cells, and this counts what it read.
+    pub(crate) static DISTANCE_CHARS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 pub(crate) fn levenshtein(a: &str, b: &str) -> usize {
-    let a: Vec<char> = a.chars().collect();
-    let b: Vec<char> = b.chars().collect();
+    let a = chars_of(a);
+    let b = chars_of(b);
     #[cfg(test)]
     DISTANCE_CELLS.with(|cells| cells.set(cells.get() + a.len() * b.len()));
     let mut prev: Vec<usize> = (0..=b.len()).collect();

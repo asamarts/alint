@@ -1013,3 +1013,75 @@ fn a_v2_object_error_that_could_quote_the_environment_is_redacted() {
          `docs/development/CONFIG-AUTHORING.md` § 10."
     );
 }
+
+/// Values read from the environment that are valid where they are written and
+/// that a mask (`<redacted>`) is not: a format, a regex with a group, a join
+/// side and a transform.
+#[derive(Debug)]
+struct FieldEnvironment;
+impl crate::EnvironmentProvider for FieldEnvironment {
+    fn get(&self, name: &str) -> Option<String> {
+        match name {
+            "FORMAT" => Some("json".to_string()),
+            "PATTERN" => Some("x(.*)".to_string()),
+            "UNIQUE" => Some("left".to_string()),
+            "TRANSFORM" => Some("trim".to_string()),
+            "AT" => Some("$.canary-secret".to_string()),
+            _ => None,
+        }
+    }
+}
+
+fn v2_field_error(yaml: &str) -> String {
+    parse_config_interpolated_inner_with_environment(
+        yaml,
+        Path::new(".alint.yml"),
+        &FieldEnvironment,
+        &TEST_ROOT,
+    )
+    .unwrap_err()
+    .to_string()
+}
+
+/// The masked source a decode error is rerun on masks only the values of the
+/// object the error is about. An environment value in another object, where a
+/// mask is no valid value (a `format:`, a regex with a group, a join's
+/// `unique:`, a transform), fails that object first in a source masked
+/// whole, and redacted an error that quotes no value; it now reads as it
+/// would with no value read from the environment. An error about the object
+/// whose own value cannot be masked stays redacted.
+#[test]
+fn a_v2_object_error_beside_an_unmaskable_value_elsewhere_stays_readable() {
+    let typo = "  b:\n    from: s\n    read: { json: $.a }\n    fieldz: { v: value }\n";
+    let typo_message = ".alint.yml: `relations.b`: unknown key `fieldz` in a relation; expected \
+                        one of `from`, `entries`, `read`, `optional`, `union`, `join`, \
+                        `fields`, `transform`, `where`";
+    for elsewhere in [
+        "  a:\n    from: s\n    entries: { format: '{{env.FORMAT | default(\"x\")}}', at: $ }\n    \
+         fields: { k: entry.key }\n",
+        "  a:\n    from: s\n    read: { regex: '{{env.PATTERN | default(\"x\")}}' }\n    fields: \
+         { v: value }\n",
+        "  a:\n    from: s\n    read: { json: $.a }\n    fields: { v: value }\n    transform: { \
+         v: ['{{env.TRANSFORM | default(\"x\")}}'] }\n",
+        "  a:\n    from: s\n    read: { json: $.a }\n    fields: { v: value }\n  c:\n    from: \
+         s\n    read: { json: $.c }\n    fields: { w: value }\n  j:\n    join: { left: a, \
+         right: c, on: { v: w }, unique: '{{env.UNIQUE | default(\"x\")}}' }\n    fields: { x: \
+         left.v }\n",
+    ] {
+        let source = format!(
+            "version: 2\nselectors:\n  s: {{ paths: a.json }}\nrelations:\n{elsewhere}{typo}\
+             rules: []\n"
+        );
+        assert_eq!(v2_field_error(&source), typo_message, "{elsewhere}");
+    }
+    // The erroring object's own value: its masked copy fails elsewhere in it
+    // (no format is `<redacted>`), so the error is redacted.
+    let source = "version: 2\nselectors:\n  s: { paths: a.json }\nrelations:\n  b:\n    from: \
+                  s\n    entries: { format: '{{env.FORMAT | default(\"x\")}}', at: '{{env.AT | \
+                  default(\"$.x\")}}' }\n    fields: { k: entry.key }\nrules: []\n";
+    assert_eq!(
+        v2_field_error(source),
+        ".alint.yml: `relations.b`: <redacted> (the error could quote a value read from the \
+         environment)"
+    );
+}

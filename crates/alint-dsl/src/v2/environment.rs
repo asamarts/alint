@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use ayaml::Value;
 
+use super::decode::Locus;
 use super::model::SourceObjects;
 
 /// What one source's selectors and relations read from the environment, by
@@ -73,6 +74,16 @@ impl Environment {
             }
         }
         environment
+    }
+
+    /// Whether the definition at `locus` (a selector or relation) takes any
+    /// value from the environment.
+    pub(crate) fn reads(&self, locus: &Locus) -> bool {
+        match locus {
+            Locus::Entry { key, name } if key == "selectors" => self.selectors.contains(name),
+            Locus::Entry { key, name } if key == "relations" => self.relations.contains_key(name),
+            _ => false,
+        }
     }
 
     /// Mark `objects`, the source's decoded selectors and relations.

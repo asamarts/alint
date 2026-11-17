@@ -321,6 +321,14 @@ fn resolve_top_level(
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+    // Resolved as each config's own path is, so a config is named by its path
+    // under this root (`.alint.d/10.yml`, `rules/base.yml`) wherever the root
+    // is reached through a symlink (`/var` is `/private/var` on macOS), a
+    // relative path or a Windows short name, and not by its file name alone.
+    let confine_root = opts
+        .config_source
+        .canonicalize(&confine_root)
+        .unwrap_or(confine_root);
     // `is_top: true` — the user's own top-level config may open the
     // `allow_out_of_root` escape hatch; an `extends:`'d ruleset may not (that
     // recursion passes `false`), so an untrusted ruleset can't lift confinement.

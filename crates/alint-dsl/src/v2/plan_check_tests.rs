@@ -29,7 +29,7 @@ fn check_root(yaml: &str) -> alint_core::Result<Vec<RelationId>> {
         sources: vec![crate::v2::source_objects(id, &v2_keys, &[]).expect("decode")],
     };
     let plan = crate::v2::resolve(&objects)?.plan;
-    check(&plan)
+    check(&plan).map_err(|failure| failure.1)
 }
 
 fn problem(yaml: &str) -> String {
@@ -579,7 +579,8 @@ fn a_relation_of_many_fields_checks_in_time_linear_in_them() {
             transforms: Vec::new(),
             filters: Vec::new(),
         };
-        check(&plan_of(vec![("wide", wide), ("joined", joined)])).map_err(|e| e.to_string())
+        check(&plan_of(vec![("wide", wide), ("joined", joined)]))
+            .map_err(|failure| failure.1.to_string())
     });
     assert_eq!(outcome, Ok(vec![RelationId(0), RelationId(1)]));
 }
@@ -596,7 +597,7 @@ fn a_union_of_many_parts_checks_in_time_linear_in_them() {
             transforms: Vec::new(),
             filters: Vec::new(),
         };
-        check(&plan_of(vec![("union", union)])).map_err(|e| e.to_string())
+        check(&plan_of(vec![("union", union)])).map_err(|failure| failure.1.to_string())
     });
     assert_eq!(outcome, Ok(vec![RelationId(0)]));
 }

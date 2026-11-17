@@ -31,22 +31,74 @@ use std::collections::{HashMap, HashSet};
 use alint_core::relation::Value;
 use alint_core::relation::plan::{
     FieldDef, FieldSource, JoinSide, Member, PathToken, Plan, Predicate, Reached, Read, Reader,
-    RelationDef, RelationId, Rows, SelectorDef, SelectorRef, Transform,
+    RelationDef, RelationId, Rows, SelectorDef, SelectorId, SelectorRef, Transform,
 };
 use alint_core::{Error, Result};
 
-use super::resolve::{located, suggest};
+use super::resolve::{Offered, located, suggest};
+
+/// What a plan-check error is about: the check that failed, which the
+/// resolver reruns alone ([`recheck`]) on a copy of the plan with the
+/// environment's values masked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Checked {
+    /// A named selector compiles.
+    Selector(SelectorId),
+    /// A relation's inline selectors compile.
+    InlineSelectors(RelationId),
+    /// No relation reads itself (the error names relations only).
+    Order,
+    /// A relation's rows, transforms and filters.
+    Relation(RelationId),
+}
 
 /// Check `plan`, and return its relations in an order where each comes after
-/// every relation it reads.
-pub(super) fn check(plan: &Plan) -> Result<Vec<RelationId>> {
-    check_selectors(plan)?;
-    let order = order(plan)?;
+/// every relation it reads; or the first error, with the check it failed.
+pub(super) fn check(plan: &Plan) -> std::result::Result<Vec<RelationId>, Box<(Checked, Error)>> {
+    let fail = |checked: Checked| move |error| Box::new((checked, error));
+    for index in 0..plan.selectors.len() {
+        let checked = Checked::Selector(SelectorId(index));
+        recheck_selectors(plan, checked).map_err(fail(checked))?;
+    }
+    for index in 0..plan.relations.len() {
+        let checked = Checked::InlineSelectors(RelationId(index));
+        recheck_selectors(plan, checked).map_err(fail(checked))?;
+    }
+    let order = order(plan).map_err(fail(Checked::Order))?;
     let fields = Fields::new(plan);
     for index in 0..plan.relations.len() {
-        check_relation(&fields, RelationId(index))?;
+        let checked = Checked::Relation(RelationId(index));
+        check_relation(&fields, RelationId(index)).map_err(fail(checked))?;
     }
     Ok(order)
+}
+
+/// Run `checked` alone on `plan`, as [`check`] runs it.
+pub(super) fn recheck(plan: &Plan, checked: Checked) -> Result<()> {
+    match checked {
+        Checked::Selector(_) | Checked::InlineSelectors(_) => recheck_selectors(plan, checked),
+        Checked::Order => order(plan).map(drop),
+        Checked::Relation(id) => check_relation(&Fields::new(plan), id),
+    }
+}
+
+/// `id` and every relation it reads, through join sides and membership
+/// references, transitively: the relations whose definitions a relation's
+/// check reads (a join's copy of a field is described by the field it
+/// copies).
+pub(super) fn read_by(plan: &Plan, id: RelationId) -> Vec<RelationId> {
+    let mut seen = HashSet::from([id]);
+    let mut found = vec![id];
+    let mut next = 0;
+    while let Some(&at) = found.get(next) {
+        next += 1;
+        for (read, _) in reads(&plan.relation(at).relation, "") {
+            if seen.insert(read) {
+                found.push(read);
+            }
+        }
+    }
+    found
 }
 
 /// Each relation's fields by name, and what each field holds once found, so
@@ -206,35 +258,45 @@ thread_local! {
     static HOLDS_STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-fn check_selectors(plan: &Plan) -> Result<()> {
-    for named in &plan.selectors {
-        let display = &plan.source(named.source).display;
-        check_selector(
-            &named.selector,
-            display,
-            &format!("selectors.{}", named.name),
-        )?;
-    }
-    for named in &plan.relations {
-        let display = &plan.source(named.source).display;
-        let path = format!("relations.{}", named.name);
-        match &named.relation.rows {
-            Rows::Part(part) => {
-                if let SelectorRef::Inline(selector) = &part.from {
-                    check_selector(selector, display, &format!("{path}.from"))?;
-                }
-            }
-            Rows::Union(parts) => {
-                for (index, part) in parts.iter().enumerate() {
+/// Compile the named selector or the inline selectors `checked` names.
+fn recheck_selectors(plan: &Plan, checked: Checked) -> Result<()> {
+    match checked {
+        Checked::Selector(id) => {
+            let named = &plan.selectors[id.0];
+            let display = &plan.source(named.source).display;
+            check_selector(
+                &named.selector,
+                display,
+                &format!("selectors.{}", named.name),
+            )
+        }
+        Checked::InlineSelectors(id) => {
+            let named = plan.relation(id);
+            let display = &plan.source(named.source).display;
+            let path = format!("relations.{}", named.name);
+            match &named.relation.rows {
+                Rows::Part(part) => {
                     if let SelectorRef::Inline(selector) = &part.from {
-                        check_selector(selector, display, &format!("{path}.union[{index}].from"))?;
+                        check_selector(selector, display, &format!("{path}.from"))?;
                     }
                 }
+                Rows::Union(parts) => {
+                    for (index, part) in parts.iter().enumerate() {
+                        if let SelectorRef::Inline(selector) = &part.from {
+                            check_selector(
+                                selector,
+                                display,
+                                &format!("{path}.union[{index}].from"),
+                            )?;
+                        }
+                    }
+                }
+                Rows::Join(_) => {}
             }
-            Rows::Join(_) => {}
+            Ok(())
         }
+        Checked::Order | Checked::Relation(_) => Ok(()),
     }
-    Ok(())
 }
 
 /// Compile `selector`, at `path` of the source `display`, as a rule's
@@ -417,12 +479,14 @@ fn written(plan: &Plan, reached: &Reached<RelationId>) -> String {
     }
 }
 
-fn field_names(relation: &RelationDef) -> Vec<String> {
-    relation
-        .fields
-        .iter()
-        .map(|(name, _)| name.clone())
-        .collect()
+fn field_names(relation: &RelationDef) -> Offered<'_> {
+    Offered::bare(
+        relation
+            .fields
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect(),
+    )
 }
 
 /// "`f` is not a field of {of}; its fields are ...".

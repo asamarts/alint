@@ -750,30 +750,110 @@ use super::super::origins::REFERENCE_STUB_KIND as REFERENCE_STUB;
 /// A suggestion for a name nothing declares weighs it against every name it
 /// could mean, each only near the diagonal of its edit distance and not at
 /// all past a length two edits cannot reach: work linear in the names, not
-/// the product of two long ones a hostile config can write.
+/// the product of two long ones a hostile config can write. What it reads
+/// counts as well as what it computes: reading the unknown name once per name
+/// it was weighed against, or an alias once per name it prefixes, computed no
+/// cell and was quadratic.
 #[test]
 fn a_suggestion_does_work_linear_in_the_names_it_weighs() {
-    let weighed = |wanted: &str, names: &[String]| {
+    let weighed = |wanted: &str, offered: &Offered<'_>| {
         crate::interp::DISTANCE_CELLS.with(|cells| cells.set(0));
-        let message = suggest(wanted, names, "its names are", "names");
+        crate::interp::DISTANCE_CHARS.with(|read| read.set(0));
+        let message = suggest(wanted, offered, "its names are", "names");
         (
             message,
             crate::interp::DISTANCE_CELLS.with(std::cell::Cell::get),
+            crate::interp::DISTANCE_CHARS.with(std::cell::Cell::get),
         )
     };
     let stem = "n".repeat(398);
     let mut names: Vec<String> = (0..64).map(|index| format!("{stem}{index:02}")).collect();
     names[40] = format!("{stem}nx");
-    let (message, work) = weighed(&format!("{stem}nn"), &names);
+    let offered = Offered::bare(names.iter().map(String::as_str).collect());
+    let (message, cells, read) = weighed(&format!("{stem}nn"), &offered);
     assert_eq!(message, format!("did you mean `{stem}nx`?"));
-    // At most five cells a character for each name, and one for the call.
-    assert!(work <= names.len() * (5 * 400 + 1), "{work} cells");
+    // At most five cells a character of each name, and each character read
+    // once: the unknown name's and each name's.
+    assert!(cells <= names.len() * 5 * 400, "{cells} cells");
+    assert!(read <= 400 + names.len() * 400, "{read} characters");
 
-    let long = "w".repeat(50_000);
-    let (message, work) = weighed(&long, &names);
+    // Many short names and one long unknown one, as a hostile config writes
+    // them: the unknown name is read once, and no name at all.
+    let long = format!("z{}", "y".repeat(100_000));
+    let short: Vec<String> = (0..2_000).map(|index| format!("s{index}")).collect();
+    let offered = Offered::bare(short.iter().map(String::as_str).collect());
+    let (message, cells, read) = weighed(&long, &offered);
     assert_eq!(
         message,
-        format!("there are 64 names, none named like `{long}`")
+        format!("there are 2000 names, none named like `{long}`")
     );
-    assert_eq!(work, 0);
+    assert_eq!((cells, read), (0, long.len()));
+
+    // The same names through a long alias: the alias is read once for all of
+    // them, and each name after it once.
+    let alias = "a".repeat(100_000);
+    let mut offered = Offered::default();
+    offered.push(Some(&alias), short.iter().map(String::as_str).collect());
+    let wanted = format!("{alias}.s1x");
+    let (message, cells, read) = weighed(&wanted, &offered);
+    assert_eq!(message, format!("did you mean `{alias}.s1`?"));
+    let names_read: usize = short.iter().map(String::len).sum();
+    assert!(
+        read <= wanted.len() + alias.len() + 1 + names_read,
+        "{read} characters"
+    );
+    assert!(cells <= 5 * read, "{cells} cells");
+    // A long unknown name against the long alias: neither is read past the
+    // point two edits cannot come back from.
+    let (message, _, read) = weighed(&long, &offered);
+    assert_eq!(
+        message,
+        format!("there are 2000 names, none named like `{long}`")
+    );
+    assert!(read <= long.len() + 3, "{read} characters");
+}
+
+/// The nearest name, weighed a group at a time with each alias read once, is
+/// the one the full edit distance of each written name finds: the first of
+/// the closest within two edits.
+#[test]
+fn the_nearest_name_through_aliases_is_the_nearest_written_one() {
+    let words = [
+        "", "a", "b", "ab", "ba", "abc", "a.b", "b.a", "abab", "é", "aé", "éb",
+    ];
+    let aliases = [None, Some("a"), Some("b"), Some("ab"), Some("é")];
+    for wanted in words {
+        for (first, second) in aliases
+            .iter()
+            .flat_map(|a| aliases.iter().map(move |b| (*a, *b)))
+        {
+            let names: Vec<&str> = words
+                .iter()
+                .copied()
+                .filter(|name| !name.is_empty())
+                .collect();
+            let mut offered = Offered::default();
+            offered.push(first, names[..5].to_vec());
+            offered.push(second, names[5..].to_vec());
+            let written: Vec<String> = [(first, &names[..5]), (second, &names[5..])]
+                .into_iter()
+                .flat_map(|(alias, group)| {
+                    group.iter().map(move |name| {
+                        alias.map_or_else(|| (*name).to_string(), |a| format!("{a}.{name}"))
+                    })
+                })
+                .collect();
+            let expected = written
+                .iter()
+                .map(|name| (crate::interp::levenshtein(wanted, name), name))
+                .filter(|(distance, _)| *distance <= 2)
+                .min_by_key(|(distance, _)| *distance)
+                .map(|(_, name)| name.clone());
+            assert_eq!(
+                nearest(wanted, &offered),
+                expected,
+                "{wanted:?} {first:?} {second:?}"
+            );
+        }
+    }
 }

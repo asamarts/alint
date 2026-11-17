@@ -28,6 +28,30 @@ fn write(root: &Path, relative: &str, body: &str) -> PathBuf {
     path
 }
 
+/// `relative` as the loader names a config under the root: its path from
+/// there, with the platform's separator.
+fn shown(relative: &str) -> String {
+    relative
+        .split('/')
+        .collect::<PathBuf>()
+        .display()
+        .to_string()
+}
+
+/// `error` without the directory `dir`, written as given or resolved (a
+/// temporary directory may sit under a symlink, such as macOS's `/var`, or
+/// have a Windows short name), as a load error prints a config's path.
+fn without_dir(error: &str, dir: &Path) -> String {
+    let resolved = dir.canonicalize().unwrap().display().to_string();
+    let resolved = resolved
+        .strip_prefix(r"\\?\")
+        .unwrap_or(&resolved)
+        .to_string();
+    error
+        .replace(&resolved, "")
+        .replace(&dir.display().to_string(), "")
+}
+
 fn options() -> LoadOptions<'static> {
     LoadOptions::with_catalog(test_catalog())
 }
@@ -98,8 +122,7 @@ fn a_version_two_config_reads_version_one_keys_as_version_one_does() {
     let body = "rules:\n  - id: x\n    kind: file_exists\n    paths: [a\n";
     let one = write(tmp.path(), "one/.alint.yml", &format!("version: 1\n{body}"));
     let two = write(tmp.path(), "two/.alint.yml", &format!("version: 2\n{body}"));
-    let strip =
-        |error: String, dir: &str| error.replace(&tmp.path().join(dir).display().to_string(), "");
+    let strip = |error: String, dir: &str| without_dir(&error, &tmp.path().join(dir));
     assert_eq!(
         strip(load_error(&one), "one"),
         strip(load_error(&two), "two")
@@ -111,6 +134,27 @@ fn a_version_two_config_reads_version_one_keys_as_version_one_does() {
     let one_error = strip(load_error(&one), "one");
     assert!(one_error.contains("line 2 column 9"), "{one_error}");
     assert_eq!(one_error, strip(load_error(&two), "two"));
+
+    // A top-level key written twice reads as version 1's decode words it,
+    // `version:` itself included.
+    for (one_body, two_body) in [
+        ("version: 1\nversion: 2\n", "version: 2\nversion: 1\n"),
+        ("version: 1\nrules: []\n", "version: 2\nrules: []\n"),
+    ] {
+        let one = write(
+            tmp.path(),
+            "one/.alint.yml",
+            &format!("{one_body}rules: []\n"),
+        );
+        let two = write(
+            tmp.path(),
+            "two/.alint.yml",
+            &format!("{two_body}rules: []\n"),
+        );
+        let one_error = strip(load_error(&one), "one");
+        assert!(one_error.contains("duplicate field"), "{one_error}");
+        assert_eq!(one_error, strip(load_error(&two), "two"));
+    }
 
     // A v1 `extends:` entry error keeps its text (the v2 entry adds `as`).
     let one = write(
@@ -287,6 +331,164 @@ fn a_version_two_error_leaves_out_a_value_from_the_environment() {
     );
 }
 
+/// Values a selector or relation reads from the environment that pass the
+/// decode and fail the plan check, each quoted by the error in a form the
+/// whole-value scrub does not remove: a path's last segment, or a value under
+/// four characters.
+const PLAN_CHECK_ENVIRONMENT: &[(&str, &str)] = &[
+    ("PATH_LIKE", "../canary-secret.json"),
+    ("SLASHED", "q/z"),
+    ("SHORT", "[q"),
+    ("BOUND", "$.q"),
+    ("PATTERN", "^canary"),
+    ("FORMAT", "json"),
+];
+
+fn plan_check_error(tmp: &Path, body: &str) -> String {
+    let path = write(tmp, ".alint.yml", &format!("version: 2\n{body}rules: []\n"));
+    load_in(&path, PLAN_CHECK_ENVIRONMENT)
+        .unwrap_err()
+        .to_string()
+}
+
+/// A plan-check error about a selector or relation that reads the
+/// environment stands only when the same check fails with the same message
+/// on a copy of the plan with those values masked, the relations a join
+/// copies from included; otherwise it is redacted to the object, as a rule's
+/// error is.
+#[test]
+fn a_plan_check_error_that_could_quote_the_environment_is_redacted() {
+    let tmp = tempfile::tempdir().unwrap();
+    let read = "    read: { json: $.a }\n    fields: { v: value }\n";
+    for (body, object) in [
+        (
+            "selectors:\n  s:\n    paths: '*.json'\n    scope_filter: { has_ancestor: \
+             '{{env.PATH_LIKE | default(\"x\")}}' }\n"
+                .to_string(),
+            "selectors.s",
+        ),
+        (
+            "selectors:\n  s:\n    paths: '*.json'\n    scope_filter: { has_ancestor: \
+             ['{{env.SLASHED | default(\"x\")}}'] }\n"
+                .to_string(),
+            "selectors.s",
+        ),
+        (
+            "selectors:\n  s:\n    paths: ['ok/**', '{{env.SHORT | default(\"x\")}}']\n"
+                .to_string(),
+            "selectors.s",
+        ),
+        (
+            format!(
+                "relations:\n  r:\n    from: {{ paths: '*.json', scope_filter: {{ has_ancestor: \
+                 '{{{{env.SLASHED | default(\"x\")}}}}' }} }}\n{read}"
+            ),
+            "relations.r",
+        ),
+        (
+            "relations:\n  u:\n    union:\n      - { from: { paths: '*.json' }, read: { json: \
+             $.a } }\n      - { from: { paths: '{{env.SHORT | default(\"x\")}}' }, read: { \
+             json: $.b } }\n    fields: { v: value }\n"
+                .to_string(),
+            "relations.u",
+        ),
+        (
+            "relations:\n  r:\n    from: { paths: '*.json' }\n    read: { json: $.a }\n    \
+             fields: { v: 'bound: {{env.BOUND | default(\"$.x\")}}' }\n    transform: { v: \
+             [strip-root] }\n"
+                .to_string(),
+            "relations.r",
+        ),
+        (
+            "relations:\n  u:\n    union:\n      - { from: { paths: '*.json' }, read: { json: \
+             $.a } }\n      - { from: { paths: '*.md' }, read: { regex: 'x(.*)' } }\n    \
+             fields: { v: 'bound: {{env.BOUND | default(\"$.x\")}}' }\n"
+                .to_string(),
+            "relations.u",
+        ),
+        // A join's copy is described by the field it copies, in another
+        // relation.
+        (
+            format!(
+                "relations:\n  a:\n    from: {{ paths: '*.json' }}\n    read: {{ json: $.a }}\n    \
+                 fields: {{ v: value, b: 'bound: {{{{env.BOUND | default(\"$.x\")}}}}' }}\n  \
+                 c:\n    from: {{ paths: '*.json' }}\n{read}  j:\n    join: {{ left: a, right: c, \
+                 on: {{ v: v }}, unique: right }}\n    fields: {{ x: left.b }}\n    transform: \
+                 {{ x: [strip-root] }}\n"
+            ),
+            "relations.j",
+        ),
+    ] {
+        let error = plan_check_error(tmp.path(), &body);
+        assert_eq!(
+            error,
+            format!(
+                ".alint.yml: `{object}`: <redacted> (the error could quote a value read from the \
+                 environment)"
+            ),
+            "{body}"
+        );
+        for fragment in ["canary", "secret", "q/z", "[q", "$.q"] {
+            assert!(!error.contains(fragment), "{fragment}: {error}");
+        }
+    }
+}
+
+/// An error the masked copy repeats quotes no value read from the
+/// environment, and reads as before: a literal beside such a value in the
+/// same selector, a relation whose pattern the environment gives, and a
+/// relation beside one whose value cannot be masked (no format is
+/// `<redacted>`). An error about that relation itself is redacted, as there
+/// is no copy to rerun it on.
+#[test]
+fn a_plan_check_error_the_masked_copy_repeats_reads_as_before() {
+    let tmp = tempfile::tempdir().unwrap();
+    assert_eq!(
+        plan_check_error(
+            tmp.path(),
+            "selectors:\n  s:\n    paths: '{{env.PATH_LIKE | default(\"x\")}}'\n    \
+             scope_filter: { has_ancestor: 'a/b' }\n",
+        ),
+        ".alint.yml: `selectors.s.scope_filter`: scope_filter.has_ancestor name \"a/b\" must be \
+         a basename - no path separators.\n  hint: to match files inside a specific subtree, use \
+         `paths:` on the rule's main scope (e.g. `paths: \"airflow-core/**/*.py\"`); to match \
+         files in any subtree that has this manifest, use the basename only (e.g. \
+         `has_ancestor: \"b\"`)."
+    );
+    assert_eq!(
+        plan_check_error(
+            tmp.path(),
+            "relations:\n  r:\n    from: { paths: '*.json' }\n    read: { json: $.a }\n    \
+             fields: { v: value }\n    where: { v: { matches: '{{env.PATTERN | \
+             default(\"x\")}}' } }\n    transform: { vv: [trim] }\n",
+        ),
+        ".alint.yml: `relations.r.transform.vv`: `vv` is not a field of relation `r`; its fields \
+         are `v`"
+    );
+    let unmaskable = "relations:\n  a:\n    from: { paths: '*.json' }\n    entries: { format: \
+                      '{{env.FORMAT | default(\"x\")}}', at: $ }\n    fields: { k: entry.key \
+                      }\n";
+    assert_eq!(
+        plan_check_error(
+            tmp.path(),
+            &format!(
+                "{unmaskable}  b:\n    from: {{ paths: '*.json' }}\n    read: {{ json: $.a }}\n    \
+                 fields: {{ v: value }}\n    transform: {{ vv: [trim] }}\n"
+            ),
+        ),
+        ".alint.yml: `relations.b.transform.vv`: `vv` is not a field of relation `b`; its fields \
+         are `v`"
+    );
+    assert_eq!(
+        plan_check_error(
+            tmp.path(),
+            &format!("{unmaskable}    transform: {{ kk: [trim] }}\n"),
+        ),
+        ".alint.yml: `relations.a`: <redacted> (the error could quote a value read from the \
+         environment)"
+    );
+}
+
 #[test]
 fn a_fragment_without_a_version_inherits_version_two() {
     let tmp = tempfile::tempdir().unwrap();
@@ -308,7 +510,7 @@ fn a_fragment_without_a_version_inherits_version_two() {
                 vec!["manifests".to_string(), "deps".to_string()]
             ),
             (
-                ".alint.d/10-docs.yml".to_string(),
+                shown(".alint.d/10-docs.yml"),
                 ConfigSourceClass::DropIn,
                 // Each source has its own namespace: the fragment may reuse a
                 // name its root declares.
@@ -319,20 +521,72 @@ fn a_fragment_without_a_version_inherits_version_two() {
     assert_eq!(load(&path).unwrap().rules.len(), 1);
 }
 
+/// A config is named by its path under the top-level config's directory
+/// however that directory is reached. The loader resolves each config's path,
+/// so it resolves the directory too: reached through a symlink (a temporary
+/// directory under macOS's `/var`, which is `/private/var`), every config was
+/// named by its file name alone.
+#[cfg(unix)]
 #[test]
-fn a_fragment_follows_a_version_one_root() {
+fn a_config_is_named_under_its_root_reached_through_a_symlink() {
     let tmp = tempfile::tempdir().unwrap();
-    let path = write(tmp.path(), ".alint.yml", "version: 1\nrules: []\n");
-    let fragment = write(tmp.path(), ".alint.d/10.yml", "selectors: {}\n");
+    let real = tmp.path().join("real");
+    std::fs::create_dir(&real).unwrap();
+    let linked = tmp.path().join("linked");
+    std::os::unix::fs::symlink(&real, &linked).unwrap();
+    write(&linked, "rules/base.yml", &format!("version: 2\n{OBJECTS}"));
+    write(
+        &linked,
+        ".alint.d/10.yml",
+        "selectors:\n  docs: { paths: 'docs/**' }\n",
+    );
+    let path = write(
+        &linked,
+        ".alint.yml",
+        "version: 2\nextends:\n  - url: ./rules/base.yml\n    as: base\n",
+    );
+    let names: Vec<String> = declared(&raw(&path).unwrap())
+        .into_iter()
+        .map(|(name, _, _)| name)
+        .collect();
+    assert_eq!(names, ["rules/base.yml", ".alint.yml", ".alint.d/10.yml"]);
+
+    std::fs::write(&path, "version: 1\nrules: []\n").unwrap();
     assert_eq!(
         load_error(&path),
         ".alint.d/10.yml: `selectors:` needs `version: 2`; this config is version 1, as its \
          root config is"
     );
+    std::fs::write(
+        &path,
+        "version: 1\nextends: [./rules/base.yml]\nrules: []\n",
+    )
+    .unwrap();
+    std::fs::remove_dir_all(real.join(".alint.d")).unwrap();
+    assert_eq!(
+        load_error(&path),
+        "rules/base.yml: a version 1 config (.alint.yml) cannot extend this version 2 config; \
+         give .alint.yml `version: 2`, or make rules/base.yml `version: 1`"
+    );
+}
+
+#[test]
+fn a_fragment_follows_a_version_one_root() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = write(tmp.path(), ".alint.yml", "version: 1\nrules: []\n");
+    let fragment = write(tmp.path(), ".alint.d/10.yml", "selectors: {}\n");
+    let shown = shown(".alint.d/10.yml");
+    assert_eq!(
+        load_error(&path),
+        format!(
+            "{shown}: `selectors:` needs `version: 2`; this config is version 1, as its root \
+             config is"
+        )
+    );
     std::fs::write(&fragment, "version: 2\nrules: []\n").unwrap();
     assert_eq!(
         load_error(&path),
-        ".alint.d/10.yml: drop-in config version 2 must equal root config version 1"
+        format!("{shown}: drop-in config version 2 must equal root config version 1")
     );
 }
 
@@ -361,7 +615,7 @@ fn a_version_two_config_extends_local_sources_through_aliases() {
         declared(&raw),
         vec![
             (
-                "rules/base.yml".to_string(),
+                shown("rules/base.yml"),
                 ConfigSourceClass::LocalExtend,
                 vec!["manifests".to_string(), "deps".to_string()]
             ),

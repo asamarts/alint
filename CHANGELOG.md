@@ -449,11 +449,13 @@ policy-test package the user does not trust.
     does, so a manifest `source:` stays inside the repository and out of `.git`.
   - Each selector and relation passes the trust gates of the file that declares it, with what it
     references, as an extended file's rules do.
-  - A selector's or relation's error stands only when the config with every value read from the
-    environment masked fails the same way; otherwise it is redacted, naming the object
-    (`` `relations.deps`: <redacted> (the error could quote a value read from the environment)
-    ``), as a version 1 rule's is. A JSONPath's hint, which quotes the path rewritten, no longer
-    shows part of a value read from the environment.
+  - A selector's or relation's error, when it decodes or compiles and in the checks across
+    objects, stands only when the same object with each value it reads from the environment
+    masked fails the same way (with the relations it joins masked too); otherwise it is redacted,
+    naming the object (`` `relations.deps`: <redacted> (the error could quote a value read from
+    the environment) ``), as a version 1 rule's is. So no error shows part of such a value: a
+    JSONPath's hint, which quotes the path rewritten, a `has_ancestor:` path's last segment, or a
+    value too short for the whole-value scrub.
   - `alint list` lists a version 2 config's named selectors and relations after its rules, each
     with the file that declares it and the aliases that reach that file; `list --format json`
     adds `selectors` and `relations` for a version 2 config only, and `--category` lists rules

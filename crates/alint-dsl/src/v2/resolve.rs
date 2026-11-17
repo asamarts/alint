@@ -30,7 +30,7 @@ use alint_core::{Capability, ConfigSourceClass, Error, GitOperation, Result};
 
 use super::model::{
     Entries, EntriesFormat, Field, FieldSource, Join, JoinSide, Member, Objects, Part, PathToken,
-    Predicate, Read, Reader, Reference, Relation, Rows, Selector, SelectorRef, Transform,
+    Predicate, Read, Reader, Reference, Relation, Rows, Selector, SelectorRef, Transform, Twins,
 };
 
 /// At most this many names are listed in an error; past it, the nearest one
@@ -43,31 +43,89 @@ pub(super) fn located(display: &str, path: &str, message: impl std::fmt::Display
     Error::Other(format!("{display}: `{path}`: {message}"))
 }
 
-/// `names` as "`a`, `b`", or the nearest of them to `wanted` when there are
-/// more than [`LISTED_MAX`]: `what` introduces a list ("its fields are"),
-/// `noun` counts the rest ("fields").
-pub(super) fn suggest(wanted: &str, names: &[String], what: &str, noun: &str) -> String {
-    if names.len() <= LISTED_MAX {
-        let listed: Vec<&str> = names.iter().map(String::as_str).collect();
-        return format!("{what} {}", super::decode::listed(&listed));
+/// The names a suggestion may offer, in order: groups of names, each written
+/// `alias.name` when its group has an alias. A group's alias is weighed once
+/// for all its names, so a long alias costs its length once, not once per
+/// name ([`crate::interp::Within`]).
+#[derive(Debug, Default)]
+pub(super) struct Offered<'n> {
+    groups: Vec<(Option<&'n str>, Vec<&'n str>)>,
+}
+
+impl<'n> Offered<'n> {
+    /// Bare `names`.
+    pub(super) fn bare(names: Vec<&'n str>) -> Self {
+        let mut offered = Self::default();
+        offered.push(None, names);
+        offered
     }
-    match nearest(wanted, names) {
-        Some(near) => format!("did you mean `{near}`?"),
-        None => format!(
-            "there are {} {noun}, none named like `{wanted}`",
-            names.len()
-        ),
+
+    /// Add `names`, written `alias.name` when `alias` is given.
+    pub(super) fn push(&mut self, alias: Option<&'n str>, names: Vec<&'n str>) {
+        self.groups.push((alias, names));
+    }
+
+    fn len(&self) -> usize {
+        self.groups.iter().map(|(_, names)| names.len()).sum()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.groups.iter().all(|(_, names)| names.is_empty())
+    }
+
+    fn written(alias: Option<&str>, name: &str) -> String {
+        alias.map_or_else(|| name.to_string(), |alias| format!("{alias}.{name}"))
     }
 }
 
-/// The name in `names` closest to `wanted`, within two edits (the first of
-/// the closest), in time linear in their total length.
-fn nearest<'n>(wanted: &str, names: &'n [String]) -> Option<&'n str> {
-    names
-        .iter()
-        .filter_map(|name| Some((crate::interp::levenshtein_within(wanted, name, 2)?, name)))
-        .min_by_key(|(distance, _)| *distance)
-        .map(|(_, name)| name.as_str())
+/// `offered` as "`a`, `b`", or the nearest of them to `wanted` when there are
+/// more than [`LISTED_MAX`]: `what` introduces a list ("its fields are"),
+/// `noun` counts the rest ("fields").
+pub(super) fn suggest(wanted: &str, offered: &Offered<'_>, what: &str, noun: &str) -> String {
+    let count = offered.len();
+    if count <= LISTED_MAX {
+        let written: Vec<String> = offered
+            .groups
+            .iter()
+            .flat_map(|(alias, names)| names.iter().map(|name| Offered::written(*alias, name)))
+            .collect();
+        let listed: Vec<&str> = written.iter().map(String::as_str).collect();
+        return format!("{what} {}", super::decode::listed(&listed));
+    }
+    match nearest(wanted, offered) {
+        Some(near) => format!("did you mean `{near}`?"),
+        None => format!("there are {count} {noun}, none named like `{wanted}`"),
+    }
+}
+
+/// The name `offered` holds closest to `wanted`, within two edits (the first
+/// of the closest), in time linear in the length of `wanted` and of the names:
+/// `wanted` is read once, each alias once, and each name only when its length
+/// can come within two edits, and then only as far as it can.
+fn nearest(wanted: &str, offered: &Offered<'_>) -> Option<String> {
+    let wanted = crate::interp::chars_of(wanted);
+    let mut closest: Option<(usize, Option<&str>, &str)> = None;
+    for (alias, names) in &offered.groups {
+        let mut start = crate::interp::Within::new(&wanted, 2);
+        if let Some(alias) = alias
+            && !(start.feed(alias) && start.feed("."))
+        {
+            continue;
+        }
+        for name in names {
+            if !start.may_reach(name.len()) {
+                continue;
+            }
+            let mut within = start.clone();
+            let Some(distance) = within.feed(name).then(|| within.distance()).flatten() else {
+                continue;
+            };
+            if closest.is_none_or(|(least, _, _)| distance < least) {
+                closest = Some((distance, *alias, name));
+            }
+        }
+    }
+    closest.map(|(_, alias, name)| Offered::written(alias, name))
 }
 
 /// The kind of object a reference must name.
@@ -197,11 +255,11 @@ impl<'o> Namespaces<'o> {
     }
 
     /// The names of `wanted`'s kind that `source` declares.
-    fn own_names(&self, source: SourceIndex, wanted: Wanted) -> Vec<String> {
+    fn own_names(&self, source: SourceIndex, wanted: Wanted) -> Vec<&'o str> {
         let objects = &self.objects.sources[source.0];
         match wanted {
-            Wanted::Selector => objects.selectors.iter().map(|(n, _)| n.clone()).collect(),
-            Wanted::Relation => objects.relations.iter().map(|(n, _)| n.clone()).collect(),
+            Wanted::Selector => objects.selectors.iter().map(|(n, _)| n.as_str()).collect(),
+            Wanted::Relation => objects.relations.iter().map(|(n, _)| n.as_str()).collect(),
         }
     }
 
@@ -341,12 +399,10 @@ impl<'o> Namespaces<'o> {
                 );
             }
         }
-        let mut reachable = self.own_names(from, wanted);
+        let mut reachable = Offered::bare(self.own_names(from, wanted));
         for alias in &self.sources[from.0].aliases {
             if let Some(target) = alias.target {
-                for held in self.own_names(target, wanted) {
-                    reachable.push(format!("{}.{held}", alias.name));
-                }
+                reachable.push(Some(&alias.name), self.own_names(target, wanted));
             }
         }
         if reachable.is_empty() {
@@ -365,10 +421,10 @@ impl<'o> Namespaces<'o> {
 
     /// What to say about `alias.name` where `from` has no alias `alias`.
     fn alias_hint(&self, from: SourceIndex, alias: &str, name: &str) -> String {
-        let aliases: Vec<String> = self.sources[from.0]
+        let aliases: Vec<&str> = self.sources[from.0]
             .aliases
             .iter()
-            .map(|alias| alias.name.clone())
+            .map(|alias| alias.name.as_str())
             .collect();
         if aliases.is_empty() {
             return format!(
@@ -376,7 +432,7 @@ impl<'o> Namespaces<'o> {
                  entry of the config that declares `{name}`"
             );
         }
-        suggest(alias, &aliases, "its aliases are", "aliases")
+        suggest(alias, &Offered::bare(aliases), "its aliases are", "aliases")
     }
 
     /// What to say about `alias.name` where `target` does not declare `name`.
@@ -404,7 +460,8 @@ impl<'o> Namespaces<'o> {
         if held.is_empty() {
             return format!("it declares no {}s", wanted.noun());
         }
-        let qualified: Vec<String> = held.iter().map(|n| format!("{alias}.{n}")).collect();
+        let mut qualified = Offered::default();
+        qualified.push(Some(alias), held);
         suggest(
             &format!("{alias}.{name}"),
             &qualified,
@@ -492,10 +549,103 @@ pub(crate) fn resolve(objects: &Objects) -> Result<Resolved<'_>> {
             reads_environment: reads_environment || selectors_read_environment,
         });
     }
-    let order = super::plan_check::check(&plan)?;
+    let order = super::plan_check::check(&plan).map_err(|failure| {
+        let (checked, error) = *failure;
+        unless_reproduced(&namespaces, &plan, checked, error)
+    })?;
     add_capabilities(&mut plan, &order);
     gate_objects(&plan)?;
     Ok(Resolved { plan, namespaces })
+}
+
+/// `error`, a plan-check error `checked` failed with, when the same check
+/// fails with the same message on a copy of the plan whose objects it reads
+/// have each value the environment supplied masked (a relation's check reads
+/// the relations it joins too); the error redacted to the object otherwise.
+/// A value can be quoted whole, cut (a `has_ancestor:` path's last segment)
+/// or under the four characters the whole-value scrub removes, so only a
+/// rerun shows the error quotes none, as for a rule's error. A check whose
+/// objects read nothing from the environment keeps its error.
+fn unless_reproduced(
+    namespaces: &Namespaces<'_>,
+    plan: &Plan,
+    checked: super::plan_check::Checked,
+    error: Error,
+) -> Error {
+    use super::plan_check::Checked;
+
+    let objects = namespaces.objects;
+    // The objects the check reads, and the one its error is about.
+    let (selectors, relations, about) = match checked {
+        Checked::Order => return error,
+        Checked::Selector(id) => {
+            let named = &plan.selectors[id.0];
+            let about = (named.source, format!("selectors.{}", named.name));
+            (vec![id], Vec::new(), about)
+        }
+        Checked::InlineSelectors(id) | Checked::Relation(id) => {
+            let named = plan.relation(id);
+            let about = (named.source, format!("relations.{}", named.name));
+            let read = if checked == Checked::Relation(id) {
+                super::plan_check::read_by(plan, id)
+            } else {
+                vec![id]
+            };
+            (Vec::new(), read, about)
+        }
+    };
+    let selector = |id: SelectorId| {
+        let (source, local) = namespaces.selectors[id.0];
+        &objects.sources[source.0].selectors[local]
+    };
+    let relation = |id: RelationId| {
+        let (source, local) = namespaces.relations[id.0];
+        (source, &objects.sources[source.0].relations[local])
+    };
+    let unneeded = selectors
+        .iter()
+        .all(|&id| matches!(selector(id).1.twins, Twins::Unneeded))
+        && relations
+            .iter()
+            .all(|&id| matches!(relation(id).1.1.twins, Twins::Unneeded));
+    if unneeded {
+        return error;
+    }
+    let message = error.to_string();
+    let reproduced = (0..alint_core::NumberMask::BOTH.len()).any(|direction| {
+        let mut copy = plan.clone();
+        for &id in &selectors {
+            if let Twins::Masked(twins) = &selector(id).1.twins {
+                let Some(twin) = &twins[direction] else {
+                    return false;
+                };
+                copy.selectors[id.0].selector = selector_def(twin);
+            }
+        }
+        for &id in &relations {
+            let (source, (name, held)) = relation(id);
+            if let Twins::Masked(twins) = &held.twins {
+                let Some(twin) = &twins[direction] else {
+                    return false;
+                };
+                let Ok(definition) = relation_def(namespaces, source, name, twin) else {
+                    return false;
+                };
+                copy.relations[id.0].relation = definition;
+            }
+        }
+        super::plan_check::recheck(&copy, checked)
+            .err()
+            .is_some_and(|rerun| rerun.to_string() == message)
+    });
+    if reproduced {
+        return error;
+    }
+    located(
+        namespaces.display(about.0),
+        &about.1,
+        "<redacted> (the error could quote a value read from the environment)",
+    )
 }
 
 /// The parts a relation reads with: its one part, a union's, or none for a
@@ -765,6 +915,7 @@ fn add_capabilities(plan: &mut Plan, order: &[RelationId]) {
                     paths: selector.paths.clone(),
                     scope_filter: selector.scope_filter.clone(),
                     reads_environment: false,
+                    twins: Twins::Unneeded,
                 }));
             }
         };
