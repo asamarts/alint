@@ -39,6 +39,7 @@ pub mod extends;
 mod interp;
 mod loader;
 mod nested;
+mod template_budget;
 mod trust;
 
 pub(crate) use trust::{
@@ -305,7 +306,7 @@ fn resolve_top_level(
             &[],
             loader::SourceContext::new(alint_core::ConfigSourceClass::DropIn, raw.version),
         )?;
-        raw = merge(raw, drop_in);
+        raw = merge(raw, drop_in)?;
     }
     // With the forms the loader printed an `extends:` entry read from the
     // environment in, which a later error can quote too (`load_extended_source`).
@@ -548,6 +549,11 @@ impl RawConfig {
                     .map(|id| (id.to_string(), t))
             })
             .collect();
+        let template_sizes: std::collections::HashMap<&str, usize> = templates_by_id
+            .iter()
+            .map(|(id, template)| (id.as_str(), template_budget::size_of_mapping(template)))
+            .collect();
+        let mut budget = template_budget::Budget::default();
 
         let mut rules = Vec::with_capacity(self.rules.len());
         for m in &self.rules {
@@ -561,9 +567,12 @@ impl RawConfig {
             // An unknown template's error quotes `extends_template:`, which may
             // be read from the environment.
             let masked_instance = masked_rule_mappings(m);
-            let mut expanded = expand_template(m, &templates_by_id).map_err(|error| {
+            let budget_before = budget;
+            let templates = (&templates_by_id, &template_sizes);
+            let mut expanded = expand_template(m, templates, &mut budget).map_err(|error| {
                 redact_rule_error(error, masked_instance.as_deref(), &id_hint, |masked| {
-                    expand_template(masked, &templates_by_id).map(drop)
+                    let mut budget = budget_before;
+                    expand_template(masked, templates, &mut budget).map(drop)
                 })
             })?;
             mark_sensitive_conditions(&mut expanded, &self.env_vars);
@@ -725,7 +734,11 @@ fn effective_requirements(compatibility: &[ConfigCompatibility]) -> Option<Confi
 /// instance's remaining keys on top.
 fn expand_template(
     rule: &Mapping,
-    templates_by_id: &std::collections::HashMap<String, &Mapping>,
+    (templates_by_id, template_sizes): (
+        &std::collections::HashMap<String, &Mapping>,
+        &std::collections::HashMap<&str, usize>,
+    ),
+    budget: &mut template_budget::Budget,
 ) -> Result<Mapping> {
     let Some(template_id) = rule
         .get("extends_template")
@@ -763,8 +776,6 @@ fn expand_template(
         .and_then(|value| value.as_mapping());
 
     let untrusted_fix_source = has_untrusted_fix_source(template) || has_untrusted_fix_source(rule);
-    let mut expanded = (*template).clone();
-    mark_template_sensitive_fields(&mut expanded, template, env_vars);
     // A template id read from the environment stays out of the attribution
     // an error about a field the template supplies quotes. (`sensitive: true`
     // leaves it shown: it names the rule's template, part of its identity.)
@@ -773,10 +784,25 @@ fn expand_template(
     } else {
         format!("template `{template_id}`")
     };
+    let overrun = |overrun: template_budget::Overrun| {
+        Error::rule_config(&id_hint, overrun.message(&template_source))
+    };
+    // Every instance copies the template's body: charge the copy before it
+    // is made.
+    budget
+        .charge(
+            template_sizes
+                .get(template_id.as_str())
+                .copied()
+                .unwrap_or(0),
+        )
+        .map_err(overrun)?;
+    let mut expanded = (*template).clone();
+    mark_template_sensitive_fields(&mut expanded, template, env_vars);
     mark_unattributed_field_sources(&mut expanded, &template_source);
     let template_field_sources = expanded.remove(FIELD_SOURCES_MARKER);
     let template_provenance = expanded.remove(PROVENANCE_MARKER);
-    expanded = substitute_template_vars(expanded, &vars);
+    expanded = substitute_template_vars(expanded, &vars, budget).map_err(overrun)?;
     expanded.remove("id");
     if let Some(field_sources) = template_field_sources {
         expanded.insert(FIELD_SOURCES_MARKER.into(), field_sources);
@@ -1015,35 +1041,38 @@ fn render_template_vars(s: &str, vars: &std::collections::HashMap<String, String
 
 /// Recursively walk a YAML mapping and substitute
 /// `{{vars.<name>}}` placeholders in every string value with
-/// the corresponding entry from `vars`. Unknown placeholders
-/// are preserved literally so a typo surfaces in the rule's
-/// error / output rather than silently blanking a field.
+/// the corresponding entry from `vars`, charging what each adds to
+/// `budget`. Unknown placeholders are preserved literally so a typo
+/// surfaces in the rule's error / output rather than silently
+/// blanking a field.
 fn substitute_template_vars(
     m: Mapping,
     vars: &std::collections::HashMap<String, String>,
-) -> Mapping {
+    budget: &mut template_budget::Budget,
+) -> std::result::Result<Mapping, template_budget::Overrun> {
     let mut out = Mapping::with_capacity(m.len());
     for (k, v) in m {
-        out.insert(k, substitute_template_vars_value(v, vars));
+        out.insert(k, substitute_template_vars_value(v, vars, budget)?);
     }
-    out
+    Ok(out)
 }
 
 fn substitute_template_vars_value(
     value: ayaml::Value,
     vars: &std::collections::HashMap<String, String>,
-) -> ayaml::Value {
+    budget: &mut template_budget::Budget,
+) -> std::result::Result<ayaml::Value, template_budget::Overrun> {
     use ayaml::Value;
-    match value {
-        Value::String(s) => Value::String(render_template_vars(&s, vars)),
+    Ok(match value {
+        Value::String(s) => Value::String(budget.render(&s, vars)?),
         Value::Sequence(seq) => Value::Sequence(
             seq.into_iter()
-                .map(|v| substitute_template_vars_value(v, vars))
-                .collect(),
+                .map(|v| substitute_template_vars_value(v, vars, budget))
+                .collect::<std::result::Result<_, _>>()?,
         ),
-        Value::Mapping(inner) => Value::Mapping(substitute_template_vars(inner, vars)),
+        Value::Mapping(inner) => Value::Mapping(substitute_template_vars(inner, vars, budget)?),
         other => other,
-    }
+    })
 }
 
 /// Lookup used by config interpolation.
@@ -1088,8 +1117,37 @@ impl ConfigSourceProvider for FilesystemConfigSource {
         path.canonicalize()
     }
 
+    /// Read a regular file of at most [`alint_core::MAX_STRUCTURED_BYTES`]. A
+    /// FIFO would block the read until a writer appears and a device such as
+    /// `/dev/zero` never ends, so anything but a regular file (after symlinks)
+    /// is refused before it is opened, and the read stops one byte past the
+    /// cap, so a file that grows meanwhile cannot make it unbounded.
     fn read_to_string(&self, path: &Path) -> std::io::Result<String> {
-        fs::read_to_string(path)
+        use std::io::Read as _;
+        if !fs::metadata(path)?.is_file() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "not a regular file",
+            ));
+        }
+        // A leading byte order mark does not count, as in [`config_text`].
+        let cap = alint_core::MAX_STRUCTURED_BYTES + '\u{feff}'.len_utf8();
+        let mut bytes = Vec::new();
+        fs::File::open(path)?
+            .take(cap as u64 + 1)
+            .read_to_end(&mut bytes)?;
+        if bytes.len() > cap {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::FileTooLarge,
+                config_too_large_message(),
+            ));
+        }
+        String::from_utf8(bytes).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "stream did not contain valid UTF-8",
+            )
+        })
     }
 
     fn yaml_files(&self, dir: &Path) -> std::io::Result<Vec<PathBuf>> {
@@ -1191,7 +1249,32 @@ impl<'catalog> LoadOptions<'catalog> {
     }
 }
 
+/// The refusal of a config larger than [`alint_core::MAX_STRUCTURED_BYTES`],
+/// in the words of a structured data file's.
+fn config_too_large_message() -> String {
+    format!(
+        "input exceeds the maximum supported size for a structured document ({} bytes)",
+        alint_core::MAX_STRUCTURED_BYTES
+    )
+}
+
+/// The YAML text of a config: `contents` without one leading byte order mark,
+/// which ayaml reads as content before a `---` or `%YAML` (data files drop it
+/// too), and refused, naming `source`, past the size every YAML document is
+/// held to.
+pub(crate) fn config_text<'c>(contents: &'c str, source: &str) -> Result<&'c str> {
+    let text = contents.strip_prefix('\u{feff}').unwrap_or(contents);
+    if text.len() > alint_core::MAX_STRUCTURED_BYTES {
+        return Err(Error::Other(format!(
+            "{source}: {}",
+            config_too_large_message()
+        )));
+    }
+    Ok(text)
+}
+
 pub fn parse(yaml: &str) -> Result<Config> {
+    let yaml = config_text(yaml, "<inline>")?;
     // Guard the deep-flow and alias bombs before the parser sees them, same as
     // `load()` / the remote+bundled `extends:` bodies. This is a public entry
     // point, so an external caller's untrusted YAML must be as safe here as
@@ -1211,12 +1294,8 @@ pub fn parse(yaml: &str) -> Result<Config> {
     let mut config: Config = match alint_core::yaml::from_str(yaml) {
         Ok(config) => config,
         Err(parse_error) => {
-            if let Err(error @ Error::Other(_)) =
-                loader::reject_nonliteral_requirement(yaml, "<inline>")
-            {
-                return Err(error);
-            }
-            return Err(Error::Yaml(parse_error));
+            return Err(loader::nonliteral_requirement_after_error(yaml, "<inline>")
+                .unwrap_or(Error::Yaml(parse_error)));
         }
     };
     if config.requires.is_some() {
@@ -1353,7 +1432,7 @@ impl FilterMode {
 ///   `any_file_exists` with `all_files_exist` would produce an
 ///   invalid fact).
 /// - `vars` merged as a map; `b`'s values override.
-/// - `ignore` concatenated `a` then `b`.
+/// - `ignore` concatenated `a` then `b`, each pattern once.
 /// - `version`, `respect_gitignore`, `fix_size_limit` and
 ///   `nested_configs` take `b`'s value when `b` sets it, else keep
 ///   `a`'s (defaults are applied once, in `finalize`). An
@@ -1398,7 +1477,41 @@ fn merge_facts(a: Vec<FactSpec>, b: Vec<FactSpec>) -> Vec<FactSpec> {
         .collect()
 }
 
-pub(crate) fn merge(a: RawConfig, b: RawConfig) -> RawConfig {
+/// The most entries (rules, templates, facts, vars, `ignore:` patterns and
+/// recorded `when` reads) a config may hold once its `extends:` chain and
+/// drop-ins are merged. Real configs hold hundreds; an `extends:` diamond that
+/// lists one source twice per level once doubled the lists at each level.
+pub(crate) const MAX_MERGED_ENTRIES: usize = 1 << 20;
+
+/// `items` without repeats, each kept where it first appears.
+fn dedup_in_order<T: Eq + std::hash::Hash + Clone>(items: Vec<T>) -> Vec<T> {
+    let mut seen = std::collections::HashSet::with_capacity(items.len());
+    items
+        .into_iter()
+        .filter(|item| seen.insert(item.clone()))
+        .collect()
+}
+
+/// [`merge_unbounded`], refused past [`MAX_MERGED_ENTRIES`].
+pub(crate) fn merge(a: RawConfig, b: RawConfig) -> Result<RawConfig> {
+    let merged = merge_unbounded(a, b);
+    let entries = merged.rules.len()
+        + merged.templates.len()
+        + merged.facts.len()
+        + merged.vars.len()
+        + merged.ignore.len()
+        + merged.untrusted_when_var_reads.len();
+    if entries > MAX_MERGED_ENTRIES {
+        return Err(Error::Other(format!(
+            "the merged config holds {entries} entries (rules, templates, facts, vars and \
+             `ignore:` patterns), more than the {MAX_MERGED_ENTRIES} supported; flatten the \
+             `extends:` chain or split the ruleset"
+        )));
+    }
+    Ok(merged)
+}
+
+fn merge_unbounded(a: RawConfig, b: RawConfig) -> RawConfig {
     let version = b.version.or(a.version);
     let respect_gitignore = b.respect_gitignore.or(a.respect_gitignore);
     let fix_size_limit = b.fix_size_limit.or(a.fix_size_limit);
@@ -1418,8 +1531,12 @@ pub(crate) fn merge(a: RawConfig, b: RawConfig) -> RawConfig {
     // by `reject_baseline_in`); the later (child) config wins when it sets one.
     let baseline = b.baseline.or(a.baseline);
 
+    // Each list keeps one copy of an entry two sources share, so a source an
+    // `extends:` diamond reaches twice does not double it at every level. An
+    // `ignore:` pattern always excludes, so order and repeats do not matter.
     let mut ignore = a.ignore;
     ignore.extend(b.ignore);
+    let ignore = dedup_in_order(ignore);
 
     // The env-derived mark follows the value that wins: `b` overriding a name
     // with a literal clears it, with an interpolated value sets it.
@@ -1434,6 +1551,7 @@ pub(crate) fn merge(a: RawConfig, b: RawConfig) -> RawConfig {
     vars.extend(b.vars);
     let mut untrusted_when_var_reads = a.untrusted_when_var_reads;
     untrusted_when_var_reads.extend(b.untrusted_when_var_reads);
+    let untrusted_when_var_reads = dedup_in_order(untrusted_when_var_reads);
     let compatibility = merged_compatibility(a.compatibility, b.compatibility);
     let mut environment_values = a.environment_values;
     loader::add_environment_values(&mut environment_values, &b.environment_values);
@@ -1464,7 +1582,7 @@ pub(crate) fn merge(a: RawConfig, b: RawConfig) -> RawConfig {
         .into_iter()
         .map(|id| templates_by_id.remove(&id).unwrap())
         .collect();
-    templates.extend(template_orphans);
+    templates.extend(dedup_in_order(template_orphans));
 
     // Rules: field-merge mappings by id. Rules without an id key
     // can't participate in merge and are passed through unchanged
@@ -1496,13 +1614,14 @@ pub(crate) fn merge(a: RawConfig, b: RawConfig) -> RawConfig {
         .into_iter()
         .map(|id| rules_by_id.remove(&id).unwrap())
         .collect();
-    rules.extend(orphans);
+    rules.extend(dedup_in_order(orphans));
 
     // `trusted_extends:` is top-level-only -- consumed at is_top before any merge,
     // and rejected from an extended / nested source. Concatenate defensively so a
     // stray non-empty value still survives to the per-source rejection upstream.
     let mut trusted_extends = a.trusted_extends;
     trusted_extends.extend(b.trusted_extends);
+    let trusted_extends = dedup_in_order(trusted_extends);
 
     RawConfig {
         version,
