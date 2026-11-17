@@ -870,11 +870,70 @@ fn discover_outside_a_repository_skips_another_users_config() {
     assert_eq!(found.skipped, Vec::<PathBuf>::new());
 
     // Inside a repository, no file is skipped: the repository is the user's
-    // to vouch for, as before.
+    // to vouch for, as before. Here the user owns `.git` and the directories,
+    // and another user the config files.
     std::fs::create_dir(mine.join(".git")).unwrap();
-    let found = discover_config_with(&nested, &|_| Some(false));
+    let configs_foreign = |path: &Path| {
+        Some(
+            path.extension()
+                .is_none_or(|ext| ext != "yml" && ext != "yaml"),
+        )
+    };
+    let found = discover_config_with(&nested, &configs_foreign);
     assert_eq!(found.path, Some(mine.join("alint.yml")));
     assert_eq!(found.skipped, Vec::<PathBuf>::new());
+}
+
+/// A `.git` another user owns (an empty file planted in a shared directory is
+/// enough), or one in a directory another user owns, makes no repository top:
+/// discovery goes on climbing and skips another user's config above the start,
+/// as outside every repository.
+#[test]
+fn discover_takes_no_repository_top_from_another_users_git() {
+    let tmp = tempfile::tempdir().unwrap();
+    if alint_core::git::repository_top(tmp.path()).is_some() {
+        eprintln!("skipped: the temporary directory is inside a repository");
+        return;
+    }
+    let shared = tmp.path().join(".alint.yml");
+    std::fs::write(&shared, "version: 1\nrules: []\n").unwrap();
+    let planted = tmp.path().join(".git");
+    std::fs::write(&planted, "").unwrap();
+    let nested = tmp.path().join("work/a/b");
+    std::fs::create_dir_all(&nested).unwrap();
+    let outside = |found: &Discovery| {
+        found
+            .path
+            .as_deref()
+            .is_none_or(|path| !path.starts_with(tmp.path()))
+    };
+
+    // Another user owns the config and the `.git` beside it.
+    let foreign = |path: &Path| Some(path != shared.as_path() && path != planted.as_path());
+    let found = discover_config_with(&nested, &foreign);
+    assert_eq!(found.skipped, std::slice::from_ref(&shared));
+    assert!(outside(&found), "{found:?}");
+
+    // The user's own `.git`, in a directory another user owns.
+    let foreign_directory = |path: &Path| Some(path != shared.as_path() && path != tmp.path());
+    let found = discover_config_with(&nested, &foreign_directory);
+    assert_eq!(found.skipped, std::slice::from_ref(&shared));
+    assert!(outside(&found), "{found:?}");
+
+    // As a directory too.
+    std::fs::remove_file(&planted).unwrap();
+    std::fs::create_dir(&planted).unwrap();
+    let found = discover_config_with(&nested, &foreign);
+    assert_eq!(found.skipped, std::slice::from_ref(&shared));
+
+    // The positive control: the user's own `.git` in the user's own directory
+    // is the top, and its config is used whoever owns that file.
+    let found = discover_config_with(&nested, &|path: &Path| Some(path != shared.as_path()));
+    assert_eq!(found.path, Some(shared.clone()));
+    assert_eq!(found.skipped, Vec::<PathBuf>::new());
+    // No owner read (Windows): any `.git` is the top.
+    let found = discover_config_with(&nested, &|_| None);
+    assert_eq!(found.path, Some(shared.clone()));
 }
 
 #[test]
@@ -975,4 +1034,55 @@ fn extends_promoting_file_remove_to_safe_is_rejected() {
          fix: { file_remove: { applicability: safe } }",
     );
     assert!(crate::reject_fix_promotion_in(std::slice::from_ref(&nested), "./base.yml").is_err());
+}
+
+#[test]
+fn an_inherited_applicability_that_is_not_a_tier_name_is_refused_and_stripped() {
+    use ayaml::Mapping;
+    let parse_rule = |y: &str| -> Mapping { alint_core::yaml::from_str(y).unwrap() };
+    // serde writes a variant as a one-entry mapping or a tag; a gate that
+    // compares strings only would let `{safe: ~}` through as a promotion.
+    for written in ["{safe: ~}", "{SAFE: null}", "!safe ~", "[safe]", "1"] {
+        for rule in [
+            format!(
+                "id: no-bak\nkind: file_absent\npaths: '**/*.bak'\nlevel: error\n\
+                 fix: {{ file_remove: {{ applicability: {written} }} }}"
+            ),
+            format!(
+                "id: parent\nkind: for_each_dir\nselect: '*'\nlevel: error\n\
+                 require:\n  - kind: file_absent\n    paths: '**/*.bak'\n    \
+                 fix: {{ file_remove: {{ applicability: {written} }} }}"
+            ),
+        ] {
+            let mut rule = parse_rule(&rule);
+            let error = crate::reject_fix_promotion_in(std::slice::from_ref(&rule), "./base.yml")
+                .expect_err(written)
+                .to_string();
+            assert!(error.contains("is not a tier name"), "{written}: {error}");
+            crate::strip_fix_promotions_in_rule(&mut rule);
+            assert!(
+                crate::reject_fix_promotion_in(std::slice::from_ref(&rule), "./base.yml").is_ok(),
+                "{written}: not stripped"
+            );
+        }
+    }
+    // A null is no value: the op's default tier.
+    let null = parse_rule(
+        "id: no-bak\nkind: file_absent\npaths: '**/*.bak'\nlevel: error\n\
+         fix: { file_remove: { applicability: ~ } }",
+    );
+    assert!(crate::reject_fix_promotion_in(std::slice::from_ref(&null), "./base.yml").is_ok());
+}
+
+#[test]
+fn a_template_placeholder_anywhere_in_an_applicability_is_refused() {
+    let template: ayaml::Mapping = alint_core::yaml::from_str(
+        "id: t\nkind: file_absent\npaths: '**/*.bak'\n\
+         fix: { file_remove: { applicability: { '{{vars.tier}}': ~ } } }",
+    )
+    .unwrap();
+    assert_eq!(
+        crate::find_template_placeholder_in_guarded_field(&template).as_deref(),
+        Some("fix.file_remove.applicability")
+    );
 }

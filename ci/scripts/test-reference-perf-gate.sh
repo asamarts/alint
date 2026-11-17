@@ -7,12 +7,16 @@
 #   - an instruction breach (gungraun "Regressed") and a syscall family over the
 #     allowance each exit 1 with a labelled verdict; a count within the
 #     allowance passes;
+#   - the `probe` family's allowance grows by 3 for each directory in the tree
+#     (outside `.git`) and 5 for each one above it, and no other family's does
+#     (ADR-0045);
 #   - a gate that cannot measure is a labelled tooling failure, never a pass: a
 #     missing reference tag, a det_check run with no result line, a non-zero
 #     exit without a regression verdict, a missing S1-S3 cell, a cell with no
 #     reference measurement, a traced run that did not complete, an empty trace;
 #   - the reference worktree is gone afterwards;
-#   - syscall-counts.py skips a spawned child's calls and resumed halves, and
+#   - syscall-counts.py skips a spawned child's calls and resumed halves,
+#     counts a stat of `.git`, `.jj`, `.gitignore` or `.ignore` as a probe, and
 #     refuses logs that are not measurements.
 # Behavioural: the gate runs in a scratch git repo against stubbed `cargo`,
 # `strace`, `gungraun-runner` and `valgrind`. The real Valgrind and strace runs
@@ -46,16 +50,31 @@ cat > "$sandbox/trace.txt" <<'TRACE'
 100 statx(AT_FDCWD, "b.rs", AT_STATX_SYNC_AS_STAT, STATX_ALL, {...}) = 0
 101 <... read resumed>"fn a() {}\n", 8192) = 10
 100 getdents64(5, 0x5581 /* 4 entries */, 32768) = 112
+101 statx(AT_FDCWD, "/w/src/.gitignore", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7f) = -1 ENOENT (No such file or directory)
+100 newfstatat(AT_FDCWD, ".git", {st_mode=S_IFDIR|0755, ...}, 0) = 0
+101 statx(AT_FDCWD, "/w/.jj",  <unfinished ...>
+101 <... statx resumed>0x7f) = -1 ENOENT (No such file or directory)
+100 statx(AT_FDCWD, "/w/src/.ignore", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7f) = -1 ENOENT (No such file or directory)
+100 statx(AT_FDCWD, "/w/a.gitignore", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7f) = 0
+100 statx(AT_FDCWD, "/w/.git/info/exclude", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7f) = 0
 102 execve("/usr/bin/git", ["git", "rev-parse"], 0x7ffc /* 3 vars */) = 0
 102 read(3, "ref: refs/heads/main\n", 4096) = 21
 102 openat(AT_FDCWD, ".git/HEAD", O_RDONLY) = 3
+102 newfstatat(AT_FDCWD, ".git", {st_mode=S_IFDIR|0755, ...}, 0) = 0
 101 +++ exited with 0 +++
 TRACE
 counts="$(python3 "$COUNTER" "$sandbox/trace.txt")"
-if [[ "$counts" == $'read 2\nstat 2\nopen 1\ndents 1' ]]; then
-  ok "threads count, the git child and resumed halves do not"
+if [[ "$counts" == $'read 2\nstat 4\nopen 1\ndents 1\nprobe 4' ]]; then
+  ok "threads count, the git child and resumed halves do not; probes by name"
 else
   bad "syscall counts: $counts"
+fi
+grep -vE '\.(git|jj|gitignore|ignore)"' "$sandbox/trace.txt" > "$sandbox/no-probes.txt"
+counts="$(python3 "$COUNTER" "$sandbox/no-probes.txt")"
+if [[ "$counts" == *$'\nprobe 0' ]]; then
+  ok "a trace with no probes is still a measurement"
+else
+  bad "no-probe counts: $counts"
 fi
 set_list="$(python3 "$COUNTER" --syscalls)"
 if [[ "$set_list" == execve,* ]] && [[ "$set_list" == *'?statx'* ]] && [[ "$set_list" == *'?preadv2'* ]]; then
@@ -90,7 +109,8 @@ case "$1" in
   bench)
     echo "bench ALINT_DET_BIN=${ALINT_DET_BIN:-unset}" >> "$STUB_LOG"
     for s in s1 s2 s3; do
-      mkdir -p "target/det-trees/$s-10000"
+      mkdir -p "target/det-trees/$s-10000/a/b" "target/det-trees/$s-10000/c" \
+        "target/det-trees/$s-10000/.git/objects"
       echo 'version: 1' > "target/det-trees/$s-10000/.alint.yml"
     done
     case " $* " in
@@ -102,7 +122,8 @@ echo "unexpected cargo $*" >&2
 exit 99
 STUB
 # strace: write a trace for whichever binary it runs (HEAD's gets
-# STUB_HEAD_EXTRA_STATS more stat calls) and exit with STUB_STRACE_RC.
+# STUB_HEAD_EXTRA_STATS more stat calls and STUB_HEAD_EXTRA_PROBES more probes)
+# and exit with STUB_STRACE_RC.
 cat > "$sandbox/bin/strace" <<'STUB'
 #!/usr/bin/env bash
 out=""; bin=""
@@ -116,10 +137,15 @@ while [[ $# -gt 0 ]]; do
 done
 if [[ -n "${STUB_EMPTY_TRACE:-}" ]]; then : > "$out"; exit 0; fi
 extra=0
-[[ "$bin" == */reference/* ]] || extra="${STUB_HEAD_EXTRA_STATS:-0}"
+probes=0
+if [[ "$bin" != */reference/* ]]; then
+  extra="${STUB_HEAD_EXTRA_STATS:-0}"
+  probes="${STUB_HEAD_EXTRA_PROBES:-0}"
+fi
 {
   echo '7 execve("alint", ["alint"], 0x1 /* 1 vars */) = 0'
   for _ in $(seq 1 $((100 + extra))); do echo '7 newfstatat(AT_FDCWD, "f", {...}, 0) = 0'; done
+  for _ in $(seq 1 $((10 + probes))); do echo '7 statx(AT_FDCWD, "d/.gitignore", 0, 0, 0x1) = -1 ENOENT'; done
   for _ in $(seq 1 50); do echo '7 read(3, "x", 8192) = 1'; done
   for _ in $(seq 1 20); do echo '7 openat(AT_FDCWD, "f", O_RDONLY) = 3'; done
   echo '7 getdents64(3, 0x1 /* 2 entries */, 32768) = 48'
@@ -219,10 +245,35 @@ else
   bad "syscall breach (rc=$rc)"
 fi
 run_gate STUB_HEAD_EXTRA_STATS=32
-if [[ $rc -eq 0 ]] && has summary '| s3_10k | stat | 100 | 132 | 32 |'; then
+if [[ $rc -eq 0 ]] && has summary '| s3_10k | stat | 100 | 132 | 32 | 32 |'; then
   ok "32 extra stat calls are within the allowance"
 else
   bad "syscall allowance (rc=$rc)"
+fi
+
+echo "==> probes: 32, 3 per directory in the tree (not .git) and 5 per one above it"
+# The stub tree holds the root, a, a/b and c (and .git/objects, not counted).
+tree_path="$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$repo/target/det-trees/s1-10000")"
+above="$(python3 -c 'import sys; print(len(sys.argv[1].strip("/").split("/")))' "$tree_path")"
+probe_allowance=$((32 + 3 * 4 + 5 * above))
+run_gate STUB_HEAD_EXTRA_PROBES="$probe_allowance"
+if [[ $rc -eq 0 ]] \
+  && has summary "| s2_10k | probe | 10 | $((10 + probe_allowance)) | ${probe_allowance} | ${probe_allowance} |"; then
+  ok "probes at the per-directory allowance pass"
+else
+  bad "probe allowance (rc=$rc)"
+fi
+run_gate STUB_HEAD_EXTRA_PROBES="$((probe_allowance + 1))"
+if [[ $rc -eq 1 ]] && has summary "| s1_10k | probe | 10 | $((11 + probe_allowance)) | $((probe_allowance + 1)) (over) |"; then
+  ok "one probe over the allowance fails"
+else
+  bad "probe breach (rc=$rc)"
+fi
+run_gate STUB_HEAD_EXTRA_STATS=33 STUB_HEAD_EXTRA_PROBES=0
+if [[ $rc -eq 1 ]] && has summary '| s1_10k | stat | 100 | 133 | 33 (over) | 32 |'; then
+  ok "the per-directory allowance is the probe family's alone"
+else
+  bad "stat allowance with directories (rc=$rc)"
 fi
 
 echo "==> tooling failures: exit 1, labelled"

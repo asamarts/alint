@@ -8,5 +8,6 @@
 //! module whose name ends in `<module>` (nextest can anchor it:
 //! `-E 'test(/^<module>::/)'`).
 
+mod git_denial;
 mod kani_proofs_present;
 mod yaml_parser_contract;

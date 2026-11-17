@@ -223,7 +223,7 @@
           "$ref": "#/$defs/FileGraphRequireMap"
         }
       ],
-      "description": "`require:` is either a bare string (`acyclic`) or a map (`{ forbidden_edges: [...] }`). A scalar and a map are structurally distinct, so an untagged enum decodes them unambiguously (the proven `cross_file_value_equals` `targets:` pattern - not the externally-tagged-enum-from-map trap `crate::extract` documents)."
+      "description": "`require:` is either a bare string (`acyclic`) or a map (`{ forbidden_edges: [...] }`)."
     },
     "FileGraphResolve": {
       "description": "How a content-extracted reference string is turned into a path.",
@@ -471,7 +471,7 @@
           "type": "array"
         }
       ],
-      "description": "`normalize:` accepts a single transform (`trim`) or an ordered list (`[trim, semver-minor]`), applied left-to-right. A scalar vs a sequence are structurally distinct, so an untagged enum decodes them unambiguously."
+      "description": "`normalize:` accepts a single transform (`trim`) or an ordered list (`[trim, semver-minor]`), applied left-to-right."
     },
     "NormalizeTransform": {
       "oneOf": [

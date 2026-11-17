@@ -530,12 +530,20 @@ pub const CONFIG_FILE_NAMES: [&str; 4] = [".alint.yml", ".alint.yaml", "alint.ym
 /// `*.yaml` drop-ins load with it, with the same trust.
 pub const CONFIG_DROP_IN_DIRECTORY: &str = ".alint.d";
 
+/// The directory `alint test` reads policy tests from when it is given no
+/// paths, below the directory it runs in. A policy test holds a configuration
+/// and what it expects of it.
+pub const POLICY_TEST_DIRECTORY: &str = "alint-tests";
+
 /// Whether `path` names alint's own configuration: its last component is one
 /// a file system could open as a name configuration discovery accepts
 /// ([`CONFIG_FILE_NAMES`], at any depth, as a nested config or the
 /// configuration of a run from that directory loads there), or any component
-/// is one it could open as the drop-in directory (`.alint.d`). Spellings are
-/// read as [`names_git_directory`] reads them, and any case matches.
+/// is one it could open as the drop-in directory (`.alint.d`) or the policy
+/// tests' directory ([`POLICY_TEST_DIRECTORY`]). Spellings are read as
+/// [`names_git_directory`] reads them, any case matches, and so does the
+/// 8.3 short name Windows may give each (`short_name_of`: `ALINT~1.YML`,
+/// `ALINT~1.D`, `ALINT-~1`).
 #[must_use]
 pub fn path_names_alint_config(path: &Path) -> bool {
     let names: Vec<String> = path
@@ -545,17 +553,43 @@ pub fn path_names_alint_config(path: &Path) -> bool {
             _ => None,
         })
         .collect();
+    let is = |file: &str, long: &str| file.eq_ignore_ascii_case(long) || short_name_of(file, long);
     names.iter().any(|name| {
         opens_as(name, |file| {
-            file.eq_ignore_ascii_case(CONFIG_DROP_IN_DIRECTORY)
+            is(file, CONFIG_DROP_IN_DIRECTORY) || is(file, POLICY_TEST_DIRECTORY)
         })
     }) || names.last().is_some_and(|name| {
         opens_as(name, |file| {
-            CONFIG_FILE_NAMES
-                .iter()
-                .any(|config| file.eq_ignore_ascii_case(config))
+            CONFIG_FILE_NAMES.iter().any(|config| is(file, config))
         })
     })
+}
+
+/// Whether `file` could be the 8.3 short name Windows gives the entry `long`
+/// (`.alint.yml` as `ALINT~1.YML`, `alint-tests` as `ALINT-~1`): the first
+/// characters of `long`'s name before its last dot, without leading dots and
+/// with no dot or space, as many as fit in eight with `~` and a number; then
+/// the first three characters of its extension, if it has one. Any case and
+/// any number match. Past `~4` Windows hashes the name instead, which this
+/// does not follow, as [`names_git_directory`] follows only `git~1`.
+fn short_name_of(file: &str, long: &str) -> bool {
+    let long = long.trim_start_matches('.');
+    let (base, extension) = long.rsplit_once('.').unwrap_or((long, ""));
+    let base: String = base.chars().filter(|c| !matches!(c, '.' | ' ')).collect();
+    let extension: String = extension.chars().take(3).collect();
+    let (short_base, short_extension) = file.rsplit_once('.').unwrap_or((file, ""));
+    let Some((prefix, number)) = short_base.split_once('~') else {
+        return false;
+    };
+    let kept = base.len().min(8usize.saturating_sub(1 + number.len()));
+    short_extension.eq_ignore_ascii_case(&extension)
+        && !number.is_empty()
+        && !number.starts_with('0')
+        && number.bytes().all(|byte| byte.is_ascii_digit())
+        && prefix.len() == kept
+        && base
+            .get(..kept)
+            .is_some_and(|kept| kept.eq_ignore_ascii_case(prefix))
 }
 
 /// Whether `path`, relative to `root`, reaches alint's own configuration: it
@@ -1066,6 +1100,54 @@ mod tests {
             assert!(path_names_git_directory(Path::new(path)), "{path:?}");
         }
         assert!(!path_names_git_directory(Path::new("sub/.github/x")));
+    }
+
+    /// Every name discovery, the drop-in directory or `alint test` reads a
+    /// configuration from names alint's configuration, as does the 8.3 short
+    /// name Windows may give it.
+    #[test]
+    fn every_spelling_of_a_config_name_names_alint_configuration() {
+        use super::path_names_alint_config;
+        for path in [
+            ".alint.yml",
+            "sub/alint.yaml",
+            ".ALINT.YML.",
+            ".alint.d/x.yml",
+            "alint-tests/case.yml",
+            "sub/alint-tests/fixtures/a.txt",
+            "ALINT-TESTS/case.yml",
+            "alint-tests",
+            // 8.3 short names.
+            "ALINT~1.YML",
+            "alint~1.yml",
+            "sub/ALINT~2.YAM",
+            "ALINT~1.D/x.yml",
+            "ALINT~1.d",
+            "ALINT-~1/case.yml",
+            "ALINT-~3/x",
+            "ALINT~10/x",
+            "ALINT~1.YML.",
+            "ALINT~1.YML:stream",
+        ] {
+            assert!(path_names_alint_config(Path::new(path)), "{path:?}");
+        }
+        for path in [
+            "README.md",
+            "alint.yml.bak",
+            "alint-tests.md",
+            "src/alint-tests-helper.rs",
+            "ALINT~1.TXT",
+            "ALINT~0.YML",
+            "ALINT~.YML",
+            "ALINT~1X.YML",
+            "ALIN~1.YML",
+            "ALINTX~1.YML",
+            "ALINT~1.YML/x",
+            "ALINT~1.DX/x",
+            "ALINT~1/x",
+        ] {
+            assert!(!path_names_alint_config(Path::new(path)), "{path:?}");
+        }
     }
 
     /// A path reaches a Git directory through an in-repo symlink to one too.

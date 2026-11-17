@@ -12,7 +12,9 @@ use alint_output::{
 use anyhow::{Context, Result, bail};
 
 use super::check::{ChangedMode, exclude_baseline_from_walk};
-use super::config_cmd::{LoadedConfig, load_rules, load_rules_for_explain, render_env};
+use super::config_cmd::{
+    LoadedConfig, engine_environment, load_rules, load_rules_for_explain, render_env,
+};
 use super::{Cli, rules};
 
 #[derive(Debug)]
@@ -644,6 +646,7 @@ fn run_explain_trace(
     if let Some(resolution) = analysis_time.copied() {
         engine = engine.with_analysis_time_resolution(resolution);
     }
+    engine = engine_environment(engine, loaded.untrusted);
     if let Some(changed_paths) = options.changed.resolve(&loaded.root)? {
         engine = engine.with_changed_paths(changed_paths);
     }

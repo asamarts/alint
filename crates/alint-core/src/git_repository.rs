@@ -49,17 +49,37 @@ impl Repository {
 
 /// The top of the work tree `start` is in: the nearest directory at or above
 /// it (an absolute `start`, or one made absolute lexically) that holds a
-/// `.git` directory or file. A directory is never taken as a bare repository.
-/// `None` outside every repository.
+/// `.git` directory or file the current user owns, in a directory the current
+/// user owns ([`owned_by_current_user`]; on Windows, where alint reads no
+/// owner, any). A directory is never taken as a bare repository. `None`
+/// outside every repository.
 ///
 /// Configuration discovery stops here, and the language server takes it as
-/// the root of a repository a workspace folder holds.
+/// the root of a repository a workspace folder holds. Another user's `.git`
+/// is no top: an empty file planted in a shared directory (`/tmp/.git`)
+/// would otherwise end discovery there, without its check of who owns a
+/// config above the start.
 #[must_use]
 pub fn repository_top(start: &Path) -> Option<PathBuf> {
+    repository_top_with(start, &owned_by_current_user)
+}
+
+/// [`repository_top`] with the ownership check given, so a test can stand in
+/// for another user.
+#[doc(hidden)]
+#[must_use]
+pub fn repository_top_with(
+    start: &Path,
+    owned_by_current_user: &dyn Fn(&Path) -> Option<bool>,
+) -> Option<PathBuf> {
     let start = std::path::absolute(start).ok()?;
     start
         .ancestors()
-        .find(|dir| holds_git_entry(dir))
+        .find(|dir| {
+            holds_git_entry(dir)
+                && owned_by_current_user(&dir.join(DOT_GIT)) != Some(false)
+                && owned_by_current_user(dir) != Some(false)
+        })
         .map(Path::to_path_buf)
 }
 
@@ -119,7 +139,8 @@ pub(crate) fn find_repository(
             git_dir: canonical(&git_dir)?,
             work_tree: dir.to_path_buf(),
         };
-        return trusted(&repository, &entry, environment).then_some(repository);
+        return trusted(&repository, &entry, environment, &owned_by_current_user)
+            .then_some(repository);
     }
     None
 }
@@ -174,11 +195,13 @@ static VERDICTS: LazyLock<Mutex<HashMap<PathBuf, bool>>> =
 /// discovery would have refused it unless the user's own configuration lists
 /// it in `safe.directory`, and naming it would skip that check, so Git is
 /// asked ([`git_accepts`]). On Windows, where alint reads no owner, Git is
-/// always asked.
+/// always asked. `owned_by_current_user` is the ownership check, which a
+/// test stands in for.
 fn trusted(
     repository: &Repository,
     entry: &Path,
     environment: Option<&crate::git::ProcessEnvironment>,
+    owned_by_current_user: &dyn Fn(&Path) -> Option<bool>,
 ) -> bool {
     let owned = [
         entry,

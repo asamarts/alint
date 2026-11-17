@@ -8,9 +8,9 @@
 //
 // Workspace trust: the server is told whether the workspace is trusted
 // (`initializationOptions.trusted`). Until it is, the server runs nothing the
-// repository's config could start (command rules, custom facts), fetches no
-// remote `extends:` and reads no environment value. Granting trust restarts
-// the server with `trusted: true`. `alint.path` and `alint.serverArgs` are
+// repository's config could start (command rules, rules that run Git, custom
+// facts), fetches no remote `extends:` and reads no environment value.
+// Granting trust restarts the server with `trusted: true`. `alint.path` and `alint.serverArgs` are
 // restricted settings (package.json), so a workspace cannot choose the binary
 // or its arguments while untrusted.
 
@@ -98,7 +98,7 @@ async function showRules(context: ExtensionContext): Promise<void> {
   // `extends:` and read the environment.
   if (!workspace.isTrusted) {
     window.showInformationMessage(
-      "alint: trust this workspace to list its rules (Workspace Trust). Until then the alint language server lints it without command rules, custom facts, remote `extends:` or environment values.",
+      "alint: trust this workspace to list its rules (Workspace Trust). Until then the alint language server lints it without command rules, rules that run Git, custom facts, remote `extends:` or environment values.",
     );
     return;
   }

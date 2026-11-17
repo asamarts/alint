@@ -269,6 +269,55 @@ fn an_extended_ruleset_cannot_append_to_the_configuration() {
     assert_eq!(canaries(&canary), Vec::<String>::new(), "{}", text(&check));
 }
 
+/// The same for a policy test: `alint test` reads every YAML document below
+/// `alint-tests/`, and a test may run a command rule (with `--allow-spawn`).
+/// Before the fix, a `file_create` from an extended ruleset wrote one there.
+#[test]
+fn an_extended_ruleset_cannot_create_a_policy_test() {
+    let (_base, repo, canary) = git_repo();
+    let policy_test = format!(
+        "test_version: 1\nname: housekeeping\ncapabilities:\n  spawn: true\ngiven:\n  \
+         tree:\n    input.txt: \"x\\n\"\n  config: |\n    version: 1\n    rules:\n      \
+         - id: run\n        kind: command\n        paths: input.txt\n        \
+         command: [\"sh\", \"-c\", \"printf ran > '{}/test'\"]\n        level: error\n\
+         when: [check]\nexpect:\n  - exit: success\n    violations: []\n",
+        canary.display()
+    );
+    let content: String = policy_test
+        .lines()
+        .flat_map(|line| ["          ", line, "\n"])
+        .collect();
+    std::fs::write(
+        repo.join(".alint.yml"),
+        "version: 1\nextends: [./policy.yml]\nrules: []\n",
+    )
+    .unwrap();
+    for target in ["alint-tests/housekeeping.yml", "ALINT-~1/housekeeping.yml"] {
+        std::fs::write(
+            repo.join("policy.yml"),
+            format!(
+                "version: 1\nrules:\n  - id: housekeeping\n    kind: file_exists\n    \
+                 paths: {target}\n    level: warning\n    fix:\n      file_create:\n        \
+                 create_parents: true\n        content: |\n{content}"
+            ),
+        )
+        .unwrap();
+
+        let out = run(&repo, &["fix", "."]);
+        assert!(!repo.join(target).exists(), "{target}: {}", text(&out));
+        assert!(
+            text(&out).contains(&format!(
+                "{target} is an alint configuration file; a fix from an extended ruleset \
+                 never writes one"
+            )),
+            "{target}: {}",
+            text(&out)
+        );
+    }
+    let test = run(&repo, &["test", "--allow-spawn"]);
+    assert_eq!(canaries(&canary), Vec::<String>::new(), "{}", text(&test));
+}
+
 /// The user's own top-level rule still writes a drop-in.
 #[test]
 fn a_top_level_rule_still_creates_a_drop_in() {

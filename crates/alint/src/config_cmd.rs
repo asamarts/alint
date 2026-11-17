@@ -92,6 +92,9 @@ pub(super) struct LoadedConfig {
     /// A version 2 configuration's resolved selectors and relations (`None`
     /// for version 1), which `list` shows after the rules.
     pub(super) relation_plan: Option<std::sync::Arc<alint_core::relation::plan::Plan>>,
+    /// Loaded with `--untrusted`: its engine reads an empty environment
+    /// ([`engine_environment`]).
+    pub(super) untrusted: bool,
     /// The loaded top-level config file.
     config_path: PathBuf,
 }
@@ -211,10 +214,7 @@ struct Validated {
 
 fn validate_config_inner(config_path: &Path, cli: &Cli) -> Result<Validated> {
     let registry = cli.registry();
-    let config = alint_dsl::load_with(
-        config_path,
-        &alint_dsl::LoadOptions::with_catalog(registry.catalog()),
-    )?;
+    let config = alint_dsl::load_with(config_path, &load_options(&registry, cli))?;
     remember_environment_values(&config);
     refuse_spawning(&config, &registry, None, cli)?;
     let mut count = 0usize;
@@ -401,22 +401,72 @@ pub(super) fn report_pattern_hints(
     }
 }
 
-/// With `--no-spawn`, refuse a config with an enabled rule (or the off rule
-/// `explain --trace` includes), fix or fact that spawns a process.
+/// With `--no-spawn` or `--untrusted`, refuse a config with an enabled rule
+/// (or the off rule `explain --trace` includes), fix or fact that spawns a
+/// process or runs Git.
 fn refuse_spawning(
     config: &alint_core::Config,
     registry: &RuleRegistry,
     include_off_rule: Option<&str>,
     cli: &Cli,
 ) -> Result<()> {
-    if !cli.no_spawn {
+    let Some(flag) = cli.process_refusal() else {
         return Ok(());
-    }
+    };
     let enabled = config.rules.iter().filter(|spec| {
         !matches!(spec.level, alint_core::Level::Off) || include_off_rule == Some(spec.id.as_str())
     });
-    alint_dsl::refuse_spawning(enabled, &config.facts, registry.catalog(), "--no-spawn")?;
+    alint_dsl::refuse_spawning(enabled, &config.facts, registry.catalog(), flag)?;
     Ok(())
+}
+
+/// An environment that holds nothing, which an `--untrusted` config reads.
+#[derive(Debug)]
+struct EmptyEnvironment;
+
+impl alint_dsl::EnvironmentProvider for EmptyEnvironment {
+    fn get(&self, _name: &str) -> Option<String> {
+        None
+    }
+}
+
+/// The options a config loads with. With `--untrusted`, as the language
+/// server loads an untrusted workspace's: a remote `extends:` is refused
+/// before anything is fetched, and `{{env.NAME}}` reads an empty environment.
+fn load_options<'catalog>(
+    registry: &'catalog RuleRegistry,
+    cli: &Cli,
+) -> alint_dsl::LoadOptions<'catalog> {
+    let mut options = alint_dsl::LoadOptions::with_catalog(registry.catalog());
+    if cli.untrusted {
+        options.environment = std::sync::Arc::new(EmptyEnvironment);
+        options.remote_policy = alint_dsl::RemotePolicy::Deny;
+    }
+    options
+}
+
+/// `engine` with this run's `--as-of` date and, with `--untrusted`, an empty
+/// environment ([`engine_environment`]).
+pub(super) fn with_run_settings(engine: alint_core::Engine, cli: &Cli) -> alint_core::Engine {
+    let engine = match cli.as_of {
+        Some(analysis_time) => engine.with_analysis_time(analysis_time),
+        None => engine,
+    };
+    engine_environment(engine, cli.untrusted)
+}
+
+/// `engine`, which for a config loaded `--untrusted` ([`LoadedConfig::untrusted`])
+/// reads an empty environment for `env.*` in a `when:` and a legacy `${VAR}`,
+/// as an untrusted language-server session does.
+pub(super) fn engine_environment(
+    engine: alint_core::Engine,
+    untrusted: bool,
+) -> alint_core::Engine {
+    if untrusted {
+        engine.with_condition_environment(std::collections::BTreeMap::new())
+    } else {
+        engine
+    }
 }
 
 /// The config discovery finds from `start` (`alint_dsl::discover_config`),
@@ -468,10 +518,7 @@ pub(super) fn load_rules_for_explain(
     };
     tracing::debug!(?config_path, "loading config");
     let registry = cli.registry();
-    let config = alint_dsl::load_with(
-        &config_path,
-        &alint_dsl::LoadOptions::with_catalog(registry.catalog()),
-    )?;
+    let config = alint_dsl::load_with(&config_path, &load_options(&registry, cli))?;
     remember_environment_values(&config);
     warn_if_experimental(&config, &config_path);
     refuse_spawning(&config, &registry, include_off_rule, cli)?;
@@ -526,6 +573,7 @@ pub(super) fn load_rules_for_explain(
         baseline: config.baseline,
         config_files: config.config_files,
         relation_plan: config.relation_plan,
+        untrusted: cli.untrusted,
         config_path,
     })
 }

@@ -70,7 +70,7 @@ pub(crate) use trust::{
 pub use trust::{
     SPAWNING_FIX_OPS, SPAWNING_RULE_KINDS, fact_spawns, refuse_spawning,
     reject_allow_out_of_root_in, reject_baseline_in, reject_trusted_extends_in,
-    reject_untrusted_ignore_in, rule_spawn_use,
+    reject_untrusted_ignore_in, rule_git_use, rule_spawn_use,
 };
 
 use alint_core::{
@@ -118,7 +118,10 @@ pub struct Discovery {
 /// Inside a repository, the walk stops at the repository's top: the nearest
 /// directory at or above `start` that holds a `.git` directory or file, which
 /// it checks. A config above the repository, in a directory someone else may
-/// write (`/tmp`, a shared home), never governs it.
+/// write (`/tmp`, a shared home), never governs it. A `.git` another user
+/// owns, or one in a directory another user owns, makes no top
+/// ([`alint_core::git::repository_top`]): anyone who may write a shared
+/// directory could plant one there.
 ///
 /// Outside every repository, the walk goes on to the file-system root, and
 /// skips a config file another user owns in a directory above `start` (on
@@ -147,7 +150,7 @@ pub(crate) fn discover_config_with(
     let Ok(start) = std::path::absolute(start) else {
         return discovery;
     };
-    let top = alint_core::git::repository_top(&start);
+    let top = alint_core::git::repository_top_with(&start, owned_by_current_user);
     for dir in start.ancestors() {
         for name in DEFAULT_CONFIG_NAMES {
             let candidate = dir.join(name);

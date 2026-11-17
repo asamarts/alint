@@ -17,6 +17,7 @@
   --show-baselined
   --show-notes
   --strict-baseline
+  --untrusted
   --width <COLS>
   -V, --version
   -c, --config <CONFIG>
@@ -42,6 +43,7 @@
   --show-baselined
   --show-notes
   --strict-baseline
+  --untrusted
   --width <COLS>
   -c, --config <CONFIG>
   -f, --format <FORMAT>
@@ -65,6 +67,7 @@
   --show-baselined
   --show-notes
   --strict-baseline
+  --untrusted
   --width <COLS>
   -c, --config <CONFIG>
   -f, --format <FORMAT>
@@ -92,6 +95,7 @@
   --show-notes
   --strict-baseline
   --trace
+  --untrusted
   --width <COLS>
   -c, --config <CONFIG>
   -f, --format <FORMAT>
@@ -120,6 +124,7 @@
   --show-notes
   --strict-baseline
   --unsafe-fixes
+  --untrusted
   --width <COLS>
   -c, --config <CONFIG>
   -f, --format <FORMAT>
@@ -142,6 +147,7 @@
   --show-baselined
   --show-notes
   --strict-baseline
+  --untrusted
   --width <COLS>
   -c, --config <CONFIG>
   -f, --format <FORMAT>
@@ -165,6 +171,7 @@
   --show-baselined
   --show-notes
   --strict-baseline
+  --untrusted
   --width <COLS>
   -c, --config <CONFIG>
   -f, --format <FORMAT>
@@ -190,6 +197,7 @@
   --show-baselined
   --show-notes
   --strict-baseline
+  --untrusted
   --width <COLS>
   -c, --config <CONFIG>
   -f, --format <FORMAT>
@@ -216,6 +224,7 @@
   --show-baselined
   --show-notes
   --strict-baseline
+  --untrusted
   --width <COLS>
   -c, --config <CONFIG>
   -f, --format <FORMAT>
@@ -242,6 +251,7 @@
   --show-notes
   --strict-baseline
   --tag <TAG>
+  --untrusted
   --update-snapshots
   --width <COLS>
   -c, --config <CONFIG>

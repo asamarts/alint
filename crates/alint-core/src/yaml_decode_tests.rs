@@ -476,3 +476,185 @@ fn a_line_s_content_starts_past_its_entries() {
     }
     assert!(holds_content("---x"));
 }
+
+/// Every type in the workspace that serde decodes from a buffered copy of the
+/// value (an `untagged` or internally tagged enum, or a struct with a
+/// `flatten` field), found by reading the sources, with why it is safe. Serde
+/// reads such a type's parts from its own buffer, past [`Checked`], so an enum
+/// variant without data there would take a one-entry mapping (`{safe: ~}`)
+/// for its name. Each entry holds no such enum, or decodes its parts through
+/// [`crate::yaml::from_value`] itself. A new buffered type fails this test
+/// until it is reviewed and listed.
+// The reviewed list is one entry per container.
+#[allow(clippy::too_many_lines)]
+#[test]
+fn every_buffered_serde_container_is_reviewed() {
+    const REVIEWED: &[(&str, &str, &str)] = &[
+        (
+            "alint-core/src/config.rs",
+            "Raw",
+            "a boolean, or lists of strings",
+        ),
+        ("alint-core/src/config.rs", "PathsSpec", "strings"),
+        ("alint-core/src/config.rs", "OneOrMany", "strings"),
+        (
+            "alint-core/src/config.rs",
+            "RuleSpec",
+            "flattens a raw mapping",
+        ),
+        (
+            "alint-core/src/config.rs",
+            "NestedRuleSpec",
+            "flattens a raw mapping",
+        ),
+        ("alint-core/src/facts.rs", "OneOrMany", "strings"),
+        (
+            "alint-core/src/facts.rs",
+            "FactKind",
+            "strings, extracts, `{}`",
+        ),
+        ("alint-core/src/scope_filter.rs", "OneOrMany", "strings"),
+        ("alint-core/src/yaml.rs", "Spec", "a test's raw mapping"),
+        (
+            "alint-core/src/yaml_decode_tests.rs",
+            "OneOrMany",
+            "a test's strings",
+        ),
+        (
+            "alint-rules/src/cross_file/spec.rs",
+            "TargetsSpec",
+            "strings, extracts",
+        ),
+        ("alint-rules/src/dir_contains.rs", "RequireList", "strings"),
+        (
+            "alint-rules/src/dir_only_contains.rs",
+            "AllowList",
+            "strings",
+        ),
+        ("alint-rules/src/for_each_dir.rs", "SelectSpec", "strings"),
+        (
+            "alint-rules/src/generated_file_fresh.rs",
+            "OutputsSpec",
+            "strings",
+        ),
+        (
+            "alint-testkit/src/policy_test.rs",
+            "PolicyCommit",
+            "strings",
+        ),
+        (
+            "alint-testkit/src/treespec/spec.rs",
+            "TreeNode",
+            "strings and maps of them",
+        ),
+    ];
+    let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("the workspace's crates directory");
+    let mut pending = vec![crates.to_path_buf()];
+    let mut scanned = 0;
+    let mut found = Vec::new();
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                if path
+                    .file_name()
+                    .is_some_and(|name| name != "target" && name != "tests")
+                {
+                    pending.push(path);
+                }
+                continue;
+            }
+            if path.extension().is_none_or(|ext| ext != "rs") {
+                continue;
+            }
+            scanned += 1;
+            let text = std::fs::read_to_string(&path).unwrap();
+            let file = path
+                .strip_prefix(crates)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/");
+            for name in buffered_containers(&text) {
+                found.push((file.clone(), name));
+            }
+        }
+    }
+    assert!(
+        scanned > 100,
+        "only {scanned} Rust files found under {}",
+        crates.display()
+    );
+    found.sort();
+    let mut reviewed: Vec<(String, String)> = REVIEWED
+        .iter()
+        .map(|(file, name, _why)| ((*file).to_owned(), (*name).to_owned()))
+        .collect();
+    reviewed.sort();
+    assert_eq!(
+        found, reviewed,
+        "a serde type decoded from a buffered value was added or removed: review \
+         whether it holds an enum variant without data, and update the list"
+    );
+}
+
+/// The names of the types `text` derives `Deserialize` for that serde decodes
+/// from a buffered value: an `untagged` or `tag = ` enum, or a struct with a
+/// `#[serde(flatten)]` field.
+fn buffered_containers(text: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    // The attributes above the next item, and the derived `Deserialize`
+    // struct the lines are in.
+    let mut attributes = String::new();
+    let mut open_brackets = 0i32;
+    let mut current: Option<(String, bool)> = None;
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        if open_brackets > 0 || trimmed.starts_with("#[") {
+            for c in trimmed.chars() {
+                match c {
+                    '[' => open_brackets += 1,
+                    ']' => open_brackets -= 1,
+                    _ => {}
+                }
+            }
+            attributes.push_str(trimmed);
+            attributes.push('\n');
+            if let Some((name, deserialize)) = &current
+                && *deserialize
+                && trimmed.contains("serde(flatten")
+                && !found.contains(name)
+            {
+                found.push(name.clone());
+            }
+            continue;
+        }
+        if trimmed.starts_with("//") || trimmed.is_empty() {
+            continue;
+        }
+        let item = trimmed
+            .trim_start_matches("pub(crate) ")
+            .trim_start_matches("pub(super) ")
+            .trim_start_matches("pub ");
+        let declared = item
+            .strip_prefix("enum ")
+            .or_else(|| item.strip_prefix("struct "))
+            .map(|rest| {
+                rest.split(|c: char| !c.is_alphanumeric() && c != '_')
+                    .next()
+                    .unwrap_or_default()
+                    .to_owned()
+            });
+        if let Some(name) = declared {
+            // Only a derive names the trait capitalised.
+            let deserialize = attributes.contains("Deserialize");
+            if deserialize && (attributes.contains("untagged") || attributes.contains("tag = ")) {
+                found.push(name.clone());
+            }
+            current = Some((name, deserialize));
+        }
+        attributes.clear();
+    }
+    found
+}

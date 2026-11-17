@@ -370,6 +370,55 @@ impl Baseline {
         out
     }
 
+    /// Read and parse the baseline file at `path`, for `check`, `fix`,
+    /// `baseline` and the language server alike. Only a regular file (after
+    /// symlinks) of at most [`crate::MAX_ANALYZE_BYTES`] is read: a FIFO would
+    /// block the read and a device such as `/dev/zero` never ends.
+    ///
+    /// `repository_root` is `Some` when the path comes from the repository,
+    /// a config's `baseline:` key (or the default name), rather than from the
+    /// user's own `--baseline` / `--output`: the file must then resolve inside
+    /// that root and outside any Git directory there
+    /// ([`crate::resolve_named_read`]), as the file `alint baseline` writes
+    /// there must.
+    ///
+    /// # Errors
+    ///
+    /// A message naming `path` (as given) for a file that is refused, cannot
+    /// be read or does not parse.
+    pub fn load_file(path: &Path, repository_root: Option<&Path>) -> Result<Self, String> {
+        if let Some(root) = repository_root {
+            let refusal = match crate::resolve_named_read(root, path) {
+                crate::NamedRead::InRoot => None,
+                crate::NamedRead::GitDirectory => Some(
+                    "is in a Git directory, where alint never reads; the `baseline:` key \
+                     names a file in the repository",
+                ),
+                crate::NamedRead::OutsideRoot => Some(
+                    "resolves outside the repository; the `baseline:` key names a file in \
+                     the repository (`--baseline` names one anywhere)",
+                ),
+            };
+            if let Some(refusal) = refusal {
+                return Err(format!("baseline file {} {refusal}", path.display()));
+            }
+        }
+        let bytes = crate::bounded_file::read_regular_capped(path, crate::MAX_ANALYZE_BYTES)
+            .map_err(|e| {
+                format!(
+                    "reading baseline file {} (run `alint baseline` to create it): {e}",
+                    path.display()
+                )
+            })?;
+        let text = String::from_utf8(bytes).map_err(|_| {
+            format!(
+                "reading baseline file {}: stream did not contain valid UTF-8",
+                path.display()
+            )
+        })?;
+        Self::load(&text).map_err(|e| format!("invalid baseline file {}: {e}", path.display()))
+    }
+
     /// Parse a baseline from JSON-Lines text. The first non-empty line is
     /// the header (its `schema_version` is gated); each remaining
     /// non-empty line is an entry.

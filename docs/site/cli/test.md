@@ -47,8 +47,8 @@ command line. This grants native code execution with the invoking user's host
 filesystem and network permissions; it is not an OS sandbox. Host-keyring
 access similarly requires both `host_keyring: true` and
 `--allow-host-keyring`. A custom fact needs the spawn capability too.
-`--no-spawn` and `--allow-spawn` contradict each other, so `alint test`
-rejects the pair.
+`--no-spawn` (or `--untrusted`) and `--allow-spawn` contradict each other,
+so `alint test` rejects the pair.
 
 All selected definitions, package paths, configs, and capability grants are
 preflighted before any rule or user command executes.

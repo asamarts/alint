@@ -20,11 +20,15 @@ that `ci/scripts/detect-changes.sh` classifies as relation-layer changes, and on
   regression is gungraun's "Regressed" verdict, and any other failure is a tooling failure. The
   numbers below are not a baseline the gate reads: it measures both sides in the same job, so
   neither the host nor the toolchain can drift the comparison.
-- **Syscalls.** Four families (read, stat, open, directory listing; `ci/scripts/syscall-counts.py`
-  holds the list) for the alint process and its threads, spawned children excluded, on the 10k
-  trees. A family more than 32 calls over v0.18.2 fails. A trace that is empty, lacks the
-  program's `execve`, or has a family with no calls, and a traced run that exited above 1, are
-  tooling failures, never a count of zero.
+- **Syscalls.** Five families (read, stat, open, directory listing, and probes: stats of `.git`,
+  `.jj`, `.gitignore` and `.ignore`; `ci/scripts/syscall-counts.py` holds the list) for the alint
+  process and its threads, spawned children excluded, on the 10k trees. A family more than 32
+  calls over v0.18.2 fails; the probe family may also grow by 3 for each directory in the tree and
+  5 for each one above it, the cost of checking each directory's ignore files before `ignore` reads
+  them ([ADR-0045](../adr/0045-count-the-walks-per-directory-probes-in-the-reference-gate.md)).
+  A trace that is empty, lacks the program's `execve`, or has a family other than the probes
+  with no calls, and a traced run that exited above 1, are tooling failures, never a count of
+  zero.
 - **Not S4.** S4 extends the `versioning@v1` and `toolchain-pins@v1` bundles, which arrived in
   v0.19, so the v0.18.2 binary cannot load it. The per-PR deterministic gate excludes S4 too; it
   is checked at release time by `bench-gate` against the previous release and `ANCHOR`.

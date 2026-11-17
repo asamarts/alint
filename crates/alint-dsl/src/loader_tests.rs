@@ -236,6 +236,106 @@ fn confine_missing_target_is_not_an_escape() {
 }
 
 #[test]
+fn an_absolute_rooted_or_network_extends_is_told_apart_by_its_text() {
+    for entry in [
+        "/etc/alint.yml",
+        "//server/share/x.yml",
+        r"\\server\share\x.yml",
+        r"\\?\UNC\server\share\x.yml",
+        r"\\.\pipe\x",
+        r"\x.yml",
+        r"C:\x.yml",
+        "C:/x.yml",
+        "c:x.yml",
+    ] {
+        assert!(names_a_path_of_its_own(entry), "{entry:?}");
+    }
+    for entry in [
+        "base.yml",
+        "./base.yml",
+        "../base.yml",
+        "sub/base.yml",
+        r"sub\base.yml",
+        "1:x.yml",
+        ":x.yml",
+        "",
+    ] {
+        assert!(!names_a_path_of_its_own(entry), "{entry:?}");
+    }
+}
+
+/// A config source that records every path the loader asks it about.
+#[derive(Debug, Default)]
+struct RecordingSource {
+    asked: std::sync::Mutex<Vec<PathBuf>>,
+}
+
+impl crate::ConfigSourceProvider for RecordingSource {
+    fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
+        self.asked.lock().unwrap().push(path.to_path_buf());
+        crate::FilesystemConfigSource.canonicalize(path)
+    }
+    fn read_to_string(&self, path: &Path) -> std::io::Result<String> {
+        self.asked.lock().unwrap().push(path.to_path_buf());
+        crate::FilesystemConfigSource.read_to_string(path)
+    }
+    fn yaml_files(&self, dir: &Path) -> std::io::Result<Vec<PathBuf>> {
+        self.asked.lock().unwrap().push(dir.to_path_buf());
+        crate::FilesystemConfigSource.yaml_files(dir)
+    }
+}
+
+/// A confined load refuses an absolute, rooted or network `extends:` before
+/// it asks the file system anything about it; with `allow_out_of_root`, the
+/// user may name one.
+#[test]
+fn an_absolute_or_network_extends_is_refused_before_any_file_system_call() {
+    let tmp = tempfile::tempdir().unwrap();
+    let config = tmp.path().join(".alint.yml");
+    for entry in [
+        "//attacker/share/x.yml",
+        r"\\attacker\share\x.yml",
+        r"C:\attacker\x.yml",
+        "/attacker/x.yml",
+    ] {
+        std::fs::write(
+            &config,
+            format!("version: 1\nextends: ['{entry}']\nrules: []\n"),
+        )
+        .unwrap();
+        let source = std::sync::Arc::new(RecordingSource::default());
+        let options = crate::LoadOptions {
+            config_source: source.clone(),
+            ..crate::LoadOptions::default()
+        };
+        let error = crate::load_with(&config, &options).unwrap_err().to_string();
+        assert!(
+            error.contains("absolute, rooted or network path"),
+            "{entry}: {error}"
+        );
+        let asked = source.asked.lock().unwrap();
+        assert!(
+            asked
+                .iter()
+                .all(|path| !path.to_string_lossy().contains("attacker")),
+            "{entry}: {asked:?}"
+        );
+    }
+    // The user's own opt-out lets an absolute path through, as before.
+    let base = tmp.path().join("elsewhere.yml");
+    std::fs::write(&base, "version: 1\nrules: []\n").unwrap();
+    std::fs::write(
+        &config,
+        format!(
+            "version: 1\nallow_out_of_root: true\nextends: ['{}']\nrules: []\n",
+            base.display()
+        ),
+    )
+    .unwrap();
+    crate::load(&config).unwrap();
+}
+
+#[test]
 fn confine_rejects_target_outside_root() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("repo");

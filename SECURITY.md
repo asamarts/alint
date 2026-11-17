@@ -135,10 +135,15 @@ config names. A repository's own top-level `.alint.yml` is trusted the way its `
 `alint check` in a clone runs that config's command rules (`kind: command` and the other spawning
 kinds), spawning fixes and `custom:` facts, fetches its remote `extends:`, and reads the
 environment values it names. To lint a repository you do not trust, use your own config
-(`alint check -c your-config.yml`) or refuse every spawning rule, fix and fact with `--no-spawn`.
-The language server (`alint lsp`) runs none of these until the editor says the workspace is
-trusted. Everything else (a nested or extended config, and the repository's file contents) is
-treated as untrusted input. The defensive posture is:
+(`alint check -c your-config.yml`) or `--untrusted`, the language server's untrusted mode on the
+command line: it refuses every rule, fix and fact that starts a process or runs Git (and
+`--changed` and `--base`), refuses a remote `extends:` before anything is fetched, and gives the
+config an empty environment. `--no-spawn` refuses the processes alone: the config still fetches
+the remote `extends:` it names and reads the environment values it names, and an `extends:` URL
+built from those values carries them to the host it names. The language server (`alint lsp`)
+runs none of these until the editor says the workspace is trusted. Everything else (a nested or
+extended config, and the repository's file contents) is treated as untrusted input. The defensive
+posture is:
 
 - **No network access by default.** The only network-touching feature is
   `extends: https://...` URLs the user explicitly puts in their config; those
@@ -154,13 +159,23 @@ treated as untrusted input. The defensive posture is:
   another name. No rule reads a Git directory either, from any configuration:
   `.git/config` can hold credentials (the `http.<url>.extraheader` that
   `actions/checkout` persists). A path a rule names there is a load error, and
-  one a symlink leads into is refused when it is read.
+  one a symlink leads into is refused when it is read. The baseline file a
+  config names (`baseline:`) is read only inside the repo root, outside a Git
+  directory; the `--baseline` flag names one anywhere.
+- **Files read whole are bounded.** The walk reads an ignore file
+  (`.gitignore`, `.ignore`, `info/exclude` and a linked worktree's `.git` file
+  and `commondir` on the way to it, the global excludes file) only when it is
+  a regular file of at most 32 MiB, and stops with an error naming one it will
+  not read: a symlink to `/dev/zero` or a FIFO is never read. A baseline file
+  is read only when it is a regular file of at most 256 MiB.
 - **Plugin trust gating.** The `command` rule kind shells out to external
   CLIs; it's gated to the user's top-level config (extends'd configs cannot
   introduce a `command` rule). A fix of a rule an `extends:`'d ruleset or a
   nested config shaped never writes alint's own configuration (`.alint.yml`
-  and the other discovery names, `.alint.d/`, or a file the configuration was
-  loaded from), so it cannot add such a rule for the next run, and never
+  and the other discovery names, `.alint.d/`, the policy tests under
+  `alint-tests/`, the Windows short name of any of them such as `ALINT~1.YML`,
+  or a file the configuration was loaded from), so it cannot add such a rule
+  for the next run, and never
   writes or reads (`content_from`, `sync_from`) outside the repo root,
   whatever `allow_out_of_root` says. Such a rule's check reads nothing
   outside the root either: `allow_out_of_root` grants the user's own
@@ -170,12 +185,18 @@ treated as untrusted input. The defensive posture is:
   `https://` ruleset not listed in `trusted_extends`, a local one may read
   `env.*` in its conditions and declare `ignore:`. Like every extended
   config, it never spawns a process, never has a fix write alint's
-  configuration or outside the root, and never reads a Git directory. Vendor
-  a ruleset only as you would vendor code, after reading it.
+  configuration or outside the root, and never reads a Git directory. It
+  names a file relative to the config that extends it, in the repository: an
+  absolute, rooted or network path (`/x`, `C:\x`, `\\server\share\x`) is
+  refused before alint touches it, unless the top-level config sets
+  `allow_out_of_root: true`. Vendor a ruleset only as you would vendor code,
+  after reading it.
 - **The configuration is the repository's.** Configuration discovery stops
   at the repository's top (the nearest directory holding a `.git` directory
   or file), so a `.alint.yml` above it, in a directory someone else may write
-  (`/tmp`, a shared home), never governs it. Outside every repository,
+  (`/tmp`, a shared home), never governs it. A `.git` another user owns, or
+  one in a directory another user owns, makes no top (an empty `/tmp/.git`
+  would otherwise end discovery there). Outside every repository,
   discovery skips a config file another user owns in a directory above the
   one alint runs in, and warns (`skipping /tmp/.alint.yml: owned by another
   user`); a config in that directory itself is used whoever owns it (root in
@@ -193,12 +214,18 @@ treated as untrusted input. The defensive posture is:
   Git command. Running alint in a repository whose `.git/config` someone
   else wrote (an unpacked archive, a copied directory) runs whatever that
   config tells Git to run, exactly as `git status` would there: Git's own
-  threat model applies.
+  threat model applies. With `--no-spawn` or `--untrusted`, and in a language
+  server workspace that is not trusted, alint runs no Git at all: a rule that
+  runs Git (the `git_*` kinds, `git_tracked_only`,
+  `scope_filter.changed_since`) is refused (skipped by the server), and so are
+  `--changed` and `--base`.
 - **The language server waits for workspace trust.** Until the editor sends
   the initialization option `{"trusted": true}` (VS Code sends its Workspace
-  Trust state), `alint lsp` skips spawning rules and `custom:` facts (a rule
-  whose fix alone spawns lints without the fix), fetches no remote
-  `extends:` and reads no environment value; other rules lint as usual. A
+  Trust state), `alint lsp` skips spawning rules, rules that run Git and
+  `custom:` facts (a rule whose fix alone spawns lints without the fix),
+  fetches no remote `extends:` and reads no environment value; other rules
+  lint as usual. `alint lsp --untrusted` takes every workspace as untrusted,
+  whatever the editor says. A
   nested or vendored `.alint.yml` never governs a file as a top-level config:
   the workspace folder's config does, as for `alint check` from the root, or,
   in a folder without one, the config at the top of the file's repository

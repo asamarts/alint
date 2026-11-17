@@ -30,6 +30,8 @@ turned off:
 - rules that run a process (`kind: command`, `generated_file_fresh`, `command_idempotent`, at any
   `require:` depth) are skipped, and a rule whose fix alone runs one (`git_untrack`, `command`)
   lints without its fix;
+- rules that run Git (the `git_*` kinds, `git_tracked_only`, `scope_filter.changed_since`) are
+  skipped, since Git runs the commands a repository's `.git/config` names;
 - `custom:` facts are skipped, so they read as unset;
 - a remote `extends:` is not fetched, and the config reports why instead of loading;
 - environment values read nothing: `{{env.NAME}}` takes its `default(...)` (or fails to load
@@ -57,14 +59,18 @@ instead of the folder's own, rooted at the folder. The file is yours rather than
 so the session is trusted whatever the editor says, as `alint check -c` runs it. The path must exist
 when the server starts.
 
+Starting the server with `--untrusted` makes every workspace untrusted, whatever the editor says
+and even with `--config`.
+
 ## Flags
 
 `alint lsp` honours these global flags:
 
 - `-c, --config <FILE>`: lint every workspace folder with this config, trusted (see above).
 - `--no-gitignore`: lint files the workspace's `.gitignore` excludes.
-- `--no-spawn`: refuse a config whose rules, fixes or facts start processes, even in a trusted
-  workspace; the error appears on the config, naming the rule.
+- `--no-spawn`: refuse a config whose rules, fixes or facts start processes or run Git, even in a
+  trusted workspace; the error appears on the config, naming the rule.
+- `--untrusted`: take every workspace as untrusted (see above).
 - `--as-of YYYY-MM-DD`: see below.
 - `--show-notes`: list informational notes on the server's stderr.
 

@@ -22,12 +22,16 @@ A specific file:
 alint validate-config path/to/.alint.yml
 ```
 
-Check that a config starts no process (no command rule, spawning fix or
-`custom:` fact), for example before linting a repository you do not trust:
+Check that a config starts no process (no command rule, spawning fix,
+`custom:` fact or rule that runs Git), fetches no remote `extends:` and needs
+no environment value, for example before linting a repository you do not
+trust:
 
 ```bash
-alint validate-config --no-spawn
+alint validate-config --untrusted
 ```
+
+`--no-spawn` checks the processes alone.
 
 ## See also
 
