@@ -16,8 +16,10 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use alint_core::{Engine, RuleEntry, WalkOptions, walk};
+use alint_core::{Engine, RuleEntry, walk};
 use alint_rules::builtin_registry;
+
+use crate::support;
 
 /// Build a single-rule engine from a YAML spec snippet. The spec
 /// is parsed via `alint_core::yaml` exactly as the loader would.
@@ -32,7 +34,7 @@ fn engine_from_yaml(yaml: &str) -> Engine {
 /// violation paths (as strings, sorted, forward-slash-normalised
 /// so the test asserts the same shape on Windows + Unix).
 fn run_and_collect_paths(engine: &Engine, root: &Path) -> Vec<String> {
-    let opts = WalkOptions::default();
+    let opts = support::walk_options();
     let index = walk(root, &opts).unwrap();
     let report = engine.run(root, &index).unwrap();
     let mut paths: Vec<String> = report

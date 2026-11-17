@@ -94,7 +94,7 @@ fn malformed_manifest_blocks_fixing_and_preserves_the_target() {
     let tmp = tempfile::tempdir().unwrap();
     std::fs::write(tmp.path().join("package.json"), b"{not json").unwrap();
     std::fs::write(tmp.path().join("a.txt"), b"01234567").unwrap();
-    let index = crate::walk(tmp.path(), &crate::WalkOptions::default()).unwrap();
+    let index = crate::walk(tmp.path(), &crate::WalkOptions::test_default()).unwrap();
     let rule = Box::new(LocatedRule {
         id: "manifest-fix".into(),
         scope: manifest_scope(),
@@ -107,7 +107,7 @@ fn malformed_manifest_blocks_fixing_and_preserves_the_target() {
         .fix(
             tmp.path(),
             &index,
-            &crate::WalkOptions::default(),
+            &crate::WalkOptions::test_default(),
             false,
             Applicability::Safe,
         )
@@ -231,7 +231,7 @@ fn located_mixed_real_and_identity_batch_downgrades_only_the_identity_edit() {
         .fix(
             tmp.path(),
             &idx(&["a.txt"]),
-            &crate::WalkOptions::default(),
+            &crate::WalkOptions::test_default(),
             true,
             Applicability::Safe,
         )
@@ -250,7 +250,7 @@ fn located_mixed_real_and_identity_batch_downgrades_only_the_identity_edit() {
         .fix(
             tmp.path(),
             &idx(&["a.txt"]),
-            &crate::WalkOptions::default(),
+            &crate::WalkOptions::test_default(),
             false,
             Applicability::Safe,
         )
@@ -299,7 +299,7 @@ fn located_regime_applies_batch_and_excludes_isolation_group() {
             .fix(
                 tmp.path(),
                 &idx(&["a.txt"]),
-                &crate::WalkOptions::default(),
+                &crate::WalkOptions::test_default(),
                 dry_run,
                 Applicability::Safe,
             )
@@ -352,7 +352,7 @@ fn located_identity_edit_reports_skip_and_converges() {
         .fix(
             tmp.path(),
             &idx(&["a.txt"]),
-            &crate::WalkOptions::default(),
+            &crate::WalkOptions::test_default(),
             false,
             Applicability::Safe,
         )
@@ -391,7 +391,7 @@ fn located_regime_honors_the_size_guard_on_the_collect_step() {
         .fix(
             tmp.path(),
             &idx(&["a.txt"]),
-            &crate::WalkOptions::default(),
+            &crate::WalkOptions::test_default(),
             false,
             Applicability::Safe,
         )
@@ -431,7 +431,7 @@ fn located_regime_dry_run_reports_but_does_not_write() {
         .fix(
             tmp.path(),
             &idx(&["a.txt"]),
-            &crate::WalkOptions::default(),
+            &crate::WalkOptions::test_default(),
             /* dry_run */ true,
             Applicability::Safe,
         )
@@ -477,7 +477,7 @@ fn located_regime_threshold_gates_unsafe_edits_through_the_engine() {
     .fix(
         tmp.path(),
         &idx(&["a.txt"]),
-        &crate::WalkOptions::default(),
+        &crate::WalkOptions::test_default(),
         false,
         Applicability::Safe,
     )
@@ -506,7 +506,7 @@ fn located_regime_threshold_gates_unsafe_edits_through_the_engine() {
     .fix(
         tmp.path(),
         &idx(&["a.txt"]),
-        &crate::WalkOptions::default(),
+        &crate::WalkOptions::test_default(),
         false,
         Applicability::Unsafe,
     )
@@ -717,7 +717,7 @@ fn fix_never_applies_a_fixer_to_a_note() {
         .fix(
             tmp.path(),
             &idx(&["grow.txt"]),
-            &crate::WalkOptions::default(),
+            &crate::WalkOptions::test_default(),
             false,
             Applicability::Safe,
         )
@@ -762,7 +762,7 @@ fn a_not_fixable_finding_is_unfixable_in_check_and_fix() {
         .fix(
             tmp.path(),
             &idx(&["grow.txt"]),
-            &crate::WalkOptions::default(),
+            &crate::WalkOptions::test_default(),
             false,
             Applicability::Unsafe,
         )
@@ -782,7 +782,7 @@ fn grow_fix(target: &Path, stop_at: Option<usize>) -> FixReport {
         .fix(
             root,
             &idx(&["grow.txt"]),
-            &crate::WalkOptions::default(),
+            &crate::WalkOptions::test_default(),
             false,
             Applicability::Safe,
         )
@@ -886,7 +886,7 @@ fn cap_confirmation_installs_new_failures_and_keeps_rule_order() {
         .fix(
             tmp.path(),
             &idx(&["grow.txt"]),
-            &crate::WalkOptions::default(),
+            &crate::WalkOptions::test_default(),
             false,
             Applicability::Safe,
         )
@@ -931,7 +931,7 @@ fn cap_confirmation_removes_failure_resolved_by_last_write() {
         .fix(
             tmp.path(),
             &idx(&["grow.txt"]),
-            &crate::WalkOptions::default(),
+            &crate::WalkOptions::test_default(),
             false,
             Applicability::Safe,
         )
@@ -972,7 +972,7 @@ fn cap_confirm_preserves_a_standing_unfixable_at_the_boundary() {
         .fix(
             tmp.path(),
             &idx(&["grow.txt", "keep.rs"]),
-            &crate::WalkOptions::default(),
+            &crate::WalkOptions::test_default(),
             false,
             Applicability::Safe,
         )
@@ -1073,7 +1073,7 @@ fn reconciliation_drops_a_moot_fix_error_when_the_file_is_removed() {
         .fix(
             tmp.path(),
             &idx(&["x.txt"]),
-            &crate::WalkOptions::default(),
+            &crate::WalkOptions::test_default(),
             false,
             Applicability::Safe,
         )
@@ -1124,7 +1124,7 @@ fn fix_against_baseline(sensitive: bool, grandfathered: &Violation) -> (bool, bo
     .fix(
         tmp.path(),
         &idx(&["x.txt"]),
-        &crate::WalkOptions::default(),
+        &crate::WalkOptions::test_default(),
         false,
         Applicability::Safe,
     )
@@ -1274,7 +1274,7 @@ fn a_rule_after_a_landed_fix_reads_the_tree_as_it_now_is() {
         .fix(
             tmp.path(),
             &idx(&[]),
-            &crate::WalkOptions::default(),
+            &crate::WalkOptions::test_default(),
             false,
             Applicability::Safe,
         )
@@ -1321,7 +1321,7 @@ fn a_fix_run_that_lands_nothing_keeps_the_relation_caches() {
             .fix(
                 tmp.path(),
                 &index,
-                &crate::WalkOptions::default(),
+                &crate::WalkOptions::test_default(),
                 dry_run,
                 Applicability::Safe,
             )
@@ -1408,7 +1408,7 @@ fn a_writing_pass_stops_trusting_the_walk_at_the_first_op_that_may_move_a_file()
             .fix(
                 tmp.path(),
                 &idx(&["x.txt"]),
-                &crate::WalkOptions::default(),
+                &crate::WalkOptions::test_default(),
                 dry_run,
                 Applicability::Safe,
             )

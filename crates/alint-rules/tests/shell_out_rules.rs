@@ -16,15 +16,17 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 
-use alint_core::{Engine, RuleEntry, WalkOptions, walk};
+use alint_core::{Engine, RuleEntry, walk};
 use alint_rules::builtin_registry;
+
+use crate::support;
 
 fn git_available() -> bool {
     Command::new("git").arg("--version").output().is_ok()
 }
 
 fn run_git(root: &Path, args: &[&str]) {
-    let out = Command::new("git")
+    let out = support::git()
         .arg("-C")
         .arg(root)
         .args(args)
@@ -39,6 +41,7 @@ fn run_git(root: &Path, args: &[&str]) {
 
 fn git_init(root: &Path) {
     run_git(root, &["init", "-q", "-b", "main"]);
+    support::ignore_global_excludes(root);
     run_git(root, &["config", "user.name", "alint test"]);
     run_git(root, &["config", "user.email", "test@alint.test"]);
 }
@@ -52,7 +55,7 @@ fn build_engine_from_yaml(yaml: &str) -> Engine {
 }
 
 fn run_engine(engine: &Engine, root: &Path) -> alint_core::Report {
-    let index = walk(root, &WalkOptions::default()).unwrap();
+    let index = walk(root, &support::walk_options()).unwrap();
     engine.run(root, &index).unwrap()
 }
 
@@ -165,7 +168,7 @@ fn git_no_denied_paths_since_scopes_to_diff() {
     run_git(root, &["add", "old.env"]);
     run_git(root, &["commit", "-q", "-m", "base"]);
     let base = String::from_utf8(
-        Command::new("git")
+        support::git()
             .arg("-C")
             .arg(root)
             .args(["rev-parse", "HEAD"])
@@ -581,7 +584,7 @@ fn changed_since_scopes_a_per_file_rule_to_the_diff() {
     run_git(root, &["add", "old.rs"]);
     run_git(root, &["commit", "-q", "-m", "base"]);
     let base = String::from_utf8(
-        Command::new("git")
+        support::git()
             .arg("-C")
             .arg(root)
             .args(["rev-parse", "HEAD"])

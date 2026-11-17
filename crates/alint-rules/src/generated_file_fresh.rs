@@ -717,7 +717,7 @@ mod tests {
     fn eval_in(r: &GeneratedFileFreshRule, root: &Path) -> Vec<Violation> {
         // A fresh on-disk walk so the index reflects current files
         // (the mutating mode snapshots from the index).
-        let idx = walk(root, &WalkOptions::default()).unwrap();
+        let idx = walk(root, &crate::test_support::walk_options()).unwrap();
         let ctx = Context::new(root, &idx);
         r.evaluate(&ctx).unwrap()
     }

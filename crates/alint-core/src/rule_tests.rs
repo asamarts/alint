@@ -625,7 +625,7 @@ fn a_content_fix_never_edits_through_a_symlink_into_the_git_directory() {
     let evil = root.join("src/evil.rs");
     let buffer = std::cell::RefCell::new(std::collections::BTreeMap::new());
     // The walk does not index `evil.rs`, so it cannot vouch for it.
-    let index = crate::walker::walk(root, &crate::walker::WalkOptions::default()).unwrap();
+    let index = crate::walker::walk(root, &crate::walker::WalkOptions::test_default()).unwrap();
     for ctx in [
         FixContext::new(root, false),
         FixContext::new(root, false).with_compose(Some(&buffer)),
@@ -673,7 +673,7 @@ fn a_fix_resolves_no_path_without_a_symlink_on_the_way() {
     std::fs::write(root.join("src/deep/a.rs"), b"x \n").unwrap();
     std::fs::write(root.join(".alint.yml"), b"version: 1\n").unwrap();
     let config = vec![root.join(".alint.yml").canonicalize().unwrap()];
-    let index = crate::walker::walk(root, &crate::walker::WalkOptions::default()).unwrap();
+    let index = crate::walker::walk(root, &crate::walker::WalkOptions::test_default()).unwrap();
     let file = root.join("src/deep/a.rs");
     // (resolutions, symlink probes) of reading, then writing, the file.
     let cost = |ctx: &FixContext<'_>| {

@@ -228,7 +228,7 @@ mod tests {
         std::fs::write(root.join("realdir/f.txt"), b"hi").unwrap();
         symlink(root.join("realdir"), root.join("linkdir")).unwrap();
 
-        let idx = alint_core::walk(root, &alint_core::WalkOptions::default()).unwrap();
+        let idx = alint_core::walk(root, &crate::test_support::walk_options()).unwrap();
         assert!(
             idx.entries
                 .iter()
@@ -269,7 +269,7 @@ mod tests {
         std::fs::write(root.join("real.txt"), b"in-tree").unwrap();
         symlink(outside.path().join("secret.txt"), root.join("escape")).unwrap();
 
-        let idx = alint_core::walk(root, &alint_core::WalkOptions::default()).unwrap();
+        let idx = alint_core::walk(root, &crate::test_support::walk_options()).unwrap();
         assert!(
             !idx.entries
                 .iter()

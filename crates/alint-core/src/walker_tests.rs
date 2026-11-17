@@ -66,7 +66,7 @@ fn walk_prunes_symlinks_that_escape_the_root() {
     symlink(outside.path(), root.path().join("link-dir")).unwrap();
     symlink(root.path().join("real.txt"), root.path().join("link-in")).unwrap();
 
-    let idx = walk(root.path(), &WalkOptions::default()).unwrap();
+    let idx = walk(root.path(), &WalkOptions::test_default()).unwrap();
     let p = paths(&idx);
 
     assert!(
@@ -122,7 +122,7 @@ fn walk_prunes_symlinks_into_the_git_directory() {
     symlink("lib.rs", root.path().join("src/alias.rs")).unwrap();
     symlink("..", root.path().join("src/up")).unwrap();
 
-    let idx = walk(root.path(), &WalkOptions::default()).unwrap();
+    let idx = walk(root.path(), &WalkOptions::test_default()).unwrap();
     let p = paths(&idx);
     for pruned in ["src/evil.rs", "gitdata", "gitdata/config", "gitdata/HEAD"] {
         assert!(
@@ -241,7 +241,7 @@ fn walk_excludes_dot_git_directory() {
         &WalkOptions {
             respect_gitignore: false,
             extra_ignores: Vec::new(),
-            global_git_excludes: true,
+            global_git_excludes: false,
         },
     )
     .unwrap();
@@ -267,7 +267,7 @@ fn walk_respects_gitignore_when_enabled() {
         &WalkOptions {
             respect_gitignore: true,
             extra_ignores: Vec::new(),
-            global_git_excludes: true,
+            global_git_excludes: false,
         },
     )
     .unwrap();
@@ -296,7 +296,7 @@ fn walk_includes_gitignored_paths_when_respect_gitignore_false() {
         &WalkOptions {
             respect_gitignore: false,
             extra_ignores: Vec::new(),
-            global_git_excludes: true,
+            global_git_excludes: false,
         },
     )
     .unwrap();
@@ -319,7 +319,7 @@ fn walk_applies_extra_ignores_as_excludes() {
         &WalkOptions {
             respect_gitignore: false,
             extra_ignores: vec!["vendor/**".to_string()],
-            global_git_excludes: true,
+            global_git_excludes: false,
         },
     )
     .unwrap();
@@ -345,7 +345,7 @@ fn walk_invalid_extra_ignore_pattern_surfaces_error() {
         &WalkOptions {
             respect_gitignore: false,
             extra_ignores: vec!["[unterminated".to_string()],
-            global_git_excludes: true,
+            global_git_excludes: false,
         },
     );
     assert!(err.is_err(), "bad pattern should fail: {err:?}");
@@ -355,7 +355,7 @@ fn walk_invalid_extra_ignore_pattern_surfaces_error() {
 fn walk_emits_files_with_correct_size() {
     let tmp = td();
     touch(tmp.path(), "a.txt", &[0u8; 1024]);
-    let idx = walk(tmp.path(), &WalkOptions::default()).unwrap();
+    let idx = walk(tmp.path(), &WalkOptions::test_default()).unwrap();
     let entry = idx
         .files()
         .find(|e| &*e.path == Path::new("a.txt"))
@@ -366,7 +366,7 @@ fn walk_emits_files_with_correct_size() {
 
 #[test]
 fn default_walk_options_respects_gitignore_and_no_extra_ignores() {
-    let opts = WalkOptions::default();
+    let opts = WalkOptions::test_default();
     assert!(opts.respect_gitignore);
     assert_eq!(opts.extra_ignores, Vec::<String>::new());
 }
@@ -386,7 +386,7 @@ fn walk_output_is_deterministic_across_runs() {
             b"// hello\n",
         );
     }
-    let opts = WalkOptions::default();
+    let opts = WalkOptions::test_default();
     let a = walk(tmp.path(), &opts).unwrap();
     let b = walk(tmp.path(), &opts).unwrap();
     assert_eq!(paths(&a), paths(&b));
@@ -405,7 +405,7 @@ fn walk_output_is_alphabetically_sorted() {
     touch(tmp.path(), "sub/b.txt", b"b");
     touch(tmp.path(), "sub/a.txt", b"a");
 
-    let idx = walk(tmp.path(), &WalkOptions::default()).unwrap();
+    let idx = walk(tmp.path(), &WalkOptions::test_default()).unwrap();
     let actual: Vec<_> = idx.entries.iter().map(|e| e.path.clone()).collect();
     let mut expected = actual.clone();
     expected.sort_unstable();
@@ -424,7 +424,7 @@ fn walk_handles_thousand_files() {
     for i in 0..n {
         touch(tmp.path(), &format!("d{}/f{i:04}.txt", i % 16), b"x");
     }
-    let idx = walk(tmp.path(), &WalkOptions::default()).unwrap();
+    let idx = walk(tmp.path(), &WalkOptions::test_default()).unwrap();
 
     let file_paths: Vec<_> = idx.files().map(|e| e.path.clone()).collect();
     assert_eq!(
@@ -641,7 +641,7 @@ fn would_walk_skip_agrees_with_the_walk() {
     let opts = WalkOptions {
         respect_gitignore: true,
         extra_ignores: vec!["vendor/**".into()],
-        global_git_excludes: true,
+        global_git_excludes: false,
     };
     let cases = [
         (".env", true),
@@ -676,7 +676,7 @@ fn would_walk_skip_agrees_with_the_walk() {
     let opts = WalkOptions {
         respect_gitignore: false,
         extra_ignores: vec!["vendor/**".into()],
-        global_git_excludes: true,
+        global_git_excludes: false,
     };
     assert!(!would_walk_skip(root, &opts, Path::new(".env"), false, &[]));
     assert!(would_walk_skip(
@@ -719,7 +719,7 @@ fn would_walk_skip_reads_a_linked_worktrees_shared_exclude() {
     let opts = WalkOptions {
         respect_gitignore: true,
         extra_ignores: Vec::new(),
-        global_git_excludes: true,
+        global_git_excludes: false,
     };
     // An absolute and a relative `commondir` both name the shared dir.
     for commondir in [repo_git.display().to_string(), "../..".to_string()] {
@@ -902,7 +902,7 @@ fn would_walk_skip_matches_the_walk_on_every_entry() {
     let opts = |respect_gitignore| WalkOptions {
         respect_gitignore,
         extra_ignores: vec!["vendor/**".into()],
-        global_git_excludes: true,
+        global_git_excludes: false,
     };
     assert_prediction_matches_walk(
         &root,
@@ -962,7 +962,7 @@ fn would_walk_skip_reads_the_ignore_files_above_the_root() {
     let opts = WalkOptions {
         respect_gitignore: true,
         extra_ignores: Vec::new(),
-        global_git_excludes: true,
+        global_git_excludes: false,
     };
     assert_prediction_matches_walk(
         &root,
@@ -1006,7 +1006,7 @@ fn ignore_files_stop_at_the_repository_boundary() {
     let opts = WalkOptions {
         respect_gitignore: true,
         extra_ignores: Vec::new(),
-        global_git_excludes: true,
+        global_git_excludes: false,
     };
     assert_prediction_matches_walk(
         &root,
@@ -1047,7 +1047,7 @@ fn ignore_files_outside_a_repository_stop_at_the_root() {
     let opts = WalkOptions {
         respect_gitignore: true,
         extra_ignores: Vec::new(),
-        global_git_excludes: true,
+        global_git_excludes: false,
     };
     assert_prediction_matches_walk(&tree, &opts, &[("README.md", false), ("a.log", true)]);
     // In the `.jj` repository the outer `.gitignore` stops at its top, but the
@@ -1129,7 +1129,7 @@ fn a_bad_ignore_file_above_the_root_does_not_stop_the_walk() {
     let opts = WalkOptions {
         respect_gitignore: true,
         extra_ignores: Vec::new(),
-        global_git_excludes: true,
+        global_git_excludes: false,
     };
     assert_prediction_matches_walk(&repo, &opts, &[("README.md", false), ("a.log", true)]);
     assert_prediction_matches_walk(&tree, &opts, &[("README.md", false)]);
@@ -1164,7 +1164,7 @@ fn an_unreadable_file_above_the_root_does_not_stop_the_walk() {
         &WalkOptions {
             respect_gitignore: true,
             extra_ignores: Vec::new(),
-            global_git_excludes: true,
+            global_git_excludes: false,
         },
     )
     .unwrap();
@@ -1188,7 +1188,7 @@ fn an_unreadable_directory_still_stops_the_walk() {
         &WalkOptions {
             respect_gitignore: true,
             extra_ignores: Vec::new(),
-            global_git_excludes: true,
+            global_git_excludes: false,
         },
     );
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -1210,7 +1210,7 @@ fn a_dot_ignore_above_the_repository_still_applies() {
     let opts = WalkOptions {
         respect_gitignore: true,
         extra_ignores: Vec::new(),
-        global_git_excludes: true,
+        global_git_excludes: false,
     };
     assert_prediction_matches_walk(&root, &opts, &[("src/main.rs", true), ("README.md", false)]);
 }
@@ -1230,7 +1230,7 @@ fn a_nearer_ignore_file_above_the_root_outranks_a_farther_one() {
     let opts = WalkOptions {
         respect_gitignore: true,
         extra_ignores: Vec::new(),
-        global_git_excludes: true,
+        global_git_excludes: false,
     };
     assert_prediction_matches_walk(&root, &opts, &[("keep.tmp", false), ("other.tmp", true)]);
 }
@@ -1251,7 +1251,7 @@ fn ignore_files_above_the_root_match_the_canonical_root() {
     let opts = WalkOptions {
         respect_gitignore: true,
         extra_ignores: Vec::new(),
-        global_git_excludes: true,
+        global_git_excludes: false,
     };
     assert_prediction_matches_walk(&link, &opts, &[("secret.txt", true), ("other.txt", false)]);
 }
@@ -1294,7 +1294,7 @@ fn ignore_files_count_only_under_their_exact_name() {
     let opts = WalkOptions {
         respect_gitignore: true,
         extra_ignores: Vec::new(),
-        global_git_excludes: true,
+        global_git_excludes: false,
     };
     assert_prediction_matches_walk(&root, &opts, &[("a.log", false), ("sub/b.txt", false)]);
 }
@@ -1328,7 +1328,7 @@ fn would_walk_skip_reads_the_ignore_files_a_fix_creates() {
     let opts = WalkOptions {
         respect_gitignore: true,
         extra_ignores: Vec::new(),
-        global_git_excludes: true,
+        global_git_excludes: false,
     };
     let predicted: Vec<(&str, bool)> = cases
         .iter()
@@ -1379,7 +1379,7 @@ fn would_walk_skip_reads_an_ignore_file_created_through_a_symlink() {
     let opts = WalkOptions {
         respect_gitignore: true,
         extra_ignores: Vec::new(),
-        global_git_excludes: true,
+        global_git_excludes: false,
     };
     for created in ["alias/.gitignore", "real/.gitignore"] {
         let created: [(&Path, &[u8]); 1] = [(Path::new(created), b"x.txt\n")];
@@ -1432,7 +1432,7 @@ fn would_walk_skip_stops_at_a_symlink_the_walk_does_not_enter() {
     let opts = WalkOptions {
         respect_gitignore: true,
         extra_ignores: Vec::new(),
-        global_git_excludes: true,
+        global_git_excludes: false,
     };
     let index = walk(&root, &opts).unwrap();
     let cases = [
@@ -1493,7 +1493,7 @@ fn would_walk_skip_matches_the_walk_from_a_relative_root() {
     let opts = WalkOptions {
         respect_gitignore: true,
         extra_ignores: Vec::new(),
-        global_git_excludes: true,
+        global_git_excludes: false,
     };
     assert_prediction_matches_walk(
         &relative,
@@ -1595,7 +1595,7 @@ fn walk_skips_a_fifo_special_file() {
         return;
     }
 
-    let idx = walk(root, &WalkOptions::default()).unwrap();
+    let idx = walk(root, &WalkOptions::test_default()).unwrap();
     let names: Vec<_> = idx.entries.iter().map(|e| e.path.to_path_buf()).collect();
     assert!(
         names.iter().any(|p| p.as_os_str() == "normal.txt"),
@@ -1621,8 +1621,8 @@ fn dangling_symlink_is_skipped_not_fatal() {
     std::fs::write(root.join("real.txt"), b"hi\n").unwrap();
     symlink("/does/not/exist/at/all", root.join("dangling")).unwrap();
 
-    let idx =
-        walk(root, &WalkOptions::default()).expect("a dangling symlink must not abort the walk");
+    let idx = walk(root, &WalkOptions::test_default())
+        .expect("a dangling symlink must not abort the walk");
     let names: Vec<_> = idx.entries.iter().map(|e| e.path.to_path_buf()).collect();
     assert!(
         names.iter().any(|p| p.as_os_str() == "real.txt"),
@@ -1656,7 +1656,7 @@ fn symlink_cycles_are_skipped_not_fatal() {
             "selfref" => symlink("loop", root.join("loop")).unwrap(),
             _ => unreachable!(),
         }
-        let idx = walk(root, &WalkOptions::default())
+        let idx = walk(root, &WalkOptions::test_default())
             .unwrap_or_else(|e| panic!("cycle shape {shape:?} must not abort the walk: {e}"));
         assert!(
             idx.entries.iter().any(|e| e.path.as_os_str() == "real.txt"),
@@ -1770,7 +1770,7 @@ fn tracked_entries_ignore_files_hid_returns_only_what_an_ignore_file_hid() {
     let opts = WalkOptions {
         respect_gitignore: true,
         extra_ignores: vec!["vendor".to_string()],
-        global_git_excludes: true,
+        global_git_excludes: false,
     };
     let index = walk(root, &opts).unwrap();
     let hidden = FileIndex::from_entries(tracked_entries_ignore_files_hid(root, &index, &tracked));
@@ -1786,7 +1786,7 @@ fn tracked_entries_ignore_files_hid_returns_only_what_an_ignore_file_hid() {
         &WalkOptions {
             respect_gitignore: false,
             extra_ignores: Vec::new(),
-            global_git_excludes: true,
+            global_git_excludes: false,
         },
     )
     .unwrap();
@@ -1819,7 +1819,7 @@ fn tracked_entries_ignore_files_hid_returns_the_directories_above_a_tracked_path
     let opts = WalkOptions {
         respect_gitignore: true,
         extra_ignores: vec!["*.class".to_string(), "ign/skip".to_string()],
-        global_git_excludes: true,
+        global_git_excludes: false,
     };
     let index = walk(root, &opts).unwrap();
     let hidden = FileIndex::from_entries(tracked_entries_ignore_files_hid(root, &index, &tracked));
@@ -1843,7 +1843,7 @@ fn tracked_entries_ignore_files_hid_skips_a_path_that_is_not_plain_relative() {
     ]
     .into_iter()
     .collect();
-    let index = walk(root, &WalkOptions::default()).unwrap();
+    let index = walk(root, &WalkOptions::test_default()).unwrap();
     let hidden = FileIndex::from_entries(tracked_entries_ignore_files_hid(root, &index, &tracked));
     assert_eq!(paths(&hidden), ["a.txt"]);
 }
@@ -1912,17 +1912,17 @@ fn tracked_entries_ignore_files_hid_skips_a_symlink_out_of_the_root() {
         .into_iter()
         .map(PathBuf::from)
         .collect();
-    let index = walk(root, &WalkOptions::default()).unwrap();
+    let index = walk(root, &WalkOptions::test_default()).unwrap();
     let hidden = FileIndex::from_entries(tracked_entries_ignore_files_hid(root, &index, &tracked));
     assert_eq!(paths(&hidden), ["out", "out/kept.txt"]);
 }
 
 #[test]
 fn walk_options_default_and_setters() {
-    let default = WalkOptions::default();
+    let default = WalkOptions::test_default();
     assert!(default.respect_gitignore);
     assert_eq!(default.extra_ignores, Vec::<String>::new());
-    let set = WalkOptions::default()
+    let set = WalkOptions::test_default()
         .with_respect_gitignore(false)
         .with_extra_ignores(vec!["target".to_string()]);
     assert!(!set.respect_gitignore);
@@ -1946,7 +1946,7 @@ fn global_excludes_need_ignore_files() {
         (false, true, false),
         (false, false, false),
     ] {
-        let opts = WalkOptions::default()
+        let opts = WalkOptions::test_default()
             .with_respect_gitignore(respect)
             .with_extra_ignores(vec!["x".to_string()])
             .with_global_git_excludes(global);

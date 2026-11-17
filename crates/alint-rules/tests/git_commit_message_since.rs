@@ -3,14 +3,15 @@
 //! deprecated `${VAR}` syntax is reported as written, never by its value.
 
 use std::path::Path;
-use std::process::Command;
 use std::sync::Arc;
 
-use alint_core::{Engine, RuleEntry, WalkOptions, walk};
+use alint_core::{Engine, RuleEntry, walk};
 use alint_rules::builtin_registry;
 
+use crate::support;
+
 fn run_git(root: &Path, args: &[&str]) {
-    let out = Command::new("git")
+    let out = support::git()
         .arg("-C")
         .arg(root)
         .args(args)
@@ -36,7 +37,7 @@ fn bad_range_failure(root: &Path, since: &str) -> String {
     let registry = builtin_registry();
     let rule = registry.build(&spec).unwrap();
     let engine = Engine::from_entries(vec![RuleEntry::new(rule).with_spec(spec)], registry);
-    let index = walk(root, &WalkOptions::default()).unwrap();
+    let index = walk(root, &support::walk_options()).unwrap();
     let report = engine.run(root, &index).unwrap();
     let failures = &report.results[0].analysis_failures;
     assert_eq!(failures.len(), 1, "{report:?}");
@@ -48,6 +49,7 @@ fn a_bad_range_from_a_legacy_reference_is_shown_as_written() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     run_git(root, &["init", "-q"]);
+    support::ignore_global_excludes(root);
     run_git(
         root,
         &[

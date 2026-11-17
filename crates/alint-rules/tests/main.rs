@@ -15,3 +15,4 @@ mod git_commit_message_since;
 mod phase4_diagnostics_integration;
 mod scope_filter_integration;
 mod shell_out_rules;
+mod support;

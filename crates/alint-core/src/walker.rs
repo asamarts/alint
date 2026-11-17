@@ -870,6 +870,16 @@ impl WalkOptions {
     fn uses_global_git_excludes(&self) -> bool {
         self.respect_gitignore && self.global_git_excludes
     }
+
+    /// [`Self::default`] without the user's global excludes file, for a unit
+    /// test: what its walk lists must not depend on the Git setup of the
+    /// machine it runs on (a global excludes file that listed `*.txt` left
+    /// out the files tests wrote). A test of the global excludes file itself
+    /// turns it back on.
+    #[cfg(test)]
+    pub(crate) fn test_default() -> Self {
+        Self::default().with_global_git_excludes(false)
+    }
 }
 
 pub fn walk(root: &Path, opts: &WalkOptions) -> Result<FileIndex> {

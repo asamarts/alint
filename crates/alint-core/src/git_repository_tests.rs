@@ -12,7 +12,7 @@ fn ceiling(dir: &Path) -> String {
 /// itself, so a bare `.git` directory is not enough there.
 pub(in crate::git) fn init_repository(dir: &Path, args: &[&str]) {
     std::fs::create_dir_all(dir).unwrap();
-    let init = Command::new("git")
+    let init = crate::git::test_git()
         .arg("init")
         .arg("-q")
         .args(args)
@@ -255,7 +255,7 @@ fn git_decides_on_a_repository_another_user_owns() {
     let tmp = tempfile::tempdir().unwrap();
     let top = tmp.path().join("repo");
     std::fs::create_dir_all(&top).unwrap();
-    let init = Command::new("git")
+    let init = crate::git::test_git()
         .args(["init", "-q"])
         .arg(&top)
         .env("GIT_CONFIG_NOSYSTEM", "1")

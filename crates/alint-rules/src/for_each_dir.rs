@@ -1572,7 +1572,7 @@ require:
         );
 
         let failing_index =
-            alint_core::walk(tmp.path(), &alint_core::WalkOptions::default()).unwrap();
+            alint_core::walk(tmp.path(), &crate::test_support::walk_options()).unwrap();
         let failing = engine
             .trace_rule_with_options(
                 "nested",
@@ -1600,7 +1600,7 @@ require:
 
         std::fs::write(tmp.path().join("pkg-b/marker"), b"ok").unwrap();
         let passing_index =
-            alint_core::walk(tmp.path(), &alint_core::WalkOptions::default()).unwrap();
+            alint_core::walk(tmp.path(), &crate::test_support::walk_options()).unwrap();
         let passing = engine
             .trace_rule("nested", tmp.path(), &passing_index)
             .unwrap();
@@ -1650,7 +1650,7 @@ require:
             vec![alint_core::RuleEntry::new(built).with_spec(spec)],
             registry,
         );
-        let index = alint_core::walk(tmp.path(), &alint_core::WalkOptions::default()).unwrap();
+        let index = alint_core::walk(tmp.path(), &crate::test_support::walk_options()).unwrap();
 
         let trace = engine
             .trace_rule("nested-structured", tmp.path(), &index)
@@ -1692,7 +1692,7 @@ require:
             vec![alint_core::RuleEntry::new(built).with_spec(spec)],
             registry,
         );
-        let index = alint_core::walk(tmp.path(), &alint_core::WalkOptions::default()).unwrap();
+        let index = alint_core::walk(tmp.path(), &crate::test_support::walk_options()).unwrap();
 
         let trace = engine.trace_rule("nested", tmp.path(), &index).unwrap();
         assert_eq!(trace.outcome, alint_core::TraceStatus::AnalysisFailure);

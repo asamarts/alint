@@ -27,7 +27,7 @@ fn collect_changed_without_base_unions_staged_unstaged_and_untracked() {
     std::fs::write(root.join("staged.txt"), "old\n").unwrap();
     std::fs::write(root.join("unstaged.txt"), "old\n").unwrap();
     let run = |args: &[&str]| {
-        let output = Command::new("git")
+        let output = crate::git::test_git()
             .arg("-C")
             .arg(root)
             .args(args)
@@ -75,7 +75,7 @@ fn collect_changed_without_base_drains_a_staged_list_larger_than_a_pipe() {
         std::fs::write(dir.join(&name), "x\n").unwrap();
         expected.insert(Path::new("a-directory-name-long-enough-to-grow-each-path").join(name));
     }
-    let status = Command::new("git")
+    let status = crate::git::test_git()
         .arg("-C")
         .arg(root)
         .args(["add", "-A"])
@@ -110,7 +110,7 @@ fn head_commit_time_uses_fixed_committer_timestamp_and_detached_head() {
         Err(AnalysisTimeUnavailable::HeadUnavailable)
     );
     assert!(
-        Command::new("git")
+        crate::git::test_git()
             .args(["init", "-q"])
             .current_dir(root)
             .status()
@@ -123,7 +123,7 @@ fn head_commit_time_uses_fixed_committer_timestamp_and_detached_head() {
     );
     std::fs::write(root.join("tracked"), "x\n").unwrap();
     assert!(
-        Command::new("git")
+        crate::git::test_git()
             .args(["add", "tracked"])
             .current_dir(root)
             .status()
@@ -131,7 +131,7 @@ fn head_commit_time_uses_fixed_committer_timestamp_and_detached_head() {
             .success()
     );
     assert!(
-        Command::new("git")
+        crate::git::test_git()
             .args([
                 "-c",
                 "user.name=Test",
@@ -152,7 +152,7 @@ fn head_commit_time_uses_fixed_committer_timestamp_and_detached_head() {
         "2024-01-02".parse::<AnalysisTime>().unwrap().unix_seconds() + 3 * 3_600 + 4 * 60 + 5;
     assert_eq!(head_commit_time(root).unwrap().unix_seconds(), expected);
     assert!(
-        Command::new("git")
+        crate::git::test_git()
             .args(["checkout", "-q", "--detach", "HEAD"])
             .current_dir(root)
             .status()
@@ -189,7 +189,7 @@ fn git_queries_ignore_foreign_repository_environment() {
             &["config", "commit.gpgsign", "false"][..],
         ] {
             assert!(
-                Command::new("git")
+                crate::git::test_git()
                     .arg("-C")
                     .arg(repo.path())
                     .args(args)
@@ -200,7 +200,7 @@ fn git_queries_ignore_foreign_repository_environment() {
         }
         std::fs::write(repo.path().join("tracked.txt"), format!("{date}\n")).unwrap();
         assert!(
-            Command::new("git")
+            crate::git::test_git()
                 .arg("-C")
                 .arg(repo.path())
                 .args(["add", "tracked.txt"])
@@ -209,7 +209,7 @@ fn git_queries_ignore_foreign_repository_environment() {
                 .success()
         );
         assert!(
-            Command::new("git")
+            crate::git::test_git()
                 .arg("-C")
                 .arg(repo.path())
                 .args(["commit", "-qm", "fixed"])
@@ -286,7 +286,7 @@ fn a_scoped_ceiling_reaches_git_and_stops_discovery() {
     let parent = outer.path().join("parent");
     let root = parent.join("sandbox/repository");
     std::fs::create_dir_all(&root).unwrap();
-    let init = std::process::Command::new("git")
+    let init = crate::git::test_git()
         .args(["init", "-q"])
         .arg(outer.path())
         .env("GIT_CONFIG_NOSYSTEM", "1")
@@ -331,7 +331,7 @@ fn git_log_queries_disable_configured_signature_verification() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     let run = |args: &[&str]| {
-        let output = Command::new("git")
+        let output = crate::git::test_git()
             .arg("-C")
             .arg(root)
             .args(args)
@@ -375,7 +375,7 @@ fn git_log_queries_disable_configured_signature_verification() {
              \n\
              signed\n"
     );
-    let mut hash_object = Command::new("git")
+    let mut hash_object = crate::git::test_git()
         .arg("-C")
         .arg(root)
         .args(["hash-object", "-t", "commit", "-w", "--stdin"])
@@ -432,7 +432,7 @@ fn git_history_queries_ignore_local_replace_refs() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     let run = |args: &[&str]| {
-        let output = Command::new("git")
+        let output = crate::git::test_git()
             .arg("-C")
             .arg(root)
             .args(args)
@@ -448,7 +448,7 @@ fn git_history_queries_ignore_local_replace_refs() {
     run(&["init", "-q"]);
     std::fs::write(root.join("tracked"), "x\n").unwrap();
     run(&["add", "tracked"]);
-    let output = Command::new("git")
+    let output = crate::git::test_git()
         .arg("-C")
         .arg(root)
         .args([
@@ -481,7 +481,7 @@ fn git_history_queries_ignore_local_replace_refs() {
              \n\
              replacement\n"
     );
-    let mut hash_object = Command::new("git")
+    let mut hash_object = crate::git::test_git()
         .arg("-C")
         .arg(root)
         .args(["hash-object", "-t", "commit", "-w", "--stdin"])
@@ -705,7 +705,7 @@ fn blame_cache_uses_only_tracked_regular_default_ignore_revs_file() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     let run = |args: &[&str]| {
-        let output = Command::new("git")
+        let output = crate::git::test_git()
             .arg("-C")
             .arg(root)
             .args(args)
@@ -719,7 +719,7 @@ fn blame_cache_uses_only_tracked_regular_default_ignore_revs_file() {
         String::from_utf8(output.stdout).unwrap().trim().to_string()
     };
     let commit_at = |message: &str, date: &str| {
-        let output = Command::new("git")
+        let output = crate::git::test_git()
             .arg("-C")
             .arg(root)
             .args([
@@ -839,7 +839,7 @@ fn blame_cache_pins_diff_algorithm() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     let run = |args: &[&str]| {
-        let output = Command::new("git")
+        let output = crate::git::test_git()
             .arg("-C")
             .arg(root)
             .args(args)
@@ -852,7 +852,7 @@ fn blame_cache_pins_diff_algorithm() {
         );
     };
     let commit_at = |message: &str, date: &str| {
-        let output = Command::new("git")
+        let output = crate::git::test_git()
             .arg("-C")
             .arg(root)
             .args([
@@ -1003,7 +1003,7 @@ fn make_repo_with_commits(subjects: &[&str]) -> tempfile::TempDir {
         vec!["config", "user.name", "Test"],
         vec!["config", "commit.gpgsign", "false"],
     ] {
-        let out = Command::new("git")
+        let out = crate::git::test_git()
             .arg("-C")
             .arg(init_dir)
             .args(&args)
@@ -1012,7 +1012,7 @@ fn make_repo_with_commits(subjects: &[&str]) -> tempfile::TempDir {
         assert!(out.status.success(), "git {args:?} failed");
     }
     for subject in subjects {
-        let out = Command::new("git")
+        let out = crate::git::test_git()
             .arg("-C")
             .arg(init_dir)
             .args(["commit", "--allow-empty", "-m", subject])
@@ -1038,7 +1038,7 @@ fn head_commit_message_lossily_decodes_non_utf8() {
     let msg = dir.join("MSG");
     // Raw non-UTF-8 bytes (0xFF/0xFE are never valid UTF-8) in the subject.
     std::fs::write(&msg, b"fix: \xff\xfe non-utf8 subject\n").unwrap();
-    let out = Command::new("git")
+    let out = crate::git::test_git()
         .arg("-C")
         .arg(dir)
         .args(["commit", "--allow-empty", "-F"])
@@ -1158,7 +1158,7 @@ fn commit_range_enumerates_real_commits_oldest_first() {
     // `since` base; the range then yields the three later
     // commits, oldest first.
     let repo = make_repo_with_commits(&["root: zero", "feat: alpha", "fix: beta", "chore: gamma"]);
-    let config = Command::new("git")
+    let config = crate::git::test_git()
         .arg("-C")
         .arg(repo.path())
         .args(["config", "core.abbrev", "20"])
@@ -1166,7 +1166,7 @@ fn commit_range_enumerates_real_commits_oldest_first() {
         .unwrap();
     assert!(config.status.success());
     let root_sha = String::from_utf8(
-        Command::new("git")
+        crate::git::test_git()
             .arg("-C")
             .arg(repo.path())
             .args(["rev-parse", "HEAD~3"])
@@ -1202,7 +1202,7 @@ fn commit_range_skips_merges_by_default() {
     let repo = make_repo_with_commits(&["init commit on main"]);
     let root = repo.path();
     let run = |args: &[&str]| {
-        let out = Command::new("git")
+        let out = crate::git::test_git()
             .arg("-C")
             .arg(root)
             .args(args)
@@ -1261,7 +1261,7 @@ fn verify_commit_returns_false_for_unsigned_commit() {
     // unsigned; verify-commit exits non-zero → Some(false).
     let repo = make_repo_with_commits(&["init: unsigned commit"]);
     let head = String::from_utf8(
-        Command::new("git")
+        crate::git::test_git()
             .arg("-C")
             .arg(repo.path())
             .args(["rev-parse", "HEAD"])

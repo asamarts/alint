@@ -15,6 +15,27 @@ use std::path::Path;
 
 use alint_core::{Context, FileEntry, FileIndex, RuleSpec};
 
+/// The environment of a test's own `git` commands: no system or global
+/// configuration file and no global excludes or attributes file
+/// (`$XDG_CONFIG_HOME/git/ignore`, which `GIT_CONFIG_GLOBAL` does not cover;
+/// a path below the null device reads as no file), so a test's repository
+/// does not depend on the Git setup of the machine it runs on.
+pub const HERMETIC_GIT: [(&str, &str); 3] = {
+    const NULL_DEVICE: &str = if cfg!(windows) { "NUL" } else { "/dev/null" };
+    [
+        ("GIT_CONFIG_NOSYSTEM", "1"),
+        ("GIT_CONFIG_GLOBAL", NULL_DEVICE),
+        ("XDG_CONFIG_HOME", NULL_DEVICE),
+    ]
+};
+
+/// The walk options of a test: without the user's global excludes file, which
+/// would leave out the files a test wrote on a machine whose global excludes
+/// list them.
+pub fn walk_options() -> alint_core::WalkOptions {
+    alint_core::WalkOptions::default().with_global_git_excludes(false)
+}
+
 /// Parse a `RuleSpec` from a YAML literal. Panics on parse
 /// errors with a clear message - tests are expected to feed
 /// it well-formed input.

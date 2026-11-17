@@ -240,7 +240,7 @@ fn runtime_when_error_is_a_condition_failure_in_check_and_fix() {
             &crate::WalkOptions {
                 respect_gitignore: true,
                 extra_ignores: Vec::new(),
-                global_git_excludes: true,
+                global_git_excludes: false,
             },
             true,
             Applicability::Safe,
@@ -344,7 +344,7 @@ fn dispatch_flip_routes_per_file_rule_through_file_major_loop() {
     });
     let engine = Engine::new(vec![rule], RuleRegistry::new());
 
-    let opts = crate::WalkOptions::default();
+    let opts = crate::WalkOptions::test_default();
     let index = crate::walk(tmp.path(), &opts).unwrap();
     let report = engine.run(tmp.path(), &index).unwrap();
 
@@ -381,7 +381,7 @@ fn dispatch_flip_aggregates_multiple_per_file_rules() {
     });
     let engine = Engine::new(vec![rule_a, rule_b], RuleRegistry::new());
 
-    let opts = crate::WalkOptions::default();
+    let opts = crate::WalkOptions::test_default();
     let index = crate::walk(tmp.path(), &opts).unwrap();
     let report = engine.run(tmp.path(), &index).unwrap();
 
@@ -421,7 +421,7 @@ fn passing_per_file_rule_appears_in_the_report() {
     });
     let engine = Engine::new(vec![rule], RuleRegistry::new());
 
-    let opts = crate::WalkOptions::default();
+    let opts = crate::WalkOptions::test_default();
     let index = crate::walk(tmp.path(), &opts).unwrap();
     let report = engine.run(tmp.path(), &index).unwrap();
 
@@ -452,7 +452,7 @@ fn run_for_file_runs_only_in_scope_per_file_rules() {
     let cross = stub("cross", "**/*.txt");
     let engine = Engine::new(vec![in_scope, out_of_scope, cross], RuleRegistry::new());
 
-    let index = crate::walk(tmp.path(), &crate::WalkOptions::default()).unwrap();
+    let index = crate::walk(tmp.path(), &crate::WalkOptions::test_default()).unwrap();
     let results = engine
         .run_for_file(tmp.path(), &index, Path::new("a.txt"), b"no magic")
         .unwrap();
@@ -478,7 +478,7 @@ fn run_for_file_applies_explicit_sensitivity_before_returning() {
     .unwrap();
     let entry = RuleEntry::new(rule).with_spec(std::sync::Arc::new(spec));
     let engine = Engine::from_entries(vec![entry], RuleRegistry::new());
-    let index = crate::walk(tmp.path(), &crate::WalkOptions::default()).unwrap();
+    let index = crate::walk(tmp.path(), &crate::WalkOptions::test_default()).unwrap();
 
     let results = engine
         .run_for_file(
@@ -577,7 +577,7 @@ fn run_for_file_uses_supplied_bytes_not_disk() {
         prefix: b"MAGIC".to_vec(),
     });
     let engine = Engine::new(vec![rule], RuleRegistry::new());
-    let index = crate::walk(tmp.path(), &crate::WalkOptions::default()).unwrap();
+    let index = crate::walk(tmp.path(), &crate::WalkOptions::test_default()).unwrap();
 
     let results = engine
         .run_for_file(tmp.path(), &index, Path::new("a.txt"), b"edited, no prefix")
@@ -596,7 +596,7 @@ fn run_for_file_passing_rule_omitted() {
         prefix: b"MAGIC".to_vec(),
     });
     let engine = Engine::new(vec![rule], RuleRegistry::new());
-    let index = crate::walk(tmp.path(), &crate::WalkOptions::default()).unwrap();
+    let index = crate::walk(tmp.path(), &crate::WalkOptions::test_default()).unwrap();
     let results = engine
         .run_for_file(tmp.path(), &index, Path::new("a.txt"), b"MAGIC passes")
         .unwrap();
@@ -630,7 +630,7 @@ fn run_for_file_caches_facts_on_index() {
         prefix: b"MAGIC".to_vec(),
     });
     let engine = Engine::new(vec![rule], RuleRegistry::new());
-    let index = crate::walk(tmp.path(), &crate::WalkOptions::default()).unwrap();
+    let index = crate::walk(tmp.path(), &crate::WalkOptions::test_default()).unwrap();
 
     assert!(index.cached_facts().is_none());
     engine
@@ -651,7 +651,7 @@ fn run_for_file_errors_when_file_not_in_index() {
     let tmp = tempfile::tempdir().unwrap();
     std::fs::write(tmp.path().join("a.txt"), b"x").unwrap();
     let engine = Engine::new(vec![], RuleRegistry::new());
-    let index = crate::walk(tmp.path(), &crate::WalkOptions::default()).unwrap();
+    let index = crate::walk(tmp.path(), &crate::WalkOptions::test_default()).unwrap();
     let err = engine
         .run_for_file(tmp.path(), &index, Path::new("ghost.txt"), b"x")
         .unwrap_err();
@@ -677,7 +677,7 @@ fn dispatch_flip_preserves_cross_file_rules_unchanged() {
     });
     let engine = Engine::new(vec![cross_rule, per_file_rule], RuleRegistry::new());
 
-    let opts = crate::WalkOptions::default();
+    let opts = crate::WalkOptions::test_default();
     let index = crate::walk(tmp.path(), &opts).unwrap();
     let report = engine.run(tmp.path(), &index).unwrap();
 
@@ -769,7 +769,7 @@ fn a_relation_free_run_does_not_enable_the_read_cache() {
         .tempdir()
         .unwrap();
     std::fs::write(tmp.path().join("a.txt"), b"hello").unwrap();
-    let index = crate::walk(tmp.path(), &crate::WalkOptions::default()).unwrap();
+    let index = crate::walk(tmp.path(), &crate::WalkOptions::test_default()).unwrap();
     let engine = Engine::new(
         vec![Box::new(PerFileStub {
             id: "per-file".into(),
@@ -823,7 +823,7 @@ fn a_nested_relation_consumer_leaves_the_run_caches_off() {
     registry.register("nested_relation_fixture", &NESTED_RELATION_META, |_spec| {
         Ok(Box::new(RelationConsumer))
     });
-    let index = crate::walk(tmp.path(), &crate::WalkOptions::default()).unwrap();
+    let index = crate::walk(tmp.path(), &crate::WalkOptions::test_default()).unwrap();
     Engine::new(
         vec![nested_parent("kind: nested_relation_fixture\n")],
         registry,
@@ -887,7 +887,7 @@ fn run_for_file_and_fix_enable_the_relation_cache() {
         .tempdir()
         .unwrap();
     std::fs::write(tmp.path().join("a.txt"), b"hello").unwrap();
-    let index = crate::walk(tmp.path(), &crate::WalkOptions::default()).unwrap();
+    let index = crate::walk(tmp.path(), &crate::WalkOptions::test_default()).unwrap();
     let engine = Engine::new(vec![Box::new(RelationConsumer)], RuleRegistry::new());
     engine
         .run_for_file(tmp.path(), &index, std::path::Path::new("a.txt"), b"hello")
@@ -898,12 +898,12 @@ fn run_for_file_and_fix_enable_the_relation_cache() {
         "run_for_file enables decodes"
     );
 
-    let index = crate::walk(tmp.path(), &crate::WalkOptions::default()).unwrap();
+    let index = crate::walk(tmp.path(), &crate::WalkOptions::test_default()).unwrap();
     engine
         .fix(
             tmp.path(),
             &index,
-            &crate::WalkOptions::default(),
+            &crate::WalkOptions::test_default(),
             true,
             crate::Applicability::Safe,
         )
@@ -919,7 +919,7 @@ fn relation_consumer_and_per_file_rule_share_one_read_and_decode() {
         .tempdir()
         .unwrap();
     std::fs::write(tmp.path().join("a.txt"), b"hello").unwrap();
-    let index = crate::walk(tmp.path(), &crate::WalkOptions::default()).unwrap();
+    let index = crate::walk(tmp.path(), &crate::WalkOptions::test_default()).unwrap();
     let engine = Engine::new(
         vec![
             Box::new(PerFileStub {
@@ -959,7 +959,7 @@ fn an_unresolvable_changed_since_ref_that_may_be_secret_is_left_out_of_the_error
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     let git = |args: &[&str]| {
-        let status = std::process::Command::new("git")
+        let status = crate::git::test_git()
             .arg("-C")
             .arg(root)
             .args(args)
@@ -979,7 +979,7 @@ fn an_unresolvable_changed_since_ref_that_may_be_secret_is_left_out_of_the_error
         "-qm",
         "one",
     ]);
-    let index = crate::walk(root, &crate::WalkOptions::default()).unwrap();
+    let index = crate::walk(root, &crate::WalkOptions::test_default()).unwrap();
     let error = |sensitive: &str, environment_fields: &[&str]| {
         let mut spec: crate::RuleSpec = crate::yaml::from_str(&format!(
             "id: scoped\nkind: nested_scope_fixture\npaths: '**/*.txt'\nscope_filter:\n  \
@@ -1044,7 +1044,7 @@ fn tracked_views_search_for_hidden_paths_only_when_the_walk_left_one_out() {
     let opts = crate::WalkOptions {
         respect_gitignore: true,
         extra_ignores: Vec::new(),
-        global_git_excludes: true,
+        global_git_excludes: false,
     };
     let full = crate::walk(root, &opts).unwrap();
     let engine = Engine::new(

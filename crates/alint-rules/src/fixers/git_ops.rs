@@ -116,6 +116,7 @@ mod tests {
 
     fn git(root: &Path, args: &[&str]) {
         let ok = Command::new("git")
+            .envs(crate::test_support::HERMETIC_GIT)
             .arg("-C")
             .arg(root)
             .args(args)
