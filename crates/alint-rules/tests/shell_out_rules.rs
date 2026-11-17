@@ -555,6 +555,78 @@ fn git_commit_gpg_signed_fires_on_unsigned_commit() {
     );
 }
 
+/// A commit signed with an SSH key that the repository's allowed-signers file
+/// lists passes: `git verify-commit` accepts it, and no other test signs a
+/// commit (a `verify_commit` that always answered "unsigned" passed them all).
+/// The key is generated in the test's temporary directory; the test skips
+/// when `ssh-keygen` is missing or this Git cannot sign or verify with it.
+#[test]
+fn git_commit_gpg_signed_passes_on_an_ssh_signed_commit() {
+    if !git_available() {
+        eprintln!("git unavailable; skipping git_commit_gpg_signed test");
+        return;
+    }
+    let keys = tempfile::tempdir().unwrap();
+    let key = keys.path().join("signing");
+    let generated = Command::new("ssh-keygen")
+        .args(["-q", "-t", "ed25519", "-N", "", "-C", "alint test", "-f"])
+        .arg(&key)
+        .output();
+    if !generated.is_ok_and(|output| output.status.success()) {
+        eprintln!("ssh-keygen unavailable; skipping the SSH-signed commit test");
+        return;
+    }
+    let public = std::fs::read_to_string(keys.path().join("signing.pub")).unwrap();
+    let allowed = keys.path().join("allowed_signers");
+    std::fs::write(&allowed, format!("test@alint.test {public}")).unwrap();
+
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    git_init(root);
+    run_git(root, &["config", "gpg.format", "ssh"]);
+    run_git(root, &["config", "user.signingkey", key.to_str().unwrap()]);
+    run_git(
+        root,
+        &[
+            "config",
+            "gpg.ssh.allowedSignersFile",
+            allowed.to_str().unwrap(),
+        ],
+    );
+    let git = |args: &[&str]| {
+        support::git()
+            .arg("-C")
+            .arg(root)
+            .args(args)
+            .output()
+            .is_ok_and(|output| output.status.success())
+    };
+    if !git(&["commit", "-q", "-S", "--allow-empty", "-m", "feat: signed"])
+        || !git(&["verify-commit", "HEAD"])
+    {
+        eprintln!("git cannot sign or verify with an SSH key here; skipping");
+        return;
+    }
+
+    let engine = build_engine_from_yaml(
+        "id: signed-commits\n\
+         kind: git_commit_gpg_signed\n\
+         level: error\n",
+    );
+    let report = run_engine(&engine, root);
+    let violations = collect_violations(&report);
+    assert!(
+        violations.is_empty(),
+        "a signed commit passes: {violations:?}"
+    );
+    let failures: Vec<_> = report
+        .results
+        .iter()
+        .flat_map(|result| &result.analysis_failures)
+        .collect();
+    assert!(failures.is_empty(), "{failures:?}");
+}
+
 #[test]
 fn git_commit_gpg_signed_fails_closed_outside_git() {
     let tmp = tempfile::tempdir().unwrap();

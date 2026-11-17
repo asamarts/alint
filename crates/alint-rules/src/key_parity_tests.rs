@@ -301,6 +301,67 @@ fn a_reference_rendered_with_backslashes_is_the_index_path() {
     );
 }
 
+/// The literal-peer half of the same fix: on Windows a nested
+/// `peers: "{dir}/fr.json"` renders `apps\web/fr.json`, which names the file
+/// the index lists as `apps/web/fr.json`, and one that renders the reference's
+/// path is refused as the reference. Simulated with `\` as a separator; off
+/// Windows the glob escapes the `\` (`apps\\web`), as `glob_escape` writes it.
+#[test]
+fn a_literal_peer_rendered_with_backslashes_is_the_index_path() {
+    let backslash = if cfg!(windows) { "\\" } else { "\\\\" };
+    let build_peer = |peer: &str| {
+        build_rule_with(
+            &spec_yaml(&format!(
+                "id: t\nkind: key_parity\nreference: 'apps\\web\\en.json'\n\
+                 peers: 'apps{backslash}web/{peer}'\nlevel: error\n"
+            )),
+            true,
+        )
+    };
+    let (tmp, index) = tempdir_with_files(&[
+        ("apps/web/en.json", br#"{"a":1,"b":2}"#),
+        ("apps/web/fr.json", br#"{"a":1}"#),
+    ]);
+    let rule = build_peer("fr.json").expect("rule builds");
+    assert_eq!(
+        rule.literal_peer.as_ref().map(RelPath::as_str),
+        Some("apps/web/fr.json")
+    );
+    let findings = rule
+        .evaluate(&ctx(tmp.path(), &index))
+        .expect("rule evaluates");
+    assert_eq!(
+        messages(&findings),
+        ["apps/web/fr.json: missing key `b` (present in apps/web/en.json)"]
+    );
+
+    let error = build_peer("en.json")
+        .expect_err("the peer is the reference")
+        .to_string();
+    assert!(
+        error.contains("must select at least one file other than the reference"),
+        "{error}"
+    );
+}
+
+/// An `ignore_keys` pattern is at most 1,024 bytes: one that long is
+/// accepted and one a byte longer refused.
+#[test]
+fn an_ignore_keys_pattern_may_be_1024_bytes_long() {
+    let build_with = |len: usize| {
+        build(&spec_yaml(&format!(
+            "id: t\nkind: key_parity\nreference: en.json\npeers: fr.json\n\
+             ignore_keys: ['{}']\nlevel: error\n",
+            "k".repeat(len)
+        )))
+    };
+    build_with(1024).expect("a 1,024-byte pattern is accepted");
+    let error = build_with(1025)
+        .expect_err("a 1,025-byte pattern is refused")
+        .to_string();
+    assert!(error.contains("must be at most 1024 bytes"), "{error}");
+}
+
 /// Outside a preparation build, a name that looks like a placeholder is a
 /// real name: a top-level rule that writes one gets the load error 0.22 gave.
 #[test]
