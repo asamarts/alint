@@ -19,6 +19,7 @@ fn trusted() -> Settings {
 }
 
 /// The ids of the rules a session built, sorted.
+#[cfg(unix)]
 fn built_rules(session: &Session) -> Vec<String> {
     let mut ids: Vec<String> = session.kinds.keys().cloned().collect();
     ids.sort();
