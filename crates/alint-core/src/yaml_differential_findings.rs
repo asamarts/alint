@@ -540,6 +540,13 @@ const FINDINGS: &[(&str, Entry, &[&str])] = &[
         Entry::Json,
         &["core-tag-on-another-kind", "after-the-root-node"],
     ),
+    // A line that starts with `%` continues the root's plain scalar, so the
+    // quote after it is the scalar's text, not a quoted scalar that holds
+    // the tab after the comment (seed 17).
+    ("1\n%\n\" #\n\t", Entry::Value, &["tab-as-white-space"]),
+    ("1\n%\n\" #\n\t", Entry::Json, &["tab-as-white-space"]),
+    ("1\n%x\n'a #\n\t \n", Entry::Value, &["tab-as-white-space"]),
+    ("1\n%x\n'a #\n\t \n", Entry::Json, &["tab-as-white-space"]),
 ];
 
 #[test]

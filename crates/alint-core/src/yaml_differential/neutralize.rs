@@ -223,7 +223,10 @@ pub(super) fn places(input: &str) -> Vec<Place> {
         if marker {
             nested = false;
         }
-        let mut comment = block && text.starts_with('%');
+        // A `%` at the start of a line is a directive, but on a line that
+        // continues the root's plain scalar, where both scanners read it as
+        // the scalar's text: `1\n%\n" #` is the scalar `1 % "`.
+        let mut comment = block && text.starts_with('%') && continuation.is_none();
         let mut state = if continuation.is_some() {
             Block::Scalar
         } else if quote.is_some() {
