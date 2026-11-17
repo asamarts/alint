@@ -21,12 +21,13 @@ type EscapingSink = Arc<Mutex<Vec<Arc<Path>>>>;
 /// family re-exports this constant (M3).
 ///
 /// NOTE (bytes, not tree): this bounds INPUT size, not the parsed
-/// `serde_json::Value` tree a structured format expands into, which costs up to
-/// ~30x the input in RSS (attribute-heavy XML; ~6-10x for JSON / dotenv). The
-/// per-file structured tree is separately bounded by
-/// `structured_format::MAX_STRUCTURED_BYTES` (32 MiB, ~1 GB tree worst
-/// case). What remains is the AGGREGATE across the `par_iter` fan-out (several files
-/// parsing at once), a concurrent-parse-memory bound tracked as a follow-up (see
+/// `serde_json::Value` tree a structured format expands into, whose parse costs up
+/// to ~30x the input in RSS for attribute-heavy XML, ~6-10x for JSON / dotenv and
+/// ~190x for YAML. The per-file structured parse is separately bounded by
+/// `structured_format::MAX_STRUCTURED_BYTES` (32 MiB of input: up to 6.2 GB
+/// peak for one YAML parse, ADR-0042). Across the `par_iter` fan-out (several
+/// files parsing at once), YAML parses share a budget of in-flight input bytes
+/// (`yaml_budget`); for the other formats the aggregate is a follow-up (see
 /// `docs/design/format-coverage.md`, "Resource-pressure hardening").
 pub const MAX_ANALYZE_BYTES: u64 = 256 * 1024 * 1024;
 

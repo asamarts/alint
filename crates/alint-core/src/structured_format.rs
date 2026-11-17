@@ -30,21 +30,26 @@ pub(crate) use xml_scan::xml_within_parse_limits;
 pub(crate) use yaml_value::json_seed;
 
 /// Maximum INPUT size any structured format will parse into a value tree. The read
-/// cap [`crate::walker::MAX_ANALYZE_BYTES`] (256 MiB) bounds bytes, but a parsed tree
-/// costs far more RSS: measured up to ~30x the input for attribute-heavy XML
-/// (roxmltree builds its own arena alongside the `serde_json::Value` tree), ~6-10x
-/// for JSON. Lossless dotenv keeps tighter byte and physical-line budgets because
-/// retained items and decoded escape maps amplify input. A
-/// near-read-cap structured file would peak at multiple GB --
-/// and the per-file rule dispatch is parallel, so several parse at once. Capping the
-/// structured-parse INPUT at 32 MiB bounds a single file's tree to ~1 GB worst case
-/// (XML), far above any real config / manifest (they are KB-MB; even a large
-/// `OpenAPI` spec or SBOM is well under 32 MiB) yet 8x tighter than the read cap. An
-/// oversize structured file is one per-file parse-error violation. HCL keeps its own
-/// tighter `MAX_HCL_BYTES` (64 KiB), and dotenv has a 4 MiB cap plus a physical-line
-/// budget; this is the ceiling for the rest. (Aggregate
-/// concurrent parse memory -- this cap times the `par_iter` fan-out -- is a separate,
-/// coarser bound tracked in `docs/design/format-coverage.md`.)
+/// cap [`crate::walker::MAX_ANALYZE_BYTES`] (256 MiB) bounds bytes, but a parse
+/// costs far more RSS than its input: measured up to ~30x the input for
+/// attribute-heavy XML (roxmltree builds its own arena alongside the
+/// `serde_json::Value` tree), ~6-10x for JSON, and up to ~190x for YAML, whose
+/// parser holds its events and the half-built tree at once. At this cap one YAML
+/// parse peaked at 6.2 GB for a `[1,1,...]` flow sequence, 4.5 GB for `k: 1`
+/// lines and 5.0 GB for a 16 MiB flow mapping (ADR-0042). Lossless dotenv keeps
+/// tighter byte and physical-line budgets because retained items and decoded
+/// escape maps amplify input. Capping the structured-parse INPUT at 32 MiB, far
+/// above any real config / manifest (they are KB-MB; even a large `OpenAPI` spec
+/// or SBOM is well under 32 MiB) yet 8x tighter than the read cap, bounds one
+/// parse to those few GB. An oversize structured file is one per-file
+/// parse-error violation. HCL keeps its own tighter `MAX_HCL_BYTES` (64 KiB), and
+/// dotenv has a 4 MiB cap plus a physical-line budget; this is the ceiling for
+/// the rest. The per-file rule dispatch is parallel, so several files parse at
+/// once: YAML inputs over 1 MiB therefore share a process-wide budget of this
+/// many in-flight input bytes, so at most one maximal YAML file parses at a time
+/// (`yaml_budget`). For the other formats, aggregate concurrent parse
+/// memory (this cap times the `par_iter` fan-out) is a coarser bound tracked in
+/// `docs/design/format-coverage.md`.
 pub const MAX_STRUCTURED_BYTES: usize = 32 * 1024 * 1024;
 
 /// The structured-parse cap must stay meaningfully below the read cap, or it does
@@ -103,8 +108,9 @@ impl Format {
         // consecutive leading BOMs are all removed. Flagging a BOM is the `no_bom`
         // rule's job.
         let text = text.trim_start_matches('\u{feff}');
-        // Bound the parsed-tree memory FIRST: a structured tree costs up to ~30x the
-        // input in RSS (XML), so a large file balloons to multiple GB. Reject before
+        // Bound the parsed-tree memory FIRST: a parse costs up to ~30x the input in
+        // RSS for XML and ~190x for YAML, so a large file balloons to multiple GB
+        // (see `MAX_STRUCTURED_BYTES`). Reject before
         // building it -- and before the whitespace-emptiness scan below, so an oversize
         // all-whitespace file is a fast size rejection rather than an O(n) trim.
         // (HCL's own 64 KiB cap in `hcl_to_value` fires first for HCL.)
@@ -148,6 +154,10 @@ impl Format {
                 serde_json::from_str(&strip_jsonc(text)).map_err(|_| strict_err.to_string())
             }),
             Self::Yaml => {
+                // Wait for this input's share of the YAML parse budget, held
+                // until the parse below ends, the guards' passes included
+                // (`yaml_budget`, ADR-0042).
+                let _budget = crate::yaml_budget::reserve(text.len());
                 // Bound flow-nesting before any parser reads it (the parser v0.22
                 // used hung on a crafted `[[[…` file; ayaml stops at the same 128
                 // levels itself, counting block levels too) -- the YAML analogue

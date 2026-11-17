@@ -779,6 +779,9 @@ fn yaml_entry_rows(
             crate::structured_format::MAX_STRUCTURED_BYTES
         )));
     }
+    // This input's share of the YAML parse budget, held until the rows are
+    // built (`yaml_budget`, ADR-0042).
+    let _budget = crate::yaml_budget::reserve(stripped.len());
     // Keep the lexical flow guard ahead of saphyr's scanner, which refuses a
     // 256th level of flow nesting of its own but does not bound block nesting
     // (the event loop below bounds both): this one refuses flow nesting past
