@@ -1,6 +1,6 @@
 # v0.23: selectors, a first constraint slice, and the YAML groundwork
 
-Status: accepted (2026-11-12, ADR-0032); in progress, phases 0 to 5 merged.
+Status: accepted (2026-11-12, ADR-0032); in progress, phases 0 to 6 merged.
 Decisions: [ADR-0032](../../adr/0032-v023-owner-decisions.md) (the owner decisions and the scope);
 [ADR-0033](../../adr/0033-v023-slice-after-the-corpus-stratum.md) (the slice after the corpus
 stratum, and the #503 fix);
@@ -20,7 +20,8 @@ oracle as a dev-dependency, superseded by ADR-0041);
 advisory, and the allowlist approved on ayaml's fixes);
 [ADR-0041](../../adr/0041-a-yaml-parser-facade-with-test-only-reference-parsers.md) (the parser
 facade with test-only reference parsers);
-ADR-0042 (measuring YAML memory and wall time, after the audit);
+[ADR-0042](../../adr/0042-measure-the-yaml-parser-by-memory-and-wall-time.md) (measuring YAML
+memory and wall time, after the audit);
 [ADR-0043](../../adr/0043-trust-and-disclosure-decisions-from-the-post-v0221-audit.md) (the
 trust and disclosure decisions of the audit after v0.22.1).
 
@@ -180,14 +181,16 @@ it must respect:
   - the corpus replay against v0.22.1, with no difference that the CHANGELOG does not explain.
 
   Item 7 does not change what alint writes, only which old baseline entries it matches. Item 12 is
-  one exception (ADR-0033 decision 3): a configuration that uses `git_tracked_only` can gain or
-  lose findings, three kinds and six bundled rules reword a message, and the CHANGELOG lists the
-  change. The ayaml cutover (phase 9) is the other: it reads some YAML differently and words
-  parse errors differently, and the CHANGELOG lists each difference (ADR-0035 decision 5). Every
-  difference in the replay must come from one of them. The replay of `main` at e7bb08a57 against
-  v0.22.1 (run 43927008138) found three: item 12's reworded `java-no-tracked-build` message in
-  gradle/gradle and quarkusio/quarkus, and the reworded message for a stream of more than one
-  document in istio/istio.
+  one exception (ADR-0033 decision 3): a configuration that uses `git_tracked_only` can gain or lose
+  findings, three kinds and six bundled rules reword a message, and the CHANGELOG lists the change.
+  The ayaml cutover (phase 9) is another: it reads some YAML differently and words parse errors
+  differently, and the CHANGELOG lists each difference (ADR-0035 decision 5). The two audits since
+  v0.22.1 (ADR-0043, ADR-0044) are the third: their security and correctness fixes change what some
+  configurations do, and the CHANGELOG's "Upgrading from 0.22" list names each change a 0.22 setup
+  can notice. Every difference in the replay must come from one of them. The replay of `main` at
+  e7bb08a57 against v0.22.1 (run 43927008138) found three: item 12's reworded
+  `java-no-tracked-build` message in gradle/gradle and quarkusio/quarkus, and the reworded message
+  for a stream of more than one document in istio/istio.
 - **The version boundary of ADR-0022 holds.** A v2 source may extend v1 sources, never the
   reverse, at any recursive edge.
 - **Trust is no weaker than v1** (section 7.1 rules 9, 11 and 12):
@@ -275,9 +278,10 @@ decided then.
 
 ## 5. Release acceptance
 
-- **v1 is unchanged** apart from item 12 and the ayaml cutover. The e2e suite passes, and the
-  corpus replay against v0.22.1 shows no difference that the CHANGELOG does not explain: item
-  12's (ADR-0033 decision 3) and the cutover's (ADR-0035 decision 5).
+- **v1 is unchanged** apart from item 12, the ayaml cutover and the audits' fixes (section 4).
+  The e2e suite passes, and the corpus replay against v0.22.1 shows no difference that the
+  CHANGELOG does not explain: item 12's (ADR-0033 decision 3), the cutover's (ADR-0035 decision 5)
+  and the audits' (ADR-0043, ADR-0044).
 - **The stratum is scored** and recorded in `general-linter.md` section 12, with the bucket shares
   before and after the slice. Phase 8 re-scores it with the shipped slice and compares the result
   with ADR-0033's projections.
@@ -296,9 +300,11 @@ decided then.
   - the deterministic gate for v1 against v0.18.2;
   - bench-record against v0.22.1;
   - for the v2 policies, wall-clock and instructions against the v1 spellings they re-express;
-  - YAML memory (ADR-0042): decoding a YAML document into the structured rules' tree, ayaml's
-    peak heap is within 1.2x of libyaml's on documents of 37 KB to 11 MB. The release
-    preflight's `yaml-memory-release.sh` measures it, and fails until an ayaml release meets it.
+  - YAML memory (ADR-0042, ADR-0044): decoding a YAML document into the structured rules' tree,
+    ayaml's peak heap is within 1.2x of libyaml's on each of the memory test's nine shapes
+    (OpenAPI documents of 37 KB, 1.1 MB and 4.4 MB, and 1 MB block and flow mappings and
+    sequences). The release preflight's `yaml-memory-release.sh` measures it, and fails until an
+    ayaml release meets it.
 
 ## 6. Risks
 
@@ -318,8 +324,8 @@ decided then.
 - **ayaml qualification.** `main` runs ayaml since #510, before the harness that qualifies it.
   If #483 is not done by the freeze, or the harness of #482 (merged in #521) or #483 finds a
   difference the owner does not approve, the release waits or #510 is reverted (ADR-0035). The
-  corpus replay of every pull request compares against v0.22.1, so a difference on real
-  repositories shows up before then.
+  corpus replay, weekly and on demand (`corpus-replay.yml`), compares against v0.22.1, so a
+  difference on real repositories shows up before then.
 
 ## 7. Status log
 
@@ -772,3 +778,41 @@ decided then.
     lexeme), `semver-*` does not apply to a path token, `strip-root` comes first and once, and
     `as:` is refused on remote and bundled `extends:` entries.
   - Next: phase 7, the `constraint` kind.
+- 2026-11-17: the second audit round.
+  - Six reviewers audited #538 to #558 on `main` at 6837a4dfa (the first audit's fixes and phase
+    6) and reported about 66 findings, 4 of them high. The scheduled YAML harness run failed at
+    seed 60 on a block scalar's indentation indicator; #559 fixed the harness's line reader.
+  - The high findings: an extended or nested config promoted a fix to apply without asking by
+    writing `applicability: {safe: ~}` (since v0.17.0); `--no-spawn` and an untrusted language
+    server ran Git, which runs the commands a repository's `.git/config` names; an empty `.git`
+    that another user planted defeated discovery's owner check; and `--no-spawn` still fetched a
+    remote `extends:` whose URL may carry an environment value.
+  - Owner decisions, recorded in ADR-0044: a global `--untrusted` for a repository the user does
+    not trust, with `--no-spawn` refusing every process, Git included; and the 1.2x memory
+    release bound on each of the memory test's nine shapes, where ayaml 0.1.2 measures 1.73x to
+    3.06x (reported to asamarts/ayaml#163). In ADR-0045 (with #560): the walk keeps checking
+    each directory's ignore files before `ignore` reads them, which the crate gives no hook for
+    and upstream declined to bound, and the reference perf gate counts those probes per
+    directory; #573 looks at reading ignore files from the walk's own listing instead.
+  - The pull requests: #560 (security), #562 (YAML), #563 (relations and `key_parity`), #577 (the
+    `version: 2` loader), #576 (the engine) and #578 (these documents). Each fix has a gate test
+    that fails when the fix is reverted. #561 audits the VS Code extension's npm dependencies
+    against a waiver list, since no picomatch release fixes GHSA-fc5q-39xc-vjpf. Before the merges,
+    all five fix branches were merged in one tree and the workspace's tests run there. #574 checks
+    the subject a squash merge writes (#563's title made a 126-character one on `main`), and #575
+    fixes three gaps the YAML harness showed with `ALINT_YAML_DIFF_SPECIALS=0`, which the weekly
+    run does not set. A review of #577 and #578 before they merged found that an `extends:` entry
+    was charged only for its merge, after `only:` narrowed its source, so entries naming one large
+    source in other words loaded it whole each time unbounded; #577 charges the load, and #580
+    tracks merging a list in linear time. Left open: #564 to #573 and #579 to #581.
+  - The advisory GHSA-78jj-xfpm-g6px gained the fix promotion, the structured-fix crashes of
+    #540, unbounded ignore-file and baseline reads, and the network `extends:` path: 26 items.
+  - A trial of ayaml's main branch (d5c1cf7) needs two API changes and fails 14 of about 4,850
+    tests, all of them pinned messages; its peak heap is about 1.26x to 1.29x libyaml's on the
+    OpenAPI shapes. At a561ae2, later that day, the OpenAPI shapes are within 1.2x and the six
+    1 MB shapes at 1.53x to 2.32x (asamarts/ayaml#178). [`yaml-parser.md`](../yaml-parser.md)
+    records the trials and the bump steps.
+  - For phase 7: the relation evaluator's run-wide counters (cells, bytes, rows) are shared, so
+    which relation reaches a cap depends on the order rules run in. Phase 7 evaluates relations
+    in plan order before the rules fan out, or documents the difference.
+  - Next: phase 7, the `constraint` kind; the ayaml bump when a release meets the conditions.

@@ -52,7 +52,8 @@ points are explicit.
    Move entries from `## [Unreleased]` to a new `## [<x.y.z>] - YYYY-MM-DD`
    section. Add a one-paragraph summary at the top of the new section
    capturing the headline change. Keep the section order 0.18.0 onward
-   uses: `### Security` first when present, then `Added`, `Changed`,
+   uses: `### Upgrading from <previous minor>` first when a release needs
+   one, then `### Security` when present, then `Added`, `Changed`,
    `Performance`, and `Fixed`, with `Deprecated` and `Removed` when a
    release needs them. Each heading appears once per release.
 
@@ -70,6 +71,11 @@ points are explicit.
    and the shell tests, which CONTRIBUTING.md's "Not in
    `preflight.sh`" list names. This is the pre-push sanity gate; run
    a listed script locally when a change touches what it checks.
+
+   Also run `ci/scripts/yaml-memory-release.sh` before tagging. The
+   release workflow runs it only after the tag is pushed, and fails the
+   release when ayaml's peak heap is over 1.2x libyaml's on any of the
+   memory test's shapes (ADR-0042, ADR-0044).
 
    For a patch release (`x.y.z` with `z > 0`), also run
    `ci/scripts/check-patch-compat.sh <every earlier x.y.z>` (for example
@@ -229,7 +235,9 @@ checklist so the release-gated pieces land and nothing drifts:
    release fixes (for v0.23.0, GHSA-78jj-xfpm-g6px, ADR-0040 and ADR-0043),
    once the release is out: check that the advisory's description matches the
    CHANGELOG's Security section, and set its patched versions to the released
-   ones, in the advisory's page or its API. Then publish it:
+   ones, in the advisory's page or its API. For v0.23.0, also settle the
+   question ADR-0043 decision 1 leaves to this step: whether the language
+   server's holes get an advisory of their own. Then publish it:
 
    ```sh
    gh api -X PATCH repos/asamarts/alint/security-advisories/GHSA-78jj-xfpm-g6px \

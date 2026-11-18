@@ -480,10 +480,11 @@ selectors:
 rules: []
 ```
 
-The [version 1 schema](/docs/configuration/) stays what a `.alint.yml` without a modeline is
-checked against, so a version 2 file needs the modeline. A version 2 `.alint.d/` fragment
-without `version:` needs one too, and the schema then asks for `version: 2`, as the version 1
-schema asks for `version: 1`.
+Nothing associates a file name with either schema: an editor checks a config against the
+schema its modeline names, as for the [version 1 schema](/docs/configuration/). A version 2
+file needs the version 2 modeline, and so does a version 2 `.alint.d/` fragment without
+`version:`; the schema then asks for `version: 2`, as the version 1 schema asks for
+`version: 1`.
 
 The draft checks what the loader checks of a single file: every key, value type, name,
 reference, field source, transform, format, `read:` form and count. It cannot check:

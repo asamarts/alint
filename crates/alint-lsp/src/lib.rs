@@ -5,12 +5,19 @@
 //! It is driven by the `alint lsp` subcommand, speaking LSP over stdio
 //! (see [`run_stdio`]).
 //!
-//! Config discovery is **per document**: each open file is linted by the
-//! nearest `.alint.yml` found walking up from its directory (the same
-//! search the CLI does from its working directory), so a monorepo with
-//! nested package configs gets one session per config. Every workspace
-//! folder the client reports (multi-root) is honored; a file outside all
-//! of them is not linted.
+//! Config discovery is **per workspace folder**: each folder the client
+//! reports (multi-root) is linted by its own `.alint.yml`, rooted at that
+//! config's directory, as `alint check` there. A folder without a config of
+//! its own (a directory holding several repositories) lints each file with
+//! the config at the top of the nearest repository above it inside the
+//! folder, rooted there. A deeper config joins only as a nested config,
+//! under the governing config's `nested_configs: true`, and a file outside
+//! every folder is not linted.
+//!
+//! Until the client says the workspace is trusted (the `trusted`
+//! initialization option), the server runs no rule, fix or fact that
+//! starts a process or runs Git, fetches no remote `extends:` and reads no
+//! environment value; every other rule lints as usual.
 //!
 //! Evaluation paths:
 //!

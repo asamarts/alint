@@ -58,4 +58,5 @@ in `docs/adr/` is missing from this table.
 | [0041](../adr/0041-a-yaml-parser-facade-with-test-only-reference-parsers.md) | A YAML parser facade with test-only reference parsers | accepted |
 | [0042](../adr/0042-measure-the-yaml-parser-by-memory-and-wall-time.md) | Measure the YAML parser by memory and wall time, not only instructions | accepted |
 | [0043](../adr/0043-trust-and-disclosure-decisions-from-the-post-v0221-audit.md) | Trust and disclosure decisions from the post-v0.22.1 audit | accepted |
+| [0044](../adr/0044-untrusted-runs-git-as-a-process-and-a-wider-memory-gate.md) | `--untrusted`, Git as a process, and a wider memory gate | accepted |
 | [0045](../adr/0045-count-the-walks-per-directory-probes-in-the-reference-gate.md) | Count the walk's per-directory probes in the reference gate | accepted |

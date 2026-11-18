@@ -6,6 +6,50 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Upgrading from 0.22
+
+These changes can stop a setup that works with 0.22 from working as it did. Each is described in
+full below.
+
+- Config discovery stops at the repository's top: a repository without a `.alint.yml` of its own
+  reports `no .alint.yml found` where a config above it governed it. Move the config into the
+  repository or pass `--config` (Changed, Security).
+- A rule that reads a file in a Git directory by name fails to load, and no fix writes there, so a
+  `file_create` of `.git/hooks/...` is reported skipped. Keep hooks in a tracked directory under
+  `core.hooksPath` (Changed, Security).
+- `allow_out_of_root` covers your own rules only, not a ruleset's from `extends:` (Security).
+- The language server runs no command rule, `custom:` fact or Git rule, fetches no remote
+  `extends:` and reads no environment value until the editor says the workspace is trusted;
+  editors other than VS Code need the `trusted` initialization option (Changed, Security).
+- YAML is read by ayaml as YAML 1.2. An enum value written as a one-entry mapping where its name
+  goes (a fix op's `applicability: {safe: ~}`, `cross_file`'s `normalize: [{trim: ~}]`,
+  `file_graph`'s `require:`) is an error, and a configuration, `extends:` source or nested
+  configuration over 32 MiB is refused (Changed, Security).
+- `git_tracked_only: true` sees tracked files an ignore file excludes, so a `file_absent` rule can
+  fire on a force-added file (Changed).
+- The human and Markdown fix reports count a fix that ran without resolving its violation as
+  `unresolved` (Changed).
+- `alint test` asks for the spawn capability for a spawning rule nested in another rule, and a
+  test's `when:` and `${VAR}` read only the test's environment (`given.env` and the sandbox's
+  values), not the host's (Security).
+- An ignore file over 32 MiB, or one that is not a regular file, stops the walk; a baseline the
+  `baseline:` key names must be a regular file inside the repository; and an absolute local
+  `extends:` needs `allow_out_of_root: true` (Security).
+- An `extends:` list's entries may load and merge at most 4,194,304 entries in all, counted as
+  the [configuration limits](docs/site/configuration/index.md#limits) say: a flat list reaches it
+  at about 90 rulesets of 1,000 rules each, or about 2,900 one-rule files (Fixed).
+- On Unix, a `.git` another user owns does not mark a repository's top. Run from a subdirectory
+  of a checkout another user owns (as root in a container, say), alint skips that checkout's
+  config with a warning; run it from the top or pass `--config` (Security).
+- A baseline last written by v0.21 or earlier no longer matches findings whose path the
+  environment hides; regenerate it once with `alint baseline --accept-new` (Removed).
+- Library: `WhenEnv::env` is an `Option<&BTreeMap<String, String>>`; `LspOptions` gains `config`,
+  `no_gitignore`, `no_spawn` and `untrusted`, and `LoadOptions` gains `global_git_excludes`, which
+  breaks a struct literal; YAML values and errors are alint's own types (`alint_core::yaml`) in
+  place of `yaml_serde`'s; `Violation`, `Context`, `RuleSpec`, `NestedRuleSpec` and `WalkOptions`
+  are `#[non_exhaustive]`, as is `alint_core::Error`; and `baseline::Fingerprints` is gone
+  (Changed, Added, Removed).
+
 ### Security
 
 GitHub security advisory GHSA-78jj-xfpm-g6px, published with this release, describes the holes
@@ -16,21 +60,25 @@ patch release follows: upgrade to v0.23.0. Until then, run `alint test` only on 
 packages whose configurations and `given:` blocks you trust, and `alint fix` only with `extends:`
 rulesets you trust and, with a content fix, only on repositories you trust.
 
-- **The language server runs nothing a workspace's config could start until the editor trusts
-  the workspace.** Since v0.11.0, opening a folder in an editor with alint's language server ran
-  that repository's `.alint.yml` as `alint check` does: its command rules (`kind: command`,
+- **The language server runs nothing a workspace's config could start until the editor trusts the
+  workspace.** Since v0.11.0, opening a folder in an editor with alint's language server ran that
+  repository's `.alint.yml` as `alint check` does: its command rules (`kind: command`,
   `generated_file_fresh`, `command_idempotent`) and `custom:` facts started processes, a remote
-  `extends:` was fetched, and `{{env.*}}` and `env.*` in a `when:` read the editor's
-  environment, so opening a cloned repository ran its commands. Until the client sends the
-  initialization option `{"trusted": true}`, the server now skips every rule of a spawning kind
-  (at any `require:` depth) and every `custom:` fact, lints a rule whose fix alone spawns (such
-  as `file_absent` with `fix: git_untrack`) without offering that fix, refuses a remote
-  `extends:` with a diagnostic on the config, and reads no environment value. Every other rule
-  lints as usual, and the server says what it turned off once, in an information message. The
-  VS Code extension sends VS Code's Workspace Trust state and restarts the server when trust is
-  granted, so a trusted VS Code workspace behaves as before; other editors opt in through their
-  server settings ([editors](docs/site/integrations/editors.md#workspace-trust)). The JetBrains
-  plugin does not send the option yet, so command rules do not run there.
+  `extends:` was fetched, and `{{env.*}}` and `env.*` in a `when:` read the editor's environment, so
+  opening a cloned repository ran its commands. Until the client sends the initialization option
+  `{"trusted": true}`, the server now skips every rule of a spawning kind (at any `require:` depth),
+  every rule that runs Git (the `git_*` kinds, `changeset_requires_path`, `pair_changed_together`,
+  `git_tracked_only`, `scope_filter.changed_since`: Git runs the commands a repository's
+  `.git/config` names, such as `core.fsmonitor`) and every
+  `custom:` fact, lints a rule whose fix alone spawns (such as `file_absent` with `fix:
+  git_untrack`) without offering that fix, refuses a remote `extends:` with a diagnostic on the
+  config, and reads no environment value. Every other rule lints as usual, and the server says what
+  it turned off once, in an information message. The VS Code extension sends VS Code's Workspace
+  Trust state and restarts the server when trust is granted, so a trusted VS Code workspace behaves
+  as before; other editors opt in through their server settings
+  ([editors](docs/site/integrations/editors.md#workspace-trust)). The JetBrains plugin does not send
+  the option yet, so command rules do not run there. `alint lsp --untrusted` takes every workspace
+  as untrusted, whatever the editor sends.
 - **A nested or vendored `.alint.yml` no longer governs files in the language server.** Since
   v0.18.0, the server linted each open file with the nearest `.alint.yml` above it as a
   top-level config. A package under `node_modules/`, which the workspace's `.gitignore` excludes
@@ -61,19 +109,22 @@ rulesets you trust and, with a content fix, only on repositories you trust.
   name or matched line in the message) could render an image the editor fetched
   (`![x](http://...)`), a link, or HTML. The message is now escaped, the rule id is a code span,
   and a policy URL is a link only when it is `http` or `https` (any other shows as text).
-- **Configuration discovery stops at the repository's top.** alint looked for `.alint.yml` from
-  the current directory up to the file-system root, so in a repository without a config of its
-  own, or from a directory below one, a `.alint.yml` that someone else wrote in a directory above
-  it (`/tmp/.alint.yml` over a checkout in `/tmp`, a shared home) governed the run, command rules
+- **Configuration discovery stops at the repository's top.** alint looked for `.alint.yml` from the
+  current directory up to the file-system root, so in a repository without a config of its own, or
+  from a directory below one, a `.alint.yml` that someone else wrote in a directory above it
+  (`/tmp/.alint.yml` over a checkout in `/tmp`, a shared home) governed the run, command rules
   included. Discovery now checks the repository's top (the nearest directory holding a `.git`
-  directory or file) and stops there. Outside every repository it climbs as before but skips a
-  config file another user owns in a directory above the one it starts from, with `alint:
-  warning: skipping /tmp/.alint.yml: owned by another user` on stderr (on Unix, a file whose
-  owner is not the effective user id; Windows does not check). A config in the starting
-  directory itself is used whoever owns it, so `alint check` as root in a container, on a
-  mounted directory the host's user owns, still finds that directory's config. This affects
-  `alint check`, `fix`, `list`, `explain`, `validate-config`, `export-agents-md` and every other
-  command that discovers a config, and the language server, in v0.1.0 to v0.22.1.
+  directory or file) and stops there. A `.git` marks the top only when the current user owns it and
+  the directory that holds it (on Unix), so an empty `.git` that another user put above a directory
+  without a `.git` of its own (an unpacked archive in `/tmp`) does not end the climb before the
+  owner check below. Outside every repository it
+  climbs as before but skips a config file another user owns in a directory above the one it starts
+  from, with `alint: warning: skipping /tmp/.alint.yml: owned by another user` on stderr (on Unix, a
+  file whose owner is not the effective user id; Windows does not check). A config in the starting
+  directory itself is used whoever owns it, so `alint check` as root in a container, on a mounted
+  directory the host's user owns, still finds that directory's config. This affects `alint check`,
+  `fix`, `list`, `explain`, `validate-config`, `export-agents-md` and every other command that
+  discovers a config, and the language server, in v0.1.0 to v0.22.1.
 - **A repository's configuration can no longer make loading it crash, hang or exhaust memory.**
   A configuration is untrusted for what it costs to load, and a small one could:
   - overflow the stack, since v0.20.0: the `requires:` check walked the whole first document
@@ -94,24 +145,24 @@ rulesets you trust and, with a content fix, only on repositories you trust.
   - hang, since v0.2.1: a configuration, a local `extends:` target or a nested configuration
     was read whatever it was, so a FIFO blocked the load forever, and a symlink to `/dev/zero`
     grew until memory ran out. The `.alint.yml` that `alint suggest` reads (since v0.7.0) was
-    read the same way. Each is now read only when it is a regular file, and only up to 32 MiB.
+    read the same way. Each is now read only when it is a regular file, and only up to 32 MiB,
+    and so is a config the language server reads again to place a YAML error.
 
   These affect every command that loads a configuration (`alint check`, `alint fix`, `alint
   test`, the language server and the others), from the version each item names to v0.22.1.
   Until v0.23.0, run alint on a repository you do not trust under a time and a memory limit.
-- **`pinned_references` no longer hangs on a workflow whose merge keys refer to themselves.**
-  Since v0.19.0, the rule resolved a `<<` merge key in a GitHub Actions workflow or a GitLab CI
-  file by following every merge source again at each level, with no memo. A 16-byte workflow
-  (`a: &r` over `<<: [*r, *r]`) made `alint check` with `ci/github-actions@v1` spin until it was
-  killed. The YAML alias guard did not stop it: it measures with the parser alint decodes with,
-  and took that parser's refusal of the text (here of an alias to a collection that contains
-  it, or of anything before an alias bomb, such as an empty `!<>` tag) for "within budget",
-  while the rule reads the text with another parser, which accepts it. The guard's verdict now
-  says when the text could not be read, and the rule refuses such a file with an analysis
-  failure, as does `key_parity`'s YAML entry extraction. The rule also refuses an alias to a
-  collection that contains it, and holds merge-key lookups to a work budget, so a file the guard
-  passes cannot spin either. This affects every command that runs the rule, from v0.19.0 to
-  v0.22.1.
+- **`pinned_references` no longer hangs on a workflow whose merge keys refer to themselves.** Since
+  v0.19.0, the rule resolved a `<<` merge key in a GitHub Actions workflow or a GitLab CI file by
+  following every merge source again at each level, with no memo. A 16-byte workflow (an anchor `&r`
+  on its top-level mapping, over `<<: [*r, *r]`) made `alint check` with `ci/github-actions@v1` spin
+  until it was killed. The YAML alias guard did not stop it: it measures with the parser alint
+  decodes with, and took that parser's refusal of the text (here of an alias to a collection that
+  contains it, or of anything before an alias bomb, such as an empty `!<>` tag) for "within budget",
+  while the rule reads the text with another parser, which accepts it. The guard's verdict now says
+  when the text could not be read, and the rule refuses such a file with an analysis failure, as
+  does `key_parity`'s YAML entry extraction. The rule also refuses an alias to a collection that
+  contains it, and holds merge-key lookups to a work budget, so a file the guard passes cannot spin
+  either. This affects every command that runs the rule, from v0.19.0 to v0.22.1.
 - **An `extends:` URL's scheme is read in any case, any other scheme is refused, and its
   credentials stay out of errors.** `HTTPS://`, `Http://` and `ALINT://bundled/` were not
   recognized as remote, plain-HTTP and bundled entries, and `ftp://`, `file://`, `ssh://` or
@@ -172,19 +223,20 @@ rulesets you trust and, with a content fix, only on repositories you trust.
   v0.5.10 (`content_from`).
 - **A fix from an extended ruleset no longer writes alint's configuration.** A ruleset reached
   through `extends:` may not declare a `kind: command` rule, but its fixes could write one: a
-  `file_create` of `.alint.d/housekeeping.yml`, or a `file_append` to `.alint.yml`, put a
-  `command` rule into the user's own configuration, and the next `alint check` ran it. A fix of a
-  rule an extended ruleset or a nested config shaped (it declared the rule, contributed a field to
-  it, or defined its template) now never creates, edits, removes, renames, moves onto or changes
-  the mode of a configuration file: `.alint.yml`, `.alint.yaml`, `alint.yml` or `alint.yaml` at
-  any depth, in any case and with the trailing dots, spaces or stream suffix Windows drops,
-  anything under `.alint.d/`, or a file
-  the configuration was loaded from (a `--config` file and local `extends:` targets included). It
-  reports `.alint.yml is an alint configuration file; a fix from an extended ruleset never writes
-  one`. The user's own rules still write configuration, and `trusted_extends` does not lift this
-  (it never let a ruleset spawn). This affects `alint fix` with a local ruleset from `extends:` in
-  v0.5.8 to v0.22.1 (a drop-in since v0.5.10), with any `https://` ruleset before v0.17.0, and
-  since then with one listed in `trusted_extends`.
+  `file_create` of `.alint.d/housekeeping.yml`, or a `file_append` to `.alint.yml`, put a `command`
+  rule into the user's own configuration, and the next `alint check` ran it. A fix of a rule an
+  extended ruleset or a nested config shaped (it declared the rule, contributed a field to it, or
+  defined its template) now never creates, edits, removes, renames, moves onto or changes the mode
+  of a configuration file: `.alint.yml`, `.alint.yaml`, `alint.yml` or `alint.yaml` at any depth, in
+  any case and with the trailing dots, spaces or stream suffix Windows drops, anything under
+  `.alint.d/` or `alint-tests/` (where `alint test` finds policy tests, which may run commands), a
+  Windows 8.3 short name of any of these (`ALINT~1.YML`), or a file the configuration was loaded
+  from (a `--config` file and local `extends:` targets included). It reports `.alint.yml is an alint
+  configuration file; a fix from an extended ruleset never writes one`. The user's own rules still
+  write configuration, and `trusted_extends` does not lift this (it never let a ruleset spawn). This
+  affects `alint fix` with a local ruleset from `extends:` in v0.5.8 to v0.22.1 (a drop-in since
+  v0.5.10), with any `https://` ruleset before v0.17.0, and since then with one listed in
+  `trusted_extends`.
 - **`allow_out_of_root` no longer lets an extended ruleset's fix write outside the repository.**
   The top-level `allow_out_of_root: true` lifted the root confinement of a fix's write targets
   too, for every rule, so a `file_create` in a ruleset reached through `extends:` could write
@@ -217,6 +269,50 @@ rulesets you trust and, with a content fix, only on repositories you trust.
   overrides by id counts) reads only inside the root and reports `registry source
   ../outside.json escapes the repo root`, in `alint check`, `alint fix` and the language server.
   This affects configs with `allow_out_of_root` and an `extends:` ruleset in v0.12.0 to v0.22.1.
+- **A structured YAML fix no longer overflows the stack.** Since v0.17.0, `set_value`,
+  `remove_value` and `replace` on a YAML file found the value's bytes with saphyr's loader, which
+  recurses once per level of nesting. saphyr does not read every document as the check side does:
+  a file that starts `&ak:---` (saphyr's anchor names run through a `:`), or that has a
+  byte-order mark at the start of a later line, can be one plain scalar to the check side and a
+  sequence 100,000 levels deep to saphyr. `alint fix` aborted on such a 60 KB file, as did
+  `check --format sarif`, and the language server's code action at 3,000 levels. The resolver
+  now walks saphyr's parser events without recursing, declines a document nested past 128
+  levels (block or flow, the check side's limit) and stops at a second document.
+- **A structured YAML fix no longer exhausts memory on an alias bomb.** Since v0.17.0, saphyr's
+  loader copied an anchored node for every alias. Its alias budget does not count what a mapping
+  key holds, so a 600-byte file of twelve nested `{? *a}` levels ran `fix` for 17 s and aborted
+  at 3.35 GB, where `check` took 0.02 s. The resolver keeps an alias as one node and never copies
+  it.
+- **An extended or nested config can no longer promote a fix by writing its tier as a mapping.**
+  Since v0.17.0, a ruleset reached through `extends:` or a nested config could write `fix: {
+  file_remove: { applicability: {safe: ~} } }`: a fix op's options were read through a buffered
+  enum that took a one-entry mapping as a unit variant, and the trust check
+  compared the value as a string only, so a bare `alint fix` applied the fix (deleting files, for
+  `file_remove`) without asking. A fix op's options now decode by the op's name, a tier is taken
+  only as a string (any other spelling is an error that lists the tiers), and the trust gates
+  refuse, or strip from a rule an extended source shaped, an `applicability` that is not a string,
+  and a `{{` placeholder anywhere inside one. `file_graph`'s `require:` and `cross_file`'s
+  `normalize:` take their values only as strings too
+  ([ADR-0044](docs/adr/0044-untrusted-runs-git-as-a-process-and-a-wider-memory-gate.md)). This
+  affects `alint fix` from v0.17.0 to v0.22.1.
+- **The walk no longer reads an ignore file without bound.** A committed `.gitignore` or `.ignore`
+  that is a symlink to `/dev/zero` or a FIFO, or an oversized `info/exclude`, worktree `.git` file
+  or `commondir`, made `alint check`, `alint fix` and the language server exhaust memory or hang.
+  Every ignore file the walk reads (in the tree, above it, and the global excludes file) is now read
+  only when it is a regular file of at most 32 MiB; otherwise the walk stops with an error that
+  names it. The check costs three `stat` calls for each directory the walk enters and each
+  directory above the root. This affects every released version.
+- **A baseline is read only when it is a regular file of at most 256 MiB, and one the `baseline:`
+  key names only inside the repository and outside `.git`.** Since v0.14.0, `check`, `fix` and the
+  language server read the baseline whole, wherever it was, so a repository's `.alint.yml` could
+  name `/dev/zero`, a FIFO or a file outside the repository. `--baseline` on the command line may
+  still name a file anywhere.
+- **A local `extends:` written as an absolute, rooted, drive-letter or network path is refused
+  before alint touches it,** unless `allow_out_of_root: true`. From v0.14.0, which first confined a
+  local `extends:`, to v0.22.1, the path was resolved before it was confined to the config's
+  directory, so on Windows `extends: //host/share/x.yml`
+  opened a connection to that host before the confinement refused it. An absolute path inside the
+  root now needs `allow_out_of_root: true` or a relative path.
 
 The fixes below are in the policy-test runner. Except where a bullet says otherwise, they affect
 `alint test` and the `alint_testkit::Runner` library in v0.20.0 to v0.22.1, and only for a
@@ -310,34 +406,59 @@ policy-test package the user does not trust.
   there (`~/.config/git/ignore`), so `check_changed` missed an untracked file the host's excludes
   listed. The runner's Git commands now get `XDG_CONFIG_HOME` in the sandbox.
 
-
 ### Added
 
 - **`alint_dsl::discover_config` and `alint_dsl::Discovery`** (library API, see Security):
-  discovery's result with the config files it skipped because another user owns them, for a
-  caller to warn about. **`alint_core::git::repository_top`**, the nearest directory at or above
-  a path that holds a `.git` directory or file, and **`alint_core::git::owned_by_current_user`**.
-  **`RuleEntry::fix_may_leave_root`**: whether a rule's fix may read or write outside the root
-  (its `allow_out_of_root`, never for a rule from an `extends:`'d ruleset), and
-  **`AllowOutOfRoot::allows_rule`**: whether the grant covers an effective rule (never one an
-  extended ruleset or a nested config shaped; `allows` still answers by id and kind alone).
-  `alint-core` depends on `rustix` on Unix, already in the dependency tree, for the effective
-  user id.
-- **`--no-spawn`** (global flag): refuse a config whose rules, fixes or facts start a process,
-  for linting a repository you do not trust with its own config. A rule of a spawning kind (at
-  any `require:` depth), a spawning fix such as `git_untrack` or `command`, or a `custom:` fact
-  fails the load before anything runs, naming it:
-  `rule "x" (kind: command) spawns a process; --no-spawn refuses it`. It applies to `check`,
-  `fix`, `baseline`, `list`, `explain`, `facts`, `validate-config` and `lsp`; `test` rejects it
-  beside `--allow-spawn`, and the commands that run no rule reject it. It does not refuse a
-  remote `extends:` or environment values.
+  discovery's result with the config files it skipped because another user owns them, for a caller
+  to warn about. **`alint_core::git::repository_top`**, the nearest directory at or above a path
+  that holds a `.git` directory or file the current user owns, and
+  **`alint_core::git::owned_by_current_user`**. **`RuleEntry::fix_may_leave_root`**: whether a
+  rule's fix may read or write outside the root (its `allow_out_of_root`, never for a rule from an
+  `extends:`'d ruleset), and **`AllowOutOfRoot::allows_rule`**: whether the grant covers an
+  effective rule (never one an extended ruleset or a nested config shaped; `allows` still answers by
+  id and kind alone). `alint-core` depends on `rustix` on Unix, already in the dependency tree, for
+  the effective user id.
+- **`--no-spawn`** (global flag): refuse a config whose rules, fixes or facts start a process or run
+  Git, to run a repository's own config without letting it start anything. An enabled rule of a
+  spawning kind (at any `require:` depth), a spawning fix such as `git_untrack` or `command`, a
+  `custom:` fact, or a rule that runs Git (the `git_*` kinds, `changeset_requires_path`,
+  `pair_changed_together`, `git_tracked_only`, `scope_filter.changed_since`; Git runs the commands a
+  repository's `.git/config` names) fails the load before anything runs, naming it: `rule "x" (kind:
+  command) spawns a process; --no-spawn refuses it`. A rule at `level: off` runs nothing and is not
+  refused. `--changed` and `--base` are refused, and the run starts no Git command. It applies to
+  `check`, `fix`, `baseline`, `list`, `explain`, `facts`, `validate-config` and `lsp`; `test`
+  rejects it beside `--allow-spawn`, and the commands that run no rule reject it. It does not refuse
+  a remote `extends:` or environment values: for a repository you do not trust, use `--untrusted`.
+- **`--untrusted`** (global flag): lint a repository you do not trust with its own config. It
+  refuses what `--no-spawn` refuses, naming `--untrusted`, refuses a remote `extends:` before
+  connecting, and gives the config an empty environment, so `{{env.NAME}}`, `env.*` in a `when:` and
+  a legacy `${VAR}` read nothing. `alint lsp --untrusted` takes every workspace as untrusted,
+  whatever the editor sends
+  ([ADR-0044](docs/adr/0044-untrusted-runs-git-as-a-process-and-a-wider-memory-gate.md)).
+  SECURITY.md recommends it for a checkout you do not trust.
 - **The language server's `trusted` initialization option** (`{"trusted": true}`): until the
-  editor sends it, `alint lsp` runs no command rule or custom fact, fetches no remote
+  editor sends it, `alint lsp` runs no command rule, Git rule or custom fact, fetches no remote
   `extends:` and reads no environment value (see Security). The VS Code extension sends VS
-  Code's Workspace Trust state and declares limited support for untrusted workspaces.
-- **`alint_dsl::rule_spawn_use`, `fact_spawns` and `refuse_spawning`** (library API): what in a
-  rule spawns a process (its kind, its fix, or a nested `require:` kind), whether a fact does,
-  and the check `--no-spawn` runs.
+  Code's Workspace Trust state.
+- **Workspace trust in each editor integration.** The VS Code extension declares limited support for
+  untrusted workspaces, and in Restricted Mode ignores the workspace's own `alint.path` and
+  `alint.serverArgs` settings and turns off **alint: Show effective rules**. The bundled `alint.el`
+  gains `alint-trusted` (nil by default); Sublime's `LSP.sublime-settings` sends `"trusted": false`,
+  to set to true; Helix's `languages.toml` and Neovim's `lsp/alint.lua` show the setting in a
+  comment; and the Eclipse, JetBrains and Zed READMEs say how a workspace is trusted there
+  ([editors](docs/site/integrations/editors.md#workspace-trust)).
+- **`alint_dsl::rule_spawn_use`, `rule_git_use`, `fact_spawns` and `refuse_spawning`** (library
+  API): what in a rule spawns a process (its kind, its fix, or a nested `require:` kind), what in a
+  rule runs Git, whether a fact spawns, and the check `--no-spawn` runs.
+- Library API for this release's bounds and scans: **`alint_core::git::deny_for_process`** (run no
+  Git command in this process from now on, as `--no-spawn` does), **`alint_core::bounded_file`**
+  (read a regular file up to a cap), **`Baseline::load_file`** (a baseline read with the bounds
+  above), **`alint_core::POLICY_TEST_DIRECTORY`**, **`Scope::candidates`, `candidate_files` and
+  `candidate_dirs`** (the index entries a scope can match, narrowed to the literal directories its
+  patterns start with), **`LspOptions::config`, `no_gitignore`, `no_spawn` and `untrusted`**,
+  **`LoadOptions::global_git_excludes`** and
+  **`alint_testkit::Runner::experimental_config_version`**. The new `LspOptions` and `LoadOptions`
+  fields break a caller that builds either struct with a literal; add `..Default::default()`.
 - **Language-server configuration errors are placed where they are.** A YAML syntax error in
   `.alint.yml` is shown on its line instead of on the first line of the file.
 - **`alint_core::yaml_depth::expansion`, `GuardScan::expansion` and `Expansion`** (library
@@ -460,13 +581,16 @@ policy-test package the user does not trust.
     with the file that declares it and the aliases that reach that file; `list --format json`
     adds `selectors` and `relations` for a version 2 config only, and `--category` lists rules
     only. A file an `extends:` entry read from the environment loads is shown as `<redacted>`,
-    here and in `export-agents-md`.
+    here and in `export-agents-md`, and so is every file loaded below it.
   - `alint export-agents-md` lists a version 2 config's named selectors and relations the same
     way, after its rules, under `### Named selectors and relations`; `--format json` adds
     `selectors` and `relations`, shaped as in `list --format json`, for a version 2 config only.
-    A version 1 config's output is unchanged. `init` still writes `version: 1`, and
-    `suggest --format yaml` still writes no `version:`, so its snippet can be added to a config
-    of either version.
+    A version 1 config's output is unchanged. In both, each version 2 file's `extends:` aliases
+    are listed once per file, and `--format json` adds a `sources` list that `selectors` and
+    `relations` entries refer to by index. An unsupported `version:` names version 2 as the
+    experiment, and `alint test` warns once a run when a policy test's config is version 2.
+    `init` still writes `version: 1`, and `suggest --format yaml` still writes no `version:`, so
+    its snippet can be added to a config of either version.
   - Nothing reads selectors and relations yet: a version 2 config runs its rules as version 1
     would, and its selectors and relations check nothing until the `constraint` rule kind lands.
   - alint can now evaluate a relation over a repository: an internal evaluator, which the
@@ -481,16 +605,20 @@ policy-test package the user does not trust.
     is reaching a row, cell, byte, join or distinct-value limit, which is never truncation (a run's
     relations hold at most 5,000,000 cells, a cell per field of each row, and 1 GiB besides: a
     value's text is held once however many fields, parts and joins copy it, and each decode, key
-    path and transformed value takes its bytes once). Every `where:` predicate
-    tests every row, so their order does not matter: a row that any predicate is false for is
-    dropped, even when another cannot test it. A field the environment writes to (`{{env.X}}` in its
-    `where:` or `transform:`) is sensitive, and a relation whose selection reads the environment
-    shows no detail in its failures, nor does a relation that reads one, as a join side or through a
-    membership reference. Nothing calls the evaluator in this build, so relations stay inert and a
-    run whose rules read none reads nothing for them.
+    path and transformed value takes its bytes once). Every `where:` predicate tests every row, so
+    their order does not matter: a row that any predicate is false for is dropped, even when another
+    cannot test it. A value substituted from `{{env.X}}` in `selectors:` or `relations:` stays text,
+    except in a field that takes a boolean (`optional:`, `leaves:`, a field's `sensitive:`). A field
+    the environment writes to (`{{env.X}}` in its `where:` or `transform:`) is sensitive, as is
+    every field that shows the same value (an entry's key, path and value, and fields bound to the
+    same value), and a relation whose selection reads the environment shows no detail in its
+    failures, nor does a relation that reads one, as a join side or through a membership reference.
+    Nothing calls the evaluator in this build, so relations stay inert and a run whose rules read
+    none reads nothing for them.
   - `facts.json` (format 7) gains `compatibility.experimental_config_versions: [2]`;
     `config_versions` stays `[1]`. `validate-config --format json` gains `config_version`, the
-    loaded config's version, for every config.
+    loaded config's version, for every config that loads (a failed validation has no
+    version to report).
   - A draft JSON Schema for version 2, `schemas/v2/config.json`, with the `$id`
     `https://raw.githubusercontent.com/asamarts/alint/v0.23.0/schemas/v2/config.json`. It is the
     version 1 schema with `version: 2`, `selectors:`, `relations:` and `as:` added, and checks
@@ -498,8 +626,8 @@ policy-test package the user does not trust.
     reference, field source, transform, `entries:` format, `read:` form and count. It leaves to
     the loader what needs every source loaded (names that resolve, cycles, the relation plan),
     regexes and JSONPaths, and a name declared twice. An editor uses it through a
-    `# yaml-language-server: $schema=` modeline in a version 2 file; the version 1 schema and its
-    `$id` are unchanged.
+    `# yaml-language-server: $schema=` modeline in a version 2 file; the version 1 schema accepts
+    the same configs and keeps its `$id` (only its descriptions change, under Changed).
   - A docs page, `docs/site/configuration/version-2.md`, describes version 2: the version
     boundary, named selectors, relations (`entries:`, `read:`, `union:`, `join:`, fields,
     `transform:` and `where:`), names, aliases and per-file namespaces, what the loader and the
@@ -541,11 +669,11 @@ policy-test package the user does not trust.
   `0 applied, 0 skipped, 0 unfixable, 1 unresolved.`, with `unresolved` shown only when nonzero.
   The JSON report is unchanged (`status: "skipped"`, `skip_kind: "unresolved"`, and the
   summary's `skipped` still includes it), as is the exit code.
-- **Breaking (library API):** the public field `WhenEnv::env` holds a `&BTreeMap<String, String>`,
-  and `WhenEnv::with_env` takes one, the type of the engine's process environment, instead of a
-  `HashMap`. The engine now passes its condition environment there whenever it has one (by default
-  its process environment), so `env.*` in a condition reads the environment the embedder chose,
-  not the host's (see Security).
+- **Breaking (library API):** the public field `WhenEnv::env` holds an `Option<&BTreeMap<String,
+  String>>`, and `WhenEnv::with_env` takes a `&BTreeMap<String, String>`, the type of the engine's
+  process environment, where both used a `HashMap`. The engine now passes its condition environment
+  there whenever it has one (by default its process environment), so `env.*` in a condition reads
+  the environment the embedder chose, not the host's (see Security).
 - **`git_tracked_only: true` sees tracked files that an ignore file excludes** (#503, ADR-0033
   decision 3). Under the default `respect_gitignore: true` the walk leaves out what `.gitignore`,
   `.ignore`, `.git/info/exclude` and the global excludes file list, and the tracked view was
@@ -773,24 +901,33 @@ policy-test package the user does not trust.
 - **`explain` and `alint rules show` label a kind's selector fields `selector fields:`** in human
   output (it was `selectors:`), so the line is not read as a version 2 config's named selectors.
   The JSON key `selectors` is unchanged.
+- The version 1 JSON Schema's descriptions follow the changes above: a path resolves in the walked
+  tree, `git_tracked_only` sees a tracked file only an ignore file hides, and `require:` and
+  `normalize:` describe their value forms only. No key or type changed.
 
 ### Performance
 
-- A `key_parity` whose `peers:` glob starts with literal directories (`locales/*.json`, or a
-  nested rule's `{dir}/*.json`) tests only the files under them, where it tested every file in
-  the tree. Nested in `require:`, it did that in every iteration, so its cost grew with the
-  number of iterations times the number of files.
-- **YAML files over 1 MiB share a budget of 32 MiB of input parsing at once** (ADR-0042). One
-  YAML parse at the 32 MiB input cap peaked at 4.5 to 6.2 GB, and every worker thread could run
-  one. A parse of a larger file now waits until its size is free in the budget, so at most one
-  file at the cap parses at a time; a file of 1 MiB or less never waits, and findings are
-  unchanged. The `yaml_path_*` rules, `json_schema_passes`, the cross-file rules' `extract:`,
-  `pinned_references` and the structured fixes all take from it, and so does
-  `alint_core::Format::parse`, which may now wait for another thread's YAML parse.
-- **YAML files of 10 KB and more cost more time and memory to read than in 0.22:** +9% to +54%
-  wall time and 1.3x to 2.9x peak memory. ayaml 0.1.2 holds about 65 bytes of heap per input byte
-  while it parses, where libyaml held 35 to 39 (asamarts/ayaml#163). The v0.23.0 release waits
-  for an ayaml release that brings its peak heap within 1.2x of libyaml's (ADR-0042).
+- A `key_parity` whose `peers:` glob starts with literal directories (`locales/*.json`) tests only
+  the files under them, where it tested every file in the tree.
+- **A rule nested in `for_each_dir` or `for_each_file` whose `paths:` is a glob below the iterated
+  directory (`{path}/*.md`) reads only that directory's entries,** where it tested every entry in
+  the tree on every iteration, so its time grew with the square of the number of directories (0.49 s
+  at 2,000 directories, 4.50 s at 8,000). About 40 kinds, `key_parity`'s peers and
+  the per-file rules narrow this way.
+- **YAML files over 1 MiB share a budget of 32 MiB of input parsing at once** (ADR-0042). With
+  ayaml, one YAML parse at the 32 MiB input cap peaks at 4.5 to 6.2 GB, and every worker thread
+  could run one. A parse of a larger file now waits until its size is free in the budget (or, when
+  its aliases expand, a 64th of the expanded size, if that is larger: sixteen 500 KB files of
+  aliases peaked at 3.1 GB), so at most one file at the cap parses at a time; a file of 1 MiB or
+  less waits only when its aliases expand past 64 MiB, and findings are unchanged. The `yaml_path_*`
+  rules, `json_schema_passes`, the cross-file rules' `extract:`, `pinned_references` and the
+  structured fixes all take from it, and so does `alint_core::Format::parse`, which may now wait for
+  another thread's YAML parse.
+- **YAML files of 10 KB and more cost more time and memory to read than in 0.22:** +9% to +54% wall
+  time and 1.3x to 2.9x peak memory. ayaml 0.1.2 holds about 65 bytes of heap per input byte while
+  it parses, where libyaml held 35 to 39 (asamarts/ayaml#163). The v0.23.0 release waits for an
+  ayaml release that brings its peak heap within 1.2x of libyaml's on each of nine document shapes
+  (ADR-0042, ADR-0044).
 
 ### Removed
 
@@ -862,30 +999,52 @@ policy-test package the user does not trust.
   and a temporary directory such as `/tmp` that also occurs inside the package path, as in
   `/home/me/tmp/policies`, left the part of the package path before it visible. The longer path
   is now replaced first (#494).
-- **A structured YAML fix no longer overflows the stack.** Since v0.17.0, `set_value`,
-  `remove_value` and `replace` on a YAML file found the value's bytes with saphyr's loader, which
-  recurses once per level of nesting. saphyr does not read every document as the check side does:
-  a file that starts `&ak:---` (saphyr's anchor names run through a `:`), or that has a
-  byte-order mark at the start of a later line, can be one plain scalar to the check side and a
-  sequence 100,000 levels deep to saphyr. `alint fix` aborted on such a 60 KB file, as did
-  `check --format sarif`, and the language server's code action at 3,000 levels. The resolver
-  now walks saphyr's parser events without recursing, declines a document nested past 128
-  levels (block or flow, the check side's limit) and stops at a second document.
-- **A structured YAML fix no longer exhausts memory on an alias bomb.** Since v0.17.0, saphyr's
-  loader copied an anchored node for every alias. Its alias budget does not count what a mapping
-  key holds, so a 600-byte file of twelve nested `{? *a}` levels ran `fix` for 17 s and aborted
-  at 3.35 GB, where `check` took 0.02 s. The resolver keeps an alias as one node and never copies
-  it.
 - **A structured YAML fix no longer edits through an alias.** Since v0.17.0, a `set_value` or
   `remove_value` whose path ran through an alias, as `$.job.image` does with `job: *base`,
   edited the anchored node's definition: every other alias of it changed too, and the re-verify
   checked only the path fixed. Such a path now declines, as one that ends at an alias did.
 - **`set_value` on an anchored YAML scalar keeps the anchor.** Since v0.17.0, the replaced bytes
-  began at the scalar's anchor, so `a: &x 1` set to `5` became `a: 5`, and a later `*x` no
-  longer parsed; a quoted scalar after an anchor also lost its trailing comment. The value is now
-  replaced after the anchor (`a: &x 5`). A core-schema tag is still replaced with the value,
-  which carries its own type (`!!str 5` set to `6` becomes `6`), and a core tag written before
-  an anchor declines.
+  began at the scalar's anchor, so `a: &x 1` set to `5` became `a: 5`, and a later `*x` no longer
+  parsed; a quoted scalar after an anchor also lost its trailing comment. The value is now replaced
+  after the anchor (`a: &x 5`) when no alias names it; when one does, the fix declines, since the
+  edit would change every alias too. A core-schema tag is still replaced with the value, which
+  carries its own type (`!!str 5` set to `6` becomes `6`), and a core tag written before an anchor
+  declines.
+- **`set_value`, `remove_value` and `replace` on YAML, JSON and TOML change only what they aim at.**
+  A fix now reads the whole file again after its edits and applies only when the result is the
+  original tree with the intended change. In YAML, removing a line could add a blank line to a `|+`
+  block scalar, attach an explicit `?` key or a key-less `:` entry to another value, or leave a bare
+  `?`; in TOML, removing the only table under a parent known only from a dotted header dropped the
+  parent. When two rules' fixes together would change more than their targets, the later rule waits
+  for the next fix pass. A YAML set or removal at a node an alias or merge key names, or on a path
+  through one, declines. Removing a YAML block mapping's last entries writes `{}`, where it left the
+  key with no value, which reads as null
+  ([ADR-0044](docs/adr/0044-untrusted-runs-git-as-a-process-and-a-wider-memory-gate.md)).
+- **In a rule nested two or more levels deep, a token's value is substituted once.** The inner
+  iterations rendered the outer one's values again, so a file or directory named like a token
+  (`x{stem}`) was expanded twice: `key_parity` reported a missing peer, and messages showed the
+  wrong path. The outermost iteration now substitutes every token.
+- **`key_parity` compares a YAML key written as a block scalar (`? |`) or left empty,** at the place
+  its text starts, where it dropped such a key.
+- **`key_parity` holds each key path of a deep, wide JSON or YAML file once,** where it copied the
+  path into every key below it, and charges each row's key path to the run's byte budget as it is
+  built: on a 1 MB file 120 levels deep with 100,000 keys its rows peaked at about 700 MB and now
+  hold about 300 MB of key paths under the default limits (#569).
+- **An `extends:` list that names one source many times loads it once,** and the work of a load's
+  `extends:` entries is bounded: 2,000 entries naming one 2,000-rule ruleset took 152 s to load. An
+  entry is charged the source it loads, before `only:` or `except:` narrows it, and each merge what
+  was merged so far and what it brings in, up to 4,194,304 entries in all (see the
+  [configuration limits](docs/site/configuration/index.md#limits)). A version 1 configuration that
+  fails to decode is no longer parsed a second time to tell its version.
+- **`alint test` no longer lets the host's global Git excludes file hide a test's nested configs.**
+  The walk that finds `nested_configs:` files read `$XDG_CONFIG_HOME/git/ignore` and a
+  `core.excludesFile` that `~/.gitconfig` names, where the test's own walk does not, so a host whose
+  excludes listed `.alint.yml` or `*.yml` dropped those nested rules from the test. `alint check`
+  still honours the file.
+- **With `allow_out_of_root: true`, a config outside the root is named by its path from the root
+  (`../b/rules.yml`, `..\b\rules.yml` on Windows) in listings and in errors found in it,** where
+  they showed its file name alone; a refusal of an `extends:` entry still names it as the entry
+  spells it.
 - **`remove_value` and `replace` on many YAML matches take linear time.** Since v0.17.0, each
   matched node parsed the whole file again to find its bytes, the engine parsed the result again
   to verify each edit, and each edit's splice moved the rest of the file: 2,000 matches took

@@ -11,6 +11,8 @@ decision-makers: asamarts
 Accepted (2026-11-16). Amends [ADR-0035](0035-keep-the-early-ayaml-cutover.md) on what qualifies
 ayaml for v0.23.0: Y-C4, "#510's deterministic performance gate passed", is not enough, and a
 memory condition is added. The rest of ADR-0035 stands.
+[ADR-0044](0044-untrusted-runs-git-as-a-process-and-a-wider-memory-gate.md) amends decisions
+1, 2 and 4: nine document shapes, the release bound on each, and a budget that charges expansion.
 
 ## Context
 

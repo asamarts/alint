@@ -15,6 +15,9 @@ decision 2's approval stands, and its condition now asks for every ayaml fix of 
 (see "The ayaml condition").
 [ADR-0042](0042-measure-the-yaml-parser-by-memory-and-wall-time.md) records the audit's decisions
 on YAML memory and wall time.
+[ADR-0044](0044-untrusted-runs-git-as-a-process-and-a-wider-memory-gate.md) refines decisions
+2, 4 and 6 (`--untrusted`, Git as a process, `.git` ownership, enum values by name) and corrects
+decision 8 and "The ayaml condition".
 
 ## Context
 
