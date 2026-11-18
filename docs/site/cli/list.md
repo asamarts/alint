@@ -25,8 +25,8 @@ alint list --category naming
 
 For an [experimental version 2 config](/docs/configuration/version-2/), `alint list` also shows
 each named selector and relation after the rules, with the config file that declares it. Then,
-for each file that `extends:` aliases reach, one line names the file and every alias that reaches
-it, with the config that declares the alias:
+for each file that `extends:` aliases reach and that declares a selector or relation, one line
+names the file and every alias that reaches it, with the config that declares the alias:
 
 ```text
 selector base_docs  rules/base.yml

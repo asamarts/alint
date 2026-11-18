@@ -1643,6 +1643,13 @@ impl RawConfig {
             + self.untrusted_when_var_reads.len()
             + self.v2.object_count()
     }
+
+    /// What an `extends:` merge or load handles of the config
+    /// ([`loader::LoadState::charge_extends`]): its entries, and each version
+    /// 2 source, which a merge looks for among those it holds.
+    fn merge_size(&self) -> usize {
+        self.entry_count() + self.v2.sources.len()
+    }
 }
 
 /// [`merge_unbounded`], refused past [`MAX_MERGED_ENTRIES`].

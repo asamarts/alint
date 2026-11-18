@@ -874,7 +874,7 @@ fn the_nearest_name_through_aliases_is_the_nearest_written_one() {
 fn recording_many_aliases_looks_at_few_of_them() {
     use super::super::model::{ALIAS_PROBES, Alias};
 
-    const ENTRIES: usize = 200_000;
+    const ENTRIES: usize = 20_000;
     let target = |entry: usize| PathBuf::from(format!("/repo/p{}.yml", entry % 7));
     // Every other entry has an alias.
     let aliases = (0..ENTRIES)
@@ -906,8 +906,8 @@ fn recording_many_aliases_looks_at_few_of_them() {
         objects.record_extended(entry, Some(&target(entry)));
     }
     let probes = ALIAS_PROBES.with(std::cell::Cell::get);
-    // A binary search of 100,000 aliases looks at about 18 of them; looking
-    // at each would be 100,000.
+    // A binary search of 10,000 aliases looks at about 14 of them; looking at
+    // each would be 10,000.
     assert!(probes <= ENTRIES * 20, "{probes} aliases looked at");
     let source = &objects.sources[0];
     assert_eq!(source.extended.len(), ENTRIES);

@@ -38,21 +38,19 @@ use super::model::SourceId;
 
 /// The committed draft's text for the crate at `crate_dir`: the workspace's
 /// `schemas/v2/config.json`, two directories up. `None` when it is absent
-/// and the crate is not in its workspace (no `Cargo.lock` there either): a
-/// packaged crate, as crates.io serves it, holds no schema, and its tests
-/// skip the checks against it. Absent inside the workspace, or unreadable,
-/// it is an error, which a test reports.
+/// and the crate is not in its workspace (a `crates` directory beside a
+/// `Cargo.lock`): a packaged crate, as crates.io serves it, or a vendored
+/// copy (`vendor/alint-dsl`) holds no schema, and its tests skip the checks
+/// against it. Absent inside the workspace, or unreadable, it is an error,
+/// which a test reports.
 fn draft_at(crate_dir: &Path) -> std::result::Result<Option<String>, String> {
     let workspace = crate_dir.join("..").join("..");
     let path = workspace.join("schemas").join("v2").join("config.json");
+    let in_workspace = crate_dir.parent().and_then(Path::file_name) == Some("crates".as_ref())
+        && workspace.join("Cargo.lock").exists();
     match std::fs::read_to_string(&path) {
         Ok(text) => Ok(Some(text)),
-        Err(error)
-            if error.kind() == std::io::ErrorKind::NotFound
-                && !workspace.join("Cargo.lock").exists() =>
-        {
-            Ok(None)
-        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound && !in_workspace => Ok(None),
         Err(error) => Err(format!(
             "read {}: {error}; run `cargo run -p xtask -- gen-schema`",
             path.display()
@@ -451,9 +449,9 @@ fn the_decode_and_the_schema_agree_on_names_and_references() {
     );
 }
 
-/// The draft is read from the workspace; a packaged crate, with no
-/// workspace around it, skips the checks against it, and a workspace without
-/// the draft fails them.
+/// The draft is read from the workspace; a packaged or vendored crate, with
+/// no workspace of its own around it, skips the checks against it, and a
+/// workspace without the draft fails them.
 #[test]
 fn the_draft_is_required_in_the_workspace_and_skipped_outside_it() {
     let tmp = tempfile::tempdir().unwrap();
@@ -461,6 +459,9 @@ fn the_draft_is_required_in_the_workspace_and_skipped_outside_it() {
     std::fs::create_dir_all(&crate_dir).unwrap();
     assert_eq!(draft_at(&crate_dir), Ok(None), "a packaged crate");
     std::fs::write(tmp.path().join("Cargo.lock"), "").unwrap();
+    let vendored = tmp.path().join("vendor").join("alint-dsl");
+    std::fs::create_dir_all(&vendored).unwrap();
+    assert_eq!(draft_at(&vendored), Ok(None), "a vendored crate");
     let error = draft_at(&crate_dir).unwrap_err();
     assert!(
         error.contains("run `cargo run -p xtask -- gen-schema`"),

@@ -543,6 +543,48 @@ fn a_template_within_the_budget_loads_in_either_version() {
     }
 }
 
+/// V2L-5 where the loader charges it: finalize charges each instance its
+/// template's body, not the markers the loader put on the template, so
+/// instances whose bodies fit the budget load, though with the markers they
+/// would not.
+#[test]
+fn an_instance_is_charged_its_templates_body_alone() {
+    use std::fmt::Write as _;
+
+    let base = format!(
+        "version: 1\ntemplates:\n  - id: t\n    kind: file_exists\n    paths: x\n    \
+         level: error\n    message: \"{}\"\n",
+        "m".repeat(60_000)
+    );
+    let (_tmp, config) = repo(&[
+        (".alint.yml", "version: 1\nextends: [./base.yml]\n"),
+        ("base.yml", &base),
+    ]);
+    let template = &raw_at(&config).templates[0];
+    let (body, marked) = (
+        template_budget::size_of_template(template),
+        template_budget::size_of_mapping(template),
+    );
+    let budget = template_budget::MAX_TEMPLATE_EXPANSION_BYTES;
+    let instances = budget / marked + 1;
+    assert!(
+        body * instances <= budget,
+        "{body} and {marked} bytes, {instances} instances"
+    );
+
+    let mut root = "version: 1\nextends: [./base.yml]\nrules:\n".to_string();
+    for instance in 0..instances {
+        writeln!(root, "  - {{id: r{instance}, extends_template: t}}").unwrap();
+    }
+    let (_tmp, config) = repo(&[(".alint.yml", &root), ("base.yml", &base)]);
+    let loaded = on_thread(8 << 20, Duration::from_secs(60), move || {
+        load(&config)
+            .map(|config| config.rules.len())
+            .map_err(|e| e.to_string())
+    });
+    assert_eq!(loaded, Ok(instances));
+}
+
 /// `config` loaded as `load` loads its chain (without its fragments), with the
 /// work its `extends:` merges were charged, in entries.
 fn merged_with_charge(config: &std::path::Path) -> (RawConfig, usize) {
@@ -590,14 +632,21 @@ fn an_extends_list_that_repeats_a_source_loads_it_once() {
     };
     let a = ruleset("a", 50, "error");
     let b = ruleset("b", 50, "error");
-    // Each merge is charged what was merged so far and what it brings in.
+    // Fifty entries that each keep another rule of one file: each loads all
+    // of it.
+    let filters: Vec<String> = (0..50)
+        .map(|i| format!("{{url: ./a.yml, only: [a{i}]}}"))
+        .collect();
+    let filters: Vec<&str> = filters.iter().map(String::as_str).collect();
+    // An entry that loads its source is charged the source's entries, and
+    // each merge what was merged so far and what it brings in.
     for (entries, times, parses, charged, rules) in [
-        (&["./a.yml"][..], 1_000, 2, 50, 50),
+        (&["./a.yml"][..], 1_000, 2, 50 + 50, 50),
         (
             &["./a.yml", "./b.yml"][..],
             500,
             3,
-            50 + (50 + 50) + 998 * (100 + 50),
+            (50 + 50) + 50 + (50 + 50) + 998 * (100 + 50),
             100,
         ),
         // A filter makes another source of the same file.
@@ -605,9 +654,10 @@ fn an_extends_list_that_repeats_a_source_loads_it_once() {
             &["./a.yml", "{url: ./a.yml, only: [a1]}"][..],
             500,
             3,
-            50 + (50 + 1) + 499 * (50 + 50) + 499 * (50 + 1),
+            (50 + 50) + 50 + (50 + 1) + 499 * (50 + 50) + 499 * (50 + 1),
             50,
         ),
+        (&filters[..], 1, 3, 50 * 50 + (1..=50).sum::<usize>(), 50),
     ] {
         let root = list(entries, times);
         let (_tmp, config) = repo(&[(".alint.yml", &root), ("a.yml", &a), ("b.yml", &b)]);
@@ -616,6 +666,21 @@ fn an_extends_list_that_repeats_a_source_loads_it_once() {
         assert_eq!(charge, charged, "{entries:?}");
         assert_eq!(raw.rules.len(), rules, "{entries:?}");
     }
+}
+
+/// A version 2 source counts in the `extends:` budget though it declares
+/// nothing, as one entry: a merge looks for each among the sources it holds.
+#[test]
+fn a_version_two_source_counts_in_the_extends_budget() {
+    let (_tmp, config) = repo(&[
+        (".alint.yml", "version: 2\nextends: [./a.yml, ./b.yml]\n"),
+        ("a.yml", "version: 2\n"),
+        ("b.yml", "version: 2\n"),
+    ]);
+    let (raw, charge) = merged_with_charge(&config);
+    assert_eq!(raw.v2.sources.len(), 3, "the root, `a` and `b`");
+    // Loading `a` and merging it, then loading `b` and merging it onto `a`.
+    assert_eq!(charge, 1 + 1 + 1 + (1 + 1));
 }
 
 /// A source an entry repeats still overrides what came between, as when it
@@ -683,10 +748,11 @@ fn an_extends_merge_budget_bounds_a_load() {
             .unwrap_err()
             .to_string(),
         format!(
-            "the `extends:` merges of this config handle more than {} entries in all (rules, \
-             templates, facts, vars and `ignore:` patterns, counted at each merge, both what \
-             was merged so far and what the entry brings in); list each source once, or \
-             flatten the `extends:` chain",
+            "the `extends:` entries of this config load and merge more than {} entries in all \
+             (rules, templates, facts, vars and `ignore:` patterns, counted for each source an \
+             entry loads and at each merge, both what was merged so far and what the entry \
+             brings in); list each source once, extend fewer and larger sources, or flatten the \
+             `extends:` chain",
             loader::MAX_EXTENDS_MERGE_WORK
         )
     );

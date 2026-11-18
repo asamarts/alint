@@ -43,6 +43,8 @@ pub(crate) struct LoadState {
     /// Every local file loaded so far, resolved: the top-level config, its
     /// drop-ins and each local `extends:` target, once each.
     pub(crate) config_files: Vec<PathBuf>,
+    /// Each of `config_files` with its index there.
+    config_file_indices: std::collections::HashMap<PathBuf, usize>,
     /// The `extends:` sources the rules' field-source markers name.
     pub(crate) field_source_names: crate::trust::FieldSourceNames,
     /// The work of every `extends:` merge so far, in entries
@@ -62,6 +64,7 @@ impl Default for LoadState {
             running_version: RunningVersion::current(),
             environment_values: Vec::new(),
             config_files: Vec::new(),
+            config_file_indices: std::collections::HashMap::new(),
             field_source_names: crate::trust::FieldSourceNames::default(),
             extends_entries: 0,
             display_root: None,
@@ -133,30 +136,44 @@ impl LoadState {
     /// Note `canonical` among the files the configuration came from: its
     /// index there.
     fn record_config_file(&mut self, canonical: &Path) -> usize {
-        self.config_files
-            .iter()
-            .position(|file| file == canonical)
-            .unwrap_or_else(|| {
-                self.config_files.push(canonical.to_path_buf());
-                self.config_files.len() - 1
-            })
+        if let Some(&index) = self.config_file_indices.get(canonical) {
+            return index;
+        }
+        self.config_files.push(canonical.to_path_buf());
+        let index = self.config_files.len() - 1;
+        self.config_file_indices
+            .insert(canonical.to_path_buf(), index);
+        index
     }
 
     /// Charge an `extends:` merge of `source` onto `merged` (what the list
     /// merged so far) with its work, the entries of both: a merge rebuilds
-    /// what it merges onto. One load's merges may do
+    /// what it merges onto. One load's entries may do
     /// [`MAX_EXTENDS_MERGE_WORK`] in all, so they are bounded however its
     /// lists repeat a source (`[a, b, a, b, ...]`) or follow a large one with
     /// many small ones.
     pub(crate) fn charge_extends(&mut self, merged: &RawConfig, source: &RawConfig) -> Result<()> {
-        let work = merged.entry_count().saturating_add(source.entry_count());
+        self.charge_extends_work(merged.merge_size().saturating_add(source.merge_size()))
+    }
+
+    /// Charge an `extends:` entry with loading `source` (read, or copied from
+    /// an earlier load), gating it and marking its rules: its entries before
+    /// `only:` or `except:` keeps some of them. So entries that name one
+    /// source in other words, or keep other rules of it, cost what they load,
+    /// not what they merge.
+    pub(crate) fn charge_extends_load(&mut self, source: &RawConfig) -> Result<()> {
+        self.charge_extends_work(source.merge_size())
+    }
+
+    fn charge_extends_work(&mut self, work: usize) -> Result<()> {
         self.extends_entries = self.extends_entries.saturating_add(work);
         if self.extends_entries > MAX_EXTENDS_MERGE_WORK {
             return Err(Error::Other(format!(
-                "the `extends:` merges of this config handle more than {MAX_EXTENDS_MERGE_WORK} \
-                 entries in all (rules, templates, facts, vars and `ignore:` patterns, counted \
-                 at each merge, both what was merged so far and what the entry brings in); \
-                 list each source once, or flatten the `extends:` chain"
+                "the `extends:` entries of this config load and merge more than \
+                 {MAX_EXTENDS_MERGE_WORK} entries in all (rules, templates, facts, vars and \
+                 `ignore:` patterns, counted for each source an entry loads and at each merge, \
+                 both what was merged so far and what the entry brings in); list each source \
+                 once, extend fewer and larger sources, or flatten the `extends:` chain"
             )));
         }
         Ok(())
@@ -1244,10 +1261,10 @@ pub(crate) fn load_recursive(
     Ok(merged)
 }
 
-/// The entries one load's `extends:` merges may handle, in all
-/// ([`LoadState::charge_extends`]): four merged configs of the largest size.
-/// A config that extends 80 rulesets of a thousand rules each spends about
-/// three quarters of it.
+/// The entries one load's `extends:` entries may load and merge, in all
+/// ([`LoadState::charge_extends`], [`LoadState::charge_extends_load`]): four
+/// merged configs of the largest size. A config that extends 80 rulesets of a
+/// thousand rules each spends about four fifths of it.
 pub(crate) const MAX_EXTENDS_MERGE_WORK: usize = 4 * crate::MAX_MERGED_ENTRIES;
 
 /// What makes two entries of one `extends:` list load the same source, gated
@@ -1478,7 +1495,7 @@ fn load_extended_source(
         confine_extends_target(&target, url, confine, opts.config_source.as_ref())?;
         load_recursive(&target, state, opts, confine, false, trusted, context)?
     };
-    gate_extended_source(&parent, &source_display, opts.kind_catalog)?;
+    gate_extended_source(state, &parent, &source_display, opts.kind_catalog)?;
     let field_source = state.field_source_names.intern(&source_display);
     mark_extended_provenance(
         &mut parent,
@@ -1683,13 +1700,17 @@ fn load_remote(
     Ok(config)
 }
 
-/// Every per-source trust refusal for one `extends:`'d config. Runs before the
-/// config merges, so `url` names the offending source in each error.
+/// Every per-source refusal for one `extends:`'d config: what loading it cost
+/// the load's budget ([`LoadState::charge_extends_load`]), then each trust
+/// refusal. Runs before the config merges, so `url` names the offending
+/// source in each error.
 fn gate_extended_source(
+    state: &mut LoadState,
     parent: &RawConfig,
     url: &str,
     catalog: Option<alint_core::KindCatalog<'_>>,
 ) -> Result<()> {
+    state.charge_extends_load(parent)?;
     // Extended configs cannot introduce `custom:` facts or process-spawning
     // rule kinds. Unknown kinds are spawning for this raw-YAML gate: a plugin
     // catalog omission must deny, never silently bypass the trust boundary.
