@@ -119,7 +119,8 @@ rulesets you trust and, with a content fix, only on repositories you trust.
   without a `.git` of its own (an unpacked archive in `/tmp`) does not end the climb before the
   owner check below. Outside every repository it
   climbs as before but skips a config file another user owns in a directory above the one it starts
-  from, with `alint: warning: skipping /tmp/.alint.yml: owned by another user` on stderr (on Unix, a
+  from, with `alint: warning: skipping /tmp/.alint.yml: owned by another user; to use it if you
+  trust it, run alint from /tmp or pass --config /tmp/.alint.yml` on stderr (on Unix, a
   file whose owner is not the effective user id; Windows does not check). A config in the starting
   directory itself is used whoever owns it, so `alint check` as root in a container, on a mounted
   directory the host's user owns, still finds that directory's config. This affects `alint check`,

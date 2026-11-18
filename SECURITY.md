@@ -199,8 +199,9 @@ posture is:
   would otherwise end discovery there). Outside every repository,
   discovery skips a config file another user owns in a directory above the
   one alint runs in, and warns (`skipping /tmp/.alint.yml: owned by another
-  user`); a config in that directory itself is used whoever owns it (root in
-  a container, on a directory the host's user owns). On Windows, where alint
+  user`, with how to use it if you trust it); a config in that directory
+  itself is used whoever owns it (root in a container, on a directory the
+  host's user owns). On Windows, where alint
   reads no owner, nothing is skipped.
 - **Git reads the repository alint names.** alint finds the repository
   itself (the nearest directory holding a `.git` directory or file) and

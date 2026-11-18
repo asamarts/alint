@@ -486,11 +486,17 @@ pub(crate) fn discover_config(start: &Path) -> Option<PathBuf> {
     discovery.path
 }
 
-/// The warning for a config file discovery skipped.
+/// The warning for a config file discovery skipped, with how to use it: from
+/// its own directory, discovery takes a config whoever owns it.
 fn skipped_config_warning(path: &Path) -> String {
+    let (path, dir) = (
+        path.display().to_string(),
+        path.parent().unwrap_or(Path::new("")).display().to_string(),
+    );
+    let (shown, dir) = (term(&path), term(&dir));
     format!(
-        "alint: warning: skipping {}: owned by another user",
-        term(&path.display().to_string())
+        "alint: warning: skipping {shown}: owned by another user; to use it if you trust it, run \
+         alint from {dir} or pass --config {shown}"
     )
 }
 
@@ -588,13 +594,14 @@ pub(super) fn load_rules_for_explain(
 mod tests {
     use super::*;
 
-    /// The warning names the skipped file, with any terminal control in its
-    /// path neutralised (a directory name someone else chose).
+    /// The warning names the skipped file and how to use it, with any terminal
+    /// control in its path neutralised (a directory name someone else chose).
     #[test]
     fn a_skipped_config_is_named_in_a_warning() {
         assert_eq!(
             skipped_config_warning(Path::new("/tmp/.alint.yml")),
-            "alint: warning: skipping /tmp/.alint.yml: owned by another user"
+            "alint: warning: skipping /tmp/.alint.yml: owned by another user; to use it if you \
+             trust it, run alint from /tmp or pass --config /tmp/.alint.yml"
         );
         let hostile = skipped_config_warning(Path::new("/tmp/\u{1b}]8;;x\u{7}/.alint.yml"));
         assert!(!hostile.contains('\u{1b}'), "{hostile:?}");
