@@ -8,8 +8,8 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 /// The kinds whose source renders a message template: a file of this crate
-/// that calls `render_message`, named for its kind (a `mod.rs` for its
-/// directory).
+/// that calls `render_message`, named for its kind (a file of a kind's
+/// directory, such as `constraint/families.rs`, for that directory).
 fn kinds_rendering_message_templates() -> BTreeSet<String> {
     fn walk(dir: &Path, out: &mut BTreeSet<String>) {
         for entry in std::fs::read_dir(dir).unwrap() {
@@ -32,12 +32,13 @@ fn kinds_rendering_message_templates() -> BTreeSet<String> {
             {
                 continue;
             }
-            let kind = if name == "mod.rs" {
-                path.parent().and_then(Path::file_name)
-            } else {
-                path.file_stem()
+            let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+            let relative = path.strip_prefix(&src).unwrap();
+            let kind = match relative.parent().and_then(|parent| parent.iter().next()) {
+                Some(directory) => directory,
+                None => relative.file_stem().unwrap(),
             };
-            out.insert(kind.unwrap().to_string_lossy().into_owned());
+            out.insert(kind.to_string_lossy().into_owned());
         }
     }
     let mut out = BTreeSet::new();

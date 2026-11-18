@@ -13,6 +13,7 @@ pub static KIND_CATEGORIES: &[(&str, &[Category])] = &[
     ("command", &[Category::PluginTier1]),
     ("command_idempotent", &[Category::CrossFile]),
     ("commented_out_code", &[Category::GitHygiene, Category::Content]),
+    ("constraint", &[Category::CrossFile]),
     ("cross_file", &[Category::CrossFile]),
     ("dir_absent", &[Category::Existence]),
     ("dir_contains", &[Category::CrossFile, Category::Structure]),

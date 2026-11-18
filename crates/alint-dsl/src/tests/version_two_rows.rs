@@ -1,8 +1,8 @@
 //! Version 2 relations evaluated over walked trees: a real configuration
 //! through the loader, a tree on disk, and the evaluator phase 7's
 //! `constraint` kind calls (design `v0.23/selectors-and-constraints.md`,
-//! sections 5 to 8 and 12). No rule reads a relation in this build, so these
-//! call the evaluator directly.
+//! sections 5 to 8 and 12). These call the evaluator directly, to see its
+//! rows; `constraint_families.rs` runs the rules that read them.
 
 use std::path::Path;
 
@@ -587,6 +587,17 @@ fn a_join_follows_its_non_unique_side_and_keeps_provenance() {
         ])
     );
     let row = &linked.rows[0].cells;
+    // A join row is the row of its side that is not unique: its own entry
+    // is the dependency, wherever a field it copies from the other side sits.
+    assert_eq!(linked.rows[0].at, row[0].at);
+    assert_eq!(
+        linked.rows[0]
+            .at
+            .pointer
+            .as_ref()
+            .map(alint_core::relation::Pointer::render),
+        Some("dependencies.b".to_string())
+    );
     assert_eq!(row[0].at.resource.path().as_str(), "a/package.json");
     assert_eq!(tree.text("a/package.json", row[1].span.unwrap()), "\"^1\"");
     assert_eq!(row[2].at.resource.path().as_str(), "b/package.json");
@@ -849,6 +860,40 @@ fn a_join_partner_and_a_field_a_sensitive_list_filters_are_sensitive() {
             );
         }
     }
+}
+
+/// A key is in its path, its parent's path and its root, so a sensitive
+/// field of any of them makes the others sensitive, in the relation and in
+/// a join that copies them; the entry's value stays shown.
+#[test]
+fn a_sensitive_key_makes_every_field_that_spells_it_sensitive() {
+    let config = "version: 2\nrelations:\n  t:\n    from: { paths: a.json }\n    entries: { \
+                  format: json, at: \"$.*\" }\n    fields:\n      k: { source: entry.key, \
+                  sensitive: true }\n      p: entry.path\n      up: entry.parent\n      top: \
+                  entry.root\n      v: entry.value\n      f: path\n  j:\n    join: { left: t, \
+                  right: t, on: { v: v }, unique: right }\n    fields: { lp: left.p, rv: right.v \
+                  }\nrules: []\n";
+    let tree = setup(config, &[("a.json", r#"{"g": {"SECRET_NAME": "x"}}"#)]);
+    let shown = |relation: &str| -> Vec<(String, bool)> {
+        tree.rows(relation)
+            .fields
+            .iter()
+            .map(|field| (field.name.clone(), field.sensitive))
+            .collect()
+    };
+    let field = |name: &str, sensitive| (name.to_string(), sensitive);
+    assert_eq!(
+        shown("t"),
+        [
+            field("k", true),
+            field("p", true),
+            field("up", true),
+            field("top", true),
+            field("v", false),
+            field("f", false),
+        ]
+    );
+    assert_eq!(shown("j"), [field("lp", true), field("rv", false)]);
 }
 
 #[test]

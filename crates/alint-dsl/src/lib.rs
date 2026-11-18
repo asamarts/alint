@@ -685,12 +685,13 @@ impl RawConfig {
                 })
             })?;
             trust::name_field_sources(&mut expanded, &self.field_source_names);
-            // Which version 2 source wrote each field, for the fields that
-            // name a relation.
+            // Which version 2 source wrote each field that names a relation.
             let origins = v2::take_field_origins(&mut expanded);
             if let Some(resolved) = &mut resolved {
                 resolved.resolve_rule(&id_hint, &expanded, &origins, &self.config_files)?;
             }
+            // The rule's options show an inline `input:` relation as written.
+            v2::take_inline_input(&mut expanded);
             mark_sensitive_conditions(&mut expanded, &self.env_vars);
             expanded.remove(ENV_VARS_MARKER);
             // A nested-config rule is confined to its subtree here, on the effective
@@ -760,7 +761,7 @@ impl RawConfig {
             spec.set_extended_source(extended_source);
             rules.push(spec);
         }
-        let mut config = Config::new(self.version.unwrap_or(0), rules)
+        Ok(Config::new(self.version.unwrap_or(0), rules)
             .with_requires(effective_requirements(&self.compatibility))
             .with_ignore(self.ignore)
             .with_respect_gitignore(self.respect_gitignore.unwrap_or(true))
@@ -772,9 +773,8 @@ impl RawConfig {
             .with_baseline(self.baseline)
             .with_compatibility(self.compatibility)
             .with_environment_values(self.environment_values)
-            .with_config_files(self.config_files);
-        config.relation_plan = resolved.map(|resolved| std::sync::Arc::new(resolved.plan));
-        Ok(config)
+            .with_config_files(self.config_files)
+            .with_relation_plan(resolved.map(|resolved| resolved.plan)))
     }
 }
 
@@ -977,6 +977,23 @@ fn validate_effective_rule_fields(
     nested_context: Option<(usize, &str)>,
 ) -> Result<()> {
     let kind = mapping.get("kind").and_then(ayaml::Value::as_str);
+
+    // A rule nested under `require:` is instantiated per iteration from its
+    // mapping alone, with no version 2 plan to read a relation from.
+    if nested_context.is_some()
+        && let Some(kind) = kind.filter(|kind| !v2::reference_fields(kind).is_empty())
+    {
+        return Err(configured_field_error(
+            parent_id,
+            nested_context,
+            "kind",
+            format!(
+                "a `{kind}` rule reads a relation, which a rule nested under `require:` \
+                 cannot; declare it as a top-level rule"
+            ),
+            configured_source(mapping, "kind", inherited_source),
+        ));
+    }
 
     if nested_context.is_some() {
         for field in [

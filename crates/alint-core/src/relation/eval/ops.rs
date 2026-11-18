@@ -158,7 +158,10 @@ fn bare_type(value: &Value) -> &'static str {
 /// of one (or of six, escaped).
 const QUOTED_CHARS: usize = 64;
 
-pub(super) fn render_value(value: &Value) -> String {
+/// A value as a message quotes it: a string escaped and in quotes, a number
+/// by its lexeme, each cut at 64 characters with its length named.
+#[must_use]
+pub fn render_value(value: &Value) -> String {
     match value {
         Value::String(text) => quoted(text, true),
         Value::Number(number) => quoted(number.lexeme(), false),
@@ -513,6 +516,7 @@ impl Evaluator<'_> {
                         JoinSide::Right => right_row.cells[*position].clone(),
                     })
                     .collect(),
+                at: Arc::clone(&row.at),
             });
         }
         Some(out)

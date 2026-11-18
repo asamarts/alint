@@ -680,8 +680,34 @@ impl Engine {
             .is_some_and(|scope| scope.sensitive_manifest_sources().next().is_some())
     }
 
+    /// Whether a relation the rule reads (a `constraint` rule's `input:`)
+    /// takes a value from the environment (`{{env.X}}`), or reads a selector
+    /// or relation that does
+    /// ([`crate::relation::plan::NamedRelation::reads_environment`]): the
+    /// environment may have chosen its rows, and so the paths and values a
+    /// finding names, so its results are redacted as a rule's whose own
+    /// `paths:` the environment wrote.
+    pub(super) fn reads_environment_relation(rule: &dyn Rule) -> bool {
+        rule.relation_inputs().is_some_and(|(plan, inputs)| {
+            inputs.iter().any(|&id| plan.relation(id).reads_environment)
+        })
+    }
+
+    /// Whether the rule's findings hold evidence that stays redacted: its
+    /// configuration is sensitive ([`crate::RuleSpec::has_sensitive_evidence`])
+    /// or a relation it reads takes a value from the environment.
+    pub(super) fn has_sensitive_evidence(entry: &RuleEntry) -> bool {
+        entry
+            .spec
+            .as_deref()
+            .is_some_and(crate::RuleSpec::has_sensitive_evidence)
+            || Self::reads_environment_relation(entry.rule.as_ref())
+    }
+
     pub(super) fn has_sensitive_path_selection(&self, entry: &RuleEntry) -> bool {
-        if Self::has_sensitive_manifest_scope(entry.rule.as_ref()) {
+        if Self::has_sensitive_manifest_scope(entry.rule.as_ref())
+            || Self::reads_environment_relation(entry.rule.as_ref())
+        {
             return true;
         }
         let Some(spec) = entry.spec.as_deref() else {
@@ -725,11 +751,7 @@ impl Engine {
         {
             result.redact_policy_url();
         }
-        if entry
-            .spec
-            .as_deref()
-            .is_some_and(crate::RuleSpec::has_sensitive_evidence)
-        {
+        if Self::has_sensitive_evidence(entry) {
             result.redact_sensitive();
         }
         result.sanitize_sensitive_metadata();
@@ -1166,10 +1188,7 @@ impl Engine {
                 // The report pass redacts every finding of a rule whose
                 // configuration is sensitive, so `baseline` and `check` saw
                 // these as sensitive: fingerprint them the same way.
-                let result_sensitive = entry
-                    .spec
-                    .as_deref()
-                    .is_some_and(crate::RuleSpec::has_sensitive_evidence);
+                let result_sensitive = Self::has_sensitive_evidence(entry);
                 let mut applied = crate::baseline::apply(&single, bl, |rid, v| {
                     if result_sensitive && !v.is_sensitive() {
                         let mut redacted = v.clone();
@@ -1768,9 +1787,7 @@ impl Engine {
                 .entries
                 .iter()
                 .find(|entry| entry.rule.id() == result.rule_id.as_ref());
-            let result_sensitive = entry
-                .and_then(|entry| entry.spec.as_deref())
-                .is_some_and(crate::RuleSpec::has_sensitive_evidence);
+            let result_sensitive = entry.is_some_and(Self::has_sensitive_evidence);
             let sensitive_paths =
                 entry.is_some_and(|entry| self.has_sensitive_path_selection(entry));
             for failure in &mut result.analysis_failures {

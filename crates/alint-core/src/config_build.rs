@@ -120,6 +120,23 @@ impl Config {
         self.config_files = config_files;
         self
     }
+
+    /// Sets [`Self::relation_plan`], the plan a version 2 configuration's
+    /// objects resolved into, and gives it to each rule that references a
+    /// relation ([`RuleSpec::relation_plan`]), whose builder reads it.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_relation_plan(mut self, plan: Option<crate::relation::plan::Plan>) -> Self {
+        self.relation_plan = plan.map(std::sync::Arc::new);
+        if let Some(plan) = &self.relation_plan {
+            for rule in &mut self.rules {
+                if plan.rule(&rule.id).is_some() {
+                    rule.set_relation_plan(Some(std::sync::Arc::clone(plan)));
+                }
+            }
+        }
+        self
+    }
 }
 
 impl RuleSpec {
@@ -141,6 +158,7 @@ impl RuleSpec {
             sensitive_fields: BTreeSet::new(),
             extended_source: false,
             rendered: false,
+            relation_plan: None,
             fix: None,
             scope_filter: None,
             extra: crate::yaml::Mapping::new(),

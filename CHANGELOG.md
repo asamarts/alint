@@ -620,8 +620,8 @@ policy-test package the user does not trust.
     experiment, and `alint test` warns once a run when a policy test's config is version 2.
     `init` still writes `version: 1`, and `suggest --format yaml` still writes no `version:`, so
     its snippet can be added to a config of either version.
-  - Nothing reads selectors and relations yet: a version 2 config runs its rules as version 1
-    would, and its selectors and relations check nothing until the `constraint` rule kind lands.
+  - Only the `constraint` rule kind (below) reads a relation: every other rule runs as in version
+    1, and a relation no `constraint` rule reads is never evaluated.
   - alint can now evaluate a relation over a repository: an internal evaluator, which the
     `constraint` rule kind will call, reads the files a selector picks (as a rule's `paths:` and
     `scope_filter:` pick them, inside the repository, never in `.git` and only regular files, as
@@ -645,12 +645,14 @@ policy-test package the user does not trust.
     filters, in every relation that reads them. A relation whose selection reads the environment
     shows no detail in its
     failures, nor does a relation that reads one, as a join side or through a membership reference.
-    Nothing calls the evaluator in this build, so relations stay inert and a run whose rules read
-    none reads nothing for them.
+    The engine evaluates, in plan order, only the relations an enabled `constraint` rule reads,
+    before any rule runs, so a run whose rules read none reads nothing for them.
   - `facts.json` (format 7) gains `compatibility.experimental_config_versions: [2]`;
-    `config_versions` stays `[1]`. `validate-config --format json` gains `config_version`, the
-    loaded config's version, for every config that loads (a failed validation has no
-    version to report).
+    `config_versions` stays `[1]`. It also gains `compatibility.kind_config_versions`
+    (`{"constraint": 2}`, the kinds that need more than version 1) and
+    `compatibility.experimental_rule_kinds` (`["constraint"]`). `validate-config --format json`
+    gains `config_version`, the loaded config's version, for every config that loads (a failed
+    validation has no version to report).
   - A draft JSON Schema for version 2, `schemas/v2/config.json`, with the `$id`
     `https://raw.githubusercontent.com/asamarts/alint/v0.23.0/schemas/v2/config.json`. It is the
     version 1 schema with `version: 2`, `selectors:`, `relations:` and `as:` added, and checks
@@ -663,9 +665,52 @@ policy-test package the user does not trust.
   - A docs page, `docs/site/configuration/version-2.md`, describes version 2: the version
     boundary, named selectors, relations (`entries:`, `read:`, `union:`, `join:`, fields,
     `transform:` and `where:`), names, aliases and per-file namespaces, what the loader and the
-    draft schema check, trust, the limits of this release and the relation halves of the three
-    policies the `constraint` kind is designed against. A test loads and validates each of its
-    examples.
+    draft schema check, trust, the limits of this release and the three policies the `constraint`
+    kind is designed against. A test loads and validates each of its examples.
+- **The `constraint` rule kind (version 2 only, experimental)**
+  ([design](docs/design/v0.23/selectors-and-constraints.md), sections 6, 8, 10 and 11). A
+  `constraint` rule reads one relation, its `input:` (a name, bare or qualified by an `extends:`
+  alias, or an inline relation, whose values may not read the environment), and makes one
+  assertion over its rows. It exists only in a `version: 2` config and is experimental as version
+  2 is: its syntax may change before a release declares version 2 stable. A version 1 config that
+  uses it, or extends a file that does, fails to load with an error that names version 2, and so
+  does a `constraint` rule nested under a `for_each_*` kind's `require:`. `alint rules list` and
+  `rules show` mark it `version 2 only, experimental`, and their JSON gains `config_version` and
+  `experimental` for every kind. The kind takes no `paths:`, `scope_filter:` or fix.
+  - `equal`: rows agree on a field, within each `group_by:` group, with one source row
+    (`to: { row: { source: .nvmrc } }`), or with another field of the same row
+    (`to: { field: G }`). `unique`: no two rows share a key; with `determines:`, rows that share
+    the key agree on the determined fields. `set`: each group's set of a field's values is equal
+    to, a subset of or disjoint from a reference group's (`{ group: en }`).
+  - Values compare by type and text (a number by its lexeme); null and a missing value match
+    nothing; a key, group or set comparison across types, a null group, a missing or repeated
+    source row and an empty reference group are analysis failures, never a pass, and so is a
+    relation that fails to evaluate. Any analysis failure withholds the rule's findings, the
+    findings for values a `read:` skipped included.
+  - Each family generates its message, quoting the keys and values (each cut at 64 characters);
+    `message:` may use `{{row.FIELD}}`, the reported row's value, cut the same way, which a
+    `sensitive` field shows as `<redacted>`. A field that spells an entry's key (`entry.key`,
+    `entry.path`, `entry.parent`, `entry.root`) is sensitive when any of them is. Findings carry
+    related locations at the other rows involved: at most 20, a row of each other value first,
+    then a count of the rest, and only those 20 are placed. A finding about a field a join copies
+    from its `unique:` side, or a `bound:` field, sits at the row's own entry.
+  - When a relation the rule reads takes a value from the environment, or reads one that does,
+    every finding's path and message are redacted, as for a version 1 rule whose `paths:` the
+    environment writes.
+  - A finding's baseline fingerprint is its rule and its key, never its path, so a row that sorts
+    first or a renamed first file keeps a baselined finding baselined. The key holds the values
+    the finding is about (a value past 128 bytes as its SHA-256 digest, a sensitive one as the
+    word `sensitive`); the rows that repeat a `unique` key share one key and are told apart by
+    their count, as are findings that differ only in a sensitive value. Other kinds'
+    fingerprints are unchanged.
+  - A group that has no rows (a locale file that is `{}`) is not checked: nothing names the groups
+    that must exist until `groups:` is supported.
+  - Every field, literal and `{{row.FIELD}}` is checked against the relation when the rule
+    builds, naming the rule, the field and the relation; names may not hold `{{...}}`.
+    `plurals: cldr`, `groups:`, a `set` against another relation and a `set` grouped by `path`
+    or a path token are refused as not yet supported.
+  - The version 2 draft schema describes the kind and refuses it nested; the version 1 schema
+    leaves it out.
 
 ### Changed
 

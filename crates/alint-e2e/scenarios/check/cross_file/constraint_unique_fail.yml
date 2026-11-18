@@ -1,0 +1,42 @@
+test_version: 1
+name: constraint reports a package name two manifests share
+tags: [check, constraint, cross_file, version_two, failing]
+
+given:
+  tree:
+    packages:
+      a:
+        package.json: |
+          {"name": "shared"}
+      b:
+        package.json: |
+          {"name": "shared"}
+      c:
+        package.json: |
+          {"name": "other"}
+  config: |
+    version: 2
+    relations:
+      names:
+        from: { paths: "packages/*/package.json" }
+        read: { json: "$.name" }
+        fields: { name: value }
+    rules:
+      - id: names-unique
+        kind: constraint
+        input: names
+        assert:
+          unique: { key: [name] }
+        message: "the package name {{row.name}} is taken"
+        level: error
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - rule: names-unique
+        path: packages/b/package.json
+        message: {exact: "the package name shared is taken"}
+        related:
+          - {label: the first row with this key, path: packages/a/package.json}

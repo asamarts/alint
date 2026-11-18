@@ -134,6 +134,7 @@ pub mod command;
 pub mod command_idempotent;
 pub mod commented_out_code;
 mod commit_range;
+pub mod constraint;
 pub mod cross_file;
 pub mod dir_absent;
 pub mod dir_contains;
@@ -242,6 +243,7 @@ pub fn rule_option_schemas() -> Vec<(&'static str, serde_json::Value)> {
         ("rule_dir_exists", dir_exists::options_schema()),
         ("rule_dir_absent", dir_absent::options_schema()),
         ("rule_cross_file", cross_file::options_schema()),
+        ("rule_constraint", constraint::options_schema()),
         (
             "rule_registry_paths_resolve",
             registry_paths_resolve::options_schema(),
@@ -810,6 +812,8 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
     // The unified cross-file value-relation kind; `cross_file_value_equals`
     // (v0.10) is a byte-compatible alias with `relation` defaulting to `equals`.
     registry.register("cross_file", &cross_file::META, cross_file::build);
+    // Version 2 only (`constraint::MIN_CONFIG_VERSION`), experimental as version 2 is.
+    registry.register_for_config_version("constraint", &constraint::META, constraint::build, 2);
     registry.register_alias("cross_file_value_equals", "cross_file");
     registry.register("file_graph", &file_graph::META, file_graph::build);
     registry.register("ordered_block", &ordered_block::META, ordered_block::build);
@@ -1012,7 +1016,7 @@ mod registry_tests {
             metadata, canonical,
             "every canonical builder must share its registration with one metadata record"
         );
-        assert_eq!(metadata.len(), 103, "the v0.19 inventory covers 103 kinds");
+        assert_eq!(metadata.len(), 104, "the v0.23 inventory covers 104 kinds");
 
         for (alias, canonical) in registry.aliases() {
             let alias_meta = registry.meta(alias).expect("registered alias has metadata");
@@ -1085,7 +1089,7 @@ mod registry_tests {
                 count(&|m| matches!(m.dispatch, DispatchClass::RuleMajorScoped)),
                 count(&|m| matches!(m.dispatch, DispatchClass::SingleShot)),
             ],
-            [56, 23, 14, 10],
+            [56, 24, 14, 10],
             "dispatch-class inventory drifted"
         );
         assert_eq!(
@@ -1094,7 +1098,7 @@ mod registry_tests {
                 count(&|m| m.paths == PathsSupport::Optional),
                 count(&|m| m.paths == PathsSupport::Forbidden),
             ],
-            [79, 0, 24],
+            [79, 0, 25],
             "paths support inventory drifted"
         );
         assert_eq!(
@@ -1103,7 +1107,7 @@ mod registry_tests {
                 count(&|m| matches!(m.scope_filter, ScopeFilterSupport::AncestorOnly)),
                 count(&|m| matches!(m.scope_filter, ScopeFilterSupport::Rejected { .. })),
             ],
-            [73, 1, 29],
+            [73, 1, 30],
             "scope-filter inventory drifted"
         );
         assert_eq!(
@@ -1112,7 +1116,7 @@ mod registry_tests {
                 count(&|m| m.git_tracked_only == GitTrackedSupport::FileOnly),
                 count(&|m| m.git_tracked_only == GitTrackedSupport::DirAware),
             ],
-            [99, 2, 2],
+            [100, 2, 2],
             "git-tracked support inventory drifted"
         );
         assert_eq!(
@@ -1121,7 +1125,7 @@ mod registry_tests {
                 count(&|m| m.since == SinceSupport::Optional),
                 count(&|m| m.since == SinceSupport::Required),
             ],
-            [94, 7, 2],
+            [95, 7, 2],
             "since support inventory drifted"
         );
         assert_eq!(count(&|m| m.expect_matches), 75);
@@ -1137,7 +1141,7 @@ mod registry_tests {
                 count(&|m| m.content == ContentAccess::Blame),
                 count(&|m| m.content == ContentAccess::Delegated),
             ],
-            [23, 5, 6, 1, 55, 6, 1, 6],
+            [23, 5, 6, 1, 55, 7, 1, 6],
             "content-access inventory drifted"
         );
 
@@ -1195,7 +1199,7 @@ mod registry_tests {
             kinds_where(&|m| m.formats.as_ref() == alint_core::Format::ALL),
             all_format_kinds
         );
-        let extract_format_kinds = BTreeSet::from(["key_parity"]);
+        let extract_format_kinds = BTreeSet::from(["constraint", "key_parity"]);
         assert_eq!(
             registry.meta("key_parity").unwrap().formats.as_ref(),
             &[

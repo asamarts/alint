@@ -34,13 +34,16 @@ use ayaml::Value;
 
 #[cfg(test)]
 pub(crate) use decode::source_objects;
-pub(crate) use decode::{Locus, Position, decode_objects, decode_twins};
+pub(crate) use decode::{
+    Locus, Position, decode_objects, decode_twins, hoist_inline_inputs, take_inline_input,
+};
 pub(crate) use document::{Document, ExtendsEntry};
 pub(crate) use environment::Environment;
 pub(crate) use literal::reject_interpolated_names;
 pub(crate) use model::{Objects, SourceId};
 pub(crate) use origins::{
-    FIELD_ORIGINS_MARKER, mark_field_origins, merge_field_origins, take_field_origins,
+    FIELD_ORIGINS_MARKER, mark_field_origins, merge_field_origins, reference_fields,
+    take_field_origins,
 };
 pub(crate) use resolve::resolve;
 

@@ -2,11 +2,11 @@
 //! 5 to 8; ADR-0034 decisions 5 to 7, as ADR-0037 decision 3 corrects them):
 //! a [`Plan`]'s relation and a walked tree in, the relation's rows out.
 //!
-//! [`evaluate`] is what the `constraint` kind (phase 7) calls with a rule's
-//! [`Context`]. Nothing else calls it in this build, so a version 2
-//! configuration's relations stay inert: a run whose rules read no relation
-//! evaluates none, reads nothing for one and allocates nothing for one (the
-//! memo on the [`FileIndex`] is set by the first evaluation).
+//! [`evaluate`] is what the `constraint` kind calls with a rule's
+//! [`Context`], and what the engine calls, in plan order, for each relation
+//! a rule that runs reads, before rules run. A run whose rules read no
+//! relation evaluates none, reads nothing for one and allocates nothing for
+//! one (the memo on the [`FileIndex`] is set by the first evaluation).
 //!
 //! - **Rows.** A relation's rows come from its parts in the order written (a
 //!   `union:`'s parts, or its one `entries:` or `read:`), each part's
@@ -55,6 +55,10 @@ use std::sync::{Arc, Mutex, OnceLock};
 use failure::Failures;
 
 pub use failure::RelationFailure;
+/// How a message shows a value, its type and a row's place, as the
+/// evaluator's own messages do: for the `constraint` kind's findings.
+pub use failure::{located, type_name};
+pub use ops::render_value;
 
 use super::cache::{DecodeCache, ReadCache};
 use super::limits::{LimitExceeded, LimitKind, Limits};
@@ -105,10 +109,15 @@ pub struct FieldInfo {
     pub sensitive: bool,
 }
 
-/// One row: a cell per field.
+/// One row: a cell per field, and the entry or `read:` value the row is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldRow {
     pub cells: Vec<Cell>,
+    /// Where the row itself came from: its entry, or its `read:` value. A
+    /// `bound:` field's cell sits elsewhere, and so does a join's copy of a
+    /// field of its unique side, which many rows share; a join row is the
+    /// row of its side that is not unique, so it has that row's provenance.
+    pub at: Arc<Provenance>,
 }
 
 /// One field's value in one row, and where it came from.
@@ -235,6 +244,37 @@ pub fn evaluate(plan: &Arc<Plan>, id: RelationId, ctx: &Context<'_>) -> Outcome 
         memo,
     }
     .relation(id)
+}
+
+/// Whether a field that holds keys (`entry.key`, `entry.parent`,
+/// `entry.root`, `entry.path`) is sensitive in relation `id` of `plan` or a
+/// relation it reads, transitively: then a key path in a message about its
+/// rows could be that field's value, so none is shown.
+#[must_use]
+pub fn keys_sensitive(plan: &Plan, id: RelationId) -> bool {
+    use super::plan::FieldSource;
+    let mut visited = vec![false; plan.relations.len()];
+    let mut stack = vec![id];
+    while let Some(next) = stack.pop() {
+        if std::mem::replace(&mut visited[next.0], true) {
+            continue;
+        }
+        let relation = &plan.relation(next).relation;
+        if relation.fields.iter().any(|(_, field)| {
+            field.sensitive
+                && matches!(
+                    field.source,
+                    FieldSource::EntryKey
+                        | FieldSource::EntryParent
+                        | FieldSource::EntryRoot
+                        | FieldSource::EntryPath
+                )
+        }) {
+            return true;
+        }
+        stack.extend(ops::reads(relation));
+    }
+    false
 }
 
 /// The relations one run has evaluated, kept on the [`FileIndex`] and set by
@@ -370,34 +410,9 @@ impl Evaluator<'_> {
         order
     }
 
-    /// Whether a field that holds keys (`entry.key`, `entry.parent`,
-    /// `entry.root`, `entry.path`) is sensitive in `id` or a relation it
-    /// reads, transitively: then a key path in its messages could be that
-    /// field's value, so none is shown.
+    /// [`keys_sensitive`] of relation `id`.
     fn keys_sensitive(&self, id: RelationId) -> bool {
-        use super::plan::FieldSource;
-        let mut visited = vec![false; self.plan.relations.len()];
-        let mut stack = vec![id];
-        while let Some(next) = stack.pop() {
-            if std::mem::replace(&mut visited[next.0], true) {
-                continue;
-            }
-            let relation = &self.plan.relation(next).relation;
-            if relation.fields.iter().any(|(_, field)| {
-                field.sensitive
-                    && matches!(
-                        field.source,
-                        FieldSource::EntryKey
-                            | FieldSource::EntryParent
-                            | FieldSource::EntryRoot
-                            | FieldSource::EntryPath
-                    )
-            }) {
-                return true;
-            }
-            stack.extend(ops::reads(relation));
-        }
-        false
+        keys_sensitive(self.plan, id)
     }
 
     /// The outcome of a relation whose reads the memo holds.
@@ -429,7 +444,13 @@ impl Evaluator<'_> {
         };
         let rows = rows.and_then(|rows| self.refine(&site, named, rows, &mut failures));
         match rows {
-            Some(rows) if failures.is_empty() => Ok(Arc::new(rows)),
+            Some(mut rows) if failures.is_empty() => {
+                // The memo holds the rows for the run: with no spare room,
+                // what they hold stays within their cells' budget however
+                // few rows a relation has.
+                rows.rows.shrink_to_fit();
+                Ok(Arc::new(rows))
+            }
             None if failures.is_empty() => {
                 // The plan check rules this out: a field the relation names
                 // that a row does not have. Never an empty failure list.

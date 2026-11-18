@@ -69,6 +69,9 @@ mod docs_paths {
     pub const RULE_AUTHORING_DOC: &str = "docs/development/rule-authoring.md";
     pub const CHANGELOG: &str = "CHANGELOG.md";
     pub const SCHEMA_JSON: &str = "schemas/v1/config.json";
+    /// The draft version 2 schema, which alone has the kinds only a
+    /// `version: 2` config may use.
+    pub const SCHEMA_V2_JSON: &str = "schemas/v2/config.json";
     pub const FACTS_JSON: &str = "facts.json";
     pub const ROADMAP_JSON: &str = "roadmap.json";
     pub const CRATE_GRAPH_MD: &str = "docs/design/architecture/crate-graph.md";

@@ -42,8 +42,52 @@ fn v2_schema_path() -> Result<PathBuf> {
 }
 
 /// Build the generated schema in memory: the committed descriptive base with
-/// every canonical rule branch replaced by its schemars-derived equivalent.
+/// every canonical rule branch replaced by its schemars-derived equivalent,
+/// without the kinds only a later config version may use
+/// ([`version_two_kinds`]), which the draft version 2 schema holds.
 pub fn build_generated_schema() -> Result<Value> {
+    let mut schema = build_full_schema()?;
+    let only_later = version_two_kinds();
+    let defs = schema
+        .get_mut("$defs")
+        .and_then(Value::as_object_mut)
+        .context("schema has no `$defs` object")?;
+    for kind in &only_later {
+        defs.remove(&format!("rule_{kind}"));
+    }
+    defs.get_mut("rule_kind_dispatch")
+        .and_then(|dispatch| dispatch.get_mut("oneOf"))
+        .and_then(Value::as_array_mut)
+        .context("rule_kind_dispatch has no `oneOf` array")?
+        .retain(|branch| {
+            branch
+                .get("$ref")
+                .and_then(Value::as_str)
+                .and_then(|reference| reference.strip_prefix("#/$defs/rule_"))
+                .is_none_or(|kind| !only_later.contains(kind))
+        });
+    prune_unreferenced_defs(&mut schema)?;
+    Ok(schema)
+}
+
+/// The canonical kinds a config of version 1 may not use (the `constraint`
+/// kind needs version 2): the version 1 schema leaves them out, and the draft
+/// version 2 schema has them.
+pub(crate) fn version_two_kinds() -> BTreeSet<String> {
+    let registry = alint_rules::builtin_registry();
+    registry
+        .canonical_kinds()
+        .filter(|kind| registry.min_config_version(kind) > 1)
+        .map(str::to_string)
+        .collect()
+}
+
+/// [`build_generated_schema`] with every canonical kind, those of
+/// [`version_two_kinds`] included: what the draft version 2 schema is derived
+/// from (`gen_schema_v2::build`). A kind of version 2 has no branch in the
+/// committed version 1 base, so its branch starts from its `kind` and the
+/// opening sentence of its `docs/rules.md` entry.
+pub(crate) fn build_full_schema() -> Result<Value> {
     let base_src = std::fs::read_to_string(root_schema_path()?)
         .context("read base schema schemas/v1/config.json")?;
     let mut schema: Value = serde_json::from_str(&base_src).context("parse base schema as JSON")?;
@@ -54,6 +98,7 @@ pub fn build_generated_schema() -> Result<Value> {
         .context("base schema has no `$defs` object")?;
 
     add_sensitive_common_field(defs)?;
+    add_version_two_bases(defs)?;
 
     let mut option_schemas = alint_rules::rule_option_schemas();
     let generated_defs: BTreeSet<String> = option_schemas
@@ -92,6 +137,37 @@ pub fn build_generated_schema() -> Result<Value> {
     normalize_descriptions(&mut schema);
     prune_unreferenced_defs(&mut schema)?;
     Ok(schema)
+}
+
+/// A base branch, and a dispatch entry, for each kind of
+/// [`version_two_kinds`], which the committed version 1 base does not have.
+fn add_version_two_bases(defs: &mut serde_json::Map<String, Value>) -> Result<()> {
+    for kind in version_two_kinds() {
+        let description = alint_rules::kind_docs::KIND_DESCRIPTIONS
+            .iter()
+            .find(|(described, _)| *described == kind)
+            .map(|(_, description)| *description)
+            .with_context(|| format!("`{kind}` has no description in docs/rules.md"))?;
+        let name = format!("rule_{kind}");
+        anyhow::ensure!(
+            !defs.contains_key(&name),
+            "the version 1 base already has `$defs/{name}`, a kind of version 2"
+        );
+        defs.insert(
+            name.clone(),
+            serde_json::json!({
+                "description": description,
+                "properties": { "kind": { "const": kind } },
+                "type": "object",
+            }),
+        );
+        defs.get_mut("rule_kind_dispatch")
+            .and_then(|dispatch| dispatch.get_mut("oneOf"))
+            .and_then(Value::as_array_mut)
+            .context("rule_kind_dispatch has no `oneOf` array")?
+            .push(serde_json::json!({ "$ref": format!("#/$defs/{name}") }));
+    }
+    Ok(())
 }
 
 fn add_sensitive_common_field(defs: &mut serde_json::Map<String, Value>) -> Result<()> {
@@ -939,7 +1015,7 @@ fn render(schema: &Value) -> Result<String> {
 pub fn run(check: bool) -> Result<()> {
     let generated = build_generated_schema()?;
     let rendered = render(&generated)?;
-    let v2_rendered = render(&crate::gen_schema_v2::build(&generated)?)?;
+    let v2_rendered = render(&crate::gen_schema_v2::build(&build_full_schema()?)?)?;
     let policy_test_rendered =
         alint_testkit::policy_test_schema_json().context("render policy-test schema")?;
     let policy_test_report_rendered = alint_testkit::policy_test_report_schema_json()

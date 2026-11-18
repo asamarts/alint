@@ -55,6 +55,9 @@ impl StoredKindMeta {
 struct RegisteredKind {
     builder: StoredBuilder,
     metadata: StoredKindMeta,
+    /// The lowest configuration `version:` whose sources may use the kind
+    /// ([`RuleRegistry::min_config_version`]).
+    min_config_version: u32,
 }
 
 /// Canonical rule-kind registrations plus alias-to-canonical mappings.
@@ -114,6 +117,17 @@ impl<'registry> KindCatalog<'registry> {
     pub fn fix_op(self, name: &str) -> Option<&'static FixOpMeta> {
         fix_op_meta(name)
     }
+
+    /// The lowest configuration `version:` whose sources may use `kind` (a
+    /// canonical kind or an alias), or `None` for a kind the registry does
+    /// not hold ([`RuleRegistry::min_config_version`]).
+    #[must_use]
+    pub fn min_config_version(self, kind: &str) -> Option<u32> {
+        self.registry
+            .kinds
+            .get(self.registry.canonical_kind(kind))
+            .map(|registration| registration.min_config_version)
+    }
 }
 
 impl RuleRegistry {
@@ -134,6 +148,31 @@ impl RuleRegistry {
             RegisteredKind {
                 builder: StoredBuilder::Direct(builder),
                 metadata: StoredKindMeta::Static(meta),
+                min_config_version: 1,
+            },
+        );
+    }
+
+    /// [`Self::register`] for a kind only a config of `version:
+    /// min_config_version` or later may use: the `constraint` kind, which
+    /// needs version 2 (design `v0.23/selectors-and-constraints.md` section
+    /// 11). The DSL refuses the kind in an older source with an error that
+    /// names the version it needs, and the checks that cover every kind
+    /// (the schemas, the fixtures, `rules list` and the facts) treat it by
+    /// its version.
+    pub fn register_for_config_version(
+        &mut self,
+        kind: &str,
+        meta: &'static KindMeta,
+        builder: RuleBuilder,
+        min_config_version: u32,
+    ) {
+        self.insert_kind(
+            kind,
+            RegisteredKind {
+                builder: StoredBuilder::Direct(builder),
+                metadata: StoredKindMeta::Static(meta),
+                min_config_version,
             },
         );
     }
@@ -145,6 +184,7 @@ impl RuleRegistry {
             RegisteredKind {
                 builder: StoredBuilder::Direct(builder),
                 metadata: StoredKindMeta::Owned(meta),
+                min_config_version: 1,
             },
         );
     }
@@ -161,6 +201,7 @@ impl RuleRegistry {
             RegisteredKind {
                 builder: StoredBuilder::Optionless(builder),
                 metadata: StoredKindMeta::Static(meta),
+                min_config_version: 1,
             },
         );
     }
@@ -227,6 +268,17 @@ impl RuleRegistry {
     /// Every registered canonical kind, in arbitrary order.
     pub fn canonical_kinds(&self) -> impl Iterator<Item = &str> {
         self.kinds.keys().map(String::as_str)
+    }
+
+    /// The lowest configuration `version:` whose sources may use `kind` (a
+    /// canonical kind or an alias): 1 for every kind but those registered
+    /// with [`Self::register_for_config_version`], and for a kind the
+    /// registry does not hold.
+    #[must_use]
+    pub fn min_config_version(&self, kind: &str) -> u32 {
+        self.kinds
+            .get(self.canonical_kind(kind))
+            .map_or(1, |registration| registration.min_config_version)
     }
 
     /// Validate the configured common fields against the canonical kind record,
@@ -856,6 +908,7 @@ mod tests {
             sensitive_fields: std::collections::BTreeSet::new(),
             extended_source: false,
             rendered: false,
+            relation_plan: None,
             fix: None,
             scope_filter: None,
             extra: crate::yaml::Mapping::new(),

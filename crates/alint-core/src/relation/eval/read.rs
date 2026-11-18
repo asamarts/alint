@@ -880,7 +880,10 @@ impl<'r> Rows<'r> {
                 }
                 cells.push(derived[slot].clone().expect("the cell was just built"));
             }
-            out.rows.push(super::FieldRow { cells });
+            out.rows.push(super::FieldRow {
+                cells,
+                at: provenance,
+            });
         }
         Ok(())
     }
@@ -1064,7 +1067,10 @@ impl<'r> Rows<'r> {
                     path: None,
                 });
             }
-            out.rows.push(super::FieldRow { cells });
+            out.rows.push(super::FieldRow {
+                cells,
+                at: provenance,
+            });
         }
         Ok(())
     }

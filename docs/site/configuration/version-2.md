@@ -10,10 +10,11 @@ the rows of data it reads from them (**relations**), and refer to both by name, 
 config file. Version 2 is everything version 1 is, plus `selectors:`, `relations:` and an `as:`
 alias on an `extends:` entry.
 
-Nothing reads a relation yet. The `constraint` rule kind, which will check a relation's rows (one
-range per dependency, the same keys in every locale, toolchain pins that agree), comes in a later
-phase. Until it lands, a version 2 config runs its rules exactly as version 1 would: its selectors
-and relations are loaded and checked when the config loads, and do nothing else.
+The [`constraint`](/docs/rules/cross-file/constraint/) rule kind reads a relation and checks its
+rows: equal values, unique keys, or the same set of values in every group (one range per
+dependency, the same keys in every locale, toolchain pins that agree). It exists only in version
+2, and is experimental as version 2 is. Every other rule kind runs exactly as in version 1, and a
+relation no `constraint` rule reads is loaded and checked when the config loads, and never read.
 
 > **Experimental.** Version 2 may change in any release until one declares it stable, v0.24 at
 > the earliest, and the [CHANGELOG](https://github.com/asamarts/alint/blob/main/CHANGELOG.md)
@@ -39,6 +40,10 @@ version.
   `version: 2`. A version read from the environment is version 1 and must equal 1, as before.
 - A version 2 config accepts every version 1 key and rule kind with its version 1 meaning. A
   rule's `paths:` keeps its version 1 form; only relations read selectors.
+- The `constraint` kind needs version 2: a version 1 config that uses it, or extends a file that
+  does, is an error that names version 2, and so is a `constraint` rule nested under a
+  `for_each_*` kind's `require:`. `alint rules list` and `alint rules show` mark the kind
+  `version 2 only, experimental`.
 - `selectors:`, `relations:` and `as:` in a version 1 config are errors that name the version
   they need (`` `selectors:` needs `version: 2`; this config is version 1 ``). An unknown key in
   a version 2 config is reported with the version 2 keys.
@@ -374,7 +379,7 @@ The whole relation plan is checked when the config loads, before any file is rea
 - each regex compiles, a `read:` regex has a capture group, and each JSONPath parses;
 - the literals in `in` and `not_in` can match.
 
-When the `constraint` kind reads a relation, what a relation cannot hold (an `entry.value` that
+When a `constraint` rule reads a relation, what a relation cannot hold (an `entry.value` that
 is an object, an array or a TOML date, a `bound:` path that does not match exactly once, a
 repeated key on a join's `unique:` side, a comparison across types) is an analysis failure naming
 the relation, the file and the key path, never a dropped row. So is reaching a row, join or
@@ -382,8 +387,10 @@ distinct-value limit, which is never truncation.
 
 ## Limits in this release
 
-- Nothing reads a relation until the `constraint` kind lands, and a rule's `paths:` cannot name a
-  selector.
+- Only the `constraint` kind reads a relation, and a rule's `paths:` cannot name a selector.
+- The `constraint` kind has no `plurals: cldr`, no `groups:`, no `set` against another relation's
+  field and no `set` grouped by `path` or a path token yet; each is refused at load. Until
+  `groups:`, a group that has no rows is not checked.
 - Only local files may be version 2 (see [the version boundary](#the-version-boundary)).
 - A selector cannot use `changed_since`.
 - Values are scalars: null, booleans, numbers (compared by the text they are written with) and
@@ -408,8 +415,8 @@ extends it.
 
 ## The three policies
 
-These are the relation halves of the three policies the `constraint` kind is designed against.
-Each loads today; the rules that check them come with the `constraint` kind.
+These are the three policies the `constraint` kind is designed against, each a relation and the
+rule that checks it.
 
 **One range per dependency** across a workspace, leaving out workspace packages and specifiers
 that are not ranges:
@@ -433,7 +440,12 @@ relations:
     where:
       range: { not_matches: "^(catalog|npm|workspace):" }
       dependency: { not_in: ["@types/node", { relation: workspace-names, field: name }] }
-rules: []
+rules:
+  - id: one-range-per-dependency
+    kind: constraint
+    input: dependency-ranges
+    assert: { unique: { key: [dependency], determines: [range] } }
+    level: error
 ```
 
 **The same keys in every locale**, over each locale's merged tree:
@@ -449,11 +461,21 @@ relations:
     fields: { locale: entry.root, key: entry.path }
     transform: { key: [strip-root] }
     where: { key: { not_matches: "^(date|devise|views)\\." } }
-rules: []
+rules:
+  - id: locale-keys-match-english
+    kind: constraint
+    input: locale-keys
+    assert: { set: { field: key, group_by: locale, equal_to: { group: en } } }
+    level: error
 ```
 
-**Toolchain pins that agree**: one row per place a Node version is pinned. A part whose path a
-file lacks gives a row without a value, which will differ from `.nvmrc`'s.
+A group is the rows that share a `group_by:` value, so a locale whose files hold no keys has no
+rows and no group: it is not checked until `groups:`, not yet supported, names the groups that
+must exist.
+
+**Toolchain pins that agree**: one row per place a Node version is pinned, each compared with the
+row `.nvmrc` gives. A part whose path a file lacks gives a row without a value, which differs from
+`.nvmrc`'s.
 
 ```yaml
 version: 2
@@ -465,7 +487,12 @@ relations:
       - { from: { paths: package.json }, read: { json: "$.devEngines.runtime.version" } }
       - { from: { paths: package.json }, read: { json: "$.volta.node" } }
     fields: { source: path, version: value }
-rules: []
+rules:
+  - id: node-pins-agree
+    kind: constraint
+    input: node-pins
+    assert: { equal: { field: version, to: { row: { source: .nvmrc } } } }
+    level: error
 ```
 
 ## Editor support: the draft schema

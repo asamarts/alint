@@ -26,6 +26,262 @@
         }
       ]
     },
+    "ConstraintAssert": {
+      "additionalProperties": false,
+      "description": "`assert:`: exactly one of its three keys.",
+      "maxProperties": 1,
+      "minProperties": 1,
+      "properties": {
+        "equal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConstraintEqual"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Rows agree on a field: within each group, with a named source row, or with another field of the same row."
+        },
+        "set": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConstraintSet"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The set of a field's values, per group, is equal to, a subset of or disjoint from the set of another group."
+        },
+        "unique": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConstraintUnique"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "No two rows share a key; with `determines:`, rows that share a key agree on the determined fields."
+        }
+      },
+      "type": "object"
+    },
+    "ConstraintEqual": {
+      "additionalProperties": false,
+      "description": "`assert.equal`.",
+      "properties": {
+        "field": {
+          "description": "The compared field.",
+          "type": "string"
+        },
+        "group_by": {
+          "description": "Compare within each group of rows that share this field's value; without it, the relation is one group. Not with `to:`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "to": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConstraintEqualTo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Compare each row with one named source row (`{ row: { FIELD: literal } }`), or with another field of the same row (`{ field: G }`)."
+        }
+      },
+      "required": [
+        "field"
+      ],
+      "type": "object"
+    },
+    "ConstraintEqualTo": {
+      "additionalProperties": false,
+      "description": "`assert.equal.to`: exactly one of `row` and `field`.",
+      "maxProperties": 1,
+      "minProperties": 1,
+      "properties": {
+        "field": {
+          "description": "Another field of the same row.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "row": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ConstraintLiteral"
+          },
+          "description": "The source row: the one row whose fields hold these literals.",
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ConstraintLiteral": {
+      "$ref": "#/$defs/ConstraintLiteralValue",
+      "description": "A literal: a string or a boolean. The loader refuses a number (a value compares by the text it is written with, which the config's YAML does not keep) and a null (which matches nothing)."
+    },
+    "ConstraintLiteralValue": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "boolean"
+        }
+      ],
+      "description": "What a literal's schema accepts."
+    },
+    "ConstraintPlurals": {
+      "description": "`exact` or `cldr`.",
+      "enum": [
+        "exact",
+        "cldr"
+      ],
+      "type": "string"
+    },
+    "ConstraintSet": {
+      "additionalProperties": false,
+      "description": "`assert.set`.",
+      "properties": {
+        "disjoint_from": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConstraintSetTarget"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Each group's set shares no value with the other set."
+        },
+        "equal_to": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConstraintSetTarget"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Each group's set equals the other set."
+        },
+        "field": {
+          "description": "The field whose values form each group's set.",
+          "type": "string"
+        },
+        "group_by": {
+          "description": "The field whose value is each row's group.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "groups": {
+          "description": "Groups that must exist, rows or not. Not yet supported: only `[]`.",
+          "items": true,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "plurals": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConstraintPlurals"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "`exact` compares values as they are; `cldr` collapses CLDR plural groups (not yet supported)."
+        },
+        "subset_of": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConstraintSetTarget"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Each group's set is a subset of the other set."
+        }
+      },
+      "required": [
+        "field"
+      ],
+      "type": "object"
+    },
+    "ConstraintSetTarget": {
+      "additionalProperties": false,
+      "description": "The other set: a group of the same relation (`{ group: literal }`), or a field of another relation (`{ relation: R, field: F }`, not yet supported).",
+      "properties": {
+        "field": {
+          "description": "That relation's field (not yet supported).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "group": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConstraintLiteral"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The reference group: the rows whose `group_by:` field holds this literal."
+        },
+        "relation": {
+          "description": "Another relation (not yet supported).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ConstraintUnique": {
+      "additionalProperties": false,
+      "description": "`assert.unique`.",
+      "properties": {
+        "determines": {
+          "description": "The fields the key determines: rows that share the key agree on them.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "key": {
+          "description": "The key: one or more field names.",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "type": "object"
+    },
     "DirOnlyContainsAllowList": {
       "anyOf": [
         {
@@ -1995,6 +2251,16 @@
                 "required": [
                   "respect_gitignore"
                 ]
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "constraint"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
               }
             ]
           }
@@ -2377,6 +2643,58 @@
         "id",
         "kind",
         "level"
+      ],
+      "type": "object"
+    },
+    "rule_constraint": {
+      "description": "An assertion over the rows of a relation: equal values, unique keys, or a set of values per group compared with a reference group.",
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "paths"
+            ]
+          },
+          {
+            "required": [
+              "scope_filter"
+            ]
+          },
+          {
+            "required": [
+              "fix"
+            ]
+          },
+          {
+            "required": [
+              "expect_matches"
+            ]
+          }
+        ]
+      },
+      "properties": {
+        "assert": {
+          "$ref": "#/$defs/ConstraintAssert",
+          "description": "The assertion: exactly one of `equal`, `unique` and `set`."
+        },
+        "input": {
+          "description": "The rows the assertion reads: a relation's name, bare or qualified by an `extends:` alias (`deps.ranges`), or an inline relation (a map, as a relation under `relations:` is written, whose values may not read the environment).",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/v2_reference"
+            },
+            {
+              "$ref": "#/$defs/v2_relation"
+            }
+          ]
+        },
+        "kind": {
+          "const": "constraint"
+        }
+      },
+      "required": [
+        "input",
+        "assert"
       ],
       "type": "object"
     },
@@ -5464,6 +5782,9 @@
         },
         {
           "$ref": "#/$defs/rule_command"
+        },
+        {
+          "$ref": "#/$defs/rule_constraint"
         }
       ]
     },

@@ -201,12 +201,12 @@ impl Check<'_> {
         Ok(())
     }
 
-    /// A rule as a `constraint` (phase 7) reads it: its `input:`, and the
-    /// names its `assert:` holds.
+    /// A rule as a `constraint` reads it: its `input:`, and the names its
+    /// `assert:` holds.
     fn constraint(&self, rule: &Value, path: &str) -> Result<()> {
         match rule.get("input") {
             Some(input @ Value::String(_)) => self.value(input, &format!("{path}.input"))?,
-            Some(input @ Value::Mapping(_)) => self.relation(input, &format!("{path}.input"))?,
+            Some(input @ Value::Mapping(_)) => self.inline(input, &format!("{path}.input"))?,
             _ => {}
         }
         if let Some(assert) = rule.get("assert") {
@@ -215,11 +215,50 @@ impl Check<'_> {
         Ok(())
     }
 
+    /// An inline relation (a rule's `input:` map) is literal throughout: the
+    /// loader decodes it as a relation of the source after interpolation, and
+    /// none of it records that it read the environment, as a named relation's
+    /// definition does. A relation that reads the environment is declared
+    /// under `relations:` and named.
+    fn inline(&self, value: &Value, path: &str) -> Result<()> {
+        // A name gets the error about names; any other value, this one.
+        self.relation(value, path)?;
+        self.literal(value, path)
+    }
+
+    fn literal(&self, value: &Value, path: &str) -> Result<()> {
+        match value {
+            Value::String(text) if interpolated(text) => Err(Error::Other(format!(
+                "{}: `{path}`: `{{{{...}}}}` is not allowed in an inline `input:` relation; \
+                 declare the relation under `relations:`, where a value may read the \
+                 environment, and name it",
+                self.display
+            ))),
+            Value::Sequence(items) => items
+                .iter()
+                .enumerate()
+                .try_for_each(|(index, item)| self.literal(item, &format!("{path}[{index}]"))),
+            Value::Mapping(map) => map.iter().try_for_each(|(key, item)| {
+                let item_path = format!("{path}.{}", super::decode::key_text(key));
+                self.literal(key, &item_path)?;
+                self.literal(item, &item_path)
+            }),
+            _ => Ok(()),
+        }
+    }
+
     fn assertion(&self, value: &Value, path: &str) -> Result<()> {
         match value {
             Value::Mapping(map) => {
                 for (key, inner) in map {
                     let inner_path = self.key(path, key)?;
+                    // `to: { row: { F: literal } }`: each key names a field and
+                    // each value is a literal, which interpolates as any value
+                    // does.
+                    if key.as_str() == Some("row") {
+                        self.keys(Some(inner), &inner_path)?;
+                        continue;
+                    }
                     if key
                         .as_str()
                         .is_some_and(|key| ASSERT_NAME_KEYS.contains(&key))

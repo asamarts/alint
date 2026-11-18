@@ -150,7 +150,8 @@ impl Failures {
 
 /// The type a comparison message names: `null`, `a boolean`, `a number`, `a
 /// string`.
-pub(super) fn type_name(value: &Value) -> &'static str {
+#[must_use]
+pub fn type_name(value: &Value) -> &'static str {
     match value {
         Value::Null => "null",
         Value::Bool(_) => "a boolean",
@@ -196,7 +197,8 @@ pub(super) fn at(cell: &Cell, hidden: bool) -> String {
 
 /// Where a cell sits, its resource included, for a message that names two
 /// rows: `` `nav.home` in locales/en.json ``, or the resource alone.
-pub(super) fn located(cell: &Cell, hidden: bool) -> String {
+#[must_use]
+pub fn located(cell: &Cell, hidden: bool) -> String {
     let resource = cell.at.resource.path().as_str();
     match &cell.at.pointer {
         Some(pointer) if !pointer.segments().is_empty() => {

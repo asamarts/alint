@@ -87,8 +87,15 @@ fn version_one_mappings_stay_unmarked() {
 }
 
 #[test]
-fn only_the_stub_kind_has_a_reference_field_in_this_build() {
+fn only_the_constraint_kind_and_the_stub_have_a_reference_field() {
     assert_eq!(reference_fields(REFERENCE_STUB_KIND), &["input"]);
+    assert_eq!(reference_fields("constraint"), &["input"]);
     assert_eq!(reference_fields("file_exists"), &[] as &[&str]);
-    assert_eq!(reference_fields("constraint"), &[] as &[&str]);
+    // Every other kind of the catalogue has none.
+    let registry = alint_rules::builtin_registry();
+    for kind in registry.known_kinds() {
+        if kind != "constraint" {
+            assert_eq!(reference_fields(kind), &[] as &[&str], "{kind}");
+        }
+    }
 }

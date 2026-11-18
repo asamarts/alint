@@ -258,9 +258,15 @@ impl<'o> Namespaces<'o> {
     /// The names of `wanted`'s kind that `source` declares.
     fn own_names(&self, source: SourceIndex, wanted: Wanted) -> Vec<&'o str> {
         let objects = &self.objects.sources[source.0];
+        // An inline `input:` relation has a name no config can write.
         match wanted {
             Wanted::Selector => objects.selectors.iter().map(|(n, _)| n.as_str()).collect(),
-            Wanted::Relation => objects.relations.iter().map(|(n, _)| n.as_str()).collect(),
+            Wanted::Relation => objects
+                .relations
+                .iter()
+                .map(|(n, _)| n.as_str())
+                .filter(|name| !super::decode::is_inline_name(name))
+                .collect(),
         }
     }
 
@@ -592,7 +598,7 @@ fn unless_reproduced(
         }
         Checked::InlineSelectors(id) | Checked::Relation(id) => {
             let named = plan.relation(id);
-            let about = (named.source, format!("relations.{}", named.name));
+            let about = (named.source, super::decode::relation_path(&named.name));
             let read = if checked == Checked::Relation(id) {
                 super::plan_check::read_by(plan, id)
             } else {
@@ -679,7 +685,7 @@ fn relation_def(
     relation: &Relation,
 ) -> Result<plan::RelationDef> {
     let at = |path: String, message: String| located(namespaces.display(source), &path, message);
-    let path = format!("relations.{name}");
+    let path = super::decode::relation_path(name);
     let part = |part: &Part, part_path: &str| -> Result<plan::Part> {
         let from = match &part.from {
             SelectorRef::Named(reference) => plan::SelectorRef::Named(
@@ -921,7 +927,10 @@ fn selector_capabilities(selector: &Selector) -> Capabilities {
 /// - a field an `in:` or `not_in:` list of a sensitive field filters, with
 ///   every field of its family ([`Family`]), as for a filter the environment
 ///   wrote (`super::environment`): the rows it keeps show which of the
-///   hidden values it holds.
+///   hidden values it holds;
+/// - every field that spells an entry's key (`entry.key`, `entry.path`,
+///   `entry.parent`, `entry.root`: a key is in its path, its parent's path
+///   and its root) when one of them is sensitive.
 fn close_sensitivity(plan: &mut Plan, order: &[RelationId]) {
     for &id in order {
         let relations = &plan.relations;
@@ -969,15 +978,31 @@ fn close_sensitivity(plan: &mut Plan, order: &[RelationId]) {
                 }
             }
         }
+        let keys_hidden = relation
+            .fields
+            .iter()
+            .any(|(_, field)| field.sensitive && spells_keys(&field.source));
         let shows: Vec<bool> = relation
             .fields
             .iter()
-            .map(|(_, field)| filtered.contains(&Family::of(&field.source, join)))
+            .map(|(_, field)| {
+                filtered.contains(&Family::of(&field.source, join))
+                    || (keys_hidden && spells_keys(&field.source))
+            })
             .collect();
         for ((_, field), shows) in plan.relations[id.0].relation.fields.iter_mut().zip(shows) {
             field.sensitive |= shows;
         }
     }
+}
+
+/// Whether a field of `source` spells an entry's key, or the keys above it.
+fn spells_keys(source: &plan::FieldSource) -> bool {
+    use plan::FieldSource as Source;
+    matches!(
+        source,
+        Source::EntryKey | Source::EntryPath | Source::EntryParent | Source::EntryRoot
+    )
 }
 
 /// The fields whose values show one another's, as `super::environment`
@@ -1125,9 +1150,14 @@ fn gate_objects(plan: &Plan) -> Result<()> {
     for (noun, section, name, source, capabilities) in objects {
         let source = plan.source(source);
         if let Some(what) = refused(capabilities, source.class) {
+            let path = if super::decode::is_inline_name(name) {
+                name.clone()
+            } else {
+                format!("{section}.{name}")
+            };
             return Err(located(
                 &source.display,
-                &format!("{section}.{name}"),
+                &path,
                 format!(
                     "this {noun} {what} (itself or through what it references), which a config \
                      reached through `extends:` may not do; declare it in the top-level config \
@@ -1179,13 +1209,21 @@ impl Resolved<'_> {
             let fail = |message: String| {
                 Error::rule_config(id, format!("`{field}` (written by {display}): {message}"))
             };
-            let text = value.as_str().ok_or_else(|| {
-                fail(format!(
-                    "expected a relation name, found {}",
-                    super::decode::describe(value)
-                ))
-            })?;
-            let reference = super::decode::parse_reference(text).map_err(fail)?;
+            // An inline relation (a map) was declared in the source that
+            // wrote it, under the name its marker holds.
+            let reference = match (value.as_str(), super::decode::inline_input(value)) {
+                (Some(text), _) => super::decode::parse_reference(text).map_err(fail)?,
+                (None, Some(name)) => Reference {
+                    alias: None,
+                    name: name.to_string(),
+                },
+                (None, None) => {
+                    return Err(fail(format!(
+                        "expected a relation name or an inline relation (a map), found {}",
+                        super::decode::describe(value)
+                    )));
+                }
+            };
             let relation = self
                 .namespaces
                 .relation(source, &reference, &format!("`{field}:` names a relation"))

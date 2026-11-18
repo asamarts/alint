@@ -89,17 +89,23 @@ pub(crate) fn take_field_origins(mapping: &mut Mapping) -> Vec<(String, usize)> 
 }
 
 /// The top-level fields of a rule of `kind` that name a relation, bare or
-/// qualified. No rule kind of this build has one: the `constraint` kind
-/// (phase 7) adds `input:` and the relations its `assert:` names. The unit
-/// tests register a stub kind with one, `input:`.
+/// qualified, or hold an inline one: the `constraint` kind's `input:`. Its
+/// `assert:` names no relation in this build (a `set` against another
+/// relation's field comes in a later step and is refused until then). The
+/// unit tests register a stub kind with one, `input:`.
 pub(crate) fn reference_fields(kind: &str) -> &'static [&'static str] {
     #[cfg(test)]
     if kind == REFERENCE_STUB_KIND {
         return &["input"];
     }
-    let _ = kind;
-    &[]
+    match kind {
+        CONSTRAINT_KIND => &["input"],
+        _ => &[],
+    }
 }
+
+/// The rule kind that reads a relation.
+pub(crate) const CONSTRAINT_KIND: &str = "constraint";
 
 /// The rule kind the unit tests give a reference field.
 #[cfg(test)]

@@ -37,8 +37,7 @@ pub struct Plan {
     /// Every named relation, in the same order.
     pub relations: Vec<NamedRelation>,
     /// The references each rule's fields make, resolved in the source that
-    /// wrote each field: none in v0.23, whose rule kinds reference no named
-    /// object (the `constraint` kind's `input:` will).
+    /// wrote each field: the `constraint` kind's `input:`.
     pub rules: Vec<RuleReferences>,
 }
 
@@ -171,6 +170,23 @@ pub struct NamedRelation {
     /// could echo the value (a key path an `at:` from the environment
     /// selected, say).
     pub reads_environment: bool,
+}
+
+impl NamedRelation {
+    /// Whether this is a rule's inline `input:` relation, which the loader
+    /// plans as a named one under where it is written (`rules[3].input`): a
+    /// name no config can declare, since a declared name starts with an
+    /// ASCII letter or `_` and holds only ASCII letters, digits, `_` and
+    /// `-`.
+    #[must_use]
+    pub fn is_inline(&self) -> bool {
+        let mut chars = self.name.chars();
+        let declared = chars
+            .next()
+            .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+            && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+        !declared
+    }
 }
 
 /// What reading an object makes alint do, as the trust gates judge it
@@ -391,7 +407,7 @@ pub enum Member {
     },
 }
 
-/// The references one rule's fields make (phase 7's `constraint` kind):
+/// The references one rule's fields make (the `constraint` kind's):
 /// each field resolved in the source that wrote it, so a field an extended
 /// source wrote keeps naming that source's objects when a consumer overrides
 /// the rule's other fields by id.
