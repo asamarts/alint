@@ -572,7 +572,10 @@ rules:
   `entry.parent`, `entry.root`, `entry.path` and path token, each text a transform changes (once
   for rows that share it), and each note and failure. A run's relations then hold at most 256
   bytes a cell and `BytesPerRun` bytes, about 2.4 GB at the defaults, whatever the size of a value
-  or the number of fields and joins that copy it.
+  or the number of fields and joins that copy it. The run's decode cache keeps a budget of
+  `BytesPerRun` bytes apart from that count: the key paths of every decode it makes take their
+  bytes from it as they are built, and `key_parity` the tables it keeps of its files' keys, so the
+  run's decodes together, not each alone, hold at most that many bytes of key paths.
 - A hit is an analysis failure, never truncation.
 
 **No finding cap** (D5b). A `constraint` rule reports every finding, as every existing kind does,

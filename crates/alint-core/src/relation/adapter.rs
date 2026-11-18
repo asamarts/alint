@@ -1,6 +1,6 @@
 //! The adapter trait: a resource's bytes in, rows and diagnostics out.
 
-use super::limits::{LimitExceeded, LimitKind, Limits};
+use super::limits::{LimitExceeded, LimitKind, Limits, RunBudget};
 use super::resource::Resource;
 use super::row::Row;
 use crate::extract::NonStringValueKind;
@@ -82,6 +82,24 @@ pub trait Adapter: Send + Sync + std::fmt::Debug {
         bytes: &[u8],
         limits: &Limits,
     ) -> Result<AdapterOutput, AdapterError>;
+
+    /// [`extract`](Self::extract), the bytes of the key paths it builds
+    /// taken from `budget`, the run's [`LimitKind::BytesPerRun`], rather than
+    /// from a budget of the decode's own. The run's
+    /// [`DecodeCache`](super::DecodeCache) decodes through this, so the key
+    /// paths of every decode it holds count against one budget. The default
+    /// leaves `budget` alone: an adapter that builds no key path from a
+    /// document's structure charges none.
+    fn extract_within(
+        &self,
+        resource: &Resource,
+        bytes: &[u8],
+        limits: &Limits,
+        budget: &RunBudget,
+    ) -> Result<AdapterOutput, AdapterError> {
+        let _ = budget;
+        self.extract(resource, bytes, limits)
+    }
 }
 
 /// The per-extractor row limit, for adapters to call as they grow their output.

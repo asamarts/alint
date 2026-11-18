@@ -9,7 +9,7 @@ use serde_json_path::JsonPath;
 use crate::extract::{EntryRowsError, EntryValue, extract_entry_values_bounded};
 use crate::relation::adapter::{Adapter, AdapterError, AdapterOutput, check_row_count};
 use crate::relation::key_paths::{EntryTable, PathBudget, PathId};
-use crate::relation::limits::{LimitExceeded, LimitKind, Limits};
+use crate::relation::limits::{LimitExceeded, LimitKind, Limits, RunBudget};
 use crate::relation::pointer::{Pointer, Segment};
 use crate::relation::resource::Resource;
 use crate::relation::row::{Row, RowState};
@@ -134,6 +134,16 @@ impl Adapter for EntryValuesAdapter {
         bytes: &[u8],
         limits: &Limits,
     ) -> Result<AdapterOutput, AdapterError> {
+        self.extract_within(resource, bytes, limits, &RunBudget::bytes(limits))
+    }
+
+    fn extract_within(
+        &self,
+        resource: &Resource,
+        bytes: &[u8],
+        limits: &Limits,
+        budget: &RunBudget,
+    ) -> Result<AdapterOutput, AdapterError> {
         // Spans index the original bytes, so the text is never lossy.
         let text = std::str::from_utf8(bytes).map_err(|_| {
             AdapterError::Parse(format!(
@@ -151,7 +161,7 @@ impl Adapter for EntryValuesAdapter {
             resource,
             limits,
             entries: &entries,
-            budget: PathBudget::new(limits),
+            budget: PathBudget::new(budget),
             rows: Vec::new(),
             emitted: vec![false; entries.rows.len()],
             walked: vec![false; entries.paths.len()],
@@ -404,8 +414,9 @@ struct Output<'o> {
     resource: &'o Resource,
     limits: &'o Limits,
     entries: &'o EntryTable,
-    /// The key-path bytes the rows hold, charged as each is built.
-    budget: PathBudget,
+    /// The key-path bytes the rows hold, taken from the run's as each is
+    /// built.
+    budget: PathBudget<'o>,
     rows: Vec<Row>,
     /// By row of the table: emitted already, where the first path selected
     /// it.

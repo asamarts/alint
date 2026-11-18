@@ -382,6 +382,19 @@ impl FileIndex {
             .get_or_init(|| std::sync::Arc::new(crate::relation::DecodeCache::new()));
     }
 
+    /// [`enable_relation_caches`](Self::enable_relation_caches), the decode
+    /// cache this call sets taking its run-wide row and byte limits from
+    /// `limits` rather than the defaults. Test/diagnostic only: a test
+    /// reaches a run-wide limit with a small tree this way.
+    #[doc(hidden)]
+    pub fn enable_relation_caches_under(&self, limits: &crate::relation::Limits) {
+        self.reads
+            .get_or_init(|| std::sync::Arc::new(crate::relation::ReadCache::new()));
+        self.decodes.get_or_init(|| {
+            std::sync::Arc::new(crate::relation::DecodeCache::with_run_limits(limits))
+        });
+    }
+
     /// This run's relation memo for `plan`, set on first use; `None` inside
     /// a nested rule's iteration, as for [`read_cache`](Self::read_cache),
     /// and for a plan other than the one the memo was set for.
