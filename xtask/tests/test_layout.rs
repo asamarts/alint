@@ -33,6 +33,12 @@ const OWN_BINARIES: &[(&str, &str, &str)] = &[
         "it installs a counting global allocator, which in `it` would count every other test's \
          allocations",
     ),
+    (
+        "alint-rules",
+        "key_parity_memory",
+        "it installs a counting global allocator, which in `it` would count every other test's \
+         allocations",
+    ),
 ];
 
 fn workspace_root() -> PathBuf {

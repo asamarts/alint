@@ -443,8 +443,12 @@ fn leaf_keys_drop_containers_and_array_members() {
 }
 
 /// One file's keys with the CLDR plural groups it forms on its own.
-fn merged_alone(keys: &Keys) -> Keys {
-    let nested = merge_nested_groups(keys, &nested_plural_groups(&[keys]));
+fn merged_alone(keys: &BTreeMap<Vec<Segment>, ByteSpan>) -> Keys<'_> {
+    let keys: Keys<'_> = keys
+        .iter()
+        .map(|(key, span)| (Cow::Borrowed(key.as_slice()), *span))
+        .collect();
+    let nested = merge_nested_groups(&keys, &nested_plural_groups(&[&keys]));
     merge_i18next_groups(&nested, &i18next_plural_groups(&[&nested]))
 }
 
@@ -475,13 +479,29 @@ fn plural_groups_merge_nested_and_i18next_keys() {
 #[test]
 fn ranges_use_a_line_index_and_ignore_the_bom_column() {
     let text = "\u{feff}a\r\nbb\nç\rx";
+    let keys = [
+        ("a", ByteSpan::new(3, 4)),
+        ("bb", ByteSpan::new(6, 8)),
+        ("ç", ByteSpan::new(9, 11)),
+        ("x", ByteSpan::new(12, 13)),
+    ];
+    let resource = Resource::literal(RelPath::parse("a.json").unwrap());
+    let rows = keys
+        .iter()
+        .zip(0..)
+        .map(|((key, span), ordinal)| {
+            Row::new(
+                resource.clone(),
+                Some(Pointer::root().key(key)),
+                ordinal,
+                RowState::Key,
+            )
+            .with_span(*span)
+        })
+        .collect();
     let file = KeyFile {
-        keys: BTreeMap::from([
-            (vec![Segment::Key("a".into())], ByteSpan::new(3, 4)),
-            (vec![Segment::Key("bb".into())], ByteSpan::new(6, 8)),
-            (vec![Segment::Key("ç".into())], ByteSpan::new(9, 11)),
-            (vec![Segment::Key("x".into())], ByteSpan::new(12, 13)),
-        ]),
+        decode: Arc::new(AdapterOutput::new(rows)),
+        leaves: keys.iter().map(|(_, span)| *span).enumerate().collect(),
         text: Arc::from(text),
         line_starts: line_starts(text),
     };
@@ -1502,9 +1522,7 @@ fn only_whole_plural_objects_merge_and_merges_never_hide_keys() {
             })
             .collect()
     };
-    let render = |keys: BTreeMap<Vec<Segment>, ByteSpan>| {
-        keys.keys().map(|key| render_key(key)).collect::<Vec<_>>()
-    };
+    let render = |keys: Keys<'_>| keys.keys().map(|key| render_key(key)).collect::<Vec<_>>();
     // `other` plus a non-category sibling: not a plural group.
     let mixed = keys(&[&["item", "one"], &["item", "other"], &["item", "label"]]);
     assert_eq!(

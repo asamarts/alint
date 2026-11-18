@@ -1053,10 +1053,17 @@ policy-test package the user does not trust.
   wrong path. The outermost iteration now substitutes every token.
 - **`key_parity` compares a YAML key written as a block scalar (`? |`) or left empty,** at the place
   its text starts, where it dropped such a key.
-- **`key_parity` holds each key path of a deep, wide JSON or YAML file once,** where it copied the
-  path into every key below it, and charges each row's key path to the run's byte budget as it is
-  built: on a 1 MB file 120 levels deep with 100,000 keys its rows peaked at about 700 MB and now
-  hold about 300 MB of key paths under the default limits (#569).
+- **`key_parity` holds each key path of a deep, wide JSON or YAML file once, in the file's decode,
+  and charges the key paths of every file a run decodes to one byte budget** (`bytes_per_run`,
+  1 GiB). The extraction copied a key's path into every key below it; the comparison copied each
+  path again for its key table, its leaves, the reference's keys, each comparison's rows and the
+  analyzer's input, none of them charged; and each decode charged its key paths to a budget of its
+  own, so every peer added its own. A 320 KB reference 120 levels deep with 30,000 keys and one
+  identical peer peaked at 2,300 MiB and took 12 s in a release build, as in 0.22.1, and now peaks
+  at 437 MiB and takes 2.6 s. The key paths every decode builds (a relation's too) and the tables
+  `key_parity` keeps of its files take their bytes from the run's decode cache, so a run past the
+  budget ends with an analysis failure rather than exhausting memory. Each decode still holds
+  every key's whole path, about 300 MB for a 1 MB file 120 levels deep with 100,000 keys (#569).
 - **An `extends:` list that names one source many times loads it once,** and the work of a load's
   `extends:` entries is bounded: 2,000 entries naming one 2,000-rule ruleset took 152 s to load. An
   entry is charged the source it loads, before `only:` or `except:` narrows it, and each merge what

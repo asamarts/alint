@@ -6,7 +6,7 @@ use crate::ByteSpan;
 use crate::extract::EntryValue;
 use crate::relation::adapter::{Adapter, AdapterError, AdapterOutput, check_row_count};
 use crate::relation::key_paths::{EntryAt, EntryTable, PathId};
-use crate::relation::limits::Limits;
+use crate::relation::limits::{Limits, RunBudget};
 use crate::relation::pointer::Segment;
 use crate::relation::resource::Resource;
 
@@ -37,6 +37,16 @@ impl Adapter for TomlRowsAdapter {
         bytes: &[u8],
         limits: &Limits,
     ) -> Result<AdapterOutput, AdapterError> {
+        self.extract_within(resource, bytes, limits, &RunBudget::bytes(limits))
+    }
+
+    fn extract_within(
+        &self,
+        resource: &Resource,
+        bytes: &[u8],
+        limits: &Limits,
+        budget: &RunBudget,
+    ) -> Result<AdapterOutput, AdapterError> {
         let text = std::str::from_utf8(bytes)
             .map_err(|_| AdapterError::Parse("the TOML document is not valid UTF-8".to_string()))?;
         let mut walk = Walk {
@@ -50,6 +60,7 @@ impl Adapter for TomlRowsAdapter {
             &walk.entries,
             resource,
             limits,
+            budget,
         )?))
     }
 }
@@ -417,7 +428,10 @@ mod tests {
     fn the_value_mode_gives_a_dotted_inline_key_its_middle_row() {
         let text = "[en]\nnav = { home.title = \"Home\", home.sub = 1, about = \"About\" }\n";
         let table = TomlRowsAdapter::values(text, &Limits::default()).unwrap();
-        let rows = super::super::entry::key_rows(&table, &resource(), &Limits::default()).unwrap();
+        let limits = Limits::default();
+        let rows =
+            super::super::entry::key_rows(&table, &resource(), &limits, &RunBudget::bytes(&limits))
+                .unwrap();
         assert_eq!(
             located(text, &rows),
             [

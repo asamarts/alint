@@ -63,8 +63,15 @@ impl Pointer {
     /// same.
     #[must_use]
     pub fn render(&self) -> String {
+        Self::render_segments(&self.0)
+    }
+
+    /// [`render`](Self::render) of the pointer `segments` make, without
+    /// building it.
+    #[must_use]
+    pub fn render_segments(segments: &[Segment]) -> String {
         let mut out = String::new();
-        for segment in &self.0 {
+        for segment in segments {
             match segment {
                 Segment::Index(index) => {
                     let _ = write!(out, "[{index}]");
@@ -92,7 +99,8 @@ impl Pointer {
 
     /// The bytes the pointer holds beyond its own size: its segments and
     /// their keys' text.
-    pub(crate) fn heap_bytes(&self) -> usize {
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
         self.0.iter().fold(
             self.0.len() * std::mem::size_of::<Segment>(),
             |bytes, segment| match segment {
@@ -168,6 +176,10 @@ mod tests {
         assert_eq!(Pointer::root().key("").render(), "['']");
         assert_eq!(Pointer::root().key("it's").render(), r"['it\'s']");
         assert_eq!(Pointer::root().render(), "");
+        assert_eq!(
+            Pointer::render_segments(pointer.segments()),
+            pointer.render()
+        );
         assert_ne!(
             Pointer::root().key("nav.home").render(),
             Pointer::root().key("nav").key("home").render()

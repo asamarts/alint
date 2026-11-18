@@ -6,13 +6,13 @@
 //! with 100,000 keys at the bottom took most of a gigabyte before an `at:`
 //! path selected anything. Here the walk's rows name a node, a path shares
 //! its prefix with every path below it, and a [`Pointer`] is built only for
-//! a row an adapter emits, its bytes charged as it is built
+//! a row an adapter emits, its bytes charged to the run as it is built
 //! ([`PathBudget`]).
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 
-use super::limits::{LimitExceeded, LimitKind, Limits};
+use super::limits::{LimitExceeded, RunBudget};
 use super::pointer::{Pointer, Segment};
 use crate::extract::{ByteSpan, EntryValue};
 
@@ -213,42 +213,29 @@ pub(crate) struct EntryTable {
     pub(crate) values: Vec<EntryValue>,
 }
 
-/// The key-path bytes one decode builds, charged as it builds each
-/// [`Pointer`]: a decode that alone holds more than the run's
-/// [`LimitKind::BytesPerRun`] fails as soon as it does, before it holds more.
+/// The key-path bytes a decode builds, charged as it builds each [`Pointer`]
+/// to a [`LimitKind::BytesPerRun`](super::LimitKind::BytesPerRun) budget:
+/// the run's, which the decode cache keeps, so the key paths of every decode
+/// the run holds count together, or, for a decode made outside any cache,
+/// one of its own. A decode that would take the budget past its limit fails
+/// as soon as it does, before it holds more.
 #[derive(Debug)]
-pub(crate) struct PathBudget {
-    used: usize,
-    limit: usize,
+pub(crate) struct PathBudget<'b> {
+    run: &'b RunBudget,
 }
 
-impl PathBudget {
-    pub(crate) fn new(limits: &Limits) -> Self {
-        Self {
-            used: 0,
-            limit: limits.get(LimitKind::BytesPerRun),
-        }
+impl<'b> PathBudget<'b> {
+    pub(crate) fn new(run: &'b RunBudget) -> Self {
+        Self { run }
     }
 
-    /// Charge `bytes`, failing once the decode's total exceeds the limit.
-    pub(crate) fn take(&mut self, bytes: usize) -> Result<(), LimitExceeded> {
-        self.used = self.used.saturating_add(bytes);
-        if self.used > self.limit {
-            return Err(LimitExceeded {
-                kind: LimitKind::BytesPerRun,
-                limit: self.limit,
-                reached: self.used,
-            });
-        }
-        Ok(())
+    /// Charge `bytes`, failing once the budget's total exceeds its limit.
+    pub(crate) fn take(&self, bytes: usize) -> Result<(), LimitExceeded> {
+        self.run.take(bytes)
     }
 
     /// `id`'s pointer, its bytes charged first.
-    pub(crate) fn pointer(
-        &mut self,
-        paths: &KeyPaths,
-        id: PathId,
-    ) -> Result<Pointer, LimitExceeded> {
+    pub(crate) fn pointer(&self, paths: &KeyPaths, id: PathId) -> Result<Pointer, LimitExceeded> {
         self.take(paths.pointer_bytes(id))?;
         Ok(paths.pointer(id))
     }
@@ -257,6 +244,7 @@ impl PathBudget {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::relation::limits::{LimitKind, Limits};
 
     #[test]
     fn a_path_is_held_once_and_numbered_in_the_order_reached() {
@@ -302,7 +290,8 @@ mod tests {
         let limits = Limits::default()
             .with(LimitKind::BytesPerRun, 3 * paths.pointer_bytes(deep))
             .unwrap();
-        let mut budget = PathBudget::new(&limits);
+        let run = RunBudget::bytes(&limits);
+        let budget = PathBudget::new(&run);
         for _ in 0..3 {
             budget.pointer(&paths, deep).unwrap();
         }

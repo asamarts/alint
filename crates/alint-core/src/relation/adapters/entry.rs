@@ -3,7 +3,7 @@
 use crate::extract::{EntryRowsError, entry_table};
 use crate::relation::adapter::{Adapter, AdapterError, AdapterOutput, check_row_count};
 use crate::relation::key_paths::{EntryTable, PathBudget};
-use crate::relation::limits::{LimitExceeded, LimitKind, Limits};
+use crate::relation::limits::{LimitExceeded, LimitKind, Limits, RunBudget};
 use crate::relation::resource::Resource;
 use crate::relation::row::{Row, RowState};
 use crate::structured_format::Format;
@@ -71,6 +71,16 @@ impl Adapter for EntryRowsAdapter {
         bytes: &[u8],
         limits: &Limits,
     ) -> Result<AdapterOutput, AdapterError> {
+        self.extract_within(resource, bytes, limits, &RunBudget::bytes(limits))
+    }
+
+    fn extract_within(
+        &self,
+        resource: &Resource,
+        bytes: &[u8],
+        limits: &Limits,
+        budget: &RunBudget,
+    ) -> Result<AdapterOutput, AdapterError> {
         // These rows carry byte spans into the original file. Lossy UTF-8
         // replacement would shift every later span, so this adapter is strict;
         // `ExtractAdapter` is the lossy one, matching `cross_file`.
@@ -82,20 +92,24 @@ impl Adapter for EntryRowsAdapter {
         })?;
         let entries = entry_table(self.format, text, limits.get(LimitKind::RowsPerExtractor))
             .map_err(entry_error)?;
-        Ok(AdapterOutput::new(key_rows(&entries, resource, limits)?))
+        Ok(AdapterOutput::new(key_rows(
+            &entries, resource, limits, budget,
+        )?))
     }
 }
 
 /// A key row per member of `entries`, in source order. Each row's key path
-/// is built as it is emitted, its bytes charged to the decode
+/// is built as it is emitted, its bytes taken from `budget`, the run's
 /// ([`PathBudget`]): a document deep and wide enough to hold more key-path
-/// bytes than the run may fails when it reaches them, not after.
+/// bytes than the run may fails when it reaches them, not after, and so
+/// does the decode that takes the run's key paths past them.
 pub(crate) fn key_rows(
     entries: &EntryTable,
     resource: &Resource,
     limits: &Limits,
+    budget: &RunBudget,
 ) -> Result<Vec<Row>, AdapterError> {
-    let mut budget = PathBudget::new(limits);
+    let budget = PathBudget::new(budget);
     let mut rows = Vec::with_capacity(entries.rows.len());
     for (ordinal, entry) in entries.rows.iter().enumerate() {
         check_row_count(limits, rows.len() + 1)?;
