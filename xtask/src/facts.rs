@@ -77,6 +77,12 @@ struct Compatibility {
     config_versions: Vec<u32>,
     /// The config versions a build loads as experimental (format v7).
     experimental_config_versions: Vec<u32>,
+    /// Each canonical kind a config of version 1 may not use, with the lowest
+    /// config version that may (format v7): `{"constraint": 2}`.
+    kind_config_versions: BTreeMap<String, u32>,
+    /// The canonical kinds only an experimental config version may use
+    /// (format v7): `["constraint"]` in v0.23.
+    experimental_rule_kinds: Vec<String>,
     policy_test_versions: Vec<u32>,
 }
 
@@ -143,11 +149,23 @@ fn build_facts() -> Result<Facts> {
         .kind_metadata()
         .map(|(kind, meta)| (kind.to_string(), meta.clone()))
         .collect();
+    let kind_config_versions: BTreeMap<String, u32> = RULE_REGISTRY
+        .canonical_kinds()
+        .map(|kind| (kind.to_string(), RULE_REGISTRY.min_config_version(kind)))
+        .filter(|(_, version)| *version > 1)
+        .collect();
+    let experimental_rule_kinds: Vec<String> = kind_config_versions
+        .iter()
+        .filter(|(_, version)| alint_dsl::EXPERIMENTAL_CONFIG_VERSIONS.contains(version))
+        .map(|(kind, _)| kind.clone())
+        .collect();
     let compatibility = Compatibility {
         config_versions: (alint_core::Config::MIN_SUPPORTED_VERSION
             ..=alint_core::Config::CURRENT_VERSION)
             .collect(),
         experimental_config_versions: alint_dsl::EXPERIMENTAL_CONFIG_VERSIONS.to_vec(),
+        kind_config_versions,
+        experimental_rule_kinds,
         policy_test_versions: vec![alint_testkit::POLICY_TEST_VERSION],
     };
     let rule_source_files = rule_source_files(&root)?;
@@ -222,10 +240,23 @@ pub fn run(check: bool) -> Result<()> {
 // Each mirrors the source `coverage_audit_readme_claims` pins the
 // README to, so `facts.json`, the README, and the engine agree.
 
-/// Distinct `kind:` values in the `all_kinds.yaml` fixture, sorted.
+/// The fixtures that hold a rule of every kind: `all_kinds.yaml` the kinds a
+/// version 1 config may use, `all_kinds_v2.yaml` the kinds only version 2 may
+/// use.
+pub(crate) const ALL_KINDS_FIXTURES: &[&str] = &[
+    "crates/alint-dsl/tests/fixtures/all_kinds.yaml",
+    "crates/alint-dsl/tests/fixtures/all_kinds_v2.yaml",
+];
+
+/// Distinct `kind:` values in the all-kinds fixtures, sorted.
 fn rule_kinds(root: &Path) -> Result<Vec<String>> {
-    let path = root.join("crates/alint-dsl/tests/fixtures/all_kinds.yaml");
-    let text = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+    let mut text = String::new();
+    for fixture in ALL_KINDS_FIXTURES {
+        let path = root.join(fixture);
+        text.push_str(
+            &fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?,
+        );
+    }
     let mut set = BTreeSet::new();
     for raw in text.lines() {
         let line = raw.trim_start();
@@ -274,7 +305,7 @@ fn rule_source_files(root: &Path) -> Result<BTreeMap<String, String>> {
     // live beside the builder, and the module is also the source mapping. `\s`
     // spans multi-line calls.
     let re = Regex::new(
-        r#"\.register(?:_optionless)?\(\s*"([A-Za-z0-9_]+)"\s*,\s*&([a-z0-9_]+)::[A-Z0-9_]+\s*,\s*([a-z0-9_]+)::"#,
+        r#"\.register(?:_optionless|_for_config_version)?\(\s*"([A-Za-z0-9_]+)"\s*,\s*&([a-z0-9_]+)::[A-Z0-9_]+\s*,\s*([a-z0-9_]+)::"#,
     )
     .expect("static regex compiles");
     let src_dir = root.join("crates/alint-rules/src");
@@ -675,6 +706,13 @@ mod tests {
         // stable versions.
         assert_eq!(facts.compatibility.experimental_config_versions, vec![2]);
         assert!(!facts.compatibility.config_versions.contains(&2));
+        // `constraint` is the one kind a version 1 config may not use, and it
+        // is experimental with version 2 (design section 11).
+        assert_eq!(
+            facts.compatibility.kind_config_versions,
+            BTreeMap::from([("constraint".to_string(), 2)])
+        );
+        assert_eq!(facts.compatibility.experimental_rule_kinds, ["constraint"]);
         assert_eq!(
             facts.compatibility.policy_test_versions,
             vec![alint_testkit::POLICY_TEST_VERSION]

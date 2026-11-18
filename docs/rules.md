@@ -910,6 +910,82 @@ In a rule nested under `for_each_file`, `for_each_dir` or `every_matching_has`, 
 
 A missing reference or literal peer, an unparsable reference or peer, and a `peers` glob that matches no file are fail-loud analysis outcomes, never a pass; a peer with no keys reports every reference key as missing. `allow_missing_peers: true` turns an absent peer (a literal `peers` path that does not exist, or a glob that selects nothing) into an informational note, for a file such as `.env` that exists on developer machines but not in CI; a missing reference still fails. Findings quote keys only, never values. The kind has no fix: inserting missing keys waits for the generic edit plan. Under `--changed` the rule is skipped only when neither the reference nor a peer changed, and otherwise evaluates over the full index; a rule with a literal peer runs whenever anything changed, because Git does not report edits to an ignored file such as `.env`.
 
+### `constraint`
+
+**Categories:** Cross-file
+
+An assertion over the rows of a relation: equal values, unique keys, or a set of values per group
+compared with a reference group. Version 2 only, and experimental as `version: 2` is: a config of
+`version: 1` that uses it is refused at load with an error that names version 2, and its syntax may
+change before a release declares version 2 stable (v0.24 at the earliest). See
+[Version 2](/docs/configuration/version-2/) for selectors and relations.
+
+A rule takes `input:`, the relation it reads (a name, bare or qualified by an `extends:` alias as
+`deps.ranges`, or an inline relation written as a relation under `relations:` is, whose values may
+not read the environment), and `assert:`, which holds exactly one of `equal`, `unique` and `set`.
+It takes the common keys `id`, `level`, `message`, `when`, `policy_url` and `sensitive`, but no
+`paths:` and no `scope_filter:`: the selectors of its relation pick what it reads. It cannot be
+nested under a `for_each_*` kind's `require:`, it has no fix, and under `--changed` it evaluates
+over the full index. Every field it names (and every `{{row.FIELD}}` in its `message:`) must be a
+field of the relation, and a literal must be a string, or a boolean for a field that can hold one;
+a number cannot be written as a literal (YAML does not keep the text it is written with), and null
+matches nothing.
+
+Values compare by their type and their text: a number by its lexeme (`1.0` is not `1`), and a path
+or path token as a string. Null, and a missing value, match nothing. A key, group or membership
+comparison between two types (a number against a string) is an analysis failure that names both
+rows, never a silent non-match, and so is a null `group_by:` value; in `equal`, values of two types
+differ, and the finding shows both types. A relation that fails to evaluate gives the rule its
+analysis failures, never a pass.
+
+#### `equal`
+
+`assert: { equal: { field: F } }`: every row has the same value of `F`. With `group_by: G`, rows
+are compared within each group of rows that share `G`'s value. Where rows disagree, each distinct
+value gets one finding, at the first row with it, related to the other rows with it and to one
+row of each other value.
+
+`to: { row: { source: .nvmrc } }` compares every row with one source row: the row whose `source`
+field holds `.nvmrc`. Exactly one such row must exist and hold a value of `F`; none, several, or a
+source row without a value is an analysis failure. Each row that differs (a missing value differs)
+gets a finding, related to the source row. This form takes no `group_by:`.
+
+`to: { field: G }` compares two fields of each row, such as a join's two sides: each row whose `F`
+differs from its `G` gets a finding at `F`, related to `G`, which may sit in another file.
+
+#### `unique`
+
+`assert: { unique: { key: [K, ...] } }`: no two rows share the key. Each row that repeats a key
+gets a finding, related to the first row with it; a row whose key holds a null is never a repeat.
+With `determines: [D, ...]`, rows that share the key must agree on the determined fields instead
+(a functional dependency): each distinct determined value of a key whose rows disagree gets one
+finding, at the first row with it, so a dependency at `^18.2.0` in 498 manifests and at `^17.0.2`
+in 2 gives two findings.
+
+#### `set`
+
+`assert: { set: { field: F, group_by: G, equal_to: { group: en } } }`: the set of `F`'s values in
+each group of `G` equals the set of the reference group, the rows whose `G` is `en`. A value the
+reference group holds and a group lacks is a finding at the group's first file, related to the
+reference row with it; a value a group holds that the reference group lacks is a finding at that
+row. `subset_of:` reports only the second, and `disjoint_from:` reports each value a group shares
+with the reference group. Null is in no set. A reference group with no rows is an analysis
+failure.
+
+Not yet: `plurals: cldr`, `groups:`, a `set` against another relation's field
+(`{ relation: R, field: F }`) and a `set` grouped by `path` or a path token are refused at load
+until a later release adds them.
+
+#### Findings and baselines
+
+A generated message quotes the keys and values a finding is about. In `message:`,
+`{{row.FIELD}}` is the reported row's value of a field (the reference group's row, for a missing
+value), and a `sensitive` field's value is shown as `<redacted>` there and in generated messages.
+A finding's baseline fingerprint is its rule and its key alone, never its path: the first row of a
+key or the first file of a group moves when rows are added, removed or renamed, so adding a row
+that sorts first, or renaming the first file, keeps a baselined finding baselined. The key is made
+of the values the finding is about; a sensitive field's value is left out of it.
+
 ### `every_matching_has`
 
 **Categories:** Cross-file

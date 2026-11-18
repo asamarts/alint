@@ -30,6 +30,7 @@ for kind in [
     "spdx_identifier_valid",
     "pinned_references",
     "key_parity",
+    "constraint",
 ]:
     facts["rule_kinds"].remove(kind)
     facts["rule_categories"].pop(kind)

@@ -90,6 +90,11 @@ const REFUSALS: &[(&str, Refusal)] = &[
         "check/version_two/a_chained_name_is_refused.yml",
         Refusal::Shape,
     ),
+    // The draft refuses a `constraint` rule under `require:`.
+    (
+        "check/version_two/a_constraint_cannot_be_nested.yml",
+        Refusal::Shape,
+    ),
     ("check/version_two/a_cycle_is_refused.yml", Refusal::Loader),
     (
         "check/version_two/a_name_cannot_be_interpolated.yml",

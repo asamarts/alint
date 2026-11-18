@@ -1,0 +1,23 @@
+test_version: 1
+name: a version 1 config that uses the constraint kind is refused with an error naming version 2
+tags: [check, constraint, version_two]
+
+given:
+  tree: {}
+  config: |
+    version: 1
+    rules:
+      - id: names-unique
+        kind: constraint
+        input: names
+        assert:
+          unique: { key: [name] }
+        level: error
+
+when: [check]
+
+expect:
+  - exit: configuration_error
+    configuration_error:
+      message:
+        regex: "the `constraint` rule kind needs config `version: 2`"

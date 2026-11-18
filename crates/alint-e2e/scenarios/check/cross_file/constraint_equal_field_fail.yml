@@ -1,0 +1,43 @@
+test_version: 1
+name: constraint compares two fields of each row
+tags: [check, constraint, cross_file, version_two, failing]
+
+given:
+  tree:
+    exports.json: |
+      {
+        "aliases": {
+          "button": "button",
+          "card": "panel"
+        }
+      }
+  config: |
+    version: 2
+    relations:
+      aliases:
+        from: { paths: exports.json }
+        entries: { format: json, at: "$.aliases" }
+        fields: { name: entry.key, target: entry.value }
+    rules:
+      - id: alias-names-its-target
+        kind: constraint
+        input: aliases
+        assert:
+          equal: { field: target, to: { field: name } }
+        level: warning
+
+when: [check]
+
+expect:
+  - exit: success
+    violations:
+      - rule: alias-names-its-target
+        level: warning
+        path: exports.json
+        line: 4
+        column: 13
+        end_line: 4
+        end_column: 20
+        message: {exact: "`target` is \"panel\" and `name` is \"card\" in this row; they must be equal"}
+        related:
+          - {label: "`name` in this row", path: exports.json, line: 4, column: 5, end_line: 4, end_column: 11}

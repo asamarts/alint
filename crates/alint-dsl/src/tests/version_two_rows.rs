@@ -1,8 +1,8 @@
 //! Version 2 relations evaluated over walked trees: a real configuration
 //! through the loader, a tree on disk, and the evaluator phase 7's
 //! `constraint` kind calls (design `v0.23/selectors-and-constraints.md`,
-//! sections 5 to 8 and 12). No rule reads a relation in this build, so these
-//! call the evaluator directly.
+//! sections 5 to 8 and 12). These call the evaluator directly, to see its
+//! rows; `constraint_families.rs` runs the rules that read them.
 
 use std::path::Path;
 

@@ -314,7 +314,55 @@ pub(crate) fn build(v1: &Value) -> Result<Value> {
         }
         defs.insert(name, def);
     }
+    constraint_kind(defs)?;
     Ok(schema)
+}
+
+/// The `constraint` kind, which only version 2 has, when `defs` holds its
+/// branch (the full schema `gen-schema` derives the draft from does;
+/// `gen_schema::build_full_schema`): its `input:` is a relation's name or an
+/// inline relation, and no `constraint` rule is nested under `require:`
+/// (design section 11).
+fn constraint_kind(defs: &mut Map<String, Value>) -> Result<()> {
+    let Some(branch) = defs.get_mut("rule_constraint") else {
+        return Ok(());
+    };
+    let properties = branch
+        .get_mut("properties")
+        .and_then(Value::as_object_mut)
+        .context("`$defs/rule_constraint` has no properties object")?;
+    ensure!(
+        properties.contains_key("input"),
+        "`$defs/rule_constraint` has no `input` property"
+    );
+    properties.insert(
+        "input".into(),
+        json!({
+            "oneOf": [
+                { "$ref": "#/$defs/v2_reference" },
+                { "$ref": "#/$defs/v2_relation" },
+            ],
+            "description": "The rows the assertion reads: a relation's name, bare or \
+                qualified by an `extends:` alias (`deps.ranges`), or an inline relation (a map, \
+                as a relation under `relations:` is written, whose values may not read the \
+                environment).",
+        }),
+    );
+    let refused = defs
+        .get_mut("nested_rule")
+        .and_then(|nested| nested.get_mut("allOf"))
+        .and_then(Value::as_array_mut)
+        .and_then(|all| {
+            all.iter_mut()
+                .find_map(|part| part.get_mut("not").and_then(|not| not.get_mut("anyOf")))
+        })
+        .and_then(Value::as_array_mut)
+        .context("`$defs/nested_rule` has no `allOf` part that refuses fields")?;
+    refused.push(json!({
+        "required": ["kind"],
+        "properties": { "kind": { "const": "constraint" } },
+    }));
+    Ok(())
 }
 
 /// Turn the version 1 `properties` into version 2's: `version: 2`, `as:` on

@@ -660,9 +660,12 @@ const MESSAGE_BRACE_MARK: char = '\u{E001}';
 /// character, so a directory named `x{{ctx.primary}}` is shown as it is
 /// named, not with the primary path in its place.
 ///
-/// For alint's own crates, whose tests keep it in step with the rules.
+/// For alint's own crates, whose tests keep it in step with the rules. A
+/// `constraint` rule (`{{row.FIELD}}`) cannot be nested, and is listed as a
+/// kind that renders its message all the same.
 #[doc(hidden)]
 pub const NESTED_MESSAGE_TEMPLATE_KINDS: &[&str] = &[
+    "constraint",
     "dir_contains",
     "dir_only_contains",
     "git_blame_age",

@@ -1,0 +1,38 @@
+test_version: 1
+name: a constraint whose relation fails reports analysis failures, never a pass
+tags: [check, constraint, cross_file, version_two, failing]
+
+given:
+  tree:
+    packages:
+      a:
+        package.json: |
+          {"name": "a", "version": "1.0.0"}
+      b:
+        package.json: |
+          {"name": "b", "version": }
+  config: |
+    version: 2
+    relations:
+      names:
+        from: { paths: "packages/*/package.json" }
+        read: { json: "$.name" }
+        fields: { name: value }
+    rules:
+      - id: names-unique
+        kind: constraint
+        input: names
+        assert:
+          unique: { key: [name] }
+        level: error
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations: []
+    analysis_failures:
+      - rule: names-unique
+        kind: resource_parse
+        path: packages/b/package.json
+        message: {regex: "^relation `names` \\(\\S+\\): could not parse the file as JSON"}

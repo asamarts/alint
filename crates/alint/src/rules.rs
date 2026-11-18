@@ -31,6 +31,30 @@ struct Row<'a> {
     categories: Vec<&'static str>,
     aliases: Vec<&'a str>,
     summary: Option<&'static str>,
+    config_version: u32,
+}
+
+/// The lowest config `version:` a rule of `kind` may be written in, and
+/// whether that version is experimental (`constraint` needs `version: 2`,
+/// experimental in v0.23).
+pub(crate) fn config_version(registry: &RuleRegistry, kind: &str) -> (u32, bool) {
+    let version = registry.min_config_version(kind);
+    (
+        version,
+        alint_dsl::EXPERIMENTAL_CONFIG_VERSIONS.contains(&version),
+    )
+}
+
+/// How human output notes a kind that needs a later config version:
+/// `version 2 only, experimental`; nothing for a kind of version 1.
+fn config_version_note(registry: &RuleRegistry, kind: &str) -> Option<String> {
+    let (version, experimental) = config_version(registry, kind);
+    (version > 1).then(|| {
+        format!(
+            "version {version} only{}",
+            if experimental { ", experimental" } else { "" }
+        )
+    })
 }
 
 pub(crate) struct CapabilitySummary<'a>(&'a KindMeta);
@@ -377,6 +401,7 @@ pub(crate) fn list(
             categories: slugs,
             aliases,
             summary,
+            config_version: registry.min_config_version(kind),
         });
     }
 
@@ -389,6 +414,8 @@ pub(crate) fn list(
                     "categories": r.categories,
                     "aliases": r.aliases,
                     "summary": r.summary,
+                    "config_version": r.config_version,
+                    "experimental": config_version(registry, r.kind).1,
                 })
             })
             .collect();
@@ -413,11 +440,16 @@ pub(crate) fn list(
                 .filter_map(|s| Category::from_slug(s))
                 .map(Category::title)
                 .collect();
-            let alias_note = if r.aliases.is_empty() {
+            let mut alias_note = if r.aliases.is_empty() {
                 String::new()
             } else {
                 format!("  (alias: {})", r.aliases.join(", "))
             };
+            if let Some(note) = config_version_note(registry, r.kind) {
+                alias_note.push_str("  [");
+                alias_note.push_str(&note);
+                alias_note.push(']');
+            }
             writeln!(
                 out,
                 "  {kind:<width$}  {cats}{alias_note}",
@@ -475,6 +507,8 @@ pub(crate) fn show(
             "categories": cats,
             "aliases": aliases,
             "summary": summary,
+            "config_version": config_version(registry, canonical).0,
+            "experimental": config_version(registry, canonical).1,
             "docs": docs,
             "capabilities": meta.serialized_capabilities(),
             "selectors": meta.selectors.as_ref(),
@@ -495,6 +529,9 @@ pub(crate) fn show(
         writeln!(out, "  categories: {}", category_titles(&titles))?;
         if !aliases.is_empty() {
             writeln!(out, "  aliases:    {}", aliases.join(", "))?;
+        }
+        if let Some(note) = config_version_note(registry, canonical) {
+            writeln!(out, "  config:       {note}")?;
         }
         writeln!(out, "  capabilities: {}", capability_summary(meta))?;
         writeln!(out, "  selector fields: {}", selector_summary(meta))?;

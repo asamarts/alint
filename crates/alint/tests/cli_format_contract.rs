@@ -248,23 +248,40 @@ rules:
 // `explain --format json` and assert each renders valid JSON with its id and
 // kind round-tripping and categories present. A newly registered kind that
 // rendered blank, mis-reported its kind, or crashed `explain` fails here.
+/// The all-kinds fixtures: `all_kinds.yaml` holds a rule of each kind a
+/// version 1 config may use, `all_kinds_v2.yaml` one of each kind only
+/// version 2 may use (`constraint`), each with the fewest rules it needs.
+const ALL_KINDS_FIXTURES: [(&str, usize); 2] = [("all_kinds.yaml", 60), ("all_kinds_v2.yaml", 5)];
+
+/// A tempdir holding all-kinds `fixture` as its `.alint.yml`.
+fn all_kinds_dir(fixture: &str) -> tempfile::TempDir {
+    let text = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../alint-dsl/tests/fixtures")
+            .join(fixture),
+    )
+    .unwrap_or_else(|error| panic!("read {fixture}: {error}"));
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join(".alint.yml"), &text).unwrap();
+    dir
+}
+
 #[test]
 fn explain_covers_every_registered_kind() {
-    let fixture = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../alint-dsl/tests/fixtures/all_kinds.yaml"
-    ))
-    .expect("read all_kinds.yaml");
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join(".alint.yml"), &fixture).unwrap();
+    for (fixture, fewest) in ALL_KINDS_FIXTURES {
+        explain_covers_every_kind_of(fixture, fewest);
+    }
+}
 
+fn explain_covers_every_kind_of(fixture: &str, fewest: usize) {
+    let dir = all_kinds_dir(fixture);
     let list: serde_json::Value =
         serde_json::from_slice(&run(dir.path(), &["list", "--format", "json"]).stdout)
             .expect("list --format json must be JSON");
     let rules = list["rules"].as_array().expect("rules array");
     assert!(
-        rules.len() > 60,
-        "all_kinds fixture should exercise many kinds (got {})",
+        rules.len() > fewest,
+        "{fixture} should exercise many kinds (got {})",
         rules.len()
     );
 
@@ -650,14 +667,13 @@ fn validate_config_help_lists_every_envelope_key() {
 // registered kind cannot silently lose catalog detail.
 #[test]
 fn explain_surfaces_catalog_detail_for_every_kind() {
-    let fixture = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../alint-dsl/tests/fixtures/all_kinds.yaml"
-    ))
-    .expect("read all_kinds.yaml");
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join(".alint.yml"), &fixture).unwrap();
+    for (fixture, _) in ALL_KINDS_FIXTURES {
+        explain_surfaces_catalog_detail_of(fixture);
+    }
+}
 
+fn explain_surfaces_catalog_detail_of(fixture: &str) {
+    let dir = all_kinds_dir(fixture);
     let list: serde_json::Value =
         serde_json::from_slice(&run(dir.path(), &["list", "--format", "json"]).stdout)
             .expect("list --format json must be JSON");

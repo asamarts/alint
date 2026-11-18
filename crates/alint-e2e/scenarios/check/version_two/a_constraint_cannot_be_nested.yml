@@ -1,0 +1,31 @@
+test_version: 1
+name: a constraint rule nested under require is refused
+tags: [check, constraint, version_two]
+
+given:
+  tree: {}
+  config: |
+    version: 2
+    relations:
+      names:
+        from: { paths: "packages/*/package.json" }
+        read: { json: "$.name" }
+        fields: { name: value }
+    rules:
+      - id: each-package
+        kind: for_each_dir
+        select: "packages/*"
+        require:
+          - kind: constraint
+            input: names
+            assert:
+              unique: { key: [name] }
+        level: error
+
+when: [check]
+
+expect:
+  - exit: configuration_error
+    configuration_error:
+      message:
+        regex: "a `constraint` rule reads a relation, which a rule nested under `require:` cannot"

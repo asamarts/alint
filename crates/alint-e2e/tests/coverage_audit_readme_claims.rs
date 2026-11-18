@@ -222,9 +222,15 @@ fn readme_rule_kinds_count_matches_fixture() {
     let claimed = num_before(&readme, "rule kinds across")
         .expect("README must contain 'N rule kinds across M families'");
 
+    // `all_kinds.yaml` has the kinds a version 1 config may use, and
+    // `all_kinds_v2.yaml` the kinds only version 2 may use (`constraint`).
     let fixture_path = workspace_root().join("crates/alint-dsl/tests/fixtures/all_kinds.yaml");
-    let fixture = fs::read_to_string(&fixture_path)
+    let mut fixture = fs::read_to_string(&fixture_path)
         .unwrap_or_else(|e| panic!("read {}: {e}", fixture_path.display()));
+    let v2_path = workspace_root().join("crates/alint-dsl/tests/fixtures/all_kinds_v2.yaml");
+    fixture.push_str(
+        &fs::read_to_string(&v2_path).unwrap_or_else(|e| panic!("read {}: {e}", v2_path.display())),
+    );
     let accepted = count_distinct_kinds(&fixture);
     let aliases = alint_rules::categories::ALIAS_TO_CANONICAL.len();
     let actual = accepted - aliases;

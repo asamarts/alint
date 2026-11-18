@@ -10,8 +10,14 @@ fn v1() -> Value {
     crate::gen_schema::build_generated_schema().expect("the version 1 schema builds")
 }
 
+/// What the draft is derived from: the version 1 schema with the kinds of
+/// version 2.
+fn full() -> Value {
+    crate::gen_schema::build_full_schema().expect("the full schema builds")
+}
+
 fn draft() -> Value {
-    build(&v1()).expect("the draft builds")
+    build(&full()).expect("the draft builds")
 }
 
 fn validator(schema: &Value) -> jsonschema::Validator {
@@ -152,4 +158,48 @@ fn the_draft_follows_the_version_one_id() {
         "the version 1 schema's `$id` (https://example.invalid/alint/v1.json) does not end in \
          `/main/schemas/v1/config.json`"
     );
+}
+
+/// The draft takes a `constraint` rule, with a named or an inline `input:`,
+/// at the top level only; the version 1 schema has no such kind.
+#[test]
+fn the_draft_takes_a_top_level_constraint_and_the_version_one_schema_none() {
+    let draft = validator(&draft());
+    let v1 = validator(&v1());
+    let config = |yaml: &str| -> Value {
+        let value: ayaml::Value = alint_core::yaml::from_str(yaml).unwrap();
+        serde_json::to_value(value).unwrap()
+    };
+    let relation = "from: { paths: \"*/package.json\" }\n    read: { json: \"$.name\" }\n    \
+                    fields: { name: value }";
+    let rule = "kind: constraint\n    assert: { unique: { key: [name] } }\n    level: error";
+    let named = config(&format!(
+        "version: 2\nrelations:\n  names:\n    {relation}\nrules:\n  - id: c\n    {rule}\n    \
+         input: names\n"
+    ));
+    assert!(draft.is_valid(&named), "{:?}", draft.validate(&named).err());
+    let inline = config(&format!(
+        "version: 2\nrules:\n  - id: c\n    {rule}\n    input:\n      {}\n",
+        relation.replace("\n    ", "\n      ")
+    ));
+    assert!(
+        draft.is_valid(&inline),
+        "{:?}",
+        draft.validate(&inline).err()
+    );
+    let nested = config(
+        "version: 2\nrules:\n  - id: each\n    kind: for_each_dir\n    select: \"packages/*\"\n    \
+         require:\n      - kind: constraint\n        input: names\n        assert: { unique: { \
+         key: [name] } }\n    level: error\n",
+    );
+    assert!(!draft.is_valid(&nested));
+    let one = config(&format!(
+        "version: 1\nrules:\n  - id: c\n    {rule}\n    input: names\n"
+    ));
+    assert!(!v1.is_valid(&one));
+    // An input is a name or a relation, nothing else.
+    let numbered = config(&format!(
+        "version: 2\nrules:\n  - id: c\n    {rule}\n    input: 3\n"
+    ));
+    assert!(!draft.is_valid(&numbered));
 }

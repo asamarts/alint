@@ -70,6 +70,11 @@ pub(super) fn generate_rules_pages(
     // spelling so aliases resolve to their canonical branch.
     let schema = load_config_schema(&workspace.join(docs_paths::SCHEMA_JSON))?;
     let kind_branches = build_kind_branch_index(&schema);
+    // A kind only a `version: 2` config may use (`constraint`) has its branch
+    // in the draft version 2 schema alone.
+    let v2_schema = load_config_schema(&workspace.join(docs_paths::SCHEMA_V2_JSON))?;
+    let v2_branches = build_kind_branch_index(&v2_schema);
+    let schemas = [(&schema, &kind_branches), (&v2_schema, &v2_branches)];
 
     // ADR-0014: scenarios carrying a `docs:` block render their kind's worked
     // example from the real fixture (tree + config + a live `alint check` run).
@@ -129,8 +134,7 @@ pub(super) fn generate_rules_pages(
             &family_dir,
             &family_slug,
             &known_kinds,
-            &schema,
-            &kind_branches,
+            &schemas,
             &mut kind_to_family,
             &mut all_kinds,
             &mut missing_examples,
@@ -241,8 +245,10 @@ fn process_family_h3s(
     family_dir: &Path,
     family_slug: &str,
     known_kinds: &std::collections::HashSet<String>,
-    schema: &serde_json::Value,
-    kind_branches: &std::collections::HashMap<String, serde_json::Value>,
+    schemas: &[(
+        &serde_json::Value,
+        &std::collections::HashMap<String, serde_json::Value>,
+    )],
     kind_to_family: &mut std::collections::HashMap<String, String>,
     all_kinds: &mut Vec<KindEntry>,
     missing_examples: &mut Vec<String>,
@@ -374,9 +380,13 @@ fn process_family_h3s(
                 .filter(|k| *k != kind)
                 .map(String::as_str)
                 .collect();
-            let options_md = kind_branches
-                .get(kind)
-                .map(|branch| options_section(branch, schema, released));
+            // The first schema with the kind's branch: version 1's, then the
+            // draft version 2 schema's.
+            let options_md = schemas.iter().find_map(|(schema, branches)| {
+                branches
+                    .get(kind)
+                    .map(|branch| options_section(branch, schema, released))
+            });
             emit_rule_page(
                 family_dir,
                 kind,

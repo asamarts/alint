@@ -1,0 +1,116 @@
+# Test fixture: every rule kind that only a `version: 2` config may use (the
+# `constraint` kind, in each of its families), beside `all_kinds.yaml`, which
+# has every other kind. The checks that cover every registered kind read both
+# (ADR-0012; design `v0.23/selectors-and-constraints.md` section 11).
+version: 2
+
+selectors:
+  manifests:
+    paths: "packages/*/package.json"
+  catalogs:
+    paths: "locales/messages.json"
+
+relations:
+  names:
+    from: manifests
+    read: { json: "$.name" }
+    fields: { name: value, manifest: path }
+  ranges:
+    from: manifests
+    entries:
+      format: json
+      at: ["$.dependencies", "$.devDependencies"]
+    fields: { field: entry.parent, dependency: entry.key, range: entry.value }
+  messages:
+    from: catalogs
+    entries: { format: json, at: ["$.en", "$.de", "$.pseudo"] }
+    fields: { locale: entry.parent, message: entry.key }
+  versions:
+    from: manifests
+    read: { json: "$.engines.node" }
+    fields: { manifest: path, node: value }
+  pins:
+    join: { left: versions, right: names, on: { manifest: manifest }, unique: right }
+    fields: { node: left.node, name: right.name }
+
+rules:
+  - id: names-unique
+    kind: constraint
+    input: names
+    assert:
+      unique: { key: [name] }
+    level: error
+    message: "the name {{row.name}} is used twice"
+    policy_url: "https://example.com/policies/names"
+
+  - id: one-range-per-dependency
+    kind: constraint
+    input: ranges
+    assert:
+      unique: { key: [dependency], determines: [range] }
+    level: warning
+
+  - id: one-range-per-field
+    kind: constraint
+    input: ranges
+    assert:
+      equal: { field: range, group_by: dependency }
+    level: info
+
+  - id: node-matches-the-root
+    kind: constraint
+    input: versions
+    assert:
+      equal:
+        field: node
+        to: { row: { manifest: packages/root/package.json } }
+    level: warning
+
+  - id: node-matches-the-name
+    kind: constraint
+    input: pins
+    assert:
+      equal: { field: node, to: { field: name } }
+    level: off
+
+  - id: locales-match-english
+    kind: constraint
+    input: messages
+    assert:
+      set:
+        field: message
+        group_by: locale
+        equal_to: { group: en }
+    level: error
+
+  - id: locales-within-english
+    kind: constraint
+    input: messages
+    assert:
+      set:
+        field: message
+        group_by: locale
+        subset_of: { group: en }
+    level: warning
+
+  - id: locales-apart-from-pseudo
+    kind: constraint
+    input: messages
+    assert:
+      set:
+        field: message
+        group_by: locale
+        disjoint_from: { group: pseudo }
+    level: info
+    sensitive: false
+
+  - id: inline-input
+    kind: constraint
+    input:
+      from: { paths: "apps/*/package.json" }
+      read: { json: "$.name" }
+      fields: { name: value }
+    assert:
+      unique: { key: [name] }
+    level: error
+    when: "true"

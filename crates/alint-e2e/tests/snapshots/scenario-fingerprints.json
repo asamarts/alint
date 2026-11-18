@@ -408,6 +408,72 @@
     "fingerprint": "c12856a9e55a7bd5fc3ac13fcc60b3fc8ac790800da8a77019055b5e91700fbb"
   },
   {
+    "scenario": "check/cross_file/constraint_equal_field_fail.yml",
+    "rule_id": "alias-names-its-target",
+    "path": "exports.json",
+    "fingerprint": "93eb1367417d1ca5b5475094afaf003b6ae5baab9264d98b14842a106dcf5861"
+  },
+  {
+    "scenario": "check/cross_file/constraint_equal_source_fail.yml",
+    "rule_id": "node-matches-nvmrc",
+    "path": "apps/site/package.json",
+    "fingerprint": "5d3fbcab006926996472c0a4052f1857803a0bbc28071d2fd11e4c53cae4c4bb"
+  },
+  {
+    "scenario": "check/cross_file/constraint_set_fail.yml",
+    "rule_id": "locales-match-english",
+    "path": "messages.json",
+    "fingerprint": "3276f8d8ebba9139d48cbad04c0dcc674fa50e04588373f2dca21fbb3281ab94"
+  },
+  {
+    "scenario": "check/cross_file/constraint_set_fail.yml",
+    "rule_id": "locales-match-english",
+    "path": "messages.json",
+    "fingerprint": "ba610a24b7364f9b0d3b743fc4af61ac40226590281561f2cb9a9b5f732130d4"
+  },
+  {
+    "scenario": "check/cross_file/constraint_set_fail.yml",
+    "rule_id": "locales-within-english",
+    "path": "messages.json",
+    "fingerprint": "a076dadaabdc82109ac0fa4cd6f49aa1ba6b98338adcbff80a74496514e93c67"
+  },
+  {
+    "scenario": "check/cross_file/constraint_set_fail.yml",
+    "rule_id": "pseudo-locale-apart",
+    "path": "messages.json",
+    "fingerprint": "0485514d0b504865e62592d614d88e312418ef17c37d9819a05532027947d5e7"
+  },
+  {
+    "scenario": "check/cross_file/constraint_set_fail.yml",
+    "rule_id": "pseudo-locale-apart",
+    "path": "messages.json",
+    "fingerprint": "743d539710818217628718208289134308722f08b11f8ea9c23eddbe10b8be93"
+  },
+  {
+    "scenario": "check/cross_file/constraint_set_fail.yml",
+    "rule_id": "pseudo-locale-apart",
+    "path": "messages.json",
+    "fingerprint": "f663be07ce8e26b9d1b915e538cbc3e4568999e76448e8cc30576e5ac8a32ba9"
+  },
+  {
+    "scenario": "check/cross_file/constraint_unique_determines_fail.yml",
+    "rule_id": "one-range-per-dependency",
+    "path": "packages/app/package.json",
+    "fingerprint": "679c6c54e867c4a7f0fbecc0a9675430fd955f7ca5664d991797a201c0479f7c"
+  },
+  {
+    "scenario": "check/cross_file/constraint_unique_determines_fail.yml",
+    "rule_id": "one-range-per-dependency",
+    "path": "packages/legacy/package.json",
+    "fingerprint": "379645bf76e161d3e18dc0f118775aecd502f6778909122801bac5c6bc782c3a"
+  },
+  {
+    "scenario": "check/cross_file/constraint_unique_fail.yml",
+    "rule_id": "names-unique",
+    "path": "packages/b/package.json",
+    "fingerprint": "74166a696d1668f926dce7a460a439527869cc329beba05b1d9cba50feb92d01"
+  },
+  {
     "scenario": "check/cross_file/cross_file_dotenv_app_version_drift_fail.yml",
     "rule_id": "app-version-synced",
     "path": "package.json",

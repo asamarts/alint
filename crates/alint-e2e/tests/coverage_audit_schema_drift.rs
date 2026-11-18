@@ -1,6 +1,9 @@
 //! Hard audit: every rule kind registered with `RuleRegistry` (the
 //! runtime source of truth) MUST have a matching dispatch entry in
-//! `schemas/v1/config.json` (the editor-LSP source of truth).
+//! `schemas/v1/config.json` (the editor-LSP source of truth), or, for a
+//! kind only a `version: 2` config may use (`constraint`), in the draft
+//! `schemas/v2/config.json` and not in the version 1 schema (design
+//! `v0.23/selectors-and-constraints.md` section 11).
 //!
 //! Without this audit, adding a new rule kind in alint-rules without
 //! also extending the schema causes a silent drift: the rule loads
@@ -33,18 +36,23 @@ use alint_rules::builtin_registry;
 // pulls both single-`const` and `enum` discriminators, so aliases
 // flow through automatically.
 
-fn schema_path() -> std::path::PathBuf {
+fn versioned_schema_path(version: u32) -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
         .parent()
         .unwrap()
-        .join("schemas/v1/config.json")
+        .join(format!("schemas/v{version}/config.json"))
 }
 
 fn parse_schema() -> serde_json::Value {
-    let text = fs::read_to_string(schema_path()).expect("read schemas/v1/config.json");
-    serde_json::from_str(&text).expect("parse schemas/v1/config.json")
+    parse_versioned_schema(1)
+}
+
+fn parse_versioned_schema(version: u32) -> serde_json::Value {
+    let path = versioned_schema_path(version);
+    let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    serde_json::from_str(&text).unwrap_or_else(|e| panic!("parse {}: {e}", path.display()))
 }
 
 /// Extract the set of rule kinds the schema's dispatch oneOf
@@ -104,12 +112,34 @@ fn schema_rule_kinds(schema: &serde_json::Value) -> BTreeSet<String> {
 #[test]
 fn every_registered_rule_kind_has_a_schema_dispatch_entry() {
     let registry = builtin_registry();
-    let registered: BTreeSet<String> = registry.known_kinds().map(str::to_string).collect();
+    let (version_two, registered): (BTreeSet<String>, BTreeSet<String>) = registry
+        .known_kinds()
+        .map(str::to_string)
+        .partition(|kind| registry.min_config_version(kind) > 1);
 
     let schema = parse_schema();
     let in_schema = schema_rule_kinds(&schema);
+    assert_version_one_dispatch(&registered, &in_schema);
 
-    let missing: Vec<String> = registered.difference(&in_schema).cloned().collect();
+    // The draft version 2 schema has every kind: those of version 1, and
+    // those only version 2 may use.
+    let draft = schema_rule_kinds(&parse_versioned_schema(2));
+    let everything: BTreeSet<String> = registered.union(&version_two).cloned().collect();
+    assert_eq!(
+        draft, everything,
+        "`schemas/v2/config.json`'s `rule_kind_dispatch` must name every registered kind \
+         (regenerate it with `cargo run -p xtask -- gen-schema`)"
+    );
+    assert!(
+        version_two.contains("constraint"),
+        "`constraint` is a kind only version 2 may use: {version_two:?}"
+    );
+}
+
+/// The version 1 dispatch names exactly the kinds a version 1 config may
+/// use.
+fn assert_version_one_dispatch(registered: &BTreeSet<String>, in_schema: &BTreeSet<String>) {
+    let missing: Vec<String> = registered.difference(in_schema).cloned().collect();
     assert!(
         missing.is_empty(),
         "{} rule kinds registered with `RuleRegistry` are missing from \
@@ -121,11 +151,11 @@ fn every_registered_rule_kind_has_a_schema_dispatch_entry() {
         missing.join("\n  - "),
     );
 
-    let extra: Vec<String> = in_schema.difference(&registered).cloned().collect();
+    let extra: Vec<String> = in_schema.difference(registered).cloned().collect();
     assert!(
         extra.is_empty(),
         "{} rule kinds present in `schemas/v1/config.json` but NOT \
-         registered with `RuleRegistry`:\n\n  - {}\n\n\
+         registered with `RuleRegistry` for a version 1 config:\n\n  - {}\n\n\
          Likely cause: a rule was deleted from alint-rules but its \
          schema entry wasn't removed. Drop the `rule_<kind>` def + \
          the dispatch $ref in the same commit.",

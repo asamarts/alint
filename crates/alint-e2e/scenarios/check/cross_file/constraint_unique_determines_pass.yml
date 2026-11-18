@@ -1,0 +1,57 @@
+test_version: 1
+name: constraint passes when every manifest holds a dependency at one range
+tags: [check, constraint, cross_file, version_two, passing]
+
+docs:
+  title: Each dependency at one range across workspace manifests
+  case: pass
+  kind: constraint
+
+given:
+  tree:
+    packages:
+      app:
+        package.json: |
+          {
+            "name": "app",
+            "dependencies": {
+              "react": "^18.2.0",
+              "lodash": "^4.17.21"
+            }
+          }
+      web:
+        package.json: |
+          {
+            "name": "web",
+            "dependencies": {
+              "react": "^18.2.0"
+            },
+            "devDependencies": {
+              "lodash": "^4.17.21"
+            }
+          }
+  config: |
+    version: 2
+    selectors:
+      manifests:
+        paths: "packages/*/package.json"
+    relations:
+      dependency-ranges:
+        from: manifests
+        entries:
+          format: json
+          at: ["$.dependencies", "$.devDependencies"]
+        fields: { dependency: entry.key, range: entry.value }
+    rules:
+      - id: one-range-per-dependency
+        kind: constraint
+        input: dependency-ranges
+        assert:
+          unique: { key: [dependency], determines: [range] }
+        level: error
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

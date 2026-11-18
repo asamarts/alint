@@ -218,20 +218,10 @@ fn sensitive_rejects_non_boolean_values() {
     );
 }
 
-/// Rot-prevention guard. Asserts the `all_kinds.yaml` fixture
-/// covers every rule kind registered in `alint-rules`. Without
-/// this gate, a newly-added rule kind ships with schema
-/// validation only if the author manually remembers to update
-/// the fixture — the v0.8 coverage audit found 18 of 66 names
-/// covered, with no test catching new gaps.
-///
-/// Failure prints the missing kinds so the fix is to add a
-/// minimal entry per kind to `tests/fixtures/all_kinds.yaml`.
-#[test]
-fn fixture_covers_every_registered_rule_kind() {
-    let yaml = include_str!("fixtures/all_kinds.yaml");
+/// The `kind:` of each rule of a fixture.
+fn fixture_kinds(yaml: &str) -> std::collections::BTreeSet<String> {
     let parsed: ayaml::Value = alint_core::yaml::from_str(yaml).expect("fixture parses");
-    let fixture_kinds: std::collections::HashSet<String> = parsed
+    parsed
         .as_mapping()
         .and_then(|m| m.get(ayaml::Value::String("rules".into())))
         .and_then(|v| v.as_sequence())
@@ -245,44 +235,91 @@ fn fixture_covers_every_registered_rule_kind() {
                 })
                 .collect()
         })
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
 
+const ALL_KINDS: &str = include_str!("fixtures/all_kinds.yaml");
+/// The kinds only a `version: 2` config may use (design
+/// `v0.23/selectors-and-constraints.md` section 11).
+const ALL_KINDS_V2: &str = include_str!("fixtures/all_kinds_v2.yaml");
+
+/// Rot-prevention guard. Asserts the `all_kinds.yaml` fixture
+/// covers every rule kind registered in `alint-rules` that a
+/// version 1 config may use, and `all_kinds_v2.yaml` the others.
+/// Without this gate, a newly-added rule kind ships with schema
+/// validation only if the author manually remembers to update
+/// the fixture; the v0.8 coverage audit found 18 of 66 names
+/// covered, with no test catching new gaps.
+///
+/// Failure prints the missing kinds so the fix is to add a
+/// minimal entry per kind to the fixture of its version.
+#[test]
+fn fixture_covers_every_registered_rule_kind() {
     let registry = alint_rules::builtin_registry();
-    let registered: std::collections::HashSet<String> =
+    let registered: std::collections::BTreeSet<String> =
         registry.known_kinds().map(str::to_string).collect();
-
-    let missing: Vec<&String> = registered.difference(&fixture_kinds).collect();
-    if !missing.is_empty() {
-        let mut sorted: Vec<&&String> = missing.iter().collect();
-        sorted.sort();
+    // Each fixture holds the kinds of its version: `all_kinds.yaml` every
+    // kind a version 1 config may use, `all_kinds_v2.yaml` the others.
+    let needs_two = |kind: &String| registry.min_config_version(kind) > 1;
+    let (two, one): (std::collections::BTreeSet<String>, _) =
+        registered.iter().cloned().partition(needs_two);
+    for (fixture, yaml, expected) in [
+        ("all_kinds.yaml", ALL_KINDS, &one),
+        ("all_kinds_v2.yaml", ALL_KINDS_V2, &two),
+    ] {
+        let fixture_kinds = fixture_kinds(yaml);
+        let missing: Vec<&String> = expected.difference(&fixture_kinds).collect();
         let mut bullets = String::new();
-        for k in &sorted {
+        for k in &missing {
             let _ = writeln!(bullets, "  - {k}");
         }
-        panic!(
-            "fixture `all_kinds.yaml` is missing {} of {} registered rule kinds. \
-             Add a minimal entry per kind so schema validation has full coverage:\n{}",
+        assert!(
+            missing.is_empty(),
+            "fixture `{fixture}` is missing {} of {} registered rule kinds. Add a minimal \
+             entry per kind so schema validation has full coverage:\n{bullets}",
             missing.len(),
-            registered.len(),
-            bullets,
+            expected.len(),
         );
-    }
-
-    let stale: Vec<&String> = fixture_kinds.difference(&registered).collect();
-    if !stale.is_empty() {
-        let mut sorted: Vec<&&String> = stale.iter().collect();
-        sorted.sort();
+        let stale: Vec<&String> = fixture_kinds.difference(expected).collect();
         let mut bullets = String::new();
-        for k in &sorted {
+        for k in &stale {
             let _ = writeln!(bullets, "  - {k}");
         }
-        panic!(
-            "fixture `all_kinds.yaml` references {} kind(s) that are NOT registered. \
-             Either remove the stale entries or register the kinds:\n{}",
+        assert!(
+            stale.is_empty(),
+            "fixture `{fixture}` references {} kind(s) that are NOT registered for its \
+             config version. Either remove the stale entries, register the kinds, or move \
+             them to the other fixture:\n{bullets}",
             stale.len(),
-            bullets,
         );
     }
+}
+
+/// The version 2 fixture validates against the draft version 2 schema, which
+/// holds the kinds only version 2 has, and not against the version 1 schema.
+#[test]
+fn the_version_two_schema_accepts_every_version_two_kind() {
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schemas/v2/config.json");
+    // Outside the workspace (the published crate) the draft is absent.
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return;
+    };
+    let schema: serde_json::Value = serde_json::from_str(&text).expect("the draft is JSON");
+    let draft = jsonschema::validator_for(&schema).expect("the draft compiles");
+    let instance = yaml_to_json(ALL_KINDS_V2);
+    assert_valid(&draft, &instance, "all_kinds_v2.yaml fixture");
+    assert_invalid(
+        &compile_schema(),
+        &instance,
+        "all_kinds_v2.yaml under version 1",
+    );
+    // A version 1 config cannot use a kind of version 2.
+    let one = yaml_to_json(
+        "version: 1\nrules:\n  - id: c\n    kind: constraint\n    input: r\n    \
+         assert: { unique: { key: [k] } }\n    level: error\n",
+    );
+    assert_invalid(&compile_schema(), &one, "a constraint rule under version 1");
 }
 
 /// Every registered rule kind — **including aliases** — must reject an
@@ -295,18 +332,23 @@ fn fixture_covers_every_registered_rule_kind() {
 /// example uses them, so only a registry-driven probe catches the divergence.
 #[test]
 fn every_registered_kind_rejects_an_unknown_option() {
-    let path =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/all_kinds.yaml");
     let registry = alint_rules::builtin_registry();
-    let config = alint_dsl::load_with(
-        &path,
-        &alint_dsl::LoadOptions::with_catalog(registry.catalog()),
-    )
-    .expect("all_kinds.yaml loads");
+    let mut specs = Vec::new();
+    for fixture in ["all_kinds.yaml", "all_kinds_v2.yaml"] {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures")
+            .join(fixture);
+        let config = alint_dsl::load_with(
+            &path,
+            &alint_dsl::LoadOptions::with_catalog(registry.catalog()),
+        )
+        .unwrap_or_else(|error| panic!("{fixture} loads: {error}"));
+        specs.extend(config.rules);
+    }
 
     let mut swallowers: Vec<String> = Vec::new();
     let mut probed: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    for spec in &config.rules {
+    for spec in &specs {
         // Only probe specs that build cleanly, so a build failure under the
         // probe is attributable to the injected option, not a terse entry.
         if registry.build(spec).is_err() {

@@ -2,7 +2,7 @@
   "format_version": 7,
   "alint_version": "0.22.1",
   "counts": {
-    "rule_kinds": 103,
+    "rule_kinds": 104,
     "rule_aliases": 11,
     "families": 13,
     "bundled_rulesets": 24,
@@ -15,6 +15,7 @@
     "command",
     "command_idempotent",
     "commented_out_code",
+    "constraint",
     "content_forbidden",
     "content_matches",
     "cross_file",
@@ -222,6 +223,9 @@
     "commented_out_code": [
       "git-hygiene",
       "content"
+    ],
+    "constraint": [
+      "cross-file"
     ],
     "cross_file": [
       "cross-file"
@@ -804,6 +808,45 @@
         ],
         "required_stages": [
           "selection",
+          "assertion"
+        ],
+        "emits_preview_rows": false,
+        "nested_evaluation": false
+      },
+      "nested_rules": false
+    },
+    "constraint": {
+      "dispatch": {
+        "kind": "full_index",
+        "path_scope": false
+      },
+      "paths": "forbidden",
+      "scope_filter": {
+        "kind": "rejected",
+        "reason": "a `constraint` rule takes no scope_filter: the selectors of its relation pick what it reads"
+      },
+      "git_tracked_only": "none",
+      "respect_gitignore": false,
+      "root_only": false,
+      "selectors": [],
+      "since": "none",
+      "capabilities": [],
+      "content": {
+        "kind": "other_files"
+      },
+      "formats": [
+        "json",
+        "yaml",
+        "toml"
+      ],
+      "dependencies": [],
+      "fix_ops": [],
+      "expect_matches": false,
+      "trace": {
+        "allowed_stages": [
+          "assertion"
+        ],
+        "required_stages": [
           "assertion"
         ],
         "emits_preview_rows": false,
@@ -6123,6 +6166,12 @@
     "experimental_config_versions": [
       2
     ],
+    "kind_config_versions": {
+      "constraint": 2
+    },
+    "experimental_rule_kinds": [
+      "constraint"
+    ],
     "policy_test_versions": [
       1
     ]
@@ -6132,6 +6181,7 @@
     "command": "command",
     "command_idempotent": "command_idempotent",
     "commented_out_code": "commented_out_code",
+    "constraint": "constraint/mod",
     "content_forbidden": "file_content_forbidden",
     "content_matches": "file_content_matches",
     "cross_file": "cross_file/mod",
