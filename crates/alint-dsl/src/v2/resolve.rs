@@ -560,6 +560,7 @@ pub(crate) fn resolve(objects: &Objects) -> Result<Resolved<'_>> {
         unless_reproduced(&namespaces, &plan, checked, error)
     })?;
     add_capabilities(&mut plan, &order);
+    close_sensitivity(&mut plan, &order);
     gate_objects(&plan)?;
     Ok(Resolved { plan, namespaces })
 }
@@ -908,6 +909,119 @@ fn selector_capabilities(selector: &Selector) -> Capabilities {
 /// key a join repeats, a value whose type clashes). `order` lists every
 /// relation after the relations it reads (the plan check's topological
 /// order), so each is complete when a relation that reads it is reached.
+/// Mark sensitive each field that shows a sensitive field's value, relation
+/// by relation in `order` (each after those it reads), so a value the
+/// environment chose or `sensitive: true` hides stays hidden wherever it
+/// shows:
+///
+/// - a join's copy (`left.F`, `right.F`) of a sensitive field of its side;
+/// - a join's copy of a field an `on:` pair joins with a sensitive one, or
+///   with one a sensitive field of the join copies: the pair holds one value
+///   in every row;
+/// - a field an `in:` or `not_in:` list of a sensitive field filters, with
+///   every field of its family ([`Family`]), as for a filter the environment
+///   wrote (`super::environment`): the rows it keeps show which of the
+///   hidden values it holds.
+fn close_sensitivity(plan: &mut Plan, order: &[RelationId]) {
+    for &id in order {
+        let relations = &plan.relations;
+        let relation = &relations[id.0].relation;
+        let sensitive = |of: RelationId, field: &str| {
+            relations[of.0]
+                .relation
+                .field(field)
+                .is_some_and(|field| field.sensitive)
+        };
+        let join = match &relation.rows {
+            plan::Rows::Join(join) => Some(join),
+            plan::Rows::Part(_) | plan::Rows::Union(_) => None,
+        };
+        let mut filtered = std::collections::HashSet::new();
+        for (field, predicates) in &relation.filters {
+            let listed = predicates.iter().any(|predicate| match predicate {
+                plan::Predicate::In(members) | plan::Predicate::NotIn(members) => {
+                    members.iter().any(|member| {
+                        matches!(member, plan::Member::Relation { relation, field }
+                            if sensitive(relation.id, field))
+                    })
+                }
+                plan::Predicate::Matches(_) | plan::Predicate::NotMatches(_) => false,
+            });
+            if listed && let Some(field) = relation.field(field) {
+                filtered.insert(Family::of(&field.source, join));
+            }
+        }
+        if let Some(join) = join {
+            let side = |side: plan::JoinSide| match side {
+                plan::JoinSide::Left => join.left.id,
+                plan::JoinSide::Right => join.right.id,
+            };
+            for (_, field) in &relation.fields {
+                if let plan::FieldSource::Side(at, of) = &field.source
+                    && (field.sensitive || sensitive(side(*at), of))
+                {
+                    filtered.insert(Family::of(&field.source, Some(join)));
+                }
+            }
+            for (left, right) in &join.on {
+                if sensitive(join.left.id, left) || sensitive(join.right.id, right) {
+                    filtered.insert(Family::Side(true, left));
+                }
+            }
+        }
+        let shows: Vec<bool> = relation
+            .fields
+            .iter()
+            .map(|(_, field)| filtered.contains(&Family::of(&field.source, join)))
+            .collect();
+        for ((_, field), shows) in plan.relations[id.0].relation.fields.iter_mut().zip(shows) {
+            field.sensitive |= shows;
+        }
+    }
+}
+
+/// The fields whose values show one another's, as `super::environment`
+/// groups them: an entry's key, path, parent, root and value; a resource's
+/// path and its tokens; a `read:` row's value; fields bound to one `bound:`
+/// path; and a join's copies of one side's field, with the other side's
+/// field an `on:` pair joins it with (named by the pair's left field).
+#[derive(Debug, PartialEq, Eq, Hash)]
+enum Family<'a> {
+    Entry,
+    Path,
+    Value,
+    Bound(&'a str),
+    Side(bool, &'a str),
+}
+
+impl<'a> Family<'a> {
+    fn of(source: &'a plan::FieldSource, join: Option<&'a plan::JoinDef>) -> Self {
+        use plan::FieldSource as Source;
+        match source {
+            Source::EntryKey
+            | Source::EntryValue
+            | Source::EntryParent
+            | Source::EntryRoot
+            | Source::EntryPath => Self::Entry,
+            Source::Path(_) => Self::Path,
+            Source::Value => Self::Value,
+            Source::Bound(query) => Self::Bound(query),
+            Source::Side(side, field) => {
+                let left = *side == plan::JoinSide::Left;
+                let paired = join.and_then(|join| {
+                    join.on
+                        .iter()
+                        .find(|(l, r)| if left { l == field } else { r == field })
+                });
+                match paired {
+                    Some((left_field, _)) => Self::Side(true, left_field),
+                    None => Self::Side(left, field),
+                }
+            }
+        }
+    }
+}
+
 fn add_capabilities(plan: &mut Plan, order: &[RelationId]) {
     for &id in order {
         let relation = &plan.relations[id.0].relation;

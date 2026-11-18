@@ -213,7 +213,10 @@ A document `read:` is one with `json:`, `yaml:` or `toml:`; one with `regex:`, `
 `whole_file:` reads the file as text and binds no `bound:` field. In a `union:`, a part binds
 `entry.*` only with `entries:`, `value` only with `read:`, and `bound:` as a relation of its one
 part would. A `bound:` path must match exactly once in each file. `sensitive: true` keeps a
-field's values out of messages, the JSON report and baselines.
+field's values out of messages, the JSON report and baselines. A field that shows a sensitive
+field's value is sensitive too: a join's copy of it, a join's copy of the field an `on:` pair joins
+with it, and a field that an `in:` or `not_in:` list of it filters, with the fields that show that
+field's value (an entry's key, path and value).
 
 ### `transform:`
 

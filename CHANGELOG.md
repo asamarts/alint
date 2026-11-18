@@ -637,7 +637,10 @@ policy-test package the user does not trust.
     except in a field that takes a boolean (`optional:`, `leaves:`, a field's `sensitive:`). A field
     the environment writes to (`{{env.X}}` in its `where:` or `transform:`) is sensitive, as is
     every field that shows the same value (an entry's key, path and value, and fields bound to the
-    same value), and a relation whose selection reads the environment shows no detail in its
+    same value). So is a join's copy of a sensitive field, and of the field an `on:` pair joins
+    with one, and a field (with its family) that an `in:` or `not_in:` list of a sensitive field
+    filters, in every relation that reads them. A relation whose selection reads the environment
+    shows no detail in its
     failures, nor does a relation that reads one, as a join side or through a membership reference.
     Nothing calls the evaluator in this build, so relations stay inert and a run whose rules read
     none reads nothing for them.

@@ -783,6 +783,62 @@ fn a_filter_the_environment_writes_makes_its_field_sensitive() {
     assert_eq!(shown, [("name", true), ("version", true)]);
 }
 
+/// A field shows a hidden value wherever it holds one: in a join, the copy of
+/// the field an `on:` pair joins with a sensitive one (`j.y`, equal to `j.x`
+/// in every row), and in a relation an `in:` list of a sensitive field
+/// filters (`m.w`, with its key). Neither value reaches the failure of a
+/// relation that joins on them.
+#[test]
+fn a_join_partner_and_a_field_a_sensitive_list_filters_are_sensitive() {
+    let env = "'{{env.ALINT_V2_ROWS_UNSET | default(\"s3cret\")}}'";
+    let config = format!(
+        "version: 2\nrelations:\n  \
+         l:\n    from: {{ paths: a.json }}\n    entries: {{ format: json, at: $ }}\n    \
+         fields: {{ k: entry.value }}\n  \
+         r:\n    from: {{ paths: b.json }}\n    entries: {{ format: json, at: $ }}\n    \
+         fields: {{ v: entry.value }}\n  \
+         j:\n    join: {{ left: l, right: r, on: {{ k: v }}, unique: right }}\n    \
+         fields: {{ x: left.k, y: right.v }}\n    where: {{ x: {{ in: [{env}] }} }}\n  \
+         d:\n    join: {{ left: j, right: j, on: {{ y: y }}, unique: right }}\n    \
+         fields: {{ y: left.y }}\n  \
+         m:\n    from: {{ paths: c.json }}\n    entries: {{ format: json, at: $ }}\n    \
+         fields: {{ w: entry.value, n: entry.key }}\n    \
+         where: {{ w: {{ in: [ {{ relation: j, field: x }} ] }} }}\n  \
+         d2:\n    join: {{ left: m, right: m, on: {{ w: w }}, unique: right }}\n    \
+         fields: {{ w: left.w }}\nrules: []\n"
+    );
+    let tree = setup(
+        &config,
+        &[
+            ("a.json", r#"{"p": "s3cret", "q": "s3cret", "z": "other"}"#),
+            ("b.json", r#"{"n": "s3cret", "o": "other"}"#),
+            ("c.json", r#"{"e": "s3cret", "f": "s3cret", "g": "nope"}"#),
+        ],
+    );
+    let shown = |relation: &str| -> Vec<(String, bool)> {
+        tree.rows(relation)
+            .fields
+            .iter()
+            .map(|field| (field.name.clone(), field.sensitive))
+            .collect()
+    };
+    let named = |name: &str| (name.to_string(), true);
+    assert_eq!(shown("j"), [named("x"), named("y")]);
+    assert_eq!(shown("m"), [named("w"), named("n")]);
+    for relation in ["d", "d2"] {
+        let failures = tree.evaluate(relation).expect_err("a key repeats");
+        assert!(!failures.is_empty(), "{relation}");
+        for failure in failures.iter() {
+            let message = failure.to_violation("rule").message;
+            assert!(!message.contains("s3cret"), "{relation}: {message}");
+            assert!(
+                !failure.to_string().contains("s3cret"),
+                "{relation}: {failure}"
+            );
+        }
+    }
+}
+
 #[test]
 fn a_relation_whose_selection_the_environment_writes_shows_no_detail() {
     let tree = setup(

@@ -249,7 +249,10 @@ JSON and YAML trees, and `key_parity` already covers XML catalogs in v1.
 
 **Redaction.** dotenv and properties values are redacted by default (ADR-0019 decision 3), so those
 formats emit no value rows, and `read:` does not take them. A field may be marked
-`sensitive: true`; its value never reaches a message, the JSON report or a baseline.
+`sensitive: true`; its value never reaches a message, the JSON report or a baseline. A field that
+shows a sensitive field's value is sensitive too: a join's copy of it, a join's copy of the field
+an `on:` pair joins with it, and a field that an `in:` or `not_in:` list of it filters, with the
+fields that show that field's value.
 
 **Provenance.** Each field keeps its resource, its pointer and its byte span (the key span for a
 key, the value span for a value). A YAML literal or folded block scalar has no value span today
