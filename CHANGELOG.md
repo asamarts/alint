@@ -21,6 +21,10 @@ full below.
 - The language server runs no command rule, `custom:` fact or Git rule, fetches no remote
   `extends:` and reads no environment value until the editor says the workspace is trusted;
   editors other than VS Code need the `trusted` initialization option (Changed, Security).
+- The language server lints each workspace folder with the folder's own config, as `alint check`
+  run there; a package's nested `.alint.yml` joins only through `nested_configs: true`. `alint lsp
+  --config` and `--no-gitignore` now take effect, and the `--config` file must exist when the
+  server starts (Security, Fixed).
 - YAML is read by ayaml as YAML 1.2. An enum value written as a one-entry mapping where its name
   goes (a fix op's `applicability: {safe: ~}`, `cross_file`'s `normalize: [{trim: ~}]`,
   `file_graph`'s `require:`) is an error, and a configuration, `extends:` source or nested
@@ -48,8 +52,10 @@ full below.
   breaks a struct literal; YAML values and errors are alint's own types (`alint_core::yaml`) in
   place of `yaml_serde`'s; `Violation`, `Context`, `RuleSpec`, `NestedRuleSpec`, `WalkOptions`,
   `LspOptions` and `LoadOptions` are `#[non_exhaustive]`, as is `alint_core::Error`, so build them
-  with their constructors and `with_*` setters; and `baseline::Fingerprints` is gone (Changed,
-  Added, Removed).
+  with their constructors and `with_*` setters; `baseline::Fingerprints`, the six
+  `alint_dsl::reject_*_in` functions and `alint_core::template::render_mapping`, `render_value`
+  and `render_nested_options` are no longer public; and the crates pin ayaml exactly (`=0.1.2`)
+  (Changed, Added, Removed).
 
 ### Security
 
@@ -302,7 +308,7 @@ rulesets you trust and, with a content fix, only on repositories you trust.
   or `commondir`, made `alint check`, `alint fix` and the language server exhaust memory or hang.
   Every ignore file the walk reads (in the tree, above it, and the global excludes file) is now read
   only when it is a regular file of at most 32 MiB; otherwise the walk stops with an error that
-  names it. The check costs three `stat` calls for each directory the walk enters and each
+  names it, except that a global excludes file that is not a regular file is skipped unread. The check costs three `stat` calls for each directory the walk enters and each
   directory above the root. This affects every released version.
 - **A baseline is read only when it is a regular file of at most 256 MiB, and one the `baseline:`
   key names only inside the repository and outside `.git`.** Since v0.14.0, `check`, `fix` and the

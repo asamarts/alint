@@ -39,9 +39,10 @@ return {
   root_markers = { ".alint.yml", ".git" },
 
   -- Until it is told the workspace is trusted, the server runs nothing the
-  -- repository's config could start (command rules, custom facts), fetches
-  -- no remote `extends:` and reads no environment value. To trust every
-  -- workspace, add this in your own config (never a repository's `.nvim.lua`):
+  -- repository's config could start (command rules, rules that run Git,
+  -- custom facts), fetches no remote `extends:` and reads no environment
+  -- value. To trust every workspace, add this in your own config (never a
+  -- repository's `.nvim.lua`):
   --
   --     vim.lsp.config("alint", { init_options = { trusted = true } })
 }

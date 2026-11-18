@@ -14,9 +14,10 @@
       "selector": "source.c | source.c++ | source.go | source.js | source.json | source.python | source.rust | source.ts | source.tsx | source.yaml | source.toml | text.html.markdown",
       "schemes": ["file"],
       // Until it is told the workspace is trusted, the server runs nothing
-      // the repository's config could start (command rules, custom facts),
-      // fetches no remote `extends:` and reads no environment value. Set
-      // "trusted" to true to trust every workspace you open.
+      // the repository's config could start (command rules, rules that run
+      // Git, custom facts), fetches no remote `extends:` and reads no
+      // environment value. Set "trusted" to true to trust every workspace
+      // you open.
       "initializationOptions": { "trusted": false }
     }
   }

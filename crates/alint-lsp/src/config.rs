@@ -70,7 +70,8 @@ impl From<String> for ConfigError {
 /// The note an untrusted workspace gets, once, when its config uses
 /// something the session left out.
 pub(crate) const UNTRUSTED_NOTE: &str = "alint: this workspace is not trusted, so command rules, \
-     rules that run Git (`git_*` kinds, `git_tracked_only`, `changed_since`), custom facts, \
+     rules that run Git (`git_*` kinds, `changeset_requires_path`, `pair_changed_together`, \
+     `git_tracked_only`, `changed_since`), custom facts, \
      remote `extends:` and environment values (`{{env.*}}`, `env.*` in `when:`) are off; other \
      rules lint as usual. To turn them on, trust the workspace: in VS Code, grant \
      Workspace Trust; in other editors, start the server with the initialization option \

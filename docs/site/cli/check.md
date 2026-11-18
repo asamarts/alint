@@ -106,8 +106,9 @@ block.
   spawning kind such as `kind: command` (at any `require:` depth), a spawning
   fix such as `git_untrack`, or a `custom:` fact. Git runs the commands a
   repository's `.git/config` names, so a rule that runs Git (the `git_*`
-  kinds, `git_tracked_only`, `scope_filter.changed_since`) is refused too,
-  and so are `--changed` and `--base`; alint runs no Git. The config fails to
+  kinds, `changeset_requires_path`, `pair_changed_together`,
+  `git_tracked_only`, `scope_filter.changed_since`) is refused too, and so
+  are `--changed` and `--base`; alint runs no Git. The config fails to
   load, naming the rule, before anything runs. The flag is global: `fix`,
   `baseline`, `list`, `explain`, `facts`, `validate-config` and `lsp` take it
   too.

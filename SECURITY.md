@@ -166,7 +166,8 @@ posture is:
   (`.gitignore`, `.ignore`, `info/exclude` and a linked worktree's `.git` file
   and `commondir` on the way to it, the global excludes file) only when it is
   a regular file of at most 32 MiB, and stops with an error naming one it will
-  not read: a symlink to `/dev/zero` or a FIFO is never read. A baseline file
+  not read (a global excludes file that is not a regular file is skipped
+  instead): a symlink to `/dev/zero` or a FIFO is never read. A baseline file
   is read only when it is a regular file of at most 256 MiB.
 - **Plugin trust gating.** The `command` rule kind shells out to external
   CLIs; it's gated to the user's top-level config (extends'd configs cannot
@@ -217,9 +218,9 @@ posture is:
   config tells Git to run, exactly as `git status` would there: Git's own
   threat model applies. With `--no-spawn` or `--untrusted`, and in a language
   server workspace that is not trusted, alint runs no Git at all: a rule that
-  runs Git (the `git_*` kinds, `git_tracked_only`,
-  `scope_filter.changed_since`) is refused (skipped by the server), and so are
-  `--changed` and `--base`.
+  runs Git (the `git_*` kinds, `changeset_requires_path`,
+  `pair_changed_together`, `git_tracked_only`, `scope_filter.changed_since`)
+  is refused (skipped by the server), and so are `--changed` and `--base`.
 - **The language server waits for workspace trust.** Until the editor sends
   the initialization option `{"trusted": true}` (VS Code sends its Workspace
   Trust state), `alint lsp` skips spawning rules, rules that run Git and

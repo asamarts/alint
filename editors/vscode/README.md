@@ -46,11 +46,12 @@ You can also install alint yourself via Homebrew, `cargo install alint`,
 The extension follows VS Code's
 [Workspace Trust](https://code.visualstudio.com/docs/editor/workspace-trust).
 In Restricted Mode, alint lints without running anything the
-repository's `.alint.yml` could start: command rules and `custom:` facts
-are skipped, a remote `extends:` is not fetched, and `{{env.*}}` values
-are left unset. The workspace's own `alint.path` and `alint.serverArgs`
-are ignored, and **alint: Show effective rules** is off. Granting trust
-restarts the server with all of them on, exactly as before.
+repository's `.alint.yml` could start: command rules, rules that run Git
+and `custom:` facts are skipped, a remote `extends:` is not fetched,
+and `{{env.*}}` values are left unset. The workspace's own `alint.path`
+and `alint.serverArgs` are ignored, and **alint: Show effective rules** is
+off. Granting trust restarts the server with all of them on, exactly as
+before.
 
 ## Commands
 

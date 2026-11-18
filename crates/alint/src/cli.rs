@@ -59,8 +59,9 @@ pub(crate) struct Cli {
     /// other spawning rule kinds (at any `require:` depth), spawning fixes
     /// such as `git_untrack`, and `custom:` facts. Git runs the commands a
     /// repository's `.git/config` names, so a rule that runs Git (the `git_*`
-    /// kinds, `git_tracked_only`, `scope_filter.changed_since`) is refused too,
-    /// and so are `--changed` and `--base`. With this flag such a config fails
+    /// kinds, `changeset_requires_path`, `pair_changed_together`,
+    /// `git_tracked_only`, `scope_filter.changed_since`) is refused too, and so
+    /// are `--changed` and `--base`. With this flag such a config fails
     /// to load with an error naming the rule, before anything runs, and alint
     /// runs no Git. It leaves a remote `extends:` and the environment to the
     /// config: lint a repository you do not trust with `--untrusted`, or with
