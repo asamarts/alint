@@ -362,7 +362,8 @@ fn load_session_config(
 ) -> Result<(alint_core::Config, bool), ConfigError> {
     let trusted = settings.trusted;
     let environment = Arc::new(UntrustedEnvironment::default());
-    let mut load_options = alint_dsl::LoadOptions::with_catalog(registry.catalog());
+    let mut load_options = alint_dsl::LoadOptions::with_catalog(registry.catalog())
+        .with_global_git_excludes(!cfg!(test));
     if !trusted {
         load_options.environment = environment.clone();
         load_options.remote_policy = alint_dsl::RemotePolicy::Deny;
@@ -572,8 +573,11 @@ fn build_session_for_config(
         extra_ignores.push(pattern);
     }
 
+    // This crate's unit tests walk without the host's global excludes file
+    // (CONTRIBUTING.md), as they load without it.
     let walk_opts = WalkOptions::default()
         .with_respect_gitignore(config.respect_gitignore && !settings.no_gitignore)
+        .with_global_git_excludes(!cfg!(test))
         .with_extra_ignores(extra_ignores);
     let index = walk(&effective_root, &walk_opts)
         .map_err(|e| redact(format!("walking repository: {e}")))?;
@@ -748,9 +752,11 @@ mod baseline_tests {
         std::fs::write(root.join("base.jsonl"), &valid).unwrap();
         std::os::unix::fs::symlink("/dev/zero", root.join("zero.jsonl")).unwrap();
         std::os::unix::fs::symlink("../outside.jsonl", root.join("link.jsonl")).unwrap();
+        // One byte past the cap, so a regression that read it whole takes
+        // 256 MiB of this process, not the host's memory.
         std::fs::File::create(root.join("sparse.jsonl"))
             .unwrap()
-            .set_len(1 << 40)
+            .set_len((256 << 20) + 1)
             .unwrap();
         let fifo = std::process::Command::new("mkfifo")
             .arg(root.join("fifo.jsonl"))
@@ -775,7 +781,16 @@ mod baseline_tests {
                 continue;
             }
             config(baseline);
-            let error = build_session(&root).err().unwrap_or_default();
+            // On another thread, with a deadline: a regression that opened
+            // the FIFO would block, and fails here instead of hanging.
+            let (sender, receiver) = std::sync::mpsc::channel();
+            let at = root.clone();
+            std::thread::spawn(move || {
+                drop(sender.send(build_session(&at).err().unwrap_or_default()));
+            });
+            let error = receiver
+                .recv_timeout(std::time::Duration::from_secs(60))
+                .unwrap_or_else(|_| panic!("{baseline}: no answer within the deadline"));
             assert!(error.contains(refusal), "{baseline}: {error}");
         }
         config("base.jsonl");

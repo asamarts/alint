@@ -33,7 +33,11 @@ fn setup(config: &str, files: &[(&str, &str)]) -> Tree {
         write(dir.path(), path, body);
     }
     let config = load(&dir.path().join(".alint.yml")).expect("the configuration loads");
-    let index = walk(dir.path(), &WalkOptions::default()).unwrap();
+    let index = walk(
+        dir.path(),
+        &WalkOptions::default().with_global_git_excludes(false),
+    )
+    .unwrap();
     Tree { dir, config, index }
 }
 
@@ -281,7 +285,11 @@ fn strip_root_needs_one_top_level_key_per_resource() {
     let flat = tree.dir.path().join("config/locales/all.yml");
     std::fs::write(flat, "greeting: Hi\n").unwrap();
     let tree = Tree {
-        index: walk(tree.dir.path(), &WalkOptions::default()).unwrap(),
+        index: walk(
+            tree.dir.path(),
+            &WalkOptions::default().with_global_git_excludes(false),
+        )
+        .unwrap(),
         ..tree
     };
     assert_eq!(
@@ -476,7 +484,11 @@ fn a_toml_datetime_value_fails_and_numbers_keep_their_lexemes() {
     )
     .unwrap();
     let tree = Tree {
-        index: walk(tree.dir.path(), &WalkOptions::default()).unwrap(),
+        index: walk(
+            tree.dir.path(),
+            &WalkOptions::default().with_global_git_excludes(false),
+        )
+        .unwrap(),
         ..tree
     };
     assert_eq!(

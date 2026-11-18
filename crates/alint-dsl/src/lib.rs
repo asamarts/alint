@@ -1368,7 +1368,10 @@ impl Default for LoadOptions<'_> {
             remote_policy: RemotePolicy::Allow,
             out_of_root_policy: OutOfRootPolicy::Allow,
             repository_root: None,
-            global_git_excludes: true,
+            // This crate's unit tests read no host's global excludes file
+            // (CONTRIBUTING.md), as `alint_core`'s run Git without the host's
+            // configuration.
+            global_git_excludes: !cfg!(test),
         }
     }
 }
