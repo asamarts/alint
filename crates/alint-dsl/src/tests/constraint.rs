@@ -170,10 +170,15 @@ fn a_fragment_takes_its_roots_version_and_no_variable_supplies_a_kind() {
              assert: {{ unique: {{ key: [name] }} }}\n    level: error\n"
         )
     };
+    // The loader names a fragment as the platform spells its path.
+    let fragment = std::path::Path::new(".alint.d").join("c.yml");
     assert_eq!(
         load_error("version: 1\nrules: []\n", &[(".alint.d/c.yml", &rule(""))]),
-        ".alint.d/c.yml: `rules[0]`: the `constraint` rule kind needs config `version: 2` (it \
-         is experimental), and this config is version 1; declare `version: 2` to use it"
+        format!(
+            "{}: `rules[0]`: the `constraint` rule kind needs config `version: 2` (it is \
+             experimental), and this config is version 1; declare `version: 2` to use it",
+            fragment.display()
+        )
     );
     builds(
         "version: 2\nrules: []\n",
