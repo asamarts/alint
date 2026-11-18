@@ -685,13 +685,25 @@ policy-test package the user does not trust.
   - Values compare by type and text (a number by its lexeme); null and a missing value match
     nothing; a key, group or set comparison across types, a null group, a missing or repeated
     source row and an empty reference group are analysis failures, never a pass, and so is a
-    relation that fails to evaluate. Any analysis failure withholds the rule's findings.
-  - Each family generates its message, quoting the keys and values; `message:` may use
-    `{{row.FIELD}}`, the reported row's value, which a `sensitive` field shows as `<redacted>`.
-    Findings carry related locations (at most 20, then a count) at the other rows involved.
+    relation that fails to evaluate. Any analysis failure withholds the rule's findings, the
+    findings for values a `read:` skipped included.
+  - Each family generates its message, quoting the keys and values (each cut at 64 characters);
+    `message:` may use `{{row.FIELD}}`, the reported row's value, cut the same way, which a
+    `sensitive` field shows as `<redacted>`. A field that spells an entry's key (`entry.key`,
+    `entry.path`, `entry.parent`, `entry.root`) is sensitive when any of them is. Findings carry
+    related locations at the other rows involved: at most 20, a row of each other value first,
+    then a count of the rest, and only those 20 are placed. A finding about a field a join copies
+    from its `unique:` side, or a `bound:` field, sits at the row's own entry.
+  - When a relation the rule reads takes a value from the environment, or reads one that does,
+    every finding's path and message are redacted, as for a version 1 rule whose `paths:` the
+    environment writes.
   - A finding's baseline fingerprint is its rule and its key, never its path, so a row that sorts
-    first or a renamed first file keeps a baselined finding baselined. Other kinds' fingerprints
-    are unchanged.
+    first or a renamed first file keeps a baselined finding baselined. The key holds the values
+    the finding is about (a value past 128 bytes as its SHA-256 digest, a sensitive one as the
+    word `sensitive`); the rows that repeat a `unique` key share one key and are told apart by
+    their count, as are findings that differ only in a sensitive value. Other kinds'
+    fingerprints are unchanged.
+  - A group that has no rows is not checked until `groups:` comes.
   - Every field, literal and `{{row.FIELD}}` is checked against the relation when the rule
     builds, naming the rule, the field and the relation; names may not hold `{{...}}`.
     `plurals: cldr`, `groups:`, a `set` against another relation and a `set` grouped by `path`

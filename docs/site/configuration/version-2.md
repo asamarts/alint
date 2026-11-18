@@ -389,7 +389,8 @@ distinct-value limit, which is never truncation.
 
 - Only the `constraint` kind reads a relation, and a rule's `paths:` cannot name a selector.
 - The `constraint` kind has no `plurals: cldr`, no `groups:`, no `set` against another relation's
-  field and no `set` grouped by `path` or a path token yet; each is refused at load.
+  field and no `set` grouped by `path` or a path token yet; each is refused at load. Until
+  `groups:`, a group that has no rows is not checked.
 - Only local files may be version 2 (see [the version boundary](#the-version-boundary)).
 - A selector cannot use `changed_since`.
 - Values are scalars: null, booleans, numbers (compared by the text they are written with) and
@@ -467,6 +468,10 @@ rules:
     assert: { set: { field: key, group_by: locale, equal_to: { group: en } } }
     level: error
 ```
+
+A group is the rows that share a `group_by:` value, so a locale whose files hold no keys has no
+rows and no group: it is not checked until `groups:` (a later release) names the groups that must
+exist.
 
 **Toolchain pins that agree**: one row per place a Node version is pinned, each compared with the
 row `.nvmrc` gives. A part whose path a file lacks gives a row without a value, which differs from

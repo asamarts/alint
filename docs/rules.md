@@ -942,8 +942,8 @@ analysis failures, never a pass.
 
 `assert: { equal: { field: F } }`: every row has the same value of `F`. With `group_by: G`, rows
 are compared within each group of rows that share `G`'s value. Where rows disagree, each distinct
-value gets one finding, at the first row with it, related to the other rows with it and to one
-row of each other value.
+value gets one finding, at the first row with it, related to one row of each other value and then
+to the other rows with it, 20 locations at most, with a count of the rest.
 
 `to: { row: { source: .nvmrc } }` compares every row with one source row: the row whose `source`
 field holds `.nvmrc`. Exactly one such row must exist and hold a value of `F`; none, several, or a
@@ -970,7 +970,8 @@ reference group holds and a group lacks is a finding at the group's first file, 
 reference row with it; a value a group holds that the reference group lacks is a finding at that
 row. `subset_of:` reports only the second, and `disjoint_from:` reports each value a group shares
 with the reference group. Null is in no set. A reference group with no rows is an analysis
-failure.
+failure. A group is the rows that share a `G` value, so a group that has no rows (a locale file
+that is `{}`) is no group, and is not checked until `groups:` names the groups that must exist.
 
 Not yet: `plurals: cldr`, `groups:`, a `set` against another relation's field
 (`{ relation: R, field: F }`) and a `set` grouped by `path` or a path token are refused at load
@@ -978,13 +979,34 @@ until a later release adds them.
 
 #### Findings and baselines
 
-A generated message quotes the keys and values a finding is about. In `message:`,
-`{{row.FIELD}}` is the reported row's value of a field (the reference group's row, for a missing
-value), and a `sensitive` field's value is shown as `<redacted>` there and in generated messages.
+A generated message quotes the keys and values a finding is about, each cut at 64 characters. In
+`message:`, `{{row.FIELD}}` is the reported row's value of a field (the reference group's row, for
+a missing value), cut the same way, and a `sensitive` field's value is shown as `<redacted>` there
+and in generated messages. A field that spells an entry's key (`entry.key`, `entry.path`,
+`entry.parent`, `entry.root`) is sensitive when any of them is, and then no message or baseline
+shows a key path. A finding about a field that a join copies from its `unique:` side, or about a
+`bound:` field, sits at the row's own entry (a join's row is the row of its other side), since
+many rows share that value.
+
+When a relation the rule reads takes a value from the environment (`{{env.X}}`) outside a field's
+`where:` and `transform:`, or reads a selector or relation that does, the environment may have
+chosen its rows: every finding's path is `<redacted>`, its message is `sensitive evidence` with a
+redaction marker, and it has no related locations, as for a version 1 rule whose `paths:` the
+environment writes.
+
 A finding's baseline fingerprint is its rule and its key alone, never its path: the first row of a
 key or the first file of a group moves when rows are added, removed or renamed, so adding a row
 that sorts first, or renaming the first file, keeps a baselined finding baselined. The key is made
-of the values the finding is about; a sensitive field's value is left out of it.
+of the values the finding is about; a value longer than 128 bytes is held as its SHA-256 digest.
+Rows that repeat a `unique` key share one key: n rows with a key give n - 1 findings, which a
+baseline tells apart by their count, so renaming any of their files changes none. A finding about
+one row (`equal` with `to: { row: ... }` or `to: { field: ... }`) is keyed by that row's file and
+key path (a `read:` row's place among the values read), so renaming its file makes it a new
+finding. A sensitive field's value is left out of the
+key: every sensitive value is the one word `sensitive`, never a digest, which anyone who reads the
+baseline could test guesses against. Findings that differ only in a sensitive value share a key
+and are told apart by their count: three such findings against a baseline that counted two are one
+new finding.
 
 ### `every_matching_has`
 
