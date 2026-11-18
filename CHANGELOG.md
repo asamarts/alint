@@ -949,7 +949,9 @@ policy-test package the user does not trust.
   could run one. A parse of a larger file now waits until its size is free in the budget (or, when
   its aliases expand, a 64th of the expanded size, if that is larger: sixteen 500 KB files of
   aliases peaked at 3.1 GB), so at most one file at the cap parses at a time; a file of 1 MiB or
-  less waits only when its aliases expand past 64 MiB, and findings are unchanged. The `yaml_path_*`
+  less waits only when its aliases expand past 64 MiB, and findings are unchanged. The budget bounds
+  the parses in flight, not the trees they leave: a tree that copies what aliases name lives outside
+  it while a rule holds it, up to the alias guard's 256 MiB each (#582). The `yaml_path_*`
   rules, `json_schema_passes`, the cross-file rules' `extract:`, `pinned_references` and the
   structured fixes all take from it, and so does `alint_core::Format::parse`, which may now wait for
   another thread's YAML parse.
@@ -1046,7 +1048,7 @@ policy-test package the user does not trust.
   block scalar, attach an explicit `?` key or a key-less `:` entry to another value, or leave a bare
   `?`; in TOML, removing the only table under a parent known only from a dotted header dropped the
   parent. When two rules' fixes together would change more than their targets, the later rule waits
-  for the next fix pass. A YAML set or removal at a node an alias or merge key names, or on a path
+  for the next fix pass, also beside another rule's free-form `replace` in the same file. A YAML set or removal at a node an alias or merge key names, or on a path
   through one, declines. Removing a YAML block mapping's last entries writes `{}`, where it left the
   key with no value, which reads as null
   ([ADR-0044](docs/adr/0044-untrusted-runs-git-as-a-process-and-a-wider-memory-gate.md)).

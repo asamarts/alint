@@ -768,7 +768,9 @@ maintained libyaml fork is the lower-risk ownership boundary.
     copied into the JSON tree once per alias, so parses that each fit under the threshold could
     together take gigabytes. `Format::parse` now charges a parse the larger of its length and
     the guard's estimate of its expanded size over 64, the most bytes of tree per byte the
-    budget lets through.
+    budget lets through. The budget still ends with the parse, as ADR-0042 decision 4 set, and a
+    tree that copies what aliases name is about its whole estimate, so it lives outside the
+    budget while a rule holds it, up to the guard's 256 MiB each; #582 tracks bounding it.
   - **A harness false failure.** On a line that continues the root's plain scalar, a `%` in
     column 0 is the scalar's text, not a directive; `places()` read it as a directive, which
     seed 17 found. Seeds 1 to 20 at 100,000 inputs each pass.
