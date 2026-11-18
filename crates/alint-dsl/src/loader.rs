@@ -1160,16 +1160,7 @@ pub(crate) fn load_recursive(
 
     let display = local_source_display(&canonical, confine.or(state.display_root.as_deref()));
     let mut config = read_local_config(&canonical, file, &display, state, opts, context)?;
-    if is_top
-        && opts.out_of_root_policy == crate::OutOfRootPolicy::Deny
-        && !config.allow_out_of_root.is_confined()
-    {
-        return Err(Error::Other(format!(
-            "{display}: `allow_out_of_root:` lets a config read and write outside the \
-             repository; an untrusted load (`--untrusted`, an editor workspace that is not \
-             trusted, or a policy test) refuses it"
-        )));
-    }
+    refuse_out_of_root(is_top, &config.allow_out_of_root, &display, opts)?;
 
     // W2 (auto-fix.md 5.5): `trusted_extends:` is a top-level authority. An is_top
     // config (the user's own `.alint.yml` or a `.alint.d/` drop-in) owns the
@@ -1405,6 +1396,35 @@ fn read_local_config(
     parsed
 }
 
+/// An untrusted load ([`crate::OutOfRootPolicy::Deny`]) refuses a top-level
+/// (`is_top`) config's `allow_out_of_root:`, which would let the config read
+/// and write outside the repository.
+fn refuse_out_of_root(
+    is_top: bool,
+    allow: &alint_core::AllowOutOfRoot,
+    display: &str,
+    opts: &LoadOptions<'_>,
+) -> Result<()> {
+    if is_top && opts.out_of_root_policy == crate::OutOfRootPolicy::Deny && !allow.is_confined() {
+        return Err(Error::Other(format!(
+            "{display}: `allow_out_of_root:` lets a config read and write outside the \
+             repository; an untrusted load (`--untrusted`, an editor workspace that is not \
+             trusted, or a policy test) refuses it"
+        )));
+    }
+    Ok(())
+}
+
+/// Why a load under [`crate::RemotePolicy::Deny`] refuses a remote
+/// `extends:` entry, before connecting.
+fn remote_refusal(source_display: &str) -> Error {
+    Error::Other(format!(
+        "remote `extends` is disabled for this load (entry {source_display:?}): an untrusted \
+         load (`--untrusted`, an editor workspace that is not trusted, or a policy test) \
+         fetches nothing"
+    ))
+}
+
 /// `from_environment`: the entry read the environment, so it is also removed
 /// from errors in the forms the loader prints it in, which need not contain the
 /// value as written (a remote URL without its credentials, query and fragment;
@@ -1448,11 +1468,7 @@ fn load_extended_source(
         )));
     } else if kind == ExtendsEntryKind::Https {
         if opts.remote_policy == crate::RemotePolicy::Deny {
-            return Err(Error::Other(format!(
-                "remote `extends` is disabled for this load (entry {source_display:?}): \
-                 an untrusted load (`--untrusted`, an editor workspace that is not trusted, \
-                 or a policy test) fetches nothing"
-            )));
+            return Err(remote_refusal(&source_display));
         }
         let mut remote = load_remote(url, opts, &mut state.visiting)?;
         validate_source_compatibility(
