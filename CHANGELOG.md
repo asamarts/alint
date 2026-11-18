@@ -1081,11 +1081,12 @@ policy-test package the user does not trust.
   path again for its key table, its leaves, the reference's keys, each comparison's rows and the
   analyzer's input, none of them charged; and each decode charged its key paths to a budget of its
   own, so every peer added its own. A 320 KB reference 120 levels deep with 30,000 keys and one
-  identical peer peaked at 2,300 MiB and took 12 s in a release build, as in 0.22.1, and now peaks
-  at 437 MiB and takes 2.6 s. The key paths every decode builds (a relation's too) and the tables
-  `key_parity` keeps of its files take their bytes from the run's decode cache, so a run past the
-  budget ends with an analysis failure rather than exhausting memory. Each decode still holds
-  every key's whole path, about 300 MB for a 1 MB file 120 levels deep with 100,000 keys (#569).
+  identical peer, which peaked at 2,300 MiB and took 12 s in a release build once the extraction
+  stopped copying, now peaks at 437 MiB and takes 2.6 s. The key paths every decode builds (a
+  relation's too) and the tables `key_parity` keeps of its files take their bytes from the run's
+  decode cache, so a run past the budget ends with an analysis failure rather than exhausting
+  memory. Each decode still holds every key's whole path, about 300 MB for a 1 MB file 120 levels
+  deep with 100,000 keys (#569).
 - **An `extends:` list that names one source many times loads it once,** and the work of a load's
   `extends:` entries is bounded: 2,000 entries naming one 2,000-rule ruleset took 152 s to load. An
   entry is charged the source it loads, before `only:` or `except:` narrows it and at least one
