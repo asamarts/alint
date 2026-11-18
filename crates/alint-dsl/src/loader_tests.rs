@@ -165,7 +165,7 @@ fn memo_clones_a_config_only_once_it_is_seen_twice() {
         MemoKey::new(
             Path::new("/repo/base.yml"),
             Some(Path::new("/repo")),
-            &[],
+            &TrustedExtends::default(),
             &SourceContext::new(ConfigSourceClass::LocalExtend, Some(1)),
         )
     };
@@ -185,8 +185,14 @@ fn memo_clones_a_config_only_once_it_is_seen_twice() {
 #[test]
 fn memoization_separates_consumer_versions() {
     let path = Path::new("/repo/base.yml");
-    let key =
-        |context: SourceContext<'_>| MemoKey::new(path, Some(Path::new("/repo")), &[], &context);
+    let key = |context: SourceContext<'_>| {
+        MemoKey::new(
+            path,
+            Some(Path::new("/repo")),
+            &TrustedExtends::default(),
+            &context,
+        )
+    };
     let v1 = key(SourceContext::new(ConfigSourceClass::LocalExtend, Some(1)));
     let v2 = key(SourceContext::new(ConfigSourceClass::LocalExtend, Some(2)));
     assert!(v1 != v2);

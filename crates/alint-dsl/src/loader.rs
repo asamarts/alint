@@ -22,55 +22,12 @@ use crate::{
 /// handful deep. See [`load_recursive`] (L5).
 const MAX_EXTENDS_DEPTH: usize = 64;
 
-/// Mutable state shared by one `load_with` call's whole extends resolution.
-pub(crate) struct LoadState {
-    /// Ancestors on the current DFS path (cycle detection + depth bound).
-    pub(crate) visiting: std::collections::HashSet<PathBuf>,
-    /// Completed non-top-level local loads, reused across a diamond chain: two
-    /// entries that both extend the same file at every level would otherwise
-    /// reload it once per path through the DAG (2^depth loads, an effective
-    /// hang from a hostile repo). `is_top` loads read their own trust and
-    /// confinement settings and are never memoized.
-    /// `None` marks a key seen once: only a key loaded a SECOND time (a real
-    /// diamond) is cloned into the memo, so a linear chain never pays for it while
-    /// a diamond still loads each shared file at most twice.
-    memo: std::collections::HashMap<MemoKey, Option<RawConfig>>,
-    running_version: RunningVersion,
-    /// Every [`RawConfig::environment_values`] parsed so far, so an error the
-    /// resolution returns before the configs merge (an unreadable `extends:`
-    /// target named by the environment) can still be scrubbed of them.
-    pub(crate) environment_values: Vec<String>,
-    /// Every local file loaded so far, resolved: the top-level config, its
-    /// drop-ins and each local `extends:` target, once each.
-    pub(crate) config_files: Vec<PathBuf>,
-    /// Each of `config_files` with its index there.
-    config_file_indices: std::collections::HashMap<PathBuf, usize>,
-    /// The `extends:` sources the rules' field-source markers name.
-    pub(crate) field_source_names: crate::trust::FieldSourceNames,
-    /// The work of every `extends:` merge so far, in entries
-    /// ([`LoadState::charge_extends`]).
-    pub(crate) extends_entries: usize,
-    /// The top-level config's directory, resolved, which a local config is
-    /// named relative to ([`local_source_display`]), also where
-    /// `allow_out_of_root: true` lifts the confinement to it.
-    pub(crate) display_root: Option<PathBuf>,
-}
+#[path = "loader_state.rs"]
+mod state;
 
-impl Default for LoadState {
-    fn default() -> Self {
-        Self {
-            visiting: std::collections::HashSet::new(),
-            memo: std::collections::HashMap::new(),
-            running_version: RunningVersion::current(),
-            environment_values: Vec::new(),
-            config_files: Vec::new(),
-            config_file_indices: std::collections::HashMap::new(),
-            field_source_names: crate::trust::FieldSourceNames::default(),
-            extends_entries: 0,
-            display_root: None,
-        }
-    }
-}
+pub(crate) use state::{LoadState, MemoKey, TrustedExtends};
+#[cfg(test)]
+pub(crate) use state::{MAX_EXTENDS_MERGE_WORK, MAX_EXTENDS_SOURCE_BYTES, MEMO_HASHED, REDACTIONS};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SourceContext<'a> {
@@ -117,99 +74,6 @@ impl<'a> SourceContext<'a> {
     {
         crate::v2::Origin::new(self.source_class, display)
             .consumer(self.consumer_version, self.consumer_display)
-    }
-}
-
-#[derive(PartialEq, Eq, Hash)]
-struct MemoKey {
-    path: PathBuf,
-    confine: Option<PathBuf>,
-    trusted: Vec<String>,
-    consumer_version: Option<u32>,
-    source_class: ConfigSourceClass,
-    /// A source loaded below an entry read from the environment records how
-    /// its own `extends:` targets are named, which another load of it skips.
-    environment_chosen: bool,
-}
-
-impl LoadState {
-    /// Note `canonical` among the files the configuration came from: its
-    /// index there.
-    fn record_config_file(&mut self, canonical: &Path) -> usize {
-        if let Some(&index) = self.config_file_indices.get(canonical) {
-            return index;
-        }
-        self.config_files.push(canonical.to_path_buf());
-        let index = self.config_files.len() - 1;
-        self.config_file_indices
-            .insert(canonical.to_path_buf(), index);
-        index
-    }
-
-    /// Charge an `extends:` merge of `source` onto `merged` (what the list
-    /// merged so far) with its work, the entries of both: a merge rebuilds
-    /// what it merges onto. One load's entries may do
-    /// [`MAX_EXTENDS_MERGE_WORK`] in all, so they are bounded however its
-    /// lists repeat a source (`[a, b, a, b, ...]`) or follow a large one with
-    /// many small ones.
-    pub(crate) fn charge_extends(&mut self, merged: &RawConfig, source: &RawConfig) -> Result<()> {
-        self.charge_extends_work(merged.merge_size().saturating_add(source.merge_size()))
-    }
-
-    /// Charge an `extends:` entry with loading `source` (read, or copied from
-    /// an earlier load), gating it and marking its rules: its entries before
-    /// `only:` or `except:` keeps some of them. So entries that name one
-    /// source in other words, or keep other rules of it, cost what they load,
-    /// not what they merge.
-    pub(crate) fn charge_extends_load(&mut self, source: &RawConfig) -> Result<()> {
-        self.charge_extends_work(source.merge_size())
-    }
-
-    fn charge_extends_work(&mut self, work: usize) -> Result<()> {
-        self.extends_entries = self.extends_entries.saturating_add(work);
-        if self.extends_entries > MAX_EXTENDS_MERGE_WORK {
-            return Err(Error::Other(format!(
-                "the `extends:` entries of this config load and merge more than \
-                 {MAX_EXTENDS_MERGE_WORK} entries in all (rules, templates, facts, vars and \
-                 `ignore:` patterns, counted for each source an entry loads and at each merge, \
-                 both what was merged so far and what the entry brings in); list each source \
-                 once, extend fewer and larger sources, or flatten the `extends:` chain"
-            )));
-        }
-        Ok(())
-    }
-
-    fn remember(&mut self, key: MemoKey, config: &RawConfig) {
-        match self.memo.entry(key) {
-            std::collections::hash_map::Entry::Vacant(seen_once) => {
-                seen_once.insert(None);
-            }
-            std::collections::hash_map::Entry::Occupied(mut seen_twice) => {
-                *seen_twice.get_mut() = Some(config.clone());
-            }
-        }
-    }
-
-    fn cached(&self, key: Option<&MemoKey>) -> Option<RawConfig> {
-        key.and_then(|k| self.memo.get(k)).and_then(Clone::clone)
-    }
-}
-
-impl MemoKey {
-    fn new(
-        path: &Path,
-        confine: Option<&Path>,
-        trusted: &[String],
-        context: &SourceContext<'_>,
-    ) -> Self {
-        Self {
-            path: path.to_path_buf(),
-            confine: confine.map(Path::to_path_buf),
-            trusted: trusted.to_vec(),
-            consumer_version: context.consumer_version,
-            source_class: context.source_class,
-            environment_chosen: context.environment_chosen,
-        }
     }
 }
 
@@ -728,7 +592,20 @@ fn parse_config_interpolated_inner_with_environment(
     environment: &dyn crate::EnvironmentProvider,
     origin: &crate::v2::Origin<'_>,
 ) -> Result<RawConfig> {
-    reject_yaml_bombs(contents, source)?;
+    let expanded = reject_yaml_bombs(contents, source)?;
+    parse_guarded(contents, source, environment, origin).map(|config| RawConfig {
+        source_size: source_size(contents, expanded),
+        ..config
+    })
+}
+
+/// [`parse_config_interpolated_inner_with_environment`] past the YAML guards.
+fn parse_guarded(
+    contents: &str,
+    source: &Path,
+    environment: &dyn crate::EnvironmentProvider,
+    origin: &crate::v2::Origin<'_>,
+) -> Result<RawConfig> {
     let source_path = source;
     let source = display_path(source);
     let text_decode = match decode_from_text(contents, &source, origin) {
@@ -832,8 +709,9 @@ fn parse_config_interpolated_inner_with_environment(
 }
 
 /// Reject a config whose YAML would cost too much to read, before any parser
-/// reads it.
-fn reject_yaml_bombs(contents: &str, source: &Path) -> Result<()> {
+/// reads it; the size the alias guard estimated for what its aliases expand
+/// into otherwise ([`source_size`]).
+fn reject_yaml_bombs(contents: &str, source: &Path) -> Result<usize> {
     // Reject a deeply-nested-flow config before any parser reads it (the parser
     // v0.22 used hung on one) — a DoS reachable through an `extends:`'d ruleset.
     let yaml_guards = alint_core::yaml_depth::scan_guards(contents);
@@ -848,13 +726,23 @@ fn reject_yaml_bombs(contents: &str, source: &Path) -> Result<()> {
     // same way. The guard was written for the parser v0.22 used, whose limits
     // missed it; ayaml charges an alias budget of its own, which the guard's
     // is stricter than, and the guard stays as defense in depth (`yaml_depth`).
-    if !yaml_guards.expansion_within_limit(contents) {
+    let (expansion, expanded) = yaml_guards.expansion_and_size(contents);
+    if !expansion.within_limit_for_ayaml() {
         return Err(Error::Other(format!(
             "{}: YAML alias expansion exceeds the maximum supported size",
             source.display(),
         )));
     }
-    Ok(())
+    Ok(expanded)
+}
+
+/// What the `extends:` budget counts a source of `text` as, in bytes
+/// (`MAX_EXTENDS_SOURCE_BYTES`): its length, or the alias guard's estimate of
+/// the tree its aliases expand into (`expanded`), scaled to input bytes as the
+/// guard scales its budget, if that is larger.
+fn source_size(text: &str, expanded: usize) -> usize {
+    text.len()
+        .max(expanded / alint_core::yaml_depth::YAML_EXPANSION_BYTES_PER_INPUT_BYTE)
 }
 
 /// Decode a version 2 source's selectors, relations and aliases onto
@@ -1038,13 +926,20 @@ fn rule_env_derived_vars(rules: Option<&ayaml::Value>) -> Vec<Mapping> {
         .unwrap_or_default()
 }
 
-/// Append each of `values` that `into` does not hold yet.
+/// Append each of `values` that `into` does not hold yet: a lookup each, not a
+/// scan of `into`.
 pub(crate) fn add_environment_values(into: &mut Vec<String>, values: &[String]) {
-    for value in values {
-        if !into.contains(value) {
-            into.push(value.clone());
-        }
+    if values.is_empty() {
+        return;
     }
+    let held: std::collections::HashSet<&str> = into.iter().map(String::as_str).collect();
+    let mut added = std::collections::HashSet::new();
+    let new: Vec<String> = values
+        .iter()
+        .filter(|value| !held.contains(value.as_str()) && added.insert(value.as_str()))
+        .cloned()
+        .collect();
+    into.extend(new);
 }
 
 /// The environment names read by the top-level fields of a raw
@@ -1103,6 +998,51 @@ fn environment_sensitive_fields(entries: Option<&ayaml::Value>) -> Vec<Mapping> 
         .collect()
 }
 
+/// Put `canonical` on the current `extends:` path (`visiting`), refusing a
+/// cycle and a chain deeper than [`MAX_EXTENDS_DEPTH`].
+fn enter_extends_chain(
+    visiting: &mut std::collections::HashSet<PathBuf>,
+    canonical: &Path,
+) -> Result<()> {
+    if !visiting.insert(canonical.to_path_buf()) {
+        return Err(Error::Other(format!(
+            "cycle in `extends` chain at {}",
+            display_path(canonical)
+        )));
+    }
+    // Bound the depth of an *acyclic* chain (the cycle guard above only catches
+    // repeats): a hostile repo could otherwise nest thousands of local configs
+    // each extending the next and overflow the recursion stack (L5). `visiting`
+    // holds exactly the ancestors on the current DFS path (balanced insert /
+    // remove), so its length is the current depth. The cap is far above any
+    // real composition (root → team → org → bundled is ~4).
+    if visiting.len() > MAX_EXTENDS_DEPTH {
+        return Err(Error::Other(format!(
+            "`extends:` chain exceeds the maximum depth of {MAX_EXTENDS_DEPTH} (at {}); \
+             flatten the chain or split the ruleset",
+            display_path(canonical),
+        )));
+    }
+    Ok(())
+}
+
+/// How the local config at `canonical` is named: by its path from the root,
+/// or, when the environment chose it or a file above it (`chosen`),
+/// `<redacted>` wherever its name is shown, as its path, even one too short
+/// for the text scrub, tells what the environment holds.
+fn local_config_display(
+    canonical: &Path,
+    confine: Option<&Path>,
+    state: &LoadState,
+    chosen: bool,
+) -> String {
+    if chosen {
+        alint_core::CONFIGURATION_MASK.to_owned()
+    } else {
+        local_source_display(canonical, confine.or(state.display_root.as_deref()))
+    }
+}
+
 /// Recursively load `path`, resolving its `extends:` chain
 /// left-to-right. Later entries in the chain override earlier
 /// ones; the current file's own definitions override everything
@@ -1120,16 +1060,19 @@ pub(crate) fn load_recursive(
     // any depth is checked against the user's list. A non-top-level config may not
     // grant trust, so nested calls receive the top's list; `is_top` calls read
     // their OWN `trusted_extends:` and ignore this argument. (W2, auto-fix.md 5.5.)
-    trusted: &[String],
+    trusted: &TrustedExtends,
     context: SourceContext<'_>,
 ) -> Result<RawConfig> {
-    let canonical = opts
-        .config_source
-        .canonicalize(path)
-        .map_err(|source| Error::Io {
+    let canonical = opts.config_source.canonicalize(path).map_err(|source| {
+        // The error names the path as joined, which the environment chose.
+        if context.environment_chosen {
+            state.environment_values.add(&display_path(path));
+        }
+        Error::Io {
             path: path.to_path_buf(),
             source,
-        })?;
+        }
+    })?;
     // Diamond chains reload a shared file once per DAG path (2^depth); a
     // non-top-level load is a pure function of its `MemoKey`, so reuse it.
     let memo_key = (!is_top).then(|| MemoKey::new(&canonical, confine, trusted, &context));
@@ -1137,28 +1080,9 @@ pub(crate) fn load_recursive(
     if let Some(cached) = state.cached(memo_key.as_ref()) {
         return Ok(cached);
     }
-    let visiting = &mut state.visiting;
-    if !visiting.insert(canonical.clone()) {
-        return Err(Error::Other(format!(
-            "cycle in `extends` chain at {}",
-            display_path(&canonical)
-        )));
-    }
-    // Bound the depth of an *acyclic* chain (the cycle guard above only catches
-    // repeats): a hostile repo could otherwise nest thousands of local configs
-    // each extending the next and overflow the recursion stack (L5). `visiting`
-    // holds exactly the ancestors on the current DFS path (balanced insert /
-    // remove), so its length is the current depth. The cap is far above any
-    // real composition (root → team → org → bundled is ~4).
-    if visiting.len() > MAX_EXTENDS_DEPTH {
-        return Err(Error::Other(format!(
-            "`extends:` chain exceeds the maximum depth of {MAX_EXTENDS_DEPTH} (at {}); \
-             flatten the chain or split the ruleset",
-            display_path(&canonical),
-        )));
-    }
+    enter_extends_chain(&mut state.visiting, &canonical)?;
 
-    let display = local_source_display(&canonical, confine.or(state.display_root.as_deref()));
+    let display = local_config_display(&canonical, confine, state, context.environment_chosen);
     let mut config = read_local_config(&canonical, file, &display, state, opts, context)?;
     if is_top
         && opts.out_of_root_policy == crate::OutOfRootPolicy::Deny
@@ -1177,9 +1101,9 @@ pub(crate) fn load_recursive(
     // list is rejected per-source below, so nested loads use the list threaded from
     // the top. Taken (consumed) at is_top -- it gates the demotion here and is not
     // carried onto `Config`.
-    let top_trusted: Vec<String>;
-    let trusted: &[String] = if is_top {
-        top_trusted = std::mem::take(&mut config.trusted_extends);
+    let top_trusted: TrustedExtends;
+    let trusted: &TrustedExtends = if is_top {
+        top_trusted = state.trusted_extends(std::mem::take(&mut config.trusted_extends));
         &top_trusted
     } else {
         trusted
@@ -1251,7 +1175,8 @@ pub(crate) fn load_recursive(
             )?,
         };
         if config.v2.has_sources() {
-            record_extended(&mut config.v2, index, entry, &source_dir, opts);
+            let chosen = context.environment_chosen || key.from_environment;
+            record_extended(&mut config.v2, index, entry, &source_dir, opts, chosen);
         }
         // An entry that repeats the one before it merges the same source onto
         // itself, which changes nothing.
@@ -1259,8 +1184,8 @@ pub(crate) fn load_recursive(
             repeats.hold(key, parent);
             continue;
         }
-        let parent = repeats.hold_copy(key, parent);
         state.charge_extends(&merged, &parent)?;
+        let parent = repeats.hold_copy(key, parent);
         merged = merge(merged, parent)?;
     }
     merged = merge(merged, config)?;
@@ -1270,12 +1195,6 @@ pub(crate) fn load_recursive(
     }
     Ok(merged)
 }
-
-/// The entries one load's `extends:` entries may load and merge, in all
-/// ([`LoadState::charge_extends`], [`LoadState::charge_extends_load`]): four
-/// merged configs of the largest size. A config that extends 80 rulesets of a
-/// thousand rules each spends about four fifths of it.
-pub(crate) const MAX_EXTENDS_MERGE_WORK: usize = 4 * crate::MAX_MERGED_ENTRIES;
 
 /// What makes two entries of one `extends:` list load the same source, gated
 /// and filtered the same way: the entry, and whether it read the environment.
@@ -1346,10 +1265,11 @@ impl<'k, 'e> Repeats<'k, 'e> {
 }
 
 /// Record on a version 2 source's `objects` where its `extends:` `entry` (at
-/// `index`) leads, for qualified references to resolve. Only a version 2
-/// source has objects to record it on, so only it pays to resolve a local
-/// target (which has just loaded, so it resolves); kept out of line for the
-/// same reason.
+/// `index`) leads, for qualified references to resolve, and that the
+/// environment chose its target (`chosen`), which is then named `<redacted>`.
+/// Only a version 2 source has objects to record it on, so only it pays to
+/// resolve a local target (which has just loaded, so it resolves); kept out
+/// of line for the same reason.
 #[inline(never)]
 fn record_extended(
     objects: &mut crate::v2::Objects,
@@ -1357,12 +1277,13 @@ fn record_extended(
     entry: &crate::v2::ExtendsEntry,
     source_dir: &Path,
     opts: &LoadOptions<'_>,
+    chosen: bool,
 ) {
     let url = entry.entry.url();
     let target = (ExtendsEntryKind::of(url) == ExtendsEntryKind::Local)
         .then(|| resolve_relative(source_dir, url))
         .and_then(|target| opts.config_source.canonicalize(&target).ok());
-    objects.record_extended(index, target.as_deref());
+    objects.record_extended(index, target.as_deref(), chosen);
 }
 
 /// Read, parse and check the local config at `canonical`, the configuration's
@@ -1387,7 +1308,7 @@ fn read_local_config(
         &context.origin(display),
     );
     if let Ok(config) = &mut parsed {
-        add_environment_values(&mut state.environment_values, &config.environment_values);
+        state.environment_values.extend(&config.environment_values);
         validate_source_compatibility(
             config,
             display,
@@ -1405,10 +1326,63 @@ fn read_local_config(
     parsed
 }
 
+/// Refuse an `extends:` entry of a scheme the loader does not read, or a
+/// remote one in a load that fetches nothing.
+fn refuse_unloadable(
+    kind: ExtendsEntryKind<'_>,
+    source_display: &str,
+    opts: &LoadOptions<'_>,
+) -> Result<()> {
+    if kind == ExtendsEntryKind::PlainHttp {
+        return Err(Error::Other(format!(
+            "plain http:// is not allowed in `extends:` (entry {source_display:?}); \
+             use https:// with an SRI hash instead"
+        )));
+    }
+    if let ExtendsEntryKind::Unsupported(scheme) = kind {
+        return Err(Error::Other(format!(
+            "unsupported `extends:` scheme `{}` (entry {source_display:?}); use https://, \
+             alint://bundled/ or a local path",
+            scheme.to_ascii_lowercase()
+        )));
+    }
+    if kind == ExtendsEntryKind::Https && opts.remote_policy == crate::RemotePolicy::Deny {
+        return Err(Error::Other(format!(
+            "remote `extends` is disabled for this load (entry {source_display:?}): \
+             an untrusted load (`--untrusted`, an editor workspace that is not trusted, \
+             or a policy test) fetches nothing"
+        )));
+    }
+    Ok(())
+}
+
+/// Drop the top-level settings an extended `parent` declares, which only the
+/// user's own config and its drop-ins set, with a warning given once per file
+/// however entries spell it (`local_target`, as joined, for a local one).
+fn drop_extended_settings(
+    parent: &mut RawConfig,
+    state: &mut LoadState,
+    opts: &LoadOptions<'_>,
+    local_target: Option<PathBuf>,
+    source_display: &str,
+    chosen: bool,
+) {
+    let declared = parent.drop_top_level_settings();
+    if !declared.is_empty() {
+        let key = local_target
+            .and_then(|target| opts.config_source.canonicalize(&target).ok())
+            .map_or_else(
+                || source_display.to_owned(),
+                |canonical| display_path(&canonical),
+            );
+        state.warn_ignored_settings(&key, source_display, chosen, declared);
+    }
+}
+
 /// `from_environment`: the entry read the environment, so it is also removed
 /// from errors in the forms the loader prints it in, which need not contain the
 /// value as written (a remote URL without its credentials, query and fragment;
-/// a local path joined, canonical, or relative to the root). `context` is the
+/// a local path canonical, or relative to the root). `context` is the
 /// local-target context, with the extending config's version and name.
 #[allow(clippy::too_many_arguments)]
 fn load_extended_source(
@@ -1418,43 +1392,26 @@ fn load_extended_source(
     state: &mut LoadState,
     opts: &LoadOptions<'_>,
     confine: Option<&Path>,
-    trusted: &[String],
+    trusted: &TrustedExtends,
     context: SourceContext<'_>,
 ) -> Result<RawConfig> {
     let consumer_version = context.consumer_version;
     let url = entry.url();
     let kind = ExtendsEntryKind::of(url);
-    let source_display = if kind.is_url() {
+    let mut source_display = if kind.is_url() {
         remote_source_display(url)
     } else {
         url.to_string()
     };
     if from_environment {
-        add_environment_values(
-            &mut state.environment_values,
-            std::slice::from_ref(&source_display),
-        );
+        state.environment_values.add(&source_display);
     }
-    let mut parent = if kind == ExtendsEntryKind::PlainHttp {
-        return Err(Error::Other(format!(
-            "plain http:// is not allowed in `extends:` (entry {source_display:?}); \
-             use https:// with an SRI hash instead"
-        )));
-    } else if let ExtendsEntryKind::Unsupported(scheme) = kind {
-        return Err(Error::Other(format!(
-            "unsupported `extends:` scheme `{}` (entry {source_display:?}); use https://, \
-             alint://bundled/ or a local path",
-            scheme.to_ascii_lowercase()
-        )));
-    } else if kind == ExtendsEntryKind::Https {
-        if opts.remote_policy == crate::RemotePolicy::Deny {
-            return Err(Error::Other(format!(
-                "remote `extends` is disabled for this load (entry {source_display:?}): \
-                 an untrusted load (`--untrusted`, an editor workspace that is not trusted, \
-                 or a policy test) fetches nothing"
-            )));
-        }
-        let mut remote = load_remote(url, opts, &mut state.visiting)?;
+    // A local target the environment chose, or one a source it chose extends.
+    let mut chosen = false;
+    let mut local_target = None;
+    refuse_unloadable(kind, &source_display, opts)?;
+    let mut parent = if kind == ExtendsEntryKind::Https {
+        let mut remote = load_remote(url, opts, state)?;
         validate_source_compatibility(
             &mut remote,
             &source_display,
@@ -1471,7 +1428,7 @@ fn load_extended_source(
         crate::reject_env_expansion_in(&remote.rules, &remote.templates, &source_display)?;
         remote
     } else if let ExtendsEntryKind::Bundled(spec) = kind {
-        let mut bundled = load_bundled(spec)?;
+        let mut bundled = state.bundled_source(spec, || load_bundled(spec))?;
         validate_source_compatibility(
             &mut bundled,
             &format!("alint://bundled/{spec}"),
@@ -1486,26 +1443,37 @@ fn load_extended_source(
         }
         bundled
     } else {
+        // A target the environment chose, or one a source it chose extends,
+        // is named `<redacted>` wherever it is named: the forms the loader
+        // prints its path in are recorded with the environment's values, for
+        // an error from below, resolved (once per file, however it is spelled;
+        // `load_recursive` records it as joined when it does not resolve).
+        let context = context.chosen_by_environment(from_environment);
+        chosen = context.environment_chosen;
+        if chosen {
+            alint_core::CONFIGURATION_MASK.clone_into(&mut source_display);
+        }
         // Decided on the text, before any file-system call reaches the path.
         if confine.is_some() && names_a_path_of_its_own(url) {
             return Err(path_of_its_own_refusal(&source_display));
         }
         let target = resolve_relative(source_dir, url);
-        // A target the environment chose, or one a source it chose extends,
-        // is named `<redacted>` wherever it is named, so the forms the
-        // loader names it in are recorded with the environment's values.
-        let context = context.chosen_by_environment(from_environment);
-        if context.environment_chosen {
-            let mut normalized = vec![display_path(&target)];
-            if let Ok(canonical) = opts.config_source.canonicalize(&target) {
-                let root = confine.or(state.display_root.as_deref());
-                normalized.push(local_source_display(&canonical, root));
-                normalized.push(display_path(&canonical));
-            }
-            add_environment_values(&mut state.environment_values, &normalized);
+        if chosen && let Ok(canonical) = opts.config_source.canonicalize(&target) {
+            let root = confine.or(state.display_root.as_deref());
+            state
+                .environment_values
+                .add(&local_source_display(&canonical, root));
+            state.environment_values.add(&display_path(&canonical));
         }
-        confine_extends_target(&target, url, confine, opts.config_source.as_ref())?;
-        load_recursive(&target, state, opts, confine, false, trusted, context)?
+        confine_extends_target(
+            &target,
+            &source_display,
+            confine,
+            opts.config_source.as_ref(),
+        )?;
+        let loaded = load_recursive(&target, state, opts, confine, false, trusted, context)?;
+        local_target = Some(target);
+        loaded
     };
     gate_extended_source(state, &parent, &source_display, opts.kind_catalog)?;
     let field_source = state.field_source_names.intern(&source_display);
@@ -1515,14 +1483,18 @@ fn load_extended_source(
         &field_source,
         kind == ExtendsEntryKind::Https,
     );
-    parent.drop_top_level_settings(&alint_core::redact_environment_values(
+    drop_extended_settings(
+        &mut parent,
+        state,
+        opts,
+        local_target,
         &source_display,
-        &state.environment_values,
-    ));
+        chosen,
+    );
     parent.rules = apply_rule_filter(parent.rules, entry, &source_display)?;
     if kind == ExtendsEntryKind::Https {
         let base = url.split('#').next().unwrap_or(url);
-        if !trusted.iter().any(|entry| entry == base || entry == url) {
+        if !trusted.contains(base) && !trusted.contains(url) {
             cap_untrusted_remote(&mut parent, &source_display, opts.kind_catalog)?;
         }
     }
@@ -1627,11 +1599,10 @@ fn sanitized_remote_resolution_error(source: &str, error: &extends::ResolveError
     Error::Other(format!("resolving {source}: {detail}"))
 }
 
-fn load_remote(
-    entry: &str,
-    opts: &LoadOptions<'_>,
-    visiting: &mut std::collections::HashSet<PathBuf>,
-) -> Result<RawConfig> {
+/// The remote `entry`, parsed. A body is pinned by its hash, so entries that
+/// name one body by other URLs (another query, say) read, hash and parse it
+/// once ([`LoadState::remote_source`]).
+fn load_remote(entry: &str, opts: &LoadOptions<'_>, state: &mut LoadState) -> Result<RawConfig> {
     let source = remote_source_display(entry);
     let (url, sri) = extends::split_url_and_sri(entry).map_err(|_| {
         Error::Other(format!(
@@ -1646,15 +1617,26 @@ fn load_remote(
         )));
     };
     let source = remote_source_display(&url);
+    state.remote_source(&sri.encoded(), |state| {
+        parse_remote(&url, &sri, &source, opts, &mut state.visiting)
+    })
+}
 
+fn parse_remote(
+    url: &str,
+    sri: &extends::Sri,
+    source: &str,
+    opts: &LoadOptions<'_>,
+    visiting: &mut std::collections::HashSet<PathBuf>,
+) -> Result<RawConfig> {
     let cache = match opts.cache.clone() {
         Some(c) => c,
         None => extends::Cache::user_default()
             .map_err(|e| Error::Other(format!("could not open cache: {e}")))?,
     };
     let fetcher = opts.fetcher.clone().unwrap_or_default();
-    let body = extends::resolve_remote(&url, &sri, &fetcher, &cache)
-        .map_err(|error| sanitized_remote_resolution_error(&source, &error))?;
+    let body = extends::resolve_remote(url, sri, &fetcher, &cache)
+        .map_err(|error| sanitized_remote_resolution_error(source, &error))?;
 
     // Remote entries may themselves extend other things (local
     // paths relative to… what, exactly?). For v0.2 we forbid
@@ -1677,7 +1659,8 @@ fn load_remote(
             alint_core::yaml_depth::MAX_YAML_FLOW_DEPTH
         )));
     }
-    if !yaml_guards.expansion_within_limit(body_str) {
+    let (expansion, expanded) = yaml_guards.expansion_and_size(body_str);
+    if !expansion.within_limit_for_ayaml() {
         return Err(Error::Other(format!(
             "remote config at {source}: YAML alias expansion exceeds the maximum supported size"
         )));
@@ -1686,8 +1669,8 @@ fn load_remote(
     // decodes as plainly version 1 is; any other is dispatched, whose refusal
     // of version 2 or a v2-only key comes before a decode error, which would
     // misreport a v2 key.
-    let origin = crate::v2::Origin::new(ConfigSourceClass::Remote, &source);
-    let decoded = deserialize_raw_config(body_str, &source);
+    let origin = crate::v2::Origin::new(ConfigSourceClass::Remote, source);
+    let decoded = deserialize_raw_config(body_str, source);
     if !decoded
         .as_ref()
         .is_ok_and(|config| crate::v2::plainly_v1(config, &origin))
@@ -1695,13 +1678,14 @@ fn load_remote(
         let document = crate::v2::read_document(body_str, &origin)?;
         crate::v2::dispatch(document.as_ref(), body_str, &origin)?;
     }
-    let config = decoded.map_err(|error| match error {
+    let mut config = decoded.map_err(|error| match error {
         Error::Yaml(error) => Error::Other(format!(
             "remote config at {source}: YAML parse error: {error}"
         )),
         other => other,
     })?;
-    crate::reject_ambiguous_yaml_in(&config, &source)?;
+    crate::reject_ambiguous_yaml_in(&config, source)?;
+    config.source_size = source_size(body_str, expanded);
     // Cycle guard token for the URL itself so a self-referencing
     // fetched config can't loop.
     let token = std::path::PathBuf::from(format!("remote://{}", sri.encoded()));
@@ -1766,7 +1750,8 @@ fn decode_bundled(body: &str, spec: &str) -> Result<RawConfig> {
     // checks uniform with the remote/local paths means no parse in the loader is
     // ever unguarded. A bundled ruleset tripping one is an alint bug.
     let yaml_guards = alint_core::yaml_depth::scan_guards(body);
-    if !yaml_guards.flow_within_limit() || !yaml_guards.expansion_within_limit(body) {
+    let (expansion, expanded) = yaml_guards.expansion_and_size(body);
+    if !yaml_guards.flow_within_limit() || !expansion.within_limit_for_ayaml() {
         return Err(Error::internal(format!(
             "built-in ruleset '{spec}' exceeds a maximum supported YAML complexity limit"
         )));
@@ -1800,7 +1785,10 @@ fn decode_bundled(body: &str, spec: &str) -> Result<RawConfig> {
     })?;
     crate::reject_ambiguous_yaml_in(&config, &display)
         .map_err(|e| Error::internal(e.to_string()))?;
-    Ok(config)
+    Ok(RawConfig {
+        source_size: source_size(body, expanded),
+        ..config
+    })
 }
 
 /// Reject a local `extends:` target that resolves outside the confinement

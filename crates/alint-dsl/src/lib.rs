@@ -306,7 +306,7 @@ fn nested_configs_key(path: &Path, source: &dyn ConfigSourceProvider) -> Result<
 fn load_top_level_raw(path: &Path, opts: &LoadOptions<'_>) -> Result<RawConfig> {
     let mut state = loader::LoadState::default();
     resolve_top_level(path, opts, &mut state).map_err(|error| {
-        alint_core::redact_environment_values_in_error(error, &state.environment_values)
+        alint_core::redact_environment_values_in_error(error, state.environment_values.as_slice())
     })
 }
 
@@ -347,7 +347,7 @@ fn resolve_top_level(
         opts,
         Some(&confine_root),
         true,
-        &[],
+        &loader::TrustedExtends::default(),
         loader::SourceContext::new(alint_core::ConfigSourceClass::Root, None),
     )?;
 
@@ -380,14 +380,21 @@ fn resolve_top_level(
             Some(&confine_root),
             true,
             // is_top: a drop-in reads its own `trusted_extends:`, so seed empty.
-            &[],
+            &loader::TrustedExtends::default(),
             loader::SourceContext::new(alint_core::ConfigSourceClass::DropIn, raw.version),
         )?;
+        // Each merge rebuilds the whole config, as an `extends:` merge does,
+        // and is charged so (200 empty drop-ins on 50,000 `ignore:` patterns
+        // took ten seconds).
+        state.charge_extends(&raw, &drop_in)?;
         raw = merge(raw, drop_in)?;
     }
     // With the forms the loader printed an `extends:` entry read from the
     // environment in, which a later error can quote too (`load_extended_source`).
-    loader::add_environment_values(&mut raw.environment_values, &state.environment_values);
+    loader::add_environment_values(
+        &mut raw.environment_values,
+        state.environment_values.as_slice(),
+    );
     // Every local file the configuration came from, which a fix from an
     // `extends:`'d ruleset must not rewrite.
     raw.config_files = std::mem::take(&mut state.config_files);
@@ -511,6 +518,11 @@ pub(crate) struct RawConfig {
     /// schema.
     #[serde(skip)]
     extends_environment: Vec<bool>,
+    /// The size of the source this config was parsed from, and of each it
+    /// merged, in bytes, which the `extends:` budget charges
+    /// (`MAX_EXTENDS_SOURCE_BYTES`). Not part of the schema.
+    #[serde(skip)]
+    source_size: usize,
     /// The language this config was decoded as: version 2 only when its
     /// top-level `version:` is the literal `2` (or it is a drop-in of a
     /// version 2 root). Set by the local-config parser. Not part of the schema.
@@ -538,30 +550,24 @@ where
 }
 
 impl RawConfig {
-    /// Drop the top-level settings an `extends:`'d config declared. They were
-    /// never honored from an extended source (the extending config's own
-    /// value -- or its default -- always replaced them), and an inherited
-    /// ruleset lifting `fix_size_limit` or `respect_gitignore` for the
-    /// consumer is not its call; warn instead of silently ignoring.
-    pub(crate) fn drop_top_level_settings(&mut self, source: &str) {
+    /// Drop the top-level settings an `extends:`'d config declared, and name
+    /// them. They were never honored from an extended source (the extending
+    /// config's own value -- or its default -- always replaced them), and an
+    /// inherited ruleset lifting `fix_size_limit` or `respect_gitignore` for
+    /// the consumer is not its call; the loader warns instead of silently
+    /// ignoring them.
+    pub(crate) fn drop_top_level_settings(&mut self) -> Vec<&'static str> {
         // `version:` describes the extended file itself, not the consumer.
         self.version = None;
         self.requires = None;
-        let declared: Vec<&str> = [
+        [
             ("respect_gitignore", self.respect_gitignore.take().is_some()),
             ("fix_size_limit", self.fix_size_limit.take().is_some()),
             ("nested_configs", self.nested_configs.take().is_some()),
         ]
         .into_iter()
         .filter_map(|(name, was_set)| was_set.then_some(name))
-        .collect();
-        if !declared.is_empty() {
-            tracing::warn!(
-                "extended config {source} sets {}; top-level settings are only read from \
-                 your own config and its `.alint.d/` drop-ins, so the value is ignored",
-                declared.join(", ")
-            );
-        }
+        .collect()
     }
 }
 
@@ -1915,6 +1921,7 @@ fn merge_unbounded(a: RawConfig, b: RawConfig) -> RawConfig {
         config_files: [a.config_files, b.config_files].concat(),
         field_source_names: either_set(a.field_source_names, b.field_source_names),
         extends_environment: Vec::new(),
+        source_size: a.source_size.saturating_add(b.source_size),
         // The language follows the version: the source that sets it decides.
         surface: b.version.map_or(a.surface, |_| b.surface),
         v2: a.v2.merged(b.v2),

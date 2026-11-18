@@ -39,9 +39,11 @@ full below.
 - An ignore file over 32 MiB, or one that is not a regular file, stops the walk; a baseline the
   `baseline:` key names must be a regular file inside the repository; and an absolute local
   `extends:` needs `allow_out_of_root: true` (Security).
-- An `extends:` list's entries may load and merge at most 4,194,304 entries in all, counted as
-  the [configuration limits](docs/site/configuration/index.md#limits) say: a flat list reaches it
-  at about 90 rulesets of 1,000 rules each, or about 2,900 one-rule files (Fixed).
+- An `extends:` list's entries and the `.alint.d/` drop-ins may load and merge at most 4,194,304
+  entries in all, and the entries at most 64 MiB of sources, each counted for every entry that
+  merges it, as the [configuration limits](docs/site/configuration/index.md#limits) say: a flat
+  list reaches the first at about 90 rulesets of 1,000 rules each, or about 2,900 one-rule files,
+  and the second at 64 entries of a 1 MiB source (Fixed).
 - On Unix, a `.git` another user owns does not mark a repository's top. Run from a subdirectory
   of a checkout another user owns (as root in a container, say), alint skips that checkout's
   config with a warning; run it from the top or pass `--config` (Security).
@@ -607,7 +609,8 @@ policy-test package the user does not trust.
     with the file that declares it and the aliases that reach that file; `list --format json`
     adds `selectors` and `relations` for a version 2 config only, and `--category` lists rules
     only. A file an `extends:` entry read from the environment loads is shown as `<redacted>`,
-    here and in `export-agents-md`, and so is every file loaded below it.
+    here, in `export-agents-md` and in errors found in it, and so is every file loaded below it
+    and an `extends:` URL there that leads to one, however short its name.
   - `alint export-agents-md` lists a version 2 config's named selectors and relations the same
     way, after its rules, under `### Named selectors and relations`; `--format json` adds
     `selectors` and `relations`, shaped as in `list --format json`, for a version 2 config only.
@@ -1059,10 +1062,20 @@ policy-test package the user does not trust.
   hold about 300 MB of key paths under the default limits (#569).
 - **An `extends:` list that names one source many times loads it once,** and the work of a load's
   `extends:` entries is bounded: 2,000 entries naming one 2,000-rule ruleset took 152 s to load. An
-  entry is charged the source it loads, before `only:` or `except:` narrows it, and each merge what
-  was merged so far and what it brings in, up to 4,194,304 entries in all (see the
-  [configuration limits](docs/site/configuration/index.md#limits)). A version 1 configuration that
-  fails to decode is no longer parsed a second time to tell its version.
+  entry is charged the source it loads, before `only:` or `except:` narrows it and at least one
+  entry for an empty one, and each merge, and each `.alint.d/` drop-in's, what was merged so far
+  and what it brings in, up to 4,194,304 entries in all; each entry is also charged its source's
+  size, up to 64 MiB in all (see the
+  [configuration limits](docs/site/configuration/index.md#limits)). A remote source named by other
+  URLs with one hash, and a bundled ruleset named with other `only:` or `except:` lists, are parsed
+  once per load. Before, 40 entries of one cached 15 MiB remote source with other queries took
+  157 s, 60 entries naming a one-rule file whose rule had 50,000 keys took 41 s, the budget
+  admitted about 230,000 entries of a bundled ruleset with a different `only:` list each (about
+  27 minutes), and 200 empty drop-ins on 50,000 `ignore:` patterns took 10 s; each is now
+  refused, or loads in a few seconds. A config the environment chose that names one
+  file in 3,000 spellings took more than 100 s, and 2,000 entries checked against 20,000
+  `trusted_extends:` URLs took 23 s; both now load in under a second. A version 1 configuration
+  that fails to decode is no longer parsed a second time to tell its version.
 - **`alint test` no longer lets the host's global Git excludes file hide a test's nested configs.**
   The walk that finds `nested_configs:` files read `$XDG_CONFIG_HOME/git/ignore` and a
   `core.excludesFile` that `~/.gitconfig` names, where the test's own walk does not, so a host whose

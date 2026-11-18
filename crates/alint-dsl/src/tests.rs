@@ -1,5 +1,6 @@
 use super::*;
 
+mod extends_costs;
 mod hardening;
 mod loading;
 mod nested_config;

@@ -999,6 +999,71 @@ fn a_source_below_an_extends_entry_read_from_the_environment_stays_out_of_output
     }
 }
 
+/// A source below an `extends:` entry read from the environment whose name is
+/// shorter than four characters, which the text scrub leaves, is named
+/// `<redacted>` all the same: `q`, which `sd/p.yml` extends as `../q`, was
+/// listed, in JSON and Markdown too, and named in errors, as `q`.
+#[test]
+fn a_short_source_name_below_an_extends_entry_read_from_the_environment_stays_out() {
+    let root = tempfile::tempdir().unwrap();
+    write(root.path(), "README.md", "hi\n");
+    write(
+        root.path(),
+        "sd/p.yml",
+        "version: 2\nextends:\n  - url: ../q\n    as: q\nselectors:\n  own: { paths: README.md \
+         }\nrules: []\n",
+    );
+    write(
+        root.path(),
+        "q",
+        "version: 2\nselectors:\n  docs: { paths: README.md }\nrules: []\n",
+    );
+    write(
+        root.path(),
+        ".alint.yml",
+        "version: 2\nextends:\n  - url: '{{env.POLICY}}'\n    as: p\nrules: []\n",
+    );
+    let env = [("POLICY", "./sd/p.yml")];
+    let listed = run(root.path(), &["list"], &env);
+    assert!(listed.status.success(), "{listed:?}");
+    let stdout = String::from_utf8(listed.stdout).unwrap();
+    assert!(
+        stdout.ends_with(
+            "\nselector docs  <redacted>\nselector own  <redacted>\naliases <redacted>  as q in \
+             <redacted>\naliases <redacted>  as p in .alint.yml\n"
+        ),
+        "{stdout}"
+    );
+    let listed = run(root.path(), &["list", "--format", "json"], &env);
+    assert!(listed.status.success(), "{listed:?}");
+    let json: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
+    let paths: Vec<&str> = json["sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|source| source["path"].as_str().unwrap())
+        .collect();
+    assert_eq!(paths, ["<redacted>", "<redacted>", ".alint.yml"]);
+    let exported = run(root.path(), &["export-agents-md"], &env);
+    assert!(exported.status.success(), "{exported:?}");
+    let markdown = String::from_utf8(exported.stdout).unwrap();
+    assert!(
+        markdown.contains("- selector `docs`: `<redacted>`") && !markdown.contains("`q`\n"),
+        "{markdown}"
+    );
+
+    // An error in `q` names it so too.
+    write(
+        root.path(),
+        "q",
+        "version: 2\nselectors:\n  docs: { paths: README.md, colour: red }\nrules: []\n",
+    );
+    for args in LOADING_SURFACES {
+        let output = run(root.path(), args, &env);
+        assert_redacted(&format!("{args:?}"), &output, &["q: ", "q:`", "\"q\""]);
+    }
+}
+
 /// Every position of a version 2 selector or relation that takes a value,
 /// with `{S}` where the value is read from the environment: what the decode
 /// checks, what the plan check compiles (globs, `scope_filter:` names and
