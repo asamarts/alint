@@ -1303,6 +1303,20 @@ pub enum RemotePolicy {
     Deny,
 }
 
+/// Whether the top-level config may set `allow_out_of_root:` for this load.
+///
+/// `Deny` is for a config the user does not trust (`--untrusted`, a language
+/// server workspace that is not trusted, a policy test): the key lets a config
+/// read and write outside the repository and name an `extends:` anywhere, so
+/// a top-level config or `.alint.d` fragment that grants anything fails to
+/// load, before its `extends:` resolves.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum OutOfRootPolicy {
+    #[default]
+    Allow,
+    Deny,
+}
+
 /// Configuration for [`load_with`].
 ///
 /// Defaults retain normal production behavior. Policy runners can inject
@@ -1331,6 +1345,8 @@ pub struct LoadOptions<'catalog> {
     pub config_source: std::sync::Arc<dyn ConfigSourceProvider>,
     /// HTTPS policy checked before cache construction or fetch.
     pub remote_policy: RemotePolicy,
+    /// Whether the top-level config may set `allow_out_of_root:`.
+    pub out_of_root_policy: OutOfRootPolicy,
     /// Repository root used by nested-config discovery. When absent, the
     /// top-level config directory remains the repository root.
     pub repository_root: Option<PathBuf>,
@@ -1350,6 +1366,7 @@ impl Default for LoadOptions<'_> {
             environment: std::sync::Arc::new(HostEnvironment),
             config_source: std::sync::Arc::new(FilesystemConfigSource),
             remote_policy: RemotePolicy::Allow,
+            out_of_root_policy: OutOfRootPolicy::Allow,
             repository_root: None,
             global_git_excludes: true,
         }
@@ -1423,6 +1440,13 @@ impl<'catalog> LoadOptions<'catalog> {
     #[must_use]
     pub fn with_remote_policy(mut self, remote_policy: RemotePolicy) -> Self {
         self.remote_policy = remote_policy;
+        self
+    }
+
+    /// Sets [`Self::out_of_root_policy`].
+    #[must_use]
+    pub fn with_out_of_root_policy(mut self, out_of_root_policy: OutOfRootPolicy) -> Self {
+        self.out_of_root_policy = out_of_root_policy;
         self
     }
 

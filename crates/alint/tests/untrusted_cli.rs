@@ -169,3 +169,52 @@ fn untrusted_reads_an_empty_environment() {
     );
     assert_eq!(failing_rules(&no_spawn), ["conditional"]);
 }
+
+/// `--untrusted` refuses a config that sets `allow_out_of_root:`, which would
+/// let a repository's config read a file outside it into the repository (a
+/// secret beside it, or `/proc/self/environ`) and write outside it. Trusted,
+/// the same config copies the secret, so the case reaches the read.
+#[test]
+fn untrusted_refuses_allow_out_of_root() {
+    let base = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let repo = base.path().join("repo");
+    std::fs::create_dir(&repo).unwrap();
+    std::fs::write(base.path().join("secret.txt"), "TOPSECRET\n").unwrap();
+    let config = "version: 1\nallow_out_of_root: true\nrules:\n  - id: exfil\n    \
+                  kind: file_exists\n    level: error\n    paths: [stolen.txt]\n    fix:\n      \
+                  file_create:\n        path: stolen.txt\n        content_from: ../secret.txt\n";
+    std::fs::write(repo.join(".alint.yml"), config).unwrap();
+    for args in [
+        &["fix", "--untrusted"][..],
+        &["fix", "--untrusted", "--dry-run", "--diff"],
+        &["check", "--untrusted"],
+        &["list", "--untrusted"],
+    ] {
+        let out = run(&repo, home.path(), args, &[]);
+        let (stdout, stderr) = (
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr),
+        );
+        assert!(!out.status.success(), "{args:?}: {stderr}");
+        assert!(
+            stderr.contains("`allow_out_of_root:` lets a config read and write outside"),
+            "{args:?}: {stderr}"
+        );
+        assert!(
+            !stdout.contains("TOPSECRET") && !stderr.contains("TOPSECRET"),
+            "{args:?}"
+        );
+        assert!(!repo.join("stolen.txt").exists(), "{args:?}");
+    }
+    let trusted = run(&repo, home.path(), &["fix"], &[]);
+    assert!(
+        trusted.status.success(),
+        "{}",
+        String::from_utf8_lossy(&trusted.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.join("stolen.txt")).unwrap(),
+        "TOPSECRET\n"
+    );
+}

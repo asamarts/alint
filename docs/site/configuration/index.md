@@ -410,6 +410,10 @@ The option also lets your own rules' fixes leave the root, for the rules it name
 a fix names. A fix of a rule an `extends:`'d ruleset or a nested config shaped never writes or
 reads outside the root, and is reported skipped.
 
+A config that sets the option fails to load under `--untrusted`, in a language server workspace
+that is not trusted, and in a policy test (`alint test`): a repository you do not trust could
+otherwise copy a file from outside it into itself.
+
 ### `baseline`
 
 Path to a committed baseline file that grandfathers pre-existing violations, so `alint check` reports and gates on only *new* findings. Persisting it here means CI need not pass `--baseline` on every run.

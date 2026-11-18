@@ -1160,6 +1160,16 @@ pub(crate) fn load_recursive(
 
     let display = local_source_display(&canonical, confine.or(state.display_root.as_deref()));
     let mut config = read_local_config(&canonical, file, &display, state, opts, context)?;
+    if is_top
+        && opts.out_of_root_policy == crate::OutOfRootPolicy::Deny
+        && !config.allow_out_of_root.is_confined()
+    {
+        return Err(Error::Other(format!(
+            "{display}: `allow_out_of_root:` lets a config read and write outside the \
+             repository; an untrusted load (`--untrusted`, an editor workspace that is not \
+             trusted, or a policy test) refuses it"
+        )));
+    }
 
     // W2 (auto-fix.md 5.5): `trusted_extends:` is a top-level authority. An is_top
     // config (the user's own `.alint.yml` or a `.alint.d/` drop-in) owns the

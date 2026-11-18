@@ -116,9 +116,10 @@ block.
   `.alint.yml` is trusted like its `Makefile`; this flag is the language
   server's untrusted mode for the command line. It refuses everything
   `--no-spawn` refuses, naming itself; refuses a remote `extends:` before
-  anything is fetched; and gives the config an empty environment, so
-  `{{env.NAME}}` takes its `default(...)` (or fails to load without one) and
-  `env.NAME` in a `when:` is unset. `--no-spawn` alone leaves those two open:
+  anything is fetched, and `allow_out_of_root:`, which would let the config
+  read and write outside the repository; and gives the config an empty
+  environment, so `{{env.NAME}}` takes its `default(...)` (or fails to load
+  without one) and `env.NAME` in a `when:` is unset. `--no-spawn` alone leaves those two open:
   the config still fetches its remote `extends:` and reads the environment,
   and an `extends:` URL built from environment values carries them to the
   host it names. Use `--untrusted`, or your own config (`-c`), for a

@@ -678,3 +678,29 @@ fn a_version_two_config_under_test_warns_once_a_run() {
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(String::from_utf8(output.stderr).unwrap(), "");
 }
+
+/// A policy test's config may not set `allow_out_of_root:`: the runner loads
+/// it as untrusted, which refuses the key before any `extends:` resolves, so
+/// a test cannot read a file beside the package (or the runner's own
+/// environment through `/proc/self/environ`) into its output.
+#[test]
+fn a_policy_test_config_may_not_set_allow_out_of_root() {
+    let root = tempfile::tempdir().unwrap();
+    write(
+        root.path(),
+        "alint-tests/escape.yml",
+        "test_version: 1\nname: escape\ngiven:\n  tree:\n    README.md: \"ok\\n\"\n  config: |\n    \
+         version: 1\n    allow_out_of_root: true\n    rules:\n      - id: readme\n        \
+         kind: file_exists\n        paths: README.md\n        level: error\nwhen: [check]\n\
+         expect:\n  - exit: success\n    violations: []\n",
+    );
+    let output = run(root.path(), &["test", "--format", "json"]);
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert_ne!(output.status.code(), Some(0), "{text}");
+    assert!(
+        text.contains(
+            "\"configuration_error\": \".escape.inline.alint.yml: `allow_out_of_root:` lets"
+        ),
+        "{text}"
+    );
+}

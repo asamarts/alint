@@ -71,9 +71,9 @@ impl From<String> for ConfigError {
 /// something the session left out.
 pub(crate) const UNTRUSTED_NOTE: &str = "alint: this workspace is not trusted, so command rules, \
      rules that run Git (`git_*` kinds, `changeset_requires_path`, `pair_changed_together`, \
-     `git_tracked_only`, `changed_since`), custom facts, \
-     remote `extends:` and environment values (`{{env.*}}`, `env.*` in `when:`) are off; other \
-     rules lint as usual. To turn them on, trust the workspace: in VS Code, grant \
+     `git_tracked_only`, `changed_since`), custom facts, remote `extends:`, \
+     `allow_out_of_root:` and environment values (`{{env.*}}`, `env.*` in `when:`) are off; \
+     other rules lint as usual. To turn them on, trust the workspace: in VS Code, grant \
      Workspace Trust; in other editors, start the server with the initialization option \
      `\"trusted\": true`. See https://alint.org/docs/cli/lsp/#workspace-trust";
 
@@ -366,12 +366,14 @@ fn load_session_config(
     if !trusted {
         load_options.environment = environment.clone();
         load_options.remote_policy = alint_dsl::RemotePolicy::Deny;
+        load_options.out_of_root_policy = alint_dsl::OutOfRootPolicy::Deny;
     }
     let config = alint_dsl::load_with(config_path, &load_options).map_err(|error| {
         let message = error.to_string();
         let untrusted = !trusted
             && (environment.asked.load(Ordering::Relaxed)
-                || message.contains("remote `extends` is disabled"));
+                || message.contains("remote `extends` is disabled")
+                || message.contains("an untrusted load"));
         let mut message = format!("loading config: {message}");
         if untrusted {
             message.push_str("\n\n");

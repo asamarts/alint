@@ -78,9 +78,10 @@ pub(crate) struct Cli {
     /// The language server's untrusted mode, for the command line. A config
     /// that `--no-spawn` refuses is refused (rules, fixes and facts that start
     /// processes, rules that run Git, `--changed` and `--base`), naming this
-    /// flag; a remote `extends:` is refused before anything is fetched; and
-    /// `{{env.NAME}}` in the config, `env.*` in a `when:` and a legacy
-    /// `${VAR}` read an empty environment. `--no-spawn` alone leaves the last
+    /// flag; a remote `extends:` is refused before anything is fetched; so is
+    /// `allow_out_of_root:`, which would let the config read and write outside
+    /// the repository; and `{{env.NAME}}` in the config, `env.*` in a `when:`
+    /// and a legacy `${VAR}` read an empty environment. `--no-spawn` alone leaves the last
     /// two open. Applies where `--no-spawn` does; `lsp` takes every workspace
     /// as untrusted, whatever the client says.
     #[arg(long, global = true)]

@@ -438,7 +438,8 @@ impl alint_dsl::EnvironmentProvider for EmptyEnvironment {
 
 /// The options a config loads with. With `--untrusted`, as the language
 /// server loads an untrusted workspace's: a remote `extends:` is refused
-/// before anything is fetched, and `{{env.NAME}}` reads an empty environment.
+/// before anything is fetched, a top-level `allow_out_of_root:` is refused,
+/// and `{{env.NAME}}` reads an empty environment.
 fn load_options<'catalog>(
     registry: &'catalog RuleRegistry,
     cli: &Cli,
@@ -447,6 +448,7 @@ fn load_options<'catalog>(
     if cli.untrusted {
         options.environment = std::sync::Arc::new(EmptyEnvironment);
         options.remote_policy = alint_dsl::RemotePolicy::Deny;
+        options.out_of_root_policy = alint_dsl::OutOfRootPolicy::Deny;
     }
     options
 }

@@ -385,6 +385,7 @@ impl Runner {
             .with_environment(context.environment.clone())
             .with_config_source(context.source_provider.clone())
             .with_remote_policy(alint_dsl::RemotePolicy::Deny)
+            .with_out_of_root_policy(alint_dsl::OutOfRootPolicy::Deny)
             .with_repository_root(Some(context.repository.to_path_buf()))
             .with_global_git_excludes(false);
         let config = match self.load_config(context.config_path, &options) {
@@ -393,12 +394,6 @@ impl Runner {
                 return Ok(prepared_configuration_error(&error.to_string(), context));
             }
         };
-        if !config.allow_out_of_root.is_confined() {
-            return Ok(prepared_configuration_error(
-                "allow_out_of_root is disabled in public policy tests",
-                context,
-            ));
-        }
         if let Err(error) = enforce_capabilities(
             context.test,
             &self.options,

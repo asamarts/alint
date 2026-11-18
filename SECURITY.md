@@ -137,8 +137,9 @@ kinds), spawning fixes and `custom:` facts, fetches its remote `extends:`, and r
 environment values it names. To lint a repository you do not trust, use your own config
 (`alint check -c your-config.yml`) or `--untrusted`, the language server's untrusted mode on the
 command line: it refuses every rule, fix and fact that starts a process or runs Git (and
-`--changed` and `--base`), refuses a remote `extends:` before anything is fetched, and gives the
-config an empty environment. `--no-spawn` refuses the processes alone: the config still fetches
+`--changed` and `--base`), refuses a remote `extends:` before anything is fetched and a top-level
+`allow_out_of_root:`, which would let the config read and write outside the repository, and gives
+the config an empty environment. `--no-spawn` refuses the processes alone: the config still fetches
 the remote `extends:` it names and reads the environment values it names, and an `extends:` URL
 built from those values carries them to the host it names. The language server (`alint lsp`)
 runs none of these until the editor says the workspace is trusted. Everything else (a nested or
@@ -221,12 +222,14 @@ posture is:
   runs Git (the `git_*` kinds, `changeset_requires_path`,
   `pair_changed_together`, `git_tracked_only`, `scope_filter.changed_since`)
   is refused (skipped by the server), and so are `--changed` and `--base`.
+  `alint test` is the exception: it runs Git in the sandbox repositories it
+  makes for a test's `given.git`, never in the repository it runs from.
 - **The language server waits for workspace trust.** Until the editor sends
   the initialization option `{"trusted": true}` (VS Code sends its Workspace
   Trust state), `alint lsp` skips spawning rules, rules that run Git and
   `custom:` facts (a rule whose fix alone spawns lints without the fix),
-  fetches no remote `extends:` and reads no environment value; other rules
-  lint as usual. `alint lsp --untrusted` takes every workspace as untrusted,
+  fetches no remote `extends:`, refuses `allow_out_of_root:` and reads no
+  environment value; other rules lint as usual. `alint lsp --untrusted` takes every workspace as untrusted,
   whatever the editor says. A
   nested or vendored `.alint.yml` never governs a file as a top-level config:
   the workspace folder's config does, as for `alint check` from the root, or,

@@ -439,8 +439,10 @@ policy-test package the user does not trust.
   a remote `extends:` or environment values: for a repository you do not trust, use `--untrusted`.
 - **`--untrusted`** (global flag): lint a repository you do not trust with its own config. It
   refuses what `--no-spawn` refuses, naming `--untrusted`, refuses a remote `extends:` before
-  connecting, and gives the config an empty environment, so `{{env.NAME}}`, `env.*` in a `when:` and
-  a legacy `${VAR}` read nothing. `alint lsp --untrusted` takes every workspace as untrusted,
+  connecting and a top-level `allow_out_of_root:` before its `extends:` resolves (it would let the
+  config read and write outside the repository; the language server's untrusted mode and `alint
+  test` refuse it too, through `LoadOptions::with_out_of_root_policy`), and gives the config an
+  empty environment, so `{{env.NAME}}`, `env.*` in a `when:` and a legacy `${VAR}` read nothing. `alint lsp --untrusted` takes every workspace as untrusted,
   whatever the editor sends
   ([ADR-0044](docs/adr/0044-untrusted-runs-git-as-a-process-and-a-wider-memory-gate.md)).
   SECURITY.md recommends it for a checkout you do not trust.
