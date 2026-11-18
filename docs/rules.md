@@ -866,6 +866,13 @@ The `iter` namespace exposes:
 
 **Token values are literal paths.** When a token expands into a nested option that alint compiles as a glob (`paths:`, and per kind options such as `dir_contains`'s `select` / `require`, `dir_only_contains`'s `select` / `allow`, `unique_by`'s `select`, `pair`'s `primary`, or a nested `for_each_*`'s own `select`), its value is glob-escaped, so a directory named `app/[slug]` or `pkgs/*` matches only itself rather than acting as a character class or wildcard. The template text around the token keeps its glob meaning (`"{path}/*.tsx"`). Options that are regexes (`for_each_match`'s `select`, `pattern`) or literal paths (`pair`'s `partner`) receive the value unescaped. Messages show the real path, not its escaped form.
 
+<!-- alint:since=0.23 -->
+**A value is substituted once.** In a rule nested two or more levels deep (a `for_each_dir`
+inside a `for_each_file`), the outermost iteration substitutes every token, and the value it
+inserts is text: a file or directory name that spells a token, such as `x{stem}`, is not
+substituted again by the iterations below it.
+<!-- /alint:since -->
+
 ### `dir_contains`
 
 **Categories:** Cross-file, Structure

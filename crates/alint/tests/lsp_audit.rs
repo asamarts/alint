@@ -16,7 +16,6 @@ use crate::lsp_common;
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::process::Command;
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
@@ -222,7 +221,7 @@ fn lsp_a_package_config_does_not_govern_without_nested_configs() {
     std::fs::write(root.join("pkg/a.txt"), text).unwrap();
     let file_uri = uri_of(&root.join("pkg/a.txt"));
 
-    let cli = Command::new(env!("CARGO_BIN_EXE_alint"))
+    let cli = crate::hermetic::command(env!("CARGO_BIN_EXE_alint"))
         .args(["check", "--format", "json"])
         .current_dir(root)
         .output()
@@ -268,7 +267,7 @@ fn lsp_honors_nested_configs_like_the_cli() {
     std::fs::write(root.join("pkg/a.txt"), text).unwrap();
     let file_uri = uri_of(&root.join("pkg/a.txt"));
 
-    let cli = Command::new(env!("CARGO_BIN_EXE_alint"))
+    let cli = crate::hermetic::command(env!("CARGO_BIN_EXE_alint"))
         .args(["check", "--format", "json"])
         .current_dir(root)
         .output()
@@ -379,7 +378,7 @@ fn lsp_honors_config_baseline() {
     )
     .unwrap();
     std::fs::write(root.join("a.txt"), "old TODO\n").unwrap();
-    let status = Command::new(env!("CARGO_BIN_EXE_alint"))
+    let status = crate::hermetic::command(env!("CARGO_BIN_EXE_alint"))
         .args(["baseline", "--quiet"])
         .current_dir(root)
         .status()

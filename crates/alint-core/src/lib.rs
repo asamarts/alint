@@ -128,7 +128,7 @@ pub use rule::{
     eval_per_file, expect_matches_violation, missing_file_violation, read_for_fix,
     read_source_for_fix, too_large_file_violation, unreadable_file_violation, write_atomic,
 };
-pub use scope::Scope;
+pub use scope::{Scope, scope_match_count};
 pub use scope_filter::{
     ManifestDeriveTarget, ManifestPathSpec, ResolvedManifestScope, ScopeFilter, ScopeFilterSpec,
     reject_scope_filter_on_cross_file, reject_scope_filter_with_reason,

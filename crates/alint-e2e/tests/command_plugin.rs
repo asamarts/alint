@@ -16,7 +16,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use alint_core::{Engine, Level, RuleEntry, WalkOptions, walk};
+use alint_core::{Engine, Level, RuleEntry, walk};
 
 use crate::support;
 
@@ -69,7 +69,7 @@ rules:
 "#,
     );
     let engine = build_engine(&cfg);
-    let index = walk(root, &WalkOptions::default()).unwrap();
+    let index = walk(root, &support::walk_options()).unwrap();
     let report = engine.run(root, &index).unwrap();
     let violations: usize = report.results.iter().map(|r| r.violations.len()).sum();
     assert_eq!(violations, 0, "unexpected: {report:?}");
@@ -96,7 +96,7 @@ rules:
 "#,
     );
     let engine = build_engine(&cfg);
-    let index = walk(root, &WalkOptions::default()).unwrap();
+    let index = walk(root, &support::walk_options()).unwrap();
     let report = engine.run(root, &index).unwrap();
 
     let r = report
@@ -157,7 +157,7 @@ rules:
     changed.insert(PathBuf::from("b.txt"));
     let engine = build_engine(&cfg).with_changed_paths(changed);
 
-    let index = walk(root, &WalkOptions::default()).unwrap();
+    let index = walk(root, &support::walk_options()).unwrap();
     engine.run(root, &index).unwrap();
 
     let invoked: Vec<String> = std::fs::read_dir(&markers)

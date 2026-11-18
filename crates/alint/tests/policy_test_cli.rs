@@ -1,12 +1,12 @@
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
 fn alint() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_alint"))
 }
 
 fn run(root: &Path, args: &[&str]) -> Output {
-    Command::new(alint())
+    crate::hermetic::command(alint())
         .args(args)
         .current_dir(root)
         .env("NO_COLOR", "1")
@@ -383,7 +383,7 @@ fn operational_preflight_failure_uses_exit_three_without_marking_the_test_invali
         &passing_test("cannot allocate sandbox", "failure", None),
     );
     let missing_temp = root.path().join("missing-temp");
-    let output = Command::new(alint())
+    let output = crate::hermetic::command(alint())
         .args(["test", "--format", "json"])
         .current_dir(root.path())
         .env("NO_COLOR", "1")
@@ -519,7 +519,7 @@ file_absent\n        paths: \"secret-*.txt\"\n        level: error\nwhen: [check
 exit: policy_failure\n    violations:\n      - { rule: no-secret, path: secret-1.txt }\n",
     );
 
-    let output = Command::new(alint())
+    let output = crate::hermetic::command(alint())
         .args(["test"])
         .current_dir(root.path())
         .env("NO_COLOR", "1")
@@ -534,4 +534,106 @@ exit: policy_failure\n    violations:\n      - { rule: no-secret, path: secret-1
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+/// Nor does it hide a nested config: the walk that finds `nested_configs:`
+/// files reads no global excludes file either (nor a `~/.gitconfig` that
+/// names one), as the test's own walk reads none. It did, so a host whose
+/// excludes listed `.alint.yml` dropped the nested rules, and a test of them
+/// passed with no finding. `alint check` keeps honouring the file.
+#[test]
+fn the_hosts_global_excludes_file_hides_no_nested_config_from_a_test() {
+    let root = tempfile::tempdir().unwrap();
+    let host = tempfile::tempdir().unwrap();
+    write(host.path(), "git/ignore", ".alint.yml\n");
+    // A `.gitconfig` in the host's home can name an excludes file too.
+    write(host.path(), "excludes", "*.yml\n");
+    write(
+        host.path(),
+        ".gitconfig",
+        &format!(
+            "[core]\n\texcludesFile = {}\n",
+            host.path().join("excludes").display()
+        ),
+    );
+    write(
+        root.path(),
+        "alint-tests/nested.yml",
+        r#"test_version: 1
+name: nested
+given:
+  tree:
+    pkg:
+      .alint.yml: |
+        version: 1
+        rules:
+          - id: no-secret
+            kind: file_absent
+            paths: "secret-*.txt"
+            level: error
+      secret-1.txt: "x"
+  config: |
+    version: 1
+    nested_configs: true
+when: [check]
+expect:
+  - exit: policy_failure
+    violations:
+      - { rule: no-secret, path: pkg/secret-1.txt }
+"#,
+    );
+
+    for xdg_config_home in [host.path().to_path_buf(), host.path().join("no-xdg")] {
+        let output = crate::hermetic::command(alint())
+            .args(["test"])
+            .current_dir(root.path())
+            .env("NO_COLOR", "1")
+            .env("XDG_CONFIG_HOME", &xdg_config_home)
+            .env("HOME", host.path())
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "XDG_CONFIG_HOME={}: {}{}",
+            xdg_config_home.display(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    // `alint check` still honours the user's excludes file there, as its own
+    // walk does: the nested config it lists is not read.
+    let tree = tempfile::tempdir().unwrap();
+    write(
+        tree.path(),
+        ".alint.yml",
+        "version: 1\nnested_configs: true\n",
+    );
+    write(
+        tree.path(),
+        "pkg/.alint.yml",
+        "version: 1\nrules:\n  - id: no-secret\n    kind: file_absent\n    \
+         paths: \"secret-*.txt\"\n    level: error\n",
+    );
+    write(tree.path(), "pkg/secret-1.txt", "x");
+    let empty = tempfile::tempdir().unwrap();
+    for (home, expected) in [(host.path(), 0), (empty.path(), 1)] {
+        let output = crate::hermetic::command(alint())
+            .args(["check"])
+            .current_dir(tree.path())
+            .env("NO_COLOR", "1")
+            .env("XDG_CONFIG_HOME", home)
+            .env("HOME", home)
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(expected),
+            "HOME={}: {}{}",
+            home.display(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }

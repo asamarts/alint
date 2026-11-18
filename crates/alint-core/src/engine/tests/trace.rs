@@ -39,7 +39,7 @@ fn traced_entry(spec: Arc<crate::RuleSpec>, rule: Box<dyn Rule>) -> RuleEntry {
 fn selected_trace_uses_production_dispatch_and_never_runs_unrelated_rules() {
     let tmp = tempfile::tempdir().unwrap();
     std::fs::write(tmp.path().join("a.txt"), b"payload").unwrap();
-    let index = crate::walk(tmp.path(), &crate::WalkOptions::default()).unwrap();
+    let index = crate::walk(tmp.path(), &crate::WalkOptions::test_default()).unwrap();
     let selected_spec = trace_spec("selected", "error", "**/*.txt", true);
     let unrelated_spec = trace_spec("unrelated", "error", "**/*", false);
     let engine = Engine::from_entries(
@@ -122,7 +122,7 @@ fn per_file_trace_records_exact_dispatch_counts_and_terminal_outcome() {
     let tmp = tempfile::tempdir().unwrap();
     std::fs::write(tmp.path().join("a.txt"), b"wrong").unwrap();
     std::fs::write(tmp.path().join("ignore.md"), b"wrong").unwrap();
-    let index = crate::walk(tmp.path(), &crate::WalkOptions::default()).unwrap();
+    let index = crate::walk(tmp.path(), &crate::WalkOptions::test_default()).unwrap();
     let spec = trace_spec("per-file", "error", "**/*.txt", false);
     let rule = Box::new(PerFileStub {
         id: "per-file".into(),
@@ -147,7 +147,7 @@ fn per_file_trace_records_exact_dispatch_counts_and_terminal_outcome() {
 fn trace_represents_common_gate_skips_and_failures() {
     let tmp = tempfile::tempdir().unwrap();
     std::fs::write(tmp.path().join("a.txt"), b"payload").unwrap();
-    let index = crate::walk(tmp.path(), &crate::WalkOptions::default()).unwrap();
+    let index = crate::walk(tmp.path(), &crate::WalkOptions::test_default()).unwrap();
 
     let off_spec = trace_spec("off", "off", "**/*.txt", false);
     let off = Engine::from_entries(
@@ -207,7 +207,7 @@ fn trace_represents_common_gate_skips_and_failures() {
 fn trace_represents_changed_expect_manifest_git_and_time_gates() {
     let tmp = tempfile::tempdir().unwrap();
     std::fs::write(tmp.path().join("a.txt"), b"payload").unwrap();
-    let index = crate::walk(tmp.path(), &crate::WalkOptions::default()).unwrap();
+    let index = crate::walk(tmp.path(), &crate::WalkOptions::test_default()).unwrap();
 
     let changed_spec = trace_spec("changed", "error", "**/*.txt", false);
     let changed_entry = || {
@@ -271,7 +271,7 @@ fn trace_represents_changed_expect_manifest_git_and_time_gates() {
     );
 
     std::fs::write(tmp.path().join("package.json"), br#"{"files":["a.txt"]}"#).unwrap();
-    let manifest_index = crate::walk(tmp.path(), &crate::WalkOptions::default()).unwrap();
+    let manifest_index = crate::walk(tmp.path(), &crate::WalkOptions::test_default()).unwrap();
     let manifest_spec = trace_spec("manifest", "error", "**/*.txt", false);
     let manifest = Engine::from_entries(
         vec![traced_entry(
@@ -312,7 +312,8 @@ fn trace_represents_changed_expect_manifest_git_and_time_gates() {
     );
 
     std::fs::write(tmp.path().join("package.json"), b"{not json").unwrap();
-    let invalid_manifest_index = crate::walk(tmp.path(), &crate::WalkOptions::default()).unwrap();
+    let invalid_manifest_index =
+        crate::walk(tmp.path(), &crate::WalkOptions::test_default()).unwrap();
     let unavailable_manifest = Engine::from_entries(
         vec![traced_entry(manifest_spec, manifest_stub("manifest"))],
         nested_registry(),
@@ -396,7 +397,7 @@ fn trace_represents_changed_expect_manifest_git_and_time_gates() {
 fn ordinary_run_never_constructs_a_trace_recorder() {
     let tmp = tempfile::tempdir().unwrap();
     std::fs::write(tmp.path().join("a.txt"), b"payload").unwrap();
-    let index = crate::walk(tmp.path(), &crate::WalkOptions::default()).unwrap();
+    let index = crate::walk(tmp.path(), &crate::WalkOptions::test_default()).unwrap();
     let before = crate::trace::recorders_created_on_current_thread();
     Engine::new(vec![stub("ordinary", "**/*.txt")], RuleRegistry::new())
         .run(tmp.path(), &index)

@@ -154,14 +154,21 @@ PLATFORM_ALLOWLIST=(
   # Debug-build checks: private assertions on the rule registry and the fix
   # merge (`assert!`, `assert_eq!`, `matches!`, `panic!`), the imports they
   # use, and index-build timing traces (a private macro, whose body logs with
-  # `tracing::debug!`, with a no-op twin for release builds). None declares
-  # public API or names a parser type.
+  # `tracing::debug!`, with a no-op twin for release builds), and the count of
+  # the paths `Scope::matches` tests (a private thread-local counter, the
+  # statement that adds to it, and the bodies of the hidden
+  # `scope_match_count` that reads it, `None` in a release build). None
+  # declares public API or names a parser type.
   "crates/alint-core/src/engine/fix.rs|cfg(debug_assertions)|in fn fix|assert!"
   "crates/alint-core/src/registry.rs|cfg(debug_assertions)|fn assert_dispatch_and_content|assert!, assert_eq!, panic!"
   "crates/alint-core/src/registry.rs|cfg(debug_assertions)|fn assert_instance_conformance|assert!, assert_eq!, matches!"
   "crates/alint-core/src/registry.rs|cfg(debug_assertions)|in fn build"
   "crates/alint-core/src/registry.rs|cfg(debug_assertions)|use crate::kind_meta::"
   "crates/alint-core/src/registry.rs|cfg(debug_assertions)|use crate::rule::GitTrackedMode"
+  "crates/alint-core/src/scope.rs|cfg(debug_assertions)|in fn matches"
+  "crates/alint-core/src/scope.rs|cfg(debug_assertions)|in fn scope_match_count"
+  "crates/alint-core/src/scope.rs|cfg(debug_assertions)|std::thread_local!|std::thread_local!, static"
+  "crates/alint-core/src/scope.rs|cfg(not(debug_assertions))|in fn scope_match_count"
   "crates/alint-core/src/walker.rs|cfg(debug_assertions)|in fn all_path_set_arc"
   "crates/alint-core/src/walker.rs|cfg(debug_assertions)|in fn children_of"
   "crates/alint-core/src/walker.rs|cfg(debug_assertions)|in fn file_entry_indices_arc"

@@ -2,7 +2,7 @@
 //! surface may serialize their evidence bytes.
 
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Output;
 
 const DOTENV_SECRET: &str = "DOTENV_TOKEN_VALUE_DO_NOT_REPORT";
 const PROPERTIES_SECRET: &str = "PROPERTIES_TOKEN_VALUE_DO_NOT_REPORT";
@@ -11,7 +11,7 @@ const RELATED_PATH_SECRET: &str = "RELATED_PATH_VALUE_DO_NOT_REPORT";
 const ENV_PATH_SECRET: &str = "ENV_SELECTOR_PATH_DO_NOT_REPORT";
 
 fn run(root: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_alint"))
+    crate::hermetic::command(env!("CARGO_BIN_EXE_alint"))
         .args(args)
         .current_dir(root)
         .env("NO_COLOR", "1")

@@ -70,7 +70,7 @@ impl Rule for DirAbsentRule {
         // hands us a pre-filtered `ctx.index` (dir_aware mode);
         // the per-entry `dir_has_tracked_files` check that lived
         // here is now subsumed by the engine narrowing.
-        for entry in ctx.index.dirs() {
+        for entry in self.scope.candidate_dirs(ctx.index) {
             if !self.scope.matches(&entry.path, ctx.index) {
                 continue;
             }

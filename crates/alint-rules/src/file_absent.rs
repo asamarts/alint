@@ -92,7 +92,7 @@ impl Rule for FileAbsentRule {
         // hands us a pre-filtered `ctx.index` (file_only mode);
         // the per-entry `is_git_tracked` check that lived here
         // is now subsumed by the engine-side narrowing.
-        for entry in ctx.index.files() {
+        for entry in self.scope.candidate_files(ctx.index) {
             if !self.scope.matches(&entry.path, ctx.index) {
                 continue;
             }

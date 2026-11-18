@@ -9,14 +9,14 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
 fn alint() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_alint"))
 }
 
 fn run(dir: &Path, args: &[&str]) -> Output {
-    Command::new(alint())
+    crate::hermetic::command(alint())
         .args(args)
         .current_dir(dir)
         .output()
@@ -103,7 +103,7 @@ fn git(dir: &Path, args: &[&str]) -> Output {
     // below fail. `-c` scopes the override to each invocation (init/add/commit/apply).
     let mut full = vec!["-c", "core.autocrlf=false"];
     full.extend_from_slice(args);
-    Command::new("git")
+    crate::hermetic::git()
         .args(&full)
         .current_dir(dir)
         .env("GIT_AUTHOR_NAME", "t")
@@ -481,7 +481,7 @@ fn diff_names_a_deferred_file_chosen_by_an_environment_value_redacted() {
     )
     .unwrap();
     std::fs::write(tmp.path().join("hunter2-dir/a.txt"), "TODO x   \n").unwrap();
-    let out = Command::new(alint())
+    let out = crate::hermetic::command(alint())
         .args(["fix", "--diff", "--unsafe-fixes", "."])
         .current_dir(tmp.path())
         .env("DIR", "hunter2-dir")

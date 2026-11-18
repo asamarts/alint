@@ -127,6 +127,31 @@ pub fn deny_for_process() {
     DENIED.store(true, Ordering::Relaxed);
 }
 
+/// The environment of every Git command alint-core's unit tests run, those
+/// of the code under test included: no system or global configuration file,
+/// and no global excludes or attributes file (`$XDG_CONFIG_HOME/git/ignore`,
+/// which `GIT_CONFIG_GLOBAL` does not cover; a path below the null device
+/// reads as no file). A test's repository then reads the same on every
+/// machine: a host whose global excludes listed `*.txt` hid the files tests
+/// wrote, and `git add` refused them.
+#[cfg(test)]
+pub(crate) const TEST_GIT_ENVIRONMENT: [(&str, &str); 3] = {
+    const NULL_DEVICE: &str = if cfg!(windows) { "NUL" } else { "/dev/null" };
+    [
+        ("GIT_CONFIG_NOSYSTEM", "1"),
+        ("GIT_CONFIG_GLOBAL", NULL_DEVICE),
+        ("XDG_CONFIG_HOME", NULL_DEVICE),
+    ]
+};
+
+/// A `git` command for a unit test's own setup, in [`TEST_GIT_ENVIRONMENT`].
+#[cfg(test)]
+pub(crate) fn test_git() -> Command {
+    let mut command = Command::new("git");
+    command.envs(TEST_GIT_ENVIRONMENT);
+    command
+}
+
 /// A Git command for `root`, naming the repository alint found for it
 /// ([`repository::find_repository`]) with `--git-dir` and `--work-tree`, so
 /// Git discovers none: a directory shaped like a bare repository is content,
@@ -160,6 +185,8 @@ fn git_command(root: &Path) -> Option<Command> {
         command.env_clear().envs(environment);
     }
     clear_git_repository_env(&mut command, environment.as_deref());
+    #[cfg(test)]
+    command.envs(TEST_GIT_ENVIRONMENT);
     // Repository paths are byte-exact inputs, never user-authored pathspecs;
     // replacement refs are clone-local state, never repository history; log
     // display preferences must not invoke signature verifiers or alter stdout.

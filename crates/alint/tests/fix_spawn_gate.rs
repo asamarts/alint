@@ -18,7 +18,7 @@
 //! *trusted* top-level config, DOES untrack the file.
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
 fn alint_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_alint"))
@@ -27,14 +27,14 @@ fn alint_bin() -> PathBuf {
 /// Is `git` on PATH? The canary needs a real repo, so skip cleanly on a git-less
 /// box; CI always has `git`.
 fn git_available() -> bool {
-    Command::new("git")
+    crate::hermetic::git()
         .arg("--version")
         .output()
         .is_ok_and(|o| o.status.success())
 }
 
 fn run(dir: &Path, args: &[&str]) -> Output {
-    Command::new(alint_bin())
+    crate::hermetic::command(alint_bin())
         .args(args)
         .current_dir(dir)
         .output()
@@ -42,7 +42,7 @@ fn run(dir: &Path, args: &[&str]) -> Output {
 }
 
 fn git(dir: &Path, args: &[&str]) {
-    let ok = Command::new("git")
+    let ok = crate::hermetic::git()
         .arg("-C")
         .arg(dir)
         .args(args)
@@ -67,7 +67,7 @@ fn scaffold_git_repo() -> tempfile::TempDir {
 }
 
 fn is_tracked(dir: &Path, name: &str) -> bool {
-    let out = Command::new("git")
+    let out = crate::hermetic::git()
         .arg("-C")
         .arg(dir)
         .args(["ls-files", "--", name])

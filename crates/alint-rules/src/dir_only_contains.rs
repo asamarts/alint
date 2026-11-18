@@ -69,7 +69,7 @@ impl Rule for DirOnlyContainsRule {
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
-        for dir in ctx.index.dirs() {
+        for dir in self.select_scope.candidate_dirs(ctx.index) {
             if !self.select_scope.matches(&dir.path, ctx.index) {
                 continue;
             }

@@ -425,6 +425,7 @@ EveryMatchingHasRule {
             },
             when: None,
             sensitive_configuration: false,
+            rendered: false,
         },
     ],
 }
@@ -951,6 +952,7 @@ ForEachDirRule {
             },
             when: None,
             sensitive_configuration: false,
+            rendered: false,
         },
     ],
 }
@@ -982,6 +984,7 @@ ForEachFileRule {
             },
             when: None,
             sensitive_configuration: false,
+            rendered: false,
         },
     ],
 }
@@ -1655,9 +1658,6 @@ KeyParityRule {
     peers: "locales/*.json",
     peers_selector: Selector {
         scope: Scope { ... },
-        within: Some(
-            "locales",
-        ),
     },
     literal_peer: None,
     scope: Scope { ... },

@@ -225,7 +225,9 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
 /// place new cross-file iteration rules thread their require
 /// list through.
 /// The parent's `require:` may hold a secret when `parent` reports it
-/// sensitive ([`RuleSpec::field_is_sensitive`]).
+/// sensitive ([`RuleSpec::field_is_sensitive`]). When an iteration built
+/// `parent` ([`RuleSpec::rendered`]), it rendered this list too, and the
+/// parent's own iterations instantiate it as it is.
 pub(crate) fn compile_nested_require(
     parent: &RuleSpec,
     require: Vec<NestedRuleSpec>,
@@ -237,6 +239,7 @@ pub(crate) fn compile_nested_require(
         .map(|(idx, spec)| {
             let mut compiled = CompiledNestedSpec::compile(spec, &parent.id, idx)?;
             compiled.sensitive_configuration = sensitive_configuration;
+            compiled.rendered = parent.rendered;
             Ok(compiled)
         })
         .collect()
@@ -390,11 +393,7 @@ pub(crate) fn visit_sensitive_for_each(
     let Some(registry) = ctx.registry else {
         return;
     };
-    let entries: Box<dyn Iterator<Item = _>> = match mode {
-        IterateMode::Dirs => Box::new(ctx.index.dirs()),
-        IterateMode::Files => Box::new(ctx.index.files()),
-        IterateMode::Both => Box::new(ctx.index.dirs().chain(ctx.index.files())),
-    };
+    let entries = iterated_entries(select_scope, ctx.index, mode);
 
     let needed_tokens = nested_path_tokens(require);
     for entry in entries {
@@ -441,6 +440,26 @@ pub(crate) fn visit_sensitive_for_each(
             };
             rule.visit_sensitive_paths(parent_explicit || spec.sensitive, ctx, visit);
         }
+    }
+}
+
+/// The entries `mode` iterates that `select_scope` can select
+/// ([`Scope::candidates`]), directories before files for
+/// [`IterateMode::Both`]. A nested iteration's `select:` (`"{path}/*"`) names
+/// its parent's directory, so it reads that directory, not the whole tree.
+fn iterated_entries<'i>(
+    select_scope: &Scope,
+    index: &'i alint_core::FileIndex,
+    mode: IterateMode,
+) -> Box<dyn Iterator<Item = &'i alint_core::FileEntry> + 'i> {
+    match mode {
+        IterateMode::Dirs => Box::new(select_scope.candidate_dirs(index)),
+        IterateMode::Files => Box::new(select_scope.candidate_files(index)),
+        IterateMode::Both => Box::new(
+            select_scope
+                .candidate_dirs(index)
+                .chain(select_scope.candidate_files(index)),
+        ),
     }
 }
 
@@ -493,15 +512,23 @@ fn evaluate_for_each_inner<const TRACE: bool>(
     let child_context = TRACE.then(|| ctx.clone().with_trace(None));
     let nested_ctx = child_context.as_ref().unwrap_or(ctx);
 
-    let entries: Box<dyn Iterator<Item = _>> = match mode {
-        IterateMode::Dirs => Box::new(ctx.index.dirs()),
-        IterateMode::Files => Box::new(ctx.index.files()),
-        IterateMode::Both => Box::new(ctx.index.dirs().chain(ctx.index.files())),
-    };
+    let entries = iterated_entries(select_scope, ctx.index, mode);
 
     let mut violations = Vec::new();
     let needed_tokens = nested_path_tokens(require);
     let mut trace_counts = alint_core::TraceCounts::default();
+    if TRACE {
+        // Every entry of the iterated kind is considered; those outside the
+        // directories `select:` starts with are passed over without a test.
+        let iterated = match mode {
+            IterateMode::Dirs => ctx.index.dirs().count(),
+            IterateMode::Files => ctx.index.files().count(),
+            IterateMode::Both => ctx.index.entries.len(),
+        };
+        trace_counts.considered = u64::try_from(iterated).map_err(|_| {
+            Error::internal("trace counter `nested.selection.considered` overflowed")
+        })?;
+    }
     let mut trace_children = if TRACE {
         ctx.trace_preview_limit()
             .map(alint_core::TracePreviewCollector::new)
@@ -510,12 +537,6 @@ fn evaluate_for_each_inner<const TRACE: bool>(
         None
     };
     for entry in entries {
-        if TRACE {
-            alint_core::TraceCounts::checked_increment(
-                &mut trace_counts.considered,
-                "nested.selection.considered",
-            )?;
-        }
         if !select_scope.matches(&entry.path, ctx.index) {
             continue;
         }
@@ -1066,6 +1087,10 @@ fn evaluate_one_per_file_rule(
 }
 
 #[cfg(test)]
+#[path = "for_each_dir_scan_tests.rs"]
+mod scan_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use alint_core::{FileEntry, FileIndex, RuleRegistry};
@@ -1572,7 +1597,7 @@ require:
         );
 
         let failing_index =
-            alint_core::walk(tmp.path(), &alint_core::WalkOptions::default()).unwrap();
+            alint_core::walk(tmp.path(), &crate::test_support::walk_options()).unwrap();
         let failing = engine
             .trace_rule_with_options(
                 "nested",
@@ -1600,7 +1625,7 @@ require:
 
         std::fs::write(tmp.path().join("pkg-b/marker"), b"ok").unwrap();
         let passing_index =
-            alint_core::walk(tmp.path(), &alint_core::WalkOptions::default()).unwrap();
+            alint_core::walk(tmp.path(), &crate::test_support::walk_options()).unwrap();
         let passing = engine
             .trace_rule("nested", tmp.path(), &passing_index)
             .unwrap();
@@ -1650,7 +1675,7 @@ require:
             vec![alint_core::RuleEntry::new(built).with_spec(spec)],
             registry,
         );
-        let index = alint_core::walk(tmp.path(), &alint_core::WalkOptions::default()).unwrap();
+        let index = alint_core::walk(tmp.path(), &crate::test_support::walk_options()).unwrap();
 
         let trace = engine
             .trace_rule("nested-structured", tmp.path(), &index)
@@ -1692,7 +1717,7 @@ require:
             vec![alint_core::RuleEntry::new(built).with_spec(spec)],
             registry,
         );
-        let index = alint_core::walk(tmp.path(), &alint_core::WalkOptions::default()).unwrap();
+        let index = alint_core::walk(tmp.path(), &crate::test_support::walk_options()).unwrap();
 
         let trace = engine.trace_rule("nested", tmp.path(), &index).unwrap();
         assert_eq!(trace.outcome, alint_core::TraceStatus::AnalysisFailure);

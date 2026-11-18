@@ -6,7 +6,7 @@
 //! `alint_core::baseline`; this asserts the CLI wiring and exit codes.
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
 fn alint() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_alint"))
@@ -37,7 +37,7 @@ fn fixture() -> tempfile::TempDir {
 }
 
 fn run(dir: &Path, args: &[&str]) -> Output {
-    Command::new(alint())
+    crate::hermetic::command(alint())
         .args(args)
         .current_dir(dir)
         .output()
@@ -525,7 +525,7 @@ fn changed_scoped_run_does_not_false_fail_strict_baseline() {
     let d = fixture();
     let root = d.path();
     let git = |args: &[&str]| {
-        std::process::Command::new("git")
+        crate::hermetic::git()
             .args(args)
             .current_dir(root)
             .output()

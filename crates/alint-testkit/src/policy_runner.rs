@@ -350,6 +350,7 @@ impl Runner {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn prepare_step(&self, step: TestStep, context: &ExecutionContext<'_>) -> Result<PreparedStep> {
         let registry = self.registry.clone();
         let options = alint_dsl::LoadOptions {
@@ -360,6 +361,7 @@ impl Runner {
             config_source: context.source_provider.clone(),
             remote_policy: alint_dsl::RemotePolicy::Deny,
             repository_root: Some(context.repository.to_path_buf()),
+            global_git_excludes: false,
         };
         let config = match alint_dsl::load_with(context.config_path, &options) {
             Ok(config) => config,
@@ -433,7 +435,8 @@ impl Runner {
             })?;
             engine = engine.with_analysis_time(analysis_time);
         }
-        // The host's global excludes file must not decide what a test sees.
+        // The host's global excludes file must not decide what a test sees,
+        // here or in nested-config discovery (`global_git_excludes` above).
         let walk_options = WalkOptions::default()
             .with_respect_gitignore(config.respect_gitignore)
             .with_extra_ignores(config.ignore.clone())

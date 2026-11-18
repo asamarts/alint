@@ -96,9 +96,6 @@ pub enum ResourceRead {
 #[derive(Debug)]
 pub struct Selector {
     scope: Scope,
-    /// A directory every path the scope matches lies under, so only the
-    /// entries at and below it are tested.
-    within: Option<std::path::PathBuf>,
 }
 
 /// What a selector picked, in canonical (segment-wise path) order, plus every
@@ -111,46 +108,33 @@ pub struct Selection {
 }
 
 impl Selector {
+    /// A selector for the files `scope` matches. It tests only the scope's
+    /// candidates ([`Scope::candidates`]), the entries under the directories
+    /// its patterns start with, and selects what testing every entry would.
     #[must_use]
     pub fn new(scope: Scope) -> Self {
-        Self {
-            scope,
-            within: None,
-        }
+        Self { scope }
     }
 
     /// A selector for the files one glob `pattern` matches, compiled as
-    /// [`Scope::from_patterns`] compiles it. It tests only the entries under
-    /// the directories the pattern starts with, when it starts with literal
-    /// names (`locales/*.json`, or a nested rule's `{dir}/*.json` once
-    /// rendered), and selects what testing every entry would, in the same
-    /// order. A rule that selects once per iteration of a nested `require:`
-    /// block then reads its own directory rather than the whole tree.
+    /// [`Scope::from_patterns`] compiles it. Like every selector it tests only
+    /// the entries under the directories the pattern starts with, when it
+    /// starts with literal names (`locales/*.json`, or a nested rule's
+    /// `{dir}/*.json` once rendered), so a rule that selects once per
+    /// iteration of a nested `require:` block reads its own directory rather
+    /// than the whole tree.
     ///
     /// # Errors
     ///
     /// An invalid glob, as [`Scope::from_patterns`] reports it.
     pub fn for_glob(pattern: &str) -> crate::error::Result<Self> {
-        Ok(Self {
-            scope: Scope::from_patterns(&[pattern.to_owned()])?,
-            within: crate::scope::literal_dir_prefix(pattern).map(std::path::PathBuf::from),
-        })
-    }
-
-    /// The positions in [`FileIndex::entries`] this selector tests, in index
-    /// order: every entry, or those at and below `within` when the
-    /// index keeps them together.
-    fn candidates(&self, index: &FileIndex) -> std::ops::Range<usize> {
-        self.within
-            .as_deref()
-            .and_then(|dir| index.subtree(dir))
-            .unwrap_or(0..index.entries.len())
+        Ok(Self::new(Scope::from_patterns(&[pattern.to_owned()])?))
     }
 
     #[must_use]
     pub fn select(&self, index: &FileIndex) -> Selection {
         let mut selection = Selection::default();
-        for position in self.candidates(index) {
+        for position in self.scope.candidate_ranges(index).into_iter().flatten() {
             let entry = &index.entries[position];
             if entry.is_dir || !self.scope.matches(&entry.path, index) {
                 continue;
@@ -245,6 +229,35 @@ mod tests {
         index(&paths)
     }
 
+    /// What `selector` selects when it tests every entry of `index`, in
+    /// canonical order, and the matching paths it cannot represent: the
+    /// reference its narrowed selection must equal.
+    fn scan_every_entry(
+        selector: &Selector,
+        index: &FileIndex,
+    ) -> (Vec<(String, Origin)>, Vec<Arc<Path>>) {
+        let mut all = Vec::new();
+        let mut unrepresentable = Vec::new();
+        for (position, entry) in index.entries.iter().enumerate() {
+            if entry.is_dir || !selector.scope.matches(&entry.path, index) {
+                continue;
+            }
+            match RelPath::from_index_path(&entry.path) {
+                Some(path) => all.push((
+                    path,
+                    Origin::Index(ResourceId(u32::try_from(position).unwrap())),
+                )),
+                None => unrepresentable.push(Arc::clone(&entry.path)),
+            }
+        }
+        all.sort_by(|a, b| a.0.cmp(&b.0));
+        let all = all
+            .into_iter()
+            .map(|(path, origin)| (path.as_str().to_owned(), origin))
+            .collect();
+        (all, unrepresentable)
+    }
+
     fn selected(selection: &Selection) -> Vec<(String, Origin)> {
         selection
             .resources
@@ -300,20 +313,21 @@ mod tests {
                 prefix,
                 "{pattern}"
             );
-            let full = Selector::new(Scope::from_patterns(&[pattern.to_owned()]).unwrap());
             let narrowed = Selector::for_glob(pattern).unwrap();
             for sorted in [true, false] {
                 let index = narrowing_index(sorted);
-                let (all, some) = (full.select(&index), narrowed.select(&index));
-                assert_eq!(
-                    selected(&some),
-                    selected(&all),
-                    "{pattern} sorted: {sorted}"
-                );
-                assert_eq!(some.unrepresentable, all.unrepresentable, "{pattern}");
+                let (all, unrepresentable) = scan_every_entry(&narrowed, &index);
+                let some = narrowed.select(&index);
+                assert_eq!(selected(&some), all, "{pattern} sorted: {sorted}");
+                assert_eq!(some.unrepresentable, unrepresentable, "{pattern}");
                 // Only entries at or below the prefix are tested, when the
                 // index keeps them together.
-                let tested = narrowed.candidates(&index);
+                let tested: Vec<usize> = narrowed
+                    .scope
+                    .candidate_ranges(&index)
+                    .into_iter()
+                    .flatten()
+                    .collect();
                 for (position, entry) in index.entries.iter().enumerate() {
                     let below = prefix.is_some_and(|dir| entry.path.starts_with(dir));
                     if sorted && prefix.is_some() {
@@ -328,7 +342,11 @@ mod tests {
         if !backslash_separates {
             let narrowed = Selector::for_glob("a\\\\b/*.json").unwrap();
             let index = narrowing_index(true);
-            assert_eq!(narrowed.candidates(&index).len(), 2);
+            assert_eq!(
+                narrowed.scope.candidate_ranges(&index),
+                [index.subtree(Path::new("a\\b")).unwrap()]
+            );
+            assert_eq!(index.subtree(Path::new("a\\b")).unwrap().len(), 2);
             assert_eq!(selected(&narrowed.select(&index)).len(), 1);
         }
     }

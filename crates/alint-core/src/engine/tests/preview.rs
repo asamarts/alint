@@ -245,7 +245,7 @@ fn a_preview_declines_a_create_into_a_missing_directory_only_when_nothing_makes_
             false,
         ),
     ];
-    let opts = crate::WalkOptions::default();
+    let opts = crate::WalkOptions::test_default();
     for (case, rules, expected) in cases {
         let applied = |report: &FixReport| {
             let result = report
@@ -318,7 +318,7 @@ fn dry_run_predicts_each_create_the_real_fix_finds_unresolved() {
         let opts = crate::WalkOptions {
             respect_gitignore: true,
             extra_ignores: Vec::new(),
-            global_git_excludes: true,
+            global_git_excludes: false,
         };
         let index = crate::walk(root, &opts).unwrap();
         let report = Engine::new(rules, RuleRegistry::new())
@@ -374,7 +374,7 @@ fn dry_run_judges_a_create_by_the_spelling_it_lands_under() {
         let opts = crate::WalkOptions {
             respect_gitignore: true,
             extra_ignores: Vec::new(),
-            global_git_excludes: true,
+            global_git_excludes: false,
         };
         let index = crate::walk(root, &opts).unwrap();
         let report = Engine::new(rules, RuleRegistry::new())
@@ -403,7 +403,7 @@ fn dry_run_takes_the_first_of_two_creates_of_one_ignore_file() {
         let opts = crate::WalkOptions {
             respect_gitignore: true,
             extra_ignores: Vec::new(),
-            global_git_excludes: true,
+            global_git_excludes: false,
         };
         let index = crate::walk(root, &opts).unwrap();
         let report = Engine::new(rules, RuleRegistry::new())
@@ -432,7 +432,7 @@ fn dry_run_reads_an_absolute_create_inside_the_root_as_relative() {
     let opts = crate::WalkOptions {
         respect_gitignore: true,
         extra_ignores: Vec::new(),
-        global_git_excludes: true,
+        global_git_excludes: false,
     };
     let index = crate::walk(&root, &opts).unwrap();
     let report = Engine::new(rules, RuleRegistry::new())
@@ -461,7 +461,7 @@ fn dry_run_trusts_a_rule_that_looks_past_the_walk() {
         let opts = crate::WalkOptions {
             respect_gitignore: true,
             extra_ignores: Vec::new(),
-            global_git_excludes: true,
+            global_git_excludes: false,
         };
         let index = crate::walk(root, &opts).unwrap();
         let report = Engine::new(rules, RuleRegistry::new())
@@ -492,7 +492,7 @@ fn dry_run_resolves_a_tracked_only_rule_only_with_a_tracked_path() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     let git = |args: &[&str]| {
-        let status = std::process::Command::new("git")
+        let status = crate::git::test_git()
             .arg("-C")
             .arg(root)
             .args([
@@ -521,7 +521,7 @@ fn dry_run_resolves_a_tracked_only_rule_only_with_a_tracked_path() {
     let opts = crate::WalkOptions {
         respect_gitignore: true,
         extra_ignores: Vec::new(),
-        global_git_excludes: true,
+        global_git_excludes: false,
     };
     let index = crate::walk(root, &opts).unwrap();
     let report = Engine::new(rules, RuleRegistry::new())
@@ -642,7 +642,7 @@ fn dry_run_judges_a_create_by_where_it_lands() {
         let opts = crate::WalkOptions {
             respect_gitignore: true,
             extra_ignores: Vec::new(),
-            global_git_excludes: true,
+            global_git_excludes: false,
         };
         let index = crate::walk(root, &opts).unwrap();
         let report = Engine::new(rules, RuleRegistry::new())
@@ -706,7 +706,7 @@ fn dry_run_names_an_absolute_create_through_the_canonical_root() {
         let opts = crate::WalkOptions {
             respect_gitignore: true,
             extra_ignores: Vec::new(),
-            global_git_excludes: true,
+            global_git_excludes: false,
         };
         let index = crate::walk(root, &opts).unwrap();
         let report = Engine::new(rules, RuleRegistry::new())
@@ -823,7 +823,7 @@ fn dry_run_judges_a_rule_without_a_paths_scope_by_the_path_as_written() {
             scopeless_create_rule("back-in", "../root/back.txt", "../root/back.txt"),
             scopeless_create_rule("normalized", "keep.txt", "out/../keep.txt"),
         ];
-        let opts = crate::WalkOptions::default();
+        let opts = crate::WalkOptions::test_default();
         let index = crate::walk(root, &opts).unwrap();
         let report = Engine::new(rules, RuleRegistry::new())
             .fix(root, &index, &opts, dry_run, Applicability::Safe)

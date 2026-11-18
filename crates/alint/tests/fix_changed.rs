@@ -6,14 +6,13 @@
 //! touched.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 fn alint() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_alint"))
 }
 
 fn git(dir: &Path, args: &[&str]) {
-    let status = Command::new("git")
+    let status = crate::hermetic::git()
         .args(args)
         .current_dir(dir)
         .env("GIT_AUTHOR_NAME", "t")
@@ -71,7 +70,7 @@ fn changed_mode_checks_and_fixes_a_staged_edit() {
     std::fs::write(root.join("a.txt"), "trailing   \n").unwrap();
     git(root, &["add", "a.txt"]);
 
-    let check = Command::new(alint())
+    let check = crate::hermetic::command(alint())
         .args(["check", "--changed", "--compact", "."])
         .current_dir(root)
         .output()
@@ -83,7 +82,7 @@ fn changed_mode_checks_and_fixes_a_staged_edit() {
         String::from_utf8_lossy(&check.stdout)
     );
 
-    let fix = Command::new(alint())
+    let fix = crate::hermetic::command(alint())
         .args(["fix", "--changed", "."])
         .current_dir(root)
         .output()
@@ -114,7 +113,7 @@ fn fix_changed_does_not_touch_files_outside_the_diff() {
     // Modify only logs/today.log -> it is the sole working-tree-diff file.
     std::fs::write(root.join("logs/today.log"), "edited\n").unwrap();
 
-    let out = Command::new(alint())
+    let out = crate::hermetic::command(alint())
         .args(["fix", "--changed", "."])
         .current_dir(root)
         .output()
@@ -144,7 +143,7 @@ fn full_fix_still_removes_every_match() {
     std::fs::write(root.join("a.log"), "a\n").unwrap();
     std::fs::write(root.join(".alint.yml"), CONFIG).unwrap();
 
-    let out = Command::new(alint())
+    let out = crate::hermetic::command(alint())
         .args(["fix", "."])
         .current_dir(root)
         .output()
@@ -186,7 +185,7 @@ fn fix_changed_recreates_a_required_file_deleted_in_the_diff() {
     // Delete README.md -> it is in the working-tree diff (changed set).
     std::fs::remove_file(root.join("README.md")).unwrap();
 
-    let out = Command::new(alint())
+    let out = crate::hermetic::command(alint())
         .args(["fix", "--changed", "."])
         .current_dir(root)
         .output()
@@ -242,7 +241,7 @@ fn fix_changed_confinement_holds_across_the_multipass_fixpoint() {
     // Delete req.md -> the sole working-tree-diff file (the changed set).
     std::fs::remove_file(root.join("req.md")).unwrap();
 
-    let out = Command::new(alint())
+    let out = crate::hermetic::command(alint())
         .args(["fix", "--changed", "."])
         .current_dir(root)
         .output()
@@ -280,7 +279,7 @@ fn fix_changed_demotes_out_of_scope_write_to_a_suggestion() {
     git(root, &["commit", "-qm", "base"]);
     std::fs::write(root.join("logs/today.log"), "edited\n").unwrap();
 
-    let out = Command::new(alint())
+    let out = crate::hermetic::command(alint())
         .args(["fix", "--changed", "."])
         .current_dir(root)
         .output()
@@ -308,7 +307,7 @@ fn fix_changed_demotes_out_of_scope_write_to_a_suggestion() {
 
     // Agreement: on the resulting tree, `check --changed` still reports the standing
     // out-of-scope violation and exits 1 -- the same verdict `fix` reached.
-    let check = Command::new(alint())
+    let check = crate::hermetic::command(alint())
         .args(["check", "--changed", "."])
         .current_dir(root)
         .output()
@@ -354,7 +353,7 @@ rules:
     git(root, &["commit", "-qm", "base"]);
     std::fs::write(root.join("logs/today.log"), "edited\n").unwrap();
 
-    let out = Command::new(alint())
+    let out = crate::hermetic::command(alint())
         .args(["fix", "--changed", "--unsafe-fixes", "."])
         .current_dir(root)
         .output()
@@ -401,7 +400,7 @@ fn fix_changed_renames_only_in_scope_files() {
     git(root, &["commit", "-qm", "base"]);
     std::fs::write(root.join("Src.md"), "a2\n").unwrap(); // Src.md now IN diff
 
-    let out = Command::new(alint())
+    let out = crate::hermetic::command(alint())
         .args(["fix", "--changed", "."])
         .current_dir(root)
         .output()
@@ -464,7 +463,7 @@ rules:
     // Edit ONLY in_scope.txt (still contains TODO) -> it is the sole diff file.
     std::fs::write(root.join("in_scope.txt"), "TODO here, edited\n").unwrap();
 
-    let out = Command::new(alint())
+    let out = crate::hermetic::command(alint())
         .args(["fix", "--changed", "--unsafe-fixes", "."])
         .current_dir(root)
         .output()
@@ -526,7 +525,7 @@ fn fix_changed_demotes_an_out_of_scope_value_propagation_to_a_suggestion() {
     )
     .unwrap();
 
-    let out = Command::new(alint())
+    let out = crate::hermetic::command(alint())
         .args(["fix", "--changed", "--unsafe-fixes", "."])
         .current_dir(root)
         .output()

@@ -41,6 +41,7 @@ mod fix_spawn_gate;
 mod fix_target_confinement_cli;
 mod git_directory_reads_cli;
 mod git_repository_cli;
+mod hermetic;
 mod hidden_path_baseline;
 mod lsp_audit;
 mod lsp_protocol;

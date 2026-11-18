@@ -172,12 +172,12 @@ impl CrossFileRule {
         };
         // A `source.files` glob: every matching file OR directory is a member.
         let mut members = Vec::new();
-        for e in ctx.index.files() {
+        for e in scope.candidate_files(ctx.index) {
             if scope.matches(&e.path, ctx.index) {
                 members.push((e.path.to_path_buf(), render_value(&e.path)));
             }
         }
-        for e in ctx.index.dirs() {
+        for e in scope.candidate_dirs(ctx.index) {
             if scope.matches(&e.path, ctx.index) {
                 members.push((e.path.to_path_buf(), render_value(&e.path)));
             }
@@ -368,9 +368,8 @@ impl CrossFileRule {
     /// explicit list), ignoring `extract` (which is absent).
     fn identical_target_paths(&self, ctx: &Context<'_>) -> Vec<PathBuf> {
         match &self.targets {
-            Some(Targets::Glob { scope, .. }) => ctx
-                .index
-                .files()
+            Some(Targets::Glob { scope, .. }) => scope
+                .candidate_files(ctx.index)
                 .filter(|e| scope.matches(&e.path, ctx.index))
                 .map(|e| e.path.to_path_buf())
                 .collect(),

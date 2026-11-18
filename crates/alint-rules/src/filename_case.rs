@@ -52,7 +52,7 @@ impl Rule for FilenameCaseRule {
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
-        for entry in ctx.index.files() {
+        for entry in self.scope.candidate_files(ctx.index) {
             if !self.scope.matches(&entry.path, ctx.index) {
                 continue;
             }

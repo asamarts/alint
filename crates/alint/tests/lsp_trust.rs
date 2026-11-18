@@ -17,7 +17,6 @@
 use std::collections::HashMap;
 use std::net::TcpListener;
 use std::path::Path;
-use std::process::Command;
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
@@ -204,12 +203,10 @@ fn an_untrusted_workspace_runs_no_command_rule_or_custom_fact() {
 
 /// Run `git` with the host's configuration left out, in `dir`.
 fn git(dir: &Path, args: &[&str]) {
-    let output = Command::new("git")
+    let output = crate::hermetic::git()
         .arg("-C")
         .arg(dir)
         .args(args)
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .output()
         .expect("run git");
     assert!(output.status.success(), "{output:?}");
@@ -403,7 +400,7 @@ fn a_vendored_config_never_governs_a_file() {
     let file = package.join("index.js");
     std::fs::write(&file, "module.exports = 1;\n").unwrap();
 
-    let cli = Command::new(env!("CARGO_BIN_EXE_alint"))
+    let cli = crate::hermetic::command(env!("CARGO_BIN_EXE_alint"))
         .arg("check")
         .arg(root)
         .output()
@@ -646,7 +643,7 @@ fn no_spawn_refuses_a_spawning_config_in_the_server() {
 #[test]
 fn a_missing_server_config_fails_at_startup() {
     let tmp = tempfile::tempdir().unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_alint"))
+    let output = crate::hermetic::command(env!("CARGO_BIN_EXE_alint"))
         .args(["lsp", "-c", "missing.yml"])
         .current_dir(tmp.path())
         .output()

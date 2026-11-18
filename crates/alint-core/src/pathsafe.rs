@@ -1191,7 +1191,7 @@ mod tests {
         std::os::unix::fs::symlink("src", root.join("lnk")).unwrap();
         std::os::unix::fs::symlink("src/deep/a.rs", root.join("alias.rs")).unwrap();
         let config = vec![root.canonicalize().unwrap().join("policy.yml")];
-        let index = crate::walker::walk(root, &crate::walker::WalkOptions::default()).unwrap();
+        let index = crate::walker::walk(root, &crate::walker::WalkOptions::test_default()).unwrap();
         // (answer, resolutions, symlink probes) of one check.
         let cost = |check: &dyn Fn() -> bool| {
             let before = path_check_costs();

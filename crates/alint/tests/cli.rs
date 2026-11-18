@@ -9,7 +9,12 @@
 fn cli_tests() {
     // Snapshot the normal Unicode presentation independently of the developer's
     // terminal. ASCII fallback itself is covered by GlyphSet unit tests.
-    trycmd::TestCases::new()
-        .env("TERM", "xterm-256color")
-        .case("tests/cli/*.toml");
+    // Every case also runs without the host's Git setup, as every process
+    // these tests start does (`crate::hermetic`).
+    let cases = trycmd::TestCases::new();
+    cases.env("TERM", "xterm-256color");
+    for (name, value) in crate::hermetic::environment() {
+        cases.env(name, value);
+    }
+    cases.case("tests/cli/*.toml");
 }

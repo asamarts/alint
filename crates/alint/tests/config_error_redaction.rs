@@ -5,7 +5,7 @@
 //! drive the real binary, so a call site that skips the redaction fails here.
 
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Output;
 
 /// A value interpolation re-types as a number: the error quotes it as one.
 const ACCOUNT_ID: &str = "123456789012";
@@ -17,7 +17,7 @@ fn write(root: &Path, relative: &str, contents: &str) {
 }
 
 fn run(root: &Path, args: &[&str], env: &[(&str, &str)]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_alint"))
+    crate::hermetic::command(env!("CARGO_BIN_EXE_alint"))
         .args(args)
         .current_dir(root)
         .env("NO_COLOR", "1")
@@ -285,7 +285,7 @@ fn a_value_read_from_the_environment_stays_out_of_warnings_and_run_errors() {
 
     // Git quotes a ref it cannot resolve.
     let git = |args: &[&str]| {
-        let status = Command::new("git")
+        let status = crate::hermetic::git()
             .arg("-C")
             .arg(root.path())
             .args(args)
@@ -386,7 +386,7 @@ fn a_nested_rule_value_read_from_the_environment_stays_out_of_warnings_and_run_e
             "one",
         ],
     ] {
-        let status = Command::new("git")
+        let status = crate::hermetic::git()
             .arg("-C")
             .arg(root.path())
             .args(args)

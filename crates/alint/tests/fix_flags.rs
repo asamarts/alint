@@ -15,7 +15,7 @@ fn alint() -> PathBuf {
 fn isolated_alint(home: &Path) -> Command {
     let config = home.join("gitconfig");
     std::fs::write(&config, "").unwrap();
-    let mut command = Command::new(alint());
+    let mut command = crate::hermetic::command(alint());
     command
         .env("GIT_CONFIG_GLOBAL", &config)
         .env("GIT_CONFIG_SYSTEM", &config)
@@ -807,7 +807,7 @@ fn dry_run_agrees_with_fix_for_a_create_through_a_directory_it_makes() {
 /// (commit signing, hooks) cannot fail or change the setup.
 fn git(dir: &Path, args: &[&str]) {
     let config = tempfile::NamedTempFile::new().unwrap();
-    let status = Command::new("git")
+    let status = crate::hermetic::git()
         .args(["-c", "commit.gpgsign=false"])
         .args(args)
         .current_dir(dir)

@@ -9,7 +9,7 @@
 
 use std::io::{BufReader, Read, Write};
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
@@ -144,7 +144,7 @@ pub fn spawn_server_with_env(root: &Path, env: &[(&str, &str)]) -> Server {
 /// [`spawn_server`] with `args` after `alint lsp` and `env` added to the
 /// server's environment.
 pub fn spawn_server_with(root: &Path, args: &[&str], env: &[(&str, &str)]) -> Server {
-    let child = Command::new(env!("CARGO_BIN_EXE_alint"))
+    let child = crate::hermetic::command(env!("CARGO_BIN_EXE_alint"))
         .arg("lsp")
         .args(args)
         .current_dir(root)

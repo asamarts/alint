@@ -49,10 +49,7 @@ pub fn policy_test_sources(root: &Path) -> Vec<(PathBuf, String)> {
 }
 
 pub fn load(path: &Path) -> alint_core::Result<alint_core::Config> {
-    alint_dsl::load_with(
-        path,
-        &alint_dsl::LoadOptions::with_catalog(REGISTRY.catalog()),
-    )
+    load_with(path, &alint_dsl::LoadOptions::default())
 }
 
 pub fn load_with(
@@ -67,6 +64,15 @@ pub fn load_with(
         config_source: options.config_source.clone(),
         remote_policy: options.remote_policy,
         repository_root: options.repository_root.clone(),
+        // Nested-config discovery reads no host Git setup (`walk_options`).
+        global_git_excludes: false,
     };
     alint_dsl::load_with(path, &options)
+}
+
+/// The walk options of an in-process run: without the user's global excludes
+/// file, so what a test's tree holds does not depend on the host's Git setup
+/// (a global excludes file that listed `*.yml` hid the files tests wrote).
+pub fn walk_options() -> alint_core::WalkOptions {
+    alint_core::WalkOptions::default().with_global_git_excludes(false)
 }

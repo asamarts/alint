@@ -102,7 +102,8 @@ fn tree(files: &[(&str, &str)]) -> Tree {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, body).unwrap();
     }
-    let index = crate::walker::walk(dir.path(), &crate::walker::WalkOptions::default()).unwrap();
+    let index =
+        crate::walker::walk(dir.path(), &crate::walker::WalkOptions::test_default()).unwrap();
     Tree { dir, index }
 }
 
@@ -300,7 +301,7 @@ fn reads_never_reach_a_git_directory() {
 
     // The walk leaves both out, so a walked tree reads only `ok.json`.
     let walked = Tree {
-        index: crate::walker::walk(tree.dir.path(), &crate::walker::WalkOptions::default())
+        index: crate::walker::walk(tree.dir.path(), &crate::walker::WalkOptions::test_default())
             .unwrap(),
         dir: tree.dir,
     };

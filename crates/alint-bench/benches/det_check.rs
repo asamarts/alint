@@ -176,11 +176,18 @@ fn materialize_analysis_time() {
 
 /// Make `root` a repository with one commit, at a fixed date, of `paths`.
 fn commit_fixed(root: &Path, paths: &str) {
+    // No system or global configuration, and no global excludes file (which
+    // `GIT_CONFIG_GLOBAL` does not cover): the host's must not change what is
+    // committed, or fail the commit (`commit.gpgsign` with no key).
+    let null_device = if cfg!(windows) { "NUL" } else { "/dev/null" };
     let run_git = |args: &[&str]| {
         let output = std::process::Command::new("git")
             .arg("-C")
             .arg(root)
             .args(args)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", null_device)
+            .env("XDG_CONFIG_HOME", null_device)
             .env("GIT_AUTHOR_DATE", "2024-01-02T03:04:05Z")
             .env("GIT_COMMITTER_DATE", "2024-01-02T03:04:05Z")
             .output()

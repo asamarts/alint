@@ -9,13 +9,13 @@
 //! injected sequences specifically.
 
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Output;
 
 const CLEAR: &str = "\u{1b}[2J";
 const RLO: char = '\u{202E}';
 
 fn run(dir: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_alint"))
+    crate::hermetic::command(env!("CARGO_BIN_EXE_alint"))
         .args(args)
         .current_dir(dir)
         .output()
@@ -105,6 +105,9 @@ fn export_agents_md_sanitizes_a_terminal_stdout() {
     };
     let tmp = fixture();
     let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_alint"));
+    for (name, value) in crate::hermetic::environment() {
+        cmd.env(name, value);
+    }
     cmd.args(["export-agents-md", "--color", "never"]);
     cmd.cwd(tmp.path());
     let mut child = pair.slave.spawn_command(cmd).expect("spawn in pty");

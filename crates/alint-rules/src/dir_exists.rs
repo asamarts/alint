@@ -72,7 +72,7 @@ impl Rule for DirExistsRule {
         // hands us a pre-filtered `ctx.index` (dir_aware mode);
         // the per-entry `dir_has_tracked_files` check that lived
         // here is now subsumed by the engine narrowing.
-        let found = ctx.index.dirs().any(|entry| {
+        let found = self.scope.candidate_dirs(ctx.index).any(|entry| {
             // `root_only`: only a directory directly at the repo root counts.
             if self.root_only && crate::is_nested(&entry.path) {
                 return false;

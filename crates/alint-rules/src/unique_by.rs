@@ -78,7 +78,7 @@ impl Rule for UniqueByRule {
         // than copying bytes through a `PathBuf`.
         let mut groups: HashMap<String, Vec<std::sync::Arc<std::path::Path>>> = HashMap::new();
         let needed = TokenSet::of(&self.key_template);
-        for entry in ctx.index.files() {
+        for entry in self.select_scope.candidate_files(ctx.index) {
             if !self.select_scope.matches(&entry.path, ctx.index) {
                 continue;
             }

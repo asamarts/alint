@@ -211,9 +211,8 @@ fn iter_has_file(iter: Option<&IterEnv<'_>>, pattern: &str) -> Result<bool, When
     );
     let scope = Scope::from_patterns(std::slice::from_ref(&combined))
         .map_err(|e| WhenError::Eval(format!("iter.has_file: invalid glob: {e}")))?;
-    Ok(iter
-        .index
-        .files()
+    Ok(scope
+        .candidate_files(iter.index)
         .any(|e| scope.matches(&e.path, iter.index)))
 }
 

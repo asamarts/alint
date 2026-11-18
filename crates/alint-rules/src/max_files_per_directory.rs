@@ -52,7 +52,7 @@ impl Rule for MaxFilesPerDirectoryRule {
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         // Group files by their immediate parent directory.
         let mut counts: BTreeMap<PathBuf, usize> = BTreeMap::new();
-        for entry in ctx.index.files() {
+        for entry in self.scope.candidate_files(ctx.index) {
             if !self.scope.matches(&entry.path, ctx.index) {
                 continue;
             }

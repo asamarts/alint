@@ -1,7 +1,7 @@
 //! End-to-end contract for selected-rule `explain --trace` execution.
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
 fn alint_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_alint"))
@@ -12,7 +12,7 @@ fn write(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) {
 }
 
 fn run(root: &Path, args: &[&str]) -> Output {
-    Command::new(alint_bin())
+    crate::hermetic::command(alint_bin())
         .args(args)
         .current_dir(root)
         .env("NO_COLOR", "1")
@@ -568,7 +568,7 @@ fn invalid_trace_flag_combinations_and_limits_exit_two() {
 fn base_implies_changed_and_is_recorded() {
     let root = fixture();
     let git = |args: &[&str]| {
-        let output = Command::new("git")
+        let output = crate::hermetic::git()
             .arg("-C")
             .arg(root.path())
             .args(args)

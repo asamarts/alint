@@ -26,7 +26,7 @@ fn alint_bin() -> PathBuf {
 }
 
 fn run(dir: &Path, args: &[&str]) -> Output {
-    std::process::Command::new(alint_bin())
+    crate::hermetic::command(alint_bin())
         .args(args)
         .current_dir(dir)
         .output()

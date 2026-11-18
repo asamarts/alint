@@ -2,9 +2,9 @@ name: Mutants
 
 # Advisory mutation testing (owner decision in docs/design/v0.21/pre-release-audit.md,
 # section 7, item 3). On a pull request that changes Rust, cargo-mutants tests the
-# mutants in the lines the pull request changes against their own crate's tests, and
-# lists the ones those tests did not catch in the job summary, and the first ten as
-# warnings on their lines. A missed mutant never fails the job, and the job is not in
+# mutants in the lines the pull request changes against the workspace's tests (with
+# alint-core's `yaml-reference` feature), and lists the ones those tests did not catch
+# in the job summary, and the first ten as warnings on their lines. A missed mutant never fails the job, and the job is not in
 # ci.yml's Summary, so it never blocks a merge.
 #
 # workflow_dispatch tests every mutant in one crate. alint-rules and alint-core have
@@ -41,8 +41,9 @@ jobs:
   mutants:
     name: cargo-mutants (advisory)
     runs-on: ubuntu-latest
-    # ci/scripts/mutants.sh stops cargo-mutants at 90 minutes; the rest is the
-    # toolchain, the install, and the baseline build.
+    # ci/scripts/mutants.sh stops cargo-mutants, its baseline build and test run
+    # included, at 90 minutes; the rest is the toolchain, the cache, the install of
+    # cargo-mutants and the upload.
     timeout-minutes: 120
     steps:
       # The pull_request checkout is the merge commit, so HEAD^1 is the base.

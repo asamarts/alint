@@ -121,7 +121,7 @@ fn malformed_manifest_fails_every_owning_rule_once() {
     let tmp = tempfile::tempdir().unwrap();
     std::fs::write(tmp.path().join("package.json"), b"{not json").unwrap();
     std::fs::write(tmp.path().join("a.txt"), b"payload").unwrap();
-    let index = crate::walk(tmp.path(), &crate::WalkOptions::default()).unwrap();
+    let index = crate::walk(tmp.path(), &crate::WalkOptions::test_default()).unwrap();
     let report = Engine::new(
         vec![manifest_stub("first"), manifest_stub("second")],
         RuleRegistry::new(),
@@ -158,7 +158,7 @@ fn false_when_does_not_resolve_manifest_scope() {
     let tmp = tempfile::tempdir().unwrap();
     std::fs::write(tmp.path().join("package.json"), b"{not json").unwrap();
     std::fs::write(tmp.path().join("a.txt"), b"payload").unwrap();
-    let index = crate::walk(tmp.path(), &crate::WalkOptions::default()).unwrap();
+    let index = crate::walk(tmp.path(), &crate::WalkOptions::test_default()).unwrap();
     let entry =
         RuleEntry::new(manifest_stub("inactive")).with_when(crate::when::parse("false").unwrap());
 
@@ -291,7 +291,7 @@ fn inactive_nested_git_and_changed_since_do_not_probe_git() {
         "kind: nested_scope_fixture\nwhen: false\nscope_filter:\n  changed_since: definitely-not-a-ref\n",
         "kind: nested_scope_fixture\nwhen: iter.basename == \"never\"\nscope_filter:\n  changed_since: definitely-not-a-ref\n",
     ] {
-        let index = crate::walk(tmp.path(), &crate::WalkOptions::default()).unwrap();
+        let index = crate::walk(tmp.path(), &crate::WalkOptions::test_default()).unwrap();
         let report = Engine::new(vec![nested_parent(yaml)], nested_registry())
             .run(tmp.path(), &index)
             .unwrap();
@@ -305,7 +305,7 @@ fn inactive_nested_git_and_changed_since_do_not_probe_git() {
 fn active_nested_git_failure_is_owned_once_and_other_rules_continue() {
     let tmp = tempfile::tempdir().unwrap();
     std::fs::write(tmp.path().join("a.txt"), b"payload").unwrap();
-    let index = crate::walk(tmp.path(), &crate::WalkOptions::default()).unwrap();
+    let index = crate::walk(tmp.path(), &crate::WalkOptions::test_default()).unwrap();
     let report = Engine::new(
         vec![
             nested_parent("kind: nested_git_fixture\nwhen: iter.basename == \"a.txt\"\n"),
@@ -341,7 +341,7 @@ fn active_nested_git_failure_is_owned_once_and_other_rules_continue() {
 fn inactive_nested_manifest_is_never_resolved() {
     let tmp = tempfile::tempdir().unwrap();
     std::fs::write(tmp.path().join("a.txt"), b"payload").unwrap();
-    let index = crate::walk(tmp.path(), &crate::WalkOptions::default()).unwrap();
+    let index = crate::walk(tmp.path(), &crate::WalkOptions::test_default()).unwrap();
     let report = Engine::new(
         vec![nested_parent(
             "kind: nested_scope_fixture\nwhen: iter.basename == \"never\"\n\
@@ -373,7 +373,7 @@ fn active_nested_manifest_failure_is_owned_once_and_other_rules_continue() {
         if let Some(contents) = contents {
             std::fs::write(tmp.path().join("package.json"), contents).unwrap();
         }
-        let index = crate::walk(tmp.path(), &crate::WalkOptions::default()).unwrap();
+        let index = crate::walk(tmp.path(), &crate::WalkOptions::test_default()).unwrap();
         let report = Engine::new(
             vec![
                 nested_parent(
@@ -422,7 +422,7 @@ fn active_nested_manifest_failure_is_owned_once_and_other_rules_continue() {
 fn active_nested_manifest_failure_stays_owned_in_fix_mode() {
     let tmp = tempfile::tempdir().unwrap();
     std::fs::write(tmp.path().join("a.txt"), b"payload").unwrap();
-    let index = crate::walk(tmp.path(), &crate::WalkOptions::default()).unwrap();
+    let index = crate::walk(tmp.path(), &crate::WalkOptions::test_default()).unwrap();
     let report = Engine::new(
         vec![nested_parent(
             "kind: nested_scope_fixture\npaths: \"**/*.txt\"\n\
@@ -434,7 +434,7 @@ fn active_nested_manifest_failure_stays_owned_in_fix_mode() {
     .fix(
         tmp.path(),
         &index,
-        &crate::WalkOptions::default(),
+        &crate::WalkOptions::test_default(),
         true,
         Applicability::Safe,
     )
@@ -548,7 +548,7 @@ fn per_file_single_file_and_fix_failures_are_structural_and_path_preserving() {
     let walk_opts = crate::WalkOptions {
         respect_gitignore: true,
         extra_ignores: Vec::new(),
-        global_git_excludes: true,
+        global_git_excludes: false,
     };
 
     let engine = Engine::new(vec![failing_per_file_rule()], RuleRegistry::new());
@@ -617,7 +617,7 @@ fn head_analysis_time_is_cached_for_the_engine_lifetime() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     let run_git = |args: &[&str], date: Option<&str>| {
-        let mut command = std::process::Command::new("git");
+        let mut command = crate::git::test_git();
         command.arg("-C").arg(root).args(args);
         if let Some(date) = date {
             command
@@ -686,7 +686,7 @@ fn empty_changed_fix_and_diff_do_not_resolve_analysis_time() {
     let walk_opts = crate::WalkOptions {
         respect_gitignore: true,
         extra_ignores: Vec::new(),
-        global_git_excludes: true,
+        global_git_excludes: false,
     };
 
     let report = engine
@@ -806,7 +806,7 @@ fn parent_select_and_when_iter_gate_nested_dependencies() {
         ("when_iter: 'false'\n", 0),
         ("when_iter: iter.basename == \"a.txt\"\n", 1),
     ] {
-        let index = crate::walk(tmp.path(), &crate::WalkOptions::default()).unwrap();
+        let index = crate::walk(tmp.path(), &crate::WalkOptions::test_default()).unwrap();
         let spec: crate::RuleSpec = crate::yaml::from_str(&format!(
             "id: owner\nkind: for_each_file\nlevel: error\n{gate}"
         ))

@@ -16,7 +16,7 @@ use std::process::{Command, Output};
 /// A command with the host's Git configuration left out, so only the
 /// repository's own `.git/config` can name a command.
 fn isolated(program: impl AsRef<std::ffi::OsStr>, dir: &Path) -> Command {
-    let mut command = Command::new(program);
+    let mut command = crate::hermetic::command(program);
     command
         .current_dir(dir)
         .env("GIT_CONFIG_NOSYSTEM", "1")

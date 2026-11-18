@@ -717,7 +717,7 @@ mod tests {
             let opts = crate::WalkOptions {
                 respect_gitignore: false,
                 extra_ignores: vec![pattern],
-                global_git_excludes: true,
+                global_git_excludes: false,
             };
             let index = crate::walker::walk(root.path(), &opts).unwrap();
             let mut left_out: Vec<&str> = names

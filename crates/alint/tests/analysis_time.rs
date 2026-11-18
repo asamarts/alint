@@ -1,7 +1,7 @@
 //! End-to-end CLI contract for deterministic analysis time.
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
 fn alint_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_alint"))
@@ -19,7 +19,7 @@ fn fixture() -> tempfile::TempDir {
 }
 
 fn run(root: &Path, args: &[&str], env_as_of: Option<&str>) -> Output {
-    let mut command = Command::new(alint_bin());
+    let mut command = crate::hermetic::command(alint_bin());
     command
         .args(args)
         .current_dir(root)
@@ -39,7 +39,7 @@ fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 fn git(root: &Path, args: &[&str], date: Option<&str>) {
-    let mut command = Command::new("git");
+    let mut command = crate::hermetic::git();
     command.arg("-C").arg(root).args(args);
     if let Some(date) = date {
         command
@@ -190,7 +190,7 @@ fn check_ignores_foreign_git_environment_for_time_and_blame() {
         Some("2030-01-01T00:00:00Z"),
     );
 
-    let output = Command::new(alint_bin())
+    let output = crate::hermetic::command(alint_bin())
         .args(["--fail-on-warning", "--format", "json", "check"])
         .current_dir(target.path())
         .env_remove("ALINT_AS_OF")

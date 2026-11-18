@@ -8,11 +8,11 @@ use dir_test::{Fixture, dir_test};
 
 use crate::support;
 
-const EXPECTED_GENERAL_SCENARIOS: usize = 549;
+const EXPECTED_GENERAL_SCENARIOS: usize = 551;
 const EXPECTED_BUNDLED_SCENARIOS: usize = 94;
 
 #[test]
-fn all_578_migrated_documents_use_the_public_v1_parser() {
+fn every_migrated_document_uses_the_public_v1_parser() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     let roots = [
         (
@@ -50,7 +50,7 @@ fn all_578_migrated_documents_use_the_public_v1_parser() {
             }
         }
     }
-    assert_eq!(total, 643);
+    assert_eq!(total, 645);
 }
 
 #[dir_test(

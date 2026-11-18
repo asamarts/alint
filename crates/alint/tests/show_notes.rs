@@ -5,10 +5,10 @@
 //! default and listed in full with `--show-notes`.
 
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Output;
 
 fn run(dir: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_alint"))
+    crate::hermetic::command(env!("CARGO_BIN_EXE_alint"))
         .args(args)
         .arg(dir)
         .output()
