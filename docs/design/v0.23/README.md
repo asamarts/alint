@@ -824,3 +824,41 @@ The feature freeze is the point at which phases 1 to 8, the #503 fix and #580 (a
     `extends:` stays refused without `allow_out_of_root`; the language server's holes stay in
     GHSA-78jj-xfpm-g6px; `LspOptions` and `LoadOptions` are sealed, with setters; and the YAML
     alias factor stays 64, set again from the memory test at the ayaml bump.
+  - A third audit, of #560 to #578 on `main` at 38947f8c5, reported 25 findings: security
+    (SEC-1 to SEC-5), YAML fixes (YAML-1, YAML-2), the engine (ENG-1 to ENG-4), the `version: 2`
+    loader (DSL-1 to DSL-5), and tests and CI (T1 to T9). The one high finding: `--untrusted`, an
+    untrusted editor workspace and `alint test` accepted a config's `allow_out_of_root:`, so a
+    repository could copy a file from outside itself with `content_from: ../secret.txt`. They now
+    refuse it before any `extends:` resolves.
+  - Security: an ignore file that gives its size as zero (`/proc/self/pagemap`) is read to count
+    it, the `git_branch` fact reads `.git/HEAD` only within 64 KiB, and `suggest` and
+    `export-agents-md` take `--no-spawn` and `--untrusted`. YAML: two rules' structured fixes are
+    checked beside another rule's free-form edit of the same file, and the parse budget's gap for
+    trees alias expansion leaves is documented (#582).
+  - The engine: a nested rule's per-entry templates (`pair`'s `partner`, `unique_by`'s `key`,
+    `cross_file`'s `register_as`, `command`'s arguments) are text once an iteration rendered them,
+    where a directory named `x{stem}` had its token expanded twice; a join partner of a sensitive
+    field is sensitive; a gate covers every scope narrowing under a nested rule; and `key_parity`
+    holds each key path once, in its file's decode, with every decode's key paths charged to the
+    run's `bytes_per_run`. A 320 KB reference 120 levels deep and one peer peaked at 2,300 MiB and
+    now at 437 MiB; #569 stays open for the decodes themselves.
+  - The loader: #577 had made 1,000 entries naming one empty file below an environment-chosen
+    entry take 68 s (DSL-1). Each source is now parsed once per hash or name and charged its size
+    against 64 MiB, `.alint.d/` drop-ins are charged as `extends:` merges are, the memo key no
+    longer hashes `trusted_extends:`, and a file below an environment-chosen entry shows as
+    `<redacted>` whatever its name's length.
+  - Tests and CI: a one-commit pull request's squash subject is checked as its commit's subject,
+    an npm-audit waiver fails once `npm audit fix` can fix its advisory, unit tests no longer read
+    the host's global excludes file, the bounded-read tests have deadlines and twice-the-cap
+    files, and the process-wide Git denial, the empty untrusted environment and the extends
+    budgets' sizes are pinned.
+  - The fixes went to four branches (security and the owner's calls, the loader, the nested
+    templates, `key_parity`), merged in one tree with the workspace's tests run there, and landed
+    in one pull request; each has a gate test that fails with the fix reverted. Filed: #583
+    (escaping iteration values in nested options), #584 (per-iteration work the scope gate cannot
+    see) and #585 (environment-value redaction outside the loader). Left open: #564 to #573 and
+    #579 to #585.
+  - The advisory GHSA-78jj-xfpm-g6px, still a draft, has 27 items: item 20 (`git_branch` read
+    `.git/HEAD` without bound) is new, and items 15, 17 and 19 are corrected.
+  - Next: phase 7, the `constraint` kind; then #580; the ayaml bump when a release meets the
+    conditions.
