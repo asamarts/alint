@@ -1,0 +1,37 @@
+test_version: 1
+name: a nested command passes a directory named like an option as a path
+# linux-only: the wrapped command is a POSIX `sh` one-liner, as in the other
+# command scenarios.
+tags: [check, command, plugin, for_each_dir, nested, linux-only]
+
+# A directory named `--x` renders the argument `{path}` as `./--x`, as the
+# command rule does for a file it matches, so a repository name cannot pass
+# itself to the checker as an option. Before the fix the iteration rendered it
+# as `--x`, and the command took the rendered `--x` for an option the
+# configuration wrote.
+
+capabilities:
+  spawn: true
+
+given:
+  tree:
+    "--x":
+      a.txt: "a\n"
+  config: |
+    version: 1
+    rules:
+      - id: dir-check
+        kind: for_each_dir
+        select: "*"
+        level: error
+        require:
+          - kind: command
+            paths: "{path}/*.txt"
+            command: ["sh", "-c", "case \"$0\" in -*) exit 1;; esac", "{path}"]
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []
+    analysis_failures: []

@@ -22,7 +22,10 @@ CommandRule {
     message: None,
     scope: Scope { ... },
     argv: [
-        "shellcheck",
+        PathTemplate {
+            text: "shellcheck",
+            rendered: false,
+        },
     ],
     timeout: 30s,
     fixer: None,
@@ -1970,7 +1973,10 @@ PairRule {
         "{{ctx.primary}} has no matching header at {{ctx.partner}}",
     ),
     primary_scope: Scope { ... },
-    partner_template: "{dir}/{stem}.h",
+    partner_template: PathTemplate {
+        text: "{dir}/{stem}.h",
+        rendered: false,
+    },
 }
 
 === kind: pair_changed_together | id: format-version-bumped ===
@@ -2322,7 +2328,10 @@ UniqueByRule {
         "{{ctx.count}} files share stem {{ctx.key}}: {{ctx.paths}}",
     ),
     select_scope: Scope { ... },
-    key_template: "{stem}",
+    key_template: PathTemplate {
+        text: "{stem}",
+        rendered: false,
+    },
     case_insensitive: true,
 }
 

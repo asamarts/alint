@@ -602,7 +602,7 @@ pub struct CrossFileRule {
     /// supporting `{path}`, `{dir}`, `{basename}`, `{stem}`, `{ext}`, and
     /// `{parent_name}`. The rendered value is looked for (and, on fix, added) in
     /// the target list. `None` uses `{path}` (the matched path).
-    register_as: Option<String>,
+    register_as: Option<alint_core::template::PathTemplate>,
     /// The `sync_from` fixer: on `relation: identical` a whole-file `SyncFromFixer`
     /// (mirror the source), on `relation: equals` a `CrossFileValueFixer`
     /// (propagate the source's extracted scalar into each target's node). `None`
@@ -1149,7 +1149,9 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         normalize,
         allow_missing: opts.allow_missing_target,
         skip_header_lines: opts.skip_header_lines.unwrap_or(0),
-        register_as: opts.register_as,
+        register_as: opts
+            .register_as
+            .map(|text| alint_core::template::PathTemplate::new(text, spec)),
         fixer,
     }))
 }

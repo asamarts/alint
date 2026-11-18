@@ -1047,10 +1047,23 @@ policy-test package the user does not trust.
   through one, declines. Removing a YAML block mapping's last entries writes `{}`, where it left the
   key with no value, which reads as null
   ([ADR-0044](docs/adr/0044-untrusted-runs-git-as-a-process-and-a-wider-memory-gate.md)).
-- **In a rule nested two or more levels deep, a token's value is substituted once.** The inner
-  iterations rendered the outer one's values again, so a file or directory named like a token
-  (`x{stem}`) was expanded twice: `key_parity` reported a missing peer, and messages showed the
-  wrong path. The outermost iteration now substitutes every token.
+- **In a nested rule, a token's value is substituted once.** In a rule nested two or more levels
+  deep, the inner iterations rendered the outer one's values again, and a nested `pair`'s
+  `partner`, `unique_by`'s `key`, `cross_file`'s `register_as` and `command`'s arguments, which the
+  iteration had rendered, were rendered again by the rule for each entry it checked. A file or
+  directory named like a token (`x{stem}`) was expanded twice: under `packages/x{stem}`, a nested
+  `pair` looked for `packages/x{stem}/api.h` as `packages/xa/api.h` and passed when that file
+  existed, `unique_by` read one shared key as several, `key_parity` reported a missing peer, and
+  messages showed the wrong path. The outermost iteration now substitutes every token, and a rule
+  it built takes these options as text. In the same way a nested `file_graph` takes a `$` in a
+  value as text in `derive_target.to` (a directory `a$1` is not a capture reference), and a
+  nested rule that fills `{{ctx.*}}` placeholders in its message (`pair`, `unique_by`,
+  `dir_contains`, `dir_only_contains`, `key_parity`, `git_blame_age`) shows a name spelled like
+  one (`x{{ctx.primary}}`) as it is.
+- **A nested `command`, `command_idempotent` or `generated_file_fresh` passes a name that starts
+  with `-` as a path.** The iteration rendered `{path}` in their `command:` arguments without the
+  guard `command` gives the files it matches (L13, 0.14.0), so a directory named `--write`
+  reached the tool as the option `--write`; it is now `./--write`.
 - **`key_parity` compares a YAML key written as a block scalar (`? |`) or left empty,** at the place
   its text starts, where it dropped such a key.
 - **`key_parity` holds each key path of a deep, wide JSON or YAML file once,** where it copied the

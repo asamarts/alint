@@ -1091,6 +1091,10 @@ fn evaluate_one_per_file_rule(
 mod scan_tests;
 
 #[cfg(test)]
+#[path = "for_each_dir_render_tests.rs"]
+mod render_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use alint_core::{FileEntry, FileIndex, RuleRegistry};
