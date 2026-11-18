@@ -336,37 +336,28 @@ thread_local! {
     pub(crate) static MEMO_HASHED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-#[cfg(not(test))]
-type MemoHasher = std::collections::hash_map::RandomState;
-
-/// The memo's hasher in the tests, which counts the bytes it hashes
-/// ([`MEMO_HASHED`]).
-#[cfg(test)]
-type MemoHasher = CountingState;
-
-#[cfg(test)]
+/// The memo's hasher: the standard library's, which in the tests also counts
+/// the bytes it hashes ([`MEMO_HASHED`]).
 #[derive(Default, Clone)]
-pub(crate) struct CountingState(std::collections::hash_map::RandomState);
+struct MemoHasher(std::collections::hash_map::RandomState);
 
-#[cfg(test)]
-impl std::hash::BuildHasher for CountingState {
-    type Hasher = Counting;
+impl std::hash::BuildHasher for MemoHasher {
+    type Hasher = MemoHashing;
 
-    fn build_hasher(&self) -> Counting {
-        Counting(self.0.build_hasher())
+    fn build_hasher(&self) -> MemoHashing {
+        MemoHashing(self.0.build_hasher())
     }
 }
 
-#[cfg(test)]
-pub(crate) struct Counting(std::collections::hash_map::DefaultHasher);
+struct MemoHashing(std::collections::hash_map::DefaultHasher);
 
-#[cfg(test)]
-impl std::hash::Hasher for Counting {
+impl std::hash::Hasher for MemoHashing {
     fn finish(&self) -> u64 {
         self.0.finish()
     }
 
     fn write(&mut self, bytes: &[u8]) {
+        #[cfg(test)]
         MEMO_HASHED.with(|hashed| hashed.set(hashed.get() + bytes.len()));
         self.0.write(bytes);
     }
