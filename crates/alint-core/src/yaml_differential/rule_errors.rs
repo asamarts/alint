@@ -5,6 +5,8 @@
 //! type: integer `1`, expected field identifier` are both at the rule's
 //! line. They are one when they agree on the problem and on the field.
 
+use std::borrow::Cow;
+
 use super::{Case, Rejection, guarded};
 
 /// Whether ayaml's and the oracle's errors for the rule of `case` are one:
@@ -20,7 +22,7 @@ pub(super) fn same_rule_error(case: &Case<'_>) -> bool {
     };
     if let Some(field) = tag_refusal_field(&ayaml.message) {
         return oracle_reads_a_tag(&oracle.message)
-            && oracle_error_is_in(case.input, case.rule, field, oracle);
+            && oracle_error_is_in(case.input, case.rule, &field, oracle);
     }
     let (field, ayaml_problem) = ayaml_path(&ayaml.message)
         .map_or((None, ayaml.message.as_str()), |(field, problem)| {
@@ -28,21 +30,20 @@ pub(super) fn same_rule_error(case: &Case<'_>) -> bool {
         });
     (problem(ayaml_problem) == problem(&oracle.message)
         || tag_as_variant(ayaml_problem, &oracle.message))
-        && field.is_none_or(|field| oracle_error_is_in(case.input, case.rule, field, oracle))
+        && field.is_none_or(|field| oracle_error_is_in(case.input, case.rule, &field, oracle))
 }
 
 /// The rule's field that alint's tag error names, as `command` in
 /// `` `command` has the YAML tag `!t`; YAML tags are not supported here ``
 /// (see [`crate::yaml_decode`]), which puts the path in backticks in front.
-/// The field is the path's first step.
-fn tag_refusal_field(message: &str) -> Option<&str> {
+/// The field is the key the path's first step names (see [`ayaml_path`]).
+fn tag_refusal_field(message: &str) -> Option<String> {
     let path = message
         .strip_prefix('`')?
         .strip_suffix("`; YAML tags are not supported here")?
         .split_once("` has the YAML tag `")?
         .0;
-    ayaml_path(&format!("{path}: x"))?;
-    Some(&path[..name_len(path)])
+    ayaml_path(&format!("{path}: x")).map(|(field, _)| field.into_owned())
 }
 
 /// Whether the oracle's error is its own for a tagged value where a value
@@ -88,40 +89,35 @@ fn name_len(text: &str) -> usize {
     }
 }
 
-/// ayaml's `message` split into the first step of the path in front of it,
-/// when that step is a name, as a rule's fields are, and the problem after
-/// the path. A path's steps are names, quoted keys (`["a b"]`), indexes
-/// (`[0]`) and keys that are collections (`[?]`), with a `.` before a name,
-/// and it ends at `: `; a problem starts with words and spaces, as
-/// `invalid type: `, so none reads as a path.
-fn ayaml_path(message: &str) -> Option<(&str, &str)> {
+/// ayaml's `message` split into the key that the first step of the path in
+/// front of it names, when that step is a name or a quoted key, as a step
+/// to a rule's field or option is, and the problem after the path. A path's
+/// steps are names, quoted keys (`["a b"]`), indexes (`[0]`) and keys that
+/// are collections (`[?]`), with a `.` before a name, and it ends at `: `; a
+/// problem starts with words and spaces, as `invalid type: `, so none reads
+/// as a path. ayaml quotes a key that is not a name, as the merge key `<<`
+/// in `["<<"].pattern[1]`.
+fn ayaml_path(message: &str) -> Option<(Cow<'_, str>, &str)> {
     let name = name_len;
-    let first = name(message);
-    if first == 0 {
-        return None;
-    }
-    let mut at = first;
+    let (first, mut at) = match name(message) {
+        0 => {
+            let len = quoted_key_len(message)?;
+            (unquoted(&message[2..len - 2])?, len)
+        }
+        len => (Cow::Borrowed(&message[..len]), len),
+    };
     loop {
         let rest = &message[at..];
         if let Some(problem) = rest.strip_prefix(": ") {
-            return Some((&message[..first], problem));
+            return Some((first, problem));
         }
         at += if let Some(after) = rest.strip_prefix('.') {
             match name(after) {
                 0 => return None,
                 len => 1 + len,
             }
-        } else if let Some(after) = rest.strip_prefix("[\"") {
-            let mut escaped = false;
-            let (close, _) = after.char_indices().find(|&(_, next)| {
-                let close = !escaped && next == '"';
-                escaped = !escaped && next == '\\';
-                close
-            })?;
-            if !after[close + 1..].starts_with(']') {
-                return None;
-            }
-            2 + close + 2
+        } else if rest.starts_with("[\"") {
+            quoted_key_len(rest)?
         } else {
             let after = rest.strip_prefix('[')?;
             let close = after.find(']')?;
@@ -132,6 +128,49 @@ fn ayaml_path(message: &str) -> Option<(&str, &str)> {
             1 + close + 1
         };
     }
+}
+
+/// The length of the quoted key at the start of `text`, as `["a \"b"]`,
+/// brackets and quotes included, when it starts with one.
+fn quoted_key_len(text: &str) -> Option<usize> {
+    let after = text.strip_prefix("[\"")?;
+    let mut escaped = false;
+    let (close, _) = after.char_indices().find(|&(_, next)| {
+        let close = !escaped && next == '"';
+        escaped = !escaped && next == '\\';
+        close
+    })?;
+    after[close + 1..].starts_with(']').then_some(2 + close + 2)
+}
+
+/// The key that `quoted`, the text between a quoted key's quotes, names:
+/// ayaml puts a `\` before a `"` or a `\`, and writes a character that
+/// could hide text, as a control, as `\u{..}` in hexadecimal. A key of more
+/// than 64 characters, which ayaml cuts short with `…`, then names no key
+/// of the rule's but one written so.
+fn unquoted(quoted: &str) -> Option<Cow<'_, str>> {
+    if !quoted.contains('\\') {
+        return Some(Cow::Borrowed(quoted));
+    }
+    let mut key = String::with_capacity(quoted.len());
+    let mut chars = quoted.chars();
+    while let Some(next) = chars.next() {
+        if next != '\\' {
+            key.push(next);
+            continue;
+        }
+        match chars.next()? {
+            escaped @ ('"' | '\\') => key.push(escaped),
+            'u' => {
+                let rest = chars.as_str().strip_prefix('{')?;
+                let (hex, after) = rest.split_once('}')?;
+                key.push(char::from_u32(u32::from_str_radix(hex, 16).ok()?)?);
+                chars = after.chars();
+            }
+            _ => return None,
+        }
+    }
+    Some(Cow::Owned(key))
 }
 
 /// Whether `text` is alint's error for an enum's value that is not a
@@ -215,23 +254,43 @@ mod tests {
     fn a_path_is_the_names_indexes_and_keys_before_the_problem() {
         assert_eq!(
             ayaml_path("message: invalid type: integer `1`, expected a string"),
-            Some(("message", "invalid type: integer `1`, expected a string"))
+            Some((
+                "message".into(),
+                "invalid type: integer `1`, expected a string"
+            ))
         );
         assert_eq!(
             ayaml_path("scope_filter.has_ancestor[1]: x"),
-            Some(("scope_filter", "x"))
+            Some(("scope_filter".into(), "x"))
         );
-        assert_eq!(ayaml_path("a[\"b \\\"c]: d\"][?].e-f: g"), Some(("a", "g")));
-        assert_eq!(ayaml_path("a[\"b\"]: x"), Some(("a", "x")));
+        assert_eq!(
+            ayaml_path("a[\"b \\\"c]: d\"][?].e-f: g"),
+            Some(("a".into(), "g"))
+        );
+        assert_eq!(ayaml_path("a[\"b\"]: x"), Some(("a".into(), "x")));
         // A name starts with a letter or `_`.
-        assert_eq!(ayaml_path("_a: x"), Some(("_a", "x")));
+        assert_eq!(ayaml_path("_a: x"), Some(("_a".into(), "x")));
+        // A first step that is a quoted key names the key, unescaped.
+        assert_eq!(
+            ayaml_path("[\"<<\"].pattern[1]: x"),
+            Some(("<<".into(), "x"))
+        );
+        assert_eq!(ayaml_path("[\"1\"]: x"), Some(("1".into(), "x")));
+        assert_eq!(
+            ayaml_path("[\"a: \\\"b\\\\\\u{1b}\"][0]: x"),
+            Some(("a: \"b\\\u{1b}".into(), "x"))
+        );
         for message in [
             "1a: x",
             "-a: x",
             "invalid type: integer `1`, expected struct RuleSpec",
             "missing field `id`",
             "a glob string, a list of globs, or an `{ include, exclude }` map",
-            "[\"1\"]: x",
+            "[0]: x",
+            "[?]: x",
+            "[\"a\": x",
+            "[\"a\\q\"]: x",
+            "[\"a\\u{d800}\"]: x",
             "a.: x",
             "a[x]: y",
             "a[]: y",
@@ -240,6 +299,30 @@ mod tests {
         ] {
             assert_eq!(ayaml_path(message), None, "{message:?}");
         }
+    }
+
+    /// ayaml quotes a key that is not a name in its path, which the path's
+    /// first step reads back as the key, but for one it cut short.
+    #[test]
+    fn a_quoted_first_step_reads_back_as_ayamls_key() {
+        let field = |written: &str| {
+            let input = format!("{{{written}: [x]}}");
+            let error =
+                crate::yaml::ayaml_from_str::<std::collections::BTreeMap<String, String>>(&input)
+                    .unwrap_err()
+                    .into_parser();
+            ayaml_path(error.message()).map(|(field, _)| field.into_owned())
+        };
+        for (written, key) in [
+            ("'<<'", "<<"),
+            ("'1'", "1"),
+            ("\"a: \\\"b\\\\\"", "a: \"b\\"),
+            ("\"\\e\\N\\L\\x7f é\"", "\u{1b}\u{85}\u{2028}\u{7f} é"),
+        ] {
+            assert_eq!(field(written).as_deref(), Some(key), "{written:?}");
+        }
+        let long = "k".repeat(65);
+        assert_ne!(field(&long).as_deref(), Some(long.as_str()));
     }
 
     #[test]
@@ -288,12 +371,15 @@ mod tests {
         let refused = |path: &str| {
             format!("`{path}` has the YAML tag `!t`; YAML tags are not supported here")
         };
-        assert_eq!(tag_refusal_field(&refused("command")), Some("command"));
-        assert_eq!(tag_refusal_field(&refused("paths[0]")), Some("paths"));
+        let field = |path: &str| tag_refusal_field(&refused(path));
+        assert_eq!(field("command").as_deref(), Some("command"));
+        assert_eq!(field("paths[0]").as_deref(), Some("paths"));
         assert_eq!(
-            tag_refusal_field(&refused("scope_filter.has_ancestor")),
+            field("scope_filter.has_ancestor").as_deref(),
             Some("scope_filter")
         );
+        assert_eq!(field("[\"<<\"].pattern[1]").as_deref(), Some("<<"));
+        assert_eq!(field("[\"<<\"]").as_deref(), Some("<<"));
         for message in [
             refused("1a"),
             refused(""),
@@ -348,10 +434,21 @@ mod tests {
 
     /// The cases the long runs of seeds 2, 3, 10 and 12 found once alint
     /// named a tag in its own words: a tag on a value where an untagged enum
-    /// goes, on an element of one, and on a level.
+    /// goes, on an element of one, and on a level; and those of seeds 5 and
+    /// 9 without specials, a tag in the value of a merge key, which ayaml
+    /// does not merge into the rule, and whose path starts with the quoted
+    /// key `["<<"]`.
     #[test]
     fn a_tagged_value_in_a_rule_is_one_error() {
         for (rule, field) in [
+            (
+                "{<<: {pattern: [a, !t b]}, id: a, kind: file_exists, paths: a, level: error}",
+                "`[\"<<\"].pattern[1]`",
+            ),
+            (
+                "{<<: {!t k: v}, id: a, kind: file_exists, paths: a, level: error}",
+                "`[\"<<\"]`",
+            ),
             (
                 "{id: a, kind: command, command: !t [x], paths: a, level: error}",
                 "command",

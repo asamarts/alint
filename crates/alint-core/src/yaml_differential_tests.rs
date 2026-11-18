@@ -635,7 +635,8 @@ fn a_tag_ayaml_reads_in_a_plain_scalar_is_not_a_nameless_verbatim_tag() {
 /// The oracle's error about a character it does not allow, which its reader
 /// gives before its scanner reads a token, is no location class's but the
 /// one about that character: ayaml's unterminated quoted scalar is another
-/// error, which the case shows once the character is gone.
+/// error, which the case shows once the character is gone; so is its error
+/// about an `x` in a block scalar's header, a character YAML allows.
 #[test]
 fn a_location_class_does_not_take_the_oracles_reader_error() {
     let (case, _) = compare("a: 'x\n  \u{7f}", Entry::Value);
@@ -648,6 +649,13 @@ fn a_location_class_does_not_take_the_oracles_reader_error() {
         explanation(&case),
         Some(vec!["quoted-only-characters", "where-a-construct-opened"])
     );
+    let (case, _) = compare("- '\u{7f}'\n- |x\n", Entry::Value);
+    assert_eq!(case.class, Class::RejectedAtDifferentLocation, "{case:?}");
+    assert_eq!(
+        explanation_without(&case, &["quoted-only-characters"]),
+        None
+    );
+    assert_eq!(explanation(&case), Some(vec!["quoted-only-characters"]));
 }
 
 /// Two errors at two places are two when the prefix through the earlier

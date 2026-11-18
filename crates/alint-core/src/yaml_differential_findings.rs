@@ -547,6 +547,51 @@ const FINDINGS: &[(&str, Entry, &[&str])] = &[
     ("1\n%\n\" #\n\t", Entry::Json, &["tab-as-white-space"]),
     ("1\n%x\n'a #\n\t \n", Entry::Value, &["tab-as-white-space"]),
     ("1\n%x\n'a #\n\t \n", Entry::Json, &["tab-as-white-space"]),
+    // A character YAML does not allow, right after a block scalar's
+    // indicators, is ayaml's unexpected character in the header, which it
+    // reports there; the oracle's reader rejects it first (seeds 6 and 12
+    // without specials, the second shortened).
+    (
+        "? {k1: 's'>\u{ffff},\n\t  null: a b, null: &a1 {a: 's',\n\t  b: true,\n\t  k1: \
+         'q}}\n: {1: -2.5,\n\t  b: true,a b: a b}\n<<:\n  1: []\na b:\n  - 0.5\n",
+        Entry::Value,
+        &["non-printable-character"],
+    ),
+    (
+        "? {k1: 's'>\u{ffff},\n\t  null: a b, null: &a1 {a: 's',\n\t  b: true,\n\t  k1: \
+         'q}}\n: {1: -2.5,\n\t  b: true,a b: a b}\n<<:\n  1: []\na b:\n  - 0.5\n",
+        Entry::Json,
+        &["non-printable-character"],
+    ),
+    (
+        "null: \na b: word word\nkey: &a1 |-3\u{9f}\n",
+        Entry::Value,
+        &["non-printable-character"],
+    ),
+    (
+        "null: \na b: word word\nkey: &a1 |-3\u{9f}\n",
+        Entry::Json,
+        &["non-printable-character"],
+    ),
+    // The oracle rejects the tab that starts the second line, and reads no
+    // further; ayaml reads it as white space, and rejects the `%` after the
+    // tab that starts the last line, as it would not after a space: the
+    // line would be the text of the plain scalar above it. With the first
+    // tab alone a space, the oracle finds a second document on the third
+    // line, where ayaml's parser rejects the input, after its scanner
+    // rejected the `%` (seed 8 without specials).
+    (
+        "\n\t-0.0|2'q''s'%YAML 1.2\n: \t18446744073709551616+11e3:a\n- -null? [\t *b\r\n\
+         \t%YAML 1.2\n",
+        Entry::Value,
+        &["tab-as-white-space", "at-the-token"],
+    ),
+    (
+        "\n\t-0.0|2'q''s'%YAML 1.2\n: \t18446744073709551616+11e3:a\n- -null? [\t *b\r\n\
+         \t%YAML 1.2\n",
+        Entry::Json,
+        &["tab-as-white-space", "at-the-token"],
+    ),
 ];
 
 #[test]
