@@ -152,7 +152,7 @@ impl LspOptions {
         self
     }
 
-    /// Sets [`Self::registry`].
+    /// Sets [`Self::registry`](field@Self::registry).
     #[must_use]
     pub fn with_registry(mut self, registry: Option<alint_core::RuleRegistry>) -> Self {
         self.registry = registry;
