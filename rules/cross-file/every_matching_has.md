@@ -2,7 +2,7 @@
 title: 'every_matching_has'
 description: 'alint every_matching_has rule (cross-file): For every file or directory matching select:, every nested rule under require: must be satisfied.'
 sidebar:
-  order: 19
+  order: 20
 categories: ['cross-file']
 ---
 
