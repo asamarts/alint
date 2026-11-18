@@ -192,9 +192,12 @@ impl<'p> NamedObjects<'p> {
             .selectors
             .iter()
             .map(|named| ("selector", named.name.as_str(), named.source))
+            // A rule's inline `input:` relation is part of the rule, which
+            // `explain` shows as written; only declared relations are listed.
             .chain(
                 plan.relations
                     .iter()
+                    .filter(|named| !named.is_inline())
                     .map(|named| ("relation", named.name.as_str(), named.source)),
             )
             .map(|(what, name, source)| NamedObject {

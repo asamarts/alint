@@ -702,7 +702,8 @@ fn a_rule_field_no_version_two_source_wrote_names_nothing() {
             .resolve_rule("r", &rule, &[origin("input", ".alint.yml")], &files())
             .unwrap_err()
             .to_string(),
-        "rule \"r\": `input` (written by .alint.yml): expected a relation name, found a list"
+        "rule \"r\": `input` (written by .alint.yml): expected a relation name or an inline \
+         relation (a map), found a list"
     );
     let rule = stub_rule(&format!("id: r\nkind: {REFERENCE_STUB}\ninput: a.b.c\n"));
     assert_eq!(

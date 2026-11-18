@@ -201,6 +201,58 @@ pub(crate) fn validate_source_compatibility(
     Ok(())
 }
 
+/// Refuse a rule or template of `config`, a source whose config `version:`
+/// has been checked ([`validate_source_compatibility`]), whose `kind:`, or
+/// the kind of a rule under its `require:` at any depth, needs a later
+/// config version than the source declares (the `constraint` kind needs 2;
+/// [`alint_core::RuleRegistry::min_config_version`]). `source` names the
+/// source in the error. Every source declares its version (an `.alint.d/`
+/// fragment takes its root's) and no `{{...}}` can supply a kind, so each
+/// rule's kind is a literal some source's check saw; without a catalog, the
+/// kind's builder refuses it.
+pub(crate) fn reject_kinds_newer_than_source(
+    config: &RawConfig,
+    source: &str,
+    catalog: Option<alint_core::KindCatalog<'_>>,
+) -> Result<()> {
+    let (Some(catalog), Some(version)) = (catalog, config.version) else {
+        return Ok(());
+    };
+    for (section, mappings) in [("rules", &config.rules), ("templates", &config.templates)] {
+        for (index, mapping) in mappings.iter().enumerate() {
+            if let Some((kind, needs)) = newer_kind(mapping, catalog, version) {
+                return Err(Error::Other(format!(
+                    "{source}: `{section}[{index}]`: the `{kind}` rule kind needs config \
+                     `version: {needs}` (it is experimental), and this config is version \
+                     {version}; declare `version: {needs}` to use it"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The first kind in `rule` or under its `require:` that a config of
+/// `version` may not use, with the version it needs.
+fn newer_kind<'m>(
+    rule: &'m Mapping,
+    catalog: alint_core::KindCatalog<'_>,
+    version: u32,
+) -> Option<(&'m str, u32)> {
+    if let Some(kind) = rule.get("kind").and_then(ayaml::Value::as_str)
+        && let Some(needs) = catalog.min_config_version(kind)
+        && needs > version
+    {
+        return Some((kind, needs));
+    }
+    rule.get("require")
+        .and_then(ayaml::Value::as_sequence)
+        .into_iter()
+        .flatten()
+        .filter_map(ayaml::Value::as_mapping)
+        .find_map(|nested| newer_kind(nested, catalog, version))
+}
+
 pub(crate) fn source_version_allowed(consumer: u32, source: u32) -> bool {
     source <= consumer
 }
@@ -800,6 +852,13 @@ fn attach_v2_objects(
             );
         }
     }
+    // A rule's or template's inline `input:` relation, which reads nothing
+    // from the environment (`{{...}}` is refused in one), joins the source's
+    // relations under a name no config can write.
+    crate::v2::hoist_inline_inputs(&mut objects, &mut config.rules, &mut config.templates)
+        .map_err(|error| {
+            alint_core::redact_environment_values_in_error(error, &config.environment_values)
+        })?;
     config.v2.sources.push(objects);
     Ok(())
 }
@@ -1307,6 +1366,7 @@ fn read_local_config(
             context.consumer_version,
             state.running_version,
         )?;
+        reject_kinds_newer_than_source(config, display, opts.kind_catalog)?;
         // Each field of a version 2 source's rules and templates is written
         // by it, for a field that names a relation to resolve there.
         if config.surface == crate::v2::Surface::V2 {
@@ -1429,6 +1489,7 @@ fn load_extended_source(
             consumer_version,
             state.running_version,
         )?;
+        reject_kinds_newer_than_source(&remote, &source_display, opts.kind_catalog)?;
         if !remote.extends.is_empty() {
             return Err(Error::Other(format!(
                 "remote config at {source_display} contains its own `extends:`; \
@@ -1439,13 +1500,15 @@ fn load_extended_source(
         remote
     } else if let ExtendsEntryKind::Bundled(spec) = kind {
         let mut bundled = state.bundled_source(spec, || load_bundled(spec))?;
+        let bundled_display = format!("alint://bundled/{spec}");
         validate_source_compatibility(
             &mut bundled,
-            &format!("alint://bundled/{spec}"),
+            &bundled_display,
             ConfigSourceClass::Bundled,
             consumer_version,
             state.running_version,
         )?;
+        reject_kinds_newer_than_source(&bundled, &bundled_display, opts.kind_catalog)?;
         if !bundled.extends.is_empty() {
             return Err(Error::internal(format!(
                 "bundled ruleset '{spec}' declares its own `extends:`"

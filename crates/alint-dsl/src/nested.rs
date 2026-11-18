@@ -238,6 +238,7 @@ fn nested_config_rules(
         consumer_version,
         running_version,
     )?;
+    crate::loader::reject_kinds_newer_than_source(&config, source, catalog)?;
 
     // MVP: reject nested configs that try to set anything that
     // could affect the whole repo. Only `version:`, `requires:`, and `rules:`

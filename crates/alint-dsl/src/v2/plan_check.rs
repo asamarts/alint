@@ -273,7 +273,7 @@ fn recheck_selectors(plan: &Plan, checked: Checked) -> Result<()> {
         Checked::InlineSelectors(id) => {
             let named = plan.relation(id);
             let display = &plan.source(named.source).display;
-            let path = format!("relations.{}", named.name);
+            let path = super::decode::relation_path(&named.name);
             match &named.relation.rows {
                 Rows::Part(part) => {
                     if let SelectorRef::Inline(selector) = &part.from {
@@ -365,7 +365,7 @@ fn order(plan: &Plan) -> Result<Vec<RelationId>> {
     let edges: Vec<Vec<(RelationId, String)>> = plan
         .relations
         .iter()
-        .map(|named| reads(&named.relation, &format!("relations.{}", named.name)))
+        .map(|named| reads(&named.relation, &super::decode::relation_path(&named.name)))
         .collect();
     let mut state = vec![State::New; edges.len()];
     let mut order = Vec::with_capacity(edges.len());
@@ -578,7 +578,7 @@ fn check_relation(fields: &Fields<'_>, id: RelationId) -> Result<()> {
     let named = plan.relation(id);
     let at = At {
         display: &plan.source(named.source).display,
-        path: format!("relations.{}", named.name),
+        path: super::decode::relation_path(&named.name),
     };
     check_rows(fields, &named.relation, &at)?;
     check_transforms(fields, id, &at)?;

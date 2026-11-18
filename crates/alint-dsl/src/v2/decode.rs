@@ -317,6 +317,86 @@ pub(crate) fn decode_objects(
     Ok(objects)
 }
 
+/// The private key the loader puts in an inline relation that a rule or
+/// template writes as its `input:` (a map), holding the name the relation was
+/// declared under in its source ([`hoist_inline_inputs`]). The loader refuses
+/// a `__alint_internal_*` key a config writes, so no config can forge it.
+pub(crate) const INLINE_INPUT_MARKER: &str = "__alint_internal_v2_inline_input";
+
+/// Whether `name`, a relation's name in a plan, is that of an inline `input:`
+/// relation ([`hoist_inline_inputs`]): one no config can write, since every
+/// declared name is a valid name ([`is_name`]).
+pub(crate) fn is_inline_name(name: &str) -> bool {
+    // `NamedRelation::is_inline` reads a plan's names the same way.
+    !is_name(name)
+}
+
+/// How an error names relation `name` of a source: `relations.<name>` for a
+/// named one, or where an inline `input:` relation is written
+/// (`rules[3].input`).
+pub(crate) fn relation_path(name: &str) -> String {
+    if is_inline_name(name) {
+        name.to_string()
+    } else {
+        format!("relations.{name}")
+    }
+}
+
+/// Decode the inline relation each of a source's rules (`rules`) and
+/// templates (`templates`) writes as its `input:` (a map, the `constraint`
+/// kind's anonymous input), whatever its `kind:` (an override by id writes
+/// none), as a relation of the source, and mark the map with the relation's
+/// name ([`INLINE_INPUT_MARKER`]). The name is where the map is written
+/// (`rules[3].input`, `templates[0].input`): no config can write one as a
+/// name (it is not a valid name) or as a reference (a reference is a name or
+/// `alias.name`), so nothing reaches it but the rule whose `input:` the
+/// loader marked, wherever the rule merges or a template expands. The map
+/// stays the rule's `input:`, which `list` and `explain` show; the plan holds
+/// the relation, planned and checked as a named one is. An inline relation
+/// is literal (`super::literal` refuses `{{...}}` in one), so it reads
+/// nothing from the environment.
+pub(crate) fn hoist_inline_inputs(
+    objects: &mut SourceObjects,
+    rules: &mut [Mapping],
+    templates: &mut [Mapping],
+) -> Result<()> {
+    let display = objects.source.display.clone();
+    let decoder = Decoder { source: &display };
+    for (section, mappings) in [("rules", rules), ("templates", templates)] {
+        for (index, mapping) in mappings.iter_mut().enumerate() {
+            let Some(Value::Mapping(input)) = mapping.get_mut("input") else {
+                continue;
+            };
+            let name = format!("{section}[{index}].input");
+            let definition = Value::Mapping(input.clone());
+            decoder.untagged(&definition, &name)?;
+            let relation = decoder.relation(&definition, &name)?;
+            input.insert(INLINE_INPUT_MARKER.into(), Value::from(name.as_str()));
+            objects.relations.push((name, relation));
+        }
+    }
+    Ok(())
+}
+
+/// Take the marker [`hoist_inline_inputs`] put in a rule's `input:` map off
+/// it, so the rule's options show the relation as written: the name of the
+/// relation the plan holds for it, or `None` when `input:` is no marked map.
+pub(crate) fn take_inline_input(rule: &mut Mapping) -> Option<String> {
+    let input = rule.get_mut("input")?.as_mapping_mut()?;
+    input
+        .remove(INLINE_INPUT_MARKER)
+        .and_then(|name| name.as_str().map(str::to_string))
+}
+
+/// The name [`hoist_inline_inputs`] marked a rule's `input:` map with, if it
+/// did.
+pub(crate) fn inline_input(value: &Value) -> Option<&str> {
+    value
+        .as_mapping()?
+        .get(INLINE_INPUT_MARKER)
+        .and_then(Value::as_str)
+}
+
 /// Give each of `objects`' selectors and relations whose definition takes a
 /// value from the environment (`reads`) the copies a plan-check error about
 /// it is rerun on ([`Twins`]): its definition as `masked` gives it, with each

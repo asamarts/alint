@@ -258,9 +258,15 @@ impl<'o> Namespaces<'o> {
     /// The names of `wanted`'s kind that `source` declares.
     fn own_names(&self, source: SourceIndex, wanted: Wanted) -> Vec<&'o str> {
         let objects = &self.objects.sources[source.0];
+        // An inline `input:` relation has a name no config can write.
         match wanted {
             Wanted::Selector => objects.selectors.iter().map(|(n, _)| n.as_str()).collect(),
-            Wanted::Relation => objects.relations.iter().map(|(n, _)| n.as_str()).collect(),
+            Wanted::Relation => objects
+                .relations
+                .iter()
+                .map(|(n, _)| n.as_str())
+                .filter(|name| !super::decode::is_inline_name(name))
+                .collect(),
         }
     }
 
@@ -592,7 +598,7 @@ fn unless_reproduced(
         }
         Checked::InlineSelectors(id) | Checked::Relation(id) => {
             let named = plan.relation(id);
-            let about = (named.source, format!("relations.{}", named.name));
+            let about = (named.source, super::decode::relation_path(&named.name));
             let read = if checked == Checked::Relation(id) {
                 super::plan_check::read_by(plan, id)
             } else {
@@ -679,7 +685,7 @@ fn relation_def(
     relation: &Relation,
 ) -> Result<plan::RelationDef> {
     let at = |path: String, message: String| located(namespaces.display(source), &path, message);
-    let path = format!("relations.{name}");
+    let path = super::decode::relation_path(name);
     let part = |part: &Part, part_path: &str| -> Result<plan::Part> {
         let from = match &part.from {
             SelectorRef::Named(reference) => plan::SelectorRef::Named(
@@ -1125,9 +1131,14 @@ fn gate_objects(plan: &Plan) -> Result<()> {
     for (noun, section, name, source, capabilities) in objects {
         let source = plan.source(source);
         if let Some(what) = refused(capabilities, source.class) {
+            let path = if super::decode::is_inline_name(name) {
+                name.clone()
+            } else {
+                format!("{section}.{name}")
+            };
             return Err(located(
                 &source.display,
-                &format!("{section}.{name}"),
+                &path,
                 format!(
                     "this {noun} {what} (itself or through what it references), which a config \
                      reached through `extends:` may not do; declare it in the top-level config \
@@ -1179,13 +1190,21 @@ impl Resolved<'_> {
             let fail = |message: String| {
                 Error::rule_config(id, format!("`{field}` (written by {display}): {message}"))
             };
-            let text = value.as_str().ok_or_else(|| {
-                fail(format!(
-                    "expected a relation name, found {}",
-                    super::decode::describe(value)
-                ))
-            })?;
-            let reference = super::decode::parse_reference(text).map_err(fail)?;
+            // An inline relation (a map) was declared in the source that
+            // wrote it, under the name its marker holds.
+            let reference = match (value.as_str(), super::decode::inline_input(value)) {
+                (Some(text), _) => super::decode::parse_reference(text).map_err(fail)?,
+                (None, Some(name)) => Reference {
+                    alias: None,
+                    name: name.to_string(),
+                },
+                (None, None) => {
+                    return Err(fail(format!(
+                        "expected a relation name or an inline relation (a map), found {}",
+                        super::decode::describe(value)
+                    )));
+                }
+            };
             let relation = self
                 .namespaces
                 .relation(source, &reference, &format!("`{field}:` names a relation"))
