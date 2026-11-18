@@ -90,7 +90,8 @@ fn untrusted_refuses_a_remote_extends_before_connecting() {
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(!out.status.success(), "{args:?}: {stderr}");
         assert!(
-            stderr.contains("remote `extends` is disabled for this load"),
+            stderr.contains("remote `extends` is disabled for this load")
+                && stderr.contains("an untrusted load (`--untrusted`"),
             "{args:?}: {stderr}"
         );
         assert!(!stderr.contains("leaked"), "{args:?}: {stderr}");

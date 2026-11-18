@@ -1439,7 +1439,9 @@ fn load_extended_source(
     } else if kind == ExtendsEntryKind::Https {
         if opts.remote_policy == crate::RemotePolicy::Deny {
             return Err(Error::Other(format!(
-                "remote `extends` is disabled for this load (entry {source_display:?})"
+                "remote `extends` is disabled for this load (entry {source_display:?}): \
+                 an untrusted load (`--untrusted`, an editor workspace that is not trusted, \
+                 or a policy test) fetches nothing"
             )));
         }
         let mut remote = load_remote(url, opts, &mut state.visiting)?;
