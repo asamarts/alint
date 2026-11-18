@@ -229,9 +229,9 @@ posture is:
   Trust state), `alint lsp` skips spawning rules, rules that run Git and
   `custom:` facts (a rule whose fix alone spawns lints without the fix),
   fetches no remote `extends:`, refuses `allow_out_of_root:` and reads no
-  environment value; other rules lint as usual. `alint lsp --untrusted` takes every workspace as untrusted,
-  whatever the editor says. A
-  nested or vendored `.alint.yml` never governs a file as a top-level config:
+  environment value; other rules lint as usual. `alint lsp --untrusted` takes
+  every workspace as untrusted, whatever the editor says. A nested or vendored
+  `.alint.yml` never governs a file as a top-level config:
   the workspace folder's config does, as for `alint check` from the root, or,
   in a folder without one, the config at the top of the file's repository
   (the nearest directory holding `.git`), and each adds nested configs only

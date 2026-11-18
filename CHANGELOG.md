@@ -451,8 +451,8 @@ policy-test package the user does not trust.
   connecting and a top-level `allow_out_of_root:` before its `extends:` resolves (it would let the
   config read and write outside the repository; the language server's untrusted mode and `alint
   test` refuse it too, through `LoadOptions::with_out_of_root_policy`), and gives the config an
-  empty environment, so `{{env.NAME}}`, `env.*` in a `when:` and a legacy `${VAR}` read nothing. `alint lsp --untrusted` takes every workspace as untrusted,
-  whatever the editor sends
+  empty environment, so `{{env.NAME}}`, `env.*` in a `when:` and a legacy `${VAR}` read nothing.
+  `alint lsp --untrusted` takes every workspace as untrusted, whatever the editor sends
   ([ADR-0044](docs/adr/0044-untrusted-runs-git-as-a-process-and-a-wider-memory-gate.md)).
   SECURITY.md recommends it for a checkout you do not trust.
 - **The language server's `trusted` initialization option** (`{"trusted": true}`): until the
@@ -1048,10 +1048,10 @@ policy-test package the user does not trust.
   block scalar, attach an explicit `?` key or a key-less `:` entry to another value, or leave a bare
   `?`; in TOML, removing the only table under a parent known only from a dotted header dropped the
   parent. When two rules' fixes together would change more than their targets, the later rule waits
-  for the next fix pass, also beside another rule's free-form `replace` in the same file. A YAML set or removal at a node an alias or merge key names, or on a path
-  through one, declines. Removing a YAML block mapping's last entries writes `{}`, where it left the
-  key with no value, which reads as null
-  ([ADR-0044](docs/adr/0044-untrusted-runs-git-as-a-process-and-a-wider-memory-gate.md)).
+  for the next fix pass, also beside another rule's free-form `replace` in the same file. A YAML set
+  or removal at a node an alias or merge key names, or on a path through one, declines. Removing a
+  YAML block mapping's last entries writes `{}`, where it left the key with no value, which reads as
+  null ([ADR-0044](docs/adr/0044-untrusted-runs-git-as-a-process-and-a-wider-memory-gate.md)).
 - **In a rule nested two or more levels deep, a token's value is substituted once.** The inner
   iterations rendered the outer one's values again, so a file or directory named like a token
   (`x{stem}`) was expanded twice: `key_parity` reported a missing peer, and messages showed the
