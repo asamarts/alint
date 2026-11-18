@@ -308,8 +308,15 @@ rulesets you trust and, with a content fix, only on repositories you trust.
   or `commondir`, made `alint check`, `alint fix` and the language server exhaust memory or hang.
   Every ignore file the walk reads (in the tree, above it, and the global excludes file) is now read
   only when it is a regular file of at most 32 MiB; otherwise the walk stops with an error that
-  names it, except that a global excludes file that is not a regular file is skipped unread. The check costs three `stat` calls for each directory the walk enters and each
-  directory above the root. This affects every released version.
+  names it, except that a global excludes file that is not a regular file is skipped unread. A
+  regular file that gives its size as zero, as a `/proc` file does, is counted by reading it, so a
+  symlink to `/proc/self/pagemap` (gigabytes) is refused too. The check costs three `stat` calls
+  for each directory the walk enters and each directory above the root, and one read of each empty
+  ignore file. This affects every released version.
+- **The `git_branch` fact reads `.git/HEAD` only when it is a regular file of at most 64 KiB.** A
+  `HEAD` that was a symlink to `/dev/zero` made the run exhaust memory, and a FIFO hung it, also
+  under `--no-spawn`. A larger or irregular `HEAD` names no branch (`""`), as an unreadable one
+  did. This affects every released version.
 - **A baseline is read only when it is a regular file of at most 256 MiB, and one the `baseline:`
   key names only inside the repository and outside `.git`.** Since v0.14.0, `check`, `fix` and the
   language server read the baseline whole, wherever it was, so a repository's `.alint.yml` could

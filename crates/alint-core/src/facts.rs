@@ -497,14 +497,23 @@ pub fn reject_custom_facts_in(facts: &[FactSpec], source: &str) -> Result<()> {
     Ok(())
 }
 
+/// The most of `.git/HEAD` the `git_branch` fact reads: far more than a
+/// `ref:` line takes.
+const MAX_HEAD_BYTES: u64 = 64 * 1024;
+
 /// Best-effort branch resolution: read `<root>/.git/HEAD` and
 /// extract the branch from a `ref: refs/heads/<branch>` line.
 /// Detached HEADs, bare SHAs, worktree pointers, missing files,
-/// non-UTF-8 content — every edge case returns `""`. Downstream
-/// `when:` coercion treats that as falsy.
+/// non-UTF-8 content, and a `HEAD` that is not a regular file of at
+/// most [`MAX_HEAD_BYTES`] (a symlink to `/dev/zero` or a FIFO) — every
+/// edge case returns `""`. Downstream `when:` coercion treats that as
+/// falsy.
 fn read_git_branch(root: &Path) -> String {
     let head = root.join(".git").join("HEAD");
-    let Ok(content) = std::fs::read_to_string(&head) else {
+    let Some(content) = crate::bounded_file::read_regular_capped(&head, MAX_HEAD_BYTES)
+        .ok()
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+    else {
         return String::new();
     };
     content
@@ -911,6 +920,52 @@ mod tests {
         let facts = parse("- id: branch\n  git_branch: {}\n");
         let v = evaluate_facts(&facts, tmp.path(), &idx(&[])).unwrap();
         assert_eq!(v.get("branch"), Some(&FactValue::String(String::new())));
+    }
+
+    /// `HEAD` is read only when it is a regular file of at most
+    /// `MAX_HEAD_BYTES`: a `ref:` line padded past it, and a FIFO, which
+    /// would block the read, name no branch.
+    #[cfg(unix)]
+    #[test]
+    fn git_branch_reads_only_a_regular_head_within_the_cap() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(tmp.path().join(".git")).unwrap();
+        let head = tmp.path().join(".git/HEAD");
+        let facts = parse("- id: branch\n  git_branch: {}\n");
+        let branch = |root: PathBuf| {
+            let facts = facts.clone();
+            let (sender, receiver) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = sender.send(evaluate_facts(&facts, &root, &idx(&[])).unwrap());
+            });
+            receiver
+                .recv_timeout(std::time::Duration::from_secs(30))
+                .expect("within the deadline")
+                .get("branch")
+                .cloned()
+        };
+        let line = "ref: refs/heads/main";
+        let within = format!("{line}{}\n", " ".repeat(64 * 1024 - line.len() - 1));
+        std::fs::write(&head, &within).unwrap();
+        assert_eq!(
+            branch(tmp.path().to_path_buf()),
+            Some(FactValue::String("main".to_string()))
+        );
+        std::fs::write(&head, format!("{within} ")).unwrap();
+        assert_eq!(
+            branch(tmp.path().to_path_buf()),
+            Some(FactValue::String(String::new()))
+        );
+        std::fs::remove_file(&head).unwrap();
+        let status = std::process::Command::new("mkfifo")
+            .arg(&head)
+            .status()
+            .expect("run mkfifo");
+        assert!(status.success(), "mkfifo failed");
+        assert_eq!(
+            branch(tmp.path().to_path_buf()),
+            Some(FactValue::String(String::new()))
+        );
     }
 
     #[test]

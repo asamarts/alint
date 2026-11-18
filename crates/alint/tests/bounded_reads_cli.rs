@@ -160,6 +160,19 @@ fn cases() -> Vec<Case> {
             },
         },
         Case {
+            name: "a .gitignore below the root, a symlink to /proc/self/pagemap",
+            build: |tmp, _| {
+                let file = Path::new("/proc/self/pagemap");
+                if !cfg!(target_os = "linux") || !file.exists() {
+                    return None;
+                }
+                let root = plain_root(tmp);
+                let link = root.join("src/.gitignore");
+                symlink(file, &link);
+                Some((root, link))
+            },
+        },
+        Case {
             name: "a .gitignore below the root that is a FIFO",
             build: |tmp, _| {
                 let root = plain_root(tmp);
