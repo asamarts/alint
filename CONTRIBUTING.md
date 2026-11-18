@@ -278,7 +278,8 @@ explained.
 - One logical change per PR. Refactors land separately from feature work.
 - The PR description goes in the body, not the title.
 - A squash merge writes the title and ` (#N)` as the commit subject on `main`, which must fit in
-  120 characters; the `Pull request title` check measures it.
+  120 characters; the `Pull request title` check measures it. For a PR of one commit, the merge
+  writes that commit's subject instead, and the check measures that.
 
 ### Branch protection
 
