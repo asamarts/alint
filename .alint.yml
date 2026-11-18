@@ -489,6 +489,22 @@ rules:
   # Every YAML decode goes through alint_core::yaml, which pins the parser
   # limits. ayaml's own defaults cap a document at 1,000,000 events and
   # refused valid multi-megabyte files that v0.22 read.
+  # The CLI's tests start alint through `tests/hermetic.rs`, which runs it
+  # without the host's Git configuration, global excludes file or HOME
+  # (CONTRIBUTING.md), so what a test sees does not depend on the machine.
+  - id: cli-tests-start-alint-hermetically
+    kind: file_content_forbidden
+    paths:
+      include:
+        - "crates/alint/tests/**/*.rs"
+      exclude:
+        - "crates/alint/tests/hermetic.rs"
+    pattern: 'Command::new\((env!\("CARGO_BIN_EXE_alint"\)|bin\(\)|alint_bin\(\))'
+    level: error
+    message: >-
+      Start alint with crate::hermetic::command, which keeps the host's Git
+      setup, global excludes file and HOME out of the test.
+
   - id: yaml-decodes-go-through-alint-core
     kind: file_content_forbidden
     paths:
