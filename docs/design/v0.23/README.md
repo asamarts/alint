@@ -273,8 +273,8 @@ The #503 fix (item 12) is its own pull request, with `add -f` e2e scenarios for 
 `dir_absent`, `file_exists` and `dir_exists`, and does not depend on the design. It merged as #509
 on 2026-11-13.
 
-The feature freeze is the point at which phases 1 to 8 and the #503 fix are merged. Phase 9 is
-decided then.
+The feature freeze is the point at which phases 1 to 8, the #503 fix and #580 (a linear
+`extends:` merge, after phase 7; ADR-0046 decision 1) are merged. Phase 9 is decided then.
 
 ## 5. Release acceptance
 
@@ -816,3 +816,11 @@ decided then.
     which relation reaches a cap depends on the order rules run in. Phase 7 evaluates relations
     in plan order before the rules fan out, or documents the difference.
   - Next: phase 7, the `constraint` kind; the ayaml bump when a release meets the conditions.
+- 2026-11-17: the round's open questions and the third audit.
+  - Owner decisions, recorded in ADR-0046, each the recommended option: #580 merges an
+    `extends:` list in linear time before v0.23.0, after phase 7; discovery keeps climbing past
+    another user's checkout and its warning says how to use the config it skips; a bad ignore
+    file still stops the walk, with the 32 MiB cap (#568 waits on #573); an absolute local
+    `extends:` stays refused without `allow_out_of_root`; the language server's holes stay in
+    GHSA-78jj-xfpm-g6px; `LspOptions` and `LoadOptions` are sealed, with setters; and the YAML
+    alias factor stays 64, set again from the memory test at the ayaml bump.

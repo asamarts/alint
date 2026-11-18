@@ -14,6 +14,8 @@ and corrects its decision 8 and "The ayaml condition" (see "A correction to ADR-
 [ADR-0042](0042-measure-the-yaml-parser-by-memory-and-wall-time.md) decisions 1, 2 and 4: the
 memory test measures nine document shapes, the release bound holds for each of them, and the
 parse budget charges what aliases expand to. The rest of both records stands.
+[ADR-0046](0046-a-linear-extends-merge-sealed-options-and-the-rounds-open-questions.md) keeps
+decision 3 and adds a hint to its warning.
 
 ## Context
 
