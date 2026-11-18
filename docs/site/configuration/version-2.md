@@ -357,7 +357,7 @@ it, then one line per file an alias reaches, with every alias that reaches it;
 `alint export-agents-md` lists them the same way. A file is named by its path from the top-level
 config's directory, `../`-relative when `allow_out_of_root: true` lets an `extends:` chain leave
 it. A file an `extends:` entry read from the environment chooses, and every file it extends in
-turn, is named `<redacted>`.
+turn, is named `<redacted>`, here and in errors found in it, however short its name.
 
 ## What the loader checks
 

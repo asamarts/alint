@@ -596,7 +596,7 @@ fn merged_with_charge(config: &std::path::Path) -> (RawConfig, usize) {
         &opts,
         config.parent(),
         true,
-        &[],
+        &loader::TrustedExtends::default(),
         loader::SourceContext::new(alint_core::ConfigSourceClass::Root, None),
     )
     .expect("loads");
@@ -748,11 +748,11 @@ fn an_extends_merge_budget_bounds_a_load() {
             .unwrap_err()
             .to_string(),
         format!(
-            "the `extends:` entries of this config load and merge more than {} entries in all \
-             (rules, templates, facts, vars and `ignore:` patterns, counted for each source an \
-             entry loads and at each merge, both what was merged so far and what the entry \
-             brings in); list each source once, extend fewer and larger sources, or flatten the \
-             `extends:` chain",
+            "the `extends:` entries and `.alint.d/` drop-ins of this config load and merge more \
+             than {} entries in all (rules, templates, facts, vars and `ignore:` patterns, counted \
+             for each source an entry loads and at each merge, both what was merged so far and \
+             what the entry or drop-in brings in); list each source once, extend fewer and larger \
+             sources, use fewer drop-ins, or flatten the `extends:` chain",
             loader::MAX_EXTENDS_MERGE_WORK
         )
     );

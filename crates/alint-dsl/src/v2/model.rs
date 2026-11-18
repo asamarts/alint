@@ -58,11 +58,12 @@ impl Objects {
 
     /// Record that the source's `extends:` entry `entry` (its index) names
     /// the local file `target`, once the loader has read it, and give the
-    /// entry's alias, if it has one, that target. Called on one source's
-    /// objects, before any merge, once per entry. The aliases are held in
-    /// entry order, so the entry's alias is found by a binary search: recording
-    /// every entry is not the entries times the aliases.
-    pub(crate) fn record_extended(&mut self, entry: usize, target: Option<&Path>) {
+    /// entry's alias, if it has one, that target, and, when the environment
+    /// chose the target (`chosen`), `<redacted>` for its URL. Called on one
+    /// source's objects, before any merge, once per entry. The aliases are
+    /// held in entry order, so the entry's alias is found by a binary search:
+    /// recording every entry is not the entries times the aliases.
+    pub(crate) fn record_extended(&mut self, entry: usize, target: Option<&Path>, chosen: bool) {
         for source in &mut self.sources {
             if let Some(target) = target {
                 source.extended.push(target.to_path_buf());
@@ -73,7 +74,11 @@ impl Objects {
                 alias.entry
             });
             if let Ok(at) = found {
-                source.aliases[at].1.target = target.map(Path::to_path_buf);
+                let alias = &mut source.aliases[at].1;
+                alias.target = target.map(Path::to_path_buf);
+                if chosen {
+                    alint_core::CONFIGURATION_MASK.clone_into(&mut alias.url);
+                }
             }
         }
     }
