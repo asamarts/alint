@@ -3,7 +3,7 @@
 //! says about versions it does not take.
 
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Output;
 
 fn write(root: &Path, relative: &str, contents: &str) {
     let path = root.join(relative);
@@ -12,7 +12,7 @@ fn write(root: &Path, relative: &str, contents: &str) {
 }
 
 fn run(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_alint"))
+    crate::hermetic::command(env!("CARGO_BIN_EXE_alint"))
         .args(args)
         .current_dir(dir)
         .env("NO_COLOR", "1")

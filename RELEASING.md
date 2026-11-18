@@ -235,9 +235,9 @@ checklist so the release-gated pieces land and nothing drifts:
    release fixes (for v0.23.0, GHSA-78jj-xfpm-g6px, ADR-0040 and ADR-0043),
    once the release is out: check that the advisory's description matches the
    CHANGELOG's Security section, and set its patched versions to the released
-   ones, in the advisory's page or its API. For v0.23.0, also settle the
-   question ADR-0043 decision 1 leaves to this step: whether the language
-   server's holes get an advisory of their own. Then publish it:
+   ones, in the advisory's page or its API. For v0.23.0, the language
+   server's holes stay in GHSA-78jj-xfpm-g6px (ADR-0046 decision 5), so there
+   is one advisory to publish. Then publish it:
 
    ```sh
    gh api -X PATCH repos/asamarts/alint/security-advisories/GHSA-78jj-xfpm-g6px \

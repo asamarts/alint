@@ -16,15 +16,17 @@
 //! their own. A literal peer in another key model is a config error; a peer a
 //! glob selects in another key model is an analysis failure.
 
+use std::borrow::{Borrow, Cow};
 use std::collections::{BTreeMap, BTreeSet};
+use std::ops::Bound;
 use std::path::Path;
 use std::sync::Arc;
 
 use alint_core::plugin_api::{Analyzer, AnalyzerError, AnalyzerInput, Finding, PointerSegment};
 use alint_core::relation::{
-    Adapter, AndroidStringsAdapter, ContractAnalyzer, DecodeCache, EntryRowsAdapter, Limits,
-    Origin, Pointer, ReadCache, RelPath, Resource, ResourceRead, ResxAdapter, Row, RowState,
-    Segment, Selector, TomlRowsAdapter,
+    Adapter, AdapterOutput, AndroidStringsAdapter, ContractAnalyzer, DecodeCache, EntryRowsAdapter,
+    LimitExceeded, Limits, Origin, Pointer, ReadCache, RelPath, Resource, ResourceRead,
+    ResxAdapter, Row, RowState, Segment, Selector, TomlRowsAdapter,
 };
 use alint_core::template::{PathTokens, render_path, render_path_glob};
 use alint_core::{
@@ -167,15 +169,49 @@ crate::options_schema_for!(Options);
 
 #[derive(Debug, Clone)]
 struct KeyFile {
-    keys: BTreeMap<Vec<Segment>, ByteSpan>,
+    /// The file's decode, which holds each key path once: the file's keys
+    /// borrow their paths from it ([`Self::keys`]) rather than copying them.
+    decode: Arc<AdapterOutput>,
+    /// The decode's leaf key rows, in key order, a repeated key once (its
+    /// first row), each with its key's span.
+    leaves: Vec<(usize, ByteSpan)>,
     text: Arc<str>,
     line_starts: Vec<usize>,
 }
 
 impl KeyFile {
+    /// The key path of the decode's row `row`.
+    fn path(&self, row: usize) -> &[Segment] {
+        self.decode.rows[row]
+            .pointer
+            .as_ref()
+            .map_or(&[], Pointer::segments)
+    }
+
+    /// The file's keys, each without its first `skip` segments, their paths
+    /// borrowed from the decode.
+    fn keys(&self, skip: usize) -> Keys<'_> {
+        self.leaves
+            .iter()
+            .map(|&(row, span)| {
+                let path = self.path(row);
+                (Cow::Borrowed(path.get(skip..).unwrap_or(&[])), span)
+            })
+            .collect()
+    }
+
+    /// What the file holds beside its decode, which the run's byte budget
+    /// takes as the file is read.
+    fn held_bytes(&self) -> usize {
+        self.text.len()
+            + self.line_starts.capacity() * std::mem::size_of::<usize>()
+            + self.leaves.capacity() * std::mem::size_of::<(usize, ByteSpan)>()
+    }
+
     #[cfg(test)]
     fn range(&self, key: &[Segment]) -> Option<SourceRange> {
-        self.range_at(*self.keys.get(key)?)
+        let (_, span) = self.leaves.iter().find(|(row, _)| self.path(*row) == key)?;
+        self.range_at(*span)
     }
 
     /// The source range of a key span. Callers pass the span from the
@@ -262,9 +298,10 @@ pub struct KeyParityRule {
 ///
 /// Keys are compared by their injective rendering ([`Pointer::render`]), the
 /// rule's key identity, so `nav['a.b']` and `nav.a.b` stay distinct (messages
-/// and baseline keys use [`display_key`]). The analyzer knows the peer's path, so a peer with
-/// no rows (an empty file, or one whose every key `ignore_keys` removed) still
-/// reports every reference key as missing.
+/// and baseline keys use [`display_key`]). A key row's pointer is one segment
+/// that holds it ([`identity_pointer`]). The analyzer knows the peer's path,
+/// so a peer with no rows (an empty file, or one whose every key
+/// `ignore_keys` removed) still reports every reference key as missing.
 struct KeySetAnalyzer {
     reference: String,
     peer: String,
@@ -286,7 +323,13 @@ impl Analyzer for KeySetAnalyzer {
                     row.resource.path
                 )));
             };
-            let key = render_contract_pointer(pointer)?;
+            let [PointerSegment::Key(key)] = pointer.as_slice() else {
+                return Err(AnalyzerError::InvalidInput(format!(
+                    "a key row of {} does not hold one key identity",
+                    row.resource.path
+                )));
+            };
+            let key = key.as_str();
             if row.resource.path == self.reference {
                 reference.insert(key);
             } else if row.resource.path == self.peer {
@@ -327,38 +370,21 @@ impl Analyzer for KeySetAnalyzer {
     }
 }
 
-/// Render a contract key path exactly as [`render_key`] renders the internal
-/// one, so analyzer findings and rule-side keys compare as equal strings.
-fn render_contract_pointer(pointer: &[PointerSegment]) -> Result<String, AnalyzerError> {
-    let mut segments = Vec::with_capacity(pointer.len());
-    for part in pointer {
-        segments.push(match part {
-            PointerSegment::Key(key) => Segment::Key(key.as_str().into()),
-            PointerSegment::Index(index) => {
-                Segment::Index(usize::try_from(*index).map_err(|_| {
-                    AnalyzerError::InvalidInput(format!("key index {index} does not fit usize"))
-                })?)
-            }
-        });
-    }
-    Ok(render_key(&segments))
-}
-
 /// Contract key rows for one compared file. Every key becomes a row; a file
 /// with more keys than a row ordinal can number is an error, never a
 /// silently shortened key set.
-fn key_rows(
+fn key_rows<K: Borrow<[Segment]>>(
     resource: &Resource,
-    keys: &BTreeMap<Vec<Segment>, ByteSpan>,
+    keys: &BTreeMap<K, ByteSpan>,
 ) -> std::result::Result<Vec<Row>, String> {
     keys.iter()
         .enumerate()
-        .map(|(ordinal, (segments, span))| {
+        .map(|(ordinal, (key, span))| {
             let ordinal = u32::try_from(ordinal)
                 .map_err(|_| format!("{} has more keys than a row can number", resource.path()))?;
             let mut row = Row::new(
                 resource.clone(),
-                Some(Pointer::from_segments(segments.clone())),
+                Some(identity_pointer(key.borrow())),
                 ordinal,
                 RowState::Key,
             );
@@ -366,6 +392,28 @@ fn key_rows(
             Ok(row)
         })
         .collect()
+}
+
+/// A key row's pointer: one segment, the key's identity ([`render_key`]),
+/// which the analyzer compares as it is. A row that held the key path itself
+/// would have the contract copy every segment of it into a string of its
+/// own, W x D strings for each file W keys wide at depth D, in every
+/// comparison.
+fn identity_pointer(key: &[Segment]) -> Pointer {
+    Pointer::from_segments(vec![Segment::Key(render_key(key).into())])
+}
+
+/// What a comparison's rows hold: each row and its key's identity.
+fn rows_bytes(rows: &[Row]) -> usize {
+    rows.iter().fold(std::mem::size_of_val(rows), |bytes, row| {
+        bytes.saturating_add(row.pointer.as_ref().map_or(0, Pointer::heap_bytes))
+    })
+}
+
+/// What a table of `len` keys holds beyond the decode its paths are
+/// borrowed from: an entry each, and about half again for the tree's nodes.
+fn table_bytes(len: usize) -> usize {
+    len.saturating_mul(3 * std::mem::size_of::<(Cow<'static, [Segment]>, ByteSpan)>() / 2)
 }
 
 impl Rule for KeyParityRule {
@@ -541,6 +589,20 @@ impl Rule for KeyParityRule {
             }
             Plurals::Cldr => (None, self.pair_keys(&reference_base, &reference_base).0),
         };
+        // What the comparisons keep of the reference for every peer takes
+        // the run's bytes. What one comparison builds of a peer (its key
+        // table, both files' rows and the analyzer's copy of them) is let go
+        // before the next, and is a small multiple of what the two files'
+        // decodes hold, which the run's bytes took as they were built.
+        let kept = table_bytes(reference_base.len())
+            + table_bytes(reference_trace.len())
+            + shared
+                .as_ref()
+                .map_or(0, |(keys, rows)| table_bytes(keys.len()) + rows_bytes(rows));
+        if let Err(limit) = decode_cache.take_bytes(kept) {
+            findings.push(limit_failure(reference_path, &limit));
+            return Ok(findings);
+        }
         record_key_trace(
             ctx,
             reference_path,
@@ -590,20 +652,27 @@ impl KeyParityRule {
     /// two files together, so a group that is partial in either file (a
     /// locale with fewer categories, or a missing `other`) merges the same
     /// way in both and a base that is a real key in either is never merged.
-    fn pair_keys(&self, reference: &Keys, peer: &Keys) -> (Keys, Keys) {
-        let (mut reference, mut peer) = (reference.clone(), peer.clone());
-        if self.plurals == Plurals::Cldr {
-            let nested = nested_plural_groups(&[&reference, &peer]);
-            reference = merge_nested_groups(&reference, &nested);
-            peer = merge_nested_groups(&peer, &nested);
-            let i18next = i18next_plural_groups(&[&reference, &peer]);
-            reference = merge_i18next_groups(&reference, &i18next);
-            peer = merge_i18next_groups(&peer, &i18next);
+    fn pair_keys<'a>(&self, reference: &Keys<'a>, peer: &Keys<'a>) -> (Keys<'a>, Keys<'a>) {
+        if self.plurals != Plurals::Cldr {
+            return (
+                self.without_ignored(reference.clone()),
+                self.without_ignored(peer.clone()),
+            );
         }
+        let nested = nested_plural_groups(&[reference, peer]);
+        let (reference, peer) = (
+            merge_nested_groups(reference, &nested),
+            merge_nested_groups(peer, &nested),
+        );
+        let i18next = i18next_plural_groups(&[&reference, &peer]);
+        let (reference, peer) = (
+            merge_i18next_groups(&reference, &i18next),
+            merge_i18next_groups(&peer, &i18next),
+        );
         (self.without_ignored(reference), self.without_ignored(peer))
     }
 
-    fn without_ignored(&self, mut keys: Keys) -> Keys {
+    fn without_ignored<'a>(&self, mut keys: Keys<'a>) -> Keys<'a> {
         if !self.ignore.is_empty() {
             keys.retain(|key, _| !self.ignore.iter().any(|pattern| pattern.matches(key)));
         }
@@ -687,30 +756,7 @@ impl KeyParityRule {
                 return None;
             }
         };
-        let mut keys = BTreeMap::new();
-        for row in &output.rows {
-            if !row.is_key() {
-                continue;
-            }
-            let Some(pointer) = row.pointer.as_ref() else {
-                continue;
-            };
-            // Array elements are values, not keys, and the document root has
-            // no name to compare.
-            if pointer.segments().is_empty()
-                || pointer
-                    .segments()
-                    .iter()
-                    .any(|segment| matches!(segment, Segment::Index(_)))
-            {
-                continue;
-            }
-            let Some(span) = row.span else {
-                continue;
-            };
-            keys.entry(pointer.segments().to_vec()).or_insert(span);
-        }
-        let keys = leaf_keys(keys);
+        let leaves = leaf_rows(&output);
         let Ok(text) = std::str::from_utf8(&bytes) else {
             findings.push(analysis_failure(
                 path,
@@ -718,11 +764,20 @@ impl KeyParityRule {
             ));
             return None;
         };
-        Some(KeyFile {
-            keys,
+        let file = KeyFile {
+            decode: output,
+            leaves,
             text: Arc::from(text),
             line_starts: line_starts(text),
-        })
+        };
+        // The decode's key paths took the run's bytes as they were built;
+        // what the file holds beside them, for the length of the
+        // comparisons, takes them too.
+        if let Err(limit) = decode_cache.take_bytes(file.held_bytes()) {
+            findings.push(limit_failure(path, &limit));
+            return None;
+        }
+        Some(file)
     }
 
     fn compare(
@@ -731,7 +786,7 @@ impl KeyParityRule {
         reference: &Compared<'_>,
         peer: &Resource,
         peer_file: &KeyFile,
-        peer_keys: &BTreeMap<Vec<Segment>, ByteSpan>,
+        peer_keys: &Keys<'_>,
         findings: &mut Vec<Violation>,
     ) {
         let peer_path = Path::new(peer.path().as_str());
@@ -853,12 +908,7 @@ fn record_parse_failure(ctx: &Context<'_>) {
     }
 }
 
-fn record_key_trace(
-    ctx: &Context<'_>,
-    path: &Path,
-    model: KeyModel,
-    keys: &BTreeMap<Vec<Segment>, ByteSpan>,
-) {
+fn record_key_trace(ctx: &Context<'_>, path: &Path, model: KeyModel, keys: &Keys<'_>) {
     if ctx.trace.is_none() {
         return;
     }
@@ -890,7 +940,7 @@ fn record_key_trace(
 /// The reference side of a comparison, built once per evaluation.
 struct Compared<'a> {
     file: &'a KeyFile,
-    keys: &'a BTreeMap<Vec<Segment>, ByteSpan>,
+    keys: &'a Keys<'a>,
     rows: &'a [Row],
 }
 
@@ -924,6 +974,19 @@ fn evaluation_failure(path: &Path, message: &str) -> Violation {
         .as_analysis_failure(AnalysisFailureKind::Evaluation)
 }
 
+/// The failure of a comparison the run's byte budget refused: the keys are
+/// not compared at all rather than in part (invariant 2).
+fn limit_failure(path: &Path, limit: &LimitExceeded) -> Violation {
+    evaluation_failure(
+        path,
+        &format!(
+            "{limit}, so the keys are not compared rather than compared in part; a run holds \
+             the key paths of each file it decodes and the keys it compares, so compare fewer \
+             or smaller files"
+        ),
+    )
+}
+
 fn analysis_failure(path: &Path, message: &str) -> Violation {
     Violation::new(format!(
         "{}: key extraction failed: {message}",
@@ -950,54 +1013,84 @@ fn infer_format(path: &Path) -> Option<KeyFormat> {
     }
 }
 
-fn leaf_keys(mut keys: BTreeMap<Vec<Segment>, ByteSpan>) -> BTreeMap<Vec<Segment>, ByteSpan> {
+/// The keys with no key below them, array members dropped. A key's
+/// descendants follow it in key order, so a key with one is followed by one.
+fn leaf_keys<K: Ord + Borrow<[Segment]>, V>(mut keys: BTreeMap<K, V>) -> BTreeMap<K, V> {
     keys.retain(|key, _| {
-        !key.iter()
+        !key.borrow()
+            .iter()
             .any(|segment| matches!(segment, Segment::Index(_)))
     });
-    let ordered: Vec<Vec<Segment>> = keys.keys().cloned().collect();
-    let mut non_leaf = BTreeSet::new();
-    for pair in ordered.windows(2) {
-        let [parent, child] = pair else {
-            continue;
-        };
-        if child.len() > parent.len() && child.starts_with(parent) {
-            non_leaf.insert(parent.clone());
-        }
+    let mut ordered = keys.keys().map(Borrow::<[Segment]>::borrow).peekable();
+    let mut leaf = Vec::with_capacity(keys.len());
+    while let Some(parent) = ordered.next() {
+        leaf.push(
+            !ordered
+                .peek()
+                .is_some_and(|child| child.len() > parent.len() && child.starts_with(parent)),
+        );
     }
-    for key in non_leaf {
-        keys.remove(&key);
-    }
+    // `retain` visits the keys in order, as `leaf` lists them.
+    let mut leaf = leaf.into_iter();
+    keys.retain(|_, _| leaf.next().unwrap_or(true));
     keys
 }
 
-type Keys = BTreeMap<Vec<Segment>, ByteSpan>;
+/// A file's keys in key order. Each borrows its path from the file's decode
+/// (or is part of one there) and is copied only to merge an i18next plural
+/// group, whose key no file holds.
+type Keys<'a> = BTreeMap<Cow<'a, [Segment]>, ByteSpan>;
+
+/// A decode's leaf key rows, in key order, a repeated key once (its first
+/// row), each with its key's span. The keys are compared by the paths the
+/// decode holds, never copies of them.
+fn leaf_rows(output: &AdapterOutput) -> Vec<(usize, ByteSpan)> {
+    let mut keys = BTreeMap::new();
+    for (index, row) in output.rows.iter().enumerate() {
+        if !row.is_key() {
+            continue;
+        }
+        let Some(pointer) = row.pointer.as_ref() else {
+            continue;
+        };
+        // Array elements are values, not keys, and the document root has
+        // no name to compare.
+        if pointer.segments().is_empty()
+            || pointer
+                .segments()
+                .iter()
+                .any(|segment| matches!(segment, Segment::Index(_)))
+        {
+            continue;
+        }
+        let Some(span) = row.span else {
+            continue;
+        };
+        keys.entry(pointer.segments()).or_insert((index, span));
+    }
+    leaf_keys(keys).into_values().collect()
+}
 
 /// Why `strip_root` cannot strip this file, if it cannot: a file with keys
 /// needs exactly one top-level key, and that key must be an object.
 fn strip_root_blocker(file: &KeyFile) -> Option<String> {
-    let roots: BTreeSet<&Segment> = file.keys.keys().filter_map(|key| key.first()).collect();
+    let mut paths = file.leaves.iter().map(|(row, _)| file.path(*row));
+    let roots: BTreeSet<&Segment> = paths.clone().filter_map(<[Segment]>::first).collect();
     if roots.len() > 1 {
         return Some(format!(
             "`strip_root` needs one top-level key, but the file has {}",
             roots.len()
         ));
     }
-    file.keys.keys().any(|key| key.len() < 2).then(|| {
+    paths.any(|key| key.len() < 2).then(|| {
         "`strip_root` needs the top-level key to be an object, but it is a value".to_string()
     })
 }
 
 /// A file's keys before pairing: below its one root when `strip_root` is set
 /// (`strip_root_blocker` has accepted the file).
-fn base_keys(file: &KeyFile, strip_root: bool) -> Keys {
-    if !strip_root {
-        return file.keys.clone();
-    }
-    file.keys
-        .iter()
-        .map(|(key, span)| (key[1..].to_vec(), *span))
-        .collect()
+fn base_keys(file: &KeyFile, strip_root: bool) -> Keys<'_> {
+    file.keys(usize::from(strip_root))
 }
 
 fn cldr_category(name: &str) -> bool {
@@ -1008,7 +1101,7 @@ fn cldr_category(name: &str) -> bool {
 /// comparison: a non-root object with a category-named leaf in either file,
 /// `other` among its members in at least one, and, in every file that has
 /// it, no member but category-named leaves.
-fn nested_plural_groups(files: &[&Keys]) -> BTreeSet<Vec<Segment>> {
+fn nested_plural_groups<'k>(files: &[&'k Keys<'_>]) -> BTreeSet<&'k [Segment]> {
     let mut candidates: BTreeMap<&[Segment], bool> = BTreeMap::new();
     for keys in files {
         for key in keys.keys() {
@@ -1025,7 +1118,7 @@ fn nested_plural_groups(files: &[&Keys]) -> BTreeSet<Vec<Segment>> {
         .filter(|(parent, has_other)| {
             *has_other && files.iter().all(|keys| is_plural_object(keys, parent))
         })
-        .map(|(parent, _)| parent.to_vec())
+        .map(|(parent, _)| parent)
         .collect()
 }
 
@@ -1033,8 +1126,8 @@ fn nested_plural_groups(files: &[&Keys]) -> BTreeSet<Vec<Segment>> {
 /// (vacuously, when the file has no key below it). Keys that share a prefix
 /// are contiguous in the map, so this visits only `parent`'s own keys and
 /// stops at the first that disqualifies it.
-fn is_plural_object(keys: &Keys, parent: &[Segment]) -> bool {
-    keys.range(parent.to_vec()..)
+fn is_plural_object(keys: &Keys<'_>, parent: &[Segment]) -> bool {
+    keys.range::<[Segment], _>((Bound::Included(parent), Bound::Unbounded))
         .take_while(|(key, _)| key.starts_with(parent))
         .all(|(key, _)| {
             key.len() == parent.len() + 1
@@ -1044,13 +1137,13 @@ fn is_plural_object(keys: &Keys, parent: &[Segment]) -> bool {
 
 /// Replace each group's members with one key at its parent, located at the
 /// file's `other` member, or at its first member when it has no `other`.
-fn merge_nested_groups(keys: &Keys, groups: &BTreeSet<Vec<Segment>>) -> Keys {
+fn merge_nested_groups<'a>(keys: &Keys<'a>, groups: &BTreeSet<&[Segment]>) -> Keys<'a> {
     let mut out = Keys::new();
     let mut merged = Keys::new();
     for (key, span) in keys {
         match key.split_last() {
             Some((Segment::Key(name), parent)) if groups.contains(parent) => {
-                let at = merged.entry(parent.to_vec()).or_insert(*span);
+                let at = merged.entry(parent_key(key)).or_insert(*span);
                 if &**name == "other" {
                     *at = *span;
                 }
@@ -1064,26 +1157,39 @@ fn merge_nested_groups(keys: &Keys, groups: &BTreeSet<Vec<Segment>>) -> Keys {
     out
 }
 
+/// The key of the object that holds `key`, borrowed when `key` is.
+fn parent_key<'a>(key: &Cow<'a, [Segment]>) -> Cow<'a, [Segment]> {
+    match key {
+        Cow::Borrowed(path) => {
+            let path: &'a [Segment] = path;
+            Cow::Borrowed(&path[..path.len().saturating_sub(1)])
+        }
+        Cow::Owned(path) => Cow::Owned(path[..path.len().saturating_sub(1)].to_vec()),
+    }
+}
+
 /// The `(parent, base)` i18next plural groups (`<base>_<category>` siblings)
 /// merged in one comparison: `<base>_other` in at least one file, a non-empty
 /// base, and `<base>` itself a key in neither, so a merge never hides a key.
-fn i18next_plural_groups(files: &[&Keys]) -> BTreeSet<(Vec<Segment>, String)> {
-    let mut candidates: BTreeMap<(Vec<Segment>, String), bool> = BTreeMap::new();
+fn i18next_plural_groups<'k>(files: &[&'k Keys<'_>]) -> BTreeSet<(&'k [Segment], &'k str)> {
+    let mut candidates: BTreeMap<(&[Segment], &str), bool> = BTreeMap::new();
     for keys in files {
         for key in keys.keys() {
             if let Some((parent, base, category)) = i18next_member(key) {
-                *candidates
-                    .entry((parent.to_vec(), base.to_string()))
-                    .or_default() |= category == "other";
+                *candidates.entry((parent, base)).or_default() |= category == "other";
             }
         }
     }
     candidates
         .into_iter()
         .filter(|((parent, base), has_other)| {
-            let mut merged = parent.clone();
-            merged.push(Segment::Key(base.as_str().into()));
-            *has_other && files.iter().all(|keys| !keys.contains_key(&merged))
+            *has_other && {
+                let mut merged = parent.to_vec();
+                merged.push(Segment::Key((*base).into()));
+                files
+                    .iter()
+                    .all(|keys| !keys.contains_key(merged.as_slice()))
+            }
         })
         .map(|(group, _)| group)
         .collect()
@@ -1099,17 +1205,16 @@ fn i18next_member(key: &[Segment]) -> Option<(&[Segment], &str, &str)> {
 }
 
 /// Replace each i18next group's members with one `<base>` key, located like
-/// [`merge_nested_groups`] does.
-fn merge_i18next_groups(keys: &Keys, groups: &BTreeSet<(Vec<Segment>, String)>) -> Keys {
+/// [`merge_nested_groups`] does. No file holds that key's path, so it is
+/// built, once per group.
+fn merge_i18next_groups<'a>(keys: &Keys<'a>, groups: &BTreeSet<(&[Segment], &str)>) -> Keys<'a> {
     let mut out = Keys::new();
-    let mut merged = Keys::new();
+    let mut merged: BTreeMap<(&[Segment], &str), ByteSpan> = BTreeMap::new();
     for (key, span) in keys {
         if let Some((parent, base, category)) = i18next_member(key)
-            && groups.contains(&(parent.to_vec(), base.to_string()))
+            && groups.contains(&(parent, base))
         {
-            let mut target = parent.to_vec();
-            target.push(Segment::Key(base.into()));
-            let at = merged.entry(target).or_insert(*span);
+            let at = merged.entry((parent, base)).or_insert(*span);
             if category == "other" {
                 *at = *span;
             }
@@ -1117,7 +1222,11 @@ fn merge_i18next_groups(keys: &Keys, groups: &BTreeSet<(Vec<Segment>, String)>) 
             out.insert(key.clone(), *span);
         }
     }
-    out.extend(merged);
+    out.extend(merged.into_iter().map(|((parent, base), span)| {
+        let mut target = parent.to_vec();
+        target.push(Segment::Key(base.into()));
+        (Cow::Owned(target), span)
+    }));
     out
 }
 
@@ -1165,7 +1274,7 @@ fn key_glob_match(pattern: &str, text: &str) -> bool {
 /// A key's identity: the injective [`Pointer::render`] form the comparison
 /// uses, so `nav['a.b']` and `nav.a.b` stay distinct.
 fn render_key(key: &[Segment]) -> String {
-    Pointer::from_segments(key.to_vec()).render()
+    Pointer::render_segments(key)
 }
 
 /// A key as findings, baseline keys, and traces show it (ADR-0025). A key of
@@ -1724,168 +1833,9 @@ fn literal_peer_format(peers: &str) -> Option<KeyFormat> {
 mod tests;
 
 #[cfg(test)]
-mod analyzer_pilot {
-    use super::*;
-    use crate::test_support::{ctx, spec_yaml, tempdir_with_files};
-    use alint_core::Format;
-    use alint_core::plugin_api::{Analyzer, AnalyzerError, AnalyzerInput, Finding};
-    use alint_core::relation::{
-        Adapter, ContractAnalyzer, EntryRowsAdapter, Limits, Row, RowState,
-    };
+#[path = "key_parity_pilot_tests.rs"]
+mod analyzer_pilot;
 
-    /// The key-parity shape as a pure contract analyzer: the first resource is
-    /// the reference, every other resource is a peer, and pointer segments are
-    /// the keys. This is the R6a pilot, not a replacement for the rule.
-    struct ParityPilot {
-        reference: String,
-    }
-
-    impl Analyzer for ParityPilot {
-        fn id(&self) -> &'static str {
-            "key-parity-pilot"
-        }
-
-        fn analyze(&self, input: AnalyzerInput<'_>) -> Result<Vec<Finding>, AnalyzerError> {
-            let keys = |path: &str| -> BTreeSet<String> {
-                input
-                    .rows
-                    .iter()
-                    .filter(|row| row.resource.path == path)
-                    .filter_map(|row| {
-                        row.pointer
-                            .as_ref()
-                            .map(|parts| render_contract_pointer(parts).unwrap())
-                    })
-                    .collect()
-            };
-            let reference = keys(&self.reference);
-            let mut findings = Vec::new();
-            for path in input
-                .rows
-                .iter()
-                .map(|row| row.resource.path.as_str())
-                .collect::<BTreeSet<_>>()
-            {
-                if path == self.reference {
-                    continue;
-                }
-                let peer = keys(path);
-                for key in reference.difference(&peer) {
-                    findings.push(Finding {
-                        path: Some(path.into()),
-                        message: format!(
-                            "{path}: missing key `{key}` (present in {})",
-                            self.reference
-                        ),
-                        line: None,
-                        column: None,
-                        related: Vec::new(),
-                        baseline_key: None,
-                        sensitive: false,
-                        analysis_failure: None,
-                        failure_kind: None,
-                        not_fixable: false,
-                    });
-                }
-                for key in peer.difference(&reference) {
-                    findings.push(Finding {
-                        path: Some(path.into()),
-                        message: format!(
-                            "{path}: extra key `{key}` (absent from {})",
-                            self.reference
-                        ),
-                        line: None,
-                        column: None,
-                        related: Vec::new(),
-                        baseline_key: None,
-                        sensitive: false,
-                        analysis_failure: None,
-                        failure_kind: None,
-                        not_fixable: false,
-                    });
-                }
-            }
-            Ok(findings)
-        }
-    }
-
-    fn key_row(path: &str, key: &str) -> Row {
-        Row::new(
-            Resource::literal(RelPath::parse(path).unwrap()),
-            Some(Pointer::root().key(key)),
-            0,
-            RowState::Key,
-        )
-    }
-
-    fn parsed_rows(path: &str, text: &str) -> Vec<Row> {
-        EntryRowsAdapter::new(Format::Json)
-            .unwrap()
-            .extract(
-                &Resource::literal(RelPath::parse(path).unwrap()),
-                text.as_bytes(),
-                &Limits::default(),
-            )
-            .unwrap()
-            .rows
-    }
-
-    #[test]
-    fn pilot_matches_the_real_rule_on_parsed_key_rows() {
-        // Top-level dotted keys need bracket notation: the oracle must render
-        // them exactly as the rule does, or this comparison fails.
-        let (tmp, index) = tempdir_with_files(&[
-            ("en.json", br#"{"a":1,"b":2,"x.y":3}"#),
-            ("fr.json", br#"{"a":1,"c":3,"x.z":4}"#),
-        ]);
-        index.enable_relation_caches();
-        let rule = build(&spec_yaml(
-            "id: t\nkind: key_parity\nreference: en.json\npeers: '*.json'\nlevel: error\n",
-        ))
-        .unwrap();
-        let expected: Vec<String> = rule
-            .evaluate(&ctx(tmp.path(), &index))
-            .unwrap()
-            .iter()
-            .map(|finding| finding.message.to_string())
-            .collect();
-        assert!(
-            expected.iter().any(|m| m.contains("missing key `['x.y']`")),
-            "{expected:?}"
-        );
-        let mut rows = parsed_rows("en.json", r#"{"a":1,"b":2,"x.y":3}"#);
-        rows.extend(parsed_rows("fr.json", r#"{"a":1,"c":3,"x.z":4}"#));
-        let actual: Vec<String> = ContractAnalyzer::new(ParityPilot {
-            reference: "en.json".into(),
-        })
-        .analyze("key-parity-pilot", &[], &rows, &Limits::default())
-        .unwrap()
-        .iter()
-        .map(|finding| finding.message.to_string())
-        .collect();
-        let mut expected = expected;
-        let mut actual = actual;
-        expected.sort();
-        actual.sort();
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn key_parity_shape_runs_through_contract_analyzer() {
-        let rows = [
-            key_row("en.json", "a"),
-            key_row("en.json", "b"),
-            key_row("fr.json", "a"),
-            key_row("fr.json", "c"),
-        ];
-        let findings = ContractAnalyzer::new(ParityPilot {
-            reference: "en.json".into(),
-        })
-        .analyze("key-parity-pilot", &[], &rows, &Limits::default())
-        .unwrap();
-        let messages: Vec<String> = findings.iter().map(|f| f.message.to_string()).collect();
-        assert!(messages.iter().any(|m| m.contains("missing key `b`")));
-        assert!(messages.iter().any(|m| m.contains("extra key `c`")));
-        assert_eq!(findings.len(), 2);
-    }
-}
+#[cfg(test)]
+#[path = "key_parity_budget_tests.rs"]
+mod budget_tests;

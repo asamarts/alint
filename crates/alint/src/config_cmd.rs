@@ -407,6 +407,20 @@ pub(super) fn report_pattern_hints(
     }
 }
 
+/// The config at `config_path` as `export-agents-md` reads it: loaded with
+/// this run's options ([`load_options`]), refusing what `--no-spawn` and
+/// `--untrusted` refuse as `list` does, though it runs nothing.
+pub(super) fn load_for_export(
+    config_path: &Path,
+    registry: &RuleRegistry,
+    cli: &Cli,
+) -> Result<alint_core::Config> {
+    let config = alint_dsl::load_with(config_path, &load_options(registry, cli))?;
+    remember_environment_values(&config);
+    refuse_spawning(&config, registry, None, cli)?;
+    Ok(config)
+}
+
 /// With `--no-spawn` or `--untrusted`, refuse a config with an enabled rule
 /// (or the off rule `explain --trace` includes), fix or fact that spawns a
 /// process or runs Git.
@@ -438,7 +452,8 @@ impl alint_dsl::EnvironmentProvider for EmptyEnvironment {
 
 /// The options a config loads with. With `--untrusted`, as the language
 /// server loads an untrusted workspace's: a remote `extends:` is refused
-/// before anything is fetched, and `{{env.NAME}}` reads an empty environment.
+/// before anything is fetched, a top-level `allow_out_of_root:` is refused,
+/// and `{{env.NAME}}` reads an empty environment.
 fn load_options<'catalog>(
     registry: &'catalog RuleRegistry,
     cli: &Cli,
@@ -447,6 +462,7 @@ fn load_options<'catalog>(
     if cli.untrusted {
         options.environment = std::sync::Arc::new(EmptyEnvironment);
         options.remote_policy = alint_dsl::RemotePolicy::Deny;
+        options.out_of_root_policy = alint_dsl::OutOfRootPolicy::Deny;
     }
     options
 }
@@ -486,11 +502,17 @@ pub(crate) fn discover_config(start: &Path) -> Option<PathBuf> {
     discovery.path
 }
 
-/// The warning for a config file discovery skipped.
+/// The warning for a config file discovery skipped, with how to use it: from
+/// its own directory, discovery takes a config whoever owns it.
 fn skipped_config_warning(path: &Path) -> String {
+    let (path, dir) = (
+        path.display().to_string(),
+        path.parent().unwrap_or(Path::new("")).display().to_string(),
+    );
+    let (shown, dir) = (term(&path), term(&dir));
     format!(
-        "alint: warning: skipping {}: owned by another user",
-        term(&path.display().to_string())
+        "alint: warning: skipping {shown}: owned by another user; to use it if you trust it, run \
+         alint from {dir} or pass --config {shown}"
     )
 }
 
@@ -588,13 +610,14 @@ pub(super) fn load_rules_for_explain(
 mod tests {
     use super::*;
 
-    /// The warning names the skipped file, with any terminal control in its
-    /// path neutralised (a directory name someone else chose).
+    /// The warning names the skipped file and how to use it, with any terminal
+    /// control in its path neutralised (a directory name someone else chose).
     #[test]
     fn a_skipped_config_is_named_in_a_warning() {
         assert_eq!(
             skipped_config_warning(Path::new("/tmp/.alint.yml")),
-            "alint: warning: skipping /tmp/.alint.yml: owned by another user"
+            "alint: warning: skipping /tmp/.alint.yml: owned by another user; to use it if you \
+             trust it, run alint from /tmp or pass --config /tmp/.alint.yml"
         );
         let hostile = skipped_config_warning(Path::new("/tmp/\u{1b}]8;;x\u{7}/.alint.yml"));
         assert!(!hostile.contains('\u{1b}'), "{hostile:?}");

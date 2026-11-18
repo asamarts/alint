@@ -249,7 +249,10 @@ JSON and YAML trees, and `key_parity` already covers XML catalogs in v1.
 
 **Redaction.** dotenv and properties values are redacted by default (ADR-0019 decision 3), so those
 formats emit no value rows, and `read:` does not take them. A field may be marked
-`sensitive: true`; its value never reaches a message, the JSON report or a baseline.
+`sensitive: true`; its value never reaches a message, the JSON report or a baseline. A field that
+shows a sensitive field's value is sensitive too: a join's copy of it, a join's copy of the field
+an `on:` pair joins with it, and a field that an `in:` or `not_in:` list of it filters, with the
+fields that show that field's value.
 
 **Provenance.** Each field keeps its resource, its pointer and its byte span (the key span for a
 key, the value span for a value). A YAML literal or folded block scalar has no value span today
@@ -569,7 +572,10 @@ rules:
   `entry.parent`, `entry.root`, `entry.path` and path token, each text a transform changes (once
   for rows that share it), and each note and failure. A run's relations then hold at most 256
   bytes a cell and `BytesPerRun` bytes, about 2.4 GB at the defaults, whatever the size of a value
-  or the number of fields and joins that copy it.
+  or the number of fields and joins that copy it. The run's decode cache keeps a budget of
+  `BytesPerRun` bytes apart from that count: the key paths of every decode it makes take their
+  bytes from it as they are built, and `key_parity` the tables it keeps of its files' keys, so the
+  run's decodes together, not each alone, hold at most that many bytes of key paths.
 - A hit is an analysis failure, never truncation.
 
 **No finding cap** (D5b). A `constraint` rule reports every finding, as every existing kind does,

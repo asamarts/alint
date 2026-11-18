@@ -323,6 +323,41 @@ fn an_untrusted_session_fetches_no_remote_extends_and_says_why() {
     );
 }
 
+/// An untrusted session refuses a workspace config that sets
+/// `allow_out_of_root:`, which would let it read and write outside the
+/// repository, and says why.
+#[test]
+fn an_untrusted_session_refuses_allow_out_of_root() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        "version: 1\nallow_out_of_root: true\nrules: []\n",
+    )
+    .unwrap();
+    let check = check_workspace(
+        &[dir.path().to_path_buf()],
+        &[],
+        &untrusted(),
+        &alint_rules::builtin_registry(),
+    );
+    let [(_, Err(error))] = check.runs.as_slice() else {
+        panic!("the config loads: {:?}", check.runs);
+    };
+    assert!(error.untrusted, "{error:?}");
+    assert!(
+        error
+            .message
+            .contains("`allow_out_of_root:` lets a config read and write outside"),
+        "{}",
+        error.message
+    );
+    assert!(
+        error.message.contains(config::UNTRUSTED_NOTE),
+        "{}",
+        error.message
+    );
+}
+
 #[test]
 fn the_workspace_folders_config_governs_a_vendored_file() {
     let tmp = tempfile::tempdir().unwrap();

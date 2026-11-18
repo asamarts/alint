@@ -473,9 +473,11 @@ pub struct RuleSpec {
     /// Whether an iteration rendered this spec ([`NestedRuleSpec::instantiate`]):
     /// every path token in it, including in the `require:` lists of the rules
     /// nested inside it, holds that iteration's value. Those lists are then
-    /// compiled already rendered ([`CompiledNestedSpec::rendered`]), so a
-    /// token spelled in a value (a directory named `x{stem}`) stays text. Set
-    /// only by instantiation; never deserialized from user input.
+    /// compiled already rendered ([`CompiledNestedSpec::rendered`]), and a
+    /// template the rule renders per entry is final
+    /// ([`PathTemplate`](crate::template::PathTemplate)), so a token spelled
+    /// in a value (a directory named `x{stem}`) stays text. Set only by
+    /// instantiation; never deserialized from user input.
     #[serde(skip)]
     #[doc(hidden)]
     pub rendered: bool,
@@ -1746,7 +1748,7 @@ impl NestedRuleSpec {
                 None => p.clone(),
             }),
             message: self.message.as_deref().map(|m| match tokens {
-                Some(tokens) => crate::template::render_path(m, tokens),
+                Some(tokens) => crate::template::render_nested_message(&self.kind, m, tokens),
                 None => m.to_owned(),
             }),
             policy_url: self.policy_url.clone(),

@@ -6,7 +6,11 @@
 #   - Development dependencies (the packaging, publishing and test tools) may
 #     have none either, except an advisory listed in
 #     editors/vscode/npm-audit-waivers.json with a reason. A waiver is for an
-#     advisory no released version fixes yet; drop it once one does.
+#     advisory no released version fixes yet; drop it once one does. A waiver
+#     lapses, and fails the gate, once npm can fix the advisory within the
+#     dependency ranges (`fixAvailable: true`, what `npm audit fix` applies);
+#     a fix that changes a package's major version only warns, since npm also
+#     names a downgrade to a version from before the advisory's dependency.
 #
 # `npm run audit` in editors/vscode runs this, in CI and in the release
 # workflow.
@@ -47,6 +51,7 @@ if 'vulnerabilities' not in report:
 
 blocking = {'moderate', 'high', 'critical'}
 found = {}
+fixes = {}
 for vulnerability in report['vulnerabilities'].values():
     for via in vulnerability.get('via', []):
         # A string names the dependency the advisory came through; the
@@ -55,17 +60,33 @@ for vulnerability in report['vulnerabilities'].values():
             continue
         ident = str(via.get('url', '')).rstrip('/').rsplit('/', 1)[-1]
         found.setdefault(ident, f"{via.get('name')} ({via.get('severity')}): {via.get('title')}")
+        fix = vulnerability.get('fixAvailable')
+        if fix:
+            fixes.setdefault(ident, []).append(fix)
 
 unwaived = sorted(ident for ident in found if ident not in waived)
+lapsed = []
 for ident in sorted(found):
     if ident in waived:
         print(f'[npm-audit] waived {ident}, {found[ident]}: {waived[ident]}')
+        for fix in fixes.get(ident, []):
+            if fix is True:
+                lapsed.append(ident)
+            elif isinstance(fix, dict):
+                print(f"[npm-audit] warning: npm would fix {ident} by changing {fix.get('name')} "
+                      f"to {fix.get('version')}, a new major version (or a downgrade); "
+                      f'check whether a release fixes it')
 for ident in sorted(set(waived) - set(found)):
     print(f'[npm-audit] warning: {ident} is waived but no longer reported; remove its waiver')
+for ident in sorted(set(lapsed)):
+    print(f'[npm-audit] {ident} is waived, but `npm audit fix` can fix it now: '
+          f'update the dependency and remove its waiver', file=sys.stderr)
 if unwaived:
     for ident in unwaived:
         print(f'[npm-audit] {ident}, {found[ident]}', file=sys.stderr)
     sys.exit(f'[npm-audit] {len(unwaived)} advisory(ies) not waived in {waivers_path}')
+if lapsed:
+    sys.exit(f'[npm-audit] {len(set(lapsed))} waiver(s) in {waivers_path} have a fix')
 print(f'[npm-audit] ok: {len(found)} advisory(ies), all waived')
 PY
 }

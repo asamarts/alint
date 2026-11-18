@@ -27,7 +27,7 @@ mod splice;
 
 use std::fs;
 use std::io::{IsTerminal as _, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::str::FromStr;
 
@@ -77,23 +77,16 @@ pub struct RunOptions {
     pub include_info: bool,
 }
 
-pub fn run(
-    config_path: Option<&Path>,
-    opts: &RunOptions,
-    registry: &alint_core::RuleRegistry,
-) -> Result<ExitCode> {
+pub fn run(opts: &RunOptions, cli: &crate::cli::Cli) -> Result<ExitCode> {
     let cwd = std::env::current_dir().context("resolving current directory")?;
-    let resolved_config_path = match config_path {
-        Some(p) => p.to_path_buf(),
+    let resolved_config_path = match cli.config.first() {
+        Some(p) => p.clone(),
         None => crate::config_cmd::discover_config(&cwd).ok_or_else(|| {
             anyhow::anyhow!("no .alint.yml found (searched from {})", cwd.display())
         })?,
     };
-    let config = alint_dsl::load_with(
-        &resolved_config_path,
-        &alint_dsl::LoadOptions::with_catalog(registry.catalog()),
-    )
-    .with_context(|| format!("loading {}", resolved_config_path.display()))?;
+    let config = crate::config_cmd::load_for_export(&resolved_config_path, &cli.registry(), cli)
+        .with_context(|| format!("loading {}", resolved_config_path.display()))?;
     crate::config_cmd::warn_if_experimental(&config, &resolved_config_path);
 
     let directives = collect_directives(&config, opts.include_info);

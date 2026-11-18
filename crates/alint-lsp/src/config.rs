@@ -70,9 +70,10 @@ impl From<String> for ConfigError {
 /// The note an untrusted workspace gets, once, when its config uses
 /// something the session left out.
 pub(crate) const UNTRUSTED_NOTE: &str = "alint: this workspace is not trusted, so command rules, \
-     rules that run Git (`git_*` kinds, `git_tracked_only`, `changed_since`), custom facts, \
-     remote `extends:` and environment values (`{{env.*}}`, `env.*` in `when:`) are off; other \
-     rules lint as usual. To turn them on, trust the workspace: in VS Code, grant \
+     rules that run Git (`git_*` kinds, `changeset_requires_path`, `pair_changed_together`, \
+     `git_tracked_only`, `changed_since`), custom facts, remote `extends:`, \
+     `allow_out_of_root:` and environment values (`{{env.*}}`, `env.*` in `when:`) are off; \
+     other rules lint as usual. To turn them on, trust the workspace: in VS Code, grant \
      Workspace Trust; in other editors, start the server with the initialization option \
      `\"trusted\": true`. See https://alint.org/docs/cli/lsp/#workspace-trust";
 
@@ -361,16 +362,19 @@ fn load_session_config(
 ) -> Result<(alint_core::Config, bool), ConfigError> {
     let trusted = settings.trusted;
     let environment = Arc::new(UntrustedEnvironment::default());
-    let mut load_options = alint_dsl::LoadOptions::with_catalog(registry.catalog());
+    let mut load_options = alint_dsl::LoadOptions::with_catalog(registry.catalog())
+        .with_global_git_excludes(!cfg!(test));
     if !trusted {
         load_options.environment = environment.clone();
         load_options.remote_policy = alint_dsl::RemotePolicy::Deny;
+        load_options.out_of_root_policy = alint_dsl::OutOfRootPolicy::Deny;
     }
     let config = alint_dsl::load_with(config_path, &load_options).map_err(|error| {
         let message = error.to_string();
         let untrusted = !trusted
             && (environment.asked.load(Ordering::Relaxed)
-                || message.contains("remote `extends` is disabled"));
+                || message.contains("remote `extends` is disabled")
+                || message.contains("an untrusted load"));
         let mut message = format!("loading config: {message}");
         if untrusted {
             message.push_str("\n\n");
@@ -569,8 +573,11 @@ fn build_session_for_config(
         extra_ignores.push(pattern);
     }
 
+    // This crate's unit tests walk without the host's global excludes file
+    // (CONTRIBUTING.md), as they load without it.
     let walk_opts = WalkOptions::default()
         .with_respect_gitignore(config.respect_gitignore && !settings.no_gitignore)
+        .with_global_git_excludes(!cfg!(test))
         .with_extra_ignores(extra_ignores);
     let index = walk(&effective_root, &walk_opts)
         .map_err(|e| redact(format!("walking repository: {e}")))?;
@@ -745,9 +752,11 @@ mod baseline_tests {
         std::fs::write(root.join("base.jsonl"), &valid).unwrap();
         std::os::unix::fs::symlink("/dev/zero", root.join("zero.jsonl")).unwrap();
         std::os::unix::fs::symlink("../outside.jsonl", root.join("link.jsonl")).unwrap();
+        // One byte past the cap, so a regression that read it whole takes
+        // 256 MiB of this process, not the host's memory.
         std::fs::File::create(root.join("sparse.jsonl"))
             .unwrap()
-            .set_len(1 << 40)
+            .set_len((256 << 20) + 1)
             .unwrap();
         let fifo = std::process::Command::new("mkfifo")
             .arg(root.join("fifo.jsonl"))
@@ -772,7 +781,16 @@ mod baseline_tests {
                 continue;
             }
             config(baseline);
-            let error = build_session(&root).err().unwrap_or_default();
+            // On another thread, with a deadline: a regression that opened
+            // the FIFO would block, and fails here instead of hanging.
+            let (sender, receiver) = std::sync::mpsc::channel();
+            let at = root.clone();
+            std::thread::spawn(move || {
+                drop(sender.send(build_session(&at).err().unwrap_or_default()));
+            });
+            let error = receiver
+                .recv_timeout(std::time::Duration::from_secs(60))
+                .unwrap_or_else(|_| panic!("{baseline}: no answer within the deadline"));
             assert!(error.contains(refusal), "{baseline}: {error}");
         }
         config("base.jsonl");

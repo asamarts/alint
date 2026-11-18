@@ -49,7 +49,7 @@ use std::process::{Command as StdCommand, Stdio};
 use std::time::Duration;
 
 use alint_core::process::{RunOutcome, run_bounded};
-use alint_core::template::{PathTokens, render_path_argv};
+use alint_core::template::{PathTemplate, PathTokens};
 use alint_core::{
     AnalysisFailureKind, Applicability, Context, Error, FactValue, FixSpec, Fixer, Level, Result,
     Rule, RuleSpec, Scope, Violation,
@@ -91,7 +91,7 @@ pub struct CommandRule {
     policy_url: Option<String>,
     message: Option<String>,
     scope: Scope,
-    argv: Vec<String>,
+    argv: Vec<PathTemplate>,
     timeout: Duration,
     /// Optional `command` fix op: a user-supplied `run:` command. Spawning, so
     /// refused from any non-top-level source before this rule is ever built.
@@ -115,12 +115,12 @@ impl Rule for CommandRule {
                 continue;
             }
             let tokens = PathTokens::from_path(&entry.path);
-            // `render_path_argv` (not `render_path`): guards against a repo
-            // filename rendered from `{path}` masquerading as an option (L13).
+            // `render_argv` (not `render`): guards against a repo filename
+            // rendered from `{path}` masquerading as an option (L13).
             let rendered: Vec<String> = self
                 .argv
                 .iter()
-                .map(|s| render_path_argv(s, &tokens))
+                .map(|template| template.render_argv(&tokens).into_owned())
                 .collect();
             match run_one(
                 &rendered,
@@ -331,7 +331,11 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
         scope: Scope::from_spec(spec)?,
-        argv: opts.command,
+        argv: opts
+            .command
+            .into_iter()
+            .map(|text| PathTemplate::new(text, spec))
+            .collect(),
         timeout,
         fixer,
     }))
@@ -368,7 +372,7 @@ mod tests {
             policy_url: None,
             message: None,
             scope: Scope::from_patterns(&[scope.to_string()]).unwrap(),
-            argv: argv.into_iter().map(String::from).collect(),
+            argv: argv.into_iter().map(PathTemplate::from).collect(),
             timeout,
             fixer: None,
         }

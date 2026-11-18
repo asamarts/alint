@@ -21,6 +21,13 @@ autotests = false
 name = "it"
 path = "tests/main.rs"
 
+# The one exception: this test installs a counting global allocator, which in
+# `it` would count every other test's allocations. It measures the heap
+# `key_parity` takes on deep, wide files against what their decodes hold.
+[[test]]
+name = "key_parity_memory"
+path = "tests/alloc/key_parity_memory.rs"
+
 [dependencies]
 alint-core.workspace = true
 schemars.workspace = true
@@ -44,6 +51,7 @@ saphyr-parser.workspace = true
 proptest.workspace = true
 tempfile.workspace = true
 ayaml.workspace = true
+cap.workspace = true
 
 [lints]
 workspace = true

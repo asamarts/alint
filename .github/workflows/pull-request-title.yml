@@ -1,9 +1,11 @@
 name: Pull request title
 
 # A squash merge writes the pull request's title and " (#N)" as the commit
-# subject on main. issue-26-e2e.yml's range-mode job checks a branch's own
-# commits; this checks the subject the merge will write, against the same rule,
-# and runs again when the title is edited.
+# subject on main, or, for a pull request of one commit, that commit's subject
+# and " (#N)" (the repository's COMMIT_OR_PR_TITLE setting). issue-26-e2e.yml's
+# range-mode job checks a branch's own commits; this checks the subject the
+# merge will write, against the same rule, and runs again when the title is
+# edited or commits are pushed.
 
 on:
   pull_request:
@@ -24,8 +26,19 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: The title makes a conventional subject of at most 120 characters
+        with:
+          # The merge commit and its parents, the pull request's head among them.
+          fetch-depth: 2
+      - name: The squash subject is conventional and at most 120 characters
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: ci/scripts/squash-subject.sh "$PR_TITLE" "$PR_NUMBER"
+          PR_COMMITS: ${{ github.event.pull_request.commits }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [[ "$PR_COMMITS" == 1 ]]; then
+            ci/scripts/squash-subject.sh "$PR_TITLE" "$PR_NUMBER" \
+              "$(git log -1 --format=%B "$PR_HEAD" | head -n 1)"
+          else
+            ci/scripts/squash-subject.sh "$PR_TITLE" "$PR_NUMBER"
+          fi

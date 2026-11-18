@@ -26,6 +26,12 @@
 //! a thread asks for while it holds one takes nothing and never waits, so a
 //! nested parse cannot deadlock either.
 //!
+//! That leaves a limit. A tree that copies what aliases name is about its
+//! whole estimate, not a fraction of its parse's peak, and it lives outside
+//! the budget for as long as a rule holds it: with one per worker thread, up
+//! to the alias guard's cap ([`crate::yaml_depth::MAX_YAML_EXPANSION_BYTES`])
+//! each. Bounding those trees is asamarts/alint#582.
+//!
 //! The entry points that parse repository YAML take a reservation:
 //! [`crate::Format::parse`], the entry rows of [`crate::extract`], the
 //! structured-fix span resolver and `pinned_references`. Only the first copies

@@ -165,7 +165,7 @@ fn memo_clones_a_config_only_once_it_is_seen_twice() {
         MemoKey::new(
             Path::new("/repo/base.yml"),
             Some(Path::new("/repo")),
-            &[],
+            &TrustedExtends::default(),
             &SourceContext::new(ConfigSourceClass::LocalExtend, Some(1)),
         )
     };
@@ -185,8 +185,14 @@ fn memo_clones_a_config_only_once_it_is_seen_twice() {
 #[test]
 fn memoization_separates_consumer_versions() {
     let path = Path::new("/repo/base.yml");
-    let key =
-        |context: SourceContext<'_>| MemoKey::new(path, Some(Path::new("/repo")), &[], &context);
+    let key = |context: SourceContext<'_>| {
+        MemoKey::new(
+            path,
+            Some(Path::new("/repo")),
+            &TrustedExtends::default(),
+            &context,
+        )
+    };
     let v1 = key(SourceContext::new(ConfigSourceClass::LocalExtend, Some(1)));
     let v2 = key(SourceContext::new(ConfigSourceClass::LocalExtend, Some(2)));
     assert!(v1 != v2);
@@ -1204,4 +1210,49 @@ fn a_config_is_named_relative_to_the_root_inside_it_or_not() {
     // A relative path shares no root with the root.
     assert_eq!(named(Path::new("a").join("rules.yml")), "rules.yml");
     assert_eq!(local_source_display(&root.join("a.yml"), None), "a.yml");
+}
+
+/// An untrusted load (`OutOfRootPolicy::Deny`) refuses a top-level config or
+/// `.alint.d` fragment that sets `allow_out_of_root:` to anything but its
+/// default, before the config's `extends:` resolves: the key would let the
+/// config read and write outside the repository and name an `extends:`
+/// anywhere. A trusted load takes it, and an untrusted one takes a config
+/// without it.
+#[test]
+fn an_untrusted_load_refuses_allow_out_of_root_before_its_extends_resolve() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join(".alint.yml");
+    let deny = crate::LoadOptions::default().with_out_of_root_policy(crate::OutOfRootPolicy::Deny);
+    for grant in [
+        "allow_out_of_root: true",
+        "allow_out_of_root: { kinds: [file_exists] }",
+    ] {
+        std::fs::write(
+            &path,
+            format!("version: 1\n{grant}\nextends: [/absent/rules.yml]\nrules: []\n"),
+        )
+        .unwrap();
+        let error = crate::load_with(&path, &deny).unwrap_err().to_string();
+        assert!(
+            error.contains("`allow_out_of_root:` lets a config read and write outside")
+                && error.contains("an untrusted load (`--untrusted`"),
+            "{grant}: {error}"
+        );
+        let trusted = crate::load_with(&path, &crate::LoadOptions::default())
+            .unwrap_err()
+            .to_string();
+        assert!(!trusted.contains("an untrusted load"), "{grant}: {trusted}");
+    }
+    std::fs::write(&path, "version: 1\nallow_out_of_root: false\nrules: []\n").unwrap();
+    assert!(crate::load_with(&path, &deny).is_ok());
+    std::fs::write(&path, "version: 1\nrules: []\n").unwrap();
+    std::fs::create_dir(root.path().join(".alint.d")).unwrap();
+    std::fs::write(
+        root.path().join(".alint.d/escape.yml"),
+        "version: 1\nallow_out_of_root: true\nrules: []\n",
+    )
+    .unwrap();
+    let error = crate::load_with(&path, &deny).unwrap_err().to_string();
+    assert!(error.contains("an untrusted load"), "{error}");
+    assert!(crate::load_with(&path, &crate::LoadOptions::default()).is_ok());
 }

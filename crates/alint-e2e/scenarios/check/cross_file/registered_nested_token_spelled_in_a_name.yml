@@ -1,0 +1,40 @@
+test_version: 1
+name: a nested cross_file registered reads register_as whose value spells a path token as text
+tags: [check, for_each_dir, cross_file, registered, nested]
+
+# Nested in `for_each_dir`, `register_as: "{basename}"` holds the iterated
+# directory's name. cross_file must not substitute the `{stem}` in the name
+# `x{stem}` again with the stem of the member `lib.rs`: before the fix it
+# looked for `xlib` in `members` and reported the registered crate as well as
+# the unregistered `y`.
+
+given:
+  tree:
+    Cargo.toml: "[workspace]\nmembers = [\"x{stem}\"]\n"
+    crates:
+      "x{stem}":
+        lib.rs: "\n"
+      y:
+        lib.rs: "\n"
+  config: |
+    version: 1
+    rules:
+      - id: crate-listed
+        kind: for_each_dir
+        select: "crates/*"
+        level: error
+        require:
+          - kind: cross_file
+            relation: registered
+            source: { files: "{path}/lib.rs" }
+            register_as: "{basename}"
+            targets:
+              - { file: Cargo.toml, extract: { toml: "$.workspace.members[*]" } }
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - {rule: crate-listed, level: error, path: Cargo.toml}
+    analysis_failures: []

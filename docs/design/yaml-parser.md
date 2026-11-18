@@ -457,9 +457,11 @@ release before alint's users get it. To move the pin (ADR-0040 decision 2):
 5. Bring any difference the bump adds to the owner before the tag (ADR-0040 decision 2).
 6. Measure memory (ADR-0042): run `ci/scripts/yaml-memory-release.sh`, which must pass before the
    tag; lower each regression bound in `crates/alint-core/tests/alloc/yaml_memory.rs` to the new
-   release's ratio plus its margin, and update the comments that cite the old ratios; update the
-   CHANGELOG's memory and wall-time figures; and run the corpus replay against v0.22.1 (the
-   `corpus-replay.yml` workflow, by `workflow_dispatch`).
+   release's ratio plus its margin, and update the comments that cite the old ratios; set
+   `EXPANSION_BYTES_PER_COST_BYTE` in `crates/alint-core/src/yaml_budget.rs` to the new release's
+   peak heap per input byte, rounded to a power of two, and update its comment and the module's
+   figures (ADR-0046 decision 7); update the CHANGELOG's memory and wall-time figures; and run
+   the corpus replay against v0.22.1 (the `corpus-replay.yml` workflow, by `workflow_dispatch`).
 
 **The bump v0.23.0 waits on** (ADR-0040, ADR-0043, ADR-0044): a release with the fixes ayaml's
 main has for asamarts/ayaml#132, #133, #137, #138, #139, #140, #141, #146 and #147 (ayaml's pull
@@ -766,7 +768,9 @@ maintained libyaml fork is the lower-risk ownership boundary.
     copied into the JSON tree once per alias, so parses that each fit under the threshold could
     together take gigabytes. `Format::parse` now charges a parse the larger of its length and
     the guard's estimate of its expanded size over 64, the most bytes of tree per byte the
-    budget lets through.
+    budget lets through. The budget still ends with the parse, as ADR-0042 decision 4 set, and a
+    tree that copies what aliases name is about its whole estimate, so it lives outside the
+    budget while a rule holds it, up to the guard's 256 MiB each; #582 tracks bounding it.
   - **A harness false failure.** On a line that continues the root's plain scalar, a `%` in
     column 0 is the scalar's text, not a directive; `places()` read it as a directive, which
     seed 17 found. Seeds 1 to 20 at 100,000 inputs each pass.

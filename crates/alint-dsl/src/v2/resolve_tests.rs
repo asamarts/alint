@@ -45,7 +45,7 @@ fn source(display: &str, class: ConfigSourceClass, yaml: &str) -> SourceObjects 
     for (index, entry) in extends.iter().enumerate() {
         let url = entry.entry.url();
         let target = file(url.trim_start_matches("./"));
-        one.record_extended(index, Some(&target));
+        one.record_extended(index, Some(&target), false);
     }
     one.sources.remove(0)
 }
@@ -903,7 +903,7 @@ fn recording_many_aliases_looks_at_few_of_them() {
     };
     ALIAS_PROBES.with(|probes| probes.set(0));
     for entry in 0..ENTRIES {
-        objects.record_extended(entry, Some(&target(entry)));
+        objects.record_extended(entry, Some(&target(entry)), false);
     }
     let probes = ALIAS_PROBES.with(std::cell::Cell::get);
     // A binary search of 10,000 aliases looks at about 14 of them; looking at

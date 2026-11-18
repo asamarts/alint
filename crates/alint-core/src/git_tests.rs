@@ -953,13 +953,6 @@ fn dir_has_tracked_files_walks_prefix() {
 
 // ----- commit_messages_in_range -----------------------------
 
-/// Build a temp dir into a git repo with the given list of
-/// empty commits in order (commit N is HEAD~(len-1-N)). Returns
-/// the tempdir so the caller controls its lifetime.
-///
-/// Uses `git commit --allow-empty` so the test doesn't need to
-/// write fixture files. Disables GPG signing and sets a fixed
-/// author so the commits are deterministic.
 #[test]
 fn commit_range_rejects_dash_since_and_writes_no_file() {
     // Security regression (git arg-injection): a config-controlled
@@ -970,7 +963,10 @@ fn commit_range_rejects_dash_since_and_writes_no_file() {
     let stem = outdir.path().join("sentinel");
     let would_write = outdir.path().join("sentinel..HEAD");
     let evil = format!("--output={}", stem.display());
-    let err = commit_messages_in_range(Path::new("."), &evil, false).unwrap_err();
+    // In a repository of its own, so the check is reached wherever the test
+    // runs (outside one, the function returns before it).
+    let repo = make_repo_with_commits(&["one", "two"]);
+    let err = commit_messages_in_range(repo.path(), &evil, false).unwrap_err();
     assert!(matches!(err, CommitRangeError::BadRange { .. }), "{err:?}");
     assert!(
         !would_write.exists(),
@@ -987,13 +983,22 @@ fn collect_changed_paths_dash_base_writes_no_file() {
     let stem = outdir.path().join("sentinel");
     let would_write = outdir.path().join("sentinel...HEAD");
     let evil = format!("--output={}", stem.display());
-    let _ = collect_changed_paths(Path::new("."), Some(&evil));
+    // In a repository of its own: outside one, no Git runs at all.
+    let repo = make_repo_with_commits(&["one", "two"]);
+    let _ = collect_changed_paths(repo.path(), Some(&evil));
     assert!(
         !would_write.exists(),
         "git diff must not have written {would_write:?}"
     );
 }
 
+/// Build a temp dir into a git repo with the given list of
+/// empty commits in order (commit N is HEAD~(len-1-N)). Returns
+/// the tempdir so the caller controls its lifetime.
+///
+/// Uses `git commit --allow-empty` so the test doesn't need to
+/// write fixture files. Disables GPG signing and sets a fixed
+/// author so the commits are deterministic.
 fn make_repo_with_commits(subjects: &[&str]) -> tempfile::TempDir {
     let tmp = tempfile::tempdir().unwrap();
     let init_dir = tmp.path();

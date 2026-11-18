@@ -292,8 +292,11 @@ fn demote_collateral(
 /// checked as a whole changes at the applied edits' targets only. Each
 /// fixer checks its own edits together (`structured_fix::checked_value_edits`
 /// and its siblings), so this looks only where edits of more than one rule
-/// meet in one format, and only when every applied edit is one of them: the
-/// check could not tell a free-form edit's change from a stray one. The
+/// meet in one format. A free-form edit (a `replace` fix's, a TOML
+/// `sync_from`'s) names no target, so the check leaves it out and splices the
+/// structured edits alone onto the original, which the accepted edits being
+/// disjoint allows: a free-form edit beside them neither hides their
+/// collateral change nor is demoted for it. The
 /// edits' targets are what their queries select in the original, with the
 /// change their expectation names: removed for `Absent`, the value for
 /// `Scalar`, and for `Matches` what the edited document holds there, which
@@ -305,9 +308,15 @@ fn collateral(original: &[u8], applied: &[usize], batch: &[LocatedEdit]) -> Vec<
         EditVerifier::Structured { format, .. } => Some(*format),
         EditVerifier::None => None,
     };
-    let Some(format) = applied.first().and_then(|&i| structured(i)) else {
+    let Some(format) = applied.iter().find_map(|&i| structured(i)) else {
         return Vec::new();
     };
+    let applied: Vec<usize> = applied
+        .iter()
+        .copied()
+        .filter(|&i| structured(i).is_some())
+        .collect();
+    let applied = applied.as_slice();
     let one_format = applied.iter().all(|&i| structured(i) == Some(format));
     let rules = applied
         .iter()
@@ -1170,6 +1179,24 @@ mod tests {
         let (out, o) = apply_file_edits(src.as_bytes(), batch(), Applicability::Safe);
         assert_eq!(o[0].1, LocatedOutcome::Applied);
         assert_eq!(o[1].1, LocatedOutcome::Suggested);
+        assert_eq!(out, b"deps:\n  b: 2\nname: x\n");
+
+        // A free-form edit of a third rule (a `replace` fix, which names no
+        // target) beside them neither hides the change nor is demoted for it.
+        let commented = "deps:\n  a: 1\n  b: 2\nname: x # TODO\n";
+        let mut with_free_form = batch();
+        with_free_form.push(edit(
+            2,
+            0,
+            replace(27..34, ""),
+            Applicability::Safe,
+            EditVerifier::None,
+            None,
+        ));
+        let (out, o) = apply_file_edits(commented.as_bytes(), with_free_form, Applicability::Safe);
+        assert_eq!(o[0].1, LocatedOutcome::Applied);
+        assert_eq!(o[1].1, LocatedOutcome::Suggested);
+        assert_eq!(o[2].1, LocatedOutcome::Applied);
         assert_eq!(out, b"deps:\n  b: 2\nname: x\n");
 
         // One rule's edits are its fixer's to check together; the engine

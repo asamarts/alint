@@ -4,7 +4,8 @@
 //! relation layer must extend that guarantee. A [`ReadCache`] maps a
 //! repository path to one [`ResourceRead`]; a [`DecodeCache`] maps
 //! `(adapter id, repository path, limits)` to one [`AdapterOutput`] and takes
-//! each fresh decode's rows from the run's [`RunBudget`]. Both use a
+//! each fresh decode's rows, and the bytes of the key paths it builds, from
+//! the run's [`RunBudget`]s. Both use a
 //! per-key [`OnceLock`] obtained under a short map lock, so concurrent
 //! consumers share one initializer instead of racing to decode twice.
 
@@ -274,13 +275,16 @@ type DecodeSlots = HashMap<(String, RelPath, Limits), Arc<OnceLock<DecodeResult>
 ///
 /// The limits a consumer passes to [`decode`](Self::decode) are part of the
 /// key, so a consumer never receives a decode made under other limits. The
-/// run-wide row limit is the cache's own: it belongs to the run, and every
-/// fresh decode takes its rows from one [`RunBudget`] built from the run's
-/// limits.
+/// run-wide row and byte limits are the cache's own: they belong to the run,
+/// and every fresh decode takes its rows from one [`RunBudget`] and the
+/// bytes of the key paths it builds from another, both built from the run's
+/// limits. A decode stays in the cache for the run, so it is the run's
+/// decodes together, not each alone, that the byte budget bounds.
 pub struct DecodeCache {
     slots: Mutex<DecodeSlots>,
     decodes: AtomicUsize,
     budget: RunBudget,
+    bytes: RunBudget,
 }
 
 impl Default for DecodeCache {
@@ -296,6 +300,7 @@ impl std::fmt::Debug for DecodeCache {
             .field("entries", &self.slots.lock().map_or(0, |slots| slots.len()))
             .field("decodes", &self.decodes.load(Ordering::Relaxed))
             .field("rows", &self.budget.used())
+            .field("bytes", &self.bytes.used())
             .finish()
     }
 }
@@ -308,14 +313,33 @@ impl DecodeCache {
     }
 
     /// A cache for a run whose run-wide row limit is
-    /// [`LimitKind::RowsPerRun`](super::LimitKind::RowsPerRun) in `limits`.
+    /// [`LimitKind::RowsPerRun`](super::LimitKind::RowsPerRun) in `limits`,
+    /// and whose run-wide byte limit is
+    /// [`LimitKind::BytesPerRun`](super::LimitKind::BytesPerRun) there.
     #[must_use]
     pub fn with_run_limits(limits: &Limits) -> Self {
         Self {
             slots: Mutex::default(),
             decodes: AtomicUsize::new(0),
             budget: RunBudget::new(limits),
+            bytes: RunBudget::bytes(limits),
         }
+    }
+
+    /// Take `bytes` from the run's byte budget, from which every decode's
+    /// key paths take theirs, for what a consumer builds of this cache's
+    /// decodes and keeps while it compares them (`key_parity`'s key tables).
+    /// A failed take still counts, so every later take, and every later
+    /// decode that builds a key path, fails too.
+    pub fn take_bytes(&self, bytes: usize) -> Result<(), super::LimitExceeded> {
+        self.bytes.take(bytes)
+    }
+
+    /// The bytes taken from the run's byte budget so far. Test/diagnostic
+    /// only.
+    #[must_use]
+    pub fn bytes_taken(&self) -> usize {
+        self.bytes.used()
     }
 
     /// Decode `resource` through `adapter` at most once per
@@ -328,7 +352,10 @@ impl DecodeCache {
     /// and every later one fail with
     /// [`LimitKind::RowsPerRun`](super::LimitKind::RowsPerRun), an analysis
     /// failure for the resource (which decodes fail first depends on
-    /// evaluation order; that one does is not).
+    /// evaluation order; that one does is not). The key paths a fresh decode
+    /// builds take their bytes from the run's byte budget as they are built
+    /// ([`Adapter::extract_within`]): the decode that takes the run's past
+    /// [`LimitKind::BytesPerRun`](super::LimitKind::BytesPerRun) fails then.
     pub fn decode(
         &self,
         adapter: &dyn Adapter,
@@ -367,7 +394,7 @@ impl DecodeCache {
                 fresh = true;
                 self.budget.spent()?;
                 self.decodes.fetch_add(1, Ordering::Relaxed);
-                let output = adapter.extract(resource, bytes, limits)?;
+                let output = adapter.extract_within(resource, bytes, limits, &self.bytes)?;
                 self.budget.take(output.rows.len())?;
                 Ok(Arc::new(output))
             })
@@ -878,6 +905,67 @@ mod tests {
                 .is_some_and(|held| held.is_ok())
         );
         assert!(cache.cached(&adapter, &literal("d.txt"), &limits).is_none());
+    }
+
+    /// The key paths of every decode the cache makes take their bytes from
+    /// one budget, the run's, not one of each decode's own: two documents
+    /// whose key paths each fit it, but not together, fail at the second,
+    /// whichever adapter builds them, and what a consumer takes counts too.
+    #[test]
+    fn fresh_decodes_take_their_key_paths_from_the_run_bytes() {
+        use crate::relation::Pointer;
+        use crate::relation::adapters::{EntryRowsAdapter, EntryValuesAdapter, TomlRowsAdapter};
+        use crate::structured_format::Format;
+
+        let entry_values =
+            EntryValuesAdapter::new(Format::Json, &["$".to_string()], true, &[]).unwrap();
+        let adapters: [(&dyn Adapter, &[u8]); 3] = [
+            (
+                &EntryRowsAdapter::new(Format::Json).unwrap(),
+                br#"{"a":{"b":{"c":1,"d":2}}}"#,
+            ),
+            (&TomlRowsAdapter::new(), b"[a.b]\nc = 1\nd = 2\n"),
+            (&entry_values, br#"{"a":{"b":{"c":1,"d":2}}}"#),
+        ];
+        let limits = Limits::default();
+        for (adapter, bytes) in adapters {
+            // What one decode's key paths hold.
+            let alone: usize = adapter
+                .extract(&literal("x"), bytes, &limits)
+                .unwrap()
+                .rows
+                .iter()
+                .map(|row| row.pointer.as_ref().map_or(0, Pointer::heap_bytes))
+                .sum();
+            assert!(alone > 0, "{}", adapter.id());
+            let run = Limits::default()
+                .with(LimitKind::BytesPerRun, alone + alone / 2)
+                .unwrap();
+            let cache = DecodeCache::with_run_limits(&run);
+            cache
+                .decode(adapter, &literal("a"), bytes, &limits)
+                .unwrap();
+            assert_eq!(cache.bytes_taken(), alone, "{}", adapter.id());
+            let over = cache
+                .decode(adapter, &literal("b"), bytes, &limits)
+                .unwrap_err();
+            assert!(
+                matches!(&over, AdapterError::Limit(limit) if limit.kind == LimitKind::BytesPerRun),
+                "{}: {over:?}",
+                adapter.id()
+            );
+
+            // A consumer's take leaves less for the decodes.
+            let cache = DecodeCache::with_run_limits(&run);
+            cache.take_bytes(alone).unwrap();
+            assert!(
+                cache
+                    .decode(adapter, &literal("a"), bytes, &limits)
+                    .is_err(),
+                "{}",
+                adapter.id()
+            );
+        }
     }
 
     #[test]

@@ -20,7 +20,7 @@
 
 use std::collections::HashMap;
 
-use alint_core::template::{PathTokens, TokenSet, render_message, render_path};
+use alint_core::template::{PathTemplate, PathTokens, render_message};
 use alint_core::{
     Context, Error, Level, RelatedLocation, Result, Rule, RuleSpec, Scope, Violation,
 };
@@ -54,7 +54,7 @@ pub struct UniqueByRule {
     policy_url: Option<String>,
     message: Option<String>,
     select_scope: Scope,
-    key_template: String,
+    key_template: PathTemplate,
     case_insensitive: bool,
 }
 
@@ -77,13 +77,13 @@ impl Rule for UniqueByRule {
         // Storing `Arc<Path>` re-uses the walker's per-file allocation rather
         // than copying bytes through a `PathBuf`.
         let mut groups: HashMap<String, Vec<std::sync::Arc<std::path::Path>>> = HashMap::new();
-        let needed = TokenSet::of(&self.key_template);
+        let needed = self.key_template.tokens();
         for entry in self.select_scope.candidate_files(ctx.index) {
             if !self.select_scope.matches(&entry.path, ctx.index) {
                 continue;
             }
             let tokens = PathTokens::from_path_with(&entry.path, needed);
-            let mut key = render_path(&self.key_template, &tokens);
+            let mut key = self.key_template.render(&tokens).into_owned();
             if self.case_insensitive {
                 key = key.to_lowercase();
             }
@@ -200,7 +200,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
         select_scope,
-        key_template: opts.key,
+        key_template: PathTemplate::new(opts.key, spec),
         case_insensitive: opts.case_insensitive,
     }))
 }
@@ -235,7 +235,7 @@ mod tests {
             policy_url: None,
             message: None,
             select_scope: Scope::from_patterns(&[select.to_string()]).unwrap(),
-            key_template: key.to_string(),
+            key_template: key.into(),
             case_insensitive,
         }
     }
@@ -340,7 +340,7 @@ mod tests {
             policy_url: None,
             message: None,
             select_scope: Scope::from_patterns(&["**/*".to_string()]).unwrap(),
-            key_template: default_key(),
+            key_template: default_key().as_str().into(),
             case_insensitive: false,
         };
         let v = eval(&r, &["src/a/mod.rs", "src/b/mod.rs"]);
@@ -355,7 +355,7 @@ mod tests {
             policy_url: None,
             message: None,
             select_scope: Scope::from_patterns(&["**/*".to_string()]).unwrap(),
-            key_template: default_key(),
+            key_template: default_key().as_str().into(),
             case_insensitive: false,
         };
         let v = eval(&r, &["src/foo.rs", "src/foo.md"]);

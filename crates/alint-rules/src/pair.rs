@@ -19,7 +19,7 @@
 
 use std::path::{Path, PathBuf};
 
-use alint_core::template::{PathTokens, TokenSet, render_message, render_path};
+use alint_core::template::{PathTemplate, PathTokens, render_message};
 use alint_core::{
     Context, Error, Level, RelatedLocation, Result, Rule, RuleSpec, Scope, Violation,
 };
@@ -43,7 +43,7 @@ pub struct PairRule {
     policy_url: Option<String>,
     message: Option<String>,
     primary_scope: Scope,
-    partner_template: String,
+    partner_template: PathTemplate,
 }
 
 impl Rule for PairRule {
@@ -61,18 +61,18 @@ impl Rule for PairRule {
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
-        let needed = TokenSet::of(&self.partner_template);
+        let needed = self.partner_template.tokens();
         for entry in self.primary_scope.candidate_files(ctx.index) {
             if !self.primary_scope.matches(&entry.path, ctx.index) {
                 continue;
             }
             let tokens = PathTokens::from_path_with(&entry.path, needed);
-            let partner_rel = render_path(&self.partner_template, &tokens);
+            let partner_rel = self.partner_template.render(&tokens).into_owned();
             if partner_rel.is_empty() {
                 violations.push(
                     Violation::new(format!(
                         "partner template {:?} resolved to an empty path for {}",
-                        self.partner_template,
+                        self.partner_template.as_str(),
                         entry.path.display(),
                     ))
                     .with_path(entry.path.clone()),
@@ -89,7 +89,7 @@ impl Rule for PairRule {
                         Violation::new(format!(
                             "partner template {:?} resolves outside the repository root for {} \
                          ({partner_rel})",
-                            self.partner_template,
+                            self.partner_template.as_str(),
                             entry.path.display(),
                         ))
                         .with_path(entry.path.clone()),
@@ -102,7 +102,7 @@ impl Rule for PairRule {
                     Violation::new(format!(
                         "partner template {:?} resolves to the primary file itself ({}) - \
                          check that the template differs from the primary",
-                        self.partner_template,
+                        self.partner_template.as_str(),
                         entry.path.display(),
                     ))
                     .with_path(entry.path.clone()),
@@ -241,7 +241,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
         primary_scope,
-        partner_template: opts.partner,
+        partner_template: PathTemplate::new(opts.partner, spec),
     }))
 }
 

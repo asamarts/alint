@@ -38,7 +38,11 @@ pub enum LimitKind {
     /// so a field or join that copies a value costs a cell and no bytes.
     /// With [`Self::CellsPerRun`] it bounds what a run's relations hold,
     /// whatever the input's shape; the evaluator takes the bytes as it
-    /// builds what holds them.
+    /// builds what holds them. Apart from that count, the run's decode cache
+    /// keeps a [`RunBudget`] of this many bytes: the key paths every decode
+    /// it makes builds take theirs from it as they are built, and
+    /// `key_parity` the tables it keeps of its files' keys, so what a run's
+    /// decodes hold of key paths is bounded however many files it decodes.
     BytesPerRun,
 }
 
@@ -173,33 +177,49 @@ impl Limits {
     }
 }
 
-/// The run-wide row budget, shared by every extractor (possibly on several
-/// threads).
+/// A run-wide budget of rows ([`LimitKind::RowsPerRun`]) or bytes
+/// ([`LimitKind::BytesPerRun`]), shared by every extractor and consumer that
+/// takes from it (possibly on several threads).
 #[derive(Debug)]
 pub struct RunBudget {
     used: AtomicUsize,
     limit: usize,
+    kind: LimitKind,
 }
 
 impl RunBudget {
+    /// The run's rows: [`LimitKind::RowsPerRun`] in `limits`.
     #[must_use]
     pub fn new(limits: &Limits) -> Self {
+        Self::of(limits, LimitKind::RowsPerRun)
+    }
+
+    /// The run's bytes: [`LimitKind::BytesPerRun`] in `limits`. The decode
+    /// cache keeps one, from which the key paths each decode builds and what
+    /// a consumer holds of its decodes take their bytes.
+    #[must_use]
+    pub fn bytes(limits: &Limits) -> Self {
+        Self::of(limits, LimitKind::BytesPerRun)
+    }
+
+    fn of(limits: &Limits, kind: LimitKind) -> Self {
         Self {
             used: AtomicUsize::new(0),
-            limit: limits.get(LimitKind::RowsPerRun),
+            limit: limits.get(kind),
+            kind,
         }
     }
 
-    /// Take `rows` from the budget, or fail once the run's total would exceed
-    /// it. A failed take still counts, so every later take fails too.
-    pub fn take(&self, rows: usize) -> Result<(), LimitExceeded> {
+    /// Take `amount` from the budget, or fail once the run's total would
+    /// exceed it. A failed take still counts, so every later take fails too.
+    pub fn take(&self, amount: usize) -> Result<(), LimitExceeded> {
         let total = self
             .used
-            .fetch_add(rows, Ordering::Relaxed)
-            .saturating_add(rows);
+            .fetch_add(amount, Ordering::Relaxed)
+            .saturating_add(amount);
         if total > self.limit {
             return Err(LimitExceeded {
-                kind: LimitKind::RowsPerRun,
+                kind: self.kind,
                 limit: self.limit,
                 reached: total,
             });
@@ -213,7 +233,7 @@ impl RunBudget {
         let used = self.used();
         if used > self.limit {
             return Err(LimitExceeded {
-                kind: LimitKind::RowsPerRun,
+                kind: self.kind,
                 limit: self.limit,
                 reached: used,
             });
@@ -384,5 +404,16 @@ mod tests {
             "an exhausted budget stays exhausted"
         );
         assert!(budget.take(usize::MAX).is_err());
+    }
+
+    #[test]
+    fn a_byte_budget_names_the_byte_limit() {
+        let limits = Limits::default().with(LimitKind::BytesPerRun, 10).unwrap();
+        let budget = RunBudget::bytes(&limits);
+        assert!(budget.take(10).is_ok());
+        let exceeded = budget.take(1).unwrap_err();
+        assert_eq!(exceeded.kind, LimitKind::BytesPerRun);
+        assert_eq!(exceeded.reached, 11);
+        assert_eq!(budget.spent().unwrap_err().kind, LimitKind::BytesPerRun);
     }
 }

@@ -22,14 +22,14 @@ lets the IDE render the results. All linting logic lives in alint.
 ## Workspace trust
 
 Until the server is told a workspace is trusted, it runs nothing the
-repository's `.alint.yml` could start: command rules and `custom:` facts
-are skipped, a remote `extends:` is not fetched, and `{{env.*}}` values
-are left unset. Every other rule lints. See
+repository's `.alint.yml` could start: command rules, rules that run Git
+and `custom:` facts are skipped, a remote `extends:` is not fetched,
+and `{{env.*}}` values are left unset. Every other rule lints. See
 [Workspace trust](https://alint.org/docs/cli/lsp/#workspace-trust).
 
 The plugin does not send the IDE's trusted-project state yet, so the
-server stays untrusted in JetBrains IDEs: command rules and custom
-facts do not run there.
+server stays untrusted in JetBrains IDEs: command rules, rules that run
+Git and custom facts do not run there.
 
 ## Building locally
 

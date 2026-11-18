@@ -8,9 +8,10 @@
 command = "alint"
 args = ["lsp"]
 # Until it is told the workspace is trusted, the server runs nothing the
-# repository's config could start (command rules, custom facts), fetches no
-# remote `extends:` and reads no environment value. To trust every workspace,
-# uncomment this here (never in a repository's `.helix/languages.toml`):
+# repository's config could start (command rules, rules that run Git, custom
+# facts), fetches no remote `extends:` and reads no environment value. To
+# trust every workspace, uncomment this here (never in a repository's
+# `.helix/languages.toml`):
 # config = { trusted = true }
 
 # Helix attaches language servers per-language — there is no "all files"

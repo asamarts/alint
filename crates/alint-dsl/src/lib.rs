@@ -306,7 +306,7 @@ fn nested_configs_key(path: &Path, source: &dyn ConfigSourceProvider) -> Result<
 fn load_top_level_raw(path: &Path, opts: &LoadOptions<'_>) -> Result<RawConfig> {
     let mut state = loader::LoadState::default();
     resolve_top_level(path, opts, &mut state).map_err(|error| {
-        alint_core::redact_environment_values_in_error(error, &state.environment_values)
+        alint_core::redact_environment_values_in_error(error, state.environment_values.as_slice())
     })
 }
 
@@ -347,7 +347,7 @@ fn resolve_top_level(
         opts,
         Some(&confine_root),
         true,
-        &[],
+        &loader::TrustedExtends::default(),
         loader::SourceContext::new(alint_core::ConfigSourceClass::Root, None),
     )?;
 
@@ -380,14 +380,21 @@ fn resolve_top_level(
             Some(&confine_root),
             true,
             // is_top: a drop-in reads its own `trusted_extends:`, so seed empty.
-            &[],
+            &loader::TrustedExtends::default(),
             loader::SourceContext::new(alint_core::ConfigSourceClass::DropIn, raw.version),
         )?;
+        // Each merge rebuilds the whole config, as an `extends:` merge does,
+        // and is charged so (200 empty drop-ins on 50,000 `ignore:` patterns
+        // took ten seconds).
+        state.charge_extends(&raw, &drop_in)?;
         raw = merge(raw, drop_in)?;
     }
     // With the forms the loader printed an `extends:` entry read from the
     // environment in, which a later error can quote too (`load_extended_source`).
-    loader::add_environment_values(&mut raw.environment_values, &state.environment_values);
+    loader::add_environment_values(
+        &mut raw.environment_values,
+        state.environment_values.as_slice(),
+    );
     // Every local file the configuration came from, which a fix from an
     // `extends:`'d ruleset must not rewrite.
     raw.config_files = std::mem::take(&mut state.config_files);
@@ -511,6 +518,11 @@ pub(crate) struct RawConfig {
     /// schema.
     #[serde(skip)]
     extends_environment: Vec<bool>,
+    /// The size of the source this config was parsed from, and of each it
+    /// merged, in bytes, which the `extends:` budget charges
+    /// (`MAX_EXTENDS_SOURCE_BYTES`). Not part of the schema.
+    #[serde(skip)]
+    source_size: usize,
     /// The language this config was decoded as: version 2 only when its
     /// top-level `version:` is the literal `2` (or it is a drop-in of a
     /// version 2 root). Set by the local-config parser. Not part of the schema.
@@ -538,30 +550,24 @@ where
 }
 
 impl RawConfig {
-    /// Drop the top-level settings an `extends:`'d config declared. They were
-    /// never honored from an extended source (the extending config's own
-    /// value -- or its default -- always replaced them), and an inherited
-    /// ruleset lifting `fix_size_limit` or `respect_gitignore` for the
-    /// consumer is not its call; warn instead of silently ignoring.
-    pub(crate) fn drop_top_level_settings(&mut self, source: &str) {
+    /// Drop the top-level settings an `extends:`'d config declared, and name
+    /// them. They were never honored from an extended source (the extending
+    /// config's own value -- or its default -- always replaced them), and an
+    /// inherited ruleset lifting `fix_size_limit` or `respect_gitignore` for
+    /// the consumer is not its call; the loader warns instead of silently
+    /// ignoring them.
+    pub(crate) fn drop_top_level_settings(&mut self) -> Vec<&'static str> {
         // `version:` describes the extended file itself, not the consumer.
         self.version = None;
         self.requires = None;
-        let declared: Vec<&str> = [
+        [
             ("respect_gitignore", self.respect_gitignore.take().is_some()),
             ("fix_size_limit", self.fix_size_limit.take().is_some()),
             ("nested_configs", self.nested_configs.take().is_some()),
         ]
         .into_iter()
         .filter_map(|(name, was_set)| was_set.then_some(name))
-        .collect();
-        if !declared.is_empty() {
-            tracing::warn!(
-                "extended config {source} sets {}; top-level settings are only read from \
-                 your own config and its `.alint.d/` drop-ins, so the value is ignored",
-                declared.join(", ")
-            );
-        }
+        .collect()
     }
 }
 
@@ -1303,13 +1309,33 @@ pub enum RemotePolicy {
     Deny,
 }
 
+/// Whether the top-level config may set `allow_out_of_root:` for this load.
+///
+/// `Deny` is for a config the user does not trust (`--untrusted`, a language
+/// server workspace that is not trusted, a policy test): the key lets a config
+/// read and write outside the repository and name an `extends:` anywhere, so
+/// a top-level config or `.alint.d` fragment that grants anything fails to
+/// load, before its `extends:` resolves.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum OutOfRootPolicy {
+    #[default]
+    Allow,
+    Deny,
+}
+
 /// Configuration for [`load_with`].
 ///
 /// Defaults retain normal production behavior. Policy runners can inject
 /// deterministic environment and package-source providers, deny remote
 /// resolution before cache access, and point nested-config discovery at a
 /// separate repository root.
+///
+/// Built with [`LoadOptions::default`], [`LoadOptions::with_catalog`] or
+/// [`LoadOptions::with_cache`] and the setters, so a later field is an
+/// addition rather than a breaking change. The fields stay public, to read
+/// and to assign.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct LoadOptions<'catalog> {
     /// Rule-kind and fix-operation capability inventory. Production callers
     /// should always inject the registry they will use to build the config.
@@ -1325,6 +1351,8 @@ pub struct LoadOptions<'catalog> {
     pub config_source: std::sync::Arc<dyn ConfigSourceProvider>,
     /// HTTPS policy checked before cache construction or fetch.
     pub remote_policy: RemotePolicy,
+    /// Whether the top-level config may set `allow_out_of_root:`.
+    pub out_of_root_policy: OutOfRootPolicy,
     /// Repository root used by nested-config discovery. When absent, the
     /// top-level config directory remains the repository root.
     pub repository_root: Option<PathBuf>,
@@ -1344,8 +1372,12 @@ impl Default for LoadOptions<'_> {
             environment: std::sync::Arc::new(HostEnvironment),
             config_source: std::sync::Arc::new(FilesystemConfigSource),
             remote_policy: RemotePolicy::Allow,
+            out_of_root_policy: OutOfRootPolicy::Allow,
             repository_root: None,
-            global_git_excludes: true,
+            // This crate's unit tests read no host's global excludes file
+            // (CONTRIBUTING.md), as `alint_core`'s run Git without the host's
+            // configuration.
+            global_git_excludes: !cfg!(test),
         }
     }
 }
@@ -1375,7 +1407,95 @@ impl<'catalog> LoadOptions<'catalog> {
         self.cache = Some(cache);
         self
     }
+
+    /// Sets [`Self::kind_catalog`].
+    #[must_use]
+    pub fn with_kind_catalog(
+        mut self,
+        kind_catalog: Option<alint_core::KindCatalog<'catalog>>,
+    ) -> Self {
+        self.kind_catalog = kind_catalog;
+        self
+    }
+
+    /// Sets [`Self::fetcher`].
+    #[must_use]
+    pub fn with_fetcher(mut self, fetcher: Option<extends::Fetcher>) -> Self {
+        self.fetcher = fetcher;
+        self
+    }
+
+    /// Sets [`Self::environment`].
+    #[must_use]
+    pub fn with_environment(
+        mut self,
+        environment: std::sync::Arc<dyn EnvironmentProvider>,
+    ) -> Self {
+        self.environment = environment;
+        self
+    }
+
+    /// Sets [`Self::config_source`].
+    #[must_use]
+    pub fn with_config_source(
+        mut self,
+        config_source: std::sync::Arc<dyn ConfigSourceProvider>,
+    ) -> Self {
+        self.config_source = config_source;
+        self
+    }
+
+    /// Sets [`Self::remote_policy`].
+    #[must_use]
+    pub fn with_remote_policy(mut self, remote_policy: RemotePolicy) -> Self {
+        self.remote_policy = remote_policy;
+        self
+    }
+
+    /// Sets [`Self::out_of_root_policy`].
+    #[must_use]
+    pub fn with_out_of_root_policy(mut self, out_of_root_policy: OutOfRootPolicy) -> Self {
+        self.out_of_root_policy = out_of_root_policy;
+        self
+    }
+
+    /// Sets [`Self::repository_root`].
+    #[must_use]
+    pub fn with_repository_root(mut self, repository_root: Option<PathBuf>) -> Self {
+        self.repository_root = repository_root;
+        self
+    }
+
+    /// Sets [`Self::global_git_excludes`].
+    #[must_use]
+    pub fn with_global_git_excludes(mut self, global_git_excludes: bool) -> Self {
+        self.global_git_excludes = global_git_excludes;
+        self
+    }
 }
+
+/// The types alint-dsl seals, as a crate that depends on it sees them
+/// (ADR-0046 decision 6).
+///
+/// The first block must compile: it uses the constructor, a setter and a
+/// field. The second must fail to compile: it does the same with a functional
+/// record update, which a sealed struct refuses. With the first block
+/// compiling, the seal is the only reason the second can fail, so a second
+/// block that compiles means the type lost `#[non_exhaustive]`.
+///
+/// ```
+/// let mut options = alint_dsl::LoadOptions::default().with_global_git_excludes(false);
+/// options.remote_policy = alint_dsl::RemotePolicy::Deny;
+/// ```
+///
+/// ```compile_fail
+/// let _ = alint_dsl::LoadOptions {
+///     global_git_excludes: false,
+///     ..alint_dsl::LoadOptions::default()
+/// };
+/// ```
+#[cfg(doctest)]
+pub struct SealedTypes;
 
 /// The refusal of a config larger than [`alint_core::MAX_STRUCTURED_BYTES`],
 /// in the words of a structured data file's.
@@ -1804,6 +1924,7 @@ fn merge_unbounded(a: RawConfig, b: RawConfig) -> RawConfig {
         config_files: [a.config_files, b.config_files].concat(),
         field_source_names: either_set(a.field_source_names, b.field_source_names),
         extends_environment: Vec::new(),
+        source_size: a.source_size.saturating_add(b.source_size),
         // The language follows the version: the source that sets it decides.
         surface: b.version.map_or(a.surface, |_| b.surface),
         v2: a.v2.merged(b.v2),

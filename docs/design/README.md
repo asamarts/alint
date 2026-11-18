@@ -60,3 +60,4 @@ in `docs/adr/` is missing from this table.
 | [0043](../adr/0043-trust-and-disclosure-decisions-from-the-post-v0221-audit.md) | Trust and disclosure decisions from the post-v0.22.1 audit | accepted |
 | [0044](../adr/0044-untrusted-runs-git-as-a-process-and-a-wider-memory-gate.md) | `--untrusted`, Git as a process, and a wider memory gate | accepted |
 | [0045](../adr/0045-count-the-walks-per-directory-probes-in-the-reference-gate.md) | Count the walk's per-directory probes in the reference gate | accepted |
+| [0046](../adr/0046-a-linear-extends-merge-sealed-options-and-the-rounds-open-questions.md) | A linear `extends:` merge, sealed options, and the round's open questions | accepted |

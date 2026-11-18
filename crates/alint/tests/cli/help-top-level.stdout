@@ -40,13 +40,16 @@ Options:
           A repository's own config may run commands: `kind: command` and the other spawning rule
           kinds (at any `require:` depth), spawning fixes such as `git_untrack`, and `custom:`
           facts. Git runs the commands a repository's `.git/config` names, so a rule that runs Git
-          (the `git_*` kinds, `git_tracked_only`, `scope_filter.changed_since`) is refused too, and
-          so are `--changed` and `--base`. With this flag such a config fails to load with an error
-          naming the rule, before anything runs, and alint runs no Git. It leaves a remote
-          `extends:` and the environment to the config: lint a repository you do not trust with
-          `--untrusted`, or with your own config (`-c`). Applies to `check`, `fix`, `baseline`,
-          `list`, `explain`, `facts`, `validate-config` and `lsp`; `test` already refuses spawning
-          without `--allow-spawn`, which this flag forbids.
+          (the `git_*` kinds, `changeset_requires_path`, `pair_changed_together`,
+          `git_tracked_only`, `scope_filter.changed_since`) is refused too, and so are `--changed`
+          and `--base`. With this flag such a config fails to load with an error naming the rule,
+          before anything runs, and alint runs no Git. It leaves a remote `extends:` and the
+          environment to the config: lint a repository you do not trust with `--untrusted`, or with
+          your own config (`-c`). Applies to `check`, `fix`, `baseline`, `list`, `explain`, `facts`,
+          `validate-config`, `export-agents-md`, `suggest` (which then runs no Git and skips its
+          stale-TODO suggestion) and `lsp`; `test` already refuses spawning without `--allow-spawn`,
+          which this flag forbids, and runs Git only in the repositories it makes for a test's
+          `given.git`.
 
       --untrusted
           Lint a repository you do not trust: run nothing, fetch nothing and read no environment on
@@ -55,10 +58,11 @@ Options:
           The language server's untrusted mode, for the command line. A config that `--no-spawn`
           refuses is refused (rules, fixes and facts that start processes, rules that run Git,
           `--changed` and `--base`), naming this flag; a remote `extends:` is refused before
-          anything is fetched; and `{{env.NAME}}` in the config, `env.*` in a `when:` and a legacy
-          `${VAR}` read an empty environment. `--no-spawn` alone leaves the last two open. Applies
-          where `--no-spawn` does; `lsp` takes every workspace as untrusted, whatever the client
-          says.
+          anything is fetched; so is `allow_out_of_root:`, which would let the config read and write
+          outside the repository; and `{{env.NAME}}` in the config, `env.*` in a `when:` and a
+          legacy `${VAR}` read an empty environment. `--no-spawn` alone leaves the last two open.
+          Applies where `--no-spawn` does; `lsp` takes every workspace as untrusted, whatever the
+          client says.
 
       --fail-on-warning
           Treat warnings as errors for exit-code purposes

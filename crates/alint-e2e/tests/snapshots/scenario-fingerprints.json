@@ -546,6 +546,12 @@
     "fingerprint": "fbfe8bb94373a23a726f19afc231a6a840988f2308c7c99cf6636f4d83865560"
   },
   {
+    "scenario": "check/cross_file/file_graph_nested_derive_target_dollar_in_a_name.yml",
+    "rule_id": "license-has-notice",
+    "path": "licenses/a$1/lucene-LICENSE.txt",
+    "fingerprint": "915141b3ae77c154248019660811e3878e7f2d37a1936542c68144a07599c1ef"
+  },
+  {
     "scenario": "check/cross_file/file_graph_no_dangling_fail.yml",
     "rule_id": "docs-links-resolve",
     "path": "docs/a.md",
@@ -768,6 +774,12 @@
     "fingerprint": "bf4990bb702034a7f3b90d1939f5e9c654950860803b284f52a519036e410b06"
   },
   {
+    "scenario": "check/cross_file/message_nested_message_placeholder_spelled_in_a_name.yml",
+    "rule_id": "package-header",
+    "path": "pk/x{{ctx.primary}}/a.c",
+    "fingerprint": "3f332d49aec3df2cd33ebe89c09cf62dff4d33a1023c65baa6133a958892398f"
+  },
+  {
     "scenario": "check/cross_file/pair_fail.yml",
     "rule_id": "c-requires-h",
     "path": "src/beta.c",
@@ -780,10 +792,22 @@
     "fingerprint": "92cb1680b329c59b51fcc453d12d251db0e13f2bc6b127a1e3a8e5fdabdfad0e"
   },
   {
+    "scenario": "check/cross_file/pair_nested_token_spelled_in_a_name.yml",
+    "rule_id": "package-header",
+    "path": "packages/x{stem}/a.c",
+    "fingerprint": "f5f77737848ee433aa4f03cf891c546f4280117598e331fabe7b39be0bcf1e6c"
+  },
+  {
     "scenario": "check/cross_file/path_confinement_escape_fail.yml",
     "rule_id": "schema-confined",
     "path": "../escape.json",
     "fingerprint": "35a57546fb2fb12a3add0892bae373e6fecd2ef9a28c05d0f3eb8a54505d4101"
+  },
+  {
+    "scenario": "check/cross_file/registered_nested_token_spelled_in_a_name.yml",
+    "rule_id": "crate-listed",
+    "path": "Cargo.toml",
+    "fingerprint": "e8c904fab11b190d35ffdd5ecf9d47cceaef6af217925663110cde2fb9b03f1d"
   },
   {
     "scenario": "check/cross_file/registry_paths_resolve_fail.yml",
@@ -814,6 +838,12 @@
     "rule_id": "unique-rs-stems",
     "path": "a/util.rs",
     "fingerprint": "db2ff8be92da367eac4454f39d606b9593c0d3db297229272e50092b7bbb3a8e"
+  },
+  {
+    "scenario": "check/cross_file/unique_by_nested_token_spelled_in_a_name.yml",
+    "rule_id": "one-doc-per-package",
+    "path": "pk/x{stem}/a.md",
+    "fingerprint": "d370a8dd5d6ec15d38feb01763b0c90f213f22840c8f471aabdb5aabddba6f19"
   },
   {
     "scenario": "check/encoding/file_hash_fail.yml",

@@ -511,6 +511,90 @@ pub fn render_path_argv(template: &str, t: &PathTokens) -> String {
     }
 }
 
+/// A path template a rule renders for each entry it checks: `pair`'s
+/// `partner`, `unique_by`'s `key`, `cross_file`'s `register_as`, an argument
+/// of `command`. In a rule an iteration built
+/// ([`RuleSpec::rendered`](crate::RuleSpec::rendered)), the iteration has
+/// substituted every token with the iterated entry's value already, so the
+/// text is final and renders as it is: a value that spells a token (a
+/// directory named `x{stem}`) is text, not a token to substitute again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PathTemplate {
+    text: String,
+    /// Whether an iteration rendered the text (see the type's documentation).
+    rendered: bool,
+}
+
+impl PathTemplate {
+    /// `text` as the rule `spec` configures it: final when an iteration
+    /// rendered `spec`.
+    #[must_use]
+    pub fn new(text: String, spec: &crate::RuleSpec) -> Self {
+        Self {
+            text,
+            rendered: spec.rendered,
+        }
+    }
+
+    /// The template as the rule holds it (for a rule an iteration built, with
+    /// the iteration's values in place of its tokens).
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.text
+    }
+
+    /// The tokens [`Self::render`] reads, for
+    /// [`PathTokens::from_path_with`]: none when the text is final.
+    #[must_use]
+    pub fn tokens(&self) -> TokenSet {
+        if self.rendered {
+            TokenSet::NONE
+        } else {
+            TokenSet::of(&self.text)
+        }
+    }
+
+    /// The template rendered for an entry with `tokens` ([`render_path`]), or
+    /// the final text as it is.
+    #[must_use]
+    pub fn render(&self, tokens: &PathTokens) -> std::borrow::Cow<'_, str> {
+        if self.rendered {
+            std::borrow::Cow::Borrowed(&self.text)
+        } else {
+            std::borrow::Cow::Owned(render_path(&self.text, tokens))
+        }
+    }
+
+    /// [`Self::render`] for a command argument ([`render_path_argv`]). A final
+    /// text was rendered as an argument by the iteration, which guarded a
+    /// leading dash its value introduced.
+    #[must_use]
+    pub fn render_argv(&self, tokens: &PathTokens) -> std::borrow::Cow<'_, str> {
+        if self.rendered {
+            std::borrow::Cow::Borrowed(&self.text)
+        } else {
+            std::borrow::Cow::Owned(render_path_argv(&self.text, tokens))
+        }
+    }
+}
+
+/// A template no iteration rendered: a rule's own default (`cross_file`'s
+/// `{path}`), or one a test builds.
+impl From<&str> for PathTemplate {
+    fn from(text: &str) -> Self {
+        Self {
+            text: text.to_owned(),
+            rendered: false,
+        }
+    }
+}
+
+impl std::fmt::Display for PathTemplate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.text)
+    }
+}
+
 /// Apply path-template substitution to every string inside a YAML mapping,
 /// recursively into nested mappings and sequences. Non-string values pass
 /// through unchanged. Used by nested-rule specs (e.g. `for_each_dir`) so that
@@ -563,12 +647,66 @@ pub fn render_paths_spec(spec: &PathsSpec, tokens: &PathTokens) -> PathsSpec {
     }
 }
 
+/// Written on both sides of each `{` of a value that an iteration substitutes
+/// into the message of a nested rule that renders its message again
+/// ([`NESTED_MESSAGE_TEMPLATE_KINDS`]), so no `{{` from a name reaches that
+/// rendering: a private-use character, which a path has no reason to hold.
+/// [`unescape_token_values`] takes the marks out of the finding's message.
+const MESSAGE_BRACE_MARK: char = '\u{E001}';
+
+/// Kinds whose rule renders its `message:` for each finding as a message
+/// template (`{{ctx.primary}}`, `{{ctx.key}}`). In a nested rule of one of
+/// them, each `{` of a substituted value is marked with a private-use
+/// character, so a directory named `x{{ctx.primary}}` is shown as it is
+/// named, not with the primary path in its place.
+///
+/// For alint's own crates, whose tests keep it in step with the rules.
+#[doc(hidden)]
+pub const NESTED_MESSAGE_TEMPLATE_KINDS: &[&str] = &[
+    "dir_contains",
+    "dir_only_contains",
+    "git_blame_age",
+    "key_parity",
+    "pair",
+    "unique_by",
+];
+
+/// Append `v` with [`MESSAGE_BRACE_MARK`] on both sides of each `{`.
+fn push_message_value(v: &str, out: &mut String) {
+    if !v.contains('{') {
+        out.push_str(v);
+        return;
+    }
+    for ch in v.chars() {
+        if ch == '{' {
+            out.push(MESSAGE_BRACE_MARK);
+            out.push('{');
+            out.push(MESSAGE_BRACE_MARK);
+        } else {
+            out.push(ch);
+        }
+    }
+}
+
+/// Render a nested rule's `message:` for one iteration: with
+/// [`render_path`], except that in a kind that renders its message again
+/// ([`NESTED_MESSAGE_TEMPLATE_KINDS`]) each `{` of a value is marked.
+pub(crate) fn render_nested_message(kind: &str, template: &str, tokens: &PathTokens) -> String {
+    if NESTED_MESSAGE_TEMPLATE_KINDS.contains(&kind) {
+        render_path_with(template, tokens, push_message_value)
+    } else {
+        render_path(template, tokens)
+    }
+}
+
 /// Undo [`render_path_glob`]'s escaping of `tokens`' values inside a
 /// user-facing `message`: a nested rule reports the glob it was built from
 /// (`expected a file matching app/[[]slug[]]/*.tsx`), and the escape forms are
-/// noise to the reader, who named the directory `app/[slug]`. Only the exact
-/// escaped spellings of this iteration's token values are replaced, so a
-/// user-written pattern is shown as written.
+/// noise to the reader, who named the directory `app/[slug]`. The marks the
+/// values carry in the message of a kind in [`NESTED_MESSAGE_TEMPLATE_KINDS`]
+/// are taken out the same way. Only the exact escaped spellings of this
+/// iteration's token values are replaced, so a user-written pattern is shown
+/// as written.
 #[must_use]
 pub fn unescape_token_values(message: &str, tokens: &PathTokens) -> Option<String> {
     let mut pairs: Vec<(String, &str)> = Vec::new();
@@ -586,6 +724,11 @@ pub fn unescape_token_values(message: &str, tokens: &PathTokens) -> Option<Strin
         }
         if let Some(rest) = v.strip_prefix('!') {
             pairs.push((format!("{{!}}{}", glob_escape(rest)), v));
+        }
+        if v.contains('{') {
+            let mut marked = String::with_capacity(v.len() + 8);
+            push_message_value(v, &mut marked);
+            pairs.push((marked, v));
         }
     }
     if pairs.is_empty() {
@@ -658,14 +801,56 @@ nested_glob_options_table! {
     ["registry_paths_resolve"] => ["source", "orphans.space"],
 }
 
+/// Option keys of a nested rule that hold a command's arguments, per kind.
+/// Each argument is rendered with [`render_path_argv`], so a value that
+/// starts with `-` (a file named `--write`) reaches the command as a path
+/// (`./--write`), not an option, as in a rule no iteration built.
+fn nested_argv_options(kind: &str) -> &'static [&'static str] {
+    match kind {
+        "command" | "command_idempotent" | "generated_file_fresh" => &["command"],
+        _ => &[],
+    }
+}
+
+/// Option keys of a nested rule that hold a regex replacement template, which
+/// the rule expands with each match's captures (`$1`, `${name}`), per kind. A
+/// `$` in a substituted value is written `$$`, so a directory named `a$1`
+/// reaches the expansion as text, not a capture reference.
+fn nested_replacement_options(kind: &str) -> &'static [&'static str] {
+    match kind {
+        "file_graph" => &["edges.derive_target.to"],
+        _ => &[],
+    }
+}
+
+/// The option keys of a nested rule's kind that are not rendered as literal
+/// text: globs, command arguments and replacement templates.
+#[derive(Clone, Copy)]
+struct OptionSyntax {
+    globs: &'static [&'static str],
+    argv: &'static [&'static str],
+    replacements: &'static [&'static str],
+}
+
+impl OptionSyntax {
+    fn of(kind: &str) -> Self {
+        Self {
+            globs: nested_glob_options(kind),
+            argv: nested_argv_options(kind),
+            replacements: nested_replacement_options(kind),
+        }
+    }
+}
+
 /// Render a nested rule's option mapping (`extra`) for one iteration. Like
 /// [`render_mapping`], every string gets the iterated entry's tokens, but a
 /// glob-typed option of `kind` ([`NESTED_GLOB_OPTIONS`]) is rendered with
-/// [`render_path_glob`] (a leading template `!` exclude is kept), and a nested
-/// rule-spec list (`for_each_dir.require`, ...) is rendered per element for
-/// that element's own kind. So a directory named `app/[slug]` reaches a nested
-/// `dir_contains` `select: "{path}"` as the literal `app/[[]slug[]]`, not a
-/// character class that matches `app/s`.
+/// [`render_path_glob`] (a leading template `!` exclude is kept), a command
+/// argument with [`render_path_argv`], a replacement template with each `$`
+/// of a value doubled, and a nested rule-spec list (`for_each_dir.require`,
+/// ...) is rendered per element for that element's own kind. So a directory
+/// named `app/[slug]` reaches a nested `dir_contains` `select: "{path}"` as the
+/// literal `app/[[]slug[]]`, not a character class that matches `app/s`.
 #[must_use]
 pub(crate) fn render_nested_options(
     kind: &str,
@@ -698,7 +883,8 @@ pub(crate) fn render_nested_extra(
 }
 
 /// [`render_nested_options`]; `with_paths` also renders the mapping's own
-/// `paths:` (a nested spec inside a nested spec list) as globs.
+/// `paths:` (a nested spec inside a nested spec list) as globs, and its
+/// `message:` as [`render_nested_message`] does.
 fn render_options(
     kind: &str,
     m: ayaml::Mapping,
@@ -706,7 +892,7 @@ fn render_options(
     with_paths: bool,
 ) -> ayaml::Mapping {
     const PATHS: &[&str] = &["paths", "paths.include", "paths.exclude"];
-    let globs = nested_glob_options(kind);
+    let syntax = OptionSyntax::of(kind);
     let spec_list = NESTED_SPEC_LISTS
         .iter()
         .find(|(kinds, _)| kinds.contains(&kind))
@@ -716,29 +902,54 @@ fn render_options(
         let key = k.as_str().unwrap_or_default().to_string();
         let v = if spec_list == Some(key.as_str()) {
             render_nested_spec_list(v, tokens)
+        } else if with_paths
+            && key == "message"
+            && let ayaml::Value::String(message) = &v
+        {
+            ayaml::Value::String(render_nested_message(kind, message, tokens))
         } else if with_paths && key == "paths" {
-            render_keyed(v, &key, PATHS, tokens)
+            let paths = OptionSyntax {
+                globs: PATHS,
+                ..syntax
+            };
+            render_keyed(v, &key, paths, tokens)
         } else {
-            render_keyed(v, &key, globs, tokens)
+            render_keyed(v, &key, syntax, tokens)
         };
         out.insert(k, v);
     }
     out
 }
 
-/// Render `v`, found at dotted key path `at`, glob-escaping where `at` is one
-/// of `globs`.
-fn render_keyed(v: ayaml::Value, at: &str, globs: &[&str], tokens: &PathTokens) -> ayaml::Value {
+/// Render `v`, found at dotted key path `at`, as `syntax` says the option at
+/// `at` is read: glob-escaping, as a command argument, as a replacement
+/// template, or literally.
+fn render_keyed(
+    v: ayaml::Value,
+    at: &str,
+    syntax: OptionSyntax,
+    tokens: &PathTokens,
+) -> ayaml::Value {
     use ayaml::Value;
     match v {
-        Value::String(s) if globs.contains(&at) => Value::String(match s.strip_prefix('!') {
-            Some(rest) => format!("!{}", render_path_glob(rest, tokens)),
-            None => render_path_glob(&s, tokens),
-        }),
+        Value::String(s) if syntax.globs.contains(&at) => {
+            Value::String(match s.strip_prefix('!') {
+                Some(rest) => format!("!{}", render_path_glob(rest, tokens)),
+                None => render_path_glob(&s, tokens),
+            })
+        }
+        Value::String(s) if syntax.argv.contains(&at) => {
+            Value::String(render_path_argv(&s, tokens))
+        }
+        Value::String(s) if syntax.replacements.contains(&at) => {
+            Value::String(render_path_with(&s, tokens, |v, out| {
+                out.push_str(&v.replace('$', "$$"));
+            }))
+        }
         Value::String(s) => Value::String(render_path(&s, tokens)),
         Value::Sequence(seq) => Value::Sequence(
             seq.into_iter()
-                .map(|e| render_keyed(e, at, globs, tokens))
+                .map(|e| render_keyed(e, at, syntax, tokens))
                 .collect(),
         ),
         Value::Mapping(m) => Value::Mapping(
@@ -748,7 +959,7 @@ fn render_keyed(v: ayaml::Value, at: &str, globs: &[&str], tokens: &PathTokens) 
                         Some(name) => format!("{at}.{name}"),
                         None => at.to_string(),
                     };
-                    (k, render_keyed(v, &sub, globs, tokens))
+                    (k, render_keyed(v, &sub, syntax, tokens))
                 })
                 .collect(),
         ),
@@ -1325,6 +1536,85 @@ mod tests {
             get(&m, &["require", "1", "message"]).as_str(),
             Some("app/[slug]")
         );
+    }
+
+    #[test]
+    fn nested_options_guard_arguments_double_dollars_and_mark_message_braces() {
+        let t = PathTokens::from_path(Path::new("--x{stem}$1"));
+        // A command argument: a leading dash the value introduced is a path.
+        let m = render_nested_options(
+            "command",
+            yaml("command: [\"tool\", \"{path}\", \"--in={path}\"]"),
+            &t,
+        );
+        assert_eq!(get(&m, &["command", "1"]).as_str(), Some("./--x{stem}$1"));
+        assert_eq!(
+            get(&m, &["command", "2"]).as_str(),
+            Some("--in=--x{stem}$1")
+        );
+        // A replacement template: the value's `$` is text; the template's is
+        // a capture reference. The regex beside it takes the value as it is.
+        let m = render_nested_options(
+            "file_graph",
+            yaml("edges:\n  derive_target:\n    from: \"{path}(.*)\"\n    to: \"{path}/$1\""),
+            &t,
+        );
+        assert_eq!(
+            get(&m, &["edges", "derive_target", "to"]).as_str(),
+            Some("--x{stem}$$1/$1")
+        );
+        assert_eq!(
+            get(&m, &["edges", "derive_target", "from"]).as_str(),
+            Some("--x{stem}$1(.*)")
+        );
+        // A message a kind renders again holds each `{` of a value marked, and
+        // the marks come out of the finding's message; another kind's message
+        // holds the value as it is.
+        let m = render_nested_options(
+            "for_each_dir",
+            yaml(
+                "require:\n  - kind: pair\n    message: \"{path}: {{ctx.primary}}\"\n  - kind: file_exists\n    message: \"{path}\"",
+            ),
+            &t,
+        );
+        let marked = get(&m, &["require", "0", "message"]).as_str().unwrap();
+        assert_eq!(marked, "--x\u{E001}{\u{E001}stem}$1: {{ctx.primary}}");
+        assert_eq!(
+            unescape_token_values(marked, &t).as_deref(),
+            Some("--x{stem}$1: {{ctx.primary}}")
+        );
+        assert_eq!(
+            get(&m, &["require", "1", "message"]).as_str(),
+            Some("--x{stem}$1")
+        );
+        assert_eq!(
+            render_nested_message("unique_by", "{basename}", &t),
+            "--x\u{E001}{\u{E001}stem}$1"
+        );
+        assert_eq!(
+            render_nested_message("file_exists", "{basename}", &t),
+            "--x{stem}$1"
+        );
+    }
+
+    #[test]
+    fn a_template_an_iteration_rendered_renders_as_it_is() {
+        let t = PathTokens::from_path(Path::new("pk/a.c"));
+        let own = PathTemplate::from("pk/x{stem}/{stem}.h");
+        assert_eq!(own.tokens(), TokenSet::of("{stem}"));
+        assert_eq!(own.render(&t), "pk/xa/a.h");
+        let rendered = PathTemplate {
+            text: "pk/x{stem}/-{stem}.h".to_owned(),
+            rendered: true,
+        };
+        assert_eq!(rendered.tokens(), TokenSet::NONE);
+        assert_eq!(rendered.render(&t), "pk/x{stem}/-{stem}.h");
+        assert_eq!(rendered.render_argv(&t), "pk/x{stem}/-{stem}.h");
+        assert_eq!(rendered.as_str(), "pk/x{stem}/-{stem}.h");
+        let argument = PathTemplate::from("{stem}");
+        let dashed = PathTokens::from_path(Path::new("-a.c"));
+        assert_eq!(argument.render_argv(&dashed), "./-a");
+        assert_eq!(argument.render(&dashed), "-a");
     }
 
     #[test]

@@ -371,19 +371,25 @@ fn literal_pattern(pattern: &str, backslash_is_separator: bool) -> Option<String
 /// when the first segment is not a literal name (`**/x`, `*/x`, `{a,b}/x`,
 /// `[ab]/x`), for a pattern with no `/` or one that starts with `/` or `.`,
 /// and for an exclude (`!x`). A segment that names nothing on its own (`.`,
-/// `..`, empty) ends the prefix, since globset compares it as text.
+/// `..`, empty) ends the prefix, since globset compares it as text. Where `\\`
+/// is a path separator (Windows) it separates segments as `/` does, so a
+/// pattern built from a `Path` (`pkg\\d000\\m*`) narrows to `pkg/d000`.
 pub(crate) fn literal_dir_prefix(pattern: &str) -> Option<String> {
+    literal_dir_prefix_with(pattern, std::path::is_separator('\\'))
+}
+
+fn literal_dir_prefix_with(pattern: &str, backslash_is_separator: bool) -> Option<String> {
     if pattern.starts_with('!') {
         return None;
     }
-    let backslash_is_separator = std::path::is_separator('\\');
-    let (dirs, _) = pattern.rsplit_once('/')?;
+    let separates = |c: char| c == '/' || (backslash_is_separator && c == '\\');
+    let (dirs, _) = pattern.rsplit_once(separates)?;
     let mut prefix = String::new();
-    for segment in dirs.split('/') {
+    for segment in dirs.split(separates) {
         let Some(name) = literal_pattern(segment, backslash_is_separator) else {
             break;
         };
-        // Where `\\` separates, the name can hold more than one.
+        // A one-character class can spell a separator (`[/]`).
         if name.split('/').any(|part| matches!(part, "" | "." | "..")) {
             break;
         }
@@ -446,6 +452,35 @@ mod tests {
                 Some("app/[slug]")
             );
         }
+    }
+
+    /// Where `\\` separates, a pattern built from a `Path` on Windows (a
+    /// `registry_paths_resolve` entry joined to its registry's directory)
+    /// narrows as its `/` spelling does; elsewhere `\\` escapes.
+    #[test]
+    fn a_backslash_separates_dir_prefix_segments_where_it_is_a_separator() {
+        for (pattern, prefix) in [
+            ("pkg\\d000\\m*", Some("pkg/d000")),
+            ("pkg\\d000/m*.txt", Some("pkg/d000")),
+            ("pkg/d000\\m*", Some("pkg/d000")),
+            ("pkg\\*\\m", Some("pkg")),
+            ("pkg/x[\\]y", Some("pkg")),
+            ("pkg\\..\\m*", Some("pkg")),
+            ("\\pkg\\m*", None),
+            ("a[\\]b/c", None),
+            ("m*", None),
+        ] {
+            assert_eq!(
+                literal_dir_prefix_with(pattern, true).as_deref(),
+                prefix,
+                "{pattern}"
+            );
+        }
+        assert_eq!(literal_dir_prefix_with("pkg\\d000\\m*", false), None);
+        assert_eq!(
+            literal_dir_prefix_with("pkg/d000\\m*", false).as_deref(),
+            Some("pkg")
+        );
     }
 
     /// Every pattern up to length 3 over the glob alphabet, against every

@@ -30,10 +30,12 @@ turned off:
 - rules that run a process (`kind: command`, `generated_file_fresh`, `command_idempotent`, at any
   `require:` depth) are skipped, and a rule whose fix alone runs one (`git_untrack`, `command`)
   lints without its fix;
-- rules that run Git (the `git_*` kinds, `git_tracked_only`, `scope_filter.changed_since`) are
-  skipped, since Git runs the commands a repository's `.git/config` names;
+- rules that run Git (the `git_*` kinds, `changeset_requires_path`, `pair_changed_together`,
+  `git_tracked_only`, `scope_filter.changed_since`) are skipped, since Git runs the commands a
+  repository's `.git/config` names;
 - `custom:` facts are skipped, so they read as unset;
-- a remote `extends:` is not fetched, and the config reports why instead of loading;
+- a remote `extends:` is not fetched, and the config reports why instead of loading, as it does
+  for `allow_out_of_root:`, which would let it read and write outside the repository;
 - environment values read nothing: `{{env.NAME}}` takes its `default(...)` (or fails to load
   without one), and `env.NAME` in a `when:` is unset.
 

@@ -22,7 +22,10 @@ use std::time::{Duration, Instant};
 /// The address space each run may take: far more than a walk of these trees
 /// needs, far less than an unbounded read reaches before the deadline.
 const MEMORY_LIMIT_KIB: u64 = 4 * 1024 * 1024;
-const DEADLINE: Duration = Duration::from_secs(60);
+/// Long enough for a run on a loaded host (cases a change did not touch
+/// missed 60 s at a load average of 270); the memory limit stops an
+/// unbounded read long before it, and a blocked read never finishes.
+const DEADLINE: Duration = Duration::from_secs(300);
 
 fn alint() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_alint"))
@@ -157,6 +160,19 @@ fn cases() -> Vec<Case> {
                 let file = root.join(".gitignore");
                 symlink(Path::new("/dev/zero"), &file);
                 Some((root, file))
+            },
+        },
+        Case {
+            name: "a .gitignore below the root, a symlink to /proc/self/pagemap",
+            build: |tmp, _| {
+                let file = Path::new("/proc/self/pagemap");
+                if !cfg!(target_os = "linux") || !file.exists() {
+                    return None;
+                }
+                let root = plain_root(tmp);
+                let link = root.join("src/.gitignore");
+                symlink(file, &link);
+                Some((root, link))
             },
         },
         Case {

@@ -867,10 +867,15 @@ The `iter` namespace exposes:
 **Token values are literal paths.** When a token expands into a nested option that alint compiles as a glob (`paths:`, and per kind options such as `dir_contains`'s `select` / `require`, `dir_only_contains`'s `select` / `allow`, `unique_by`'s `select`, `pair`'s `primary`, or a nested `for_each_*`'s own `select`), its value is glob-escaped, so a directory named `app/[slug]` or `pkgs/*` matches only itself rather than acting as a character class or wildcard. The template text around the token keeps its glob meaning (`"{path}/*.tsx"`). Options that are regexes (`for_each_match`'s `select`, `pattern`) or literal paths (`pair`'s `partner`) receive the value unescaped. Messages show the real path, not its escaped form.
 
 <!-- alint:since=0.23 -->
-**A value is substituted once.** In a rule nested two or more levels deep (a `for_each_dir`
-inside a `for_each_file`), the outermost iteration substitutes every token, and the value it
-inserts is text: a file or directory name that spells a token, such as `x{stem}`, is not
-substituted again by the iterations below it.
+**A value is substituted once.** The outermost iteration substitutes every token of the rules
+nested in it, and the value it inserts is text: a file or directory name that spells a token,
+such as `x{stem}`, is not substituted again, neither by the iterations below it (a `for_each_dir`
+inside a `for_each_file`) nor by a nested rule that renders a template for each entry it checks
+(`pair`'s `partner`, `unique_by`'s `key`, `cross_file`'s `register_as`, `command`'s arguments).
+Likewise a `$` in a value is text in `file_graph`'s `derive_target.to` (`a$1` is not a capture
+reference), and a name spelled like a message placeholder (`x{{ctx.primary}}`) is shown as it is
+in the message of a rule that fills such placeholders. In a `command:` argument, a value that
+starts with `-` is passed as a path (`./--write`), as `command` passes a file it matches.
 <!-- /alint:since -->
 
 ### `dir_contains`
@@ -940,7 +945,7 @@ Output is drained while the child runs (a child writing more than a pipe buffer 
 
 **Trust gate.** Every process-spawning rule kind — `command`, `generated_file_fresh`, and `command_idempotent` — is allowed only in the user's own top-level config. Any of them introduced via `extends:` (local file, HTTPS URL, or `alint://bundled/`) is a load-time error — the same gate that protects `custom:` facts. Adopting a published ruleset must never imply granting it arbitrary code execution.
 
-**Path confinement + `allow_out_of_root`.** Every config-declared path is confined to the repo root — a rule can't read or resolve a file outside the tree it was pointed at. The top-level-only `allow_out_of_root:` key relaxes this for *reads* (`json_schema_passes` `schema_path:`, `pair_hash` `target:`, `registry_paths_resolve` `source:`) when a trusted config must reference an external file, and, under `alint fix`, for the owning rule's fix paths (`file_create`, `dir_create`, `sync_from`, and `create_and_register` targets, plus `content_from` reads); editor code actions always stay confined. It is **rejected from `extends:`'d rulesets** (same trust model as the spawn gate above) and a permitted read emits a note. See [Configuration → `allow_out_of_root`](/docs/configuration/#allow_out_of_root).
+**Path confinement + `allow_out_of_root`.** Every config-declared path is confined to the repo root — a rule can't read or resolve a file outside the tree it was pointed at. The top-level-only `allow_out_of_root:` key relaxes this for *reads* (`json_schema_passes` `schema_path:`, `pair_hash` `target:`, `registry_paths_resolve` `source:`) when a trusted config must reference an external file, and, under `alint fix`, for the owning rule's fix paths (`file_create`, `dir_create`, `sync_from`, and `create_and_register` targets, plus `content_from` reads); editor code actions always stay confined. It is **rejected from `extends:`'d rulesets** (same trust model as the spawn gate above), refused under `--untrusted`, in a language server workspace that is not trusted and in a policy test, and a permitted read emits a note. See [Configuration → `allow_out_of_root`](/docs/configuration/#allow_out_of_root).
 
 `--changed` interaction: `command` is a per-file rule, so under `alint check --changed` it spawns only for files in the diff. The expensive check is automatically incremental in CI.
 

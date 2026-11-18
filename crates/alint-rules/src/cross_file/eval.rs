@@ -157,7 +157,10 @@ impl CrossFileRule {
         let render_value = |p: &Path| -> String {
             let slashed = crate::slash(p);
             let tokens = PathTokens::from_path(Path::new(&slashed));
-            render_path(self.register_as.as_deref().unwrap_or("{path}"), &tokens)
+            match &self.register_as {
+                Some(template) => template.render(&tokens).into_owned(),
+                None => render_path("{path}", &tokens),
+            }
         };
         let Some(scope) = &self.source_glob else {
             // A single named member (`source.file`). Normalize the config-verbatim

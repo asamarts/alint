@@ -410,6 +410,10 @@ The option also lets your own rules' fixes leave the root, for the rules it name
 a fix names. A fix of a rule an `extends:`'d ruleset or a nested config shaped never writes or
 reads outside the root, and is reported skipped.
 
+A config that sets the option fails to load under `--untrusted`, in a language server workspace
+that is not trusted, and in a policy test (`alint test`): a repository you do not trust could
+otherwise copy a file from outside it into itself.
+
 ### `baseline`
 
 Path to a committed baseline file that grandfathers pre-existing violations, so `alint check` reports and gates on only *new* findings. Persisting it here means CI need not pass `--baseline` on every run.
@@ -433,11 +437,18 @@ A config is untrusted for what it costs to load, so loading it is bounded:
 - an `ignore:` pattern listed more than once, in one source or in several (as when `extends:`
   reaches one source by two paths), is kept once. The merged config may hold at most 1,048,576
   rules, templates, facts, vars and `ignore:` patterns;
-- an `extends:` list's entries may load and merge at most 4,194,304 entries in all (rules,
-  templates, facts, vars, `ignore:` patterns and each version 2 source): an entry is charged the
-  source it loads, before `only:` or `except:` narrows it, and each merge what was merged so far
-  and what the entry brings in. A list that repeats a source loads it once; a flat list reaches
-  the bound at about 90 rulesets of 1,000 rules each, or about 2,900 one-rule files;
+- an `extends:` list's entries and the `.alint.d/` drop-ins may load and merge at most 4,194,304
+  entries in all (rules, templates, facts, vars, `ignore:` patterns and each version 2 source): an
+  entry is charged the source it loads, before `only:` or `except:` narrows it and at least one
+  entry for an empty source, and each merge, an entry's or a drop-in's, what was merged so far
+  and what it brings in. A list that repeats a source loads it once (a remote source named by
+  other URLs with one hash, and a bundled ruleset named with other `only:` or `except:` lists,
+  too); a flat list reaches the bound at about 90 rulesets of 1,000 rules each, or about 2,900
+  one-rule files;
+- the `extends:` entries may merge at most 64 MiB (67,108,864 bytes) of sources in all. Each
+  entry is charged its source's size: its text, or what its YAML aliases expand to if that is
+  larger, and for a source that extends others, what it merged too. A list reaches the bound at
+  64 entries naming a 1 MiB source, in other spellings or with other filters;
 - all the [`extends_template:`](/docs/configuration/templates/) instances of a config may expand
   to at most 64 MiB, and no rendered string may be longer than 32 MiB. An error names the budget
   and the rule.

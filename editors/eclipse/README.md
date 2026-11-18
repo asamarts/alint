@@ -28,9 +28,9 @@ Requires the `alint` binary on `PATH`.
 ## Workspace trust
 
 Until the server is told a workspace is trusted, it runs nothing the
-repository's `.alint.yml` could start: command rules and `custom:` facts
-are skipped, a remote `extends:` is not fetched, and `{{env.*}}` values
-are left unset. Every other rule lints. See
+repository's `.alint.yml` could start: command rules, rules that run Git
+and `custom:` facts are skipped, a remote `extends:` is not fetched,
+and `{{env.*}}` values are left unset. Every other rule lints. See
 [Workspace trust](https://alint.org/docs/cli/lsp/#workspace-trust).
 
 LSP4E's preference UI does not send initialization options, so the

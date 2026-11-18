@@ -22,6 +22,11 @@ Keep `AGENTS.md` in sync between the `alint:start` / `alint:end` markers:
 alint export-agents-md --inline --output AGENTS.md
 ```
 
+`--untrusted` loads the config as [`alint check --untrusted`](/docs/cli/check/) does: a remote
+`extends:` and `allow_out_of_root:` are refused and `{{env.NAME}}` reads an empty environment.
+With it or `--no-spawn`, a config whose rules or facts would start a process or run Git fails to
+load, as it does for `alint list`, though `export-agents-md` runs no rule.
+
 ## Version 2 selectors and relations
 
 For an [experimental version 2 config](/docs/configuration/version-2/), the section also lists

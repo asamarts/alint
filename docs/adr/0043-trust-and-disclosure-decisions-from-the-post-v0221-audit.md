@@ -18,6 +18,8 @@ on YAML memory and wall time.
 [ADR-0044](0044-untrusted-runs-git-as-a-process-and-a-wider-memory-gate.md) refines decisions
 2, 4 and 6 (`--untrusted`, Git as a process, `.git` ownership, enum values by name) and corrects
 decision 8 and "The ayaml condition".
+[ADR-0046](0046-a-linear-extends-merge-sealed-options-and-the-rounds-open-questions.md) decision
+5 settles decision 1's question: the language server's holes stay in the one advisory.
 
 ## Context
 

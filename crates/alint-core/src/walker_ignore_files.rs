@@ -39,17 +39,22 @@ pub(super) struct Refused {
 impl Refused {
     /// Why `ignore` must not read `path`: something there that is neither a
     /// regular file nor a directory (a device never ends; opening a FIFO
-    /// blocks), or a regular file larger than [`MAX_IGNORE_FILE_BYTES`].
-    /// `None` when nothing is there, it cannot be read (which `ignore`
-    /// tolerates), it is a directory (which `ignore` fails to read, harmlessly)
-    /// or it is a regular file within the cap.
+    /// blocks), or a regular file larger than [`MAX_IGNORE_FILE_BYTES`]. A
+    /// regular file that gives its size as zero is read to count what it
+    /// holds ([`reads_past_cap`]): a `/proc` file does, whatever it holds, and
+    /// `/proc/self/pagemap` holds gigabytes. `None` when nothing is there, it
+    /// cannot be read (which `ignore` tolerates), it is a directory (which
+    /// `ignore` fails to read, harmlessly) or it is a regular file within the
+    /// cap.
     fn check(path: PathBuf) -> Option<Self> {
         let metadata = std::fs::metadata(&path).ok()?;
         let reason = if metadata.is_dir() {
             return None;
         } else if !metadata.is_file() {
             "it is not a regular file".to_string()
-        } else if metadata.len() > MAX_IGNORE_FILE_BYTES {
+        } else if metadata.len() > MAX_IGNORE_FILE_BYTES
+            || (metadata.len() == 0 && reads_past_cap(&path))
+        {
             format!(
                 "it is larger than {}",
                 crate::bounded_file::describe_cap(MAX_IGNORE_FILE_BYTES)
@@ -70,6 +75,29 @@ impl Refused {
             crate::bounded_file::describe_cap(MAX_IGNORE_FILE_BYTES)
         ))
     }
+}
+
+/// Whether reading `path` yields more than [`MAX_IGNORE_FILE_BYTES`], counted
+/// in whole blocks without keeping what it reads (`/proc/self/pagemap` fails a
+/// read of a length that is not a multiple of 8). An empty file costs one
+/// read; a read that fails within the cap is no refusal, as `ignore`
+/// tolerates it.
+fn reads_past_cap(path: &Path) -> bool {
+    use std::io::Read as _;
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut block = [0; 8192];
+    let mut read = 0_u64;
+    while read <= MAX_IGNORE_FILE_BYTES {
+        match file.read(&mut block) {
+            Ok(0) => return false,
+            Ok(count) => read = read.saturating_add(u64::try_from(count).unwrap_or(u64::MAX)),
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(_) => return false,
+        }
+    }
+    true
 }
 
 /// The first file among those `ignore` reads for `dir` that the walk refuses
@@ -149,10 +177,12 @@ mod tests {
         receiver.recv_timeout(deadline).ok()
     }
 
+    /// A sparse file past the cap: twice it, so a regression that read it
+    /// whole takes 64 MiB of this process, not the host's memory.
     fn sparse(path: &Path) {
         std::fs::File::create(path)
             .unwrap()
-            .set_len(64 << 30)
+            .set_len(2 * MAX_IGNORE_FILE_BYTES)
             .unwrap();
     }
 
@@ -203,6 +233,26 @@ mod tests {
         std::fs::create_dir(dir.join(".gitignore")).unwrap();
         assert!(refused_in(&dir).is_none());
         sparse(&dir.join(".ignore"));
+        let refused = refused_in(&dir).unwrap();
+        assert_eq!(refused.path, dir.join(".ignore"));
+        assert_eq!(refused.reason, "it is larger than 32 MiB");
+    }
+
+    /// A regular file that gives its size as zero is counted by reading it:
+    /// an empty `.gitignore` passes, and `/proc/self/pagemap`, which gives its
+    /// size as zero and holds gigabytes, is refused as past the cap.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_file_that_gives_its_size_as_zero_is_counted_by_reading_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("repo");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(".gitignore"), "").unwrap();
+        assert!(refused_in(&dir).is_none());
+        std::fs::remove_file(dir.join(".gitignore")).unwrap();
+        std::os::unix::fs::symlink("/proc/self/environ", dir.join(".gitignore")).unwrap();
+        assert!(refused_in(&dir).is_none());
+        std::os::unix::fs::symlink("/proc/self/pagemap", dir.join(".ignore")).unwrap();
         let refused = refused_in(&dir).unwrap();
         assert_eq!(refused.path, dir.join(".ignore"));
         assert_eq!(refused.reason, "it is larger than 32 MiB");
