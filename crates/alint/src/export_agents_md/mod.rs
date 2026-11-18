@@ -22,7 +22,7 @@
 //! See `docs/design/v0.7/alint_export_agents_md.md` for the
 //! full design.
 
-mod markdown;
+pub(crate) mod markdown;
 mod splice;
 
 use std::fs;
@@ -106,8 +106,8 @@ pub fn run(
         &|text| alint_core::redact_environment_values(text, values);
     let body = match opts.format {
         OutputFormat::Markdown => {
-            let objects = plan.map(|plan| crate::inspect::named_objects(plan, redact));
-            markdown::render(&directives, objects.as_deref(), &opts.section_title)
+            let objects = plan.map(|plan| crate::inspect::NamedObjects::of(plan, redact));
+            markdown::render(&directives, objects.as_ref(), &opts.section_title)
         }
         OutputFormat::Json => render_json(&directives, plan, redact, &opts.section_title)?,
     };
@@ -188,13 +188,10 @@ struct JsonReport<'a> {
     section_title: &'a str,
     generated_at: String,
     directives: Vec<JsonDirective<'a>>,
-    /// A version 2 config's named selectors, as `list --format json` shows
-    /// them; absent for version 1.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    selectors: Option<Vec<serde_json::Value>>,
-    /// A version 2 config's named relations; absent for version 1.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    relations: Option<Vec<serde_json::Value>>,
+    /// A version 2 config's sources and named selectors and relations, as
+    /// `list --format json` shows them; absent for version 1.
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    objects: Option<crate::inspect::NamedObjectsJson>,
 }
 
 #[derive(Serialize)]
@@ -225,8 +222,7 @@ fn render_json(
                 policy_url: d.policy_url.as_deref(),
             })
             .collect(),
-        selectors: plan.map(|plan| crate::inspect::named_objects_json(plan, "selector", redact)),
-        relations: plan.map(|plan| crate::inspect::named_objects_json(plan, "relation", redact)),
+        objects: plan.map(|plan| crate::inspect::named_objects_json(plan, redact)),
     };
     let mut s = serde_json::to_string_pretty(&report).context("encoding json")?;
     s.push('\n');

@@ -56,24 +56,34 @@ impl Objects {
         !self.sources.is_empty()
     }
 
-    /// Record that the source extends the local file `target`, through
-    /// `alias` when its entry has one, once the loader has read it. Called on
-    /// one source's objects, before any merge.
-    pub(crate) fn record_extended(&mut self, alias: Option<&str>, target: Option<&Path>) {
+    /// Record that the source's `extends:` entry `entry` (its index) names
+    /// the local file `target`, once the loader has read it, and give the
+    /// entry's alias, if it has one, that target. Called on one source's
+    /// objects, before any merge, once per entry. The aliases are held in
+    /// entry order, so the entry's alias is found by a binary search: recording
+    /// every entry is not the entries times the aliases.
+    pub(crate) fn record_extended(&mut self, entry: usize, target: Option<&Path>) {
         for source in &mut self.sources {
             if let Some(target) = target {
                 source.extended.push(target.to_path_buf());
             }
-            let Some(alias) = alias else {
-                continue;
-            };
-            for (name, held) in &mut source.aliases {
-                if name == alias {
-                    held.target = target.map(Path::to_path_buf);
-                }
+            let found = source.aliases.binary_search_by_key(&entry, |(_, alias)| {
+                #[cfg(test)]
+                ALIAS_PROBES.with(|probes| probes.set(probes.get() + 1));
+                alias.entry
+            });
+            if let Ok(at) = found {
+                source.aliases[at].1.target = target.map(Path::to_path_buf);
             }
         }
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many aliases [`Objects::record_extended`] has looked at on this
+    /// thread.
+    pub(crate) static ALIAS_PROBES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// The objects one source declares, under its own namespace (design section
@@ -113,8 +123,10 @@ pub(crate) struct SourceId {
 /// extends, so it can reach that source's objects as `alias.name`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Alias {
-    /// The entry's URL, as written.
+    /// The entry's URL, after `{{env.X}}` interpolation.
     pub(crate) url: String,
+    /// The entry's index in the source's `extends:` list.
+    pub(crate) entry: usize,
     /// The extended source's resolved file, once the loader has read it.
     pub(crate) target: Option<PathBuf>,
 }

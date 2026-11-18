@@ -40,6 +40,23 @@ fn size_of_value(value: &Value) -> usize {
     }
 }
 
+/// [`size_of_mapping`] of a template's body without the loader's private
+/// markers (`__alint_internal_*`), which say where its fields came from and
+/// are no part of what an instance expands to: the same template costs the
+/// same whichever source declares it, and whatever version that source is.
+pub(crate) fn size_of_template(template: &Mapping) -> usize {
+    template
+        .iter()
+        .filter(|(key, _)| {
+            !key.as_str()
+                .is_some_and(|key| key.starts_with(crate::trust::INTERNAL_FIELD_PREFIX))
+        })
+        .fold(0, |sum, (key, value)| {
+            sum.saturating_add(size_of_value(key))
+                .saturating_add(size_of_value(value))
+        })
+}
+
 /// [`size_of_value`] of a mapping's entries.
 pub(crate) fn size_of_mapping(mapping: &Mapping) -> usize {
     mapping.iter().fold(0, |sum, (key, value)| {

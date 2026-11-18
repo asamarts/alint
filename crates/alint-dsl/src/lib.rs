@@ -222,16 +222,17 @@ fn load_resolved(
                     path: path.to_path_buf(),
                     source,
                 })?;
+        let mut field_source_names = std::mem::take(&mut raw.field_source_names);
         let (discovered_rules, discovered_compatibility, discovered_environment_values) =
             nested::discover_nested(
                 &root_dir,
                 &canonical_root_cfg,
                 &raw,
-                opts.kind_catalog,
+                opts,
                 RunningVersion::current(),
-                opts.environment.as_ref(),
-                opts.global_git_excludes,
+                &mut field_source_names,
             )?;
+        raw.field_source_names = field_source_names;
         raw.rules.extend(discovered_rules);
         extend_compatibility(&mut raw.compatibility, discovered_compatibility);
         loader::add_environment_values(environment_values, &discovered_environment_values);
@@ -333,6 +334,8 @@ fn resolve_top_level(
         .config_source
         .canonicalize(&confine_root)
         .unwrap_or(confine_root);
+    // Configs are named relative to it, inside it or not.
+    state.display_root = Some(confine_root.clone());
     // `is_top: true` — the user's own top-level config may open the
     // `allow_out_of_root` escape hatch; an `extends:`'d ruleset may not (that
     // recursion passes `false`), so an untrusted ruleset can't lift confinement.
@@ -388,6 +391,7 @@ fn resolve_top_level(
     // Every local file the configuration came from, which a fix from an
     // `extends:`'d ruleset must not rewrite.
     raw.config_files = std::mem::take(&mut state.config_files);
+    raw.field_source_names = std::mem::take(&mut state.field_source_names).into_names();
     Ok(raw)
 }
 
@@ -497,6 +501,11 @@ pub(crate) struct RawConfig {
     /// [`Config::config_files`]. Not part of the schema.
     #[serde(skip)]
     config_files: Vec<PathBuf>,
+    /// The `extends:` sources the rules' field-source markers name by index
+    /// ([`trust::FIELD_SOURCES_MARKER`]), set on the top-level result. Not
+    /// part of the schema.
+    #[serde(skip)]
+    field_source_names: Vec<String>,
     /// Whether each of [`Self::extends`] read the environment, recorded by the
     /// local-config parser before interpolation erases it. Not part of the
     /// schema.
@@ -638,7 +647,7 @@ impl RawConfig {
             .collect();
         let template_sizes: std::collections::HashMap<&str, usize> = templates_by_id
             .iter()
-            .map(|(id, template)| (id.as_str(), template_budget::size_of_mapping(template)))
+            .map(|(id, template)| (id.as_str(), template_budget::size_of_template(template)))
             .collect();
         let mut budget = template_budget::Budget::default();
         // Version 2: every reference resolves in its source's namespace and
@@ -669,11 +678,12 @@ impl RawConfig {
                     expand_template(masked, templates, &mut budget).map(drop)
                 })
             })?;
+            trust::name_field_sources(&mut expanded, &self.field_source_names);
             // Which version 2 source wrote each field, for the fields that
             // name a relation.
             let origins = v2::take_field_origins(&mut expanded);
             if let Some(resolved) = &mut resolved {
-                resolved.resolve_rule(&id_hint, &expanded, &origins)?;
+                resolved.resolve_rule(&id_hint, &expanded, &origins, &self.config_files)?;
             }
             mark_sensitive_conditions(&mut expanded, &self.env_vars);
             expanded.remove(ENV_VARS_MARKER);
@@ -1441,10 +1451,8 @@ pub fn parse(yaml: &str) -> Result<Config> {
     }
     if !Config::supports_version(config.version) {
         return Err(Error::Other(format!(
-            "<inline>: unsupported config version {} (this build supports {} through {})",
-            config.version,
-            Config::MIN_SUPPORTED_VERSION,
-            Config::CURRENT_VERSION
+            "<inline>: {}",
+            v2::unsupported_version(config.version)
         )));
     }
     let running_version = RunningVersion::current();
@@ -1624,17 +1632,31 @@ fn dedup_in_order<T: Eq + std::hash::Hash + Clone>(items: Vec<T>) -> Vec<T> {
         .collect()
 }
 
+impl RawConfig {
+    /// The entries [`MAX_MERGED_ENTRIES`] counts.
+    fn entry_count(&self) -> usize {
+        self.rules.len()
+            + self.templates.len()
+            + self.facts.len()
+            + self.vars.len()
+            + self.ignore.len()
+            + self.untrusted_when_var_reads.len()
+            + self.v2.object_count()
+    }
+
+    /// What an `extends:` merge or load handles of the config
+    /// ([`loader::LoadState::charge_extends`]): its entries, and each version
+    /// 2 source, which a merge looks for among those it holds.
+    fn merge_size(&self) -> usize {
+        self.entry_count() + self.v2.sources.len()
+    }
+}
+
 /// [`merge_unbounded`], refused past [`MAX_MERGED_ENTRIES`].
 pub(crate) fn merge(a: RawConfig, b: RawConfig) -> Result<RawConfig> {
     let merged = merge_unbounded(a, b);
     let objects = merged.v2.object_count();
-    let entries = merged.rules.len()
-        + merged.templates.len()
-        + merged.facts.len()
-        + merged.vars.len()
-        + merged.ignore.len()
-        + merged.untrusted_when_var_reads.len()
-        + objects;
+    let entries = merged.entry_count();
     if entries > MAX_MERGED_ENTRIES {
         // A version 1 config's message is unchanged.
         let held = if objects == 0 {
@@ -1694,8 +1716,6 @@ fn merge_unbounded(a: RawConfig, b: RawConfig) -> RawConfig {
     let compatibility = merged_compatibility(a.compatibility, b.compatibility);
     let mut environment_values = a.environment_values;
     loader::add_environment_values(&mut environment_values, &b.environment_values);
-    let mut config_files = a.config_files;
-    config_files.extend(b.config_files);
     let facts = merge_facts(a.facts, b.facts);
 
     // Templates merge by id, same shape as rules — later wins
@@ -1781,7 +1801,8 @@ fn merge_unbounded(a: RawConfig, b: RawConfig) -> RawConfig {
         untrusted_when_var_reads,
         compatibility,
         environment_values,
-        config_files,
+        config_files: [a.config_files, b.config_files].concat(),
+        field_source_names: either_set(a.field_source_names, b.field_source_names),
         extends_environment: Vec::new(),
         // The language follows the version: the source that sets it decides.
         surface: b.version.map_or(a.surface, |_| b.surface),
@@ -1789,17 +1810,18 @@ fn merge_unbounded(a: RawConfig, b: RawConfig) -> RawConfig {
     }
 }
 
+/// `a`, unless it is empty: for a list set once, on the top-level result
+/// after every merge (`RawConfig::field_source_names`).
+fn either_set<T>(a: Vec<T>, b: Vec<T>) -> Vec<T> {
+    if a.is_empty() { b } else { a }
+}
+
 /// `surface`: the language the top-level config was decoded as; version 2
 /// is valid only when it is version 2's.
 fn validate(config: &Config, surface: v2::Surface) -> Result<()> {
     let experimental = surface == v2::Surface::V2 && config.version == v2::VERSION;
     if !Config::supports_version(config.version) && !experimental {
-        return Err(Error::Other(format!(
-            "unsupported config version {} (this build supports {} through {})",
-            config.version,
-            Config::MIN_SUPPORTED_VERSION,
-            Config::CURRENT_VERSION,
-        )));
+        return Err(Error::Other(v2::unsupported_version(config.version)));
     }
     let mut seen = std::collections::HashSet::new();
     for rule in &config.rules {

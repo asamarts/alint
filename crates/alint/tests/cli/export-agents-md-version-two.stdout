@@ -10,12 +10,16 @@ Generated from `.alint.yml` by `alint export-agents-md`. Re-run after editing th
 
 ### Named selectors and relations
 
-Declared by this `version: 2` config (experimental), each with the config file that declares it and the `extends:` aliases that reach that file.
+Declared by this `version: 2` config (experimental), each with the config file that declares it.
 
-- selector `manifests`: `deps.yml` (as `deps` in `.alint.yml`)
+- selector `manifests`: `deps.yml`
 - selector `docs`: `.alint.yml`
-- relation `ranges`: `deps.yml` (as `deps` in `.alint.yml`)
+- relation `ranges`: `deps.yml`
 - relation `titles`: `.alint.yml`
 - relation `pinned`: `.alint.yml`
+
+The `extends:` aliases that reach those files:
+
+- `deps.yml`: as `deps` in `.alint.yml`
 
 <!-- alint:end -->

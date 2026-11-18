@@ -49,9 +49,57 @@ pub(crate) const SENSITIVE_FIELDS_MARKER: &str = "__alint_internal_sensitive_fie
 /// [`PROVENANCE_MARKER`], this marker follows last-wins field merging rather
 /// than accumulating monotonically. `finalize` uses it only to enrich a
 /// configured-field error, then removes it before typed deserialization.
+///
+/// A template or a nested config is named by its text. An `extends:` source is
+/// named by its index in the load's [`FieldSourceNames`], which `finalize`
+/// turns back into its text one rule at a time ([`name_field_sources`]): every
+/// field of every rule an `extends:` entry brings in is marked, and a copy of
+/// the entry's text in each (a deep path, say) cost a multiple of the config.
 pub(crate) const FIELD_SOURCES_MARKER: &str = "__alint_internal_field_sources";
 
-const INTERNAL_FIELD_PREFIX: &str = "__alint_internal_";
+/// The `extends:` sources one load names in [`FIELD_SOURCES_MARKER`], each
+/// held once, by the index the marker carries.
+#[derive(Debug, Default)]
+pub(crate) struct FieldSourceNames {
+    names: Vec<String>,
+    index: std::collections::HashMap<String, usize>,
+}
+
+impl FieldSourceNames {
+    /// The marker value that names `source`.
+    pub(crate) fn intern(&mut self, source: &str) -> ayaml::Value {
+        let next = self.names.len();
+        let index = *self.index.entry(source.to_string()).or_insert(next);
+        if index == next {
+            self.names.push(source.to_string());
+        }
+        ayaml::Value::from(index)
+    }
+
+    /// The names, each at its index.
+    pub(crate) fn into_names(self) -> Vec<String> {
+        self.names
+    }
+}
+
+/// Write each `extends:` source `mapping`'s [`FIELD_SOURCES_MARKER`] names by
+/// index as its text from `names`, so an error about a field can quote it.
+pub(crate) fn name_field_sources(mapping: &mut Mapping, names: &[String]) {
+    let Some(ayaml::Value::Mapping(sources)) = mapping.get_mut(FIELD_SOURCES_MARKER) else {
+        return;
+    };
+    for source in sources.values_mut() {
+        if let Some(name) = source
+            .as_u64()
+            .and_then(|index| usize::try_from(index).ok())
+            .and_then(|index| names.get(index))
+        {
+            *source = name.as_str().into();
+        }
+    }
+}
+
+pub(crate) const INTERNAL_FIELD_PREFIX: &str = "__alint_internal_";
 
 /// A class of `extends:` source recorded in [`PROVENANCE_MARKER`].
 #[derive(Clone, Copy)]
@@ -123,20 +171,24 @@ pub(crate) fn mark_provenance_in(mappings: &mut [Mapping], class: SourceClass, s
 /// level re-marks every inherited rule: the field-source map keeps its keys and
 /// only changed values are replaced, and a provenance marker that is already
 /// the last key is not removed and re-inserted.
+///
+/// The provenance marker names `source`; the field-source marker holds
+/// `field_source`, the value that names it there ([`FieldSourceNames`]).
 pub(crate) fn mark_extended_source_in(
     mappings: &mut [Mapping],
     source: &str,
+    field_source: &ayaml::Value,
     classes: &[SourceClass],
 ) {
     for mapping in mappings {
-        mark_field_sources_one(mapping, source);
+        mark_field_sources_one(mapping, field_source);
         for &class in classes {
             mark_provenance_one(mapping, class, source);
         }
     }
 }
 
-fn mark_field_sources_one(mapping: &mut Mapping, source: &str) {
+fn mark_field_sources_one(mapping: &mut Mapping, source: &ayaml::Value) {
     let in_place = field_sources(mapping).is_some_and(|sources| {
         !sources.is_empty()
             && sources
@@ -149,8 +201,8 @@ fn mark_field_sources_one(mapping: &mut Mapping, source: &str) {
     }
     if let Some(ayaml::Value::Mapping(sources)) = mapping.get_mut(FIELD_SOURCES_MARKER) {
         for value in sources.values_mut() {
-            if value.as_str() != Some(source) {
-                *value = source.into();
+            if value != source {
+                *value = source.clone();
             }
         }
     }
@@ -204,16 +256,17 @@ fn field_sources(mapping: &Mapping) -> Option<&Mapping> {
         .and_then(ayaml::Value::as_mapping)
 }
 
-/// Attribute every current user-authored field in each mapping to `source`.
+/// Attribute every current user-authored field in each mapping to `source`
+/// (a name, or the index of one: [`FIELD_SOURCES_MARKER`]).
 ///
 /// This deliberately overwrites an older attribution: when `child.yml`
 /// extends `parent.yml` and is itself extended by the root, naming
 /// `child.yml` is the useful immediate source of its effective fields.
-pub(crate) fn mark_field_sources_in(mappings: &mut [Mapping], source: &str) {
+pub(crate) fn mark_field_sources_in(mappings: &mut [Mapping], source: &ayaml::Value) {
     for mapping in mappings {
         let mut sources = Mapping::new();
         for key in mapping.keys().filter(|key| !is_internal_field(key)) {
-            sources.insert(key.clone(), source.into());
+            sources.insert(key.clone(), source.clone());
         }
         if !sources.is_empty() {
             mapping.insert(FIELD_SOURCES_MARKER.into(), sources.into());

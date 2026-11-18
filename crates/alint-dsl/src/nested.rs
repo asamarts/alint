@@ -85,13 +85,13 @@ pub(crate) fn discover_nested(
     root_dir: &Path,
     canonical_root_cfg: &Path,
     root: &RawConfig,
-    catalog: Option<KindCatalog<'_>>,
+    opts: &crate::LoadOptions<'_>,
     running_version: RunningVersion,
-    environment: &dyn crate::EnvironmentProvider,
-    global_git_excludes: bool,
+    field_source_names: &mut Vec<String>,
 ) -> Result<NestedRules> {
+    let (catalog, environment) = (opts.kind_catalog, opts.environment.as_ref());
     let walk_opts = alint_core::WalkOptions::default()
-        .with_global_git_excludes(global_git_excludes)
+        .with_global_git_excludes(opts.global_git_excludes)
         .with_respect_gitignore(root.respect_gitignore.unwrap_or(true))
         .with_extra_ignores(root.ignore.clone());
     let index = alint_core::walk(root_dir, &walk_opts)?;
@@ -136,10 +136,14 @@ pub(crate) fn discover_nested(
             .unwrap_or_default();
 
         let source = entry.path.to_string_lossy().replace('\\', "/");
+        // Each field of its rules names it by its index among the root's
+        // field sources ([`RawConfig::field_source_names`]), not by its path.
+        let field_source = ayaml::Value::from(field_source_names.len());
+        field_source_names.push(source.clone());
         let (nested_rules, nested_compatibility, nested_environment_values) = load_nested_config(
             &abs,
             &rel_dir,
-            &source,
+            (&source, &field_source),
             root.version,
             running_version,
             catalog,
@@ -176,10 +180,12 @@ pub(crate) type NestedRules = (Vec<Mapping>, Vec<ConfigCompatibility>, Vec<Strin
 /// Load a nested config and return its rule mappings, each
 /// scoped to `rel_dir` (the path, relative to the root config's
 /// directory, where the nested config lives).
+/// `source` is how the config is named, and the value its rules' field-source
+/// marker names it by.
 fn load_nested_config(
     abs_path: &Path,
     rel_dir: &Path,
-    source: &str,
+    (source, field_source): (&str, &ayaml::Value),
     consumer_version: Option<u32>,
     running_version: RunningVersion,
     catalog: Option<KindCatalog<'_>>,
@@ -207,7 +213,7 @@ fn load_nested_config(
     let (rules, compatibility) = nested_config_rules(
         config,
         rel_dir,
-        source,
+        (source, field_source),
         consumer_version,
         running_version,
         catalog,
@@ -220,7 +226,7 @@ fn load_nested_config(
 fn nested_config_rules(
     mut config: RawConfig,
     rel_dir: &Path,
-    source: &str,
+    (source, field_source): (&str, &ayaml::Value),
     consumer_version: Option<u32>,
     running_version: RunningVersion,
     catalog: Option<KindCatalog<'_>>,
@@ -317,7 +323,7 @@ fn nested_config_rules(
     // SILENT auto-apply, matching this module's stated "as untrusted as an
     // `extends:`'d ruleset" trust model (audit: nested-config HIGH).
     crate::demote_content_fixers_in(&mut config.rules, catalog);
-    crate::mark_field_sources_in(&mut config.rules, source);
+    crate::mark_field_sources_in(&mut config.rules, field_source);
     // Preserve that source trust through root-template expansion. Without this
     // marker a nested rule with `extends_template:` could acquire a root template's
     // content fixer only after the source-local demotion above had already run.

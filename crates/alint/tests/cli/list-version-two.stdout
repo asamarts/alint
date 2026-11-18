@@ -1,7 +1,8 @@
 error    has-readme  file_exists
 
-selector manifests  deps.yml (as deps in .alint.yml)
+selector manifests  deps.yml
 selector docs  .alint.yml
-relation ranges  deps.yml (as deps in .alint.yml)
+relation ranges  deps.yml
 relation titles  .alint.yml
 relation pinned  .alint.yml
+aliases deps.yml  as deps in .alint.yml

@@ -60,6 +60,7 @@ mod styling_uniform;
 mod terminal_sanitize_cli;
 mod tracing_color;
 mod untrusted_cli;
+mod version_two_cli;
 mod walk_boundary;
 mod weird_path_formats_cli;
 mod write_confinement_cli;

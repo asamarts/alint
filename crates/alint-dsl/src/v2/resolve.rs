@@ -174,6 +174,8 @@ enum Found {
 #[derive(Debug)]
 pub(crate) struct Namespaces<'o> {
     objects: &'o Objects,
+    /// Each source by its resolved file.
+    at_path: HashMap<&'o Path, SourceIndex>,
     sources: Vec<PlanSource>,
     /// Each source's declared names.
     names: Vec<HashMap<&'o str, Declared>>,
@@ -187,15 +189,16 @@ pub(crate) struct Namespaces<'o> {
 
 impl<'o> Namespaces<'o> {
     fn new(objects: &'o Objects) -> Self {
-        let index_of = |path: &Path| {
-            objects
-                .sources
-                .iter()
-                .position(|source| source.source.path == path)
-                .map(SourceIndex)
-        };
+        let mut at_path = HashMap::with_capacity(objects.sources.len());
+        for (index, source) in objects.sources.iter().enumerate() {
+            at_path
+                .entry(source.source.path.as_path())
+                .or_insert(SourceIndex(index));
+        }
+        let index_of = |path: &Path| at_path.get(path).copied();
         let mut namespaces = Self {
             objects,
+            at_path: HashMap::new(),
             sources: Vec::with_capacity(objects.sources.len()),
             names: Vec::with_capacity(objects.sources.len()),
             extended: Vec::with_capacity(objects.sources.len()),
@@ -239,6 +242,7 @@ impl<'o> Namespaces<'o> {
                 aliases,
             });
         }
+        namespaces.at_path = at_path;
         namespaces
     }
 
@@ -248,10 +252,7 @@ impl<'o> Namespaces<'o> {
 
     /// The source whose resolved file is `path`, if it is version 2.
     pub(crate) fn source_at(&self, path: &Path) -> Option<SourceIndex> {
-        self.sources
-            .iter()
-            .position(|source| source.path == path)
-            .map(SourceIndex)
+        self.at_path.get(path).copied()
     }
 
     /// The names of `wanted`'s kind that `source` declares.
@@ -399,9 +400,14 @@ impl<'o> Namespaces<'o> {
                 );
             }
         }
+        // Each config it reaches through an alias once, under its first
+        // alias: two aliases of one config reach the same objects.
         let mut reachable = Offered::bare(self.own_names(from, wanted));
+        let mut reached = std::collections::HashSet::new();
         for alias in &self.sources[from.0].aliases {
-            if let Some(target) = alias.target {
+            if let Some(target) = alias.target
+                && reached.insert(target)
+            {
                 reachable.push(Some(&alias.name), self.own_names(target, wanted));
             }
         }
@@ -1021,13 +1027,16 @@ fn gate_objects(plan: &Plan) -> Result<()> {
 
 impl Resolved<'_> {
     /// Resolve the reference fields of rule `id` (an effective rule mapping
-    /// of `kind`), each in the source that wrote it (`origins`), and record
-    /// them on the plan. A field no version 2 source wrote names no relation.
+    /// of `kind`), each in the source that wrote it (`origins`, an index into
+    /// `config_files`, the files the configuration was loaded from), and
+    /// record them on the plan. A field no version 2 source wrote names no
+    /// relation.
     pub(crate) fn resolve_rule(
         &mut self,
         id: &str,
         rule: &ayaml::Mapping,
-        origins: &[(String, PathBuf)],
+        origins: &[(String, usize)],
+        config_files: &[PathBuf],
     ) -> Result<()> {
         let kind = rule
             .get("kind")
@@ -1041,7 +1050,8 @@ impl Resolved<'_> {
             let origin = origins
                 .iter()
                 .find(|(held, _)| held == field)
-                .and_then(|(_, path)| self.namespaces.source_at(path));
+                .and_then(|(_, file)| config_files.get(*file))
+                .and_then(|path| self.namespaces.source_at(path));
             let Some(source) = origin else {
                 return Err(Error::rule_config(
                     id,

@@ -1290,11 +1290,11 @@ fn fused_extended_marking_matches_the_separate_passes() {
             let mut fused = vec![base];
             // Two levels of an `extends:` chain, then the same source again.
             for source in ["src", "other", "other"] {
-                mark_field_sources_in(&mut separate, source);
+                mark_field_sources_in(&mut separate, &source.into());
                 for &class in classes {
                     mark_provenance_in(&mut separate, class, source);
                 }
-                mark_extended_source_in(&mut fused, source, classes);
+                mark_extended_source_in(&mut fused, source, &source.into(), classes);
                 assert_eq!(
                     ordered(&fused[0]),
                     ordered(&separate[0]),

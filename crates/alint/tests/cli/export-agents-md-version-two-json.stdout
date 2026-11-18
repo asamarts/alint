@@ -11,43 +11,43 @@
       "policy_url": null
     }
   ],
-  "selectors": [
+  "sources": [
     {
       "aliases": [
         {
           "alias": "deps",
-          "in": ".alint.yml"
+          "in": 1
         }
       ],
-      "name": "manifests",
-      "source": "deps.yml"
+      "path": "deps.yml"
     },
     {
       "aliases": [],
+      "path": ".alint.yml"
+    }
+  ],
+  "selectors": [
+    {
+      "name": "manifests",
+      "source": 0
+    },
+    {
       "name": "docs",
-      "source": ".alint.yml"
+      "source": 1
     }
   ],
   "relations": [
     {
-      "aliases": [
-        {
-          "alias": "deps",
-          "in": ".alint.yml"
-        }
-      ],
       "name": "ranges",
-      "source": "deps.yml"
+      "source": 0
     },
     {
-      "aliases": [],
       "name": "titles",
-      "source": ".alint.yml"
+      "source": 1
     },
     {
-      "aliases": [],
       "name": "pinned",
-      "source": ".alint.yml"
+      "source": 1
     }
   ]
 }

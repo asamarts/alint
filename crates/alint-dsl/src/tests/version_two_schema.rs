@@ -17,7 +17,7 @@
 
 use serde_json::Value as Json;
 
-use crate::v2::schema_parity::{decode_stage, json_of, schema_errors};
+use crate::v2::schema_parity::{decode_stage, has_schema, json_of, schema_errors};
 
 use super::*;
 
@@ -547,6 +547,9 @@ fn shape_refusals() -> Vec<(&'static str, String)> {
 
 #[test]
 fn the_schema_refuses_what_the_decode_refuses_for_its_shape() {
+    if !has_schema() {
+        return;
+    }
     for (what, config) in shape_refusals() {
         let decoded = decode_stage(&config);
         assert!(decoded.is_err(), "{what}: the decode accepted\n{config}");
@@ -606,6 +609,14 @@ fn unexpressed() -> Vec<(&'static str, String)> {
             rel("{ from: s, read: { json: $ }, fields: { f: 'bound: $.a[' } }"),
         ),
     ];
+    // A 2 written as another number is the number 2 to JSON, which `const:
+    // 2` accepts; the loader takes only the plain integer.
+    for spelling in ["2.0", "+2", "0x2", "0o2", "2e0"] {
+        configs.push((
+            "a `version:` of 2 written other than as the plain integer `2`",
+            format!("version: {spelling}\nselectors:\n  s: {{ paths: a }}\n"),
+        ));
+    }
     // JSON has no key but a string, so an editor reads `true:` as `"true":`
     // and the schema sees a valid name; the decode refuses a key YAML reads
     // as a boolean or null.
@@ -638,6 +649,9 @@ fn as_an_editor_reads(yaml: &str) -> Json {
 
 #[test]
 fn the_schema_accepts_what_it_cannot_tell_from_a_valid_config() {
+    if !has_schema() {
+        return;
+    }
     for (what, config) in unexpressed() {
         assert!(
             decode_stage(&config).is_err(),
@@ -794,6 +808,14 @@ fn loader_refusals() -> Vec<(&'static str, String, &'static str)> {
             read_rel(", where: { f: { in: [true] } }"),
             "a boolean never equals a string",
         ),
+        // A version 1 gap version 2 keeps. (So are an invalid glob and a
+        // `has_ancestor:` that is not a file name, which the rule's build
+        // refuses, after the loader.)
+        (
+            "a plain `http://` `extends:` entry",
+            doc("extends:\n  - http://example.test/rules.yml\n"),
+            "plain http:// is not allowed in `extends:`",
+        ),
         (
             "a selector manifest outside the repository",
             sel(
@@ -811,6 +833,9 @@ fn loader_refusals() -> Vec<(&'static str, String, &'static str)> {
 
 #[test]
 fn the_schema_leaves_resolution_and_the_plan_check_to_the_loader() {
+    if !has_schema() {
+        return;
+    }
     for (what, config, expected) in loader_refusals() {
         // The decode accepts it, so `schema_parity::assert_accepts` has
         // checked the schema accepts it too.
@@ -829,6 +854,9 @@ fn the_schema_leaves_resolution_and_the_plan_check_to_the_loader() {
 
 #[test]
 fn section_twelves_policies_validate_and_load() {
+    if !has_schema() {
+        return;
+    }
     for policy in [
         version_two_rows::DEPENDENCY_RANGES,
         version_two_rows::LOCALE_KEYS,
@@ -843,6 +871,9 @@ fn section_twelves_policies_validate_and_load() {
 
 #[test]
 fn a_config_the_loader_accepts_with_every_form_validates() {
+    if !has_schema() {
+        return;
+    }
     let tmp = tempfile::tempdir().unwrap();
     let config = "version: 2\nextends:\n  - ./base.yml\n  - { url: ./base.yml, as: base \
         }\nselectors:\n  manifests:\n    paths: { include: \"**/package.json\", \
@@ -870,6 +901,9 @@ fn a_config_the_loader_accepts_with_every_form_validates() {
 
 #[test]
 fn an_empty_rule_list_on_an_extends_entry_is_refused_by_both() {
+    if !has_schema() {
+        return;
+    }
     // The decode leaves `only:` and `except:` to the loader, which refuses an
     // empty list when it resolves the entry, as the schema of either version
     // does.

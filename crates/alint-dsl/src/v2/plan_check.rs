@@ -310,6 +310,12 @@ fn check_selector(selector: &SelectorDef, display: &str, path: &str) -> Result<(
                 Error::RuleConfig { message, .. } => message,
                 other => other.to_string(),
             };
+            // The `has_ancestor:` hint points a rule at its scope; a selector
+            // has `paths:` of its own.
+            let message = message.replace(
+                "use `paths:` on the rule's main scope",
+                "use the selector's own `paths:`",
+            );
             located(display, &format!("{path}.scope_filter"), message)
         })?;
     }

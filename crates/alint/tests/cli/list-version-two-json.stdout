@@ -2,24 +2,16 @@
   "kind": "rule-inventory",
   "relations": [
     {
-      "aliases": [
-        {
-          "alias": "deps",
-          "in": ".alint.yml"
-        }
-      ],
       "name": "ranges",
-      "source": "deps.yml"
+      "source": 0
     },
     {
-      "aliases": [],
       "name": "titles",
-      "source": ".alint.yml"
+      "source": 1
     },
     {
-      "aliases": [],
       "name": "pinned",
-      "source": ".alint.yml"
+      "source": 1
     }
   ],
   "rules": [
@@ -39,19 +31,27 @@
   "schema_version": 1,
   "selectors": [
     {
+      "name": "manifests",
+      "source": 0
+    },
+    {
+      "name": "docs",
+      "source": 1
+    }
+  ],
+  "sources": [
+    {
       "aliases": [
         {
           "alias": "deps",
-          "in": ".alint.yml"
+          "in": 1
         }
       ],
-      "name": "manifests",
-      "source": "deps.yml"
+      "path": "deps.yml"
     },
     {
       "aliases": [],
-      "name": "docs",
-      "source": ".alint.yml"
+      "path": ".alint.yml"
     }
   ]
 }

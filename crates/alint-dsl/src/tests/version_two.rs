@@ -212,10 +212,7 @@ fn a_version_read_from_the_environment_is_version_one() {
         ".alint.yml",
         "version: '{{env.ALINT_V2_TEST_VERSION | default(\"2\")}}'\nrules: []\n",
     );
-    assert_eq!(
-        load_error(&path),
-        ".alint.yml: unsupported config version 2 (this build supports 1 through 1)"
-    );
+    assert_eq!(load_error(&path), format!(".alint.yml: {TWO_AS_WRITTEN}"));
     let path = write(
         tmp.path(),
         ".alint.yml",
@@ -225,6 +222,136 @@ fn a_version_read_from_the_environment_is_version_one() {
         load_error(&path),
         ".alint.yml: `selectors:` needs `version: 2`; this config's `version:` is not the \
          integer `2` (a version read from the environment is version 1)"
+    );
+}
+
+/// A value substituted into a selector or relation stayed text in every field
+/// (V2L-7), so `optional: "{{env.B}}"` with `B=true` failed ("expected `true`
+/// or `false`"). In a field that takes a boolean (a relation's or a union
+/// part's `optional:`, `entries:`'s `leaves:`, a field's `sensitive:`) a value
+/// that spells one reads as one; a number stays text there, and so does a
+/// value that spells a boolean in any other field, even one named like those.
+#[test]
+fn a_value_from_the_environment_is_a_boolean_where_the_field_takes_one() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = write(
+        tmp.path(),
+        ".alint.yml",
+        "version: 2\nrelations:\n  r:\n    from: { paths: '*.json' }\n    read: { json: $.a }\n    \
+         optional: '{{env.B}}'\n    fields: { v: { source: value, sensitive: '{{env.B}}' } }\n  \
+         e:\n    from: { paths: '*.json' }\n    entries: { format: json, at: $, leaves: \
+         '{{env.B}}' }\n    fields: { k: entry.key }\n  u:\n    union:\n      - { from: { paths: \
+         a.json }, read: { json: $.a }, optional: '{{env.B}}' }\n      - { from: { paths: b.json \
+         }, read: { json: $.b } }\n    fields: { v: value }\nrules: []\n",
+    );
+    for (value, bound) in [("true", "true"), ("false", "false")] {
+        let environment: &'static [(&str, &str)] = if value == "true" {
+            &[("B", "true")]
+        } else {
+            &[("B", "false")]
+        };
+        load_in(&path, environment).unwrap();
+        let raw = load_top_level_raw(
+            &path,
+            &LoadOptions {
+                environment: std::sync::Arc::new(Environment(environment)),
+                ..options()
+            },
+        )
+        .unwrap();
+        // What each relation decoded to, without its masked copies.
+        let shown = raw.v2.sources[0]
+            .relations
+            .iter()
+            .map(|(_, relation)| format!("{:?} {:?}\n", relation.rows, relation.fields))
+            .collect::<Vec<_>>()
+            .concat();
+        for field in ["optional", "leaves", "sensitive"] {
+            let bound_here = format!("{field}: {bound}");
+            assert!(shown.contains(&bound_here), "{bound_here} in {shown}");
+        }
+        // The relation's `optional`, and the union's first part's (its second
+        // part's is `false` unset).
+        let parts = if bound == "true" { 2 } else { 3 };
+        assert_eq!(
+            shown.matches(&format!("optional: {bound}")).count(),
+            parts,
+            "{shown}"
+        );
+    }
+    // A number is no boolean.
+    let error = load_in(&path, &[("B", "1")]).unwrap_err().to_string();
+    assert!(
+        error.contains("expected `true` or `false`, found a string"),
+        "{error}"
+    );
+    // `where:` names a field `optional`, whose predicates are no boolean:
+    // the value stays text, as the error says.
+    let path = write(
+        tmp.path(),
+        ".alint.yml",
+        "version: 2\nrelations:\n  r:\n    from: { paths: '*.json' }\n    read: { json: $.a }\n    \
+         fields: { optional: value }\n    where: { optional: '{{env.B}}' }\nrules: []\n",
+    );
+    let error = load_in(&path, &[("B", "true")]).unwrap_err().to_string();
+    assert!(error.contains("`relations.r.where.optional`"), "{error}");
+    assert!(error.ends_with("found a string"), "{error}");
+}
+
+/// What a 2 the loader did not read as version 2 is refused with.
+const TWO_AS_WRITTEN: &str = "unsupported config version 2 as written: only a literal \
+                              `version: 2` in a local config file selects the experimental \
+                              version 2 (a version read from the environment is version 1)";
+
+/// An unsupported version said "this build supports 1 through 1", which
+/// left version 2 out, and so did a 2 read from the environment (in a root,
+/// or in a fragment of a version 2 root), which the message did not tell from
+/// a version this build does not know. Version 2 is named as the experiment,
+/// and a 2 read from the environment is told to be written literally.
+#[test]
+fn an_unsupported_version_names_version_two_as_the_experiment() {
+    let tmp = tempfile::tempdir().unwrap();
+    for version in ["0", "3"] {
+        let path = write(
+            tmp.path(),
+            ".alint.yml",
+            &format!("version: {version}\nrules: []\n"),
+        );
+        assert_eq!(
+            load_error(&path),
+            format!(
+                ".alint.yml: unsupported config version {version} (this build supports version \
+                 1, and version 2 as an experiment)"
+            )
+        );
+    }
+    assert_eq!(
+        crate::parse("version: 3\nrules: []\n")
+            .unwrap_err()
+            .to_string(),
+        "<inline>: unsupported config version 3 (this build supports version 1, and version 2 \
+         as an experiment)"
+    );
+    let path = write(
+        tmp.path(),
+        ".alint.yml",
+        "version: '{{env.V}}'\nrules: []\n",
+    );
+    assert_eq!(
+        load_in(&path, &[("V", "2")]).unwrap_err().to_string(),
+        format!(".alint.yml: {TWO_AS_WRITTEN}")
+    );
+    // A fragment of a version 2 root that reads its version from the
+    // environment.
+    let path = write(tmp.path(), ".alint.yml", "version: 2\nrules: []\n");
+    write(
+        tmp.path(),
+        ".alint.d/10.yml",
+        "version: '{{env.V}}'\nrules: []\n",
+    );
+    assert_eq!(
+        load_in(&path, &[("V", "2")]).unwrap_err().to_string(),
+        format!("{}: {TWO_AS_WRITTEN}", shown(".alint.d/10.yml"))
     );
 }
 
@@ -295,6 +422,45 @@ fn a_version_two_value_interpolates_and_a_name_does_not() {
          reference of a version 2 config, which must name the same thing in every environment; \
          write it literally"
     );
+}
+
+/// A value substituted into a selector or relation was re-typed as it is in a
+/// rule, so `in: ["{{env.NODE_MAJOR}}"]` with `NODE_MAJOR=18` held the number
+/// 18 and failed to load ("expected a string"), and `matches: "{{env.X}}"`
+/// with `X=5` too. A selector's or relation's value stays text; a rule's is
+/// re-typed as before.
+#[test]
+fn a_value_from_the_environment_stays_text_in_a_selector_or_relation() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = write(
+        tmp.path(),
+        ".alint.yml",
+        "version: 2\nselectors:\n  pkgs:\n    paths: '{{env.DIR}}/**'\nrelations:\n  \
+         node:\n    from: pkgs\n    read: { json: $.engines.node }\n    fields: { v: value }\n    \
+         where: { v: { in: ['{{env.NODE_MAJOR}}'], matches: '{{env.X}}' } }\nrules:\n  - id: \
+         r\n    kind: file_max_size\n    paths: x\n    max_bytes: '{{env.NODE_MAJOR}}'\n    \
+         level: error\n",
+    );
+    let environment = &[("DIR", "1"), ("NODE_MAJOR", "18"), ("X", "5")];
+    let config = load_in(&path, environment).unwrap();
+    // The rule's `max_bytes:` still reads a number.
+    assert_eq!(config.rules.len(), 1);
+    let raw = load_top_level_raw(
+        &path,
+        &LoadOptions {
+            environment: std::sync::Arc::new(Environment(environment)),
+            ..options()
+        },
+    )
+    .unwrap();
+    let source = &raw.v2.sources[0];
+    assert_eq!(
+        format!("{:?}", source.selectors[0].1.paths),
+        format!("{:?}", alint_core::PathsSpec::Single("1/**".into()))
+    );
+    let shown = format!("{:?}", source.relations[0].1);
+    assert!(shown.contains("\"18\""), "{shown}");
+    assert!(shown.contains("\"5\""), "{shown}");
 }
 
 #[test]
@@ -451,9 +617,9 @@ fn a_plan_check_error_the_masked_copy_repeats_reads_as_before() {
         ),
         ".alint.yml: `selectors.s.scope_filter`: scope_filter.has_ancestor name \"a/b\" must be \
          a basename - no path separators.\n  hint: to match files inside a specific subtree, use \
-         `paths:` on the rule's main scope (e.g. `paths: \"airflow-core/**/*.py\"`); to match \
-         files in any subtree that has this manifest, use the basename only (e.g. \
-         `has_ancestor: \"b\"`)."
+         the selector's own `paths:` (e.g. `paths: \"airflow-core/**/*.py\"`); to match files \
+         in any subtree that has this manifest, use the basename only (e.g. `has_ancestor: \
+         \"b\"`)."
     );
     assert_eq!(
         plan_check_error(

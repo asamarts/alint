@@ -59,8 +59,8 @@ fn a_selector_compiles_as_a_rule_scope_does() {
         ),
         ".alint.yml: `relations.r.from.scope_filter`: scope_filter.has_ancestor name \"../x\" \
          must be a basename - no path separators.\n  hint: to match files inside a specific \
-         subtree, use `paths:` on the rule's main scope (e.g. `paths: \"airflow-core/**/*.py\"`); \
-         to match files in any subtree that has this manifest, use the basename only (e.g. \
+         subtree, use the selector's own `paths:` (e.g. `paths: \"airflow-core/**/*.py\"`); to \
+         match files in any subtree that has this manifest, use the basename only (e.g. \
          `has_ancestor: \"x\"`)."
     );
     assert_eq!(
