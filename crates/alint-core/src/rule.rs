@@ -221,6 +221,12 @@ pub struct Violation {
     /// MUST use [`Self::report_path`] instead.
     #[doc(hidden)]
     pub path_sensitive: bool,
+    /// Whether the baseline fingerprint hashes the rule id and
+    /// [`Self::baseline_key`] alone, never the path
+    /// ([`crate::baseline::fingerprint`]). Only the `constraint` kind sets it:
+    /// its findings sit at a key's first row, which moves as rows change.
+    #[doc(hidden)]
+    pub path_free_identity: bool,
     /// Engine-computed: whether a bare `alint fix` would resolve *this*
     /// violation. A rule sets this to `false` at construction (rules do not know
     /// about fixers); the engine overwrites it at result-assembly time as
@@ -266,6 +272,7 @@ impl Violation {
             fix_key: None,
             sensitive: false,
             path_sensitive: false,
+            path_free_identity: false,
             is_fixable: false,
             not_fixable: false,
             proposed_edits: Vec::new(),
@@ -536,6 +543,15 @@ impl Violation {
     #[must_use]
     pub fn with_baseline_key(mut self, key: impl Into<Cow<'static, str>>) -> Self {
         self.baseline_key = Some(key.into());
+        self
+    }
+
+    /// Identify the finding by its rule and [`Self::baseline_key`] alone, never
+    /// its path ([`Self::path_free_identity`]): for the `constraint` kind.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_path_free_identity(mut self) -> Self {
+        self.path_free_identity = true;
         self
     }
 
@@ -963,43 +979,6 @@ impl Context<'_> {
     }
 }
 
-/// How a rule narrows its iteration to git-tracked entries.
-/// Returned by [`Rule::git_tracked_mode`]; the engine reads
-/// this at construction time to pick the right pre-filtered
-/// `FileIndex` (file-only or dir-aware) for each opted-in
-/// rule.
-///
-/// The mode is per-rule (a config might opt in some rules and
-/// not others). The engine builds at most two filtered indexes
-/// per run regardless of how many rules opt in, so the cost
-/// amortises across the whole rule set.
-///
-/// See `docs/design/v0.9/git-tracked-filtered-index.md` for
-/// the v0.9.11 structural fix this enum is the entry point of.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GitTrackedMode {
-    /// Rule does not consult the git-tracked set. Engine
-    /// routes the rule's evaluation against the unfiltered
-    /// `FileIndex`. The default; do not override unless the
-    /// rule opts into `git_tracked_only:`.
-    Off,
-    /// Rule iterates files (`ctx.index.files()`) and the
-    /// engine narrows that to entries where
-    /// `git_tracked.contains(path)` before the rule sees them.
-    /// File-mode existence rules (`file_exists`, `file_absent`)
-    /// pick this mode when the spec's `git_tracked_only: true`.
-    FileOnly,
-    /// Rule iterates dirs (`ctx.index.dirs()`) and the engine
-    /// narrows that to dirs where
-    /// `dir_has_tracked_files(path, &git_tracked)`. Dir-mode
-    /// existence rules (`dir_exists`, `dir_absent`) pick this
-    /// mode when the spec's `git_tracked_only: true`. The
-    /// filtered index also includes the tracked files
-    /// themselves so a `dir_*` rule's nested per-file checks
-    /// (e.g. `paths:` glob) still match.
-    DirAware,
-}
-
 /// Stamp out the three boilerplate `Rule` impl methods every rule
 /// kind ships: `id`, `level`, `policy_url`. Expects the impl'ing
 /// struct to have fields named `id: String`, `level: Level`, and
@@ -1093,6 +1072,20 @@ pub trait Rule: Send + Sync + std::fmt::Debug {
     /// and the R2 test-only relation consumer override this.
     fn uses_relations(&self) -> bool {
         false
+    }
+
+    /// The relations of a version 2 plan this rule reads (the `constraint`
+    /// kind's input). The engine evaluates every running rule's, in plan
+    /// order, before rules fan out, so which relation reaches a run-wide
+    /// limit does not depend on rule order. Hidden, as the relation layer is.
+    #[doc(hidden)]
+    fn relation_inputs(
+        &self,
+    ) -> Option<(
+        &std::sync::Arc<crate::relation::plan::Plan>,
+        &[crate::relation::plan::RelationId],
+    )> {
+        None
     }
 
     /// Decorate the configuration-integrity finding produced when
@@ -1978,6 +1971,10 @@ pub trait Fixer: Send + Sync + std::fmt::Debug {
         false
     }
 }
+
+#[path = "rule_git_tracked.rs"]
+mod git_tracked;
+pub use git_tracked::GitTrackedMode;
 
 #[path = "rule_fix_io.rs"]
 mod fix_io;

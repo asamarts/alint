@@ -64,6 +64,26 @@ pub enum ContractValueError {
 }
 
 impl Value {
+    /// A literal a configuration writes, as the relation layer compares it: a
+    /// boolean, a string, or a number by the text YAML gives it (which need
+    /// not be the text written: YAML reads `1.10` as the float 1.1). `None`
+    /// for null, a list, a map or a tagged value, none of which is a literal.
+    #[must_use]
+    pub fn from_literal(value: &crate::yaml::Value) -> Option<Self> {
+        match value.parser() {
+            ayaml::Value::Bool(flag) => Some(Self::Bool(*flag)),
+            ayaml::Value::Number(number) => {
+                let text = number.to_string();
+                Some(
+                    Number::from_lexeme(&text)
+                        .map_or_else(|| Self::String(text.into()), Self::Number),
+                )
+            }
+            ayaml::Value::String(text) => Some(Self::String(text.as_str().into())),
+            _ => None,
+        }
+    }
+
     /// The bytes the value holds beyond its own size: a string's text, a
     /// number's lexeme, and a list's or record's items. What the relation
     /// evaluator charges to [`LimitKind::BytesPerRun`](super::LimitKind::BytesPerRun)

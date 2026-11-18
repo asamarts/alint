@@ -411,6 +411,58 @@ impl Engine {
         }
     }
 
+    /// Evaluate the relations of a version 2 plan that the rules about to run
+    /// read, before any rule runs, one after another in plan order (each
+    /// after the relations it reads), on the full index `ctx` describes. The
+    /// run's relation counters (cells, bytes, decoded rows) are shared, so a
+    /// relation evaluated in the order rules happen to run in could reach a
+    /// limit that another relation, evaluated first, would have reached
+    /// instead; in plan order, which one does is the same in every run. Only
+    /// a relation some rule that runs reads is evaluated: a rule whose
+    /// `when:` is not true, or that `--changed` skips, reads none. (A rule
+    /// that is off is not built by the CLI; an entry the engine is given
+    /// runs, so its relations are evaluated here too.) Each outcome stays in
+    /// the run's memo on the index, where the rule reads it.
+    pub(super) fn evaluate_read_relations(&self, ctx: &Context<'_>, when_env: &WhenEnv<'_>) {
+        use crate::relation::plan::{Plan, RelationId};
+        let mut wanted: Vec<(&Arc<Plan>, RelationId)> = Vec::new();
+        for entry in &self.entries {
+            let Some((plan, relations)) = entry.rule.relation_inputs() else {
+                continue;
+            };
+            if entry
+                .when
+                .as_ref()
+                .is_some_and(|expr| !matches!(expr.evaluate(when_env), Ok(true)))
+                || self.skip_for_changed(entry.rule.as_ref(), ctx.index, None)
+            {
+                continue;
+            }
+            wanted.extend(relations.iter().map(|id| (plan, *id)));
+        }
+        // One plan per configuration; grouped by plan all the same, in the
+        // order each plan first appears.
+        let mut plans: Vec<&Arc<Plan>> = Vec::new();
+        for (plan, _) in &wanted {
+            if !plans.iter().any(|held| Arc::ptr_eq(held, plan)) {
+                plans.push(plan);
+            }
+        }
+        for plan in plans {
+            let mut ids: Vec<RelationId> = wanted
+                .iter()
+                .filter(|(held, _)| Arc::ptr_eq(held, plan))
+                .map(|(_, id)| *id)
+                .collect();
+            ids.sort_unstable();
+            ids.dedup();
+            for id in ids {
+                // The outcome, rows or failures, is memoised for the rule.
+                let _ = crate::relation::eval::evaluate(plan, id, ctx);
+            }
+        }
+    }
+
     #[allow(clippy::too_many_lines)]
     pub(super) fn run_internal(
         &self,
@@ -605,6 +657,10 @@ impl Engine {
             }
         }
         let manifest_gates = self.manifest_gates_by_entry(index, &when_env)?;
+        // The relations the rules read, in plan order, before they fan out.
+        let t_relations = Instant::now();
+        self.evaluate_read_relations(&full_ctx, &when_env);
+        phase!(t_relations, "evaluate_relations");
         let gate_inputs = RunGateInputs {
             when_env: &when_env,
             manifest_gates: &manifest_gates,

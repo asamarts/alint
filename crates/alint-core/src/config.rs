@@ -481,6 +481,17 @@ pub struct RuleSpec {
     #[serde(skip)]
     #[doc(hidden)]
     pub rendered: bool,
+    /// The resolved plan of the version 2 configuration this rule belongs to,
+    /// set by the DSL loader once every reference has resolved, on a rule
+    /// whose fields reference a relation (the `constraint` kind's `input:`):
+    /// [`Plan::rule`](crate::relation::plan::Plan::rule) holds what each
+    /// field resolved to. `None` for every other rule, and for a rule a
+    /// version 1 config or code built. Hidden, as the relation layer is:
+    /// version 2 is experimental (ADR-0034 decision 1). Never deserialized
+    /// from user input.
+    #[serde(skip)]
+    #[doc(hidden)]
+    pub relation_plan: Option<std::sync::Arc<crate::relation::plan::Plan>>,
     /// Optional mechanical-fix strategy. Rules whose builders understand
     /// the chosen op attach a [`Fixer`](crate::Fixer) to the built rule;
     /// rules whose kind is incompatible with the op return a config error
@@ -1420,6 +1431,13 @@ impl RuleSpec {
         self.extended_source = extended_source;
     }
 
+    /// Record the version 2 plan this rule's reference fields resolved in
+    /// ([`Self::relation_plan`]), after config composition.
+    #[doc(hidden)]
+    pub fn set_relation_plan(&mut self, plan: Option<std::sync::Arc<crate::relation::plan::Plan>>) {
+        self.relation_plan = plan;
+    }
+
     /// Whether one effective top-level field must be hidden from public output.
     #[must_use]
     pub fn field_is_sensitive(&self, field: &str) -> bool {
@@ -1760,6 +1778,9 @@ impl NestedRuleSpec {
             extended_source: false,
             // This iteration renders the `require:` lists inside the spec too.
             rendered: true,
+            // A nested rule reads no relation (the loader refuses one that
+            // would).
+            relation_plan: None,
             fix: None,
             // `git_tracked_only` and `respect_gitignore` are both kind-specific
             // options now (ADR-0008), stripped from the nested `extra` via

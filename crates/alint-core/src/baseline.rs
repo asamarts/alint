@@ -109,16 +109,35 @@ fn hash_components(components: [&[u8]; 3]) -> String {
 /// path. No real path contains a NUL byte, so no finding with a path shares
 /// it. A rule's hidden-path findings share the one fingerprint and match by
 /// count.
+///
+/// A finding that asks for a path-free identity
+/// ([`Violation::path_free_identity`], the `constraint` kind's) hashes
+/// `sha256(lp(rule_id) ‖ lp("\0constraint") ‖ lp(baseline_key))`, or
+/// `"sensitive"` for the key of a sensitive finding: where it sits moves when
+/// rows are added or renamed, and its key names what it is about. No path
+/// starts with a NUL byte, so no finding with a path shares the form.
 #[must_use]
 pub fn fingerprint(rule_id: &str, v: &Violation, file_bytes: Option<&[u8]>) -> String {
     if v.path_is_sensitive() {
         return hash_components([rule_id.as_bytes(), HIDDEN_PATH, b"sensitive"]);
+    }
+    if v.path_free_identity {
+        let key: &[u8] = if v.is_sensitive() {
+            b"sensitive"
+        } else {
+            v.baseline_key.as_deref().unwrap_or_default().as_bytes()
+        };
+        return hash_components([rule_id.as_bytes(), PATH_FREE, key]);
     }
     path_identity_fingerprint(rule_id, v, file_bytes)
 }
 
 /// What stands for the path in a hidden-path finding's fingerprint.
 const HIDDEN_PATH: &[u8] = b"\0hidden-path";
+
+/// What stands for the path in the fingerprint of a finding identified by its
+/// key alone ([`Violation::path_free_identity`]).
+const PATH_FREE: &[u8] = b"\0constraint";
 
 /// [`fingerprint`] as if no path were hidden: `rule_id` and path always take
 /// part. The engine keys findings by it within a run, where two hidden paths
@@ -168,7 +187,11 @@ pub fn fingerprint_content<'c, S: std::hash::BuildHasher>(
     v: &Violation,
     cache: &'c mut std::collections::HashMap<std::path::PathBuf, Option<Vec<u8>>, S>,
 ) -> Option<&'c [u8]> {
-    if v.is_sensitive() || v.baseline_key.is_some() || identity_line(v).is_none() {
+    if v.is_sensitive()
+        || v.baseline_key.is_some()
+        || v.path_free_identity
+        || identity_line(v).is_none()
+    {
         return None;
     }
     let path = v.path.as_deref()?;
@@ -1049,6 +1072,76 @@ mod tests {
             path_identity_fingerprint("rule", &one, None),
             path_identity_fingerprint("rule", &two, None)
         );
+    }
+
+    /// A finding identified by its key alone, as the `constraint` kind makes
+    /// one.
+    fn path_free(path: &str, key: &str) -> Violation {
+        Violation::new(format!("m at {path}"))
+            .with_path(Path::new(path))
+            .with_location(3, 1)
+            .with_baseline_key(key.to_string())
+            .with_path_free_identity()
+    }
+
+    #[test]
+    fn a_path_free_finding_hashes_its_rule_and_key_alone() {
+        let first = path_free("packages/a/package.json", "6:unique");
+        let current = fingerprint("rule", &first, Some(b"a\nb\nc\n"));
+        // Pinned: the form the design writes,
+        // sha256(lp(rule_id) || lp("\0constraint") || lp(baseline_key)).
+        assert_eq!(
+            current,
+            hash_components([b"rule", b"\0constraint", b"6:unique"])
+        );
+        // Another path, line and message: the same finding.
+        assert_eq!(
+            fingerprint("rule", &path_free("b/package.json", "6:unique"), None),
+            current
+        );
+        assert_ne!(
+            fingerprint("rule", &path_free("a", "6:unique1:x"), None),
+            current
+        );
+        assert_ne!(fingerprint("other", &first, None), current);
+        // Without the flag the path counts, as for every other kind.
+        let flagless = Violation::new("m")
+            .with_path(Path::new("packages/a/package.json"))
+            .with_baseline_key("6:unique");
+        assert_eq!(
+            fingerprint("rule", &flagless, None),
+            fp(
+                "rule",
+                Some("packages/a/package.json"),
+                None,
+                Some("6:unique"),
+                "",
+                None
+            )
+        );
+        assert_ne!(fingerprint("rule", &flagless, None), current);
+        // A sensitive one hashes no key; a hidden path still wins.
+        let mut sensitive = path_free("a", "6:unique");
+        sensitive.redact_message("rule");
+        assert_eq!(
+            fingerprint("rule", &sensitive, None),
+            hash_components([b"rule", b"\0constraint", b"sensitive"])
+        );
+        let mut hidden = path_free("a", "6:unique");
+        hidden.mark_path_sensitive();
+        assert_eq!(
+            fingerprint("rule", &hidden, None),
+            hash_components([b"rule", HIDDEN_PATH, b"sensitive"])
+        );
+        // The content of the file it sits in is never read for it.
+        let mut cache = std::collections::HashMap::new();
+        let mut keyless = Violation::new("m")
+            .with_path(Path::new("a"))
+            .with_location(1, 1)
+            .with_path_free_identity();
+        keyless.baseline_key = None;
+        assert!(fingerprint_content(Path::new("."), &keyless, &mut cache).is_none());
+        assert!(cache.is_empty());
     }
 
     fn item(rule: &str, path: Option<&str>, fp: &str) -> FingerprintedViolation {

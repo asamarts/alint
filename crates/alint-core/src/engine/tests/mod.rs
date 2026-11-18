@@ -784,6 +784,7 @@ impl crate::PerFileRule for PerFileStub {
 }
 mod fix;
 mod preview;
+mod relations;
 mod run;
 mod trace;
 
