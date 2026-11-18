@@ -940,7 +940,8 @@ policy-test package the user does not trust.
   directory (`{path}/*.md`) reads only that directory's entries,** where it tested every entry in
   the tree on every iteration, so its time grew with the square of the number of directories (0.49 s
   at 2,000 directories, 4.50 s at 8,000). About 40 kinds, `key_parity`'s peers and
-  the per-file rules narrow this way.
+  the per-file rules narrow this way, and so does the search for the directories a
+  `registry_paths_resolve` glob entry matches.
 - **YAML files over 1 MiB share a budget of 32 MiB of input parsing at once** (ADR-0042). With
   ayaml, one YAML parse at the 32 MiB input cap peaks at 4.5 to 6.2 GB, and every worker thread
   could run one. A parse of a larger file now waits until its size is free in the budget (or, when
