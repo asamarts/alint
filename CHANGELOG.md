@@ -703,7 +703,8 @@ policy-test package the user does not trust.
     word `sensitive`); the rows that repeat a `unique` key share one key and are told apart by
     their count, as are findings that differ only in a sensitive value. Other kinds'
     fingerprints are unchanged.
-  - A group that has no rows is not checked until `groups:` comes.
+  - A group that has no rows (a locale file that is `{}`) is not checked: nothing names the groups
+    that must exist until `groups:` is supported.
   - Every field, literal and `{{row.FIELD}}` is checked against the relation when the rule
     builds, naming the rule, the field and the relation; names may not hold `{{...}}`.
     `plurals: cldr`, `groups:`, a `set` against another relation and a `set` grouped by `path`

@@ -276,6 +276,20 @@ on 2026-11-13.
 The feature freeze is the point at which phases 1 to 8, the #503 fix and #580 (a linear
 `extends:` merge, after phase 7; ADR-0046 decision 1) are merged. Phase 9 is decided then.
 
+Phase 7 lands in four steps, each a pull request:
+
+1. The kind, experimental, with `equal` (within groups, against a source row, within a row),
+   `unique` (with or without `determines:`) and `set` against `{ group: }`; the version check per
+   source, the refusal under `for_each_dir`, `for_each_file` and `every_matching_has`, the
+   relations evaluated before the rules that read them, the path-free fingerprint, and the
+   kind's marks in `rules list`, `rules show`, `facts.json`, the draft schema and its rule page.
+2. `plurals: cldr` (a plural module shared with `key_parity`), `group_by` on a path or a path
+   token, `groups:`, and `set` against a relation.
+3. `--changed`: the trigger scope is the union of the plan's selectors, with a full-index test
+   in place of `v010_cross_file_kinds_require_full_index_and_no_path_scope`; and the
+   related-location gate over JSON, SARIF and the language server.
+4. `explain`'s plan display and the `selector fields:` wording.
+
 ## 5. Release acceptance
 
 - **v1 is unchanged** apart from item 12, the ayaml cutover and the audits' fixes (section 4).
@@ -862,3 +876,28 @@ The feature freeze is the point at which phases 1 to 8, the #503 fix and #580 (a
     `.git/HEAD` without bound) is new, and items 15, 17 and 19 are corrected.
   - Next: phase 7, the `constraint` kind; then #580; the ayaml bump when a release meets the
     conditions.
+- 2026-11-18: #586 merged, and phase 7 step 1.
+  - #586 landed the third audit's fixes and the owner's calls. Its Windows runs found that a
+    `registry_paths_resolve` glob entry, joined to its registry's directory as a `Path`, spelled
+    its directories with `\` and so still tested every entry in the tree; a scope now splits its
+    literal directory prefix on `\` where `\` separates. The advisory's patch list names #586.
+  - Phase 7 is split into four steps (section 4). Step 1 adds the `constraint` kind, experimental
+    and only in `version: 2`: `equal` in its three forms, `unique` with or without
+    `determines:`, and `set` against `{ group: }`. A rule's kind is checked against the version
+    of the source that writes it, a relation reader is refused under `for_each_dir`,
+    `for_each_file` and `every_matching_has`, the engine evaluates the relations a rule reads
+    before the rules run, and a finding's fingerprint holds no path.
+  - An independent review of step 1 reproduced 12 findings and 6 test gaps, each fixed with a
+    gate test that fails with its fix reverted. Related locations are built only for the 20 a
+    finding lists (8,000 distinct values under `determines:` took 62 s), a row of each other
+    value first. A relation the environment selects has its findings' paths and values redacted,
+    as a version 1 rule's environment-written `paths:` has. A sensitive key makes every field
+    that spells it sensitive. A file is checked as UTF-8 once, not per finding. Long values are
+    cut in messages and held as a digest in keys. A repeated `unique` key is keyed by its values
+    alone, so renaming a file keeps it baselined. Findings beside an analysis failure are
+    withheld, a finding about a join's `unique:` side sits at the row's own entry, and the file a
+    place is read from passes the evaluator's symlink checks. Sensitive values still share the
+    key word `sensitive` and are told apart by count: a digest of a low-entropy secret would be a
+    dictionary oracle (`redaction.rs`).
+  - Next: phase 7 step 2 (`plurals: cldr`, `group_by` on a path, `groups:`, `set` against a
+    relation).

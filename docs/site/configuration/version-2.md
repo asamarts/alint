@@ -470,8 +470,8 @@ rules:
 ```
 
 A group is the rows that share a `group_by:` value, so a locale whose files hold no keys has no
-rows and no group: it is not checked until `groups:` (a later release) names the groups that must
-exist.
+rows and no group: it is not checked until `groups:`, not yet supported, names the groups that
+must exist.
 
 **Toolchain pins that agree**: one row per place a Node version is pinned, each compared with the
 row `.nvmrc` gives. A part whose path a file lacks gives a row without a value, which differs from
