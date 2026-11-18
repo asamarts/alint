@@ -135,6 +135,10 @@ fn untrusted_reads_an_empty_environment() {
     let dir = tempfile::tempdir().unwrap();
     let home = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("SECRET.txt"), "x\n").unwrap();
+    // `named` passes only where `default('absent')` applies, so an
+    // environment that held a value would fail it (interpolation reads an
+    // empty value as none).
+    std::fs::write(dir.path().join("absent.txt"), "x\n").unwrap();
     std::fs::write(
         dir.path().join(".alint.yml"),
         "version: 1\nrules:\n  - id: named\n    kind: file_exists\n    \
@@ -155,7 +159,8 @@ fn untrusted_reads_an_empty_environment() {
         let mut args = vec!["check", "--format", "json"];
         args.extend_from_slice(flags);
         let untrusted = run(dir.path(), home.path(), &args, &env);
-        assert_eq!(failing_rules(&untrusted), ["named"], "{flags:?}");
+        assert!(untrusted.status.success(), "{flags:?}");
+        assert_eq!(failing_rules(&untrusted), [] as [&str; 0], "{flags:?}");
         assert!(
             !String::from_utf8_lossy(&untrusted.stdout).contains("SECRET"),
             "{flags:?}"

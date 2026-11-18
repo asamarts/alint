@@ -201,3 +201,133 @@ fn rules_commands_list_only_kinds_the_registry_can_build() {
         .expect_err("the registry has no file_exists");
     assert!(error.to_string().contains("unknown rule kind"), "{error}");
 }
+
+/// A kind whose metadata declares no Git use, though it runs Git: it reports
+/// the HEAD commit's subject when Git answers.
+#[derive(Debug)]
+struct GitReaderRule {
+    id: String,
+    level: Level,
+}
+
+impl Rule for GitReaderRule {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn level(&self) -> Level {
+        self.level
+    }
+
+    fn evaluate(&self, ctx: &Context<'_>) -> alint_core::Result<Vec<Violation>> {
+        Ok(alint_core::git::head_commit_message(ctx.root)
+            .map(|message| Violation::new(format!("git ran: {message}")))
+            .into_iter()
+            .collect())
+    }
+}
+
+// The function must match the public `RuleBuilder` signature.
+#[allow(clippy::unnecessary_wraps)]
+fn build_git_reader(spec: &RuleSpec) -> alint_core::Result<Box<dyn Rule>> {
+    Ok(Box::new(GitReaderRule {
+        id: spec.id.clone(),
+        level: spec.level,
+    }))
+}
+
+/// Set in the process [`no_spawn_denies_git_to_a_rule_its_metadata_misses`]
+/// starts: the repository, the flag (or nothing) and whether Git should run,
+/// one per line.
+const DENIAL_CHILD: &str = "ALINT_TEST_DENIAL_CHILD";
+
+/// The child half of [`no_spawn_denies_git_to_a_rule_its_metadata_misses`]; it
+/// does nothing in an ordinary test run. `--no-spawn` denies Git to the whole
+/// process for good, so each case runs in a process of its own and no other
+/// test here loses Git.
+#[test]
+fn denial_child() {
+    let Ok(case) = std::env::var(DENIAL_CHILD) else {
+        return;
+    };
+    let mut lines = case.lines();
+    let (repo, flag, ran) = (
+        lines.next().unwrap(),
+        lines.next().unwrap(),
+        lines.next().unwrap() == "ran",
+    );
+    let mut registry = alint_rules::builtin_registry();
+    registry.register("git_reader", &MARKER_META, build_git_reader);
+    let mut args = vec!["--format", "json"];
+    if !flag.is_empty() {
+        args.push(flag);
+    }
+    args.extend(["check", repo]);
+    let code = run(cli(&args, Some(registry))).expect("the config loads");
+    let expected = if ran {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
+    };
+    assert_eq!(code, expected, "{flag:?}");
+}
+
+/// `--no-spawn` and `--untrusted` deny Git to the whole process, so a rule
+/// whose metadata does not say it runs Git (and the load therefore does not
+/// refuse) still reads as finding no repository instead of running the
+/// commands the repository's Git configuration names.
+#[test]
+fn no_spawn_denies_git_to_a_rule_its_metadata_misses() {
+    let dir = tempfile::tempdir().unwrap();
+    let null_device = if cfg!(windows) { "NUL" } else { "/dev/null" };
+    let git = |args: &[&str]| {
+        let status = std::process::Command::new("git")
+            .current_dir(dir.path())
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", null_device)
+            .env("XDG_CONFIG_HOME", null_device)
+            .args(args)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    };
+    git(&["init", "-q"]);
+    git(&[
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@example.com",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "subject",
+    ]);
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        "version: 1\nrules:\n  - id: reader\n    kind: git_reader\n    level: error\n",
+    )
+    .unwrap();
+    for (flag, ran) in [
+        ("", "ran"),
+        ("--no-spawn", "refused"),
+        ("--untrusted", "refused"),
+    ] {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "registry_tests::denial_child", "--nocapture"])
+            .env(
+                DENIAL_CHILD,
+                format!("{}\n{flag}\n{ran}", path_arg(dir.path())),
+            )
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success() && stdout.contains("1 passed"),
+            "{flag:?}: {stdout}{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
