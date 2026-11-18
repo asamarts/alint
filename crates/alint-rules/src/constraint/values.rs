@@ -6,7 +6,8 @@ use std::fmt::Write as _;
 use std::sync::Arc;
 
 use alint_core::relation::Value;
-use alint_core::relation::eval::{Cell, render_value};
+use alint_core::relation::eval::{Cell, Provenance, render_value};
+use sha2::{Digest as _, Sha256};
 
 /// A value as the kind compares it: its type and its text. A number compares
 /// by its lexeme (`1.0` is not `1`), and a path is a string. A missing value
@@ -75,8 +76,8 @@ impl Scalar {
         }
     }
 
-    /// The text a baseline key and `{{row.FIELD}}` hold: a string's text, a
-    /// number's lexeme, `true`/`false`, and nothing for null.
+    /// The text a baseline key holds: a string's text, a number's lexeme,
+    /// `true`/`false`, and nothing for null.
     pub(super) fn text(&self) -> &str {
         match self {
             Self::Null => "",
@@ -94,6 +95,17 @@ impl Scalar {
             Self::Number(lexeme) => alint_core::relation::Number::from_lexeme(lexeme)
                 .map_or_else(|| Value::String(Arc::clone(lexeme)), Value::Number),
             Self::String(text) => Value::String(Arc::clone(text)),
+        }
+    }
+
+    /// The text `{{row.FIELD}}` shows: [`Self::text`], cut as a message cuts
+    /// a quoted value, at [`SHOWN_CHARS`] characters with its length named
+    /// (`abc... (1048576 bytes)`).
+    pub(super) fn text_shown(&self) -> String {
+        let text = self.text();
+        match text.char_indices().nth(SHOWN_CHARS) {
+            Some((end, _)) => format!("{}... ({} bytes)", &text[..end], text.len()),
+            None => text.to_string(),
         }
     }
 
@@ -128,6 +140,16 @@ pub(super) struct Key(String);
 /// What stands for a value, or a key path, that is kept out of baselines.
 const SENSITIVE_PART: &str = "sensitive";
 
+/// The longest text a key holds as it is; a longer value's key holds its
+/// SHA-256 digest, so a key stays short however long the value (a `set`
+/// copies a value the reference group holds into the key of each group that
+/// lacks it).
+const KEY_TEXT_BYTES: usize = 128;
+
+/// The characters of a value `{{row.FIELD}}` shows, as `render_value`
+/// quotes a value in a message.
+const SHOWN_CHARS: usize = 64;
+
 impl Key {
     pub(super) fn new(family: &str) -> Self {
         let mut key = Self::default();
@@ -140,22 +162,33 @@ impl Key {
         self
     }
 
-    /// A value: its type and its text, or one part for a sensitive field's
-    /// value, which never reaches a baseline.
+    /// A value: its type and its text (its type and its digest, past
+    /// [`KEY_TEXT_BYTES`]), or one part for a sensitive field's value, which
+    /// never reaches a baseline, not even as a digest: a digest of a short
+    /// secret can be found by trying values.
     pub(super) fn value(&mut self, value: &Scalar, sensitive: bool) -> &mut Self {
+        let text = value.text();
         if sensitive {
             self.part(SENSITIVE_PART)
+        } else if text.len() > KEY_TEXT_BYTES {
+            let digest = Sha256::digest(text.as_bytes());
+            let mut hex = String::with_capacity(digest.len() * 2);
+            for byte in digest {
+                write!(hex, "{byte:02x}").expect("writing to a String cannot fail");
+            }
+            self.part(&format!("{}-sha256", value.type_word()))
+                .part(&hex)
         } else {
-            self.part(value.type_word()).part(value.text())
+            self.part(value.type_word()).part(text)
         }
     }
 
-    /// A row: the resource path and the key path of `cell`'s value, or, for
-    /// a `read:` row, which has no key path, its part's index in the relation
-    /// and its ordinal. `hide_keys` keeps a key path out (a field that holds
-    /// keys is sensitive).
-    pub(super) fn row(&mut self, cell: &Cell, hide_keys: bool) -> &mut Self {
-        let at = &cell.at;
+    /// A row, by where the row itself came from (`at`, its entry's, never a
+    /// value it copies from elsewhere): the resource path and the entry's key
+    /// path, or, for a `read:` row, which has no key path, its part's index
+    /// in the relation and its ordinal. `hide_keys` keeps a key path out (a
+    /// field that holds keys is sensitive).
+    pub(super) fn row(&mut self, at: &Provenance, hide_keys: bool) -> &mut Self {
         self.part(at.resource.path().as_str());
         match &at.pointer {
             Some(_) if hide_keys => self.part(SENSITIVE_PART),
@@ -204,5 +237,40 @@ mod tests {
         );
         assert_eq!(Scalar::of_value(&Value::List(Vec::new())), Err("a list"));
         assert_eq!(Scalar::String("x".into()).show(true), "<redacted>");
+    }
+
+    #[test]
+    fn a_long_value_is_a_digest_in_a_key_and_cut_where_a_message_shows_it() {
+        let text = "x".repeat(KEY_TEXT_BYTES + 1);
+        let mut hex = String::new();
+        for byte in Sha256::digest(text.as_bytes()) {
+            write!(hex, "{byte:02x}").unwrap();
+        }
+        let long = Scalar::String(text.into());
+        let mut key = Key::new("set");
+        key.value(&long, false);
+        assert_eq!(key.into_string(), format!("3:set13:string-sha25664:{hex}"));
+        // A value at the bound is held as it is, and a sensitive one never
+        // as a digest.
+        let short = Scalar::String("x".repeat(KEY_TEXT_BYTES).into());
+        let mut key = Key::new("set");
+        key.value(&short, false).value(&long, true);
+        assert_eq!(
+            key.into_string(),
+            format!("3:set6:string128:{}9:sensitive", "x".repeat(KEY_TEXT_BYTES))
+        );
+        // `{{row.FIELD}}` cuts as a quoted value is cut.
+        assert_eq!(
+            long.text_shown(),
+            format!(
+                "{}... ({} bytes)",
+                "x".repeat(SHOWN_CHARS),
+                KEY_TEXT_BYTES + 1
+            )
+        );
+        assert_eq!(
+            Scalar::String("é".repeat(64).into()).text_shown(),
+            "é".repeat(64)
+        );
     }
 }

@@ -127,6 +127,38 @@ fn a_template_cannot_bring_the_kind_into_a_rule_of_version_one() {
     );
 }
 
+/// A rule takes its kind from the source that declares the kind: a version 1
+/// file may instantiate a template of kind `constraint` that the version 2
+/// root declares, and the rule reads the root's plan; a version 1 file may
+/// not declare such a template, wherever it is instantiated.
+#[test]
+fn a_template_of_the_kind_is_declared_in_a_source_of_version_two() {
+    let template = "templates:\n  - id: t\n    kind: constraint\n    input: names\n    \
+                    assert: { unique: { key: [name] } }\n    level: error\n";
+    let base = "version: 1\nrules:\n  - id: x\n    extends_template: t\n";
+    let config = builds(
+        &format!("version: 2\nextends: [./base.yml]\n{NAMES}{template}rules: []\n"),
+        &[("base.yml", base)],
+    );
+    let spec = config.rules.iter().find(|spec| spec.id == "x").unwrap();
+    assert_eq!(spec.kind, "constraint");
+    assert!(spec.relation_plan.is_some());
+
+    let base = format!("version: 1\n{template}");
+    let error = load_error(
+        &format!(
+            "version: 2\nextends: [./base.yml]\n{NAMES}rules:\n  - id: x\n    \
+             extends_template: t\n"
+        ),
+        &[("base.yml", &base)],
+    );
+    assert!(
+        error.contains("the `constraint` rule kind needs config `version: 2`")
+            && error.contains("base.yml"),
+        "{error}"
+    );
+}
+
 /// Every source declares its version (an `.alint.d/` fragment takes its
 /// root's), and no `{{...}}` can supply a kind, so the check of each
 /// source's literal kinds covers every rule.

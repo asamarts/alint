@@ -109,10 +109,15 @@ pub struct FieldInfo {
     pub sensitive: bool,
 }
 
-/// One row: a cell per field.
+/// One row: a cell per field, and the entry or `read:` value the row is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldRow {
     pub cells: Vec<Cell>,
+    /// Where the row itself came from: its entry, or its `read:` value. A
+    /// `bound:` field's cell sits elsewhere, and so does a join's copy of a
+    /// field of its unique side, which many rows share; a join row is the
+    /// row of its side that is not unique, so it has that row's provenance.
+    pub at: Arc<Provenance>,
 }
 
 /// One field's value in one row, and where it came from.
@@ -439,7 +444,13 @@ impl Evaluator<'_> {
         };
         let rows = rows.and_then(|rows| self.refine(&site, named, rows, &mut failures));
         match rows {
-            Some(rows) if failures.is_empty() => Ok(Arc::new(rows)),
+            Some(mut rows) if failures.is_empty() => {
+                // The memo holds the rows for the run: with no spare room,
+                // what they hold stays within their cells' budget however
+                // few rows a relation has.
+                rows.rows.shrink_to_fit();
+                Ok(Arc::new(rows))
+            }
             None if failures.is_empty() => {
                 // The plan check rules this out: a field the relation names
                 // that a row does not have. Never an empty failure list.

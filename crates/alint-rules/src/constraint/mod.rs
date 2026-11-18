@@ -203,7 +203,7 @@ impl Rule for ConstraintRule {
                     .collect());
             }
         };
-        let mut findings = Self::notes(&rows);
+        let (mut reported, skipped) = Self::notes(&rows);
         let mut run = families::Run::new(self, &rows, ctx);
         match &self.assertion {
             Assertion::Unique { key, determines } => run.unique(key, determines),
@@ -219,24 +219,25 @@ impl Rule for ConstraintRule {
                 mode,
             } => run.set(field, group_by, group, *mode),
         }
-        findings.extend(run.finish());
-        Ok(findings)
+        reported.extend(run.finish(skipped));
+        Ok(reported)
     }
 }
 
 impl ConstraintRule {
-    /// What the relation's `read:` parts skipped: a computed value (`${VAR}`)
-    /// as a note, and the values that are not strings as one finding per
-    /// resource and part that names their kinds, as `cross_file` reports
-    /// both (design section 5).
-    fn notes(rows: &RelationRows) -> Vec<Violation> {
-        let mut findings = Vec::new();
+    /// What the relation's `read:` parts skipped, as `cross_file` reports it
+    /// (design section 5): the notes, one per computed value (`${VAR}`); and
+    /// the findings, one per resource and part whose values are not strings,
+    /// naming their kinds, which an assertion with no verdict withholds with
+    /// its own.
+    fn notes(rows: &RelationRows) -> (Vec<Violation>, Vec<Violation>) {
+        let (mut notes, mut findings) = (Vec::new(), Vec::new());
         for note in &rows.notes {
             let path = note.resource.path().as_path();
             let message = format!("{}: {}", crate::slash(path), note.message);
             match &note.skipped {
                 Skipped::NonLiteral => {
-                    findings.push(Violation::new(message).with_path(path).as_note());
+                    notes.push(Violation::new(message).with_path(path).as_note());
                 }
                 Skipped::NonString { part, kinds } => {
                     let mut key = values::Key::new("non-string");
@@ -255,7 +256,7 @@ impl ConstraintRule {
                 }
             }
         }
-        findings
+        (notes, findings)
     }
 
     /// An analysis failure of the assertion: no verdict, never a pass.

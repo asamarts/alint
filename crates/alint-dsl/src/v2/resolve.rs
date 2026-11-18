@@ -927,7 +927,10 @@ fn selector_capabilities(selector: &Selector) -> Capabilities {
 /// - a field an `in:` or `not_in:` list of a sensitive field filters, with
 ///   every field of its family ([`Family`]), as for a filter the environment
 ///   wrote (`super::environment`): the rows it keeps show which of the
-///   hidden values it holds.
+///   hidden values it holds;
+/// - every field that spells an entry's key (`entry.key`, `entry.path`,
+///   `entry.parent`, `entry.root`: a key is in its path, its parent's path
+///   and its root) when one of them is sensitive.
 fn close_sensitivity(plan: &mut Plan, order: &[RelationId]) {
     for &id in order {
         let relations = &plan.relations;
@@ -975,15 +978,31 @@ fn close_sensitivity(plan: &mut Plan, order: &[RelationId]) {
                 }
             }
         }
+        let keys_hidden = relation
+            .fields
+            .iter()
+            .any(|(_, field)| field.sensitive && spells_keys(&field.source));
         let shows: Vec<bool> = relation
             .fields
             .iter()
-            .map(|(_, field)| filtered.contains(&Family::of(&field.source, join)))
+            .map(|(_, field)| {
+                filtered.contains(&Family::of(&field.source, join))
+                    || (keys_hidden && spells_keys(&field.source))
+            })
             .collect();
         for ((_, field), shows) in plan.relations[id.0].relation.fields.iter_mut().zip(shows) {
             field.sensitive |= shows;
         }
     }
+}
+
+/// Whether a field of `source` spells an entry's key, or the keys above it.
+fn spells_keys(source: &plan::FieldSource) -> bool {
+    use plan::FieldSource as Source;
+    matches!(
+        source,
+        Source::EntryKey | Source::EntryPath | Source::EntryParent | Source::EntryRoot
+    )
 }
 
 /// The fields whose values show one another's, as `super::environment`

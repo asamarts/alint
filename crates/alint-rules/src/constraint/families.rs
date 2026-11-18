@@ -8,10 +8,11 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write as _;
 use std::path::Path;
+use std::sync::Arc;
 
 use alint_core::relation::Value;
-use alint_core::relation::eval::{Cell, FieldRow, RelationRows, located, type_name};
-use alint_core::{Context, RelatedLocation, Violation};
+use alint_core::relation::eval::{Cell, FieldRow, Provenance, RelationRows, located, type_name};
+use alint_core::{Context, MAX_RELATED_LOCATIONS, RelatedLocation, Violation};
 
 use super::places::Places;
 use super::values::{Key, Kind, Scalar};
@@ -79,9 +80,12 @@ impl<'r> Run<'r> {
         }
     }
 
-    /// The findings, or, when the assertion has no verdict, its failures.
-    pub(super) fn finish(self) -> Vec<Violation> {
-        verdict(self.findings, self.failures)
+    /// `earlier` (findings about the rows, such as values a `read:` skipped)
+    /// and the assertion's findings, or, when the assertion has no verdict,
+    /// its failures alone.
+    pub(super) fn finish(self, mut earlier: Vec<Violation>) -> Vec<Violation> {
+        earlier.extend(self.findings);
+        verdict(earlier, self.failures)
     }
 
     // ------------------------------------------------------------------
@@ -121,6 +125,45 @@ impl<'r> Run<'r> {
 
     fn located(&self, cell: &Cell) -> String {
         located(cell, self.hide_keys)
+    }
+
+    /// Where row `row` itself came from: its entry, or its `read:` value.
+    fn own(&self, row: usize) -> &'r Arc<Provenance> {
+        &self.rows.rows[row].at
+    }
+
+    /// Where a finding about row `row`'s field at `position` sits: the
+    /// field's cell, or, when the cell is not the row's own (a join's copy of
+    /// a field of its unique side, or a `bound:` field, which many rows
+    /// share), the row's own entry: its first cell there, one with a span
+    /// first, or its resource.
+    fn spot(&self, row: usize, position: usize) -> Place<'r> {
+        let own = self.own(row);
+        let is_own = |cell: &Cell| Arc::ptr_eq(&cell.at, own) || cell.at == *own;
+        let cell = self.cell(row, position);
+        if is_own(cell) {
+            return Place::Cell(cell);
+        }
+        let cells = &self.rows.rows[row].cells;
+        cells
+            .iter()
+            .find(|cell| is_own(cell) && cell.span.is_some())
+            .or_else(|| cells.iter().find(|cell| is_own(cell)))
+            .map_or(Place::Row(own), Place::Cell)
+    }
+
+    /// Where `place` is, as a message names it.
+    fn located_at(&self, place: Place<'_>) -> String {
+        match place {
+            Place::Cell(cell) => self.located(cell),
+            Place::Row(at) => self.located(&Cell {
+                value: None,
+                at: Arc::clone(at),
+                span: None,
+                path: None,
+            }),
+            Place::Resource(path) => crate::slash(path),
+        }
     }
 
     fn fail(&mut self, at: Option<&Path>, message: String) {
@@ -218,15 +261,15 @@ impl<'r> Run<'r> {
     // ------------------------------------------------------------------
     // Findings.
 
-    /// A finding at `cell` (or at resource `at` when there is no cell),
-    /// identified by `key` alone, with `related` locations; its message is
-    /// the rule's `message:` rendered for `reported`, or `generated`.
+    /// A finding at `at`, identified by `key` alone, with `related`
+    /// locations, which leave out `omitted` more; its message is the rule's
+    /// `message:` rendered for row `reported`, or `generated`.
     fn report(
         &mut self,
         at: Place<'_>,
         generated: String,
         key: Key,
-        related: Vec<RelatedLocation>,
+        related: Related,
         reported: usize,
     ) {
         let message = match &self.rule.message {
@@ -241,13 +284,15 @@ impl<'r> Run<'r> {
                     None => finding,
                 }
             }
+            Place::Row(row) => Violation::new(message).with_path(row.resource.path().as_path()),
             Place::Resource(path) => Violation::new(message).with_path(path),
         };
         finding = finding
             .with_baseline_key(key.into_string())
             .with_path_free_identity()
-            .with_related_locations(related)
+            .with_related_locations(related.locations)
             .with_not_fixable();
+        finding.related_locations_omitted += related.omitted;
         self.findings.push(finding);
     }
 
@@ -267,15 +312,31 @@ impl<'r> Run<'r> {
                 None => "<missing>".to_string(),
                 Some(Value::Null) => "null".to_string(),
                 Some(value) => match Scalar::of_value(value) {
-                    Ok(scalar) => scalar.text().to_string(),
+                    Ok(scalar) => scalar.text_shown(),
                     Err(_) => alint_core::relation::eval::render_value(value),
                 },
             })
         })
     }
 
-    fn related(&mut self, cell: &Cell, label: &str) -> RelatedLocation {
-        self.places.related(cell, label)
+    /// A related location at `place`, labelled `label`.
+    fn related(&mut self, place: Place<'_>, label: &str) -> RelatedLocation {
+        match place {
+            Place::Cell(cell) => self.places.related(cell, label),
+            Place::Row(row) => RelatedLocation::new(row.resource.path().as_path(), label),
+            Place::Resource(path) => RelatedLocation::new(path, label),
+        }
+    }
+
+    /// The related locations at `places`, which leave out `omitted` more.
+    fn related_at(&mut self, places: Vec<(Place<'_>, &str)>, omitted: usize) -> Related {
+        Related {
+            locations: places
+                .into_iter()
+                .map(|(place, label)| self.related(place, label))
+                .collect(),
+            omitted,
+        }
     }
 
     /// `` `name` "value" `` for the fields at `positions` and their values.
@@ -381,20 +442,24 @@ impl<'r> Run<'r> {
     }
 
     /// One finding per row of `members` after the first, which repeats its
-    /// key `value`.
+    /// key `value`. They share one baseline key, the key's values: the rows
+    /// that repeat a key are told apart by their count, so renaming the
+    /// first row's file changes none of them.
     fn repeats(&mut self, key_at: &[usize], value: &[Scalar], members: &[usize]) {
-        let first = self.cell(members[0], key_at[0]);
+        let first = self.spot(members[0], key_at[0]);
+        let first_shown = self.located_at(first);
+        let mut key = Key::new("unique");
+        for (&position, part) in key_at.iter().zip(value) {
+            key.value(part, self.sensitive(position));
+        }
         for &row in &members[1..] {
-            let cell = self.cell(row, key_at[0]);
-            let mut key = Key::new("unique");
-            key.part("row").row(cell, self.hide_keys);
             let message = format!(
-                "{} is not unique: the first row with it is {}",
+                "{} is not unique: the first row with it is {first_shown}",
                 self.describe(key_at, value),
-                self.located(first)
             );
-            let related = vec![self.related(first, "the first row with this key")];
-            self.report(Place::Cell(cell), message, key, related, row);
+            let related = self.related_at(vec![(first, "the first row with this key")], 0);
+            let at = self.spot(row, key_at[0]);
+            self.report(at, message, key.clone(), related, row);
         }
     }
 
@@ -434,9 +499,9 @@ impl<'r> Run<'r> {
 
     /// Rows `members`, which must agree on the fields at `fields`: when they
     /// do not (two values, or a null, which matches nothing), one finding per
-    /// distinct value, at the first row with it, related to the other rows
-    /// with it and to one row of each other value. Each finding's key is
-    /// `base` and the value.
+    /// distinct value, at the first row with it, related to one row of each
+    /// other value and to the other rows with it ([`related_rows`]). Each
+    /// finding's key is `base` and the value.
     fn disagreements(
         &mut self,
         members: &[usize],
@@ -486,18 +551,20 @@ impl<'r> Run<'r> {
             .map(|(value, rows)| (value.clone(), rows.clone()))
             .collect();
         for (index, (value, holders)) in distinct.iter().enumerate() {
-            let at = self.cell(holders[0], fields[varying]);
-            let mut related = Vec::new();
-            for &row in &holders[1..] {
-                let cell = self.cell(row, fields[varying]);
-                related.push(self.related(cell, "another row with this value"));
-            }
-            for (other, (_, rows)) in distinct.iter().enumerate() {
-                if other != index {
-                    let cell = self.cell(rows[0], fields[varying]);
-                    related.push(self.related(cell, "a row with another value"));
-                }
-            }
+            let at = self.spot(holders[0], fields[varying]);
+            let (rows, omitted) = related_rows(&distinct, index, MAX_RELATED_LOCATIONS);
+            let places = rows
+                .into_iter()
+                .map(|(row, same)| {
+                    let label = if same {
+                        "another row with this value"
+                    } else {
+                        "a row with another value"
+                    };
+                    (self.spot(row, fields[varying]), label)
+                })
+                .collect();
+            let related = self.related_at(places, omitted);
             let mut here = format!("{} here", self.show_tuple(fields, value, typed));
             if holders.len() > 1 {
                 let others = holders.len() - 1;
@@ -536,7 +603,7 @@ impl<'r> Run<'r> {
             for (&position, part) in fields.iter().zip(value) {
                 key.value(part, self.sensitive(position));
             }
-            self.report(Place::Cell(at), message, key, related, holders[0]);
+            self.report(at, message, key, related, holders[0]);
         }
     }
 
@@ -570,11 +637,12 @@ impl<'r> Run<'r> {
             return;
         };
         let source_cell = self.cell(source, field_at);
+        let source_at = self.spot(source, field_at);
+        let source_shown = self.located_at(source_at);
         if expected.is_null() {
             let message = format!(
-                "`assert.equal.to.row`: the source row ({source_desc}, at {}) holds no value of \
-                 `{field}`",
-                self.located(source_cell)
+                "`assert.equal.to.row`: the source row ({source_desc}, at {source_shown}) holds \
+                 no value of `{field}`"
             );
             self.fail(Some(source_cell.at.resource.path().as_path()), message);
             return;
@@ -605,14 +673,15 @@ impl<'r> Run<'r> {
                 shown(&value)
             };
             let message = format!(
-                "`{field}` is {here} here, but {} in the source row ({source_desc}, at {})",
+                "`{field}` is {here} here, but {} in the source row ({source_desc}, at \
+                 {source_shown})",
                 shown(&expected),
-                self.located(source_cell)
             );
             let mut key = Key::new("equal");
-            key.part("source").row(cell, self.hide_keys);
-            let related = vec![self.related(source_cell, "the source row")];
-            self.report(Place::Cell(cell), message, key, related, row);
+            key.part("source").row(self.own(row), self.hide_keys);
+            let related = self.related_at(vec![(source_at, "the source row")], 0);
+            let at = self.spot(row, field_at);
+            self.report(at, message, key, related, row);
         }
     }
 
@@ -719,9 +788,11 @@ impl<'r> Run<'r> {
                 }
             );
             let mut key = Key::new("equal");
-            key.part("row").row(cell, self.hide_keys);
-            let related = vec![self.related(other_cell, &format!("`{other}` in this row"))];
-            self.report(Place::Cell(cell), message, key, related, row);
+            key.part("row").row(self.own(row), self.hide_keys);
+            let label = format!("`{other}` in this row");
+            let related = self.related_at(vec![(Place::Cell(other_cell), label.as_str())], 0);
+            let at = self.spot(row, field_at);
+            self.report(at, message, key, related, row);
         }
     }
 
@@ -811,20 +882,20 @@ impl<'r> Run<'r> {
             // A missing value sits at the group's first resource.
             let first = rows
                 .iter()
-                .map(|&row| self.cell(row, field_at).at.resource.path())
+                .map(|&row| self.own(row).resource.path())
                 .min()
-                .expect("a group has rows")
-                .clone();
+                .expect("a group has rows");
             for (value, holders) in reference.held.iter() {
                 if held.rows.contains_key(value) {
                     continue;
                 }
-                let holder = self.cell(holders[0], field_at);
                 let message = format!(
                     "{subject} lacks `{field}` {}, which `{group_by}` {shown} holds",
                     value[0].show(sensitive)
                 );
-                let related = vec![self.related(holder, "the reference group's row with it")];
+                let holder = self.spot(holders[0], field_at);
+                let related =
+                    self.related_at(vec![(holder, "the reference group's row with it")], 0);
                 self.report(
                     Place::Resource(first.as_path()),
                     message,
@@ -835,44 +906,39 @@ impl<'r> Run<'r> {
             }
         }
         for (value, holders) in held.iter() {
-            let (what, message, related) = match (reference.mode, reference.held.rows.get(value)) {
-                (SetMode::EqualTo | SetMode::SubsetOf, None) => {
-                    let related = holders[1..]
-                        .iter()
-                        .map(|&row| {
-                            let cell = self.cell(row, field_at);
-                            self.places
-                                .related(cell, "another row of the group with it")
-                        })
-                        .collect();
-                    let message = format!(
-                        "{subject} holds `{field}` {}, which `{group_by}` {shown} lacks",
-                        value[0].show(sensitive)
-                    );
-                    ("extra", message, related)
-                }
-                (SetMode::DisjointFrom, Some(theirs)) => {
-                    let cell = self.cell(theirs[0], field_at);
-                    let message = format!(
-                        "{subject} and `{group_by}` {shown} both hold `{field}` {}",
-                        value[0].show(sensitive)
-                    );
-                    let related = vec![
-                        self.places
-                            .related(cell, "the reference group's row with it"),
-                    ];
-                    ("shared", message, related)
-                }
-                _ => continue,
-            };
-            let at = self.cell(holders[0], field_at);
-            self.report(
-                Place::Cell(at),
-                message,
-                base(&value[0], what),
-                related,
-                holders[0],
-            );
+            let (what, message, places, omitted) =
+                match (reference.mode, reference.held.rows.get(value)) {
+                    (SetMode::EqualTo | SetMode::SubsetOf, None) => {
+                        let others = &holders[1..];
+                        let places: Vec<_> = others
+                            .iter()
+                            .take(MAX_RELATED_LOCATIONS)
+                            .map(|&row| {
+                                let place = self.spot(row, field_at);
+                                (place, "another row of the group with it")
+                            })
+                            .collect();
+                        let message = format!(
+                            "{subject} holds `{field}` {}, which `{group_by}` {shown} lacks",
+                            value[0].show(sensitive)
+                        );
+                        let omitted = others.len() - places.len();
+                        ("extra", message, places, omitted)
+                    }
+                    (SetMode::DisjointFrom, Some(theirs)) => {
+                        let message = format!(
+                            "{subject} and `{group_by}` {shown} both hold `{field}` {}",
+                            value[0].show(sensitive)
+                        );
+                        let place = self.spot(theirs[0], field_at);
+                        let places = vec![(place, "the reference group's row with it")];
+                        ("shared", message, places, 0)
+                    }
+                    _ => continue,
+                };
+            let related = self.related_at(places, omitted);
+            let at = self.spot(holders[0], field_at);
+            self.report(at, message, base(&value[0], what), related, holders[0]);
         }
     }
 
@@ -925,11 +991,48 @@ struct Reference<'a> {
     mode: SetMode,
 }
 
-/// Where a finding sits.
+/// Where a finding or a related location sits.
 #[derive(Clone, Copy)]
 enum Place<'p> {
+    /// A cell: its resource, and its span when it has one.
     Cell(&'p Cell),
+    /// A row with no cell of its own: its resource.
+    Row(&'p Arc<Provenance>),
+    /// A resource.
     Resource(&'p Path),
+}
+
+/// A finding's related locations, and how many more it leaves out.
+struct Related {
+    locations: Vec<RelatedLocation>,
+    omitted: usize,
+}
+
+/// The rows a finding about `distinct[index]` (a value and the rows with
+/// it, among the distinct values of a comparison) relates to, at most `cap`
+/// of them, each marked when it holds the same value; and how many more it
+/// leaves out. The first row of each other value comes first, so a finding
+/// shows what it disagrees with however many rows agree with it; the value's
+/// other rows fill what room is left. No more are picked than are listed,
+/// however many values and rows there are.
+fn related_rows(
+    distinct: &[(Vec<Scalar>, Vec<usize>)],
+    index: usize,
+    cap: usize,
+) -> (Vec<(usize, bool)>, usize) {
+    let holders = &distinct[index].1;
+    let mut rows: Vec<(usize, bool)> = distinct
+        .iter()
+        .enumerate()
+        .filter(|(other, _)| *other != index)
+        .map(|(_, (_, rows))| (rows[0], false))
+        .take(cap)
+        .collect();
+    let room = cap - rows.len();
+    rows.extend(holders[1..].iter().take(room).map(|&row| (row, true)));
+    let total = distinct.len() - 1 + holders.len() - 1;
+    let omitted = total - rows.len();
+    (rows, omitted)
 }
 
 /// `findings`, or `failures` alone when there are any: an assertion with no
@@ -981,5 +1084,42 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["a failure"]
         );
+    }
+
+    /// Distinct values, the first held by `first` rows and each other by one.
+    fn distinct(values: usize, first: usize) -> Vec<(Vec<Scalar>, Vec<usize>)> {
+        let mut row = 0;
+        (0..values)
+            .map(|index| {
+                let held = if index == 0 { first } else { 1 };
+                let rows = (row..row + held).collect();
+                row += held;
+                (vec![Scalar::String(index.to_string().into())], rows)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn related_rows_are_bounded_and_list_other_values_first() {
+        // 10,000 values: 20 rows of other values, the rest counted.
+        let many = distinct(10_000, 3);
+        let (rows, omitted) = related_rows(&many, 0, 20);
+        assert_eq!(rows.len(), 20);
+        assert!(rows.iter().all(|(_, same)| !same));
+        assert_eq!(omitted, 9_999 + 2 - 20);
+        // 28 rows of one value and 2 of another: the other comes first.
+        let two = vec![
+            (vec![Scalar::Bool(true)], (0..28).collect()),
+            (vec![Scalar::Bool(false)], vec![28, 29]),
+        ];
+        let (rows, omitted) = related_rows(&two, 0, 20);
+        assert_eq!(rows[0], (28, false));
+        assert_eq!(
+            rows[1..],
+            (1..20).map(|row| (row, true)).collect::<Vec<_>>()
+        );
+        assert_eq!(omitted, 8);
+        let (rows, omitted) = related_rows(&two, 1, 20);
+        assert_eq!((rows, omitted), (vec![(0, false), (29, true)], 0));
     }
 }

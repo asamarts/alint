@@ -516,6 +516,7 @@ impl Evaluator<'_> {
                         JoinSide::Right => right_row.cells[*position].clone(),
                     })
                     .collect(),
+                at: Arc::clone(&row.at),
             });
         }
         Some(out)

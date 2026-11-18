@@ -343,3 +343,163 @@ fn a_version_one_config_that_uses_the_kind_is_refused() {
         "{stderr}"
     );
 }
+
+fn run_env(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Output {
+    let mut command = crate::hermetic::command(env!("CARGO_BIN_EXE_alint"));
+    command
+        .args(args)
+        .current_dir(dir)
+        .env("NO_COLOR", "1")
+        .env("COLUMNS", "200");
+    for (name, value) in env {
+        command.env(name, value);
+    }
+    command.output().unwrap()
+}
+
+/// Every surface a finding reaches, as text: human, JSON and SARIF output,
+/// and the baseline file `alint baseline` writes.
+fn surfaces(root: &Path, env: &[(&str, &str)]) -> Vec<(&'static str, String)> {
+    let mut shown = Vec::new();
+    for (name, format) in [("human", "human"), ("json", "json"), ("sarif", "sarif")] {
+        let output = run_env(root, &["check", "--format", format], env);
+        assert_eq!(output.status.code(), Some(1), "{name}: {}", text(&output));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        shown.push((name, format!("{}{stderr}", text(&output))));
+    }
+    let output = run_env(root, &["baseline"], env);
+    assert_eq!(output.status.code(), Some(0), "{}", text(&output));
+    let baseline = std::fs::read_to_string(root.join(".alint-baseline.json")).unwrap();
+    shown.push(("baseline", baseline));
+    shown
+}
+
+/// A relation whose selection the environment writes may have read rows,
+/// and so paths and values, the environment chose: the findings of a rule
+/// that reads it, or reads a relation that reads it (`linked`), show
+/// neither, as a version 1 rule's whose `paths:` the environment writes.
+#[test]
+fn a_relation_the_environment_selects_shows_no_path_or_value_of_its_findings() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        ".alint.yml",
+        "version: 2\nrelations:\n  ranges:\n    from: { \
+        paths: \"{{env.SECRET_DIR}}/*/package.json\" \
+         }\n    entries: { format: json, at: \"$.dependencies\" }\n    fields: { dependency: \
+         entry.key, range: entry.value }\n  wanted:\n    from: { paths: wanted.json }\n    \
+         entries: { format: json, at: \"$\" }\n    fields: { name: entry.key }\n  linked:\n    \
+         join: { left: ranges, right: wanted, on: { dependency: name }, unique: right }\n    \
+         fields: { range: left.range }\nrules:\n  - id: same\n    kind: constraint\n    input: \
+         ranges\n    assert: { equal: { field: range, group_by: dependency } }\n    level: \
+         error\n  - id: linked\n    kind: constraint\n    input: linked\n    assert: { equal: \
+         { field: range } }\n    level: error\n",
+    );
+    write(root, "pkgs/a/package.json", &manifest("a", "^18.2.0"));
+    write(root, "pkgs/b/package.json", &manifest("b", "^17.0.2"));
+    write(root, "wanted.json", "{\"react\": true}\n");
+    let env = [("SECRET_DIR", "pkgs")];
+    for (surface, shown) in surfaces(root, &env) {
+        for secret in ["pkgs", "react", "^18.2.0", "^17.0.2"] {
+            assert!(!shown.contains(secret), "{surface} shows {secret}: {shown}");
+        }
+        if surface != "baseline" {
+            assert!(shown.contains("sensitive evidence"), "{surface}: {shown}");
+        }
+    }
+    let output = run_env(root, &["check", "--format", "json"], &env);
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    for result in json["results"].as_array().unwrap() {
+        let violations = result["violations"].as_array().unwrap();
+        assert_eq!(violations.len(), 2, "{result}");
+        for violation in violations {
+            assert_eq!(violation["path"], "<redacted>", "{violation}");
+            assert!(
+                violation["related_locations"]
+                    .as_array()
+                    .is_none_or(Vec::is_empty),
+                "{violation}"
+            );
+        }
+    }
+}
+
+/// A sensitive `entry.key` hides an `entry.path` beside it, which spells
+/// the key, in a generated message, in `{{row.FIELD}}` and in the baseline.
+#[test]
+fn a_sensitive_key_shows_in_no_field_that_spells_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        ".alint.yml",
+        "version: 2\nrelations:\n  tokens:\n    from: { paths: tokens.json }\n    entries: { \
+         format: json, at: \"$\" }\n    fields:\n      k: { source: entry.key, sensitive: true \
+         }\n      \
+         p: entry.path\n      v: entry.value\nrules:\n  - id: paths\n    kind: constraint\n    \
+         input: tokens\n    assert: { equal: { field: p } }\n    level: error\n  - id: values\n    \
+         kind: constraint\n    input: tokens\n    assert: { unique: { key: [v] } }\n    message: \
+         \"key {{row.k}} at {{row.p}}\"\n    level: error\n",
+    );
+    write(
+        root,
+        "tokens.json",
+        "{\"SECRET_TOKEN_NAME_1\": \"x\", \"SECRET_TOKEN_NAME_2\": \"x\"}\n",
+    );
+    for (surface, shown) in surfaces(root, &[]) {
+        assert!(!shown.contains("SECRET"), "{surface}: {shown}");
+    }
+    let human = text(&run(root, &["check"]));
+    assert!(human.contains("key <redacted> at <redacted>"), "{human}");
+}
+
+/// Every value of a sensitive field has one key word, `sensitive`, never a
+/// digest, which would let anyone who reads the baseline try values: the
+/// findings are told apart by their count, so a third against a baselined
+/// two is one new finding.
+#[test]
+fn findings_about_sensitive_values_share_a_key_and_are_counted() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        ".alint.yml",
+        "version: 2\nrelations:\n  owners:\n    from: { paths: owners.json }\n    entries: { \
+         format: json, at: \"$\" }\n    fields:\n      name: entry.key\n      owner: { source: \
+         entry.value, sensitive: true }\nrules:\n  - id: one-owner\n    kind: constraint\n    \
+         input: owners\n    assert: { equal: { field: owner } }\n    level: error\n",
+    );
+    write(root, "owners.json", "{\"a\": \"s1\", \"b\": \"s2\"}\n");
+    assert_eq!(run(root, &["baseline"]).status.code(), Some(0));
+    // A header line and one entry, counted twice.
+    let baseline = std::fs::read_to_string(root.join(".alint-baseline.json")).unwrap();
+    let entries: Vec<serde_json::Value> = baseline
+        .lines()
+        .skip(1)
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(entries.len(), 1, "{baseline}");
+    assert_eq!(entries[0]["count"], 2, "{baseline}");
+    let check = || {
+        let output = run(
+            root,
+            &[
+                "check",
+                "--baseline",
+                ".alint-baseline.json",
+                "--format",
+                "json",
+            ],
+        );
+        let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        json["results"][0]["violations"].as_array().unwrap().len()
+    };
+    assert_eq!(check(), 0);
+    write(
+        root,
+        "owners.json",
+        "{\"a\": \"s1\", \"b\": \"s2\", \"c\": \"s3\"}\n",
+    );
+    assert_eq!(check(), 1);
+}

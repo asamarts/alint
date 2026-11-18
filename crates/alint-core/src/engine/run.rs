@@ -361,10 +361,7 @@ impl Engine {
             fix_baseline: None,
             config_files: self.config_files.clone(),
         };
-        let sensitive_evidence = entry
-            .spec
-            .as_deref()
-            .is_some_and(crate::RuleSpec::has_sensitive_evidence);
+        let sensitive_evidence = Self::has_sensitive_evidence(entry);
         let sensitive_paths = self.has_sensitive_path_selection(entry);
         let trace = TraceSession::with_options(
             meta.trace.clone(),

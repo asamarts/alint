@@ -367,7 +367,8 @@ fn a_list_or_a_record_never_reaches_an_assertion() {
     assert_eq!(
         failures(&results, "c"),
         [
-            "owners.json: relation `r` (.alint.yml): `owner` binds `entry.value`, which is an array \
+            "owners.json: relation `r` (.alint.yml): `owner` binds `entry.value`, which is an \
+            array \
           at `owners.a`; a field holds a scalar (null, a boolean, a number or a string), so \
           select the members below it with `at:`, or bind only `entry.key`"
         ]
@@ -379,7 +380,8 @@ fn a_list_or_a_record_never_reaches_an_assertion() {
 const PINS: &str = "version: 2\nrelations:\n  pins:\n    from: { paths: \"**/pins.json\" }\n    \
                     entries: { format: json, at: \"$\" }\n    fields: { tool: entry.key, version: \
                     entry.value, file: path }\nrules:\n  - id: c\n    kind: constraint\n    input: \
-                    pins\n    assert: { equal: { field: version, to: { row: { file: ROW } } } }\n    \
+                    pins\n    assert: { equal: { field: version, to: { row: { file: ROW } } } \
+                    }\n    \
                     level: error\n";
 
 #[test]
@@ -438,7 +440,8 @@ fn a_source_row_must_exist_once_and_hold_a_value() {
     assert_eq!(
         failures(&null, "c"),
         [
-            "pins.json: relation `pins` (.alint.yml): `assert.equal.to.row`: the source row (`file` \
+            "pins.json: relation `pins` (.alint.yml): `assert.equal.to.row`: the source row \
+            (`file` \
           \"pins.json\", at `node` in pins.json) holds no value of `version`"
         ]
     );
@@ -453,7 +456,8 @@ fn a_literal_of_another_type_than_the_field_is_an_analysis_failure() {
     assert_eq!(
         failures(&results, "c"),
         [
-            "pins.json: relation `pins` (.alint.yml): `assert.equal.to.row.version`: the literal is \
+            "pins.json: relation `pins` (.alint.yml): `assert.equal.to.row.version`: the literal \
+            is \
           a boolean and `version` holds a string at `node` in pins.json; the comparison would \
           cross types, so the assertion has no verdict"
         ]
@@ -476,7 +480,8 @@ fn a_literal_from_the_environment_is_not_shown() {
     assert_eq!(
         findings(&results, "c"),
         [
-            "a/pins.json:1:10: `version` is \"18\" here, but \"20\" in the source row (the literals \
+            "a/pins.json:1:10: `version` is \"18\" here, but \"20\" in the source row (the \
+            literals \
           `to.row` names, at `node` in pins.json)\n  ~ the source row: pins.json:1:10"
         ]
     );
@@ -594,7 +599,8 @@ fn a_set_whose_values_or_group_cross_types_has_no_verdict() {
     assert_eq!(
         failures(&results, "c"),
         [
-            "messages.json: relation `m` (.alint.yml): `assert.set.field`: `message` holds a string \
+            "messages.json: relation `m` (.alint.yml): `assert.set.field`: `message` holds a \
+            string \
           at `en.a` in messages.json and a number at `fr.a` in messages.json; the comparison would \
           cross types, so the assertion has no verdict"
         ]
@@ -665,7 +671,8 @@ fn a_message_renders_the_reported_row_and_redacts_a_sensitive_field() {
                   format: json, at: \"$.owners\" }\n    fields:\n      name: entry.key\n      \
                   owner: { source: entry.value, sensitive: true }\nrules:\n  - id: c\n    kind: \
                   constraint\n    input: r\n    assert: { unique: { key: [owner] } }\n    \
-                  message: \"{{row.name}} repeats {{row.owner}}\"\n    level: error\n  - id: g\n    \
+                  message: \"{{row.name}} repeats {{row.owner}}\"\n    level: error\n  - id: \
+                  g\n    \
                   kind: constraint\n    input: r\n    assert: { unique: { key: [owner] } }\n    \
                   level: error\n";
     let results = run(
@@ -798,4 +805,440 @@ fn a_key_names_the_family_and_the_values_it_is_about() {
     for violation in &result(&results, "c").violations {
         assert!(violation.path_free_identity);
     }
+}
+
+// --- Bounds, places and identity (the step 1 review) -------------------------
+
+/// `owners.json` with `count` owners, each of its own value.
+fn distinct_owners(count: usize) -> String {
+    let owners: Vec<String> = (0..count)
+        .map(|index| format!("\"k{index}\": \"v{index}\""))
+        .collect();
+    format!("{{\"owners\": {{\n{}}}}}\n", owners.join(",\n"))
+}
+
+/// 3,000 distinct values give 3,000 findings, each relating to 20 rows and
+/// counting the 2,979 others, without placing them: building every related
+/// location first made the findings quadratic in the values.
+#[test]
+fn a_finding_places_no_more_related_locations_than_it_lists() {
+    let config = entries("\"$.owners\"", OWNERS, "{ equal: { field: owner } }");
+    let body = distinct_owners(3_000);
+    let started = std::time::Instant::now();
+    let results = run(&config, &[("owners.json", &body)]);
+    let elapsed = started.elapsed();
+    let result = result(&results, "c");
+    assert_eq!(result.violations.len(), 3_000);
+    for violation in &result.violations {
+        assert_eq!(violation.related_locations.len(), 20);
+        assert_eq!(violation.related_locations_omitted, 2_979);
+    }
+    assert!(
+        elapsed < std::time::Duration::from_secs(10),
+        "3,000 values took {elapsed:?}"
+    );
+}
+
+#[test]
+fn a_finding_relates_a_row_of_each_other_value_before_rows_of_its_own() {
+    let config = "version: 2\nrelations:\n  deps:\n    from: { paths: \"*/package.json\" }\n    \
+                  entries: { format: json, at: \"$.dependencies\" }\n    fields: { dependency: \
+                  entry.key, range: entry.value }\nrules:\n  - id: c\n    kind: constraint\n    \
+                  input: deps\n    assert: { unique: { key: [dependency], determines: [range] } \
+                  }\n    level: error\n";
+    let manifest = |range: &str| format!("{{\"dependencies\": {{\"react\": \"{range}\"}}}}\n");
+    let (new, old) = (manifest("^18.2.0"), manifest("^17.0.2"));
+    let mut files: Vec<(String, &str)> = (0..28)
+        .map(|index| (format!("p{index:02}/package.json"), new.as_str()))
+        .collect();
+    files.push(("q1/package.json".into(), old.as_str()));
+    files.push(("q2/package.json".into(), old.as_str()));
+    let files: Vec<(&str, &str)> = files
+        .iter()
+        .map(|(path, body)| (path.as_str(), *body))
+        .collect();
+    let results = run(config, &files);
+    let result = result(&results, "c");
+    assert_eq!(result.violations.len(), 2);
+    let labels = |violation: &Violation| -> Vec<String> {
+        violation
+            .related_locations
+            .iter()
+            .filter(|related| related.label == "a row with another value")
+            .map(|related| related.path.display().to_string().replace('\\', "/"))
+            .collect()
+    };
+    // 27 other rows at `^18.2.0`: 19 listed after the row of `^17.0.2`.
+    let common = &result.violations[0];
+    assert_eq!(labels(common), ["q1/package.json"]);
+    assert_eq!(common.related_locations.len(), 20);
+    assert_eq!(common.related_locations_omitted, 8);
+    let rare = &result.violations[1];
+    assert_eq!(labels(rare), ["p00/package.json"]);
+    assert_eq!(rare.related_locations.len(), 2);
+    assert_eq!(rare.related_locations_omitted, 0);
+}
+
+#[test]
+fn rows_that_repeat_a_key_share_its_identity_and_keep_it_when_files_are_renamed() {
+    let config = "version: 2\nrelations:\n  names:\n    from: { paths: \"p/*.json\" }\n    read: { \
+                  json: \"$.name\" }\n    fields: { name: value }\nrules:\n  - id: c\n    kind: \
+                  constraint\n    input: names\n    assert: { unique: { key: [name] } }\n    \
+                  level: \
+                  error\n";
+    let dup = "{\"name\": \"dup\"}";
+    let before = run(config, &[("p/a.json", dup), ("p/b.json", dup)]);
+    let after = run(config, &[("p/b.json", dup), ("p/c.json", dup)]);
+    assert_eq!(fingerprints(&before, "c"), fingerprints(&after, "c"));
+    assert_eq!(
+        result(&after, "c").violations[0].path.as_deref(),
+        Some(std::path::Path::new("p/c.json"))
+    );
+    // Three rows with a key give two findings of one identity.
+    let three = run(
+        config,
+        &[("p/a.json", dup), ("p/b.json", dup), ("p/c.json", dup)],
+    );
+    let prints = fingerprints(&three, "c");
+    assert_eq!(prints.len(), 2);
+    assert_eq!(prints[0], prints[1]);
+    assert_eq!(prints[0], fingerprints(&before, "c")[0]);
+}
+
+#[test]
+fn values_a_read_skipped_are_withheld_with_the_findings_of_a_rule_without_a_verdict() {
+    let config = "version: 2\nrelations:\n  pins:\n    from: { paths: \"*/package.json\" \
+                  }\n    read: { json: \"$.engines.node\" }\n    fields: { version: value, source: \
+                  path }\nrules:\n  - id: c\n    kind: constraint\n    \
+                  input: pins\n    assert: { equal: { field: version, to: { row: { source: \
+                  .nvmrc-missing } } } }\n    level: error\n";
+    let results = run(
+        config,
+        &[
+            ("a/package.json", "{\"engines\": {\"node\": 20}}"),
+            ("b/package.json", "{\"engines\": {\"node\": \"20\"}}"),
+        ],
+    );
+    assert_eq!(
+        failures(&results, "c"),
+        [
+            "relation `pins` (.alint.yml): `assert.equal.to.row`: no row has `source` \
+             \".nvmrc-missing\"; the source row must exist"
+        ]
+    );
+    // With a verdict, the skipped value is a finding.
+    let config = config.replace(".nvmrc-missing", "b/package.json");
+    let results = run(
+        &config,
+        &[
+            ("a/package.json", "{\"engines\": {\"node\": 20}}"),
+            ("b/package.json", "{\"engines\": {\"node\": \"20\"}}"),
+        ],
+    );
+    let found = findings(&results, "c");
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(found[0].contains("non-string"), "{found:?}");
+}
+
+/// Three manifests depend on `shared`, joined with its manifest's name: a
+/// finding about a field the join copies from its unique side sits at each
+/// row's own entry, the dependency, never at the one name all three share.
+#[test]
+fn a_finding_about_a_field_of_a_joins_unique_side_sits_at_the_rows_own_entry() {
+    let config = "version: 2\nrelations:\n  names:\n    from: { paths: \"*/package.json\" }\n    \
+                  read: { json: \"$.name\" }\n    fields: { name: value }\n  deps:\n    from: { \
+                  paths: \"*/package.json\" }\n    entries: { format: json, at: \
+                  \"$.dependencies\" }\n    fields: { dependency: entry.key, range: entry.value \
+                  }\n  linked:\n    join: { left: deps, right: names, on: { dependency: name }, \
+                  unique: right }\n    fields: { range: left.range, wname: right.name }\nrules:\n  \
+                  - id: u\n    kind: constraint\n    input: linked\n    assert: { unique: { key: \
+                  [wname] } }\n    level: error\n  - id: e\n    kind: constraint\n    input: \
+                  linked\n    assert: { equal: { field: wname, to: { field: range } } }\n    \
+                  level: error\n";
+    let dependent = "{\"name\": \"N\",\n\"dependencies\": {\"shared\": \"^1\"}}\n";
+    let results = run(
+        config,
+        &[
+            ("a/package.json", &dependent.replace('N', "a")),
+            ("b/package.json", &dependent.replace('N', "b")),
+            ("c/package.json", &dependent.replace('N', "c")),
+            ("shared/package.json", "{\"name\": \"shared\"}"),
+        ],
+    );
+    assert_eq!(
+        findings(&results, "u"),
+        [
+            "b/package.json:2:28: `wname` \"shared\" is not unique: the first row with it is \
+             `dependencies.shared` in a/package.json\n  ~ the first row with this key: \
+             a/package.json:2:28",
+            "c/package.json:2:28: `wname` \"shared\" is not unique: the first row with it is \
+             `dependencies.shared` in a/package.json\n  ~ the first row with this key: \
+             a/package.json:2:28",
+        ]
+    );
+    let found = findings(&results, "e");
+    assert_eq!(found.len(), 3);
+    for (finding, manifest) in found.iter().zip(["a", "b", "c"]) {
+        assert!(
+            finding.starts_with(&format!(
+                "{manifest}/package.json:2:28: `wname` is \"shared\""
+            )),
+            "{finding}"
+        );
+    }
+    let prints = fingerprints(&results, "e");
+    assert_eq!(prints.len(), 3);
+    assert!(prints[0] != prints[1] && prints[1] != prints[2]);
+    // A join that copies only its unique side's fields: a row's own entry
+    // has no cell, so its finding sits at its file.
+    let only = config.replace(
+        "fields: { range: left.range, wname: right.name }",
+        "fields: { wname: right.name }",
+    );
+    let only = only[..only.find("  - id: e\n").unwrap()].to_string();
+    let results = run(
+        &only,
+        &[
+            ("a/package.json", &dependent.replace('N', "a")),
+            ("b/package.json", &dependent.replace('N', "b")),
+            ("shared/package.json", "{\"name\": \"shared\"}"),
+        ],
+    );
+    assert_eq!(
+        findings(&results, "u"),
+        [
+            "b/package.json: `wname` \"shared\" is not unique: the first row with it is \
+             `dependencies.shared` in a/package.json\n  ~ the first row with this key: \
+             a/package.json"
+        ]
+    );
+}
+
+#[test]
+fn a_long_value_is_cut_in_a_message_and_held_as_a_digest_in_a_key() {
+    let long = "x".repeat(10_000);
+    let config = locales("equal_to", "en").replace("message: entry.key", "message: entry.value");
+    let config = config.replace(
+        "    level: error\n",
+        "    message: \"lacks {{row.message}}\"\n    level: error\n",
+    );
+    let body = format!("{{\"en\": {{\"a\": \"{long}\"}}, \"fr\": {{\"b\": \"y\"}}}}");
+    let results = run(&config, &[("messages.json", &body)]);
+    let result = result(&results, "c");
+    assert_eq!(result.violations.len(), 2);
+    for violation in &result.violations {
+        let key = violation.baseline_key.as_deref().unwrap();
+        assert!(key.len() < 200, "{key}");
+        assert!(violation.message.len() < 200, "{}", violation.message);
+    }
+    let missing = &result.violations[0];
+    assert_eq!(
+        missing.message,
+        format!("lacks {}... (10000 bytes)", "x".repeat(64))
+    );
+    assert!(
+        missing
+            .baseline_key
+            .as_deref()
+            .unwrap()
+            .contains("13:string-sha256"),
+        "{:?}",
+        missing.baseline_key
+    );
+}
+
+/// A sensitive `entry.key` makes every field that spells the key sensitive:
+/// `entry.path` shows it whole.
+#[test]
+fn a_sensitive_key_hides_every_field_that_spells_it() {
+    let config = "version: 2\nrelations:\n  r:\n    from: { paths: tokens.json }\n    entries: { \
+                  format: json, at: \"$\" }\n    fields:\n      k: { source: entry.key, \
+                  sensitive: true }\n      p: entry.path\n      v: entry.value\nrules:\n  - id: \
+                  e\n    kind: constraint\n    input: r\n    assert: { equal: { field: p } }\n    \
+                  level: error\n  - id: m\n    kind: constraint\n    input: r\n    assert: { \
+                  unique: { key: [v] } }\n    message: \"key {{row.k}} at {{row.p}}\"\n    level: \
+                  error\n";
+    let results = run(
+        config,
+        &[(
+            "tokens.json",
+            "{\"SECRET_TOKEN_NAME_1\": \"x\", \"SECRET_TOKEN_NAME_2\": \"x\"}",
+        )],
+    );
+    for id in ["e", "m"] {
+        let result = result(&results, id);
+        assert!(!result.violations.is_empty(), "{id}");
+        for violation in &result.violations {
+            let shown = shown(violation);
+            let key = violation.baseline_key.as_deref().unwrap();
+            assert!(!shown.contains("SECRET"), "{id}: {shown}");
+            assert!(!key.contains("SECRET"), "{id}: {key}");
+        }
+    }
+    assert_eq!(
+        result(&results, "m").violations[0].message,
+        "key <redacted> at <redacted>"
+    );
+}
+
+/// A field that holds keys is sensitive, so no message or baseline key of
+/// the relation's findings shows a key path, not even one of a row's own.
+#[test]
+fn a_sensitive_key_keeps_key_paths_out_of_messages_and_keys() {
+    let config = "version: 2\nrelations:\n  r:\n    from: { paths: \"*/pins.json\" }\n    \
+                  entries: { format: json, at: \"$\" }\n    fields:\n      tool: { source: \
+                  entry.key, sensitive: true }\n      version: entry.value\n      file: \
+                  path\nrules:\n  - id: s\n    kind: constraint\n    input: r\n    \
+                  assert: { equal: { field: version, to: { row: { file: a/pins.json } } } }\n    \
+                  level: error\n  - id: u\n    kind: constraint\n    input: r\n    assert: { \
+                  unique: { key: [version] } }\n    level: error\n";
+    let results = run(
+        config,
+        &[
+            ("a/pins.json", "{\"SECRET_TOOL\": \"1\"}"),
+            ("b/pins.json", "{\"SECRET_TOOL\": \"2\"}"),
+            ("c/pins.json", "{\"SECRET_TOOL\": \"1\"}"),
+        ],
+    );
+    for id in ["s", "u"] {
+        let result = result(&results, id);
+        assert!(result.analysis_failures.is_empty(), "{id}");
+        assert_eq!(result.violations.len(), 1, "{id}");
+        for violation in &result.violations {
+            let shown = shown(violation);
+            let key = violation.baseline_key.as_deref().unwrap();
+            assert!(!shown.contains("SECRET"), "{id}: {shown}");
+            assert!(
+                shown.contains("a key path not shown (a field holding keys is sensitive)"),
+                "{id}: {shown}"
+            );
+            assert!(!key.contains("SECRET"), "{id}: {key}");
+        }
+    }
+}
+
+#[test]
+fn two_missing_or_null_values_of_a_row_are_not_equal() {
+    let config = entries(
+        "\"$\"",
+        "{ a: entry.value, b: entry.value }",
+        "{ equal: { field: a, to: { field: b } } }",
+    );
+    let results = run(&config, &[("owners.json", "{\"k\": null, \"j\": \"1\"}")]);
+    assert_eq!(
+        findings(&results, "c"),
+        [
+            "owners.json:1:7: `a` is null and `b` is null in this row; they must be equal (null \
+             matches nothing)\n  ~ `b` in this row: owners.json:1:7"
+        ]
+    );
+}
+
+#[test]
+fn a_key_with_a_null_field_is_never_a_repeat() {
+    let config = entries(
+        "\"$.owners\"",
+        "{ name: entry.key, owner: entry.value, file: path }",
+        "{ unique: { key: [file, owner] } }",
+    );
+    let results = run(
+        &config,
+        &[(
+            "owners.json",
+            "{\"owners\": {\"a\": null, \"b\": null, \"c\": \"x\"}}",
+        )],
+    );
+    assert_eq!(findings(&results, "c"), [] as [String; 0]);
+}
+
+#[test]
+fn a_missing_value_sits_at_the_groups_first_file() {
+    // Group `fr` is read from two files: a value it lacks sits at the first.
+    let config = "version: 2\nrelations:\n  m:\n    from: { paths: \"*.json\" }\n    entries: { \
+                  format: json, at: \"$.*\" }\n    fields: { locale: entry.parent, message: \
+                  entry.key }\nrules:\n  - id: c\n    kind: constraint\n    input: m\n    assert: \
+                  { set: { field: message, group_by: locale, equal_to: { group: en } } }\n    \
+                  level: error\n";
+    let results = run(
+        config,
+        &[
+            (
+                "a.json",
+                "{\"en\": {\"home\": 1, \"about\": 2}, \"fr\": {\"home\": 1}}",
+            ),
+            ("b.json", "{\"fr\": {\"faq\": 1}}"),
+        ],
+    );
+    let found = findings(&results, "c");
+    assert!(
+        found.iter().any(|finding| finding.starts_with(
+            "a.json: `locale` \"fr\" lacks `message` \"about\", which `locale` \"en\" holds"
+        )),
+        "{found:?}"
+    );
+}
+
+/// With two determined fields, a finding sits at the first one the rows
+/// disagree on: here `owner`, since the rows of key `a` share their file.
+#[test]
+fn a_finding_sits_at_the_first_determined_field_the_rows_disagree_on() {
+    let config = entries(
+        "[\"$.dev\", \"$.prod\"]",
+        "{ name: entry.key, owner: entry.value, file: path }",
+        "{ unique: { key: [name], determines: [file, owner] } }",
+    );
+    let results = run(
+        &config,
+        &[(
+            "owners.json",
+            "{\"dev\": {\"a\": \"x\"},\n\"prod\": {\"a\": \"y\"}}\n",
+        )],
+    );
+    let found = findings(&results, "c");
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert!(found[0].starts_with("owners.json:1:15:"), "{found:?}");
+    assert!(found[1].starts_with("owners.json:2:15:"), "{found:?}");
+}
+
+/// A finding's place is read as the relation read its file: as a literal
+/// path, never through a symlink out of the root that replaced the file
+/// after the relation read it (or a FIFO, which would block the read).
+#[cfg(unix)]
+#[test]
+fn a_place_is_read_as_the_relation_read_its_file() {
+    let config = entries("\"$.owners\"", OWNERS, "{ unique: { key: [owner] } }");
+    let body = "{\"owners\": {\"a\": \"x\", \"b\": \"x\"}}";
+    let (dir, loaded) = load_tree(&config, &[("owners.json", body)]);
+    let config = loaded.unwrap();
+    let index = walk(
+        dir.path(),
+        &WalkOptions::default().with_global_git_excludes(false),
+    )
+    .unwrap();
+    let mut registry = alint_core::RuleRegistry::new();
+    alint_rules::register_builtin(&mut registry);
+    let rule = registry.build(&config.rules[0]).unwrap();
+    let ctx = alint_core::Context::new(dir.path(), &index);
+    let first = rule.evaluate(&ctx).unwrap();
+    assert_eq!(first.len(), 1);
+    assert!(first[0].range.is_some());
+    // The relation's rows are the run's; its file is now a symlink out.
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(outside.path().join("o.json"), format!("\n\n{body}")).unwrap();
+    std::fs::remove_file(dir.path().join("owners.json")).unwrap();
+    std::os::unix::fs::symlink(
+        outside.path().join("o.json"),
+        dir.path().join("owners.json"),
+    )
+    .unwrap();
+    let second = rule.evaluate(&ctx).unwrap();
+    assert_eq!(second.len(), 1);
+    assert_eq!(second[0].path, first[0].path);
+    assert_eq!(second[0].range, None);
+    assert!(
+        second[0]
+            .related_locations
+            .iter()
+            .all(|related| related.range.is_none())
+    );
 }
