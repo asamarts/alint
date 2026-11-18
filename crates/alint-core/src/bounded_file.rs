@@ -72,13 +72,13 @@ mod tests {
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
         let error = read_regular_capped(&tmp.path().join("missing"), 4).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
-        // A file far past the cap is refused before it is read. Sparse on
-        // Unix; NTFS allocates a file it extends unless it is marked sparse,
-        // so Windows takes one only a little past the cap.
+        // A file past the cap is refused. Twice the cap, so a regression that
+        // read it whole takes 64 MiB of this process, not the host's memory
+        // (sparse on Unix; NTFS allocates it).
         let sparse = tmp.path().join("sparse");
         std::fs::File::create(&sparse)
             .unwrap()
-            .set_len(if cfg!(windows) { 64 << 20 } else { 1 << 40 })
+            .set_len(64 << 20)
             .unwrap();
         let error = read_regular_capped(&sparse, 32 << 20).unwrap_err();
         assert_eq!(error.to_string(), "larger than 32 MiB");

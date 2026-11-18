@@ -177,10 +177,12 @@ mod tests {
         receiver.recv_timeout(deadline).ok()
     }
 
+    /// A sparse file past the cap: twice it, so a regression that read it
+    /// whole takes 64 MiB of this process, not the host's memory.
     fn sparse(path: &Path) {
         std::fs::File::create(path)
             .unwrap()
-            .set_len(64 << 30)
+            .set_len(2 * MAX_IGNORE_FILE_BYTES)
             .unwrap();
     }
 
