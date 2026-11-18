@@ -1,0 +1,40 @@
+test_version: 1
+name: a nested file_graph derives targets under a directory whose name holds a dollar sign
+tags: [check, for_each_dir, file_graph, cross_file, nested]
+
+# The iteration renders `to: "licenses/{basename}/$1-NOTICE.txt"` for the
+# directory `licenses/a$1`. Its `$1` is text, not a capture reference for
+# file_graph's own expansion: before the fix both licenses derived
+# `licenses/aarrow/arrow-NOTICE.txt` and `licenses/alucene/lucene-NOTICE.txt`,
+# so the arrow notice that exists read as dangling too.
+
+given:
+  tree:
+    licenses:
+      "a$1":
+        arrow-LICENSE.txt: "Apache License 2.0\n"
+        arrow-NOTICE.txt: "Arrow NOTICE\n"
+        lucene-LICENSE.txt: "Apache License 2.0\n"
+  config: |
+    version: 1
+    rules:
+      - id: license-has-notice
+        kind: for_each_dir
+        select: "licenses/*"
+        level: error
+        require:
+          - kind: file_graph
+            nodes: "{path}/*"
+            edges:
+              derive_target:
+                from: '([a-z]+)-LICENSE\.txt$'
+                to: 'licenses/{basename}/$1-NOTICE.txt'
+            require: no_dangling
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - {rule: license-has-notice, level: error, path: "licenses/a$1/lucene-LICENSE.txt"}
+    analysis_failures: []

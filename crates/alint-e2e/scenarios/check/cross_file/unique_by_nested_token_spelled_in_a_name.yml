@@ -1,0 +1,35 @@
+test_version: 1
+name: a nested unique_by reads a key whose value spells a path token as text
+tags: [check, for_each_dir, unique_by, cross_file, nested]
+
+# Nested in `for_each_dir`, `key: "{basename}"` holds the iterated directory's
+# name, so every file under one directory shares it. unique_by must not
+# substitute the `{stem}` in the name `x{stem}` again with each file's stem:
+# before the fix the keys read `xa` and `xb`, and the duplicate went unseen.
+
+given:
+  tree:
+    pk:
+      "x{stem}":
+        a.md: "# a\n"
+        s:
+          b.md: "# b\n"
+  config: |
+    version: 1
+    rules:
+      - id: one-doc-per-package
+        kind: for_each_dir
+        select: "pk/*"
+        level: error
+        require:
+          - kind: unique_by
+            select: "{path}/**/*.md"
+            key: "{basename}"
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - {rule: one-doc-per-package, level: error, path: "pk/x{stem}/a.md", message: {regex: '^duplicate key "x\{stem\}" shared by 2 file\(s\)'}}
+    analysis_failures: []

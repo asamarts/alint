@@ -490,8 +490,8 @@ impl RegistryPathsResolveRule {
             .filter(|e| scope.matches(&e.path, ctx.index))
             .map(|e| e.path.to_path_buf())
             .chain(
-                ctx.index
-                    .dirs()
+                scope
+                    .candidate_dirs(ctx.index)
                     .filter(|e| scope.matches(&e.path, ctx.index))
                     .map(|e| e.path.to_path_buf()),
             )

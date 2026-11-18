@@ -1,0 +1,37 @@
+test_version: 1
+name: a nested pair looks for the partner under a directory whose name spells a path token
+tags: [check, for_each_dir, pair, cross_file, nested]
+
+# The iteration renders `partner: "packages/{basename}/api.h"` as
+# `packages/x{stem}/api.h` for the directory `packages/x{stem}`. pair must not
+# substitute the `{stem}` in that name again with each primary's stem: before
+# the fix it looked for `packages/xa/api.h`, which exists, and passed. The
+# directory `packages/xa` has its header, so its `b.c` passes.
+
+given:
+  tree:
+    packages:
+      "x{stem}":
+        a.c: "int a;\n"
+      xa:
+        api.h: "int b;\n"
+        b.c: "int b;\n"
+  config: |
+    version: 1
+    rules:
+      - id: package-header
+        kind: for_each_dir
+        select: "packages/*"
+        level: error
+        require:
+          - kind: pair
+            primary: "{path}/*.c"
+            partner: "packages/{basename}/api.h"
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - {rule: package-header, level: error, path: "packages/x{stem}/a.c", message: {regex: 'no matching partner at packages[/\\]x\{stem\}[/\\]api\.h \(template: packages/x\{stem\}/api\.h\)$'}}
+    analysis_failures: []

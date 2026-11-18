@@ -1,0 +1,38 @@
+test_version: 1
+name: a nested command passes an argument whose value spells a path token as text
+# linux-only: the wrapped command is a POSIX `sh` one-liner, as in the other
+# command scenarios.
+tags: [check, command, plugin, for_each_dir, nested, linux-only]
+
+# The iteration renders the argument `{path}` as `pk/x{stem}`, the iterated
+# directory. command must not substitute the `{stem}` in that name again with
+# each matched file's stem: before the fix the checker received `pk/xa` for
+# `pk/x{stem}/a.txt`. The checker passes when its argument is the directory of
+# the file alint matched (`ALINT_PATH`).
+
+capabilities:
+  spawn: true
+
+given:
+  tree:
+    pk:
+      "x{stem}":
+        a.txt: "a\n"
+  config: |
+    version: 1
+    rules:
+      - id: package-check
+        kind: for_each_dir
+        select: "pk/*"
+        level: error
+        require:
+          - kind: command
+            paths: "{path}/*.txt"
+            command: ["sh", "-c", "test \"$0\" = \"$(dirname \"$ALINT_PATH\")\"", "{path}"]
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []
+    analysis_failures: []

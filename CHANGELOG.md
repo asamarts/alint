@@ -946,7 +946,8 @@ policy-test package the user does not trust.
   directory (`{path}/*.md`) reads only that directory's entries,** where it tested every entry in
   the tree on every iteration, so its time grew with the square of the number of directories (0.49 s
   at 2,000 directories, 4.50 s at 8,000). About 40 kinds, `key_parity`'s peers and
-  the per-file rules narrow this way.
+  the per-file rules narrow this way, and so does the search for the directories a
+  `registry_paths_resolve` glob entry matches.
 - **YAML files over 1 MiB share a budget of 32 MiB of input parsing at once** (ADR-0042). With
   ayaml, one YAML parse at the 32 MiB input cap peaks at 4.5 to 6.2 GB, and every worker thread
   could run one. A parse of a larger file now waits until its size is free in the budget (or, when
@@ -1055,10 +1056,23 @@ policy-test package the user does not trust.
   or removal at a node an alias or merge key names, or on a path through one, declines. Removing a
   YAML block mapping's last entries writes `{}`, where it left the key with no value, which reads as
   null ([ADR-0044](docs/adr/0044-untrusted-runs-git-as-a-process-and-a-wider-memory-gate.md)).
-- **In a rule nested two or more levels deep, a token's value is substituted once.** The inner
-  iterations rendered the outer one's values again, so a file or directory named like a token
-  (`x{stem}`) was expanded twice: `key_parity` reported a missing peer, and messages showed the
-  wrong path. The outermost iteration now substitutes every token.
+- **In a nested rule, a token's value is substituted once.** In a rule nested two or more levels
+  deep, the inner iterations rendered the outer one's values again, and a nested `pair`'s
+  `partner`, `unique_by`'s `key`, `cross_file`'s `register_as` and `command`'s arguments, which the
+  iteration had rendered, were rendered again by the rule for each entry it checked. A file or
+  directory named like a token (`x{stem}`) was expanded twice: under `packages/x{stem}`, a nested
+  `pair` looked for `packages/x{stem}/api.h` as `packages/xa/api.h` and passed when that file
+  existed, `unique_by` read one shared key as several, `key_parity` reported a missing peer, and
+  messages showed the wrong path. The outermost iteration now substitutes every token, and a rule
+  it built takes these options as text. In the same way a nested `file_graph` takes a `$` in a
+  value as text in `derive_target.to` (a directory `a$1` is not a capture reference), and a
+  nested rule that fills `{{ctx.*}}` placeholders in its message (`pair`, `unique_by`,
+  `dir_contains`, `dir_only_contains`, `key_parity`, `git_blame_age`) shows a name spelled like
+  one (`x{{ctx.primary}}`) as it is.
+- **A nested `command`, `command_idempotent` or `generated_file_fresh` passes a name that starts
+  with `-` as a path.** The iteration rendered `{path}` in their `command:` arguments without the
+  guard `command` gives the files it matches (L13, 0.14.0), so a directory named `--write`
+  reached the tool as the option `--write`; it is now `./--write`.
 - **`key_parity` compares a YAML key written as a block scalar (`? |`) or left empty,** at the place
   its text starts, where it dropped such a key.
 - **`key_parity` holds each key path of a deep, wide JSON or YAML file once,** where it copied the
