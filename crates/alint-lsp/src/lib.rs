@@ -106,9 +106,14 @@ use edits::{fix_edit_to_workspace_edit, located_edits_to_workspace_edit};
 use render::{render_finding, render_notes};
 
 /// Server options, set from the `alint lsp` command line.
+///
+/// Built with [`LspOptions::default`] and the `with_*` setters, so a later
+/// field is an addition rather than a breaking change. The fields stay public,
+/// to read and to assign.
 // Each bool is a command-line flag.
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct LspOptions {
     /// `--show-notes`: list every informational note on stderr after a
     /// full check, instead of the default one-line count.
@@ -133,6 +138,55 @@ pub struct LspOptions {
 }
 
 impl LspOptions {
+    /// Sets [`Self::show_notes`].
+    #[must_use]
+    pub fn with_show_notes(mut self, show_notes: bool) -> Self {
+        self.show_notes = show_notes;
+        self
+    }
+
+    /// Sets [`Self::analysis_time`].
+    #[must_use]
+    pub fn with_analysis_time(mut self, analysis_time: Option<alint_core::AnalysisTime>) -> Self {
+        self.analysis_time = analysis_time;
+        self
+    }
+
+    /// Sets [`Self::registry`].
+    #[must_use]
+    pub fn with_registry(mut self, registry: Option<alint_core::RuleRegistry>) -> Self {
+        self.registry = registry;
+        self
+    }
+
+    /// Sets [`Self::config`].
+    #[must_use]
+    pub fn with_config(mut self, config: Option<PathBuf>) -> Self {
+        self.config = config;
+        self
+    }
+
+    /// Sets [`Self::no_gitignore`].
+    #[must_use]
+    pub fn with_no_gitignore(mut self, no_gitignore: bool) -> Self {
+        self.no_gitignore = no_gitignore;
+        self
+    }
+
+    /// Sets [`Self::no_spawn`].
+    #[must_use]
+    pub fn with_no_spawn(mut self, no_spawn: bool) -> Self {
+        self.no_spawn = no_spawn;
+        self
+    }
+
+    /// Sets [`Self::untrusted`].
+    #[must_use]
+    pub fn with_untrusted(mut self, untrusted: bool) -> Self {
+        self.untrusted = untrusted;
+        self
+    }
+
     fn registry(&self) -> alint_core::RuleRegistry {
         self.registry
             .clone()
@@ -151,6 +205,26 @@ impl LspOptions {
         }
     }
 }
+
+/// The types alint-lsp seals, as a crate that depends on it sees them
+/// (ADR-0046 decision 6).
+///
+/// The first block must compile: it uses the constructor, a setter and a
+/// field. The second must fail to compile: it does the same with a functional
+/// record update, which a sealed struct refuses. With the first block
+/// compiling, the seal is the only reason the second can fail, so a second
+/// block that compiles means the type lost `#[non_exhaustive]`.
+///
+/// ```
+/// let mut options = alint_lsp::LspOptions::default().with_no_spawn(true);
+/// options.untrusted = true;
+/// ```
+///
+/// ```compile_fail
+/// let _ = alint_lsp::LspOptions { untrusted: true, ..alint_lsp::LspOptions::default() };
+/// ```
+#[cfg(doctest)]
+pub struct SealedTypes;
 
 /// One cached finding for a file: enough to publish a diagnostic and to
 /// render a hover. Kept per URI in [`State::diagnostics`] so `hover`

@@ -46,9 +46,10 @@ full below.
 - Library: `WhenEnv::env` is an `Option<&BTreeMap<String, String>>`; `LspOptions` gains `config`,
   `no_gitignore`, `no_spawn` and `untrusted`, and `LoadOptions` gains `global_git_excludes`, which
   breaks a struct literal; YAML values and errors are alint's own types (`alint_core::yaml`) in
-  place of `yaml_serde`'s; `Violation`, `Context`, `RuleSpec`, `NestedRuleSpec` and `WalkOptions`
-  are `#[non_exhaustive]`, as is `alint_core::Error`; and `baseline::Fingerprints` is gone
-  (Changed, Added, Removed).
+  place of `yaml_serde`'s; `Violation`, `Context`, `RuleSpec`, `NestedRuleSpec`, `WalkOptions`,
+  `LspOptions` and `LoadOptions` are `#[non_exhaustive]`, as is `alint_core::Error`, so build them
+  with their constructors and `with_*` setters; and `baseline::Fingerprints` is gone (Changed,
+  Added, Removed).
 
 ### Security
 
@@ -458,8 +459,8 @@ policy-test package the user does not trust.
   `candidate_dirs`** (the index entries a scope can match, narrowed to the literal directories its
   patterns start with), **`LspOptions::config`, `no_gitignore`, `no_spawn` and `untrusted`**,
   **`LoadOptions::global_git_excludes`** and
-  **`alint_testkit::Runner::experimental_config_version`**. The new `LspOptions` and `LoadOptions`
-  fields break a caller that builds either struct with a literal; add `..Default::default()`.
+  **`alint_testkit::Runner::experimental_config_version`**. `LspOptions` and `LoadOptions` are now
+  sealed (see Changed), so a caller builds them with the setters below.
 - **Language-server configuration errors are placed where they are.** A YAML syntax error in
   `.alint.yml` is shown on its line instead of on the first line of the file.
 - **`alint_core::yaml_depth::expansion`, `GuardScan::expansion` and `Expansion`** (library
@@ -494,6 +495,13 @@ policy-test package the user does not trust.
     for each other field.
   - `WalkOptions::default()`, as before, with `with_respect_gitignore`, `with_extra_ignores`
     and `with_global_git_excludes` (below).
+  - `alint_lsp::LspOptions::default()`, with a `with_*` setter for each field (`with_show_notes`,
+    `with_analysis_time`, `with_registry`, `with_config`, `with_no_gitignore`, `with_no_spawn`
+    and `with_untrusted`).
+  - `alint_dsl::LoadOptions::default()`, `with_catalog(catalog)` and `with_cache(cache)`, as
+    before, with `cache` and a `with_*` setter for each other field (`with_kind_catalog`,
+    `with_fetcher`, `with_environment`, `with_config_source`, `with_remote_policy`,
+    `with_repository_root` and `with_global_git_excludes`).
   - `Violation::new` and its existing setters are unchanged; its other fields are assigned.
 - **The options structs of 14 fix operations are exported from `alint_core`** (library API,
   ADR-0038): `ChmodFixSpec`, `CommandFixSpec`, `CreateAndRegisterFixSpec`, `DirCreateFixSpec`,
@@ -894,8 +902,9 @@ policy-test package the user does not trust.
     `reject_spawning_fix_op_templates_in`, `reject_spawning_fix_ops_in` and
     `reject_spawning_templates_in`. The loader still runs them on every configuration.
 - **Breaking (library API): `Violation`, `Context`, `RuleSpec`, `NestedRuleSpec` and
-  `WalkOptions` are `#[non_exhaustive]`** (#518, ADR-0032 decision 3, ADR-0038). Adding a field
-  to them is no longer a breaking change, and code outside `alint-core` can no longer build them
+  `WalkOptions` are `#[non_exhaustive]`** (#518, ADR-0032 decision 3, ADR-0038), **and so are
+  `alint_lsp::LspOptions` and `alint_dsl::LoadOptions`** (ADR-0046 decision 6). Adding a field
+  to them is no longer a breaking change, and code outside their crate can no longer build them
   with a struct literal or a functional record update (`..other`). Build them with the
   constructors and setters listed under Added; the fields stay public to read and to assign, and
   a pattern that destructures one needs `..`.

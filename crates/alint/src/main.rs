@@ -559,16 +559,15 @@ fn cmd_lsp(cli: &Cli) -> Result<ExitCode> {
         }
         None => None,
     };
-    let code = alint_lsp::run_stdio(alint_lsp::LspOptions {
-        show_notes: cli.show_notes,
-        analysis_time: cli.as_of,
-        registry: Some(cli.registry()),
-        config,
-        no_gitignore: cli.no_gitignore,
-        no_spawn: cli.no_spawn,
-        untrusted: cli.untrusted,
-    })
-    .context("running language server")?;
+    let options = alint_lsp::LspOptions::default()
+        .with_show_notes(cli.show_notes)
+        .with_analysis_time(cli.as_of)
+        .with_registry(Some(cli.registry()))
+        .with_config(config)
+        .with_no_gitignore(cli.no_gitignore)
+        .with_no_spawn(cli.no_spawn)
+        .with_untrusted(cli.untrusted);
+    let code = alint_lsp::run_stdio(options).context("running language server")?;
     Ok(ExitCode::from(u8::try_from(code).unwrap_or(1)))
 }
 

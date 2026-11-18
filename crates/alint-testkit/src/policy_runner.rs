@@ -380,16 +380,13 @@ impl Runner {
     #[allow(clippy::too_many_lines)]
     fn prepare_step(&self, step: TestStep, context: &ExecutionContext<'_>) -> Result<PreparedStep> {
         let registry = self.registry.clone();
-        let options = alint_dsl::LoadOptions {
-            kind_catalog: Some(registry.catalog()),
-            cache: Some(alint_dsl::extends::Cache::at(context.sandbox.join("cache"))),
-            fetcher: None,
-            environment: context.environment.clone(),
-            config_source: context.source_provider.clone(),
-            remote_policy: alint_dsl::RemotePolicy::Deny,
-            repository_root: Some(context.repository.to_path_buf()),
-            global_git_excludes: false,
-        };
+        let options = alint_dsl::LoadOptions::with_catalog(registry.catalog())
+            .cache(alint_dsl::extends::Cache::at(context.sandbox.join("cache")))
+            .with_environment(context.environment.clone())
+            .with_config_source(context.source_provider.clone())
+            .with_remote_policy(alint_dsl::RemotePolicy::Deny)
+            .with_repository_root(Some(context.repository.to_path_buf()))
+            .with_global_git_excludes(false);
         let config = match self.load_config(context.config_path, &options) {
             Ok(config) => config,
             Err(error) => {

@@ -1309,7 +1309,13 @@ pub enum RemotePolicy {
 /// deterministic environment and package-source providers, deny remote
 /// resolution before cache access, and point nested-config discovery at a
 /// separate repository root.
+///
+/// Built with [`LoadOptions::default`], [`LoadOptions::with_catalog`] or
+/// [`LoadOptions::with_cache`] and the setters, so a later field is an
+/// addition rather than a breaking change. The fields stay public, to read
+/// and to assign.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct LoadOptions<'catalog> {
     /// Rule-kind and fix-operation capability inventory. Production callers
     /// should always inject the registry they will use to build the config.
@@ -1375,7 +1381,88 @@ impl<'catalog> LoadOptions<'catalog> {
         self.cache = Some(cache);
         self
     }
+
+    /// Sets [`Self::kind_catalog`].
+    #[must_use]
+    pub fn with_kind_catalog(
+        mut self,
+        kind_catalog: Option<alint_core::KindCatalog<'catalog>>,
+    ) -> Self {
+        self.kind_catalog = kind_catalog;
+        self
+    }
+
+    /// Sets [`Self::fetcher`].
+    #[must_use]
+    pub fn with_fetcher(mut self, fetcher: Option<extends::Fetcher>) -> Self {
+        self.fetcher = fetcher;
+        self
+    }
+
+    /// Sets [`Self::environment`].
+    #[must_use]
+    pub fn with_environment(
+        mut self,
+        environment: std::sync::Arc<dyn EnvironmentProvider>,
+    ) -> Self {
+        self.environment = environment;
+        self
+    }
+
+    /// Sets [`Self::config_source`].
+    #[must_use]
+    pub fn with_config_source(
+        mut self,
+        config_source: std::sync::Arc<dyn ConfigSourceProvider>,
+    ) -> Self {
+        self.config_source = config_source;
+        self
+    }
+
+    /// Sets [`Self::remote_policy`].
+    #[must_use]
+    pub fn with_remote_policy(mut self, remote_policy: RemotePolicy) -> Self {
+        self.remote_policy = remote_policy;
+        self
+    }
+
+    /// Sets [`Self::repository_root`].
+    #[must_use]
+    pub fn with_repository_root(mut self, repository_root: Option<PathBuf>) -> Self {
+        self.repository_root = repository_root;
+        self
+    }
+
+    /// Sets [`Self::global_git_excludes`].
+    #[must_use]
+    pub fn with_global_git_excludes(mut self, global_git_excludes: bool) -> Self {
+        self.global_git_excludes = global_git_excludes;
+        self
+    }
 }
+
+/// The types alint-dsl seals, as a crate that depends on it sees them
+/// (ADR-0046 decision 6).
+///
+/// The first block must compile: it uses the constructor, a setter and a
+/// field. The second must fail to compile: it does the same with a functional
+/// record update, which a sealed struct refuses. With the first block
+/// compiling, the seal is the only reason the second can fail, so a second
+/// block that compiles means the type lost `#[non_exhaustive]`.
+///
+/// ```
+/// let mut options = alint_dsl::LoadOptions::default().with_global_git_excludes(false);
+/// options.remote_policy = alint_dsl::RemotePolicy::Deny;
+/// ```
+///
+/// ```compile_fail
+/// let _ = alint_dsl::LoadOptions {
+///     global_git_excludes: false,
+///     ..alint_dsl::LoadOptions::default()
+/// };
+/// ```
+#[cfg(doctest)]
+pub struct SealedTypes;
 
 /// The refusal of a config larger than [`alint_core::MAX_STRUCTURED_BYTES`],
 /// in the words of a structured data file's.

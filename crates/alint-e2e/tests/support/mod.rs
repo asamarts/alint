@@ -56,17 +56,11 @@ pub fn load_with(
     path: &Path,
     options: &alint_dsl::LoadOptions<'_>,
 ) -> alint_core::Result<alint_core::Config> {
-    let options = alint_dsl::LoadOptions {
-        kind_catalog: Some(REGISTRY.catalog()),
-        cache: options.cache.clone(),
-        fetcher: options.fetcher.clone(),
-        environment: options.environment.clone(),
-        config_source: options.config_source.clone(),
-        remote_policy: options.remote_policy,
-        repository_root: options.repository_root.clone(),
+    let options = options
+        .clone()
+        .with_kind_catalog(Some(REGISTRY.catalog()))
         // Nested-config discovery reads no host Git setup (`walk_options`).
-        global_git_excludes: false,
-    };
+        .with_global_git_excludes(false);
     alint_dsl::load_with(path, &options)
 }
 
