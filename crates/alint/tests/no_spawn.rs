@@ -27,7 +27,7 @@ fn run(dir: &Path, args: &[&str]) -> Output {
 const REFUSING_FLAGS: [&str; 2] = ["--no-spawn", "--untrusted"];
 
 /// Each subcommand that loads a config, with `flag`.
-fn config_commands(flag: &'static str) -> [Vec<&'static str>; 7] {
+fn config_commands(flag: &'static str) -> [Vec<&'static str>; 8] {
     [
         vec!["check", flag],
         vec![flag],
@@ -36,6 +36,7 @@ fn config_commands(flag: &'static str) -> [Vec<&'static str>; 7] {
         vec!["facts", flag],
         vec!["list", flag],
         vec!["validate-config", flag],
+        vec!["export-agents-md", flag],
     ]
 }
 
@@ -334,14 +335,36 @@ fn explain_trace_refuses_the_traced_spawning_rule_even_when_off() {
     }
 }
 
+/// `suggest` runs Git (`git ls-files`, to look for stale TODOs) only without
+/// the flags: with either, it suggests from the walk alone and Git runs no
+/// command the repository's `.git/config` names.
+#[test]
+fn suggest_runs_no_git_with_no_spawn() {
+    let dir = tempfile::tempdir().unwrap();
+    let canary = git_canary_repository(dir.path());
+    for flag in REFUSING_FLAGS {
+        let out = run(dir.path(), &["suggest", flag]);
+        assert!(
+            out.status.success(),
+            "{flag}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(!canary.exists(), "{flag}: Git ran");
+    }
+    let out = run(dir.path(), &["suggest"]);
+    assert!(
+        canary.exists(),
+        "positive control did not run Git: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
 #[test]
 fn no_spawn_is_rejected_where_it_means_nothing() {
     let dir = tempfile::tempdir().unwrap();
     for flag in REFUSING_FLAGS {
         for args in [
             &["init", flag][..],
-            &["suggest", flag],
-            &["export-agents-md", flag],
             &["rules", "list", flag],
             &["test", flag, "--allow-spawn"],
         ] {

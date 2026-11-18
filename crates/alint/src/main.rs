@@ -340,21 +340,17 @@ fn run(mut cli: Cli) -> Result<ExitCode> {
              subcommand writes via `--output`)"
         );
     }
-    // `--no-spawn` and `--untrusted` refuse what a loaded config would run; a
-    // subcommand that runs no rule (or, like `test`, gates spawning itself)
-    // would silently ignore them.
+    // `--no-spawn` and `--untrusted` refuse what a loaded config would run and
+    // what alint would run for it (`suggest` runs Git to look for stale TODOs);
+    // a subcommand that loads no config and runs nothing would silently ignore
+    // them.
     if let Some(flag) = cli.process_refusal()
-        && matches!(
-            command,
-            Command::Init { .. }
-                | Command::Suggest { .. }
-                | Command::ExportAgentsMd { .. }
-                | Command::Rules { .. }
-        )
+        && matches!(command, Command::Init { .. } | Command::Rules { .. })
     {
         bail!(
             "`{flag}` applies only to `check`, `fix`, `baseline`, `list`, `explain`, \
-             `facts`, `validate-config`, `test` and `lsp`; this subcommand runs no rule"
+             `facts`, `validate-config`, `export-agents-md`, `suggest`, `test` and `lsp`; \
+             this subcommand loads no config and runs nothing"
         );
     }
     if let Some(flag) = cli.process_refusal() {
@@ -597,12 +593,7 @@ fn cmd_export_agents_md(opts: &ExportAgentsMdOptions, cli: &Cli) -> Result<ExitC
         section_title,
         include_info: opts.include_info,
     };
-    let registry = cli.registry();
-    export_agents_md::run(
-        cli.config.first().map(PathBuf::as_path),
-        &run_opts,
-        &registry,
-    )
+    export_agents_md::run(&run_opts, cli)
 }
 
 #[derive(Debug)]

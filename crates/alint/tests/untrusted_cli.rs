@@ -85,6 +85,7 @@ fn untrusted_refuses_a_remote_extends_before_connecting() {
         &["list", "--untrusted"],
         &["explain", "readme", "--untrusted"],
         &["validate-config", "--untrusted"],
+        &["export-agents-md", "--untrusted"],
     ] {
         let out = run(dir.path(), home.path(), args, &ENV);
         let stderr = String::from_utf8_lossy(&out.stderr);
@@ -190,6 +191,7 @@ fn untrusted_refuses_allow_out_of_root() {
         &["fix", "--untrusted", "--dry-run", "--diff"],
         &["check", "--untrusted"],
         &["list", "--untrusted"],
+        &["export-agents-md", "--untrusted"],
     ] {
         let out = run(&repo, home.path(), args, &[]);
         let (stdout, stderr) = (

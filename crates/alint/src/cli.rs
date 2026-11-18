@@ -67,8 +67,11 @@ pub(crate) struct Cli {
     /// config: lint a repository you do not trust with `--untrusted`, or with
     /// your own config (`-c`).
     /// Applies to `check`, `fix`, `baseline`, `list`, `explain`, `facts`,
-    /// `validate-config` and `lsp`; `test` already refuses spawning without
-    /// `--allow-spawn`, which this flag forbids.
+    /// `validate-config`, `export-agents-md`, `suggest` (which then runs no
+    /// Git and skips its stale-TODO suggestion) and `lsp`; `test` already
+    /// refuses spawning without `--allow-spawn`, which this flag forbids,
+    /// and runs Git only in the repositories it makes for a test's
+    /// `given.git`.
     #[arg(long, global = true)]
     pub(crate) no_spawn: bool,
 

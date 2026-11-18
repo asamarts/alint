@@ -407,6 +407,20 @@ pub(super) fn report_pattern_hints(
     }
 }
 
+/// The config at `config_path` as `export-agents-md` reads it: loaded with
+/// this run's options ([`load_options`]), refusing what `--no-spawn` and
+/// `--untrusted` refuse as `list` does, though it runs nothing.
+pub(super) fn load_for_export(
+    config_path: &Path,
+    registry: &RuleRegistry,
+    cli: &Cli,
+) -> Result<alint_core::Config> {
+    let config = alint_dsl::load_with(config_path, &load_options(registry, cli))?;
+    remember_environment_values(&config);
+    refuse_spawning(&config, registry, None, cli)?;
+    Ok(config)
+}
+
 /// With `--no-spawn` or `--untrusted`, refuse a config with an enabled rule
 /// (or the off rule `explain --trace` includes), fix or fact that spawns a
 /// process or runs Git.

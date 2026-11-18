@@ -441,8 +441,10 @@ policy-test package the user does not trust.
   repository's `.git/config` names) fails the load before anything runs, naming it: `rule "x" (kind:
   command) spawns a process; --no-spawn refuses it`. A rule at `level: off` runs nothing and is not
   refused. `--changed` and `--base` are refused, and the run starts no Git command. It applies to
-  `check`, `fix`, `baseline`, `list`, `explain`, `facts`, `validate-config` and `lsp`; `test`
-  rejects it beside `--allow-spawn`, and the commands that run no rule reject it. It does not refuse
+  `check`, `fix`, `baseline`, `list`, `explain`, `facts`, `validate-config`, `export-agents-md`,
+  `suggest` (which then runs no Git and skips its stale-TODO suggestion) and `lsp`; `test` rejects
+  it beside `--allow-spawn`, and `init` and `rules`, which load no config and run nothing, reject
+  it. It does not refuse
   a remote `extends:` or environment values: for a repository you do not trust, use `--untrusted`.
 - **`--untrusted`** (global flag): lint a repository you do not trust with its own config. It
   refuses what `--no-spawn` refuses, naming `--untrusted`, refuses a remote `extends:` before

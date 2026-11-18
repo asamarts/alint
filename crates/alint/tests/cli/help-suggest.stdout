@@ -54,8 +54,10 @@ Options:
           before anything runs, and alint runs no Git. It leaves a remote `extends:` and the
           environment to the config: lint a repository you do not trust with `--untrusted`, or with
           your own config (`-c`). Applies to `check`, `fix`, `baseline`, `list`, `explain`, `facts`,
-          `validate-config` and `lsp`; `test` already refuses spawning without `--allow-spawn`,
-          which this flag forbids.
+          `validate-config`, `export-agents-md`, `suggest` (which then runs no Git and skips its
+          stale-TODO suggestion) and `lsp`; `test` already refuses spawning without `--allow-spawn`,
+          which this flag forbids, and runs Git only in the repositories it makes for a test's
+          `given.git`.
 
       --untrusted
           Lint a repository you do not trust: run nothing, fetch nothing and read no environment on

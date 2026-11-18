@@ -110,8 +110,9 @@ block.
   `git_tracked_only`, `scope_filter.changed_since`) is refused too, and so
   are `--changed` and `--base`; alint runs no Git. The config fails to
   load, naming the rule, before anything runs. The flag is global: `fix`,
-  `baseline`, `list`, `explain`, `facts`, `validate-config` and `lsp` take it
-  too.
+  `baseline`, `list`, `explain`, `facts`, `validate-config`,
+  `export-agents-md`, `suggest` (which then runs no Git and skips its
+  stale-TODO suggestion) and `lsp` take it too.
 - **`--untrusted`** lints a repository you do not trust. A repository's own
   `.alint.yml` is trusted like its `Makefile`; this flag is the language
   server's untrusted mode for the command line. It refuses everything
