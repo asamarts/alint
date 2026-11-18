@@ -2,6 +2,8 @@
 # Pin the npm advisory policy of ci/scripts/npm-audit.sh:
 #   - an advisory at moderate or above that is not waived FAILS, naming it;
 #   - a waived one passes, and a low one needs no waiver;
+#   - a waiver lapses once `npm audit fix` can fix its advisory; a fix that
+#     changes a major version (perhaps a downgrade) only warns;
 #   - a waiver needs a GHSA id and a reason;
 #   - the runtime dependencies are audited with no waivers: their failure
 #     fails the gate whatever the waiver list says;
@@ -21,12 +23,13 @@ ok() { echo "  ok: $1"; pass=$((pass + 1)); }
 bad() { echo "  FAIL: $1" >&2; sed 's/^/      | /' "$sandbox/out" >&2; fail=$((fail + 1)); }
 
 # A report holding one advisory of `severity` with id `ghsa`, reached through
-# one package, as `npm audit --json` writes it.
+# one package, as `npm audit --json` writes it; `fix` is the advisory's
+# package's `fixAvailable` (false when not given).
 report() {
-  local ghsa="$1" severity="$2"
+  local ghsa="$1" severity="$2" fix="${3:-false}"
   cat <<JSON
 {"auditReportVersion": 2, "vulnerabilities": {
-  "picomatch": {"name": "picomatch", "severity": "$severity", "via": [
+  "picomatch": {"name": "picomatch", "severity": "$severity", "fixAvailable": $fix, "via": [
     {"source": 1, "name": "picomatch", "title": "a ReDoS",
      "url": "https://github.com/advisories/$ghsa", "severity": "$severity", "range": "<=4.0.7"}]},
   "tinyglobby": {"name": "tinyglobby", "severity": "$severity", "via": ["picomatch"]}
@@ -83,6 +86,17 @@ waivers "$waived"
 echo '{"error": "no lockfile"}' > "$sandbox/broken.json"
 expect "a report that is not an audit report fails" fail "not an" \
   "$GATE" --check-json "$sandbox/broken.json"
+
+report GHSA-fc5q-39xc-vjpf critical true > "$sandbox/fixable.json"
+expect "a waiver lapses once npm audit fix can fix its advisory" fail "can fix it now" \
+  "$GATE" --check-json "$sandbox/fixable.json"
+
+# What npm reported for the waiver when it was written: a fix that downgrades
+# @vscode/vsce to a release from before it depended on picomatch.
+report GHSA-fc5q-39xc-vjpf high \
+  '{"name": "@vscode/vsce", "version": "3.9.2", "isSemVerMajor": true}' > "$sandbox/major.json"
+expect "a fix that changes a major version only warns" pass "a new major version" \
+  "$GATE" --check-json "$sandbox/major.json"
 
 waivers "$waived, {\"id\": \"GHSA-dddd-eeee-ffff\", \"reason\": \"fixed since\"}"
 expect "a waiver for an advisory no longer reported warns" pass "no longer reported" \
