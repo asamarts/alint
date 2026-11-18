@@ -800,13 +800,18 @@ decided then.
     against a waiver list, since no picomatch release fixes GHSA-fc5q-39xc-vjpf. Before the merges,
     all five fix branches were merged in one tree and the workspace's tests run there. #574 checks
     the subject a squash merge writes (#563's title made a 126-character one on `main`), and #575
-    fixes three gaps the YAML harness showed with `ALINT_YAML_DIFF_SPECIALS=0`, which the nightly
-    does not run. Left open: #564 to #573 and #579.
+    fixes three gaps the YAML harness showed with `ALINT_YAML_DIFF_SPECIALS=0`, which the weekly
+    run does not set. A review of #577 and #578 before they merged found that an `extends:` entry
+    was charged only for its merge, after `only:` narrowed its source, so entries naming one large
+    source in other words loaded it whole each time unbounded; #577 charges the load, and #580
+    tracks merging a list in linear time. Left open: #564 to #573 and #579 to #581.
   - The advisory GHSA-78jj-xfpm-g6px gained the fix promotion, the structured-fix crashes of
     #540, unbounded ignore-file and baseline reads, and the network `extends:` path: 26 items.
   - A trial of ayaml's main branch (d5c1cf7) needs two API changes and fails 14 of about 4,850
     tests, all of them pinned messages; its peak heap is about 1.26x to 1.29x libyaml's on the
-    OpenAPI shapes. [`yaml-parser.md`](../yaml-parser.md) records the trial and the bump steps.
+    OpenAPI shapes. At a561ae2, later that day, the OpenAPI shapes are within 1.2x and the six
+    1 MB shapes at 1.53x to 2.32x (asamarts/ayaml#178). [`yaml-parser.md`](../yaml-parser.md)
+    records the trials and the bump steps.
   - For phase 7: the relation evaluator's run-wide counters (cells, bytes, rows) are shared, so
     which relation reaches a cap depends on the order rules run in. Phase 7 evaluates relations
     in plan order before the rules fan out, or documents the difference.

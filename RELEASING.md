@@ -52,7 +52,8 @@ points are explicit.
    Move entries from `## [Unreleased]` to a new `## [<x.y.z>] - YYYY-MM-DD`
    section. Add a one-paragraph summary at the top of the new section
    capturing the headline change. Keep the section order 0.18.0 onward
-   uses: `### Security` first when present, then `Added`, `Changed`,
+   uses: `### Upgrading from <previous minor>` first when a release needs
+   one, then `### Security` when present, then `Added`, `Changed`,
    `Performance`, and `Fixed`, with `Deprecated` and `Removed` when a
    release needs them. Each heading appears once per release.
 

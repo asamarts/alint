@@ -461,9 +461,9 @@ release before alint's users get it. To move the pin (ADR-0040 decision 2):
    CHANGELOG's memory and wall-time figures; and run the corpus replay against v0.22.1 (the
    `corpus-replay.yml` workflow, by `workflow_dispatch`).
 
-**The bump v0.23.0 waits on** (ADR-0040, ADR-0043): a release with the fixes ayaml's main has for
-asamarts/ayaml#132, #133, #137, #139, #140, #141, #146 and #147 (ayaml's pull requests #152 and
-#154 to #159). Beside the steps above:
+**The bump v0.23.0 waits on** (ADR-0040, ADR-0043, ADR-0044): a release with the fixes ayaml's
+main has for asamarts/ayaml#132, #133, #137, #138, #139, #140, #141, #146 and #147 (ayaml's pull
+requests #152 and #154 to #159). Beside the steps above:
 - the CHANGELOG: drop the sentences on #132, #133, #139, #146 and #147 from the cutover's entry,
   drop "Before v0.23.0 ships, the owner's approval of the harness's documented differences
   qualifies the parser (ADR-0035)", and change "ayaml 0.1.2" and the `=0.1.2` pin it names to
@@ -491,6 +491,10 @@ bump will need beside the steps above:
   and the message for a tag a typed field cannot read;
 - peak heap 1.29x libyaml's at 37 KB and 1.26x at 1.1 MB on the OpenAPI shape, down from about
   1.75x on 0.1.2, so the memory condition (step 6) still fails (asamarts/ayaml#163).
+
+The same two API changes build against ayaml's main at a561ae2, later that day. Its peak heap is
+within 1.2x on the three OpenAPI shapes (1.19x, 1.05x and 1.04x) and 1.53x to 2.32x on the six
+1 MB shapes of short keys and scalars, so step 6 still fails (asamarts/ayaml#178).
 
 ## Migration and rollback
 

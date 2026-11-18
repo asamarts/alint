@@ -10,7 +10,7 @@ decision-makers: asamarts
 
 Accepted (2026-11-17). Refines
 [ADR-0043](0043-trust-and-disclosure-decisions-from-the-post-v0221-audit.md) decisions 2, 4 and 6,
-and corrects its decision 8 (see "A correction to ADR-0043"). Amends
+and corrects its decision 8 and "The ayaml condition" (see "A correction to ADR-0043"). Amends
 [ADR-0042](0042-measure-the-yaml-parser-by-memory-and-wall-time.md) decisions 1, 2 and 4: the
 memory test measures nine document shapes, the release bound holds for each of them, and the
 parse budget charges what aliases expand to. The rest of both records stands.
@@ -47,12 +47,12 @@ parse budget charges what aliases expand to. The rest of both records stands.
 
 ## Decision
 
-1. **`--no-spawn` keeps its name and refuses every process, Git included.** A rule that runs
-   Git (the `git_*` kinds, `git_tracked_only`, `scope_filter.changed_since`, a `git_untrack` fix,
-   at any `require:` depth) is refused when the configuration loads, `--changed` and `--base` are
-   refused, and once the flag is read the process runs no Git command at all: each Git helper
-   reads as Git finding no repository. The language server skips such rules until the workspace
-   is trusted.
+1. **`--no-spawn` keeps its name and refuses every process, Git included.** A rule that runs Git
+   (the `git_*` kinds, `changeset_requires_path`, `pair_changed_together`, `git_tracked_only`,
+   `scope_filter.changed_since`, a `git_untrack` fix, at any `require:` depth) is refused when the
+   configuration loads, `--changed` and `--base` are refused, and once the flag is read the process
+   runs no Git command at all: each Git helper reads as Git finding no repository. The language
+   server skips such rules until the workspace is trusted.
 2. **A new global `--untrusted` is the language server's untrusted mode on the command line.** It
    refuses what `--no-spawn` refuses, refuses a remote `extends:` before connecting, and gives the
    configuration an empty environment (`{{env.*}}`, `env.*` in a `when:`, and a legacy `${VAR}`).
@@ -93,8 +93,9 @@ parse budget charges what aliases expand to. The rest of both records stands.
    outside `.git`. A local `extends:` that is absolute, rooted, a drive path or a network path is
    refused from its text, before any file-system call, unless `allow_out_of_root: true`.
 9. **The advisory covers this round's holes too.** GHSA-78jj-xfpm-g6px gains the fix promotion
-   (v0.17.0 to v0.22.1), the unbounded ignore-file and baseline reads, and the network path an
-   `extends:` could open on Windows. The others this round fixed are gaps in protections added
+   (v0.17.0 to v0.22.1), the structured YAML fix crashes #540 fixed (v0.17.0 to v0.22.1), the
+   unbounded ignore-file and baseline reads, and the network path an `extends:` could open on
+   Windows. The others this round fixed are gaps in protections added
    after v0.22.1, which the advisory already describes as missing from released versions.
 
 ### A correction to ADR-0043
@@ -117,9 +118,10 @@ immutable, so the corrections are recorded here, and ADR-0043's status points to
   from the top; discovery climbs on, with a warning for each configuration another user owns.
 - A configuration that wrote an enum value as a mapping or a tag fails to load, with an error
   that lists the values.
-- The release waits on ayaml improving every shape. At the 2026-11-17 measurement, ayaml 0.1.2
-  is at 1.73x to 3.06x, and its main branch at about 1.26x to 1.29x on the OpenAPI shapes. The
-  shapes and ratios are reported to asamarts/ayaml#163.
+- The release waits on ayaml improving every shape. At the 2026-11-17 measurements, ayaml 0.1.2
+  is at 1.73x to 3.06x. Its main branch, at a561ae2, is within 1.2x on the three OpenAPI shapes
+  and at 1.53x to 2.32x on the six 1 MB shapes. The shapes and ratios are reported to
+  asamarts/ayaml#163 and #178.
 - Each structured fix does one more full parse, and a batch of fixes from several rules about
   two more. A fix that the whole-document check declines is reported as declined, not applied.
 - A regular ignore file over 32 MiB stops the walk, where Git accepts one up to 100 MiB, and a

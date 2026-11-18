@@ -14,27 +14,41 @@ full below.
 - Config discovery stops at the repository's top: a repository without a `.alint.yml` of its own
   reports `no .alint.yml found` where a config above it governed it. Move the config into the
   repository or pass `--config` (Changed, Security).
-- A rule that names a path in a Git directory fails to load, and no fix writes there, so a
+- A rule that reads a file in a Git directory by name fails to load, and no fix writes there, so a
   `file_create` of `.git/hooks/...` is reported skipped. Keep hooks in a tracked directory under
   `core.hooksPath` (Changed, Security).
 - `allow_out_of_root` covers your own rules only, not a ruleset's from `extends:` (Security).
 - The language server runs no command rule, `custom:` fact or Git rule, fetches no remote
   `extends:` and reads no environment value until the editor says the workspace is trusted;
   editors other than VS Code need the `trusted` initialization option (Changed, Security).
-- YAML is read by ayaml as YAML 1.2. A one-entry mapping or a tag where a value's name goes
-  (`level: {error: ~}`, `applicability: !safe ~`) is an error, and data files over 32 MiB are
-  refused (Changed).
+- YAML is read by ayaml as YAML 1.2. An enum value written as a one-entry mapping where its name
+  goes (a fix op's `applicability: {safe: ~}`, `cross_file`'s `normalize: [{trim: ~}]`,
+  `file_graph`'s `require:`) is an error, and a configuration, `extends:` source or nested
+  configuration over 32 MiB is refused (Changed, Security).
 - `git_tracked_only: true` sees tracked files an ignore file excludes, so a `file_absent` rule can
   fire on a force-added file (Changed).
 - The human and Markdown fix reports count a fix that ran without resolving its violation as
   `unresolved` (Changed).
 - `alint test` asks for the spawn capability for a spawning rule nested in another rule, and a
-  test's `when:` and `${VAR}` read only its `given.env` (Security).
+  test's `when:` and `${VAR}` read only the test's environment (`given.env` and the sandbox's
+  values), not the host's (Security).
 - An ignore file over 32 MiB, or one that is not a regular file, stops the walk; a baseline the
   `baseline:` key names must be a regular file inside the repository; and an absolute local
   `extends:` needs `allow_out_of_root: true` (Security).
-- Library: `WhenEnv::env` is an `Option<&BTreeMap<String, String>>`, and `LspOptions` and
-  `LoadOptions` gain a field each, which breaks a struct literal (Changed, Added).
+- An `extends:` list's entries may load and merge at most 4,194,304 entries in all, counted as
+  the [configuration limits](docs/site/configuration/index.md#limits) say: a flat list reaches it
+  at about 90 rulesets of 1,000 rules each, or about 2,900 one-rule files (Fixed).
+- On Unix, a `.git` another user owns does not mark a repository's top. Run from a subdirectory
+  of a checkout another user owns (as root in a container, say), alint skips that checkout's
+  config with a warning; run it from the top or pass `--config` (Security).
+- A baseline last written by v0.21 or earlier no longer matches findings whose path the
+  environment hides; regenerate it once with `alint baseline --accept-new` (Removed).
+- Library: `WhenEnv::env` is an `Option<&BTreeMap<String, String>>`; `LspOptions` gains `config`,
+  `no_gitignore`, `no_spawn` and `untrusted`, and `LoadOptions` gains `global_git_excludes`, which
+  breaks a struct literal; YAML values and errors are alint's own types (`alint_core::yaml`) in
+  place of `yaml_serde`'s; `Violation`, `Context`, `RuleSpec`, `NestedRuleSpec` and `WalkOptions`
+  are `#[non_exhaustive]`, as is `alint_core::Error`; and `baseline::Fingerprints` is gone
+  (Changed, Added, Removed).
 
 ### Security
 
@@ -53,8 +67,9 @@ rulesets you trust and, with a content fix, only on repositories you trust.
   `extends:` was fetched, and `{{env.*}}` and `env.*` in a `when:` read the editor's environment, so
   opening a cloned repository ran its commands. Until the client sends the initialization option
   `{"trusted": true}`, the server now skips every rule of a spawning kind (at any `require:` depth),
-  every rule that runs Git (the `git_*` kinds, `git_tracked_only`, `scope_filter.changed_since`: Git
-  runs the commands a repository's `.git/config` names, such as `core.fsmonitor`) and every
+  every rule that runs Git (the `git_*` kinds, `changeset_requires_path`, `pair_changed_together`,
+  `git_tracked_only`, `scope_filter.changed_since`: Git runs the commands a repository's
+  `.git/config` names, such as `core.fsmonitor`) and every
   `custom:` fact, lints a rule whose fix alone spawns (such as `file_absent` with `fix:
   git_untrack`) without offering that fix, refuses a remote `extends:` with a diagnostic on the
   config, and reads no environment value. Every other rule lints as usual, and the server says what
@@ -100,8 +115,9 @@ rulesets you trust and, with a content fix, only on repositories you trust.
   (`/tmp/.alint.yml` over a checkout in `/tmp`, a shared home) governed the run, command rules
   included. Discovery now checks the repository's top (the nearest directory holding a `.git`
   directory or file) and stops there. A `.git` marks the top only when the current user owns it and
-  the directory that holds it (on Unix), so an empty `.git` that another user put in a directory
-  above a checkout does not end the climb before the owner check below. Outside every repository it
+  the directory that holds it (on Unix), so an empty `.git` that another user put above a directory
+  without a `.git` of its own (an unpacked archive in `/tmp`) does not end the climb before the
+  owner check below. Outside every repository it
   climbs as before but skips a config file another user owns in a directory above the one it starts
   from, with `alint: warning: skipping /tmp/.alint.yml: owned by another user` on stderr (on Unix, a
   file whose owner is not the effective user id; Windows does not check). A config in the starting
@@ -253,11 +269,6 @@ rulesets you trust and, with a content fix, only on repositories you trust.
   overrides by id counts) reads only inside the root and reports `registry source
   ../outside.json escapes the repo root`, in `alint check`, `alint fix` and the language server.
   This affects configs with `allow_out_of_root` and an `extends:` ruleset in v0.12.0 to v0.22.1.
-
-The fixes below are in the policy-test runner. Except where a bullet says otherwise, they affect
-`alint test` and the `alint_testkit::Runner` library in v0.20.0 to v0.22.1, and only for a
-policy-test package the user does not trust.
-
 - **A structured YAML fix no longer overflows the stack.** Since v0.17.0, `set_value`,
   `remove_value` and `replace` on a YAML file found the value's bytes with saphyr's loader, which
   recurses once per level of nesting. saphyr does not read every document as the check side does:
@@ -272,10 +283,10 @@ policy-test package the user does not trust.
   key holds, so a 600-byte file of twelve nested `{? *a}` levels ran `fix` for 17 s and aborted
   at 3.35 GB, where `check` took 0.02 s. The resolver keeps an alias as one node and never copies
   it.
-- **An extended or nested config can no longer promote a fix by writing its tier as a mapping or a
-  tag.** Since v0.17.0, a ruleset reached through `extends:` or a nested config could write `fix: {
-  file_remove: { applicability: {safe: ~} } }`, or `applicability: !safe ~`: a fix op's options were
-  read through a buffered enum that took a one-entry mapping as a unit variant, and the trust check
+- **An extended or nested config can no longer promote a fix by writing its tier as a mapping.**
+  Since v0.17.0, a ruleset reached through `extends:` or a nested config could write `fix: {
+  file_remove: { applicability: {safe: ~} } }`: a fix op's options were read through a buffered
+  enum that took a one-entry mapping as a unit variant, and the trust check
   compared the value as a string only, so a bare `alint fix` applied the fix (deleting files, for
   `file_remove`) without asking. A fix op's options now decode by the op's name, a tier is taken
   only as a string (any other spelling is an error that lists the tiers), and the trust gates
@@ -297,10 +308,16 @@ policy-test package the user does not trust.
   name `/dev/zero`, a FIFO or a file outside the repository. `--baseline` on the command line may
   still name a file anywhere.
 - **A local `extends:` written as an absolute, rooted, drive-letter or network path is refused
-  before alint touches it,** unless `allow_out_of_root: true`. In v0.22.1 the path was resolved
-  before it was confined to the config's directory, so on Windows `extends: //host/share/x.yml`
+  before alint touches it,** unless `allow_out_of_root: true`. From v0.14.0, which first confined a
+  local `extends:`, to v0.22.1, the path was resolved before it was confined to the config's
+  directory, so on Windows `extends: //host/share/x.yml`
   opened a connection to that host before the confinement refused it. An absolute path inside the
   root now needs `allow_out_of_root: true` or a relative path.
+
+The fixes below are in the policy-test runner. Except where a bullet says otherwise, they affect
+`alint test` and the `alint_testkit::Runner` library in v0.20.0 to v0.22.1, and only for a
+policy-test package the user does not trust.
+
 - **`given.env` in a policy test no longer reaches Git.** Since v0.20.0, `alint test` passed a
   test's `given.env` to the Git commands it runs itself: the `given.git` fixture setup, and
   alint's Git reads for rules such as `git_tracked_only`. A variable such as `GIT_CONFIG_*`
@@ -404,14 +421,14 @@ policy-test package the user does not trust.
 - **`--no-spawn`** (global flag): refuse a config whose rules, fixes or facts start a process or run
   Git, to run a repository's own config without letting it start anything. An enabled rule of a
   spawning kind (at any `require:` depth), a spawning fix such as `git_untrack` or `command`, a
-  `custom:` fact, or a rule that runs Git (the `git_*` kinds, `git_tracked_only`,
-  `scope_filter.changed_since`; Git runs the commands a repository's `.git/config` names) fails the
-  load before anything runs, naming it: `rule "x" (kind: command) spawns a process; --no-spawn
-  refuses it`. A rule at `level: off` runs nothing and is not refused. `--changed` and `--base` are
-  refused, and the run starts no Git command. It applies to `check`, `fix`, `baseline`, `list`,
-  `explain`, `facts`, `validate-config` and `lsp`; `test` rejects it beside `--allow-spawn`, and the
-  commands that run no rule reject it. It does not refuse a remote `extends:` or environment values:
-  for a repository you do not trust, use `--untrusted`.
+  `custom:` fact, or a rule that runs Git (the `git_*` kinds, `changeset_requires_path`,
+  `pair_changed_together`, `git_tracked_only`, `scope_filter.changed_since`; Git runs the commands a
+  repository's `.git/config` names) fails the load before anything runs, naming it: `rule "x" (kind:
+  command) spawns a process; --no-spawn refuses it`. A rule at `level: off` runs nothing and is not
+  refused. `--changed` and `--base` are refused, and the run starts no Git command. It applies to
+  `check`, `fix`, `baseline`, `list`, `explain`, `facts`, `validate-config` and `lsp`; `test`
+  rejects it beside `--allow-spawn`, and the commands that run no rule reject it. It does not refuse
+  a remote `extends:` or environment values: for a repository you do not trust, use `--untrusted`.
 - **`--untrusted`** (global flag): lint a repository you do not trust with its own config. It
   refuses what `--no-spawn` refuses, naming `--untrusted`, refuses a remote `extends:` before
   connecting, and gives the config an empty environment, so `{{env.NAME}}`, `env.*` in a `when:` and
@@ -420,9 +437,9 @@ policy-test package the user does not trust.
   ([ADR-0044](docs/adr/0044-untrusted-runs-git-as-a-process-and-a-wider-memory-gate.md)).
   SECURITY.md recommends it for a checkout you do not trust.
 - **The language server's `trusted` initialization option** (`{"trusted": true}`): until the
-  editor sends it, `alint lsp` runs no command rule or custom fact, fetches no remote
+  editor sends it, `alint lsp` runs no command rule, Git rule or custom fact, fetches no remote
   `extends:` and reads no environment value (see Security). The VS Code extension sends VS
-  Code's Workspace Trust state and declares limited support for untrusted workspaces.
+  Code's Workspace Trust state.
 - **Workspace trust in each editor integration.** The VS Code extension declares limited support for
   untrusted workspaces, and in Restricted Mode ignores the workspace's own `alint.path` and
   `alint.serverArgs` settings and turns off **alint: Show effective rules**. The bundled `alint.el`
@@ -438,7 +455,8 @@ policy-test package the user does not trust.
   (read a regular file up to a cap), **`Baseline::load_file`** (a baseline read with the bounds
   above), **`alint_core::POLICY_TEST_DIRECTORY`**, **`Scope::candidates`, `candidate_files` and
   `candidate_dirs`** (the index entries a scope can match, narrowed to the literal directories its
-  patterns start with), **`LspOptions::untrusted`**, **`LoadOptions::global_git_excludes`** and
+  patterns start with), **`LspOptions::config`, `no_gitignore`, `no_spawn` and `untrusted`**,
+  **`LoadOptions::global_git_excludes`** and
   **`alint_testkit::Runner::experimental_config_version`**. The new `LspOptions` and `LoadOptions`
   fields break a caller that builds either struct with a literal; add `..Default::default()`.
 - **Language-server configuration errors are placed where they are.** A YAML syntax error in
@@ -652,10 +670,10 @@ policy-test package the user does not trust.
   The JSON report is unchanged (`status: "skipped"`, `skip_kind: "unresolved"`, and the
   summary's `skipped` still includes it), as is the exit code.
 - **Breaking (library API):** the public field `WhenEnv::env` holds an `Option<&BTreeMap<String,
-  String>>`, and `WhenEnv::with_env` takes one, the type of the engine's process environment,
-  instead of a `HashMap`. The engine now passes its condition environment there whenever it has one
-  (by default its process environment), so `env.*` in a condition reads the environment the embedder
-  chose, not the host's (see Security).
+  String>>`, and `WhenEnv::with_env` takes a `&BTreeMap<String, String>`, the type of the engine's
+  process environment, where both used a `HashMap`. The engine now passes its condition environment
+  there whenever it has one (by default its process environment), so `env.*` in a condition reads
+  the environment the embedder chose, not the host's (see Security).
 - **`git_tracked_only: true` sees tracked files that an ignore file excludes** (#503, ADR-0033
   decision 3). Under the default `respect_gitignore: true` the walk leaves out what `.gitignore`,
   `.ignore`, `.git/info/exclude` and the global excludes file list, and the tracked view was
@@ -893,17 +911,18 @@ policy-test package the user does not trust.
   the files under them, where it tested every file in the tree.
 - **A rule nested in `for_each_dir` or `for_each_file` whose `paths:` is a glob below the iterated
   directory (`{path}/*.md`) reads only that directory's entries,** where it tested every entry in
-  the tree on every iteration, so its time grew with the square of the number of directories: 8,000
-  directories took about 3.6 s and now take about 0.5 s. About 40 kinds, `key_parity`'s peers and
+  the tree on every iteration, so its time grew with the square of the number of directories (0.49 s
+  at 2,000 directories, 4.50 s at 8,000). About 40 kinds, `key_parity`'s peers and
   the per-file rules narrow this way.
 - **YAML files over 1 MiB share a budget of 32 MiB of input parsing at once** (ADR-0042). With
   ayaml, one YAML parse at the 32 MiB input cap peaks at 4.5 to 6.2 GB, and every worker thread
   could run one. A parse of a larger file now waits until its size is free in the budget (or, when
   its aliases expand, a 64th of the expanded size, if that is larger: sixteen 500 KB files of
   aliases peaked at 3.1 GB), so at most one file at the cap parses at a time; a file of 1 MiB or
-  less never waits, and findings are unchanged. The `yaml_path_*` rules, `json_schema_passes`, the
-  cross-file rules' `extract:`, `pinned_references` and the structured fixes all take from it, and
-  so does `alint_core::Format::parse`, which may now wait for another thread's YAML parse.
+  less waits only when its aliases expand past 64 MiB, and findings are unchanged. The `yaml_path_*`
+  rules, `json_schema_passes`, the cross-file rules' `extract:`, `pinned_references` and the
+  structured fixes all take from it, and so does `alint_core::Format::parse`, which may now wait for
+  another thread's YAML parse.
 - **YAML files of 10 KB and more cost more time and memory to read than in 0.22:** +9% to +54% wall
   time and 1.3x to 2.9x peak memory. ayaml 0.1.2 holds about 65 bytes of heap per input byte while
   it parses, where libyaml held 35 to 39 (asamarts/ayaml#163). The v0.23.0 release waits for an
@@ -955,6 +974,15 @@ policy-test package the user does not trust.
   one spelled like the load-time placeholder, `reference: "data/_stem_"`), a literal peer whose
   key model does not allow `strip_root` or an `ignore_keys` pattern, and
   `peers: "{dir}/{basename}"` against `reference: "{path}"` (#504).
+- **On Windows, a nested `key_parity` tells its templated `reference:` apart from its peers.**
+  `{path}` and `{dir}` render with the OS separator, so `reference: "{path}"` became
+  `apps\web\en.json`, which `key_parity` read as one file name where the walk lists
+  `apps/web/en.json`. A `peers:` glob that selected only the reference compared it with itself
+  and passed, where Linux and macOS report that the glob matched no other file;
+  `peers: "{dir}/en.json"` against `reference: "{path}"` passed, where they report that the peer
+  is the reference; and messages quoted the reference with backslashes. On Windows, `key_parity`
+  now reads a `\` in `reference:` and in a literal `peers:` path as a separator, as globs already
+  do.
 - **Nested rules of every kind are checked at load with a placeholder for each path token**
   (`{stem}` as `_stem_`), where 0.22 rendered `{dir}`, `{ext}` and `{parent_name}` empty. A
   template whose empty rendering was invalid now loads, such as `reference:
@@ -999,18 +1027,24 @@ policy-test package the user does not trust.
 - **`key_parity` compares a YAML key written as a block scalar (`? |`) or left empty,** at the place
   its text starts, where it dropped such a key.
 - **`key_parity` holds each key path of a deep, wide JSON or YAML file once,** where it copied the
-  path into every key below it: a 1 MB file 120 levels deep with 100,000 keys peaked at about 700
-  MB, and now at about four times a plain parse.
+  path into every key below it, and charges each row's key path to the run's byte budget as it is
+  built: on a 1 MB file 120 levels deep with 100,000 keys its rows peaked at about 700 MB and now
+  hold about 300 MB of key paths under the default limits (#569).
 - **An `extends:` list that names one source many times loads it once,** and the work of a load's
-  `extends:` merges is bounded: 2,000 entries naming one 2,000-rule ruleset took 152 s to load. A
-  configuration that fails to decode is parsed once, where it was parsed twice.
+  `extends:` entries is bounded: 2,000 entries naming one 2,000-rule ruleset took 152 s to load. An
+  entry is charged the source it loads, before `only:` or `except:` narrows it, and each merge what
+  was merged so far and what it brings in, up to 4,194,304 entries in all (see the
+  [configuration limits](docs/site/configuration/index.md#limits)). A version 1 configuration that
+  fails to decode is no longer parsed a second time to tell its version.
 - **`alint test` no longer lets the host's global Git excludes file hide a test's nested configs.**
   The walk that finds `nested_configs:` files read `$XDG_CONFIG_HOME/git/ignore` and a
   `core.excludesFile` that `~/.gitconfig` names, where the test's own walk does not, so a host whose
   excludes listed `.alint.yml` or `*.yml` dropped those nested rules from the test. `alint check`
   still honours the file.
 - **With `allow_out_of_root: true`, a config outside the root is named by its path from the root
-  (`../rules.yml`),** where messages and listings showed its file name alone.
+  (`../b/rules.yml`, `..\b\rules.yml` on Windows) in listings and in errors found in it,** where
+  they showed its file name alone; a refusal of an `extends:` entry still names it as the entry
+  spells it.
 - **`remove_value` and `replace` on many YAML matches take linear time.** Since v0.17.0, each
   matched node parsed the whole file again to find its bytes, the engine parsed the result again
   to verify each edit, and each edit's splice moved the rest of the file: 2,000 matches took
