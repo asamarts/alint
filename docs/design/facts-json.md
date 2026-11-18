@@ -79,6 +79,8 @@ volatile fields, so it is committed and content-diff gated like the schema.
   "compatibility": {
     "config_versions": [1],
     "experimental_config_versions": [2],
+    "kind_config_versions": { "constraint": 2 },
+    "experimental_rule_kinds": ["constraint"],
     "policy_test_versions": [1]
   },
   "bundled_rulesets": ["apache/governance", "go", "rust", "..."],
@@ -100,7 +102,11 @@ list-backed counts equal their list lengths; `auto_fix_ops` is count-only.
 runtime constants. Format v6 adds each canonical kind's allowed/required trace stages, preview
 capability, and nested-evaluation capability to that same inventory. Format v7 adds
 `compatibility.experimental_config_versions`, the versions a build loads but does not yet call
-stable (`[2]` in v0.23); `config_versions` stays the stable list. The alint.org facts loader
+stable (`[2]` in v0.23); `config_versions` stays the stable list. It also adds
+`compatibility.kind_config_versions`, the lowest config version of each kind that needs more than
+version 1 (`{"constraint": 2}`), and `compatibility.experimental_rule_kinds`, the kinds only an
+experimental config version can use; both were added before v0.23 shipped, so the format stays
+v7. A kind in neither runs in every config version. The alint.org facts loader
 ignores unknown keys; its supported-version checks apply to the separate bundle manifest.
 
 ## 3. Semantics
@@ -116,8 +122,10 @@ uses, so `facts.json` can never disagree with the README:
 | `kind_meta` | canonical `KindMeta` records in the built-in `RuleRegistry`; aliases resolve through `rule_aliases` |
 | `compatibility.config_versions` | `Config::{MIN_SUPPORTED_VERSION,CURRENT_VERSION}` |
 | `compatibility.experimental_config_versions` | `alint_dsl::EXPERIMENTAL_CONFIG_VERSIONS` |
+| `compatibility.kind_config_versions` | `RuleRegistry::min_config_version` of each built-in kind, kept when above 1 |
+| `compatibility.experimental_rule_kinds` | the kinds whose minimum config version is in `EXPERIMENTAL_CONFIG_VERSIONS` |
 | `compatibility.policy_test_versions` | `alint_testkit::POLICY_TEST_VERSION` |
-| `rule_kinds` (list) | accepted `kind:` values in `crates/alint-dsl/tests/fixtures/all_kinds.yaml`, aliases included |
+| `rule_kinds` (list) | accepted `kind:` values in `crates/alint-dsl/tests/fixtures/all_kinds.yaml` and `all_kinds_v2.yaml`, aliases included |
 | `families` | non-meta `## ` headings in `docs/rules.md` |
 | `bundled_rulesets` | `.yml` files (recursive) under `crates/alint-dsl/rulesets/v1/` |
 | `output_formats` | variants of `enum Format` in `crates/alint-output/src/lib.rs`, lowercased |
