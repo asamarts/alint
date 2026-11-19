@@ -33,7 +33,9 @@ pub(super) struct Run<'r> {
     rows: &'r RelationRows,
     places: Places<'r>,
     /// Key paths stay out of messages and baselines: a field that holds keys
-    /// is sensitive, or the relation's configuration reads the environment.
+    /// is sensitive, or the relation's configuration reads the environment
+    /// (whose findings the engine redacts whole as well, but whose keys and
+    /// places this keeps clean before it does).
     hide_keys: bool,
     findings: Vec<Pending>,
     failures: Vec<Violation>,

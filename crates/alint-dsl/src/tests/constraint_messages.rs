@@ -491,3 +491,108 @@ fn a_union_part_that_read_nothing_is_named() {
         "{shown:?}"
     );
 }
+
+// --- What the environment writes ---------------------------------------------
+
+/// A relation whose `at:` the environment writes reads the environment: its
+/// key paths stay out of the keys the rule makes, before the engine redacts
+/// the findings, and a finding's place shows no end.
+#[test]
+fn a_relation_that_reads_the_environment_keeps_key_paths_out_of_its_keys() {
+    let config = top_level("{ equal: { field: v, to: { row: { k: a } } } }", "").replace(
+        "at: \"$\"",
+        "at: \"{{env.ALINT_TEST_UNSET_AT | default('$')}}\"",
+    );
+    let files = [("data.json", "{\"a\": \"1\", \"b\": \"2\"}")];
+    let (dir, loaded) = super::load_tree(&config, &files);
+    let loaded = loaded.unwrap();
+    let mut registry = alint_core::RuleRegistry::new();
+    alint_rules::register_builtin(&mut registry);
+    let rule = registry.build(&loaded.rules[0]).unwrap();
+    let index = alint_core::walk(
+        dir.path(),
+        &alint_core::WalkOptions::default().with_global_git_excludes(false),
+    )
+    .unwrap();
+    let found = rule
+        .evaluate(&alint_core::Context::new(dir.path(), &index))
+        .unwrap();
+    assert_eq!(found.len(), 1, "{found:?}");
+    // The row's file, then `sensitive` for its key path `b`.
+    assert_eq!(
+        found[0].baseline_key.as_deref(),
+        Some("5:equal6:source9:data.json9:sensitive")
+    );
+    assert!(
+        found[0].message.contains("a key path not shown"),
+        "{}",
+        found[0].message
+    );
+    // Through the engine, every message is redacted, and the finding is at
+    // its start alone.
+    let results = run(&config, &files);
+    let violation = &result(&results, "c").violations[0];
+    assert!(violation.message.starts_with("sensitive evidence"));
+    assert_eq!((violation.line, violation.column), (Some(1), Some(17)));
+    assert!(violation.range.is_none());
+}
+
+/// A literal the environment writes in `assert:` redacts every message of
+/// the rule, as a version 1 rule's evidence is when its configuration reads
+/// the environment: the kind's own hiding of that literal (`<redacted>`)
+/// shows only without the rule's spec, which no run lacks.
+#[test]
+fn an_environment_literal_in_assert_redacts_every_message_of_the_rule() {
+    let env = |name: &str, default: &str| format!("\"{{{{env.{name} | default('{default}')}}}}\"");
+    let locales = |set: &str| {
+        format!(
+            "version: 2\nrelations:\n  m:\n    from: {{ paths: messages.json }}\n    entries: {{ \
+             format: json, at: [\"$.en\", \"$.fr\"] }}\n    fields: {{ locale: entry.parent, key: \
+             entry.key }}\nrules:\n  - id: c\n    kind: constraint\n    input: m\n    assert: {{ \
+             set: {{ field: key, group_by: locale, {set} }} }}\n    level: error\n"
+        )
+    };
+    let messages = [(
+        "messages.json",
+        "{\"en\": {\"home\": \"Home\", \"about\": \"About\"},\n\"fr\": {\"home\": \"Accueil\"}}",
+    )];
+    let group = locales(&format!(
+        "equal_to: {{ group: {} }}",
+        env("ALINT_TEST_UNSET_REFERENCE", "en")
+    ));
+    let groups = locales(&format!(
+        "equal_to: {{ group: en }}, groups: [{}]",
+        env("ALINT_TEST_UNSET_GROUP", "es")
+    ));
+    let row = top_level(
+        &format!(
+            "{{ equal: {{ field: v, to: {{ row: {{ k: {} }} }} }} }}",
+            env("ALINT_TEST_UNSET_ROW", "a")
+        ),
+        "",
+    );
+    let pins = [("data.json", "{\"a\": \"1\", \"b\": \"2\"}")];
+    for (position, config, files) in [
+        ("{ group: }", &group, &messages[..]),
+        ("groups:", &groups, &messages[..]),
+        ("to: { row: }", &row, &pins[..]),
+    ] {
+        let (results, _) = run_under(config, files, None, true);
+        let violations = &result(&results, "c").violations;
+        assert!(!violations.is_empty(), "{position}");
+        for violation in violations {
+            assert!(
+                violation.message.starts_with("sensitive evidence")
+                    && violation.related_locations.is_empty(),
+                "{position}: {violation:?}"
+            );
+        }
+        // Without the spec, the kind hides the literal itself.
+        let shown = findings(&run(config, files), "c");
+        assert!(
+            shown.iter().any(|finding| finding.contains("<redacted>")
+                || finding.contains("the literals `to.row` names")),
+            "{position}: {shown:?}"
+        );
+    }
+}

@@ -167,6 +167,16 @@ pub struct ConstraintRule {
     assertion: Assertion,
     /// The assertion's literals came from the environment, so no message
     /// quotes them.
+    ///
+    /// Defence in depth, unreachable in output today: an environment value
+    /// anywhere in `assert:` makes the rule's spec carry sensitive evidence
+    /// ([`RuleSpec::has_sensitive_evidence`]), and the engine redacts every
+    /// message of such a rule, as it does a version 1 rule's (the
+    /// conservative policy, kept). This finer hiding (`<redacted>` for the
+    /// literal of a `{ group: }` target, a `groups:` item or `to: { row: }`,
+    /// and [`families`]' `group_hidden`) shows only where a rule runs without
+    /// its spec, which no run does; it keeps those literals out if the
+    /// whole-rule redaction ever narrows.
     hide_literals: bool,
 }
 

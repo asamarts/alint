@@ -445,6 +445,9 @@ impl<'r> Run<'r> {
 
     /// Whether group `group`'s value stays out of messages and keys: the
     /// field is sensitive, or the value is a literal the environment wrote.
+    /// The second is defence in depth: a literal the environment wrote in
+    /// `assert:` redacts every message of the rule already
+    /// ([`ConstraintRule::hide_literals`](crate::constraint::ConstraintRule)).
     fn group_hidden(&self, group: &SetGroup<'_>, group_at: usize) -> bool {
         self.sensitive(group_at) || (group.literal && self.rule.hide_literals)
     }
