@@ -1008,33 +1008,59 @@ as #589, step 3 as #590, and step 4 is the last.
     then phase 8 (the three conformance policies).
 - 2026-11-19: audit round 4, over aacb561ac..c3906120c (phase 7 steps 1 to 4, #587, #589, #590,
   #591, and #588).
-  - Docs, schemas and `explain` (fix/r4-doc):
-    - alint.org showed unreleased behaviour: docs-bundle.yml overlays main's reference and concept
-      pages on the release's, and two lines added since v0.22.1 (the JSON `related_locations`
-      field, the rename under `--changed`) sat outside since-blocks. They and every other such
-      line are now marked; corrections of shipped behaviour carry `since=0.22.1`, which the site
-      keeps. `ci/scripts/check-docs-overlay-since.py` (CI's Docs job, with a shell harness) fails
-      on a line added since the latest `v*` tag in an overlaid page, or in a released kind's
-      `docs/rules.md` section, outside a since-block. A since marker that opens a rule's
-      paragraph no longer leaks into its summary.
-    - The draft version 2 schema's `constraint` branch is derived from the kind's option types,
-      which now carry what the builder checks of an `assert:` alone (one family, one `set` target
-      of one shape, names, references, counts, repeats, and the keys that need or exclude
-      others); the builder refuses an optional key written as null, which the schema refused and
-      the loader read as absent. alint-dsl's `tests/version_two_schema/constraint.rs` holds the
-      two to one verdict over 2,343 generated shapes.
-    - The trace schema's `plan` is described key by key (alint-core `trace/plan_schema.rs`), and
-      a renamed or added key in a real plan fails it.
-    - `explain`'s trigger heading and the version 2 page name every change that runs a
-      `constraint` rule under `--changed`; the `optional: <redacted>` arm is pinned.
-    - Doc corrections: `list` does not mark fields sensitive; the draft schema's claims; a stub
-      locale root; the group a `where:` rejects; a sensitive `set` target's family; design
-      sections 6 and 9; related locations listed by path; multi-field `to: { row: }`; the
-      relation limits with their values; the v1 rename change in section 5 and the CHANGELOG;
-      the `constraint` section of `docs/rules.md` in one-line paragraphs; the generated rule
-      indexes mark version 2 kinds; the library API in the CHANGELOG; alint.org's
-      `rule-source-files.ts` in the release check.
-  - PLACEHOLDER (audit round 4, to complete when the other fixers report): the relation, DSL,
-    message, bound, `--changed`, Git and SARIF fixes, with their gates.
-  - Next: #580 (an `extends:` list merged in linear time, before v0.23.0, ADR-0046 decision 1),
-    then phase 8 (the three conformance policies).
+  - Six reviewers covered the kind's semantics; security and bounds; `--changed`, Git and the output
+    formats; the documents, schemas and `explain`; tests and hygiene; and journeys from end to end.
+    None of their findings was high. Five were medium: placing findings kept every file it read
+    until the rule ended, so eight files of 32 MiB of line breaks held 2,380 MiB for one rule; a
+    message quoted a key path whole, so 1,000 rows repeating the value of a 1 MB key made 1 GB of
+    messages; a stub locale (`fr:`) failed `strip-root` and so withheld every locale's verdict;
+    `fix`'s redaction of a rule over a relation the environment selects had no test; and alint.org
+    showed unreleased text. The rest were low.
+  - The fixes went to four branches, merged in one tree (`fix/r4-audit`) with the workspace's tests
+    run there; each fix has a gate test that fails with the fix reverted.
+    - `--changed`, Git and outputs (fix/r4-chg): a submodule whose recorded commit moved, or an
+      untracked repository, which Git lists as one changed directory, now runs the `constraint`
+      rules whose selectors can match below it; a pass decides each trigger scope once, testing a
+      selector against only the changed paths below its literal directories;
+      `changeset_requires_path`'s `add_glob:` passes `--find-renames`, whatever `diff.renames` says;
+      SARIF tells apart a fingerprint repeated within a run by occurrence, as GitLab output does
+      (ADR-0047); and gates cover `fix`'s redaction, the `--changed` skip of relation evaluation,
+      and the e2e scenarios under `fix`, directory changes, deletions and renames.
+    - Relations and the loader (fix/r4-rel): a `where:` or `transform:` entry that reads the
+      environment redacts the finding paths of every rule over its relation, through joins, `in:`
+      lists and `set` targets; under `strip-root` a top-level key that holds nothing reads as a file
+      with no keys; `read:` rows carry their value's span, so their findings have a line and column
+      (`ExtractAdapter::with_spans`); and the loader and `NamedRelation::is_inline` share one name
+      predicate, `relation::plan::is_name`.
+    - Messages and places (fix/r4-msg): a key path is cut at 64 characters per key and 256 in all,
+      and key paths and `{{row.FIELD}}` escape controls, bidi and zero-width characters; placing
+      findings reads one file at a time, charged to `bytes_per_run`, and every related row is listed
+      or counted; a sensitive cell shows only where it starts; a missing value is `missing` in every
+      family, and a `union:` part that read nothing is named; did-you-mean under the kind's options
+      suggests the field rather than the typo, with version 1's messages unchanged.
+    - Docs, schemas and `explain` (fix/r4-doc): `ci/scripts/check-docs-overlay-since.py` fails CI's
+      Docs job, and the local preflight, on a line added since the latest `v*` tag outside a
+      since-block in a page docs-bundle.yml overlays from main, or in a released kind's
+      `docs/rules.md` section, and the lines it found are marked (corrections of shipped behaviour
+      as `since=0.22.1`); the draft version 2 schema's `constraint` branch is derived from the
+      kind's option types, and a test holds it to the builder's verdict over 2,343 generated shapes
+      and every `constraint` config alint-dsl's tests build; the trace schema describes the `plan`
+      key by key; `explain`'s trigger heading names every change that runs the rule; the generated
+      rule indexes mark version 2 kinds; and the documents, the CHANGELOG and ADR-0047 record the
+      round.
+  - Filed: #592 (two fields of one array element in one row, and a transform that splits a value),
+    #593 (a `bound:` query that may match nothing), #594 (a `message:` placeholder for the value a
+    `set` finding is about), #595 (placing a finding that a group lacks a value at the file the
+    value belongs in), #596 (bounding a rule's findings when every group lacks the whole reference
+    set, G × V today) and #597 (version 1 nits: list the formats on an unknown `--format`, and name
+    a null root in `key_parity`'s `strip_root` error). Left open: #564 to #573, #579 to #585 and
+    #592 to #597.
+  - For phase 8: locale parity written as a version 2 `set` costs about 1.5x the instructions and
+    1.9x the peak RSS of `key_parity` (100,000 rows: 6.31G instructions and 144 MB against 4.17G and
+    77 MB; Mastodon's YAML locales: 20.5G and 318 MB against 14.5G and 179 MB).
+  - `--changed` with 200 `constraint` rules and changed files outside every selector ran 4.5G
+    instructions at 10,000 changed files and 41.3G at 100,000, against 1.56G and 10.0G for a full
+    check; deciding each trigger scope once brings them to 0.79G and 4.6G. Placing findings one file
+    at a time takes the memory case from 2,380 MiB to 101 MiB for one rule.
+  - Next: #580 (merge an `extends:` list in linear time, before v0.23.0, ADR-0046 decision 1), then
+    phase 8 (the three conformance policies).
