@@ -406,12 +406,40 @@ fn process_family_h3s(
                 kind: kind.clone(),
                 family_title: h2.title.clone(),
                 family_slug: family_slug.to_string(),
-                summary: summary.clone(),
+                summary: index_summary(registry, kind, &summary),
                 categories: category_slugs.iter().copied().map(String::from).collect(),
             });
         }
     }
     Ok(())
+}
+
+/// A kind's summary as the rule indexes show it (the master index and each
+/// family's table): led by the config version it needs, as `rules list` marks
+/// it, when that is not version 1, so a reader of the index does not write it
+/// in a version 1 config.
+pub(crate) fn index_summary(
+    registry: &alint_core::RuleRegistry,
+    kind: &str,
+    summary: &str,
+) -> String {
+    match version_note(registry, kind) {
+        Some(note) => format!("_{note}._ {summary}"),
+        None => summary.to_string(),
+    }
+}
+
+/// `Version 2 only, experimental` for a kind only a config of `version: 2`
+/// (experimental) or later may use; nothing for a kind of version 1.
+pub(crate) fn version_note(registry: &alint_core::RuleRegistry, kind: &str) -> Option<String> {
+    let version = registry.min_config_version(kind);
+    let experimental = alint_dsl::EXPERIMENTAL_CONFIG_VERSIONS.contains(&version);
+    (version > 1).then(|| {
+        format!(
+            "Version {version} only{}",
+            if experimental { ", experimental" } else { "" }
+        )
+    })
 }
 
 #[derive(Clone)]
