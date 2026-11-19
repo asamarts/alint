@@ -183,7 +183,7 @@ fn each_family_reports_in_human_and_json_output() {
         findings("names-unique"),
         [(
             "packages/old/package.json".to_string(),
-            None,
+            Some(2),
             "the name app is taken".to_string()
         )]
     );
