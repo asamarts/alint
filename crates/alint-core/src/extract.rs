@@ -432,6 +432,21 @@ pub(crate) fn entry_table(
     }
 }
 
+/// [`entry_table`] of a JSON or YAML `text` that [`Format::parse`] has
+/// already read as `format`: a JSON text is not read through that parse's
+/// guards (size, depth and dialect) once more, which would read it whole
+/// again, as [`entry_table`] does before its lossless pass.
+pub(crate) fn parsed_entry_table(
+    format: Format,
+    text: &str,
+    max_rows: usize,
+) -> std::result::Result<EntryTable, EntryRowsError> {
+    match format {
+        Format::Json => json_ast_entry_table(text, Some(max_rows), false),
+        _ => entry_table(format, text, max_rows),
+    }
+}
+
 /// A JSON or YAML document's members, and their values when `values`.
 fn nested_entry_table(
     format: Format,
@@ -543,10 +558,19 @@ fn json_entry_table(
     max_rows: Option<usize>,
     values: bool,
 ) -> std::result::Result<EntryTable, EntryRowsError> {
-    use jsonc_parser::{CollectOptions, CommentCollectionStrategy, parse_to_ast};
-
     // Reuse the check-side size/depth/dialect guards before the lossless pass.
     Format::Json.parse(text).map_err(EntryRowsError::Parse)?;
+    json_ast_entry_table(text, max_rows, values)
+}
+
+/// [`json_entry_table`] of a text its guards passed.
+fn json_ast_entry_table(
+    text: &str,
+    max_rows: Option<usize>,
+    values: bool,
+) -> std::result::Result<EntryTable, EntryRowsError> {
+    use jsonc_parser::{CollectOptions, CommentCollectionStrategy, parse_to_ast};
+
     let stripped = text.trim_start_matches('\u{feff}');
     let offset = text.len() - stripped.len();
     let ast = parse_to_ast(

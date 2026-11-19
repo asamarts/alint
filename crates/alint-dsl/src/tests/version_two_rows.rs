@@ -77,8 +77,9 @@ impl Tree {
             .collect()
     }
 
-    /// The text at `span` in `path`.
-    fn text(&self, path: &str, span: alint_core::ByteSpan) -> String {
+    /// The text at `span`, a span known without reading again, in `path`.
+    fn text(&self, path: &str, span: Option<&eval::Span>) -> String {
+        let span = span.and_then(eval::Span::bytes).expect("a known span");
         let text = std::fs::read_to_string(self.dir.path().join(path)).unwrap();
         text[span.as_range()].to_string()
     }
@@ -199,9 +200,9 @@ fn dependency_ranges_filter_by_pattern_and_workspace_membership() {
             .map(alint_core::relation::Pointer::render),
         Some("dependencies.react".into())
     );
-    assert_eq!(tree.text(manifest, row[1].span.unwrap()), "\"react\"");
-    assert_eq!(tree.text(manifest, row[2].span.unwrap()), "\"^18.2.0\"");
-    assert_eq!(tree.text(manifest, row[0].span.unwrap()), "\"react\"");
+    assert_eq!(tree.text(manifest, row[1].span.as_ref()), "\"react\"");
+    assert_eq!(tree.text(manifest, row[2].span.as_ref()), "\"^18.2.0\"");
+    assert_eq!(tree.text(manifest, row[0].span.as_ref()), "\"react\"");
 }
 
 #[test]
@@ -265,7 +266,7 @@ fn locale_keys_strip_the_locale_and_read_past_arrays() {
     let segments = cell.path.as_ref().unwrap().segments().len();
     assert_eq!(segments, 2);
     assert_eq!(
-        tree.text("config/locales/fr.yml", cell.span.unwrap()),
+        tree.text("config/locales/fr.yml", cell.span.as_ref()),
         "home"
     );
 }
@@ -509,6 +510,77 @@ fn a_read_value_keeps_its_place() {
             "{read}: {findings:#?}"
         );
     }
+}
+
+/// A `read:` finds where its values are written only for the values a
+/// finding places: over 3,000 `package.json` files whose rows pass, no file
+/// is walked for its values' places, and with one finding, only the file
+/// it sits in is, the finding has its place, and what finding it held (the
+/// document's tree and entries, several times its text) is taken from the
+/// run's bytes.
+#[test]
+fn a_read_finds_the_places_of_only_the_values_a_finding_places() {
+    let config = "version: 2\nrelations:\n  names:\n    from: { paths: \"*/package.json\" }\n    \
+                  read: { json: \"$.name\" }\n    fields: { name: value, package: dir }\nrules:\n  \
+                  - id: c\n    kind: constraint\n    input: names\n    assert: { equal: { field: \
+                  name, to: { field: package } } }\n    level: error\n";
+    // Each package's name; the findings, the walks finding their places
+    // took, and the bytes the run took.
+    let walked = |names: &dyn Fn(usize) -> String| {
+        let files: Vec<(String, String)> = (0..3_000)
+            .map(|index| {
+                (
+                    format!("p{index}/package.json"),
+                    format!(
+                        "{{\n  \"version\": \"1.0.0\",\n  \"name\": \"{}\"\n}}\n",
+                        names(index)
+                    ),
+                )
+            })
+            .collect();
+        let files: Vec<(&str, &str)> = files
+            .iter()
+            .map(|(path, body)| (path.as_str(), body.as_str()))
+            .collect();
+        let (dir, loaded) = super::constraint::load_tree(config, &files);
+        let config = loaded.unwrap();
+        let index = walk(
+            dir.path(),
+            &WalkOptions::default().with_global_git_excludes(false),
+        )
+        .unwrap();
+        index.enable_relation_caches_under(&alint_core::relation::Limits::default());
+        let mut registry = alint_core::RuleRegistry::new();
+        alint_rules::register_builtin(&mut registry);
+        let rule = registry.build(&config.rules[0]).unwrap();
+        // The rule reads and places on this thread, where the walks count.
+        let before = eval::read_span_walks();
+        let findings = rule.evaluate(&Context::new(dir.path(), &index)).unwrap();
+        let findings: Vec<String> = findings
+            .iter()
+            .map(|finding| {
+                let path = finding.path.as_ref().unwrap();
+                let path = path.display().to_string().replace('\\', "/");
+                format!("{path}:{:?}:{:?}", finding.line, finding.column)
+            })
+            .collect();
+        let taken = index.decode_cache().unwrap().bytes_taken();
+        (findings, eval::read_span_walks() - before, taken)
+    };
+    let (findings, walks, passing) = walked(&|index| format!("p{index}"));
+    assert_eq!((findings, walks), (Vec::new(), 0));
+    // "other" is as long as "p1234": the two runs decode alike.
+    let (findings, walks, taken) = walked(&|index| {
+        if index == 1_234 {
+            "other".to_string()
+        } else {
+            format!("p{index}")
+        }
+    });
+    assert_eq!(findings, ["p1234/package.json:Some(3):Some(11)"]);
+    assert_eq!(walks, 1);
+    let text = "{\n  \"version\": \"1.0.0\",\n  \"name\": \"other\"\n}\n".len();
+    assert!(taken - passing > 3 * text, "{taken} {passing} {text}");
 }
 
 pub(super) const NODE_PINS: &str = r#"version: 2
@@ -770,7 +842,7 @@ fn a_bound_path_must_match_once_in_each_resource() {
     assert_eq!(table(&rows), strings(&[&["a", "x"], &["a", "y"]]));
     // A bound value's span is its value's.
     assert_eq!(
-        once.text("a.yaml", rows.rows[1].cells[0].span.unwrap()),
+        once.text("a.yaml", rows.rows[1].cells[0].span.as_ref()),
         "a"
     );
 }
@@ -828,7 +900,7 @@ fn a_join_follows_its_non_unique_side_and_keeps_provenance() {
         Some("dependencies.b".to_string())
     );
     assert_eq!(row[0].at.resource.path().as_str(), "a/package.json");
-    assert_eq!(tree.text("a/package.json", row[1].span.unwrap()), "\"^1\"");
+    assert_eq!(tree.text("a/package.json", row[1].span.as_ref()), "\"^1\"");
     assert_eq!(row[2].at.resource.path().as_str(), "b/package.json");
     assert_eq!(row[2].at.pointer, None);
 

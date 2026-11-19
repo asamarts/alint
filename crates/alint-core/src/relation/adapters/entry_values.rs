@@ -260,8 +260,8 @@ impl Adapter for EntryValuesAdapter {
 
 /// A JSON, YAML or TOML (`format`) document's entries with their values and
 /// spans, at most the rows `limits` allows: what an `entries:` part reads,
-/// and what places a structured `read:`'s values
-/// ([`super::ExtractAdapter::with_spans`]).
+/// and what places the structured `read:` values a finding asks about
+/// (`extract::locate`).
 pub(super) fn entry_table(
     format: Format,
     text: &str,

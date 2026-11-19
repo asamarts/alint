@@ -5,9 +5,12 @@
 //! rule places them all at the end ([`Places::resolve`]), one resource at a
 //! time: the resource is read, each place asked of it is found in one pass
 //! over its text, and the text is let go before the next resource is read.
-//! So placing holds one resource's text at a time, however many resources
+//! A `read:` value's span is found in that text first ([`find_spans`]): the
+//! relation read it without one. So placing holds one resource's text (and
+//! what finding its `read:` values holds) at a time, however many resources
 //! the findings sit in, and each resource's text, with the offsets asked of
-//! it, must fit in what the run's relations left of its bytes
+//! it and what finding its `read:` values held, must fit in what the run's
+//! relations left of its bytes
 //! ([`LimitKind::BytesPerRun`](alint_core::relation::LimitKind::BytesPerRun),
 //! [`DecodeCache::may_hold`]): past them the rule has no verdict. Placing
 //! takes nothing from the run's bytes, since it lets each text go, so
@@ -16,8 +19,7 @@
 
 use std::collections::BTreeMap;
 
-use alint_core::ByteSpan;
-use alint_core::relation::eval::Cell;
+use alint_core::relation::eval::{Cell, Span, find_spans};
 use alint_core::relation::{
     DecodeCache, LimitExceeded, ReadCache, RelPath, Resource, ResourceRead,
 };
@@ -28,7 +30,7 @@ use alint_core::{Context, SourceRange};
 pub(super) struct Places<'c> {
     ctx: &'c Context<'c>,
     /// Each resource's spans, each with the index of the place that asked.
-    asked: BTreeMap<RelPath, Vec<(usize, ByteSpan)>>,
+    asked: BTreeMap<RelPath, Vec<(usize, Span)>>,
     count: usize,
 }
 
@@ -75,7 +77,7 @@ impl<'c> Places<'c> {
     /// Ask for the place of `cell`'s span, when it has one; `point` shows
     /// only its start.
     pub(super) fn ask(&mut self, cell: &Cell, point: bool) -> Option<Asked> {
-        let span = cell.span?;
+        let span = cell.span.clone()?;
         let index = self.count;
         self.count += 1;
         self.asked
@@ -118,13 +120,21 @@ impl<'c> Places<'c> {
             let ResourceRead::Present(bytes) = read.as_ref() else {
                 continue;
             };
+            // A `read:` value's span is found now, in the text read again;
+            // what finding it held counts with the text.
+            let (found, finding) = find_spans(bytes, spans.iter().map(|(_, span)| span));
+            let spans: Vec<(usize, _)> = spans
+                .iter()
+                .zip(found)
+                .filter_map(|((index, _), span)| Some((*index, span?)))
+                .collect();
             let mut offsets: Vec<usize> = spans
                 .iter()
                 .flat_map(|(_, span)| [span.start, span.end])
                 .collect();
             offsets.sort_unstable();
             offsets.dedup();
-            let held = bytes.len() + offsets.capacity() * std::mem::size_of::<usize>();
+            let held = bytes.len() + offsets.capacity() * std::mem::size_of::<usize>() + finding;
             if let Err(limit) = budget.may_hold(held) {
                 return Err((path, limit));
             }

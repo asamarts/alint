@@ -6,12 +6,15 @@ use std::path::Path;
 use std::sync::Arc;
 
 use super::failure::{Failures, place};
-use super::{Cell, Evaluator, FieldInfo, Provenance, RelationNote, RelationRows, Site, Skipped};
+use super::spans::{ReadSpan, Reading};
+use super::{
+    Cell, Evaluator, FieldInfo, Provenance, RelationNote, RelationRows, Site, Skipped, Span,
+};
 use crate::ByteSpan;
 use crate::extract::{Extract, LinesOpts};
 use crate::relation::adapter::{Adapter, AdapterError, AdapterNote, AdapterOutput};
 use crate::relation::adapters::{EntryValuesAdapter, ExtractAdapter, entry_values};
-use crate::relation::limits::{LimitExceeded, LimitKind};
+use crate::relation::limits::{LimitExceeded, LimitKind, Limits};
 use crate::relation::path::RelPath;
 use crate::relation::plan::{
     Entries, EntriesFormat, FieldDef, FieldSource, NamedRelation, Part, PathToken, Read, Reader,
@@ -109,7 +112,7 @@ impl Evaluator<'_> {
             return ControlFlow::Continue(());
         };
         let bound: Vec<String> = bound_queries(relation);
-        let reader = match PartReader::new(&part.reader, &bound) {
+        let reader = match PartReader::new(&part.reader, &bound, &self.limits) {
             Ok(reader) => reader,
             Err(message) => {
                 failures.push(site.failure(AnalysisFailureKind::Evaluation, None, message));
@@ -176,9 +179,10 @@ impl Evaluator<'_> {
                     read,
                     optional,
                     bound,
+                    reading,
                     ..
                 } => rows.read(
-                    read,
+                    (read, reading.as_ref()),
                     *optional,
                     bound
                         .as_ref()
@@ -441,11 +445,15 @@ enum PartReader {
         /// The `bound:` paths, for a structured `read:` whose fields have
         /// some.
         bound: Option<EntryValuesAdapter>,
+        /// What the adapter reads with, which finds where a value is written
+        /// when a finding asks ([`ReadSpan`]); none for `whole_file`, whose
+        /// value is the whole file.
+        reading: Option<Arc<Reading>>,
     },
 }
 
 impl PartReader {
-    fn new(reader: &Reader, bound: &[String]) -> Result<Self, String> {
+    fn new(reader: &Reader, bound: &[String], limits: &Limits) -> Result<Self, String> {
         match reader {
             Reader::Entries(Entries { format, at, leaves }) => {
                 EntryValuesAdapter::new(entries_format(*format), at, *leaves, bound)
@@ -478,11 +486,14 @@ impl PartReader {
                         ));
                     }
                 };
+                let reading = (!matches!(extract, Extract::WholeFile))
+                    .then(|| Reading::new(extract.clone(), *limits));
                 Ok(Self::Read {
-                    adapter: ExtractAdapter::with_spans(extract),
+                    adapter: ExtractAdapter::new(extract),
                     read: read.clone(),
                     optional: *optional,
                     bound,
+                    reading,
                 })
             }
         }
@@ -809,7 +820,7 @@ impl<'r> Rows<'r> {
             cells.push(Some(Cell {
                 value: Some(value),
                 at: self.provenance(row.pointer.clone(), row.ordinal, false)?,
-                span: row.value_span.or(row.span),
+                span: row.value_span.or(row.span).map(Span::Bytes),
                 path: None,
             }));
         }
@@ -869,10 +880,10 @@ impl<'r> Rows<'r> {
             let mut derived = Derived::default();
             let mut cells = Vec::with_capacity(self.relation.fields.len());
             for (position, (name, field)) in self.relation.fields.iter().enumerate() {
-                let cell = |value: Value, span| Cell {
+                let cell = |value: Value, span: Option<ByteSpan>| Cell {
                     value: Some(value),
                     at: Arc::clone(&provenance),
-                    span,
+                    span: span.map(Span::Bytes),
                     path: None,
                 };
                 let (slot, source) = match &field.source {
@@ -994,7 +1005,7 @@ impl<'r> Rows<'r> {
     /// says instead). Each row is its own, for its ordinal.
     fn read(
         &self,
-        read: &Read,
+        (read, reading): (&Read, Option<&Arc<Reading>>),
         optional: bool,
         bound_output: Option<&AdapterOutput>,
         output: &AdapterOutput,
@@ -1051,27 +1062,32 @@ impl<'r> Rows<'r> {
             None => vec![None; self.relation.fields.len()],
         };
         // Shared with the decode, which took their bytes.
-        let values: Vec<(Option<Value>, u32, Option<ByteSpan>)> = if output.rows.is_empty() {
+        let values: Vec<(Option<Value>, u32)> = if output.rows.is_empty() {
             if optional || !output.notes.is_empty() || !output.non_strings.is_empty() {
                 Vec::new()
             } else {
-                vec![(None, 0, None)]
+                vec![(None, 0)]
             }
         } else {
             output
                 .rows
                 .iter()
-                .map(|row| (row.value().cloned(), row.ordinal, row.span))
+                .map(|row| (row.value().cloned(), row.ordinal))
                 .collect()
         };
-        for (value, ordinal, value_span) in values {
+        for (value, ordinal) in values {
             self.take_row()?;
             let provenance = self.provenance(None, ordinal, false)?;
+            // Where the value is written is found only when a finding asks.
+            let value_span = value
+                .as_ref()
+                .and(reading)
+                .map(|reading| Span::Read(ReadSpan::new(reading, ordinal)));
             let mut cells = Vec::with_capacity(self.relation.fields.len());
             for (position, (name, field)) in self.relation.fields.iter().enumerate() {
                 let (value, span) = match &field.source {
                     FieldSource::Path(token) => (Some(self.token(*token)), None),
-                    FieldSource::Value => (value.clone(), value_span),
+                    FieldSource::Value => (value.clone(), value_span.clone()),
                     FieldSource::Bound(_) => {
                         cells.push(bound[position].clone().expect("a bound field's cell"));
                         continue;

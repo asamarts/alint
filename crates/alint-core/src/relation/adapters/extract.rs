@@ -1,24 +1,25 @@
-//! The value-bearing wrapper over today's [`Extract`].
+//! The value-bearing wrapper over today's [`Extract`], and where the values
+//! it read are written ([`locate`]).
 
-use std::borrow::Cow;
+use std::collections::HashMap;
 
 use regex::Regex;
 
 use crate::extract::{
-    ByteSpan, Extract, ExtractFailure, ExtractedValues, NonStringValueKind,
-    extract_values_bounded_typed, is_non_literal,
+    ByteSpan, EntryValue, Extract, ExtractFailure, extract_values_bounded_typed, is_non_literal,
 };
 use crate::relation::adapter::{
     Adapter, AdapterError, AdapterNote, AdapterOutput, check_row_count,
 };
-use crate::relation::key_paths::{EntryTable, PathId};
+use crate::relation::key_paths::{EntryAt, EntryTable, PathId};
 use crate::relation::limits::{LimitExceeded, LimitKind, Limits};
+use crate::relation::pointer::Segment;
 use crate::relation::resource::Resource;
 use crate::relation::row::{Row, RowState};
 use crate::relation::value::Value;
 use crate::structured_format::Format;
 
-use super::entry_values::{Document, entry_table};
+use super::entry_values::entry_table;
 
 /// Wraps today's string-only extraction as a relation adapter.
 ///
@@ -36,13 +37,13 @@ use super::entry_values::{Document, entry_table};
 /// by syntax (Dockerfile `FROM`, `__version__`, and similar), so its reader
 /// takes those captures from the target-syntax filter instead of this adapter.
 ///
-/// [`Self::with_spans`] also places each value ([`Row::span`]), for a
-/// relation's `read:`; [`Self::new`] reads as `cross_file` always has.
+/// Its rows carry no span: where a relation's `read:` value is written is
+/// found only for a value a finding places, by reading its file again
+/// ([`find_spans`](crate::relation::eval::find_spans)), so reading costs
+/// what it costs `cross_file`.
 #[derive(Debug, Clone)]
 pub struct ExtractAdapter {
     extract: Extract,
-    /// Whether each row carries its value's byte span, where it has one.
-    spans: bool,
     id: String,
 }
 
@@ -50,30 +51,7 @@ impl ExtractAdapter {
     #[must_use]
     pub fn new(extract: Extract) -> Self {
         let id = spec_id(&extract);
-        Self {
-            extract,
-            spans: false,
-            id,
-        }
-    }
-
-    /// An adapter that reads the values [`Self::new`]'s does, in its order,
-    /// and gives each row its value's byte span in the file: a `lines:`
-    /// value's trimmed line, a `regex:` value's capture, and a JSON, YAML or
-    /// TOML value an object member holds, its value's span (the key's for a
-    /// YAML block scalar), as an `entries:` part places it. A `whole_file`
-    /// value, a value in an array, and a value of a file that is not UTF-8
-    /// (read lossily) have none, and a structured file whose entries cannot be
-    /// walked within the rows limit places none of its values. Its id is its
-    /// own, so the two never share a decode.
-    #[must_use]
-    pub fn with_spans(extract: Extract) -> Self {
-        let id = format!("{}:spans", spec_id(&extract));
-        Self {
-            extract,
-            spans: true,
-            id,
-        }
+        Self { extract, id }
     }
 
     #[must_use]
@@ -101,37 +79,35 @@ impl Adapter for ExtractAdapter {
         // the wrapper must stay byte-compatible with it.
         let text = String::from_utf8_lossy(bytes);
         let max = limits.get(LimitKind::RowsPerExtractor);
-        // A span indexes the file's bytes, which a lossy text does not.
-        let (values, spans) = match (&self.extract, &text) {
-            (
-                Extract::Lines(_) | Extract::Regex(_) | Extract::Structured(_),
-                Cow::Borrowed(text),
-            ) if self.spans => located(&self.extract, text, max, limits)?,
-            _ => (
-                extract_values_bounded_typed(&self.extract, &text, max).map_err(extract_failure)?,
-                Vec::new(),
-            ),
-        };
+        let values =
+            extract_values_bounded_typed(&self.extract, &text, max).map_err(
+                |error| match error {
+                    ExtractFailure::Parse(message) => AdapterError::Parse(message),
+                    ExtractFailure::Limit { limit, reached } => {
+                        AdapterError::Limit(LimitExceeded {
+                            kind: LimitKind::RowsPerExtractor,
+                            limit,
+                            reached,
+                        })
+                    }
+                },
+            )?;
 
         let mut rows = Vec::new();
         let mut notes = Vec::new();
         let skip_non_literal = !matches!(self.extract, Extract::WholeFile);
-        for (index, value) in values.strings.into_iter().enumerate() {
+        for value in values.strings {
             if skip_non_literal && is_non_literal(&value) {
                 notes.push(AdapterNote::NonLiteral { value });
                 continue;
             }
             check_row_count(limits, rows.len() + 1)?;
-            let mut row = Row::new(
+            rows.push(Row::new(
                 resource.clone(),
                 None,
                 u32::try_from(rows.len()).expect("the row limit is far below u32::MAX"),
                 RowState::Value(Value::String(value.into())),
-            );
-            if let Some(span) = spans.get(index).copied().flatten() {
-                row = row.with_span(span);
-            }
-            rows.push(row);
+            ));
         }
         Ok(AdapterOutput {
             rows,
@@ -141,43 +117,36 @@ impl Adapter for ExtractAdapter {
     }
 }
 
-fn extract_failure(error: ExtractFailure) -> AdapterError {
-    match error {
-        ExtractFailure::Parse(message) => AdapterError::Parse(message),
-        ExtractFailure::Limit { limit, reached } => AdapterError::Limit(LimitExceeded {
-            kind: LimitKind::RowsPerExtractor,
-            limit,
-            reached,
-        }),
-    }
-}
-
-/// The values a `lines:`, `regex:` or structured extract reads from `text`
-/// (UTF-8, so its offsets are the file's), as
-/// [`extract_values_bounded_typed`] reads them, each string with its span
-/// when it has one (`spans[i]` is `strings[i]`'s); a structured format other
-/// than JSON, YAML and TOML places none. At most `max` values, failing as
-/// that function fails past it.
-fn located(
+/// Where the rows `ordinals` are written that [`ExtractAdapter`] read with
+/// `extract` from a file whose text is now `text`: `spans[i]` is the span of
+/// the row `ordinals[i]` (its place among the rows the adapter emitted, which
+/// skip non-literal values), each found in one walk of `text`. A `lines:`
+/// value's span is its trimmed line, a `regex:` value's its capture, and a
+/// JSON, YAML or TOML value an object member holds, its value's (its key's
+/// for a YAML block scalar), as an `entries:` part places it. A row the text
+/// no longer holds, a `whole_file` value, a value in an array, the document
+/// root, a repeated key's value (the tree holds only one of them), and a value
+/// of a document whose entries cannot be walked within `limits` have none.
+///
+/// Also the bytes the walk held besides `text` (a structured document's tree,
+/// and its entries when a value asked for is an object member's), which the
+/// caller takes from the run's bytes: it held them only while it ran.
+pub(crate) fn locate(
     extract: &Extract,
     text: &str,
-    max: usize,
+    ordinals: &[u32],
     limits: &Limits,
-) -> Result<(ExtractedValues, Vec<Option<ByteSpan>>), AdapterError> {
-    let mut values = ExtractedValues::default();
-    let mut spans = Vec::new();
-    // Room for one more value, or the limit error that function gives.
-    let room = |values: &ExtractedValues| {
-        if values.strings.len() + values.non_strings.len() >= max {
-            Err(AdapterError::Limit(LimitExceeded {
-                kind: LimitKind::RowsPerExtractor,
-                limit: max,
-                reached: max.saturating_add(1),
-            }))
-        } else {
-            Ok(())
-        }
+) -> (Vec<Option<ByteSpan>>, usize) {
+    if ordinals.is_empty() {
+        return (Vec::new(), 0);
+    }
+    WALKS.with(|walks| walks.set(walks.get() + 1));
+    let mut rows = Rows {
+        asked: ordinals.iter().map(|ordinal| (*ordinal, None)).collect(),
+        next: 0,
+        last: ordinals.iter().copied().max().unwrap_or_default(),
     };
+    let mut held = 0;
     match extract {
         Extract::Lines(options) => {
             for (start, line) in crate::physical_lines(text) {
@@ -188,82 +157,228 @@ fn located(
                 {
                     continue;
                 }
-                room(&values)?;
                 let at = start + (line.len() - line.trim_start().len());
-                values.strings.push(trimmed.to_string());
-                spans.push(Some(ByteSpan::new(at, at + trimmed.len())));
+                if !rows.row(trimmed, || Some(ByteSpan::new(at, at + trimmed.len()))) {
+                    break;
+                }
             }
         }
         Extract::Regex(pattern) => {
-            let regex = Regex::new(pattern)
-                .map_err(|error| AdapterError::Parse(format!("bad regex: {error}")))?;
-            for matched in regex
-                .captures_iter(text)
-                .filter_map(|captures| captures.get(1))
-            {
-                room(&values)?;
-                values.strings.push(matched.as_str().to_string());
-                spans.push(Some(ByteSpan::new(matched.start(), matched.end())));
+            if let Ok(regex) = Regex::new(pattern) {
+                for matched in regex
+                    .captures_iter(text)
+                    .filter_map(|captures| captures.get(1))
+                {
+                    let span = || Some(ByteSpan::new(matched.start(), matched.end()));
+                    if !rows.row(matched.as_str(), span) {
+                        break;
+                    }
+                }
             }
         }
         Extract::Structured(structured) => {
-            let tree = structured.format.parse(text).map_err(AdapterError::Parse)?;
-            let nodes = structured.path.query(&tree).all();
-            // The entries place each string an object member holds, walked
-            // only when a string matched; a file they cannot be walked in,
-            // within the rows limit, places none.
-            let entries = (nodes.iter().any(|node| node.is_string())
-                && matches!(
-                    structured.format,
-                    Format::Json | Format::Yaml | Format::Toml
-                ))
-            .then(|| entry_table(structured.format, text, limits).ok())
-            .flatten();
-            let document = entries
-                .as_ref()
-                .map(|entries| Document::new(entries, &tree));
-            for node in nodes {
-                room(&values)?;
-                let kind = match node {
-                    serde_json::Value::String(value) => {
-                        values.strings.push(value.clone());
-                        spans.push(
-                            document
-                                .as_ref()
-                                .zip(entries.as_ref())
-                                .and_then(|(document, entries)| place(document, entries, node)),
-                        );
-                        continue;
-                    }
-                    serde_json::Value::Null => NonStringValueKind::Null,
-                    serde_json::Value::Bool(_) => NonStringValueKind::Boolean,
-                    serde_json::Value::Number(_) => NonStringValueKind::Number,
-                    serde_json::Value::Array(_) => NonStringValueKind::Array,
-                    serde_json::Value::Object(_) => NonStringValueKind::Object,
-                };
-                values.non_strings.push(kind);
-            }
+            held = members(structured.format, &structured.path, text, &mut rows, limits);
         }
-        Extract::WholeFile => unreachable!("a whole file is read without a span"),
+        Extract::WholeFile => {}
     }
-    Ok((values, spans))
+    (
+        ordinals.iter().map(|ordinal| rows.asked[ordinal]).collect(),
+        held,
+    )
 }
 
-/// Where `node`, a value of the tree `document` indexes, is written: the
-/// value's span of the one entry that holds it (its key's for a YAML block
-/// scalar, as an `entries:` row's), or `None` for a value in an array, the
-/// root, and a repeated key's, whose value the tree holds only one of.
-fn place(
-    document: &Document<'_>,
-    entries: &EntryTable,
-    node: &serde_json::Value,
-) -> Option<ByteSpan> {
-    let at = document.path(node).filter(|at| *at != PathId::ROOT)?;
-    let mut held = document.rows_at(at);
-    let row = &entries.rows[held.next()?];
-    held.next()
-        .is_none()
-        .then_some(row.value_span.unwrap_or(row.key_span))
+/// The rows [`locate`] is asked for, by ordinal, with each one's span once
+/// it is found, as it numbers the rows the adapter emitted.
+struct Rows {
+    asked: HashMap<u32, Option<ByteSpan>>,
+    /// The next row's ordinal.
+    next: u32,
+    /// The last row asked for.
+    last: u32,
+}
+
+impl Rows {
+    /// Number a string value the reader read, whose span `span` gives, as
+    /// the adapter does: a non-literal value is no row. Whether a later
+    /// row is asked for.
+    fn row(&mut self, value: &str, span: impl FnOnce() -> Option<ByteSpan>) -> bool {
+        if is_non_literal(value) {
+            return true;
+        }
+        if let Some(slot) = self.asked.get_mut(&self.next) {
+            *slot = span();
+        }
+        self.next += 1;
+        self.next <= self.last
+    }
+}
+
+std::thread_local! {
+    /// How many times [`locate`] has walked a text on this thread.
+    static WALKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many times [`locate`] has walked a text to place `read:` values on
+/// this thread. Test only.
+pub(crate) fn walks() -> usize {
+    WALKS.with(std::cell::Cell::get)
+}
+
+/// [`locate`] for a structured query over `text` parsed as `format`: each
+/// string row asked of `rows` is placed at the one object member that holds
+/// it, or nowhere. The bytes it held.
+fn members(
+    format: Format,
+    path: &serde_json_path::JsonPath,
+    text: &str,
+    rows: &mut Rows,
+    limits: &Limits,
+) -> usize {
+    let Ok(tree) = format.parse(text) else {
+        return 0;
+    };
+    // The string rows asked for, as the adapter numbered them.
+    let mut asked: Vec<(u32, &serde_json::Value)> = Vec::new();
+    for node in path.query(&tree) {
+        let serde_json::Value::String(value) = node else {
+            continue;
+        };
+        let ordinal = rows.next;
+        let more = rows.row(value, || None);
+        if rows.next > ordinal && rows.asked.contains_key(&ordinal) {
+            asked.push((ordinal, node));
+        }
+        if !more {
+            break;
+        }
+    }
+    let (paths, tree_bytes) = key_paths(&tree, &asked);
+    // Only an object member's value is placed, from the document's entries,
+    // which only JSON, YAML and TOML give.
+    let paths: Vec<Option<Vec<Segment>>> = paths
+        .into_iter()
+        .map(|path| path.filter(|path| matches!(path.last(), Some(Segment::Key(_)))))
+        .collect();
+    if paths.iter().all(Option::is_none)
+        || !matches!(format, Format::Json | Format::Yaml | Format::Toml)
+    {
+        return tree_bytes;
+    }
+    // The entries' spans, without their values (which TOML's walk alone
+    // needs for its values' spans), and without parsing the text whole once
+    // more: the tree is its parse.
+    let entries = if format == Format::Toml {
+        entry_table(format, text, limits).ok()
+    } else {
+        let max = limits.get(LimitKind::RowsPerExtractor);
+        crate::extract::parsed_entry_table(format, text, max).ok()
+    };
+    let Some(entries) = entries else {
+        return tree_bytes;
+    };
+    // Each path's entries: how many there are (more than one for a repeated
+    // key), and the first.
+    let ids: Vec<Option<PathId>> = paths
+        .iter()
+        .map(|path| {
+            path.as_ref()?.iter().try_fold(PathId::ROOT, |at, segment| {
+                entries.paths.get(at, segment.clone())
+            })
+        })
+        .collect();
+    let mut held: HashMap<PathId, (usize, Option<EntryAt>)> =
+        ids.iter().flatten().map(|id| (*id, (0, None))).collect();
+    for row in &entries.rows {
+        if let Some((count, first)) = held.get_mut(&row.path) {
+            *count += 1;
+            first.get_or_insert(*row);
+        }
+    }
+    for ((ordinal, _), id) in asked.iter().zip(&ids) {
+        let span = match id.and_then(|id| held.get(&id)) {
+            Some((1, Some(row))) => Some(row.value_span.unwrap_or(row.key_span)),
+            _ => None,
+        };
+        rows.asked.insert(*ordinal, span);
+    }
+    tree_bytes + table_bytes(&entries, text)
+}
+
+/// One step of a key path, as a walk of a tree reads it.
+#[derive(Clone, Copy)]
+enum Step<'t> {
+    Key(&'t str),
+    Index(usize),
+}
+
+/// The key path of each of `asked`'s nodes in `tree` (none for a node it
+/// does not hold), found in one walk, and roughly what the tree holds on the
+/// heap.
+fn key_paths(
+    tree: &serde_json::Value,
+    asked: &[(u32, &serde_json::Value)],
+) -> (Vec<Option<Vec<Segment>>>, usize) {
+    let mut paths = vec![None; asked.len()];
+    // The nodes asked for, by address, each with its place in `asked`.
+    let mut wanted: Vec<(*const serde_json::Value, usize)> = asked
+        .iter()
+        .enumerate()
+        .map(|(index, (_, node))| (std::ptr::from_ref(*node), index))
+        .collect();
+    wanted.sort_unstable();
+    let mut bytes = 0;
+    let mut path: Vec<Step<'_>> = Vec::new();
+    let mut pending: Vec<(&serde_json::Value, usize, Option<Step<'_>>)> = vec![(tree, 0, None)];
+    while let Some((node, depth, step)) = pending.pop() {
+        path.truncate(depth.saturating_sub(1));
+        path.extend(step);
+        let address = std::ptr::from_ref(node);
+        let first = wanted.partition_point(|(asked, _)| *asked < address);
+        for (_, index) in wanted[first..]
+            .iter()
+            .take_while(|(asked, _)| *asked == address)
+        {
+            paths[*index] = Some(
+                path.iter()
+                    .map(|step| match step {
+                        Step::Key(key) => Segment::Key((*key).into()),
+                        Step::Index(index) => Segment::Index(*index),
+                    })
+                    .collect(),
+            );
+        }
+        bytes += std::mem::size_of::<serde_json::Value>();
+        match node {
+            serde_json::Value::String(value) => bytes += value.capacity(),
+            serde_json::Value::Object(map) => {
+                for (key, value) in map {
+                    bytes += key.capacity() + std::mem::size_of::<(String, usize)>();
+                    pending.push((value, depth + 1, Some(Step::Key(key))));
+                }
+            }
+            serde_json::Value::Array(items) => {
+                bytes += items.capacity().saturating_sub(items.len())
+                    * std::mem::size_of::<serde_json::Value>();
+                for (index, item) in items.iter().enumerate() {
+                    pending.push((item, depth + 1, Some(Step::Index(index))));
+                }
+            }
+            serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => {
+            }
+        }
+    }
+    (paths, bytes)
+}
+
+/// Roughly what `entries`, a document's entries walked from `text`, hold on
+/// the heap: their rows and values, and each key path with its key (held
+/// twice) and its index; a key and a string value are at most the text.
+fn table_bytes(entries: &EntryTable, text: &str) -> usize {
+    let path = 2 * std::mem::size_of::<Segment>() + 4 * std::mem::size_of::<usize>();
+    entries.rows.capacity() * std::mem::size_of::<EntryAt>()
+        + entries.values.capacity() * std::mem::size_of::<EntryValue>()
+        + entries.paths.len() * path
+        + 3 * text.len()
 }
 
 fn spec_id(extract: &Extract) -> String {
@@ -275,6 +390,11 @@ fn spec_id(extract: &Extract) -> String {
         Extract::Regex(pattern) => format!("extract:regex:{pattern}"),
         Extract::WholeFile => "extract:whole_file".to_string(),
     }
+}
+
+/// Whether `a` and `b` read alike: the same extractor and specification.
+pub(crate) fn same_reading(a: &Extract, b: &Extract) -> bool {
+    spec_id(a) == spec_id(b)
 }
 
 #[cfg(test)]
@@ -417,98 +537,139 @@ mod tests {
         ]
     }
 
-    /// The values, non-strings and notes a row of `output` holds, without
-    /// spans.
-    fn read(output: &AdapterOutput) -> (Vec<(Option<Value>, u32)>, AdapterOutput) {
-        let rows = output
-            .rows
-            .iter()
-            .map(|row| (row.value().cloned(), row.ordinal))
-            .collect();
-        let rest = AdapterOutput {
-            rows: Vec::new(),
-            ..output.clone()
-        };
-        (rows, rest)
+    /// Where `extract` places each row [`ExtractAdapter`] reads from `bytes`,
+    /// asked one at a time.
+    fn placed(extract: &Extract, bytes: &[u8]) -> Vec<Option<ByteSpan>> {
+        let rows = ExtractAdapter::new(extract.clone())
+            .extract(&resource("a"), bytes, &Limits::default())
+            .map_or(0, |output| output.rows.len());
+        let text = std::str::from_utf8(bytes).unwrap();
+        (0..rows)
+            .map(|ordinal| {
+                let ordinal = u32::try_from(ordinal).unwrap();
+                locate(extract, text, &[ordinal], &Limits::default()).0[0]
+            })
+            .collect()
     }
 
-    /// A `read:` reads what `cross_file` reads, and `cross_file`'s adapter
-    /// places nothing: spans are only added.
+    /// Where an `entries:` walk of the whole document places each string
+    /// row a structured `extract` reads, as `read:` placed them when it
+    /// walked every document it read: the oracle [`locate`] is held to.
+    fn walked(extract: &Extract, text: &str) -> Vec<Option<ByteSpan>> {
+        let Extract::Structured(structured) = extract else {
+            unreachable!("a structured extract")
+        };
+        let tree = structured.format.parse(text).unwrap();
+        let entries = entry_table(structured.format, text, &Limits::default()).unwrap();
+        let document = super::super::entry_values::Document::new(&entries, &tree);
+        structured
+            .path
+            .query(&tree)
+            .iter()
+            .filter(|node| node.as_str().is_some_and(|value| !is_non_literal(value)))
+            .map(|node| {
+                let at = document.path(node).filter(|at| *at != PathId::ROOT)?;
+                let mut held = document.rows_at(at);
+                let row = &entries.rows[held.next()?];
+                held.next()
+                    .is_none()
+                    .then_some(row.value_span.unwrap_or(row.key_span))
+            })
+            .collect()
+    }
+
+    /// A structured row is placed where a walk of every entry of its
+    /// document places it, though only the members asked for are looked
+    /// up: arrays, objects in arrays, repeated keys, non-literal values,
+    /// a query that matches one node twice, a BOM, a YAML block scalar and
+    /// TOML tables.
     #[test]
-    fn spans_change_no_value_and_cross_file_gets_none() {
-        for (extract, bytes) in extracts() {
-            let plain = ExtractAdapter::new(extract.clone());
-            let placed = ExtractAdapter::with_spans(extract.clone());
-            assert_ne!(plain.id(), placed.id());
-            let limits = Limits::default();
-            let plain = plain.extract(&resource("a"), bytes, &limits);
-            let placed = placed.extract(&resource("a"), bytes, &limits);
-            match (plain, placed) {
-                (Ok(plain), Ok(placed)) => {
-                    assert_eq!(read(&plain), read(&placed), "{extract:?}");
-                    assert!(plain.rows.iter().all(|row| row.span.is_none()));
-                    // Each span spells its value in the original bytes, quoted
-                    // or not, or a YAML block scalar's key.
-                    for row in &placed.rows {
-                        if let (Some(span), Some(Value::String(value))) = (row.span, row.value()) {
-                            let spelled = &bytes[span.as_range()];
-                            let quoted = format!("\"{value}\"");
-                            assert!(
-                                [value.as_bytes(), quoted.as_bytes()].contains(&spelled)
-                                    || (&**value, spelled) == ("block\n", b"b"),
-                                "{extract:?}: {:?} at {span:?}",
-                                String::from_utf8_lossy(spelled)
-                            );
-                        }
-                    }
-                }
-                (plain, placed) => {
-                    assert_eq!(
-                        plain.map(|output| read(&output)),
-                        placed.map(|output| read(&output)),
-                        "{extract:?}"
-                    );
-                }
+    fn a_structured_row_is_placed_where_a_walk_of_its_document_places_it() {
+        let structured = |format, query| Extract::structured(format, query).unwrap();
+        let json = "{\"a\": \"x\", \"b\": 1, \"c\": [\"y\", {\"d\": \"z\"}], \"e\": \"${E}\",\n \
+                    \"f\": {\"g\": \"w\", \"g\": \"v\"}, \"h\": {\"i\": {\"j\": \"u\"}}}";
+        let yaml =
+            "\u{feff}a: x\nb: |\n  block\nc: [y, {d: z}]\nh:\n  i: {j: u}\nk: '${K}'\nl: \"t\"\n";
+        let toml = "a = \"x\"\n[t]\nb = \"y\"\nc = [\"z\"]\n[t.u]\nd = 'w'\n[[v]]\ne = \"s\"\n";
+        for (format, text) in [
+            (Format::Json, json),
+            (Format::Yaml, yaml),
+            (Format::Toml, toml),
+        ] {
+            for query in ["$..*", "$.*", "$['a','a']", "$..d", "$.a"] {
+                let extract = structured(format, query);
+                let spans = placed(&extract, text.as_bytes());
+                assert_eq!(spans, walked(&extract, text), "{format:?} {query}");
             }
         }
-        // Past the rows limit, both fail alike.
-        let limits = Limits::default()
-            .with(LimitKind::RowsPerExtractor, 1)
-            .unwrap();
+        // Every member's value is placed in each document, as itself or
+        // quoted (a YAML block scalar at its key).
+        let extract = structured(Format::Json, "$..*");
+        let spans = placed(&extract, json.as_bytes());
+        assert_eq!(spans.iter().flatten().count(), 3, "{spans:?}");
+    }
+
+    /// Each span [`locate`] finds spells its row's value in the file, as
+    /// written or quoted (a YAML block scalar's, its key); a structured
+    /// value of a format other than JSON, YAML and TOML has none.
+    #[test]
+    fn each_span_spells_its_value() {
+        let mut found = 0;
         for (extract, bytes) in extracts() {
-            let plain =
-                ExtractAdapter::new(extract.clone()).extract(&resource("a"), bytes, &limits);
-            let placed =
-                ExtractAdapter::with_spans(extract.clone()).extract(&resource("a"), bytes, &limits);
-            assert_eq!(
-                plain.map(|output| read(&output)),
-                placed.map(|output| read(&output)),
-                "{extract:?}"
-            );
+            let Ok(text) = std::str::from_utf8(bytes) else {
+                continue;
+            };
+            let output = ExtractAdapter::new(extract.clone())
+                .extract(&resource("a"), bytes, &Limits::default())
+                .unwrap();
+            let ordinals: Vec<u32> = (0..output.rows.len())
+                .map(|ordinal| u32::try_from(ordinal).unwrap())
+                .collect();
+            let (spans, _) = locate(&extract, text, &ordinals, &Limits::default());
+            assert_eq!(spans.len(), output.rows.len());
+            for (row, span) in output.rows.iter().zip(spans) {
+                let (Some(span), Some(Value::String(value))) = (span, row.value()) else {
+                    continue;
+                };
+                found += 1;
+                let spelled = &bytes[span.as_range()];
+                let quoted = format!("\"{value}\"");
+                assert!(
+                    [value.as_bytes(), quoted.as_bytes()].contains(&spelled)
+                        || (&**value, spelled) == ("block\n", b"b"),
+                    "{extract:?}: {:?} at {span:?}",
+                    String::from_utf8_lossy(spelled)
+                );
+            }
         }
+        assert_eq!(found, 10);
     }
 
     /// Where each reader places its values: a trimmed line, a capture, and
     /// the value an object member holds; not a value in an array, nor a
-    /// value of a text that is not UTF-8.
+    /// value of a repeated key, nor a `whole_file` value. A non-literal
+    /// value is no row, so the rows after it keep their ordinals.
     #[test]
     fn each_reader_places_its_values() {
         let spans = |extract: Extract, bytes: &[u8]| -> Vec<Option<(usize, usize)>> {
-            ExtractAdapter::with_spans(extract)
-                .extract(&resource("a"), bytes, &Limits::default())
-                .unwrap()
-                .rows
-                .iter()
-                .map(|row| row.span.map(|span| (span.start, span.end)))
+            placed(&extract, bytes)
+                .into_iter()
+                .map(|span| span.map(|span| (span.start, span.end)))
                 .collect()
         };
         assert_eq!(
-            spans(Extract::Lines(LinesOpts::default()), b"# c\r\n  ab \r\nc"),
-            [Some((7, 9)), Some((12, 13))]
+            spans(
+                Extract::Lines(LinesOpts::default()),
+                b"# c\r\n  ab \r\n${X}\nc"
+            ),
+            [Some((7, 9)), Some((17, 18))]
         );
         assert_eq!(
-            spans(Extract::Regex(r"(?m)^v=(\S+)".into()), b"v=ab\nw=1\nv=c\n"),
-            [Some((2, 4)), Some((11, 12))]
+            spans(
+                Extract::Regex(r"(?m)^v=(\S+)".into()),
+                b"v=ab\nv=${V}\nv=c\n"
+            ),
+            [Some((2, 4)), Some((14, 15))]
         );
         let json = |query| Extract::structured(Format::Json, query).unwrap();
         assert_eq!(
@@ -523,10 +684,47 @@ mod tests {
         assert_eq!(spans(yaml, b"a:  'x'\n"), [Some((4, 7))]);
         let toml = Extract::structured(Format::Toml, "$.t.a").unwrap();
         assert_eq!(spans(toml, b"[t]\na = \"x\"\n"), [Some((8, 11))]);
+        assert_eq!(spans(Extract::WholeFile, b"a\n"), [None]);
+        // A file that no longer holds the row, or no longer parses, places
+        // nothing.
+        let text = "{\"a\": \"x\"}";
         assert_eq!(
-            spans(Extract::Lines(LinesOpts::default()), b"a\xff\nb\n"),
-            [None, None]
+            locate(&json("$.a"), text, &[1], &Limits::default()).0,
+            [None]
         );
+        assert_eq!(
+            locate(&json("$.a"), "{", &[0], &Limits::default()).0,
+            [None]
+        );
+    }
+
+    /// One walk places every row asked of it, in the order asked, as it
+    /// places each alone; it walks the document's entries only for an
+    /// object member's value, and what it held counts the entries.
+    #[test]
+    fn one_walk_places_every_row_asked() {
+        let text = "{\"a\": [\"x\", \"y\"], \"b\": \"z\", \"c\": \"x\"}";
+        let extract = Extract::structured(Format::Json, "$..*").unwrap();
+        let alone = placed(&extract, text.as_bytes());
+        assert_eq!(alone.len(), 4);
+        let before = walks();
+        let (together, held) = locate(&extract, text, &[3, 0, 2, 3], &Limits::default());
+        assert_eq!(walks() - before, 1);
+        assert_eq!(together, [alone[3], alone[0], alone[2], alone[3]]);
+        assert!(held > 3 * text.len(), "{held}");
+        // Values in an array alone: the entries are not walked.
+        let in_array: Vec<u32> = (0..4)
+            .filter(|ordinal| alone[*ordinal as usize].is_none())
+            .collect();
+        assert_eq!(in_array.len(), 2);
+        let (_, tree) = locate(&extract, text, &in_array, &Limits::default());
+        assert!(tree < held, "{tree} {held}");
+        // Nothing asked: no walk.
+        assert_eq!(
+            locate(&extract, text, &[], &Limits::default()),
+            (Vec::new(), 0)
+        );
+        assert_eq!(walks() - before, 2);
     }
 
     #[test]
