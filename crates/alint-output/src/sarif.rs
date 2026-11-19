@@ -1666,17 +1666,10 @@ mod tests {
         assert_eq!(gitlab_again, backwards);
     }
 
-    /// The results that share a fingerprint are numbered baselined first, then
-    /// by what they show, not by the order they are written in. The baseline
-    /// suppresses a fingerprint's first findings by path, line, column and
-    /// message, up to its count: a repeat keeps its fingerprint while the
-    /// repeats that sort before it stay, and a repeat that sorts before it
-    /// shifts it, baselined or not, as it can take its place in the baseline.
-    #[test]
-    fn a_repeat_keeps_its_fingerprint_while_the_repeats_before_it_stay() {
-        use crate::{BaselineMarks, ResultMarks, SuppressedFinding};
-        use alint_core::baseline::{self, Baseline, FingerprintedViolation};
-        let report = |findings: &[(&str, usize)]| Report {
+    /// A `unique` rule's findings at `findings` (path and line), all with
+    /// one message.
+    fn repeats(findings: &[(&str, usize)]) -> Report {
+        Report {
             results: vec![RuleResult {
                 rule_id: "names-unique".into(),
                 level: Level::Error,
@@ -1693,11 +1686,77 @@ mod tests {
                 is_fixable: false,
                 analysis_failures: Vec::new(),
             }],
+        }
+    }
+
+    /// A path-free fingerprint, as a `constraint` rule's `unique` gives.
+    fn path_free(_: &str, _: &Violation) -> String {
+        "fp-x".to_string()
+    }
+
+    /// Each SARIF result of [`repeats`] at `findings` by its path: its
+    /// fingerprint and whether it is baselined, with `baseline` applied as
+    /// `check` applies it. No two results share a fingerprint.
+    fn shown_under(
+        baseline: &alint_core::baseline::Baseline,
+        findings: &[(&str, usize)],
+    ) -> BTreeMap<String, (String, bool)> {
+        use crate::{BaselineMarks, ResultMarks, SuppressedFinding};
+        let applied = alint_core::baseline::apply(&repeats(findings), baseline, path_free);
+        let marks = BaselineMarks {
+            per_result: vec![ResultMarks {
+                live_fingerprints: applied.live_fingerprints[0].clone(),
+                suppressed: applied
+                    .suppressed
+                    .iter()
+                    .map(|suppressed| SuppressedFinding {
+                        violation: suppressed.violation.clone(),
+                        fingerprint: suppressed.fingerprint.clone(),
+                    })
+                    .collect(),
+            }],
+            suppressed_total: applied.suppressed_total,
         };
-        // A path-free fingerprint, as a `constraint` rule's `unique` gives.
-        let fingerprint_of = |_: &str, _: &Violation| "fp-x".to_string();
+        let mut sarif = Vec::new();
+        write_sarif_with_baseline(&applied.live, Some(&marks), &mut sarif).unwrap();
+        let sarif: Value = serde_json::from_slice(&sarif).unwrap();
+        let results = sarif["runs"][0]["results"].as_array().unwrap();
+        let shown: BTreeMap<String, (String, bool)> = results
+            .iter()
+            .map(|result| {
+                let location = &result["locations"][0]["physicalLocation"];
+                (
+                    location["artifactLocation"]["uri"]
+                        .as_str()
+                        .unwrap()
+                        .to_string(),
+                    (
+                        result["partialFingerprints"]["alint/v1"]
+                            .as_str()
+                            .unwrap()
+                            .to_string(),
+                        result["baselineState"] == "unchanged",
+                    ),
+                )
+            })
+            .collect();
+        let distinct: std::collections::BTreeSet<&String> =
+            shown.values().map(|(fingerprint, _)| fingerprint).collect();
+        assert_eq!(distinct.len(), results.len(), "{shown:?}");
+        shown
+    }
+
+    /// The results that share a fingerprint are numbered baselined first, then
+    /// by what they show, not by the order they are written in. The baseline
+    /// suppresses a fingerprint's first findings by path, line, column and
+    /// message, up to its count: a repeat keeps its fingerprint while the
+    /// repeats that sort before it stay, and a repeat that sorts before it
+    /// shifts it, baselined or not, as it can take its place in the baseline.
+    #[test]
+    fn a_repeat_keeps_its_fingerprint_while_the_repeats_before_it_stay() {
+        use alint_core::baseline::{Baseline, FingerprintedViolation};
         // The baseline written while `b` and `d` were the findings.
-        let written = report(&[("b/package.json", 1), ("d/package.json", 5)]);
+        let written = repeats(&[("b/package.json", 1), ("d/package.json", 5)]);
         let baseline = Baseline::from_fingerprints(
             None,
             written.results[0]
@@ -1706,56 +1765,11 @@ mod tests {
                 .map(|violation| FingerprintedViolation {
                     rule_id: "names-unique".into(),
                     path: None,
-                    fingerprint: fingerprint_of("names-unique", violation),
+                    fingerprint: path_free("names-unique", violation),
                     message: Some(violation.message.to_string()),
                 }),
         );
-        // Each result's path with its fingerprint and whether it is
-        // baselined, after the baseline is applied as `check` applies it.
-        let shown = |findings: &[(&str, usize)]| -> BTreeMap<String, (String, bool)> {
-            let applied = baseline::apply(&report(findings), &baseline, fingerprint_of);
-            let marks = BaselineMarks {
-                per_result: vec![ResultMarks {
-                    live_fingerprints: applied.live_fingerprints[0].clone(),
-                    suppressed: applied
-                        .suppressed
-                        .iter()
-                        .map(|suppressed| SuppressedFinding {
-                            violation: suppressed.violation.clone(),
-                            fingerprint: suppressed.fingerprint.clone(),
-                        })
-                        .collect(),
-                }],
-                suppressed_total: applied.suppressed_total,
-            };
-            let mut sarif = Vec::new();
-            write_sarif_with_baseline(&applied.live, Some(&marks), &mut sarif).unwrap();
-            let sarif: Value = serde_json::from_slice(&sarif).unwrap();
-            let results = sarif["runs"][0]["results"].as_array().unwrap();
-            let shown: BTreeMap<String, (String, bool)> = results
-                .iter()
-                .map(|result| {
-                    let location = &result["locations"][0]["physicalLocation"];
-                    (
-                        location["artifactLocation"]["uri"]
-                            .as_str()
-                            .unwrap()
-                            .to_string(),
-                        (
-                            result["partialFingerprints"]["alint/v1"]
-                                .as_str()
-                                .unwrap()
-                                .to_string(),
-                            result["baselineState"] == "unchanged",
-                        ),
-                    )
-                })
-                .collect();
-            let distinct: std::collections::BTreeSet<&String> =
-                shown.values().map(|(fingerprint, _)| fingerprint).collect();
-            assert_eq!(distinct.len(), results.len(), "{shown:?}");
-            shown
-        };
+        let shown = |findings: &[(&str, usize)]| shown_under(&baseline, findings);
         let at = |shown: &BTreeMap<String, (String, bool)>, path: &str| shown[path].clone();
         let alone = shown(&[("b/package.json", 1), ("d/package.json", 5)]);
         let (b, d) = (at(&alone, "b/package.json"), at(&alone, "d/package.json"));
