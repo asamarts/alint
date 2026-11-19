@@ -55,6 +55,7 @@ mod path_confinement_cli;
 mod pattern_hints_cli;
 mod policy_test_cli;
 mod pty_color;
+mod related_locations_contract;
 mod sarif_fixes;
 mod show_notes;
 mod spawn_gate;

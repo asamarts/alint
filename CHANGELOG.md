@@ -432,7 +432,10 @@ policy-test package the user does not trust.
   Unicode code points, end exclusive), at most 20 in the finding's order, and
   `related_locations_omitted`, the count of the rest. Both are left out when there are none, and
   for a finding whose path is `<redacted>`, as SARIF leaves its related locations out. The report
-  stays `schema_version: 1`; `schemas/v1/check-report.json` describes both fields.
+  stays `schema_version: 1`; `schemas/v1/check-report.json` describes both fields. A test over a
+  `constraint` fixture with a finding of each family checks that JSON, SARIF and the language
+  server carry every related location the engine produced, in its order, with its path, range
+  and label, and the count of the rest.
 - **`alint_dsl::discover_config` and `alint_dsl::Discovery`** (library API, see Security):
   discovery's result with the config files it skipped because another user owns them, for a caller
   to warn about. **`alint_core::git::repository_top`**, the nearest directory at or above a path

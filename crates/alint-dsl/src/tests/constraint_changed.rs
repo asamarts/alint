@@ -76,17 +76,41 @@ relations:
     read: { json: "$.name" }
     fields: { name: value }
 rules:
-  - { id: input, kind: constraint, input: names, assert: { unique: { key: [name] } }, level: error }
-  - { id: join, kind: constraint, input: linked, assert: { unique: { key: [name] } }, level: error }
-  - { id: in, kind: constraint, input: kept, assert: { unique: { key: [name] } }, level: error }
-  - { id: not-in, kind: constraint, input: dropped, assert: { unique: { key: [name] } }, level: error }
+  - id: input
+    kind: constraint
+    input: names
+    assert: { unique: { key: [name] } }
+    level: error
+  - id: join
+    kind: constraint
+    input: linked
+    assert: { unique: { key: [name] } }
+    level: error
+  - id: in
+    kind: constraint
+    input: kept
+    assert: { unique: { key: [name] } }
+    level: error
+  - id: not-in
+    kind: constraint
+    input: dropped
+    assert: { unique: { key: [name] } }
+    level: error
   - id: set
     kind: constraint
     input: names
     assert: { set: { field: name, subset_of: { relation: catalog, field: name } } }
     level: error
-  - { id: union, kind: constraint, input: either, assert: { unique: { key: [line] } }, level: error }
-  - { id: marked, kind: constraint, input: modules, assert: { unique: { key: [name] } }, level: error }
+  - id: union
+    kind: constraint
+    input: either
+    assert: { unique: { key: [line] } }
+    level: error
+  - id: marked
+    kind: constraint
+    input: modules
+    assert: { unique: { key: [name] } }
+    level: error
   - id: members
     kind: constraint
     input: workspace
