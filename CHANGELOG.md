@@ -772,13 +772,17 @@ policy-test package the user does not trust.
     findings reads each file they sit in again, one at a time. Each file must fit in what the run's
     relations left of `bytes_per_run` (the limit less what their decodes and their rows took,
     counted once they are evaluated, before any rule runs): alone, before its `read:` values'
-    places are looked for, and then with its offsets and what finding those places held. Placing
-    takes none of it, so whether a rule's findings fit does not depend on the rules placing beside
-    it, and `alint fix`, which evaluates the relations the same way at the start of each pass and
-    again after a fix changes the tree, places them as `alint check` would. When a file does not
-    fit, the rule reports an analysis failure, not findings without places. A `read:` value's place is found only in the files a finding or
-    related location sits in. A typo in the kind's options gets a "did you mean" for the nearest
-    field, not for the typo itself.
+    places are looked for, and then with its offsets and what finding those places held (the
+    document parsed again, and what was read from the parse). Placing takes none of it, so whether
+    a rule's findings fit does not depend on the rules placing beside it, and `alint fix`, which
+    evaluates the relations the same way at the start of each pass and again after a fix changes
+    the tree, places them as `alint check` would. When a file does not fit, the rule reports an
+    analysis failure, not findings without places. A `read:` value's place is found only in the
+    files a finding or related location sits in. A cell is placed only where the file read again
+    still holds what was read there (its value, or its key for an entry's key), so a file changed
+    during the run leaves a finding or related location without a place rather than at other
+    text. A typo in the kind's options gets a "did you mean" for the nearest field, not for the
+    typo itself.
   - When a relation the rule reads takes a value from the environment anywhere in its definition, a
     field's `where:` and `transform:` included, or reads one that does (a join side, an `in:` list's
     relation, a `set` target), every finding's path and message are redacted, as for a version 1

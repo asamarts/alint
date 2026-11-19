@@ -473,12 +473,15 @@ distinct-value limit, which is never truncation.
 - Placing a `constraint` rule's findings reads each file they sit in again, one at a time. Each
   file must fit in what the run's relations left of `bytes_per_run`, the limit less what their
   decodes and their rows took: alone, before its `read:` values' places are looked for, and then
-  with its offsets and what finding those places held. The relations are evaluated, and what they
-  took counted, before any rule runs, in `alint check` and at the start of each pass of `alint
-  fix` (and again after a fix changes the tree), so `fix` places findings as `check` would.
-  Placing takes nothing from it, so every rule's files are checked against the same amount,
-  whatever other rules hold, and a run holds at most one such file per thread. When a file does
-  not fit, the rule reports an analysis failure, not findings without places.
+  with its offsets and what finding those places held (the document parsed again, and what was
+  read from the parse). The relations are evaluated, and what they took counted, before any rule
+  runs, in `alint check` and at the start of each pass of `alint fix` (and again after a fix
+  changes the tree), so `fix` places findings as `check` would. Placing takes nothing from it, so
+  every rule's files are checked against the same amount, whatever other rules hold, and a run
+  holds at most one such file per thread. When a file does not fit, the rule reports an analysis
+  failure, not findings without places. A cell is placed only where the file read again still
+  holds what was read there, its value or its key, so a file changed during the run leaves a
+  finding or related location without a place.
 - A `set` with `equal_to:` gives one finding per value the reference group holds for each group
   that lacks it, so G empty groups against V reference values give G × V findings, as
   `key_parity` does for files without keys
