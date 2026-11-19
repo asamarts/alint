@@ -81,7 +81,7 @@ The filter narrows which files **per-file rules** check, but a checked file is a
 - **Outside a git repo** (or `git` missing from `PATH`): `--changed` hard-errors rather than silently falling back to a full check, because a silent full run would betray the intent the flag expressed.
 - **Deleted files** appear in the diff. A `LICENSE` you deleted is in the changed set, the walker no longer sees it on disk, and an existence rule for `LICENSE` evaluates the whole tree (which now lacks it) and fires.
 <!-- alint:since=0.23.0 -->
-- **Renamed files** appear in the diff under both paths, as a deletion and an addition. `git mv LICENSE LICENSE.txt` puts `LICENSE` in the changed set, so the existence rule for `LICENSE` runs and fires.
+- **Renamed files** appear in the diff under both paths, as a deletion and an addition. `git mv LICENSE LICENSE.txt` puts `LICENSE` in the changed set, so the existence rule for `LICENSE` runs and fires, and `alint fix --changed` recreates `LICENSE` when the rule has a `file_create` fix.
 <!-- /alint:since -->
 - **Partly staged files** are checked from the working tree, because that is what alint reads. The pre-commit framework temporarily stashes unstaged hunks, so its working tree matches the index while the hook runs; a hand-written hook should do the same if it needs index-exact content.
 
