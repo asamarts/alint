@@ -125,12 +125,12 @@ ones: the first carries the fingerprint, and each later one a fingerprint derive
 occurrence.
 <!-- /alint:since -->
 <!-- alint:since=0.23.0 -->
-A `constraint` finding's fingerprint leaves its path out too. SARIF tells apart findings in one run
-that share a fingerprint as GitLab does, with the same derived values: the first keeps the
-canonical fingerprint the baseline file records, and each later one carries a fingerprint derived
-from it and its occurrence, so each stays its own alert. GitLab Code Quality drops entries that
-share a fingerprint, and GitHub Code Scanning may merge them. A run in which no fingerprint repeats
-is written as before.
+A `constraint` finding's fingerprint leaves its path out, as a `<redacted>` path's does. SARIF tells
+apart findings in one run that share a fingerprint as GitLab does, with the same derived values: the
+first keeps the canonical fingerprint the baseline file records, and each later one carries a
+fingerprint derived from it and its occurrence, so each stays its own alert. GitLab Code Quality
+drops entries that share a fingerprint, and GitHub Code Scanning may merge them. A run in which no
+fingerprint repeats is written as before.
 <!-- /alint:since -->
 
 ## Baseline suppression
