@@ -2,6 +2,7 @@
 //! `v0.23/selectors-and-constraints.md` section 6, "Comparison" and
 //! "Identity").
 
+use std::borrow::Cow;
 use std::fmt::Write as _;
 use std::sync::Arc;
 
@@ -120,14 +121,7 @@ impl Scalar {
             Some((end, _)) => (&text[..end], true),
             None => (text, false),
         };
-        let mut shown = String::with_capacity(kept.len());
-        for c in kept.chars() {
-            if escaped_in_message(c) {
-                shown.extend(c.escape_debug());
-            } else {
-                shown.push(c);
-            }
-        }
+        let mut shown = escaped(kept).into_owned();
         if cut {
             write!(shown, "... ({} bytes)", text.len()).expect("writing to a String cannot fail");
         }
@@ -167,6 +161,24 @@ impl Scalar {
 /// written.
 fn escaped_in_message(c: char) -> bool {
     !matches!(c, '"' | '\'' | '\\') && c.escape_debug().nth(1).is_some()
+}
+
+/// `text` (a value, a path, or words about a file) as a message shows it
+/// unquoted: each character [`escaped_in_message`] names escaped, the others
+/// as they are. Text it escaped already shows the same.
+pub(super) fn escaped(text: &str) -> Cow<'_, str> {
+    if !text.chars().any(escaped_in_message) {
+        return Cow::Borrowed(text);
+    }
+    let mut out = String::with_capacity(text.len() + 8);
+    for c in text.chars() {
+        if escaped_in_message(c) {
+            out.extend(c.escape_debug());
+        } else {
+            out.push(c);
+        }
+    }
+    Cow::Owned(out)
 }
 
 /// A finding's `baseline_key`: parts, each written as its byte length in

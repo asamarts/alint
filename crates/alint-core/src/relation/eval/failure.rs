@@ -1,5 +1,6 @@
 //! A relation's analysis failures, and the phrases their messages share.
 
+use std::borrow::Cow;
 use std::fmt::Write as _;
 use std::path::Path;
 use std::sync::Arc;
@@ -31,7 +32,9 @@ impl RelationFailure {
     /// redacted as a rule's own analysis failure is when it is sensitive.
     #[must_use]
     pub fn to_violation(&self, rule_id: &str) -> Violation {
-        let mut violation = Violation::new(self.message.to_string());
+        // Each value and key path in it is escaped already; this escapes a
+        // path, or a parser's words about the file, that is not.
+        let mut violation = Violation::new(escaped(&self.message).into_owned());
         if let Some(resource) = &self.resource {
             violation = violation.with_path(Arc::clone(resource));
         }
@@ -46,8 +49,13 @@ impl RelationFailure {
 impl std::fmt::Display for RelationFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.resource {
-            Some(resource) => write!(f, "{}: {}", resource.display(), self.message),
-            None => f.write_str(&self.message),
+            Some(resource) => write!(
+                f,
+                "{}: {}",
+                escaped(&resource.display().to_string()),
+                escaped(&self.message)
+            ),
+            None => f.write_str(&escaped(&self.message)),
         }
     }
 }
@@ -258,6 +266,24 @@ fn escaped_in_message(c: char) -> bool {
     !matches!(c, '"' | '\'' | '\\') && c.escape_debug().nth(1).is_some()
 }
 
+/// `text` (a path, or words about a file) as a message shows it unquoted:
+/// each character [`escaped_in_message`] names escaped, the others as they
+/// are. Text it escaped already shows the same.
+fn escaped(text: &str) -> Cow<'_, str> {
+    if !text.chars().any(escaped_in_message) {
+        return Cow::Borrowed(text);
+    }
+    let mut out = String::with_capacity(text.len() + 8);
+    for c in text.chars() {
+        if escaped_in_message(c) {
+            out.extend(c.escape_debug());
+        } else {
+            out.push(c);
+        }
+    }
+    Cow::Owned(out)
+}
+
 /// Where a key path sits: ``at `nav.home` ``, or `at the document root`.
 pub(super) fn place(pointer: Option<&Pointer>, hidden: bool) -> String {
     match pointer {
@@ -282,12 +308,12 @@ pub(super) fn at(cell: &Cell, hidden: bool) -> String {
 /// rows: `` `nav.home` in locales/en.json ``, or the resource alone.
 #[must_use]
 pub fn located(cell: &Cell, hidden: bool) -> String {
-    let resource = cell.at.resource.path().as_str();
+    let resource = escaped(cell.at.resource.path().as_str());
     match &cell.at.pointer {
         Some(pointer) if !pointer.segments().is_empty() => {
             format!("{} in {resource}", key_path(pointer, hidden))
         }
-        _ => resource.to_string(),
+        _ => resource.into_owned(),
     }
 }
 
@@ -365,5 +391,49 @@ mod tests {
         for c in ['a', 'é', '"', '\'', '\\', ' '] {
             assert!(!escaped_in_message(c), "{c:?}");
         }
+    }
+
+    /// A path in a message, alone or after a key path, and the text of a
+    /// relation's analysis failure (a parser's words about a file, a path
+    /// another module wrote into it) are escaped as a value is; text escaped
+    /// already shows the same.
+    #[test]
+    fn paths_and_failure_text_are_escaped_in_messages() {
+        let name = "d/a\u{1b}[31m\u{202e}.json";
+        let shown = "d/a\\u{1b}[31m\\u{202e}.json";
+        let cell = |pointer: Option<Pointer>| Cell {
+            value: None,
+            at: Arc::new(super::super::Provenance {
+                resource: crate::relation::Resource::literal(
+                    crate::relation::RelPath::from_index_path(Path::new(name)).unwrap(),
+                ),
+                pointer,
+                part: 0,
+                ordinal: 0,
+                empty: false,
+            }),
+            span: None,
+            path: None,
+        };
+        assert_eq!(located(&cell(None), false), shown);
+        assert_eq!(
+            located(&cell(Some(keys(&["k"]))), false),
+            format!("`k` in {shown}")
+        );
+        let failure = RelationFailure {
+            kind: AnalysisFailureKind::ResourceParse,
+            resource: Some(Arc::from(Path::new(name))),
+            message: format!("could not parse {name}: a\nb").into(),
+            sensitive: false,
+        };
+        assert_eq!(
+            failure.to_violation("r").message,
+            format!("could not parse {shown}: a\\nb")
+        );
+        assert_eq!(
+            failure.to_string(),
+            format!("{shown}: could not parse {shown}: a\\nb")
+        );
+        assert_eq!(escaped(shown), shown, "escaped once");
     }
 }

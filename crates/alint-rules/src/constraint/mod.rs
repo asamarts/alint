@@ -244,7 +244,8 @@ fn input_relation(spec: &RuleSpec) -> Result<(Arc<Plan>, RelationId)> {
 /// ``the inline relation at `rules[0].input` (.alint.yml)``.
 fn relation_label(plan: &Plan, id: RelationId) -> String {
     let named = plan.relation(id);
-    let display = &plan.source(named.source).display;
+    // The file that declares it, which a repository may name as it likes.
+    let display = values::escaped(&plan.source(named.source).display);
     if named.is_inline() {
         format!("the inline relation at `{}` ({display})", named.name)
     } else {
@@ -348,7 +349,11 @@ impl ConstraintRule {
         let (mut notes, mut findings) = (Vec::new(), Vec::new());
         for note in skipped {
             let path = note.resource.path().as_path();
-            let message = format!("{}: {}", crate::slash(path), note.message);
+            let message = format!(
+                "{}: {}",
+                values::escaped(&crate::slash(path)),
+                values::escaped(&note.message)
+            );
             match &note.skipped {
                 Skipped::NonLiteral => {
                     notes.push(Violation::new(message).with_path(path).as_note());
@@ -376,7 +381,9 @@ impl ConstraintRule {
     /// An analysis failure of the assertion: no verdict, never a pass.
     fn failure(&self, at: Option<&std::path::Path>, mut message: String) -> Violation {
         message.insert_str(0, &format!("{}: ", self.input_label()));
-        let mut finding = Violation::new(message);
+        // Each path, key path and value in it is escaped already; this
+        // keeps any other text from a file from reaching output raw.
+        let mut finding = Violation::new(values::escaped(&message).into_owned());
         if let Some(path) = at {
             finding = finding.with_path(path);
         }

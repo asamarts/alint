@@ -644,3 +644,57 @@ fn an_environment_literal_in_assert_redacts_every_message_of_the_rule() {
         );
     }
 }
+
+// --- Paths in notes and labels are escaped -----------------------------------
+
+/// A file a note names and the file that declares a relation reach messages
+/// escaped, as a row's path does: a `${VAR}` value skipped in a file whose
+/// name holds a right-to-left override (rule `n`), and a relation declared
+/// in an `.alint.d/` fragment whose name holds one, whose rule `c` fails.
+#[test]
+fn a_note_and_a_relation_label_name_their_files_escaped() {
+    let config = "version: 2\nrules: []\n";
+    let fragment = "relations:\n  r:\n    from: { paths: \"n/*.json\" }\n    read: { json: \
+                    \"$.v\" }\n    fields: { v: value, file: path }\nrules:\n  - id: c\n    \
+                    kind: constraint\n    input: r\n    assert: { equal: { field: v, to: { row: \
+                    { file: none.json } } } }\n    level: error\n  - id: n\n    kind: \
+                    constraint\n    input: r\n    assert: { unique: { key: [v] } }\n    level: \
+                    error\n";
+    let files = [
+        (".alint.d/x\u{202e}.yml", fragment),
+        ("n/a\u{202e}.json", "{\"v\": \"${VAR}\"}"),
+        ("n/b.json", "{\"v\": \"x\"}"),
+    ];
+    let results = run(config, &files);
+    let shown: Vec<&str> = ["c", "n"]
+        .into_iter()
+        .flat_map(|id| {
+            let found = result(&results, id);
+            found
+                .violations
+                .iter()
+                .chain(&found.notes)
+                .map(|violation| violation.message.as_ref())
+                .chain(
+                    found
+                        .analysis_failures
+                        .iter()
+                        .map(|failure| failure.message.as_ref()),
+                )
+        })
+        .collect();
+    assert!(
+        shown.iter().any(|message| message
+            .starts_with("relation `r` (.alint.d/x\\u{202e}.yml): `assert.equal.to.row`")),
+        "{shown:?}"
+    );
+    assert!(
+        shown
+            .iter()
+            .any(|message| message.starts_with("n/a\\u{202e}.json: skipped non-literal value")),
+        "{shown:?}"
+    );
+    for message in shown {
+        assert!(!message.contains('\u{202e}'), "{message:?}");
+    }
+}

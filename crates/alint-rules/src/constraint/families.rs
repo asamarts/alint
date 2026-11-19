@@ -19,7 +19,7 @@ use alint_core::{Context, MAX_RELATED_LOCATIONS, RelatedLocation, Violation};
 
 use super::ConstraintRule;
 use super::places::{Asked, Placed, Places};
-use super::values::{Key, Kind, Scalar};
+use super::values::{Key, Kind, Scalar, escaped};
 
 #[path = "set.rs"]
 mod set;
@@ -224,7 +224,7 @@ impl<'r> Run<'r> {
                 span: None,
                 path: None,
             }),
-            Place::Resource(path) => crate::slash(path),
+            Place::Resource(path) => escaped(&crate::slash(path)).into_owned(),
             Place::Nowhere => "no resource".to_string(),
         }
     }
@@ -255,7 +255,10 @@ impl<'r> Run<'r> {
         if named.reads_environment || self.sensitive(position) {
             format!(" (`{at}` matched nothing)")
         } else {
-            format!(" (`{at}`, `{}`, matched nothing)", part_text(part))
+            format!(
+                " (`{at}`, `{}`, matched nothing)",
+                escaped(&part_text(part))
+            )
         }
     }
 

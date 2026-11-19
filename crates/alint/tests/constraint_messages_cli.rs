@@ -118,6 +118,125 @@ fn a_key_path_and_row_text_reach_human_and_json_output_escaped() {
             "{message:?}"
         );
     }
+
+    file_names_reach_human_json_and_sarif_output_escaped();
+}
+
+/// Rule `read` over `d/*.json`'s `$.v` values, a `read:` row naming its
+/// file alone, and rule `entries` over the same files' `v` entries, a row
+/// naming its key path in its file; and rule `types` over the entries of
+/// `t/*.json`, whose `v` holds a string in one file and a number in the
+/// other, an analysis failure naming both.
+const FILE_NAMES: &str = r#"version: 2
+relations:
+  read:
+    from: { paths: "d/*.json" }
+    read: { json: "$.v" }
+    fields: { v: value }
+  entries:
+    from: { paths: "d/*.json" }
+    entries: { format: json, at: "$" }
+    fields: { v: entry.value }
+  types:
+    from: { paths: "t/*.json" }
+    entries: { format: json, at: "$" }
+    fields: { v: entry.value }
+rules:
+  - id: read
+    kind: constraint
+    input: read
+    assert: { unique: { key: [v] } }
+    level: error
+  - id: entries
+    kind: constraint
+    input: entries
+    assert: { unique: { key: [v] } }
+    level: error
+  - id: types
+    kind: constraint
+    input: types
+    assert: { unique: { key: [v] } }
+    level: error
+"#;
+
+/// A file whose name holds a right-to-left override, and on Unix one whose
+/// name holds an escape (Windows refuses control characters in file names),
+/// each the first row of a value another file repeats, and of a type
+/// another file's value is not: each message names the file escaped, as
+/// `{{row.FIELD}}` shows its path, in human, JSON and SARIF output.
+fn file_names_reach_human_json_and_sarif_output_escaped() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), ".alint.yml", FILE_NAMES);
+    let mut names = vec![("a\u{202e}", "a\\u{202e}")];
+    if cfg!(unix) {
+        names.push(("b\u{1b}[31m", "b\\u{1b}[31m"));
+    }
+    for (index, (name, _)) in names.iter().enumerate() {
+        let value = format!("{{\"v\": \"x{index}\"}}");
+        write(dir.path(), &format!("d/{name}.json"), &value);
+        write(dir.path(), &format!("d/z{index}.json"), &value);
+    }
+    write(
+        dir.path(),
+        &format!("t/{}.json", names[0].0),
+        "{\"v\": \"1\"}",
+    );
+    write(dir.path(), "t/z.json", "{\"v\": 1}");
+
+    let mut expected = Vec::new();
+    for (index, (_, shown)) in names.iter().enumerate() {
+        expected.push(format!(
+            "`v` \"x{index}\" is not unique: the first row with it is d/{shown}.json"
+        ));
+        expected.push(format!(
+            "`v` \"x{index}\" is not unique: the first row with it is `v` in d/{shown}.json"
+        ));
+    }
+    let types = format!(
+        "relation `types` (.alint.yml): `assert.unique.key`: `v` holds a string at `v` in \
+         t/{}.json and a number at `v` in t/z.json; the comparison would cross types, so the \
+         assertion has no verdict",
+        names[0].1
+    );
+
+    let raw = |text: &str| text.chars().any(|c| c.is_control() || c == '\u{202e}');
+    let human = run(dir.path(), &["check"]);
+    let human = String::from_utf8(human.stdout).unwrap();
+    for line in human.lines() {
+        assert!(!raw(line), "{line:?} in\n{human}");
+    }
+    let json = json(dir.path(), "json");
+    let mut messages: Vec<String> = ["read", "entries"]
+        .iter()
+        .flat_map(|id| violations(&json, id))
+        .map(|violation| violation["message"].as_str().unwrap().to_string())
+        .collect();
+    messages.sort();
+    expected.sort();
+    assert_eq!(messages, expected);
+    let failures: Vec<&str> = json["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|result| result["id"] == "types")
+        .unwrap()["analysis_failures"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|failure| failure["message"].as_str().unwrap())
+        .collect();
+    assert_eq!(failures, [types.as_str()]);
+    let sarif = json_sarif(dir.path());
+    let texts: Vec<&str> = sarif["runs"][0]["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|result| result["message"]["text"].as_str().unwrap())
+        .collect();
+    assert!(texts.len() >= expected.len(), "{texts:?}");
+    for text in texts {
+        assert!(!raw(text), "{text:?}");
+    }
 }
 
 /// `data.json`'s two entries share a value, of field `v`, sensitive when
