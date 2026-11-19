@@ -85,8 +85,15 @@ fn held(rows: &[usize], values: &[Scalar]) -> Groups {
 
 impl<'r> Run<'r> {
     /// `set`; `other_rows` are the rows of the relation a `{ relation: R }`
-    /// target names (the input's, for a `{ group: }` target).
-    pub(in crate::constraint) fn set(&mut self, set: &SetAssertion, other_rows: &'r RelationRows) {
+    /// target names (the input's, for a `{ group: }` target), and `kept`
+    /// says, for each resource the input lists, whether `where:` may keep a
+    /// row of it, when groups sit at resources without rows.
+    pub(in crate::constraint) fn set(
+        &mut self,
+        set: &SetAssertion,
+        other_rows: &'r RelationRows,
+        kept: Option<&[bool]>,
+    ) {
         let Some(field_at) = self.position(&set.field) else {
             return;
         };
@@ -105,7 +112,7 @@ impl<'r> Run<'r> {
         if !self.failures.is_empty() {
             return;
         }
-        let Some(groups) = self.set_groups(set, group_at) else {
+        let Some(groups) = self.set_groups(set, group_at, kept) else {
             return;
         };
         let Some(other) = self.other_set(set, field_at, &values, &groups, other_rows) else {
@@ -139,20 +146,28 @@ impl<'r> Run<'r> {
     }
 
     /// The groups: each value of the field at `group_at` with its rows; each
-    /// resource the relation reads, when the field is a path token; and each
-    /// literal of `groups:`. Without `group_by:`, the relation is one group,
-    /// whose resources are every one it reads.
+    /// resource the relation reads that `where:` may keep a row of (`kept`),
+    /// when the field is a path token; and each literal of `groups:`.
+    /// Without `group_by:`, the relation is one group, whose resources are
+    /// every one it reads and may keep a row of.
     fn set_groups(
         &mut self,
         set: &SetAssertion,
         group_at: Option<usize>,
+        kept: Option<&[bool]>,
     ) -> Option<Vec<SetGroup<'r>>> {
         let rows: &'r RelationRows = self.rows;
+        let resources = rows
+            .resources
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| kept.is_none_or(|kept| kept[*index]))
+            .map(|(_, resource)| resource);
         let Some(group_at) = group_at else {
             return Some(vec![SetGroup {
                 value: None,
                 rows: (0..rows.rows.len()).collect(),
-                first: rows.resources.iter().map(Resource::path).min(),
+                first: resources.map(Resource::path).min(),
                 literal: false,
             }]);
         };
@@ -202,7 +217,7 @@ impl<'r> Run<'r> {
         // Grouped by a path token, every resource forms its group, made as
         // its rows' is.
         if let Some(by_resource) = &set.resource_groups {
-            for resource in rows.resources.iter() {
+            for resource in resources {
                 let value = Scalar::String(by_resource.group_of(resource).into());
                 let path = resource.path();
                 if let Some(&at) = index.get(&value) {
@@ -399,10 +414,8 @@ impl<'r> Run<'r> {
             self.fail(Some(path), message);
             return None;
         }
-        // A value of a sensitive field shows in a group that holds it.
-        if other_rows.fields[at].sensitive {
-            self.also_sensitive = Some(field_at);
-        }
+        // A sensitive field's values show in the compared field: the loader
+        // made it sensitive too, with every field that spells the same values.
         Some(Other {
             rows: other_rows,
             at,

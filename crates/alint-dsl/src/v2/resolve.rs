@@ -523,6 +523,21 @@ const MEMBER_SITE: &str = "a membership reference's `relation:` names a relation
 pub(crate) struct Resolved<'o> {
     pub(crate) plan: Plan,
     pub(crate) namespaces: Namespaces<'o>,
+    /// The relations, each after those it reads ([`close_sensitivity`]).
+    order: Vec<RelationId>,
+    /// Each `set` against another relation's field the rules make.
+    compared: Vec<Compared>,
+}
+
+/// A `constraint` rule's `set` against another relation's field: its input
+/// relation's field `field` holds values beside relation `other`'s field
+/// `other_field`, so a sensitive `other_field` makes it sensitive.
+#[derive(Debug)]
+struct Compared {
+    input: RelationId,
+    field: String,
+    other: RelationId,
+    other_field: String,
 }
 
 /// Resolve every reference of `objects`, check the plan, and judge each
@@ -568,7 +583,12 @@ pub(crate) fn resolve(objects: &Objects) -> Result<Resolved<'_>> {
     add_capabilities(&mut plan, &order);
     close_sensitivity(&mut plan, &order);
     gate_objects(&plan)?;
-    Ok(Resolved { plan, namespaces })
+    Ok(Resolved {
+        plan,
+        namespaces,
+        order,
+        compared: Vec::new(),
+    })
 }
 
 /// `error`, a plan-check error `checked` failed with, when the same check
@@ -996,6 +1016,57 @@ fn close_sensitivity(plan: &mut Plan, order: &[RelationId]) {
     }
 }
 
+/// [`close_sensitivity`] with each `set` against another relation's field
+/// (`compared`): the compared field holds values a finding shows beside the
+/// other field's, so when that field is sensitive the compared field is too,
+/// with every field of its family, as for an `in:` list naming it. The
+/// relations that read the input follow, so the two repeat until nothing
+/// changes; each round makes a field sensitive, so there are at most as many
+/// rounds as fields.
+fn close_compared_sensitivity(plan: &mut Plan, order: &[RelationId], compared: &[Compared]) {
+    loop {
+        let mut changed = false;
+        for edge in compared {
+            let relations = &plan.relations;
+            if !relations[edge.other.0]
+                .relation
+                .field(&edge.other_field)
+                .is_some_and(|field| field.sensitive)
+            {
+                continue;
+            }
+            let relation = &relations[edge.input.0].relation;
+            let join = match &relation.rows {
+                plan::Rows::Join(join) => Some(join),
+                plan::Rows::Part(_) | plan::Rows::Union(_) => None,
+            };
+            let Some(field) = relation.field(&edge.field) else {
+                continue;
+            };
+            let family = Family::of(&field.source, join);
+            let shown: Vec<usize> = relation
+                .fields
+                .iter()
+                .enumerate()
+                .filter(|(_, (_, held))| {
+                    !held.sensitive && Family::of(&held.source, join) == family
+                })
+                .map(|(position, _)| position)
+                .collect();
+            for position in shown {
+                plan.relations[edge.input.0].relation.fields[position]
+                    .1
+                    .sensitive = true;
+                changed = true;
+            }
+        }
+        if !changed {
+            return;
+        }
+        close_sensitivity(plan, order);
+    }
+}
+
 /// Whether a field of `source` spells an entry's key, or the keys above it.
 fn spells_keys(source: &plan::FieldSource) -> bool {
     use plan::FieldSource as Source;
@@ -1170,6 +1241,13 @@ fn gate_objects(plan: &Plan) -> Result<()> {
 }
 
 impl Resolved<'_> {
+    /// The plan, once every rule is resolved: the sensitivity each `set`
+    /// against another relation's field adds is closed over it.
+    pub(crate) fn into_plan(mut self) -> Plan {
+        close_compared_sensitivity(&mut self.plan, &self.order, &self.compared);
+        self.plan
+    }
+
     /// Resolve the reference fields of rule `id` (an effective rule mapping
     /// of `kind`), each in the source that wrote it (`origins`, an index into
     /// `config_files`, the files the configuration was loaded from), and
@@ -1219,6 +1297,37 @@ impl Resolved<'_> {
                     origins,
                     config_files,
                 )?);
+            }
+        }
+        // A `set` against another relation's field: its compared field.
+        let input = references
+            .iter()
+            .find(|reference| reference.field == "input");
+        let set = rule.get("assert").and_then(|assert| assert.get("set"));
+        let compared = set
+            .and_then(|set| set.get("field"))
+            .and_then(ayaml::Value::as_str);
+        if let (Some(input), Some(set), Some(compared)) = (input, set, compared) {
+            for reference in &references {
+                let Some(mode) = reference
+                    .field
+                    .strip_prefix("assert.set.")
+                    .and_then(|rest| rest.strip_suffix(".relation"))
+                else {
+                    continue;
+                };
+                if let Some(other_field) = set
+                    .get(mode)
+                    .and_then(|target| target.get("field"))
+                    .and_then(ayaml::Value::as_str)
+                {
+                    self.compared.push(Compared {
+                        input: input.relation.id,
+                        field: compared.to_string(),
+                        other: reference.relation.id,
+                        other_field: other_field.to_string(),
+                    });
+                }
             }
         }
         if !references.is_empty() {

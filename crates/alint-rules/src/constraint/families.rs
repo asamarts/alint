@@ -32,9 +32,6 @@ pub(super) struct Run<'r> {
     /// Key paths stay out of messages and baselines: a field that holds keys
     /// is sensitive, or the relation's configuration reads the environment.
     hide_keys: bool,
-    /// A field whose values another relation's sensitive field holds too (a
-    /// `set` compared with it), so it is sensitive here.
-    also_sensitive: Option<usize>,
     findings: Vec<Violation>,
     failures: Vec<Violation>,
 }
@@ -83,7 +80,6 @@ impl<'r> Run<'r> {
             rows,
             places: Places::new(ctx),
             hide_keys,
-            also_sensitive: None,
             findings: Vec::new(),
             failures: Vec::new(),
         }
@@ -121,7 +117,7 @@ impl<'r> Run<'r> {
     }
 
     fn sensitive(&self, position: usize) -> bool {
-        self.rows.fields[position].sensitive || self.also_sensitive == Some(position)
+        self.rows.fields[position].sensitive
     }
 
     fn name(&self, position: usize) -> &str {

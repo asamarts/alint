@@ -774,7 +774,7 @@ impl RawConfig {
             .with_compatibility(self.compatibility)
             .with_environment_values(self.environment_values)
             .with_config_files(self.config_files)
-            .with_relation_plan(resolved.map(|resolved| resolved.plan)))
+            .with_relation_plan(resolved.map(v2::Resolved::into_plan)))
     }
 }
 

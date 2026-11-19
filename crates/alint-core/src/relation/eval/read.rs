@@ -651,11 +651,11 @@ const fn token_slot(token: PathToken) -> usize {
 
 /// Every path token of `resource`, from its index path, which is `/`-separated
 /// on every host, so a token is too.
-fn resource_tokens(resource: &Resource) -> PathTokens {
+pub(super) fn resource_tokens(resource: &Resource) -> PathTokens {
     PathTokens::from_path(resource.path().as_path())
 }
 
-fn token_text(paths: &PathTokens, token: PathToken) -> &str {
+pub(super) fn token_text(paths: &PathTokens, token: PathToken) -> &str {
     match token {
         PathToken::Path => &paths.path,
         PathToken::Dir => &paths.dir,

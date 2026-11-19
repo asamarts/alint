@@ -254,6 +254,110 @@ fn a_set_grouped_by_path_is_linear_in_the_files() {
     );
 }
 
+/// Relation `m` of each `locales/*.json` file's leaves, grouped by its stem
+/// after `transform`, with `where:` `filter`, and the files `en` and `fr`
+/// with keys `a` and `b`, beside `extra`.
+fn filtered(transform: &str, filter: &str, extra: &[(&str, &str)]) -> Vec<String> {
+    let config = format!(
+        "version: 2\nrelations:\n  drafts:\n    from: {{ paths: drafts.json }}\n    entries: {{ \
+         format: json, at: \"$\" }}\n    fields: {{ name: entry.key }}\n  m:\n    from: {{ \
+         paths: \"locales/*.json\" }}\n    entries: {{ format: json, at: \"$\", leaves: true \
+         }}\n    fields: {{ locale: stem, key: entry.path }}\n{transform}    where: \
+         {filter}\nrules:\n  - id: c\n    kind: constraint\n    input: m\n    assert: {{ set: {{ \
+         field: key, group_by: locale, equal_to: {{ group: en }} }} }}\n    level: error\n"
+    );
+    let mut files = vec![
+        ("drafts.json", "{\"draft\": true}"),
+        ("locales/en.json", "{\"a\": 1, \"b\": 2}"),
+        ("locales/fr.json", "{\"a\": 1, \"b\": 2}"),
+    ];
+    files.extend_from_slice(extra);
+    findings(&run(&config, &files), "c")
+}
+
+/// A resource that `where:` drops by its path tokens alone, rows or not, is
+/// no group: its values are known without rows, after the transforms, and
+/// a list may name another relation's field.
+#[test]
+fn a_resource_where_drops_by_its_path_is_no_group() {
+    let draft = [("locales/draft.json", "{}")];
+    for filter in [
+        "{ locale: { not_in: [draft] } }",
+        "{ locale: { in: [en, fr] } }",
+        "{ locale: { not_matches: \"^dr\" } }",
+        "{ locale: { not_in: [{ relation: drafts, field: name }] } }",
+    ] {
+        assert_eq!(filtered("", filter, &draft), [] as [String; 0], "{filter}");
+    }
+    let lowered = "    transform: { locale: [lower] }\n";
+    let draft = [("locales/Draft.json", "{}")];
+    assert_eq!(
+        filtered(lowered, "{ locale: { not_in: [draft] } }", &draft),
+        [] as [String; 0]
+    );
+    // Without the transform, `Draft` is not `draft`, so it is a group.
+    assert_eq!(
+        filtered("", "{ locale: { not_in: [draft] } }", &draft).len(),
+        2
+    );
+}
+
+/// A predicate on a field the path does not give may keep a row of a
+/// resource without rows, had it any: that resource is a group.
+#[test]
+fn a_predicate_on_another_field_keeps_a_resource_without_rows() {
+    let empty = [("locales/de.json", "{}")];
+    for filter in [
+        "{ key: { not_matches: \"^z\" } }",
+        "{ key: { in: [a, b] }, locale: { not_in: [draft] } }",
+    ] {
+        assert_eq!(
+            filtered("", filter, &empty),
+            [
+                "locales/de.json: `locale` \"de\" lacks `key` \"a\", which `locale` \"en\" \
+                 holds\n  ~ the reference group's row with it: locales/en.json:1:2",
+                "locales/de.json: `locale` \"de\" lacks `key` \"b\", which `locale` \"en\" \
+                 holds\n  ~ the reference group's row with it: locales/en.json:1:10",
+            ],
+            "{filter}"
+        );
+    }
+}
+
+/// A join's copy of a path token from the side whose resources it lists is
+/// known from the path too, through both relations' `where:`.
+#[test]
+fn a_join_drops_a_resource_by_its_copy_of_a_path_token() {
+    let join = |side: &str, joined: &str| {
+        format!(
+            "version: 2\nrelations:\n  known:\n    from: {{ paths: known.json }}\n    entries: \
+             {{ format: json, at: \"$\" }}\n    fields: {{ name: entry.key }}\n  keys:\n    from: \
+             {{ paths: \"locales/*.json\" }}\n    entries: {{ format: json, at: \"$\", leaves: \
+             true }}\n    fields: {{ locale: stem, key: entry.path }}\n{side}  m:\n    join: {{ \
+             left: keys, right: known, on: {{ key: name }}, unique: right }}\n    fields: {{ \
+             locale: left.locale, key: left.key }}\n{joined}rules:\n  - id: c\n    kind: \
+             constraint\n    input: m\n    assert: {{ set: {{ field: key, group_by: locale, \
+             equal_to: {{ group: en }} }} }}\n    level: error\n"
+        )
+    };
+    let files = [
+        ("known.json", "{\"a\": 1}"),
+        ("locales/en.json", "{\"a\": 1}"),
+        ("locales/draft.json", "{}"),
+    ];
+    let drop = "{ locale: { not_in: [draft] } }";
+    for (side, joined) in [
+        (format!("    where: {drop}\n"), String::new()),
+        (String::new(), format!("    where: {drop}\n")),
+    ] {
+        assert_eq!(
+            findings(&run(&join(&side, &joined), &files), "c"),
+            [] as [String; 0]
+        );
+    }
+    assert_eq!(findings(&run(&join("", ""), &files), "c").len(), 1);
+}
+
 // --- `groups:` ----------------------------------------------------------------
 
 /// Relation `m` of `messages.json`'s locales, and rule `c` asserting a set
@@ -510,6 +614,64 @@ fn a_failure_of_the_other_relation_withholds_every_finding() {
         failures[0].starts_with("allowed.json: relation `allowed` (.alint.yml): could not parse"),
         "{failures:?}"
     );
+}
+
+/// What the other relation's `read:` skipped (a value that is not a string,
+/// a `${VAR}`) is reported by the rule, once, whether or not the input
+/// relation took the same notes through a `where:` list that reads it.
+#[test]
+fn the_other_relations_skipped_values_are_reported_once() {
+    let config = |filter: &str| {
+        format!(
+            "version: 2\nrelations:\n  allowed:\n    from: {{ paths: allowed.json }}\n    read: \
+             {{ json: \"$.names[*]\" }}\n    fields: {{ name: value }}\n  deps:\n    from: {{ \
+             paths: \"packages/*/package.json\" }}\n    entries: {{ format: json, at: \
+             \"$.dependencies\" }}\n    fields: {{ dependency: entry.key }}\n{filter}rules:\n  - \
+             id: c\n    kind: constraint\n    input: deps\n    assert: {{ set: {{ field: \
+             dependency, equal_to: {{ relation: allowed, field: name }} }} }}\n    level: error\n"
+        )
+    };
+    let files = [
+        (
+            "allowed.json",
+            "{\"names\": [\"react\", 3, \"vue\", \"${PKG}\"]}",
+        ),
+        (
+            "packages/a/package.json",
+            "{\"dependencies\": {\"react\": \"1\", \"vue\": \"1\"}}",
+        ),
+    ];
+    for filter in [
+        "",
+        "    where: { dependency: { in: [{ relation: allowed, field: name }] } }\n",
+    ] {
+        let results = run(&config(filter), &files);
+        let result = result(&results, "c");
+        let found: Vec<String> = result
+            .violations
+            .iter()
+            .map(|violation| violation.message.to_string())
+            .collect();
+        assert_eq!(
+            found,
+            [
+                "allowed.json: `read.json: $.names[*]` matched non-string value(s) (number: 1); \
+                 `read:` rows hold strings, so select string values, or read typed values with \
+                 `entries:`"
+            ],
+            "{filter}"
+        );
+        let notes: Vec<String> = result
+            .notes
+            .iter()
+            .map(|note| note.message.to_string())
+            .collect();
+        assert_eq!(
+            notes,
+            ["allowed.json: skipped non-literal value \"${PKG}\""],
+            "{filter}"
+        );
+    }
 }
 
 /// A sensitive field of the other relation hides its values in messages,

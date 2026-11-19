@@ -40,9 +40,10 @@ mod options;
 mod places;
 mod values;
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
-use alint_core::relation::eval::{self, RelationRows, Skipped};
+use alint_core::relation::eval::{self, RelationNote, Skipped};
 use alint_core::relation::plan::{PathToken, Plan, RelationId};
 use alint_core::relation::{Resource, StringTransform, Value};
 use alint_core::{AnalysisFailureKind, Context, Error, Level, Result, Rule, RuleSpec, Violation};
@@ -271,13 +272,21 @@ impl Rule for ConstraintRule {
         }
         let rows = &outcomes[0];
         // What the relation a `set` compares against skipped is a value its
-        // set lacks, as a `where:` list's relation's is a row it lacks.
-        let (mut reported, mut skipped) = (Vec::new(), Vec::new());
+        // set lacks, as a `where:` list's relation's is a row it lacks. The
+        // input may hold the same notes, taken from it through a list or a
+        // join: each is reported once.
+        let mut seen = HashSet::new();
+        let mut notes = Vec::new();
         for outcome in &outcomes {
-            let (notes, findings) = Self::notes(outcome);
-            reported.extend(notes);
-            skipped.extend(findings);
+            notes.extend(
+                outcome
+                    .notes
+                    .iter()
+                    .filter(|note| seen.insert(note.key()))
+                    .cloned(),
+            );
         }
+        let (mut reported, skipped) = Self::notes(&notes);
         let mut run = families::Run::new(self, rows, ctx);
         match &self.assertion {
             Assertion::Unique { key, determines } => run.unique(key, determines),
@@ -294,7 +303,11 @@ impl Rule for ConstraintRule {
                     }
                     SetTarget::Group(_) => rows,
                 };
-                run.set(set, other);
+                // The resources a group may sit at: those `where:` may keep
+                // a row of, as their paths alone decide.
+                let kept = (set.group_by.is_none() || set.resource_groups.is_some())
+                    .then(|| eval::resources_kept(&self.plan, self.inputs[0], rows, ctx));
+                run.set(set, other, kept.as_deref());
             }
         }
         reported.extend(run.finish(skipped));
@@ -308,9 +321,9 @@ impl ConstraintRule {
     /// the findings, one per resource and part whose values are not strings,
     /// naming their kinds, which an assertion with no verdict withholds with
     /// its own.
-    fn notes(rows: &RelationRows) -> (Vec<Violation>, Vec<Violation>) {
+    fn notes(skipped: &[RelationNote]) -> (Vec<Violation>, Vec<Violation>) {
         let (mut notes, mut findings) = (Vec::new(), Vec::new());
-        for note in &rows.notes {
+        for note in skipped {
             let path = note.resource.path().as_path();
             let message = format!("{}: {}", crate::slash(path), note.message);
             match &note.skipped {

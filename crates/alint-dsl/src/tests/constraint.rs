@@ -830,6 +830,48 @@ fn a_set_against_another_relation_names_the_relation_and_its_field() {
     );
 }
 
+/// A `set` against a sensitive field of another relation makes the compared
+/// field sensitive in the plan `explain` and `list` show, with its family
+/// (every entry field, here), and a relation that reads it follows.
+#[test]
+fn a_set_against_a_sensitive_field_makes_the_compared_family_sensitive() {
+    let objects = format!(
+        "{DEPS}  denied:\n    from: {{ paths: denied.json }}\n    entries: {{ format: json, at: \
+         \"$\" }}\n    fields: {{ name: {{ source: entry.key, sensitive: true }} }}\n  later:\n    \
+         from: {{ paths: later.json }}\n    entries: {{ format: json, at: \"$\" }}\n    fields: \
+         {{ name: entry.key, where_from: path }}\n    where: {{ name: {{ in: [{{ relation: deps, \
+         field: dependency }}] }} }}\n"
+    );
+    let sensitive = |config: &Config, relation: &str| -> Vec<String> {
+        let plan = config.relation_plan.as_ref().expect("a plan");
+        let named = plan
+            .relations
+            .iter()
+            .find(|named| named.name == relation)
+            .unwrap();
+        named
+            .relation
+            .fields
+            .iter()
+            .filter(|(_, field)| field.sensitive)
+            .map(|(name, _)| name.clone())
+            .collect()
+    };
+    let rest = "    input: deps\n    assert: { set: { field: dependency, disjoint_from: { \
+                relation: denied, field: name } } }\n";
+    let config = builds(&v2(&objects, rest), &[]);
+    assert_eq!(sensitive(&config, "deps"), ["dependency", "range"]);
+    assert_eq!(sensitive(&config, "later"), ["name"]);
+    // A group target, or another relation's field that is not sensitive,
+    // changes nothing.
+    let rest = "    input: deps\n    assert: { set: { field: dependency, group_by: at, \
+                disjoint_from: { group: x } } }\n";
+    assert_eq!(
+        sensitive(&builds(&v2(&objects, rest), &[]), "deps"),
+        [] as [String; 0]
+    );
+}
+
 #[test]
 fn a_set_names_a_relation_qualified_by_an_extends_alias() {
     let base = format!("version: 2\n{NAMES}rules: []\n");
