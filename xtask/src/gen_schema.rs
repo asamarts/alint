@@ -135,7 +135,10 @@ pub(crate) fn build_full_schema() -> Result<Value> {
     apply_kind_meta_restrictions(defs)?;
 
     normalize_descriptions(&mut schema);
-    prune_unreferenced_defs(&mut schema)?;
+    // A kind of version 2 may refer to a definition only the draft version 2
+    // schema adds (the `constraint` options name fields and relations by
+    // `$defs/v2_name` and `$defs/v2_reference`), so those may dangle here.
+    prune_unreferenced_defs_except(&mut schema, crate::gen_schema_v2::KIND_REFERENCED_DEFS)?;
     Ok(schema)
 }
 
@@ -221,6 +224,12 @@ fn merge_fresh_option_defs(
 /// type that is renamed or removed would otherwise leave its old `$defs` entry
 /// in every future schema even though no branch references it.
 fn prune_unreferenced_defs(schema: &mut Value) -> Result<()> {
+    prune_unreferenced_defs_except(schema, &[])
+}
+
+/// [`prune_unreferenced_defs`], where a reference to one of `later` (a
+/// definition a later stage adds) is neither followed nor an error.
+fn prune_unreferenced_defs_except(schema: &mut Value, later: &[&str]) -> Result<()> {
     fn collect_refs(value: &Value, out: &mut std::collections::BTreeSet<String>) {
         match value {
             Value::Object(map) => {
@@ -249,8 +258,12 @@ fn prune_unreferenced_defs(schema: &mut Value) -> Result<()> {
         .clone();
     let mut reachable = std::collections::BTreeSet::new();
     collect_refs(schema, &mut reachable);
+    reachable.retain(|name| !later.contains(&name.as_str()));
     let mut pending: Vec<String> = reachable.iter().cloned().collect();
     while let Some(name) = pending.pop() {
+        if later.contains(&name.as_str()) {
+            continue;
+        }
         let def = all_defs
             .get(&name)
             .with_context(|| format!("schema references missing `$defs/{name}`"))?;

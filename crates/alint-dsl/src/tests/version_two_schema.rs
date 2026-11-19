@@ -21,6 +21,9 @@ use crate::v2::schema_parity::{decode_stage, has_schema, json_of, schema_errors}
 
 use super::*;
 
+/// The `constraint` kind's branch of the draft against its builder.
+mod constraint;
+
 /// A version 2 source that `extends: [{ url: ./base.yml, as: base }]` reaches.
 const BASE: &str = "version: 2\nrelations:\n  pins:\n    from: { paths: pins.json }\n    \
                     entries: { format: json, at: $ }\n    fields: { name: entry.key, version: \

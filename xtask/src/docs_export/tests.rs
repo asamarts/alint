@@ -48,7 +48,8 @@ Trailer line, always shown.
 /// `alint rules` read.
 #[test]
 fn first_sentence_skips_since_markers() {
-    let body = "<!-- alint:since=0.22.1 -->\nValidate links. More text.\n<!-- /alint:since -->\n\nNext.\n";
+    let body =
+        "<!-- alint:since=0.22.1 -->\nValidate links. More text.\n<!-- /alint:since -->\n\nNext.\n";
     assert_eq!(first_sentence(body), "Validate links.");
     let after = "Lead in\n<!-- alint:since=0.23.0 -->\ncontinued.\n<!-- /alint:since -->\n";
     assert_eq!(first_sentence(after), "Lead in continued.");

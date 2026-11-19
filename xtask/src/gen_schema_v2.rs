@@ -26,6 +26,14 @@
 //! check (references, cycles, field existence, literal types) is the loader's
 //! alone. What version 2 takes from version 1 (`paths:`, the `scope_filter:`
 //! predicates, `extends:` entries, rules) it takes from the version 1 schema.
+//!
+//! The `constraint` kind's branch is derived from its option types
+//! (`alint-rules/src/constraint/options.rs`), which name fields and relations
+//! by the `$defs/v2_name` and `$defs/v2_reference` defined here and state the
+//! shapes its builder checks; alint-dsl's
+//! `src/tests/version_two_schema/constraint.rs` holds the branch to the builder
+//! over a sweep of shapes. The full schema leaves references to those two
+//! dangling until this module adds them ([`KIND_REFERENCED_DEFS`]).
 
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::{Map, Value, json};
@@ -38,6 +46,10 @@ pub(crate) const RELEASE: &str = "v0.23.0";
 /// The tail of the version 1 schema's `$id` (on `main`), which the draft's
 /// `$id` replaces with the release tag and its own path.
 const V1_ID_TAIL: &str = "/main/schemas/v1/config.json";
+
+/// The definitions this module adds that a kind of version 2 refers to from
+/// its option types, which the full schema leaves dangling until then.
+pub(crate) const KIND_REFERENCED_DEFS: &[&str] = &["v2_name", "v2_reference"];
 
 /// A name: an ASCII letter or `_`, then ASCII letters, digits, `_` and `-`.
 const NAME: &str = "[A-Za-z_][A-Za-z0-9_-]*";
