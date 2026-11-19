@@ -612,13 +612,14 @@ fn a_read_finds_the_places_of_only_the_values_a_finding_places() {
                 format!("{path}:{:?}:{:?}", finding.line, finding.column)
             })
             .collect();
-        let taken = index.decode_cache().unwrap().bytes_taken();
-        (findings, eval::read_span_walks() - before, taken)
+        let cache = index.decode_cache().unwrap();
+        let bytes = (cache.bytes_taken(), cache.largest_held());
+        (findings, eval::read_span_walks() - before, bytes)
     };
     let (findings, walks, passing) = walked(&|index| format!("p{index}"));
-    assert_eq!((findings, walks), (Vec::new(), 0));
+    assert_eq!((findings, walks, passing.1), (Vec::new(), 0, 0));
     // "other" is as long as "p1234": the two runs decode alike.
-    let (findings, walks, taken) = walked(&|index| {
+    let (findings, walks, placing) = walked(&|index| {
         if index == 1_234 {
             "other".to_string()
         } else {
@@ -628,7 +629,10 @@ fn a_read_finds_the_places_of_only_the_values_a_finding_places() {
     assert_eq!(findings, ["p1234/package.json:Some(3):Some(11)"]);
     assert_eq!(walks, 1);
     let text = "{\n  \"version\": \"1.0.0\",\n  \"name\": \"other\"\n}\n".len();
-    assert!(taken - passing > 3 * text, "{taken} {passing} {text}");
+    // Placing takes none of the run's bytes, but the file it holds, with
+    // what finding the value's span held, must fit in what is left.
+    assert_eq!(placing.0, passing.0);
+    assert!(placing.1 > 3 * text, "{placing:?} {passing:?} {text}");
 }
 
 pub(super) const NODE_PINS: &str = r#"version: 2
