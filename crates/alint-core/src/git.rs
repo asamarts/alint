@@ -505,9 +505,12 @@ pub fn collect_changed_paths_checked(
 /// `Err(BadRange)` on an unresolvable `since`. Used by
 /// `changeset_requires_path` to find files *added* in `<since>...HEAD`.
 ///
-/// Unlike the unfiltered set, this one keeps git's rename detection: under
+/// Unlike the unfiltered set, this one detects renames: under
 /// `--diff-filter=A` a file moved from one path to another is not an added
-/// file, where with `--no-renames` its new path would be one.
+/// file, where with `--no-renames` its new path would be one. Detection is
+/// `--find-renames` whatever the user's `diff.renames` says: with `false` a
+/// move would count as an addition, and with `copies` a new file copied from
+/// a modified one would be listed as a copy (`C`), not an addition.
 pub fn collect_changed_paths_filtered(
     root: &Path,
     since: &str,
@@ -553,10 +556,14 @@ fn diff_name_only(
         });
     }
     // The unfiltered set lists a rename under both paths, as
-    // `collect_changed_paths` does; a filtered one keeps rename detection, so
-    // `A` is what the range added, not what it moved.
+    // `collect_changed_paths` does; a filtered one detects renames, so `A` is
+    // what the range added, not what it moved. `--find-renames` sets the
+    // detection itself, renames and no copies, over the user's `diff.renames`.
     match diff_filter {
-        Some(filter) => cmd.arg(format!("--diff-filter={filter}")),
+        Some(filter) => cmd.args([
+            "--find-renames".to_string(),
+            format!("--diff-filter={filter}"),
+        ]),
         None => cmd.arg("--no-renames"),
     };
     // `--end-of-options`: a config-controlled `since` starting with `-`

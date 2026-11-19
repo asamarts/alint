@@ -132,6 +132,53 @@ fn every_changed_set_lists_a_rename_under_both_paths_and_none_as_an_addition() {
     );
 }
 
+/// The added set detects renames, and no copies, whatever the repository's
+/// `diff.renames` says: with `false` a moved changelog entry would count as a
+/// new one, and with `copies` a new file copied from a modified one would be
+/// listed as a copy and not count as added.
+#[test]
+fn the_added_set_detects_renames_and_no_copies_whatever_diff_renames_says() {
+    for setting in ["false", "copies"] {
+        let repo = make_repo_with_commits(&["init"]);
+        let root = repo.path();
+        let run = |args: &[&str]| {
+            let output = crate::git::test_git()
+                .arg("-C")
+                .arg(root)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        run(&["config", "diff.renames", setting]);
+        std::fs::create_dir(root.join("changes")).unwrap();
+        std::fs::write(
+            root.join("changes").join("one.md"),
+            "one\ntwo\nthree\nfour\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("source.txt"), "alpha\nbeta\ngamma\ndelta\n").unwrap();
+        run(&["add", "-A"]);
+        run(&["commit", "-m", "base"]);
+        run(&["branch", "base"]);
+        run(&["mv", "changes/one.md", "changes/two.md"]);
+        let source = "alpha\nbeta\ngamma\ndelta\nepsilon\n";
+        std::fs::write(root.join("source.txt"), source).unwrap();
+        std::fs::write(root.join("copy.txt"), source).unwrap();
+        run(&["add", "-A"]);
+        run(&["commit", "-m", "move one entry, copy a modified file"]);
+        assert_eq!(
+            collect_changed_paths_filtered(root, "base", "A"),
+            Ok(Some(HashSet::from([PathBuf::from("copy.txt")]))),
+            "diff.renames={setting}"
+        );
+    }
+}
+
 #[test]
 #[cfg(unix)]
 fn path_from_git_chunk_preserves_non_utf8() {
