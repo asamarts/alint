@@ -699,10 +699,16 @@ fn a_note_and_a_relation_label_name_their_files_escaped() {
                 )
         })
         .collect();
+    // The label names the declaring file as the loader shows it, with the
+    // platform's separator, as every relation label does.
+    let fragment = std::path::Path::new(".alint.d").join("x\\u{202e}.yml");
+    let label = format!(
+        "relation `r` ({}): `assert.equal.to.row`",
+        fragment.display()
+    );
     assert!(
-        shown.iter().any(|message| message
-            .starts_with("relation `r` (.alint.d/x\\u{202e}.yml): `assert.equal.to.row`")),
-        "{shown:?}"
+        shown.iter().any(|message| message.starts_with(&label)),
+        "{shown:?} {label}"
     );
     assert!(
         shown
