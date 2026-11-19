@@ -1124,10 +1124,11 @@ fn write_relation(out: &mut impl Write, relation: &RelationView, labels: &[&str]
     match &relation.rows {
         RowsView::Part(part) => write_part(out, "      ", part, labels)?,
         RowsView::Union { union } => {
-            writeln!(out, "      {dim}union:{dim:#}")?;
+            // Each part by its place in `union:`, from 0, as a message that
+            // names a part does (`relations.pins.union[2]`).
             for (index, part) in union.iter().enumerate() {
-                writeln!(out, "        {dim}part {}:{dim:#}", index + 1)?;
-                write_part(out, "          ", part, labels)?;
+                writeln!(out, "      {dim}union[{index}]:{dim:#}")?;
+                write_part(out, "        ", part, labels)?;
             }
         }
         RowsView::Join { join } => {
@@ -1334,7 +1335,7 @@ fn write_selector(
             term(labels[relation]),
             selector
                 .part
-                .map(|part| format!(", part {}", part + 1))
+                .map(|part| format!(", union[{part}]"))
                 .unwrap_or_default()
         )?,
         (None, None) => write!(out, "inline selector")?,

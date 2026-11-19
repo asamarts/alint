@@ -384,7 +384,8 @@ fn a_join_shows_both_sides_first_and_its_keys() {
 }
 
 /// A union: each part with its own selector and reader, in the order
-/// written, and each inline selector in the trigger by its part.
+/// written, and each inline selector in the trigger by its part, each named
+/// by its place from 0 (`union[0]`), as a message that names a part does.
 #[test]
 fn a_union_shows_each_part_in_order() {
     let dir = tempfile::tempdir().unwrap();
@@ -421,30 +422,29 @@ rules:
             "  assert: equal: field version, to the source row where source = \".nvmrc\"",
             "  relations, in evaluation order:",
             "    relation pins  .alint.yml  (input)",
-            "      union:",
-            "        part 1:",
-            "          from: inline selector  .alint.yml",
-            "            paths: .nvmrc",
-            "          read: regex \"^v?(\\\\S+)\"",
-            "        part 2:",
-            "          from: inline selector  .alint.yml",
-            "            paths: package.json, packages/*/package.json",
-            "          read: json $.engines.node, optional",
-            "        part 3:",
-            "          from: inline selector  .alint.yml",
-            "            paths: .tool-versions",
-            "          read: lines, comment \"#\"",
+            "      union[0]:",
+            "        from: inline selector  .alint.yml",
+            "          paths: .nvmrc",
+            "        read: regex \"^v?(\\\\S+)\"",
+            "      union[1]:",
+            "        from: inline selector  .alint.yml",
+            "          paths: package.json, packages/*/package.json",
+            "        read: json $.engines.node, optional",
+            "      union[2]:",
+            "        from: inline selector  .alint.yml",
+            "          paths: .tool-versions",
+            "        read: lines, comment \"#\"",
             "      fields:",
             "        source: path",
             "        version: value",
             "  trigger: under --changed, the rule runs on a change to a path these selectors pick, \
              to an ignore file, submodule or nested repository where they can match, or to a \
              marker or manifest their scope_filter: consults",
-            "    the inline selector of relation pins, part 1  .alint.yml",
+            "    the inline selector of relation pins, union[0]  .alint.yml",
             "      paths: .nvmrc",
-            "    the inline selector of relation pins, part 2  .alint.yml",
+            "    the inline selector of relation pins, union[1]  .alint.yml",
             "      paths: package.json, packages/*/package.json",
-            "    the inline selector of relation pins, part 3  .alint.yml",
+            "    the inline selector of relation pins, union[2]  .alint.yml",
             "      paths: .tool-versions",
             "  cost: linear in the rows of each relation it reads",
         ])
