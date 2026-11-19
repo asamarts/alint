@@ -66,6 +66,7 @@ A value read from the environment may be a secret, so alint keeps it out of what
 - From v0.22, the fingerprint of a finding with a `<redacted>` path leaves the path out, in the baseline file and in SARIF (`partialFingerprints`) and GitLab output, so someone holding one of them cannot test a guessed path against it. A rule's findings with `<redacted>` paths share one fingerprint, and a baseline grandfathers them by count. v0.22 still matches a baseline file v0.21 wrote for them; v0.23 will not, so re-run `alint baseline` before upgrading to it.
 <!-- alint:since=0.23 -->
 - From v0.23, a baseline no longer matches the fingerprints v0.21 wrote for these findings: the findings count as new and those entries as stale. Regenerate such a file once with `alint baseline --accept-new`.
+- From v0.23, SARIF output gives each repeat of such a fingerprint within a run a fingerprint derived from the shared one and its occurrence, as GitLab output already does, so GitHub code scanning keeps them as separate alerts. The first keeps the shared fingerprint, which the baseline records.
 <!-- /alint:since -->
 - A `JSONPath`, or a `when_iter:` or nested rule's `when:` expression, is masked with one that still parses, so an unrelated error after it stays readable.
 - `alint baseline`'s confirmation, and `alint facts` for a fact value (a `custom:` command given the value as an argument can print it), show `<redacted>` in its place.

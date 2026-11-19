@@ -119,6 +119,19 @@ and `agent` formats carry one location per finding, or none, and no related loca
 In `sarif`, every result has a location: a finding that isn't tied to one file (a missing `LICENSE`, a tree-level rule) is anchored on line 1 of the config file that loaded the rule, since GitHub Code Scanning drops results without a location. The run declares `columnKind: "unicodeCodePoints"`, because alint counts columns in Unicode characters (in fix regions too), and artifact URIs percent-encode `:` so a file like `a:b.txt` isn't read as a URI scheme. On Unix, URI encoding uses the original filename bytes, so distinct non-UTF-8 paths cannot alias. JSON and agent reports omit the optional `proposed_edit` field when an edit path has no exact JSON string representation; their safe `fix_command` remains available.
 
 `sarif` and `gitlab` attach a stable per-finding fingerprint (SARIF `partialFingerprints`, GitLab `fingerprint`) to every **policy-violation** result — not only when a `--baseline` is active. SARIF's is the canonical `violation_fingerprint`, the same identity the [baseline](/docs/concepts/adoption/baseline/) file records, so an alert keeps one identity across SARIF and the baseline. A finding with a `<redacted>` path carries a fingerprint without its path, which the rule's other such findings share. A finding with a unique fingerprint carries that same identity in GitLab too; GitLab additionally disambiguates genuine within-report duplicates (two findings with byte-identical content), because GitLab Code Quality drops entries that share a fingerprint. GitLab analysis-failure issues receive only the deterministic transport identity its schema requires; SARIF analysis failures have no `partialFingerprints`. GitHub Code Scanning uses policy findings' SARIF fingerprints to correlate alerts across runs — dedupe, and track a finding as fixed or reopened — with no `--baseline` required.
+<!-- alint:since=0.22.1 -->
+GitLab tells apart every finding in a report that repeats a fingerprint, not only byte-identical
+ones: the first carries the fingerprint, and each later one a fingerprint derived from it and its
+occurrence.
+<!-- /alint:since -->
+<!-- alint:since=0.23.0 -->
+A `constraint` finding's fingerprint leaves its path out too. SARIF tells apart findings in one run
+that share a fingerprint as GitLab does, with the same derived values: the first keeps the
+canonical fingerprint the baseline file records, and each later one carries a fingerprint derived
+from it and its occurrence, so each stays its own alert. GitLab Code Quality drops entries that
+share a fingerprint, and GitHub Code Scanning may merge them. A run in which no fingerprint repeats
+is written as before.
+<!-- /alint:since -->
 
 ## Baseline suppression
 

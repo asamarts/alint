@@ -239,7 +239,9 @@ field's value (an entry's key, path and value).
   copy of one;
 - `strip-root`, which drops the first segment of an `entry.path` field (`en.nav.home` becomes
   `nav.home`), or of a join's copy of one that no transform has changed. It comes first in its
-  list, and each file must have one top-level key.
+  list, and each file must have one top-level key. A file whose top-level key holds nothing
+  (`fr:`, `fr: {}`, `fr: []`) has no keys, as an empty file has none; one whose top-level key
+  holds a value (`fr: hello`) is an analysis failure.
 
 ### `where:`
 
@@ -463,6 +465,13 @@ distinct-value limit, which is never truncation.
     (`join_outputs`);
   - 100,000 distinct values of the field a `set` compares against in another relation
     (`distinct_values`).
+- Placing a `constraint` rule's findings reads each file they sit in again, one at a time. That
+  file's bytes count against the run's `bytes_per_run` limit beside what the relations hold; past
+  it the rule reports an analysis failure, not findings without places.
+- A `set` with `equal_to:` gives one finding per value the reference group holds for each group
+  that lacks it, so G empty groups against V reference values give G × V findings, as
+  `key_parity` does for files without keys
+  ([#596](https://github.com/asamarts/alint/issues/596)).
 
 ## Trust
 
@@ -536,7 +545,7 @@ rules:
 
 A group is the rows that share a `group_by:` value, so `groups:` (with `equal_to:` only) names
 the locales that must exist: one whose files hold no keys lacks every English key, in findings
-with no path. A file that holds only its root (`fr:` or `fr: {}`) holds no keys.
+with no path. A file that holds only its root (`fr:`, `fr: {}` or `fr: []`) holds no keys.
 `plurals: cldr` compares `inbox: { one, other }` with a locale's `inbox: { one, few, many,
 other }` as one key, `inbox`, and `items_one`, `items_other` as `items`. Grouped by a path
 token instead (`fields: { locale: stem, ... }`), every file is a group, and an empty one lacks

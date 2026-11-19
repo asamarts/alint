@@ -238,6 +238,7 @@ strict: aliases, merge keys and complex keys are parse failures, as in every rel
   `optional: true`. A missing row sits at its resource and has no value.
 - A missing value never joins, never forms a key or a group, and is in no set, as
   `Relation::distinct_values` skips it today. `equal` reports it as a difference (section 6).
+  Messages and baseline keys call it `missing`, never `null`.
 
 **Adapters.** Value-bearing rows are new adapter modes with their own adapter ids, so their decodes
 never share a cache entry with the key-only modes. TOML gets its value mode in `TomlRowsAdapter`
@@ -344,10 +345,12 @@ rules:
 applied in order; the relation then applies `where:` (section 7). No user-defined functions.
 - `trim`, `lower`, `semver-major`, `semver-minor`: `cross_file`'s `normalize` values, on strings.
 - `strip-root`: on an `entry.path` field, drops the path's first segment, as `key_parity`'s
-  `strip_root` does. Each resource the relation reads must have at most one top-level key, and
-  every row's key path must have at least two segments, so a top-level key that is itself a leaf
-  (`en: hello`, `en: {}`) fails. A resource that breaks either rule is an analysis failure naming
-  the reason. A resource with no keys emits no rows.
+  `strip_root` does. Each resource the relation reads must have at most one top-level key, and every
+  row's key path must have at least two segments, so a top-level key that holds a scalar or a
+  non-empty array (`en: hello`, `en: [a]`) fails; one that holds nothing (`en:`, `en: {}`, `en: []`)
+  reads as a file with no keys, but still counts as its one top-level key. A resource that breaks
+  either rule is an analysis failure naming the reason. A resource with no keys emits no rows. Audit
+  round 4 corrected this bullet, which made a top-level key that holds nothing fail.
 
 **CLDR plurals.** `plurals: cldr` is an option of `set` against a group, and needs `field:` to be an
 `entry.path` field. For each comparison of the reference group with another group, it merges
@@ -621,10 +624,14 @@ predicate out of the trigger scope: a changed path that the selector's `paths:` 
 predicates keep runs the rule, which reports the failure, and a change outside them (a `README.md`
 alone) runs nothing and reports nothing. A selector that does not compile takes every path. An
 ignore file the walk reads (a `.gitignore` or `.ignore`, in any directory) decides which files below
-it are in the index, so a change to one triggers each selector whose `paths:` can match there.
+it are in the index, so a change to one triggers each selector whose `paths:` can match there. Git
+lists a submodule whose recorded commit moved, and an untracked repository, as one changed
+directory rather than by its files, so a changed path the walk holds as a directory triggers each
+selector whose `paths:` can match below it (audit round 4).
 
-The changed set is the paths Git reports, so three kinds of change that can alter a verdict trigger
-nothing, as they skip a per-file rule or a version 1 full-index kind today; a full run covers them:
+The changed set is the paths Git reports, so several kinds of change that can alter a verdict
+trigger nothing, as they skip a per-file rule or a version 1 full-index kind today; a full run
+covers them:
 - an edit to the target of a symlink a selector reads through: with `locales/de.json` linked to
   `shared/de.json`, Git reports `shared/de.json` alone. Following links back from their targets
   would need the link-to-target map the walk does not keep, and a deleted target leaves a broken
@@ -632,7 +639,12 @@ nothing, as they skip a per-file rule or a version 1 full-index kind today; a fu
 - with `respect_gitignore: false`, a file Git ignores, which the walk reads and Git never lists as
   untracked (an untracked file under a gitignored directory);
 - a change to `.git/info/exclude`, to the global excludes file, or to an ignore file above the
-  linted directory when alint lints a subdirectory of a repository.
+  linted directory when alint lints a subdirectory of a repository;
+- an edit to a file marked `git update-index --assume-unchanged`, or to a `.ignore` file that a
+  `.gitignore` ignores, neither of which Git lists;
+- a submodule Git is told to ignore (`submodule.<name>.ignore`, `diff.ignoreSubmodules`), and a
+  submodule removed whole, which leaves no directory behind to trigger a selector that reads only
+  below it.
 
 A selector read by a full-index rule may not use `changed_since` (section 4), because what the rule
 sees would then depend on the diff. The other `scope_filter:` predicates are allowed in those
