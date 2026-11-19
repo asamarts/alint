@@ -561,6 +561,9 @@ pub(crate) fn resolve(objects: &Objects) -> Result<Resolved<'_>> {
     for &(source, local) in &namespaces.relations {
         let (name, relation) = &objects.sources[source.0].relations[local];
         let reads_environment = relation.reads_environment;
+        // A `where:` or `transform:` entry from the environment chooses its
+        // rows, though `explain` may still show the rest of its definition.
+        let filters_read_environment = relation.filters_read_environment;
         let relation = relation_def(&namespaces, source, name, relation)?;
         // A named selector it reads that takes a value from the environment
         // makes its failures show no detail too.
@@ -573,7 +576,9 @@ pub(crate) fn resolve(objects: &Objects) -> Result<Resolved<'_>> {
             source,
             relation,
             capabilities: Capabilities::default(),
-            reads_environment: reads_environment || selectors_read_environment,
+            reads_environment: reads_environment
+                || filters_read_environment
+                || selectors_read_environment,
             definition_reads_environment: reads_environment,
         });
     }

@@ -1008,6 +1008,7 @@ fn marking_many_objects_takes_time_linear_in_them() {
             transforms: Vec::new(),
             filters: Vec::new(),
             reads_environment: false,
+            filters_read_environment: false,
             twins: model::Twins::Unneeded,
         };
         let reading: Value =
@@ -1034,12 +1035,11 @@ fn marking_many_objects_takes_time_linear_in_them() {
         objects
     });
     assert!(marked.selectors.iter().all(|(_, s)| s.reads_environment));
-    assert!(
-        marked
-            .relations
-            .iter()
-            .all(|(_, relation)| { !relation.reads_environment && relation.fields[0].1.sensitive })
-    );
+    assert!(marked.relations.iter().all(|(_, relation)| {
+        !relation.reads_environment
+            && relation.filters_read_environment
+            && relation.fields[0].1.sensitive
+    }));
 }
 
 /// A `bound:` field reads a JSON, YAML or TOML document, so a relation that

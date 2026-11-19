@@ -211,19 +211,22 @@ pub struct NamedRelation {
     /// What reading its rows needs: its own reads, and those of every
     /// selector and relation it references, transitively.
     pub capabilities: Capabilities,
-    /// Whether its definition, outside its fields' `where:` and `transform:`
-    /// entries (which make those fields sensitive instead), or a named
-    /// selector it reads takes a value from the environment (`{{env.X}}`), or
-    /// a relation it reads (a join side, a membership reference) does,
-    /// transitively: then no analysis failure of it shows its detail, which
-    /// could echo the value (a key path an `at:` from the environment
-    /// selected, say).
+    /// Whether its definition, its fields' `where:` and `transform:` entries
+    /// included (which make those fields sensitive too), or a named selector
+    /// it reads takes a value from the environment (`{{env.X}}`), or a
+    /// relation it reads (a join side, a membership reference) does,
+    /// transitively. Then the environment may have chosen its rows: no
+    /// analysis failure of it shows its detail, which could echo the value (a
+    /// key path an `at:` from the environment selected, say), and a rule
+    /// that reads it shows no path or value of its findings, since the rows
+    /// a filter from the environment keeps say where that value occurs.
     pub reads_environment: bool,
     /// Whether its own definition, outside its fields' `where:` and
     /// `transform:` entries, takes a value from the environment: then
     /// `explain` shows none of the values it holds (an inline selector's
     /// globs, its reader, a `bound:` path, a join's `unique:`), only its
-    /// names. [`Self::reads_environment`] is this, or what it reads doing so.
+    /// names. [`Self::reads_environment`] is this, a `where:` or `transform:`
+    /// entry from the environment, or what it reads doing either.
     pub definition_reads_environment: bool,
 }
 

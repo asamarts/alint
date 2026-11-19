@@ -194,6 +194,12 @@ pub(crate) struct Relation {
     /// Its definition takes a value from the environment outside its
     /// fields' `where:` and `transform:` entries ([`super::Environment`]).
     pub(crate) reads_environment: bool,
+    /// A `where:` or `transform:` entry of a field takes a value from the
+    /// environment, which makes that field sensitive: the environment may
+    /// then choose its rows, so it reads the environment as
+    /// `NamedRelation::reads_environment` means, though its own definition
+    /// does not as `NamedRelation::definition_reads_environment` means.
+    pub(crate) filters_read_environment: bool,
     /// What a plan-check error about it is rerun on.
     pub(crate) twins: Twins<Self>,
 }

@@ -1118,8 +1118,9 @@ fn the_plan_records_what_the_environment_writes() {
         .map(|named| (named.name.as_str(), named.reads_environment))
         .collect();
     assert_eq!(selectors, [("docs", true), ("plain", false)]);
-    // A relation reads the environment through a selector it reads, too;
-    // its own definition does only where it holds such a value.
+    // A relation reads the environment through a selector it reads, too,
+    // and through a `where:` entry, which chooses its rows; its own
+    // definition does only where it holds such a value outside one.
     let relations: Vec<(&str, bool, bool, Vec<bool>)> = plan
         .relations
         .iter()
@@ -1142,7 +1143,7 @@ fn the_plan_records_what_the_environment_writes() {
         [
             ("by-selector", true, false, vec![false]),
             ("by-read", true, true, vec![false]),
-            ("by-filter", false, false, vec![true, false]),
+            ("by-filter", true, false, vec![true, false]),
             ("untouched", false, false, vec![false]),
         ]
     );

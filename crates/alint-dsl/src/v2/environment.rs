@@ -10,9 +10,13 @@
 //!   baseline, nor do the literals it is compared with. So is every field
 //!   that shows its value ([`family`]): a filter on an entry's key would
 //!   echo in its path, its parent's and its root.
-//! - Any other part of a relation's definition, or of a named selector, that
-//!   reads it makes the relation's analysis failures show no detail: an
-//!   `at:` path from the environment would echo in the key path it selects.
+//! - Any part of a relation's definition, or of a named selector it reads,
+//!   that reads it makes the relation's analysis failures show no detail
+//!   (an `at:` path from the environment would echo in the key path it
+//!   selects), and a rule's findings over it show no path: the rows the
+//!   environment selects, through a `where:` or `transform:` entry too, say
+//!   where its value occurs. `explain` hides the values of a definition that
+//!   reads it outside those entries; inside them, the fields' values only.
 
 use std::collections::{HashMap, HashSet};
 
@@ -98,6 +102,7 @@ impl Environment {
                 continue;
             };
             relation.reads_environment = environment.reading;
+            relation.filters_read_environment = !environment.fields.is_empty();
             let marked: HashSet<Family<'_>> = relation
                 .fields
                 .iter()

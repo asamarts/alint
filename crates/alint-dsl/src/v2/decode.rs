@@ -851,6 +851,7 @@ impl Decoder<'_> {
             transforms,
             filters,
             reads_environment: false,
+            filters_read_environment: false,
             twins: Twins::Unneeded,
         })
     }
