@@ -408,7 +408,9 @@ The parts of each finding's key:
 - `unique` with `determines:`: `unique`, the key values, the determined values. A range that
   appears later is a new finding even when the key's earlier disagreement is in the baseline, and
   fixing a range resolves exactly its finding;
-- `unique` without `determines:`: `unique`, `row`, the row;
+- `unique` without `determines:`: `unique` and the key values. The rows that repeat a key share
+  one key and are told apart by their count, so renaming the first file keeps a baselined finding
+  baselined. Phase 7 step 1's review corrected this bullet, which keyed each repeat by its row;
 - `equal` within groups: `equal`, the group, the value;
 - `equal` against a named source row: `equal`, `source`, the row;
 - `equal` within a row: `equal`, `row`, `field:`'s resource path, `field:`'s pointer;
@@ -434,7 +436,7 @@ metadata keys, plus these. `assert:` holds exactly one of `equal`, `unique` and 
 | `set.field` | a field name | required | the field whose values form each set |
 | `set.group_by` | a field name | none: the relation is one group | the group of each row |
 | `set.equal_to`, `set.subset_of`, `set.disjoint_from` | `{ group: literal }` or `{ relation: R, field: F }` | exactly one is required | the other set |
-| `set.groups` | a list of literals | `[]` | groups that must exist, rows or not |
+| `set.groups` | a list of literals | `[]` | groups that must exist, rows or not (`equal_to` only) |
 | `set.plurals` | `exact` or `cldr` | `exact` | collapse CLDR plural groups (`{ group: }` targets only) |
 
 ## 7. `when` and row filters (Q15)

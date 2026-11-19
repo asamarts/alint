@@ -523,6 +523,21 @@ const MEMBER_SITE: &str = "a membership reference's `relation:` names a relation
 pub(crate) struct Resolved<'o> {
     pub(crate) plan: Plan,
     pub(crate) namespaces: Namespaces<'o>,
+    /// The relations, each after those it reads ([`close_sensitivity`]).
+    order: Vec<RelationId>,
+    /// Each `set` against another relation's field the rules make.
+    compared: Vec<Compared>,
+}
+
+/// A `constraint` rule's `set` against another relation's field: its input
+/// relation's field `field` holds values beside relation `other`'s field
+/// `other_field`, so a sensitive `other_field` makes it sensitive.
+#[derive(Debug)]
+struct Compared {
+    input: RelationId,
+    field: String,
+    other: RelationId,
+    other_field: String,
 }
 
 /// Resolve every reference of `objects`, check the plan, and judge each
@@ -568,7 +583,12 @@ pub(crate) fn resolve(objects: &Objects) -> Result<Resolved<'_>> {
     add_capabilities(&mut plan, &order);
     close_sensitivity(&mut plan, &order);
     gate_objects(&plan)?;
-    Ok(Resolved { plan, namespaces })
+    Ok(Resolved {
+        plan,
+        namespaces,
+        order,
+        compared: Vec::new(),
+    })
 }
 
 /// `error`, a plan-check error `checked` failed with, when the same check
@@ -996,6 +1016,57 @@ fn close_sensitivity(plan: &mut Plan, order: &[RelationId]) {
     }
 }
 
+/// [`close_sensitivity`] with each `set` against another relation's field
+/// (`compared`): the compared field holds values a finding shows beside the
+/// other field's, so when that field is sensitive the compared field is too,
+/// with every field of its family, as for an `in:` list naming it. The
+/// relations that read the input follow, so the two repeat until nothing
+/// changes; each round makes a field sensitive, so there are at most as many
+/// rounds as fields.
+fn close_compared_sensitivity(plan: &mut Plan, order: &[RelationId], compared: &[Compared]) {
+    loop {
+        let mut changed = false;
+        for edge in compared {
+            let relations = &plan.relations;
+            if !relations[edge.other.0]
+                .relation
+                .field(&edge.other_field)
+                .is_some_and(|field| field.sensitive)
+            {
+                continue;
+            }
+            let relation = &relations[edge.input.0].relation;
+            let join = match &relation.rows {
+                plan::Rows::Join(join) => Some(join),
+                plan::Rows::Part(_) | plan::Rows::Union(_) => None,
+            };
+            let Some(field) = relation.field(&edge.field) else {
+                continue;
+            };
+            let family = Family::of(&field.source, join);
+            let shown: Vec<usize> = relation
+                .fields
+                .iter()
+                .enumerate()
+                .filter(|(_, (_, held))| {
+                    !held.sensitive && Family::of(&held.source, join) == family
+                })
+                .map(|(position, _)| position)
+                .collect();
+            for position in shown {
+                plan.relations[edge.input.0].relation.fields[position]
+                    .1
+                    .sensitive = true;
+                changed = true;
+            }
+        }
+        if !changed {
+            return;
+        }
+        close_sensitivity(plan, order);
+    }
+}
+
 /// Whether a field of `source` spells an entry's key, or the keys above it.
 fn spells_keys(source: &plan::FieldSource) -> bool {
     use plan::FieldSource as Source;
@@ -1170,6 +1241,13 @@ fn gate_objects(plan: &Plan) -> Result<()> {
 }
 
 impl Resolved<'_> {
+    /// The plan, once every rule is resolved: the sensitivity each `set`
+    /// against another relation's field adds is closed over it.
+    pub(crate) fn into_plan(mut self) -> Plan {
+        close_compared_sensitivity(&mut self.plan, &self.order, &self.compared);
+        self.plan
+    }
+
     /// Resolve the reference fields of rule `id` (an effective rule mapping
     /// of `kind`), each in the source that wrote it (`origins`, an index into
     /// `config_files`, the files the configuration was loaded from), and
@@ -1188,51 +1266,69 @@ impl Resolved<'_> {
             .unwrap_or("");
         let mut references = Vec::new();
         for &field in super::origins::reference_fields(kind) {
-            let Some(value) = rule.get(field) else {
-                continue;
-            };
-            let origin = origins
-                .iter()
-                .find(|(held, _)| held == field)
-                .and_then(|(_, file)| config_files.get(*file))
-                .and_then(|path| self.namespaces.source_at(path));
-            let Some(source) = origin else {
-                return Err(Error::rule_config(
+            if let Some(value) = rule.get(field) {
+                references.push(self.resolve_field(
                     id,
-                    format!(
-                        "`{field}` names a relation, but a version 1 config wrote it; only a \
-                         version 2 config's rules reference selectors and relations"
-                    ),
-                ));
-            };
-            let display = self.namespaces.display(source).to_string();
-            let fail = |message: String| {
-                Error::rule_config(id, format!("`{field}` (written by {display}): {message}"))
-            };
-            // An inline relation (a map) was declared in the source that
-            // wrote it, under the name its marker holds.
-            let reference = match (value.as_str(), super::decode::inline_input(value)) {
-                (Some(text), _) => super::decode::parse_reference(text).map_err(fail)?,
-                (None, Some(name)) => Reference {
-                    alias: None,
-                    name: name.to_string(),
-                },
-                (None, None) => {
-                    return Err(fail(format!(
-                        "expected a relation name or an inline relation (a map), found {}",
-                        super::decode::describe(value)
-                    )));
+                    field,
+                    field,
+                    value,
+                    true,
+                    origins,
+                    config_files,
+                )?);
+            }
+        }
+        for &(top, path) in super::origins::nested_reference_fields(kind) {
+            let mut value = rule.get(top);
+            for key in path {
+                value = value.and_then(|value| value.get(*key));
+            }
+            if let Some(value) = value {
+                let field = std::iter::once(top)
+                    .chain(path.iter().copied())
+                    .collect::<Vec<_>>()
+                    .join(".");
+                references.push(self.resolve_field(
+                    id,
+                    &field,
+                    top,
+                    value,
+                    false,
+                    origins,
+                    config_files,
+                )?);
+            }
+        }
+        // A `set` against another relation's field: its compared field.
+        let input = references
+            .iter()
+            .find(|reference| reference.field == "input");
+        let set = rule.get("assert").and_then(|assert| assert.get("set"));
+        let compared = set
+            .and_then(|set| set.get("field"))
+            .and_then(ayaml::Value::as_str);
+        if let (Some(input), Some(set), Some(compared)) = (input, set, compared) {
+            for reference in &references {
+                let Some(mode) = reference
+                    .field
+                    .strip_prefix("assert.set.")
+                    .and_then(|rest| rest.strip_suffix(".relation"))
+                else {
+                    continue;
+                };
+                if let Some(other_field) = set
+                    .get(mode)
+                    .and_then(|target| target.get("field"))
+                    .and_then(ayaml::Value::as_str)
+                {
+                    self.compared.push(Compared {
+                        input: input.relation.id,
+                        field: compared.to_string(),
+                        other: reference.relation.id,
+                        other_field: other_field.to_string(),
+                    });
                 }
-            };
-            let relation = self
-                .namespaces
-                .relation(source, &reference, &format!("`{field}:` names a relation"))
-                .map_err(fail)?;
-            references.push(RuleReference {
-                field: field.to_string(),
-                source,
-                relation,
-            });
+            }
         }
         if !references.is_empty() {
             self.plan.rules.push(RuleReferences {
@@ -1241,6 +1337,77 @@ impl Resolved<'_> {
             });
         }
         Ok(())
+    }
+
+    /// Resolve `value`, rule `id`'s field `field` (below its top-level field
+    /// `top`), in the source that wrote `top`: a relation name, bare or
+    /// qualified, or, where `inline` allows one, an inline relation the
+    /// loader planned under a name.
+    #[allow(clippy::too_many_arguments)]
+    fn resolve_field(
+        &self,
+        id: &str,
+        field: &str,
+        top: &str,
+        value: &ayaml::Value,
+        inline: bool,
+        origins: &[(String, usize)],
+        config_files: &[PathBuf],
+    ) -> Result<RuleReference> {
+        let origin = origins
+            .iter()
+            .find(|(held, _)| held == top)
+            .and_then(|(_, file)| config_files.get(*file))
+            .and_then(|path| self.namespaces.source_at(path));
+        let Some(source) = origin else {
+            return Err(Error::rule_config(
+                id,
+                format!(
+                    "`{field}` names a relation, but a version 1 config wrote it; only a version \
+                     2 config's rules reference selectors and relations"
+                ),
+            ));
+        };
+        let display = self.namespaces.display(source).to_string();
+        let fail = |message: String| {
+            Error::rule_config(id, format!("`{field}` (written by {display}): {message}"))
+        };
+        // An inline relation (a map) was declared in the source that wrote
+        // it, under the name its marker holds.
+        let reference = match (value.as_str(), super::decode::inline_input(value)) {
+            (Some(text), _) => super::decode::parse_reference(text).map_err(fail)?,
+            (None, Some(name)) if inline => Reference {
+                alias: None,
+                name: name.to_string(),
+            },
+            (None, _) if !inline && value.as_mapping().is_some() => {
+                return Err(fail(
+                    "names a relation, bare or qualified by an `extends:` alias; an inline \
+                     relation is not allowed here, so declare it under `relations:` and name it"
+                        .to_string(),
+                ));
+            }
+            (None, _) => {
+                let expected = if inline {
+                    "a relation name or an inline relation (a map)"
+                } else {
+                    "a relation name"
+                };
+                return Err(fail(format!(
+                    "expected {expected}, found {}",
+                    super::decode::describe(value)
+                )));
+            }
+        };
+        let relation = self
+            .namespaces
+            .relation(source, &reference, &format!("`{field}:` names a relation"))
+            .map_err(fail)?;
+        Ok(RuleReference {
+            field: field.to_string(),
+            source,
+            relation,
+        })
     }
 
     /// Judge rule `id`, which an extended source shaped (`extended` names

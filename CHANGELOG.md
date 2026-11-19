@@ -681,7 +681,20 @@ policy-test package the user does not trust.
     (`to: { row: { source: .nvmrc } }`), or with another field of the same row
     (`to: { field: G }`). `unique`: no two rows share a key; with `determines:`, rows that share
     the key agree on the determined fields. `set`: each group's set of a field's values is equal
-    to, a subset of or disjoint from a reference group's (`{ group: en }`).
+    to, a subset of or disjoint from a reference group's (`{ group: en }`), or the values of
+    another relation's field (`{ relation: R, field: F }`, a name, bare or qualified, never an
+    inline relation), with `plurals: cldr` merging CLDR plural groups of an `entry.path` field
+    as `key_parity` does (against a group only).
+  - A `set` grouped by `path` or a path token gives every resource its relation reads a group, rows
+    or not, except one `where:` rejects by its path alone, and `groups:` names groups that must
+    exist (with `equal_to:` only; under the other two a group without rows passes, so they refuse it
+    at load): a group with no rows lacks every value of the other set, at its first resource, or
+    without a path when only `groups:` names it. A missing value is related to the row that holds
+    it; an extra one sits at its row; a shared one sits at its row, related to a row of the other
+    set. The other relation is read before the rule, its failures withhold the rule's findings, its
+    notes are reported once, and its set is bounded by the 100,000 distinct-value limit. A sensitive
+    field on either side hides the values of both, and a sensitive field of the other relation makes
+    the compared field sensitive at load, with every field that spells the same values.
   - Values compare by type and text (a number by its lexeme); null and a missing value match
     nothing; a key, group or set comparison across types, a null group, a missing or repeated
     source row and an empty reference group are analysis failures, never a pass, and so is a
@@ -703,12 +716,10 @@ policy-test package the user does not trust.
     word `sensitive`); the rows that repeat a `unique` key share one key and are told apart by
     their count, as are findings that differ only in a sensitive value. Other kinds'
     fingerprints are unchanged.
-  - A group that has no rows (a locale file that is `{}`) is not checked: nothing names the groups
-    that must exist until `groups:` is supported.
   - Every field, literal and `{{row.FIELD}}` is checked against the relation when the rule
-    builds, naming the rule, the field and the relation; names may not hold `{{...}}`.
-    `plurals: cldr`, `groups:`, a `set` against another relation and a `set` grouped by `path`
-    or a path token are refused as not yet supported.
+    builds, naming the rule, the field and the relation; names may not hold `{{...}}`. A
+    `groups:` literal must be of the `group_by:` field's type, once, and not the reference
+    group; `plurals: cldr` needs an `entry.path` field with no transform but `strip-root`.
   - The version 2 draft schema describes the kind and refuses it nested; the version 1 schema
     leaves it out.
 

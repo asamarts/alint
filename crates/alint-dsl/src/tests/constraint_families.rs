@@ -11,7 +11,7 @@ use alint_core::{FileIndex, RuleResult, Violation, WalkOptions, walk};
 use super::constraint::load_tree;
 
 /// The results of running every rule of `config` over `files`.
-fn run(config: &str, files: &[(&str, &str)]) -> Vec<RuleResult> {
+pub(super) fn run(config: &str, files: &[(&str, &str)]) -> Vec<RuleResult> {
     let (dir, loaded) = load_tree(config, files);
     let config = loaded.unwrap_or_else(|error| panic!("the config loads: {error}"));
     let index: FileIndex = walk(
@@ -48,7 +48,7 @@ fn place(path: &std::path::Path, range: Option<&alint_core::SourceRange>) -> Str
 
 /// A finding as `place: message`, each related location on a line of its
 /// own (`  ~ label: place`).
-fn shown(violation: &Violation) -> String {
+pub(super) fn shown(violation: &Violation) -> String {
     let mut out = match &violation.path {
         Some(path) => format!(
             "{}: {}",
@@ -73,7 +73,7 @@ fn shown(violation: &Violation) -> String {
 }
 
 /// Rule `id`'s result.
-fn result<'r>(results: &'r [RuleResult], id: &str) -> &'r RuleResult {
+pub(super) fn result<'r>(results: &'r [RuleResult], id: &str) -> &'r RuleResult {
     results
         .iter()
         .find(|result| &*result.rule_id == id)
@@ -81,7 +81,7 @@ fn result<'r>(results: &'r [RuleResult], id: &str) -> &'r RuleResult {
 }
 
 /// Rule `id`'s findings, shown.
-fn findings(results: &[RuleResult], id: &str) -> Vec<String> {
+pub(super) fn findings(results: &[RuleResult], id: &str) -> Vec<String> {
     let result = result(results, id);
     assert!(
         result.analysis_failures.is_empty(),
@@ -92,7 +92,7 @@ fn findings(results: &[RuleResult], id: &str) -> Vec<String> {
 }
 
 /// Rule `id`'s analysis failures, as `path: message`; it has no finding.
-fn failures(results: &[RuleResult], id: &str) -> Vec<String> {
+pub(super) fn failures(results: &[RuleResult], id: &str) -> Vec<String> {
     let result = result(results, id);
     assert!(
         result.violations.is_empty(),
@@ -725,7 +725,7 @@ fn a_missing_or_null_value_renders_as_such() {
 }
 
 /// The fingerprints of rule `id`'s findings, sorted.
-fn fingerprints(results: &[RuleResult], id: &str) -> Vec<String> {
+pub(super) fn fingerprints(results: &[RuleResult], id: &str) -> Vec<String> {
     let mut prints: Vec<String> = result(results, id)
         .violations
         .iter()

@@ -420,6 +420,16 @@ fn a_name_in_an_assertion_cannot_be_interpolated() {
              equal_to: { group: en } } }\n",
             "rules[0].assert.set.group_by",
         ),
+        (
+            "    input: names\n    assert: { set: { field: name, subset_of: { relation: \
+             \"{{env.R}}\", field: name } } }\n",
+            "rules[0].assert.set.subset_of.relation",
+        ),
+        (
+            "    input: names\n    assert: { set: { field: name, subset_of: { relation: names, \
+             field: \"{{env.F}}\" } } }\n",
+            "rules[0].assert.set.subset_of.field",
+        ),
     ] {
         assert_eq!(
             load_error(&v2(NAMES, rest), &[]),
@@ -614,61 +624,313 @@ fn the_assertion_is_one_family_of_one_shape() {
     );
     refused(
         "    assert: { set: { field: dependency, group_by: range, equal_to: {} } }\n",
-        "`assert.set.equal_to`: names the reference group: `{ group: literal }`, the rows whose \
-         `group_by:` field holds the literal",
+        "`assert.set.equal_to`: names the other set: `{ group: literal }` (a group of this \
+         relation) or `{ relation: R, field: F }` (every value of another relation's field)",
+    );
+}
+
+/// `refused(rest, at, message)`: rule `c` over `objects`, with `rest` as its
+/// `input:` and `assert:`, is refused at `at` with `message`.
+fn refused_with(objects: &str) -> impl Fn(&str, &str, &str) + '_ {
+    move |rest: &str, at: &str, message: &str| {
+        assert_eq!(
+            build_error(&v2(objects, rest), "c"),
+            format!("rule \"c\": `{at}`: {message}"),
+            "{rest}"
+        );
+    }
+}
+
+/// Relation `keys` of each locale file's leaves: `key` below the locale,
+/// `lowered` lowercased too.
+const KEYS: &str = "relations:\n  keys:\n    from: { paths: \"locales/*.json\" }\n    entries: { \
+                    format: json, at: \"$\", leaves: true }\n    fields: { locale: entry.root, key: \
+                    entry.path, lowered: entry.path, name: entry.key }\n    transform: { key: \
+                    [strip-root], lowered: [strip-root, lower] }\n  joined:\n    join: { left: \
+                    keys, right: keys, on: { name: name }, unique: right }\n    fields: { locale: \
+                    left.locale, key: left.key }\n";
+
+#[test]
+fn plurals_cldr_merges_the_key_paths_of_an_entry_path_field_against_a_group() {
+    let refused = refused_with(KEYS);
+    refused(
+        "    input: keys\n    assert: { set: { field: name, group_by: locale, equal_to: { group: \
+         en }, plurals: cldr } }\n",
+        "assert.set.plurals",
+        "`plurals: cldr` merges key paths, so `field:` must be an `entry.path` field (or a \
+         join's copy of one), and `name` is not",
+    );
+    refused(
+        "    input: keys\n    assert: { set: { field: lowered, group_by: locale, equal_to: { \
+         group: en }, plurals: cldr } }\n",
+        "assert.set.plurals",
+        "`plurals: cldr` merges key paths by their segments, and `transform:` applies `lower` \
+         to `lowered` in relation `keys` (.alint.yml), which changes its text but not its \
+         segments; only `strip-root` may apply to the field",
+    );
+    refused(
+        "    input: keys\n    assert: { set: { field: key, subset_of: { relation: keys, field: \
+         key }, plurals: cldr } }\n",
+        "assert.set.plurals",
+        "`plurals: cldr` decides each plural group over the key paths of two groups of one \
+         relation, so it takes a `{ group: }` target, not `{ relation: R, field: F }`",
+    );
+    // An `entry.path` field, after `strip-root`, or a join's copy of one.
+    for input in ["keys", "joined"] {
+        builds(
+            &v2(
+                KEYS,
+                &format!(
+                    "    input: {input}\n    assert: {{ set: {{ field: key, group_by: locale, \
+                     equal_to: {{ group: en }}, plurals: cldr }} }}\n"
+                ),
+            ),
+            &[],
+        );
+    }
+}
+
+#[test]
+fn groups_lists_literals_of_the_group_by_field_once_each() {
+    let refused = refused_with(DEPS);
+    let set = |rest: &str| {
+        format!("    input: deps\n    assert: {{ set: {{ field: dependency, {rest} }} }}\n")
+    };
+    refused(
+        &set("subset_of: { relation: deps, field: dependency }, groups: [x]"),
+        "assert.set.groups",
+        "names groups, which are values of the `group_by:` field, and this `set` has no \
+         `group_by:`",
+    );
+    // `subset_of:` and `disjoint_from:` find nothing in a group without
+    // rows, so a group that must exist needs `equal_to:`.
+    for mode in ["subset_of", "disjoint_from"] {
+        refused(
+            &set(&format!(
+                "group_by: range, {mode}: {{ group: x }}, groups: [y]"
+            )),
+            "assert.set.groups",
+            &format!(
+                "names groups that must exist, which only `equal_to:` checks: under `{mode}:` a \
+                 group without rows holds no value, so it passes; compare with `equal_to:`, or \
+                 drop `groups:`"
+            ),
+        );
+    }
+    refused(
+        &set("group_by: range, equal_to: { group: x }, groups: [y, z, y]"),
+        "assert.set.groups[2]",
+        "names the group `assert.set.groups[0]` names",
+    );
+    refused(
+        &set("group_by: range, equal_to: { group: x }, groups: [y, x]"),
+        "assert.set.groups[1]",
+        "names the reference group, which must have rows anyway (a reference group without \
+         rows is an analysis failure); list only the groups compared with it",
+    );
+    refused(
+        &set("group_by: range, equal_to: { group: x }, groups: [1.10]"),
+        "assert.set.groups[0]",
+        "a number cannot be written as a literal in this build: a value compares by the text \
+         it is written with (`1.10` is not `1.1`), which the config's YAML does not keep; write \
+         it as a string (`'1.10'`) to match a string value",
+    );
+    refused(
+        &set("group_by: at, equal_to: { group: x }, groups: [true]"),
+        "assert.set.groups[0]",
+        "`at` holds strings, and a boolean never equals a string; quote it (`'true'`) to match \
+         that text",
+    );
+    // A boolean names a group of a field that can hold one, and an empty
+    // list names none.
+    builds(
+        &v2(
+            DEPS,
+            &set("group_by: range, equal_to: { group: x }, groups: [true, y]"),
+        ),
+        &[],
+    );
+    builds(
+        &v2(
+            DEPS,
+            &set("group_by: range, equal_to: { group: x }, groups: []"),
+        ),
+        &[],
     );
 }
 
 #[test]
-fn what_a_later_step_adds_is_refused_as_not_yet_supported() {
-    let not_yet = |rest: &str, at: &str, what: &str| {
-        assert_eq!(
-            build_error(&v2(DEPS, &format!("    input: deps\n{rest}")), "c"),
-            format!(
-                "rule \"c\": `{at}`: {what} is not yet supported by the `constraint` kind in this \
-                 build; it comes in a later step of version 2"
-            ),
-            "{rest}"
-        );
+fn a_set_against_another_relation_names_the_relation_and_its_field() {
+    let objects = format!("{DEPS}{}", &NAMES["relations:\n".len()..]);
+    let refused = refused_with(&objects);
+    let set = |target: &str| {
+        format!(
+            "    input: deps\n    assert: {{ set: {{ field: dependency, subset_of: {target} }} }}\n"
+        )
     };
-    not_yet(
-        "    assert: { set: { field: dependency, group_by: range, equal_to: { group: x }, \
-         plurals: cldr } }\n",
-        "assert.set.plurals",
-        "`plurals: cldr`",
-    );
-    not_yet(
-        "    assert: { set: { field: dependency, group_by: range, equal_to: { group: x }, \
-         groups: [x, y] } }\n",
-        "assert.set.groups",
-        "`groups:`",
-    );
-    not_yet(
-        "    assert: { set: { field: dependency, group_by: range, subset_of: { relation: deps, \
-         field: dependency } } }\n",
+    refused(
+        &set("{ relation: names }"),
         "assert.set.subset_of",
-        "a `set` against another relation's field",
+        "names another relation's field as `{ relation: R, field: F }`, and `field:` is missing",
     );
-    for token in ["at", "file"] {
-        not_yet(
-            &format!(
-                "    assert: {{ set: {{ field: dependency, group_by: {token}, equal_to: {{ group: \
-                 x }} }} }}\n"
+    refused(
+        &set("{ field: name }"),
+        "assert.set.subset_of",
+        "names another relation's field as `{ relation: R, field: F }`, and `relation:` is \
+         missing",
+    );
+    refused(
+        &set("{ group: x, relation: names, field: name }"),
+        "assert.set.subset_of",
+        "names one other set: `{ group: literal }` (a group of this relation) or `{ relation: \
+         R, field: F }` (every value of another relation's field), not both",
+    );
+    refused(
+        &set("{ relation: names, field: nmae }"),
+        "assert.set.subset_of.field",
+        "`nmae` is not a field of relation `names` (.alint.yml); its fields are `name`, \
+         `manifest`",
+    );
+    // The loader resolves the relation as it resolves `input:`.
+    let error = load_error(&v2(&objects, &set("{ relation: nmaes, field: name }")), &[]);
+    assert!(
+        error.contains("`assert.set.subset_of.relation` (written by .alint.yml)")
+            && error.contains("nmaes"),
+        "{error}"
+    );
+    assert_eq!(
+        load_error(
+            &v2(
+                &objects,
+                &set(
+                    "{ relation: { from: { paths: x }, read: { whole_file: {} }, fields: { f: \
+                      path } }, field: f }"
+                )
             ),
-            "assert.set.group_by",
-            "a `set` grouped by `path` or a path token (where every resource forms a group, \
-             rows or not)",
-        );
-    }
-    // `plurals: exact` and an empty `groups:` are what the kind does anyway.
-    builds(
-        &v2(
-            DEPS,
-            "    input: deps\n    assert: { set: { field: dependency, group_by: range, \
-             equal_to: { group: x }, plurals: exact, groups: [] } }\n",
+            &[]
         ),
-        &[],
+        "rule \"c\": `assert.set.subset_of.relation` (written by .alint.yml): names a relation, \
+         bare or qualified by an `extends:` alias; an inline relation is not allowed here, so \
+         declare it under `relations:` and name it"
     );
+    assert_eq!(
+        load_error(
+            &v2(&objects, &set("{ relation: [names], field: name }")),
+            &[]
+        ),
+        "rule \"c\": `assert.set.subset_of.relation` (written by .alint.yml): expected a \
+         relation name, found a list"
+    );
+    // The rule reads the relation, which the plan lists as its reference.
+    let config = builds(&v2(&objects, &set("{ relation: names, field: name }")), &[]);
+    let plan = config.relation_plan.as_ref().expect("a plan");
+    let references: Vec<(&str, &str)> = plan
+        .rule("c")
+        .unwrap()
+        .references
+        .iter()
+        .map(|reference| {
+            (
+                reference.field.as_str(),
+                plan.relation(reference.relation.id).name.as_str(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        references,
+        [
+            ("input", "deps"),
+            ("assert.set.subset_of.relation", "names")
+        ]
+    );
+}
+
+/// A `set` against a sensitive field of another relation makes the compared
+/// field sensitive in the plan `explain` and `list` show, with its family
+/// (every entry field, here), and a relation that reads it follows.
+#[test]
+fn a_set_against_a_sensitive_field_makes_the_compared_family_sensitive() {
+    let objects = format!(
+        "{DEPS}  denied:\n    from: {{ paths: denied.json }}\n    entries: {{ format: json, at: \
+         \"$\" }}\n    fields: {{ name: {{ source: entry.key, sensitive: true }} }}\n  later:\n    \
+         from: {{ paths: later.json }}\n    entries: {{ format: json, at: \"$\" }}\n    fields: \
+         {{ name: entry.key, where_from: path }}\n    where: {{ name: {{ in: [{{ relation: deps, \
+         field: dependency }}] }} }}\n"
+    );
+    let sensitive = |config: &Config, relation: &str| -> Vec<String> {
+        let plan = config.relation_plan.as_ref().expect("a plan");
+        let named = plan
+            .relations
+            .iter()
+            .find(|named| named.name == relation)
+            .unwrap();
+        named
+            .relation
+            .fields
+            .iter()
+            .filter(|(_, field)| field.sensitive)
+            .map(|(name, _)| name.clone())
+            .collect()
+    };
+    let rest = "    input: deps\n    assert: { set: { field: dependency, disjoint_from: { \
+                relation: denied, field: name } } }\n";
+    let config = builds(&v2(&objects, rest), &[]);
+    assert_eq!(sensitive(&config, "deps"), ["dependency", "range"]);
+    assert_eq!(sensitive(&config, "later"), ["name"]);
+    // A group target, or another relation's field that is not sensitive,
+    // changes nothing.
+    let rest = "    input: deps\n    assert: { set: { field: dependency, group_by: at, \
+                disjoint_from: { group: x } } }\n";
+    assert_eq!(
+        sensitive(&builds(&v2(&objects, rest), &[]), "deps"),
+        [] as [String; 0]
+    );
+}
+
+#[test]
+fn a_set_names_a_relation_qualified_by_an_extends_alias() {
+    let base = format!("version: 2\n{NAMES}rules: []\n");
+    let config = format!(
+        "version: 2\nextends:\n  - {{ url: ./base.yml, as: base }}\n{DEPS}rules:\n  - id: c\n    \
+         kind: constraint\n    input: deps\n    assert: {{ set: {{ field: dependency, \
+         disjoint_from: {{ relation: RELATION, field: name }} }} }}\n    level: error\n"
+    );
+    let loaded = builds(
+        &config.replace("RELATION", "base.names"),
+        &[("base.yml", &base)],
+    );
+    let plan = loaded.relation_plan.as_ref().expect("a plan");
+    let reference = &plan.rule("c").unwrap().references[1];
+    assert_eq!(plan.relation(reference.relation.id).name, "names");
+    assert_eq!(reference.relation.alias.as_deref(), Some("base"));
+    // The bare name is not the root's.
+    let error = load_error(&config.replace("RELATION", "names"), &[("base.yml", &base)]);
+    assert!(error.contains("base.names"), "{error}");
+}
+
+#[test]
+fn a_set_grouped_by_a_path_token_reads_the_resources_its_relation_lists() {
+    let objects = format!(
+        "{DEPS}{}  linked:\n    join: {{ left: deps, right: names, on: {{ dependency: name }}, \
+         unique: right }}\n    fields: {{ dependency: left.dependency, mine: left.at, theirs: \
+         right.manifest }}\n",
+        &NAMES["relations:\n".len()..]
+    );
+    let set = |group_by: &str| {
+        format!(
+            "    input: linked\n    assert: {{ set: {{ field: dependency, group_by: {group_by}, \
+             subset_of: {{ relation: names, field: name }} }} }}\n"
+        )
+    };
+    refused_with(&objects)(
+        &set("theirs"),
+        "assert.set.group_by",
+        "`theirs` is a path token that relation `linked` (.alint.yml) copies from its \
+         `unique:` side; a `set` grouped by a path token gives every resource the relation \
+         reads a group, and a join reads the resources of its other side, so group by a field \
+         of that side",
+    );
+    builds(&v2(&objects, &set("mine")), &[]);
 }
 
 #[test]

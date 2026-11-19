@@ -425,6 +425,102 @@ fn a_relation_the_environment_selects_shows_no_path_or_value_of_its_findings() {
     }
 }
 
+/// A `set` against another relation's field reads that relation too: when
+/// the environment selects it, the rule's findings show no path or value,
+/// though the rule's own input reads no environment.
+#[test]
+fn a_set_against_a_relation_the_environment_selects_shows_no_path_or_value() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        ".alint.yml",
+        "version: 2\nrelations:\n  ranges:\n    from: { paths: \"packages/*/package.json\" }\n    \
+         entries: { format: json, at: \"$.dependencies\" }\n    fields: { manifest: path, \
+         dependency: entry.key }\n  denied:\n    from: { paths: \"{{env.SECRET_DIR}}/denied.json\" \
+         }\n    entries: { format: json, at: \"$\" }\n    fields: { name: entry.key }\nrules:\n  \
+         - id: denied\n    kind: constraint\n    input: ranges\n    assert: { set: { field: \
+         dependency, group_by: manifest, disjoint_from: { relation: denied, field: name } } \
+         }\n    level: error\n  - id: needed\n    kind: constraint\n    input: ranges\n    \
+         assert: { set: { field: dependency, group_by: manifest, equal_to: { relation: denied, \
+         field: name } } }\n    level: error\n",
+    );
+    write(root, "packages/a/package.json", &manifest("a", "^18.2.0"));
+    write(
+        root,
+        "secret/denied.json",
+        "{\"react\": true, \"left-pad\": true}\n",
+    );
+    let env = [("SECRET_DIR", "secret")];
+    for (surface, shown) in surfaces(root, &env) {
+        for secret in ["secret", "react", "left-pad", "packages/a"] {
+            assert!(!shown.contains(secret), "{surface} shows {secret}: {shown}");
+        }
+        if surface != "baseline" {
+            assert!(shown.contains("sensitive evidence"), "{surface}: {shown}");
+        }
+    }
+    let output = run_env(root, &["check", "--format", "json"], &env);
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let results = json["results"].as_array().unwrap();
+    // `denied`'s shared `react`, and `needed`'s missing `left-pad`.
+    assert_eq!(results.len(), 2, "{json}");
+    for result in results {
+        let violations = result["violations"].as_array().unwrap();
+        assert_eq!(violations.len(), 1, "{result}");
+        assert_eq!(violations[0]["path"], "<redacted>", "{result}");
+        assert!(
+            violations[0]["related_locations"]
+                .as_array()
+                .is_none_or(Vec::is_empty),
+            "{result}"
+        );
+    }
+}
+
+/// A `set` against a sensitive field of another relation makes the compared
+/// field sensitive, with every field that spells the same key: no surface
+/// shows a value the two share, through `{{row.FIELD}}` of any of them.
+#[test]
+fn a_set_against_a_sensitive_field_hides_every_field_that_spells_its_values() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        ".alint.yml",
+        "version: 2\nrelations:\n  deps:\n    from: { paths: \"packages/*/package.json\" }\n    \
+         entries: { format: json, at: \"$.dependencies\" }\n    fields: { manifest: path, \
+         dependency: entry.key, full: entry.path, parent: entry.parent, root: entry.root \
+         }\n  denied:\n    from: { \
+         paths: denied.json }\n    entries: { format: json, at: \"$\" }\n    fields: { name: { \
+         source: entry.key, sensitive: true } }\nrules:\n  - id: denied\n    kind: \
+         constraint\n    input: deps\n    assert: { set: { field: dependency, disjoint_from: { \
+         relation: denied, field: name } } }\n    message: \"{{row.dependency}} is denied \
+         ({{row.full}}, {{row.parent}}, {{row.root}}, {{row.manifest}})\"\n    level: error\n",
+    );
+    write(
+        root,
+        "packages/a/package.json",
+        "{\n  \"dependencies\": {\n    \"secret-pkg\": \"1\"\n  }\n}\n",
+    );
+    write(root, "denied.json", "{\"secret-pkg\": true}\n");
+    for (surface, shown) in surfaces(root, &[]) {
+        assert!(
+            !shown.contains("secret-pkg"),
+            "{surface} shows the value: {shown}"
+        );
+        if surface == "json" {
+            assert!(
+                shown.contains(
+                    "<redacted> is denied (<redacted>, <redacted>, <redacted>, \
+                     packages/a/package.json)"
+                ),
+                "{shown}"
+            );
+        }
+    }
+}
+
 /// A sensitive `entry.key` hides an `entry.path` beside it, which spells
 /// the key, in a generated message, in `{{row.FIELD}}` and in the baseline.
 #[test]

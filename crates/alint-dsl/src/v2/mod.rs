@@ -45,7 +45,7 @@ pub(crate) use origins::{
     FIELD_ORIGINS_MARKER, mark_field_origins, merge_field_origins, reference_fields,
     take_field_origins,
 };
-pub(crate) use resolve::resolve;
+pub(crate) use resolve::{Resolved, resolve};
 
 #[cfg(test)]
 pub(crate) use model::{Read, Reader, Rows};

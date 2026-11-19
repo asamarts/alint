@@ -12,12 +12,12 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use super::failure::{Failures, at, key_path, located, type_name};
-use super::{Cell, Evaluator, FieldInfo, FieldRow, RelationNote, RelationRows, Site, Skipped};
-use crate::relation::RelPath;
+use super::{Cell, Evaluator, FieldInfo, FieldRow, RelationNote, RelationRows, Site};
+use crate::relation::Resource;
 use crate::relation::limits::LimitKind;
 use crate::relation::plan::{
-    FieldSource, JoinDef, JoinSide, Member, NamedRelation, Predicate, RelationDef, RelationId,
-    Rows, Transform,
+    FieldSource, JoinDef, JoinSide, Member, NamedRelation, PathToken, Predicate, RelationDef,
+    RelationId, Rows, Transform,
 };
 use crate::relation::pointer::{Pointer, Segment};
 use crate::relation::transform::StringTransform;
@@ -531,16 +531,9 @@ impl Evaluator<'_> {
         rows: &mut RelationRows,
         from: &RelationRows,
     ) -> Result<(), crate::relation::LimitExceeded> {
-        let key = |note: &RelationNote| -> (RelPath, String, Option<u32>) {
-            let part = match &note.skipped {
-                Skipped::NonLiteral => None,
-                Skipped::NonString { part, .. } => Some(*part),
-            };
-            (note.resource.path().clone(), note.message.clone(), part)
-        };
-        let held: HashSet<_> = rows.notes.iter().map(key).collect();
+        let held: HashSet<_> = rows.notes.iter().map(RelationNote::key).collect();
         for note in &from.notes {
-            if !held.contains(&key(note)) {
+            if !held.contains(&note.key()) {
                 self.take_bytes(super::read::note_bytes(&note.skipped, &note.message))?;
                 rows.notes.push(note.clone());
             }
@@ -625,6 +618,138 @@ impl Evaluator<'_> {
                 }
             }
         }
+    }
+}
+
+/// How a field gets its value from a resource's path alone: the path token
+/// it holds, and the transforms applied to it, innermost relation first.
+type FromPath = (PathToken, Vec<StringTransform>);
+
+/// One relation of the chain [`Evaluator::resources_kept`] walks: its
+/// fields whose values a resource's path gives, and its `where:` predicates
+/// on them.
+struct PathLevel<'p> {
+    at: RelationId,
+    fields: HashMap<&'p str, FromPath>,
+    filters: Vec<(String, Vec<Predicate>)>,
+}
+
+/// The fields of `relation` whose values a resource's path gives: a path
+/// token, or a join's copy of a field of the side whose resources it lists
+/// that the path gives there (`inner`), each after the relation's string
+/// transforms.
+fn path_fields<'p>(
+    relation: &'p RelationDef,
+    inner: &HashMap<&'p str, FromPath>,
+) -> HashMap<&'p str, FromPath> {
+    let mut fields = HashMap::new();
+    'fields: for (name, field) in &relation.fields {
+        let from = match (&field.source, &relation.rows) {
+            (FieldSource::Path(token), _) => Some((*token, Vec::new())),
+            (FieldSource::Side(side, copied), Rows::Join(join)) if *side != join.unique => {
+                inner.get(copied.as_str()).cloned()
+            }
+            _ => None,
+        };
+        let Some((token, mut transforms)) = from else {
+            continue;
+        };
+        for transform in relation.transforms_of(name) {
+            transforms.push(match transform {
+                Transform::Trim => StringTransform::Trim,
+                Transform::Lower => StringTransform::Lower,
+                Transform::SemverMajor => StringTransform::SemverMajor,
+                Transform::SemverMinor => StringTransform::SemverMinor,
+                // The plan check refuses it on a path token.
+                Transform::StripRoot => continue 'fields,
+            });
+        }
+        fields.insert(name.as_str(), (token, transforms));
+    }
+    fields
+}
+
+impl Evaluator<'_> {
+    /// Relation `id`, then down the side of each join whose resources it
+    /// lists, innermost first, each with its fields the path gives and its
+    /// `where:` predicates on them.
+    fn path_levels(&self, id: RelationId) -> Option<Vec<PathLevel<'_>>> {
+        let mut chain = vec![id];
+        while let Rows::Join(join) = &self.plan.relation(chain[chain.len() - 1]).relation.rows {
+            if chain.len() > self.plan.relations.len() {
+                return None;
+            }
+            chain.push(match join.unique {
+                JoinSide::Left => join.right.id,
+                JoinSide::Right => join.left.id,
+            });
+        }
+        let mut levels: Vec<PathLevel<'_>> = Vec::with_capacity(chain.len());
+        for &at in chain.iter().rev() {
+            let relation = &self.plan.relation(at).relation;
+            let inner = levels.last().map(|level| &level.fields);
+            let fields = path_fields(relation, inner.unwrap_or(&HashMap::new()));
+            let filters = relation
+                .filters
+                .iter()
+                .filter(|(field, _)| fields.contains_key(field.as_str()))
+                .cloned()
+                .collect();
+            levels.push(PathLevel {
+                at,
+                fields,
+                filters,
+            });
+        }
+        Some(levels)
+    }
+
+    /// [`super::resources_kept`] of relation `id`, which the memo holds with
+    /// every relation it reads.
+    pub(super) fn resources_kept(&self, id: RelationId, resources: &[Resource]) -> Vec<bool> {
+        let kept_all = || vec![true; resources.len()];
+        let Some(levels) = self.path_levels(id) else {
+            return kept_all();
+        };
+        // Each level's tests, built as its `where:` builds them.
+        let mut tested = Vec::new();
+        for level in &levels {
+            let Ok(rows) = self.computed(level.at) else {
+                return kept_all();
+            };
+            let named = self.plan.relation(level.at);
+            let site = Site {
+                prefix: named.name.clone(),
+                sensitive: named.reads_environment,
+                keys_sensitive: self.keys_sensitive(level.at),
+            };
+            let mut failures = Failures::default();
+            let Some(tests) = self.tests(&site, &rows, &level.filters, &mut failures) else {
+                return kept_all();
+            };
+            if !failures.is_empty() {
+                return kept_all();
+            }
+            for test in tests {
+                tested.push((&level.fields[test.field], test));
+            }
+        }
+        if tested.is_empty() {
+            return kept_all();
+        }
+        resources
+            .iter()
+            .map(|resource| {
+                let tokens = super::read::resource_tokens(resource);
+                tested.iter().all(|((token, transforms), test)| {
+                    let mut text = super::read::token_text(&tokens, *token).to_string();
+                    for transform in transforms {
+                        text = transform.apply(&text);
+                    }
+                    test.verdict_of(Some(&Value::String(text.into()))) != Verdict::Fail
+                })
+            })
+            .collect()
     }
 }
 
@@ -836,15 +961,20 @@ impl Verdict {
 
 impl Test<'_> {
     fn verdict(&self, cell: &Cell) -> Verdict {
+        self.verdict_of(cell.value.as_ref())
+    }
+
+    /// What the predicate says of a value (`None`: a missing one).
+    fn verdict_of(&self, value: Option<&Value>) -> Verdict {
         match &self.check {
-            Check::Pattern(regex) => match &cell.value {
+            Check::Pattern(regex) => match value {
                 // A missing value matches no pattern.
                 None => Verdict::of(!self.wanted),
                 Some(Value::String(text)) => Verdict::of(regex.is_match(text) == self.wanted),
                 Some(_) => Verdict::TypeError,
             },
             // Null and a missing value are in no list.
-            Check::Member(set) => match comparable(cell) {
+            Check::Member(set) => match value.filter(|value| !matches!(value, Value::Null)) {
                 None => Verdict::of(!self.wanted),
                 Some(value) if set.other_than(kind(value)).is_some() => Verdict::TypeError,
                 Some(value) => Verdict::of(set.values.contains(value) == self.wanted),

@@ -121,7 +121,7 @@ pub static KIND_DESCRIPTIONS: &[(&str, &str)] = &[
     ("command", "Shell out to an external CLI per matched file."),
     ("command_idempotent", "Run a user-declared formatter/checker in its --check (idempotence) mode once: exit 0 => the tree is formatter-clean (silent); non-zero => violation(s)."),
     ("commented_out_code", "Heuristic detector for blocks of commented-out source code (as opposed to prose comments, license headers, doc comments, or ASCII banners)."),
-    ("constraint", "An assertion over the rows of a relation: equal values, unique keys, or a set of values per group compared with a reference group."),
+    ("constraint", "An assertion over the rows of a relation: equal values, unique keys, or a set of values per group compared with a reference group or another relation's field."),
     ("cross_file", "A source must hold a relation to one or more targets (or, for resolves, the walked tree)."),
     ("dir_absent", "Directory counterpart of file_absent."),
     ("dir_contains", "Every directory matching select: must contain files matching every glob in require."),

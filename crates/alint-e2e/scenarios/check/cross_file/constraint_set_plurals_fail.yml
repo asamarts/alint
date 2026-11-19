@@ -1,0 +1,58 @@
+test_version: 1
+name: constraint merges CLDR plural groups before comparing each locale's keys with English
+tags: [check, constraint, cross_file, version_two, failing]
+
+given:
+  tree:
+    locales/en.yml: |
+      en:
+        inbox:
+          one: "1 message"
+          other: "%{count} messages"
+        items_one: "1 item"
+        items_other: "%{count} items"
+        title: "Inbox"
+    locales/pl.yml: |
+      pl:
+        inbox:
+          one: "1 wiadomość"
+          few: "%{count} wiadomości"
+          many: "%{count} wiadomości"
+          other: "%{count} wiadomości"
+        items_one: "1 element"
+        items_few: "%{count} elementy"
+        items_other: "%{count} elementów"
+        inbox_title: "Skrzynka"
+  config: |
+    version: 2
+    relations:
+      keys:
+        from: { paths: "locales/*.yml" }
+        entries: { format: yaml, at: "$", leaves: true }
+        fields: { locale: entry.root, key: entry.path }
+        transform: { key: [strip-root] }
+    rules:
+      - id: locales-match-english
+        kind: constraint
+        input: keys
+        assert:
+          set: { field: key, group_by: locale, equal_to: { group: en }, plurals: cldr }
+        level: error
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - rule: locales-match-english
+        path: locales/pl.yml
+        message: {exact: "`locale` \"pl\" lacks `key` \"title\", which `locale` \"en\" holds"}
+        related:
+          - {label: "the reference group's row with it", path: locales/en.yml, line: 7, column: 3, end_line: 7, end_column: 8}
+      - rule: locales-match-english
+        path: locales/pl.yml
+        line: 10
+        column: 3
+        end_line: 10
+        end_column: 14
+        message: {exact: "`locale` \"pl\" holds `key` \"inbox_title\", which `locale` \"en\" lacks"}

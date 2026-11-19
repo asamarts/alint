@@ -59,9 +59,11 @@ pub use failure::RelationFailure;
 /// evaluator's own messages do: for the `constraint` kind's findings.
 pub use failure::{located, type_name};
 pub use ops::render_value;
+pub use read::path_token;
 
 use super::cache::{DecodeCache, ReadCache};
 use super::limits::{LimitExceeded, LimitKind, Limits};
+use super::path::RelPath;
 use super::plan::{Plan, RelationId};
 use super::pointer::Pointer;
 use super::resource::Resource;
@@ -173,6 +175,20 @@ pub struct RelationNote {
     pub message: String,
 }
 
+impl RelationNote {
+    /// What tells notes apart: a relation that reads another (a join's side,
+    /// or a list's relation) takes each of its notes once by this key, and a
+    /// rule that reads both reports each once.
+    #[must_use]
+    pub fn key(&self) -> (RelPath, String, Option<u32>) {
+        let part = match &self.skipped {
+            Skipped::NonLiteral => None,
+            Skipped::NonString { part, .. } => Some(*part),
+        };
+        (self.resource.path().clone(), self.message.clone(), part)
+    }
+}
+
 /// What a [`RelationNote`] says a `read:` skipped.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Skipped {
@@ -209,6 +225,40 @@ pub type Outcome = Result<Arc<RelationRows>, Arc<[RelationFailure]>>;
 /// of the relations it reads. A rule reports each with
 /// [`RelationFailure::to_violation`].
 pub fn evaluate(plan: &Arc<Plan>, id: RelationId, ctx: &Context<'_>) -> Outcome {
+    with_evaluator(plan, ctx, |evaluator| evaluator.relation(id))
+}
+
+/// Whether `where:` of relation `id` may keep a row of each resource its
+/// rows list (`rows.resources`, in order), decided from each resource's path
+/// alone: a predicate on a field whose value the path gives (`path` or a
+/// path token, after the relation's transforms, or a join's copy of one from
+/// the side whose resources it lists) is tested, and a predicate on any
+/// other field is unknown. `where:` keeps a row only when all its predicates
+/// hold, so a resource is dropped (`false`) only when a predicate it tests is
+/// false; one it cannot test (a type error) or one on another field keeps
+/// it. A `{ relation: R, field: F }` list is read as the relation's own
+/// `where:` reads it. A relation that does not evaluate keeps every
+/// resource: its rule reports the failure.
+#[must_use]
+pub fn resources_kept(
+    plan: &Arc<Plan>,
+    id: RelationId,
+    rows: &RelationRows,
+    ctx: &Context<'_>,
+) -> Vec<bool> {
+    with_evaluator(plan, ctx, |evaluator| match evaluator.relation(id) {
+        Ok(_) => evaluator.resources_kept(id, &rows.resources),
+        Err(_) => vec![true; rows.resources.len()],
+    })
+}
+
+/// Run `then` with an evaluator over the run's memo and caches (or, inside a
+/// nested rule's iteration, ones of its own).
+fn with_evaluator<T>(
+    plan: &Arc<Plan>,
+    ctx: &Context<'_>,
+    then: impl FnOnce(&Evaluator<'_>) -> T,
+) -> T {
     // The run's caches, so a resource another relation or rule reads is read
     // and decoded once; inside an iteration they stay out of reach.
     ctx.index.enable_relation_caches();
@@ -234,7 +284,7 @@ pub fn evaluate(plan: &Arc<Plan>, id: RelationId, ctx: &Context<'_>) -> Outcome 
         local_decodes = DecodeCache::new();
         &local_decodes
     };
-    Evaluator {
+    then(&Evaluator {
         plan,
         root: ctx.root,
         index: ctx.index,
@@ -242,8 +292,7 @@ pub fn evaluate(plan: &Arc<Plan>, id: RelationId, ctx: &Context<'_>) -> Outcome 
         reads,
         decodes,
         memo,
-    }
-    .relation(id)
+    })
 }
 
 /// Whether a field that holds keys (`entry.key`, `entry.parent`,

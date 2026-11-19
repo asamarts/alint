@@ -52,7 +52,7 @@
               "type": "null"
             }
           ],
-          "description": "The set of a field's values, per group, is equal to, a subset of or disjoint from the set of another group."
+          "description": "The set of a field's values, per group, is equal to, a subset of or disjoint from another set: a group's, or another relation's field's."
         },
         "unique": {
           "anyOf": [
@@ -180,15 +180,17 @@
           "type": "string"
         },
         "group_by": {
-          "description": "The field whose value is each row's group.",
+          "description": "The field whose value is each row's group; without it, the relation is one group. Grouped by `path` or a path token, every resource the relation reads forms its group, rows or not.",
           "type": [
             "string",
             "null"
           ]
         },
         "groups": {
-          "description": "Groups that must exist, rows or not. Not yet supported: only `[]`.",
-          "items": true,
+          "description": "Groups that must exist, rows or not, with `equal_to:`: literals of the `group_by:` field. A group named only here lacks every value of the other set.",
+          "items": {
+            "$ref": "#/$defs/ConstraintLiteral"
+          },
           "type": [
             "array",
             "null"
@@ -203,7 +205,7 @@
               "type": "null"
             }
           ],
-          "description": "`exact` compares values as they are; `cldr` collapses CLDR plural groups (not yet supported)."
+          "description": "`exact` compares values as they are; `cldr` collapses CLDR plural groups of an `entry.path` field, as `key_parity` does (`{ group: }` targets only)."
         },
         "subset_of": {
           "anyOf": [
@@ -224,10 +226,10 @@
     },
     "ConstraintSetTarget": {
       "additionalProperties": false,
-      "description": "The other set: a group of the same relation (`{ group: literal }`), or a field of another relation (`{ relation: R, field: F }`, not yet supported).",
+      "description": "The other set: a group of the same relation (`{ group: literal }`), or every value of another relation's field (`{ relation: R, field: F }`).",
       "properties": {
         "field": {
-          "description": "That relation's field (not yet supported).",
+          "description": "That relation's field, whose values are the other set.",
           "type": [
             "string",
             "null"
@@ -245,7 +247,7 @@
           "description": "The reference group: the rows whose `group_by:` field holds this literal."
         },
         "relation": {
-          "description": "Another relation (not yet supported).",
+          "description": "Another relation: its name, bare or qualified by an `extends:` alias (`ws.names`); not an inline relation.",
           "type": [
             "string",
             "null"
@@ -2647,7 +2649,7 @@
       "type": "object"
     },
     "rule_constraint": {
-      "description": "An assertion over the rows of a relation: equal values, unique keys, or a set of values per group compared with a reference group.",
+      "description": "An assertion over the rows of a relation: equal values, unique keys, or a set of values per group compared with a reference group or another relation's field.",
       "not": {
         "anyOf": [
           {

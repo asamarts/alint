@@ -89,9 +89,7 @@ pub(crate) fn take_field_origins(mapping: &mut Mapping) -> Vec<(String, usize)> 
 }
 
 /// The top-level fields of a rule of `kind` that name a relation, bare or
-/// qualified, or hold an inline one: the `constraint` kind's `input:`. Its
-/// `assert:` names no relation in this build (a `set` against another
-/// relation's field comes in a later step and is refused until then). The
+/// qualified, or hold an inline one: the `constraint` kind's `input:`. The
 /// unit tests register a stub kind with one, `input:`.
 pub(crate) fn reference_fields(kind: &str) -> &'static [&'static str] {
     #[cfg(test)]
@@ -100,6 +98,23 @@ pub(crate) fn reference_fields(kind: &str) -> &'static [&'static str] {
     }
     match kind {
         CONSTRAINT_KIND => &["input"],
+        _ => &[],
+    }
+}
+
+/// The fields nested in a rule of `kind` that name a relation, bare or
+/// qualified (never an inline one), each as the top-level field that holds
+/// it, which wrote it, and its path below that: a `constraint` rule's `set`
+/// against another relation's field (`{ relation: R, field: F }`).
+pub(crate) fn nested_reference_fields(
+    kind: &str,
+) -> &'static [(&'static str, &'static [&'static str])] {
+    match kind {
+        CONSTRAINT_KIND => &[
+            ("assert", &["set", "equal_to", "relation"]),
+            ("assert", &["set", "subset_of", "relation"]),
+            ("assert", &["set", "disjoint_from", "relation"]),
+        ],
         _ => &[],
     }
 }

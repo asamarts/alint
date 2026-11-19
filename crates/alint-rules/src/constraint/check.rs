@@ -1,20 +1,27 @@
 //! The builder's check of a `constraint` rule against its input relation
 //! (design section 8, "plan check"): every field the assertion and the
 //! message name exists, every literal can match the field it is compared
-//! with, and what a later step adds is refused as not yet supported.
+//! with, and each `set` option fits the fields it reads.
 
-use alint_core::relation::Value;
-use alint_core::relation::plan::{FieldSource, JoinSide, Plan, RelationId, Rows};
+use std::collections::HashMap;
+
+use alint_core::relation::plan::{
+    FieldSource, JoinSide, Plan, RelationId, Rows, RuleReference, Transform,
+};
+use alint_core::relation::{StringTransform, Value};
 use alint_core::{Error, Result};
 
 use super::options::{self, Plurals};
-use super::{Assertion, SetMode, relation_label};
+use super::{Assertion, ResourceGroups, SetAssertion, SetMode, SetTarget, relation_label};
 
 /// Checks one rule's options against relation `input` of `plan`.
 pub(super) struct Checker<'p> {
     plan: &'p Plan,
     input: RelationId,
     rule: &'p str,
+    /// The relations the rule's fields name, as the loader resolved them
+    /// (`input`, and a `set`'s `{ relation: R }`).
+    references: &'p [RuleReference],
 }
 
 /// What a field's values hold, as far as the plan knows.
@@ -28,38 +35,39 @@ enum Holds {
 }
 
 impl<'p> Checker<'p> {
-    pub(super) fn new(plan: &'p Plan, input: RelationId, rule: &'p str) -> Self {
-        Self { plan, input, rule }
+    pub(super) fn new(
+        plan: &'p Plan,
+        input: RelationId,
+        rule: &'p str,
+        references: &'p [RuleReference],
+    ) -> Self {
+        Self {
+            plan,
+            input,
+            rule,
+            references,
+        }
     }
 
     fn fail(&self, path: &str, message: impl std::fmt::Display) -> Error {
         Error::rule_config(self.rule, format!("`{path}`: {message}"))
     }
 
-    fn not_yet(&self, path: &str, what: &str) -> Error {
-        self.fail(
-            path,
-            format!(
-                "{what} is not yet supported by the `constraint` kind in this build; it comes \
-                 in a later step of version 2"
-            ),
-        )
+    /// Refuse `name` at `path` unless the input relation has that field.
+    fn field(&self, name: &str, path: &str) -> Result<()> {
+        self.field_of(self.input, name, path)
     }
 
-    /// The fields of the input relation, in the order written.
-    fn field_names(&self) -> Vec<&'p str> {
-        self.plan
-            .relation(self.input)
+    /// Refuse `name` at `path` unless relation `id` has that field.
+    fn field_of(&self, id: RelationId, name: &str, path: &str) -> Result<()> {
+        let names: Vec<&str> = self
+            .plan
+            .relation(id)
             .relation
             .fields
             .iter()
             .map(|(name, _)| name.as_str())
-            .collect()
-    }
-
-    /// Refuse `name` at `path` unless the input relation has that field.
-    fn field(&self, name: &str, path: &str) -> Result<()> {
-        let names = self.field_names();
+            .collect();
         if names.contains(&name) {
             return Ok(());
         }
@@ -72,7 +80,7 @@ impl<'p> Checker<'p> {
             path,
             format!(
                 "`{name}` is not a field of {}; its fields are {listed}",
-                relation_label(self.plan, self.input)
+                relation_label(self.plan, id)
             ),
         ))
     }
@@ -214,12 +222,6 @@ impl<'p> Checker<'p> {
 
     fn set(&self, set: &options::Set) -> Result<Assertion> {
         self.field(&set.field, "assert.set.field")?;
-        if set.plurals == Some(Plurals::Cldr) {
-            return Err(self.not_yet("assert.set.plurals", "`plurals: cldr`"));
-        }
-        if set.groups.as_ref().is_some_and(|groups| !groups.is_empty()) {
-            return Err(self.not_yet("assert.set.groups", "`groups:`"));
-        }
         let targets = [
             (SetMode::EqualTo, &set.equal_to),
             (SetMode::SubsetOf, &set.subset_of),
@@ -236,44 +238,274 @@ impl<'p> Checker<'p> {
             ));
         };
         let path = format!("assert.set.{}", mode.key());
-        if target.relation.is_some() || target.field.is_some() {
-            return Err(self.not_yet(&path, "a `set` against another relation's field"));
+        if let Some(group_by) = &set.group_by {
+            self.field(group_by, "assert.set.group_by")?;
+            if group_by == &set.field {
+                return Err(self.fail(
+                    "assert.set.group_by",
+                    format!("groups by `{group_by}`, the field whose values it compares"),
+                ));
+            }
         }
-        let Some(group) = &target.group else {
-            return Err(self.fail(
-                &path,
-                "names the reference group: `{ group: literal }`, the rows whose `group_by:` \
-                 field holds the literal",
-            ));
+        let target = self.set_target(set, *mode, target, &path)?;
+        let plurals = set.plurals == Some(Plurals::Cldr);
+        if plurals {
+            if matches!(target, SetTarget::Relation { .. }) {
+                return Err(self.fail(
+                    "assert.set.plurals",
+                    "`plurals: cldr` decides each plural group over the key paths of two groups \
+                     of one relation, so it takes a `{ group: }` target, not `{ relation: R, \
+                     field: F }`",
+                ));
+            }
+            self.key_paths(&set.field)?;
+        }
+        let groups = self.groups(set, *mode, &target)?;
+        let resource_groups = match &set.group_by {
+            Some(group_by) => self.resource_groups(group_by)?,
+            None => None,
+        };
+        Ok(Assertion::Set(Box::new(SetAssertion {
+            field: set.field.clone(),
+            group_by: set.group_by.clone(),
+            resource_groups,
+            target,
+            mode: *mode,
+            groups,
+            plurals,
+        })))
+    }
+
+    /// The other set of a `set` in mode `mode`: `{ group: literal }`, a
+    /// value of `group_by:`, or `{ relation: R, field: F }`, whose relation
+    /// the loader resolved.
+    fn set_target(
+        &self,
+        set: &options::Set,
+        mode: SetMode,
+        target: &options::SetTarget,
+        path: &str,
+    ) -> Result<SetTarget> {
+        let both = "`{ group: literal }` (a group of this relation) or `{ relation: R, field: F }` \
+                    (every value of another relation's field)";
+        match (&target.group, &target.relation, &target.field) {
+            (Some(group), None, None) => {
+                let Some(group_by) = &set.group_by else {
+                    return Err(self.fail(
+                        path,
+                        "a reference group (`{ group: ... }`) is a value of the `group_by:` \
+                         field, and this `set` has no `group_by:`",
+                    ));
+                };
+                Ok(SetTarget::Group(self.literal(
+                    group,
+                    group_by,
+                    &format!("{path}.group"),
+                )?))
+            }
+            (None, Some(_), Some(field)) => {
+                let field_name = format!("assert.set.{}.relation", mode.key());
+                let Some(reference) = self
+                    .references
+                    .iter()
+                    .find(|reference| reference.field == field_name)
+                else {
+                    return Err(self.fail(
+                        &format!("{path}.relation"),
+                        "the loader did not resolve the relation; this is a bug in alint, so \
+                         please report it",
+                    ));
+                };
+                let relation = reference.relation.id;
+                let name = &self.plan.relation(relation).name;
+                let written = match &reference.relation.alias {
+                    Some(alias) => format!("{alias}.{name}"),
+                    None => name.clone(),
+                };
+                self.field_of(relation, field, &format!("{path}.field"))?;
+                Ok(SetTarget::Relation {
+                    relation,
+                    field: field.clone(),
+                    written,
+                })
+            }
+            (None, Some(_), None) => Err(self.fail(
+                path,
+                "names another relation's field as `{ relation: R, field: F }`, and `field:` is \
+                 missing",
+            )),
+            (None, None, Some(_)) => Err(self.fail(
+                path,
+                "names another relation's field as `{ relation: R, field: F }`, and `relation:` \
+                 is missing",
+            )),
+            (None, None, None) => Err(self.fail(path, format!("names the other set: {both}"))),
+            (Some(_), _, _) => {
+                Err(self.fail(path, format!("names one other set: {both}, not both")))
+            }
+        }
+    }
+
+    /// `groups:`: literals of the `group_by:` field, none twice and none the
+    /// reference group, which must have rows anyway, under `equal_to:` (in
+    /// mode `mode`): the only mode in which a group without rows can fail.
+    fn groups(&self, set: &options::Set, mode: SetMode, target: &SetTarget) -> Result<Vec<Value>> {
+        let Some(literals) = set.groups.as_ref().filter(|groups| !groups.is_empty()) else {
+            return Ok(Vec::new());
         };
         let Some(group_by) = &set.group_by else {
             return Err(self.fail(
-                &path,
-                "a reference group (`{ group: ... }`) is a value of the `group_by:` field, and \
-                 this `set` has no `group_by:`",
+                "assert.set.groups",
+                "names groups, which are values of the `group_by:` field, and this `set` has no \
+                 `group_by:`",
             ));
         };
-        self.field(group_by, "assert.set.group_by")?;
-        if group_by == &set.field {
+        if mode != SetMode::EqualTo {
             return Err(self.fail(
-                "assert.set.group_by",
-                format!("groups by `{group_by}`, the field whose values it compares"),
+                "assert.set.groups",
+                format!(
+                    "names groups that must exist, which only `equal_to:` checks: under `{}:` a \
+                     group without rows holds no value, so it passes; compare with `equal_to:`, \
+                     or drop `groups:`",
+                    mode.key()
+                ),
             ));
         }
-        if self.is_path_token(self.input, group_by) {
-            return Err(self.not_yet(
-                "assert.set.group_by",
-                "a `set` grouped by `path` or a path token (where every resource forms a \
-                 group, rows or not)",
-            ));
+        let mut groups: Vec<Value> = Vec::with_capacity(literals.len());
+        // Each literal's place, by value.
+        let mut seen: HashMap<Value, usize> = HashMap::with_capacity(literals.len());
+        for (index, literal) in literals.iter().enumerate() {
+            let at = format!("assert.set.groups[{index}]");
+            let value = self.literal(literal, group_by, &at)?;
+            if let Some(earlier) = seen.insert(value.clone(), index) {
+                return Err(self.fail(
+                    &at,
+                    format!("names the group `assert.set.groups[{earlier}]` names"),
+                ));
+            }
+            if matches!(target, SetTarget::Group(reference) if *reference == value) {
+                return Err(self.fail(
+                    &at,
+                    "names the reference group, which must have rows anyway (a reference group \
+                     without rows is an analysis failure); list only the groups compared with it",
+                ));
+            }
+            groups.push(value);
         }
-        let group = self.literal(group, group_by, &format!("{path}.group"))?;
-        Ok(Assertion::Set {
-            field: set.field.clone(),
-            group_by: group_by.clone(),
-            group,
-            mode: *mode,
-        })
+        Ok(groups)
+    }
+
+    /// When field `name` of the input is `path` or a path token, or a join's
+    /// copy of one from the side whose resources the join lists (the side
+    /// that is not `unique:`): how a resource gets the group its rows would
+    /// have. A join's copy from its `unique:` side is refused: the join does
+    /// not list that side's resources.
+    fn resource_groups(&self, name: &str) -> Result<Option<ResourceGroups>> {
+        let mut at = (self.input, name.to_string());
+        // Each relation's transforms of the field, outermost first.
+        let mut levels: Vec<&[Transform]> = Vec::new();
+        for _ in 0..=self.plan.relations.len() {
+            let relation = &self.plan.relation(at.0).relation;
+            levels.push(relation.transforms_of(&at.1));
+            match (
+                relation.field(&at.1).map(|field| &field.source),
+                &relation.rows,
+            ) {
+                (Some(FieldSource::Path(token)), _) => {
+                    let mut transforms = Vec::new();
+                    for transform in levels.iter().rev().flat_map(|level| level.iter()) {
+                        transforms.push(match transform {
+                            Transform::Trim => StringTransform::Trim,
+                            Transform::Lower => StringTransform::Lower,
+                            Transform::SemverMajor => StringTransform::SemverMajor,
+                            Transform::SemverMinor => StringTransform::SemverMinor,
+                            // The plan check refuses it on anything but an
+                            // `entry.path` field.
+                            Transform::StripRoot => {
+                                return Err(self.fail(
+                                    "assert.set.group_by",
+                                    "`strip-root` applies to a path token; this is a bug in \
+                                     alint's plan check, so please report it",
+                                ));
+                            }
+                        });
+                    }
+                    return Ok(Some(ResourceGroups {
+                        token: *token,
+                        transforms,
+                    }));
+                }
+                (Some(FieldSource::Side(side, copied)), Rows::Join(join)) => {
+                    let next = match side {
+                        JoinSide::Left => join.left.id,
+                        JoinSide::Right => join.right.id,
+                    };
+                    if *side == join.unique && self.is_path_token(next, copied) {
+                        return Err(self.fail(
+                            "assert.set.group_by",
+                            format!(
+                                "`{name}` is a path token that {} copies from its `unique:` \
+                                 side; a `set` grouped by a path token gives every resource the \
+                                 relation reads a group, and a join reads the resources of its \
+                                 other side, so group by a field of that side",
+                                relation_label(self.plan, at.0)
+                            ),
+                        ));
+                    }
+                    at = (next, copied.clone());
+                }
+                _ => return Ok(None),
+            }
+        }
+        Ok(None)
+    }
+
+    /// `plurals: cldr` merges key paths by their segments: `field:` must be
+    /// an `entry.path` field, or a join's copy of one, whose text no
+    /// transform but `strip-root` (which changes its segments too) changed.
+    fn key_paths(&self, name: &str) -> Result<()> {
+        let mut at = (self.input, name.to_string());
+        for _ in 0..=self.plan.relations.len() {
+            let relation = &self.plan.relation(at.0).relation;
+            if let Some(transform) = relation
+                .transforms_of(&at.1)
+                .iter()
+                .find(|transform| **transform != Transform::StripRoot)
+            {
+                return Err(self.fail(
+                    "assert.set.plurals",
+                    format!(
+                        "`plurals: cldr` merges key paths by their segments, and `transform:` \
+                         applies `{}` to `{}` in {}, which changes its text but not its \
+                         segments; only `strip-root` may apply to the field",
+                        transform_name(*transform),
+                        at.1,
+                        relation_label(self.plan, at.0)
+                    ),
+                ));
+            }
+            match (
+                relation.field(&at.1).map(|field| &field.source),
+                &relation.rows,
+            ) {
+                (Some(FieldSource::EntryPath), _) => return Ok(()),
+                (Some(FieldSource::Side(side, copied)), Rows::Join(join)) => {
+                    let next = match side {
+                        JoinSide::Left => join.left.id,
+                        JoinSide::Right => join.right.id,
+                    };
+                    at = (next, copied.clone());
+                }
+                _ => break,
+            }
+        }
+        Err(self.fail(
+            "assert.set.plurals",
+            format!(
+                "`plurals: cldr` merges key paths, so `field:` must be an `entry.path` field (or \
+                 a join's copy of one), and `{name}` is not"
+            ),
+        ))
     }
 
     /// Literal `literal`, compared with field `field`, at `path`: a string,
@@ -390,5 +622,16 @@ impl<'p> Checker<'p> {
             }
         }
         false
+    }
+}
+
+/// A transform as a configuration writes it.
+fn transform_name(transform: Transform) -> &'static str {
+    match transform {
+        Transform::Trim => "trim",
+        Transform::Lower => "lower",
+        Transform::SemverMajor => "semver-major",
+        Transform::SemverMinor => "semver-minor",
+        Transform::StripRoot => "strip-root",
     }
 }
