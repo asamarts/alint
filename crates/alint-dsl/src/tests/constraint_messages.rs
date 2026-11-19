@@ -359,17 +359,17 @@ fn a_place_at_a_sensitive_cell_shows_its_start_only() {
 /// Rows without a span in one file are one related location: the rows it
 /// stands for and those left out still add up to the rows the message
 /// counts, where the duplicates went uncounted (one location shown and 29
-/// counted of 49 rows).
+/// counted of 49 rows). The values of a JSON array that `read:` selects
+/// have no span, by design, so every row sits at the file alone.
 #[test]
 fn related_rows_at_one_place_are_shown_once_and_counted() {
-    let config = "version: 2\nrelations:\n  r:\n    from: { paths: lines.txt }\n    read: { lines: \
-                  {} }\n    fields: { v: value }\nrules:\n  - id: c\n    kind: constraint\n    \
-                  input: r\n    assert: { equal: { field: v } }\n    level: error\n";
-    let mut body = "a\n".repeat(25);
-    for index in 0..25 {
-        writeln!(body, "b{index}").unwrap();
-    }
-    let results = run(config, &[("lines.txt", &body)]);
+    let config = "version: 2\nrelations:\n  r:\n    from: { paths: data.json }\n    read: { json: \
+                  \"$.v[*]\" }\n    fields: { v: value }\nrules:\n  - id: c\n    kind: \
+                  constraint\n    input: r\n    assert: { equal: { field: v } }\n    level: error\n";
+    let mut values: Vec<String> = vec!["\"a\"".to_string(); 25];
+    values.extend((0..25).map(|index| format!("\"b{index}\"")));
+    let body = format!("{{\"v\": [{}]}}", values.join(", "));
+    let results = run(config, &[("data.json", &body)]);
     let violations = &result(&results, "c").violations;
     // `a` and each of the 25 others.
     assert_eq!(violations.len(), 26);
@@ -379,15 +379,25 @@ fn related_rows_at_one_place_are_shown_once_and_counted() {
         "{}",
         first.message
     );
-    // 24 other rows with `a`, and a row of each of the 25 other values.
+    // The rows have no span: one location, at the file, and the other 48
+    // of the 24 other rows with `a` and a row of each of the 25 other
+    // values counted.
+    assert!(first.range.is_none() && first.line.is_none(), "{first:?}");
     assert_eq!(
-        first.related_locations.len() + first.related_locations_omitted,
-        49
+        (
+            first.related_locations.len(),
+            first.related_locations_omitted
+        ),
+        (1, 48),
+        "{first:?}"
     );
     for other in &violations[1..] {
         assert_eq!(
-            other.related_locations.len() + other.related_locations_omitted,
-            25,
+            (
+                other.related_locations.len(),
+                other.related_locations_omitted
+            ),
+            (1, 24),
             "{other:?}"
         );
     }
