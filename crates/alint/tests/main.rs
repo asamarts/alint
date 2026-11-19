@@ -57,6 +57,7 @@ mod pattern_hints_cli;
 mod policy_test_cli;
 mod pty_color;
 mod related_locations_contract;
+mod relation_names_cli;
 mod sarif_fixes;
 mod show_notes;
 mod spawn_gate;

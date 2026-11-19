@@ -302,6 +302,86 @@ fn an_inline_input_is_planned_under_a_name_no_config_can_write() {
     );
 }
 
+/// A declared name may start with `_` and hold `_` and `-`: such a relation
+/// is no inline one, by the one predicate the loader checks names with, so
+/// a rule's messages name it as ``relation `NAME` ``, whichever of its
+/// messages names it (a `set`'s subject, an analysis failure's prefix).
+#[test]
+fn a_declared_name_with_underscores_and_hyphens_is_not_inline() {
+    let config = "version: 2\nrelations:\n  _dep-ranges:\n    from: { paths: \
+                  \"**/package.json\" }\n    entries: { format: json, at: \"$.dependencies\" \
+                  }\n    fields: { dependency: entry.key, file: path }\n  dep_ranges:\n    from: \
+                  { paths: wanted.json }\n    entries: { format: json, at: \"$\" }\n    fields: \
+                  { dependency: entry.key, file: path }\nrules:\n  - id: lacks-wanted\n    kind: \
+                  constraint\n    input: _dep-ranges\n    assert: { set: { field: dependency, \
+                  equal_to: { relation: dep_ranges, field: dependency } } }\n    level: error\n  \
+                  - id: lacks-used\n    kind: constraint\n    input: dep_ranges\n    assert: { \
+                  set: { field: dependency, equal_to: { relation: _dep-ranges, field: dependency \
+                  } } }\n    level: error\n  - id: no-reference\n    kind: constraint\n    \
+                  input: _dep-ranges\n    assert: { set: { field: dependency, group_by: file, \
+                  equal_to: { group: none.json } } }\n    level: error\n  - id: no-reference-2\n    \
+                  kind: constraint\n    input: dep_ranges\n    assert: { set: { field: \
+                  dependency, group_by: file, equal_to: { group: none.json } } }\n    level: \
+                  error\n";
+    let files = &[
+        (
+            "a/package.json",
+            "{\"dependencies\": {\"react\": \"1\", \"left-pad\": \"1\"}}\n",
+        ),
+        ("wanted.json", "{\"react\": true, \"vue\": true}\n"),
+    ];
+    let config_loaded = builds(config, files);
+    let plan = config_loaded.relation_plan.as_ref().expect("a plan");
+    let inline: Vec<(&str, bool)> = plan
+        .relations
+        .iter()
+        .map(|named| (named.name.as_str(), named.is_inline()))
+        .collect();
+    assert_eq!(inline, [("_dep-ranges", false), ("dep_ranges", false)]);
+    let results = super::constraint_families::run(config, files);
+    let first_line = |shown: &[String]| -> Vec<String> {
+        shown
+            .iter()
+            .map(|shown| shown.lines().next().unwrap_or_default().to_string())
+            .collect()
+    };
+    assert_eq!(
+        first_line(&super::constraint_families::findings(
+            &results,
+            "lacks-wanted"
+        )),
+        [
+            "a/package.json: relation `_dep-ranges` lacks `dependency` \"vue\", which \
+             `dependency` of relation `dep_ranges` holds",
+            "a/package.json:1:33: relation `_dep-ranges` holds `dependency` \"left-pad\", which \
+             `dependency` of relation `dep_ranges` lacks"
+        ]
+    );
+    assert_eq!(
+        first_line(&super::constraint_families::findings(
+            &results,
+            "lacks-used"
+        )),
+        [
+            "wanted.json: relation `dep_ranges` lacks `dependency` \"left-pad\", which \
+             `dependency` of relation `_dep-ranges` holds",
+            "wanted.json:1:17: relation `dep_ranges` holds `dependency` \"vue\", which \
+             `dependency` of relation `_dep-ranges` lacks"
+        ]
+    );
+    for (rule, relation) in [
+        ("no-reference", "_dep-ranges"),
+        ("no-reference-2", "dep_ranges"),
+    ] {
+        let failures = super::constraint_families::failures(&results, rule);
+        assert_eq!(failures.len(), 1, "{failures:?}");
+        assert!(
+            failures[0].starts_with(&format!("relation `{relation}` (.alint.yml): ")),
+            "{failures:?}"
+        );
+    }
+}
+
 /// A built rule says it reads relations, so the engine turns the run's
 /// relation caches on for it (each file a relation reads is read once),
 /// evaluates its inputs before the rules run and hands it the full index.

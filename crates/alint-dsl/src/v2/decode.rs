@@ -327,7 +327,8 @@ pub(crate) const INLINE_INPUT_MARKER: &str = "__alint_internal_v2_inline_input";
 /// relation ([`hoist_inline_inputs`]): one no config can write, since every
 /// declared name is a valid name ([`is_name`]).
 pub(crate) fn is_inline_name(name: &str) -> bool {
-    // `NamedRelation::is_inline` reads a plan's names the same way.
+    // `NamedRelation::is_inline` reads a plan's names with the same
+    // predicate.
     !is_name(name)
 }
 
@@ -459,15 +460,11 @@ impl Names {
     }
 }
 
-/// Whether `text` is a valid name: an ASCII letter or `_`, then ASCII
-/// letters, digits, `_` and `-`. A `.` would read as a qualified reference.
-pub(crate) fn is_name(text: &str) -> bool {
-    let mut chars = text.chars();
-    chars
-        .next()
-        .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
-        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-}
+// Whether a text is a valid name: an ASCII letter or `_`, then ASCII
+// letters, digits, `_` and `-`. It is the plan's own predicate, by which
+// `NamedRelation::is_inline` tells an inline `input:` relation, so a declared
+// name is never read as an inline one.
+pub(crate) use alint_core::relation::plan::is_name;
 
 /// What a value is, for an error that says what was found.
 pub(crate) fn describe(value: &Value) -> String {

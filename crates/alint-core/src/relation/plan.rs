@@ -230,18 +230,27 @@ pub struct NamedRelation {
 impl NamedRelation {
     /// Whether this is a rule's inline `input:` relation, which the loader
     /// plans as a named one under where it is written (`rules[3].input`): a
-    /// name no config can declare, since a declared name starts with an
-    /// ASCII letter or `_` and holds only ASCII letters, digits, `_` and
-    /// `-`.
+    /// name no config can declare, since every declared name is a name
+    /// ([`is_name`]).
     #[must_use]
     pub fn is_inline(&self) -> bool {
-        let mut chars = self.name.chars();
-        let declared = chars
-            .next()
-            .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
-            && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
-        !declared
+        !is_name(&self.name)
     }
+}
+
+/// Whether `text` is a name a config can declare a selector or relation
+/// under: an ASCII letter or `_`, then ASCII letters, digits, `_` and `-`.
+/// A `.` would read as a qualified reference. The loader checks every
+/// declared name with this, and a plan tells a rule's inline `input:`
+/// relation by its name not being one ([`NamedRelation::is_inline`]), so the
+/// two never disagree.
+#[must_use]
+pub fn is_name(text: &str) -> bool {
+    let mut chars = text.chars();
+    chars
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
 /// What reading an object makes alint do, as the trust gates judge it
