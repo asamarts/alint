@@ -165,13 +165,15 @@ impl MemoKey {
 /// [`LoadState::charge_extends_load`], [`LoadState::charge_extends_merged_onto`]):
 /// four merged configs of the largest size. An entry is charged its source
 /// twice, to load it and to merge it, so a flat list of distinct sources that
-/// override none of each other's rules or templates stays within it while
-/// they hold at most half of it in all (an empty source counting as one
-/// entry), and a source one level down, loaded and merged again with what it
-/// extends, the rest; a rule or template that overrides an earlier one is
-/// charged once more. Sources that hold the same entries are charged for each:
-/// they can pass it though they merge to fewer than
-/// [`crate::MAX_MERGED_ENTRIES`].
+/// override none of each other's rules or templates, and repeat no id within
+/// one, stays within it while they hold at most half of it in all (an empty
+/// source counting as one entry), and a source one level down, loaded and
+/// merged again with what it extends, the rest. A rule or template that
+/// overrides an earlier one of its id, in its own source too, is charged once
+/// more, but for one an earlier entry naming the same source wrote last, which
+/// is not merged again ([`crate::merge::Merger::push_repeated`]). Sources that
+/// hold the same entries are charged for each: they can pass it though they
+/// merge to fewer than [`crate::MAX_MERGED_ENTRIES`].
 pub(crate) const MAX_EXTENDS_MERGE_WORK: usize = 4 * crate::MAX_MERGED_ENTRIES;
 
 /// The bytes of source one load's `extends:` entries may merge, in all
@@ -257,8 +259,10 @@ impl LoadState {
                  `ignore:` patterns, the `vars.` reads in an untrusted remote's `when:`, and each \
                  version 2 source, selector and relation, counted for each source an entry loads, \
                  again for what each entry or drop-in brings in to a merge, and again for each \
-                 rule or template a merge combines with one of its id); list each source once, \
-                 extend fewer sources, use fewer drop-ins, or flatten the `extends:` chain"
+                 rule or template a merge combines with one of its id, but not one an earlier \
+                 entry naming the same source, with the same filters, wrote last); list each \
+                 source once, remove repeated rule and template ids within a source, extend \
+                 fewer sources, use fewer drop-ins, or flatten the `extends:` chain"
             )));
         }
         Ok(())

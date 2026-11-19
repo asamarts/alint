@@ -757,8 +757,10 @@ fn an_extends_merge_budget_bounds_a_load() {
              `vars.` reads in an untrusted remote's `when:`, and each version 2 source, selector \
              and relation, counted for each source an entry loads, again for what each entry or \
              drop-in brings in to a merge, and again for each rule or template a merge combines \
-             with one of its id); list each source once, extend fewer sources, use fewer drop-ins, \
-             or flatten the `extends:` chain",
+             with one of its id, but not one an earlier entry naming the same source, with the \
+             same filters, wrote last); list each source once, remove repeated rule and template \
+             ids within a source, extend fewer sources, use fewer drop-ins, or flatten the \
+             `extends:` chain",
             loader::MAX_EXTENDS_MERGE_WORK
         )
     );

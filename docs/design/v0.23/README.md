@@ -1147,10 +1147,11 @@ as #589, step 3 as #590, and step 4 is the last.
 - 2026-11-19: #580, the `extends:` merge in linear time (ADR-0046 decision 1). An `extends:` list
   and the `.alint.d/` drop-ins merge into one accumulator (alint-dsl `merge.rs`), so a merge
   costs what its entry brings in, and a property test holds it to the old merge's left fold on
-  generated lists. Each merge is charged that, and once more each rule it merges onto an earlier
-  one of its id: a flat list of distinct rulesets that override nothing stays within the budget
-  while they hold at most 2,097,152 entries in all, where it refused the 91st ruleset of 1,000
-  rules or the 2,895th one-rule file. A rule that a source the list names again merged last is
-  not merged again, so `[a, b]` 1,000 times over rulesets of 2,000 rules (#567) is refused by a
-  budget with each later entry looking each rule up.
+  generated lists. Each merge is charged that, and once more each rule and template it merges
+  onto an earlier one of its id, in its own source too: a flat list of distinct rulesets that
+  override none of each other's rules or templates, and repeat no id within one, stays within the
+  budget while they hold at most 2,097,152 entries in all, where it refused the 91st ruleset of
+  1,000 rules or the 2,895th one-rule file. A rule or template that an earlier entry naming the
+  same source wrote last is not merged again, nor charged, so `[a, b]` 1,000 times over rulesets
+  of 2,000 rules (#567) is refused by a budget with each later entry looking each rule up.
   - Next: phase 8 (the three conformance policies).

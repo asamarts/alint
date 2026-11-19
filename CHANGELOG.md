@@ -43,9 +43,10 @@ full below.
   entries in all, and the entries at most 64 MiB of sources, each counted for every entry that
   merges it, as the [configuration limits](docs/site/configuration/index.md#limits) say. A list
   merges into one config in place (#580), so an entry is charged what it loads, what it brings in,
-  and once more each rule it merges onto an earlier one of its id; a rule that a source the list
-  names again merged last is not merged again (#567). A flat list of distinct rulesets that
-  override none of each other's rules stays within the first bound while they hold at most
+  and once more each rule and template it merges onto an earlier one of its id, in its own source
+  too; one that an earlier entry naming the same source wrote last is not merged again, nor
+  charged (#567). A flat list of distinct rulesets that override none of each other's rules or
+  templates, and repeat no id within one, stays within the first bound while they hold at most
   2,097,152 entries in all; the second is reached at 64 entries of a 1 MiB source (Fixed).
 - On Unix, a `.git` another user owns does not mark a repository's top. Run from a subdirectory
   of a checkout another user owns (as root in a container, say), alint skips that checkout's

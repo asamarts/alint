@@ -436,18 +436,21 @@ A config is untrusted for what it costs to load, so loading it is bounded:
 - YAML nests at most 128 levels deep, and aliases may expand a source only so far;
 - an `ignore:` pattern listed more than once, in one source or in several (as when `extends:`
   reaches one source by two paths), is kept once. The merged config may hold at most 1,048,576
-  rules, templates, facts, vars and `ignore:` patterns;
+  entries in all (rules, templates, facts, vars, `ignore:` patterns, the `vars.` reads in an
+  untrusted remote's `when:`, and version 2 selectors and relations);
 - an `extends:` list's entries and the `.alint.d/` drop-ins may load and merge at most 4,194,304
   entries in all (rules, templates, facts, vars, `ignore:` patterns, the `vars.` reads in an
   untrusted remote's `when:`, and each version 2 source, selector and relation): an
   entry is charged the source it loads, before `only:` or `except:` narrows it, and each merge, an
   entry's or a drop-in's, what it brings in, each at least one entry, and one more for each rule
-  or template it merges onto an earlier one of its id. A list that repeats a source loads it once
-  (a remote source named by other URLs with one hash, and a bundled ruleset named with other
+  or template it merges onto an earlier one of its id, in its own source too. A rule or template
+  that an earlier entry naming the same source, with the same `only:` and `except:`, wrote last is
+  the exception: it is not merged again, and not charged. A list that repeats a source loads it
+  once (a remote source named by other URLs with one hash, and a bundled ruleset named with other
   `only:` or `except:` lists, too) and is charged for each entry that merges it. A flat list of
-  distinct sources that override none of each other's rules stays within the bound while they hold
-  at most 2,097,152 entries in all (an empty source counting as one), twice the merged config's
-  limit above;
+  distinct sources that override none of each other's rules or templates, and repeat no id within
+  one source, stays within the bound while they hold at most 2,097,152 entries in all (an empty
+  source counting as one), twice the merged config's limit above;
 - the `extends:` entries may merge at most 64 MiB (67,108,864 bytes) of sources in all. Each
   entry is charged its source's size: its text, or what its YAML aliases expand to if that is
   larger, and for a source that extends others, what it merged too. A list reaches the bound at
