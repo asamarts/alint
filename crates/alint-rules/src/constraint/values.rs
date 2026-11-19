@@ -100,13 +100,28 @@ impl Scalar {
 
     /// The text `{{row.FIELD}}` shows: [`Self::text`], cut as a message cuts
     /// a quoted value, at [`SHOWN_CHARS`] characters with its length named
-    /// (`abc... (1048576 bytes)`).
+    /// (`abc... (1048576 bytes)`), and each character a quoted value escapes
+    /// (a control, a bidi control or a zero-width character) escaped as it
+    /// is there (`\n`, `\u{202e}`), so a value can neither add a line to a
+    /// report nor reorder what a reader sees.
     pub(super) fn text_shown(&self) -> String {
         let text = self.text();
-        match text.char_indices().nth(SHOWN_CHARS) {
-            Some((end, _)) => format!("{}... ({} bytes)", &text[..end], text.len()),
-            None => text.to_string(),
+        let (kept, cut) = match text.char_indices().nth(SHOWN_CHARS) {
+            Some((end, _)) => (&text[..end], true),
+            None => (text, false),
+        };
+        let mut shown = String::with_capacity(kept.len());
+        for c in kept.chars() {
+            if escaped_in_message(c) {
+                shown.extend(c.escape_debug());
+            } else {
+                shown.push(c);
+            }
         }
+        if cut {
+            write!(shown, "... ({} bytes)", text.len()).expect("writing to a String cannot fail");
+        }
+        shown
     }
 
     /// The value as a message quotes it: `"^18.2.0"`, `1.0`, `true`, `null`,
@@ -129,6 +144,16 @@ impl Scalar {
             Self::String(_) => format!("the string {}", self.show(sensitive)),
         }
     }
+}
+
+/// Whether a message writes `c` escaped, as a string's `Debug` form does,
+/// which is how a message quotes a value (`render_value`, and a key path in
+/// `alint_core`'s relation messages): a control character (`\n`), a bidi
+/// control (`\u{202e}`), a zero-width character and the others that form
+/// escapes. Quotes and `\` are not: text shown unquoted keeps them as
+/// written.
+fn escaped_in_message(c: char) -> bool {
+    !matches!(c, '"' | '\'' | '\\') && c.escape_debug().nth(1).is_some()
 }
 
 /// A finding's `baseline_key`: parts, each written as its byte length in
@@ -271,6 +296,37 @@ mod tests {
         assert_eq!(
             Scalar::String("é".repeat(64).into()).text_shown(),
             "é".repeat(64)
+        );
+    }
+
+    /// `{{row.FIELD}}` escapes what a quoted value escapes, and only that:
+    /// quotes and `\` stay as written.
+    #[test]
+    fn row_text_escapes_what_a_quoted_value_escapes() {
+        let value = Scalar::String("a\n  ~ related: x\u{1b}[31m\u{202e}b\u{200b}\"q\" C:\\".into());
+        assert_eq!(
+            value.text_shown(),
+            "a\\n  ~ related: x\\u{1b}[31m\\u{202e}b\\u{200b}\"q\" C:\\"
+        );
+        for c in [
+            '\n', '\t', '\u{1b}', '\u{202e}', '\u{2066}', '\u{200b}', '\u{feff}',
+        ] {
+            let quoted = render_value(&Value::String(c.to_string().into()));
+            assert_eq!(
+                Scalar::String(c.to_string().into()).text_shown(),
+                quoted[1..quoted.len() - 1],
+                "{c:?} as a quoted value shows it"
+            );
+        }
+        // Cut first, then escaped: the cut counts characters of the value.
+        let long = Scalar::String(format!("{}{}", "\n".repeat(SHOWN_CHARS), "x").into());
+        assert_eq!(
+            long.text_shown(),
+            format!(
+                "{}... ({} bytes)",
+                "\\n".repeat(SHOWN_CHARS),
+                SHOWN_CHARS + 1
+            )
         );
     }
 }

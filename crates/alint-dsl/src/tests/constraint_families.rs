@@ -10,6 +10,9 @@ use alint_core::{FileIndex, RuleResult, Violation, WalkOptions, walk};
 
 use super::constraint::load_tree;
 
+#[path = "constraint_messages.rs"]
+mod messages;
+
 /// The results of running every rule of `config` over `files`.
 pub(super) fn run(config: &str, files: &[(&str, &str)]) -> Vec<RuleResult> {
     let (dir, loaded) = load_tree(config, files);
