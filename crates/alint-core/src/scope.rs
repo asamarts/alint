@@ -228,6 +228,24 @@ impl Scope {
             .is_none_or(|filter| filter.matches_without_manifest(path, index))
     }
 
+    /// Whether a path at or below the directory `dir` (root-relative, empty
+    /// for the root) can match this scope's path patterns, judged from the
+    /// patterns alone: a sole literal include only when `dir` holds it, and
+    /// includes that each start with a literal directory
+    /// ([`literal_dir_prefix`]) only when `dir` and one of those lie one below
+    /// the other. `true` when the patterns cannot tell. The `scope_filter`
+    /// is not consulted.
+    pub(crate) fn may_match_below(&self, dir: &Path) -> bool {
+        if let Some(literal) = &self.literal {
+            return std::str::from_utf8(literal)
+                .map_or(true, |literal| Path::new(literal).starts_with(dir));
+        }
+        self.within.as_ref().is_none_or(|dirs| {
+            dirs.iter()
+                .any(|within| within.starts_with(dir) || dir.starts_with(within))
+        })
+    }
+
     /// The entries of `index`, directories and files, that this scope can
     /// match, in index order: those at and below the directories its include
     /// patterns start with (`locales/*.json`, or a nested rule's

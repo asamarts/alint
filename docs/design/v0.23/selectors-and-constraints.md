@@ -603,11 +603,29 @@ full-index rule does today. It reports every finding, not only those located in 
 change to one locale file can make another locale fail. A change to a configuration source alone
 does not trigger a rule, as in v1.
 
+A rename is a change to both of its paths: the changed set lists the old path as it lists a deleted
+one, so a file renamed out of a selector triggers the rule.
+
 A selector's `scope_filter:` narrows the trigger scope as it narrows what the selector reads, judged
 on the tree after the change, so a change to what a predicate consults also triggers the rule: a
-file a `has_ancestor` predicate names, or the manifest a manifest-derived predicate reads. A
-manifest that cannot be read leaves its predicate out of the trigger scope (the rule then runs and
-reports the failure), and so does a selector that does not compile.
+file a `has_ancestor` predicate names, in a directory at or below which the selector's `paths:` can
+match, or the manifest a manifest-derived predicate reads. A manifest that cannot be read leaves its
+predicate out of the trigger scope: a changed path that the selector's `paths:` and its other
+predicates keep runs the rule, which reports the failure, and a change outside them (a `README.md`
+alone) runs nothing and reports nothing. A selector that does not compile takes every path. An
+ignore file the walk reads (a `.gitignore` or `.ignore`, in any directory) decides which files below
+it are in the index, so a change to one triggers each selector whose `paths:` can match there.
+
+The changed set is the paths Git reports, so three kinds of change that can alter a verdict trigger
+nothing, as they skip a per-file rule or a version 1 full-index kind today; a full run covers them:
+- an edit to the target of a symlink a selector reads through: with `locales/de.json` linked to
+  `shared/de.json`, Git reports `shared/de.json` alone. Following links back from their targets
+  would need the link-to-target map the walk does not keep, and a deleted target leaves a broken
+  link the walk prunes, its target no longer known;
+- with `respect_gitignore: false`, a file Git ignores, which the walk reads and Git never lists as
+  untracked (an untracked file under a gitignored directory);
+- a change to `.git/info/exclude`, to the global excludes file, or to an ignore file above the
+  linted directory when alint lints a subdirectory of a repository.
 
 A selector read by a full-index rule may not use `changed_since` (section 4), because what the rule
 sees would then depend on the diff. The other `scope_filter:` predicates are allowed in those

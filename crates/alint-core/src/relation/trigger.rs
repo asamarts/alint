@@ -13,17 +13,27 @@
 //! predicates keep, so the predicates narrow the trigger scope as they narrow
 //! the selector. They are judged on the tree after the change, so a change to
 //! what they consult also triggers the rule: a file named as a
-//! `has_ancestor` marker, and the manifest a manifest-derived predicate
+//! `has_ancestor` marker in a directory where the selector's `paths:` can
+//! match (at or below it), and the manifest a manifest-derived predicate
 //! reads. With neither changed, a predicate's verdict on a deleted path is
 //! the one it had before the change. A selector that does not compile, or
 //! that uses `changed_since` (which the loader refuses), takes every path:
 //! the rule then runs and reports why it cannot read.
+//!
+//! An ignore file the walk reads ([`IGNORE_FILE_NAMES`]) decides which files
+//! below its directory are in the index, so a change to one triggers every
+//! selector whose `paths:` can match there.
 
 use std::path::{Path, PathBuf};
 
 use crate::{FileIndex, Scope, ScopeFilter};
 
 use super::plan::{Member, Plan, Predicate, RelationId, Rows, SelectorId, SelectorRef};
+
+/// The ignore files the walk reads in every directory it lists, with
+/// `respect_gitignore` on (`crate::walker_ignore_files`). The others it reads
+/// (`.git/info/exclude`, the global excludes file) are never in a diff.
+const IGNORE_FILE_NAMES: [&str; 2] = [".gitignore", ".ignore"];
 
 /// The selectors a rule's relations read, compiled, as a trigger under
 /// `--changed`.
@@ -93,16 +103,25 @@ impl TriggerSelector {
         let Some(scope) = &self.scope else {
             return true;
         };
+        // An ignore file decides which files below its directory the walk
+        // indexes, and so which ones the selector reads there.
+        if index.reads_ignore_files()
+            && path
+                .file_name()
+                .is_some_and(|name| IGNORE_FILE_NAMES.iter().any(|ignore| name == *ignore))
+            && path.parent().is_some_and(|dir| scope.may_match_below(dir))
+        {
+            return true;
+        }
         let Some(filter) = scope.scope_filter() else {
             return scope.matches(path, index);
         };
         // What the predicates consult changed: what the selector picks may
-        // have changed with it.
-        if filter
-            .has_ancestor_names()
-            .iter()
-            .any(|marker| path.ends_with(marker))
-            || self.manifests.iter().any(|manifest| manifest == path)
+        // have changed with it. A marker counts for the files at and below
+        // its directory, so only where the selector's paths can match.
+        if filter.has_ancestor_names().iter().any(|marker| {
+            marker_directory(path, marker).is_some_and(|dir| scope.may_match_below(dir))
+        }) || self.manifests.iter().any(|manifest| manifest == path)
         {
             return true;
         }
@@ -119,6 +138,15 @@ impl TriggerSelector {
             scope.matches_without_manifest(path, index)
         }
     }
+}
+
+/// The directory `path` names a `has_ancestor` marker in, when it is one:
+/// `crates/api` for `crates/api/Cargo.toml` and the marker `Cargo.toml`.
+fn marker_directory<'p>(path: &'p Path, marker: &Path) -> Option<&'p Path> {
+    if !path.ends_with(marker) {
+        return None;
+    }
+    path.ancestors().nth(marker.components().count())
 }
 
 /// The walk over the plan from a rule's relations to every selector they

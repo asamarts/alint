@@ -3,8 +3,9 @@
 //! the union of the selectors of every relation its plan reads, followed
 //! through joins, membership filters and a `set`'s other relation, and
 //! narrowed by each selector's `scope_filter:` as the selector is. A change
-//! to what a predicate consults (a marker, a manifest) triggers too. The
-//! command line is tested in `crates/alint/tests/constraint_changed_cli.rs`.
+//! to what a predicate consults (a marker, a manifest) triggers too, as does
+//! an ignore file where the selector's paths can match. The command line is
+//! tested in `crates/alint/tests/constraint_changed_cli.rs`.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -18,7 +19,7 @@ selectors:
   manifests:
     paths: "packages/*/package.json"
   marked:
-    paths: "**/module.json"
+    paths: "mods/**/module.json"
     scope_filter: { has_ancestor: module.marker }
   members:
     paths: "workspace/**/member.json"
@@ -128,9 +129,9 @@ const TREE: &[(&str, &str)] = &[
     ("a/one.txt", "x\n"),
     ("b/two.txt", "y\n"),
     ("b/skip/three.txt", "y\n"),
-    ("mods/module.marker", ""),
+    ("mods/a/module.marker", ""),
     ("mods/a/module.json", r#"{"name": "a"}"#),
-    ("loose/module.json", r#"{"name": "loose"}"#),
+    ("mods/loose/module.json", r#"{"name": "loose"}"#),
     ("members.json", r#"{"members": ["workspace/w1"]}"#),
     ("workspace/w1/member.json", r#"{"name": "w1"}"#),
     ("workspace/w2/member.json", r#"{"name": "w2"}"#),
@@ -141,13 +142,24 @@ const TREE: &[(&str, &str)] = &[
 /// changed, in config order, each with whether it reported an analysis
 /// failure.
 fn ran(config: &str, files: &[(&str, &str)], changed: &[&str]) -> Vec<(String, bool)> {
-    let (dir, loaded) = load_tree(config, files);
-    let config = loaded.unwrap_or_else(|error| panic!("the config loads: {error}"));
-    let index: FileIndex = walk(
-        dir.path(),
+    ran_walked(
+        config,
+        files,
+        changed,
         &WalkOptions::default().with_global_git_excludes(false),
     )
-    .unwrap();
+}
+
+/// [`ran`] over a tree walked with `options`.
+fn ran_walked(
+    config: &str,
+    files: &[(&str, &str)],
+    changed: &[&str],
+    options: &WalkOptions,
+) -> Vec<(String, bool)> {
+    let (dir, loaded) = load_tree(config, files);
+    let config = loaded.unwrap_or_else(|error| panic!("the config loads: {error}"));
+    let index: FileIndex = walk(dir.path(), options).unwrap();
     let registry = alint_rules::builtin_registry();
     let entries = config
         .rules
@@ -226,10 +238,37 @@ fn a_change_outside_every_selector_runs_nothing() {
 fn has_ancestor_narrows_the_trigger_and_a_changed_marker_triggers() {
     assert_eq!(triggered(&["mods/a/module.json"]), ["marked"]);
     // No marker above it: the selector does not read it.
-    assert_eq!(triggered(&["loose/module.json"]), NONE);
-    // A marker added or removed changes what the selector reads.
-    assert_eq!(triggered(&["loose/module.marker"]), ["marked"]);
-    assert_eq!(triggered(&["mods/module.marker"]), ["marked"]);
+    assert_eq!(triggered(&["mods/loose/module.json"]), NONE);
+    // A marker added or removed changes what the selector reads below it.
+    assert_eq!(triggered(&["mods/loose/module.marker"]), ["marked"]);
+    assert_eq!(triggered(&["mods/a/module.marker"]), ["marked"]);
+    assert_eq!(triggered(&["module.marker"]), ["marked"]);
+    // Below a marker outside `mods/`, the selector's paths match nothing.
+    assert_eq!(triggered(&["tools/x/module.marker"]), NONE);
+}
+
+#[test]
+fn a_changed_ignore_file_runs_the_rules_whose_selectors_match_below_it() {
+    // At the root it can hide or reveal any file a selector reads.
+    assert_eq!(
+        triggered(&[".gitignore"]),
+        [
+            "in", "input", "join", "marked", "members", "not-in", "set", "union"
+        ]
+    );
+    // Below `packages/`, what the manifests selector reads there.
+    assert_eq!(
+        triggered(&["packages/a/.ignore"]),
+        ["in", "input", "join", "not-in", "set"]
+    );
+    assert_eq!(triggered(&["mods/.gitignore"]), ["marked"]);
+    // Below a directory where no selector's paths match, nothing.
+    assert_eq!(triggered(&["src/.gitignore"]), NONE);
+    // A walk that reads no ignore files gives them no say.
+    let unignored = WalkOptions::default()
+        .with_global_git_excludes(false)
+        .with_respect_gitignore(false);
+    assert_eq!(ran_walked(CONFIG, TREE, &[".gitignore"], &unignored), []);
 }
 
 #[test]

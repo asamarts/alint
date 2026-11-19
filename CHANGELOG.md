@@ -734,11 +734,14 @@ policy-test package the user does not trust.
   - Under `--changed` and `--base`, a rule runs when a changed path (added, modified or deleted)
     is in its trigger scope: the selectors of every relation it reads (its input, both sides of
     each join, the relations its `in:` and `not_in:` lists probe and the relation its `set`
-    compares against), narrowed by their `scope_filter:`, and the `has_ancestor` markers and
-    manifests that `scope_filter:` consults. It then judges the whole snapshot and reports every
+    compares against), narrowed by their `scope_filter:`, with the manifests that `scope_filter:`
+    reads, and the `has_ancestor` markers and `.gitignore` and `.ignore` files in the directories
+    where those selectors' `paths:` can match. It then judges the whole snapshot and reports every
     finding, those in unchanged files included. Outside its trigger scope it does not run and
-    reports nothing, and a change to a configuration file alone runs no rule. `facts.json` lists
-    the kind's dispatch as `full_index` with `path_scope: true`.
+    reports nothing, and a change to a configuration file alone runs no rule. An edit to a
+    symlink's target, a file Git ignores under `respect_gitignore: false`, and an ignore file Git
+    does not report run no rule; `docs/rules.md` lists them. `facts.json` lists the kind's
+    dispatch as `full_index` with `path_scope: true`.
   - The version 2 draft schema describes the kind and refuses it nested; the version 1 schema
     leaves it out.
 

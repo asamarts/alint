@@ -1039,14 +1039,26 @@ new finding.
 modified or deleted, is one its trigger scope covers: the selectors of every relation the rule
 reads, which are its `input:`, both sides of each join, the relation each `in:` or `not_in:` list
 probes, and the relation a `set` compares against, followed through every relation they read. A
+renamed file is a change to both of its paths, so one renamed out of a selector runs the rule. A
 selector's `scope_filter:` narrows the trigger scope as it narrows what the selector reads, and a
-change to what it consults also runs the rule: a file named as a `has_ancestor` marker, or the
-manifest an `include_manifest_paths` or `exclude_manifest_paths` predicate reads. The rule then
+change to what it consults also runs the rule: a file named as a `has_ancestor` marker in a
+directory where the selector's `paths:` can match (at or below it), or the manifest an
+`include_manifest_paths` or `exclude_manifest_paths` predicate reads. So does a `.gitignore` or
+`.ignore` in such a directory, since it decides which files there the walk reads. The rule then
 judges every file its relations read, changed or not, and reports every finding, so adding a key to
 `locales/en.json` reports the keys `locales/fr.json` lacks though `fr.json` did not change. When no
 changed path is in its trigger scope the rule does not run and reports nothing, not even an
 analysis failure. A change to `.alint.yml` or another configuration file alone runs no rule, as in
 version 1.
+
+The changed paths are the ones Git reports, so three kinds of change that can alter a verdict run
+no rule. An edit to the target of a symlink a selector reads through is a change to the target's
+path alone: with `locales/de.json` linked to `shared/de.json`, editing `shared/de.json` does not run
+a rule whose selector reads `locales/*.json`. With `respect_gitignore: false`, a file Git ignores is
+read by the walk but never listed by Git, so adding or editing one (say, under a gitignored
+directory) runs nothing. And Git does not report a change to `.git/info/exclude`, to the global
+excludes file, or to an ignore file above the directory alint lints. A full `alint check` covers
+all three.
 
 ### `every_matching_has`
 

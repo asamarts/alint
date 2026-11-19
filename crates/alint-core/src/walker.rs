@@ -655,6 +655,15 @@ impl FileIndex {
             .get_or_init(|| self.entries.is_sorted_by(|a, b| a.path <= b.path))
     }
 
+    /// Whether the walk read ignore files (`.gitignore`, `.ignore`), so that
+    /// a change to one can change what this index holds: `true` for an index
+    /// built from entries, which cannot say.
+    pub(crate) fn reads_ignore_files(&self) -> bool {
+        self.walk_options
+            .as_ref()
+            .is_none_or(|opts| opts.respect_gitignore)
+    }
+
     /// The positions in [`Self::entries`] of `dir` and of every entry below it
     /// (`Path::starts_with`, component by component), one range since sorted
     /// entries keep them together. `None` when the entries are not sorted, so
