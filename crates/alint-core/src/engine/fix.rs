@@ -949,6 +949,11 @@ impl Engine {
             }
         }
         let manifest_gates = self.manifest_gates_by_entry(index, &when_env)?;
+        // The relations the rules read, before any rule runs, as `check`
+        // evaluates them: what they take of the run's bytes is recorded
+        // then, so what a rule may hold to place its findings is what it is
+        // in `check`, not what the relations of the rules before it took.
+        self.evaluate_read_relations(&full_ctx, &when_env, &pass, 0);
         // A `has_ancestor` marker lookup on the `--changed` index must see unchanged
         // files too. Only the changed-set index shares the full tree's file set
         // (the git-tracked indexes are deliberately subsets and must not), and only
@@ -1510,6 +1515,14 @@ impl Engine {
                     .any(|item| matches!(item.status, FixStatus::Applied(_)))
             {
                 index.clear_relation_caches();
+                // The rules after this one read the tree as it is now: their
+                // relations are evaluated again, before they run, and what
+                // they take is recorded, so a rule places its findings in
+                // what they left, not in what the relations before the
+                // clear took. The rules before keep this pass's outcomes;
+                // the pass that applies nothing, whose outcomes the report
+                // keeps, evaluates every relation first, as `check` does.
+                self.evaluate_read_relations(&full_ctx, &when_env, &pass, rule_index + 1);
             }
             push_fix_result(
                 &mut results,

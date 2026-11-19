@@ -9,7 +9,7 @@ use alint_core::relation::{LimitKind, Limits};
 
 use alint_core::{SourceRange, Violation};
 
-use super::{failures, findings, result, run, run_under};
+use super::{RunBytes, failures, findings, result, run, run_under};
 
 /// A version 2 config: relation `r` reading `data.json`'s top-level entries
 /// as `k` (the key) and `v` (the value), and rule `c` asserting `assert`,
@@ -189,13 +189,13 @@ fn over_padded(assert: &str, rules: usize) -> String {
 }
 
 /// What a run of `rules` rules over `count` [`padded`] files gives: the
-/// results, the bytes the run took and the most a rule asked to hold.
+/// results and the run's bytes.
 fn run_padded(
     assert: &str,
     count: usize,
     rules: usize,
     limits: Option<&Limits>,
-) -> (Vec<alint_core::RuleResult>, usize, usize) {
+) -> (Vec<alint_core::RuleResult>, RunBytes) {
     let files = padded(count);
     let files: Vec<(&str, &str)> = files
         .iter()
@@ -216,29 +216,35 @@ fn placing_findings_holds_one_file_at_a_time_however_many_files_it_reads() {
     // One file's text, and the offsets asked of it.
     let one_file = PADDING..PADDING + 4096;
     for count in [8, 2] {
-        let (passing, relation, nothing) = run_padded("{ equal: { field: l } }", count, 1, None);
+        let (passing, relation) = run_padded("{ equal: { field: l } }", count, 1, None);
         assert!(result(&passing, "c0").violations.is_empty());
-        assert_eq!(nothing, 0, "a rule with no finding places nothing");
-        let (results, taken, held) = run_padded(UNIQUE, count, 1, None);
+        assert_eq!(relation.held, 0, "a rule with no finding places nothing");
+        let (results, bytes) = run_padded(UNIQUE, count, 1, None);
         // 2 * count rows of `dup`: one fewer repeats.
         assert_eq!(result(&results, "c0").violations.len(), 2 * count - 1);
         assert!(
-            one_file.contains(&held),
-            "placing held {held} bytes at once for {count} files of {PADDING}"
+            one_file.contains(&bytes.held),
+            "placing held {} bytes at once for {count} files of {PADDING}",
+            bytes.held
         );
-        assert_eq!(taken, relation, "placing took bytes from the run");
+        assert_eq!(
+            bytes.taken, relation.taken,
+            "placing took bytes from the run"
+        );
+        assert_eq!(bytes.relations, relation.relations);
     }
 }
 
 /// A file a finding sits in that, with its offsets, does not fit in what
-/// the run's relations left of its bytes gives the rule no verdict: the
+/// the run's relations left of its bytes (what their decodes and their rows
+/// took, as the engine recorded it) gives the rule no verdict: the
 /// rule's analysis failure says so, as `key_parity`'s does, rather than
 /// findings without their places. One byte more, and it fits.
 #[test]
 fn a_file_to_place_that_does_not_fit_beside_the_relations_fails_the_rule() {
-    let (_, taken, held) = run_padded(UNIQUE, 8, 1, None);
+    let (_, bytes) = run_padded(UNIQUE, 8, 1, None);
     let limits = Limits::default()
-        .with(LimitKind::BytesPerRun, taken + held - 1)
+        .with(LimitKind::BytesPerRun, bytes.relations + bytes.held - 1)
         .unwrap();
     let (results, ..) = run_padded(UNIQUE, 8, 1, Some(&limits));
     let failed = failures(&results, "c0");
@@ -252,7 +258,7 @@ fn a_file_to_place_that_does_not_fit_beside_the_relations_fails_the_rule() {
         "{failed:?}"
     );
     let limits = Limits::default()
-        .with(LimitKind::BytesPerRun, taken + held)
+        .with(LimitKind::BytesPerRun, bytes.relations + bytes.held)
         .unwrap();
     let (results, ..) = run_padded(UNIQUE, 8, 1, Some(&limits));
     assert_eq!(result(&results, "c0").violations.len(), 15);
@@ -267,9 +273,9 @@ fn a_file_to_place_that_does_not_fit_beside_the_relations_fails_the_rule() {
 #[test]
 fn rules_placing_in_one_file_each_fit_and_give_one_outcome_in_every_run() {
     const RULES: usize = 12;
-    let (_, taken, held) = run_padded(UNIQUE, 1, 1, None);
+    let (_, bytes) = run_padded(UNIQUE, 1, 1, None);
     let limits = Limits::default()
-        .with(LimitKind::BytesPerRun, taken + held)
+        .with(LimitKind::BytesPerRun, bytes.relations + bytes.held)
         .unwrap();
     let outcome = |results: &[alint_core::RuleResult]| -> Vec<String> {
         let mut shown: Vec<String> = results

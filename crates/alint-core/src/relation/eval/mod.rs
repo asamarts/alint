@@ -415,8 +415,9 @@ impl RunMemo {
         self.cells.load(Ordering::Relaxed)
     }
 
-    /// The bytes taken so far. Test only.
-    #[cfg(test)]
+    /// The bytes taken so far ([`LimitKind::BytesPerRun`]): what the engine
+    /// records, with the decode cache's, as what the relations took
+    /// ([`DecodeCache::record_relations`](super::DecodeCache::record_relations)).
     pub(crate) fn bytes(&self) -> usize {
         self.bytes.load(Ordering::Relaxed)
     }

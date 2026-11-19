@@ -12,7 +12,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use super::adapter::{Adapter, AdapterError, AdapterOutput};
 use super::limits::{LimitExceeded, LimitKind, Limits, RunBudget};
@@ -284,17 +284,25 @@ pub struct DecodeCache {
     slots: Mutex<DecodeSlots>,
     decodes: AtomicUsize,
     budget: RunBudget,
-    bytes: RunBudget,
-    /// The run's [`LimitKind::BytesPerRun`].
-    bytes_limit: usize,
-    /// The bytes taken before the first consumer used the cache: what the
-    /// run's relations, all evaluated before any rule runs, took. Set by the
-    /// first [`decode`](Self::decode), [`take_bytes`](Self::take_bytes) or
-    /// [`may_hold`](Self::may_hold), and again after [`clear`](Self::clear).
-    before_consumers: Mutex<Option<usize>>,
+    /// The run's bytes since the cache was made or last cleared: what the
+    /// key paths of its decodes and each consumer's takes hold. A clear lets
+    /// its decodes go, and starts a new count.
+    bytes: RwLock<Arc<RunBudget>>,
+    /// The run's limits, from which a clear makes the new count.
+    limits: Limits,
+    /// What the relations the rules read took of the run's bytes, from this
+    /// cache's count and the relation memo's together: recorded by the
+    /// engine once it has evaluated them, before any rule runs
+    /// ([`record_relations`](Self::record_relations)), or, when nothing
+    /// recorded it (a rule run alone), this cache's count when the first
+    /// consumer uses it. A clear forgets it.
+    relations: Mutex<Option<usize>>,
     /// The most a consumer asked [`may_hold`](Self::may_hold) for at once.
     /// Test/diagnostic only.
     largest_held: AtomicUsize,
+    /// How many times [`may_hold`](Self::may_hold) refused. Test/diagnostic
+    /// only.
+    refusals: AtomicUsize,
 }
 
 impl Default for DecodeCache {
@@ -310,13 +318,14 @@ impl std::fmt::Debug for DecodeCache {
             .field("entries", &self.slots.lock().map_or(0, |slots| slots.len()))
             .field("decodes", &self.decodes.load(Ordering::Relaxed))
             .field("rows", &self.budget.used())
-            .field("bytes", &self.bytes.used())
-            .field("bytes_limit", &self.bytes_limit)
+            .field("bytes", &self.byte_budget().used())
+            .field("bytes_limit", &self.limits.get(LimitKind::BytesPerRun))
             .field(
-                "before_consumers",
-                &self.before_consumers.lock().map_or(None, |taken| *taken),
+                "relations",
+                &self.relations.lock().map_or(None, |taken| *taken),
             )
             .field("largest_held", &self.largest_held.load(Ordering::Relaxed))
+            .field("refusals", &self.refusals.load(Ordering::Relaxed))
             .finish()
     }
 }
@@ -338,25 +347,42 @@ impl DecodeCache {
             slots: Mutex::default(),
             decodes: AtomicUsize::new(0),
             budget: RunBudget::new(limits),
-            bytes: RunBudget::bytes(limits),
-            bytes_limit: limits.get(LimitKind::BytesPerRun),
-            before_consumers: Mutex::default(),
+            bytes: RwLock::new(Arc::new(RunBudget::bytes(limits))),
+            limits: *limits,
+            relations: Mutex::default(),
             largest_held: AtomicUsize::new(0),
+            refusals: AtomicUsize::new(0),
         }
     }
 
-    /// The bytes taken before the first consumer used the cache, recorded
-    /// now when this is the first. The engine evaluates every relation the
-    /// rules read before any rule runs, and the relation evaluator decodes
-    /// through [`decode_fresh`](Self::decode_fresh), which records nothing;
-    /// so this is what the relations took, the same in every run, whichever
-    /// consumer comes first and whatever they take after.
-    fn before_consumers(&self) -> usize {
+    /// The run's byte count since the cache was made or last cleared.
+    fn byte_budget(&self) -> Arc<RunBudget> {
+        Arc::clone(&self.bytes.read().expect("decode cache bytes lock"))
+    }
+
+    /// Record what the relations the rules read took of the run's bytes,
+    /// once the engine has evaluated them and before any rule runs: this
+    /// cache's count (the key paths their decodes built) and `memo_bytes`,
+    /// what the relation memo holds beyond its cells (rows' key paths,
+    /// tokens, transformed values and each decode's rows), which counts
+    /// against [`LimitKind::BytesPerRun`] too. A key path both count is
+    /// counted twice, so what a consumer may hold errs low.
+    pub fn record_relations(&self, memo_bytes: usize) {
+        let taken = self.byte_budget().used().saturating_add(memo_bytes);
+        *self.relations.lock().expect("decode cache relations lock") = Some(taken);
+    }
+
+    /// What the relations took of the run's bytes ([`Self::relations`]):
+    /// when nothing recorded it, this cache's count now, recorded. The
+    /// relation evaluator decodes through
+    /// [`decode_fresh`](Self::decode_fresh), which records nothing, so the
+    /// first consumer records what the relations took before it.
+    fn relations_took(&self) -> usize {
         *self
-            .before_consumers
+            .relations
             .lock()
-            .expect("decode cache consumers lock")
-            .get_or_insert_with(|| self.bytes.used())
+            .expect("decode cache relations lock")
+            .get_or_insert_with(|| self.byte_budget().used())
     }
 
     /// Take `bytes` from the run's byte budget, from which every decode's
@@ -365,29 +391,47 @@ impl DecodeCache {
     /// A failed take still counts, so every later take, and every later
     /// decode that builds a key path, fails too.
     pub fn take_bytes(&self, bytes: usize) -> Result<(), LimitExceeded> {
-        self.before_consumers();
-        self.bytes.take(bytes)
+        self.relations_took();
+        self.byte_budget().take(bytes)
     }
 
     /// Whether a consumer may hold `bytes` for a while and let them go
     /// (a `constraint` rule placing its findings holds one file's text at a
     /// time): they must fit in what the run's relations left of the run's
-    /// byte budget ([`LimitKind::BytesPerRun`]). Nothing is taken, so the
-    /// answer depends on `bytes` and the relations alone, never on what
-    /// other consumers, on other threads, hold or took: each consumer holds
-    /// at most that much at once, and the run's consumers at most that much
-    /// each.
+    /// bytes ([`LimitKind::BytesPerRun`]): the limit, less what their
+    /// decodes and their rows took ([`record_relations`](Self::record_relations)).
+    /// Nothing is taken, so the answer depends on `bytes` and the relations
+    /// alone, never on what other consumers, on other threads, hold or
+    /// took: each consumer holds at most that much at once, and the run's
+    /// consumers at most that much each.
     pub fn may_hold(&self, bytes: usize) -> Result<(), LimitExceeded> {
         self.largest_held.fetch_max(bytes, Ordering::Relaxed);
-        let reached = self.before_consumers().saturating_add(bytes);
-        if reached > self.bytes_limit {
+        let limit = self.limits.get(LimitKind::BytesPerRun);
+        let reached = self.relations_took().saturating_add(bytes);
+        if reached > limit {
+            self.refusals.fetch_add(1, Ordering::Relaxed);
             return Err(LimitExceeded {
                 kind: LimitKind::BytesPerRun,
-                limit: self.bytes_limit,
+                limit,
                 reached,
             });
         }
         Ok(())
+    }
+
+    /// What the relations took of the run's bytes, as recorded
+    /// ([`record_relations`](Self::record_relations)), or `None` before
+    /// anything recorded it. Test/diagnostic only.
+    #[must_use]
+    pub fn relations_recorded(&self) -> Option<usize> {
+        *self.relations.lock().expect("decode cache relations lock")
+    }
+
+    /// How many times [`may_hold`](Self::may_hold) refused, clears
+    /// included. Test/diagnostic only.
+    #[must_use]
+    pub fn may_hold_refusals(&self) -> usize {
+        self.refusals.load(Ordering::Relaxed)
     }
 
     /// The most a consumer asked [`may_hold`](Self::may_hold) for at once.
@@ -401,7 +445,7 @@ impl DecodeCache {
     /// only.
     #[must_use]
     pub fn bytes_taken(&self) -> usize {
-        self.bytes.used()
+        self.byte_budget().used()
     }
 
     /// Decode `resource` through `adapter` at most once per
@@ -425,7 +469,7 @@ impl DecodeCache {
         bytes: &[u8],
         limits: &Limits,
     ) -> DecodeResult {
-        self.before_consumers();
+        self.relations_took();
         self.decode_fresh(adapter, resource, bytes, limits).0
     }
 
@@ -457,7 +501,8 @@ impl DecodeCache {
                 fresh = true;
                 self.budget.spent()?;
                 self.decodes.fetch_add(1, Ordering::Relaxed);
-                let output = adapter.extract_within(resource, bytes, limits, &self.bytes)?;
+                let output =
+                    adapter.extract_within(resource, bytes, limits, &self.byte_budget())?;
                 self.budget.take(output.rows.len())?;
                 Ok(Arc::new(output))
             })
@@ -485,15 +530,17 @@ impl DecodeCache {
 
     /// Forget every decode, with [`ReadCache::clear`]. The rows already taken
     /// stay counted against the run's budget, which bounds the run's decode
-    /// work, not only what is kept.
+    /// work, not only what is kept. The bytes are counted again from none,
+    /// since the decodes that held them are let go, and what the relations
+    /// took is forgotten: the engine evaluates the relations again, and
+    /// records what they take, before a rule uses the cache again, so the
+    /// rules after a clear see the bytes a run over the tree as it is now
+    /// would.
     pub fn clear(&self) {
         self.slots.lock().expect("decode cache lock").clear();
-        // The caller evaluates relations again, through the rules that read
-        // them, before their consumers use the cache.
-        *self
-            .before_consumers
-            .lock()
-            .expect("decode cache consumers lock") = None;
+        *self.bytes.write().expect("decode cache bytes lock") =
+            Arc::new(RunBudget::bytes(&self.limits));
+        *self.relations.lock().expect("decode cache relations lock") = None;
     }
 
     /// How many decodes this cache performed. Test/diagnostic only.
@@ -1037,37 +1084,51 @@ mod tests {
         }
     }
 
-    /// What a consumer may hold is what the relations took before any
-    /// consumer used the cache, subtracted from the run's bytes: it takes
-    /// nothing, and what consumers take after (on other threads, in any
-    /// order) never changes the answer, so whether a rule's files fit is the
-    /// same in every run. After a clear, the next consumer records the
-    /// relations again.
+    /// What a consumer may hold is the run's bytes less what the relations
+    /// took, from the cache's count and the memo's as the engine records
+    /// them: it takes nothing, and what consumers take after (on other
+    /// threads, in any order) never changes the answer, so whether a rule's
+    /// files fit is the same in every run. A clear starts the count again
+    /// and forgets the record, so the relations evaluated after it are all
+    /// that counts, as in a run over the tree as it is then.
     #[test]
     fn what_a_consumer_may_hold_is_what_the_relations_left() {
         let run = Limits::default().with(LimitKind::BytesPerRun, 100).unwrap();
         let cache = DecodeCache::with_run_limits(&run);
-        // The relations' decodes take 30 of the 100.
-        cache.bytes.take(30).unwrap();
+        // The relations' decodes take 30 of the 100, and their rows 20.
+        cache.byte_budget().take(30).unwrap();
+        cache.record_relations(20);
         for _ in 0..3 {
-            assert_eq!(cache.may_hold(70), Ok(()));
+            assert_eq!(cache.may_hold(50), Ok(()));
         }
         assert_eq!(cache.bytes_taken(), 30, "holding takes nothing");
-        let over = cache.may_hold(71).unwrap_err();
+        let over = cache.may_hold(51).unwrap_err();
         assert_eq!(
             (over.kind, over.limit, over.reached),
             (LimitKind::BytesPerRun, 100, 101)
         );
         // Another consumer takes, a decode takes: the answer stands.
-        cache.take_bytes(50).unwrap();
-        cache.bytes.take(10).unwrap();
-        assert_eq!(cache.may_hold(70), Ok(()));
-        assert!(cache.may_hold(71).is_err());
-        assert_eq!(cache.largest_held(), 71);
-        // A clear: the relations are evaluated again, and have taken 90.
+        cache.take_bytes(40).unwrap();
+        cache.byte_budget().take(10).unwrap();
+        assert_eq!(cache.may_hold(50), Ok(()));
+        assert!(cache.may_hold(51).is_err());
+        assert_eq!(cache.largest_held(), 51);
+        // A clear: the count starts again, and the relations evaluated
+        // after it take 5 and hold 15, so 80 is left, whatever came before.
         cache.clear();
-        assert_eq!(cache.may_hold(10), Ok(()));
-        assert!(cache.may_hold(11).is_err());
+        assert_eq!(cache.bytes_taken(), 0);
+        cache.byte_budget().take(5).unwrap();
+        cache.record_relations(15);
+        assert_eq!(cache.may_hold(80), Ok(()));
+        assert!(cache.may_hold(81).is_err());
+        // With nothing recorded, the first consumer records the cache's
+        // count before it: a rule run alone, its relations evaluated first.
+        cache.clear();
+        cache.byte_budget().take(25).unwrap();
+        assert_eq!(cache.may_hold(75), Ok(()));
+        cache.take_bytes(20).unwrap();
+        assert_eq!(cache.may_hold(75), Ok(()));
+        assert!(cache.may_hold(76).is_err());
     }
 
     #[test]
