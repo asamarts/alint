@@ -1138,8 +1138,10 @@ fn a_part_whose_decode_is_held_reads_nothing() {
 
 /// A decode the run makes takes what it holds from the run's bytes once:
 /// its rows, its notes with their values, and its non-string kinds. A run
-/// that finds the decode held takes nothing for it, so the two runs differ
-/// by exactly that.
+/// that finds the decode held takes nothing for it. The budget a run needs
+/// is exactly what it takes, and the decode needs at least what it holds, by
+/// count; the exact sums after pin the types' sizes too, so an overcount
+/// shows as an undercount does.
 #[test]
 fn a_fresh_decode_takes_what_it_holds_from_the_runs_bytes() {
     use std::mem::size_of;
@@ -1166,6 +1168,26 @@ fn a_fresh_decode_takes_what_it_holds_from_the_runs_bytes() {
         .unwrap();
     assert_eq!((output.rows.len(), output.notes.len()), (0, 2));
     assert_eq!(output.non_strings.len(), 1);
+    // Exactly what a run takes is enough for it, and a byte less is not.
+    let total = fresh.bytes();
+    let within = |bytes: usize| {
+        let memo = RunMemo::new(Arc::clone(&plan));
+        run_with_memo(&plan, 0, &tree, limit(LimitKind::BytesPerRun, bytes), &memo)
+    };
+    assert!(within(total).is_ok());
+    let failed = messages(&within(total - 1));
+    assert!(
+        failed.len() == 1 && failed[0].contains("`bytes_per_run`"),
+        "{failed:?}"
+    );
+    // The decode needs at least each note, its value's text and each
+    // non-string kind beyond what the notes take: a budget a byte short of
+    // that stops the run.
+    let held_by_decode = output.notes.len() * size_of::<crate::relation::AdapterNote>()
+        + "${A}".len()
+        + "${BB}".len()
+        + output.non_strings.len() * size_of::<crate::extract::NonStringValueKind>();
+    assert!(within(held.bytes() + held_by_decode - 1).is_err());
     let expected = output.rows.capacity() * size_of::<crate::relation::row::Row>()
         + output.notes.capacity() * size_of::<crate::relation::AdapterNote>()
         + "${A}".len()
