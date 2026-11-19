@@ -70,6 +70,11 @@ pub(super) type ExplainPlan = Shown<Box<PlanView>>;
 
 #[derive(Debug, Serialize)]
 pub(super) struct PlanView {
+    /// The `id` of the rule's input in `relations`.
+    input: usize,
+    /// The `id` of a `set`'s other relation in `relations`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    set_target: Option<usize>,
     /// The assertion, in readable form.
     assertion: Shown<AssertionView>,
     /// Every relation the rule reads, in the order a run evaluates them.
@@ -90,12 +95,23 @@ struct AssertionView {
 
 #[derive(Debug, Serialize)]
 struct RelationView {
+    /// Its place in `relations`, by which a join's sides, an `in:` or
+    /// `not_in:` list, the trigger and the plan's `input` and `set_target`
+    /// name it.
+    id: usize,
     /// As it is declared: a name, or where an inline `input:` is written
     /// (`rules[0].input`).
     name: String,
-    /// As the config writes the reference that reaches it, qualified with
-    /// its `extends:` alias where it has one (`deps.ranges`).
-    written: String,
+    /// Each way the config writes a reference that reaches it, qualified
+    /// with the `extends:` alias that reference uses where it has one
+    /// (`deps.ranges`): the rule's own first, then each relation's reads.
+    written: Vec<String>,
+    /// What the human output calls it, wherever it refers to it: its first
+    /// spelling, with the config source that declares it when another
+    /// relation listed would show the same, and its place when that is the
+    /// same too.
+    #[serde(skip)]
+    label: String,
     inline: bool,
     /// `input` and `set_target`, as the rule reads it; empty for one only
     /// another relation reads.
@@ -137,8 +153,10 @@ struct EntriesView {
 
 #[derive(Debug, Serialize)]
 struct JoinView {
-    left: String,
-    right: String,
+    /// The `id` of its left side in `relations`.
+    left: usize,
+    /// The `id` of its right side in `relations`.
+    right: usize,
     on: Vec<OnPair>,
     unique: Shown<&'static str>,
 }
@@ -154,9 +172,10 @@ struct SelectorView {
     /// A named selector's name, as the reference writes it in a relation's
     /// `from:` and as it is declared in the trigger; `None` for an inline one.
     selector: Option<String>,
-    /// For an inline selector in the trigger: the relation it is part of.
+    /// For an inline selector in the trigger: the `id` in `relations` of
+    /// the relation it is part of.
     #[serde(skip_serializing_if = "Option::is_none")]
-    relation: Option<String>,
+    relation: Option<usize>,
     /// For an inline selector in the trigger that is part of a `union:`:
     /// the index of its part.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -291,21 +310,36 @@ pub(super) fn plan_of(entry: &RuleEntry, root: &Path, redact: Redact<'_>) -> Opt
     if explain_field_is_sensitive(entry, "input") {
         return Some(Shown::Redacted(REDACTED));
     }
-    let builder = Builder {
-        plan,
-        root,
-        redact,
-        scopes: std::cell::RefCell::new(HashMap::new()),
-    };
     let references = plan
         .rule(entry.rule.id())
         .map_or(&[][..], |rule| &rule.references);
     let input = inputs[0];
     let order = plan.evaluation_order(inputs);
+    let builder = Builder {
+        plan,
+        root,
+        redact,
+        scopes: std::cell::RefCell::new(HashMap::new()),
+        positions: order
+            .iter()
+            .enumerate()
+            .map(|(position, &id)| (id, position))
+            .collect(),
+    };
     let written = builder.written(&order, references);
+    let labels = labels(
+        &order
+            .iter()
+            .map(|id| {
+                let named = plan.relation(*id);
+                (written[id][0].as_str(), builder.declared_in(named.source))
+            })
+            .collect::<Vec<_>>(),
+    );
     let relations = order
         .iter()
-        .map(|&id| {
+        .zip(&labels)
+        .map(|(&id, label)| {
             let mut roles = Vec::new();
             for reference in references.iter().filter(|r| r.relation.id == id) {
                 let role = if reference.field == "input" {
@@ -317,7 +351,7 @@ pub(super) fn plan_of(entry: &RuleEntry, root: &Path, redact: Redact<'_>) -> Opt
                     roles.push(role);
                 }
             }
-            builder.relation(id, written[&id].clone(), roles)
+            builder.relation(id, written[&id].clone(), label.clone(), roles)
         })
         .collect();
     let trigger = entry
@@ -326,21 +360,57 @@ pub(super) fn plan_of(entry: &RuleEntry, root: &Path, redact: Redact<'_>) -> Opt
         .map(|scope| {
             scope
                 .origins()
-                .map(|origin| builder.trigger(origin, &written))
+                .map(|origin| builder.trigger(origin))
                 .collect()
         })
         .unwrap_or_default();
+    let set_target = references
+        .iter()
+        .find(|reference| reference.field != "input")
+        .map(|reference| builder.position(reference.relation.id));
     let assert = assert_option(entry);
     let assertion = Shown::hidden_if(explain_field_is_sensitive(entry, "assert"), || {
-        assertion(&assert, &|field| field_is_sensitive(plan, input, field))
+        assertion(
+            &assert,
+            &|field| field_is_sensitive(plan, input, field),
+            set_target.map(|target| labels[target].as_str()),
+        )
     });
     let cost = cost(&assert);
     Some(Shown::Value(Box::new(PlanView {
+        input: builder.position(input),
+        set_target,
         assertion,
         relations,
         trigger,
         cost,
     })))
+}
+
+/// What the human output calls each relation listed, from its first
+/// spelling and the config source that declares it: the spelling alone
+/// when no other relation listed has it, then with the source, then with
+/// its place in the list too, so no two relations read alike.
+fn labels(relations: &[(&str, String)]) -> Vec<String> {
+    let mut labels: Vec<String> = relations
+        .iter()
+        .map(|(spelling, _)| (*spelling).to_string())
+        .collect();
+    let shared =
+        |labels: &[String], label: &str| labels.iter().filter(|other| *other == label).count() > 1;
+    let spellings = labels.clone();
+    for (label, (spelling, source)) in labels.iter_mut().zip(relations) {
+        if shared(&spellings, spelling) {
+            *label = format!("{spelling} ({source})");
+        }
+    }
+    let sourced = labels.clone();
+    for (position, label) in labels.iter_mut().enumerate() {
+        if shared(&sourced, label) {
+            let _ = write!(label, " #{}", position + 1);
+        }
+    }
+    labels
 }
 
 /// The rule's `assert:` option as JSON.
@@ -477,8 +547,13 @@ fn text_of<'v>(value: &'v serde_json::Value, key: &str) -> &'v str {
 }
 
 /// `assert:` in readable form, with the literals compared with a field
-/// `sensitive` reports hidden.
-fn assertion(assert: &serde_json::Value, sensitive: &dyn Fn(&str) -> bool) -> AssertionView {
+/// `sensitive` reports hidden, and a `set`'s other relation called `target`
+/// (as the relation list calls it) when the rule reads one.
+fn assertion(
+    assert: &serde_json::Value,
+    sensitive: &dyn Fn(&str) -> bool,
+    target: Option<&str>,
+) -> AssertionView {
     let literal = |field: &str, value: &serde_json::Value| {
         if sensitive(field) {
             REDACTED.to_string()
@@ -534,6 +609,7 @@ fn assertion(assert: &serde_json::Value, sensitive: &dyn Fn(&str) -> bool) -> As
     if let Some(group_by) = group_by {
         let _ = write!(text, " per group of {group_by}");
     }
+    let relation = target;
     for mode in ["equal_to", "subset_of", "disjoint_from"] {
         let Some(target) = set.get(mode) else {
             continue;
@@ -546,7 +622,7 @@ fn assertion(assert: &serde_json::Value, sensitive: &dyn Fn(&str) -> bool) -> As
                 text,
                 ", {mode} field {} of relation {}",
                 text_of(target, "field"),
-                text_of(target, "relation")
+                relation.unwrap_or_else(|| text_of(target, "relation"))
             );
         }
     }
@@ -589,6 +665,8 @@ struct Builder<'a> {
     /// Each selector's scope, built once: a named selector a rule's
     /// relations share is shown with each, and its manifests read once.
     scopes: std::cell::RefCell<HashMap<TriggerOrigin, ScopeView>>,
+    /// Each relation's place in the plan's `relations`, its `id` there.
+    positions: HashMap<RelationId, usize>,
 }
 
 impl Builder<'_> {
@@ -596,32 +674,42 @@ impl Builder<'_> {
         (self.redact)(&self.plan.source(source).display).into_owned()
     }
 
-    /// How the config writes the reference that reaches each relation of
-    /// `order`: the rule's own references first, then each reference a
-    /// relation makes to those it reads, the relations that read others
-    /// first.
+    /// Relation `id`'s place in the plan's `relations`.
+    fn position(&self, id: RelationId) -> usize {
+        self.positions[&id]
+    }
+
+    /// Each way the config writes a reference that reaches each relation
+    /// of `order`, each once: the rule's own references first, then each
+    /// reference a relation makes to those it reads, the relations that
+    /// read others first; a relation no reference names (none) by its name.
     fn written(
         &self,
         order: &[RelationId],
         references: &[alint_core::relation::plan::RuleReference],
-    ) -> HashMap<RelationId, String> {
-        let mut written = HashMap::with_capacity(order.len());
+    ) -> HashMap<RelationId, Vec<String>> {
+        let mut written: HashMap<RelationId, Vec<String>> = HashMap::with_capacity(order.len());
+        let mut add = |id: RelationId, spelling: String| {
+            let spellings = written.entry(id).or_default();
+            if !spellings.contains(&spelling) {
+                spellings.push(spelling);
+            }
+        };
         for reference in references {
-            written.entry(reference.relation.id).or_insert_with(|| {
-                self.spelled(reference.relation.id, reference.relation.alias.as_deref())
-            });
+            add(
+                reference.relation.id,
+                self.spelled(reference.relation.id, reference.relation.alias.as_deref()),
+            );
         }
         for &id in order.iter().rev() {
             for read in self.plan.relation(id).relation.reads() {
-                written
-                    .entry(read.id)
-                    .or_insert_with(|| self.spelled(read.id, read.alias.as_deref()));
+                add(read.id, self.spelled(read.id, read.alias.as_deref()));
             }
         }
         for &id in order {
             written
                 .entry(id)
-                .or_insert_with(|| self.plan.relation(id).name.clone());
+                .or_insert_with(|| vec![self.plan.relation(id).name.clone()]);
         }
         written
     }
@@ -635,7 +723,13 @@ impl Builder<'_> {
         }
     }
 
-    fn relation(&self, id: RelationId, written: String, roles: Vec<&'static str>) -> RelationView {
+    fn relation(
+        &self,
+        id: RelationId,
+        written: Vec<String>,
+        label: String,
+        roles: Vec<&'static str>,
+    ) -> RelationView {
         let named = self.plan.relation(id);
         let relation = &named.relation;
         let hidden = named.definition_reads_environment;
@@ -652,8 +746,8 @@ impl Builder<'_> {
             },
             Rows::Join(join) => RowsView::Join {
                 join: JoinView {
-                    left: self.spelled(join.left.id, join.left.alias.as_deref()),
-                    right: self.spelled(join.right.id, join.right.alias.as_deref()),
+                    left: self.position(join.left.id),
+                    right: self.position(join.right.id),
                     on: join
                         .on
                         .iter()
@@ -670,8 +764,10 @@ impl Builder<'_> {
             },
         };
         RelationView {
+            id: self.position(id),
             name: named.name.clone(),
             written,
+            label,
             inline: named.is_inline(),
             roles,
             declared_in: self.declared_in(named.source),
@@ -792,11 +888,7 @@ impl Builder<'_> {
         scope
     }
 
-    fn trigger(
-        &self,
-        origin: TriggerOrigin,
-        written: &HashMap<RelationId, String>,
-    ) -> SelectorView {
+    fn trigger(&self, origin: TriggerOrigin) -> SelectorView {
         match origin {
             TriggerOrigin::Named(id) => {
                 let selector = self.plan.selector(id);
@@ -812,12 +904,7 @@ impl Builder<'_> {
                 let named = self.plan.relation(relation);
                 SelectorView {
                     selector: None,
-                    relation: Some(
-                        written
-                            .get(&relation)
-                            .cloned()
-                            .unwrap_or_else(|| named.name.clone()),
-                    ),
+                    relation: Some(self.position(relation)),
                     part: matches!(named.relation.rows, Rows::Union(_)).then_some(part),
                     declared_in: self.declared_in(named.source),
                     scope: self.scope(origin),
@@ -861,7 +948,7 @@ impl Builder<'_> {
             // The loader takes a string or a boolean only.
             Member::Literal(_) => serde_json::Value::from(REDACTED),
             Member::Relation { relation, field } => serde_json::json!({
-                "relation": self.spelled(relation.id, relation.alias.as_deref()),
+                "relation": self.position(relation.id),
                 "field": field,
             }),
         }
@@ -990,8 +1077,13 @@ pub(super) fn write_human(out: &mut impl Write, plan: &ExplainPlan) -> Result<()
     };
     writeln!(out, "  {dim}assert:{dim:#} {}", term(assertion))?;
     writeln!(out, "  {dim}relations, in evaluation order:{dim:#}")?;
+    let labels: Vec<&str> = plan
+        .relations
+        .iter()
+        .map(|relation| relation.label.as_str())
+        .collect();
     for relation in &plan.relations {
-        write_relation(out, relation)?;
+        write_relation(out, relation, &labels)?;
     }
     writeln!(
         out,
@@ -999,13 +1091,77 @@ pub(super) fn write_human(out: &mut impl Write, plan: &ExplainPlan) -> Result<()
     )?;
     for selector in &plan.trigger {
         write!(out, "    ")?;
-        write_selector(out, "    ", selector)?;
+        write_selector(out, "    ", selector, &labels)?;
     }
     writeln!(out, "  {dim}cost:{dim:#} {}", plan.cost)?;
     Ok(())
 }
 
-fn write_relation(out: &mut impl Write, relation: &RelationView) -> Result<()> {
+/// Relation `relation`, with each relation it refers to called by its label
+/// in `labels` (by `id`).
+fn write_relation(out: &mut impl Write, relation: &RelationView, labels: &[&str]) -> Result<()> {
+    let dim = alint_output::style::DIM;
+    write_relation_heading(out, relation)?;
+    match &relation.rows {
+        RowsView::Part(part) => write_part(out, "      ", part, labels)?,
+        RowsView::Union { union } => {
+            writeln!(out, "      {dim}union:{dim:#}")?;
+            for (index, part) in union.iter().enumerate() {
+                writeln!(out, "        {dim}part {}:{dim:#}", index + 1)?;
+                write_part(out, "          ", part, labels)?;
+            }
+        }
+        RowsView::Join { join } => {
+            let on: Vec<String> = join
+                .on
+                .iter()
+                .map(|pair| format!("{} = {}", pair.left, pair.right))
+                .collect();
+            let unique = match &join.unique {
+                Shown::Value(side) => side,
+                Shown::Redacted(marker) => marker,
+            };
+            writeln!(
+                out,
+                "      {dim}join:{dim:#} left {}, right {}, on {}, unique {unique}",
+                term(labels[join.left]),
+                term(labels[join.right]),
+                term(&on.join(" and "))
+            )?;
+        }
+    }
+    write_fields(out, &relation.fields)?;
+    if !relation.filters.is_empty() {
+        writeln!(out, "      {dim}where:{dim:#}")?;
+        for filter in &relation.filters {
+            let test = match (&filter.members, &filter.pattern) {
+                (Some(members), _) => {
+                    let members: Vec<String> = members
+                        .iter()
+                        .map(|member| member_text(member, labels))
+                        .collect();
+                    format!("[{}]", members.join(", "))
+                }
+                (None, Some(Shown::Value(pattern))) => {
+                    serde_json::Value::from(pattern.as_str()).to_string()
+                }
+                _ => REDACTED.to_string(),
+            };
+            writeln!(
+                out,
+                "        {} {} {}",
+                term(&filter.field),
+                filter.predicate,
+                term(&test)
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// A relation's heading: its label, the file that declares it, its roles,
+/// and each spelling when the config reaches it by more than one.
+fn write_relation_heading(out: &mut impl Write, relation: &RelationView) -> Result<()> {
     let dim = alint_output::style::DIM;
     let mut marks: Vec<&str> = Vec::new();
     for role in &relation.roles {
@@ -1023,39 +1179,25 @@ fn write_relation(out: &mut impl Write, relation: &RelationView) -> Result<()> {
     writeln!(
         out,
         "    relation {}  {dim}{}{dim:#}{marks}",
-        term(&relation.written),
+        term(&relation.label),
         term(&relation.declared_in)
     )?;
-    match &relation.rows {
-        RowsView::Part(part) => write_part(out, "      ", part)?,
-        RowsView::Union { union } => {
-            writeln!(out, "      {dim}union:{dim:#}")?;
-            for (index, part) in union.iter().enumerate() {
-                writeln!(out, "        {dim}part {}:{dim:#}", index + 1)?;
-                write_part(out, "          ", part)?;
-            }
-        }
-        RowsView::Join { join } => {
-            let on: Vec<String> = join
-                .on
-                .iter()
-                .map(|pair| format!("{} = {}", pair.left, pair.right))
-                .collect();
-            let unique = match &join.unique {
-                Shown::Value(side) => side,
-                Shown::Redacted(marker) => marker,
-            };
-            writeln!(
-                out,
-                "      {dim}join:{dim:#} left {}, right {}, on {}, unique {unique}",
-                term(&join.left),
-                term(&join.right),
-                term(&on.join(" and "))
-            )?;
-        }
+    // A relation the config reaches by more than one spelling lists each.
+    if relation.written.len() > 1 {
+        writeln!(
+            out,
+            "      {dim}written:{dim:#} {}",
+            term(&relation.written.join(", "))
+        )?;
     }
+    Ok(())
+}
+
+/// A relation's fields, with their sources, transforms and sensitivity.
+fn write_fields(out: &mut impl Write, fields: &[FieldView]) -> Result<()> {
+    let dim = alint_output::style::DIM;
     writeln!(out, "      {dim}fields:{dim:#}")?;
-    for field in &relation.fields {
+    for field in fields {
         let mut notes = Vec::new();
         match &field.transforms {
             Shown::Value(transforms) if transforms.is_empty() => {}
@@ -1078,38 +1220,20 @@ fn write_relation(out: &mut impl Write, relation: &RelationView) -> Result<()> {
             term(&notes)
         )?;
     }
-    if !relation.filters.is_empty() {
-        writeln!(out, "      {dim}where:{dim:#}")?;
-        for filter in &relation.filters {
-            let test = match (&filter.members, &filter.pattern) {
-                (Some(members), _) => {
-                    let members: Vec<String> = members.iter().map(member_text).collect();
-                    format!("[{}]", members.join(", "))
-                }
-                (None, Some(Shown::Value(pattern))) => {
-                    serde_json::Value::from(pattern.as_str()).to_string()
-                }
-                _ => REDACTED.to_string(),
-            };
-            writeln!(
-                out,
-                "        {} {} {}",
-                term(&filter.field),
-                filter.predicate,
-                term(&test)
-            )?;
-        }
-    }
     Ok(())
 }
 
-fn member_text(member: &serde_json::Value) -> String {
+/// An `in:` or `not_in:` member: a literal, or a reference to a relation
+/// called by its label in `labels`.
+fn member_text(member: &serde_json::Value, labels: &[&str]) -> String {
     match member {
         serde_json::Value::Object(reference) => format!(
             "{{ relation: {}, field: {} }}",
             reference
                 .get("relation")
-                .and_then(serde_json::Value::as_str)
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|id| labels.get(usize::try_from(id).ok()?))
+                .copied()
                 .unwrap_or_default(),
             reference
                 .get("field")
@@ -1120,10 +1244,10 @@ fn member_text(member: &serde_json::Value) -> String {
     }
 }
 
-fn write_part(out: &mut impl Write, indent: &str, part: &PartView) -> Result<()> {
+fn write_part(out: &mut impl Write, indent: &str, part: &PartView, labels: &[&str]) -> Result<()> {
     let dim = alint_output::style::DIM;
     write!(out, "{indent}{dim}from:{dim:#} ")?;
-    write_selector(out, indent, &part.from)?;
+    write_selector(out, indent, &part.from, labels)?;
     if let Some(entries) = &part.entries {
         let entries = match entries {
             Shown::Value(entries) => {
@@ -1173,15 +1297,22 @@ fn read_text(read: &serde_json::Value) -> String {
 }
 
 /// A selector: its name (or `inline selector`) and source on this line,
-/// then its `paths:` and `scope_filter:` below, `indent` deeper.
-fn write_selector(out: &mut impl Write, indent: &str, selector: &SelectorView) -> Result<()> {
+/// then its `paths:` and `scope_filter:` below, `indent` deeper; the
+/// relation an inline one in the trigger is part of is called by its label
+/// in `labels`.
+fn write_selector(
+    out: &mut impl Write,
+    indent: &str,
+    selector: &SelectorView,
+    labels: &[&str],
+) -> Result<()> {
     let dim = alint_output::style::DIM;
-    match (&selector.selector, &selector.relation) {
+    match (&selector.selector, selector.relation) {
         (Some(name), _) => write!(out, "selector {}", term(name))?,
         (None, Some(relation)) => write!(
             out,
             "the inline selector of relation {}{}",
-            term(relation),
+            term(labels[relation]),
             selector
                 .part
                 .map(|part| format!(", part {}", part + 1))

@@ -173,13 +173,15 @@ rules:
     assert_eq!(
         json["plan"],
         serde_json::json!({
+            "input": 0,
             "assertion": {
                 "family": "unique",
                 "text": "unique: key [dependency], determines [range]",
             },
             "relations": [{
+                "id": 0,
                 "name": "ranges",
-                "written": "ranges",
+                "written": ["ranges"],
                 "inline": false,
                 "roles": ["input"],
                 "declared_in": ".alint.yml",
@@ -301,12 +303,20 @@ fn a_join_shows_both_sides_first_and_its_keys() {
     assert_eq!(
         plan["relations"][2]["join"],
         serde_json::json!({
-            "left": "ranges",
-            "right": "names",
+            "left": 0,
+            "right": 1,
             "on": [{ "left": "dependency", "right": "name" }],
             "unique": "right",
         })
     );
+    let ids: Vec<&serde_json::Value> = plan["relations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|relation| &relation["id"])
+        .collect();
+    assert_eq!(ids, [0, 1, 2]);
+    assert_eq!((&plan["input"], plan.get("set_target")), (&2.into(), None));
     assert_eq!(plan["relations"][2]["roles"], serde_json::json!(["input"]));
     assert_eq!(plan["relations"][0]["roles"], serde_json::json!([]));
     assert_eq!(
@@ -398,7 +408,7 @@ rules:
         serde_json::json!({ "lines": { "comment": "#" } })
     );
     assert_eq!(union[0]["from"]["selector"], serde_json::Value::Null);
-    assert_eq!(json["plan"]["trigger"][2]["relation"], "pins");
+    assert_eq!(json["plan"]["trigger"][2]["relation"], 0);
     assert_eq!(json["plan"]["trigger"][2]["part"], 2);
     assert!(!human.contains("20.11.1") && !json.to_string().contains("20.11.1"));
 }
@@ -437,7 +447,7 @@ fn an_inline_input_is_marked() {
     let relation = &json["plan"]["relations"][0];
     assert_eq!(relation["inline"], true);
     assert_eq!(relation["name"], "rules[0].input");
-    assert_eq!(relation["written"], "rules[0].input");
+    assert_eq!(relation["written"], serde_json::json!(["rules[0].input"]));
     assert_eq!(relation["roles"], serde_json::json!(["input"]));
     assert!(!human.contains("__alint_internal"), "{human}");
 }
@@ -485,7 +495,7 @@ fn a_qualified_input_names_its_alias_and_source() {
     );
     let relation = &json["plan"]["relations"][0];
     assert_eq!(relation["name"], "ranges");
-    assert_eq!(relation["written"], "deps.ranges");
+    assert_eq!(relation["written"], serde_json::json!(["deps.ranges"]));
     assert_eq!(relation["declared_in"], deps.as_str());
     assert_eq!(relation["from"]["declared_in"], deps.as_str());
     assert_eq!(json["plan"]["trigger"][0]["declared_in"], deps.as_str());
@@ -563,22 +573,179 @@ rules:
     );
     assert_eq!(
         plan["relations"][2]["where"][0]["members"],
-        serde_json::json!(["@types/node", { "relation": "ignored", "field": "name" }])
+        serde_json::json!(["@types/node", { "relation": 1, "field": "name" }])
     );
-    let trigger: Vec<&str> = plan["trigger"]
+    let trigger: Vec<u64> = plan["trigger"]
         .as_array()
         .unwrap()
         .iter()
-        .map(|selector| selector["relation"].as_str().unwrap())
+        .map(|selector| selector["relation"].as_u64().unwrap())
         .collect();
     // The trigger lists selectors in walk order: the input's, the relation
     // its list probes, then the target's.
-    assert_eq!(trigger, ["deps", "ignored", "workspaces"]);
+    assert_eq!(trigger, [2, 1, 0]);
+    assert_eq!(
+        (&plan["input"], &plan["set_target"]),
+        (&2.into(), &0.into())
+    );
     assert_eq!(
         plan["assertion"]["text"],
         "set: values of dependency per group of manifest, subset_of field name of relation \
          workspaces"
     );
+}
+
+/// One relation two `extends:` aliases reach is listed once, with each
+/// spelling, and every reference to it reads as the list calls it.
+#[test]
+fn a_relation_two_aliases_reach_is_listed_once_with_each_spelling() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        "policies/base.yml",
+        "version: 2\nrelations:\n  names:\n    from: { paths: \"packages/*/package.json\" }\n    \
+         read: { json: \"$.name\" }\n    fields: { name: value }\n",
+    );
+    for (file, alias, relation) in [("a.yml", "base", "j"), ("b.yml", "common", "k")] {
+        write(
+            root,
+            &format!("policies/{file}"),
+            &format!(
+                "version: 2\nextends:\n  - {{ url: ./base.yml, as: {alias} }}\nrelations:\n  \
+                 {relation}:\n    join: {{ left: {alias}.names, right: {alias}.names, on: {{ \
+                 name: name }}, unique: right }}\n    fields: {{ name: left.name }}\n"
+            ),
+        );
+    }
+    write(
+        root,
+        ".alint.yml",
+        "version: 2\nextends:\n  - { url: ./policies/a.yml, as: a }\n  - { url: \
+         ./policies/b.yml, as: b }\nrules:\n  - id: c\n    kind: constraint\n    input: a.j\n    \
+         assert: { set: { field: name, subset_of: { relation: b.k, field: name } } }\n    level: \
+         error\n",
+    );
+    let (human, json) = explain(root, "c", &[]);
+    let (base, a, b) = (
+        source("policies/base.yml"),
+        source("policies/a.yml"),
+        source("policies/b.yml"),
+    );
+    assert_eq!(
+        plan_block(&human),
+        lines(&[
+            "plan:",
+            "  assert: set: values of name, subset_of field name of relation b.k",
+            "  relations, in evaluation order:",
+            &format!("    relation common.names  {base}"),
+            "      written: common.names, base.names",
+            &format!("      from: inline selector  {base}"),
+            "        paths: packages/*/package.json",
+            "      read: json $.name",
+            "      fields:",
+            "        name: value",
+            &format!("    relation a.j  {a}  (input)"),
+            "      join: left common.names, right common.names, on name = name, unique right",
+            "      fields:",
+            "        name: left.name",
+            &format!("    relation b.k  {b}  (set target)"),
+            "      join: left common.names, right common.names, on name = name, unique right",
+            "      fields:",
+            "        name: left.name",
+            "  trigger: under --changed, a change to what these selectors read runs the rule",
+            &format!("    the inline selector of relation common.names  {base}"),
+            "      paths: packages/*/package.json",
+            "  cost: linear in the rows of each relation it reads",
+        ])
+    );
+    let plan = &json["plan"];
+    assert_eq!(
+        plan["relations"][0]["written"],
+        serde_json::json!(["common.names", "base.names"])
+    );
+    for (id, relation) in plan["relations"].as_array().unwrap().iter().enumerate() {
+        assert_eq!(relation["id"], id);
+    }
+    for at in [1, 2] {
+        let join = &plan["relations"][at]["join"];
+        assert_eq!((&join["left"], &join["right"]), (&0.into(), &0.into()));
+    }
+    assert_eq!(
+        (&plan["input"], &plan["set_target"]),
+        (&1.into(), &2.into())
+    );
+    assert_eq!(plan["trigger"][0]["relation"], 0);
+}
+
+/// Two relations of one name, from two config sources, read differently
+/// wherever they are named: each with the source that declares it.
+#[test]
+fn two_relations_of_one_name_read_differently() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        "policies/deps.yml",
+        "version: 2\nrelations:\n  ranges:\n    from: { paths: \"packages/*/package.json\" }\n    \
+         entries: { format: json, at: \"$.dependencies\" }\n    fields: { dependency: \
+         entry.key, range: entry.value }\n  names:\n    from: { paths: \
+         \"packages/*/package.json\" }\n    read: { json: \"$.name\" }\n    fields: { name: \
+         value }\n  joined:\n    join: { left: ranges, right: names, on: { dependency: name }, \
+         unique: right }\n    fields: { dependency: left.dependency }\n",
+    );
+    write(
+        root,
+        ".alint.yml",
+        "version: 2\nextends:\n  - { url: ./policies/deps.yml, as: deps }\nrelations:\n  \
+         ranges:\n    from: { paths: allowed.json }\n    entries: { format: json, at: \"$\" }\n    \
+         fields: { dependency: entry.key }\n  kept:\n    from: { paths: kept.json }\n    \
+         entries: { format: json, at: \"$\" }\n    fields: { dependency: entry.key }\n    where: \
+         { dependency: { in: [{ relation: ranges, field: dependency }] } }\nrules:\n  - id: c\n    \
+         kind: constraint\n    input: deps.joined\n    assert: { set: { field: dependency, \
+         subset_of: { relation: kept, field: dependency } } }\n    level: error\n",
+    );
+    let (human, json) = explain(root, "c", &[]);
+    let (deps, own) = (source("policies/deps.yml"), source(".alint.yml"));
+    for expected in [
+        format!("    relation ranges ({deps})  {deps}\n"),
+        format!("    relation ranges ({own})  {own}\n"),
+        format!(
+            "      join: left ranges ({deps}), right names, on dependency = name, unique right\n"
+        ),
+        format!("        dependency in [{{ relation: ranges ({own}), field: dependency }}]\n"),
+        format!("    the inline selector of relation ranges ({deps})  {deps}\n"),
+        format!("    the inline selector of relation ranges ({own})  {own}\n"),
+    ] {
+        assert!(human.contains(&expected), "{expected}\n{human}");
+    }
+    // No two relations listed read alike.
+    let listed: Vec<&str> = human
+        .lines()
+        .filter_map(|line| line.strip_prefix("    relation "))
+        .collect();
+    let mut distinct = listed.clone();
+    distinct.sort_unstable();
+    distinct.dedup();
+    assert_eq!(listed.len(), distinct.len(), "{listed:?}");
+    let plan = &json["plan"];
+    let relations = plan["relations"].as_array().unwrap();
+    let named = |id: &serde_json::Value| {
+        let relation = &relations[usize::try_from(id.as_u64().unwrap()).unwrap()];
+        (
+            relation["name"].as_str().unwrap(),
+            relation["declared_in"].as_str().unwrap(),
+        )
+    };
+    let joined = relations.iter().find(|r| r["name"] == "joined").unwrap();
+    assert_eq!(named(&joined["join"]["left"]), ("ranges", deps.as_str()));
+    let kept = relations.iter().find(|r| r["name"] == "kept").unwrap();
+    assert_eq!(
+        named(&kept["where"][0]["members"][0]["relation"]),
+        ("ranges", own.as_str())
+    );
+    assert_eq!(named(&plan["set_target"]), ("kept", own.as_str()));
+    assert_eq!(named(&plan["input"]), ("joined", deps.as_str()));
 }
 
 /// `secret` appears in neither output.
@@ -656,7 +823,7 @@ fn an_environment_written_relation_definition_is_redacted() {
     assert_eq!(relations[0]["from"]["paths"], "<redacted>");
     assert_eq!(relations[0]["fields"][1]["source"], "bound: <redacted>");
     assert_eq!(relations[2]["join"]["unique"], "<redacted>");
-    assert_eq!(relations[2]["join"]["left"], "ranges");
+    assert_eq!(relations[2]["join"]["left"], 0);
 }
 
 /// An assertion whose literal the environment writes is `<redacted>` whole,
