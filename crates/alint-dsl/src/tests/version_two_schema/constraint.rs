@@ -82,7 +82,15 @@ fn flow(entries: impl IntoIterator<Item = Option<String>>) -> String {
 /// The sweep: `(input, assert)` for each shape of each family.
 fn sweep() -> Vec<(&'static str, String)> {
     let mut cases = Vec::new();
-    // The family keys, each left out, written or null.
+    families(&mut cases);
+    equal(&mut cases);
+    unique(&mut cases);
+    set(&mut cases);
+    cases
+}
+
+/// The family keys, each left out, written or null.
+fn families(cases: &mut Vec<(&'static str, String)>) {
     let family = [None, Some("~")];
     for equal in family.iter().copied().chain([Some("{ field: range }")]) {
         for unique in family
@@ -104,7 +112,10 @@ fn sweep() -> Vec<(&'static str, String)> {
             }
         }
     }
-    // `equal`: `group_by:` and each form of `to:`.
+}
+
+/// `equal`: `group_by:` and each form of `to:`.
+fn equal(cases: &mut Vec<(&'static str, String)>) {
     for group_by in [None, Some("dependency"), Some("~"), Some("'not a name'")] {
         for to in [
             None,
@@ -131,7 +142,10 @@ fn sweep() -> Vec<(&'static str, String)> {
             cases.push(("deps", format!("{{ equal: {equal} }}")));
         }
     }
-    // `unique`: `key:` and `determines:`.
+}
+
+/// `unique`: `key:` and `determines:`.
+fn unique(cases: &mut Vec<(&'static str, String)>) {
     for key in [
         "[dependency]",
         "[dependency, at]",
@@ -152,8 +166,11 @@ fn sweep() -> Vec<(&'static str, String)> {
             cases.push(("deps", format!("{{ unique: {unique} }}")));
         }
     }
-    // `set`: `group_by:`, the target keys, each target's shape, `groups:` and
-    // `plurals:`.
+}
+
+/// `set`: `group_by:`, the target keys, each target's shape, `groups:` and
+/// `plurals:`.
+fn set(cases: &mut Vec<(&'static str, String)>) {
     let shapes = [
         "{ group: en }",
         "{ relation: names, field: name }",
@@ -192,7 +209,6 @@ fn sweep() -> Vec<(&'static str, String)> {
             }
         }
     }
-    cases
 }
 
 /// The draft's rule schema (`$defs/rule`, which every entry of `rules:`
@@ -214,10 +230,11 @@ fn rule_validator() -> jsonschema::Validator {
 fn verdicts(cases: &[(&str, String)]) -> Vec<(std::result::Result<(), String>, Vec<String>)> {
     let mut config = format!("{RELATIONS}rules:\n");
     for (index, (input, assert)) in cases.iter().enumerate() {
-        config.push_str(&format!(
+        let _ = write!(
+            config,
             "  - id: c{index}\n    kind: constraint\n    level: error\n    input: {input}\n    \
              assert: {assert}\n"
-        ));
+        );
     }
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join(".alint.yml");

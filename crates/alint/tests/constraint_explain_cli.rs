@@ -1437,16 +1437,13 @@ fn the_trace_schema_describes_the_plan_key_by_key() {
                     .pointer_mut(&pointer)
                     .and_then(serde_json::Value::as_object_mut)
                     .unwrap();
-                let change = match name {
-                    Some(name) => {
-                        let value = object.remove(name).unwrap();
-                        object.insert(format!("{name}_renamed"), value);
-                        format!("`{name}` renamed")
-                    }
-                    None => {
-                        object.insert("unexpected".into(), serde_json::Value::from(1));
-                        "a key added".into()
-                    }
+                let change = if let Some(name) = name {
+                    let value = object.remove(name).unwrap();
+                    object.insert(format!("{name}_renamed"), value);
+                    format!("`{name}` renamed")
+                } else {
+                    object.insert("unexpected".into(), serde_json::Value::from(1));
+                    "a key added".into()
                 };
                 assert!(
                     !validator.is_valid(&changed),

@@ -14,23 +14,32 @@
 //! validates real plans against it, renames and adds each of their keys, and
 //! checks the plans it builds name every key declared here.
 
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 const REDACTED: &str = "<redacted>";
 
 /// `schema`, or `<redacted>` in its place.
 fn or_redacted(schema: Value) -> Value {
-    json!({ "oneOf": [schema, { "const": REDACTED }] })
+    let mut one_of = Map::new();
+    one_of.insert(
+        "oneOf".into(),
+        Value::Array(vec![schema, json!({ "const": REDACTED })]),
+    );
+    Value::Object(one_of)
 }
 
 /// An object with exactly the keys of `properties`, `required` among them.
 fn closed(properties: Value, required: &[&str]) -> Value {
-    json!({
+    let mut object = json!({
         "type": "object",
         "additionalProperties": false,
-        "properties": properties,
         "required": required,
-    })
+    });
+    object
+        .as_object_mut()
+        .expect("an object")
+        .insert("properties".into(), properties);
+    object
 }
 
 /// A place in the plan's `relations` list, by which other parts name it.
