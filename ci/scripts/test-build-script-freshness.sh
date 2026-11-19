@@ -73,6 +73,33 @@ EOF
   printf 'Cargo.lock\n' >"$root/.gitignore"
 }
 
+# script_ran: whether cargo -v output on stdin shows the build script run.
+# cargo prints "Running `<path>`" for it: `<hash dir>/build-script-build`
+# (cargo 1.97, for one) or `<hash dir>/out/build_script_build` (the build-dir
+# layout of cargo 1.100, the default Rust of the ubuntu-26.04 runner image
+# from 20261116). Compiling it shows `--crate-name build_script_build` and arguments
+# after it, so the name is never right before the backtick there.
+# shellcheck disable=SC2016  # the backticks are cargo's, literal
+script_ran() {
+  grep -qE 'Running `[^`]*/build[-_]script[-_]build`'
+}
+
+# Both layouts' lines, whichever cargo runs this harness: a regex that misses
+# one reads every build as fresh, and every expect_fresh case passes.
+# shellcheck disable=SC2016  # the backticks are cargo's, literal
+for line in \
+  '     Running `/t/debug/build/fixture-0123456789abcdef/build-script-build`' \
+  '     Running `/t/debug/build/fixture/0123456789abcdef/out/build_script_build`'; do
+  if script_ran <<<"$line"; then ok "a run line is read as a run: ${line##*/}"; else
+    bad "a run line is not read as a run: $line"
+  fi
+done
+# shellcheck disable=SC2016  # the backticks are cargo's, literal
+compile='     Running `rustc --crate-name build_script_build --edition=2024 build.rs -C opt-level=0`'
+if script_ran <<<"$compile"; then bad "compiling the script is read as a run"; else
+  ok "compiling the script is not read as a run"
+fi
+
 # build <checkout> [env assignments...]: one verbose cargo build with the
 # checkout's own target dir. Sets RAN (the build script executed) and FRESH
 # (cargo reported the binary up to date).
@@ -86,9 +113,7 @@ build() {
     RAN=error FRESH=error
     return 0
   }
-  # cargo -v prints "Running `<path>/build-script-build`" when it executes the
-  # script (compiling it shows `build_script_build`, with underscores).
-  if grep -q 'build-script-build`' <<<"$log"; then RAN=yes; else RAN=no; fi
+  if script_ran <<<"$log"; then RAN=yes; else RAN=no; fi
   if grep -qE '^ *Fresh fixture v' <<<"$log"; then FRESH=yes; else FRESH=no; fi
 }
 
