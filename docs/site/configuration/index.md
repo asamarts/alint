@@ -438,13 +438,16 @@ A config is untrusted for what it costs to load, so loading it is bounded:
   reaches one source by two paths), is kept once. The merged config may hold at most 1,048,576
   rules, templates, facts, vars and `ignore:` patterns;
 - an `extends:` list's entries and the `.alint.d/` drop-ins may load and merge at most 4,194,304
-  entries in all (rules, templates, facts, vars, `ignore:` patterns and each version 2 source): an
+  entries in all (rules, templates, facts, vars, `ignore:` patterns, the `vars.` reads in an
+  untrusted remote's `when:`, and each version 2 source, selector and relation): an
   entry is charged the source it loads, before `only:` or `except:` narrows it, and each merge, an
-  entry's or a drop-in's, what it brings in, each at least one entry. A list that repeats a source
-  loads it once (a remote source named by other URLs with one hash, and a bundled ruleset named
-  with other `only:` or `except:` lists, too) and is charged for each entry that merges it. A flat
-  list of distinct sources stays within the bound while they hold at most 2,097,152 entries in all
-  (an empty source counting as one), twice the merged config's limit above;
+  entry's or a drop-in's, what it brings in, each at least one entry, and one more for each rule
+  or template it merges onto an earlier one of its id. A list that repeats a source loads it once
+  (a remote source named by other URLs with one hash, and a bundled ruleset named with other
+  `only:` or `except:` lists, too) and is charged for each entry that merges it. A flat list of
+  distinct sources that override none of each other's rules stays within the bound while they hold
+  at most 2,097,152 entries in all (an empty source counting as one), twice the merged config's
+  limit above;
 - the `extends:` entries may merge at most 64 MiB (67,108,864 bytes) of sources in all. Each
   entry is charged its source's size: its text, or what its YAML aliases expand to if that is
   larger, and for a source that extends others, what it merged too. A list reaches the bound at
