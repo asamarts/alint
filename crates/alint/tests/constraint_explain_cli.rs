@@ -250,6 +250,53 @@ rules:
 
 /// A join: both sides before it, in evaluation order, the join with its
 /// `left`, `right`, `on` and `unique`, and the trigger through both sides.
+/// A walk that reads no ignore files gives a change to one no say, so the
+/// trigger names none: with `respect_gitignore: false`, and with
+/// `--no-gitignore`.
+#[test]
+fn the_trigger_names_ignore_files_only_when_the_walk_reads_them() {
+    let config = "version: 2\nrelations:\n  names:\n    from: { paths: \"packages/*/package.json\" }\n    \
+                  read: { json: \"$.name\" }\n    fields: { name: value }\nrules:\n  - id: names\n    \
+                  kind: constraint\n    input: names\n    assert: { unique: { key: [name] } }\n    \
+                  level: error\n";
+    let trigger = |ignore_file: &str| {
+        format!(
+            "  trigger: under --changed, the rule runs on a change to a path these selectors \
+             pick, to {ignore_file}submodule or nested repository where they can match, or to \
+             a marker or manifest their scope_filter: consults\n"
+        )
+    };
+    let read = trigger("an ignore file, ");
+    let unread = trigger("a ");
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(root, "packages/a/package.json", &manifest("a", "1.0.0"));
+    for (config, args, expected) in [
+        (config.to_string(), &[][..], &read),
+        (config.to_string(), &["--no-gitignore"][..], &unread),
+        (
+            format!("respect_gitignore: false\n{config}"),
+            &[][..],
+            &unread,
+        ),
+    ] {
+        write(root, ".alint.yml", &config);
+        let mut command = args.to_vec();
+        command.extend(["explain", "names"]);
+        let output = run(root, &command, &[]);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let human = String::from_utf8(output.stdout).unwrap();
+        assert!(
+            plan_block(&human).contains(expected.as_str()),
+            "{args:?}: {human}"
+        );
+    }
+}
+
 #[test]
 fn a_join_shows_both_sides_first_and_its_keys() {
     let dir = tempfile::tempdir().unwrap();

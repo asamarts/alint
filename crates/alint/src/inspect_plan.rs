@@ -1060,8 +1060,15 @@ fn transform_name(transform: Transform) -> &'static str {
     }
 }
 
-/// Human output: the `plan:` block that ends `explain`.
-pub(super) fn write_human(out: &mut impl Write, plan: &ExplainPlan) -> Result<()> {
+/// Human output: the `plan:` block that ends `explain`. `reads_ignore_files`
+/// is whether the walk reads `.gitignore` and `.ignore` files (the config's
+/// `respect_gitignore:`, unless `--no-gitignore`), so that a change to one
+/// runs the rule.
+pub(super) fn write_human(
+    out: &mut impl Write,
+    plan: &ExplainPlan,
+    reads_ignore_files: bool,
+) -> Result<()> {
     let dim = alint_output::style::DIM;
     let plan = match plan {
         Shown::Redacted(marker) => {
@@ -1085,15 +1092,20 @@ pub(super) fn write_human(out: &mut impl Write, plan: &ExplainPlan) -> Result<()
     for relation in &plan.relations {
         write_relation(out, relation, &labels)?;
     }
-    // What a change must touch to run the rule (`TriggerScope::matches`):
-    // a path a selector picks; an ignore file (`.gitignore`, `.ignore`), or a
-    // directory Git lists whole (a submodule, a nested repository), where its
-    // `paths:` can match; a `has_ancestor` marker or a manifest its
-    // `scope_filter:` consults.
+    // What a change must touch to run the rule (`TriggerScope::hits`): a
+    // path a selector picks; an ignore file (`.gitignore`, `.ignore`) the walk
+    // reads, or a directory Git lists whole (a submodule, a nested
+    // repository), where its `paths:` can match; a `has_ancestor` marker or a
+    // manifest its `scope_filter:` consults.
+    let ignore_file = if reads_ignore_files {
+        "an ignore file, "
+    } else {
+        "a "
+    };
     writeln!(
         out,
         "  {dim}trigger:{dim:#} under --changed, the rule runs on a change to a path these \
-         selectors pick, to an ignore file, submodule or nested repository where they can \
+         selectors pick, to {ignore_file}submodule or nested repository where they can \
          match, or to a marker or manifest their scope_filter: consults"
     )?;
     for selector in &plan.trigger {
