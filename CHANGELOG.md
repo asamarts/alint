@@ -562,8 +562,9 @@ policy-test package the user does not trust.
 - **`alint_core::git::collect_changed_set`, `collect_changed_set_checked` and `ChangedSet`**
   (library API). They return a `ChangedSet`: the changed paths, with those Git lists as a
   directory (a submodule, an untracked repository) marked. `Engine::with_changed_set` takes one;
-  `with_changed_paths` still takes the paths alone and marks none. A `constraint` rule runs on a
-  marked path when its selectors can match below it (see the kind's entry).
+  `with_changed_paths` still takes the paths alone and marks none, dropping any marks an earlier
+  `with_changed_set` gave. A `constraint` rule runs on a marked path when its selectors can match
+  below it (see the kind's entry).
 - **A YAML parser facade with test-only reference parsers** (ADR-0041). `alint_core::yaml` decodes
   through a backend. alint-core's `yaml-reference` feature, which no release enables and which is
   not a stable API, adds libyaml (through `yaml_serde` 0.10.7, the parser v0.22 used) and a compare
@@ -798,8 +799,9 @@ policy-test package the user does not trust.
     ignored). It then judges the whole snapshot and reports every finding, those in unchanged files
     included. Outside its trigger scope it does not run and reports nothing, and a change to a
     configuration file alone runs no rule. An edit to a symlink's target, a file Git ignores under
-    `respect_gitignore: false`, an ignore file Git does not report, and a staged or committed change
-    to a submodule Git is told to ignore run no rule; `docs/rules.md` lists them. A pass decides
+    `respect_gitignore: false`, an ignore file Git does not report, a staged or committed change
+    to a submodule Git is told to ignore, `git submodule deinit` or `update --init`, and an edit in
+    a submodule's work tree on the same commit run no rule; `docs/rules.md` lists them. A pass decides
     once which rules the changed paths run, and a selector tests only the changed paths below the
     literal directories its `paths:` start with, each once: with 200 rules and 10,000 changed files
     outside every selector, `check --changed` runs 0.79 billion instructions, against 1.56 billion
@@ -1180,10 +1182,12 @@ policy-test package the user does not trust.
   value, which GitHub code scanning may merge into one alert. Findings that share a fingerprint in
   a run are now numbered by the path, line and column they show, then rule and message, baselined
   ones before live ones. The first keeps the canonical fingerprint the baseline file uses, and
-  each other carries one derived from it and its number, so a baselined repeat keeps its
-  fingerprint as live repeats come and go. GitLab output numbers its findings the same way
-  (before, it numbered them in the order it wrote them), so without a baseline the two formats
-  agree finding by finding. A run in which no fingerprint repeats is written as before.
+  each other carries one derived from it and its number. A repeat keeps its fingerprint while the
+  repeats that sort before it stay; one that sorts before it, new or gone, shifts it, baselined or
+  not, since the baseline suppresses a fingerprint's first findings in that order, up to its
+  count, so a new one can take a baselined one's place. GitLab output numbers its findings the
+  same way (before, it numbered them in the order it wrote them), so without a baseline the two
+  formats agree finding by finding. A run in which no fingerprint repeats is written as before.
 - **An extended config is named by its path under the repository on every platform.** Under a
   root reached through a symlink, from a relative `--config`, or on macOS (where `/var` is
   `/private/var`), a config file an `extends:` entry reads was named by its file name alone

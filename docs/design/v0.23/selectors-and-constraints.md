@@ -631,8 +631,11 @@ and an untracked repository, as one changed directory rather than by its files: 
 and so is one `ls-files --others` lists as `sub/`. Such a path triggers each selector whose `paths:`
 can match below it, whether or not the walk still holds it (audit round 4). A pattern without `**`
 matches paths with as many components as it has, so it can match below a directory only when it
-has more components and its leading ones can match the directory's. Without `--base`, Git lists an
-untracked repository on every run until it is committed or ignored.
+has more components and its leading ones can match the directory's. globset lets a class that is
+negated or holds a range match `/` (`a[!x]sm/*.json` matches `a/sm/c.json`), so a pattern with such
+a class, an alternation or an escape counts as one that can match below every directory its leading
+literal directories allow. Without `--base`, Git lists an untracked repository on every run until
+it is committed or ignored.
 
 The changed set is the paths Git reports, so several kinds of change that can alter a verdict
 trigger nothing, as they skip a per-file rule or a version 1 full-index kind today; a full run
@@ -648,7 +651,11 @@ covers them:
 - an edit to a file marked `git update-index --assume-unchanged`, or to a `.ignore` file that a
   `.gitignore` ignores, neither of which Git lists;
 - a staged or committed change to a submodule Git is told to ignore (`submodule.<name>.ignore`,
-  `diff.ignoreSubmodules`).
+  `diff.ignoreSubmodules`);
+- `git submodule deinit`, which empties a submodule's directory, `git submodule update --init` of
+  one that was not checked out, and an edit inside a submodule's work tree that leaves its
+  checked-out commit where it was: each changes the files the walk reads there, and Git lists
+  none. Finding the edits would mean a `git status` in every submodule on every run.
 
 A selector read by a full-index rule may not use `changed_since` (section 4), because what the rule
 sees would then depend on the diff. The other `scope_filter:` predicates are allowed in those

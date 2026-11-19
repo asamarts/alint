@@ -46,7 +46,8 @@ findings could disappear from the alert list. Audit round 4 after v0.22.1 found 
 2. Number N (N > 0) carries the hex SHA-256 of the fingerprint, `:` and N as four little-endian
    bytes. GitLab output numbers a report's findings the same way and derives the same values. It
    holds no baselined findings, so without a baseline the two formats agree finding by finding;
-   under one, a live repeat's SARIF number counts the baselined repeats before it.
+   under one, a live repeat's SARIF number also counts the baselined repeats, all numbered before
+   it, so it can differ from GitLab's.
 3. The baseline file is unchanged: it records the canonical fingerprint with a count, and matching
    stays by count.
 
@@ -60,10 +61,13 @@ findings could disappear from the alert list. Audit round 4 after v0.22.1 found 
   says so.
 - A repeat's fingerprint depends on where it sorts among the results that share its fingerprint.
   When one goes away, each that sorts after it takes the number before its own, so the alert that
-  closes may be another repeat's; the number of open alerts stays right. The baseline suppresses
-  the first findings of a fingerprint in path, line, column and message order, and SARIF numbers
-  baselined results first, so a baselined repeat keeps its fingerprint while live repeats of its
-  key come and go. GitLab output numbered repeats in written order from v0.14.0 and numbers them
+  closes may be another repeat's; the number of open alerts stays right. A repeat keeps its
+  fingerprint while the repeats that sort before it stay, baselined or not. The baseline
+  suppresses the first findings of a fingerprint in path, line, column and message order, up to
+  its count, so a new repeat that sorts before a baselined one takes its place: the one it
+  displaces turns live, and it and each repeat after it shift. SARIF numbers baselined results
+  first only so that a hidden path, which shows as `<redacted>`, cannot sort a live result before
+  a baselined one. GitLab output numbered repeats in written order from v0.14.0 and numbers them
   as SARIF does from v0.23.0, which can change the fingerprint it gives a version 1 finding that
   repeats one.
 

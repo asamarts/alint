@@ -129,8 +129,10 @@ A `constraint` finding's fingerprint leaves its path out, as a `<redacted>` path
 apart findings in one run that share a fingerprint as GitLab does. They are numbered by the path,
 line and column they show, then rule and message, a baselined result before a live one in SARIF.
 The first keeps the canonical fingerprint the baseline file records, and each other carries a
-fingerprint derived from it and its number, so each stays its own alert. Without a baseline, SARIF
-and GitLab give each finding the same value. GitLab numbers findings this way from 0.23.0; before,
+fingerprint derived from it and its number, so each stays its own alert. A repeat keeps its
+fingerprint while the repeats that sort before it stay; one that sorts before it, new or gone,
+shifts it, baselined or not, as the baseline suppresses the first findings of a fingerprint in that
+order, up to its count. Without a baseline, SARIF and GitLab give each finding the same value. GitLab numbers findings this way from 0.23.0; before,
 it numbered them in the order it wrote them. GitLab Code Quality drops entries that share a
 fingerprint, and GitHub Code Scanning may merge them. A run in which no fingerprint repeats is
 written as before.
