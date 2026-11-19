@@ -161,6 +161,11 @@ pub struct Provenance {
     /// `where:` that drops other rows does not change (0 for a missing
     /// row).
     pub ordinal: u32,
+    /// Whether the entry's value is null, an empty object or an empty array
+    /// (false for a `read:` value and a `bound:` one). `strip-root` reads
+    /// such a top-level key, a stub locale file's (`fr:`, `fr: {}`), as a
+    /// file with no keys: the row is dropped, not a failure.
+    pub empty: bool,
 }
 
 /// What a `read:` skipped in one resource.

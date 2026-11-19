@@ -30,6 +30,11 @@ pub(crate) const BOUND_LABEL: &str = "bound:";
 /// and a key-only relation never looks.
 pub(crate) const OBJECT: &str = "an object";
 pub(crate) const ARRAY: &str = "an array";
+/// An object or array with nothing in it, told apart from one with members
+/// or elements: under `strip-root`, a top-level key that holds one (or null)
+/// is a file with no keys ([`holds_nothing`]).
+pub(crate) const EMPTY_OBJECT: &str = "an empty object";
+pub(crate) const EMPTY_ARRAY: &str = "an empty array";
 pub(crate) const DATETIME: &str = "a TOML date or time";
 pub(crate) const UNREADABLE: &str = "a YAML scalar its tag cannot read";
 /// A number in an array: no entry row holds it, so its lexeme is unknown.
@@ -48,7 +53,8 @@ pub(crate) const ARRAY_TABLE: &str = "a table in an array of tables";
 /// member row's pointer is its key path, its `span` the key's, its
 /// `value_span` the value's (none for a YAML block scalar), and its state the
 /// scalar it holds, or an [`RowState::Error`] naming what it holds otherwise
-/// ([`OBJECT`], [`ARRAY`], [`DATETIME`], [`UNREADABLE`]).
+/// ([`OBJECT`], [`ARRAY`], [`EMPTY_OBJECT`], [`EMPTY_ARRAY`], [`DATETIME`],
+/// [`UNREADABLE`]).
 ///
 /// A path that selects something other than an object emits one row labelled
 /// `at:<path>` at what it selected, whose error state names it (`an array`,
@@ -204,7 +210,7 @@ impl Adapter for EntryValuesAdapter {
                     if std::mem::replace(&mut out.emitted[index], true) {
                         continue;
                     }
-                    let row = out.entry_row(index, None)?;
+                    let row = out.entry_row(&document, index, None)?;
                     out.push(row)?;
                 }
             }
@@ -234,7 +240,7 @@ impl Adapter for EntryValuesAdapter {
                     matches += 1;
                 } else {
                     for index in held {
-                        let row = out.entry_row(index, Some(&label))?;
+                        let row = out.entry_row(&document, index, Some(&label))?;
                         out.push(row)?;
                         matches += 1;
                     }
@@ -283,6 +289,9 @@ struct Document<'d> {
     /// same object: each object's members in document order.
     first: Vec<u32>,
     next: Vec<u32>,
+    /// By key path, whether the tree holds an empty object or an empty array
+    /// there.
+    empty: Vec<bool>,
 }
 
 /// No row, in [`Document::first`] and [`Document::next`].
@@ -301,11 +310,21 @@ impl<'d> Document<'d> {
         // the order the walk reached their entries, which is the document's,
         // and a member no entry names (a TOML date's private key) after them.
         let mut nodes = HashMap::new();
+        let mut empty = vec![false; entries.paths.len()];
         let mut pending: Vec<(&serde_json::Value, Option<PathId>)> =
             vec![(tree, Some(PathId::ROOT))];
         while let Some((node, at)) = pending.pop() {
             let rank = nodes.len();
             nodes.insert(std::ptr::from_ref(node), (rank, at));
+            if let Some(at) = at
+                && match node {
+                    serde_json::Value::Object(map) => map.is_empty(),
+                    serde_json::Value::Array(items) => items.is_empty(),
+                    _ => false,
+                }
+            {
+                empty[at.index()] = true;
+            }
             match node {
                 serde_json::Value::Object(map) => {
                     let mut members: Vec<(Option<PathId>, &serde_json::Value)> = map
@@ -334,7 +353,13 @@ impl<'d> Document<'d> {
             nodes,
             first,
             next,
+            empty,
         }
+    }
+
+    /// Whether the tree holds an empty object or an empty array at `at`.
+    fn is_empty(&self, at: PathId) -> bool {
+        self.empty[at.index()]
     }
 
     /// `node`'s place in document order.
@@ -432,12 +457,21 @@ impl Output<'_> {
         Ok(())
     }
 
-    /// The row of the table's entry `index`, its key path built and charged.
-    fn entry_row(&mut self, index: usize, label: Option<&str>) -> Result<Row, AdapterError> {
+    /// The row of the table's entry `index` in `document`, its key path built
+    /// and charged.
+    fn entry_row(
+        &mut self,
+        document: &Document<'_>,
+        index: usize,
+        label: Option<&str>,
+    ) -> Result<Row, AdapterError> {
         let entry = &self.entries.rows[index];
+        let empty = document.is_empty(entry.path);
         let state = match &self.entries.values[index] {
             EntryValue::Scalar(value) => RowState::Value(value.clone()),
+            EntryValue::Object if empty => RowState::Error(EMPTY_OBJECT.into()),
             EntryValue::Object => RowState::Error(OBJECT.into()),
+            EntryValue::Array if empty => RowState::Error(EMPTY_ARRAY.into()),
             EntryValue::Array => RowState::Error(ARRAY.into()),
             EntryValue::Datetime => RowState::Error(DATETIME.into()),
             EntryValue::Unreadable => RowState::Error(UNREADABLE.into()),
@@ -472,6 +506,16 @@ impl Output<'_> {
             .map_or_else(Pointer::root, |found| pointer_of(found.location()));
         self.budget.take(pointer.heap_bytes())?;
         Ok(pointer)
+    }
+}
+
+/// Whether an entry row's state is null, an empty object or an empty array:
+/// a value with nothing in it.
+pub(crate) fn holds_nothing(state: &RowState) -> bool {
+    match state {
+        RowState::Value(value) => *value == crate::relation::Value::Null,
+        RowState::Error(kind) => [EMPTY_OBJECT, EMPTY_ARRAY].contains(&kind.as_ref()),
+        RowState::Key | RowState::Missing => false,
     }
 }
 

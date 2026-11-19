@@ -302,6 +302,129 @@ fn strip_root_needs_one_top_level_key_per_resource() {
     );
 }
 
+/// The same keys in every locale (`docs/site/configuration/version-2.md`):
+/// each locale's keys below its top-level key, grouped by locale, or by
+/// file.
+const STUB_LOCALES: &str = r#"version: 2
+relations:
+  locale-keys:
+    from: { paths: "config/locales/*.yml" }
+    entries: { format: yaml, at: "$", leaves: true }
+    fields: { locale: entry.root, file: stem, key: entry.path }
+    transform: { key: [strip-root] }
+rules:
+  - id: by-locale
+    kind: constraint
+    input: locale-keys
+    assert:
+      set: { field: key, group_by: locale, equal_to: { group: en }, groups: [de, fr, it, pl] }
+    level: error
+  - id: by-file
+    kind: constraint
+    input: locale-keys
+    assert: { set: { field: key, group_by: file, equal_to: { group: en } } }
+    level: error
+"#;
+
+/// Under `strip-root`, a locale file whose top-level key holds nothing
+/// (`fr: {}`, `it:`, `pl: []`), as 71 of Mastodon's 530 do, has no keys, as
+/// an empty file has none: it lacks every key of the reference locale, and
+/// the rule still reports the others' missing keys.
+#[test]
+fn a_stub_locale_file_has_no_keys_under_strip_root() {
+    let files = &[
+        ("config/locales/en.yml", "en:\n  hello: Hello\n  bye: Bye\n"),
+        ("config/locales/de.yml", "de:\n  hello: Hallo\n"),
+        ("config/locales/fr.yml", "fr: {}\n"),
+        ("config/locales/it.yml", "it:\n"),
+        ("config/locales/pl.yml", "pl: []\n"),
+    ];
+    let tree = setup(STUB_LOCALES, files);
+    assert_eq!(
+        table(&tree.rows("locale-keys")),
+        strings(&[
+            &["de", "de", "hello"],
+            &["en", "en", "hello"],
+            &["en", "en", "bye"],
+        ])
+    );
+    let results = super::constraint_families::run(STUB_LOCALES, files);
+    let missing = |group: &str, key: &str| {
+        format!(
+            "`locale` \"{group}\" lacks `key` \"{key}\", which `locale` \"en\" holds\n  ~ the \
+             reference group's row with it: config/locales/en.yml:{}",
+            if key == "hello" { "2:3" } else { "3:3" }
+        )
+    };
+    let mut expected = vec![format!("config/locales/de.yml: {}", missing("de", "bye"))];
+    for group in ["fr", "it", "pl"] {
+        expected.extend([missing(group, "hello"), missing(group, "bye")]);
+    }
+    assert_eq!(
+        super::constraint_families::findings(&results, "by-locale"),
+        expected
+    );
+    let by_file = super::constraint_families::findings(&results, "by-file");
+    for (file, keys) in [
+        ("de", &["bye"][..]),
+        ("fr", &["hello", "bye"]),
+        ("it", &["hello", "bye"]),
+        ("pl", &["hello", "bye"]),
+    ] {
+        for key in keys {
+            let prefix =
+                format!("config/locales/{file}.yml: `file` \"{file}\" lacks `key` \"{key}\"");
+            assert!(
+                by_file.iter().any(|finding| finding.starts_with(&prefix)),
+                "{prefix}: {by_file:#?}"
+            );
+        }
+    }
+    assert_eq!(by_file.len(), 7, "{by_file:#?}");
+}
+
+/// A top-level key that holds a scalar, or a list with something in it, is
+/// no stub: there are keys below it to compare or none to strip to, so
+/// `strip-root` still fails on it, and a stub still counts as its file's
+/// one top-level key.
+#[test]
+fn a_top_level_key_holding_a_value_still_fails_strip_root() {
+    for (body, shown) in [
+        ("fr: Bonjour\n", "`fr`"),
+        ("fr: [a]\n", "`fr`"),
+        ("fr: 0\n", "`fr`"),
+    ] {
+        let tree = setup(
+            STUB_LOCALES,
+            &[
+                ("config/locales/en.yml", "en:\n  hello: Hello\n"),
+                ("config/locales/fr.yml", body),
+            ],
+        );
+        assert_eq!(
+            tree.failures("locale-keys"),
+            [format!(
+                "config/locales/fr.yml: relation `locale-keys` (.alint.yml): `strip-root` on \
+                 `key` needs every key path to have at least two segments, but {shown} has one; \
+                 read the keys below the top-level key, or drop `strip-root`"
+            )],
+            "{body}"
+        );
+    }
+    let tree = setup(
+        STUB_LOCALES,
+        &[("config/locales/all.yml", "en:\n  hello: Hello\nfr:\n")],
+    );
+    assert_eq!(
+        tree.failures("locale-keys"),
+        [
+            "config/locales/all.yml: relation `locale-keys` (.alint.yml): `strip-root` on `key` \
+             needs one top-level key in each resource, but this one has `en`, `fr`; read one \
+             top-level object per file, or drop `strip-root`"
+        ]
+    );
+}
+
 pub(super) const NODE_PINS: &str = r#"version: 2
 relations:
   node-pins:

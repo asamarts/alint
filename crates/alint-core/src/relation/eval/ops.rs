@@ -196,10 +196,19 @@ impl Evaluator<'_> {
             return None;
         }
         let relation = &named.relation;
+        // Under `strip-root`, a top-level key whose value is null, `{}` or
+        // `[]` (a stub locale file, `fr:`) holds no keys: its row goes before
+        // any transform reads it, so its file is one with no rows.
+        let stubs = take_stub_roots(&mut rows, relation);
         for (field, transforms) in &relation.transforms {
             let position = rows.field(field)?;
             for transform in transforms {
-                self.transform_field(site, &mut rows, position, field, *transform, failures);
+                match string_transform(*transform) {
+                    Some(transform) => {
+                        self.transform_field(site, &mut rows, position, field, transform, failures);
+                    }
+                    None => self.strip_root(site, &mut rows, &stubs, position, field, failures),
+                }
             }
         }
         if !failures.is_empty() {
@@ -536,28 +545,18 @@ impl Evaluator<'_> {
         }
     }
 
-    /// Apply one transform to the field at `position` of every row. A value
-    /// it does not change stays shared, and rows that share a value share
-    /// what it becomes; each new text takes its bytes from the run.
+    /// Apply one string transform to the field at `position` of every row. A
+    /// value it does not change stays shared, and rows that share a value
+    /// share what it becomes; each new text takes its bytes from the run.
     fn transform_field(
         &self,
         site: &Site,
         rows: &mut RelationRows,
         position: usize,
         field: &str,
-        transform: Transform,
+        string_transform: StringTransform,
         failures: &mut Failures,
     ) {
-        let string_transform = match transform {
-            Transform::StripRoot => {
-                self.strip_root(site, rows, position, field, failures);
-                return;
-            }
-            Transform::Trim => StringTransform::Trim,
-            Transform::Lower => StringTransform::Lower,
-            Transform::SemverMajor => StringTransform::SemverMajor,
-            Transform::SemverMinor => StringTransform::SemverMinor,
-        };
         // Each text transformed, by the text it was, while the field is.
         let mut done: HashMap<Arc<str>, Arc<str>> = HashMap::new();
         for row in &mut rows.rows {
@@ -639,14 +638,11 @@ fn path_fields<'p>(
             continue;
         };
         for transform in relation.transforms_of(name) {
-            transforms.push(match transform {
-                Transform::Trim => StringTransform::Trim,
-                Transform::Lower => StringTransform::Lower,
-                Transform::SemverMajor => StringTransform::SemverMajor,
-                Transform::SemverMinor => StringTransform::SemverMinor,
-                // The plan check refuses it on a path token.
-                Transform::StripRoot => continue 'fields,
-            });
+            // The plan check refuses `strip-root` on a path token.
+            let Some(transform) = string_transform(*transform) else {
+                continue 'fields;
+            };
+            transforms.push(transform);
         }
         fields.insert(name.as_str(), (token, transforms));
     }
@@ -1044,23 +1040,86 @@ fn roots_named(named: &[&Segment], count: usize) -> String {
     }
 }
 
+/// Each resource's top-level keys, by its path: a set, and the first few to
+/// name.
+type Roots<'r> = BTreeMap<&'r str, (HashSet<&'r Segment>, Vec<&'r Segment>)>;
+
+/// Add the top-level key of `path`, `cell`'s key path, to its resource's.
+fn add_root<'r>(roots: &mut Roots<'r>, cell: &'r Cell, path: &'r Pointer) {
+    let (set, named) = roots.entry(cell.at.resource.path().as_str()).or_default();
+    if let Some(first) = path.segments().first()
+        && set.insert(first)
+        && named.len() < NAMED_ROOTS
+    {
+        named.push(first);
+    }
+}
+
+/// The string transform `transform` is, or `None` for `strip-root`, which
+/// reads a key path's segments rather than a string.
+const fn string_transform(transform: Transform) -> Option<StringTransform> {
+    match transform {
+        Transform::Trim => Some(StringTransform::Trim),
+        Transform::Lower => Some(StringTransform::Lower),
+        Transform::SemverMajor => Some(StringTransform::SemverMajor),
+        Transform::SemverMinor => Some(StringTransform::SemverMinor),
+        Transform::StripRoot => None,
+    }
+}
+
+/// Take out of `rows`, keeping the others' order, each row whose field under
+/// `strip-root` is a stub root: a top-level key whose value is null, `{}` or
+/// `[]` (a locale file that is `fr:` or `fr: {}`), below which there is
+/// nothing to strip to. Such a file has no keys, as an empty one has none,
+/// but its key still counts as its one top-level key
+/// ([`Evaluator::strip_root`]). A top-level key holding anything else stays,
+/// and fails `strip-root`.
+fn take_stub_roots(rows: &mut RelationRows, relation: &RelationDef) -> Vec<FieldRow> {
+    let stripped: Vec<usize> = relation
+        .transforms
+        .iter()
+        .filter(|(_, transforms)| transforms.contains(&Transform::StripRoot))
+        .filter_map(|(field, _)| rows.field(field))
+        .collect();
+    let is_stub = |row: &FieldRow| {
+        stripped.iter().any(|&position| {
+            let cell = &row.cells[position];
+            cell.at.empty
+                && cell
+                    .path
+                    .as_ref()
+                    .is_some_and(|path| path.segments().len() == 1)
+        })
+    };
+    if !rows.rows.iter().any(is_stub) {
+        return Vec::new();
+    }
+    let (stubs, kept) = std::mem::take(&mut rows.rows)
+        .into_iter()
+        .partition(is_stub);
+    rows.rows = kept;
+    stubs
+}
+
 impl Evaluator<'_> {
     /// `strip-root`: drop the first segment of an `entry.path` field, as
     /// `key_parity`'s `strip_root` does. Each resource must hold one
-    /// top-level key among its rows, and every row's key path at least two
-    /// segments. Rows that share a key path share what it becomes, and each
-    /// new one takes its bytes from the run.
+    /// top-level key among its rows and its `stubs` (the stub roots
+    /// [`take_stub_roots`] took out, which are no rows), and every row's key
+    /// path at least two segments. Rows that share a key path share what it
+    /// becomes, and each new one takes its bytes from the run.
     fn strip_root(
         &self,
         site: &Site,
         rows: &mut RelationRows,
+        stubs: &[FieldRow],
         position: usize,
         field: &str,
         failures: &mut Failures,
     ) {
         let sensitive = rows.fields[position].sensitive || site.keys_sensitive;
         // Each resource's top-level keys: a set, and the first few to name.
-        let mut roots: BTreeMap<&str, (HashSet<&Segment>, Vec<&Segment>)> = BTreeMap::new();
+        let mut roots: Roots<'_> = BTreeMap::new();
         for row in &rows.rows {
             let cell = &row.cells[position];
             let Some(path) = &cell.path else {
@@ -1074,13 +1133,12 @@ impl Evaluator<'_> {
                 ));
                 continue;
             };
-            let resource = cell.at.resource.path().as_str();
-            let (set, named) = roots.entry(resource).or_default();
-            if let Some(first) = path.segments().first()
-                && set.insert(first)
-                && named.len() < NAMED_ROOTS
-            {
-                named.push(first);
+            add_root(&mut roots, cell, path);
+        }
+        for row in stubs {
+            let cell = &row.cells[position];
+            if let Some(path) = &cell.path {
+                add_root(&mut roots, cell, path);
             }
         }
         for (resource, (set, named)) in &roots {

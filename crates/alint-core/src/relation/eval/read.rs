@@ -723,14 +723,21 @@ impl<'r> Rows<'r> {
     }
 
     /// The provenance of the row the part's adapter emitted `ordinal`th, at
-    /// `pointer`, its key path's bytes taken.
-    fn provenance(&self, pointer: Option<Pointer>, ordinal: u32) -> Result<Arc<Provenance>, Stop> {
+    /// `pointer`, its key path's bytes taken; `empty` when it is an entry
+    /// whose value is null, an empty object or an empty array.
+    fn provenance(
+        &self,
+        pointer: Option<Pointer>,
+        ordinal: u32,
+        empty: bool,
+    ) -> Result<Arc<Provenance>, Stop> {
         self.take_bytes(pointer.as_ref().map_or(0, Pointer::heap_bytes))?;
         Ok(Arc::new(Provenance {
             resource: self.resource.clone(),
             pointer,
             part: self.part,
             ordinal,
+            empty,
         }))
     }
 
@@ -801,7 +808,7 @@ impl<'r> Rows<'r> {
             };
             cells.push(Some(Cell {
                 value: Some(value),
-                at: self.provenance(row.pointer.clone(), row.ordinal)?,
+                at: self.provenance(row.pointer.clone(), row.ordinal, false)?,
                 span: row.value_span.or(row.span),
                 path: None,
             }));
@@ -850,8 +857,11 @@ impl<'r> Rows<'r> {
         let bound = self.bound_cells(output)?;
         for row in output.rows.iter().filter(|row| row.label.is_none()) {
             self.take_row()?;
-            let provenance =
-                self.provenance(Some(row.pointer.clone().unwrap_or_default()), row.ordinal)?;
+            let provenance = self.provenance(
+                Some(row.pointer.clone().unwrap_or_default()),
+                row.ordinal,
+                entry_values::holds_nothing(&row.state),
+            )?;
             let pointer = provenance
                 .pointer
                 .as_ref()
@@ -1056,7 +1066,7 @@ impl<'r> Rows<'r> {
         };
         for (value, ordinal) in values {
             self.take_row()?;
-            let provenance = self.provenance(None, ordinal)?;
+            let provenance = self.provenance(None, ordinal, false)?;
             let mut cells = Vec::with_capacity(self.relation.fields.len());
             for (position, (name, field)) in self.relation.fields.iter().enumerate() {
                 let (value, span) = match &field.source {
