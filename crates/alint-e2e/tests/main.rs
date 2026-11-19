@@ -11,6 +11,7 @@
 // Shared by several modules: loaders and the shared rule registry.
 mod support;
 
+mod changed_full_index;
 mod command_plugin;
 mod coverage_audit;
 mod coverage_audit_baseline_safety;
