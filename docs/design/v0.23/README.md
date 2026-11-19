@@ -1029,9 +1029,10 @@ as #589, step 3 as #590, and step 4 is the last.
     - Relations and the loader (fix/r4-rel): a `where:` or `transform:` entry that reads the
       environment redacts the finding paths of every rule over its relation, through joins, `in:`
       lists and `set` targets; under `strip-root` a top-level key that holds nothing reads as a file
-      with no keys; `read:` rows carry their value's span, so their findings have a line and column
-      (`ExtractAdapter::with_spans`); and the loader and `NamedRelation::is_inline` share one name
-      predicate, `relation::plan::is_name`.
+      with no keys; a finding about a `read:` value has its line and column, found only in the
+      files a finding or related location sits in (`relation::eval::find_spans`, called from
+      `constraint`'s `Places::resolve`); and the loader and `NamedRelation::is_inline` share one
+      name predicate, `relation::plan::is_name`.
     - Messages and places (fix/r4-msg): a key path is cut at 64 characters per key and 256 in all,
       and key paths and `{{row.FIELD}}` escape controls, bidi and zero-width characters; placing
       findings reads one file at a time, charged to `bytes_per_run`, and every related row is listed
@@ -1048,13 +1049,41 @@ as #589, step 3 as #590, and step 4 is the last.
       key by key; `explain`'s trigger heading names every change that runs the rule; the generated
       rule indexes mark version 2 kinds; and the documents, the CHANGELOG and ADR-0047 record the
       round.
+  - A second pass: an independent review of the merged fixes found 7 defects, all fixed.
+    - Placing findings took each rule's largest file from `bytes_per_run` and never gave it back,
+      so which rules failed depended on thread scheduling (one 31 MiB file and 40 rules gave 7
+      failures, a different 7 each run). Placing now takes nothing, and checks each file against
+      what the run's relations left (`DecodeCache::may_hold`): the 40 rules give 40 findings.
+    - Finding every `read:` value's span as it was read cost 2.4 times the run over 3,000 passing
+      `package.json` files (669M instructions, against 280M now) and 5 times for a 12 MB file. A
+      span is now found only for a value a finding places, and the parsed tree is let go before
+      the walk over the document's entries: the 12 MB file with a finding peaks at 386 MB, against
+      400 MB when every span was found as it was read.
+    - A removed submodule ran no rule, since the trigger asked the walk which changed paths are
+      directories. Git now marks them by their gitlink mode in `--raw` diffs (`ChangedSet`), with
+      `diff-files --ignore-submodules=none` for a submodule changed before `git add`.
+    - `may_match_below` counts components and tests each leading one, literal or wildcard, so an
+      untracked repository, which Git lists on every run without `--base`, runs fewer rules: a
+      selector of `a/[!x]*.txt` no longer runs its rule for `a/sm`.
+    - A row's file, a note's file and the file that declares a relation reached messages raw; they
+      are escaped as values are, and an analysis failure's text is escaped whole.
+    - The test of related rows at one place fails again with its fix reverted: it read `lines:`
+      values, which now have places, and reads a JSON array's values instead.
+    - The output-formats line on a `constraint` fingerprint now says it leaves its path out as a
+      `<redacted>` path's does.
+    - Also: an empty changed set runs no rule, even through a selector that does not compile;
+      `explain`'s trigger heading names ignore files only when the walk reads them, and names a
+      union's parts `union[0]` and on; a `strip-root` failure and a skipped-value note cut what
+      they quote; and SARIF numbers a repeated fingerprint by what each finding shows, baselined
+      results first, so a baselined repeat keeps its fingerprint, with GitLab numbering the same
+      way (ADR-0047).
   - Filed: #592 (two fields of one array element in one row, and a transform that splits a value),
     #593 (a `bound:` query that may match nothing), #594 (a `message:` placeholder for the value a
     `set` finding is about), #595 (placing a finding that a group lacks a value at the file the
     value belongs in), #596 (bounding a rule's findings when every group lacks the whole reference
-    set, G × V today) and #597 (version 1 nits: list the formats on an unknown `--format`, and name
-    a null root in `key_parity`'s `strip_root` error). Left open: #564 to #573, #579 to #585 and
-    #592 to #597.
+    set, G × V today), #597 (version 1 nits: list the formats on an unknown `--format`, and name a
+    null root in `key_parity`'s `strip_root` error) and #598 (let a stub locale root name its group
+    when `group_by` reads `entry.root`). Left open: #564 to #573, #579 to #585 and #592 to #598.
   - For phase 8: locale parity written as a version 2 `set` costs about 1.5x the instructions and
     1.9x the peak RSS of `key_parity` (100,000 rows: 6.31G instructions and 144 MB against 4.17G and
     77 MB; Mastodon's YAML locales: 20.5G and 318 MB against 14.5G and 179 MB).
