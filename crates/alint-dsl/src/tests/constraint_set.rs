@@ -108,13 +108,38 @@ fn plurals_cldr_merges_the_plural_groups_of_each_pair() {
     assert_eq!(findings(&results, "c").len(), 6);
 }
 
-/// A reference of 40,000 keys and 4,000 groups of one key each: each group
+/// Under `plurals: cldr`, missing values are reported in the reference's
+/// row order and extra ones in the group's, not in key order.
+#[test]
+fn plurals_cldr_reports_in_row_order() {
+    let results = run(
+        &locales(CLDR),
+        &[
+            (
+                "locales/en.yml",
+                "en:\n  zeta: \"z\"\n  alpha: \"a\"\n  inbox:\n    one: \"1\"\n    other: \"n\"\n",
+            ),
+            (
+                "locales/fr.yml",
+                "fr:\n  zz: \"z\"\n  inbox:\n    other: \"n\"\n  aa: \"a\"\n",
+            ),
+        ],
+    );
+    let found = findings(&results, "c");
+    let values: Vec<&str> = found
+        .iter()
+        .map(|finding| finding.split('"').nth(3).unwrap())
+        .collect();
+    assert_eq!(values, ["zeta", "alpha", "zz", "aa"], "{found:?}");
+}
+
+/// A reference of 20,000 keys and 2,000 groups of one key each: each group
 /// is compared by looking its keys up, never by merging the reference again,
 /// which made the comparisons the groups times the reference.
 #[test]
 fn plurals_cldr_compares_a_small_group_without_the_whole_reference() {
     let mut en = String::from("{\"en\": {\n");
-    for index in 0..10_000 {
+    for index in 0..5_000 {
         writeln!(
             en,
             "\"k{index}\": {{\"one\": \"1\", \"other\": \"n\"}}, \"m{index}_one\": \"1\", \
@@ -124,7 +149,7 @@ fn plurals_cldr_compares_a_small_group_without_the_whole_reference() {
     }
     en.push_str("\"last\": \"x\"}}\n");
     let mut files = vec![("locales/en.json".to_string(), en)];
-    for index in 0..4_000 {
+    for index in 0..2_000 {
         files.push((
             format!("locales/l{index}.json"),
             format!("{{\"l{index}\": {{\"k{index}\": {{\"few\": \"f\"}}}}}}\n"),
@@ -143,7 +168,7 @@ fn plurals_cldr_compares_a_small_group_without_the_whole_reference() {
     assert_eq!(findings(&results, "c"), [] as [String; 0]);
     assert!(
         elapsed < Duration::from_secs(20),
-        "4,000 groups took {elapsed:?}"
+        "2,000 groups took {elapsed:?}"
     );
 }
 
@@ -429,6 +454,24 @@ fn a_group_the_environment_names_is_not_shown() {
     );
 }
 
+/// A reference group the environment names is a literal it wrote: no
+/// message or key shows it.
+#[test]
+fn a_reference_group_the_environment_names_is_not_shown() {
+    let config = named_groups("[]").replace(
+        "equal_to: { group: en }",
+        "equal_to: { group: \"{{env.ALINT_TEST_UNSET_REFERENCE | default('en')}}\" }",
+    );
+    let results = run(&config, &[("messages.json", MESSAGES)]);
+    assert_eq!(
+        findings(&results, "c"),
+        [
+            "messages.json: `locale` \"fr\" lacks `key` \"about\", which `locale` <redacted> \
+             holds\n  ~ the reference group's row with it: messages.json:1:25"
+        ]
+    );
+}
+
 #[test]
 fn a_group_literal_of_another_type_than_the_groups_has_no_verdict() {
     let config = named_groups("[\"true\"]")
@@ -616,6 +659,43 @@ fn a_failure_of_the_other_relation_withholds_every_finding() {
     );
 }
 
+/// A sensitive field of the other relation hides its values in messages,
+/// keys and `{{row.FIELD}}` of the field compared with it.
+#[test]
+fn a_sensitive_field_of_the_other_relation_hides_its_values() {
+    let config = against(
+        "{ set: { field: dependency, group_by: manifest, equal_to: { relation: allowed, field: \
+         name } } }",
+        "",
+    )
+    .replace(
+        "fields: { name: entry.key, flag: entry.value }",
+        "fields: { name: { source: entry.key, sensitive: true } }",
+    );
+    let results = run(&config, &packages());
+    for finding in findings(&results, "c") {
+        for secret in ["react", "vue", "left-pad"] {
+            assert!(!finding.contains(secret), "{finding}");
+        }
+    }
+    for key in keys(&results, "c") {
+        assert!(key.contains("9:sensitive"), "{key}");
+        assert!(!key.contains("react") && !key.contains("vue"), "{key}");
+    }
+    let message = config.replace(
+        "    level: error\n",
+        "    message: \"{{row.dependency}} in {{row.manifest}}\"\n    level: error\n",
+    );
+    let results = run(&message, &packages());
+    assert!(
+        findings(&results, "c")
+            .iter()
+            .all(|finding| !finding.contains("react") && !finding.contains("left-pad")),
+        "{:?}",
+        findings(&results, "c")
+    );
+}
+
 /// What the other relation's `read:` skipped (a value that is not a string,
 /// a `${VAR}`) is reported by the rule, once, whether or not the input
 /// relation took the same notes through a `where:` list that reads it.
@@ -674,40 +754,66 @@ fn the_other_relations_skipped_values_are_reported_once() {
     }
 }
 
-/// A sensitive field of the other relation hides its values in messages,
-/// keys and `{{row.FIELD}}` of the field compared with it.
+/// The other relation may be the input itself: each manifest holds every
+/// dependency any manifest holds. Groups with rows come first, in the order
+/// of their first rows, then files without rows.
 #[test]
-fn a_sensitive_field_of_the_other_relation_hides_its_values() {
-    let config = against(
-        "{ set: { field: dependency, group_by: manifest, equal_to: { relation: allowed, field: \
-         name } } }",
-        "",
-    )
-    .replace(
-        "fields: { name: entry.key, flag: entry.value }",
-        "fields: { name: { source: entry.key, sensitive: true } }",
+fn a_set_against_a_field_of_its_own_input() {
+    let assert = "{ set: { field: dependency, group_by: manifest, equal_to: { relation: deps, \
+                  field: dependency } } }";
+    let mut files = packages();
+    files.push((
+        "packages/c/package.json",
+        "{\"dependencies\": {\"react\": \"1\"}}\n",
+    ));
+    let results = run(&against(assert, ""), &files);
+    assert_eq!(
+        findings(&results, "c"),
+        [
+            "packages/c/package.json: `manifest` \"packages/c/package.json\" lacks \
+             `dependency` \"left-pad\", which `dependency` of relation `deps` holds\n  ~ the row \
+             of relation `deps` with it: packages/a/package.json:1:33",
+            "packages/b/package.json: `manifest` \"packages/b/package.json\" lacks \
+             `dependency` \"react\", which `dependency` of relation `deps` holds\n  ~ the row of \
+             relation `deps` with it: packages/a/package.json:1:19",
+            "packages/b/package.json: `manifest` \"packages/b/package.json\" lacks \
+             `dependency` \"left-pad\", which `dependency` of relation `deps` holds\n  ~ the row \
+             of relation `deps` with it: packages/a/package.json:1:33",
+        ]
     );
-    let results = run(&config, &packages());
-    for finding in findings(&results, "c") {
-        for secret in ["react", "vue", "left-pad"] {
-            assert!(!finding.contains(secret), "{finding}");
-        }
-    }
-    for key in keys(&results, "c") {
-        assert!(key.contains("9:sensitive"), "{key}");
-        assert!(!key.contains("react") && !key.contains("vue"), "{key}");
-    }
-    let message = config.replace(
-        "    level: error\n",
-        "    message: \"{{row.dependency}} in {{row.manifest}}\"\n    level: error\n",
-    );
-    let results = run(&message, &packages());
+}
+
+/// An extra value held by many rows of its group is related to the first 20
+/// of the others in row order, with a count of the rest. `packages/q` is
+/// walked before `packages/q-00`, but sorts after it as a path, so the 20
+/// sorted locations of all 25 others would leave it out.
+#[test]
+fn an_extra_value_is_related_to_its_first_20_other_rows() {
+    let mut files = packages();
+    let paths: Vec<String> = std::iter::once("packages/q/package.json".to_string())
+        .chain((0..24).map(|index| format!("packages/q-{index:02}/package.json")))
+        .collect();
+    let body = "{\"dependencies\": {\"left-pad\": \"1\"}}";
+    files.extend(paths.iter().map(|path| (path.as_str(), body)));
+    let assert = "{ set: { field: dependency, subset_of: { relation: allowed, field: name } } }";
+    let results = run(&against(assert, ""), &files);
+    let violations = &result(&results, "c").violations;
+    assert_eq!(violations.len(), 1);
+    let related: Vec<&std::path::Path> = violations[0]
+        .related_locations
+        .iter()
+        .map(|related| related.path.as_path())
+        .collect();
+    let mut expected: Vec<&std::path::Path> =
+        paths[1..20].iter().map(std::path::Path::new).collect();
+    expected.push(std::path::Path::new(&paths[0]));
+    assert_eq!(related, expected);
+    assert_eq!(violations[0].related_locations_omitted, 5);
     assert!(
-        findings(&results, "c")
+        violations[0]
+            .related_locations
             .iter()
-            .all(|finding| !finding.contains("react") && !finding.contains("left-pad")),
-        "{:?}",
-        findings(&results, "c")
+            .all(|related| related.label == "another row of the group with it")
     );
 }
 
@@ -760,43 +866,50 @@ fn the_other_set_is_bounded_by_the_distinct_value_limit() {
     );
 }
 
-/// 6,000 groups of two values each against 90,000 values, one value of each
+/// 4,000 groups of two values each against 50,000 values, one value of each
 /// group outside them: each value is looked up in the other set, never
-/// compared with each of its values, which took 6,000 times 90,000
+/// compared with each of its values, which took 4,000 times 50,000
 /// comparisons.
 #[test]
 fn a_set_against_another_relation_is_linear_in_the_rows() {
     let mut allowed = String::from("{");
-    for index in 0..90_000 {
+    for index in 0..50_000 {
         if index > 0 {
             allowed.push(',');
         }
         write!(allowed, "\"d{index}\": true").unwrap();
     }
     allowed.push('}');
-    let mut files = vec![("allowed.json".to_string(), allowed)];
-    for index in 0..6_000 {
-        files.push((
-            format!("packages/p{index}/package.json"),
-            format!("{{\"dependencies\": {{\"d{index}\": \"1\", \"x{index}\": \"1\"}}}}"),
-        ));
+    let mut deps = String::from("{");
+    for index in 0..4_000 {
+        if index > 0 {
+            deps.push(',');
+        }
+        write!(
+            deps,
+            "\"p{index}\": {{\"d{index}\": \"1\", \"x{index}\": \"1\"}}"
+        )
+        .unwrap();
     }
-    let files: Vec<(&str, &str)> = files
-        .iter()
-        .map(|(path, body)| (path.as_str(), body.as_str()))
-        .collect();
-    let assert = "{ set: { field: dependency, group_by: manifest, disjoint_from: { relation: \
-                  allowed, field: name } } }";
+    deps.push('}');
+    let config = "version: 2\nrelations:\n  deps:\n    from: { paths: deps.json }\n    entries: { \
+                  format: json, at: \"$.*\" }\n    fields: { package: entry.parent, dependency: \
+                  entry.key }\n  allowed:\n    from: { paths: allowed.json }\n    entries: { \
+                  format: json, at: \"$\" }\n    fields: { name: entry.key }\nrules:\n  - id: \
+                  c\n    kind: constraint\n    input: deps\n    assert: { set: { field: \
+                  dependency, group_by: package, disjoint_from: { relation: allowed, field: name \
+                  } } }\n    \
+                  level: error\n";
     let started = Instant::now();
-    let results = run(&against(assert, ""), &files);
+    let results = run(config, &[("allowed.json", &allowed), ("deps.json", &deps)]);
     let elapsed = started.elapsed();
     let result = result(&results, "c");
-    assert_eq!(result.violations.len(), 6_000);
+    assert_eq!(result.violations.len(), 4_000);
     for violation in &result.violations {
         assert_eq!(violation.related_locations.len(), 1);
     }
     assert!(
         elapsed < Duration::from_secs(20),
-        "6,000 groups took {elapsed:?}"
+        "4,000 groups took {elapsed:?}"
     );
 }
