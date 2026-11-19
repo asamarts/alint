@@ -639,7 +639,8 @@ fn an_extends_list_that_repeats_a_source_loads_it_once() {
         .collect();
     let filters: Vec<&str> = filters.iter().map(String::as_str).collect();
     // An entry that loads its source is charged the source's entries, and
-    // each merge what it brings in.
+    // each merge what it brings in, and each rule it merges onto one an
+    // other source merged last once more.
     for (entries, times, parses, charged, rules) in [
         (&["./a.yml"][..], 1_000, 2, 50 + 50, 50),
         (
@@ -649,12 +650,13 @@ fn an_extends_list_that_repeats_a_source_loads_it_once() {
             (50 + 50) + (50 + 50) + 998 * 50,
             100,
         ),
-        // A filter makes another source of the same file.
+        // A filter makes another source of the same file, whose `a1` each
+        // entry after the first merges onto the other's.
         (
             &["./a.yml", "{url: ./a.yml, only: [a1]}"][..],
             500,
             3,
-            (50 + 50) + (50 + 1) + 499 * 50 + 499,
+            (50 + 50) + (50 + 1) + 499 * 50 + 499 + 999,
             50,
         ),
         (&filters[..], 1, 3, 50 * 50 + 50, 50),
@@ -751,10 +753,12 @@ fn an_extends_merge_budget_bounds_a_load() {
             .to_string(),
         format!(
             "the `extends:` entries and `.alint.d/` drop-ins of this config load and merge more \
-             than {} entries in all (rules, templates, facts, vars and `ignore:` patterns, counted \
-             for each source an entry loads, and again for what each entry or drop-in brings in \
-             to a merge); list each source once, extend fewer sources, use fewer drop-ins, or \
-             flatten the `extends:` chain",
+             than {} entries in all (rules, templates, facts, vars, `ignore:` patterns, the \
+             `vars.` reads in an untrusted remote's `when:`, and each version 2 source, selector \
+             and relation, counted for each source an entry loads, again for what each entry or \
+             drop-in brings in to a merge, and again for each rule or template a merge combines \
+             with one of its id); list each source once, extend fewer sources, use fewer drop-ins, \
+             or flatten the `extends:` chain",
             loader::MAX_EXTENDS_MERGE_WORK
         )
     );

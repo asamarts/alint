@@ -169,6 +169,14 @@ impl Merger {
         self.push_from(source, Some(repeated))
     }
 
+    /// How many rules and templates the pushes since the last call
+    /// field-merged onto one with their id ([`merge_mapping_fields`]): about
+    /// as much work again as adding them, which a merge of a rule that the
+    /// same entry merged onto last, and nothing since, does not do.
+    pub(crate) fn take_merged_onto(&mut self) -> usize {
+        self.rules.take_merged_onto() + self.templates.take_merged_onto()
+    }
+
     /// What was merged.
     pub(crate) fn finish(self) -> RawConfig {
         let Self {
@@ -217,6 +225,8 @@ impl Merger {
         touch(self.compatibility.len() + self.environment_values.len() + self.v2_paths.len());
         let mut first = Cow::Owned(first);
         self.add_reduced(&mut first, None);
+        // Only what a push merges onto counts.
+        self.take_merged_onto();
         self.merged = RawConfig {
             requires: None,
             extends: Vec::new(),
@@ -458,6 +468,9 @@ struct ById {
     /// For each of `with_id`, the entry of a repeated source that merged onto
     /// it last, or that it is, with nothing merged onto it since.
     written: Vec<Option<Written>>,
+    /// How many of the added have field-merged onto one with their id, since
+    /// [`Merger::take_merged_onto`].
+    merged_onto: usize,
     /// Those without an id, each once, after the others: they merge with
     /// nothing, and `finalize` refuses them.
     orphans: Unique<Mapping>,
@@ -484,6 +497,7 @@ impl ById {
             // `fix.file_create.content` alone would be too surprising.
             #[cfg(test)]
             count(&MAPPING_MERGES);
+            self.merged_onto += 1;
             merge_mapping_fields(&mut self.with_id[at], owned(mapping));
             self.written[at] = writer.map(|writer| Written::new(writer, true));
         } else {
@@ -496,6 +510,10 @@ impl ById {
 
     fn len(&self) -> usize {
         self.with_id.len() + self.orphans.len()
+    }
+
+    fn take_merged_onto(&mut self) -> usize {
+        std::mem::take(&mut self.merged_onto)
     }
 
     fn into_list(self) -> Vec<Mapping> {

@@ -388,9 +388,11 @@ fn resolve_top_level(
             &loader::TrustedExtends::default(),
             loader::SourceContext::new(alint_core::ConfigSourceClass::DropIn, merger.version()),
         )?;
-        // Each merge is charged as an `extends:` merge is, what it brings in.
+        // Each merge is charged as an `extends:` merge is: what it brings in,
+        // and what it merges onto a rule or template of its id.
         state.charge_extends(&drop_in)?;
         merger.push(drop_in)?;
+        state.charge_extends_merged_onto(merger.take_merged_onto())?;
     }
     let mut raw = merger.finish();
     // With the forms the loader printed an `extends:` entry read from the

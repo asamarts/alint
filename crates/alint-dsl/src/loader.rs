@@ -1237,6 +1237,7 @@ pub(crate) fn load_recursive(
         }
         state.charge_extends(&parent)?;
         repeats.merge(key, parent, &mut merging)?;
+        state.charge_extends_merged_onto(merging.take_merged_onto())?;
     }
     merging.push(config)?;
     let merged = merging.finish();

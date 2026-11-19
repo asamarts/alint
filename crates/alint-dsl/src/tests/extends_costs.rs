@@ -331,17 +331,20 @@ fn each_drop_in_merge_is_charged() {
 
 /// The budgets' sizes, and where a flat list of rulesets meets the entry
 /// budget: each entry is charged the ruleset it loads and what it brings in
-/// to its merge, twice the ruleset, so the merged config's size
-/// ([`MAX_MERGED_ENTRIES`]) refuses such a list first, at 1,049 rulesets of
-/// 1,000 rules each. Before #580 each merge was charged what was merged so
-/// far too, and the budget refused the 91st ruleset, or the 2,895th one-rule
-/// file.
+/// to its merge, twice the ruleset, so the list stays within the budget while
+/// its rulesets hold at most 2,097,152 entries in all. Rulesets that hold
+/// other entries meet the merged config's size ([`MAX_MERGED_ENTRIES`])
+/// first, at 1,049 rulesets of 1,000 entries each; rulesets that hold the same
+/// entries meet the budget, at 2,098, though they merge to 1,000 entries.
+/// Before #580 each merge was charged what was merged so far too, and the
+/// budget refused the 91st ruleset, or the 2,895th one-rule file.
 #[test]
 fn the_extends_budgets_have_their_documented_sizes() {
     assert_eq!(loader::MAX_EXTENDS_MERGE_WORK, 4_194_304);
     assert_eq!(loader::MAX_EXTENDS_SOURCE_BYTES, 64 * 1024 * 1024);
+    // A ruleset of `count` `ignore:` patterns: the same in each ruleset.
     let entries = |count: usize| RawConfig {
-        ignore: vec![String::new(); count],
+        ignore: (0..count).map(|pattern| pattern.to_string()).collect(),
         ..RawConfig::default()
     };
     // The first entry of a flat list of `rules`-rule rulesets the budget
@@ -361,6 +364,13 @@ fn the_extends_budgets_have_their_documented_sizes() {
     assert_eq!(refused_at(1_000), 2_098);
     assert_eq!(refused_at(1), 2_097_153);
     assert_eq!(MAX_MERGED_ENTRIES / 1_000 + 1, 1_049);
+    // The 2,097 rulesets the budget takes, of the same 1,000 patterns, merge
+    // to those 1,000.
+    let mut merger = crate::merge::Merger::new(RawConfig::default());
+    for _ in 1..refused_at(1_000) {
+        merger.push(entries(1_000)).unwrap();
+    }
+    assert_eq!(merger.finish().ignore.len(), 1_000);
     // Sources of 1 MiB: the 65th passes 64 MiB.
     let mut state = LoadState::default();
     let source = RawConfig {

@@ -1399,3 +1399,39 @@ fn an_alternating_extends_list_is_refused_in_linear_work() {
     assert_eq!(counted.copied, 2 * rules);
     assert_eq!(counted.merged_onto, 0);
 }
+
+/// An `extends:` list whose sources override each other's rules (`[a, b] x
+/// 10`, `b` setting another level on each rule of `a`) field-merges every rule
+/// at every entry after the first. Each such merge is charged once more, as
+/// the merge that rebuilt what was merged so far charged it: the list is
+/// charged what it was before #580, so it meets the budget where it did.
+#[test]
+fn an_alternating_list_of_overriding_rulesets_is_charged_its_merges() {
+    let tmp = tempfile::tempdir().unwrap();
+    let rules = 100;
+    let ruleset = |name: &str, level: &str| {
+        use std::fmt::Write as _;
+        let mut text = String::from("version: 1\nrules:\n");
+        for index in 0..rules {
+            writeln!(
+                text,
+                "  - {{id: x-{index}, kind: file_exists, paths: x, level: {level}}}"
+            )
+            .unwrap();
+        }
+        std::fs::write(tmp.path().join(format!("{name}.yml")), text).unwrap();
+        format!("./{name}.yml")
+    };
+    let pair = [ruleset("a", "error"), ruleset("b", "warning")];
+    let entries: Vec<String> = (0..10).flat_map(|_| pair.clone()).collect();
+    let counted = load_counted(&write_extending(tmp.path(), &entries));
+    let raw = counted.raw.unwrap();
+    assert_eq!(raw.rules.len(), rules);
+    assert_eq!(raw.rules[0]["level"], ayaml::Value::from("warning"));
+    // Each entry after the first merges each rule onto the other ruleset's.
+    assert_eq!(counted.merged_onto, 19 * rules);
+    // Loading `a` and `b`, what each entry brings in, and those merges: what
+    // each entry was charged before, the rules merged so far and its own.
+    assert_eq!(counted.charged, 2 * rules + 20 * rules + 19 * rules);
+    assert_eq!(counted.charged, 2 * rules + rules + 19 * (rules + rules));
+}
