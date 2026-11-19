@@ -90,6 +90,49 @@ fn collect_changed_without_base_drains_a_staged_list_larger_than_a_pipe() {
 }
 
 #[test]
+fn every_changed_set_lists_a_rename_under_both_paths_and_none_as_an_addition() {
+    let repo = make_repo_with_commits(&["init"]);
+    let root = repo.path();
+    let run = |args: &[&str]| {
+        let output = crate::git::test_git()
+            .arg("-C")
+            .arg(root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    std::fs::write(root.join("before.txt"), "the same contents\n").unwrap();
+    run(&["add", "before.txt"]);
+    run(&["commit", "-m", "add before.txt"]);
+    run(&["branch", "base"]);
+    run(&["mv", "before.txt", "after.txt"]);
+    let both = HashSet::from([PathBuf::from("before.txt"), PathBuf::from("after.txt")]);
+    assert_eq!(
+        collect_changed_paths(root, None),
+        Some(both.clone()),
+        "staged"
+    );
+
+    run(&["commit", "-m", "rename"]);
+    assert_eq!(
+        collect_changed_paths(root, Some("base")),
+        Some(both.clone())
+    );
+    assert_eq!(collect_changed_paths_checked(root, "base"), Ok(Some(both)));
+    // A file moved is not a file added: `changeset_requires_path` must not
+    // take a moved changelog entry for a new one.
+    assert_eq!(
+        collect_changed_paths_filtered(root, "base", "A"),
+        Ok(Some(HashSet::new()))
+    );
+}
+
+#[test]
 #[cfg(unix)]
 fn path_from_git_chunk_preserves_non_utf8() {
     use std::os::unix::ffi::OsStrExt as _;

@@ -4,7 +4,8 @@
 //! of its relations read: its input's, a join's other side's, or the relation
 //! its `set` compares against. It then judges the whole snapshot and reports
 //! every finding, also those in unchanged files. A change outside those
-//! selectors, or to `.alint.yml` alone, runs no `constraint` rule.
+//! selectors, or to `.alint.yml` alone, runs no `constraint` rule. A rename
+//! changes both its paths, so a file renamed out of a selector runs the rule.
 
 use std::path::{Path, PathBuf};
 use std::process::Output;
@@ -140,7 +141,8 @@ fn run(root: &Path, args: &[&str]) -> Output {
 }
 
 /// `alint check --format json` with `args`: its exit code, and each rule
-/// that ran with the paths of its findings, in order.
+/// that ran with the paths of its findings, in order (a pathless finding's as
+/// an empty path).
 fn check(root: &Path, args: &[&str]) -> (Option<i32>, Vec<(String, Vec<PathBuf>)>) {
     let mut command = vec!["check", "--format", "json"];
     command.extend_from_slice(args);
@@ -166,7 +168,7 @@ fn check(root: &Path, args: &[&str]) -> (Option<i32>, Vec<(String, Vec<PathBuf>)
                 .as_array()
                 .unwrap()
                 .iter()
-                .map(|violation| PathBuf::from(violation["path"].as_str().unwrap()))
+                .map(|violation| PathBuf::from(violation["path"].as_str().unwrap_or_default()))
                 .collect();
             (result["id"].as_str().unwrap().to_string(), paths)
         })
@@ -292,5 +294,92 @@ fn a_change_to_the_configuration_alone_runs_no_constraint_rule() {
             Some(0),
             vec![ran("locales-match-english", &["locales/fr.json"])]
         )
+    );
+}
+
+/// A catalog whose every package must be a manifest's name, beside a
+/// version 1 kind that reads the full index through a path scope.
+const RENAME_CONFIG: &str = r#"version: 2
+selectors:
+  manifests:
+    paths: "packages/*/package.json"
+relations:
+  names:
+    from: manifests
+    read: { json: "$.name" }
+    fields: { name: value }
+  catalog:
+    from: { paths: catalog.json }
+    entries: { format: json, at: "$.packages" }
+    fields: { name: entry.key }
+rules:
+  - id: catalog-names-packages
+    kind: constraint
+    input: catalog
+    assert: { set: { field: name, subset_of: { relation: names, field: name } } }
+    level: error
+  - id: license-exists
+    kind: file_exists
+    paths: LICENSE
+    level: error
+"#;
+
+/// A committed repository, on a branch `base` as well, whose policies in
+/// [`RENAME_CONFIG`] pass.
+fn rename_repository() -> tempfile::TempDir {
+    let tmp = repository(true);
+    let root = tmp.path();
+    write(root, ".alint.yml", RENAME_CONFIG);
+    write(root, "LICENSE", "MIT\n");
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "rename policies"]);
+    git(root, &["branch", "base"]);
+    tmp
+}
+
+#[test]
+fn a_file_renamed_out_of_a_selector_runs_the_rule_that_reads_it() {
+    let tmp = rename_repository();
+    let root = tmp.path();
+    // `api` leaves `packages/`, so the catalog names a package no manifest
+    // there declares. Git lists the rename under its new path alone, which no
+    // selector reads; its old path is the one in `manifests`.
+    std::fs::create_dir_all(root.join("legacy").join("api")).unwrap();
+    git(
+        root,
+        &["mv", "packages/api/package.json", "legacy/api/package.json"],
+    );
+    let expected = vec![ran("catalog-names-packages", &["catalog.json"])];
+    assert_eq!(
+        check(root, &["--changed"]),
+        (Some(1), expected.clone()),
+        "staged"
+    );
+    git(root, &["commit", "-qm", "move api"]);
+    assert_eq!(
+        check(root, &["--base", "base"]),
+        (Some(1), expected),
+        "committed"
+    );
+}
+
+#[test]
+fn a_renamed_required_file_runs_a_version_one_full_index_rule() {
+    let tmp = rename_repository();
+    let root = tmp.path();
+    // `file_exists` reads the whole index but runs under `--changed` only
+    // when a changed path is in its `paths:`: here the rename's old path.
+    git(root, &["mv", "LICENSE", "LICENSE.txt"]);
+    let expected = vec![ran("license-exists", &[""])];
+    assert_eq!(
+        check(root, &["--changed"]),
+        (Some(1), expected.clone()),
+        "staged"
+    );
+    git(root, &["commit", "-qm", "rename the license"]);
+    assert_eq!(
+        check(root, &["--base", "base"]),
+        (Some(1), expected),
+        "committed"
     );
 }

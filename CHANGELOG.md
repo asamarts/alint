@@ -1057,6 +1057,15 @@ policy-test package the user does not trust.
 
 ### Fixed
 
+- **A rename under `--changed` changes both of its paths.** Git's rename detection listed a
+  renamed file under its new path alone, so neither `--changed` (staged) nor `--base`
+  (committed) saw the old path change: after `git mv LICENSE LICENSE.txt`, a `file_exists` rule
+  for `LICENSE` was skipped, and so were `file_absent`, `key_parity`, `max_files_per_directory`
+  and `no_case_conflicts` rules whose `paths:` matched only the old path. The changed set now lists
+  both paths, as it lists a deleted file and a new one. `pair_changed_together` and the
+  `when_changed:` of `changeset_requires_path` read the same set, so a file renamed out of their
+  globs now counts as changed there too; `changeset_requires_path`'s `add_glob:` keeps git's
+  rename detection, so a moved file still does not count as an added one.
 - **An extended config is named by its path under the repository on every platform.** Under a
   root reached through a symlink, from a relative `--config`, or on macOS (where `/var` is
   `/private/var`), a config file an `extends:` entry reads was named by its file name alone
