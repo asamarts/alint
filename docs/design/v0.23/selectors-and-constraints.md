@@ -321,7 +321,8 @@ rules:
   (`{ relation: workspace-names, field: name }`, section 8).
   - The groups are the reference group, every group named in `groups:`, and every value of the
     `group_by:` field. When `group_by:` is `path` or a path token, every resource the relation's
-    selectors pick forms its group, rows or not.
+    selectors pick forms its group, rows or not, except one whose path alone the relation's
+    `where:` rejects, which forms none.
   - A group with no rows reports each reference value as missing: at the resource that declared
     it, or without a path for a group named only in `groups:`. `key_parity` does the same for an
     empty peer file.
@@ -379,7 +380,10 @@ today).
   related to the source row. A missing row differs, so a removed `volta.node` fires.
 - **`equal` within a row:** one finding per row whose `field:` differs from its `to: { field: }`,
   at `field:`'s location, with the other field's location as a related location. A join keeps each
-  field's provenance, so the two can sit in different files.
+  field's provenance, so the two can sit in different files. When `field:` is a join's copy from
+  its `unique:` side, or a `bound:` field, many rows share its location, so the finding sits at the
+  row's own entry instead (a join's row is the row of its other side). Audit round 4 corrected
+  this bullet, which put every such finding at `field:`'s location.
 - **`set`:** one finding per missing, extra or shared value per group.
   - A missing value (`equal_to:`; in the other set, not in the group) sits at the group's first
     resource in canonical order, related to the row that holds it, as `key_parity` reports a
@@ -413,7 +417,10 @@ The parts of each finding's key:
   baselined. Phase 7 step 1's review corrected this bullet, which keyed each repeat by its row;
 - `equal` within groups: `equal`, the group, the value;
 - `equal` against a named source row: `equal`, `source`, the row;
-- `equal` within a row: `equal`, `row`, `field:`'s resource path, `field:`'s pointer;
+- `equal` within a row: `equal`, `row`, the resource path and pointer of the row's own entry
+  (for a join, the row of its other side), never of `field:`'s resource, which a `unique:` side
+  or a `bound:` field shares between rows. Audit round 4 corrected this bullet, which named
+  `field:`'s resource;
 - `set`: `set`, the group, the value, and `missing`, `extra` or `shared`.
 
 Related locations never enter a fingerprint.
@@ -641,7 +648,8 @@ amendment records existing practice.
   index and declare no path scope. It cannot cover a kind that declares one, so it is
   **replaced**, not extended: phase 7 adds a test over every full-index kind that asserts the rule
   receives the full index under `--changed`.
-- `metadata_inventory_matches_the_audited_v019_shape` pins the five kinds that declare a scope.
+- `metadata_inventory_matches_the_audited_v019_shape` pins the six kinds that declare a scope:
+  the five above and `constraint`.
 
 ## 10. Names, provenance and trust (Q12)
 

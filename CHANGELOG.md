@@ -49,6 +49,12 @@ full below.
   config with a warning; run it from the top or pass `--config` (Security).
 - A baseline last written by v0.21 or earlier no longer matches findings whose path the
   environment hides; regenerate it once with `alint baseline --accept-new` (Removed).
+- Under `--changed` and `--base`, a renamed file changes its old path too, so a rule whose
+  `paths:` match only the old path now runs: after `git mv LICENSE LICENSE.txt`, a `file_exists`
+  rule for `LICENSE` fires, and `alint fix --changed` recreates `LICENSE` through its
+  `file_create` fix. `pair_changed_together` and the `when_changed:` of
+  `changeset_requires_path` count a file renamed out of their globs as changed, so they can fire
+  where 0.22 stayed silent (Fixed).
 - Library: `WhenEnv::env` is an `Option<&BTreeMap<String, String>>`; `LspOptions` gains `config`,
   `no_gitignore`, `no_spawn` and `untrusted`, and `LoadOptions` gains `global_git_excludes`, which
   breaks a struct literal; YAML values and errors are alint's own types (`alint_core::yaml`) in
@@ -705,7 +711,8 @@ policy-test package the user does not trust.
     set. The other relation is read before the rule, its failures withhold the rule's findings, its
     notes are reported once, and its set is bounded by the 100,000 distinct-value limit. A sensitive
     field on either side hides the values of both, and a sensitive field of the other relation makes
-    the compared field sensitive at load, with every field that spells the same values.
+    the compared field sensitive at load, with every field of the input that can spell the same
+    values (for an `entry.*` field, every `entry.*` field, `entry.value` included).
   - Values compare by type and text (a number by its lexeme); null and a missing value match
     nothing; a key, group or set comparison across types, a null group, a missing or repeated
     source row and an empty reference group are analysis failures, never a pass, and so is a
@@ -715,9 +722,10 @@ policy-test package the user does not trust.
     `message:` may use `{{row.FIELD}}`, the reported row's value, cut the same way, which a
     `sensitive` field shows as `<redacted>`. A field that spells an entry's key (`entry.key`,
     `entry.path`, `entry.parent`, `entry.root`) is sensitive when any of them is. Findings carry
-    related locations at the other rows involved: at most 20, a row of each other value first,
-    then a count of the rest, and only those 20 are placed. A finding about a field a join copies
-    from its `unique:` side, or a `bound:` field, sits at the row's own entry.
+    related locations at the other rows involved: at most 20, picked with a row of each other value
+    first and listed by path, then a count of the rest, and only those 20 are placed. A finding
+    about a field a join copies from its `unique:` side, or a `bound:` field, sits at the row's own
+    entry.
   - When a relation the rule reads takes a value from the environment, or reads one that does,
     every finding's path and message are redacted, as for a version 1 rule whose `paths:` the
     environment writes.
@@ -731,17 +739,17 @@ policy-test package the user does not trust.
     builds, naming the rule, the field and the relation; names may not hold `{{...}}`. A
     `groups:` literal must be of the `group_by:` field's type, once, and not the reference
     group; `plurals: cldr` needs an `entry.path` field with no transform but `strip-root`.
-  - Under `--changed` and `--base`, a rule runs when a changed path (added, modified or deleted)
-    is in its trigger scope: the selectors of every relation it reads (its input, both sides of
-    each join, the relations its `in:` and `not_in:` lists probe and the relation its `set`
-    compares against), narrowed by their `scope_filter:`, with the manifests that `scope_filter:`
-    reads, and the `has_ancestor` markers and `.gitignore` and `.ignore` files in the directories
-    where those selectors' `paths:` can match. It then judges the whole snapshot and reports every
-    finding, those in unchanged files included. Outside its trigger scope it does not run and
-    reports nothing, and a change to a configuration file alone runs no rule. An edit to a
-    symlink's target, a file Git ignores under `respect_gitignore: false`, and an ignore file Git
-    does not report run no rule; `docs/rules.md` lists them. `facts.json` lists the kind's
-    dispatch as `full_index` with `path_scope: true`.
+  - Under `--changed` and `--base`, a rule runs when a changed path (added, modified or deleted) is
+    in its trigger scope: the selectors of every relation it reads (its input, both sides of each
+    join, the relations its `in:` and `not_in:` lists probe and the relation its `set` compares
+    against), narrowed by their `scope_filter:`, with the manifests that `scope_filter:` reads, and
+    the `has_ancestor` markers, `.gitignore` and `.ignore` files, submodules and nested repositories
+    in the directories where those selectors' `paths:` can match. It then judges the whole snapshot
+    and reports every finding, those in unchanged files included. Outside its trigger scope it does
+    not run and reports nothing, and a change to a configuration file alone runs no rule. An edit to
+    a symlink's target, a file Git ignores under `respect_gitignore: false`, and an ignore file Git
+    does not report run no rule; `docs/rules.md` lists them. `facts.json` lists the kind's dispatch
+    as `full_index` with `path_scope: true`.
   - `alint explain <rule>` shows the rule's resolved plan, after its options: the assertion in
     words; every relation the rule reads, in the order a run evaluates them, named as the config
     writes each reference that reaches it (with the file that declares it when two relations would
@@ -751,20 +759,31 @@ policy-test package the user does not trust.
     reader (`entries:` with its format and `at:`, or `read:` with its query), its fields with their
     sources, transforms and sensitivity, its `where:`, and the config file that declares it; the
     selectors that run the rule under `--changed`; and its cost class. `--format json` adds the same
-    as a `plan` object, which the experimental trace schema's rule document allows, where each
-    relation has an `id` (its place in the list) by which a join's sides, an `in:` list, the
-    trigger, `input` and `set_target` name it; a rule of any other kind has no `plan`, so its output
-    is unchanged. The plan is configuration: it shows no value read from a file, except the paths a
-    manifest-derived `scope_filter:` resolves to, as for any rule (ADR-0010). What the environment
-    wrote stays redacted as `explain` redacts it elsewhere: a selector or relation definition that
-    reads the environment shows `<redacted>` for each value it holds, an `extends:` entry the
-    environment chooses names its files `<redacted>`, and an environment-written assertion is
-    `<redacted>` whole. A sensitive field's `where:` literals and patterns, its transforms, and the
-    literals the assertion compares with it (`to: { row: }`, `{ group: }`, `groups:`) show as
-    `<redacted>`, in the plan and in the rule's options; a rule marked `sensitive: true` shows its
-    plan as `<redacted>`.
+    as a `plan` object, which the experimental trace schema's rule document describes key by key
+    (`schemas/experimental/rule-trace.json`), where each relation has an `id` (its place in the
+    list) by which a join's sides, an `in:` list, the trigger, `input` and `set_target` name it; a
+    rule of any other kind has no `plan`, so its output is unchanged. The plan is configuration: it
+    shows no value read from a file, except the paths a manifest-derived `scope_filter:` resolves
+    to, as for any rule (ADR-0010). What the environment wrote stays redacted as `explain` redacts
+    it elsewhere: a selector or relation definition that reads the environment shows `<redacted>`
+    for each value it holds, an `extends:` entry the environment chooses names its files
+    `<redacted>`, and an environment-written assertion is `<redacted>` whole. A sensitive field's
+    `where:` literals and patterns, its transforms, and the literals the assertion compares with it
+    (`to: { row: }`, `{ group: }`, `groups:`) show as `<redacted>`, in the plan and in the rule's
+    options; a rule marked `sensitive: true` shows its plan as `<redacted>`.
   - The version 2 draft schema describes the kind and refuses it nested; the version 1 schema
-    leaves it out.
+    leaves it out. The draft checks what the kind's builder checks of an `assert:` alone: one
+    family, one `set` target of one shape, the names of fields and relations, counts and repeats,
+    and the keys that need or exclude others (`group_by:` with `to:`, a `{ group: }` target
+    without `group_by:`, `groups:` outside `equal_to:`, `plurals: cldr` against a relation). A key
+    written as null is refused, as the builder refuses it. What needs the relation (a field it
+    has, a literal of the field's type) or compares two values (`determines:` naming a key field)
+    is the builder's alone.
+  - Library API: **`alint_rules::constraint`**, the kind's builder, its `META`, its
+    `options_schema` and `MIN_CONFIG_VERSION`; **`RuleRegistry::register_for_config_version`**,
+    which registers a kind only a config of a given `version:` or later may use, with
+    **`RuleRegistry::min_config_version`** and **`KindCatalog::min_config_version`**, the lowest
+    `version:` a kind needs.
 
 ### Changed
 

@@ -269,6 +269,11 @@ next. Phases 1, 4 and 5 do not depend on the design and can run alongside phases
 | 9 | Qualify the cutover that #510 made: #483, and the #482 harness's verdict with an approved allowlist. Otherwise the owner holds the release or reverts #510 (ADR-0035). Approved on 2026-11-15, on condition that v0.23.0 is tagged on an ayaml release that fixes asamarts/ayaml#132, #133 and #137 (ADR-0040). Since 2026-11-16 the condition is an ayaml release with the fixes ayaml's main has for every gap alint filed, #132, #133, #137, #139, #140, #141, #146 and #147, and ADR-0042's condition on memory (ADR-0043). The bump follows `yaml-parser.md`'s "Bumping ayaml" | yes (parser) |
 | 10 | Documentation, the CHANGELOG (re-run `alint baseline`; the library migration; the `git_tracked_only` change; the affected versions of item 13's fixes), facts, publishing the security advisory drafted for item 13 (GHSA-78jj-xfpm-g6px, a private draft; ADR-0040, widened by ADR-0043; step 5 of RELEASING.md's documentation checklist), and the release check | no |
 
+Phase 10's release check has one step on alint.org, which this repository cannot make: once the
+site's facts sync to v0.23.0, its `src/lib/rule-source-files.ts` needs
+`constraint: 'constraint/mod'`, since the kind's source is a module directory, not
+`constraint.rs` (audit round 4).
+
 The #503 fix (item 12) is its own pull request, with `add -f` e2e scenarios for `file_absent`,
 `dir_absent`, `file_exists` and `dir_exists`, and does not depend on the design. It merged as #509
 on 2026-11-13.
@@ -295,10 +300,14 @@ as #589, step 3 as #590, and step 4 is the last.
 
 ## 5. Release acceptance
 
-- **v1 is unchanged** apart from item 12, the ayaml cutover and the audits' fixes (section 4).
-  The e2e suite passes, and the corpus replay against v0.22.1 shows no difference that the
-  CHANGELOG does not explain: item 12's (ADR-0033 decision 3), the cutover's (ADR-0035 decision 5)
-  and the audits' (ADR-0043, ADR-0044).
+- **v1 is unchanged** apart from item 12, the ayaml cutover, the audits' fixes (section 4) and
+  #590's rename under `--changed`: a renamed file changes its old path too, so a rule whose
+  `paths:` match only the old path now runs (after `git mv LICENSE LICENSE.txt`, a `file_exists`
+  rule for `LICENSE` fires, and `fix --changed` recreates it), and `pair_changed_together` and
+  `changeset_requires_path`'s `when_changed:` can newly fire. The e2e suite passes, and the corpus
+  replay against v0.22.1 shows no difference that the CHANGELOG does not explain: item 12's
+  (ADR-0033 decision 3), the cutover's (ADR-0035 decision 5), the audits' (ADR-0043, ADR-0044)
+  and #590's (its "Upgrading from 0.22" entry).
 - **The stratum is scored** and recorded in `general-linter.md` section 12, with the bucket shares
   before and after the slice. Phase 8 re-scores it with the shipped slice and compares the result
   with ADR-0033's projections.
@@ -917,8 +926,9 @@ as #589, step 3 as #590, and step 4 is the last.
     have no path. A `set` against `{ relation: R, field: F }` reads `R` before the rule, as an
     input: `R`'s failures withhold the rule's findings, its notes are reported once with the
     input's, and the environment redaction covers it. A sensitive `F` makes the compared field
-    sensitive at load, with every field that spells the same values, so `explain` and `list` show
-    it. `R` is a name, never an inline relation.
+    sensitive at load, with every field that spells the same values, so `explain` shows it (audit
+    round 4 corrected "`explain` and `list`": `list` shows no fields). `R` is a name, never an
+    inline relation.
   - Section 6's identity of `unique` without `determines:` now reads as step 1 built it.
   - Next: phase 7 step 3 (the `--changed` trigger scope, and the related-location gate over
     JSON, SARIF and the language server).
@@ -994,5 +1004,37 @@ as #589, step 3 as #590, and step 4 is the last.
     which an acyclic plan never reaches; `not_a_member` (2), as an entry row is always an object
     member; and `wrong_source` (6), as the plan check refuses a source the part's reader does not
     give.
+  - Next: #580 (an `extends:` list merged in linear time, before v0.23.0, ADR-0046 decision 1),
+    then phase 8 (the three conformance policies).
+- 2026-11-19: audit round 4, over aacb561ac..c3906120c (phase 7 steps 1 to 4, #587, #589, #590,
+  #591, and #588).
+  - Docs, schemas and `explain` (fix/r4-doc):
+    - alint.org showed unreleased behaviour: docs-bundle.yml overlays main's reference and concept
+      pages on the release's, and two lines added since v0.22.1 (the JSON `related_locations`
+      field, the rename under `--changed`) sat outside since-blocks. They and every other such
+      line are now marked; corrections of shipped behaviour carry `since=0.22.1`, which the site
+      keeps. `ci/scripts/check-docs-overlay-since.py` (CI's Docs job, with a shell harness) fails
+      on a line added since the latest `v*` tag in an overlaid page, or in a released kind's
+      `docs/rules.md` section, outside a since-block. A since marker that opens a rule's
+      paragraph no longer leaks into its summary.
+    - The draft version 2 schema's `constraint` branch is derived from the kind's option types,
+      which now carry what the builder checks of an `assert:` alone (one family, one `set` target
+      of one shape, names, references, counts, repeats, and the keys that need or exclude
+      others); the builder refuses an optional key written as null, which the schema refused and
+      the loader read as absent. alint-dsl's `tests/version_two_schema/constraint.rs` holds the
+      two to one verdict over 2,343 generated shapes.
+    - The trace schema's `plan` is described key by key (alint-core `trace/plan_schema.rs`), and
+      a renamed or added key in a real plan fails it.
+    - `explain`'s trigger heading and the version 2 page name every change that runs a
+      `constraint` rule under `--changed`; the `optional: <redacted>` arm is pinned.
+    - Doc corrections: `list` does not mark fields sensitive; the draft schema's claims; a stub
+      locale root; the group a `where:` rejects; a sensitive `set` target's family; design
+      sections 6 and 9; related locations listed by path; multi-field `to: { row: }`; the
+      relation limits with their values; the v1 rename change in section 5 and the CHANGELOG;
+      the `constraint` section of `docs/rules.md` in one-line paragraphs; the generated rule
+      indexes mark version 2 kinds; the library API in the CHANGELOG; alint.org's
+      `rule-source-files.ts` in the release check.
+  - PLACEHOLDER (audit round 4, to complete when the other fixers report): the relation, DSL,
+    message, bound, `--changed`, Git and SARIF fixes, with their gates.
   - Next: #580 (an `extends:` list merged in linear time, before v0.23.0, ADR-0046 decision 1),
     then phase 8 (the three conformance policies).

@@ -451,8 +451,18 @@ distinct-value limit, which is never truncation.
 - A join is inner, and one side must be unique on the join key: there is no many-to-many join.
 - The transforms are the five listed; there are no user-defined ones.
 - `in` and `not_in` cannot list null or a number.
-- Reading is bounded by alint's row, join and distinct-value limits; reaching one is an analysis
-  failure, never truncation.
+- Reading is bounded by these limits, which a config cannot change in this release. Reaching one
+  is an analysis failure that names it, never truncation:
+  - 1,000,000 rows from one reader of one file (`rows_per_extractor`);
+  - 5,000,000 rows from every reader in a run (`rows_per_run`);
+  - 5,000,000 cells in the relations a run builds, a row of n fields holding n cells and each file
+    a part reads one more (`cells_per_run`);
+  - 1 GiB that a run's relations hold beyond their cells: the files they decode, and the key
+    paths, path tokens and transformed values they build (`bytes_per_run`);
+  - 1,000,000 rows into each side of a join (`join_inputs`), and 1,000,000 out of it
+    (`join_outputs`);
+  - 100,000 distinct values of the field a `set` compares against in another relation
+    (`distinct_values`).
 
 ## Trust
 
@@ -526,7 +536,7 @@ rules:
 
 A group is the rows that share a `group_by:` value, so `groups:` (with `equal_to:` only) names
 the locales that must exist: one whose files hold no keys lacks every English key, in findings
-with no path.
+with no path. A file that holds only its root (`fr:` or `fr: {}`) holds no keys.
 `plurals: cldr` compares `inbox: { one, other }` with a locale's `inbox: { one, few, many,
 other }` as one key, `inbox`, and `items_one`, `items_other` as `items`. Grouped by a path
 token instead (`fields: { locale: stem, ... }`), every file is a group, and an empty one lacks
@@ -601,11 +611,17 @@ file needs the version 2 modeline, and so does a version 2 `.alint.d/` fragment 
 `version: 1`.
 
 The draft checks what the loader checks of a single file: every key, value type, name,
-reference, field source, transform, format, `read:` form and count. It cannot check:
+reference, field source, transform, format, `read:` form and count, and the keys that need or
+exclude others (one family in a `constraint` rule's `assert:`, one target in its `set`). It cannot
+check:
 
 - what needs every file loaded: names and aliases that resolve, re-exports, cycles, and the plan
   checks above (fields that exist, union parts that bind every field, transforms that apply, the
   literals in `in` and `not_in`);
+- in a `constraint` rule's `assert:`, what needs its relation or compares two of its values: a
+  field the relation has, a literal of the field's type, a `group_by:` or `to: { field: }` that
+  names the compared field, a `determines:` field that is part of the key, a `groups:` entry that
+  names the reference group, and an `entry.path` field under `plurals: cldr`;
 - a name declared twice across selectors, relations and aliases;
 - regexes, a `read:` regex's capture group and JSONPaths;
 - which files may be version 2, and that a version 1 config does not extend a version 2 one;
