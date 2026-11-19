@@ -215,3 +215,75 @@ fn a_trigger_scope_reads_no_manifest_when_the_change_cannot_run_its_rule() {
     let member = Path::new("workspace").join("w1").join("member.json");
     assert_eq!(failures_read(member), Some(1));
 }
+
+/// The run evaluates the relations its rules read in the order `explain`
+/// shows them, [`Plan::evaluation_order`] of the ids they read: each after
+/// those it reads.
+#[test]
+fn the_run_evaluates_relations_in_the_order_explain_shows() {
+    let dir = tempfile::tempdir().unwrap();
+    for name in ["a", "b", "c"] {
+        std::fs::write(
+            dir.path().join(format!("{name}.json")),
+            r#"{"deps": {"x": "1"}}"#,
+        )
+        .unwrap();
+    }
+    let index =
+        crate::walker::walk(dir.path(), &crate::walker::WalkOptions::test_default()).unwrap();
+    let side = |id| crate::relation::plan::Reached {
+        id: RelationId(id),
+        alias: None,
+    };
+    let mut joined = relation("joined", "a.json");
+    joined.relation.rows = Rows::Join(crate::relation::plan::JoinDef {
+        left: side(2),
+        right: side(1),
+        on: vec![("name".into(), "name".into())],
+        unique: crate::relation::plan::JoinSide::Right,
+    });
+    joined.relation.fields[0].1.source =
+        FieldSource::Side(crate::relation::plan::JoinSide::Left, "name".into());
+    let plan = Arc::new(Plan {
+        sources: vec![PlanSource {
+            display: ".alint.yml".into(),
+            path: std::path::PathBuf::from(".alint.yml"),
+            class: ConfigSourceClass::Root,
+            aliases: Vec::new(),
+        }],
+        selectors: Vec::new(),
+        relations: vec![
+            joined,
+            relation("names", "b.json"),
+            relation("deps", "a.json"),
+            relation("other", "c.json"),
+        ],
+        rules: Vec::new(),
+    });
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let rule = |id, input| ReadsRelation {
+        id,
+        level: Level::Error,
+        plan: Arc::clone(&plan),
+        input: [RelationId(input)],
+        seen: Arc::clone(&seen),
+        trigger: None,
+    };
+    let entries = vec![
+        RuleEntry::new(Box::new(rule("reads-other", 3))),
+        RuleEntry::new(Box::new(rule("reads-joined", 0))),
+    ];
+    Engine::from_entries(entries, RuleRegistry::new())
+        .run(dir.path(), &index)
+        .unwrap();
+    let memo = index
+        .relation_memo(&plan)
+        .expect("the run's memo for the plan");
+    let order = plan.evaluation_order(&[RelationId(3), RelationId(0)]);
+    assert_eq!(memo.computed(), order);
+    // Each after those it reads.
+    assert_eq!(
+        order,
+        [RelationId(2), RelationId(1), RelationId(0), RelationId(3)]
+    );
+}

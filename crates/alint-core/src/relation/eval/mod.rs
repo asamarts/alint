@@ -343,6 +343,9 @@ pub struct RunMemo {
     /// The bytes they hold beyond their cells ([`LimitKind::BytesPerRun`]);
     /// a failed take still counts.
     bytes: AtomicUsize,
+    /// The relations evaluated, in the order they were. Test only.
+    #[cfg(test)]
+    computed: Mutex<Vec<RelationId>>,
 }
 
 impl RunMemo {
@@ -354,6 +357,8 @@ impl RunMemo {
             manifests: Mutex::default(),
             cells: AtomicUsize::new(0),
             bytes: AtomicUsize::new(0),
+            #[cfg(test)]
+            computed: Mutex::default(),
         }
     }
 
@@ -378,6 +383,12 @@ impl RunMemo {
     #[cfg(test)]
     pub(crate) fn bytes(&self) -> usize {
         self.bytes.load(Ordering::Relaxed)
+    }
+
+    /// The relations evaluated so far, in the order they were. Test only.
+    #[cfg(test)]
+    pub(crate) fn computed(&self) -> Vec<RelationId> {
+        self.computed.lock().expect("the memo's order lock").clone()
     }
 }
 
@@ -422,7 +433,15 @@ impl Evaluator<'_> {
     /// the memo does not hold it yet.
     fn relation(&self, id: RelationId) -> Outcome {
         for next in self.order(id) {
-            self.memo.outcomes[next.0].get_or_init(|| self.compute(next));
+            self.memo.outcomes[next.0].get_or_init(|| {
+                #[cfg(test)]
+                self.memo
+                    .computed
+                    .lock()
+                    .expect("the memo's order lock")
+                    .push(next);
+                self.compute(next)
+            });
         }
         self.memo.outcomes[id.0]
             .get()
