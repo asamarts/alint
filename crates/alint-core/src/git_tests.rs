@@ -132,6 +132,90 @@ fn every_changed_set_lists_a_rename_under_both_paths_and_none_as_an_addition() {
     );
 }
 
+/// A rename or copy record of `git diff --raw -z` holds two paths after its
+/// status. alint's own diffs pass `--no-renames`, so Git lists a rename as a
+/// removal and an addition, but a record of two paths still reads as one:
+/// both paths are changed, both marked for a submodule, and the record after
+/// it parses, also when the new path starts with `:` as a record does. The
+/// records here are Git's own, renames detected, staged and over a range.
+#[test]
+fn a_rename_record_adds_both_its_paths_and_the_next_record_still_parses() {
+    let source = make_repo_with_commits(&["submodule"]);
+    let repo = make_repo_with_commits(&["init"]);
+    let root = repo.path();
+    let git = |args: &[&str]| {
+        let output = crate::git::test_git()
+            .arg("-C")
+            .arg(root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output.stdout
+    };
+    git(&[
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        "-q",
+        source.path().to_str().unwrap(),
+        "sub",
+    ]);
+    std::fs::write(root.join("old.txt"), "the same contents\n").unwrap();
+    std::fs::write(root.join("gone.txt"), "gone\n").unwrap();
+    std::fs::write(root.join("z.txt"), "z\n").unwrap();
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "base"]);
+    git(&["branch", "base"]);
+    // Windows allows no `:` in a file name.
+    let new = if cfg!(windows) { "new.txt" } else { ":new.txt" };
+    git(&["mv", "sub", "moved"]);
+    git(&["mv", "old.txt", new]);
+    git(&["rm", "-q", "gone.txt"]);
+    std::fs::write(root.join("z.txt"), "zz\n").unwrap();
+    git(&["add", "-A"]);
+
+    let paths: HashSet<PathBuf> = [
+        ".gitmodules",
+        "sub",
+        "moved",
+        "old.txt",
+        new,
+        "gone.txt",
+        "z.txt",
+    ]
+    .into_iter()
+    .map(PathBuf::from)
+    .collect();
+    let directories = HashSet::from([PathBuf::from("sub"), PathBuf::from("moved")]);
+    let read = |stdout: &[u8]| {
+        let mut set = ChangedSet::default();
+        set.add_raw_diff(stdout);
+        (set.paths, set.directories)
+    };
+    let staged = git(&["diff", "--cached", "--raw", "-M", "--relative", "-z"]);
+    assert_eq!(staged.windows(5).filter(|w| w == b" R100").count(), 2);
+    assert_eq!(read(&staged), (paths.clone(), directories.clone()));
+    // And as alint reads the change itself.
+    let set = collect_changed_set(root, None).expect("changed set");
+    assert_eq!(
+        (set.paths, set.directories),
+        (paths.clone(), directories.clone())
+    );
+
+    git(&["commit", "-qm", "rename"]);
+    let range = git(&["diff", "--raw", "-M", "--relative", "-z", "base...HEAD"]);
+    assert_eq!(range.windows(5).filter(|w| w == b" R100").count(), 2);
+    assert_eq!(read(&range), (paths.clone(), directories.clone()));
+    let set = collect_changed_set(root, Some("base")).expect("changed set");
+    assert_eq!((set.paths, set.directories), (paths, directories));
+}
+
 /// The added set detects renames, and no copies, whatever the repository's
 /// `diff.renames` says: with `false` a moved changelog entry would count as a
 /// new one, and with `copies` a new file copied from a modified one would be
