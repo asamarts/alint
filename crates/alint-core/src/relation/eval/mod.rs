@@ -135,8 +135,12 @@ pub struct Cell {
     /// Where the value is written: the key's span for `entry.key` (and for
     /// the `entry.parent`, `entry.root` and `entry.path` of the entry), the
     /// value's for `entry.value` and a `bound:` field (the key's for a YAML
-    /// block scalar, which has none), none for a path token or a `read:`
-    /// value.
+    /// block scalar, which has none), and the value's for a `read:` value
+    /// where its reader places it (a `lines:` line, a `regex:` capture, a
+    /// JSON, YAML or TOML value an object member holds; not a `whole_file`
+    /// value or a value in an array:
+    /// [`crate::relation::ExtractAdapter::with_spans`]); none for a path
+    /// token.
     pub span: Option<ByteSpan>,
     /// For an `entry.path` field, the key path's segments, after
     /// `strip-root`, whose [`Pointer::render`] the value is (until a string

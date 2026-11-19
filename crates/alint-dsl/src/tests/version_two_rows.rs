@@ -425,6 +425,90 @@ fn a_top_level_key_holding_a_value_still_fails_strip_root() {
     );
 }
 
+/// A `read:` row's value keeps its byte span, so a finding about it has a
+/// line and column, as one about an entry's has: a `lines:` value's trimmed
+/// line, a `regex:` value's capture, and a JSON, YAML or TOML value's own
+/// span; a value in an array, and a `whole_file` value, have none.
+#[test]
+fn a_read_value_keeps_its_place() {
+    let cases = [
+        (
+            "{ json: \"$.*\" }",
+            "a.json",
+            "{\"x\": \"dup\",\n  \"y\": \"dup\"}\n",
+            ("1:7", "2:8"),
+        ),
+        (
+            "{ yaml: \"$.*\" }",
+            "a.yml",
+            "x: dup\ny:   'dup'\n",
+            ("1:4", "2:6"),
+        ),
+        (
+            "{ toml: \"$.*\" }",
+            "a.toml",
+            "x = \"dup\"\n\n y = \"dup\"\n",
+            ("1:5", "3:6"),
+        ),
+        (
+            "{ lines: {} }",
+            "a.txt",
+            "  dup  \n# note\n\ndup\n",
+            ("1:3", "4:1"),
+        ),
+        (
+            "{ regex: \"(?m)^v=(\\\\S+)\" }",
+            "a.env",
+            "v=dup\nw=1\n  v=no\nv=dup\n",
+            ("1:3", "4:3"),
+        ),
+    ];
+    for (read, file, body, (first, repeat)) in cases {
+        let config = format!(
+            "version: 2\nrelations:\n  values:\n    from: {{ paths: {file} }}\n    read: \
+             {read}\n    fields: {{ v: value }}\nrules:\n  - id: c\n    kind: constraint\n    \
+             input: values\n    assert: {{ unique: {{ key: [v] }} }}\n    level: error\n"
+        );
+        let results = super::constraint_families::run(&config, &[(file, body)]);
+        let findings = super::constraint_families::findings(&results, "c");
+        assert_eq!(findings.len(), 1, "{read}: {findings:#?}");
+        let (place, related) = findings[0].split_once(": ").unwrap();
+        assert_eq!(place, format!("{file}:{repeat}"), "{read}: {findings:#?}");
+        assert!(
+            related.ends_with(&format!("~ the first row with this key: {file}:{first}")),
+            "{read}: {findings:#?}"
+        );
+    }
+    // A value in an array, and the whole file, have no place.
+    for (read, paths, files, place) in [
+        (
+            "{ json: \"$.a[*]\" }",
+            "a.json",
+            &[("a.json", "{\"a\": [\"dup\", \"dup\"]}\n")][..],
+            "a.json",
+        ),
+        (
+            "{ whole_file: {} }",
+            "\"*.txt\"",
+            &[("b.txt", "same\n"), ("c.txt", "same\n")][..],
+            "c.txt",
+        ),
+    ] {
+        let config = format!(
+            "version: 2\nrelations:\n  values:\n    from: {{ paths: {paths} }}\n    read: \
+             {read}\n    fields: {{ v: value }}\nrules:\n  - id: c\n    kind: constraint\n    \
+             input: values\n    assert: {{ unique: {{ key: [v] }} }}\n    level: error\n"
+        );
+        let results = super::constraint_families::run(&config, files);
+        let findings = super::constraint_families::findings(&results, "c");
+        assert_eq!(findings.len(), 1, "{read}: {findings:#?}");
+        assert!(
+            findings[0].starts_with(&format!("{place}: ")),
+            "{read}: {findings:#?}"
+        );
+    }
+}
+
 pub(super) const NODE_PINS: &str = r#"version: 2
 relations:
   node-pins:

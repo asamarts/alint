@@ -1158,8 +1158,9 @@ fn a_fresh_decode_takes_what_it_holds_from_the_runs_bytes() {
     let held = RunMemo::new(Arc::clone(&plan));
     run_with_caches(&plan, 0, &tree, limits, (&reads, &decodes, &held)).unwrap();
     assert_eq!(decodes.decodes(), 1);
-    // The decode the cache holds, found by its adapter, path and limits.
-    let adapter = crate::relation::ExtractAdapter::new(
+    // The decode the cache holds, found by its adapter (a `read:`'s places
+    // its values), path and limits.
+    let adapter = crate::relation::ExtractAdapter::with_spans(
         crate::extract::Extract::structured(crate::structured_format::Format::Json, "$.v[*]")
             .unwrap(),
     );

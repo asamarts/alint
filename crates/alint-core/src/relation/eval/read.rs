@@ -479,7 +479,7 @@ impl PartReader {
                     }
                 };
                 Ok(Self::Read {
-                    adapter: ExtractAdapter::new(extract),
+                    adapter: ExtractAdapter::with_spans(extract),
                     read: read.clone(),
                     optional: *optional,
                     bound,
@@ -1051,27 +1051,27 @@ impl<'r> Rows<'r> {
             None => vec![None; self.relation.fields.len()],
         };
         // Shared with the decode, which took their bytes.
-        let values: Vec<(Option<Value>, u32)> = if output.rows.is_empty() {
+        let values: Vec<(Option<Value>, u32, Option<ByteSpan>)> = if output.rows.is_empty() {
             if optional || !output.notes.is_empty() || !output.non_strings.is_empty() {
                 Vec::new()
             } else {
-                vec![(None, 0)]
+                vec![(None, 0, None)]
             }
         } else {
             output
                 .rows
                 .iter()
-                .map(|row| (row.value().cloned(), row.ordinal))
+                .map(|row| (row.value().cloned(), row.ordinal, row.span))
                 .collect()
         };
-        for (value, ordinal) in values {
+        for (value, ordinal, value_span) in values {
             self.take_row()?;
             let provenance = self.provenance(None, ordinal, false)?;
             let mut cells = Vec::with_capacity(self.relation.fields.len());
             for (position, (name, field)) in self.relation.fields.iter().enumerate() {
                 let (value, span) = match &field.source {
                     FieldSource::Path(token) => (Some(self.token(*token)), None),
-                    FieldSource::Value => (value.clone(), None),
+                    FieldSource::Value => (value.clone(), value_span),
                     FieldSource::Bound(_) => {
                         cells.push(bound[position].clone().expect("a bound field's cell"));
                         continue;

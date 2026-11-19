@@ -157,7 +157,7 @@ impl Adapter for EntryValuesAdapter {
                 self.format.label()
             ))
         })?;
-        let entries = self.entries(text, limits)?;
+        let entries = entry_table(self.format, text, limits)?;
         // The `JSONPath`s run over the parsed tree, as every structured
         // extract does; the entries give what the tree loses (each key's
         // span, a number's lexeme, a repeated key, the members' order).
@@ -258,29 +258,36 @@ impl Adapter for EntryValuesAdapter {
     }
 }
 
-impl EntryValuesAdapter {
-    fn entries(&self, text: &str, limits: &Limits) -> Result<EntryTable, AdapterError> {
-        if self.format == Format::Toml {
-            return TomlRowsAdapter::values(text, limits);
-        }
-        let max = limits.get(LimitKind::RowsPerExtractor);
-        extract_entry_values_bounded(self.format, text, max).map_err(|error| match error {
-            EntryRowsError::Limit { limit } => AdapterError::Limit(LimitExceeded {
-                kind: LimitKind::RowsPerExtractor,
-                limit,
-                reached: limit + 1,
-            }),
-            EntryRowsError::Parse(message) => AdapterError::Parse(message),
-            EntryRowsError::UnsupportedFormat(_) => {
-                unreachable!("`new` accepts JSON, YAML and TOML only")
-            }
-        })
+/// A JSON, YAML or TOML (`format`) document's entries with their values and
+/// spans, at most the rows `limits` allows: what an `entries:` part reads,
+/// and what places a structured `read:`'s values
+/// ([`super::ExtractAdapter::with_spans`]).
+pub(super) fn entry_table(
+    format: Format,
+    text: &str,
+    limits: &Limits,
+) -> Result<EntryTable, AdapterError> {
+    if format == Format::Toml {
+        return TomlRowsAdapter::values(text, limits);
     }
+    let max = limits.get(LimitKind::RowsPerExtractor);
+    extract_entry_values_bounded(format, text, max).map_err(|error| match error {
+        EntryRowsError::Limit { limit } => AdapterError::Limit(LimitExceeded {
+            kind: LimitKind::RowsPerExtractor,
+            limit,
+            reached: limit + 1,
+        }),
+        EntryRowsError::Parse(message) => AdapterError::Parse(message),
+        EntryRowsError::UnsupportedFormat(format) => AdapterError::Parse(format!(
+            "value-bearing entry rows are not supported for {}",
+            format.label()
+        )),
+    })
 }
 
 /// A row-free index of a document: each tree node's place in document order
 /// and key path, and each object's members.
-struct Document<'d> {
+pub(super) struct Document<'d> {
     entries: &'d EntryTable,
     /// Each node of the tree, by address: its place in a walk of the tree
     /// in document order, and its key path when an entry is at or below it.
@@ -298,7 +305,7 @@ struct Document<'d> {
 const NONE: u32 = u32::MAX;
 
 impl<'d> Document<'d> {
-    fn new(entries: &'d EntryTable, tree: &serde_json::Value) -> Self {
+    pub(super) fn new(entries: &'d EntryTable, tree: &serde_json::Value) -> Self {
         let mut first = vec![NONE; entries.paths.len()];
         let mut next = vec![NONE; entries.rows.len()];
         for (index, row) in entries.rows.iter().enumerate().rev() {
@@ -370,7 +377,7 @@ impl<'d> Document<'d> {
     }
 
     /// `node`'s key path, when an entry is at or below it.
-    fn path(&self, node: &serde_json::Value) -> Option<PathId> {
+    pub(super) fn path(&self, node: &serde_json::Value) -> Option<PathId> {
         self.nodes
             .get(&std::ptr::from_ref(node))
             .and_then(|(_, path)| *path)
@@ -395,7 +402,7 @@ impl<'d> Document<'d> {
     }
 
     /// The rows whose key path is `at` (more than one for a repeated key).
-    fn rows_at(&self, at: PathId) -> impl Iterator<Item = usize> + '_ {
+    pub(super) fn rows_at(&self, at: PathId) -> impl Iterator<Item = usize> + '_ {
         self.members(self.entries.paths.parent(at))
             .filter(move |index| self.entries.rows[*index].path == at)
     }
