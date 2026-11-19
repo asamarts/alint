@@ -312,20 +312,29 @@ fn tree_files_are_shared_only_for_a_rule_that_looks_them_up_on_the_filtered_inde
 
     // No `has_ancestor` anywhere: never shared.
     let plain = engine(vec![stub("t", "**/*.rs")], changed.clone());
-    assert!(!plain.needs_tree_files(&index, None, false));
-    assert!(!plain.needs_tree_files(&index, None, true));
+    let needs = |engine: &Engine, per_file_on_filtered: bool| {
+        engine.needs_tree_files(&engine.changed_pass(&index, None), per_file_on_filtered)
+    };
+    assert!(!needs(&plain, false));
+    assert!(!needs(&plain, true));
     // A rule-by-rule rule with a lookup and a changed in-scope file: shared.
-    assert!(engine(vec![rule_major(false)], changed.clone()).needs_tree_files(&index, None, false));
+    assert!(needs(
+        &engine(vec![rule_major(false)], changed.clone()),
+        false
+    ));
     // ...but not when it is `--changed`-skipped (no in-scope file changed),
     let other: HashSet<PathBuf> = [PathBuf::from("README.md")].into();
-    assert!(!engine(vec![rule_major(false)], other).needs_tree_files(&index, None, false));
+    assert!(!needs(&engine(vec![rule_major(false)], other), false));
     // ...nor when it is full-index (it gets the full index anyway).
-    assert!(!engine(vec![rule_major(true)], changed.clone()).needs_tree_files(&index, None, false));
+    assert!(!needs(
+        &engine(vec![rule_major(true)], changed.clone()),
+        false
+    ));
     // A per-file rule: `check` matches its scope on the full index (no share);
     // `fix` evaluates it on the filtered index (share).
     let pf = engine(vec![per_file()], changed);
-    assert!(!pf.needs_tree_files(&index, None, false));
-    assert!(pf.needs_tree_files(&index, None, true));
+    assert!(!needs(&pf, false));
+    assert!(needs(&pf, true));
 }
 
 #[test]

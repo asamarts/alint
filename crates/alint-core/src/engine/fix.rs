@@ -922,7 +922,9 @@ impl Engine {
         if git_available {
             self.resolve_changed_paths(root, index, &when_env)?;
         }
-        self.resolve_manifest_paths(root, index, &when_env, Some(created))?;
+        // The pass's `--changed` gates, with the files this run created.
+        let pass = self.changed_pass(index, Some(created));
+        self.resolve_manifest_paths(root, &when_env, &pass)?;
         // Propagate BOTH resolved caches onto every alternate index the fix loop
         // may `pick_ctx` (see `run`): the `--changed` filtered index and the
         // git-tracked file-only / dir-aware indexes, so `fix` respects manifest
@@ -954,7 +956,7 @@ impl Engine {
         // building the set is a pass over the full index that other `--changed`
         // runs should not pay.
         if let Some(fi) = filtered_index.as_ref()
-            && self.needs_tree_files(index, Some(created), true)
+            && self.needs_tree_files(&pass, true)
         {
             fi.share_tree_files_from(index);
         }
@@ -997,8 +999,7 @@ impl Engine {
             // dropped (the old silent behavior, which made `fix` exit 0 while
             // `check` reported them and exited 1). `Some(created)` keeps a rule
             // alive for a file a fix in scope created (its cascade must finish).
-            let skipped_for_changed =
-                self.skip_for_changed(entry.rule.as_ref(), full_ctx.index, Some(created));
+            let skipped_for_changed = self.skip_for_changed(entry.rule.as_ref(), &pass);
             if skipped_for_changed && !entry.expect_matches() {
                 continue;
             }

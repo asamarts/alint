@@ -244,7 +244,7 @@ impl Engine {
             env: self.when_environment(),
         };
         if self
-            .resolve_manifest_paths(root, index, &when_env, None)
+            .resolve_manifest_paths(root, &when_env, &self.changed_pass(index, None))
             .is_err()
         {
             return true;
@@ -420,7 +420,12 @@ impl Engine {
     /// that is off is not built by the CLI; an entry the engine is given
     /// runs, so its relations are evaluated here too.) Each outcome stays in
     /// the run's memo on the index, where the rule reads it.
-    pub(super) fn evaluate_read_relations(&self, ctx: &Context<'_>, when_env: &WhenEnv<'_>) {
+    pub(super) fn evaluate_read_relations(
+        &self,
+        ctx: &Context<'_>,
+        when_env: &WhenEnv<'_>,
+        pass: &super::gates::ChangedPass<'_>,
+    ) {
         use crate::relation::plan::{Plan, RelationId};
         let mut wanted: Vec<(&Arc<Plan>, RelationId)> = Vec::new();
         for entry in &self.entries {
@@ -431,7 +436,7 @@ impl Engine {
                 .when
                 .as_ref()
                 .is_some_and(|expr| !matches!(expr.evaluate(when_env), Ok(true)))
-                || self.skip_for_changed(entry.rule.as_ref(), ctx.index, None)
+                || self.skip_for_changed(entry.rule.as_ref(), pass)
             {
                 continue;
             }
@@ -633,7 +638,10 @@ impl Engine {
         if git_available {
             self.resolve_changed_paths(root, index, &when_env)?;
         }
-        self.resolve_manifest_paths(root, index, &when_env, None)?;
+        // The pass's `--changed` gates, which decide once what each rule's
+        // trigger scope takes of the changed paths.
+        let pass = self.changed_pass(index, None);
+        self.resolve_manifest_paths(root, &when_env, &pass)?;
         let alt_indexes = [
             filtered_index.as_ref(),
             git_tracked_indexes
@@ -656,7 +664,7 @@ impl Engine {
         let manifest_gates = self.manifest_gates_by_entry(index, &when_env)?;
         // The relations the rules read, in plan order, before they fan out.
         let t_relations = Instant::now();
-        self.evaluate_read_relations(&full_ctx, &when_env);
+        self.evaluate_read_relations(&full_ctx, &when_env, &pass);
         phase!(t_relations, "evaluate_relations");
         let gate_inputs = RunGateInputs {
             when_env: &when_env,
@@ -672,7 +680,7 @@ impl Engine {
         // building the set is a pass over the full index that other `--changed`
         // runs should not pay.
         if let Some(fi) = filtered_index.as_ref()
-            && self.needs_tree_files(index, None, false)
+            && self.needs_tree_files(&pass, false)
         {
             fi.share_tree_files_from(index);
         }
@@ -702,8 +710,7 @@ impl Engine {
                     if entry.rule.as_per_file().is_some() {
                         return None;
                     }
-                    let skipped_for_changed =
-                        self.skip_for_changed(entry.rule.as_ref(), full_ctx.index, None);
+                    let skipped_for_changed = self.skip_for_changed(entry.rule.as_ref(), &pass);
                     let ctx = pick_ctx(
                         entry.rule.as_ref(),
                         self.dependency_changed(entry.rule.as_ref()),
@@ -778,8 +785,14 @@ impl Engine {
         // matches. Coalesces N reads of one file across N rules
         // sharing it.
         let t_per_file = Instant::now();
-        let per_file_results =
-            self.run_per_file(root, &full_ctx, filtered_ctx.as_ref(), &gate_inputs, trace);
+        let per_file_results = self.run_per_file(
+            root,
+            &full_ctx,
+            filtered_ctx.as_ref(),
+            &gate_inputs,
+            &pass,
+            trace,
+        );
         phase!(
             t_per_file,
             "per_file_partition",
@@ -833,9 +846,11 @@ impl Engine {
         full_ctx: &'a Context<'a>,
         filtered_ctx: Option<&'a Context<'a>>,
         gate_inputs: &RunGateInputs<'_, '_>,
+        pass: &super::gates::ChangedPass<'_>,
         trace: Option<&TraceSession>,
     ) -> Vec<(usize, RuleResult)> {
-        let (live, gate_results) = self.collect_live_per_file_entries(full_ctx, gate_inputs, trace);
+        let (live, gate_results) =
+            self.collect_live_per_file_entries(full_ctx, gate_inputs, pass, trace);
         if live.is_empty() {
             return gate_results;
         }
@@ -953,6 +968,7 @@ impl Engine {
         &'a self,
         ctx: &Context<'_>,
         gate_inputs: &RunGateInputs<'_, '_>,
+        pass: &super::gates::ChangedPass<'_>,
         trace: Option<&TraceSession>,
     ) -> LivePerFileEntries<'a> {
         let index = ctx.index;
@@ -966,7 +982,7 @@ impl Engine {
             // a change outside its scope (a deleted target) can still change its
             // verdict, exactly as for `markdown_links_resolve`.
             let skipped_for_changed = !entry.rule.requires_full_index()
-                && self.skip_for_changed(entry.rule.as_ref(), index, None);
+                && self.skip_for_changed(entry.rule.as_ref(), pass);
             match evaluate_entry_gates(
                 idx,
                 entry,
@@ -1050,7 +1066,8 @@ impl Engine {
         if git_available {
             self.resolve_changed_paths(root, index, &when_env)?;
         }
-        self.resolve_manifest_paths(root, index, &when_env, None)?;
+        let pass = self.changed_pass(index, None);
+        self.resolve_manifest_paths(root, &when_env, &pass)?;
 
         let ctx = Context {
             root,
@@ -1074,7 +1091,8 @@ impl Engine {
             git_available,
             changed_active: self.changed_paths.is_some(),
         };
-        let (live, gate_results) = self.collect_live_per_file_entries(&ctx, &gate_inputs, None);
+        let (live, gate_results) =
+            self.collect_live_per_file_entries(&ctx, &gate_inputs, &pass, None);
 
         // Dispatch each in-scope rule against the supplied bytes. The
         // raw violations (notes included) are bucketed by entry index;

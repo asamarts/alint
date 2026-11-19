@@ -4,7 +4,8 @@
 //! through joins, membership filters and a `set`'s other relation, and
 //! narrowed by each selector's `scope_filter:` as the selector is. A change
 //! to what a predicate consults (a marker, a manifest) triggers too, as does
-//! an ignore file where the selector's paths can match. The command line is
+//! an ignore file, or a directory Git lists whole (a submodule, an untracked
+//! repository), where the selector's paths can match. The command line is
 //! tested in `crates/alint/tests/constraint_changed_cli.rs`.
 
 use std::collections::HashSet;
@@ -269,6 +270,21 @@ fn a_changed_ignore_file_runs_the_rules_whose_selectors_match_below_it() {
         .with_global_git_excludes(false)
         .with_respect_gitignore(false);
     assert_eq!(ran_walked(CONFIG, TREE, &[".gitignore"], &unignored), []);
+}
+
+#[test]
+fn a_change_git_lists_as_a_directory_runs_the_rules_whose_selectors_match_below_it() {
+    // Git lists a submodule (a gitlink) by its directory alone, and an
+    // untracked repository as `dir/`, though the walk reads the files below.
+    let manifests = ["in", "input", "join", "not-in", "set"];
+    assert_eq!(triggered(&["packages/a"]), manifests);
+    assert_eq!(triggered(&["packages/a/"]), manifests);
+    assert_eq!(triggered(&["packages"]), manifests);
+    assert_eq!(triggered(&["mods"]), ["marked"]);
+    // Below a directory where no selector's paths match, nothing.
+    assert_eq!(triggered(&["src"]), NONE);
+    // A path the walk holds no directory at is judged as a file.
+    assert_eq!(triggered(&["packages/gone"]), NONE);
 }
 
 #[test]

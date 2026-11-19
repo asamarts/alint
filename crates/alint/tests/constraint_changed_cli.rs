@@ -383,3 +383,109 @@ fn a_renamed_required_file_runs_a_version_one_full_index_rule() {
         "committed"
     );
 }
+
+/// A locale policy over the locales of `dir`.
+fn locales_below(dir: &str) -> String {
+    format!(
+        "version: 2\nrelations:\n  messages:\n    from: {{ paths: \"{dir}/locales/*.json\" }}\n    \
+         entries: {{ format: json, at: \"$\" }}\n    fields: {{ locale: stem, key: entry.key }}\n\
+         rules:\n  - id: locales-match-english\n    kind: constraint\n    input: messages\n    \
+         assert: {{ set: {{ field: key, group_by: locale, equal_to: {{ group: en }} }} }}\n    \
+         level: error\n"
+    )
+}
+
+/// A committed repository at `root` of English and German locales that
+/// agree.
+fn locale_repository(root: &Path) {
+    write(root, "locales/en.json", "{\"home\": \"Home\"}\n");
+    write(root, "locales/de.json", "{\"home\": \"Start\"}\n");
+    git(root, &["init", "-q"]);
+    git(root, &["config", "commit.gpgsign", "false"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "locales"]);
+}
+
+/// English gains a key in the repository at `root`, committed there.
+fn english_gains_a_key(root: &Path) {
+    write(
+        root,
+        "locales/en.json",
+        "{\"home\": \"Home\", \"about\": \"About\"}\n",
+    );
+    git(root, &["commit", "-qam", "about"]);
+}
+
+/// Git lists a submodule whose commit moved by its path alone, though the walk
+/// reads the files in it: the change runs every rule whose selectors can
+/// match below it, and no other.
+#[test]
+fn a_submodule_change_runs_the_rules_that_read_below_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("source");
+    locale_repository(&source);
+    let root = tmp.path().join("main");
+    write(&root, ".alint.yml", &locales_below("sub"));
+    git(&root, &["init", "-q"]);
+    git(&root, &["config", "commit.gpgsign", "false"]);
+    let source = source.to_str().unwrap();
+    for path in ["sub", "vendor"] {
+        git(
+            &root,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                "-q",
+                source,
+                path,
+            ],
+        );
+    }
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-qm", "base"]);
+    git(&root, &["branch", "base"]);
+
+    // `vendor` moves: no selector reads below it.
+    english_gains_a_key(&root.join("vendor"));
+    git(&root, &["add", "vendor"]);
+    assert_eq!(check(&root, &["--changed"]), (Some(0), Vec::new()));
+
+    // `sub` moves: German, unchanged, now lacks the key English gained.
+    english_gains_a_key(&root.join("sub"));
+    git(&root, &["add", "sub"]);
+    let expected = vec![ran("locales-match-english", &["sub/locales/de.json"])];
+    assert_eq!(check(&root, &["--changed"]), (Some(1), expected.clone()));
+    git(&root, &["commit", "-qm", "move sub"]);
+    assert_eq!(check(&root, &["--base", "base"]), (Some(1), expected));
+}
+
+/// Git lists an untracked repository as `dir/`, and none of its files: the
+/// change runs every rule whose selectors can match below it, and no other.
+#[test]
+fn an_untracked_repository_runs_the_rules_that_read_below_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    write(root, ".alint.yml", &locales_below("nested"));
+    git(root, &["init", "-q"]);
+    git(root, &["config", "commit.gpgsign", "false"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    let elsewhere = root.join("elsewhere");
+    locale_repository(&elsewhere);
+    english_gains_a_key(&elsewhere);
+    assert_eq!(check(root, &["--changed"]), (Some(0), Vec::new()));
+
+    let nested = root.join("nested");
+    locale_repository(&nested);
+    english_gains_a_key(&nested);
+    assert_eq!(
+        check(root, &["--changed"]),
+        (
+            Some(1),
+            vec![ran("locales-match-english", &["nested/locales/de.json"])]
+        )
+    );
+}

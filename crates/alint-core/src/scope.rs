@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::path::Path;
 
 use globset::{Candidate, Glob, GlobBuilder, GlobSet, GlobSetBuilder};
@@ -246,6 +248,13 @@ impl Scope {
         })
     }
 
+    /// Whether [`Self::path_matches`] tests a path against a `GlobSet`, not
+    /// against a sole literal include by comparing bytes.
+    #[cfg(test)]
+    pub(crate) fn matches_by_glob(&self) -> bool {
+        self.literal.is_none()
+    }
+
     /// The entries of `index`, directories and files, that this scope can
     /// match, in index order: those at and below the directories its include
     /// patterns start with (`locales/*.json`, or a nested rule's
@@ -309,6 +318,115 @@ impl Scope {
     }
 }
 
+/// The paths one `--changed` pass tests scopes against (the changed set, and
+/// the files this `fix` run created), indexed once so that a scope finds the
+/// few its patterns can match without testing the others
+/// ([`Self::candidates`]).
+#[derive(Debug)]
+pub(crate) struct ChangedPaths<'p> {
+    paths: Vec<&'p Path>,
+    /// Each directory a path lies below, `a` and `a/b` for `a/b/c.json`,
+    /// with the positions in `paths` of the paths below it.
+    below: HashMap<&'p Path, Vec<usize>>,
+    /// The positions in `paths` of the paths with each file name.
+    by_name: HashMap<&'p OsStr, Vec<usize>>,
+    /// The positions in `paths` of those the index holds as a directory.
+    directories: Vec<usize>,
+}
+
+impl<'p> ChangedPaths<'p> {
+    /// `paths`, with each one `index` holds as a directory: Git lists a
+    /// submodule (a gitlink) by its path alone, and an untracked repository
+    /// as `sub/`, though the walk reads the files in them.
+    pub(crate) fn new(paths: impl IntoIterator<Item = &'p Path>, index: &FileIndex) -> Self {
+        let paths: Vec<&Path> = paths.into_iter().collect();
+        let mut below: HashMap<&Path, Vec<usize>> = HashMap::new();
+        let mut by_name: HashMap<&OsStr, Vec<usize>> = HashMap::new();
+        let mut directories = Vec::new();
+        for (position, path) in paths.iter().enumerate() {
+            for dir in path.ancestors().skip(1) {
+                if dir.as_os_str().is_empty() {
+                    break;
+                }
+                below.entry(dir).or_default().push(position);
+            }
+            if let Some(name) = path.file_name() {
+                by_name.entry(name).or_default().push(position);
+            }
+            if is_directory(index, path) {
+                directories.push(position);
+            }
+        }
+        Self {
+            paths,
+            below,
+            by_name,
+            directories,
+        }
+    }
+
+    /// The path at `position`.
+    pub(crate) fn path(&self, position: usize) -> &'p Path {
+        self.paths[position]
+    }
+
+    /// The positions of the paths named `name`.
+    pub(crate) fn named(&self, name: &OsStr) -> &[usize] {
+        self.by_name.get(name).map_or(&[], Vec::as_slice)
+    }
+
+    /// The positions of the paths the index holds as a directory.
+    pub(crate) fn directories(&self) -> &[usize] {
+        &self.directories
+    }
+
+    /// The positions of the paths `scope`'s include patterns can match,
+    /// judged from what the patterns start with, in ascending order: for a
+    /// sole literal include the paths with its file name, for includes that
+    /// each start with a literal directory ([`literal_dir_prefix`]) the paths
+    /// below one of them, and every path otherwise. The caller still tests
+    /// each one with [`Scope::path_matches`]; a path left out never matches.
+    pub(crate) fn candidates(&self, scope: &Scope) -> Vec<usize> {
+        if let Some(literal) = &scope.literal {
+            let name = std::str::from_utf8(literal)
+                .ok()
+                .and_then(|literal| Path::new(literal).file_name());
+            return match name {
+                Some(name) => self.named(name).to_vec(),
+                // Not a name: test every path, as the pattern alone cannot
+                // tell which one it matches.
+                None => (0..self.paths.len()).collect(),
+            };
+        }
+        let Some(dirs) = &scope.within else {
+            return (0..self.paths.len()).collect();
+        };
+        let mut positions: Vec<usize> = dirs
+            .iter()
+            .filter_map(|dir| self.below.get(&**dir))
+            .flatten()
+            .copied()
+            .collect();
+        if dirs.len() > 1 {
+            positions.sort_unstable();
+            positions.dedup();
+        }
+        positions
+    }
+}
+
+/// Whether `index` holds `path` as a directory, found by a search of its
+/// sorted entries, with no lookup table to build.
+fn is_directory(index: &FileIndex, path: &Path) -> bool {
+    match index.subtree(path) {
+        Some(range) => index
+            .entries
+            .get(range.start)
+            .is_some_and(|entry| !range.is_empty() && entry.is_dir && *entry.path == *path),
+        None => index.dirs().any(|entry| *entry.path == *path),
+    }
+}
+
 #[cfg(debug_assertions)]
 std::thread_local! {
     /// How many paths [`Scope::matches`] tested on this thread.
@@ -354,7 +472,7 @@ impl Scope {
     /// out-of-line `is_match_candidate` also keeps this body small enough that
     /// callers inline it whole, which matters in the per-file dispatch loop.
     #[inline]
-    fn path_matches(&self, path: &Path) -> bool {
+    pub(crate) fn path_matches(&self, path: &Path) -> bool {
         if let Some(literal) = &self.literal {
             return literal_matches(literal, path);
         }

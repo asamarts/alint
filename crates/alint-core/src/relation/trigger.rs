@@ -22,10 +22,20 @@
 //!
 //! An ignore file the walk reads ([`IGNORE_FILE_NAMES`]) decides which files
 //! below its directory are in the index, so a change to one triggers every
-//! selector whose `paths:` can match there.
+//! selector whose `paths:` can match there. So does a change Git lists as a
+//! directory the walk holds: a submodule, whose files Git does not list, or
+//! an untracked repository (`sub/`), whose files it does not list either.
+//!
+//! The engine decides once per pass what each rule's scope takes of the
+//! changed paths ([`TriggerScope::hits`]), and reads it before and after it
+//! resolves the manifests: each selector tests a changed path against its
+//! globs at most once, and not at all one outside the directories its
+//! `paths:` start with ([`ChangedPaths::candidates`]).
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
+use crate::scope::ChangedPaths;
 use crate::{FileIndex, Scope, ScopeFilter};
 
 use super::plan::{Member, Plan, Predicate, RelationId, Rows, SelectorId, SelectorRef};
@@ -40,6 +50,10 @@ const IGNORE_FILE_NAMES: [&str; 2] = [".gitignore", ".ignore"];
 #[derive(Debug, Clone, Default)]
 pub struct TriggerScope {
     selectors: Vec<TriggerSelector>,
+    /// How many times a selector tested a changed path against its globs.
+    /// Test only, shared by the scope's clones.
+    #[cfg(test)]
+    glob_tests: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 
 /// Which selector of a plan a trigger scope holds, as `explain` names it.
@@ -77,6 +91,8 @@ impl TriggerScope {
         }
         Self {
             selectors: walk.selectors,
+            #[cfg(test)]
+            glob_tests: std::sync::Arc::default(),
         }
     }
 
@@ -91,17 +107,70 @@ impl TriggerScope {
     /// makes the rule run.
     #[must_use]
     pub fn matches(&self, path: &Path, index: &FileIndex) -> bool {
-        self.selectors
-            .iter()
-            .any(|selector| selector.matches(path, index, true))
+        let changed = ChangedPaths::new([path], index);
+        let mut pending = Vec::new();
+        self.hits(&changed, index, &mut pending) || self.pending_runs(&pending, &changed, index)
     }
 
-    /// [`Self::matches`] with every manifest-derived predicate left out, for
-    /// when the engine has not resolved the manifests yet.
-    pub(crate) fn matches_without_manifest(&self, path: &Path, index: &FileIndex) -> bool {
-        self.selectors
-            .iter()
-            .any(|selector| selector.matches(path, index, false))
+    /// What the scope takes of `changed`: `true` when a changed path runs
+    /// the rule whatever the manifests say. Otherwise each `(selector, path)`
+    /// that the selector's globs and other predicates take, for a selector
+    /// with manifest-derived predicates, goes to `pending`: it runs the rule
+    /// when the manifests keep it too ([`Self::pending_runs`]), and with the
+    /// manifests left out, before the engine resolves them, any one does.
+    /// Each selector tests a path against its globs at most once, and not
+    /// at all one its `paths:` cannot match ([`ChangedPaths::candidates`]).
+    pub(crate) fn hits(
+        &self,
+        changed: &ChangedPaths<'_>,
+        index: &FileIndex,
+        pending: &mut Vec<(usize, usize)>,
+    ) -> bool {
+        for (position, selector) in self.selectors.iter().enumerate() {
+            let Some(scope) = &selector.scope else {
+                return true;
+            };
+            if selector.consulted_changed(scope, changed, index) {
+                return true;
+            }
+            for path in changed.candidates(scope) {
+                let changed_path = changed.path(path);
+                #[cfg(test)]
+                if scope.matches_by_glob() {
+                    self.glob_tests
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                if !scope.path_matches(changed_path) {
+                    continue;
+                }
+                let Some(filter) = scope.scope_filter() else {
+                    return true;
+                };
+                if !filter.matches_without_manifest(changed_path, index) {
+                    continue;
+                }
+                if filter.manifest_predicates().is_empty() {
+                    return true;
+                }
+                pending.push((position, path));
+            }
+        }
+        false
+    }
+
+    /// Whether a `(selector, path)` of `pending` ([`Self::hits`]) runs the
+    /// rule with the manifests the engine resolved on `index`. A manifest the
+    /// engine has not read, or could not, keeps every path the other
+    /// predicates keep: the rule runs and reports the failure.
+    pub(crate) fn pending_runs(
+        &self,
+        pending: &[(usize, usize)],
+        changed: &ChangedPaths<'_>,
+        index: &FileIndex,
+    ) -> bool {
+        pending.iter().any(|&(selector, path)| {
+            self.selectors[selector].manifests_keep(changed.path(path), index)
+        })
     }
 
     /// The manifest-derived predicates of every selector, for the engine to
@@ -114,47 +183,81 @@ impl TriggerScope {
             .filter_map(|selector| selector.scope.as_ref()?.scope_filter())
             .flat_map(ScopeFilter::manifest_predicates)
     }
+
+    /// How many times a selector tested a changed path against its globs.
+    #[cfg(test)]
+    pub(crate) fn glob_tests(&self) -> usize {
+        self.glob_tests.load(std::sync::atomic::Ordering::Relaxed)
+    }
 }
 
 impl TriggerSelector {
-    fn matches(&self, path: &Path, index: &FileIndex, manifests: bool) -> bool {
-        let Some(scope) = &self.scope else {
-            return true;
-        };
+    /// Whether a changed path changes what the selector reads whatever its
+    /// globs say of it: an ignore file, or a directory Git lists whole, where
+    /// the selector's paths can match, and what its predicates consult.
+    fn consulted_changed(
+        &self,
+        scope: &Scope,
+        changed: &ChangedPaths<'_>,
+        index: &FileIndex,
+    ) -> bool {
+        let at = |path: usize| changed.path(path);
         // An ignore file decides which files below its directory the walk
         // indexes, and so which ones the selector reads there.
         if index.reads_ignore_files()
-            && path
-                .file_name()
-                .is_some_and(|name| IGNORE_FILE_NAMES.iter().any(|ignore| name == *ignore))
-            && path.parent().is_some_and(|dir| scope.may_match_below(dir))
+            && IGNORE_FILE_NAMES.iter().any(|name| {
+                changed.named(OsStr::new(name)).iter().any(|&path| {
+                    at(path)
+                        .parent()
+                        .is_some_and(|dir| scope.may_match_below(dir))
+                })
+            })
+        {
+            return true;
+        }
+        // Git lists a submodule, or an untracked repository, by its directory
+        // alone: what the selector reads below it may have changed.
+        if changed
+            .directories()
+            .iter()
+            .any(|&path| scope.may_match_below(at(path)))
         {
             return true;
         }
         let Some(filter) = scope.scope_filter() else {
-            return scope.matches(path, index);
+            return false;
         };
         // What the predicates consult changed: what the selector picks may
         // have changed with it. A marker counts for the files at and below
         // its directory, so only where the selector's paths can match.
-        if filter.has_ancestor_names().iter().any(|marker| {
-            marker_directory(path, marker).is_some_and(|dir| scope.may_match_below(dir))
-        }) || self.manifests.iter().any(|manifest| manifest == path)
-        {
+        filter.has_ancestor_names().iter().any(|marker| {
+            marker.file_name().is_some_and(|name| {
+                changed.named(name).iter().any(|&path| {
+                    marker_directory(at(path), marker).is_some_and(|dir| scope.may_match_below(dir))
+                })
+            })
+        }) || self.manifests.iter().any(|manifest| {
+            manifest.file_name().is_some_and(|name| {
+                changed
+                    .named(name)
+                    .iter()
+                    .any(|&path| at(path) == manifest.as_path())
+            })
+        })
+    }
+
+    /// Whether the selector's manifest-derived predicates keep `path`, which
+    /// its globs and other predicates take: also when one of its manifests is
+    /// not resolved on `index`, or could not be read.
+    fn manifests_keep(&self, path: &Path, index: &FileIndex) -> bool {
+        let Some(filter) = self.scope.as_ref().and_then(Scope::scope_filter) else {
             return true;
-        }
-        // A manifest the engine has not read, or could not, keeps every path
-        // the other predicates keep: the rule runs and reports the failure.
-        let resolved = manifests
-            && filter.manifest_predicates().iter().all(|predicate| {
-                let key = predicate.cache_key();
-                index.manifest_paths(key).is_some() && index.manifest_failure(key).is_none()
-            });
-        if resolved {
-            scope.matches(path, index)
-        } else {
-            scope.matches_without_manifest(path, index)
-        }
+        };
+        let resolved = filter.manifest_predicates().iter().all(|predicate| {
+            let key = predicate.cache_key();
+            index.manifest_paths(key).is_some() && index.manifest_failure(key).is_none()
+        });
+        !resolved || filter.matches(path, index)
     }
 }
 
