@@ -492,6 +492,47 @@ fn a_submodule_change_runs_the_rules_that_read_below_it() {
     assert_eq!(check(&root, &["--base", "used"]), (Some(1), expected));
 }
 
+/// A submodule whose `.gitmodules` entry says `ignore = all`: Git's diffs
+/// leave it out, but `ls-files --modified` lists it once its checked-out
+/// commit moves, as a submodule, so the rules that read below it run.
+#[test]
+fn an_ignored_submodule_checked_out_anew_runs_the_rules_that_read_below_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("source");
+    locale_repository(&source);
+    let root = tmp.path().join("main");
+    write(&root, ".alint.yml", &locales_below("sub"));
+    git(&root, &["init", "-q"]);
+    git(&root, &["config", "commit.gpgsign", "false"]);
+    let source = source.to_str().unwrap();
+    git(
+        &root,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            source,
+            "sub",
+        ],
+    );
+    git(
+        &root,
+        &["config", "-f", ".gitmodules", "submodule.sub.ignore", "all"],
+    );
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-qm", "base"]);
+    english_gains_a_key(&root.join("sub"));
+    assert_eq!(
+        check(&root, &["--changed"]),
+        (
+            Some(1),
+            vec![ran("locales-match-english", &["sub/locales/de.json"])]
+        )
+    );
+}
+
 /// Git lists an untracked repository as `dir/`, and none of its files: the
 /// change runs every rule whose selectors can match below it, and no other.
 #[test]

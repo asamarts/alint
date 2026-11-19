@@ -527,8 +527,16 @@ pub fn collect_changed_set(root: &Path, base: Option<&str>) -> Option<ChangedSet
     ])?;
     // Plumbing, so no user configuration renames or colours its entries; it
     // only marks which of the paths `ls-files --modified` lists are
-    // submodules, and adds none.
-    let unstaged = spawn(&["diff-files", "--raw", "--relative", "-z"]);
+    // submodules, and adds none. `ls-files` lists a submodule whose
+    // `.gitmodules` entry says `ignore = all` too, so its mark must not be
+    // left out either.
+    let unstaged = spawn(&[
+        "diff-files",
+        "--raw",
+        "--relative",
+        "--ignore-submodules=none",
+        "-z",
+    ]);
     let working = git_command(root).map(|mut command| {
         command
             .arg("-C")
