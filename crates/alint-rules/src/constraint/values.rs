@@ -11,9 +11,12 @@ use sha2::{Digest as _, Sha256};
 
 /// A value as the kind compares it: its type and its text. A number compares
 /// by its lexeme (`1.0` is not `1`), and a path is a string. A missing value
-/// (a `read:` that matched nothing) is null: it matches nothing.
+/// (a `read:` that matched nothing) matches nothing, as null does, and a
+/// message calls it missing.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(super) enum Scalar {
+    /// No value: a `read:` that matched nothing in its resource.
+    Missing,
     Null,
     Bool(bool),
     Number(Arc<str>),
@@ -34,7 +37,8 @@ impl Scalar {
     /// comparison takes (`a list`, `a record`, `bytes`).
     pub(super) fn of(cell: &Cell) -> Result<Self, &'static str> {
         match &cell.value {
-            None | Some(Value::Null) => Ok(Self::Null),
+            None => Ok(Self::Missing),
+            Some(Value::Null) => Ok(Self::Null),
             Some(value) => Self::of_value(value),
         }
     }
@@ -55,20 +59,26 @@ impl Scalar {
     /// Its type, when it can match.
     pub(super) fn kind(&self) -> Option<Kind> {
         match self {
-            Self::Null => None,
+            Self::Missing | Self::Null => None,
             Self::Bool(_) => Some(Kind::Bool),
             Self::Number(_) => Some(Kind::Number),
             Self::String(_) => Some(Kind::String),
         }
     }
 
+    /// Whether it matches nothing: null, or a missing value.
     pub(super) fn is_null(&self) -> bool {
-        matches!(self, Self::Null)
+        matches!(self, Self::Missing | Self::Null)
+    }
+
+    pub(super) fn is_missing(&self) -> bool {
+        matches!(self, Self::Missing)
     }
 
     /// The type's word in a baseline key.
     fn type_word(&self) -> &'static str {
         match self {
+            Self::Missing => "missing",
             Self::Null => "null",
             Self::Bool(_) => "bool",
             Self::Number(_) => "number",
@@ -80,7 +90,7 @@ impl Scalar {
     /// `true`/`false`, and nothing for null.
     pub(super) fn text(&self) -> &str {
         match self {
-            Self::Null => "",
+            Self::Missing | Self::Null => "",
             Self::Bool(true) => "true",
             Self::Bool(false) => "false",
             Self::Number(lexeme) => lexeme,
@@ -90,7 +100,7 @@ impl Scalar {
 
     fn value(&self) -> Value {
         match self {
-            Self::Null => Value::Null,
+            Self::Missing | Self::Null => Value::Null,
             Self::Bool(flag) => Value::Bool(*flag),
             Self::Number(lexeme) => alint_core::relation::Number::from_lexeme(lexeme)
                 .map_or_else(|| Value::String(Arc::clone(lexeme)), Value::Number),
@@ -125,19 +135,22 @@ impl Scalar {
     }
 
     /// The value as a message quotes it: `"^18.2.0"`, `1.0`, `true`, `null`,
-    /// or `<redacted>` for a sensitive field's.
+    /// `missing`, or `<redacted>` for a sensitive field's.
     pub(super) fn show(&self, sensitive: bool) -> String {
         if sensitive {
             "<redacted>".to_string()
+        } else if self.is_missing() {
+            "missing".to_string()
         } else {
             render_value(&self.value())
         }
     }
 
     /// The value with its type, for a message about values of several types:
-    /// `the number 1`, `the string "1"`, `null`.
+    /// `the number 1`, `the string "1"`, `null`, `missing`.
     pub(super) fn show_typed(&self, sensitive: bool) -> String {
         match self {
+            Self::Missing => "missing".to_string(),
             Self::Null => "null".to_string(),
             Self::Bool(_) => format!("the boolean {}", self.show(sensitive)),
             Self::Number(_) => format!("the number {}", self.show(sensitive)),
@@ -239,11 +252,12 @@ mod tests {
         key.value(&Scalar::String("a:b".into()), false)
             .value(&Scalar::Number("1.0".into()), false)
             .value(&Scalar::Null, false)
+            .value(&Scalar::Missing, false)
             .value(&Scalar::Bool(true), false)
             .value(&Scalar::String("secret".into()), true);
         assert_eq!(
             key.into_string(),
-            "6:unique6:string3:a:b6:number3:1.04:null0:4:bool4:true9:sensitive"
+            "6:unique6:string3:a:b6:number3:1.04:null0:7:missing0:4:bool4:true9:sensitive"
         );
     }
 

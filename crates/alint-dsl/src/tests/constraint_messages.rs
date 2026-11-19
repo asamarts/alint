@@ -9,7 +9,7 @@ use alint_core::relation::{LimitKind, Limits};
 
 use alint_core::{SourceRange, Violation};
 
-use super::{failures, result, run, run_under};
+use super::{failures, findings, result, run, run_under};
 
 /// A version 2 config: relation `r` reading `data.json`'s top-level entries
 /// as `k` (the key) and `v` (the value), and rule `c` asserting `assert`,
@@ -343,4 +343,151 @@ fn related_rows_at_one_place_are_shown_once_and_counted() {
             "{other:?}"
         );
     }
+}
+
+// --- Missing is not null -------------------------------------------------------
+
+/// Relation `p` reading `$.v` of each `p/*.json` as `v`, beside its path as
+/// `src`, and rule `c` asserting `assert`.
+fn read_v(assert: &str) -> String {
+    format!(
+        "version: 2\nrelations:\n  p:\n    from: {{ paths: \"p/*.json\" }}\n    read: {{ json: \
+         \"$.v\" }}\n    fields: {{ src: path, v: value }}\nrules:\n  - id: c\n    kind: \
+         constraint\n    input: p\n    assert: {assert}\n    level: error\n"
+    )
+}
+
+const READ_V: [(&str, &str); 2] = [("p/a.json", "{\"v\": \"1\"}"), ("p/b.json", "{}")];
+
+/// A file a `read:` matches nothing in has a missing value, which every
+/// family calls missing, and a null value null.
+#[test]
+fn a_missing_value_is_called_missing_and_a_null_null_by_every_family() {
+    let results = run(&read_v("{ equal: { field: v } }"), &READ_V);
+    assert_eq!(
+        findings(&results, "c"),
+        [
+            "p/a.json: rows disagree on `v`: \"1\" here; missing in 1 row\n  ~ a row with another \
+             value: p/b.json",
+            "p/b.json: rows disagree on `v`: missing here; \"1\" in 1 row (a missing value \
+             matches nothing, so a row without a value agrees with no row)\n  ~ a row with \
+             another value: p/a.json",
+        ]
+    );
+    let results = run(
+        &read_v("{ equal: { field: v, to: { row: { src: p/a.json } } } }"),
+        &READ_V,
+    );
+    assert_eq!(
+        findings(&results, "c"),
+        [
+            "p/b.json: `v` is missing here, but \"1\" in the source row (`src` \"p/a.json\", at \
+             p/a.json)\n  ~ the source row: p/a.json"
+        ]
+    );
+    let results = run(
+        &read_v("{ equal: { field: v, to: { field: src } } }"),
+        &READ_V,
+    );
+    assert_eq!(
+        findings(&results, "c")[1],
+        "p/b.json: `v` is missing and `src` is \"p/b.json\" in this row; they must be equal (a \
+         missing value matches nothing)\n  ~ `src` in this row: p/b.json"
+    );
+
+    // An entry's null value is null in each.
+    let null = [("data.json", "{\"a\": \"1\", \"b\": null}")];
+    let results = run(&top_level("{ equal: { field: v } }", ""), &null);
+    assert_eq!(
+        findings(&results, "c")[1],
+        "data.json:1:17: rows disagree on `v`: null here; \"1\" in 1 row (null matches nothing, \
+         so a row without a value agrees with no row)\n  ~ a row with another value: \
+         data.json:1:7"
+    );
+    let results = run(
+        &top_level("{ equal: { field: v, to: { row: { k: a } } } }", ""),
+        &null,
+    );
+    assert_eq!(
+        findings(&results, "c"),
+        [
+            "data.json:1:17: `v` is null here, but \"1\" in the source row (`k` \"a\", at `a` in \
+             data.json)\n  ~ the source row: data.json:1:7"
+        ]
+    );
+    let results = run(
+        &top_level("{ equal: { field: v, to: { field: k } } }", ""),
+        &null,
+    );
+    assert_eq!(
+        findings(&results, "c")[1],
+        "data.json:1:17: `v` is null and `k` is \"b\" in this row; they must be equal (null \
+         matches nothing)\n  ~ `k` in this row: data.json:1:12"
+    );
+}
+
+// --- A `union:` part that read nothing is named --------------------------------
+
+/// The node-pins example of `version-2.md`: one row per place a Node version
+/// is pinned, `version` written as `version`.
+fn node_pins(version: &str) -> String {
+    format!(
+        "version: 2\nrelations:\n  node-pins:\n    union:\n      - {{ from: {{ paths: .nvmrc }}, \
+         read: {{ regex: \"^v?(\\\\S+)\" }} }}\n      - {{ from: {{ paths: package.json }}, read: \
+         {{ json: \"$.engines.node\" }} }}\n      - {{ from: {{ paths: package.json }}, read: {{ \
+         json: \"$.devEngines.runtime.version\" }} }}\n      - {{ from: {{ paths: package.json }}, \
+         read: {{ json: \"$.volta.node\" }} }}\n    fields: {{ source: path, version: {version} \
+         }}\nrules:\n  - id: node-pins-agree\n    kind: constraint\n    input: node-pins\n    \
+         assert: {{ equal: {{ field: version, to: {{ row: {{ source: .nvmrc }} }} }} }}\n    \
+         level: error\n"
+    )
+}
+
+const PINNED: [(&str, &str); 2] = [
+    (".nvmrc", "v18\n"),
+    ("package.json", "{\"engines\": {\"node\": \"18\"}}"),
+];
+
+/// Two parts that read nothing in one file give two findings at the file,
+/// each naming its part by its place in the `union:` and its query.
+#[test]
+fn a_union_part_that_read_nothing_is_named() {
+    let results = run(&node_pins("value"), &PINNED);
+    assert_eq!(
+        findings(&results, "node-pins-agree"),
+        [
+            "package.json: `version` is missing here (`relations.node-pins.union[2]`, \
+             `read.json: $.devEngines.runtime.version`, matched nothing), but \"18\" in the \
+             source row (`source` \".nvmrc\", at .nvmrc)\n  ~ the source row: .nvmrc",
+            "package.json: `version` is missing here (`relations.node-pins.union[3]`, \
+             `read.json: $.volta.node`, matched nothing), but \"18\" in the source row (`source` \
+             \".nvmrc\", at .nvmrc)\n  ~ the source row: .nvmrc",
+        ]
+    );
+    // A sensitive field's part is named by its place alone.
+    let results = run(&node_pins("{ source: value, sensitive: true }"), &PINNED);
+    let shown = findings(&results, "node-pins-agree");
+    assert_eq!(shown.len(), 2);
+    assert!(
+        shown[0].contains("(`relations.node-pins.union[2]` matched nothing)")
+            && shown[1].contains("(`relations.node-pins.union[3]` matched nothing)")
+            && !shown.iter().any(|finding| finding.contains("read.json")),
+        "{shown:?}"
+    );
+    // So do rows of a `union:` that disagree within groups.
+    let results = run(
+        &node_pins("value").replace(
+            "{ equal: { field: version, to: { row: { source: .nvmrc } } } }",
+            "{ equal: { field: version } }",
+        ),
+        &PINNED,
+    );
+    let shown = findings(&results, "node-pins-agree");
+    assert!(
+        shown.iter().any(|finding| finding.contains(
+            "missing here (`relations.node-pins.union[2]`, `read.json: \
+             $.devEngines.runtime.version`, matched nothing) and in 1 other row"
+        )),
+        "{shown:?}"
+    );
 }

@@ -12,6 +12,9 @@ use std::sync::Arc;
 
 use alint_core::relation::Value;
 use alint_core::relation::eval::{Cell, FieldRow, Provenance, RelationRows, located, type_name};
+use alint_core::relation::plan::{
+    FieldSource, JoinSide, Part, Plan, Read, Reader, RelationId, Rows,
+};
 use alint_core::{Context, MAX_RELATED_LOCATIONS, RelatedLocation, Violation};
 
 use super::ConstraintRule;
@@ -220,6 +223,36 @@ impl<'r> Run<'r> {
             }),
             Place::Resource(path) => crate::slash(path),
             Place::Nowhere => "no resource".to_string(),
+        }
+    }
+
+    /// Which `union:` part read nothing where row `row`'s field at
+    /// `position` is missing, after a space: ``(`relations.pins.union[2]`,
+    /// `read.json: $.volta.node`, matched nothing)``, so the findings of two
+    /// parts that read nothing in one file differ. The part's query is left
+    /// out when its relation's configuration reads the environment or the
+    /// field is sensitive. Nothing for a value a relation of one part read:
+    /// its resource names the row.
+    fn read_nothing(&self, row: usize, position: usize) -> String {
+        let plan = &self.rule.plan;
+        let id = reading_relation(plan, self.rule.inputs[0], self.name(position));
+        let named = plan.relation(id);
+        let Rows::Union(parts) = &named.relation.rows else {
+            return String::new();
+        };
+        let index = self.cell(row, position).at.part;
+        let Some(part) = usize::try_from(index).ok().and_then(|at| parts.get(at)) else {
+            return String::new();
+        };
+        let at = if named.is_inline() {
+            format!("{}.union[{index}]", named.name)
+        } else {
+            format!("relations.{}.union[{index}]", named.name)
+        };
+        if named.reads_environment || self.sensitive(position) {
+            format!(" (`{at}` matched nothing)")
+        } else {
+            format!(" (`{at}`, `{}`, matched nothing)", part_text(part))
         }
     }
 
@@ -650,6 +683,11 @@ impl<'r> Run<'r> {
                 .collect();
             let related = self.related_at(places, omitted);
             let mut here = format!("{} here", self.show_tuple(fields, value, typed));
+            for (&position, part) in fields.iter().zip(value) {
+                if part.is_missing() {
+                    here.push_str(&self.read_nothing(holders[0], position));
+                }
+            }
             if holders.len() > 1 {
                 let others = holders.len() - 1;
                 write!(here, " and in {others} other {}", rows_word(others))
@@ -678,10 +716,12 @@ impl<'r> Run<'r> {
                 message.push_str("; ");
                 message.push_str(&others.join("; "));
             }
-            if value.iter().any(Scalar::is_null) {
-                message.push_str(
-                    " (null matches nothing, so a row without a value agrees with no row)",
-                );
+            if let Some(nothing) = matches_nothing(value) {
+                write!(
+                    message,
+                    " ({nothing}, so a row without a value agrees with no row)"
+                )
+                .expect("writing to a String cannot fail");
             }
             let mut key = base.clone();
             for (&position, part) in fields.iter().zip(value) {
@@ -742,7 +782,6 @@ impl<'r> Run<'r> {
             if value == expected {
                 continue;
             }
-            let cell = self.cell(row, field_at);
             let typed = value.kind().is_some() && value.kind() != expected.kind();
             let shown = |scalar: &Scalar| {
                 if typed {
@@ -751,14 +790,15 @@ impl<'r> Run<'r> {
                     scalar.show(sensitive)
                 }
             };
-            let here = if cell.value.is_none() {
-                "missing".to_string()
-            } else {
-                shown(&value)
-            };
             let message = format!(
-                "`{field}` is {here} here, but {} in the source row ({source_desc}, at \
+                "`{field}` is {} here{}, but {} in the source row ({source_desc}, at \
                  {source_shown})",
+                shown(&value),
+                if value.is_missing() {
+                    self.read_nothing(row, field_at)
+                } else {
+                    String::new()
+                },
                 shown(&expected),
             );
             let mut key = Key::new("equal");
@@ -848,29 +888,30 @@ impl<'r> Run<'r> {
             if value == theirs && !value.is_null() {
                 continue;
             }
-            let cell = self.cell(row, field_at);
             let other_cell = self.cell(row, other_at);
             let typed =
                 value.kind().is_some() && theirs.kind().is_some() && value.kind() != theirs.kind();
-            let shown = |scalar: &Scalar, cell: &Cell, sensitive: bool| {
-                if cell.value.is_none() {
-                    "missing".to_string()
-                } else if typed {
+            let shown = |scalar: &Scalar, sensitive: bool| {
+                if typed {
                     scalar.show_typed(sensitive)
                 } else {
                     scalar.show(sensitive)
                 }
             };
-            let message = format!(
-                "`{field}` is {} and `{other}` is {} in this row; they must be equal{}",
-                shown(&value, cell, self.sensitive(field_at)),
-                shown(&theirs, other_cell, self.sensitive(other_at)),
-                if value.is_null() || theirs.is_null() {
-                    " (null matches nothing)"
-                } else {
-                    ""
-                }
+            let mut message = format!(
+                "`{field}` is {} and `{other}` is {} in this row",
+                shown(&value, self.sensitive(field_at)),
+                shown(&theirs, self.sensitive(other_at)),
             );
+            for (scalar, position) in [(&value, field_at), (&theirs, other_at)] {
+                if scalar.is_missing() {
+                    message.push_str(&self.read_nothing(row, position));
+                }
+            }
+            message.push_str("; they must be equal");
+            if let Some(nothing) = matches_nothing(&[value.clone(), theirs.clone()]) {
+                write!(message, " ({nothing})").expect("writing to a String cannot fail");
+            }
             let mut key = Key::new("equal");
             key.part("row").row(self.own(row), self.hide_keys);
             let label = format!("`{other}` in this row");
@@ -970,6 +1011,57 @@ fn verdict(findings: Vec<Violation>, failures: Vec<Violation>) -> Vec<Violation>
         findings
     } else {
         failures
+    }
+}
+
+/// The relation that read field `name` of relation `id`: `id`, or, for a
+/// join's copy of a field of a side, the relation that read that field.
+fn reading_relation(plan: &Plan, mut id: RelationId, name: &str) -> RelationId {
+    let mut name = name.to_string();
+    loop {
+        let relation = &plan.relation(id).relation;
+        match (
+            &relation.rows,
+            relation.field(&name).map(|field| &field.source),
+        ) {
+            (Rows::Join(join), Some(FieldSource::Side(side, field))) => {
+                id = match side {
+                    JoinSide::Left => join.left.id,
+                    JoinSide::Right => join.right.id,
+                };
+                name.clone_from(field);
+            }
+            _ => return id,
+        }
+    }
+}
+
+/// A `union:` part's query as a message names it: `read.json: $.name`, or
+/// `entries.at: $.a, $.b`.
+fn part_text(part: &Part) -> String {
+    match &part.reader {
+        Reader::Read { read, .. } => match read {
+            Read::Json(query) => format!("read.json: {query}"),
+            Read::Yaml(query) => format!("read.yaml: {query}"),
+            Read::Toml(query) => format!("read.toml: {query}"),
+            Read::Regex(pattern) => format!("read.regex: {pattern}"),
+            Read::Lines { .. } => "read.lines".to_string(),
+            Read::WholeFile => "read.whole_file".to_string(),
+        },
+        Reader::Entries(entries) => format!("entries.at: {}", entries.at.join(", ")),
+    }
+}
+
+/// Why rows holding `values` agree with none: `null matches nothing`, `a
+/// missing value matches nothing`, or both; `None` when they hold neither.
+fn matches_nothing(values: &[Scalar]) -> Option<&'static str> {
+    let null = values.contains(&Scalar::Null);
+    let missing = values.iter().any(Scalar::is_missing);
+    match (null, missing) {
+        (true, true) => Some("null and a missing value match nothing"),
+        (true, false) => Some("null matches nothing"),
+        (false, true) => Some("a missing value matches nothing"),
+        (false, false) => None,
     }
 }
 
