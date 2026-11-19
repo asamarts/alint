@@ -177,9 +177,13 @@ impl Engine {
     /// to lint. Rules with `expect_matches: true` still evaluate their full-tree
     /// scope assertion so an empty diff cannot hide a vacuous configuration.
     /// Pass `None` (or omit) to disable `--changed` semantics entirely.
+    ///
+    /// The set replaces any earlier one whole: no path in it is a directory
+    /// Git lists ([`Self::with_changed_set`]).
     #[must_use]
     pub fn with_changed_paths(mut self, set: HashSet<PathBuf>) -> Self {
         self.changed_paths = Some(set);
+        self.changed_directories = HashSet::new();
         self
     }
 

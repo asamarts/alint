@@ -411,3 +411,38 @@ fn a_trigger_scope_tests_each_changed_path_against_its_globs_at_most_once_a_pass
     assert!(glob_tests(&taken, false) <= taken.len() - outside.len());
     assert_eq!(seen.lock().unwrap().len(), 1, "the rule runs once");
 }
+
+/// `with_changed_paths` replaces the changed set whole: a directory an
+/// earlier `with_changed_set` marked is a plain path after it, so a change
+/// Git listed as a directory no longer runs the rules that read below it.
+#[test]
+fn with_changed_paths_forgets_the_directories_an_earlier_set_marked() {
+    let plan = locales_plan();
+    let dir = locales_tree(&[]);
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let locales = PathBuf::from("locales");
+    let engine = || {
+        let rule = ReadsRelation {
+            id: "locales",
+            level: Level::Error,
+            plan: Arc::clone(&plan),
+            input: [RelationId(0)],
+            seen: Arc::clone(&seen),
+            trigger: Some(crate::relation::TriggerScope::of(&plan, &[RelationId(0)])),
+        };
+        Engine::from_entries(vec![RuleEntry::new(Box::new(rule))], RuleRegistry::new())
+            .with_changed_set(crate::git::ChangedSet::new(
+                HashSet::from([locales.clone()]),
+                HashSet::from([locales.clone()]),
+            ))
+    };
+    let run = |engine: Engine| {
+        let index =
+            crate::walker::walk(dir.path(), &crate::walker::WalkOptions::test_default()).unwrap();
+        engine.run(dir.path(), &index).unwrap();
+    };
+    run(engine());
+    assert_eq!(seen.lock().unwrap().len(), 1, "a directory runs the rule");
+    run(engine().with_changed_paths(HashSet::from([locales.clone()])));
+    assert_eq!(seen.lock().unwrap().len(), 1, "a plain path runs nothing");
+}
