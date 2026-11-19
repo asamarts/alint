@@ -107,7 +107,9 @@ fn the_written_fingerprint_says_nothing_about_the_path() {
     );
     assert_ne!(fingerprints[0], v021("alpha.txt"));
 
-    // SARIF and GitLab carry the same path-free identity in both trees.
+    // SARIF and GitLab carry the same path-free identities in both trees: the
+    // first finding the shared fingerprint, the repeat one derived from it and
+    // its occurrence, so each stays its own alert.
     let sarif = |root| {
         json_strings(
             &alint(root, &["check", "--format", "sarif", "."]),
@@ -115,7 +117,12 @@ fn the_written_fingerprint_says_nothing_about_the_path() {
             "/partialFingerprints/alint~1v1",
         )
     };
-    assert_eq!(sarif(one.path()), BTreeSet::from([fingerprints[0].clone()]));
+    assert_eq!(
+        sarif(one.path()).len(),
+        2,
+        "SARIF keeps its fingerprints unique"
+    );
+    assert!(sarif(one.path()).contains(&fingerprints[0]));
     assert_eq!(sarif(one.path()), sarif(two.path()));
     let gitlab = |root| {
         json_strings(
@@ -130,6 +137,7 @@ fn the_written_fingerprint_says_nothing_about_the_path() {
         "GitLab keeps its fingerprints unique"
     );
     assert_eq!(gitlab(one.path()), gitlab(two.path()));
+    assert_eq!(gitlab(one.path()), sarif(one.path()));
 }
 
 #[test]
