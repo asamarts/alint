@@ -473,7 +473,7 @@ impl Engine {
         let mut plans: Vec<&Arc<Plan>> = Vec::new();
         // What the memos of the plans hold once their relations are
         // evaluated.
-        let mut held = 0usize;
+        let mut memo_bytes = 0usize;
         for (plan, _) in &wanted {
             if !plans.iter().any(|held| Arc::ptr_eq(held, plan)) {
                 plans.push(plan);
@@ -492,11 +492,11 @@ impl Engine {
                 let _ = crate::relation::eval::evaluate(plan, id, ctx);
             }
             if let Some(memo) = ctx.index.relation_memo(plan) {
-                held = held.saturating_add(memo.bytes());
+                memo_bytes = memo_bytes.saturating_add(memo.bytes());
             }
         }
         if let Some(cache) = ctx.index.decode_cache() {
-            cache.record_relations(held);
+            cache.record_relations(memo_bytes);
         }
     }
 
