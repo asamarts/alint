@@ -15,7 +15,7 @@ use alint_core::relation::eval::{Cell, FieldRow, Provenance, RelationRows, locat
 use alint_core::{Context, MAX_RELATED_LOCATIONS, RelatedLocation, Violation};
 
 use super::ConstraintRule;
-use super::places::Places;
+use super::places::{Asked, Placed, Places};
 use super::values::{Key, Kind, Scalar};
 
 #[path = "set.rs"]
@@ -32,8 +32,46 @@ pub(super) struct Run<'r> {
     /// Key paths stay out of messages and baselines: a field that holds keys
     /// is sensitive, or the relation's configuration reads the environment.
     hide_keys: bool,
-    findings: Vec<Violation>,
+    findings: Vec<Pending>,
     failures: Vec<Violation>,
+}
+
+/// A finding whose places wait for [`Places::resolve`]: its own, and each
+/// related location's.
+struct Pending {
+    finding: Violation,
+    at: Option<Asked>,
+    related: Related,
+}
+
+impl Pending {
+    /// The finding, at its places. Each related row is listed or counted:
+    /// rows at one place (a resource's rows without a span) collapse into
+    /// one location, and the others count as left out, so the locations
+    /// listed and the count add up to the rows the message relates to.
+    fn placed(self, placed: &Placed) -> Violation {
+        let mut finding = self.finding;
+        if let Some(asked) = self.at
+            && let Some(range) = placed.range(asked)
+        {
+            finding = if asked.point {
+                finding.with_location(range.start_line(), range.start_column())
+            } else {
+                finding.with_range(range)
+            };
+        }
+        let rows = self.related.locations.len();
+        let locations = self.related.locations.into_iter().map(|(location, asked)| {
+            match asked.and_then(|asked| placed.range(asked)) {
+                Some(range) => location.with_range(range),
+                None => location,
+            }
+        });
+        finding = finding.with_related_locations(locations);
+        let kept = finding.related_locations.len() + finding.related_locations_omitted;
+        finding.related_locations_omitted += self.related.omitted + (rows - kept);
+        finding
+    }
 }
 
 /// Rows that share a value, in the order the first of them appears.
@@ -86,11 +124,32 @@ impl<'r> Run<'r> {
     }
 
     /// `earlier` (findings about the rows, such as values a `read:` skipped)
-    /// and the assertion's findings, or, when the assertion has no verdict,
-    /// its failures alone.
+    /// and the assertion's findings, at their places, or, when the assertion
+    /// has no verdict, its failures alone. Placing them reads the resources
+    /// they sit in, one at a time ([`Places::resolve`]): when the run's bytes
+    /// cannot hold one, the rule has no verdict either.
     pub(super) fn finish(self, mut earlier: Vec<Violation>) -> Vec<Violation> {
-        earlier.extend(self.findings);
-        verdict(earlier, self.failures)
+        let Self {
+            rule,
+            places,
+            findings,
+            mut failures,
+            ..
+        } = self;
+        if failures.is_empty() && !findings.is_empty() {
+            match places.resolve() {
+                Ok(placed) => earlier.extend(findings.into_iter().map(|f| f.placed(&placed))),
+                Err((path, limit)) => failures.push(rule.failure(
+                    Some(path.as_path()),
+                    format!(
+                        "{limit}, so the rule reports no finding rather than findings without \
+                         their places; placing a finding reads the file it sits in, one file at \
+                         a time, so findings in a smaller file, or fewer files, fit"
+                    ),
+                )),
+            }
+        }
+        verdict(earlier, failures)
     }
 
     // ------------------------------------------------------------------
@@ -120,6 +179,12 @@ impl<'r> Run<'r> {
         self.rows.fields[position].sensitive
     }
 
+    /// Whether a place at a cell of the field at `position` shows only its
+    /// start ([`point`]).
+    fn point(&self, position: usize) -> bool {
+        point(self.rows, position, self.hide_keys)
+    }
+
     fn name(&self, position: usize) -> &str {
         &self.rows.fields[position].name
     }
@@ -140,13 +205,13 @@ impl<'r> Run<'r> {
     /// Where a finding about row `row`'s field at `position` sits
     /// ([`spot_in`]).
     fn spot(&self, row: usize, position: usize) -> Place<'r> {
-        spot_in(self.rows, row, position)
+        spot_in(self.rows, row, position, self.hide_keys)
     }
 
     /// Where `place` is, as a message names it.
     fn located_at(&self, place: Place<'_>) -> String {
         match place {
-            Place::Cell(cell) => self.located(cell),
+            Place::Cell(cell, _) => self.located(cell),
             Place::Row(at) => self.located(&Cell {
                 value: None,
                 at: Arc::clone(at),
@@ -269,26 +334,28 @@ impl<'r> Run<'r> {
             Some(template) => self.render(template, reported.map(|row| &self.rows.rows[row])),
             None => generated,
         };
-        let mut finding = match at {
-            Place::Cell(cell) => {
-                let finding = Violation::new(message).with_path(cell.at.resource.path().as_path());
-                match self.places.range(cell) {
-                    Some(range) => finding.with_range(range),
-                    None => finding,
-                }
-            }
-            Place::Row(row) => Violation::new(message).with_path(row.resource.path().as_path()),
-            Place::Resource(path) => Violation::new(message).with_path(path),
+        let (finding, asked) = match at {
+            Place::Cell(cell, point) => (
+                Violation::new(message).with_path(cell.at.resource.path().as_path()),
+                self.places.ask(cell, point),
+            ),
+            Place::Row(row) => (
+                Violation::new(message).with_path(row.resource.path().as_path()),
+                None,
+            ),
+            Place::Resource(path) => (Violation::new(message).with_path(path), None),
             // A group named only in `groups:` has no resource.
-            Place::Nowhere => Violation::new(message),
+            Place::Nowhere => (Violation::new(message), None),
         };
-        finding = finding
+        let finding = finding
             .with_baseline_key(key.into_string())
             .with_path_free_identity()
-            .with_related_locations(related.locations)
             .with_not_fixable();
-        finding.related_locations_omitted += related.omitted;
-        self.findings.push(finding);
+        self.findings.push(Pending {
+            finding,
+            at: asked,
+            related,
+        });
     }
 
     /// The rule's `message:` with each `{{row.FIELD}}` replaced by the
@@ -317,18 +384,36 @@ impl<'r> Run<'r> {
         })
     }
 
-    /// A related location at `place`, labelled `label`.
-    fn related(&mut self, place: Place<'_>, label: &str) -> RelatedLocation {
+    /// A related location at `place`, labelled `label`, and the place it
+    /// asked for.
+    fn related(&mut self, place: Place<'_>, label: &str) -> (RelatedLocation, Option<Asked>) {
         match place {
-            Place::Cell(cell) => self.places.related(cell, label),
-            Place::Row(row) => RelatedLocation::new(row.resource.path().as_path(), label),
-            Place::Resource(path) => RelatedLocation::new(path, label),
+            Place::Cell(cell, point) => (
+                RelatedLocation::new(cell.at.resource.path().as_path(), label),
+                self.places.ask(cell, point),
+            ),
+            Place::Row(row) => (
+                RelatedLocation::new(row.resource.path().as_path(), label),
+                None,
+            ),
+            Place::Resource(path) => (RelatedLocation::new(path, label), None),
             Place::Nowhere => unreachable!("a related location is at a row or a resource"),
         }
     }
 
     /// The related locations at `places`, which leave out `omitted` more.
+    ///
+    /// A finding builds no more related locations than it lists
+    /// ([`MAX_RELATED_LOCATIONS`]): a family picks the rows it relates to
+    /// first ([`related_rows`]), and counts the rest. Building one for every
+    /// row and cutting the list after made a finding cost every row, and the
+    /// findings quadratic in the values; a debug build stops there.
     fn related_at(&mut self, places: Vec<(Place<'_>, &str)>, omitted: usize) -> Related {
+        debug_assert!(
+            places.len() <= MAX_RELATED_LOCATIONS,
+            "a finding builds {} related locations, past the {MAX_RELATED_LOCATIONS} it lists",
+            places.len()
+        );
         Related {
             locations: places
                 .into_iter()
@@ -789,7 +874,8 @@ impl<'r> Run<'r> {
             let mut key = Key::new("equal");
             key.part("row").row(self.own(row), self.hide_keys);
             let label = format!("`{other}` in this row");
-            let related = self.related_at(vec![(Place::Cell(other_cell), label.as_str())], 0);
+            let other_place = Place::Cell(other_cell, self.point(other_at));
+            let related = self.related_at(vec![(other_place, label.as_str())], 0);
             let at = self.spot(row, field_at);
             self.report(at, message, key, related, Some(row));
         }
@@ -799,8 +885,9 @@ impl<'r> Run<'r> {
 /// Where a finding or a related location sits.
 #[derive(Clone, Copy)]
 enum Place<'p> {
-    /// A cell: its resource, and its span when it has one.
-    Cell(&'p Cell),
+    /// A cell: its resource, and its span when it has one; only the span's
+    /// start when `true`, since the cell holds a sensitive value or key.
+    Cell(&'p Cell, bool),
     /// A row with no cell of its own: its resource.
     Row(&'p Arc<Provenance>),
     /// A resource.
@@ -814,24 +901,37 @@ enum Place<'p> {
 /// field of its unique side, or a `bound:` field, which many rows share), the
 /// row's own entry: its first cell there, one with a span first, or its
 /// resource.
-fn spot_in(rows: &RelationRows, row: usize, position: usize) -> Place<'_> {
+///
+/// The end of a cell's span gives away the length of what it spans, so only
+/// its start is shown ([`point`]) when the cell is a sensitive field's, or
+/// when `hide_keys`: then a key could be a sensitive field's value.
+fn spot_in(rows: &RelationRows, row: usize, position: usize, hide_keys: bool) -> Place<'_> {
     let own = &rows.rows[row].at;
     let is_own = |cell: &Cell| Arc::ptr_eq(&cell.at, own) || cell.at == *own;
     let cells = &rows.rows[row].cells;
-    let cell = &cells[position];
-    if is_own(cell) {
-        return Place::Cell(cell);
+    let at = |position: usize| Place::Cell(&cells[position], point(rows, position, hide_keys));
+    if is_own(&cells[position]) {
+        return at(position);
     }
     cells
         .iter()
-        .find(|cell| is_own(cell) && cell.span.is_some())
-        .or_else(|| cells.iter().find(|cell| is_own(cell)))
-        .map_or(Place::Row(own), Place::Cell)
+        .position(|cell| is_own(cell) && cell.span.is_some())
+        .or_else(|| cells.iter().position(is_own))
+        .map_or(Place::Row(own), at)
 }
 
-/// A finding's related locations, and how many more it leaves out.
+/// Whether a place at the cell of field `position` of `rows` shows only its
+/// start: the field is sensitive, or key paths are hidden (a field that
+/// holds keys is sensitive, or the relation's configuration reads the
+/// environment), since a cell's span may be its key's.
+fn point(rows: &RelationRows, position: usize, hide_keys: bool) -> bool {
+    hide_keys || rows.fields[position].sensitive
+}
+
+/// A finding's related locations, each with the place it asked for, and how
+/// many more it leaves out.
 struct Related {
-    locations: Vec<RelatedLocation>,
+    locations: Vec<(RelatedLocation, Option<Asked>)>,
     omitted: usize,
 }
 
