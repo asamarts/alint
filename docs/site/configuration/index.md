@@ -439,12 +439,12 @@ A config is untrusted for what it costs to load, so loading it is bounded:
   rules, templates, facts, vars and `ignore:` patterns;
 - an `extends:` list's entries and the `.alint.d/` drop-ins may load and merge at most 4,194,304
   entries in all (rules, templates, facts, vars, `ignore:` patterns and each version 2 source): an
-  entry is charged the source it loads, before `only:` or `except:` narrows it and at least one
-  entry for an empty source, and each merge, an entry's or a drop-in's, what was merged so far
-  and what it brings in. A list that repeats a source loads it once (a remote source named by
-  other URLs with one hash, and a bundled ruleset named with other `only:` or `except:` lists,
-  too); a flat list reaches the bound at about 90 rulesets of 1,000 rules each, or about 2,900
-  one-rule files;
+  entry is charged the source it loads, before `only:` or `except:` narrows it, and each merge, an
+  entry's or a drop-in's, what it brings in, each at least one entry. A list that repeats a source
+  loads it once (a remote source named by other URLs with one hash, and a bundled ruleset named
+  with other `only:` or `except:` lists, too) and is charged for each entry that merges it. A flat
+  list of distinct sources stays within the bound while they hold at most 2,097,152 entries in all
+  (an empty source counting as one), twice the merged config's limit above;
 - the `extends:` entries may merge at most 64 MiB (67,108,864 bytes) of sources in all. Each
   entry is charged its source's size: its text, or what its YAML aliases expand to if that is
   larger, and for a source that extends others, what it merged too. A list reaches the bound at

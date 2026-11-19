@@ -1144,3 +1144,11 @@ as #589, step 3 as #590, and step 4 is the last.
     at a time takes the memory case from 2,380 MiB to 101 MiB for one rule.
   - Next: #580 (merge an `extends:` list in linear time, before v0.23.0, ADR-0046 decision 1), then
     phase 8 (the three conformance policies).
+- 2026-11-19: #580, the `extends:` merge in linear time (ADR-0046 decision 1). An `extends:` list
+  and the `.alint.d/` drop-ins merge into one accumulator (alint-dsl `merge.rs`), so a merge
+  costs what its entry brings in, and a property test holds it to the old merge's left fold on
+  generated lists. Each merge is charged only that: a flat list of distinct rulesets meets the
+  merged config's limit first, where the budget refused the 91st ruleset of 1,000 rules or the
+  2,895th one-rule file, and `[a, b]` 1,000 times over rulesets of 2,000 rules (#567) is refused
+  by the byte budget with each entry's work linear in its source.
+  - Next: phase 8 (the three conformance policies).
