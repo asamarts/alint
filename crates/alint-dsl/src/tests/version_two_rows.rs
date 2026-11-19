@@ -811,6 +811,23 @@ fn a_sensitive_field_keeps_its_values_and_keys_out_of_messages() {
           the list)"
         ]
     );
+    // A string literal is named by its type too.
+    let number = setup(
+        &relation(&format!(
+            "{DEPS_AT}    fields: {{ name: entry.key, version: {{ source: entry.value, \
+             sensitive: true }} }}\n    where: {{ version: {{ in: ['1'] }} }}\n"
+        )),
+        &[("package.json", r#"{"deps": {"a": 1}}"#)],
+    );
+    assert_eq!(
+        number.failures("deps"),
+        [
+            "package.json: relation `deps` (.alint.yml): `where.version.in` compares a number at \
+             `deps.a` in package.json with a literal string; a value is in a list only beside \
+             values of its own type, so compare values of one type (transform the field, or \
+             change the list)"
+        ]
+    );
     let key = setup(
         &relation(&format!(
             "{DEPS_AT}    fields: {{ name: {{ source: entry.key, sensitive: true }}, version: \
