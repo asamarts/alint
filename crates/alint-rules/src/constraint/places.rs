@@ -12,7 +12,9 @@
 //! it and what finding its `read:` values held, must fit in what the run's
 //! relations left of its bytes
 //! ([`LimitKind::BytesPerRun`](alint_core::relation::LimitKind::BytesPerRun),
-//! [`DecodeCache::may_hold`]): past them the rule has no verdict. Placing
+//! [`DecodeCache::may_hold`]): past them the rule has no verdict. The text
+//! alone is checked before any span is looked for in it, so a file that
+//! cannot fit is not parsed again. Placing
 //! takes nothing from the run's bytes, since it lets each text go, so
 //! whether a rule's findings fit depends on its files and the relations
 //! alone, never on the rules placing beside it.
@@ -88,9 +90,10 @@ impl<'c> Places<'c> {
     }
 
     /// Every place asked for, each resource read once, in path order, and
-    /// let go before the next; or the first resource whose text, with its
-    /// offsets, does not fit in what the run's relations left of its bytes,
-    /// and the limit it reached.
+    /// let go before the next; or the first resource whose text (checked
+    /// first, alone), or whose text with its offsets and what finding its
+    /// spans held, does not fit in what the run's relations left of its
+    /// bytes, and the limit it reached.
     pub(super) fn resolve(self) -> Result<Placed, (RelPath, LimitExceeded)> {
         let mut placed = vec![None; self.count];
         if self.count == 0 {
@@ -120,6 +123,10 @@ impl<'c> Places<'c> {
             let ResourceRead::Present(bytes) = read.as_ref() else {
                 continue;
             };
+            // The text alone must fit before any span is looked for in it.
+            if let Err(limit) = budget.may_hold(bytes.len()) {
+                return Err((path, limit));
+            }
             // A `read:` value's span is found now, in the text read again;
             // what finding it held counts with the text.
             let (found, finding) = find_spans(bytes, spans.iter().map(|(_, span)| span));

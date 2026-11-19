@@ -186,6 +186,82 @@ fn after_a_fix_a_finding_is_placed_as_a_check_of_the_fixed_tree_places_it() {
     assert!(seen.contains(&(1, vec![])), "{seen:?}");
 }
 
+/// Rule `c`'s outcome over two `package.json` files whose names repeat,
+/// one padded to 60 KB, under the run's bytes `limit` when given: the
+/// findings, the failures, the walks finding the `read:` values' places
+/// took (on this thread, where the rule runs), and the run's bytes.
+fn placed_by_a_read(limit: Option<usize>) -> (usize, Vec<String>, usize, usize, usize) {
+    let config = "version: 2\nrelations:\n  names:\n    from: { paths: \"*/package.json\" }\n    \
+                  read: { json: \"$.name\" }\n    fields: { name: value }\nrules:\n  - id: c\n    \
+                  kind: constraint\n    input: names\n    assert: { unique: { key: [name] } }\n    \
+                  level: error\n";
+    let padded = format!("{{\"name\": \"dup\"{}}}", " ".repeat(60_000));
+    let files = [
+        ("a/package.json", padded.as_str()),
+        ("b/package.json", "{\"name\": \"dup\"}"),
+    ];
+    let (dir, loaded) = load_tree(config, &files);
+    let loaded = loaded.unwrap();
+    let limits = match limit {
+        Some(limit) => Limits::default()
+            .with(LimitKind::BytesPerRun, limit)
+            .unwrap(),
+        None => Limits::default(),
+    };
+    let index = index_under(dir.path(), &limits);
+    let mut registry = alint_core::RuleRegistry::new();
+    alint_rules::register_builtin(&mut registry);
+    let rule = registry.build(&loaded.rules[0]).unwrap();
+    let before = alint_core::relation::eval::read_span_walks();
+    let findings = rule
+        .evaluate(&alint_core::Context::new(dir.path(), &index))
+        .unwrap();
+    let walks = alint_core::relation::eval::read_span_walks() - before;
+    let (failures, findings): (Vec<_>, Vec<_>) = findings
+        .iter()
+        .partition(|finding| finding.analysis_failure_kind().is_some());
+    let failures = failures
+        .iter()
+        .map(|failure| failure.message.to_string())
+        .collect();
+    let cache = cache(&index);
+    let relations = cache.relations_recorded().unwrap_or_default();
+    (
+        findings.len(),
+        failures,
+        walks,
+        relations,
+        cache.largest_held(),
+    )
+}
+
+/// A file to place a finding in that is larger, alone, than what the run's
+/// relations left of its bytes fails the rule before its `read:` values'
+/// places are looked for: no walk over a text that cannot be held. With
+/// room for the text but not for what finding its spans holds beside it,
+/// the walk runs, and the rule fails after it.
+#[test]
+fn a_file_too_large_to_place_in_fails_the_rule_before_its_spans_are_found() {
+    // The finding sits in one file and names the other: both are walked.
+    let (found, failures, walks, relations, held) = placed_by_a_read(None);
+    assert_eq!((found, failures.len(), walks), (1, 0, 2), "{failures:?}");
+    let text = 60_000 + "{\"name\": \"dup\"}".len();
+    assert!(held > text, "{held} {text}");
+    let (found, failures, walks, ..) = placed_by_a_read(Some(relations + text - 1));
+    assert_eq!((found, walks), (0, 0), "{failures:?}");
+    assert!(
+        failures.len() == 1 && failures[0].contains("`bytes_per_run`"),
+        "{failures:?}"
+    );
+    // The padded file comes first, in path order, and is walked.
+    let (found, failures, walks, ..) = placed_by_a_read(Some(relations + text));
+    assert_eq!((found, walks), (0, 1), "{failures:?}");
+    assert!(
+        failures.len() == 1 && failures[0].contains("`bytes_per_run`"),
+        "{failures:?}"
+    );
+}
+
 /// What the relations took counts their rows, which the relation memo
 /// holds, with their decodes' key paths, which the decode cache holds: a
 /// limit with room for the decodes and `a`'s file, but not the rows, gives
