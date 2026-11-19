@@ -672,9 +672,12 @@ policy-test package the user does not trust.
     every field that shows the same value (an entry's key, path and value, and fields bound to the
     same value). So is a join's copy of a sensitive field, and of the field an `on:` pair joins
     with one, and a field (with its family) that an `in:` or `not_in:` list of a sensitive field
-    filters, in every relation that reads them. A relation whose selection reads the environment
-    shows no detail in its
-    failures, nor does a relation that reads one, as a join side or through a membership reference.
+    filters, in every relation that reads them. A rule that reads a relation which takes a value
+    from the environment anywhere in its definition, a field's `where:` or `transform:` included,
+    shows its findings' paths as `<redacted>`, as an environment-written selector's rule does: the
+    rows such a filter keeps say which files hold the value. A relation whose selection reads the
+    environment shows no detail in its failures, nor does a relation that reads one, as a join side
+    or through a membership reference.
     The engine evaluates, in plan order, only the relations an enabled `constraint` rule reads,
     before any rule runs, so a run whose rules read none reads nothing for them.
   - `facts.json` (format 7) gains `compatibility.experimental_config_versions: [2]`;

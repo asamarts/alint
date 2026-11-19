@@ -86,9 +86,11 @@ impl fmt::Debug for ReadSpan {
 ///
 /// Also the most the walks held at once besides `bytes` (a structured
 /// document's tree, and its entries when a value asked for is an object
-/// member's), which the caller takes from the run's bytes
-/// ([`LimitKind::BytesPerRun`](crate::relation::LimitKind::BytesPerRun)):
-/// each walk lets go of what it held before the next.
+/// member's), which the caller counts with `bytes` in what it may hold of
+/// the run's bytes
+/// ([`LimitKind::BytesPerRun`](crate::relation::LimitKind::BytesPerRun),
+/// [`DecodeCache::may_hold`](crate::relation::DecodeCache::may_hold)): each
+/// walk lets go of what it held before the next.
 pub fn find_spans<'s>(
     bytes: &[u8],
     spans: impl IntoIterator<Item = &'s Span>,

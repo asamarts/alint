@@ -1069,8 +1069,9 @@ as #589, step 3 as #590, and step 4 is the last.
       are escaped as values are, and an analysis failure's text is escaped whole.
     - The test of related rows at one place fails again with its fix reverted: it read `lines:`
       values, which now have places, and reads a JSON array's values instead.
-    - The output-formats line on a `constraint` fingerprint now says it leaves its path out as a
-      `<redacted>` path's does.
+    - `docs/rules.md` said only an environment value outside a field's `where:` and `transform:`
+      redacts a rule's findings, the opposite of the first pass's fix; it now says such an entry
+      redacts them too, and the CHANGELOG says so.
     - Also: an empty changed set runs no rule, even through a selector that does not compile;
       `explain`'s trigger heading names ignore files only when the walk reads them, and names a
       union's parts `union[0]` and on; a `strip-root` failure and a skipped-value note cut what
