@@ -16,7 +16,9 @@ pub(super) fn write(root: &Path, relative: &str, body: &str) -> PathBuf {
     path
 }
 
-/// `config` written as `.alint.yml` with `files` beside it, loaded.
+/// `config` written as `.alint.yml` with `files` beside it, loaded. A config
+/// with a `constraint` rule whose rules all build must validate against the
+/// draft version 2 schema too.
 pub(super) fn load_tree(
     config: &str,
     files: &[(&str, &str)],
@@ -26,6 +28,9 @@ pub(super) fn load_tree(
         write(dir.path(), path, body);
     }
     let loaded = load(&write(dir.path(), ".alint.yml", config));
+    if let Ok(loaded) = &loaded {
+        super::version_two_schema::constraint::assert_valid_when_loaded_builds(config, loaded);
+    }
     (dir, loaded)
 }
 

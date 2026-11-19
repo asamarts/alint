@@ -32,7 +32,9 @@ fn setup(config: &str, files: &[(&str, &str)]) -> Tree {
     for (path, body) in files {
         write(dir.path(), path, body);
     }
-    let config = load(&dir.path().join(".alint.yml")).expect("the configuration loads");
+    let loaded = load(&dir.path().join(".alint.yml")).expect("the configuration loads");
+    super::version_two_schema::constraint::assert_valid_when_loaded_builds(config, &loaded);
+    let config = loaded;
     let index = walk(
         dir.path(),
         &WalkOptions::default().with_global_git_excludes(false),

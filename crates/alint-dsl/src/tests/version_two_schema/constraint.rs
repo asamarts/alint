@@ -60,6 +60,29 @@ pub(crate) fn assert_valid_when_it_builds(config: &str) {
     if !has_schema() || builds(config).is_err() {
         return;
     }
+    assert_valid(config);
+}
+
+/// [`assert_valid_when_it_builds`] for `text` that a test has loaded as
+/// `loaded`, beside the files it extends: when it declares a `constraint`
+/// rule and every rule of it builds, `text` validates. `load_tree` and the
+/// row tests' `setup` call it, so every `constraint` config the crate's tests
+/// load is checked against the draft.
+pub(crate) fn assert_valid_when_loaded_builds(text: &str, loaded: &Config) {
+    if !has_schema()
+        || !loaded.rules.iter().any(|spec| spec.kind == "constraint")
+        || loaded
+            .rules
+            .iter()
+            .any(|spec| test_registry().build(spec).is_err())
+    {
+        return;
+    }
+    assert_valid(text);
+}
+
+/// `config` validates against the draft.
+fn assert_valid(config: &str) {
     let errors = refusals(config);
     assert!(
         errors.is_empty(),
