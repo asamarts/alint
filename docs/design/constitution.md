@@ -22,10 +22,11 @@ wins and this document is wrong.
    amending ADR-0003; ADR-0037). Enforced by:
    - `every_full_index_kind_receives_the_full_index_under_changed`
      (`crates/alint-e2e/tests/changed_full_index.rs`), over every kind the registry marks
-     full-index, with no list of its own: in every corpus scenario that configures one, whenever
-     the rule runs under `--changed` it receives what a full run hands it (the index, a per-file
-     rule's files, a relation reader's rows), and every such kind runs under `--changed` in some
-     scenario;
+     full-index, with no list of its own: in every scenario of the policy-test corpus (the e2e
+     scenarios and the bundled rulesets' tests) that configures one inline, over an inline tree,
+     in a config that loads, whenever the rule runs under `--changed` it receives what a full run
+     hands it (the index, a per-file rule's files, each relation it reads with every row's cells),
+     and every such kind runs under `--changed` in some scenario;
    - `metadata_inventory_matches_the_audited_v019_shape`, which pins the six full-index kinds that
      declare a scope (`constraint`, `file_absent`, `file_exists`, `key_parity`,
      `max_files_per_directory`, `no_case_conflicts`);

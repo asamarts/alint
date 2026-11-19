@@ -5,16 +5,18 @@
 //!
 //! The test takes every kind the built-in registry marks full-index (a
 //! `FullIndex` dispatch, or a per-file dispatch with `full_index`), with no
-//! list of its own, and every scenario of the policy-test corpus that
-//! configures one inline over an inline tree. It wraps each such rule in a
+//! list of its own, and every scenario of the policy-test corpus (the e2e
+//! scenarios and the bundled rulesets' tests) that configures one inline,
+//! over an inline tree, in a config that loads. It wraps each such rule in a
 //! [`Probe`] that records what the engine hands it and evaluates nothing (so
 //! no rule spawns a process here), adds an unchanged file to the tree, and runs
 //! the engine once in full and then under `--changed` with each file of the
 //! tree changed alone, and with a deleted path. Whenever the rule runs under
 //! `--changed`, what it received must equal what it received in the full run:
-//! the same index, and for a per-file rule the same files. Every full-index
-//! kind must run under `--changed` in at least one scenario, so a new kind
-//! without a scenario fails here instead of passing unchecked.
+//! the same index, for a per-file rule the same files, and for a rule that
+//! reads relations the same rows, cell by cell. Every full-index kind must run
+//! under `--changed` in at least one scenario, so a new kind without a
+//! scenario fails here instead of passing unchecked.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
@@ -36,7 +38,9 @@ const DELETED: &str = "zz-deleted-under-changed.txt";
 
 /// What a rule received in one run: the paths of the index it was handed,
 /// for a per-file rule the files it was dispatched, and for a rule that reads
-/// relations, each relation's rows and the resources they were read from.
+/// relations, each relation as it evaluates: its fields, every row's cells
+/// and where each came from, the resources it read and its notes, or its
+/// failures.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 struct Seen {
     indexes: BTreeSet<Vec<PathBuf>>,
@@ -161,15 +165,8 @@ impl Rule for Probe {
             for &id in relations {
                 let outcome = alint_core::relation::eval::evaluate(plan, id, ctx);
                 seen.relations.insert(match outcome {
-                    Ok(rows) => format!(
-                        "{id:?}: {} rows from {:?}",
-                        rows.rows.len(),
-                        rows.resources
-                            .iter()
-                            .map(|resource| resource.path().to_string())
-                            .collect::<Vec<_>>()
-                    ),
-                    Err(failures) => format!("{id:?}: {} failures", failures.len()),
+                    Ok(rows) => format!("{id:?}: {rows:?}"),
+                    Err(failures) => format!("{id:?}: {failures:?}"),
                 });
             }
         }
