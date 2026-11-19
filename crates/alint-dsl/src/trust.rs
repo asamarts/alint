@@ -226,6 +226,10 @@ fn mark_provenance_one(mapping: &mut Mapping, class: SourceClass, source: &str) 
 
 /// Union `incoming`'s [`PROVENANCE_MARKER`] into `existing`'s, keeping
 /// `existing`'s source for a class both carry.
+///
+/// The table is taken out and put back at the end, unchanged when `incoming`
+/// was unioned into it last: the rule `merge.rs`'s `Remerge` relies on
+/// ([`merge_mapping_fields`]).
 pub(crate) fn union_provenance(existing: &mut Mapping, incoming: &Mapping) {
     let Some(theirs) = incoming
         .get(PROVENANCE_MARKER)
@@ -298,6 +302,10 @@ pub(crate) fn mark_unattributed_field_sources(mapping: &mut Mapping, source: &st
 /// A local incoming value clears inherited attribution for that field; an
 /// attributed incoming value replaces it. Fields the incoming mapping does not
 /// touch retain their existing source.
+///
+/// The table is taken out and put back at the end, unchanged when `incoming`
+/// merged onto it last: the rule `merge.rs`'s `Remerge` relies on
+/// ([`merge_mapping_fields`]).
 pub(crate) fn merge_field_sources(existing: &mut Mapping, incoming: &Mapping) {
     let incoming_sources = field_sources(incoming);
     let mut merged = existing
@@ -336,6 +344,10 @@ fn add_sensitive_field(mapping: &mut Mapping, field: &ayaml::Value) {
 }
 
 /// Carry sparse sensitivity with the same last-wins semantics as rule fields.
+///
+/// The table is taken out and put back at the end, unchanged when `incoming`
+/// merged onto it last: the rule `merge.rs`'s `Remerge` relies on
+/// ([`merge_mapping_fields`]).
 pub(crate) fn merge_sensitive_fields(existing: &mut Mapping, incoming: &Mapping) {
     let incoming_sensitive = sensitive_fields(incoming);
     let mut merged = existing
@@ -1346,6 +1358,18 @@ pub(crate) fn take_untrusted_fix_source(mapping: &mut Mapping) -> bool {
 /// Field-merge one raw rule/template mapping while preserving the monotonic
 /// provenance bit. Treating the marker like an ordinary last-wins YAML field
 /// would let a later mapping erase an earlier untrusted contribution.
+///
+/// `merge.rs`'s `Remerge` relies on this rule: merging `incoming` again onto
+/// what it merged onto last, with nothing merged there since (or onto itself,
+/// when its tables are as the loader writes them), changes no value. It only
+/// takes the field sources, the sensitive fields and the field origins out
+/// (when held), then the provenance (when `incoming` carries one) and the
+/// environment's vars (when `incoming` sets `vars:` and carries them), and
+/// puts each back at the end, in that order. A change that breaks the rule (a
+/// field that accumulates, as a list appended to would, or a table moved in
+/// another order) changes `Remerge` too; a debug build checks each replay
+/// against this merge, and `merge_tests.rs` compares the two on generated
+/// lists.
 pub(crate) fn merge_mapping_fields(existing: &mut Mapping, incoming: Mapping) {
     let untrusted_fix_source =
         has_untrusted_fix_source(existing) || has_untrusted_fix_source(&incoming);

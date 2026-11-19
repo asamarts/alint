@@ -325,14 +325,34 @@ fn list<T: std::fmt::Debug>(
     prop::collection::vec(entry, 0..=most)
 }
 
+/// A field's value, of a few: text, a list, or a nested mapping (a `paths:`
+/// include and exclude pair), which a merge replaces wholesale.
+fn value(field: &str, value: u8, shape: u8) -> ayaml::Value {
+    let text = |at: u8| ayaml::Value::from(format!("{field}{at}"));
+    match shape {
+        0 | 1 => text(value),
+        2 => vec![text(value), text(value + 1)].into(),
+        _ => [
+            ("include".into(), vec![text(value)].into()),
+            ("exclude".into(), text(value + 1)),
+        ]
+        .into_iter()
+        .collect::<Mapping>()
+        .into(),
+    }
+}
+
 /// A rule or template: an id of a few, so ids repeat and override, or none;
 /// fields of a few values; the markers a merge carries, in any order, as the
-/// loader writes them; and fields after them, as a merge appends a field.
+/// loader writes them, or now and then a table a merge would change (empty,
+/// or a sensitive field marked `false`); and fields after them, as a merge
+/// appends a field.
 fn mapping() -> impl Strategy<Value = Mapping> {
     let field = || {
         (
             prop::sample::select(&["kind", "level", "paths", "message", "vars"][..]),
             0..3_u8,
+            0..4_u8,
         )
     };
     (
@@ -347,16 +367,17 @@ fn mapping() -> impl Strategy<Value = Mapping> {
             any::<bool>(),
         ),
         Just((0..6).collect::<Vec<u8>>()).prop_shuffle(),
+        prop::option::weighted(0.1, 0..4_usize),
         list(field(), 2),
     )
-        .prop_map(|(id, fields, markers, order, late)| {
+        .prop_map(|(id, fields, markers, order, flawed, late)| {
             let (source, sensitive, origin, provenance, untrusted, env_vars) = markers;
             let mut mapping = Mapping::new();
             if let Some(id) = id {
                 mapping.insert("id".into(), id.into());
             }
-            for (field, value) in fields {
-                mapping.insert(field.into(), format!("{field}{value}").into());
+            for (field, at, shape) in fields {
+                mapping.insert(field.into(), value(field, at, shape));
             }
             let marked = std::slice::from_mut(&mut mapping);
             for marker in order {
@@ -408,11 +429,37 @@ fn mapping() -> impl Strategy<Value = Mapping> {
                     }
                 }
             }
-            for (field, value) in late {
-                mapping.insert(field.into(), format!("{field}{value}").into());
+            if let Some(flawed) = flawed {
+                flaw(&mut mapping, flawed);
+            }
+            for (field, at, shape) in late {
+                mapping.insert(field.into(), value(field, at, shape));
             }
             mapping
         })
+}
+
+/// The tables of a mapping a merge would change, merging it onto itself: the
+/// field sources, the sensitive fields or the field origins empty
+/// (`flawed` 0 to 2), or the first of its fields marked sensitive `false`.
+fn flaw(mapping: &mut Mapping, flawed: usize) {
+    let tables = [
+        crate::FIELD_SOURCES_MARKER,
+        crate::SENSITIVE_FIELDS_MARKER,
+        crate::v2::FIELD_ORIGINS_MARKER,
+    ];
+    if let Some(table) = tables.get(flawed) {
+        mapping.insert((*table).into(), Mapping::new().into());
+        return;
+    }
+    let field = mapping
+        .keys()
+        .find(|key| key.as_str().is_some_and(|key| !key.starts_with("__")))
+        .cloned();
+    if let Some(field) = field {
+        let marked: Mapping = [(field, false.into())].into_iter().collect();
+        mapping.insert(crate::SENSITIVE_FIELDS_MARKER.into(), marked.into());
+    }
 }
 
 /// The `when` reads of `vars.v<var>` an untrusted source `s<source>` made in
@@ -683,6 +730,42 @@ proptest! {
             prop_assert_eq!(merger.version(), folded.version);
         }
         prop_assert_eq!(canonical(&merger.finish()), canonical(&folded));
+    }
+}
+
+/// A rule a repeated source added as it was, whose tables a merge of it onto
+/// itself would change ([`flaw`]), is merged again, not replayed: `[a, c, a]`
+/// merges to what the fold gives.
+#[test]
+fn a_rule_whose_tables_a_merge_would_change_is_merged_again() {
+    let config = |id: &str| {
+        let mut rule = Mapping::new();
+        rule.insert("id".into(), id.into());
+        rule.insert("kind".into(), "file_exists".into());
+        crate::mark_field_sources_in(std::slice::from_mut(&mut rule), &0_u64.into());
+        RawConfig {
+            rules: vec![rule],
+            ..RawConfig::default()
+        }
+    };
+    for flawed in 0..4 {
+        let mut a = config("a");
+        flaw(&mut a.rules[0], flawed);
+        let c = config("c");
+        let mut folded = RawConfig::default();
+        for source in [&a, &c, &a] {
+            folded = reference::merge(folded, source.clone()).unwrap();
+        }
+        let mut merger = Merger::new(RawConfig::default());
+        merger.push_repeated(Cow::Borrowed(&a), 0).unwrap();
+        merger.push(c).unwrap();
+        merger.push_repeated(Cow::Owned(a), 0).unwrap();
+        assert_eq!(merger.take_merged_onto(), 1, "flaw {flawed}");
+        assert_eq!(
+            canonical(&merger.finish()),
+            canonical(&folded),
+            "flaw {flawed}"
+        );
     }
 }
 

@@ -489,7 +489,11 @@ impl ById {
                 && written.writer == writer
                 && let Some(remerge) = written.remerge(&self.with_id[at], &mapping, keys)
             {
+                #[cfg(debug_assertions)]
+                let before = self.with_id[at].clone();
                 remerge.apply(&mut self.with_id[at], keys);
+                #[cfg(debug_assertions)]
+                check_replay(before, &mapping, &self.with_id[at]);
                 return;
             }
             // Nested structures (a `fix:` block, a `paths:` include/exclude
@@ -521,6 +525,21 @@ impl ById {
         list.extend(self.orphans.entries);
         list
     }
+}
+
+/// In a debug build, that a replay ([`Remerge`]) left `replayed` as merging
+/// `entry` onto `before`, what it was, leaves it: the same keys, with the same
+/// values, in the same order.
+#[cfg(debug_assertions)]
+fn check_replay(mut before: Mapping, entry: &Mapping, replayed: &Mapping) {
+    merge_mapping_fields(&mut before, entry.clone());
+    // `==` on mappings ignores the order of their keys; their debug form does
+    // not.
+    debug_assert_eq!(
+        format!("{replayed:?}"),
+        format!("{before:?}"),
+        "a replayed merge left a rule or template other than the merge does"
+    );
 }
 
 /// `mapping`, copied if it is borrowed.
@@ -588,7 +607,9 @@ impl Written {
 /// when the entry carries one, and the environment's vars when the entry
 /// sets `vars:` and carries them. Every other key of the entry is in the
 /// mapping already, with the entry's value, and keeps its place; each table
-/// holds what it did, since the entry wrote it.
+/// holds what it did, since the entry wrote it. [`merge_mapping_fields`] says
+/// so where it is written, and a debug build checks each replay against the
+/// merge it stands for ([`check_replay`]).
 #[derive(Clone, Copy)]
 struct Remerge {
     /// One bit for each of [`Keys::moved`] the merge takes out and puts back.
