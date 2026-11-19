@@ -440,7 +440,10 @@ mod tests {
             "{}",
             enrich("constraint", msg)
         );
-        assert_eq!(extract_expected_fields("expected `a` or `b`"), [] as [&str; 0]);
+        assert_eq!(
+            extract_expected_fields("expected `a` or `b`"),
+            [] as [&str; 0]
+        );
     }
 
     #[test]
