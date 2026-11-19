@@ -1256,3 +1256,111 @@ fn an_untrusted_load_refuses_allow_out_of_root_before_its_extends_resolve() {
     assert!(error.contains("an untrusted load"), "{error}");
     assert!(crate::load_with(&path, &crate::LoadOptions::default()).is_ok());
 }
+
+/// What loading the config at `root` returned (its `extends:` chain and
+/// drop-ins, before `finalize`), with the work its entries were charged and
+/// the entries its merges handled ([`crate::merge::MERGE_TOUCHED`]).
+fn load_counted(root: &Path) -> (Result<RawConfig>, usize, usize) {
+    let registry = alint_rules::builtin_registry();
+    let options = crate::LoadOptions::with_catalog(registry.catalog());
+    let mut state = LoadState::default();
+    let touched = || crate::merge::MERGE_TOUCHED.with(std::cell::Cell::get);
+    let before = touched();
+    let raw = crate::resolve_top_level(root, &options, &mut state);
+    (raw, state.extends_entries, touched() - before)
+}
+
+/// In `dir`, a ruleset `<name>.yml` of `rules` rules of its own, each with a
+/// message of `message` bytes, and its `extends:` entry.
+fn write_ruleset(dir: &Path, name: &str, rules: usize, message: usize) -> String {
+    use std::fmt::Write as _;
+    let message = "m".repeat(message);
+    let mut text = String::from("version: 1\nrules:\n");
+    for index in 0..rules {
+        writeln!(
+            text,
+            "  - {{id: {name}-{index}, kind: file_exists, paths: x, level: error, \
+             message: '{message}'}}"
+        )
+        .unwrap();
+    }
+    std::fs::write(dir.join(format!("{name}.yml")), text).unwrap();
+    format!("./{name}.yml")
+}
+
+/// In `dir`, a config that extends `entries`, in order.
+fn write_extending(dir: &Path, entries: &[String]) -> PathBuf {
+    let listed = entries.iter().fold(String::new(), |mut listed, entry| {
+        listed.push_str("  - ");
+        listed.push_str(entry);
+        listed.push('\n');
+        listed
+    });
+    let path = dir.join(".alint.yml");
+    std::fs::write(&path, format!("version: 1\nextends:\n{listed}rules: []\n")).unwrap();
+    path
+}
+
+/// A flat list of 100 rulesets of 1,000 rules each loads (#580). Each merge
+/// rebuilt what its list merged so far, and was charged it, so the budget
+/// refused the 91st ruleset. A merge handles what its entry brings in, each
+/// rule and the ruleset's compatibility record once, and is charged that.
+#[test]
+fn a_flat_list_of_large_rulesets_loads() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (count, rules) = (100, 1_000);
+    let entries: Vec<String> = (0..count)
+        .map(|index| write_ruleset(tmp.path(), &format!("r{index}"), rules, 1))
+        .collect();
+    let (raw, charged, touched) = load_counted(&write_extending(tmp.path(), &entries));
+    assert_eq!(raw.unwrap().rules.len(), count * rules);
+    // Each ruleset's rules to load it, and again to merge it.
+    assert_eq!(charged, count * 2 * rules);
+    // And the root's own record.
+    assert_eq!(touched, count * (rules + 1) + 1);
+}
+
+/// A list of 2,900 one-rule files loads (#580): the budget refused the
+/// 2,895th, charged what the list merged before it at each merge.
+#[test]
+fn a_list_of_many_one_rule_files_loads() {
+    let tmp = tempfile::tempdir().unwrap();
+    let count = 2_900;
+    let entries: Vec<String> = (0..count)
+        .map(|index| write_ruleset(tmp.path(), &format!("r{index}"), 1, 1))
+        .collect();
+    let (raw, charged, touched) = load_counted(&write_extending(tmp.path(), &entries));
+    assert_eq!(raw.unwrap().rules.len(), count);
+    assert_eq!(charged, count * 2);
+    assert_eq!(touched, count * 2 + 1);
+}
+
+/// An `extends:` list that alternates two rulesets of 2,000 rules each a
+/// thousand times (#567) rebuilt the 4,000 rules merged so far at every entry
+/// before a budget refused it, some 48 seconds in a debug build. Each entry
+/// now handles the rules it brings in, once, and the list is refused when the
+/// sources its entries merged pass 64 MiB. (Each rule's message makes each
+/// ruleset over 2 MiB, so that is after 31 entries, which keeps the test
+/// short; rules of 60 bytes are refused after 574 entries.)
+#[test]
+fn an_alternating_extends_list_is_refused_in_linear_work() {
+    let tmp = tempfile::tempdir().unwrap();
+    let rules = 2_000;
+    let pair = [
+        write_ruleset(tmp.path(), "a", rules, 1_000),
+        write_ruleset(tmp.path(), "b", rules, 1_000),
+    ];
+    let entries: Vec<String> = (0..1_000).flat_map(|_| pair.clone()).collect();
+    let (raw, charged, touched) = load_counted(&write_extending(tmp.path(), &entries));
+    let error = raw.unwrap_err().to_string();
+    assert!(error.contains("bytes of sources in all"), "{error}");
+    // The rulesets are as large, and the entry that passes the budget is
+    // refused before it merges.
+    let size = std::fs::metadata(tmp.path().join("a.yml")).unwrap().len();
+    let merged = MAX_EXTENDS_SOURCE_BYTES / usize::try_from(size).unwrap();
+    assert_eq!(merged, 31);
+    // Loading `a` and `b`, and each entry's merge, the refused one's too.
+    assert_eq!(charged, 2 * rules + (merged + 1) * rules);
+    // Each merged entry's rules and compatibility record, once.
+    assert_eq!(touched, merged * (rules + 1));
+}

@@ -585,7 +585,8 @@ proptest! {
 
     /// A list pushed onto one [`Merger`], each entry moved in or merged from
     /// where it is held, merges to what the left fold of the old merge gave,
-    /// and the merge counts the size the fold's would have at every step.
+    /// and counts the entries the fold's result held at every step, which
+    /// [`MAX_MERGED_ENTRIES`] bounds.
     #[test]
     fn a_list_merged_in_one_pass_equals_the_fold_of_the_old_merge(
         configs in prop::collection::vec(config(), 1..=12),
@@ -602,7 +603,7 @@ proptest! {
             } else {
                 merger.push(source).unwrap();
             }
-            prop_assert_eq!(merger.merge_size(), folded.merge_size());
+            prop_assert_eq!(merger.entry_count(), folded.entry_count());
             prop_assert_eq!(merger.version(), folded.version);
         }
         prop_assert_eq!(canonical(&merger.finish()), canonical(&folded));

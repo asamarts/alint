@@ -388,10 +388,8 @@ fn resolve_top_level(
             &loader::TrustedExtends::default(),
             loader::SourceContext::new(alint_core::ConfigSourceClass::DropIn, merger.version()),
         )?;
-        // Each merge is charged as an `extends:` merge is (200 empty drop-ins
-        // on 50,000 `ignore:` patterns took ten seconds when a merge rebuilt
-        // the whole config).
-        state.charge_extends(merger.merge_size(), &drop_in)?;
+        // Each merge is charged as an `extends:` merge is, what it brings in.
+        state.charge_extends(&drop_in)?;
         merger.push(drop_in)?;
     }
     let mut raw = merger.finish();

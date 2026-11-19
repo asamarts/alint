@@ -139,14 +139,6 @@ impl Merger {
             .map_or(self.merged.version, |first| first.version)
     }
 
-    /// What [`RawConfig::merge_size`] counts of what was merged so far.
-    pub(crate) fn merge_size(&self) -> usize {
-        self.first.as_ref().map_or_else(
-            || self.entry_count() + self.merged.v2.sources.len(),
-            RawConfig::merge_size,
-        )
-    }
-
     /// Merge `source` onto what was merged so far, moving its entries in.
     pub(crate) fn push(&mut self, source: RawConfig) -> Result<()> {
         self.push_from(Cow::Owned(source))

@@ -163,8 +163,11 @@ impl MemoKey {
 /// The entries one load's `extends:` entries (and `.alint.d/` drop-ins) may
 /// load and merge, in all ([`LoadState::charge_extends`],
 /// [`LoadState::charge_extends_load`]): four merged configs of the largest
-/// size. A config that extends 80 rulesets of a thousand rules each spends
-/// about four fifths of it.
+/// size. An entry is charged its source twice, to load it and to merge it, so
+/// a flat list of distinct sources that fits [`crate::MAX_MERGED_ENTRIES`]
+/// spends at most half of it (and one entry each to load and merge an empty
+/// source), and a source one level down, loaded and merged again with what it
+/// extends, the rest.
 pub(crate) const MAX_EXTENDS_MERGE_WORK: usize = 4 * crate::MAX_MERGED_ENTRIES;
 
 /// The bytes of source one load's `extends:` entries may merge, in all
@@ -198,15 +201,15 @@ impl LoadState {
         }
     }
 
-    /// Charge an `extends:` merge of `source` onto what the list merged so far
-    /// (`merged`, its [`RawConfig::merge_size`]), or of a drop-in onto the
-    /// config, with its work: the entries of both, and the bytes of `source`
-    /// ([`MAX_EXTENDS_SOURCE_BYTES`]). One load's entries may do
-    /// [`MAX_EXTENDS_MERGE_WORK`] in all, so they are bounded however its
-    /// lists repeat a source (`[a, b, a, b, ...]`) or follow a large one with
-    /// many small ones.
-    pub(crate) fn charge_extends(&mut self, merged: usize, source: &RawConfig) -> Result<()> {
-        self.charge_extends_work(merged.saturating_add(source.merge_size()))?;
+    /// Charge an `extends:` merge of `source` onto what its list merged so far,
+    /// or of a drop-in onto the config, with its work: what it brings in
+    /// ([`RawConfig::merge_size`], and at least one entry), as a merge onto
+    /// what was merged handles only that ([`crate::merge::Merger`]), and the
+    /// bytes of `source` ([`MAX_EXTENDS_SOURCE_BYTES`]). One load's entries
+    /// may do [`MAX_EXTENDS_MERGE_WORK`] in all, so they are bounded however
+    /// its lists repeat a source (`[a, b, a, b, ...]`).
+    pub(crate) fn charge_extends(&mut self, source: &RawConfig) -> Result<()> {
+        self.charge_extends_work(source.merge_size().max(1))?;
         self.extends_bytes = self.extends_bytes.saturating_add(source.source_size);
         if self.extends_bytes > MAX_EXTENDS_SOURCE_BYTES {
             return Err(Error::Other(format!(
@@ -235,10 +238,9 @@ impl LoadState {
             return Err(Error::Other(format!(
                 "the `extends:` entries and `.alint.d/` drop-ins of this config load and merge \
                  more than {MAX_EXTENDS_MERGE_WORK} entries in all (rules, templates, facts, vars \
-                 and `ignore:` patterns, counted for each source an entry loads and at each \
-                 merge, both what was merged so far and what the entry or drop-in brings in); \
-                 list each source once, extend fewer and larger sources, use fewer drop-ins, or \
-                 flatten the `extends:` chain"
+                 and `ignore:` patterns, counted for each source an entry loads, and again for \
+                 what each entry or drop-in brings in to a merge); list each source once, extend \
+                 fewer sources, use fewer drop-ins, or flatten the `extends:` chain"
             )));
         }
         Ok(())
