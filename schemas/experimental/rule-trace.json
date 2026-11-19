@@ -812,9 +812,13 @@
           ]
         },
         "plan": {
-          "type": [
-            "object",
-            "string"
+          "oneOf": [
+            {
+              "type": "object"
+            },
+            {
+              "const": "<redacted>"
+            }
           ]
         },
         "policy_url": {

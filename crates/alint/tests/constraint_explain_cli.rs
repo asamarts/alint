@@ -1159,5 +1159,9 @@ fn the_trace_carries_the_plan_its_schema_accepts() {
             .map(|error| error.to_string())
             .collect();
         assert!(errors.is_empty(), "schema errors: {errors:#?}");
+        // A plan is an object or `<redacted>`, never another string.
+        let mut other = document.clone();
+        other["rule"]["plan"] = serde_json::Value::from("plan");
+        assert!(!validator.is_valid(&other), "{other}");
     }
 }

@@ -1000,7 +1000,9 @@ fn trace_rule_payload_schema(_: &mut schemars::SchemaGenerator) -> schemars::Sch
             "conditional": { "type": "boolean" },
             "fixable": { "type": "boolean" },
             "fix": { "type": ["string", "null"] },
-            "plan": { "type": ["object", "string"] },
+            "plan": {
+                "oneOf": [{ "type": "object" }, { "const": "<redacted>" }]
+            },
             "analysis_time": {
                 "type": "object",
                 "additionalProperties": false,
