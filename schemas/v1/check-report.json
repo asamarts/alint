@@ -229,7 +229,7 @@
       "type": "object",
       "required": ["path", "label"],
       "additionalProperties": true,
-      "description": "A place that explains a finding. The range is present when the producer knows it: 1-based lines and columns counted in Unicode characters, the end exclusive, as SARIF regions are.",
+      "description": "A place that explains a finding. The range is present when the producer knows it: 1-based lines and columns counted in Unicode characters, the end exclusive, as SARIF regions are. Its fields are named after the violation's own `line` and `column`, not SARIF's `startLine` and `startColumn`.",
       "properties": {
         "path": { "type": "string", "description": "Repo-relative path." },
         "label": { "type": "string", "description": "What the location is to the finding." },

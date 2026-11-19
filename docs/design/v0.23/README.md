@@ -929,10 +929,17 @@ Phase 7 lands in four steps, each a pull request:
     `Rule::path_scope`, which also drives `expect_matches`, tracing and the sensitive-path checks.
   - `every_full_index_kind_receives_the_full_index_under_changed` replaces
     `v010_cross_file_kinds_require_full_index_and_no_path_scope`: over every kind the registry
-    marks full-index (25) and every corpus scenario that configures one, a probe in place of the
-    rule records what the engine hands it under `--changed`, which must be what a full run hands
+    marks full-index (25) and every corpus scenario that configures one inline, over an inline
+    tree, in a config that loads, a probe in place of the rule records what the engine hands it
+    under `--changed` (a relation reader's rows cell by cell), which must be what a full run hands
     it. Constitution invariant 2 names it.
   - The JSON report gains `related_locations` and `related_locations_omitted` on each violation,
     note and baselined finding, left out when empty and for a redacted path. A gate over one
     fixture with a finding of each family checks that JSON, SARIF and the language server carry
     every related location the engine produced, in order, with the count of the rest.
+  - Review fixes: the changed set lists a rename under both of its paths (`--no-renames`), which
+    also reaches the five version 1 kinds with a path scope; a changed `.gitignore` or `.ignore`
+    triggers each selector whose `paths:` can match below it, and a changed `has_ancestor` marker
+    only such a selector; a change that cannot run a rule reads none of its trigger's manifests.
+    Section 9 and `docs/rules.md` list what Git does not report (an edit to a symlink's target, a
+    file Git ignores under `respect_gitignore: false`, an ignore file outside the diff).

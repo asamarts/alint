@@ -90,9 +90,11 @@ keeps the count of the rest. Each format that has a place for related locations 
   related locations`.
 - **`json`** adds `related_locations` to the violation, note or baselined finding: an array of
   `{ "path", "label" }` objects, each with `line`, `column`, `end_line` and `end_column` when its
-  range is known (1-based, Unicode code points, the end exclusive, as SARIF regions). The count of
-  the rest is `related_locations_omitted`. Both are omitted when there are none, so a finding
-  without related locations keeps its earlier shape, and the report stays `schema_version: 1`.
+  range is known (1-based, Unicode code points, the end exclusive, as SARIF regions). The names
+  follow the violation's own `line` and `column`, not SARIF's `startLine` and `startColumn`. The
+  count of the rest is `related_locations_omitted`. Both are omitted when there are none, so a
+  finding without related locations keeps its earlier shape, and the report stays
+  `schema_version: 1`. The items of `alint fix --format json` carry no related locations.
 - **`sarif`** projects the primary range into the result's first physical location and emits the
   secondary locations in `relatedLocations`, including regions when known. SARIF columns use
   Unicode code points. The count of the rest is one more related location at the config file,

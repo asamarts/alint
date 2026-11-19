@@ -230,7 +230,7 @@ impl Scope {
 
     /// Whether a path at or below the directory `dir` (root-relative, empty
     /// for the root) can match this scope's path patterns, judged from the
-    /// patterns alone: a sole literal include only when `dir` holds it, and
+    /// patterns alone: a sole literal include only when it lies below `dir`, and
     /// includes that each start with a literal directory
     /// ([`literal_dir_prefix`]) only when `dir` and one of those lie one below
     /// the other. `true` when the patterns cannot tell. The `scope_filter`
