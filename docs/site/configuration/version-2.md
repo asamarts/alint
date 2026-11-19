@@ -366,6 +366,47 @@ config's directory, `../`-relative when `allow_out_of_root: true` lets an `exten
 it. A file an `extends:` entry read from the environment chooses, and every file it extends in
 turn, is named `<redacted>`, here and in errors found in it, however short its name.
 
+`alint explain <rule>` on a `constraint` rule shows its resolved plan after its options: the
+assertion, then every relation the rule reads in the order a run evaluates them (its input, both
+sides of each join, the relations its `in:` and `not_in:` lists probe, and a `set`'s other
+relation), each named as the rule writes it, with its source, reader, fields, transforms,
+`where:` and the file that declares it; then the selectors that run the rule under `--changed`.
+For example, for a rule whose `input:` joins two relations:
+
+```text
+plan:
+  assert: unique: key [dependency], determines [range]
+  relations, in evaluation order:
+    relation ranges  .alint.yml
+      from: selector manifests  .alint.yml
+        paths: packages/*/package.json
+      entries: json at $.dependencies
+      fields:
+        dependency: entry.key
+        range: entry.value
+    relation names  .alint.yml
+      from: selector manifests  .alint.yml
+        paths: packages/*/package.json
+      read: json $.name
+      fields:
+        name: value
+        manifest: path
+    relation joined  .alint.yml  (input)
+      join: left ranges, right names, on dependency = name, unique right
+      fields:
+        dependency: left.dependency
+        range: left.range
+        manifest: right.manifest
+  trigger: under --changed, a change to what these selectors read runs the rule
+    selector manifests  .alint.yml
+      paths: packages/*/package.json
+  cost: linear in the rows of each relation it reads
+```
+
+`--format json` gives the same as a `plan` object. The plan is configuration and shows no value
+read from a file. What the environment wrote shows as `<redacted>`, as do a sensitive field's
+`where:` literals, patterns and transforms and the literals the assertion compares with it.
+
 ## What the loader checks
 
 The whole relation plan is checked when the config loads, before any file is read:

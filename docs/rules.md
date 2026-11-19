@@ -1033,6 +1033,12 @@ baseline could test guesses against. Findings that differ only in a sensitive va
 and are told apart by their count: three such findings against a baseline that counted two are one
 new finding.
 
+`alint explain <rule>` shows a `constraint` rule's resolved plan after its options: the assertion,
+every relation it reads in the order a run evaluates them, each with its source, reader, fields and
+`where:` and the file that declares it, and the selectors that run it under `--changed`; it shows
+no value read from a file, and what the environment wrote or a sensitive field compares with shows
+as `<redacted>` (see [Version 2](/docs/configuration/version-2/)).
+
 #### Under `--changed`
 
 `alint check --changed` (and `--base`) runs a `constraint` rule when a changed path, added,
