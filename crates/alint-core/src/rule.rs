@@ -403,14 +403,42 @@ impl Violation {
 
     /// The message without a leading `"{path}: "` that repeats `path`, for a
     /// renderer that prints the path itself: many rules start a message with
-    /// the slash-separated path of the file it concerns.
+    /// the slash-separated path of the file it concerns, as written or, as a
+    /// `constraint` rule's notes do, [escaped](Self::escaped_for_message).
     #[must_use]
     pub fn message_after_path(&self, path: &Path) -> &str {
+        fn after<'m>(message: &'m str, path: &str) -> Option<&'m str> {
+            message.strip_prefix(path)?.strip_prefix(": ")
+        }
         let shown = path.to_string_lossy().replace('\\', "/");
-        self.message
-            .strip_prefix(shown.as_str())
-            .and_then(|rest| rest.strip_prefix(": "))
+        after(&self.message, &shown)
+            .or_else(|| after(&self.message, &Self::escaped_for_message(&shown)))
             .unwrap_or(&self.message)
+    }
+
+    /// `text` (a path, or words about a file) as a message shows it unquoted:
+    /// each control character, bidi control, zero-width character and other
+    /// character a string's `Debug` form escapes, escaped (`\u{202e}`); quotes
+    /// and `\` as written. Text escaped already shows the same. This is how a
+    /// `constraint` rule's messages and a relation's failures name a file, so
+    /// a renderer that prints a note's path itself, before
+    /// [`message_after_path`](Self::message_after_path), shows it this way.
+    #[must_use]
+    pub fn escaped_for_message(text: &str) -> Cow<'_, str> {
+        let escaped =
+            |c: char| !matches!(c, '"' | '\'' | '\\') && c.escape_debug().nth(1).is_some();
+        if !text.chars().any(escaped) {
+            return Cow::Borrowed(text);
+        }
+        let mut out = String::with_capacity(text.len() + 8);
+        for c in text.chars() {
+            if escaped(c) {
+                out.extend(c.escape_debug());
+            } else {
+                out.push(c);
+            }
+        }
+        Cow::Owned(out)
     }
 
     /// Whether public consumers must suppress the primary and related paths.

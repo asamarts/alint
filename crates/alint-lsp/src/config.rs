@@ -203,8 +203,15 @@ fn run_config(
         .results
         .iter()
         .flat_map(|r| r.notes.iter())
-        .map(|n| match &n.path {
-            Some(p) => format!("{}: {}", p.display(), n.message_after_path(p)),
+        // The path once, escaped as the message names it (a `constraint`
+        // note's message starts with its path escaped), and `<redacted>`
+        // when it is sensitive, as `alint check --show-notes` prints it.
+        .map(|n| match n.report_path() {
+            Some(p) => format!(
+                "{}: {}",
+                alint_core::Violation::escaped_for_message(&p.display().to_string()),
+                n.message_after_path(p)
+            ),
             None => n.message.to_string(),
         })
         .collect();
@@ -795,5 +802,88 @@ mod baseline_tests {
         }
         config("base.jsonl");
         assert!(build_session(&root).unwrap().unwrap().baseline.is_some());
+    }
+}
+
+#[cfg(test)]
+mod note_tests {
+    use super::*;
+
+    /// A `constraint` note's message starts with its file's path, escaped;
+    /// the note shows that path once, escaped as the message names it, not
+    /// the raw path and then the message's escaped one. The file's name
+    /// holds an escape sequence (where the filesystem allows one) and a
+    /// right-to-left override.
+    #[test]
+    fn a_note_names_its_file_once_and_escaped() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join(".alint.yml"),
+            "version: 2\nrelations:\n  r:\n    from: { paths: \"d/*.json\" }\n    read: { json: \
+             \"$.v\" }\n    fields: { v: value }\nrules:\n  - id: n\n    kind: constraint\n    \
+             input: r\n    assert: { unique: { key: [v] } }\n    level: error\n",
+        )
+        .unwrap();
+        std::fs::create_dir(root.join("d")).unwrap();
+        let (name, shown) = if cfg!(unix) {
+            ("a\u{1b}[31m\u{202e}Z2.json", "a\\u{1b}[31m\\u{202e}Z2.json")
+        } else {
+            ("a\u{202e}Z2.json", "a\\u{202e}Z2.json")
+        };
+        std::fs::write(root.join("d").join(name), "{\"v\": \"${VAR}\"}").unwrap();
+        let check = check_workspace(
+            &[root.to_path_buf()],
+            &[],
+            &Settings::default(),
+            &alint_rules::builtin_registry(),
+        );
+        let notes: Vec<&String> = check
+            .runs
+            .iter()
+            .flat_map(|(_, run)| &run.as_ref().unwrap().notes)
+            .collect();
+        let path = Path::new("d").join(shown).display().to_string();
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(
+            notes[0].starts_with(&format!("{path}: skipped non-literal value")),
+            "{notes:?} {path}"
+        );
+        assert_eq!(notes[0].matches("Z2.json").count(), 1, "{notes:?}");
+        assert!(!notes[0].contains(['\u{1b}', '\u{202e}']), "{notes:?}");
+    }
+
+    /// A note of a rule whose relation keeps its rows by a value from the
+    /// environment says where that value occurs, so its path is hidden, as
+    /// `alint check --show-notes` hides it: `<redacted>`, not the file.
+    #[test]
+    fn a_note_of_a_rule_whose_rows_the_environment_picks_hides_its_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join(".alint.yml"),
+            "version: 2\nrelations:\n  r:\n    from: { paths: \"d/*.json\" }\n    read: { json: \
+             \"$.v\" }\n    fields: { v: value, file: path }\n    where: { file: { in: \
+             [\"{{env.ALINT_LSP_NOTE_TARGET | default('d/secret-falcon.json')}}\"] } \
+             }\nrules:\n  - id: n\n    kind: constraint\n    input: r\n    assert: { unique: \
+             { key: [v] } }\n    level: error\n",
+        )
+        .unwrap();
+        std::fs::create_dir(root.join("d")).unwrap();
+        std::fs::write(root.join("d/secret-falcon.json"), "{\"v\": \"${VAR}\"}").unwrap();
+        let check = check_workspace(
+            &[root.to_path_buf()],
+            &[],
+            &Settings::default(),
+            &alint_rules::builtin_registry(),
+        );
+        let notes: Vec<&String> = check
+            .runs
+            .iter()
+            .flat_map(|(_, run)| &run.as_ref().unwrap().notes)
+            .collect();
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(notes[0].starts_with("<redacted>: "), "{notes:?}");
+        assert!(!notes[0].contains("falcon"), "{notes:?}");
     }
 }

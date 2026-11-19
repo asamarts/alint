@@ -297,3 +297,40 @@ fn a_place_at_a_sensitive_cell_shows_no_length_in_json_or_sarif() {
 fn json_sarif(dir: &Path) -> Value {
     json(dir, "sarif")
 }
+
+/// A `constraint` note's message starts with its file's path, escaped;
+/// `--show-notes` prints the path once, escaped for the terminal, then the
+/// rest of the message, not the path and then the message's escaped path.
+/// The file's name holds an escape sequence (on Unix: Windows refuses
+/// control characters in file names) and a right-to-left override.
+#[test]
+fn show_notes_names_a_note_file_once_and_escaped() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        dir.path(),
+        ".alint.yml",
+        "version: 2\nrelations:\n  r:\n    from: { paths: \"d/*.json\" }\n    read: { json: \
+         \"$.v\" }\n    fields: { v: value }\nrules:\n  - id: n\n    kind: constraint\n    \
+         input: r\n    assert: { unique: { key: [v] } }\n    level: error\n",
+    );
+    let (name, shown) = if cfg!(unix) {
+        ("a\u{1b}[31m\u{202e}Z2.json", "a\\x1b[31m\\u{202e}Z2.json")
+    } else {
+        ("a\u{202e}Z2.json", "a\\u{202e}Z2.json")
+    };
+    write(dir.path(), &format!("d/{name}"), "{\"v\": \"${VAR}\"}");
+    let out = run(dir.path(), &["check", "--show-notes"]);
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    let notes: Vec<&str> = stderr
+        .lines()
+        .filter(|line| line.starts_with("  note: "))
+        .collect();
+    let path = Path::new("d").join(shown).display().to_string();
+    assert_eq!(notes.len(), 1, "{stderr}");
+    assert!(
+        notes[0].starts_with(&format!("  note: {path}: skipped non-literal value")),
+        "{notes:?} {path}"
+    );
+    assert_eq!(notes[0].matches("Z2.json").count(), 1, "{notes:?}");
+    assert!(!notes[0].contains(['\u{1b}', '\u{202e}']), "{notes:?}");
+}
