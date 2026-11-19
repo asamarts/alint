@@ -140,6 +140,51 @@ fn the_written_fingerprint_says_nothing_about_the_path() {
     assert_eq!(gitlab(one.path()), sarif(one.path()));
 }
 
+/// A new hidden-path finding beside a baselined one: both show as
+/// `<redacted>` at the same line, so only being baselined tells them apart in
+/// SARIF, and the baselined one keeps the fingerprint the baseline gives it.
+#[test]
+fn a_baselined_hidden_finding_keeps_its_fingerprint_beside_a_new_one() {
+    let tmp = tree(&["alpha.txt"]);
+    let root = tmp.path();
+    let out = alint(root, &["baseline", "--output", "bl.json", "."]);
+    assert!(out.status.success(), "{out:?}");
+    let written = entries(root, "bl.json");
+    assert_eq!(written.len(), 1, "{written:?}");
+    std::fs::write(root.join("beta.txt"), "a  \nb\n").unwrap();
+    let out = alint(
+        root,
+        &["check", "--baseline", "bl.json", "--format", "sarif", "."],
+    );
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let sarif: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let results: Vec<(String, String)> = sarif["runs"][0]["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|result| {
+            (
+                result["baselineState"].as_str().unwrap().to_string(),
+                result["partialFingerprints"]["alint/v1"]
+                    .as_str()
+                    .unwrap()
+                    .to_string(),
+            )
+        })
+        .collect();
+    assert_eq!(results.len(), 2, "{results:?}");
+    assert!(
+        results.contains(&("unchanged".to_string(), written[0].fingerprint.clone())),
+        "{results:?}"
+    );
+    assert!(
+        results
+            .iter()
+            .any(|(state, fingerprint)| state == "new" && *fingerprint != written[0].fingerprint),
+        "{results:?}"
+    );
+}
+
 #[test]
 fn a_v021_baseline_no_longer_matches() {
     let root = tree(&["alpha.txt", "beta.txt"]);

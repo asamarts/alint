@@ -533,11 +533,13 @@ fn build_fixes(rule_id: &str, v: &Violation) -> Vec<SarifFix> {
 /// ones first, then the live ones, each by the path, line and column they
 /// show, then rule and message ([`OccurrenceKey`]). The baseline suppresses
 /// the first findings of a fingerprint in path, line, column and message
-/// order, so the baselined results come first by their key anyway, but for a
-/// hidden path, which shows as `<redacted>`; a baselined repeat then keeps its
-/// number while live repeats come and go. The first keeps the canonical
-/// fingerprint, the identity the baseline gives the finding; the Nth (N > 0)
-/// gets [`occurrence_fingerprint`]. A run with no repeat is written unchanged.
+/// order, up to its count, so the baselined results come first by their key
+/// anyway, but for a hidden path, which shows as `<redacted>`. A repeat then
+/// keeps its number while the repeats that sort before it stay; one that
+/// sorts before it shifts it, baselined or not, as the new one can take a
+/// baselined place. The first keeps the canonical fingerprint, the identity
+/// the baseline gives the finding; the Nth (N > 0) gets
+/// [`occurrence_fingerprint`]. A run with no repeat is written unchanged.
 fn number_repeated_fingerprints(
     results: &mut [SarifResult],
     numbered: &[(usize, &str, (bool, OccurrenceKey<'_>))],
@@ -1665,52 +1667,72 @@ mod tests {
     }
 
     /// The results that share a fingerprint are numbered baselined first, then
-    /// by what they show, not by the order they are written in: a baselined
-    /// repeat keeps its fingerprint while live repeats of its key come and go,
-    /// also one that shows before it (as one at a hidden path can).
+    /// by what they show, not by the order they are written in. The baseline
+    /// suppresses a fingerprint's first findings by path, line, column and
+    /// message, up to its count: a repeat keeps its fingerprint while the
+    /// repeats that sort before it stay, and a repeat that sorts before it
+    /// shifts it, baselined or not, as it can take its place in the baseline.
     #[test]
-    fn a_baselined_repeat_keeps_its_fingerprint_as_live_repeats_come_and_go() {
+    fn a_repeat_keeps_its_fingerprint_while_the_repeats_before_it_stay() {
         use crate::{BaselineMarks, ResultMarks, SuppressedFinding};
-        let finding = |path: &str, line: usize| {
-            Violation::new("`name` \"x\" is not unique")
-                .with_path(Path::new(path))
-                .with_location(line, 1)
+        use alint_core::baseline::{self, Baseline, FingerprintedViolation};
+        let report = |findings: &[(&str, usize)]| Report {
+            results: vec![RuleResult {
+                rule_id: "names-unique".into(),
+                level: Level::Error,
+                policy_url: None,
+                violations: findings
+                    .iter()
+                    .map(|&(path, line)| {
+                        Violation::new("`name` \"x\" is not unique")
+                            .with_path(Path::new(path))
+                            .with_location(line, 1)
+                    })
+                    .collect(),
+                notes: Vec::new(),
+                is_fixable: false,
+                analysis_failures: Vec::new(),
+            }],
         };
-        // Each result's path, line and fingerprint, as written.
-        let shown = |live: &[(&str, usize)]| -> Vec<(String, u64, String)> {
-            let report = Report {
-                results: vec![RuleResult {
+        // A path-free fingerprint, as a `constraint` rule's `unique` gives.
+        let fingerprint_of = |_: &str, _: &Violation| "fp-x".to_string();
+        // The baseline written while `b` and `d` were the findings.
+        let written = report(&[("b/package.json", 1), ("d/package.json", 5)]);
+        let baseline = Baseline::from_fingerprints(
+            None,
+            written.results[0]
+                .violations
+                .iter()
+                .map(|violation| FingerprintedViolation {
                     rule_id: "names-unique".into(),
-                    level: Level::Error,
-                    policy_url: None,
-                    violations: live
-                        .iter()
-                        .map(|&(path, line)| finding(path, line))
-                        .collect(),
-                    notes: Vec::new(),
-                    is_fixable: false,
-                    analysis_failures: Vec::new(),
-                }],
-            };
+                    path: None,
+                    fingerprint: fingerprint_of("names-unique", violation),
+                    message: Some(violation.message.to_string()),
+                }),
+        );
+        // Each result's path with its fingerprint and whether it is
+        // baselined, after the baseline is applied as `check` applies it.
+        let shown = |findings: &[(&str, usize)]| -> BTreeMap<String, (String, bool)> {
+            let applied = baseline::apply(&report(findings), &baseline, fingerprint_of);
             let marks = BaselineMarks {
                 per_result: vec![ResultMarks {
-                    live_fingerprints: vec!["fp-x".into(); live.len()],
-                    suppressed: [("b/package.json", 1), ("d/package.json", 5)]
+                    live_fingerprints: applied.live_fingerprints[0].clone(),
+                    suppressed: applied
+                        .suppressed
                         .iter()
-                        .map(|&(path, line)| SuppressedFinding {
-                            violation: finding(path, line),
-                            fingerprint: "fp-x".into(),
+                        .map(|suppressed| SuppressedFinding {
+                            violation: suppressed.violation.clone(),
+                            fingerprint: suppressed.fingerprint.clone(),
                         })
                         .collect(),
                 }],
-                suppressed_total: 2,
+                suppressed_total: applied.suppressed_total,
             };
             let mut sarif = Vec::new();
-            write_sarif_with_baseline(&report, Some(&marks), &mut sarif).unwrap();
+            write_sarif_with_baseline(&applied.live, Some(&marks), &mut sarif).unwrap();
             let sarif: Value = serde_json::from_slice(&sarif).unwrap();
-            sarif["runs"][0]["results"]
-                .as_array()
-                .unwrap()
+            let results = sarif["runs"][0]["results"].as_array().unwrap();
+            let shown: BTreeMap<String, (String, bool)> = results
                 .iter()
                 .map(|result| {
                     let location = &result["locations"][0]["physicalLocation"];
@@ -1719,39 +1741,67 @@ mod tests {
                             .as_str()
                             .unwrap()
                             .to_string(),
-                        location["region"]["startLine"].as_u64().unwrap(),
-                        result["partialFingerprints"]["alint/v1"]
-                            .as_str()
-                            .unwrap()
-                            .to_string(),
+                        (
+                            result["partialFingerprints"]["alint/v1"]
+                                .as_str()
+                                .unwrap()
+                                .to_string(),
+                            result["baselineState"] == "unchanged",
+                        ),
                     )
                 })
-                .collect()
-        };
-        let baselined = |results: Vec<(String, u64, String)>| -> Vec<(String, u64, String)> {
-            results
-                .into_iter()
-                .filter(|(path, line, _)| {
-                    [("b/package.json", 1), ("d/package.json", 5)].contains(&(path.as_str(), *line))
-                })
-                .collect()
-        };
-        let alone = shown(&[]);
-        assert_eq!(alone[0].2, "fp-x");
-        assert_ne!(alone[1].2, "fp-x");
-        for live in [
-            &[("e/package.json", 1)][..],
-            &[("a/package.json", 1)],
-            &[("c/package.json", 1), ("a/package.json", 1)],
-            &[("d/package.json", 1)],
-        ] {
-            let results = shown(live);
-            assert_eq!(baselined(results.clone()), alone, "{live:?}");
-            let distinct: std::collections::BTreeSet<&String> = results
-                .iter()
-                .map(|(_, _, fingerprint)| fingerprint)
                 .collect();
-            assert_eq!(distinct.len(), results.len(), "{results:?}");
+            let distinct: std::collections::BTreeSet<&String> =
+                shown.values().map(|(fingerprint, _)| fingerprint).collect();
+            assert_eq!(distinct.len(), results.len(), "{shown:?}");
+            shown
+        };
+        let at = |shown: &BTreeMap<String, (String, bool)>, path: &str| shown[path].clone();
+        let alone = shown(&[("b/package.json", 1), ("d/package.json", 5)]);
+        let (b, d) = (at(&alone, "b/package.json"), at(&alone, "d/package.json"));
+        assert_eq!(b, ("fp-x".to_string(), true));
+        assert!(d.1, "{alone:?}");
+
+        // A repeat that sorts after them leaves both as they were, in either
+        // order the findings come in.
+        for findings in [
+            [
+                ("b/package.json", 1),
+                ("d/package.json", 5),
+                ("e/package.json", 1),
+            ],
+            [
+                ("e/package.json", 1),
+                ("d/package.json", 5),
+                ("b/package.json", 1),
+            ],
+        ] {
+            let after = shown(&findings);
+            assert_eq!(at(&after, "b/package.json"), b, "{after:?}");
+            assert_eq!(at(&after, "d/package.json"), d, "{after:?}");
+            assert!(!at(&after, "e/package.json").1, "{after:?}");
         }
+
+        // One that sorts between them leaves `b`, and takes `d`'s place in
+        // the baseline: `d` is new, under another fingerprint.
+        let between = shown(&[
+            ("b/package.json", 1),
+            ("c/package.json", 1),
+            ("d/package.json", 5),
+        ]);
+        assert_eq!(at(&between, "b/package.json"), b, "{between:?}");
+        assert_eq!(at(&between, "c/package.json"), d, "{between:?}");
+        assert!(!at(&between, "d/package.json").1, "{between:?}");
+        assert_ne!(at(&between, "d/package.json").0, d.0, "{between:?}");
+
+        // One that sorts first shifts both.
+        let first = shown(&[
+            ("a/package.json", 1),
+            ("b/package.json", 1),
+            ("d/package.json", 5),
+        ]);
+        assert_eq!(at(&first, "a/package.json"), b, "{first:?}");
+        assert_eq!(at(&first, "b/package.json"), d, "{first:?}");
+        assert!(!at(&first, "d/package.json").1, "{first:?}");
     }
 }
