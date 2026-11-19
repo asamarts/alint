@@ -318,6 +318,36 @@ fn locales_tree(changed: &[PathBuf]) -> tempfile::TempDir {
     dir
 }
 
+/// A rule that `--changed` skips evaluates no relation before the rules
+/// run: the memo records none (`Engine::evaluate_read_relations`).
+#[test]
+fn a_change_outside_the_trigger_scope_evaluates_no_relation() {
+    let plan = locales_plan();
+    let changed = PathBuf::from("README.md");
+    let dir = locales_tree(std::slice::from_ref(&changed));
+    let index =
+        crate::walker::walk(dir.path(), &crate::walker::WalkOptions::test_default()).unwrap();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let rule = ReadsRelation {
+        id: "locales",
+        level: Level::Error,
+        plan: Arc::clone(&plan),
+        input: [RelationId(0)],
+        seen: Arc::clone(&seen),
+        trigger: Some(crate::relation::TriggerScope::of(&plan, &[RelationId(0)])),
+    };
+    let report = Engine::from_entries(vec![RuleEntry::new(Box::new(rule))], RuleRegistry::new())
+        .with_changed_paths(HashSet::from([changed]))
+        .run(dir.path(), &index)
+        .unwrap();
+    assert!(report.results.is_empty(), "{:?}", report.results);
+    assert!(seen.lock().unwrap().is_empty(), "the rule must not run");
+    let memo = index
+        .relation_memo(&plan)
+        .expect("the run's memo for the plan");
+    assert_eq!(memo.computed(), Vec::<RelationId>::new());
+}
+
 /// Under `--changed`, a pass decides once what a rule's trigger scope takes
 /// of the changed paths, and every gate of the pass reads that decision: a
 /// selector tests each changed path below the directory its `paths:` start

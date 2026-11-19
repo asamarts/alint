@@ -489,3 +489,52 @@ fn an_untracked_repository_runs_the_rules_that_read_below_it() {
         )
     );
 }
+
+/// A manifest that a trigger scope reads only to decide whether its rule runs
+/// warns of nothing when it lists no paths: the warning that a rule's own
+/// manifest scope selects nothing is not about a selector's, which no full
+/// check warns of either.
+#[test]
+fn a_trigger_scopes_empty_manifest_warns_of_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    write(
+        root,
+        ".alint.yml",
+        "version: 2\nselectors:\n  members:\n    paths: \"workspace/*/member.json\"\n    \
+         scope_filter:\n      include_manifest_paths:\n        source: \"{{env.MANIFEST}}\"\n        \
+         extract: { json: \"$.members[*]\" }\nrelations:\n  names:\n    from: members\n    \
+         read: { json: \"$.name\" }\n    fields: { name: value }\nrules:\n  - id: names-unique\n    \
+         kind: constraint\n    input: names\n    assert: { unique: { key: [name] } }\n    \
+         level: error\n",
+    );
+    write(root, "members.json", "{\"members\": []}\n");
+    write(root, "workspace/a/member.json", "{\"name\": \"a\"}\n");
+    write(root, "workspace/b/member.json", "{\"name\": \"a\"}\n");
+    git(root, &["init", "-q"]);
+    git(root, &["config", "commit.gpgsign", "false"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+    // A path the selector's globs match, outside the manifest's members: the
+    // trigger scope reads the manifest to find that the rule does not run.
+    write(
+        root,
+        "workspace/a/member.json",
+        "{\"name\": \"a\", \"x\": 1}\n",
+    );
+    for args in [&["check", "--changed"][..], &["check"]] {
+        let output = crate::hermetic::command(env!("CARGO_BIN_EXE_alint"))
+            .args(args)
+            .current_dir(root)
+            .env("NO_COLOR", "1")
+            .env("MANIFEST", "members.json")
+            .output()
+            .expect("run alint");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(0), "{args:?}: {stderr}");
+        assert!(
+            !stderr.contains("resolved to no paths"),
+            "{args:?}: {stderr}"
+        );
+    }
+}
