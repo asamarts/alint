@@ -1,0 +1,151 @@
+test_version: 1
+name: constraint reads joins, where filters, narrowed selectors, TOML, bound fields and unions
+tags: [check, constraint, cross_file, version_two, failing]
+
+# A tree of every shape a constraint's relations read, so that the
+# `changed_full_index` e2e test changes, deletes and renames each file of it,
+# markers, the manifest and an ignore file among them, under `--changed`.
+given:
+  tree:
+    .gitignore: "build/\n"
+    build/out.txt: "ignored\n"
+    pins.toml: |
+      [pins]
+      react = "^18.2.0"
+      zod = "^3.22.0"
+    workspace.json: |
+      {"members": ["packages/web", "packages/api", "packages/lib", "packages/nomark"]}
+    allowed.txt: "react\nzod\nleft-pad\n"
+    banned.txt: "left-pad\n"
+    packages/web/package.marker: ""
+    packages/web/package.json: |
+      {"name": "web", "dependencies": {"react": "^18.2.0", "left-pad": "^1.3.0"}}
+    packages/api/package.marker: ""
+    packages/api/package.json: |
+      {"name": "api", "dependencies": {"react": "~17.0.2", "zod": "^3.22.0"}}
+    packages/lib/package.marker: ""
+    packages/lib/package.json: |
+      {"name": "lib", "dependencies": {"react": "^18.3.0"}}
+    packages/nomark/package.json: |
+      {"name": "nomark", "dependencies": {"react": "^15.0.0"}}
+    packages/old/package.marker: ""
+    packages/old/package.json: |
+      {"name": "old", "dependencies": {"react": "^16.0.0"}}
+    crates/a/Cargo.toml: |
+      [package]
+      name = "core"
+    crates/b/Cargo.toml: |
+      [package]
+      name = "core"
+    notes/en/a.txt: "hello\nbye\n"
+    notes/fr/a.txt: "bonjour\nhello\n"
+    notes/fr/draft-b.txt: "hello\n"
+  config: |
+    version: 2
+    selectors:
+      manifests:
+        paths: "packages/*/package.json"
+        scope_filter:
+          has_ancestor: package.marker
+          include_manifest_paths:
+            source: workspace.json
+            extract: { json: "$.members[*]" }
+      crates:
+        paths: "crates/*/Cargo.toml"
+    relations:
+      deps:
+        from: manifests
+        entries: { format: json, at: "$.dependencies" }
+        fields: { package: "bound: $.name", dependency: entry.key, range: entry.value }
+      pins:
+        from: { paths: pins.toml }
+        entries: { format: toml, at: "$.pins" }
+        fields: { name: entry.key, pin: entry.value }
+      allowed:
+        from: { paths: allowed.txt }
+        read: { lines: {} }
+        fields: { name: value }
+      banned:
+        from: { paths: banned.txt }
+        read: { lines: {} }
+        fields: { name: value }
+      pinned:
+        join: { left: deps, right: pins, on: { dependency: name }, unique: right }
+        fields: { package: left.package, range: left.range, pin: right.pin }
+      vetted:
+        from: manifests
+        entries: { format: json, at: "$.dependencies" }
+        fields: { dependency: entry.key, range: entry.value }
+        where:
+          dependency: { in: [{ relation: allowed, field: name }], not_in: [{ relation: banned, field: name }] }
+          range: { matches: "^\\^" }
+      crate-names:
+        from: crates
+        read: { toml: "$.package.name" }
+        fields: { name: value }
+      notes:
+        union:
+          - { from: { paths: "notes/en/*.txt" }, read: { lines: {} } }
+          - { from: { paths: { include: "notes/fr/*.txt", exclude: "notes/fr/draft-*.txt" } }, read: { lines: {} } }
+        fields: { line: value, file: path }
+    rules:
+      - id: ranges-match-pins
+        kind: constraint
+        input: pinned
+        assert: { equal: { field: range, to: { field: pin } } }
+        level: error
+      - id: vetted-ranges-agree
+        kind: constraint
+        input: vetted
+        assert: { unique: { key: [dependency], determines: [range] } }
+        level: error
+      - id: crate-names-unique
+        kind: constraint
+        input: crate-names
+        assert: { unique: { key: [name] } }
+        level: error
+      - id: notes-unique
+        kind: constraint
+        input: notes
+        assert: { unique: { key: [line] } }
+        level: warning
+
+when: [check]
+
+# `old` is outside the manifest's members and `nomark` has no marker, so
+# neither is read; `left-pad` is banned and `~17.0.2` fails `matches`, so
+# `vetted` drops both; the French draft is excluded from the union.
+expect:
+  - exit: policy_failure
+    violations:
+      - rule: ranges-match-pins
+        path: packages/api/package.json
+        message: {exact: "`range` is \"~17.0.2\" and `pin` is \"^18.2.0\" in this row; they must be equal"}
+        related:
+          - {label: "`pin` in this row", path: pins.toml, line: 2, column: 9, end_line: 2, end_column: 18}
+      - rule: ranges-match-pins
+        path: packages/lib/package.json
+        message: {exact: "`range` is \"^18.3.0\" and `pin` is \"^18.2.0\" in this row; they must be equal"}
+        related:
+          - {label: "`pin` in this row", path: pins.toml, line: 2, column: 9, end_line: 2, end_column: 18}
+      - rule: vetted-ranges-agree
+        path: packages/lib/package.json
+        message: {exact: "rows with `dependency` \"react\" disagree on `range`: \"^18.3.0\" here; \"^18.2.0\" in 1 row"}
+        related:
+          - {label: "a row with another value", path: packages/web/package.json, line: 1, column: 43, end_line: 1, end_column: 52}
+      - rule: vetted-ranges-agree
+        path: packages/web/package.json
+        message: {exact: "rows with `dependency` \"react\" disagree on `range`: \"^18.2.0\" here; \"^18.3.0\" in 1 row"}
+        related:
+          - {label: "a row with another value", path: packages/lib/package.json, line: 1, column: 43, end_line: 1, end_column: 52}
+      - rule: crate-names-unique
+        path: crates/b/Cargo.toml
+        message: {exact: "`name` \"core\" is not unique: the first row with it is crates/a/Cargo.toml"}
+        related:
+          - {label: "the first row with this key", path: crates/a/Cargo.toml}
+      - rule: notes-unique
+        level: warning
+        path: notes/fr/a.txt
+        message: {exact: "`line` \"hello\" is not unique: the first row with it is notes/en/a.txt"}
+        related:
+          - {label: "the first row with this key", path: notes/en/a.txt}
