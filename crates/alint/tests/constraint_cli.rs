@@ -425,6 +425,40 @@ fn a_relation_the_environment_selects_shows_no_path_or_value_of_its_findings() {
     }
 }
 
+/// `fix` redacts the findings of a rule that reads a relation the
+/// environment selects as `check` does: its human and JSON reports show none
+/// of the paths the environment chose, in a finding's path or its message.
+#[test]
+fn fix_shows_no_path_of_a_relation_the_environment_selects() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        ".alint.yml",
+        "version: 2\nrelations:\n  names:\n    from: { paths: \"{{env.SECRET_DIR}}/*/package.json\" \
+         }\n    read: { json: \"$.name\" }\n    fields: { name: value }\nrules:\n  - id: \
+         names-unique\n    kind: constraint\n    input: names\n    assert: { unique: { key: \
+         [name] } }\n    level: error\n",
+    );
+    write(root, "secretdir/a/package.json", "{\"name\": \"x\"}\n");
+    write(root, "secretdir/b/package.json", "{\"name\": 1}\n");
+    let env = [("SECRET_DIR", "secretdir")];
+    for format in ["human", "json"] {
+        let output = run_env(root, &["fix", "--format", format], &env);
+        let shown = format!(
+            "{}{}",
+            text(&output),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.status.code(), Some(1), "{format}: {shown}");
+        assert!(
+            !shown.contains("secretdir"),
+            "{format} shows the path: {shown}"
+        );
+        assert!(shown.contains("sensitive evidence"), "{format}: {shown}");
+    }
+}
+
 /// A `set` against another relation's field reads that relation too: when
 /// the environment selects it, the rule's findings show no path or value,
 /// though the rule's own input reads no environment.
