@@ -7,7 +7,8 @@
 //! over its text, and the text is let go before the next resource is read.
 //! So placing holds one resource's text at a time, however many resources
 //! the findings sit in, and that text, at most the largest resource placed,
-//! takes the run's bytes ([`LimitKind::BytesPerRun`]) as a
+//! takes the run's bytes
+//! ([`LimitKind::BytesPerRun`](alint_core::relation::LimitKind::BytesPerRun)) as a
 //! `key_parity` comparison's files do: past them the rule has no verdict.
 
 use std::collections::BTreeMap;

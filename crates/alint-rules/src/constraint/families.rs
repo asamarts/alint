@@ -148,8 +148,9 @@ impl<'r> Run<'r> {
                     Some(path.as_path()),
                     format!(
                         "{limit}, so the rule reports no finding rather than findings without \
-                         their places; placing a finding reads the file it sits in, one file at \
-                         a time, so findings in a smaller file, or fewer files, fit"
+                         their places; placing its findings reads each file they sit in, one at \
+                         a time, beside what the run's relations hold, so read fewer or smaller \
+                         files"
                     ),
                 )),
             }
