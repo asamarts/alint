@@ -17,14 +17,16 @@
 //! match (at or below it), and the manifest a manifest-derived predicate
 //! reads. With neither changed, a predicate's verdict on a deleted path is
 //! the one it had before the change. A selector that does not compile, or
-//! that uses `changed_since` (which the loader refuses), takes every path:
+//! that uses `changed_since` (which the loader refuses), takes every change:
 //! the rule then runs and reports why it cannot read.
 //!
 //! An ignore file the walk reads ([`IGNORE_FILE_NAMES`]) decides which files
 //! below its directory are in the index, so a change to one triggers every
-//! selector whose `paths:` can match there. So does a change Git lists as a
-//! directory the walk holds: a submodule, whose files Git does not list, or
-//! an untracked repository (`sub/`), whose files it does not list either.
+//! selector whose `paths:` can match below it. So does a path Git lists as a
+//! directory ([`crate::git::ChangedSet::directories`]), whether or not the
+//! walk still holds it: a submodule added, moved or removed, whose files Git
+//! does not list, or an untracked repository (`sub/`), whose files it does
+//! not list either, on every run until it is committed or ignored.
 //!
 //! The engine decides once per pass what each rule's scope takes of the
 //! changed paths ([`TriggerScope::hits`]), and reads it before and after it
@@ -104,10 +106,12 @@ impl TriggerScope {
     }
 
     /// Whether a change to `path` (root-relative, as `--changed` lists it)
-    /// makes the rule run.
+    /// makes the rule run, Git having listed it as a file: a path it lists as
+    /// a directory runs the rule when the selectors can match below it
+    /// ([`crate::Engine::with_changed_set`]).
     #[must_use]
     pub fn matches(&self, path: &Path, index: &FileIndex) -> bool {
-        let changed = ChangedPaths::new([path], index);
+        let changed = ChangedPaths::new([path], &std::collections::HashSet::new());
         let mut pending = Vec::new();
         self.hits(&changed, index, &mut pending) || self.pending_runs(&pending, &changed, index)
     }
@@ -215,8 +219,9 @@ impl TriggerSelector {
         {
             return true;
         }
-        // Git lists a submodule, or an untracked repository, by its directory
-        // alone: what the selector reads below it may have changed.
+        // Git lists a submodule, added, moved or removed, or an untracked
+        // repository, by its directory alone: what the selector reads below
+        // it may have changed.
         if changed
             .directories()
             .iter()

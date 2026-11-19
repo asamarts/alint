@@ -5,7 +5,7 @@
 //! narrowed by each selector's `scope_filter:` as the selector is. A change
 //! to what a predicate consults (a marker, a manifest) triggers too, as does
 //! an ignore file, or a directory Git lists whole (a submodule, an untracked
-//! repository), where the selector's paths can match. The command line is
+//! repository), below which the selector's paths can match. The command line is
 //! tested in `crates/alint/tests/constraint_changed_cli.rs`.
 
 use std::collections::HashSet;
@@ -158,6 +158,18 @@ fn ran_walked(
     changed: &[&str],
     options: &WalkOptions,
 ) -> Vec<(String, bool)> {
+    ran_changing(config, files, changed, &[], options)
+}
+
+/// [`ran_walked`] with `directories` changed too, as Git lists a submodule or
+/// an untracked repository.
+fn ran_changing(
+    config: &str,
+    files: &[(&str, &str)],
+    changed: &[&str],
+    directories: &[&str],
+    options: &WalkOptions,
+) -> Vec<(String, bool)> {
     let (dir, loaded) = load_tree(config, files);
     let config = loaded.unwrap_or_else(|error| panic!("the config loads: {error}"));
     let index: FileIndex = walk(dir.path(), options).unwrap();
@@ -167,8 +179,14 @@ fn ran_walked(
         .iter()
         .map(|spec| alint_core::RuleEntry::new(registry.build(spec).unwrap()))
         .collect();
-    let changed: HashSet<PathBuf> = changed.iter().map(PathBuf::from).collect();
-    let engine = alint_core::Engine::from_entries(entries, registry).with_changed_paths(changed);
+    let directories: HashSet<PathBuf> = directories.iter().map(PathBuf::from).collect();
+    let changed: HashSet<PathBuf> = changed
+        .iter()
+        .map(PathBuf::from)
+        .chain(directories.iter().cloned())
+        .collect();
+    let engine = alint_core::Engine::from_entries(entries, registry)
+        .with_changed_set(alint_core::git::ChangedSet::new(changed, directories));
     let report = engine.run(dir.path(), &index).unwrap();
     report
         .results
@@ -187,7 +205,14 @@ const NONE: [&str; 0] = [];
 
 /// The ids of the rules that run when `changed` changed in [`TREE`].
 fn triggered(changed: &[&str]) -> Vec<String> {
-    let mut ids: Vec<String> = ran(CONFIG, TREE, changed)
+    triggered_by(changed, &[])
+}
+
+/// [`triggered`] with `directories` changed, as Git lists a submodule or an
+/// untracked repository.
+fn triggered_by(changed: &[&str], directories: &[&str]) -> Vec<String> {
+    let options = WalkOptions::default().with_global_git_excludes(false);
+    let mut ids: Vec<String> = ran_changing(CONFIG, TREE, changed, directories, &options)
         .into_iter()
         .map(|(id, failed)| {
             assert!(!failed, "{id} reported an analysis failure");
@@ -263,8 +288,12 @@ fn a_changed_ignore_file_runs_the_rules_whose_selectors_match_below_it() {
         ["in", "input", "join", "not-in", "set"]
     );
     assert_eq!(triggered(&["mods/.gitignore"]), ["marked"]);
-    // Below a directory where no selector's paths match, nothing.
+    assert_eq!(triggered(&["mods/a/b/.gitignore"]), ["marked"]);
+    // Below a directory where no selector's paths match, nothing: not under
+    // `src/`, nor under `packages/a/b/`, deeper than `packages/*/package.json`
+    // reaches.
     assert_eq!(triggered(&["src/.gitignore"]), NONE);
+    assert_eq!(triggered(&["packages/a/b/.gitignore"]), NONE);
     // A walk that reads no ignore files gives them no say.
     let unignored = WalkOptions::default()
         .with_global_git_excludes(false)
@@ -277,13 +306,20 @@ fn a_change_git_lists_as_a_directory_runs_the_rules_whose_selectors_match_below_
     // Git lists a submodule (a gitlink) by its directory alone, and an
     // untracked repository as `dir/`, though the walk reads the files below.
     let manifests = ["in", "input", "join", "not-in", "set"];
-    assert_eq!(triggered(&["packages/a"]), manifests);
-    assert_eq!(triggered(&["packages/a/"]), manifests);
-    assert_eq!(triggered(&["packages"]), manifests);
-    assert_eq!(triggered(&["mods"]), ["marked"]);
-    // Below a directory where no selector's paths match, nothing.
-    assert_eq!(triggered(&["src"]), NONE);
-    // A path the walk holds no directory at is judged as a file.
+    assert_eq!(triggered_by(&[], &["packages/a"]), manifests);
+    assert_eq!(triggered_by(&[], &["packages/a/"]), manifests);
+    assert_eq!(triggered_by(&[], &["packages"]), manifests);
+    assert_eq!(triggered_by(&[], &["mods"]), ["marked"]);
+    assert_eq!(triggered_by(&[], &["mods/a/deep"]), ["marked"]);
+    // A removed submodule, which the walk no longer holds, counts the same.
+    assert_eq!(triggered_by(&[], &["packages/gone"]), manifests);
+    // Below a directory where no selector's paths match, nothing: not under
+    // `src/`, nor under `packages/a/b/`, deeper than `packages/*/package.json`
+    // reaches.
+    assert_eq!(triggered_by(&[], &["src"]), NONE);
+    assert_eq!(triggered_by(&[], &["packages/a/b"]), NONE);
+    // The same paths that Git lists as files are judged as files.
+    assert_eq!(triggered(&["packages/a"]), NONE);
     assert_eq!(triggered(&["packages/gone"]), NONE);
 }
 

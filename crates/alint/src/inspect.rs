@@ -695,8 +695,8 @@ fn run_explain_trace(
         engine = engine.with_analysis_time_resolution(resolution);
     }
     engine = engine_environment(engine, loaded.untrusted);
-    if let Some(changed_paths) = options.changed.resolve(&loaded.root)? {
-        engine = engine.with_changed_paths(changed_paths);
+    if let Some(changed) = options.changed.resolve(&loaded.root)? {
+        engine = engine.with_changed_set(changed);
     }
 
     let mut extra_ignores = loaded.extra_ignores.clone();

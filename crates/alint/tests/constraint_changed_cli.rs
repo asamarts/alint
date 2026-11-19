@@ -416,9 +416,18 @@ fn english_gains_a_key(root: &Path) {
     git(root, &["commit", "-qam", "about"]);
 }
 
-/// Git lists a submodule whose commit moved by its path alone, though the walk
-/// reads the files in it: the change runs every rule whose selectors can
-/// match below it, and no other.
+/// A policy that the keys `used.json` names are keys of English in the
+/// submodule `sub`.
+const KEYS_IN_SUBMODULE: &str = "version: 2\nrelations:\n  used:\n    from: { paths: used.json }\n    \
+     entries: { format: json, at: \"$\" }\n    fields: { key: entry.key }\n  english:\n    \
+     from: { paths: sub/locales/en.json }\n    entries: { format: json, at: \"$\" }\n    \
+     fields: { key: entry.key }\nrules:\n  - id: keys-in-english\n    kind: constraint\n    \
+     input: used\n    assert: { set: { field: key, subset_of: { relation: english, field: key } } }\n    \
+     level: error\n";
+
+/// Git lists a submodule whose commit moved, or that was removed, by its path
+/// alone, though the walk reads (or read) the files in it: the change runs
+/// every rule whose selectors can match below it, and no other.
 #[test]
 fn a_submodule_change_runs_the_rules_that_read_below_it() {
     let tmp = tempfile::tempdir().unwrap();
@@ -453,12 +462,34 @@ fn a_submodule_change_runs_the_rules_that_read_below_it() {
     assert_eq!(check(&root, &["--changed"]), (Some(0), Vec::new()));
 
     // `sub` moves: German, unchanged, now lacks the key English gained.
+    // Checked out, then staged, then committed.
     english_gains_a_key(&root.join("sub"));
-    git(&root, &["add", "sub"]);
     let expected = vec![ran("locales-match-english", &["sub/locales/de.json"])];
+    assert_eq!(check(&root, &["--changed"]), (Some(1), expected.clone()));
+    git(&root, &["add", "sub"]);
     assert_eq!(check(&root, &["--changed"]), (Some(1), expected.clone()));
     git(&root, &["commit", "-qm", "move sub"]);
     assert_eq!(check(&root, &["--base", "base"]), (Some(1), expected));
+
+    // `sub` goes, which the walk then holds nothing of: the keys `used.json`
+    // names are no longer English's. Deleted, then removed from the index,
+    // then committed.
+    write(&root, ".alint.yml", KEYS_IN_SUBMODULE);
+    write(&root, "used.json", "{\"home\": 1}\n");
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-qm", "use"]);
+    git(&root, &["branch", "used"]);
+    assert_eq!(
+        check(&root, &[]),
+        (Some(0), vec![ran("keys-in-english", &[])])
+    );
+    std::fs::remove_dir_all(root.join("sub")).unwrap();
+    let expected = vec![ran("keys-in-english", &["used.json"])];
+    assert_eq!(check(&root, &["--changed"]), (Some(1), expected.clone()));
+    git(&root, &["rm", "-q", "sub"]);
+    assert_eq!(check(&root, &["--changed"]), (Some(1), expected.clone()));
+    git(&root, &["commit", "-qm", "remove sub"]);
+    assert_eq!(check(&root, &["--base", "used"]), (Some(1), expected));
 }
 
 /// Git lists an untracked repository as `dir/`, and none of its files: the

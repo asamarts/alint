@@ -83,7 +83,7 @@ pub(super) fn cmd_fix(
         .with_config_files(loaded.config_files);
     engine = with_run_settings(engine, cli);
     if let Some(set) = changed.resolve(&root)? {
-        engine = engine.with_changed_paths(set);
+        engine = engine.with_changed_set(set);
     }
 
     let effective_gitignore = if cli.no_gitignore {

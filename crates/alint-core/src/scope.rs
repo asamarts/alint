@@ -1,6 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 use globset::{Candidate, Glob, GlobBuilder, GlobSet, GlobSetBuilder};
 
@@ -46,6 +46,11 @@ pub struct Scope {
     /// them can match ([`Scope::candidates`]). `None` when an include starts
     /// with no literal directory, or there is no include.
     within: Option<Box<[Box<Path>]>>,
+    /// What the components of a path each include pattern matches can be
+    /// ([`IncludeDepth`]), for [`Scope::may_match_below`]. `None` for a sole
+    /// literal include, with no include, or when a pattern's components
+    /// cannot be told from its text.
+    depths: Option<Box<[IncludeDepth]>>,
     // The field name `scope_filter` is intentional — the public
     // accessor and the spec field share it, so renaming to
     // `filter` would cost more clarity than it saves.
@@ -80,6 +85,7 @@ impl Scope {
                 has_include: true,
                 literal: Some(literal.into_bytes().into_boxed_slice()),
                 within: include_dirs(patterns),
+                depths: None,
                 scope_filter: None,
             });
         }
@@ -106,6 +112,7 @@ impl Scope {
             has_include,
             literal: None,
             within: include_dirs(patterns),
+            depths: include_depths(patterns),
             scope_filter: None,
         })
     }
@@ -150,6 +157,7 @@ impl Scope {
             has_include: true,
             literal: None,
             within: None,
+            depths: None,
             scope_filter: None,
         }
     }
@@ -230,22 +238,38 @@ impl Scope {
             .is_none_or(|filter| filter.matches_without_manifest(path, index))
     }
 
-    /// Whether a path at or below the directory `dir` (root-relative, empty
-    /// for the root) can match this scope's path patterns, judged from the
-    /// patterns alone: a sole literal include only when it lies below `dir`, and
-    /// includes that each start with a literal directory
-    /// ([`literal_dir_prefix`]) only when `dir` and one of those lie one below
-    /// the other. `true` when the patterns cannot tell. The `scope_filter`
-    /// is not consulted.
+    /// Whether a path below the directory `dir` (root-relative, empty for the
+    /// root) can match this scope's path patterns, judged from the patterns
+    /// alone: a sole literal include only when it lies below `dir`, and a
+    /// glob include only when it can have more components than `dir` (any
+    /// number after a `**`) and each of its leading components, a literal
+    /// name or a wildcard, can match `dir`'s ([`IncludeDepth`]): neither
+    /// `a/[!x]*.txt` nor `b/**` can match below `a/sm`. `true` when the
+    /// patterns cannot tell. The excludes and the `scope_filter` are not
+    /// consulted.
     pub(crate) fn may_match_below(&self, dir: &Path) -> bool {
         if let Some(literal) = &self.literal {
-            return std::str::from_utf8(literal)
-                .map_or(true, |literal| Path::new(literal).starts_with(dir));
+            return std::str::from_utf8(literal).map_or(true, |literal| {
+                let literal = Path::new(literal);
+                literal.starts_with(dir) && literal != dir
+            });
         }
-        self.within.as_ref().is_none_or(|dirs| {
-            dirs.iter()
-                .any(|within| within.starts_with(dir) || dir.starts_with(within))
-        })
+        let Some(depths) = &self.depths else {
+            return self.within.as_ref().is_none_or(|dirs| {
+                dirs.iter()
+                    .any(|within| within.starts_with(dir) || dir.starts_with(within))
+            });
+        };
+        let mut names = Vec::new();
+        for component in dir.components() {
+            match component {
+                Component::Normal(name) => names.push(name),
+                Component::CurDir => {}
+                // Not a root-relative directory: the patterns cannot tell.
+                _ => return true,
+            }
+        }
+        depths.iter().any(|depth| depth.may_match_below(&names))
     }
 
     /// Whether [`Self::path_matches`] tests a path against a `GlobSet`, not
@@ -330,19 +354,24 @@ pub(crate) struct ChangedPaths<'p> {
     below: HashMap<&'p Path, Vec<usize>>,
     /// The positions in `paths` of the paths with each file name.
     by_name: HashMap<&'p OsStr, Vec<usize>>,
-    /// The positions in `paths` of those the index holds as a directory.
+    /// The positions in `paths` of those Git lists as a directory.
     directories: Vec<usize>,
 }
 
 impl<'p> ChangedPaths<'p> {
-    /// `paths`, with each one `index` holds as a directory: Git lists a
-    /// submodule (a gitlink) by its path alone, and an untracked repository
-    /// as `sub/`, though the walk reads the files in them.
-    pub(crate) fn new(paths: impl IntoIterator<Item = &'p Path>, index: &FileIndex) -> Self {
+    /// `paths`, with each one of `directories` marked: Git lists a submodule
+    /// (a gitlink) added, moved or removed by its path alone, and an untracked
+    /// repository as `sub/`, though the walk reads the files in them
+    /// ([`crate::git::ChangedSet::directories`]). Whether the walk still
+    /// holds the directory does not matter, so a removed submodule counts.
+    pub(crate) fn new(
+        paths: impl IntoIterator<Item = &'p Path>,
+        directories: &HashSet<PathBuf>,
+    ) -> Self {
         let paths: Vec<&Path> = paths.into_iter().collect();
         let mut below: HashMap<&Path, Vec<usize>> = HashMap::new();
         let mut by_name: HashMap<&OsStr, Vec<usize>> = HashMap::new();
-        let mut directories = Vec::new();
+        let mut directories_at = Vec::new();
         for (position, path) in paths.iter().enumerate() {
             for dir in path.ancestors().skip(1) {
                 if dir.as_os_str().is_empty() {
@@ -353,16 +382,21 @@ impl<'p> ChangedPaths<'p> {
             if let Some(name) = path.file_name() {
                 by_name.entry(name).or_default().push(position);
             }
-            if is_directory(index, path) {
-                directories.push(position);
+            if directories.contains(*path) {
+                directories_at.push(position);
             }
         }
         Self {
             paths,
             below,
             by_name,
-            directories,
+            directories: directories_at,
         }
+    }
+
+    /// Whether there are no changed paths.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.paths.is_empty()
     }
 
     /// The path at `position`.
@@ -375,7 +409,7 @@ impl<'p> ChangedPaths<'p> {
         self.by_name.get(name).map_or(&[], Vec::as_slice)
     }
 
-    /// The positions of the paths the index holds as a directory.
+    /// The positions of the paths Git lists as a directory.
     pub(crate) fn directories(&self) -> &[usize] {
         &self.directories
     }
@@ -415,18 +449,6 @@ impl<'p> ChangedPaths<'p> {
     }
 }
 
-/// Whether `index` holds `path` as a directory, found by a search of its
-/// sorted entries, with no lookup table to build.
-fn is_directory(index: &FileIndex, path: &Path) -> bool {
-    match index.subtree(path) {
-        Some(range) => index
-            .entries
-            .get(range.start)
-            .is_some_and(|entry| !range.is_empty() && entry.is_dir && *entry.path == *path),
-        None => index.dirs().any(|entry| *entry.path == *path),
-    }
-}
-
 #[cfg(debug_assertions)]
 std::thread_local! {
     /// How many paths [`Scope::matches`] tested on this thread.
@@ -461,6 +483,109 @@ fn include_dirs(patterns: &[String]) -> Option<Box<[Box<Path>]>> {
         dirs.push(Box::from(Path::new(&literal_dir_prefix(pattern)?)));
     }
     (!dirs.is_empty()).then(|| dirs.into_boxed_slice())
+}
+
+/// What the components of a path an include pattern matches can be, as far as
+/// [`Scope::may_match_below`] needs them. With a separator that only `/` (or,
+/// where it separates, `\\`) spells, a pattern of `n` components without `**`
+/// matches only paths of `n` components, since `*`, `?` and a class never
+/// match a separator: `a/[!x]*.txt` matches `a/b.txt` and nothing below `a/b`.
+#[derive(Debug, Clone)]
+struct IncludeDepth {
+    /// The pattern's components before its first `**` (all of them without
+    /// one): a literal name, or `None` for one with a wildcard, which can
+    /// match any name.
+    leading: Box<[Option<Box<OsStr>>]>,
+    /// Whether a `**` follows `leading`, so a match can have any number of
+    /// components more.
+    open: bool,
+}
+
+impl IncludeDepth {
+    /// Whether a path below the directory of components `dir` can match.
+    fn may_match_below(&self, dir: &[&OsStr]) -> bool {
+        if !self.open && self.leading.len() <= dir.len() {
+            return false;
+        }
+        self.leading
+            .iter()
+            .zip(dir)
+            .all(|(component, name)| component.as_deref().is_none_or(|literal| literal == *name))
+    }
+}
+
+/// The [`IncludeDepth`] of each include pattern, or `None` when there is no
+/// include or a pattern's components cannot be told from its text.
+fn include_depths(patterns: &[String]) -> Option<Box<[IncludeDepth]>> {
+    let backslash_is_separator = std::path::is_separator('\\');
+    let mut depths = Vec::new();
+    for pattern in patterns.iter().filter(|pattern| !pattern.starts_with('!')) {
+        depths.push(include_depth(pattern, backslash_is_separator)?);
+    }
+    (!depths.is_empty()).then(|| depths.into_boxed_slice())
+}
+
+fn include_depth(pattern: &str, backslash_is_separator: bool) -> Option<IncludeDepth> {
+    // An alternation can hold a separator, and so can a class; an escape
+    // hides what it escapes. Where `\\` separates, globset rewrites it to `/`
+    // outside a class only.
+    if pattern.contains('{')
+        || (pattern.contains('\\') && (!backslash_is_separator || pattern.contains('[')))
+        || class_holds_separator(pattern)
+    {
+        return None;
+    }
+    let pattern = if backslash_is_separator {
+        std::borrow::Cow::Owned(pattern.replace('\\', "/"))
+    } else {
+        std::borrow::Cow::Borrowed(pattern)
+    };
+    let mut leading = Vec::new();
+    for component in pattern.split('/') {
+        if component.contains("**") {
+            return Some(IncludeDepth {
+                leading: leading.into_boxed_slice(),
+                open: true,
+            });
+        }
+        if matches!(component, "" | "." | "..") {
+            return None;
+        }
+        leading
+            .push((!component.contains(['*', '?', '['])).then(|| Box::from(OsStr::new(component))));
+    }
+    Some(IncludeDepth {
+        leading: leading.into_boxed_slice(),
+        open: false,
+    })
+}
+
+/// Whether a class in `pattern` (`[...]`, its first `]` after an optional
+/// `!` or `^` a member) holds a `/`, or one is never closed.
+fn class_holds_separator(pattern: &str) -> bool {
+    let bytes = pattern.as_bytes();
+    let mut at = 0;
+    while let Some(open) = bytes[at..].iter().position(|&b| b == b'[') {
+        let mut end = at + open + 1;
+        if matches!(bytes.get(end), Some(b'!' | b'^')) {
+            end += 1;
+        }
+        if bytes.get(end) == Some(&b']') {
+            end += 1;
+        }
+        let Some(close) = bytes[end.min(bytes.len())..]
+            .iter()
+            .position(|&b| b == b']')
+        else {
+            return true;
+        };
+        let close = end + close;
+        if bytes[at + open..close].contains(&b'/') {
+            return true;
+        }
+        at = close + 1;
+    }
+    false
 }
 
 impl Scope {
@@ -951,5 +1076,90 @@ mod tests {
         assert!(scope.matches(Path::new("pkg/in_scope.rs"), &idx));
         assert!(!scope.matches(Path::new("other/out_of_scope.rs"), &idx));
         assert!(scope.scope_filter().is_some(), "filter should be wired");
+    }
+
+    /// Whether `patterns` can match a path below each of `dirs`.
+    fn below(patterns: &[&str], dirs: &[&str]) -> Vec<bool> {
+        let patterns: Vec<String> = patterns.iter().map(ToString::to_string).collect();
+        let scope = Scope::from_patterns(&patterns).unwrap();
+        dirs.iter()
+            .map(|dir| scope.may_match_below(Path::new(dir)))
+            .collect()
+    }
+
+    /// A pattern of one component matches only at the root, so only below
+    /// the root; a literal one too.
+    #[test]
+    fn a_single_component_pattern_can_match_below_the_root_alone() {
+        assert_eq!(below(&["*.json"], &["", "a", "a/b"]), [true, false, false]);
+        assert_eq!(below(&["[!x]*.txt"], &["", "a"]), [true, false]);
+        assert_eq!(
+            below(&["pins.toml"], &["", "pins.toml", "a"]),
+            [true, false, false]
+        );
+    }
+
+    /// A pattern without `**` matches paths of as many components as it has:
+    /// below a directory only when it has more, and each leading component,
+    /// literal or wildcard, can match the directory's.
+    #[test]
+    fn a_fixed_depth_pattern_can_match_only_above_its_depth_and_along_its_names() {
+        let dirs = ["", "a", "a/sm", "a/sm/x", "b", "b/sm"];
+        assert_eq!(
+            below(&["a/[!x]*.txt"], &dirs),
+            [true, true, false, false, false, false]
+        );
+        assert_eq!(
+            below(&["a/*/c.json"], &dirs),
+            [true, true, true, false, false, false]
+        );
+        assert_eq!(
+            below(&["*/sm/*.json"], &dirs),
+            [true, true, true, false, true, true]
+        );
+        assert_eq!(
+            below(&["a/sm/c.json"], &dirs),
+            [true, true, true, false, false, false]
+        );
+        // Each include counts; an exclude never narrows.
+        assert_eq!(
+            below(&["a/*.json", "b/*/*.json", "!b/sm/**"], &dirs),
+            [true, true, false, false, true, true]
+        );
+        // A trailing separator or `.` changes no component.
+        assert_eq!(below(&["a/*/c.json"], &["a/sm/", "./a/sm"]), [true, true]);
+    }
+
+    /// After a `**`, a match can have any number of components more: the
+    /// components before it still have to match.
+    #[test]
+    fn a_double_star_pattern_can_match_below_any_directory_along_its_names() {
+        let dirs = ["", "a", "a/sm", "a/sm/x/y", "b", "b/sm"];
+        assert_eq!(below(&["**"], &dirs), [true; 6]);
+        assert_eq!(below(&["**/*.json"], &dirs), [true; 6]);
+        assert_eq!(
+            below(&["a/**/*.json"], &dirs),
+            [true, true, true, true, false, false]
+        );
+        assert_eq!(
+            below(&["*/sm/**"], &dirs),
+            [true, true, true, true, true, true]
+        );
+        assert_eq!(
+            below(&["a/x/**"], &dirs),
+            [true, true, false, false, false, false]
+        );
+    }
+
+    /// A pattern whose components its text cannot tell (an alternation, a
+    /// class that holds a separator, an escape) can match below any
+    /// directory its literal leading directories allow.
+    #[test]
+    fn a_pattern_of_untold_components_can_match_below_any_directory() {
+        let dirs = ["a/sm/x/y", "b"];
+        assert_eq!(below(&["a/{b,c/d}.json"], &dirs), [true, false]);
+        assert_eq!(below(&["{a,b}/*.json"], &dirs), [true, true]);
+        assert_eq!(below(&["a/x[/z]*.json"], &dirs), [true, false]);
+        assert_eq!(below(&["a/x[]/]*.json"], &dirs), [true, false]);
     }
 }

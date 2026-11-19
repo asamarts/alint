@@ -243,10 +243,20 @@ fn run(
         })
         .collect();
     let mut engine = Engine::from_entries(entries, alint_rules::builtin_registry());
-    if let Some(changed) = changed {
-        engine = engine.with_changed_paths(changed.iter().cloned().collect::<HashSet<_>>());
-    }
     let index = walk(root, &support::walk_options()).unwrap();
+    if let Some(changed) = changed {
+        // A directory changes as Git lists a submodule or an untracked
+        // repository: by its path, marked as a directory.
+        let directories = changed
+            .iter()
+            .filter(|path| index.dirs().any(|dir| *dir.path == **path))
+            .cloned()
+            .collect();
+        engine = engine.with_changed_set(alint_core::git::ChangedSet::new(
+            changed.iter().cloned().collect::<HashSet<_>>(),
+            directories,
+        ));
+    }
     let ran = match verb {
         Verb::Check => engine
             .run(root, &index)

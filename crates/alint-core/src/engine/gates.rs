@@ -32,6 +32,8 @@ pub(super) struct ChangedPass<'a> {
     pub(super) created: Option<&'a HashSet<PathBuf>>,
     /// The changed set, `None` for a full run.
     changed: Option<&'a HashSet<PathBuf>>,
+    /// Those of the changed paths Git lists as a directory.
+    directories: &'a HashSet<PathBuf>,
     /// The changed set and the created files, indexed once, when a trigger
     /// scope first reads them.
     paths: OnceLock<ChangedPaths<'a>>,
@@ -69,7 +71,7 @@ impl ChangedPass<'_> {
                     .iter()
                     .chain(self.created.into_iter().flatten())
                     .map(PathBuf::as_path),
-                self.index,
+                self.directories,
             )
         });
         let find = || {
@@ -112,6 +114,7 @@ impl Engine {
             index,
             created,
             changed: self.changed_paths.as_ref(),
+            directories: &self.changed_directories,
             paths: OnceLock::new(),
             triggers,
         }

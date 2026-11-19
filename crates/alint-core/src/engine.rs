@@ -920,6 +920,9 @@ pub struct Engine {
     /// engine bypasses every changed-set short-circuit. See
     /// [`Engine::with_changed_paths`] for the contract.
     changed_paths: Option<HashSet<PathBuf>>,
+    /// The changed paths Git lists as a directory (a submodule, an untracked
+    /// repository); see [`Engine::with_changed_set`].
+    changed_directories: HashSet<PathBuf>,
     /// When set (`fix --baseline`), the loaded baseline: the fix pass SKIPS
     /// (surfaces, never applies) any violation the baseline suppresses, so `fix`
     /// resolves only NEW findings -- matching `check --baseline`. `None` means

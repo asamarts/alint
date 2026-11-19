@@ -42,6 +42,7 @@ impl Engine {
             analysis_time_required: OnceLock::new(),
             analysis_time_cache: Mutex::new(None),
             changed_paths: None,
+            changed_directories: HashSet::new(),
             fix_baseline: None,
             config_files: Vec::new(),
         }
@@ -61,6 +62,7 @@ impl Engine {
             analysis_time_required: OnceLock::new(),
             analysis_time_cache: Mutex::new(None),
             changed_paths: None,
+            changed_directories: HashSet::new(),
             fix_baseline: None,
             config_files: Vec::new(),
         }
@@ -178,6 +180,17 @@ impl Engine {
     #[must_use]
     pub fn with_changed_paths(mut self, set: HashSet<PathBuf>) -> Self {
         self.changed_paths = Some(set);
+        self
+    }
+
+    /// [`Self::with_changed_paths`] with `set`'s paths, knowing which of them
+    /// Git lists as a directory ([`crate::git::ChangedSet::directories`]): a
+    /// change to one runs every `constraint` rule whose selectors can read
+    /// below it, since Git lists none of the files there.
+    #[must_use]
+    pub fn with_changed_set(mut self, set: crate::git::ChangedSet) -> Self {
+        self.changed_paths = Some(set.paths);
+        self.changed_directories = set.directories;
         self
     }
 
@@ -358,6 +371,7 @@ impl Engine {
             analysis_time_required: OnceLock::new(),
             analysis_time_cache: Mutex::new(None),
             changed_paths: self.changed_paths.clone(),
+            changed_directories: self.changed_directories.clone(),
             fix_baseline: None,
             config_files: self.config_files.clone(),
         };

@@ -374,10 +374,10 @@ pub fn untrack_path(root: &Path, rel_path: &Path, dry_run: bool) -> UntrackOutco
 /// relative to `root`.
 ///
 /// `base` selects the diff:
-/// - `Some("main")` — `git diff --name-only --relative main...HEAD`
+/// - `Some("main")` — `git diff --raw --relative main...HEAD`
 ///   (three-dot — diff against the merge-base of `main` and
 ///   `HEAD`). Right shape for PR-check use cases.
-/// - `None` — the union of `git diff --cached --name-only --relative`
+/// - `None` — the union of `git diff --cached --raw --relative`
 ///   and `git ls-files --modified --others --exclude-standard` from
 ///   `root`. This includes staged, unstaged, and untracked changes,
 ///   which is the right shape for pre-commit / local-dev use cases.
@@ -398,11 +398,79 @@ pub fn untrack_path(root: &Path, rel_path: &Path, dry_run: bool) -> UntrackOutco
 /// `alint check --changed` errors out rather than fall back, so
 /// the user's "diff-only" intent isn't silently broken).
 pub fn collect_changed_paths(root: &Path, base: Option<&str>) -> Option<HashSet<PathBuf>> {
-    // Two distinct invocations: ref-based diff vs. working-tree
-    // status. Both emit NUL-separated output so paths with
-    // newlines / non-UTF-8 bytes round-trip.
-    let outputs = if let Some(base) = base {
-        // Defense-in-depth, matching `diff_name_only`: reject a `base`
+    collect_changed_set(root, base).map(|set| set.paths)
+}
+
+/// What `--changed` reads from Git: the changed paths, and which of them Git
+/// lists as a directory, with no file below it listed.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ChangedSet {
+    /// The changed paths, root-relative, as [`collect_changed_paths`] lists
+    /// them.
+    pub paths: HashSet<PathBuf>,
+    /// Those of [`Self::paths`] Git lists as a directory: a submodule (a
+    /// gitlink, mode `160000`) added, moved or removed, and an untracked
+    /// repository, which `ls-files --others` lists as `sub/`. What changed
+    /// below one, Git does not say.
+    pub directories: HashSet<PathBuf>,
+}
+
+impl ChangedSet {
+    /// A changed set of `paths`, `directories` among them.
+    #[must_use]
+    pub fn new(paths: HashSet<PathBuf>, directories: HashSet<PathBuf>) -> Self {
+        Self { paths, directories }
+    }
+
+    /// Add the entries of `git diff --raw -z --no-renames` output: each a
+    /// `:<old mode> <new mode> <old id> <new id> <status>` field, then its
+    /// path (two paths for a rename or copy, which `--no-renames` leaves out).
+    /// A path with the gitlink mode on either side is a directory. A field
+    /// that does not parse is taken as a path, so no change is lost.
+    fn add_raw_diff(&mut self, stdout: &[u8]) {
+        let mut chunks = stdout.split(|&b| b == 0).filter(|chunk| !chunk.is_empty());
+        while let Some(chunk) = chunks.next() {
+            let Some(fields) = chunk.strip_prefix(b":") else {
+                self.paths.insert(path_from_git_chunk(chunk));
+                continue;
+            };
+            let mut fields = fields.split(|&b| b == b' ');
+            let modes = [fields.next(), fields.next()];
+            let gitlink = modes.contains(&Some(GITLINK_MODE.as_bytes()));
+            // The old and new object ids, then the status.
+            let paths = match fields.nth(2).and_then(|status| status.first()) {
+                Some(b'R' | b'C') => 2,
+                _ => 1,
+            };
+            for chunk in chunks.by_ref().take(paths) {
+                let path = path_from_git_chunk(chunk);
+                if gitlink {
+                    self.directories.insert(path.clone());
+                }
+                self.paths.insert(path);
+            }
+        }
+    }
+}
+
+/// The mode Git gives a gitlink, a submodule's entry in its superproject.
+const GITLINK_MODE: &str = "160000";
+
+/// [`collect_changed_paths`], with the paths Git lists as a directory marked
+/// ([`ChangedSet::directories`]).
+///
+/// The working tree's set (`base` `None`) also reads `git diff-files --raw`,
+/// in parallel with the rest, for which of the paths `ls-files --modified`
+/// lists are submodules: a submodule whose checked-out commit moved, or whose
+/// directory was removed, before `git add`.
+pub fn collect_changed_set(root: &Path, base: Option<&str>) -> Option<ChangedSet> {
+    // Distinct invocations: ref-based diff vs. working-tree status. All emit
+    // NUL-separated output so paths with newlines / non-UTF-8 bytes
+    // round-trip.
+    let mut set = ChangedSet::default();
+    if let Some(base) = base {
+        // Defense-in-depth, matching `diff_range`: reject a `base`
         // starting with `-` explicitly (treat as "no changed-set"), in
         // addition to the `--end-of-options` guard below.
         if base.starts_with('-') {
@@ -411,7 +479,7 @@ pub fn collect_changed_paths(root: &Path, base: Option<&str>) -> Option<HashSet<
         let output = git_command(root)?
             .arg("-C")
             .arg(root)
-            .args(["diff", "--name-only", "--no-renames", "--relative", "-z"])
+            .args(["diff", "--raw", "--no-renames", "--relative", "-z"])
             // `--end-of-options` so a `base`/`since` starting with `-`
             // can't be parsed as a git OPTION (e.g. `--output=…`, which
             // would write/truncate an arbitrary file).
@@ -419,38 +487,50 @@ pub fn collect_changed_paths(root: &Path, base: Option<&str>) -> Option<HashSet<
             .arg(format!("{base}...HEAD"))
             .output()
             .ok()?;
-        vec![output]
-    } else {
-        // `ls-files --modified` compares the worktree with the index, so a
-        // staged edit disappears from it. Union the index-vs-HEAD diff with
-        // the working-tree/untracked set; otherwise a pre-commit hook can
-        // silently check zero files after the framework stashes unstaged
-        // changes. `--cached` also works for an unborn HEAD.
-        //
-        // The two reads are independent, so the staged diff runs in the
-        // background while `ls-files` runs: one process's latency instead of
-        // two, on every `--changed` run. A staged list too big for the pipe
-        // buffer (64 KiB on Linux, 4 KiB on Windows) makes the child wait for
-        // `ls-files` to finish, which is no slower than running them in turn.
-        // `wait_with_output` then drains both pipes, so the child can't wedge,
-        // and it is always reaped, even when `ls-files` fails to spawn.
-        let staged = git_command(root)?
+        if !output.status.success() {
+            return None;
+        }
+        set.add_raw_diff(&output.stdout);
+        return Some(set);
+    }
+    // `ls-files --modified` compares the worktree with the index, so a
+    // staged edit disappears from it. Union the index-vs-HEAD diff with the
+    // working-tree/untracked set; otherwise a pre-commit hook can silently
+    // check zero files after the framework stashes unstaged changes.
+    // `--cached` also works for an unborn HEAD.
+    //
+    // The reads are independent, so the staged diff and `diff-files` run in
+    // the background while `ls-files` runs: one process's latency instead of
+    // three, on every `--changed` run. A list too big for the pipe buffer
+    // (64 KiB on Linux, 4 KiB on Windows) makes its child wait for `ls-files`
+    // to finish, which is no slower than running them in turn.
+    // `wait_with_output` then drains both pipes, so a child can't wedge, and
+    // each is always reaped, even when a later one fails to spawn.
+    let spawn = |args: &[&str]| {
+        git_command(root)?
             .arg("-C")
             .arg(root)
-            .args([
-                "diff",
-                "--cached",
-                "--name-only",
-                "--no-renames",
-                "--relative",
-                "-z",
-            ])
+            .args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .ok()?;
-        let working = git_command(root)?
+            .ok()
+    };
+    let staged = spawn(&[
+        "diff",
+        "--cached",
+        "--raw",
+        "--no-renames",
+        "--relative",
+        "-z",
+    ])?;
+    // Plumbing, so no user configuration renames or colours its entries; it
+    // only marks which of the paths `ls-files --modified` lists are
+    // submodules, and adds none.
+    let unstaged = spawn(&["diff-files", "--raw", "--relative", "-z"]);
+    let working = git_command(root).map(|mut command| {
+        command
             .arg("-C")
             .arg(root)
             .args([
@@ -460,23 +540,32 @@ pub fn collect_changed_paths(root: &Path, base: Option<&str>) -> Option<HashSet<
                 "--exclude-standard",
                 "-z",
             ])
-            .output();
-        let staged = staged.wait_with_output().ok()?;
-        vec![staged, working.ok()?]
-    };
-    if outputs.iter().any(|output| !output.status.success()) {
+            .output()
+    });
+    let staged = staged.wait_with_output().ok()?;
+    let unstaged = unstaged?.wait_with_output().ok()?;
+    let working = working?.ok()?;
+    if [&staged, &unstaged, &working]
+        .iter()
+        .any(|output| !output.status.success())
+    {
         return None;
     }
-    let mut out = HashSet::new();
-    for output in outputs {
-        for chunk in output.stdout.split(|&b| b == 0) {
-            if chunk.is_empty() {
-                continue;
-            }
-            out.insert(path_from_git_chunk(chunk));
+    set.add_raw_diff(&staged.stdout);
+    let mut submodules = ChangedSet::default();
+    submodules.add_raw_diff(&unstaged.stdout);
+    for chunk in working.stdout.split(|&b| b == 0) {
+        if chunk.is_empty() {
+            continue;
         }
+        let path = path_from_git_chunk(chunk);
+        // An untracked repository is listed as `sub/`, and none of its files.
+        if chunk.ends_with(b"/") || submodules.directories.contains(&path) {
+            set.directories.insert(path.clone());
+        }
+        set.paths.insert(path);
     }
-    Some(out)
+    Some(set)
 }
 
 /// Like [`collect_changed_paths`] with a `base` ref, but distinguishes
@@ -496,7 +585,21 @@ pub fn collect_changed_paths_checked(
     root: &Path,
     since: &str,
 ) -> Result<Option<HashSet<PathBuf>>, CommitRangeError> {
-    diff_name_only(root, since, None)
+    collect_changed_set_checked(root, since).map(|set| set.map(|set| set.paths))
+}
+
+/// [`collect_changed_paths_checked`], with the submodules the range added,
+/// moved or removed marked ([`ChangedSet::directories`]).
+pub fn collect_changed_set_checked(
+    root: &Path,
+    since: &str,
+) -> Result<Option<ChangedSet>, CommitRangeError> {
+    let Some(output) = diff_range(root, since, None)? else {
+        return Ok(None);
+    };
+    let mut set = ChangedSet::default();
+    set.add_raw_diff(&output);
+    Ok(Some(set))
 }
 
 /// Like [`collect_changed_paths_checked`] but restricted to a git
@@ -516,18 +619,32 @@ pub fn collect_changed_paths_filtered(
     since: &str,
     diff_filter: &str,
 ) -> Result<Option<HashSet<PathBuf>>, CommitRangeError> {
-    diff_name_only(root, since, Some(diff_filter))
+    let Some(output) = diff_range(root, since, Some(diff_filter))? else {
+        return Ok(None);
+    };
+    let mut out = HashSet::new();
+    for chunk in output.split(|&b| b == 0) {
+        if chunk.is_empty() {
+            continue;
+        }
+        // Preserve a non-UTF-8 changed path instead of collapsing the whole set
+        // to `None` (which the caller maps to an empty changed-set, silently
+        // no-opping every `changed_since`-scoped rule — a fail-open lint bypass).
+        // Same decode the top-level `--changed` collector uses (M6).
+        out.insert(path_from_git_chunk(chunk));
+    }
+    Ok(Some(out))
 }
 
-/// Shared `git diff --name-only --relative -z <since>...HEAD`
-/// (optionally `--diff-filter=<…>`), with the git-repo probe and NUL
-/// parsing both [`collect_changed_paths_checked`] and
-/// [`collect_changed_paths_filtered`] need.
-fn diff_name_only(
+/// Shared `git diff --relative -z <since>...HEAD`, with the git-repo probe
+/// both [`collect_changed_set_checked`] and [`collect_changed_paths_filtered`]
+/// need: its output, `--raw` unfiltered, and `--name-only` under a
+/// `--diff-filter=<…>`.
+fn diff_range(
     root: &Path,
     since: &str,
     diff_filter: Option<&str>,
-) -> Result<Option<HashSet<PathBuf>>, CommitRangeError> {
+) -> Result<Option<Vec<u8>>, CommitRangeError> {
     // Probe: are we in a git repo at all? If not, silent None —
     // matching the advisory posture of the rest of this module.
     let Some(mut probe) = git_command(root) else {
@@ -547,9 +664,7 @@ fn diff_name_only(
     let Some(mut cmd) = git_command(root) else {
         return Ok(None);
     };
-    cmd.arg("-C")
-        .arg(root)
-        .args(["diff", "--name-only", "--relative", "-z"]);
+    cmd.arg("-C").arg(root).args(["diff", "--relative", "-z"]);
     if since.starts_with('-') {
         return Err(CommitRangeError::BadRange {
             stderr: format!("`since` must not start with '-' (got {since:?})"),
@@ -561,10 +676,11 @@ fn diff_name_only(
     // detection itself, renames and no copies, over the user's `diff.renames`.
     match diff_filter {
         Some(filter) => cmd.args([
+            "--name-only".to_string(),
             "--find-renames".to_string(),
             format!("--diff-filter={filter}"),
         ]),
-        None => cmd.arg("--no-renames"),
+        None => cmd.args(["--raw", "--no-renames"]),
     };
     // `--end-of-options`: a config-controlled `since` starting with `-`
     // (e.g. `--output=…`) must never be parsed as a git OPTION — that
@@ -579,18 +695,7 @@ fn diff_name_only(
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(CommitRangeError::BadRange { stderr });
     }
-    let mut out = HashSet::new();
-    for chunk in output.stdout.split(|&b| b == 0) {
-        if chunk.is_empty() {
-            continue;
-        }
-        // Preserve a non-UTF-8 changed path instead of collapsing the whole set
-        // to `None` (which the caller maps to an empty changed-set, silently
-        // no-opping every `changed_since`-scoped rule — a fail-open lint bypass).
-        // Same decode the top-level `--changed` collector uses (M6).
-        out.insert(path_from_git_chunk(chunk));
-    }
-    Ok(Some(out))
+    Ok(Some(output.stdout))
 }
 
 /// HEAD's commit message, as a single string with newlines
