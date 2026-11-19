@@ -1036,8 +1036,9 @@ new finding.
 `alint explain <rule>` shows a `constraint` rule's resolved plan after its options: the assertion,
 every relation it reads in the order a run evaluates them, each with its source, reader, fields and
 `where:` and the file that declares it, and the selectors that run it under `--changed`; it shows
-no value read from a file, and what the environment wrote or a sensitive field compares with shows
-as `<redacted>` (see [Version 2](/docs/configuration/version-2/)).
+no value read from a file, except the paths a manifest-derived `scope_filter:` resolves to, as for
+any rule (ADR-0010), and what the environment wrote or a sensitive field compares with shows as
+`<redacted>` (see [Version 2](/docs/configuration/version-2/)).
 
 #### Under `--changed`
 

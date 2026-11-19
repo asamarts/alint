@@ -744,20 +744,23 @@ policy-test package the user does not trust.
     dispatch as `full_index` with `path_scope: true`.
   - `alint explain <rule>` shows the rule's resolved plan, after its options: the assertion in
     words; every relation the rule reads, in the order a run evaluates them, named as the config
-    writes the reference that reaches it and marked as the input, an inline input or the `set`
-    target; each one's source (a selector with its `paths:`, its `scope_filter:` and the
-    manifests that resolves to, a join with its `left`, `right`, `on` and `unique`, or a union's
-    parts), its reader (`entries:` with its format and `at:`, or `read:` with its query), its
-    fields with their sources, transforms and sensitivity, its `where:`, and the config file that
-    declares it; the selectors that run the rule under `--changed`; and its cost class.
-    `--format json` adds the same as a `plan` object, which the experimental trace schema's rule
-    document allows; a rule of any other kind has no `plan`, so its output is unchanged. The plan
-    is configuration: it shows no value read from a file. What the environment wrote stays
-    redacted as `explain` redacts it elsewhere: a selector or relation definition that reads the
-    environment shows `<redacted>` for each value it holds, an `extends:` entry the environment
-    chooses names its files `<redacted>`, and an environment-written assertion is `<redacted>`
-    whole. A sensitive field's `where:` literals and patterns, its transforms, and the literals
-    the assertion compares with it (`to: { row: }`, `{ group: }`, `groups:`) show as
+    writes each reference that reaches it (with the file that declares it when two relations would
+    read alike, so each reference names one) and marked as the input, an inline input or the `set`
+    target; each one's source (a selector with its `paths:`, its `scope_filter:` and the manifests
+    that resolves to, a join with its `left`, `right`, `on` and `unique`, or a union's parts), its
+    reader (`entries:` with its format and `at:`, or `read:` with its query), its fields with their
+    sources, transforms and sensitivity, its `where:`, and the config file that declares it; the
+    selectors that run the rule under `--changed`; and its cost class. `--format json` adds the same
+    as a `plan` object, which the experimental trace schema's rule document allows, where each
+    relation has an `id` (its place in the list) by which a join's sides, an `in:` list, the
+    trigger, `input` and `set_target` name it; a rule of any other kind has no `plan`, so its output
+    is unchanged. The plan is configuration: it shows no value read from a file, except the paths a
+    manifest-derived `scope_filter:` resolves to, as for any rule (ADR-0010). What the environment
+    wrote stays redacted as `explain` redacts it elsewhere: a selector or relation definition that
+    reads the environment shows `<redacted>` for each value it holds, an `extends:` entry the
+    environment chooses names its files `<redacted>`, and an environment-written assertion is
+    `<redacted>` whole. A sensitive field's `where:` literals and patterns, its transforms, and the
+    literals the assertion compares with it (`to: { row: }`, `{ group: }`, `groups:`) show as
     `<redacted>`, in the plan and in the rule's options; a rule marked `sensitive: true` shows its
     plan as `<redacted>`.
   - The version 2 draft schema describes the kind and refuses it nested; the version 1 schema

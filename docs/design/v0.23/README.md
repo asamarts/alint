@@ -949,39 +949,50 @@ as #589, step 3 as #590, and step 4 is the last.
 - 2026-11-19: phase 7 step 4, and phase 7 is complete.
   - `alint explain <rule>` shows a `constraint` rule's resolved plan, in human and JSON output (a
     `plan` object, which the trace's rule document carries too): the assertion in words; every
-    relation the rule reads, in the order a run evaluates them, named as the config writes the
-    reference that reaches it and marked as the input, an inline input or the `set` target; each
-    one's source (a selector with its paths, `scope_filter:` and resolved manifests, a join, or a
-    union's parts), reader, fields, transforms and `where:`, with the file that declares it; the
-    selectors of its `--changed` trigger scope; and its cost class. `Plan::evaluation_order` gives
-    the order, and the evaluator's own walk now shares it; `TriggerScope::origins` names the
-    trigger's selectors. Phase 6 (#558) had already renamed `selectors:` to `selector fields:`.
-  - The plan shows configuration only, never a value read from a file. What the environment wrote
-    stays redacted: a named selector that reads it, or a relation whose own definition reads it
-    (the plan now records `definition_reads_environment` beside the transitive flag), shows each
+    relation the rule reads, in the order a run evaluates them, named as the config writes each
+    reference that reaches it (with the file that declares it when two relations would read alike)
+    and marked as the input, an inline input or the `set` target; each one's source (a selector with
+    its paths, `scope_filter:` and resolved manifests, a join, or a union's parts), reader, fields,
+    transforms and `where:`, with the file that declares it; the selectors of its `--changed`
+    trigger scope; and its cost class. `Plan::evaluation_order` gives the order, the run evaluates
+    the relations its rules read in that order, and the evaluator's own walk shares its post-order
+    walk (`Plan::post_order`); `TriggerScope::origins` names the trigger's selectors. Phase 6 (#558)
+    had already renamed `selectors:` to `selector fields:`.
+  - The plan shows configuration only, never a value read from a file, except the paths a
+    manifest-derived `scope_filter:` resolves to, as for any rule (ADR-0010). What the environment
+    wrote stays redacted: a named selector that reads it, or a relation whose own definition reads
+    it (the plan now records `definition_reads_environment` beside the transitive flag), shows each
     value it holds as `<redacted>`; an environment-chosen `extends:` entry names its files
     `<redacted>`; an environment-written assertion is `<redacted>` whole. A sensitive field's
-    `where:` literals, patterns and transforms, and the literals the assertion compares with it,
-    are `<redacted>` in the plan and in the rule's options. A version 1 rule's `explain` is byte
-    for byte what it was, against snapshots taken before the change, and the v2 all-kinds fixture
-    drives each source shape through the ADR-0012 explain gates.
+    `where:` literals, patterns and transforms, and the literals the assertion compares with it, are
+    `<redacted>` in the plan and in the rule's options. A version 1 rule's `explain` is byte for
+    byte what it was, against snapshots taken before the change, and the v2 all-kinds fixture drives
+    each source shape through the ADR-0012 explain gates.
+  - Review fixes: each relation in the JSON plan has an `id`, its place in the list, and a join's
+    sides, an `in:` list's relation, the trigger's inline selectors, `input` and `set_target` name
+    it by that; the human plan lists each spelling of a relation two aliases reach and adds the
+    declaring file where two relations would read alike, so every reference names one relation.
+    The run evaluates the relations its rules read in `Plan::evaluation_order`, as `explain` lists
+    them, with a test that fails when the two differ. The trace schema's `plan` is an object or
+    `<redacted>`, and no other string.
   - Mutants: cargo-mutants 27.1.0 over `constraint/` and `plural_groups.rs` (alint-rules), and
-    `relation/trigger.rs` and `relation/eval/{failure,mod,ops,read}.rs` (alint-core), file by
-    file: each mutant ran against its crate's tests, a survivor against four crates' (alint-core,
+    `relation/trigger.rs` and `relation/eval/{failure,mod,ops,read}.rs` (alint-core), file by file:
+    each mutant ran against its crate's tests, a survivor against four crates' (alint-core,
     alint-dsl, alint-rules, alint), and a survivor of those against the whole workspace. Of 832
-    mutants, 57 survived the workspace before the new tests, and 15 survive after them (one more
-    is a timeout: `index += 1` made `*=` in `places.rs` loops forever, so the tests catch it by
-    their timeout). The tests that kill the 42 cover the plan check's refusals, the families'
-    and the `set`'s messages and places, `where:` on a missing value, a membership clash's
-    witness, the bound-path and strip-root errors, a per-file extractor limit, the run's bytes
-    for a decode, a note, a shared key path and a stripped one, and a sensitive value's note.
-    Equivalent, 5: in `set.rs` a group's first path kept when equal (`<` made `<=`) and the
-    distinct-value limit checked again at an unchanged count (`>` made `>=`); in `eval/mod.rs` a
-    guard on an empty failure list that refinement never leaves non-empty with rows; in `ops.rs`
-    a string's kind made `Other`, which sorts after every kind a field can hold, as `String`
-    does; in `read.rs` a non-string kind's size, which is one byte (`*` made `/`). Defensive, 10:
-    the cycle guard of `path_levels` (`>` made `==` or `>=`), which an acyclic plan never
-    reaches; `not_a_member` (2), as an entry row is always an object member; and `wrong_source`
-    (6), as the plan check refuses a source the part's reader does not give.
+    mutants, 57 survived the workspace before the new tests, and 14 survive after them (one more is
+    a timeout: `index += 1` made `*=` in `places.rs` loops forever, so the tests catch it by their
+    timeout). The tests that kill the 43 cover the plan check's refusals, the families' and the
+    `set`'s messages and places, `where:` on a missing value, a membership clash's witness, the
+    bound-path and strip-root errors, a per-file extractor limit, the run's bytes for a decode, a
+    note, a shared key path and a stripped one, a sensitive value's note, and the type a sensitive
+    field's membership clash names for a string literal (review found `kind`'s string arm reachable
+    there, through `bare_type`, after it was first called equivalent). Equivalent, 4: in `set.rs` a
+    group's first path kept when equal (`<` made `<=`) and the distinct-value limit checked again at
+    an unchanged count (`>` made `>=`); in `eval/mod.rs` a guard on an empty failure list that
+    refinement never leaves non-empty with rows; in `read.rs` a non-string kind's size, which is one
+    byte (`*` made `/`). Defensive, 10: the cycle guard of `path_levels` (`>` made `==` or `>=`),
+    which an acyclic plan never reaches; `not_a_member` (2), as an entry row is always an object
+    member; and `wrong_source` (6), as the plan check refuses a source the part's reader does not
+    give.
   - Next: #580 (an `extends:` list merged in linear time, before v0.23.0, ADR-0046 decision 1),
     then phase 8 (the three conformance policies).

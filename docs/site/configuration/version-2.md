@@ -369,9 +369,10 @@ turn, is named `<redacted>`, here and in errors found in it, however short its n
 `alint explain <rule>` on a `constraint` rule shows its resolved plan after its options: the
 assertion, then every relation the rule reads in the order a run evaluates them (its input, both
 sides of each join, the relations its `in:` and `not_in:` lists probe, and a `set`'s other
-relation), each named as the rule writes it, with its source, reader, fields, transforms,
-`where:` and the file that declares it; then the selectors that run the rule under `--changed`.
-For example, for a rule whose `input:` joins two relations:
+relation), each named as the config writes each reference that reaches it (with the file that
+declares it when two relations would read alike, so a reference names one), with its source, reader,
+fields, transforms, `where:` and the file that declares it; then the selectors that run the rule
+under `--changed`. For example, for a rule whose `input:` joins two relations:
 
 ```text
 plan:
@@ -403,9 +404,12 @@ plan:
   cost: linear in the rows of each relation it reads
 ```
 
-`--format json` gives the same as a `plan` object. The plan is configuration and shows no value
-read from a file. What the environment wrote shows as `<redacted>`, as do a sensitive field's
-`where:` literals, patterns and transforms and the literals the assertion compares with it.
+`--format json` gives the same as a `plan` object, where each relation has an `id` (its place in the
+list) by which a join's sides, an `in:` list, the trigger, `input` and `set_target` name it. The
+plan is configuration and shows no value read from a file, except the paths a manifest-derived
+`scope_filter:` resolves to, as for any rule (ADR-0010). What the environment wrote shows as
+`<redacted>`, as do a sensitive field's `where:` literals, patterns and transforms and the literals
+the assertion compares with it.
 
 ## What the loader checks
 
