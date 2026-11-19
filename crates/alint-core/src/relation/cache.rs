@@ -311,6 +311,12 @@ impl std::fmt::Debug for DecodeCache {
             .field("decodes", &self.decodes.load(Ordering::Relaxed))
             .field("rows", &self.budget.used())
             .field("bytes", &self.bytes.used())
+            .field("bytes_limit", &self.bytes_limit)
+            .field(
+                "before_consumers",
+                &self.before_consumers.lock().map_or(None, |taken| *taken),
+            )
+            .field("largest_held", &self.largest_held.load(Ordering::Relaxed))
             .finish()
     }
 }
