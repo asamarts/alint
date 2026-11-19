@@ -34,6 +34,8 @@ use alint_core::{AnalysisFailure, Level, Report, RuleResult, Violation};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+use crate::occurrence::{OccurrenceKey, occurrence_fingerprint, occurrences};
+
 /// `fingerprints`, when supplied, is the per-result / per-violation canonical
 /// `baseline::violation_fingerprint` (indexed `[result][violation]`, aligned with
 /// `report.results[i].violations[j]`), so an un-collided finding shares ONE
@@ -44,24 +46,23 @@ use sha2::{Digest, Sha256};
 ///
 /// The canonical fingerprint is deliberately collision-prone — it collapses
 /// identical-content findings so baseline mode can count them — but GitLab Code
-/// Quality drops findings that share a fingerprint. So `build_issue` runs a
-/// per-report occurrence pass over BOTH fingerprint sources: the first finding
-/// with a given base identity emits it raw (cross-format identity preserved),
-/// and any in-report collision gets a deterministic suffix, so every emitted
-/// issue is unique and none is silently dropped.
+/// Quality drops findings that share a fingerprint. So this runs a per-report
+/// occurrence pass over BOTH fingerprint sources: the findings that share a
+/// base identity are numbered by the path, line and column they show, then
+/// rule and message, as SARIF numbers them; the first emits it raw
+/// (cross-format identity preserved), and each other gets a deterministic
+/// suffix, so every emitted issue is unique and none is silently dropped.
 pub fn write_gitlab(
     report: &Report,
     fingerprints: Option<&[Vec<String>]>,
     w: &mut dyn Write,
 ) -> std::io::Result<()> {
     let mut issues: Vec<Issue> = Vec::new();
-    // Per-report occurrence counter keyed by each finding's BASE fingerprint
-    // (canonical when supplied, else the self-contained hash). Consulted for
-    // EVERY issue so an in-report collision — which the canonical fingerprint
-    // deliberately produces on identical content — is disambiguated and GitLab
-    // keeps both findings (Code Climate requires per-report uniqueness).
-    // Deterministic: report iteration order is stable.
-    let mut seen: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+    // Each finding's issue, at its BASE fingerprint (canonical when supplied,
+    // else the self-contained hash), with where it stands among those that
+    // share it, and each analysis failure's.
+    let mut findings: Vec<(usize, OccurrenceKey<'_>)> = Vec::new();
+    let mut failures: Vec<usize> = Vec::new();
     for (ri, result) in report.results.iter().enumerate() {
         if result.level != Level::Off {
             for (vi, violation) in result.violations.iter().enumerate() {
@@ -69,12 +70,39 @@ pub fn write_gitlab(
                     .and_then(|f| f.get(ri))
                     .and_then(|r| r.get(vi))
                     .cloned();
-                issues.push(build_issue(result, violation, precomputed, &mut seen));
+                findings.push((issues.len(), OccurrenceKey::of(&result.rule_id, violation)));
+                issues.push(build_issue(result, violation, precomputed));
             }
         }
         for failure in &result.analysis_failures {
-            issues.push(build_analysis_failure_issue(result, failure, &mut seen));
+            failures.push(issues.len());
+            issues.push(build_analysis_failure_issue(result, failure));
         }
+    }
+    // An in-report collision, which the canonical fingerprint deliberately
+    // produces on identical content and leaves free of a hidden path or a
+    // `constraint` finding's path, is disambiguated so GitLab keeps every
+    // finding (Code Climate requires per-report uniqueness). The findings that
+    // share a fingerprint are numbered by the path, line and column they show,
+    // then rule and message, as SARIF numbers them (ADR-0047); the first keeps
+    // the base. Analysis failures and the note summary follow, in report order.
+    let numbers = occurrences(
+        &findings
+            .iter()
+            .map(|&(at, key)| (issues[at].fingerprint.as_str(), key))
+            .collect::<Vec<_>>(),
+    );
+    let mut seen: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+    for (&(at, _), occurrence) in findings.iter().zip(numbers) {
+        let count = seen.entry(issues[at].fingerprint.clone()).or_insert(0);
+        *count = (*count).max(occurrence + 1);
+        if occurrence > 0 {
+            issues[at].fingerprint = occurrence_fingerprint(&issues[at].fingerprint, occurrence);
+        }
+    }
+    for at in failures {
+        let base = std::mem::take(&mut issues[at].fingerprint);
+        issues[at].fingerprint = unique_fingerprint(base, &mut seen);
     }
     let note_count = report.total_notes();
     if note_count > 0 {
@@ -116,11 +144,12 @@ struct Lines {
     begin: usize,
 }
 
+/// The issue for `violation`, at its base fingerprint; `write_gitlab` then
+/// tells apart the issues that share one.
 fn build_issue(
     result: &RuleResult,
     violation: &Violation,
     precomputed_fingerprint: Option<String>,
-    seen: &mut std::collections::HashMap<String, u32>,
 ) -> Issue {
     let path = violation
         .report_path()
@@ -132,13 +161,13 @@ fn build_issue(
     // discriminates on line *content*, not line number, so a rule firing on two
     // identical lines of one file hashes both the same (baseline count-collapse).
     // GitLab Code Quality requires per-report-UNIQUE fingerprints — a collision
-    // makes GitLab silently drop the duplicate finding — so disambiguate the Nth
-    // (N>0) occurrence of any base identity within this report. Occurrence 0 (the
-    // common case) keeps the raw base, so cross-format identity is preserved;
-    // only genuine in-report collisions get a deterministic suffix.
-    let base = precomputed_fingerprint
+    // makes GitLab silently drop the duplicate finding — so `write_gitlab`
+    // disambiguates the Nth (N>0) occurrence of any base identity within this
+    // report. Occurrence 0 (the common case) keeps the raw base, so
+    // cross-format identity is preserved; only genuine in-report collisions get
+    // a deterministic suffix.
+    let fingerprint = precomputed_fingerprint
         .unwrap_or_else(|| self_fingerprint(&result.rule_id, &path, &violation.message));
-    let fingerprint = unique_fingerprint(base, seen);
 
     Issue {
         description: violation.message.to_string(),
@@ -158,11 +187,9 @@ fn build_issue(
     }
 }
 
-fn build_analysis_failure_issue(
-    result: &RuleResult,
-    failure: &AnalysisFailure,
-    seen: &mut std::collections::HashMap<String, u32>,
-) -> Issue {
+/// The issue for `failure`, at its base fingerprint; `write_gitlab` then
+/// tells apart the issues that share one.
+fn build_analysis_failure_issue(result: &RuleResult, failure: &AnalysisFailure) -> Issue {
     let path = failure
         .report_path()
         .map_or_else(|| ".".to_string(), crate::slash_path);
@@ -177,7 +204,7 @@ fn build_analysis_failure_issue(
     Issue {
         description,
         check_name,
-        fingerprint: unique_fingerprint(base, seen),
+        fingerprint: base,
         severity: "critical",
         location: Location {
             path,
@@ -237,20 +264,8 @@ fn unique_fingerprint(base: String, seen: &mut std::collections::HashMap<String,
     if occurrence == 0 {
         base
     } else {
-        occurrence_suffixed(&base, occurrence)
+        occurrence_fingerprint(&base, occurrence)
     }
-}
-
-/// Deterministically derive a distinct fingerprint for the Nth (`occurrence` >
-/// 0) in-report collision of `base`, so GitLab keeps every finding. Only reached
-/// on a genuine collision — the first occurrence emits the raw `base`, preserving
-/// cross-format identity for the common (unique) case.
-fn occurrence_suffixed(base: &str, occurrence: u32) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(base.as_bytes());
-    hasher.update(b":");
-    hasher.update(occurrence.to_le_bytes());
-    hex_digest(hasher)
 }
 
 fn hex_digest(hasher: Sha256) -> String {

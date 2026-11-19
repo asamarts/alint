@@ -14,6 +14,7 @@ use std::io::Write;
 use alint_core::{Level, NoteKind, Report, Violation};
 use serde::Serialize;
 
+use crate::occurrence::{OccurrenceKey, occurrence_fingerprint, occurrences};
 use crate::{BaselineMarks, ResultMarks};
 
 /// `partialFingerprints` key carrying alint's baseline fingerprint, so GitHub
@@ -54,10 +55,11 @@ pub fn write_sarif_with_baseline(
 /// Quality use. GitHub Code Scanning can then correlate alerts across runs even
 /// without `--baseline`. No `baselineState` is emitted (no baseline is in
 /// effect). `None` (generic dispatch / callers with no file access) emits no
-/// fingerprints, matching [`write_sarif`]. A fingerprint that an earlier
-/// result of the run already carries is replaced by one derived from it and
-/// the repeat's occurrence, as GitLab output derives it, so that each finding
-/// stays its own alert.
+/// fingerprints, matching [`write_sarif`]. Results that share a fingerprint
+/// are numbered by the path, line and column they show, then rule and
+/// message, and each after the first carries one derived from it and its
+/// number, as GitLab output derives it, so that each finding stays its own
+/// alert.
 pub fn write_sarif_with_fingerprints(
     report: &Report,
     fingerprints: Option<&[Vec<String>]>,
@@ -109,6 +111,10 @@ fn build_sarif(
     let mut results = Vec::new();
     let mut notifications = Vec::new();
     let mut execution_successful = true;
+    // Each result with a fingerprint, for `number_repeated_fingerprints`: its
+    // index in `results`, its fingerprint, and where it stands among those that
+    // share it: whether it is live (a baselined one first), then its key.
+    let mut numbered: Vec<(usize, &str, (bool, OccurrenceKey<'_>))> = Vec::new();
 
     for (idx, rr) in report.results.iter().enumerate() {
         rules.push(SarifRule {
@@ -141,6 +147,7 @@ fn build_sarif(
                     res.baseline_state = Some("new");
                 }
                 res.partial_fingerprints = Some(fingerprint_map(fp));
+                numbered.push((results.len(), fp, (true, OccurrenceKey::of(&rr.rule_id, v))));
             }
             results.push(res);
         }
@@ -197,12 +204,17 @@ fn build_sarif(
                 res.suppressions = vec![SarifSuppression { kind: "external" }];
                 res.baseline_state = Some("unchanged");
                 res.partial_fingerprints = Some(fingerprint_map(&sf.fingerprint));
+                numbered.push((
+                    results.len(),
+                    &sf.fingerprint,
+                    (false, OccurrenceKey::of(&rr.rule_id, &sf.violation)),
+                ));
                 results.push(res);
             }
         }
     }
 
-    tell_repeated_fingerprints_apart(&mut results);
+    number_repeated_fingerprints(&mut results, &numbered);
 
     Sarif {
         schema: "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
@@ -511,49 +523,37 @@ fn build_fixes(rule_id: &str, v: &Violation) -> Vec<SarifFix> {
     }]
 }
 
-/// Give every result whose fingerprint an earlier result of the run already
-/// carries a fingerprint of its own, as GitLab output does: the canonical
+/// Give every result whose fingerprint another result of the run carries a
+/// fingerprint of its own (ADR-0047), as GitLab output does: the canonical
 /// fingerprint is free of paths for some findings (a `constraint` rule's
 /// `unique` without `determines` gives one per repeated row, at different
 /// files), and GitHub Code Scanning may merge results that share one into a
-/// single alert. The first result with a fingerprint keeps it, so it stays
-/// the identity the baseline and GitLab give the finding; the Nth repeat
-/// (N > 0), in the order the results are written, gets
-/// [`occurrence_fingerprint`]. A run with no repeat is written unchanged.
-fn tell_repeated_fingerprints_apart(results: &mut [SarifResult]) {
-    let mut seen: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
-    for result in results {
-        let Some(fingerprint) = result
-            .partial_fingerprints
-            .as_mut()
-            .and_then(|fingerprints| fingerprints.get_mut(FINGERPRINT_KEY))
-        else {
-            continue;
-        };
-        let count = seen.entry(fingerprint.clone()).or_insert(0);
-        let occurrence = *count;
-        *count += 1;
+/// single alert. The results that share a fingerprint are numbered in an
+/// order the results decide, not the order they are written in: the baselined
+/// ones first, then the live ones, each by the path, line and column they
+/// show, then rule and message ([`OccurrenceKey`]). The baseline suppresses
+/// the first findings of a fingerprint in path, line, column and message
+/// order, so the baselined results come first by their key anyway, but for a
+/// hidden path, which shows as `<redacted>`; a baselined repeat then keeps its
+/// number while live repeats come and go. The first keeps the canonical
+/// fingerprint, the identity the baseline gives the finding; the Nth (N > 0)
+/// gets [`occurrence_fingerprint`]. A run with no repeat is written unchanged.
+fn number_repeated_fingerprints(
+    results: &mut [SarifResult],
+    numbered: &[(usize, &str, (bool, OccurrenceKey<'_>))],
+) {
+    let findings: Vec<(&str, (bool, OccurrenceKey<'_>))> = numbered
+        .iter()
+        .map(|&(_, fingerprint, key)| (fingerprint, key))
+        .collect();
+    for (&(at, fingerprint, _), occurrence) in numbered.iter().zip(occurrences(&findings)) {
         if occurrence > 0 {
-            *fingerprint = occurrence_fingerprint(fingerprint, occurrence);
+            results[at].partial_fingerprints = Some(fingerprint_map(&occurrence_fingerprint(
+                fingerprint,
+                occurrence,
+            )));
         }
     }
-}
-
-/// The fingerprint of the `occurrence`th repeat of `base` in a run: the hex
-/// SHA-256 of `base`, `:` and the occurrence as four little-endian bytes,
-/// which is what GitLab output gives the same repeat.
-fn occurrence_fingerprint(base: &str, occurrence: u32) -> String {
-    use sha2::{Digest, Sha256};
-    use std::fmt::Write as _;
-    let mut hasher = Sha256::new();
-    hasher.update(base.as_bytes());
-    hasher.update(b":");
-    hasher.update(occurrence.to_le_bytes());
-    let mut hex = String::with_capacity(64);
-    for byte in hasher.finalize() {
-        let _ = write!(&mut hex, "{byte:02x}");
-    }
-    hex
 }
 
 fn fingerprint_map(fp: &str) -> BTreeMap<&'static str, String> {
@@ -1577,12 +1577,11 @@ mod tests {
 
     /// Findings at different files can share a fingerprint, which is free of
     /// paths for a `constraint` finding: each repeat within a run gets its
-    /// own, derived from the fingerprint and how many came before as GitLab
-    /// derives it, so Code Scanning keeps every finding as its own alert. The
-    /// first keeps the fingerprint it shares with the baseline and GitLab.
+    /// own, derived from the fingerprint and its number as GitLab derives it,
+    /// so Code Scanning keeps every finding as its own alert. The first keeps
+    /// the fingerprint it shares with the baseline and GitLab.
     #[test]
     fn a_repeated_fingerprint_gets_an_occurrence_of_its_own() {
-        use crate::{BaselineMarks, ResultMarks, SuppressedFinding};
         let finding =
             |message: &'static str, path: &str| Violation::new(message).with_path(Path::new(path));
         let report = Report {
@@ -1640,25 +1639,119 @@ mod tests {
         let distinct: std::collections::BTreeSet<&String> = sarif.iter().collect();
         assert_eq!(distinct.len(), 4, "{sarif:?}");
 
-        // Under a baseline, a suppressed finding counts in the same run.
-        let marks = BaselineMarks {
-            per_result: vec![ResultMarks {
-                live_fingerprints: vec!["fp-x".into()],
-                suppressed: vec![SuppressedFinding {
-                    violation: finding("`name` \"x\" is not unique", "a/package.json"),
-                    fingerprint: "fp-x".into(),
-                }],
-            }],
-            suppressed_total: 1,
-        };
-        let one = Report {
+        // The numbers follow what each finding shows, not the order the
+        // findings are written in, in both formats.
+        let reversed = Report {
             results: vec![RuleResult {
-                violations: report.results[0].violations[..1].to_vec(),
+                violations: report.results[0].violations.iter().rev().cloned().collect(),
                 ..report.results[0].clone()
             }],
         };
-        let mut baselined = Vec::new();
-        write_sarif_with_baseline(&one, Some(&marks), &mut baselined).unwrap();
-        assert_eq!(shown(&baselined), [sarif[0].clone(), sarif[1].clone()]);
+        let fingerprints: Vec<Vec<String>> = vec![fingerprints[0].iter().rev().cloned().collect()];
+        let mut again = Vec::new();
+        write_sarif_with_fingerprints(&reversed, Some(&fingerprints), &mut again).unwrap();
+        let mut gitlab_again = Vec::new();
+        crate::gitlab::write_gitlab(&reversed, Some(&fingerprints), &mut gitlab_again).unwrap();
+        let gitlab_again: Vec<String> = serde_json::from_slice::<Value>(&gitlab_again)
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|issue| issue["fingerprint"].as_str().unwrap().to_string())
+            .collect();
+        let backwards: Vec<String> = sarif.iter().rev().cloned().collect();
+        assert_eq!(shown(&again), backwards);
+        assert_eq!(gitlab_again, backwards);
+    }
+
+    /// The results that share a fingerprint are numbered baselined first, then
+    /// by what they show, not by the order they are written in: a baselined
+    /// repeat keeps its fingerprint while live repeats of its key come and go,
+    /// also one that shows before it (as one at a hidden path can).
+    #[test]
+    fn a_baselined_repeat_keeps_its_fingerprint_as_live_repeats_come_and_go() {
+        use crate::{BaselineMarks, ResultMarks, SuppressedFinding};
+        let finding = |path: &str, line: usize| {
+            Violation::new("`name` \"x\" is not unique")
+                .with_path(Path::new(path))
+                .with_location(line, 1)
+        };
+        // Each result's path, line and fingerprint, as written.
+        let shown = |live: &[(&str, usize)]| -> Vec<(String, u64, String)> {
+            let report = Report {
+                results: vec![RuleResult {
+                    rule_id: "names-unique".into(),
+                    level: Level::Error,
+                    policy_url: None,
+                    violations: live
+                        .iter()
+                        .map(|&(path, line)| finding(path, line))
+                        .collect(),
+                    notes: Vec::new(),
+                    is_fixable: false,
+                    analysis_failures: Vec::new(),
+                }],
+            };
+            let marks = BaselineMarks {
+                per_result: vec![ResultMarks {
+                    live_fingerprints: vec!["fp-x".into(); live.len()],
+                    suppressed: [("b/package.json", 1), ("d/package.json", 5)]
+                        .iter()
+                        .map(|&(path, line)| SuppressedFinding {
+                            violation: finding(path, line),
+                            fingerprint: "fp-x".into(),
+                        })
+                        .collect(),
+                }],
+                suppressed_total: 2,
+            };
+            let mut sarif = Vec::new();
+            write_sarif_with_baseline(&report, Some(&marks), &mut sarif).unwrap();
+            let sarif: Value = serde_json::from_slice(&sarif).unwrap();
+            sarif["runs"][0]["results"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|result| {
+                    let location = &result["locations"][0]["physicalLocation"];
+                    (
+                        location["artifactLocation"]["uri"]
+                            .as_str()
+                            .unwrap()
+                            .to_string(),
+                        location["region"]["startLine"].as_u64().unwrap(),
+                        result["partialFingerprints"]["alint/v1"]
+                            .as_str()
+                            .unwrap()
+                            .to_string(),
+                    )
+                })
+                .collect()
+        };
+        let baselined = |results: Vec<(String, u64, String)>| -> Vec<(String, u64, String)> {
+            results
+                .into_iter()
+                .filter(|(path, line, _)| {
+                    [("b/package.json", 1), ("d/package.json", 5)].contains(&(path.as_str(), *line))
+                })
+                .collect()
+        };
+        let alone = shown(&[]);
+        assert_eq!(alone[0].2, "fp-x");
+        assert_ne!(alone[1].2, "fp-x");
+        for live in [
+            &[("e/package.json", 1)][..],
+            &[("a/package.json", 1)],
+            &[("c/package.json", 1), ("a/package.json", 1)],
+            &[("d/package.json", 1)],
+        ] {
+            let results = shown(live);
+            assert_eq!(baselined(results.clone()), alone, "{live:?}");
+            let distinct: std::collections::BTreeSet<&String> = results
+                .iter()
+                .map(|(_, _, fingerprint)| fingerprint)
+                .collect();
+            assert_eq!(distinct.len(), results.len(), "{results:?}");
+        }
     }
 }
