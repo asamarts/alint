@@ -164,6 +164,11 @@ jobs:
         # the overlaid docs and is gated mechanically. Idempotent once the tag's
         # own docs-export gains the stripper. (ADR-0007; documentation-drift.md
         # P-REF. The rule-page bridge below gates separately via MAIN's xtask.)
+        # The stripper only drops what is marked, so ci.yml's Docs job runs
+        # ci/scripts/check-docs-overlay-since.py, which reads the path list of
+        # the strip-since.mjs command below and fails when a line added since
+        # the latest release tag in those pages (or in a released kind's
+        # docs/rules.md section) sits outside a since-block.
         run: |
           set -euo pipefail
           # strip-since.mjs is main-tracked tooling absent from the release tag

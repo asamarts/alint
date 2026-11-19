@@ -42,6 +42,18 @@ Trailer line, always shown.
     assert_eq!(strip_unreleased_prose(plain, Some((0, 13, 0))), plain);
 }
 
+/// A rule's opening paragraph wrapped in a since-block (a correction to
+/// released prose, which the overlay gate requires) must not put the marker
+/// comment into the summary that the rule index, the meta description and
+/// `alint rules` read.
+#[test]
+fn first_sentence_skips_since_markers() {
+    let body = "<!-- alint:since=0.22.1 -->\nValidate links. More text.\n<!-- /alint:since -->\n\nNext.\n";
+    assert_eq!(first_sentence(body), "Validate links.");
+    let after = "Lead in\n<!-- alint:since=0.23.0 -->\ncontinued.\n<!-- /alint:since -->\n";
+    assert_eq!(first_sentence(after), "Lead in continued.");
+}
+
 /// P-REF: `copy_site_tree` release-gates the hand-written docs the same way the
 /// rule pages are gated, so a `<!-- alint:since=X -->` block in a main-overlaid
 /// reference page can't ship ahead of the release. Revert-sensitive.

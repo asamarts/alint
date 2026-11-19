@@ -367,12 +367,14 @@ fn process_family_h3s(
                     .collect()
             })
             .unwrap_or_default();
-        let summary = first_sentence(&clean_body);
         // Release-gate the prose the same way the Options table is gated:
         // drop `<!-- alint:since=X -->` blocks describing capability newer than
         // the released version. Computed once per H3 (a multi-kind heading's
-        // siblings share it). See ADR-0007 / documentation-drift.md P1.
+        // siblings share it). See ADR-0007 / documentation-drift.md P1. The
+        // summary is taken from the gated body, so an unreleased opening
+        // paragraph never becomes the index summary.
         let page_body = strip_unreleased_prose(&clean_body, released);
+        let summary = first_sentence(&page_body);
         for kind in &group_kinds {
             kind_order += 1;
             let siblings: Vec<&str> = group_kinds
@@ -562,6 +564,8 @@ fn harvest_aliases(src: &str) -> std::collections::HashSet<String> {
 /// mistaken for an abbreviation and correctly ends the sentence. Markdown is
 /// left intact — the website rule index renders it directly; `kind_summary`
 /// (terminal) and `rule_meta_description` (SERP) strip it for their surfaces.
+/// A `<!-- alint:since=X -->` or `<!-- /alint:since -->` marker line is skipped,
+/// so a paragraph wrapped in a since-block never puts the marker in a summary.
 pub(super) fn first_sentence(body: &str) -> String {
     const ABBREV: &[&str] = &[
         "e.g", "i.e", "vs", "cf", "etc", "al", "resp", "approx", "fig", "no",
@@ -577,6 +581,9 @@ pub(super) fn first_sentence(body: &str) -> String {
             continue;
         }
         let trimmed = line.trim();
+        if trimmed.starts_with("<!-- alint:since=") || trimmed == "<!-- /alint:since -->" {
+            continue;
+        }
         if trimmed.is_empty() {
             if !paragraph.is_empty() {
                 break;
