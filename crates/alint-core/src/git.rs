@@ -385,6 +385,11 @@ pub fn untrack_path(root: &Path, rel_path: &Path, dry_run: bool) -> UntrackOutco
 ///   disk, so the engine's intersect-with-walked-index step filters
 ///   them out naturally).
 ///
+/// A rename is listed under both its old and its new path (`--no-renames`):
+/// git's rename detection would list only the new one, and a rule that reads
+/// the old path (one that requires it, or a selector it fell out of) would
+/// not see it change.
+///
 /// Returns `None` on the same conditions as
 /// [`collect_tracked_paths`]: `git` not on PATH, `root` outside
 /// a repo, or the invocation exits non-zero. Callers should
@@ -406,7 +411,7 @@ pub fn collect_changed_paths(root: &Path, base: Option<&str>) -> Option<HashSet<
         let output = git_command(root)?
             .arg("-C")
             .arg(root)
-            .args(["diff", "--name-only", "--relative", "-z"])
+            .args(["diff", "--name-only", "--no-renames", "--relative", "-z"])
             // `--end-of-options` so a `base`/`since` starting with `-`
             // can't be parsed as a git OPTION (e.g. `--output=…`, which
             // would write/truncate an arbitrary file).
@@ -432,7 +437,14 @@ pub fn collect_changed_paths(root: &Path, base: Option<&str>) -> Option<HashSet<
         let staged = git_command(root)?
             .arg("-C")
             .arg(root)
-            .args(["diff", "--cached", "--name-only", "--relative", "-z"])
+            .args([
+                "diff",
+                "--cached",
+                "--name-only",
+                "--no-renames",
+                "--relative",
+                "-z",
+            ])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -477,6 +489,9 @@ pub fn collect_changed_paths(root: &Path, base: Option<&str>) -> Option<HashSet<
 /// - `Ok(None)`       — the repository or Git executable is unavailable.
 /// - `Err(BadRange)`  — in a repo, but `<since>` didn't resolve (e.g.
 ///   a shallow-clone gotcha). The caller surfaces a fetch-depth hint.
+///
+/// A rename is listed under both its paths, as [`collect_changed_paths`]
+/// lists it.
 pub fn collect_changed_paths_checked(
     root: &Path,
     since: &str,
@@ -489,6 +504,10 @@ pub fn collect_changed_paths_checked(
 /// Same posture: `Ok(None)` outside a repo / `git` missing,
 /// `Err(BadRange)` on an unresolvable `since`. Used by
 /// `changeset_requires_path` to find files *added* in `<since>...HEAD`.
+///
+/// Unlike the unfiltered set, this one keeps git's rename detection: under
+/// `--diff-filter=A` a file moved from one path to another is not an added
+/// file, where with `--no-renames` its new path would be one.
 pub fn collect_changed_paths_filtered(
     root: &Path,
     since: &str,
@@ -533,9 +552,13 @@ fn diff_name_only(
             stderr: format!("`since` must not start with '-' (got {since:?})"),
         });
     }
-    if let Some(filter) = diff_filter {
-        cmd.arg(format!("--diff-filter={filter}"));
-    }
+    // The unfiltered set lists a rename under both paths, as
+    // `collect_changed_paths` does; a filtered one keeps rename detection, so
+    // `A` is what the range added, not what it moved.
+    match diff_filter {
+        Some(filter) => cmd.arg(format!("--diff-filter={filter}")),
+        None => cmd.arg("--no-renames"),
+    };
     // `--end-of-options`: a config-controlled `since` starting with `-`
     // (e.g. `--output=…`) must never be parsed as a git OPTION — that
     // would write/truncate an arbitrary out-of-tree file. Force it into

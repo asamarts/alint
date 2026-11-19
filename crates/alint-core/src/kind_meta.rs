@@ -22,7 +22,10 @@ pub enum DispatchClass {
     },
     /// The rule evaluates the repository index as a whole.
     FullIndex {
-        /// Whether a path scope is available as the `--changed` skip predicate.
+        /// Whether a path scope is available as the `--changed` skip predicate:
+        /// the rule's [`crate::Rule::path_scope`], or the trigger scope of a
+        /// rule that reads relations. Either decides only whether the rule
+        /// runs, never what it sees.
         path_scope: bool,
     },
     /// The rule is evaluated rule-major over an enumerable path scope.

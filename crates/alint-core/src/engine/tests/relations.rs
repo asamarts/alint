@@ -1,7 +1,8 @@
 //! The engine evaluates the relations the rules about to run read before
 //! any rule runs (`Engine::evaluate_read_relations`), and only those: a
 //! relation no rule reads, or only a rule whose `when:` is false, is never
-//! evaluated.
+//! evaluated. Under `--changed`, a rule's trigger scope reads the manifests
+//! its selectors consult only when the change can run the rule.
 
 use std::sync::{Arc, Mutex};
 
@@ -53,6 +54,8 @@ struct ReadsRelation {
     plan: Arc<Plan>,
     input: [RelationId; 1],
     seen: Seen,
+    /// What runs it under `--changed`, when it has a trigger scope.
+    trigger: Option<crate::relation::TriggerScope>,
 }
 
 /// Each rule's id, with which relations of the plan were evaluated when it
@@ -74,6 +77,9 @@ impl Rule for ReadsRelation {
     }
     fn relation_inputs(&self) -> Option<(&Arc<Plan>, &[RelationId])> {
         Some((&self.plan, &self.input))
+    }
+    fn trigger_scope(&self) -> Option<&crate::relation::TriggerScope> {
+        self.trigger.as_ref()
     }
     fn evaluate(&self, ctx: &Context<'_>) -> crate::error::Result<Vec<Violation>> {
         let memo = ctx
@@ -123,6 +129,7 @@ fn the_relations_rules_read_are_evaluated_before_any_rule_runs_and_no_others() {
         plan: Arc::clone(&plan),
         input: [RelationId(input)],
         seen: Arc::clone(&seen),
+        trigger: None,
     };
     let entries = vec![
         RuleEntry::new(Box::new(rule("reads-0", Level::Error, 0))),
@@ -144,4 +151,66 @@ fn the_relations_rules_read_are_evaluated_before_any_rule_runs_and_no_others() {
             ("reads-0", vec![true, false, true, false]),
         ]
     );
+}
+
+#[test]
+fn a_trigger_scope_reads_no_manifest_when_the_change_cannot_run_its_rule() {
+    // A selector of `workspace/**/member.json` narrowed to the members a
+    // manifest lists, and the manifest malformed: reading it caches a
+    // failure on the index.
+    let mut members = relation("members", "workspace/**/member.json");
+    let Rows::Part(part) = &mut members.relation.rows else {
+        unreachable!("`relation` builds a part");
+    };
+    let SelectorRef::Inline(selector) = &mut part.from else {
+        unreachable!("`relation` builds an inline selector");
+    };
+    selector.scope_filter = Some(
+        crate::yaml::from_str(
+            "include_manifest_paths:\n  source: members.json\n  \
+             extract: { json: \"$.members[*]\" }\n",
+        )
+        .unwrap(),
+    );
+    let plan = Arc::new(Plan {
+        sources: vec![PlanSource {
+            display: ".alint.yml".into(),
+            path: std::path::PathBuf::from(".alint.yml"),
+            class: ConfigSourceClass::Root,
+            aliases: Vec::new(),
+        }],
+        selectors: Vec::new(),
+        relations: vec![members],
+        rules: Vec::new(),
+    });
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("workspace/w1")).unwrap();
+    std::fs::write(dir.path().join("workspace/w1/member.json"), "{}").unwrap();
+    std::fs::write(dir.path().join("members.json"), "{").unwrap();
+    std::fs::write(dir.path().join("README.md"), "# repo\n").unwrap();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let failures_read = |changed: PathBuf| {
+        let index =
+            crate::walker::walk(dir.path(), &crate::walker::WalkOptions::test_default()).unwrap();
+        let rule = ReadsRelation {
+            id: "members",
+            level: Level::Error,
+            plan: Arc::clone(&plan),
+            input: [RelationId(0)],
+            seen: Arc::clone(&seen),
+            trigger: Some(crate::relation::TriggerScope::of(&plan, &[RelationId(0)])),
+        };
+        Engine::from_entries(vec![RuleEntry::new(Box::new(rule))], RuleRegistry::new())
+            .with_changed_paths(HashSet::from([changed]))
+            .run(dir.path(), &index)
+            .unwrap();
+        index.manifest_failures_map().map(HashMap::len)
+    };
+    // `README.md` is outside the selector's globs, so no manifest can bring
+    // it in: the rule does not run, and the manifest is not read.
+    assert_eq!(failures_read(PathBuf::from("README.md")), Some(0));
+    assert!(seen.lock().unwrap().is_empty(), "the rule must not run");
+    // A path the globs match runs the rule, and its manifest is read.
+    let member = Path::new("workspace").join("w1").join("member.json");
+    assert_eq!(failures_read(member), Some(1));
 }

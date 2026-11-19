@@ -20,17 +20,19 @@ wins and this document is wrong.
    never the `--changed` subset. A path scope it declares (for `constraint`, its trigger scope)
    decides only whether it runs under `--changed`, never what it sees (ADR-0034 decision 3,
    amending ADR-0003; ADR-0037). Enforced by:
-   - `v010_cross_file_kinds_require_full_index_and_no_path_scope`, for the eight kinds and one
-     alias it lists, which declare no scope;
-   - `metadata_inventory_matches_the_audited_v019_shape`, which pins the five full-index kinds that
-     declare one (`file_absent`, `file_exists`, `key_parity`, `max_files_per_directory`,
-     `no_case_conflicts`);
+   - `every_full_index_kind_receives_the_full_index_under_changed`
+     (`crates/alint-e2e/tests/changed_full_index.rs`), over every kind the registry marks
+     full-index, with no list of its own: in every scenario of the policy-test corpus (the e2e
+     scenarios and the bundled rulesets' tests) that configures one inline, over an inline tree,
+     in a config that loads, whenever the rule runs under `--changed` it receives what a full run
+     hands it (the index, a per-file rule's files, each relation it reads with every row's cells),
+     and every such kind runs under `--changed` in some scenario;
+   - `metadata_inventory_matches_the_audited_v019_shape`, which pins the six full-index kinds that
+     declare a scope (`constraint`, `file_absent`, `file_exists`, `key_parity`,
+     `max_files_per_directory`, `no_case_conflicts`);
    - build-time rejection of `scope_filter:` on cross-file rules
      (`reject_scope_filter_on_cross_file` in `alint-core/src/scope_filter.rs`); `constraint` takes
      `scope_filter:` only in its selectors.
-
-   v0.23 phase 7 replaces the first test with one over every full-index kind that asserts it
-   receives the full index under `--changed`.
 3. Bounded analysis reads. Whole-file analysis reads (not fixers) go through
    `crate::io::read_capped` (256 MiB `MAX_ANALYZE_BYTES`); over-cap files produce a clear
    violation, never a silent skip or OOM.

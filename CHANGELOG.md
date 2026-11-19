@@ -425,6 +425,17 @@ policy-test package the user does not trust.
 
 ### Added
 
+- **`related_locations` in the JSON report**: each violation, note and baselined finding of
+  `check --format json` carries the related locations its rule found, as SARIF's
+  `relatedLocations` and the language server's `relatedInformation` do: an array of `path`,
+  `label` and, when the range is known, `line`, `column`, `end_line` and `end_column` (1-based,
+  Unicode code points, end exclusive), at most 20 in the finding's order, and
+  `related_locations_omitted`, the count of the rest. Both are left out when there are none, and
+  for a finding whose path is `<redacted>`, as SARIF leaves its related locations out. The report
+  stays `schema_version: 1`; `schemas/v1/check-report.json` describes both fields. A test over a
+  `constraint` fixture with a finding of each family checks that JSON, SARIF and the language
+  server carry every related location the engine produced, in its order, with its path, range
+  and label, and the count of the rest.
 - **`alint_dsl::discover_config` and `alint_dsl::Discovery`** (library API, see Security):
   discovery's result with the config files it skipped because another user owns them, for a caller
   to warn about. **`alint_core::git::repository_top`**, the nearest directory at or above a path
@@ -720,6 +731,17 @@ policy-test package the user does not trust.
     builds, naming the rule, the field and the relation; names may not hold `{{...}}`. A
     `groups:` literal must be of the `group_by:` field's type, once, and not the reference
     group; `plurals: cldr` needs an `entry.path` field with no transform but `strip-root`.
+  - Under `--changed` and `--base`, a rule runs when a changed path (added, modified or deleted)
+    is in its trigger scope: the selectors of every relation it reads (its input, both sides of
+    each join, the relations its `in:` and `not_in:` lists probe and the relation its `set`
+    compares against), narrowed by their `scope_filter:`, with the manifests that `scope_filter:`
+    reads, and the `has_ancestor` markers and `.gitignore` and `.ignore` files in the directories
+    where those selectors' `paths:` can match. It then judges the whole snapshot and reports every
+    finding, those in unchanged files included. Outside its trigger scope it does not run and
+    reports nothing, and a change to a configuration file alone runs no rule. An edit to a
+    symlink's target, a file Git ignores under `respect_gitignore: false`, and an ignore file Git
+    does not report run no rule; `docs/rules.md` lists them. `facts.json` lists the kind's
+    dispatch as `full_index` with `path_scope: true`.
   - The version 2 draft schema describes the kind and refuses it nested; the version 1 schema
     leaves it out.
 
@@ -1038,6 +1060,15 @@ policy-test package the user does not trust.
 
 ### Fixed
 
+- **A rename under `--changed` changes both of its paths.** Git's rename detection listed a
+  renamed file under its new path alone, so neither `--changed` (staged) nor `--base`
+  (committed) saw the old path change: after `git mv LICENSE LICENSE.txt`, a `file_exists` rule
+  for `LICENSE` was skipped, and so were `file_absent`, `key_parity`, `max_files_per_directory`
+  and `no_case_conflicts` rules whose `paths:` matched only the old path. The changed set now lists
+  both paths, as it lists a deleted file and a new one. `pair_changed_together` and the
+  `when_changed:` of `changeset_requires_path` read the same set, so a file renamed out of their
+  globs now counts as changed there too; `changeset_requires_path`'s `add_glob:` keeps git's
+  rename detection, so a moved file still does not count as an added one.
 - **An extended config is named by its path under the repository on every platform.** Under a
   root reached through a symlink, from a relative `--config`, or on macOS (where `/var` is
   `/private/var`), a config file an `extends:` entry reads was named by its file name alone

@@ -224,6 +224,21 @@ pub struct SelectorDef {
     pub scope_filter: Option<ScopeFilterSpec>,
 }
 
+impl SelectorDef {
+    /// The selector's `paths:` and `scope_filter:` as one scope, as a rule's
+    /// [`Scope::from_spec`](crate::Scope::from_spec) compiles its own. `name`
+    /// is how an error names the selector.
+    pub(crate) fn compile(&self, name: &str) -> crate::Result<crate::Scope> {
+        let scope = crate::Scope::from_paths_spec(&self.paths)?;
+        Ok(match &self.scope_filter {
+            Some(spec) => {
+                scope.with_scope_filter(crate::ScopeFilter::from_spec(name, spec.clone())?)
+            }
+            None => scope,
+        })
+    }
+}
+
 /// Where a relation reads: a named selector, or an anonymous inline one.
 #[derive(Debug, Clone)]
 pub enum SelectorRef {

@@ -801,6 +801,76 @@ fn json_with_baseline_validates_against_published_schema() {
     }
 }
 
+/// `related_locations` and `related_locations_omitted` on a violation, a note
+/// and a baselined finding validate, and the schema keeps their types.
+#[test]
+fn json_with_related_locations_validates_against_published_schema() {
+    use alint_core::{RelatedLocation, SourceRange};
+    use alint_output::{BaselineMarks, ResultMarks, SuppressedFinding};
+    let related = |message: &'static str| {
+        let mut finding = Violation::new(message)
+            .with_path(std::path::Path::new("a.json"))
+            .with_related_locations([
+                RelatedLocation::new("b.json", "the source row")
+                    .with_range(SourceRange::new(2, 3, 2, 9).unwrap()),
+                RelatedLocation::new("c.json", "a row with another value"),
+            ]);
+        finding.related_locations_omitted = 4;
+        finding
+    };
+    let report = Report {
+        results: vec![RuleResult::new(
+            "constraint".into(),
+            Level::Error,
+            None,
+            vec![related("live"), related("a note").as_note()],
+            false,
+        )],
+    };
+    let marks = BaselineMarks {
+        per_result: vec![ResultMarks {
+            live_fingerprints: vec!["fp-live".into()],
+            suppressed: vec![SuppressedFinding {
+                violation: related("old"),
+                fingerprint: "fp-old".into(),
+            }],
+        }],
+        suppressed_total: 1,
+    };
+    let mut buf = Vec::new();
+    alint_output::write_json_with_baseline(&report, Some(&marks), true, &mut buf).unwrap();
+    let instance: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+    for finding in [
+        &instance["results"][0]["violations"][0],
+        &instance["results"][0]["notes"][0],
+        &instance["baselined"][0],
+    ] {
+        assert_eq!(
+            finding["related_locations"][0]["end_column"], 9,
+            "{finding}"
+        );
+        assert_eq!(finding["related_locations_omitted"], 4, "{finding}");
+    }
+    let errors = schema_errors(&instance, CHECK_REPORT_SCHEMA);
+    assert!(errors.is_empty(), "{}", errors.join("\n"));
+
+    let mut wrong = instance.clone();
+    wrong["results"][0]["violations"][0]["related_locations_omitted"] = serde_json::json!("4");
+    assert!(
+        !schema_errors(&wrong, CHECK_REPORT_SCHEMA).is_empty(),
+        "the omitted count must stay an integer"
+    );
+    let mut unlabelled = instance;
+    unlabelled["baselined"][0]["related_locations"][1]
+        .as_object_mut()
+        .unwrap()
+        .remove("label");
+    assert!(
+        !schema_errors(&unlabelled, CHECK_REPORT_SCHEMA).is_empty(),
+        "a related location must keep its label"
+    );
+}
+
 // AUDIT R2 MED-1: `github` / `markdown` (like `human`) must neutralize terminal
 // control bytes from an attacker-named path or message -- previewing either format
 // in a terminal on an untrusted repo must not fire an escape sequence. No raw ESC or

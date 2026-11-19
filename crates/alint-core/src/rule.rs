@@ -1181,6 +1181,15 @@ pub trait Rule: Send + Sync + std::fmt::Debug {
         None
     }
 
+    /// Under `--changed`, the trigger scope of a full-index rule that reads
+    /// relations ([`crate::relation::TriggerScope`]): in place of
+    /// [`Self::path_scope`], it decides whether the rule runs, never what it
+    /// sees. Default `None`; hidden, as the relation layer is.
+    #[doc(hidden)]
+    fn trigger_scope(&self) -> Option<&crate::relation::TriggerScope> {
+        None
+    }
+
     /// Whether this rule looks for the file at `path` (root-relative and
     /// normalized) on disk itself, so it finds the file even where the walk
     /// leaves it out: `file_exists` with `respect_gitignore: false` on a

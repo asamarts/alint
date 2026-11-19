@@ -22,7 +22,6 @@ use crate::relation::resource::{Origin, Resource, ResourceId, ResourceRead};
 use crate::relation::row::{Row, RowState};
 use crate::relation::value::Value;
 use crate::rule::AnalysisFailureKind;
-use crate::scope::Scope;
 use crate::scope_filter::{ManifestFailure, ManifestPredicate, ManifestSet, ScopeFilter};
 use crate::structured_format::Format;
 use crate::template::PathTokens;
@@ -265,15 +264,7 @@ impl Evaluator<'_> {
             }
             SelectorRef::Inline(selector) => (selector.as_ref(), "the selector".to_string()),
         };
-        let compiled = Scope::from_paths_spec(&selector.paths).and_then(|scope| {
-            match &selector.scope_filter {
-                Some(spec) => {
-                    Ok(scope.with_scope_filter(ScopeFilter::from_spec(&name, spec.clone())?))
-                }
-                None => Ok(scope),
-            }
-        });
-        let scope = match compiled {
+        let scope = match selector.compile(&name) {
             Ok(scope) => scope,
             Err(error) => {
                 failures.push(site.failure(

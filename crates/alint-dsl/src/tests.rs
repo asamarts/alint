@@ -1,6 +1,7 @@
 use super::*;
 
 mod constraint;
+mod constraint_changed;
 mod constraint_families;
 mod constraint_set;
 mod extends_costs;
