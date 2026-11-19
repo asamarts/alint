@@ -2,6 +2,7 @@ use super::*;
 
 mod constraint;
 mod constraint_families;
+mod constraint_set;
 mod extends_costs;
 mod hardening;
 mod loading;

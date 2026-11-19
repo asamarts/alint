@@ -11,17 +11,19 @@
 //!   with another field of the same row (`to: { field: G }`);
 //! - **`unique`:** no two rows share `key:`; with `determines:`, rows that
 //!   share `key:` agree on the determined fields;
-//! - **`set`:** the set of `field:`'s values in each group (`group_by:`) is
-//!   equal to, a subset of or disjoint from the set of a reference group of
-//!   the same relation (`{ group: literal }`).
+//! - **`set`:** the set of `field:`'s values in each group (`group_by:`, or
+//!   the relation as one group) is equal to, a subset of or disjoint from
+//!   another set: a reference group of the same relation (`{ group: literal
+//!   }`), or every value of another relation's field (`{ relation: R, field:
+//!   F }`). The groups are every value of `group_by:`, every resource the
+//!   relation reads when it groups by `path` or a path token, and every
+//!   literal of `groups:`; `plurals: cldr` collapses CLDR plural groups of
+//!   an `entry.path` field against a reference group, as `key_parity` does.
 //!
-//! `plurals: cldr`, `groups:`, a `set` against another relation's field and
-//! a `set` grouped by `path` or a path token come in a later step; the
-//! builder refuses each until then.
-//!
-//! The engine evaluates the relation before rules run (in plan order); the
-//! rule reads its outcome from the run's memo. A relation that fails gives
-//! the rule its analysis failures, never a pass. Every finding is
+//! The engine evaluates the rule's relations (its input, and the relation
+//! its `set` compares against) before rules run, in plan order; the rule
+//! reads their outcomes from the run's memo. A relation that fails gives the
+//! rule its analysis failures, never a pass. Every finding is
 //! identified by its rule and its key alone, never its path
 //! ([`alint_core::Violation::path_free_identity`]): it sits at a key's first
 //! row or a group's first resource, which moves when rows are added or
@@ -40,9 +42,9 @@ mod values;
 
 use std::sync::Arc;
 
-use alint_core::relation::Value;
 use alint_core::relation::eval::{self, RelationRows, Skipped};
-use alint_core::relation::plan::{Plan, RelationId};
+use alint_core::relation::plan::{PathToken, Plan, RelationId};
+use alint_core::relation::{Resource, StringTransform, Value};
 use alint_core::{AnalysisFailureKind, Context, Error, Level, Result, Rule, RuleSpec, Violation};
 
 pub use options::options_schema;
@@ -71,13 +73,58 @@ enum Assertion {
     },
     /// `equal` within each row.
     EqualField { field: String, other: String },
-    /// `set` against the group whose `group_by:` value is `group`.
-    Set {
+    /// `set`.
+    Set(Box<SetAssertion>),
+}
+
+/// A `set` assertion: each group's set of `field`'s values against `target`.
+#[derive(Debug, Clone)]
+struct SetAssertion {
+    field: String,
+    /// The group of each row; without it, the relation is one group.
+    group_by: Option<String>,
+    /// When `group_by:` is `path` or a path token: every resource the
+    /// relation reads forms its group, rows or not.
+    resource_groups: Option<ResourceGroups>,
+    target: SetTarget,
+    mode: SetMode,
+    /// `groups:`: the groups that must exist, rows or not.
+    groups: Vec<Value>,
+    /// `plurals: cldr`: CLDR plural groups of the key paths merge.
+    plurals: bool,
+}
+
+/// The set each group is compared with.
+#[derive(Debug, Clone)]
+enum SetTarget {
+    /// The reference group: the rows whose `group_by:` value is this.
+    Group(Value),
+    /// Every value of `field` across the rows of `relation`, which the
+    /// config names as `written` (`names`, or `alias.names`).
+    Relation {
+        relation: RelationId,
         field: String,
-        group_by: String,
-        group: Value,
-        mode: SetMode,
+        written: String,
     },
+}
+
+/// How a `set` grouped by a path token gives a resource its group: the
+/// token's text, then the transforms the group field's values took, in
+/// order, as the resource's rows have it.
+#[derive(Debug, Clone)]
+struct ResourceGroups {
+    token: PathToken,
+    transforms: Vec<StringTransform>,
+}
+
+impl ResourceGroups {
+    fn group_of(&self, resource: &Resource) -> String {
+        let mut text = eval::path_token(resource, self.token);
+        for transform in &self.transforms {
+            text = transform.apply(&text);
+        }
+        text
+    }
 }
 
 /// How each group's set relates to the reference group's.
@@ -105,8 +152,10 @@ pub struct ConstraintRule {
     policy_url: Option<String>,
     message: Option<String>,
     plan: Arc<Plan>,
-    /// The input relation, as [`Rule::relation_inputs`] lists it.
-    input: [RelationId; 1],
+    /// The relations the rule reads, as [`Rule::relation_inputs`] lists
+    /// them: its input, then the relation its `set` compares against, when
+    /// that is another.
+    inputs: Vec<RelationId>,
     assertion: Assertion,
     /// The assertion's literals came from the environment, so no message
     /// quotes them.
@@ -123,9 +172,18 @@ fn build_rule(spec: &RuleSpec) -> Result<ConstraintRule> {
         .deserialize_options()
         .map_err(|error| cfg(format!("invalid `constraint` options: {error}")))?;
     let (plan, input) = input_relation(spec)?;
-    let assertion = check::Checker::new(&plan, input, &spec.id).assertion(&options.assert)?;
+    let references = plan.rule(&spec.id).map_or(&[][..], |rule| &rule.references);
+    let checker = check::Checker::new(&plan, input, &spec.id, references);
+    let assertion = checker.assertion(&options.assert)?;
     if let Some(message) = &spec.message {
-        check::Checker::new(&plan, input, &spec.id).message(message)?;
+        checker.message(message)?;
+    }
+    let mut inputs = vec![input];
+    if let Assertion::Set(set) = &assertion
+        && let SetTarget::Relation { relation, .. } = &set.target
+        && *relation != input
+    {
+        inputs.push(*relation);
     }
     Ok(ConstraintRule {
         id: spec.id.clone(),
@@ -133,7 +191,7 @@ fn build_rule(spec: &RuleSpec) -> Result<ConstraintRule> {
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
         plan,
-        input: [input],
+        inputs,
         assertion,
         hide_literals: spec.field_is_environment_derived("assert"),
     })
@@ -190,21 +248,37 @@ impl Rule for ConstraintRule {
     }
 
     fn relation_inputs(&self) -> Option<(&Arc<Plan>, &[RelationId])> {
-        Some((&self.plan, &self.input))
+        Some((&self.plan, &self.inputs))
     }
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
-        let rows = match eval::evaluate(&self.plan, self.input[0], ctx) {
-            Ok(rows) => rows,
-            Err(failures) => {
-                return Ok(failures
-                    .iter()
-                    .map(|failure| failure.to_violation(&self.id))
-                    .collect());
+        // A relation the rule reads that fails leaves it without a verdict:
+        // its failures, every relation's, and nothing else.
+        let mut outcomes = Vec::with_capacity(self.inputs.len());
+        let mut failed = Vec::new();
+        for &id in &self.inputs {
+            match eval::evaluate(&self.plan, id, ctx) {
+                Ok(rows) => outcomes.push(rows),
+                Err(failures) => failed.extend(
+                    failures
+                        .iter()
+                        .map(|failure| failure.to_violation(&self.id)),
+                ),
             }
-        };
-        let (mut reported, skipped) = Self::notes(&rows);
-        let mut run = families::Run::new(self, &rows, ctx);
+        }
+        if !failed.is_empty() {
+            return Ok(failed);
+        }
+        let rows = &outcomes[0];
+        // What the relation a `set` compares against skipped is a value its
+        // set lacks, as a `where:` list's relation's is a row it lacks.
+        let (mut reported, mut skipped) = (Vec::new(), Vec::new());
+        for outcome in &outcomes {
+            let (notes, findings) = Self::notes(outcome);
+            reported.extend(notes);
+            skipped.extend(findings);
+        }
+        let mut run = families::Run::new(self, rows, ctx);
         match &self.assertion {
             Assertion::Unique { key, determines } => run.unique(key, determines),
             Assertion::EqualGroups { field, group_by } => {
@@ -212,12 +286,16 @@ impl Rule for ConstraintRule {
             }
             Assertion::EqualSource { field, row } => run.equal_source(field, row),
             Assertion::EqualField { field, other } => run.equal_field(field, other),
-            Assertion::Set {
-                field,
-                group_by,
-                group,
-                mode,
-            } => run.set(field, group_by, group, *mode),
+            Assertion::Set(set) => {
+                let other = match &set.target {
+                    SetTarget::Relation { relation, .. } => {
+                        let at = self.inputs.iter().position(|id| id == relation);
+                        &outcomes[at.expect("the builder lists the relation as an input")]
+                    }
+                    SetTarget::Group(_) => rows,
+                };
+                run.set(set, other);
+            }
         }
         reported.extend(run.finish(skipped));
         Ok(reported)
@@ -270,7 +348,7 @@ impl ConstraintRule {
     }
 
     fn input_label(&self) -> String {
-        relation_label(&self.plan, self.input[0])
+        relation_label(&self.plan, self.inputs[0])
     }
 }
 

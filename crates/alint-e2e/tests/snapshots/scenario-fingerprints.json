@@ -456,6 +456,72 @@
     "fingerprint": "f663be07ce8e26b9d1b915e538cbc3e4568999e76448e8cc30576e5ac8a32ba9"
   },
   {
+    "scenario": "check/cross_file/constraint_set_group_by_path_fail.yml",
+    "rule_id": "files-match-english",
+    "path": "locales/de.json",
+    "fingerprint": "9163a67ca01ca4fe4f21592e6c1365a7cb1bf9518c8b81493c25bc9a86869d76"
+  },
+  {
+    "scenario": "check/cross_file/constraint_set_group_by_path_fail.yml",
+    "rule_id": "files-match-english",
+    "path": "locales/de.json",
+    "fingerprint": "b4ee7b05324ef71a067a0b6c9ce76609c7e5af7327af685f90f4d1c75e58e723"
+  },
+  {
+    "scenario": "check/cross_file/constraint_set_group_by_path_fail.yml",
+    "rule_id": "files-match-english",
+    "path": "locales/fr.json",
+    "fingerprint": "4206db28eb732cd1240e3f698981800266cd57eff87019e4278a306f9d9285d6"
+  },
+  {
+    "scenario": "check/cross_file/constraint_set_groups_fail.yml",
+    "rule_id": "every-locale-ships",
+    "path": null,
+    "fingerprint": "8202149bc383a038af19b63b321afca1c717325fefaf481d5688e89d974d4a2e"
+  },
+  {
+    "scenario": "check/cross_file/constraint_set_groups_fail.yml",
+    "rule_id": "every-locale-ships",
+    "path": null,
+    "fingerprint": "fd74fd9809dfbac85823a67a9d58c4fd9a624ad0a512b750ee585520e98a0e46"
+  },
+  {
+    "scenario": "check/cross_file/constraint_set_plurals_fail.yml",
+    "rule_id": "locales-match-english",
+    "path": "locales/pl.yml",
+    "fingerprint": "65bb2abec0fe598a2c9e74b8530e71d3a9e7c75514cb80be1c08974499f4744f"
+  },
+  {
+    "scenario": "check/cross_file/constraint_set_plurals_fail.yml",
+    "rule_id": "locales-match-english",
+    "path": "locales/pl.yml",
+    "fingerprint": "a4be63e019ca8d8ad9011827d89a190d5db7b43942176602d172c00980753f4d"
+  },
+  {
+    "scenario": "check/cross_file/constraint_set_relation_fail.yml",
+    "rule_id": "approved-dependencies",
+    "path": "packages/web/package.json",
+    "fingerprint": "2bda17418affeb510d3f7c4a326b5472c51cde0da2e10adb8eee0a834f9508c5"
+  },
+  {
+    "scenario": "check/cross_file/constraint_set_relation_fail.yml",
+    "rule_id": "no-banned-dependencies",
+    "path": "packages/web/package.json",
+    "fingerprint": "061bde70c4e69e3829a6a2e0d000fbdd45793242954fb1e2f10ce8fdab02c4ad"
+  },
+  {
+    "scenario": "check/cross_file/constraint_set_relation_fail.yml",
+    "rule_id": "scripts-match-the-template",
+    "path": "packages/api/package.json",
+    "fingerprint": "415aa2019a66fad425382a811ba0439e197c2d62b88ba5d6fb6ae07e65fa5886"
+  },
+  {
+    "scenario": "check/cross_file/constraint_set_relation_fail.yml",
+    "rule_id": "scripts-match-the-template",
+    "path": "packages/api/package.json",
+    "fingerprint": "77efecdae1d9b75cd69efa7546e4e72db0d992a026b4bc4dea4886ec198c9e32"
+  },
+  {
     "scenario": "check/cross_file/constraint_unique_determines_fail.yml",
     "rule_id": "one-range-per-dependency",
     "path": "packages/app/package.json",

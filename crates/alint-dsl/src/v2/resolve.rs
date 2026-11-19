@@ -1188,51 +1188,38 @@ impl Resolved<'_> {
             .unwrap_or("");
         let mut references = Vec::new();
         for &field in super::origins::reference_fields(kind) {
-            let Some(value) = rule.get(field) else {
-                continue;
-            };
-            let origin = origins
-                .iter()
-                .find(|(held, _)| held == field)
-                .and_then(|(_, file)| config_files.get(*file))
-                .and_then(|path| self.namespaces.source_at(path));
-            let Some(source) = origin else {
-                return Err(Error::rule_config(
+            if let Some(value) = rule.get(field) {
+                references.push(self.resolve_field(
                     id,
-                    format!(
-                        "`{field}` names a relation, but a version 1 config wrote it; only a \
-                         version 2 config's rules reference selectors and relations"
-                    ),
-                ));
-            };
-            let display = self.namespaces.display(source).to_string();
-            let fail = |message: String| {
-                Error::rule_config(id, format!("`{field}` (written by {display}): {message}"))
-            };
-            // An inline relation (a map) was declared in the source that
-            // wrote it, under the name its marker holds.
-            let reference = match (value.as_str(), super::decode::inline_input(value)) {
-                (Some(text), _) => super::decode::parse_reference(text).map_err(fail)?,
-                (None, Some(name)) => Reference {
-                    alias: None,
-                    name: name.to_string(),
-                },
-                (None, None) => {
-                    return Err(fail(format!(
-                        "expected a relation name or an inline relation (a map), found {}",
-                        super::decode::describe(value)
-                    )));
-                }
-            };
-            let relation = self
-                .namespaces
-                .relation(source, &reference, &format!("`{field}:` names a relation"))
-                .map_err(fail)?;
-            references.push(RuleReference {
-                field: field.to_string(),
-                source,
-                relation,
-            });
+                    field,
+                    field,
+                    value,
+                    true,
+                    origins,
+                    config_files,
+                )?);
+            }
+        }
+        for &(top, path) in super::origins::nested_reference_fields(kind) {
+            let mut value = rule.get(top);
+            for key in path {
+                value = value.and_then(|value| value.get(*key));
+            }
+            if let Some(value) = value {
+                let field = std::iter::once(top)
+                    .chain(path.iter().copied())
+                    .collect::<Vec<_>>()
+                    .join(".");
+                references.push(self.resolve_field(
+                    id,
+                    &field,
+                    top,
+                    value,
+                    false,
+                    origins,
+                    config_files,
+                )?);
+            }
         }
         if !references.is_empty() {
             self.plan.rules.push(RuleReferences {
@@ -1241,6 +1228,77 @@ impl Resolved<'_> {
             });
         }
         Ok(())
+    }
+
+    /// Resolve `value`, rule `id`'s field `field` (below its top-level field
+    /// `top`), in the source that wrote `top`: a relation name, bare or
+    /// qualified, or, where `inline` allows one, an inline relation the
+    /// loader planned under a name.
+    #[allow(clippy::too_many_arguments)]
+    fn resolve_field(
+        &self,
+        id: &str,
+        field: &str,
+        top: &str,
+        value: &ayaml::Value,
+        inline: bool,
+        origins: &[(String, usize)],
+        config_files: &[PathBuf],
+    ) -> Result<RuleReference> {
+        let origin = origins
+            .iter()
+            .find(|(held, _)| held == top)
+            .and_then(|(_, file)| config_files.get(*file))
+            .and_then(|path| self.namespaces.source_at(path));
+        let Some(source) = origin else {
+            return Err(Error::rule_config(
+                id,
+                format!(
+                    "`{field}` names a relation, but a version 1 config wrote it; only a version \
+                     2 config's rules reference selectors and relations"
+                ),
+            ));
+        };
+        let display = self.namespaces.display(source).to_string();
+        let fail = |message: String| {
+            Error::rule_config(id, format!("`{field}` (written by {display}): {message}"))
+        };
+        // An inline relation (a map) was declared in the source that wrote
+        // it, under the name its marker holds.
+        let reference = match (value.as_str(), super::decode::inline_input(value)) {
+            (Some(text), _) => super::decode::parse_reference(text).map_err(fail)?,
+            (None, Some(name)) if inline => Reference {
+                alias: None,
+                name: name.to_string(),
+            },
+            (None, _) if !inline && value.as_mapping().is_some() => {
+                return Err(fail(
+                    "names a relation, bare or qualified by an `extends:` alias; an inline \
+                     relation is not allowed here, so declare it under `relations:` and name it"
+                        .to_string(),
+                ));
+            }
+            (None, _) => {
+                let expected = if inline {
+                    "a relation name or an inline relation (a map)"
+                } else {
+                    "a relation name"
+                };
+                return Err(fail(format!(
+                    "expected {expected}, found {}",
+                    super::decode::describe(value)
+                )));
+            }
+        };
+        let relation = self
+            .namespaces
+            .relation(source, &reference, &format!("`{field}:` names a relation"))
+            .map_err(fail)?;
+        Ok(RuleReference {
+            field: field.to_string(),
+            source,
+            relation,
+        })
     }
 
     /// Judge rule `id`, which an extended source shaped (`extended` names

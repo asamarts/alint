@@ -649,6 +649,31 @@ const fn token_slot(token: PathToken) -> usize {
     }
 }
 
+/// Every path token of `resource`, from its index path, which is `/`-separated
+/// on every host, so a token is too.
+fn resource_tokens(resource: &Resource) -> PathTokens {
+    PathTokens::from_path(resource.path().as_path())
+}
+
+fn token_text(paths: &PathTokens, token: PathToken) -> &str {
+    match token {
+        PathToken::Path => &paths.path,
+        PathToken::Dir => &paths.dir,
+        PathToken::Basename => &paths.basename,
+        PathToken::Stem => &paths.stem,
+        PathToken::Ext => &paths.ext,
+        PathToken::ParentName => &paths.parent_name,
+    }
+}
+
+/// The text a field bound to path token `token` holds in every row of
+/// `resource`, before its transforms: what a `set` grouped by a path token
+/// gives a resource without rows, as its rows would have it.
+#[must_use]
+pub fn path_token(resource: &Resource, token: PathToken) -> String {
+    token_text(&resource_tokens(resource), token).to_string()
+}
+
 /// The cells a row's `entry.*` fields share, by source ([`KEY`] to
 /// [`VALUE`]): each is built once for the row, and every field bound to it
 /// copies it, sharing its value.
@@ -679,18 +704,10 @@ impl<'r> Rows<'r> {
             if slot.is_some() {
                 continue;
             }
-            let paths =
-                paths.get_or_insert_with(|| PathTokens::from_path(resource.path().as_path()));
-            let text = match token {
-                PathToken::Path => &paths.path,
-                PathToken::Dir => &paths.dir,
-                PathToken::Basename => &paths.basename,
-                PathToken::Stem => &paths.stem,
-                PathToken::Ext => &paths.ext,
-                PathToken::ParentName => &paths.parent_name,
-            };
+            let paths = paths.get_or_insert_with(|| resource_tokens(resource));
+            let text = token_text(paths, token);
             evaluator.take_bytes(text.len())?;
-            *slot = Some(Value::String(text.as_str().into()));
+            *slot = Some(Value::String(text.into()));
         }
         Ok(Self {
             evaluator,

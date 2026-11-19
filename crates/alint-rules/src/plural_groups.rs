@@ -20,9 +20,13 @@
 //! row for the `constraint` kind), which a merge takes from that member.
 //!
 //! [`pair`] decides and merges both sets at once, in time linear in both.
+//! [`Probe`] makes the same decisions on demand, for a peer far smaller than
+//! the reference: what a peer holds once merged, and whether the merged
+//! reference holds a key, cost time linear in the peer, however large the
+//! reference. A test checks the two against each other.
 
 use std::borrow::Cow;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::ops::Bound;
 
 use alint_core::relation::Segment;
@@ -206,6 +210,166 @@ fn child(parent: &[Segment], name: &str) -> Vec<Segment> {
     path
 }
 
+/// One side of a [`Probe`]'s comparison.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Side {
+    Reference,
+    Peer,
+}
+
+/// One comparison of a reference's keys with a peer's, its plural groups
+/// decided on demand as [`pair`] decides them, each decision once. What the
+/// peer holds once merged ([`Probe::merged`]) and whether the merged
+/// reference holds a key ([`Probe::find`]) look up only the keys around the
+/// one asked about, so a comparison with a peer of a few keys costs a few
+/// lookups however many keys the reference has.
+pub(crate) struct Probe<'k, 'a, V> {
+    reference: &'k Keys<'a, V>,
+    peer: &'k Keys<'a, V>,
+    /// Whether each parent asked about is a merged nested group.
+    nested: HashMap<Vec<Segment>, bool>,
+    /// Whether each `(parent, base)` asked about is a merged i18next group.
+    i18next: HashMap<(Vec<Segment>, Box<str>), bool>,
+}
+
+impl<'k, 'a, V: Copy> Probe<'k, 'a, V> {
+    pub(crate) fn new(reference: &'k Keys<'a, V>, peer: &'k Keys<'a, V>) -> Self {
+        Self {
+            reference,
+            peer,
+            nested: HashMap::new(),
+            i18next: HashMap::new(),
+        }
+    }
+
+    fn keys(&self, side: Side) -> &'k Keys<'a, V> {
+        match side {
+            Side::Reference => self.reference,
+            Side::Peer => self.peer,
+        }
+    }
+
+    /// Whether `parent` is a merged nested group: [`nested_plural_groups`]
+    /// of the two sets holds it.
+    fn nested(&mut self, parent: &[Segment]) -> bool {
+        if parent.is_empty() {
+            return false;
+        }
+        if let Some(&decided) = self.nested.get(parent) {
+            return decided;
+        }
+        let other = child(parent, "other");
+        let decided = (self.reference.contains_key(other.as_slice())
+            || self.peer.contains_key(other.as_slice()))
+            && is_plural_object(self.reference, parent)
+            && is_plural_object(self.peer, parent);
+        self.nested.insert(parent.to_vec(), decided);
+        decided
+    }
+
+    /// Where `side` holds `key` once nested groups merge: its own place, the
+    /// place of the group it names, or `None` (absent, or merged into its
+    /// parent).
+    fn after_nested(&mut self, side: Side, key: &[Segment]) -> Option<V> {
+        let keys = self.keys(side);
+        if let Some(&at) = keys.get(key) {
+            // A merged parent has only category-named leaves (in each set
+            // that has it), so a key of another name is never merged.
+            let merged = match key.split_last() {
+                Some((Segment::Key(name), parent)) => cldr_category(name) && self.nested(parent),
+                _ => false,
+            };
+            return (!merged).then_some(at);
+        }
+        if !self.nested(key) {
+            return None;
+        }
+        // A merged group's keys below it are all its members.
+        let mut first = None;
+        for (member, &at) in keys
+            .range::<[Segment], _>((Bound::Excluded(key), Bound::Unbounded))
+            .take_while(|(member, _)| member.starts_with(key))
+        {
+            if matches!(member.last(), Some(Segment::Key(name)) if &**name == "other") {
+                return Some(at);
+            }
+            first.get_or_insert(at);
+        }
+        first
+    }
+
+    /// Whether `(parent, base)` is a merged i18next group:
+    /// [`i18next_plural_groups`] of the two sets, nested groups merged,
+    /// holds it.
+    fn i18next(&mut self, parent: &[Segment], base: &str) -> bool {
+        if base.is_empty() {
+            return false;
+        }
+        let memo = (parent.to_vec(), Box::<str>::from(base));
+        if let Some(&decided) = self.i18next.get(&memo) {
+            return decided;
+        }
+        let other = child(parent, &format!("{base}_other"));
+        let merged = child(parent, base);
+        let decided = (self.after_nested(Side::Reference, &other).is_some()
+            || self.after_nested(Side::Peer, &other).is_some())
+            && self.after_nested(Side::Reference, &merged).is_none()
+            && self.after_nested(Side::Peer, &merged).is_none();
+        self.i18next.insert(memo, decided);
+        decided
+    }
+
+    /// Where `side`, both kinds of group merged, holds `key`: what [`pair`]
+    /// gives that side holds `key` there.
+    pub(crate) fn find(&mut self, side: Side, key: &[Segment]) -> Option<V> {
+        if let Some((Segment::Key(last), parent)) = key.split_last()
+            && self.i18next(parent, last)
+        {
+            let mut first = None;
+            for category in CATEGORIES {
+                let member = child(parent, &format!("{last}_{category}"));
+                if let Some(at) = self.after_nested(side, &member) {
+                    if category == "other" {
+                        return Some(at);
+                    }
+                    first.get_or_insert(at);
+                }
+            }
+            return first;
+        }
+        let at = self.after_nested(side, key)?;
+        match i18next_member(key) {
+            Some((parent, base, _)) if self.i18next(parent, base) => None,
+            _ => Some(at),
+        }
+    }
+
+    /// What `side` holds, both kinds of group merged: what [`pair`] gives
+    /// that side. Each decision it takes is about a key of `side`.
+    pub(crate) fn merged(&mut self, side: Side) -> Keys<'a, V> {
+        let keys = self.keys(side);
+        let mut nested = BTreeSet::new();
+        for key in keys.keys() {
+            if let Some((Segment::Key(name), parent)) = key.split_last()
+                && cldr_category(name)
+                && self.nested(parent)
+            {
+                nested.insert(parent);
+            }
+        }
+        let after = merge_nested_groups(keys, &nested);
+        let mut groups = BTreeSet::new();
+        for key in after.keys() {
+            if let Some((parent, base, _)) = i18next_member(key)
+                && self.i18next(parent, base)
+            {
+                groups.insert((parent, base));
+            }
+        }
+        merge_i18next_groups(&after, &groups)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -260,4 +424,88 @@ mod tests {
         );
     }
 
+    /// A small deterministic generator, so the cases are the same each run.
+    struct Cases(u64);
+
+    impl Cases {
+        fn next(&mut self, below: usize) -> usize {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            usize::try_from(self.0 % below as u64).expect("below fits")
+        }
+
+        /// A key path from a small alphabet that forms plural groups often.
+        fn key(&mut self) -> String {
+            const NAMES: [&str; 12] = [
+                "a",
+                "b",
+                "one",
+                "other",
+                "few",
+                "zero",
+                "a_one",
+                "a_other",
+                "b_few",
+                "x",
+                "x_other",
+                "one_other",
+            ];
+            let depth = 1 + self.next(3);
+            (0..depth)
+                .map(|_| NAMES[self.next(NAMES.len())])
+                .collect::<Vec<_>>()
+                .join(".")
+        }
+
+        fn keys(&mut self) -> Keys<'static, usize> {
+            let count = self.next(9);
+            (0..count)
+                .map(|index| (Cow::Owned(path(&self.key())), index))
+                .collect()
+        }
+    }
+
+    /// The probe decides as [`pair`] does: the merged peer it builds, and
+    /// every key it finds or does not find on either side, over 5,000
+    /// random pairs.
+    #[test]
+    fn a_probe_decides_as_a_pair_does() {
+        let mut cases = Cases(0x9e37_79b9_7f4a_7c15);
+        for _ in 0..5_000 {
+            let (reference, peer) = (cases.keys(), cases.keys());
+            let (want_reference, want_peer) = pair(&reference, &peer);
+            let mut probe = Probe::new(&reference, &peer);
+            assert_eq!(
+                shown(&probe.merged(Side::Peer)),
+                shown(&want_peer),
+                "{:?} / {:?}",
+                shown(&reference),
+                shown(&peer)
+            );
+            assert_eq!(
+                shown(&probe.merged(Side::Reference)),
+                shown(&want_reference)
+            );
+            let asked: Vec<Vec<Segment>> = want_reference
+                .keys()
+                .chain(want_peer.keys())
+                .chain(reference.keys())
+                .chain(peer.keys())
+                .map(|key| key.to_vec())
+                .chain((0..4).map(|_| path(&cases.key())))
+                .collect();
+            for key in &asked {
+                for (side, want) in [(Side::Reference, &want_reference), (Side::Peer, &want_peer)] {
+                    assert_eq!(
+                        probe.find(side, key),
+                        want.get(key.as_slice()).copied(),
+                        "{side:?} {key:?} in {:?} / {:?}",
+                        shown(&reference),
+                        shown(&peer)
+                    );
+                }
+            }
+        }
+    }
 }

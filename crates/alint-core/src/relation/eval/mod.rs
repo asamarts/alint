@@ -59,6 +59,7 @@ pub use failure::RelationFailure;
 /// evaluator's own messages do: for the `constraint` kind's findings.
 pub use failure::{located, type_name};
 pub use ops::render_value;
+pub use read::path_token;
 
 use super::cache::{DecodeCache, ReadCache};
 use super::limits::{LimitExceeded, LimitKind, Limits};

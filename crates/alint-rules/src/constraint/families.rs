@@ -1,6 +1,6 @@
 //! The `constraint` families over a relation's rows (design section 6):
-//! `unique`, `equal` in its three forms, and `set` against a group of the
-//! same relation. Each finding sits at a row's field, or at a resource, with
+//! `unique`, `equal` in its three forms, and `set` (in `set.rs`). Each
+//! finding sits at a row's field, or at a resource, with
 //! related locations at the rows it is compared with; an analysis failure
 //! (a null group, a comparison across types, a missing source row) leaves
 //! the rule without a verdict, so it reports the failures and no finding.
@@ -14,9 +14,12 @@ use alint_core::relation::Value;
 use alint_core::relation::eval::{Cell, FieldRow, Provenance, RelationRows, located, type_name};
 use alint_core::{Context, MAX_RELATED_LOCATIONS, RelatedLocation, Violation};
 
+use super::ConstraintRule;
 use super::places::Places;
 use super::values::{Key, Kind, Scalar};
-use super::{ConstraintRule, SetMode};
+
+#[path = "set.rs"]
+mod set;
 
 /// The most other values a generated message lists.
 const LISTED_VALUES: usize = 5;
@@ -29,6 +32,9 @@ pub(super) struct Run<'r> {
     /// Key paths stay out of messages and baselines: a field that holds keys
     /// is sensitive, or the relation's configuration reads the environment.
     hide_keys: bool,
+    /// A field whose values another relation's sensitive field holds too (a
+    /// `set` compared with it), so it is sensitive here.
+    also_sensitive: Option<usize>,
     findings: Vec<Violation>,
     failures: Vec<Violation>,
 }
@@ -67,14 +73,17 @@ impl<'r> Run<'r> {
         rows: &'r RelationRows,
         ctx: &'r Context<'r>,
     ) -> Self {
-        let named = rule.plan.relation(rule.input[0]);
-        let hide_keys = named.reads_environment
-            || alint_core::relation::eval::keys_sensitive(&rule.plan, rule.input[0]);
+        // A key path of any relation the rule reads may reach a message.
+        let hide_keys = rule.inputs.iter().any(|&id| {
+            rule.plan.relation(id).reads_environment
+                || alint_core::relation::eval::keys_sensitive(&rule.plan, id)
+        });
         Self {
             rule,
             rows,
             places: Places::new(ctx),
             hide_keys,
+            also_sensitive: None,
             findings: Vec::new(),
             failures: Vec::new(),
         }
@@ -112,7 +121,7 @@ impl<'r> Run<'r> {
     }
 
     fn sensitive(&self, position: usize) -> bool {
-        self.rows.fields[position].sensitive
+        self.rows.fields[position].sensitive || self.also_sensitive == Some(position)
     }
 
     fn name(&self, position: usize) -> &str {
@@ -132,24 +141,10 @@ impl<'r> Run<'r> {
         &self.rows.rows[row].at
     }
 
-    /// Where a finding about row `row`'s field at `position` sits: the
-    /// field's cell, or, when the cell is not the row's own (a join's copy of
-    /// a field of its unique side, or a `bound:` field, which many rows
-    /// share), the row's own entry: its first cell there, one with a span
-    /// first, or its resource.
+    /// Where a finding about row `row`'s field at `position` sits
+    /// ([`spot_in`]).
     fn spot(&self, row: usize, position: usize) -> Place<'r> {
-        let own = self.own(row);
-        let is_own = |cell: &Cell| Arc::ptr_eq(&cell.at, own) || cell.at == *own;
-        let cell = self.cell(row, position);
-        if is_own(cell) {
-            return Place::Cell(cell);
-        }
-        let cells = &self.rows.rows[row].cells;
-        cells
-            .iter()
-            .find(|cell| is_own(cell) && cell.span.is_some())
-            .or_else(|| cells.iter().find(|cell| is_own(cell)))
-            .map_or(Place::Row(own), Place::Cell)
+        spot_in(self.rows, row, position)
     }
 
     /// Where `place` is, as a message names it.
@@ -163,6 +158,7 @@ impl<'r> Run<'r> {
                 path: None,
             }),
             Place::Resource(path) => crate::slash(path),
+            Place::Nowhere => "no resource".to_string(),
         }
     }
 
@@ -263,17 +259,18 @@ impl<'r> Run<'r> {
 
     /// A finding at `at`, identified by `key` alone, with `related`
     /// locations, which leave out `omitted` more; its message is the rule's
-    /// `message:` rendered for row `reported`, or `generated`.
+    /// `message:` rendered for row `reported` (none, for a value only another
+    /// relation holds), or `generated`.
     fn report(
         &mut self,
         at: Place<'_>,
         generated: String,
         key: Key,
         related: Related,
-        reported: usize,
+        reported: Option<usize>,
     ) {
         let message = match &self.rule.message {
-            Some(template) => self.render(template, &self.rows.rows[reported]),
+            Some(template) => self.render(template, reported.map(|row| &self.rows.rows[row])),
             None => generated,
         };
         let mut finding = match at {
@@ -286,6 +283,8 @@ impl<'r> Run<'r> {
             }
             Place::Row(row) => Violation::new(message).with_path(row.resource.path().as_path()),
             Place::Resource(path) => Violation::new(message).with_path(path),
+            // A group named only in `groups:` has no resource.
+            Place::Nowhere => Violation::new(message),
         };
         finding = finding
             .with_baseline_key(key.into_string())
@@ -298,8 +297,8 @@ impl<'r> Run<'r> {
 
     /// The rule's `message:` with each `{{row.FIELD}}` replaced by the
     /// reported row's value of the field (`<redacted>` for a sensitive
-    /// field's).
-    fn render(&self, template: &str, row: &FieldRow) -> String {
+    /// field's, and `<no row>` without a reported row).
+    fn render(&self, template: &str, row: Option<&FieldRow>) -> String {
         alint_core::template::render_message(template, |namespace, name| {
             if namespace != "row" {
                 return None;
@@ -308,6 +307,9 @@ impl<'r> Run<'r> {
             if self.sensitive(position) {
                 return Some("<redacted>".to_string());
             }
+            let Some(row) = row else {
+                return Some("<no row>".to_string());
+            };
             Some(match &row.cells[position].value {
                 None => "<missing>".to_string(),
                 Some(Value::Null) => "null".to_string(),
@@ -325,6 +327,7 @@ impl<'r> Run<'r> {
             Place::Cell(cell) => self.places.related(cell, label),
             Place::Row(row) => RelatedLocation::new(row.resource.path().as_path(), label),
             Place::Resource(path) => RelatedLocation::new(path, label),
+            Place::Nowhere => unreachable!("a related location is at a row or a resource"),
         }
     }
 
@@ -459,7 +462,7 @@ impl<'r> Run<'r> {
             );
             let related = self.related_at(vec![(first, "the first row with this key")], 0);
             let at = self.spot(row, key_at[0]);
-            self.report(at, message, key.clone(), related, row);
+            self.report(at, message, key.clone(), related, Some(row));
         }
     }
 
@@ -603,7 +606,7 @@ impl<'r> Run<'r> {
             for (&position, part) in fields.iter().zip(value) {
                 key.value(part, self.sensitive(position));
             }
-            self.report(at, message, key, related, holders[0]);
+            self.report(at, message, key, related, Some(holders[0]));
         }
     }
 
@@ -681,7 +684,7 @@ impl<'r> Run<'r> {
             key.part("source").row(self.own(row), self.hide_keys);
             let related = self.related_at(vec![(source_at, "the source row")], 0);
             let at = self.spot(row, field_at);
-            self.report(at, message, key, related, row);
+            self.report(at, message, key, related, Some(row));
         }
     }
 
@@ -792,203 +795,9 @@ impl<'r> Run<'r> {
             let label = format!("`{other}` in this row");
             let related = self.related_at(vec![(Place::Cell(other_cell), label.as_str())], 0);
             let at = self.spot(row, field_at);
-            self.report(at, message, key, related, row);
+            self.report(at, message, key, related, Some(row));
         }
     }
-
-    // ------------------------------------------------------------------
-    // `set` against a group of the same relation.
-
-    pub(super) fn set(&mut self, field: &str, group_by: &str, group: &Value, mode: SetMode) {
-        let (Some(field_at), Some(group_at)) = (self.position(field), self.position(group_by))
-        else {
-            return;
-        };
-        let option = format!("assert.set.{}.group", mode.key());
-        let reference = Scalar::of_value(group).expect("the builder takes scalar literals");
-        let Some((groups, values)) = self.set_values(field_at, group_at, &reference, &option)
-        else {
-            return;
-        };
-        let group_sensitive = self.sensitive(group_at);
-        let reference_shown = if self.rule.hide_literals || group_sensitive {
-            "<redacted>".to_string()
-        } else {
-            reference.show(false)
-        };
-        let reference_key = vec![reference.clone()];
-        let Some(reference_rows) = groups.rows.get(&reference_key) else {
-            self.fail(
-                None,
-                format!(
-                    "`{option}`: the reference group (`{group_by}` {reference_shown}) has no \
-                     rows; a set is compared with it, so it must have some"
-                ),
-            );
-            return;
-        };
-        let held = |rows: &[usize]| {
-            let mut held = Groups::new();
-            for &row in rows {
-                if !values[row].is_null() {
-                    held.add(vec![values[row].clone()], row);
-                }
-            }
-            held
-        };
-        let reference = Reference {
-            field,
-            group_by,
-            field_at,
-            group_sensitive,
-            shown: reference_shown,
-            held: held(reference_rows),
-            mode,
-        };
-        for (group_value, rows) in groups.iter() {
-            if group_value != &reference_key {
-                self.compare_group(&reference, &group_value[0], rows, &held(rows));
-            }
-        }
-    }
-
-    /// The findings of group `group` (rows `rows`, whose values are `held`)
-    /// against `reference`.
-    fn compare_group(
-        &mut self,
-        reference: &Reference<'_>,
-        group: &Scalar,
-        rows: &[usize],
-        held: &Groups,
-    ) {
-        let Reference {
-            field,
-            group_by,
-            field_at,
-            group_sensitive,
-            ref shown,
-            ..
-        } = *reference;
-        let sensitive = self.sensitive(field_at);
-        let subject = format!("`{group_by}` {}", group.show(group_sensitive));
-        let base = |value: &Scalar, what: &str| {
-            let mut key = Key::new("set");
-            key.value(group, group_sensitive)
-                .value(value, sensitive)
-                .part(what);
-            key
-        };
-        if reference.mode == SetMode::EqualTo {
-            // A missing value sits at the group's first resource.
-            let first = rows
-                .iter()
-                .map(|&row| self.own(row).resource.path())
-                .min()
-                .expect("a group has rows");
-            for (value, holders) in reference.held.iter() {
-                if held.rows.contains_key(value) {
-                    continue;
-                }
-                let message = format!(
-                    "{subject} lacks `{field}` {}, which `{group_by}` {shown} holds",
-                    value[0].show(sensitive)
-                );
-                let holder = self.spot(holders[0], field_at);
-                let related =
-                    self.related_at(vec![(holder, "the reference group's row with it")], 0);
-                self.report(
-                    Place::Resource(first.as_path()),
-                    message,
-                    base(&value[0], "missing"),
-                    related,
-                    holders[0],
-                );
-            }
-        }
-        for (value, holders) in held.iter() {
-            let (what, message, places, omitted) =
-                match (reference.mode, reference.held.rows.get(value)) {
-                    (SetMode::EqualTo | SetMode::SubsetOf, None) => {
-                        let others = &holders[1..];
-                        let places: Vec<_> = others
-                            .iter()
-                            .take(MAX_RELATED_LOCATIONS)
-                            .map(|&row| {
-                                let place = self.spot(row, field_at);
-                                (place, "another row of the group with it")
-                            })
-                            .collect();
-                        let message = format!(
-                            "{subject} holds `{field}` {}, which `{group_by}` {shown} lacks",
-                            value[0].show(sensitive)
-                        );
-                        let omitted = others.len() - places.len();
-                        ("extra", message, places, omitted)
-                    }
-                    (SetMode::DisjointFrom, Some(theirs)) => {
-                        let message = format!(
-                            "{subject} and `{group_by}` {shown} both hold `{field}` {}",
-                            value[0].show(sensitive)
-                        );
-                        let place = self.spot(theirs[0], field_at);
-                        let places = vec![(place, "the reference group's row with it")];
-                        ("shared", message, places, 0)
-                    }
-                    _ => continue,
-                };
-            let related = self.related_at(places, omitted);
-            let at = self.spot(holders[0], field_at);
-            self.report(at, message, base(&value[0], what), related, holders[0]);
-        }
-    }
-
-    /// The rows grouped by the field at `group_at`, and the values of the
-    /// field at `field_at`, or `None` after a failure: a null group, groups
-    /// or values of two types, or a reference literal of another type than
-    /// the groups.
-    fn set_values(
-        &mut self,
-        field_at: usize,
-        group_at: usize,
-        reference: &Scalar,
-        option: &str,
-    ) -> Option<(Groups, Vec<Scalar>)> {
-        let (groups, group_values) = self.groups_by(group_at, "assert.set.group_by")?;
-        // The literal names a group: comparing it with the groups' values
-        // must not cross types.
-        if let Some(row) = group_values
-            .iter()
-            .position(|value| value.kind() != reference.kind())
-        {
-            let cell = self.cell(row, group_at);
-            let message = format!(
-                "`{option}`: the literal is {} and `{}` holds {} at {}; the comparison would \
-                 cross types, so the assertion has no verdict",
-                literal_type(reference),
-                self.name(group_at),
-                type_of(cell),
-                self.located(cell)
-            );
-            self.fail(Some(cell.at.resource.path().as_path()), message);
-            return None;
-        }
-        let values = self.column(field_at, "assert.set.field")?;
-        let all: Vec<usize> = (0..values.len()).collect();
-        self.one_type(&all, field_at, &values, "assert.set.field");
-        self.failures.is_empty().then_some((groups, values))
-    }
-}
-
-/// What a `set` compares each group with: the reference group's values
-/// (`held`), shown as `shown`.
-struct Reference<'a> {
-    field: &'a str,
-    group_by: &'a str,
-    field_at: usize,
-    group_sensitive: bool,
-    shown: String,
-    held: Groups,
-    mode: SetMode,
 }
 
 /// Where a finding or a related location sits.
@@ -1000,6 +809,28 @@ enum Place<'p> {
     Row(&'p Arc<Provenance>),
     /// A resource.
     Resource(&'p Path),
+    /// No resource: a group named only in `groups:`.
+    Nowhere,
+}
+
+/// Where a finding about row `row`'s field at `position` of `rows` sits: the
+/// field's cell, or, when the cell is not the row's own (a join's copy of a
+/// field of its unique side, or a `bound:` field, which many rows share), the
+/// row's own entry: its first cell there, one with a span first, or its
+/// resource.
+fn spot_in(rows: &RelationRows, row: usize, position: usize) -> Place<'_> {
+    let own = &rows.rows[row].at;
+    let is_own = |cell: &Cell| Arc::ptr_eq(&cell.at, own) || cell.at == *own;
+    let cells = &rows.rows[row].cells;
+    let cell = &cells[position];
+    if is_own(cell) {
+        return Place::Cell(cell);
+    }
+    cells
+        .iter()
+        .find(|cell| is_own(cell) && cell.span.is_some())
+        .or_else(|| cells.iter().find(|cell| is_own(cell)))
+        .map_or(Place::Row(own), Place::Cell)
 }
 
 /// A finding's related locations, and how many more it leaves out.
