@@ -814,6 +814,899 @@
         "plan": {
           "oneOf": [
             {
+              "additionalProperties": false,
+              "properties": {
+                "assertion": {
+                  "oneOf": [
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "family": {
+                          "enum": [
+                            "equal",
+                            "unique",
+                            "set"
+                          ]
+                        },
+                        "text": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "family",
+                        "text"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "const": "<redacted>"
+                    }
+                  ]
+                },
+                "cost": {
+                  "type": "string"
+                },
+                "input": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "relations": {
+                  "items": {
+                    "additionalProperties": false,
+                    "dependentRequired": {
+                      "entries": [
+                        "from"
+                      ],
+                      "optional": [
+                        "from",
+                        "read"
+                      ],
+                      "read": [
+                        "from",
+                        "optional"
+                      ]
+                    },
+                    "oneOf": [
+                      {
+                        "required": [
+                          "entries"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "read"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "union"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "join"
+                        ]
+                      }
+                    ],
+                    "properties": {
+                      "declared_in": {
+                        "type": "string"
+                      },
+                      "entries": {
+                        "oneOf": [
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "at": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              "format": {
+                                "enum": [
+                                  "json",
+                                  "yaml",
+                                  "toml"
+                                ]
+                              },
+                              "leaves": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "format",
+                              "at",
+                              "leaves"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "const": "<redacted>"
+                          }
+                        ]
+                      },
+                      "fields": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "name": {
+                              "type": "string"
+                            },
+                            "sensitive": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string"
+                            },
+                            "transforms": {
+                              "oneOf": [
+                                {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                {
+                                  "const": "<redacted>"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "source",
+                            "transforms",
+                            "sensitive"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "from": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "declared_in": {
+                            "type": "string"
+                          },
+                          "part": {
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "paths": {
+                            "oneOf": [
+                              {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "exclude": {
+                                    "items": {
+                                      "type": "string"
+                                    },
+                                    "type": "array"
+                                  },
+                                  "include": {
+                                    "items": {
+                                      "type": "string"
+                                    },
+                                    "type": "array"
+                                  }
+                                },
+                                "required": [
+                                  "include",
+                                  "exclude"
+                                ],
+                                "type": "object"
+                              },
+                              {
+                                "const": "<redacted>"
+                              }
+                            ]
+                          },
+                          "relation": {
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "scope_filter": {
+                            "oneOf": [
+                              {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "changed_since": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "has_ancestor": {
+                                    "oneOf": [
+                                      {
+                                        "items": {
+                                          "type": "string"
+                                        },
+                                        "type": "array"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "manifest_scopes": {
+                                    "items": {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "paths": {
+                                          "items": {
+                                            "type": "string"
+                                          },
+                                          "type": "array"
+                                        },
+                                        "predicate": {
+                                          "enum": [
+                                            "include_manifest_paths",
+                                            "exclude_manifest_paths"
+                                          ]
+                                        },
+                                        "source": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "predicate",
+                                        "source",
+                                        "paths"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    "type": "array"
+                                  }
+                                },
+                                "required": [
+                                  "has_ancestor",
+                                  "changed_since",
+                                  "manifest_scopes"
+                                ],
+                                "type": "object"
+                              },
+                              {
+                                "const": "<redacted>"
+                              }
+                            ]
+                          },
+                          "selector": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "selector",
+                          "declared_in",
+                          "paths"
+                        ],
+                        "type": "object"
+                      },
+                      "id": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "inline": {
+                        "type": "boolean"
+                      },
+                      "join": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "left": {
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "on": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "left": {
+                                  "type": "string"
+                                },
+                                "right": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "left",
+                                "right"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "right": {
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "unique": {
+                            "oneOf": [
+                              {
+                                "enum": [
+                                  "left",
+                                  "right"
+                                ]
+                              },
+                              {
+                                "const": "<redacted>"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "left",
+                          "right",
+                          "on",
+                          "unique"
+                        ],
+                        "type": "object"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "optional": {
+                        "oneOf": [
+                          {
+                            "type": "boolean"
+                          },
+                          {
+                            "const": "<redacted>"
+                          }
+                        ]
+                      },
+                      "read": {
+                        "oneOf": [
+                          {
+                            "additionalProperties": false,
+                            "maxProperties": 1,
+                            "minProperties": 1,
+                            "properties": {
+                              "json": {
+                                "type": "string"
+                              },
+                              "lines": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "comment": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [],
+                                "type": "object"
+                              },
+                              "regex": {
+                                "type": "string"
+                              },
+                              "toml": {
+                                "type": "string"
+                              },
+                              "whole_file": {
+                                "additionalProperties": false,
+                                "properties": {},
+                                "required": [],
+                                "type": "object"
+                              },
+                              "yaml": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          {
+                            "const": "<redacted>"
+                          }
+                        ]
+                      },
+                      "roles": {
+                        "items": {
+                          "enum": [
+                            "input",
+                            "set_target"
+                          ]
+                        },
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "union": {
+                        "items": {
+                          "additionalProperties": false,
+                          "dependentRequired": {
+                            "entries": [
+                              "from"
+                            ],
+                            "optional": [
+                              "from",
+                              "read"
+                            ],
+                            "read": [
+                              "from",
+                              "optional"
+                            ]
+                          },
+                          "oneOf": [
+                            {
+                              "required": [
+                                "entries"
+                              ]
+                            },
+                            {
+                              "required": [
+                                "read"
+                              ]
+                            }
+                          ],
+                          "properties": {
+                            "entries": {
+                              "oneOf": [
+                                {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "at": {
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "type": "array"
+                                    },
+                                    "format": {
+                                      "enum": [
+                                        "json",
+                                        "yaml",
+                                        "toml"
+                                      ]
+                                    },
+                                    "leaves": {
+                                      "type": "boolean"
+                                    }
+                                  },
+                                  "required": [
+                                    "format",
+                                    "at",
+                                    "leaves"
+                                  ],
+                                  "type": "object"
+                                },
+                                {
+                                  "const": "<redacted>"
+                                }
+                              ]
+                            },
+                            "from": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "declared_in": {
+                                  "type": "string"
+                                },
+                                "part": {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "paths": {
+                                  "oneOf": [
+                                    {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "exclude": {
+                                          "items": {
+                                            "type": "string"
+                                          },
+                                          "type": "array"
+                                        },
+                                        "include": {
+                                          "items": {
+                                            "type": "string"
+                                          },
+                                          "type": "array"
+                                        }
+                                      },
+                                      "required": [
+                                        "include",
+                                        "exclude"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    {
+                                      "const": "<redacted>"
+                                    }
+                                  ]
+                                },
+                                "relation": {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "scope_filter": {
+                                  "oneOf": [
+                                    {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "changed_since": {
+                                          "type": [
+                                            "string",
+                                            "null"
+                                          ]
+                                        },
+                                        "has_ancestor": {
+                                          "oneOf": [
+                                            {
+                                              "items": {
+                                                "type": "string"
+                                              },
+                                              "type": "array"
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ]
+                                        },
+                                        "manifest_scopes": {
+                                          "items": {
+                                            "additionalProperties": false,
+                                            "properties": {
+                                              "paths": {
+                                                "items": {
+                                                  "type": "string"
+                                                },
+                                                "type": "array"
+                                              },
+                                              "predicate": {
+                                                "enum": [
+                                                  "include_manifest_paths",
+                                                  "exclude_manifest_paths"
+                                                ]
+                                              },
+                                              "source": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": [
+                                              "predicate",
+                                              "source",
+                                              "paths"
+                                            ],
+                                            "type": "object"
+                                          },
+                                          "type": "array"
+                                        }
+                                      },
+                                      "required": [
+                                        "has_ancestor",
+                                        "changed_since",
+                                        "manifest_scopes"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    {
+                                      "const": "<redacted>"
+                                    }
+                                  ]
+                                },
+                                "selector": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "selector",
+                                "declared_in",
+                                "paths"
+                              ],
+                              "type": "object"
+                            },
+                            "optional": {
+                              "oneOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "const": "<redacted>"
+                                }
+                              ]
+                            },
+                            "read": {
+                              "oneOf": [
+                                {
+                                  "additionalProperties": false,
+                                  "maxProperties": 1,
+                                  "minProperties": 1,
+                                  "properties": {
+                                    "json": {
+                                      "type": "string"
+                                    },
+                                    "lines": {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "comment": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [],
+                                      "type": "object"
+                                    },
+                                    "regex": {
+                                      "type": "string"
+                                    },
+                                    "toml": {
+                                      "type": "string"
+                                    },
+                                    "whole_file": {
+                                      "additionalProperties": false,
+                                      "properties": {},
+                                      "required": [],
+                                      "type": "object"
+                                    },
+                                    "yaml": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "type": "object"
+                                },
+                                {
+                                  "const": "<redacted>"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "from"
+                          ],
+                          "type": "object"
+                        },
+                        "minItems": 1,
+                        "type": "array"
+                      },
+                      "where": {
+                        "items": {
+                          "additionalProperties": false,
+                          "else": {
+                            "not": {
+                              "required": [
+                                "members"
+                              ]
+                            },
+                            "required": [
+                              "pattern"
+                            ]
+                          },
+                          "if": {
+                            "properties": {
+                              "predicate": {
+                                "enum": [
+                                  "in",
+                                  "not_in"
+                                ]
+                              }
+                            }
+                          },
+                          "properties": {
+                            "field": {
+                              "type": "string"
+                            },
+                            "members": {
+                              "items": {
+                                "oneOf": [
+                                  {
+                                    "type": [
+                                      "string",
+                                      "boolean"
+                                    ]
+                                  },
+                                  {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "field": {
+                                        "type": "string"
+                                      },
+                                      "relation": {
+                                        "minimum": 0,
+                                        "type": "integer"
+                                      }
+                                    },
+                                    "required": [
+                                      "relation",
+                                      "field"
+                                    ],
+                                    "type": "object"
+                                  }
+                                ]
+                              },
+                              "type": "array"
+                            },
+                            "pattern": {
+                              "type": "string"
+                            },
+                            "predicate": {
+                              "enum": [
+                                "in",
+                                "not_in",
+                                "matches",
+                                "not_matches"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "field",
+                            "predicate"
+                          ],
+                          "then": {
+                            "not": {
+                              "required": [
+                                "pattern"
+                              ]
+                            },
+                            "required": [
+                              "members"
+                            ]
+                          },
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "written": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "minItems": 1,
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "name",
+                      "written",
+                      "inline",
+                      "roles",
+                      "declared_in",
+                      "fields",
+                      "where"
+                    ],
+                    "type": "object"
+                  },
+                  "minItems": 1,
+                  "type": "array"
+                },
+                "set_target": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "trigger": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "declared_in": {
+                        "type": "string"
+                      },
+                      "part": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "paths": {
+                        "oneOf": [
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "exclude": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              "include": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              }
+                            },
+                            "required": [
+                              "include",
+                              "exclude"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "const": "<redacted>"
+                          }
+                        ]
+                      },
+                      "relation": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "scope_filter": {
+                        "oneOf": [
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "changed_since": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "has_ancestor": {
+                                "oneOf": [
+                                  {
+                                    "items": {
+                                      "type": "string"
+                                    },
+                                    "type": "array"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "manifest_scopes": {
+                                "items": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "paths": {
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "type": "array"
+                                    },
+                                    "predicate": {
+                                      "enum": [
+                                        "include_manifest_paths",
+                                        "exclude_manifest_paths"
+                                      ]
+                                    },
+                                    "source": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "predicate",
+                                    "source",
+                                    "paths"
+                                  ],
+                                  "type": "object"
+                                },
+                                "type": "array"
+                              }
+                            },
+                            "required": [
+                              "has_ancestor",
+                              "changed_since",
+                              "manifest_scopes"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "const": "<redacted>"
+                          }
+                        ]
+                      },
+                      "selector": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "selector",
+                      "declared_in",
+                      "paths"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "input",
+                "assertion",
+                "relations",
+                "trigger",
+                "cost"
+              ],
               "type": "object"
             },
             {

@@ -78,8 +78,10 @@ rules: []
 A selector cannot use `changed_since`: the rules that read selectors judge the whole repository,
 under `--changed` too, so what a selector picks must not depend on the diff. Under `--changed`, a
 [`constraint`](/docs/rules/cross-file/constraint/) rule runs when a changed path is one the
-selectors of its relations read, or a marker or manifest their `scope_filter:` consults. A
-manifest `source:` stays inside the repository, as a rule's does.
+selectors of its relations read; an ignore file (`.gitignore`, `.ignore`), a submodule or a nested
+repository (a directory Git lists whole) in a directory where their `paths:` can match; or a
+`has_ancestor` marker or a manifest their `scope_filter:` consults. A manifest `source:` stays
+inside the repository, as a rule's does.
 
 Wherever a relation names a selector (`from:`), it may write one inline instead, as a map:
 `from: { paths: package.json }`. A string there is always a selector's name, never a glob.
@@ -398,7 +400,7 @@ plan:
         dependency: left.dependency
         range: left.range
         manifest: right.manifest
-  trigger: under --changed, a change to what these selectors read runs the rule
+  trigger: under --changed, the rule runs on a change to a path these selectors pick, to an ignore file, submodule or nested repository where they can match, or to a marker or manifest their scope_filter: consults
     selector manifests  .alint.yml
       paths: packages/*/package.json
   cost: linear in the rows of each relation it reads

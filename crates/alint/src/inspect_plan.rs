@@ -1085,9 +1085,16 @@ pub(super) fn write_human(out: &mut impl Write, plan: &ExplainPlan) -> Result<()
     for relation in &plan.relations {
         write_relation(out, relation, &labels)?;
     }
+    // What a change must touch to run the rule (`TriggerScope::matches`):
+    // a path a selector picks; an ignore file (`.gitignore`, `.ignore`), or a
+    // directory Git lists whole (a submodule, a nested repository), where its
+    // `paths:` can match; a `has_ancestor` marker or a manifest its
+    // `scope_filter:` consults.
     writeln!(
         out,
-        "  {dim}trigger:{dim:#} under --changed, a change to what these selectors read runs the rule"
+        "  {dim}trigger:{dim:#} under --changed, the rule runs on a change to a path these \
+         selectors pick, to an ignore file, submodule or nested repository where they can \
+         match, or to a marker or manifest their scope_filter: consults"
     )?;
     for selector in &plan.trigger {
         write!(out, "    ")?;
