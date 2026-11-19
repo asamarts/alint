@@ -132,6 +132,11 @@ rulesets you trust and, with a content fix, only on repositories you trust.
   name or matched line in the message) could render an image the editor fetched
   (`![x](http://...)`), a link, or HTML. The message is now escaped, the rule id is a code span,
   and a policy URL is a link only when it is `http` or `https` (any other shows as text).
+- **The language server's notes hide a path alint hides.** Since v0.20.0, a note of a rule whose
+  files a value from the environment picks showed `<redacted>` for its path in `alint check
+  --show-notes`, but the language server's notes, which it writes to its log with `--show-notes`,
+  showed the file's path. They now show the path as `alint check` does, `<redacted>` when it is
+  hidden, and a file's name once, with control and bidi characters escaped.
 - **Configuration discovery stops at the repository's top.** alint looked for `.alint.yml` from the
   current directory up to the file-system root, so in a repository without a config of its own, or
   from a directory below one, a `.alint.yml` that someone else wrote in a directory above it
@@ -764,11 +769,14 @@ policy-test package the user does not trust.
     `read:` value in an array, a path token and a value of a file that is not UTF-8 have none. A
     finding or related location at a sensitive cell, or at any cell while key paths are hidden,
     shows only where it starts, since its end would give away the value's length. Placing the
-    findings reads each file they sit in again, one at a time, and each file, with its offsets and
-    what finding its `read:` values' places held, must fit in what the run's relations left of
-    `bytes_per_run`; placing takes none of it, so whether a rule's findings fit does not depend on
-    the rules placing beside it. When a file does not fit, the rule reports an analysis failure,
-    not findings without places. A `read:` value's place is found only in the files a finding or
+    findings reads each file they sit in again, one at a time. Each file must fit in what the run's
+    relations left of `bytes_per_run` (the limit less what their decodes and their rows took,
+    counted once they are evaluated, before any rule runs): alone, before its `read:` values'
+    places are looked for, and then with its offsets and what finding those places held. Placing
+    takes none of it, so whether a rule's findings fit does not depend on the rules placing beside
+    it, and `alint fix`, which evaluates the relations the same way at the start of each pass and
+    again after a fix changes the tree, places them as `alint check` would. When a file does not
+    fit, the rule reports an analysis failure, not findings without places. A `read:` value's place is found only in the files a finding or
     related location sits in. A typo in the kind's options gets a "did you mean" for the nearest
     field, not for the typo itself.
   - When a relation the rule reads takes a value from the environment anywhere in its definition, a
