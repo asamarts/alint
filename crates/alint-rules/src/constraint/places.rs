@@ -6,10 +6,13 @@
 //! time: the resource is read, each place asked of it is found in one pass
 //! over its text, and the text is let go before the next resource is read.
 //! So placing holds one resource's text at a time, however many resources
-//! the findings sit in, and that text, at most the largest resource placed,
-//! takes the run's bytes
-//! ([`LimitKind::BytesPerRun`](alint_core::relation::LimitKind::BytesPerRun)) as a
-//! `key_parity` comparison's files do: past them the rule has no verdict.
+//! the findings sit in, and each resource's text, with the offsets asked of
+//! it, must fit in what the run's relations left of its bytes
+//! ([`LimitKind::BytesPerRun`](alint_core::relation::LimitKind::BytesPerRun),
+//! [`DecodeCache::may_hold`]): past them the rule has no verdict. Placing
+//! takes nothing from the run's bytes, since it lets each text go, so
+//! whether a rule's findings fit depends on its files and the relations
+//! alone, never on the rules placing beside it.
 
 use std::collections::BTreeMap;
 
@@ -83,8 +86,9 @@ impl<'c> Places<'c> {
     }
 
     /// Every place asked for, each resource read once, in path order, and
-    /// let go before the next; or the resource whose text the run's bytes
-    /// could not hold, and the limit it reached.
+    /// let go before the next; or the first resource whose text, with its
+    /// offsets, does not fit in what the run's relations left of its bytes,
+    /// and the limit it reached.
     pub(super) fn resolve(self) -> Result<Placed, (RelPath, LimitExceeded)> {
         let mut placed = vec![None; self.count];
         if self.count == 0 {
@@ -105,8 +109,6 @@ impl<'c> Places<'c> {
             .as_ref()
             .or_else(|| self.ctx.index.decode_cache())
             .expect("a decode cache: the run's or a local one");
-        // The most this has held at once, which the run's bytes took.
-        let mut taken = 0;
         for (path, spans) in self.asked {
             // Read as the relation read it: as a literal path, which the
             // cache keeps inside the root and out of a Git directory, and
@@ -123,11 +125,8 @@ impl<'c> Places<'c> {
             offsets.sort_unstable();
             offsets.dedup();
             let held = bytes.len() + offsets.capacity() * std::mem::size_of::<usize>();
-            if held > taken {
-                if let Err(limit) = budget.take_bytes(held - taken) {
-                    return Err((path, limit));
-                }
-                taken = held;
+            if let Err(limit) = budget.may_hold(held) {
+                return Err((path, limit));
             }
             let Some(found) = positions(bytes, &offsets) else {
                 continue;

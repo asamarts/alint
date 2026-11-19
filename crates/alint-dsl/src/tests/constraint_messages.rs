@@ -171,67 +171,77 @@ fn padded(count: usize) -> Vec<(String, String)> {
         .collect()
 }
 
-/// A rule over every entry of [`padded`]'s files asserting `assert`.
-fn over_padded(assert: &str) -> String {
-    format!(
-        "version: 2\nrelations:\n  r:\n    from: {{ paths: \"data/*.json\" }}\n    entries: {{ \
-         format: json, at: \"$\" }}\n    fields: {{ l: entry.value }}\nrules:\n  - id: c\n    \
-         kind: constraint\n    input: r\n    assert: {assert}\n    level: error\n"
-    )
+/// Rules `c0` to `c{rules - 1}` over every entry of [`padded`]'s files,
+/// each asserting `assert`.
+fn over_padded(assert: &str, rules: usize) -> String {
+    let mut config = "version: 2\nrelations:\n  r:\n    from: { paths: \"data/*.json\" }\n    \
+                      entries: { format: json, at: \"$\" }\n    fields: { l: entry.value }\nrules:\n"
+        .to_string();
+    for rule in 0..rules {
+        write!(
+            config,
+            "  - id: c{rule}\n    kind: constraint\n    input: r\n    assert: {assert}\n    \
+             level: error\n"
+        )
+        .unwrap();
+    }
+    config
 }
 
+/// What a run of `rules` rules over `count` [`padded`] files gives: the
+/// results, the bytes the run took and the most a rule asked to hold.
 fn run_padded(
     assert: &str,
     count: usize,
+    rules: usize,
     limits: Option<&Limits>,
-) -> (Vec<alint_core::RuleResult>, usize) {
+) -> (Vec<alint_core::RuleResult>, usize, usize) {
     let files = padded(count);
     let files: Vec<(&str, &str)> = files
         .iter()
         .map(|(path, body)| (path.as_str(), body.as_str()))
         .collect();
-    run_under(&over_padded(assert), &files, limits, false)
+    run_under(&over_padded(assert, rules), &files, limits, false)
 }
+
+const UNIQUE: &str = "{ unique: { key: [l] } }";
 
 /// Placing the findings of eight padded files holds one file's text at a
-/// time, which the run's bytes take once: what the run takes for them is
-/// one file's bytes, as for two files, where keeping each file and a table
-/// of its lines until the rule ended held 2.4 GB for eight files of 32 MB,
-/// none of it taken.
+/// time, as for two files, where keeping each file and a table of its lines
+/// until the rule ended held 2.4 GB for eight files of 32 MB. Placing takes
+/// nothing from the run's bytes, since it lets each file go: the run takes
+/// what its relations take.
 #[test]
-fn placing_findings_takes_one_files_bytes_however_many_files_it_reads() {
-    let (passing, relation) = run_padded("{ equal: { field: l } }", 8, None);
-    assert!(result(&passing, "c").violations.is_empty());
-    let (results, eight) = run_padded("{ unique: { key: [l] } }", 8, None);
-    // 16 rows of `dup`: 15 repeats, in each of the eight files.
-    assert_eq!(result(&results, "c").violations.len(), 15);
+fn placing_findings_holds_one_file_at_a_time_however_many_files_it_reads() {
     // One file's text, and the offsets asked of it.
     let one_file = PADDING..PADDING + 4096;
-    let placing = eight - relation;
-    assert!(
-        one_file.contains(&placing),
-        "placing took {placing} bytes for eight files of {PADDING}"
-    );
-    let (_, two) = run_padded("{ unique: { key: [l] } }", 2, None);
-    let (_, relation_two) = run_padded("{ equal: { field: l } }", 2, None);
-    let placing = two - relation_two;
-    assert!(
-        one_file.contains(&placing),
-        "placing took {placing} bytes for two files of {PADDING}"
-    );
+    for count in [8, 2] {
+        let (passing, relation, nothing) = run_padded("{ equal: { field: l } }", count, 1, None);
+        assert!(result(&passing, "c0").violations.is_empty());
+        assert_eq!(nothing, 0, "a rule with no finding places nothing");
+        let (results, taken, held) = run_padded(UNIQUE, count, 1, None);
+        // 2 * count rows of `dup`: one fewer repeats.
+        assert_eq!(result(&results, "c0").violations.len(), 2 * count - 1);
+        assert!(
+            one_file.contains(&held),
+            "placing held {held} bytes at once for {count} files of {PADDING}"
+        );
+        assert_eq!(taken, relation, "placing took bytes from the run");
+    }
 }
 
-/// A run whose bytes cannot hold a file a finding sits in has no verdict:
-/// the rule's analysis failure says so, as `key_parity`'s does, rather
-/// than findings without their places.
+/// A file a finding sits in that, with its offsets, does not fit in what
+/// the run's relations left of its bytes gives the rule no verdict: the
+/// rule's analysis failure says so, as `key_parity`'s does, rather than
+/// findings without their places. One byte more, and it fits.
 #[test]
-fn a_run_whose_bytes_cannot_hold_a_file_to_place_fails_the_rule() {
-    let (_, taken) = run_padded("{ unique: { key: [l] } }", 8, None);
+fn a_file_to_place_that_does_not_fit_beside_the_relations_fails_the_rule() {
+    let (_, taken, held) = run_padded(UNIQUE, 8, 1, None);
     let limits = Limits::default()
-        .with(LimitKind::BytesPerRun, taken - 1)
+        .with(LimitKind::BytesPerRun, taken + held - 1)
         .unwrap();
-    let (results, _) = run_padded("{ unique: { key: [l] } }", 8, Some(&limits));
-    let failed = failures(&results, "c");
+    let (results, ..) = run_padded(UNIQUE, 8, 1, Some(&limits));
+    let failed = failures(&results, "c0");
     assert_eq!(failed.len(), 1, "{failed:?}");
     assert!(
         failed[0].starts_with("data/a")
@@ -241,12 +251,50 @@ fn a_run_whose_bytes_cannot_hold_a_file_to_place_fails_the_rule() {
             ),
         "{failed:?}"
     );
-    // At the bytes it took, the run holds them.
     let limits = Limits::default()
-        .with(LimitKind::BytesPerRun, taken)
+        .with(LimitKind::BytesPerRun, taken + held)
         .unwrap();
-    let (results, _) = run_padded("{ unique: { key: [l] } }", 8, Some(&limits));
-    assert_eq!(result(&results, "c").violations.len(), 15);
+    let (results, ..) = run_padded(UNIQUE, 8, 1, Some(&limits));
+    assert_eq!(result(&results, "c0").violations.len(), 15);
+}
+
+/// Every rule placing its findings in one file fits when the file fits
+/// beside the relations, however many rules place in it, on however many
+/// threads: placing takes nothing from the run's bytes, so no rule's
+/// placing leaves less for the next, and which rules fail cannot depend on
+/// the order they run in. Twelve rules under bytes for the relations and
+/// one file each give twelve findings, the same in every run.
+#[test]
+fn rules_placing_in_one_file_each_fit_and_give_one_outcome_in_every_run() {
+    const RULES: usize = 12;
+    let (_, taken, held) = run_padded(UNIQUE, 1, 1, None);
+    let limits = Limits::default()
+        .with(LimitKind::BytesPerRun, taken + held)
+        .unwrap();
+    let outcome = |results: &[alint_core::RuleResult]| -> Vec<String> {
+        let mut shown: Vec<String> = results
+            .iter()
+            .map(|result| {
+                format!(
+                    "{}: {:?} {:?}",
+                    result.rule_id, result.violations, result.analysis_failures
+                )
+            })
+            .collect();
+        shown.sort();
+        shown
+    };
+    let (results, ..) = run_padded(UNIQUE, 1, RULES, Some(&limits));
+    for rule in 0..RULES {
+        let found = result(&results, &format!("c{rule}"));
+        assert!(found.analysis_failures.is_empty(), "{found:?}");
+        assert_eq!(found.violations.len(), 1, "{found:?}");
+    }
+    let first = outcome(&results);
+    for _ in 0..3 {
+        let (again, ..) = run_padded(UNIQUE, 1, RULES, Some(&limits));
+        assert_eq!(outcome(&again), first);
+    }
 }
 
 // --- A sensitive cell's end is not shown -------------------------------------
@@ -577,7 +625,7 @@ fn an_environment_literal_in_assert_redacts_every_message_of_the_rule() {
         ("groups:", &groups, &messages[..]),
         ("to: { row: }", &row, &pins[..]),
     ] {
-        let (results, _) = run_under(config, files, None, true);
+        let (results, ..) = run_under(config, files, None, true);
         let violations = &result(&results, "c").violations;
         assert!(!violations.is_empty(), "{position}");
         for violation in violations {

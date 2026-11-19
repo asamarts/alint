@@ -19,15 +19,17 @@ pub(super) fn run(config: &str, files: &[(&str, &str)]) -> Vec<RuleResult> {
 }
 
 /// [`run`], the run's relation limits `limits` when given, and the bytes the
-/// run took from its byte budget. With `specs`, each rule's entry carries
-/// its spec, as the CLI's do, so a rule whose configuration reads the
-/// environment has its findings redacted.
+/// run took from its byte budget and the most a rule asked to hold of it at
+/// once ([`DecodeCache::largest_held`](alint_core::relation::DecodeCache::largest_held)).
+/// With `specs`, each rule's entry carries its spec, as the CLI's do, so a
+/// rule whose configuration reads the environment has its findings
+/// redacted.
 fn run_under(
     config: &str,
     files: &[(&str, &str)],
     limits: Option<&alint_core::relation::Limits>,
     specs: bool,
-) -> (Vec<RuleResult>, usize) {
+) -> (Vec<RuleResult>, usize, usize) {
     let (dir, loaded) = load_tree(config, files);
     let config = loaded.unwrap_or_else(|error| panic!("the config loads: {error}"));
     let index: FileIndex = walk(
@@ -58,10 +60,10 @@ fn run_under(
         .collect();
     let engine = alint_core::Engine::from_entries(entries, registry);
     let results = engine.run(dir.path(), &index).unwrap().results;
-    let taken = index
-        .decode_cache()
-        .map_or(0, alint_core::relation::DecodeCache::bytes_taken);
-    (results, taken)
+    let cache = index.decode_cache();
+    let taken = cache.map_or(0, alint_core::relation::DecodeCache::bytes_taken);
+    let held = cache.map_or(0, alint_core::relation::DecodeCache::largest_held);
+    (results, taken, held)
 }
 
 /// Where a finding or related location sits: `path:line:column`, or the

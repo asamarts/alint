@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use super::adapter::{Adapter, AdapterError, AdapterOutput};
-use super::limits::{Limits, RunBudget};
+use super::limits::{LimitExceeded, LimitKind, Limits, RunBudget};
 use super::path::RelPath;
 use super::resource::{Resource, ResourceRead};
 
@@ -285,6 +285,16 @@ pub struct DecodeCache {
     decodes: AtomicUsize,
     budget: RunBudget,
     bytes: RunBudget,
+    /// The run's [`LimitKind::BytesPerRun`].
+    bytes_limit: usize,
+    /// The bytes taken before the first consumer used the cache: what the
+    /// run's relations, all evaluated before any rule runs, took. Set by the
+    /// first [`decode`](Self::decode), [`take_bytes`](Self::take_bytes) or
+    /// [`may_hold`](Self::may_hold), and again after [`clear`](Self::clear).
+    before_consumers: Mutex<Option<usize>>,
+    /// The most a consumer asked [`may_hold`](Self::may_hold) for at once.
+    /// Test/diagnostic only.
+    largest_held: AtomicUsize,
 }
 
 impl Default for DecodeCache {
@@ -323,7 +333,24 @@ impl DecodeCache {
             decodes: AtomicUsize::new(0),
             budget: RunBudget::new(limits),
             bytes: RunBudget::bytes(limits),
+            bytes_limit: limits.get(LimitKind::BytesPerRun),
+            before_consumers: Mutex::default(),
+            largest_held: AtomicUsize::new(0),
         }
+    }
+
+    /// The bytes taken before the first consumer used the cache, recorded
+    /// now when this is the first. The engine evaluates every relation the
+    /// rules read before any rule runs, and the relation evaluator decodes
+    /// through [`decode_fresh`](Self::decode_fresh), which records nothing;
+    /// so this is what the relations took, the same in every run, whichever
+    /// consumer comes first and whatever they take after.
+    fn before_consumers(&self) -> usize {
+        *self
+            .before_consumers
+            .lock()
+            .expect("decode cache consumers lock")
+            .get_or_insert_with(|| self.bytes.used())
     }
 
     /// Take `bytes` from the run's byte budget, from which every decode's
@@ -331,8 +358,37 @@ impl DecodeCache {
     /// decodes and keeps while it compares them (`key_parity`'s key tables).
     /// A failed take still counts, so every later take, and every later
     /// decode that builds a key path, fails too.
-    pub fn take_bytes(&self, bytes: usize) -> Result<(), super::LimitExceeded> {
+    pub fn take_bytes(&self, bytes: usize) -> Result<(), LimitExceeded> {
+        self.before_consumers();
         self.bytes.take(bytes)
+    }
+
+    /// Whether a consumer may hold `bytes` for a while and let them go
+    /// (a `constraint` rule placing its findings holds one file's text at a
+    /// time): they must fit in what the run's relations left of the run's
+    /// byte budget ([`LimitKind::BytesPerRun`]). Nothing is taken, so the
+    /// answer depends on `bytes` and the relations alone, never on what
+    /// other consumers, on other threads, hold or took: each consumer holds
+    /// at most that much at once, and the run's consumers at most that much
+    /// each.
+    pub fn may_hold(&self, bytes: usize) -> Result<(), LimitExceeded> {
+        self.largest_held.fetch_max(bytes, Ordering::Relaxed);
+        let reached = self.before_consumers().saturating_add(bytes);
+        if reached > self.bytes_limit {
+            return Err(LimitExceeded {
+                kind: LimitKind::BytesPerRun,
+                limit: self.bytes_limit,
+                reached,
+            });
+        }
+        Ok(())
+    }
+
+    /// The most a consumer asked [`may_hold`](Self::may_hold) for at once.
+    /// Test/diagnostic only.
+    #[must_use]
+    pub fn largest_held(&self) -> usize {
+        self.largest_held.load(Ordering::Relaxed)
     }
 
     /// The bytes taken from the run's byte budget so far. Test/diagnostic
@@ -363,6 +419,7 @@ impl DecodeCache {
         bytes: &[u8],
         limits: &Limits,
     ) -> DecodeResult {
+        self.before_consumers();
         self.decode_fresh(adapter, resource, bytes, limits).0
     }
 
@@ -425,6 +482,12 @@ impl DecodeCache {
     /// work, not only what is kept.
     pub fn clear(&self) {
         self.slots.lock().expect("decode cache lock").clear();
+        // The caller evaluates relations again, through the rules that read
+        // them, before their consumers use the cache.
+        *self
+            .before_consumers
+            .lock()
+            .expect("decode cache consumers lock") = None;
     }
 
     /// How many decodes this cache performed. Test/diagnostic only.
@@ -966,6 +1029,39 @@ mod tests {
                 adapter.id()
             );
         }
+    }
+
+    /// What a consumer may hold is what the relations took before any
+    /// consumer used the cache, subtracted from the run's bytes: it takes
+    /// nothing, and what consumers take after (on other threads, in any
+    /// order) never changes the answer, so whether a rule's files fit is the
+    /// same in every run. After a clear, the next consumer records the
+    /// relations again.
+    #[test]
+    fn what_a_consumer_may_hold_is_what_the_relations_left() {
+        let run = Limits::default().with(LimitKind::BytesPerRun, 100).unwrap();
+        let cache = DecodeCache::with_run_limits(&run);
+        // The relations' decodes take 30 of the 100.
+        cache.bytes.take(30).unwrap();
+        for _ in 0..3 {
+            assert_eq!(cache.may_hold(70), Ok(()));
+        }
+        assert_eq!(cache.bytes_taken(), 30, "holding takes nothing");
+        let over = cache.may_hold(71).unwrap_err();
+        assert_eq!(
+            (over.kind, over.limit, over.reached),
+            (LimitKind::BytesPerRun, 100, 101)
+        );
+        // Another consumer takes, a decode takes: the answer stands.
+        cache.take_bytes(50).unwrap();
+        cache.bytes.take(10).unwrap();
+        assert_eq!(cache.may_hold(70), Ok(()));
+        assert!(cache.may_hold(71).is_err());
+        assert_eq!(cache.largest_held(), 71);
+        // A clear: the relations are evaluated again, and have taken 90.
+        cache.clear();
+        assert_eq!(cache.may_hold(10), Ok(()));
+        assert!(cache.may_hold(11).is_err());
     }
 
     #[test]
