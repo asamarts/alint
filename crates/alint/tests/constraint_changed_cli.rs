@@ -533,6 +533,58 @@ fn an_ignored_submodule_checked_out_anew_runs_the_rules_that_read_below_it() {
     );
 }
 
+/// Telling a submodule's commit move apart runs no `git status` inside its
+/// work tree: an edit there, on the same commit, is not a change `--changed`
+/// sees, so walking a large submodule for it on every run would cost much
+/// and find nothing.
+#[test]
+fn a_dirty_submodule_runs_no_status_inside_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("source");
+    locale_repository(&source);
+    let root = tmp.path().join("main");
+    write(&root, ".alint.yml", &locales_below("sub"));
+    git(&root, &["init", "-q"]);
+    git(&root, &["config", "commit.gpgsign", "false"]);
+    git(
+        &root,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            source.to_str().unwrap(),
+            "sub",
+        ],
+    );
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-qm", "base"]);
+    write(
+        &root,
+        "sub/locales/en.json",
+        "{\"home\": \"Home\", \"about\": \"About\"}\n",
+    );
+
+    let trace = tmp.path().join("trace.txt");
+    let output = crate::hermetic::command(env!("CARGO_BIN_EXE_alint"))
+        .args(["check", "--changed"])
+        .current_dir(&root)
+        .env("NO_COLOR", "1")
+        .env("GIT_TRACE", &trace)
+        .output()
+        .expect("run alint");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let trace = std::fs::read_to_string(trace).unwrap();
+    assert!(trace.contains("diff-files"), "{trace}");
+    assert!(
+        !trace
+            .lines()
+            .any(|line| line.split_whitespace().any(|word| word == "status")),
+        "{trace}"
+    );
+}
+
 /// Git lists an untracked repository as `dir/`, and none of its files: the
 /// change runs every rule whose selectors can match below it, and no other.
 #[test]

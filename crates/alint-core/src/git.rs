@@ -527,14 +527,17 @@ pub fn collect_changed_set(root: &Path, base: Option<&str>) -> Option<ChangedSet
     ])?;
     // Plumbing, so no user configuration renames or colours its entries; it
     // only marks which of the paths `ls-files --modified` lists are
-    // submodules, and adds none. `ls-files` lists a submodule whose
-    // `.gitmodules` entry says `ignore = all` too, so its mark must not be
-    // left out either.
+    // submodules, and adds none. `ls-files` lists a submodule whose checked-out
+    // commit moved or that was deleted, even when its `.gitmodules` entry says
+    // `ignore = all`, but not one whose work tree alone holds edits. `dirty`
+    // lists the same, overriding that entry, and runs no `git status` in each
+    // submodule's work tree, as `none` would on every run to find edits
+    // `ls-files` does not list.
     let unstaged = spawn(&[
         "diff-files",
         "--raw",
         "--relative",
-        "--ignore-submodules=none",
+        "--ignore-submodules=dirty",
         "-z",
     ]);
     let working = git_command(root).map(|mut command| {
