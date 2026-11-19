@@ -54,7 +54,10 @@ pub fn write_sarif_with_baseline(
 /// Quality use. GitHub Code Scanning can then correlate alerts across runs even
 /// without `--baseline`. No `baselineState` is emitted (no baseline is in
 /// effect). `None` (generic dispatch / callers with no file access) emits no
-/// fingerprints, matching [`write_sarif`].
+/// fingerprints, matching [`write_sarif`]. A fingerprint that an earlier
+/// result of the run already carries is replaced by one derived from it and
+/// the repeat's occurrence, as GitLab output derives it, so that each finding
+/// stays its own alert.
 pub fn write_sarif_with_fingerprints(
     report: &Report,
     fingerprints: Option<&[Vec<String>]>,
@@ -198,6 +201,8 @@ fn build_sarif(
             }
         }
     }
+
+    tell_repeated_fingerprints_apart(&mut results);
 
     Sarif {
         schema: "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
@@ -504,6 +509,51 @@ fn build_fixes(rule_id: &str, v: &Violation) -> Vec<SarifFix> {
         },
         artifact_changes,
     }]
+}
+
+/// Give every result whose fingerprint an earlier result of the run already
+/// carries a fingerprint of its own, as GitLab output does: the canonical
+/// fingerprint is free of paths for some findings (a `constraint` rule's
+/// `unique` without `determines` gives one per repeated row, at different
+/// files), and GitHub Code Scanning may merge results that share one into a
+/// single alert. The first result with a fingerprint keeps it, so it stays
+/// the identity the baseline and GitLab give the finding; the Nth repeat
+/// (N > 0), in the order the results are written, gets
+/// [`occurrence_fingerprint`]. A run with no repeat is written unchanged.
+fn tell_repeated_fingerprints_apart(results: &mut [SarifResult]) {
+    let mut seen: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+    for result in results {
+        let Some(fingerprint) = result
+            .partial_fingerprints
+            .as_mut()
+            .and_then(|fingerprints| fingerprints.get_mut(FINGERPRINT_KEY))
+        else {
+            continue;
+        };
+        let count = seen.entry(fingerprint.clone()).or_insert(0);
+        let occurrence = *count;
+        *count += 1;
+        if occurrence > 0 {
+            *fingerprint = occurrence_fingerprint(fingerprint, occurrence);
+        }
+    }
+}
+
+/// The fingerprint of the `occurrence`th repeat of `base` in a run: the hex
+/// SHA-256 of `base`, `:` and the occurrence as four little-endian bytes,
+/// which is what GitLab output gives the same repeat.
+fn occurrence_fingerprint(base: &str, occurrence: u32) -> String {
+    use sha2::{Digest, Sha256};
+    use std::fmt::Write as _;
+    let mut hasher = Sha256::new();
+    hasher.update(base.as_bytes());
+    hasher.update(b":");
+    hasher.update(occurrence.to_le_bytes());
+    let mut hex = String::with_capacity(64);
+    for byte in hasher.finalize() {
+        let _ = write!(&mut hex, "{byte:02x}");
+    }
+    hex
 }
 
 fn fingerprint_map(fp: &str) -> BTreeMap<&'static str, String> {
@@ -1323,5 +1373,292 @@ mod tests {
         assert_eq!(by_msg("a1")["partialFingerprints"]["alint/v1"], "fp-a1");
         assert_eq!(by_msg("b1")["ruleId"], "rule-b");
         assert_eq!(by_msg("b1")["partialFingerprints"]["alint/v1"], "fp-b1");
+    }
+
+    /// A report whose every finding has its own fingerprint, under a baseline
+    /// and without one.
+    fn unrepeated_fingerprints() -> (Report, Vec<Vec<String>>, crate::BaselineMarks) {
+        use crate::{BaselineMarks, ResultMarks, SuppressedFinding};
+        let report = Report {
+            results: vec![
+                RuleResult {
+                    rule_id: "rule-a".into(),
+                    level: Level::Error,
+                    policy_url: None,
+                    violations: vec![
+                        Violation::new("a1").with_path(Path::new("a.txt")),
+                        Violation::new("a2").with_path(Path::new("b.txt")),
+                    ],
+                    notes: Vec::new(),
+                    is_fixable: false,
+                    analysis_failures: Vec::new(),
+                },
+                RuleResult {
+                    rule_id: "rule-b".into(),
+                    level: Level::Warning,
+                    policy_url: None,
+                    violations: vec![Violation::new("b1")],
+                    notes: Vec::new(),
+                    is_fixable: false,
+                    analysis_failures: Vec::new(),
+                },
+            ],
+        };
+        let fingerprints = vec![
+            vec!["fp-a1".to_string(), "fp-a2".to_string()],
+            vec!["fp-b1".to_string()],
+        ];
+        let marks = BaselineMarks {
+            per_result: vec![
+                ResultMarks {
+                    live_fingerprints: fingerprints[0].clone(),
+                    suppressed: vec![SuppressedFinding {
+                        violation: Violation::new("a0").with_path(Path::new("c.txt")),
+                        fingerprint: "fp-a0".into(),
+                    }],
+                },
+                ResultMarks {
+                    live_fingerprints: fingerprints[1].clone(),
+                    suppressed: Vec::new(),
+                },
+            ],
+            suppressed_total: 1,
+        };
+        (report, fingerprints, marks)
+    }
+
+    /// The SARIF a baselined run of [`unrepeated_fingerprints`] wrote before
+    /// repeated fingerprints were told apart, `{version}` for alint's.
+    const UNREPEATED_BASELINED: &str = r#"{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "alint",
+          "informationUri": "https://github.com/asamarts/alint",
+          "version": "{version}",
+          "rules": [
+            {
+              "id": "rule-a",
+              "shortDescription": {
+                "text": "alint rule `rule-a`"
+              }
+            },
+            {
+              "id": "rule-b",
+              "shortDescription": {
+                "text": "alint rule `rule-b`"
+              }
+            }
+          ]
+        }
+      },
+      "columnKind": "unicodeCodePoints",
+      "results": [
+        {
+          "ruleId": "rule-a",
+          "level": "error",
+          "message": {
+            "text": "a1"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "a.txt"
+                }
+              }
+            }
+          ],
+          "baselineState": "new",
+          "partialFingerprints": {
+            "alint/v1": "fp-a1"
+          }
+        },
+        {
+          "ruleId": "rule-a",
+          "level": "error",
+          "message": {
+            "text": "a2"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "b.txt"
+                }
+              }
+            }
+          ],
+          "baselineState": "new",
+          "partialFingerprints": {
+            "alint/v1": "fp-a2"
+          }
+        },
+        {
+          "ruleId": "rule-a",
+          "level": "error",
+          "message": {
+            "text": "a0"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "c.txt"
+                }
+              }
+            }
+          ],
+          "suppressions": [
+            {
+              "kind": "external"
+            }
+          ],
+          "baselineState": "unchanged",
+          "partialFingerprints": {
+            "alint/v1": "fp-a0"
+          }
+        },
+        {
+          "ruleId": "rule-b",
+          "level": "warning",
+          "message": {
+            "text": "b1"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".alint.yml"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "baselineState": "new",
+          "partialFingerprints": {
+            "alint/v1": "fp-b1"
+          }
+        }
+      ]
+    }
+  ]
+}
+"#;
+
+    /// A run whose findings each carry their own fingerprint is written as it
+    /// was before repeats were told apart, byte for byte, and each result
+    /// keeps the fingerprint it was given.
+    #[test]
+    fn a_run_without_repeated_fingerprints_is_unchanged() {
+        let (report, fingerprints, marks) = unrepeated_fingerprints();
+        let mut baselined = Vec::new();
+        write_sarif_with_baseline(&report, Some(&marks), &mut baselined).unwrap();
+        assert_eq!(
+            String::from_utf8(baselined).unwrap(),
+            UNREPEATED_BASELINED.replace("{version}", env!("CARGO_PKG_VERSION"))
+        );
+        let mut plain = Vec::new();
+        write_sarif_with_fingerprints(&report, Some(&fingerprints), &mut plain).unwrap();
+        let plain: Value = serde_json::from_slice(&plain).unwrap();
+        let shown: Vec<&str> = plain["runs"][0]["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|result| result["partialFingerprints"]["alint/v1"].as_str().unwrap())
+            .collect();
+        assert_eq!(shown, ["fp-a1", "fp-a2", "fp-b1"]);
+    }
+
+    /// Findings at different files can share a fingerprint, which is free of
+    /// paths for a `constraint` finding: each repeat within a run gets its
+    /// own, derived from the fingerprint and how many came before as GitLab
+    /// derives it, so Code Scanning keeps every finding as its own alert. The
+    /// first keeps the fingerprint it shares with the baseline and GitLab.
+    #[test]
+    fn a_repeated_fingerprint_gets_an_occurrence_of_its_own() {
+        use crate::{BaselineMarks, ResultMarks, SuppressedFinding};
+        let finding =
+            |message: &'static str, path: &str| Violation::new(message).with_path(Path::new(path));
+        let report = Report {
+            results: vec![RuleResult {
+                rule_id: "names-unique".into(),
+                level: Level::Error,
+                policy_url: None,
+                violations: vec![
+                    finding("`name` \"x\" is not unique", "b/package.json"),
+                    finding("`name` \"x\" is not unique", "c/package.json"),
+                    finding("`name` \"y\" is not unique", "d/package.json"),
+                    finding("`name` \"x\" is not unique", "e/package.json"),
+                ],
+                notes: Vec::new(),
+                is_fixable: false,
+                analysis_failures: Vec::new(),
+            }],
+        };
+        let fingerprints = vec![vec![
+            "fp-x".to_string(),
+            "fp-x".to_string(),
+            "fp-y".to_string(),
+            "fp-x".to_string(),
+        ]];
+        let shown = |sarif: &[u8]| -> Vec<String> {
+            let sarif: Value = serde_json::from_slice(sarif).unwrap();
+            sarif["runs"][0]["results"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|result| {
+                    result["partialFingerprints"]["alint/v1"]
+                        .as_str()
+                        .unwrap()
+                        .to_string()
+                })
+                .collect()
+        };
+        let mut sarif = Vec::new();
+        write_sarif_with_fingerprints(&report, Some(&fingerprints), &mut sarif).unwrap();
+        let sarif = shown(&sarif);
+        // GitLab's fingerprints for the same findings, in the same order.
+        let mut gitlab = Vec::new();
+        crate::gitlab::write_gitlab(&report, Some(&fingerprints), &mut gitlab).unwrap();
+        let gitlab: Vec<String> = serde_json::from_slice::<Value>(&gitlab)
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|issue| issue["fingerprint"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(sarif, gitlab);
+        assert_eq!(sarif[0], "fp-x");
+        assert_eq!(sarif[2], "fp-y");
+        let distinct: std::collections::BTreeSet<&String> = sarif.iter().collect();
+        assert_eq!(distinct.len(), 4, "{sarif:?}");
+
+        // Under a baseline, a suppressed finding counts in the same run.
+        let marks = BaselineMarks {
+            per_result: vec![ResultMarks {
+                live_fingerprints: vec!["fp-x".into()],
+                suppressed: vec![SuppressedFinding {
+                    violation: finding("`name` \"x\" is not unique", "a/package.json"),
+                    fingerprint: "fp-x".into(),
+                }],
+            }],
+            suppressed_total: 1,
+        };
+        let one = Report {
+            results: vec![RuleResult {
+                violations: report.results[0].violations[..1].to_vec(),
+                ..report.results[0].clone()
+            }],
+        };
+        let mut baselined = Vec::new();
+        write_sarif_with_baseline(&one, Some(&marks), &mut baselined).unwrap();
+        assert_eq!(shown(&baselined), [sarif[0].clone(), sarif[1].clone()]);
     }
 }
