@@ -2,7 +2,9 @@ use std::borrow::Cow;
 use std::io::Write;
 use std::path::Path;
 
-use alint_core::{AnalysisFailure, FixReport, FixStatus, Level, ProposedEdit, Report};
+use alint_core::{
+    AnalysisFailure, FixReport, FixStatus, Level, ProposedEdit, RelatedLocation, Report, Violation,
+};
 use serde::Serialize;
 
 use crate::BaselineMarks;
@@ -14,6 +16,66 @@ use crate::BaselineMarks;
 /// every other renderer (SARIF, GitLab, `JUnit`, GitHub, human).
 fn lossy_path(path: Option<&Path>) -> Option<Cow<'_, str>> {
     path.map(Path::to_string_lossy)
+}
+
+/// A finding's related locations, as SARIF's `relatedLocations` and the
+/// language server's `relatedInformation` carry them: each at most 20 the
+/// finding retains, in the order it holds them, and how many more it left
+/// out. Both are omitted when there are none, so a finding without related
+/// locations renders as before. A finding whose path came from protected
+/// configuration has none here, as in SARIF: a related path could reveal it.
+#[derive(Serialize)]
+struct JsonRelated<'a> {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    related_locations: Vec<JsonRelatedLocation<'a>>,
+    #[serde(skip_serializing_if = "is_zero")]
+    related_locations_omitted: usize,
+}
+
+/// One related location: its path, its label, and its range when it has
+/// one (1-based lines and columns, the end exclusive, as SARIF's region).
+#[derive(Serialize)]
+struct JsonRelatedLocation<'a> {
+    path: Cow<'a, str>,
+    label: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    line: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    column: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    end_line: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    end_column: Option<usize>,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde's `skip_serializing_if` passes a reference.
+fn is_zero(count: &usize) -> bool {
+    *count == 0
+}
+
+fn related(v: &Violation) -> JsonRelated<'_> {
+    if v.path_is_sensitive() {
+        return JsonRelated {
+            related_locations: Vec::new(),
+            related_locations_omitted: 0,
+        };
+    }
+    JsonRelated {
+        related_locations: v.related_locations.iter().map(related_location).collect(),
+        related_locations_omitted: v.related_locations_omitted,
+    }
+}
+
+fn related_location(location: &RelatedLocation) -> JsonRelatedLocation<'_> {
+    let range = location.range.as_ref();
+    JsonRelatedLocation {
+        path: location.path.to_string_lossy(),
+        label: &location.label,
+        line: range.map(alint_core::SourceRange::start_line),
+        column: range.map(alint_core::SourceRange::start_column),
+        end_line: range.map(alint_core::SourceRange::end_line),
+        end_column: range.map(alint_core::SourceRange::end_column),
+    }
 }
 
 #[derive(Serialize)]
@@ -54,6 +116,8 @@ struct JsonBaselined<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     column: Option<usize>,
     fingerprint: &'a str,
+    #[serde(flatten)]
+    related: JsonRelated<'a>,
 }
 
 #[derive(Serialize)]
@@ -97,6 +161,8 @@ struct JsonViolation<'a> {
     /// JSON string representation; a note never carries one.
     #[serde(skip_serializing_if = "Option::is_none")]
     proposed_edit: Option<&'a [ProposedEdit]>,
+    #[serde(flatten)]
+    related: JsonRelated<'a>,
 }
 
 #[derive(Serialize)]
@@ -110,6 +176,8 @@ struct JsonNote<'a> {
     column: Option<usize>,
     kind: &'static str,
     fixable: bool,
+    #[serde(flatten)]
+    related: JsonRelated<'a>,
 }
 #[derive(Serialize)]
 struct JsonAnalysisFailure<'a> {
@@ -164,6 +232,7 @@ pub fn write_json_with_baseline(
                     column: v.column,
                     fixable: v.is_fixable,
                     proposed_edit: crate::utf8_proposed_edits(v),
+                    related: related(v),
                 })
                 .collect(),
             notes: r
@@ -179,6 +248,7 @@ pub fn write_json_with_baseline(
                         .unwrap_or(alint_core::NoteKind::Informational)
                         .as_str(),
                     fixable: false,
+                    related: related(v),
                 })
                 .collect(),
             analysis_failures: r
@@ -202,6 +272,7 @@ pub fn write_json_with_baseline(
                         line: sf.violation.line,
                         column: sf.violation.column,
                         fingerprint: sf.fingerprint.as_str(),
+                        related: related(&sf.violation),
                     })
                 })
                 .collect()
@@ -486,5 +557,146 @@ mod tests {
         let out = render(&Report { results: vec![r] });
         assert!(!out.contains("baselined_suppressed"), "{out}");
         assert!(!out.contains("\"baselined\""), "{out}");
+    }
+
+    /// A finding with three related locations, the second without a range,
+    /// that left out two more.
+    fn related_finding(message: &'static str) -> Violation {
+        let range = |line, column| alint_core::SourceRange::new(line, column, line, column + 4);
+        let mut finding = Violation::new(message)
+            .with_path(std::path::PathBuf::from("a.json"))
+            .with_related_locations([
+                alint_core::RelatedLocation::new("b.json", "a row with another value")
+                    .with_range(range(2, 3).unwrap()),
+                alint_core::RelatedLocation::new("c.json", "the source row"),
+                alint_core::RelatedLocation::new("b.json", "another row with this value")
+                    .with_range(range(1, 9).unwrap()),
+            ]);
+        finding.related_locations_omitted = 2;
+        finding
+    }
+
+    /// What `related_locations` holds for each finding: `path:line:column-
+    /// end_line:end_column label`, or `path label` without a range.
+    fn shown_related(finding: &serde_json::Value) -> Vec<String> {
+        finding["related_locations"]
+            .as_array()
+            .map(|locations| {
+                locations
+                    .iter()
+                    .map(|location| match location.get("line") {
+                        Some(line) => format!(
+                            "{}:{line}:{}-{}:{} {}",
+                            location["path"].as_str().unwrap(),
+                            location["column"],
+                            location["end_line"],
+                            location["end_column"],
+                            location["label"].as_str().unwrap()
+                        ),
+                        None => format!(
+                            "{} {}",
+                            location["path"].as_str().unwrap(),
+                            location["label"].as_str().unwrap()
+                        ),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn related_locations_reach_violations_notes_and_baselined_findings_in_order() {
+        use crate::{BaselineMarks, ResultMarks, SuppressedFinding};
+        let finding = related_finding("live");
+        let held: Vec<String> = finding
+            .related_locations
+            .iter()
+            .map(|location| format!("{} {}", location.path.display(), location.label))
+            .collect();
+        let report = Report {
+            results: vec![RuleResult::new(
+                "r".into(),
+                Level::Error,
+                None,
+                vec![
+                    finding,
+                    related_finding("a note").as_note(),
+                    Violation::new("plain"),
+                ],
+                false,
+            )],
+        };
+        let marks = BaselineMarks {
+            per_result: vec![ResultMarks {
+                live_fingerprints: vec!["fp-live".into(), "fp-plain".into()],
+                suppressed: vec![SuppressedFinding {
+                    violation: related_finding("old"),
+                    fingerprint: "fp-old".into(),
+                }],
+            }],
+            suppressed_total: 1,
+        };
+        let mut buf = Vec::new();
+        write_json_with_baseline(&report, Some(&marks), true, &mut buf).unwrap();
+        let out: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+        // The order the finding holds, which sorts them by path and range.
+        let expected = [
+            "b.json:1:9-1:13 another row with this value",
+            "b.json:2:3-2:7 a row with another value",
+            "c.json the source row",
+        ];
+        assert_eq!(
+            held,
+            [
+                "b.json another row with this value",
+                "b.json a row with another value",
+                "c.json the source row"
+            ]
+        );
+        let result = &out["results"][0];
+        for finding in [
+            &result["violations"][0],
+            &result["notes"][0],
+            &out["baselined"][0],
+        ] {
+            assert_eq!(shown_related(finding), expected, "{finding}");
+            assert_eq!(finding["related_locations_omitted"], 2, "{finding}");
+        }
+        // Neither field appears on a finding without related locations.
+        let plain = &result["violations"][1];
+        assert_eq!(plain["message"], "plain");
+        assert!(plain.get("related_locations").is_none(), "{plain}");
+        assert!(plain.get("related_locations_omitted").is_none(), "{plain}");
+    }
+
+    #[test]
+    fn a_protected_path_leaves_out_every_related_location_as_sarif_does() {
+        let mut finding = related_finding("protected");
+        finding.path_sensitive = true;
+        let report = Report {
+            results: vec![RuleResult::new(
+                "r".into(),
+                Level::Error,
+                None,
+                vec![finding],
+                false,
+            )],
+        };
+        let out: serde_json::Value = serde_json::from_str(&render(&report)).unwrap();
+        let violation = &out["results"][0]["violations"][0];
+        assert_eq!(violation["path"], "<redacted>");
+        assert!(violation.get("related_locations").is_none(), "{violation}");
+        assert!(
+            violation.get("related_locations_omitted").is_none(),
+            "{violation}"
+        );
+        let mut sarif = Vec::new();
+        crate::write_sarif(&report, &mut sarif).unwrap();
+        let sarif: serde_json::Value = serde_json::from_slice(&sarif).unwrap();
+        assert!(
+            sarif["runs"][0]["results"][0]
+                .get("relatedLocations")
+                .is_none()
+        );
     }
 }

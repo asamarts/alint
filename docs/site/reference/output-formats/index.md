@@ -82,19 +82,29 @@ single `line` / `column` points remain valid and are used when no primary range 
 Relationship rules use this metadata to keep their established report anchor while also pointing
 to the source, target, partner, or colliding member that explains the failure.
 
-- **`human`** lists each related label and path below the finding. A finding retains at most 20
-  related locations; if producers supplied more, the output reports the omitted count.
+A finding retains at most 20 related locations, in a fixed order; when its producer had more, it
+keeps the count of the rest. Each format that has a place for related locations shows the same
+20, in the same order, with the same path, range and label, and shows the count of the rest:
+
+- **`human`** lists each related label and path below the finding, then a line `and N more
+  related locations`.
+- **`json`** adds `related_locations` to the violation, note or baselined finding: an array of
+  `{ "path", "label" }` objects, each with `line`, `column`, `end_line` and `end_column` when its
+  range is known (1-based, Unicode code points, the end exclusive, as SARIF regions). The count of
+  the rest is `related_locations_omitted`. Both are omitted when there are none, so a finding
+  without related locations keeps its earlier shape, and the report stays `schema_version: 1`.
 - **`sarif`** projects the primary range into the result's first physical location and emits the
   secondary locations in `relatedLocations`, including regions when known. SARIF columns use
-  Unicode code points.
+  Unicode code points. The count of the rest is one more related location at the config file,
+  with the message `and N more related locations`.
 - **LSP diagnostics** project the primary range into `Diagnostic.range` and related locations into
   `Diagnostic.relatedInformation`, with UTF-16 columns. alint sends related information only when
-  the client advertises `publishDiagnostics.relatedInformation`.
+  the client advertises `publishDiagnostics.relatedInformation`. The count of the rest is one more
+  entry at the finding's own range, with the message `and N more related locations`.
 
-The other check-format payloads do not gain related-location fields in v0.19. In particular, the
-JSON report remains `schema_version: 1` with its previous emitted shape. Its schema now permits
-additive fields so consumers can adopt the structured fields in the next release without an
-atomic schema migration; required fields and known-field types remain enforced.
+A finding whose path is `<redacted>` carries no related locations in any of these formats, since
+a related path could reveal what the redaction hides. The `github`, `gitlab`, `junit`, `markdown`
+and `agent` formats carry one location per finding, or none, and no related locations.
 
 ## Stable fingerprints
 

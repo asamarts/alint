@@ -113,6 +113,17 @@
           "type": "array",
           "description": "The concrete Safe edit(s) `alint fix` would apply to resolve this violation. Present only under `--include-fixes`, only for a Safe-fixable finding, and only when every target path has an exact JSON string representation.",
           "items": { "$ref": "#/$defs/proposed_edit" }
+        },
+        "related_locations": {
+          "type": "array",
+          "maxItems": 20,
+          "description": "The finding's related locations: the other places that explain it (the row it repeats, the source row, the reference row), at most 20, in the order the finding holds them, as SARIF `relatedLocations` and the language server's `relatedInformation` carry them. Omitted when there are none, and for a finding whose path is redacted.",
+          "items": { "$ref": "#/$defs/related_location" }
+        },
+        "related_locations_omitted": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "How many more related locations the finding had past the 20 it lists. Omitted when none were left out."
         }
       }
     },
@@ -136,6 +147,17 @@
         "fixable": {
           "const": false,
           "description": "Notes are non-violations and are never auto-fixable."
+        },
+        "related_locations": {
+          "type": "array",
+          "maxItems": 20,
+          "description": "The finding's related locations: the other places that explain it (the row it repeats, the source row, the reference row), at most 20, in the order the finding holds them, as SARIF `relatedLocations` and the language server's `relatedInformation` carry them. Omitted when there are none, and for a finding whose path is redacted.",
+          "items": { "$ref": "#/$defs/related_location" }
+        },
+        "related_locations_omitted": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "How many more related locations the finding had past the 20 it lists. Omitted when none were left out."
         }
       }
     },
@@ -189,7 +211,32 @@
         "message": { "type": "string" },
         "line": { "type": "integer", "minimum": 1 },
         "column": { "type": "integer", "minimum": 1 },
-        "fingerprint": { "type": "string", "description": "The baseline fingerprint that matched." }
+        "fingerprint": { "type": "string", "description": "The baseline fingerprint that matched." },
+        "related_locations": {
+          "type": "array",
+          "maxItems": 20,
+          "description": "The finding's related locations: the other places that explain it (the row it repeats, the source row, the reference row), at most 20, in the order the finding holds them, as SARIF `relatedLocations` and the language server's `relatedInformation` carry them. Omitted when there are none, and for a finding whose path is redacted.",
+          "items": { "$ref": "#/$defs/related_location" }
+        },
+        "related_locations_omitted": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "How many more related locations the finding had past the 20 it lists. Omitted when none were left out."
+        }
+      }
+    },
+    "related_location": {
+      "type": "object",
+      "required": ["path", "label"],
+      "additionalProperties": true,
+      "description": "A place that explains a finding. The range is present when the producer knows it: 1-based lines and columns counted in Unicode characters, the end exclusive, as SARIF regions are.",
+      "properties": {
+        "path": { "type": "string", "description": "Repo-relative path." },
+        "label": { "type": "string", "description": "What the location is to the finding." },
+        "line": { "type": "integer", "minimum": 1 },
+        "column": { "type": "integer", "minimum": 1 },
+        "end_line": { "type": "integer", "minimum": 1 },
+        "end_column": { "type": "integer", "minimum": 1 }
       }
     }
   }

@@ -425,6 +425,14 @@ policy-test package the user does not trust.
 
 ### Added
 
+- **`related_locations` in the JSON report**: each violation, note and baselined finding of
+  `check --format json` carries the related locations its rule found, as SARIF's
+  `relatedLocations` and the language server's `relatedInformation` do: an array of `path`,
+  `label` and, when the range is known, `line`, `column`, `end_line` and `end_column` (1-based,
+  Unicode code points, end exclusive), at most 20 in the finding's order, and
+  `related_locations_omitted`, the count of the rest. Both are left out when there are none, and
+  for a finding whose path is `<redacted>`, as SARIF leaves its related locations out. The report
+  stays `schema_version: 1`; `schemas/v1/check-report.json` describes both fields.
 - **`alint_dsl::discover_config` and `alint_dsl::Discovery`** (library API, see Security):
   discovery's result with the config files it skipped because another user owns them, for a caller
   to warn about. **`alint_core::git::repository_top`**, the nearest directory at or above a path
