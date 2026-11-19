@@ -1,7 +1,10 @@
 # Test fixture: every rule kind that only a `version: 2` config may use (the
-# `constraint` kind, in each of its families), beside `all_kinds.yaml`, which
-# has every other kind. The checks that cover every registered kind read both
-# (ADR-0012; design `v0.23/selectors-and-constraints.md` section 11).
+# `constraint` kind, in each of its families, over each source shape a plan
+# can read: a selector, a join, a union, a membership list, a `set` against
+# a relation and an inline input), beside `all_kinds.yaml`, which has every
+# other kind. The checks that cover every registered kind read both (ADR-0012;
+# design `v0.23/selectors-and-constraints.md` section 11), `explain`'s plan
+# among them.
 version: 2
 
 selectors:
@@ -32,6 +35,21 @@ relations:
   pins:
     join: { left: versions, right: names, on: { manifest: manifest }, unique: right }
     fields: { node: left.node, name: right.name }
+  node-pins:
+    union:
+      - from: { paths: .nvmrc }
+        read: { regex: "^v?(.+)$" }
+      - from: manifests
+        read: { json: "$.engines.node" }
+        optional: true
+    fields: { source: path, node: value }
+    transform: { node: [trim] }
+  external-ranges:
+    from: manifests
+    entries: { format: json, at: "$.dependencies" }
+    fields: { manifest: path, dependency: entry.key, range: entry.value }
+    where:
+      dependency: { not_in: ["@types/node", { relation: names, field: name }] }
 
 rules:
   - id: names-unique
@@ -103,6 +121,31 @@ rules:
         disjoint_from: { group: pseudo }
     level: info
     sensitive: false
+
+  - id: one-node-pin
+    kind: constraint
+    input: node-pins
+    assert:
+      equal:
+        field: node
+        to: { row: { source: .nvmrc } }
+    level: warning
+
+  - id: external-ranges-agree
+    kind: constraint
+    input: external-ranges
+    assert:
+      unique: { key: [dependency], determines: [range] }
+    level: info
+
+  - id: manifests-name-workspaces
+    kind: constraint
+    input: versions
+    assert:
+      set:
+        field: manifest
+        subset_of: { relation: names, field: manifest }
+    level: info
 
   - id: inline-input
     kind: constraint

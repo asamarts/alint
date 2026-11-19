@@ -1,0 +1,45 @@
+{
+  "capabilities": [
+    {
+      "capability": {
+        "kind": "git",
+        "operations": [
+          "diff"
+        ]
+      },
+      "condition": {
+        "kind": "common_field_set",
+        "field": "scope_filter.changed_since"
+      }
+    }
+  ],
+  "categories": [
+    "text-hygiene"
+  ],
+  "conditional": false,
+  "docs": "https://alint.org/docs/rules/text-hygiene/no_trailing_whitespace/",
+  "expect_matches": false,
+  "fix": "strip trailing whitespace on every line",
+  "fix_ops": [
+    "file_trim_trailing_whitespace"
+  ],
+  "fixable": true,
+  "id": "no-tabs",
+  "kind": "rule",
+  "level": "error",
+  "message": null,
+  "options": null,
+  "paths": {
+    "exclude": [],
+    "include": [
+      "**/*.md"
+    ]
+  },
+  "policy_url": null,
+  "rule_kind": "no_trailing_whitespace",
+  "schema_version": 1,
+  "scope_filter": null,
+  "selectors": [],
+  "summary": "No line may end with space or tab.",
+  "when": null
+}

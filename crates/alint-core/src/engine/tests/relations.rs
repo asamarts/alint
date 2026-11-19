@@ -42,6 +42,7 @@ fn relation(name: &str, file: &str) -> NamedRelation {
         },
         capabilities: Capabilities::default(),
         reads_environment: false,
+        definition_reads_environment: false,
     }
 }
 

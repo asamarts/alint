@@ -51,6 +51,7 @@ fn named(name: &str, rows: Rows, fields: &[(&str, FieldSource)]) -> NamedRelatio
         },
         capabilities: crate::relation::plan::Capabilities::default(),
         reads_environment: false,
+        definition_reads_environment: false,
     }
 }
 

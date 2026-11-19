@@ -1,0 +1,46 @@
+{
+  "capabilities": [
+    {
+      "capability": {
+        "kind": "git",
+        "operations": [
+          "tracked_set"
+        ]
+      },
+      "condition": {
+        "kind": "option_set",
+        "option": "git_tracked_only"
+      }
+    }
+  ],
+  "categories": [
+    "existence"
+  ],
+  "conditional": false,
+  "docs": "https://alint.org/docs/rules/existence/file_exists/",
+  "expect_matches": false,
+  "fix": null,
+  "fix_ops": [
+    "file_create"
+  ],
+  "fixable": false,
+  "id": "license-present",
+  "kind": "rule",
+  "level": "error",
+  "message": "add a license",
+  "options": null,
+  "paths": {
+    "exclude": [],
+    "include": [
+      "LICENSE",
+      "LICENSE.md"
+    ]
+  },
+  "policy_url": null,
+  "rule_kind": "file_exists",
+  "schema_version": 1,
+  "scope_filter": null,
+  "selectors": [],
+  "summary": "Every glob match in paths must correspond to a real file.",
+  "when": null
+}

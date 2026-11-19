@@ -1,0 +1,11 @@
+id:         no-tabs
+kind:       no_trailing_whitespace
+categories: text-hygiene
+summary:    No line may end with space or tab.
+capabilities: git(diff) [when scope_filter.changed_since is set]
+selector fields: none
+fix_ops:     file_trim_trailing_whitespace
+docs:       https://alint.org/docs/rules/text-hygiene/no_trailing_whitespace/
+level:      error
+paths:      **/*.md
+fix:        strip trailing whitespace on every line

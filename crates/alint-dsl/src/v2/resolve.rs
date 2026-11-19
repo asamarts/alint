@@ -574,6 +574,7 @@ pub(crate) fn resolve(objects: &Objects) -> Result<Resolved<'_>> {
             relation,
             capabilities: Capabilities::default(),
             reads_environment: reads_environment || selectors_read_environment,
+            definition_reads_environment: reads_environment,
         });
     }
     let order = super::plan_check::check(&plan).map_err(|failure| {

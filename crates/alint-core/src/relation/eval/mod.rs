@@ -431,31 +431,16 @@ impl Evaluator<'_> {
     }
 
     /// `id` and the relations it reads, transitively, each after those it
-    /// reads; those the memo holds are left out. The walk keeps its own
-    /// stack, so a long chain of joins cannot exhaust the thread's, and it
-    /// visits each relation once (the plan check refused cycles).
+    /// reads; those the memo holds are left out ([`Plan::post_order`]).
     fn order(&self, id: RelationId) -> Vec<RelationId> {
         let mut order = Vec::new();
         let mut visited = vec![false; self.plan.relations.len()];
-        let mut stack = vec![(id, false)];
-        while let Some((next, expanded)) = stack.pop() {
-            if expanded {
-                order.push(next);
-                continue;
-            }
-            if std::mem::replace(&mut visited[next.0], true) || self.memo.evaluated(next) {
-                continue;
-            }
-            stack.push((next, true));
-            for read in ops::reads(&self.plan.relation(next).relation)
-                .into_iter()
-                .rev()
-            {
-                if !visited[read.0] {
-                    stack.push((read, false));
-                }
-            }
-        }
+        self.plan.post_order(
+            id,
+            &mut visited,
+            &|next| self.memo.evaluated(next),
+            &mut order,
+        );
         order
     }
 

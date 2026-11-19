@@ -811,6 +811,12 @@
             }
           ]
         },
+        "plan": {
+          "type": [
+            "object",
+            "string"
+          ]
+        },
         "policy_url": {
           "type": [
             "string",
