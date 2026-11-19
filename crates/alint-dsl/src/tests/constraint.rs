@@ -302,6 +302,31 @@ fn an_inline_input_is_planned_under_a_name_no_config_can_write() {
     );
 }
 
+/// A built rule says it reads relations, so the engine turns the run's
+/// relation caches on for it (each file a relation reads is read once),
+/// evaluates its inputs before the rules run and hands it the full index.
+#[test]
+fn a_built_rule_reads_its_relations_through_the_runs_caches() {
+    let config = builds(
+        &v2(
+            NAMES,
+            "    input: names\n    assert: { unique: { key: [name] } }\n",
+        ),
+        &[],
+    );
+    let rule = test_registry()
+        .build(&config.rules[0])
+        .expect("the rule builds");
+    assert!(rule.uses_relations());
+    assert!(rule.requires_full_index());
+    let (plan, inputs) = rule.relation_inputs().expect("the rule's inputs");
+    let names: Vec<&str> = inputs
+        .iter()
+        .map(|&id| plan.relation(id).name.as_str())
+        .collect();
+    assert_eq!(names, ["names"]);
+}
+
 #[test]
 fn an_inline_input_of_a_template_is_planned_too() {
     let template = "version: 2\ntemplates:\n  - id: t\n    kind: constraint\n    input:\n      \
@@ -524,6 +549,17 @@ fn every_field_an_assertion_names_is_a_field_of_its_relation() {
         "message",
         "nmae",
     );
+    // A placeholder of one character or none before it is skipped whole.
+    for before in ["{{x}}", "{{}}"] {
+        unknown(
+            &format!(
+                "    assert: {{ unique: {{ key: [name] }} }}\n    message: \"{before} \
+                 {{{{row.nmae}}}}\"\n"
+            ),
+            "message",
+            "nmae",
+        );
+    }
 }
 
 #[test]
@@ -931,6 +967,36 @@ fn a_set_grouped_by_a_path_token_reads_the_resources_its_relation_lists() {
          of that side",
     );
     builds(&v2(&objects, &set("mine")), &[]);
+    // A field copied from the `unique:` side that is no path token groups
+    // as any field does.
+    let named = objects.replace(
+        "theirs: right.manifest",
+        "theirs: right.manifest, name: right.name",
+    );
+    builds(&v2(&named, &set("name")), &[]);
+    // A join's copy of a join's copy of a path token is one too, from
+    // whichever side of the inner join it came.
+    let outer = format!(
+        "{objects}  outer:\n    join: {{ left: names, right: linked, on: {{ name: dependency }}, \
+         unique: right }}\n    fields: {{ name: left.name, copied: right.mine }}\n"
+    );
+    refused_with(&outer)(
+        "    input: outer\n    assert: { set: { field: name, group_by: copied, subset_of: { \
+         relation: names, field: name } } }\n",
+        "assert.set.group_by",
+        "`copied` is a path token that relation `outer` (.alint.yml) copies from its `unique:` \
+         side; a `set` grouped by a path token gives every resource the relation reads a group, \
+         and a join reads the resources of its other side, so group by a field of that side",
+    );
+    // What a join copies holds what its side's field holds: a boolean never
+    // equals a path.
+    refused_with(&objects)(
+        "    input: linked\n    assert: { equal: { field: dependency, to: { row: { theirs: true \
+         } } } }\n",
+        "assert.equal.to.row.theirs",
+        "`theirs` holds strings, and a boolean never equals a string; quote it (`'true'`) to \
+         match that text",
+    );
 }
 
 #[test]

@@ -903,3 +903,41 @@ fn a_set_against_another_relation_is_linear_in_the_rows() {
         "4,000 groups took {elapsed:?}"
     );
 }
+
+/// A join's field copied from its `unique:` side is no path token, even
+/// when its other side has a path token of that name: a `where:` on it
+/// never rejects a file by its path, so the group's first file is the
+/// first the join reads.
+#[test]
+fn a_field_copied_from_the_unique_side_rejects_no_file_by_its_path() {
+    let config = "version: 2\nrelations:\n  deps:\n    from: { paths: \"packages/*/package.json\" \
+                  }\n    entries: { format: json, at: \"$.dependencies\" }\n    fields: { \
+                  dependency: entry.key, dir: parent_name }\n  names:\n    from: { paths: \
+                  \"packages/*/package.json\" }\n    read: { json: \"$.name\" }\n    fields: { \
+                  name: value, dir: value }\n  linked:\n    join: { left: deps, right: names, on: \
+                  { dependency: name }, unique: right }\n    fields: { dependency: \
+                  left.dependency, d: right.dir }\n    where: { d: { in: [b] } }\n  wanted:\n    \
+                  from: { paths: wanted.json }\n    entries: { format: json, at: \"$\" }\n    \
+                  fields: { name: entry.key }\nrules:\n  - id: c\n    kind: constraint\n    \
+                  input: linked\n    assert: { set: { field: dependency, equal_to: { relation: \
+                  wanted, field: name } } }\n    level: error\n";
+    let files = [
+        ("wanted.json", "{\"b\": 1,\n\"react\": 1}\n"),
+        (
+            "packages/a/package.json",
+            "{\"name\": \"a\", \"dependencies\": {\"b\": \"1\"}}\n",
+        ),
+        (
+            "packages/b/package.json",
+            "{\"name\": \"b\", \"dependencies\": {\"a\": \"1\"}}\n",
+        ),
+    ];
+    let results = run(config, &files);
+    assert_eq!(
+        findings(&results, "c"),
+        [
+            "packages/a/package.json: relation `linked` lacks `dependency` \"react\", which `name` \
+          of relation `wanted` holds\n  ~ the row of relation `wanted` with it: wanted.json:2:1"
+        ]
+    );
+}

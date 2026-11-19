@@ -229,6 +229,26 @@ fn a_finding_lists_twenty_related_locations_and_counts_the_rest() {
     assert_eq!(first.related_locations_omitted, 5);
 }
 
+#[test]
+fn a_message_lists_five_other_values_and_counts_the_rest() {
+    let mut body = String::from("{\"owners\": {");
+    for index in 0..8 {
+        write!(body, "\"k{index}\": \"v{index}\", ").unwrap();
+    }
+    body.push_str("\"z\": \"v0\"}}");
+    let config = entries("[\"$.owners\"]", OWNERS, "{ equal: { field: owner } }");
+    let results = run(&config, &[("owners.json", &body)]);
+    let shown = findings(&results, "c");
+    assert_eq!(shown.len(), 8);
+    // Each finding lists five of the seven other values and counts two.
+    for finding in &shown {
+        let message = finding.lines().next().unwrap();
+        assert!(message.ends_with("; and 2 more values"), "{finding}");
+        // Its own value, five others and the count.
+        assert_eq!(message.split("; ").count(), 7, "{finding}");
+    }
+}
+
 // --- `equal` within groups ---------------------------------------------------
 
 #[test]
@@ -462,6 +482,20 @@ fn a_literal_of_another_type_than_the_field_is_an_analysis_failure() {
           cross types, so the assertion has no verdict"
         ]
     );
+    // A value at the document root is named by its file alone.
+    let config = "version: 2\nrelations:\n  r:\n    from: { paths: \"*.json\" }\n    read: { \
+                  json: \"$\" }\n    fields: { v: value, r: \"bound: $\" }\nrules:\n  - id: c\n    \
+                  kind: constraint\n    input: r\n    assert: { equal: { field: v, to: { row: { r: \
+                  true } } } }\n    level: error\n";
+    let results = run(config, &[("pin.json", "\"x\"")]);
+    assert_eq!(
+        failures(&results, "c"),
+        [
+            "pin.json: relation `r` (.alint.yml): `assert.equal.to.row.r`: the literal is a \
+             boolean and `r` holds a string at pin.json; the comparison would cross types, so the \
+             assertion has no verdict"
+        ]
+    );
 }
 
 #[test]
@@ -616,6 +650,20 @@ fn a_set_whose_values_or_group_cross_types_has_no_verdict() {
             "messages.json: relation `m` (.alint.yml): `assert.set.equal_to.group`: the literal is \
           a string and `locale` holds a boolean at `en.a` in messages.json; the comparison would \
           cross types, so the assertion has no verdict"
+        ]
+    );
+    // Groups of two types stop the assertion there: no literal is compared
+    // with them, so the one failure is the groups'.
+    let results = run(
+        &config,
+        &[("messages.json", "{\"en\": {\"a\": true, \"b\": \"x\"}}")],
+    );
+    assert_eq!(
+        failures(&results, "c"),
+        [
+            "messages.json: relation `m` (.alint.yml): `assert.set.group_by`: `locale` holds a \
+          boolean at `en.a` in messages.json and a string at `en.b` in messages.json; the \
+          comparison would cross types, so the assertion has no verdict"
         ]
     );
 }
@@ -805,6 +853,23 @@ fn a_key_names_the_family_and_the_values_it_is_about() {
     for violation in &result(&results, "c").violations {
         assert!(violation.path_free_identity);
     }
+    // A row compared with a source row is named by its file and key path,
+    // which no sensitive field hides here.
+    let config = entries(
+        "\"$.owners\"",
+        OWNERS,
+        "{ equal: { field: owner, to: { row: { name: a } } } }",
+    );
+    let results = run(
+        &config,
+        &[("owners.json", "{\"owners\": {\"a\": \"x\", \"b\": \"y\"}}")],
+    );
+    let keys: Vec<&str> = result(&results, "c")
+        .violations
+        .iter()
+        .map(|violation| violation.baseline_key.as_deref().unwrap())
+        .collect();
+    assert_eq!(keys, ["5:equal6:source11:owners.json8:owners.b"]);
 }
 
 // --- Bounds, places and identity (the step 1 review) -------------------------
@@ -1012,6 +1077,61 @@ fn a_finding_about_a_field_of_a_joins_unique_side_sits_at_the_rows_own_entry() {
              a/package.json"
         ]
     );
+    // Whichever field comes first, a finding sits at a cell of the row's own
+    // entry with a span, not at the first cell with one: here the name, an
+    // entry's value, has one in shared/package.json.
+    let swapped = config
+        .replace(
+            "fields: { range: left.range, wname: right.name }",
+            "fields: { wname: right.name, range: left.range }",
+        )
+        .replace(
+            "names:\n    from: { paths: \"*/package.json\" }\n    read: { json: \"$.name\" }\n    \
+             fields: { name: value }",
+            "names:\n    from: { paths: shared/package.json }\n    entries: { format: json, at: \
+             \"$\" }\n    fields: { name: entry.value }",
+        );
+    assert!(swapped.contains("fields: { name: entry.value }"));
+    let results = run(
+        &swapped,
+        &[
+            ("a/package.json", &dependent.replace('N', "a")),
+            ("shared/package.json", "{\"name\": \"shared\"}"),
+        ],
+    );
+    let found = findings(&results, "e");
+    assert_eq!(found.len(), 1);
+    assert!(
+        found[0].starts_with("a/package.json:2:28: `wname` is \"shared\""),
+        "{found:?}"
+    );
+}
+
+/// A join of two relations that read the same entries: a cell the join
+/// copies from its unique side is at the row's own entry, though another
+/// relation read it, so a finding sits at that cell.
+#[test]
+fn a_cell_another_relation_read_at_the_rows_own_entry_is_its_own() {
+    let config = "version: 2\nrelations:\n  keys:\n    from: { paths: package.json }\n    \
+                  entries: { format: json, at: \"$.dependencies\" }\n    fields: { dependency: \
+                  entry.key }\n  ranges:\n    from: { paths: package.json }\n    entries: { \
+                  format: json, at: \"$.dependencies\" }\n    fields: { name: entry.key, range: \
+                  entry.value }\n  linked:\n    join: { left: keys, right: ranges, on: { \
+                  dependency: name }, unique: right }\n    fields: { dependency: left.dependency, \
+                  range: right.range }\nrules:\n  - id: e\n    kind: constraint\n    input: \
+                  linked\n    assert: { equal: { field: range } }\n    level: error\n";
+    let results = run(
+        config,
+        &[(
+            "package.json",
+            "{\"dependencies\": {\"a\": \"^1\",\n\"b\": \"^2\"}}",
+        )],
+    );
+    let found = findings(&results, "e");
+    assert_eq!(found.len(), 2, "{found:?}");
+    // At each range, never at its key.
+    assert!(found[0].starts_with("package.json:1:24: "), "{found:?}");
+    assert!(found[1].starts_with("package.json:2:6: "), "{found:?}");
 }
 
 #[test]
