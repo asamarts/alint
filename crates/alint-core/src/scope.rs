@@ -244,7 +244,7 @@ impl Scope {
     /// glob include only when it can have more components than `dir` (any
     /// number after a `**`) and each of its leading components, a literal
     /// name or a wildcard, can match `dir`'s ([`IncludeDepth`]): neither
-    /// `a/[!x]*.txt` nor `b/**` can match below `a/sm`. `true` when the
+    /// `a/[xy]*.txt` nor `b/**` can match below `a/sm`. `true` when the
     /// patterns cannot tell. The excludes and the `scope_filter` are not
     /// consulted.
     pub(crate) fn may_match_below(&self, dir: &Path) -> bool {
@@ -488,8 +488,11 @@ fn include_dirs(patterns: &[String]) -> Option<Box<[Box<Path>]>> {
 /// What the components of a path an include pattern matches can be, as far as
 /// [`Scope::may_match_below`] needs them. With a separator that only `/` (or,
 /// where it separates, `\\`) spells, a pattern of `n` components without `**`
-/// matches only paths of `n` components, since `*`, `?` and a class never
-/// match a separator: `a/[!x]*.txt` matches `a/b.txt` and nothing below `a/b`.
+/// matches only paths of `n` components, since `*` and `?` never match a
+/// separator, nor does a class that lists characters other than `/` and no
+/// range and is not negated: `a/[xy]*.txt` matches `a/x.txt` and nothing below
+/// `a/x`. A class that can match `/` leaves the count untold
+/// ([`class_may_match_separator`]).
 #[derive(Debug, Clone)]
 struct IncludeDepth {
     /// The pattern's components before its first `**` (all of them without
@@ -531,7 +534,7 @@ fn include_depth(pattern: &str, backslash_is_separator: bool) -> Option<IncludeD
     // outside a class only.
     if pattern.contains('{')
         || (pattern.contains('\\') && (!backslash_is_separator || pattern.contains('[')))
-        || class_holds_separator(pattern)
+        || class_may_match_separator(pattern)
     {
         return None;
     }
@@ -561,14 +564,19 @@ fn include_depth(pattern: &str, backslash_is_separator: bool) -> Option<IncludeD
 }
 
 /// Whether a class in `pattern` (`[...]`, its first `]` after an optional
-/// `!` or `^` a member) holds a `/`, or one is never closed.
-fn class_holds_separator(pattern: &str) -> bool {
+/// `!` or `^` a member) can match a `/`, or one is never closed. globset
+/// matches a separator with a class even under `literal_separator`, so
+/// `a[!x]sm` matches `a/sm` and `a[+-b]a` matches `a/a`. Rather than tell
+/// which ranges span `/`, a class that is negated or holds a `-` counts as one
+/// that can, as does one that holds a `/`: only a class that lists other
+/// characters alone is certain not to.
+fn class_may_match_separator(pattern: &str) -> bool {
     let bytes = pattern.as_bytes();
     let mut at = 0;
     while let Some(open) = bytes[at..].iter().position(|&b| b == b'[') {
         let mut end = at + open + 1;
         if matches!(bytes.get(end), Some(b'!' | b'^')) {
-            end += 1;
+            return true;
         }
         if bytes.get(end) == Some(&b']') {
             end += 1;
@@ -580,7 +588,10 @@ fn class_holds_separator(pattern: &str) -> bool {
             return true;
         };
         let close = end + close;
-        if bytes[at + open..close].contains(&b'/') {
+        if bytes[at + open..close]
+            .iter()
+            .any(|&b| matches!(b, b'/' | b'-'))
+        {
             return true;
         }
         at = close + 1;
@@ -1092,21 +1103,22 @@ mod tests {
     #[test]
     fn a_single_component_pattern_can_match_below_the_root_alone() {
         assert_eq!(below(&["*.json"], &["", "a", "a/b"]), [true, false, false]);
-        assert_eq!(below(&["[!x]*.txt"], &["", "a"]), [true, false]);
+        assert_eq!(below(&["[xy]*.txt"], &["", "a"]), [true, false]);
         assert_eq!(
             below(&["pins.toml"], &["", "pins.toml", "a"]),
             [true, false, false]
         );
     }
 
-    /// A pattern without `**` matches paths of as many components as it has:
-    /// below a directory only when it has more, and each leading component,
-    /// literal or wildcard, can match the directory's.
+    /// A pattern without `**`, and without a class that can match a separator,
+    /// matches paths of as many components as it has: below a directory only
+    /// when it has more, and each leading component, literal or wildcard, can
+    /// match the directory's.
     #[test]
     fn a_fixed_depth_pattern_can_match_only_above_its_depth_and_along_its_names() {
         let dirs = ["", "a", "a/sm", "a/sm/x", "b", "b/sm"];
         assert_eq!(
-            below(&["a/[!x]*.txt"], &dirs),
+            below(&["a/[xy]*.txt"], &dirs),
             [true, true, false, false, false, false]
         );
         assert_eq!(
@@ -1152,7 +1164,7 @@ mod tests {
     }
 
     /// A pattern whose components its text cannot tell (an alternation, a
-    /// class that holds a separator, an escape) can match below any
+    /// class that can match a separator, an escape) can match below any
     /// directory its literal leading directories allow.
     #[test]
     fn a_pattern_of_untold_components_can_match_below_any_directory() {
@@ -1161,5 +1173,80 @@ mod tests {
         assert_eq!(below(&["{a,b}/*.json"], &dirs), [true, true]);
         assert_eq!(below(&["a/x[/z]*.json"], &dirs), [true, false]);
         assert_eq!(below(&["a/x[]/]*.json"], &dirs), [true, false]);
+        // A negated class, or a range that spans `/`, matches a separator:
+        // `a[!x]sm/*.json` matches `a/sm/c.json`.
+        assert_eq!(below(&["a[!x]sm/*.json"], &dirs), [true, true]);
+        assert_eq!(below(&["a/x[^y]z.json"], &dirs), [true, false]);
+        assert_eq!(below(&["a/x[+-z]y.json"], &dirs), [true, false]);
+        assert_eq!(below(&["[!.]*/a[.-0]sm"], &["a/a"]), [true]);
+    }
+
+    /// [`Scope::may_match_below`] never rules out a directory that a path the
+    /// patterns match lies below. Every pattern of up to three tokens (four,
+    /// of the kinds that change a pattern's components) is tested against
+    /// every path of up to three components over a few names, as globset
+    /// matches them.
+    #[test]
+    fn may_match_below_never_rules_out_a_directory_a_match_lies_below() {
+        const TOKENS: [&str; 15] = [
+            "a", "b", "*", "?", "[a]", "[!a]", "[^b]", "[+-b]", "[a-b]", "[]a]", "{a,b}",
+            "{a,b/a}", "\\a", "/", "**",
+        ];
+        const SHAPING: [&str; 7] = ["a", "*", "[!a]", "[+-b]", "{a,b/a}", "/", "**"];
+        const NAMES: [&str; 6] = ["a", "b", "aa", "ab", "ba", "bb"];
+        let mut paths: Vec<PathBuf> = NAMES.iter().map(PathBuf::from).collect();
+        for depth in 1..3 {
+            let shallower: Vec<PathBuf> = paths
+                .iter()
+                .filter(|path| path.components().count() == depth)
+                .cloned()
+                .collect();
+            for path in shallower {
+                paths.extend(NAMES.iter().map(|name| path.join(name)));
+            }
+        }
+        let mut patterns: Vec<String> = TOKENS.iter().map(ToString::to_string).collect();
+        for _ in 1..3 {
+            let shorter = patterns.clone();
+            for pattern in &shorter {
+                patterns.extend(TOKENS.iter().map(|token| format!("{pattern}{token}")));
+            }
+        }
+        let mut four: Vec<String> = vec![String::new()];
+        for _ in 0..4 {
+            four = four
+                .iter()
+                .flat_map(|pattern| SHAPING.iter().map(move |token| format!("{pattern}{token}")))
+                .collect();
+        }
+        patterns.extend(four);
+        patterns.sort();
+        patterns.dedup();
+        let (mut tested, mut ruled_out) = (0_usize, 0_usize);
+        for pattern in &patterns {
+            let Ok(scope) = Scope::from_patterns(std::slice::from_ref(pattern)) else {
+                continue;
+            };
+            tested += 1;
+            let mut below_a_match = HashSet::new();
+            for path in paths.iter().filter(|path| scope.path_matches(path)) {
+                below_a_match.extend(path.ancestors().skip(1));
+            }
+            for dir in std::iter::once(Path::new("")).chain(paths.iter().map(PathBuf::as_path)) {
+                if dir.components().count() == 3 {
+                    continue;
+                }
+                let may = scope.may_match_below(dir);
+                assert!(
+                    may || !below_a_match.contains(dir),
+                    "`{pattern}` matches a path below `{}`",
+                    dir.display()
+                );
+                ruled_out += usize::from(!may);
+            }
+        }
+        // The patterns exercise the narrowing, not only its fallbacks.
+        assert!(tested > 5_000, "{tested} patterns compiled");
+        assert!(ruled_out > 15_000, "{ruled_out} directories ruled out");
     }
 }

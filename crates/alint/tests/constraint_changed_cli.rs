@@ -562,6 +562,37 @@ fn an_untracked_repository_runs_the_rules_that_read_below_it() {
     );
 }
 
+/// A class can match a separator: `a[!x]sm/*.json` matches `a/sm/y.json`, so
+/// a change to `a/sm/.gitignore` that lets the walk read `y.json` runs the
+/// rule, as a full check would find.
+#[test]
+fn an_ignore_file_change_runs_a_rule_whose_class_matches_a_separator() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    write(
+        root,
+        ".alint.yml",
+        "version: 2\nrelations:\n  values:\n    from: { paths: \"a[!x]sm/*.json\" }\n    \
+         read: { json: \"$.v\" }\n    fields: { v: value }\nrules:\n  - id: values-unique\n    \
+         kind: constraint\n    input: values\n    assert: { unique: { key: [v] } }\n    \
+         level: error\n",
+    );
+    write(root, "a/sm/x.json", "{\"v\": \"1\"}\n");
+    write(root, "a/sm/y.json", "{\"v\": \"1\"}\n");
+    write(root, "a/sm/.gitignore", "y.json\n");
+    git(root, &["init", "-q"]);
+    git(root, &["config", "commit.gpgsign", "false"]);
+    git(root, &["add", "-A"]);
+    git(root, &["add", "-f", "a/sm/y.json"]);
+    git(root, &["commit", "-qm", "base"]);
+    assert_eq!(check(root, &[]), (Some(0), vec![ran("values-unique", &[])]));
+
+    write(root, "a/sm/.gitignore", "");
+    let full = check(root, &[]);
+    assert_eq!(full.0, Some(1), "{full:?}");
+    assert_eq!(check(root, &["--changed"]), full);
+}
+
 /// A manifest that a trigger scope reads only to decide whether its rule runs
 /// warns of nothing when it lists no paths: the warning that a rule's own
 /// manifest scope selects nothing is not about a selector's, which no full
