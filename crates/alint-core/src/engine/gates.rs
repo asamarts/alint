@@ -397,7 +397,10 @@ impl Engine {
     /// Manifest membership itself cannot decide whether its own source should
     /// be read. Match the configured globs and every already-resolved
     /// non-manifest predicate; if none can see a changed/created path, the rule
-    /// is invocation-inactive and its manifest remains untouched.
+    /// is invocation-inactive and its manifest remains untouched. A rule with a
+    /// trigger scope is judged by it, with the manifest predicates of its
+    /// selectors left out, so that a change it cannot run on reads none of the
+    /// manifests they consult ([`Self::resolve_manifest_paths`]).
     pub(super) fn skip_for_changed_without_manifest(
         &self,
         rule: &dyn Rule,
@@ -699,9 +702,12 @@ impl Engine {
                     }
                     // Under `--changed`, the manifests a trigger scope's
                     // selectors read decide whether its rule runs; resolved
-                    // here once, the relations read the same sets.
+                    // here once, the relations read the same sets. A rule no
+                    // changed path can run without them (judged with every
+                    // manifest predicate left out) needs none of them read.
                     if self.changed_paths.is_some()
                         && let Some(trigger) = rule.trigger_scope()
+                        && !self.skip_for_changed_without_manifest(rule, index, created)
                     {
                         for pred in trigger.manifest_predicates() {
                             groups
