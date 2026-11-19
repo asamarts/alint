@@ -128,9 +128,10 @@ impl Adapter for ExtractAdapter {
 /// root, a repeated key's value (the tree holds only one of them), and a value
 /// of a document whose entries cannot be walked within `limits` have none.
 ///
-/// Also the bytes the walk held besides `text` (a structured document's tree,
-/// and its entries when a value asked for is an object member's), which the
-/// caller takes from the run's bytes: it held them only while it ran.
+/// Also the most the walk held at once besides `text` (a structured
+/// document's tree, and then, the tree let go, its entries when a value asked
+/// for is an object member's), which the caller takes from the run's bytes:
+/// it held them only while it ran.
 pub(crate) fn locate(
     extract: &Extract,
     text: &str,
@@ -226,7 +227,7 @@ pub(crate) fn walks() -> usize {
 
 /// [`locate`] for a structured query over `text` parsed as `format`: each
 /// string row asked of `rows` is placed at the one object member that holds
-/// it, or nowhere. The bytes it held.
+/// it, or nowhere. The most it held at once.
 fn members(
     format: Format,
     path: &serde_json_path::JsonPath,
@@ -253,6 +254,10 @@ fn members(
         }
     }
     let (paths, tree_bytes) = key_paths(&tree, &asked);
+    let ordinals: Vec<u32> = asked.iter().map(|(ordinal, _)| *ordinal).collect();
+    // The tree is let go before the entries are walked: the paths name
+    // what it was asked for.
+    drop(tree);
     // Only an object member's value is placed, from the document's entries,
     // which only JSON, YAML and TOML give.
     let paths: Vec<Option<Vec<Segment>>> = paths
@@ -276,6 +281,8 @@ fn members(
     let Some(entries) = entries else {
         return tree_bytes;
     };
+    #[cfg(test)]
+    tests::TABLES.with(|tables| tables.set(tables.get() + 1));
     // Each path's entries: how many there are (more than one for a repeated
     // key), and the first.
     let ids: Vec<Option<PathId>> = paths
@@ -294,14 +301,14 @@ fn members(
             first.get_or_insert(*row);
         }
     }
-    for ((ordinal, _), id) in asked.iter().zip(&ids) {
+    for (ordinal, id) in ordinals.iter().zip(&ids) {
         let span = match id.and_then(|id| held.get(&id)) {
             Some((1, Some(row))) => Some(row.value_span.unwrap_or(row.key_span)),
             _ => None,
         };
         rows.asked.insert(*ordinal, span);
     }
-    tree_bytes + table_bytes(&entries, text)
+    tree_bytes.max(table_bytes(&entries, text))
 }
 
 /// One step of a key path, as a walk of a tree reads it.
@@ -400,6 +407,11 @@ pub(crate) fn same_reading(a: &Extract, b: &Extract) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    std::thread_local! {
+        /// How many entry tables [`members`] has walked on this thread.
+        pub(super) static TABLES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
     use crate::extract::{LinesOpts, NonStringValueKind};
     use crate::structured_format::Format;
 
@@ -700,16 +712,17 @@ mod tests {
 
     /// One walk places every row asked of it, in the order asked, as it
     /// places each alone; it walks the document's entries only for an
-    /// object member's value, and what it held counts the entries.
+    /// object member's value, and what it held counts them.
     #[test]
     fn one_walk_places_every_row_asked() {
         let text = "{\"a\": [\"x\", \"y\"], \"b\": \"z\", \"c\": \"x\"}";
         let extract = Extract::structured(Format::Json, "$..*").unwrap();
         let alone = placed(&extract, text.as_bytes());
         assert_eq!(alone.len(), 4);
-        let before = walks();
+        let tables = || TABLES.with(std::cell::Cell::get);
+        let (before, tables_before) = (walks(), tables());
         let (together, held) = locate(&extract, text, &[3, 0, 2, 3], &Limits::default());
-        assert_eq!(walks() - before, 1);
+        assert_eq!((walks() - before, tables() - tables_before), (1, 1));
         assert_eq!(together, [alone[3], alone[0], alone[2], alone[3]]);
         assert!(held > 3 * text.len(), "{held}");
         // Values in an array alone: the entries are not walked.
@@ -717,8 +730,10 @@ mod tests {
             .filter(|ordinal| alone[*ordinal as usize].is_none())
             .collect();
         assert_eq!(in_array.len(), 2);
-        let (_, tree) = locate(&extract, text, &in_array, &Limits::default());
-        assert!(tree < held, "{tree} {held}");
+        let (spans, tree) = locate(&extract, text, &in_array, &Limits::default());
+        assert_eq!(spans, [None, None]);
+        assert!(tree > 0);
+        assert_eq!((walks() - before, tables() - tables_before), (2, 1));
         // Nothing asked: no walk.
         assert_eq!(
             locate(&extract, text, &[], &Limits::default()),
