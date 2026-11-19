@@ -367,11 +367,11 @@ fn a_missing_value_is_called_missing_and_a_null_null_by_every_family() {
     assert_eq!(
         findings(&results, "c"),
         [
-            "p/a.json: rows disagree on `v`: \"1\" here; missing in 1 row\n  ~ a row with another \
-             value: p/b.json",
+            "p/a.json:1:7: rows disagree on `v`: \"1\" here; missing in 1 row\n  ~ a row with \
+             another value: p/b.json",
             "p/b.json: rows disagree on `v`: missing here; \"1\" in 1 row (a missing value \
              matches nothing, so a row without a value agrees with no row)\n  ~ a row with \
-             another value: p/a.json",
+             another value: p/a.json:1:7",
         ]
     );
     let results = run(
@@ -382,7 +382,7 @@ fn a_missing_value_is_called_missing_and_a_null_null_by_every_family() {
         findings(&results, "c"),
         [
             "p/b.json: `v` is missing here, but \"1\" in the source row (`src` \"p/a.json\", at \
-             p/a.json)\n  ~ the source row: p/a.json"
+             p/a.json)\n  ~ the source row: p/a.json:1:7"
         ]
     );
     let results = run(
@@ -458,10 +458,10 @@ fn a_union_part_that_read_nothing_is_named() {
         [
             "package.json: `version` is missing here (`relations.node-pins.union[2]`, \
              `read.json: $.devEngines.runtime.version`, matched nothing), but \"18\" in the \
-             source row (`source` \".nvmrc\", at .nvmrc)\n  ~ the source row: .nvmrc",
+             source row (`source` \".nvmrc\", at .nvmrc)\n  ~ the source row: .nvmrc:1:2",
             "package.json: `version` is missing here (`relations.node-pins.union[3]`, \
              `read.json: $.volta.node`, matched nothing), but \"18\" in the source row (`source` \
-             \".nvmrc\", at .nvmrc)\n  ~ the source row: .nvmrc",
+             \".nvmrc\", at .nvmrc)\n  ~ the source row: .nvmrc:1:2",
         ]
     );
     // A sensitive field's part is named by its place alone.
