@@ -17,7 +17,9 @@ use crate::relation::Segment;
 use crate::relation::key_paths::{EntryAt, EntryTable, PathId, PathStack};
 use crate::structured_format::Format;
 
+mod json_members;
 mod yaml_rows;
+pub(crate) use json_members::{JsonSyntax, TREE_MEMBER};
 use yaml_rows::yaml_entry_table;
 
 /// Runtime extraction mode, resolved from [`ExtractSpec`].
@@ -432,21 +434,6 @@ pub(crate) fn entry_table(
     }
 }
 
-/// [`entry_table`] of a JSON or YAML `text` that [`Format::parse`] has
-/// already read as `format`: a JSON text is not read through that parse's
-/// guards (size, depth and dialect) once more, which would read it whole
-/// again, as [`entry_table`] does before its lossless pass.
-pub(crate) fn parsed_entry_table(
-    format: Format,
-    text: &str,
-    max_rows: usize,
-) -> std::result::Result<EntryTable, EntryRowsError> {
-    match format {
-        Format::Json => json_ast_entry_table(text, Some(max_rows), false),
-        _ => entry_table(format, text, max_rows),
-    }
-}
-
 /// A JSON or YAML document's members, and their values when `values`.
 fn nested_entry_table(
     format: Format,
@@ -559,6 +546,8 @@ fn json_entry_table(
     values: bool,
 ) -> std::result::Result<EntryTable, EntryRowsError> {
     // Reuse the check-side size/depth/dialect guards before the lossless pass.
+    #[cfg(test)]
+    tests::JSON_GUARDS.with(|guards| guards.set(guards.get() + 1));
     Format::Json.parse(text).map_err(EntryRowsError::Parse)?;
     json_ast_entry_table(text, max_rows, values)
 }
@@ -1084,7 +1073,14 @@ fn structured(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
+    std::thread_local! {
+        /// How many times the guards have parsed a JSON text before its
+        /// entries were walked, on this thread.
+        pub(crate) static JSON_GUARDS: std::cell::Cell<usize> =
+            const { std::cell::Cell::new(0) };
+    }
+
     use super::{
         EntryPathSegment, EntryRowsError, Extract, extract_entry_rows, extract_entry_rows_bounded,
         extract_entry_rows_strict_yaml, extract_entry_rows_strict_yaml_bounded,

@@ -61,7 +61,10 @@ pub use failure::RelationFailure;
 pub use failure::{located, type_name};
 pub use ops::render_value;
 pub use read::path_token;
-pub use spans::{ReadSpan, find_spans, read_span_walks};
+#[cfg(test)]
+pub(crate) use spans::fingerprint;
+pub(crate) use spans::fingerprint_text;
+pub use spans::{BytesSpan, ReadSpan, find_spans, read_span_walks};
 
 use super::cache::{DecodeCache, ReadCache};
 use super::limits::{LimitExceeded, LimitKind, Limits};
@@ -149,11 +152,13 @@ pub struct Cell {
     pub path: Option<Arc<Pointer>>,
 }
 
-/// Where a cell's value is written ([`Cell::span`]).
+/// Where a cell's value is written ([`Cell::span`]). Placing a cell finds
+/// it in the resource read again, and places the cell only where the text
+/// still holds what it held when the relation read it ([`find_spans`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Span {
-    /// These bytes of the cell's resource.
-    Bytes(ByteSpan),
+    /// These bytes of the cell's resource: an entry's key or value.
+    Bytes(BytesSpan),
     /// Where the `read:` that read the value finds it in its resource
     /// ([`find_spans`]): a `lines:` value's trimmed line, a `regex:` value's
     /// capture, the value a JSON, YAML or TOML object member holds (its
@@ -170,7 +175,7 @@ impl Span {
     #[must_use]
     pub const fn bytes(&self) -> Option<ByteSpan> {
         match self {
-            Self::Bytes(bytes) => Some(*bytes),
+            Self::Bytes(bytes) => Some(bytes.bytes()),
             Self::Read(_) => None,
         }
     }

@@ -262,7 +262,7 @@ impl Adapter for EntryValuesAdapter {
 /// spans, at most the rows `limits` allows: what an `entries:` part reads,
 /// and what places the structured `read:` values a finding asks about
 /// (`extract::locate`).
-pub(super) fn entry_table(
+pub(crate) fn entry_table(
     format: Format,
     text: &str,
     limits: &Limits,

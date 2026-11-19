@@ -6,7 +6,8 @@ use std::collections::HashMap;
 use regex::Regex;
 
 use crate::extract::{
-    ByteSpan, EntryValue, Extract, ExtractFailure, extract_values_bounded_typed, is_non_literal,
+    ByteSpan, EntryValue, Extract, ExtractFailure, JsonSyntax, extract_values_bounded_typed,
+    is_non_literal,
 };
 use crate::relation::adapter::{
     Adapter, AdapterError, AdapterNote, AdapterOutput, check_row_count,
@@ -20,6 +21,7 @@ use crate::relation::value::Value;
 use crate::structured_format::Format;
 
 use super::entry_values::entry_table;
+use crate::relation::eval::fingerprint_text;
 
 /// Wraps today's string-only extraction as a relation adapter.
 ///
@@ -117,35 +119,45 @@ impl Adapter for ExtractAdapter {
     }
 }
 
-/// Where the rows `ordinals` are written that [`ExtractAdapter`] read with
+/// Where the rows `asked` are written that [`ExtractAdapter`] read with
 /// `extract` from a file whose text is now `text`: `spans[i]` is the span of
-/// the row `ordinals[i]` (its place among the rows the adapter emitted, which
-/// skip non-literal values), each found in one walk of `text`. A `lines:`
-/// value's span is its trimmed line, a `regex:` value's its capture, and a
-/// JSON, YAML or TOML value an object member holds, its value's (its key's
-/// for a YAML block scalar), as an `entries:` part places it. A row the text
-/// no longer holds, a `whole_file` value, a value in an array, the document
-/// root, a repeated key's value (the tree holds only one of them), and a value
-/// of a document whose entries cannot be walked within `limits` have none.
+/// the row `asked[i]`, an ordinal (its place among the rows the adapter
+/// emitted, which skip non-literal values) and the fingerprint of the value
+/// it held, each found in one walk of `text`. A `lines:` value's span is its trimmed line, a
+/// `regex:` value's its capture, and a JSON, YAML or TOML value an object
+/// member holds, its value's (its key's for a YAML block scalar), as an
+/// `entries:` part places it. A row whose value the text no longer holds
+/// (the file changed since it was read), a `whole_file` value, a value in an
+/// array, the document root, a repeated key's value (the tree holds only one
+/// of them), and a value of a document whose entries cannot be walked within
+/// `limits` have none.
 ///
 /// Also the most the walk held at once besides `text` (a structured
-/// document's tree, and then, the tree let go, its entries when a value asked
-/// for is an object member's), which the caller takes from the run's bytes:
-/// it held them only while it ran.
+/// document's tree, and then, the tree let go, the parse its entries are
+/// read from and the entries, when a value asked for is an object
+/// member's), which the caller takes from the run's bytes: it held them
+/// only while it ran.
 pub(crate) fn locate(
     extract: &Extract,
     text: &str,
-    ordinals: &[u32],
+    asked: &[(u32, u32)],
     limits: &Limits,
 ) -> (Vec<Option<ByteSpan>>, usize) {
-    if ordinals.is_empty() {
+    if asked.is_empty() {
         return (Vec::new(), 0);
     }
     WALKS.with(|walks| walks.set(walks.get() + 1));
     let mut rows = Rows {
-        asked: ordinals.iter().map(|ordinal| (*ordinal, None)).collect(),
+        asked: asked
+            .iter()
+            .map(|&(ordinal, held)| (ordinal, (held, None)))
+            .collect(),
         next: 0,
-        last: ordinals.iter().copied().max().unwrap_or_default(),
+        last: asked
+            .iter()
+            .map(|(ordinal, _)| *ordinal)
+            .max()
+            .unwrap_or_default(),
     };
     let mut held = 0;
     match extract {
@@ -183,15 +195,22 @@ pub(crate) fn locate(
         Extract::WholeFile => {}
     }
     (
-        ordinals.iter().map(|ordinal| rows.asked[ordinal]).collect(),
+        asked
+            .iter()
+            .map(|(ordinal, held)| match rows.asked[ordinal] {
+                (found, span) if found == *held => span,
+                _ => None,
+            })
+            .collect(),
         held,
     )
 }
 
-/// The rows [`locate`] is asked for, by ordinal, with each one's span once
-/// it is found, as it numbers the rows the adapter emitted.
+/// The rows [`locate`] is asked for, by ordinal, each with the fingerprint
+/// of its value and its span once it is found, as it numbers the rows the
+/// adapter emitted.
 struct Rows {
-    asked: HashMap<u32, Option<ByteSpan>>,
+    asked: HashMap<u32, (u32, Option<ByteSpan>)>,
     /// The next row's ordinal.
     next: u32,
     /// The last row asked for.
@@ -200,13 +219,16 @@ struct Rows {
 
 impl Rows {
     /// Number a string value the reader read, whose span `span` gives, as
-    /// the adapter does: a non-literal value is no row. Whether a later
-    /// row is asked for.
+    /// the adapter does: a non-literal value is no row. A row asked for is
+    /// placed only when it is the value it was ([`fingerprint_text`]).
+    /// Whether a later row is asked for.
     fn row(&mut self, value: &str, span: impl FnOnce() -> Option<ByteSpan>) -> bool {
         if is_non_literal(value) {
             return true;
         }
-        if let Some(slot) = self.asked.get_mut(&self.next) {
+        if let Some((held, slot)) = self.asked.get_mut(&self.next)
+            && *held == fingerprint_text(value)
+        {
             *slot = span();
         }
         self.next += 1;
@@ -245,8 +267,12 @@ fn members(
             continue;
         };
         let ordinal = rows.next;
-        let more = rows.row(value, || None);
-        if rows.next > ordinal && rows.asked.contains_key(&ordinal) {
+        let mut same = false;
+        let more = rows.row(value, || {
+            same = true;
+            None
+        });
+        if same {
             asked.push((ordinal, node));
         }
         if !more {
@@ -269,14 +295,29 @@ fn members(
     {
         return tree_bytes;
     }
+    // A JSON value is found in the document's syntax tree, along its path
+    // alone, without the entries every member would make: the tree is read
+    // without its guards, which the tree's parse passed.
+    if format == Format::Json {
+        let Ok(syntax) = JsonSyntax::parsed(text) else {
+            return tree_bytes;
+        };
+        #[cfg(test)]
+        tests::TABLES.with(|tables| tables.set(tables.get() + 1));
+        for (ordinal, span) in ordinals.iter().zip(syntax.member_spans(&paths)) {
+            if let Some((_, slot)) = rows.asked.get_mut(ordinal) {
+                *slot = span;
+            }
+        }
+        return tree_bytes.max(syntax.held());
+    }
     // The entries' spans, without their values (which TOML's walk alone
-    // needs for its values' spans), and without parsing the text whole once
-    // more: the tree is its parse.
+    // needs for its values' spans).
     let entries = if format == Format::Toml {
         entry_table(format, text, limits).ok()
     } else {
         let max = limits.get(LimitKind::RowsPerExtractor);
-        crate::extract::parsed_entry_table(format, text, max).ok()
+        crate::extract::entry_table(format, text, max).ok()
     };
     let Some(entries) = entries else {
         return tree_bytes;
@@ -306,9 +347,12 @@ fn members(
             Some((1, Some(row))) => Some(row.value_span.unwrap_or(row.key_span)),
             _ => None,
         };
-        rows.asked.insert(*ordinal, span);
+        if let Some((_, slot)) = rows.asked.get_mut(ordinal) {
+            *slot = span;
+        }
     }
-    tree_bytes.max(table_bytes(&entries, text))
+    // The parse the entries were read from was held with them.
+    tree_bytes.max(entries.parsed + table_bytes(&entries))
 }
 
 /// One step of a key path, as a walk of a tree reads it.
@@ -359,7 +403,7 @@ fn key_paths(
             serde_json::Value::String(value) => bytes += value.capacity(),
             serde_json::Value::Object(map) => {
                 for (key, value) in map {
-                    bytes += key.capacity() + std::mem::size_of::<(String, usize)>();
+                    bytes += key.capacity() + crate::extract::TREE_MEMBER;
                     pending.push((value, depth + 1, Some(Step::Key(key))));
                 }
             }
@@ -377,15 +421,21 @@ fn key_paths(
     (paths, bytes)
 }
 
-/// Roughly what `entries`, a document's entries walked from `text`, hold on
-/// the heap: their rows and values, and each key path with its key (held
-/// twice) and its index; a key and a string value are at most the text.
-fn table_bytes(entries: &EntryTable, text: &str) -> usize {
-    let path = 2 * std::mem::size_of::<Segment>() + 4 * std::mem::size_of::<usize>();
+/// Roughly what `entries`, a document's entries, hold on the heap: their
+/// rows, their values and the values' text, and their key paths.
+pub(crate) fn table_bytes(entries: &EntryTable) -> usize {
+    let values: usize = entries
+        .values
+        .iter()
+        .map(|value| match value {
+            EntryValue::Scalar(value) => value.heap_bytes(),
+            _ => 0,
+        })
+        .sum();
     entries.rows.capacity() * std::mem::size_of::<EntryAt>()
         + entries.values.capacity() * std::mem::size_of::<EntryValue>()
-        + entries.paths.len() * path
-        + 3 * text.len()
+        + values
+        + entries.paths.heap_bytes()
 }
 
 fn spec_id(extract: &Extract) -> String {
@@ -413,6 +463,7 @@ mod tests {
         pub(super) static TABLES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     }
     use crate::extract::{LinesOpts, NonStringValueKind};
+    use crate::relation::eval::fingerprint;
     use crate::structured_format::Format;
 
     fn resource(path: &str) -> Resource {
@@ -549,6 +600,22 @@ mod tests {
         ]
     }
 
+    /// The rows `ordinals` of those [`ExtractAdapter`] reads with `extract`
+    /// from `bytes`, as [`locate`] is asked for them: each with the
+    /// fingerprint of its value.
+    fn asked(extract: &Extract, bytes: &[u8], ordinals: &[u32]) -> Vec<(u32, u32)> {
+        let output = ExtractAdapter::new(extract.clone())
+            .extract(&resource("a"), bytes, &Limits::default())
+            .unwrap();
+        ordinals
+            .iter()
+            .map(|ordinal| {
+                let row = &output.rows[*ordinal as usize];
+                (*ordinal, fingerprint(row.value().unwrap()))
+            })
+            .collect()
+    }
+
     /// Where `extract` places each row [`ExtractAdapter`] reads from `bytes`,
     /// asked one at a time.
     fn placed(extract: &Extract, bytes: &[u8]) -> Vec<Option<ByteSpan>> {
@@ -559,7 +626,8 @@ mod tests {
         (0..rows)
             .map(|ordinal| {
                 let ordinal = u32::try_from(ordinal).unwrap();
-                locate(extract, text, &[ordinal], &Limits::default()).0[0]
+                let asked = asked(extract, bytes, &[ordinal]);
+                locate(extract, text, &asked, &Limits::default()).0[0]
             })
             .collect()
     }
@@ -593,8 +661,8 @@ mod tests {
     /// A structured row is placed where a walk of every entry of its
     /// document places it, though only the members asked for are looked
     /// up: arrays, objects in arrays, repeated keys, non-literal values,
-    /// a query that matches one node twice, a BOM, a YAML block scalar and
-    /// TOML tables.
+    /// a query that matches one node twice, a BOM (JSON's and YAML's), a
+    /// YAML block scalar and TOML tables.
     #[test]
     fn a_structured_row_is_placed_where_a_walk_of_its_document_places_it() {
         let structured = |format, query| Extract::structured(format, query).unwrap();
@@ -603,8 +671,10 @@ mod tests {
         let yaml =
             "\u{feff}a: x\nb: |\n  block\nc: [y, {d: z}]\nh:\n  i: {j: u}\nk: '${K}'\nl: \"t\"\n";
         let toml = "a = \"x\"\n[t]\nb = \"y\"\nc = [\"z\"]\n[t.u]\nd = 'w'\n[[v]]\ne = \"s\"\n";
+        let marked = format!("\u{feff}{json}");
         for (format, text) in [
             (Format::Json, json),
+            (Format::Json, &marked),
             (Format::Yaml, yaml),
             (Format::Toml, toml),
         ] {
@@ -637,7 +707,8 @@ mod tests {
             let ordinals: Vec<u32> = (0..output.rows.len())
                 .map(|ordinal| u32::try_from(ordinal).unwrap())
                 .collect();
-            let (spans, _) = locate(&extract, text, &ordinals, &Limits::default());
+            let asked = asked(&extract, bytes, &ordinals);
+            let (spans, _) = locate(&extract, text, &asked, &Limits::default());
             assert_eq!(spans.len(), output.rows.len());
             for (row, span) in output.rows.iter().zip(spans) {
                 let (Some(span), Some(Value::String(value))) = (span, row.value()) else {
@@ -699,15 +770,59 @@ mod tests {
         assert_eq!(spans(Extract::WholeFile, b"a\n"), [None]);
         // A file that no longer holds the row, or no longer parses, places
         // nothing.
+        let x = fingerprint_text("x");
         let text = "{\"a\": \"x\"}";
         assert_eq!(
-            locate(&json("$.a"), text, &[1], &Limits::default()).0,
+            locate(&json("$.a"), text, &[(1, x)], &Limits::default()).0,
             [None]
         );
         assert_eq!(
-            locate(&json("$.a"), "{", &[0], &Limits::default()).0,
+            locate(&json("$.a"), "{", &[(0, x)], &Limits::default()).0,
             [None]
         );
+    }
+
+    /// A row is placed only where the file, read again, still holds its
+    /// value: a file rewritten since the row was read, whose row of that
+    /// ordinal holds another value now, places it nowhere, for each reader.
+    #[test]
+    fn a_row_whose_value_changed_is_placed_nowhere() {
+        let x = fingerprint_text("x");
+        let json = Extract::structured(Format::Json, "$.*").unwrap();
+        let yaml = Extract::structured(Format::Yaml, "$.*").unwrap();
+        let toml = Extract::structured(Format::Toml, "$.*").unwrap();
+        let lines = Extract::Lines(LinesOpts::default());
+        let regex = Extract::Regex("v=(.)".into());
+        for (extract, was, is) in [
+            (&json, "{\"a\": \"x\"}", "{\"a\": \"q\"}"),
+            (&yaml, "a: x\n", "a: q\n"),
+            (&toml, "a = \"x\"\n", "a = \"q\"\n"),
+            (&lines, "x\n", "q\n"),
+            (&regex, "v=x\n", "v=q\n"),
+        ] {
+            let found = |text| locate(extract, text, &[(0, x)], &Limits::default()).0;
+            assert!(found(was)[0].is_some(), "{extract:?}");
+            assert_eq!(found(is), [None], "{extract:?}");
+        }
+    }
+
+    /// Placing a JSON value walks its document's entries from the tree it
+    /// parsed it to, without the guards parsing the text whole once more:
+    /// the tree's parse passed them.
+    #[test]
+    fn placing_a_json_value_parses_its_text_once() {
+        let guards = || crate::extract::tests::JSON_GUARDS.with(std::cell::Cell::get);
+        let text = "{\"a\": {\"b\": \"x\"}}";
+        let extract = Extract::structured(Format::Json, "$.a.b").unwrap();
+        let before = guards();
+        assert_eq!(
+            placed(&extract, text.as_bytes()),
+            [Some(ByteSpan::new(12, 15))]
+        );
+        assert_eq!(guards() - before, 0);
+        // An `entries:` part's read is guarded.
+        entry_table(Format::Json, text, &Limits::default()).unwrap();
+        assert_eq!(guards() - before, 1);
     }
 
     /// One walk places every row asked of it, in the order asked, as it
@@ -721,7 +836,8 @@ mod tests {
         assert_eq!(alone.len(), 4);
         let tables = || TABLES.with(std::cell::Cell::get);
         let (before, tables_before) = (walks(), tables());
-        let (together, held) = locate(&extract, text, &[3, 0, 2, 3], &Limits::default());
+        let asked_for = asked(&extract, text.as_bytes(), &[3, 0, 2, 3]);
+        let (together, held) = locate(&extract, text, &asked_for, &Limits::default());
         assert_eq!((walks() - before, tables() - tables_before), (1, 1));
         assert_eq!(together, [alone[3], alone[0], alone[2], alone[3]]);
         assert!(held > 3 * text.len(), "{held}");
@@ -730,6 +846,7 @@ mod tests {
             .filter(|ordinal| alone[*ordinal as usize].is_none())
             .collect();
         assert_eq!(in_array.len(), 2);
+        let in_array = asked(&extract, text.as_bytes(), &in_array);
         let (spans, tree) = locate(&extract, text, &in_array, &Limits::default());
         assert_eq!(spans, [None, None]);
         assert!(tree > 0);

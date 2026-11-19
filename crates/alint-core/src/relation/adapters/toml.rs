@@ -131,6 +131,12 @@ impl Walk<'_> {
             .child(parent, Segment::Key(key_text.into()));
         let text = self.text;
         self.push(path, span, || item_value(item, text))?;
+        // The walk does not descend an array: what the document holds
+        // below one.
+        self.entries.parsed += match item {
+            Item::Value(Value::Array(_)) | Item::ArrayOfTables(_) => below(item),
+            Item::None | Item::Value(_) | Item::Table(_) => 0,
+        };
 
         match item {
             Item::Table(table) => self.table(table, path)?,
@@ -147,6 +153,8 @@ impl Walk<'_> {
         value: impl FnOnce() -> TomlValue,
     ) -> Result<(), AdapterError> {
         check_row_count(self.limits, self.entries.rows.len() + 1)?;
+        // What the document holds for the member.
+        self.entries.parsed += MEMBER;
         let value_span = if self.values {
             let held = value();
             self.entries.values.push(held.value);
@@ -161,6 +169,57 @@ impl Walk<'_> {
         });
         Ok(())
     }
+}
+
+/// Roughly what a `toml_edit` document holds on the heap for one member:
+/// its key, its item, and its place in its table's map, twice over, as a
+/// map that grows by doubling its room may hold twice its members.
+const MEMBER: usize = 2 * (std::mem::size_of::<Key>() + std::mem::size_of::<Item>() + 32);
+
+/// Roughly what a document holds below `item`, an array or an array of
+/// tables: each element, each table's members, and what is below those.
+/// An explicit stack, so nesting cannot exhaust the call stack.
+fn below(item: &Item) -> usize {
+    enum Node<'n> {
+        Item(&'n Item),
+        Value(&'n Value),
+    }
+    let mut held = 0;
+    let mut pending = vec![Node::Item(item)];
+    while let Some(node) = pending.pop() {
+        match node {
+            Node::Item(Item::Value(value)) => pending.push(Node::Value(value)),
+            Node::Item(Item::Table(table)) => {
+                for (_, item) in table {
+                    held += MEMBER;
+                    pending.push(Node::Item(item));
+                }
+            }
+            Node::Item(Item::ArrayOfTables(tables)) => {
+                for table in tables {
+                    held += std::mem::size_of::<Item>();
+                    for (_, item) in table {
+                        held += MEMBER;
+                        pending.push(Node::Item(item));
+                    }
+                }
+            }
+            Node::Value(Value::Array(array)) => {
+                for value in array {
+                    held += std::mem::size_of::<Item>();
+                    pending.push(Node::Value(value));
+                }
+            }
+            Node::Value(Value::InlineTable(table)) => {
+                for (_, value) in table {
+                    held += MEMBER;
+                    pending.push(Node::Value(value));
+                }
+            }
+            Node::Item(Item::None) | Node::Value(_) => {}
+        }
+    }
+    held
 }
 
 /// What a table member's item holds.

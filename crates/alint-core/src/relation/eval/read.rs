@@ -6,11 +6,10 @@ use std::path::Path;
 use std::sync::Arc;
 
 use super::failure::{Failures, place};
-use super::spans::{ReadSpan, Reading};
+use super::spans::{BytesSpan, ReadSpan, Reading};
 use super::{
     Cell, Evaluator, FieldInfo, Provenance, RelationNote, RelationRows, Site, Skipped, Span,
 };
-use crate::ByteSpan;
 use crate::extract::{Extract, LinesOpts};
 use crate::relation::adapter::{Adapter, AdapterError, AdapterNote, AdapterOutput};
 use crate::relation::adapters::{EntryValuesAdapter, ExtractAdapter, entry_values};
@@ -166,7 +165,7 @@ impl Evaluator<'_> {
                 },
                 _ => None,
             };
-            let rows = match Rows::new(self, site, relation, index, &resource) {
+            let rows = match Rows::new(self, site, relation, (index, reader.format()), &resource) {
                 Ok(rows) => rows,
                 Err(limit) => {
                     failures.push_limit(limit_reached(&limit));
@@ -609,6 +608,9 @@ struct Rows<'r> {
     relation: &'r RelationDef,
     /// The part's index in the relation.
     part: u32,
+    /// What the part reads its entries' spans as: an `entries:` part's
+    /// format, or a structured `read:`'s, whose `bound:` paths are entries.
+    format: Option<Format>,
     resource: &'r Resource,
     /// The path tokens the relation's fields bind, by [`token_slot`]: built
     /// once for the resource and shared by its rows.
@@ -693,7 +695,7 @@ impl<'r> Rows<'r> {
         evaluator: &'r Evaluator<'r>,
         site: &Site,
         relation: &'r RelationDef,
-        part: u32,
+        (part, format): (u32, Option<Format>),
         resource: &'r Resource,
     ) -> Result<Self, LimitExceeded> {
         let mut tokens: [Option<Value>; 6] = Default::default();
@@ -717,6 +719,7 @@ impl<'r> Rows<'r> {
             hide_config: site.sensitive,
             relation,
             part,
+            format,
             resource,
             tokens,
         })
@@ -818,9 +821,9 @@ impl<'r> Rows<'r> {
                 }
             };
             cells.push(Some(Cell {
+                span: self.value_span(row, &value),
                 value: Some(value),
                 at: self.provenance(row.pointer.clone(), row.ordinal, false)?,
-                span: row.value_span.or(row.span).map(Span::Bytes),
                 path: None,
             }));
         }
@@ -879,11 +882,15 @@ impl<'r> Rows<'r> {
                 .expect("an entry row's key path");
             let mut derived = Derived::default();
             let mut cells = Vec::with_capacity(self.relation.fields.len());
+            // The key's span, made once for the cells of the entry that
+            // place at its key.
+            let key_span = std::cell::OnceCell::new();
+            let key_span = || key_span.get_or_init(|| self.key_span(row, pointer)).clone();
             for (position, (name, field)) in self.relation.fields.iter().enumerate() {
-                let cell = |value: Value, span: Option<ByteSpan>| Cell {
+                let cell = |value: Value, span: Option<Span>| Cell {
                     value: Some(value),
                     at: Arc::clone(&provenance),
-                    span: span.map(Span::Bytes),
+                    span,
                     path: None,
                 };
                 let (slot, source) = match &field.source {
@@ -905,7 +912,8 @@ impl<'r> Rows<'r> {
                     FieldSource::EntryValue => (VALUE, &field.source),
                 };
                 if derived[slot].is_none() {
-                    derived[slot] = Some(self.entry_cell(name, source, row, pointer, &cell)?);
+                    derived[slot] =
+                        Some(self.entry_cell(name, source, (row, pointer), &key_span, &cell)?);
                 }
                 cells.push(derived[slot].clone().expect("the cell was just built"));
             }
@@ -917,16 +925,33 @@ impl<'r> Rows<'r> {
         Ok(())
     }
 
+    /// Where an entry row's key is written: its span, with the key it holds,
+    /// the last segment of `pointer`, the row's key path.
+    fn key_span(&self, row: &Row, pointer: &Pointer) -> Option<Span> {
+        let Some(Segment::Key(key)) = pointer.segments().last() else {
+            return None;
+        };
+        Some(Span::Bytes(BytesSpan::key(row.span?, self.format?, key)))
+    }
+
+    /// Where an entry row's `value` is written: its value's span, or, for a
+    /// YAML block scalar, which has none, its key's.
+    fn value_span(&self, row: &Row, value: &Value) -> Option<Span> {
+        let span = row.value_span.or(row.span)?;
+        Some(Span::Bytes(BytesSpan::value(span, self.format?, value)))
+    }
+
     /// The cell of an `entry.*` source for one entry row at `pointer`, its
-    /// new text's bytes taken from the run. `cell` makes a cell of a value
-    /// and span at the row's provenance.
+    /// new text's bytes taken from the run. `key_span` is the span of the
+    /// entry's key, and `cell` makes a cell of a value and span at the row's
+    /// provenance.
     fn entry_cell(
         &self,
         name: &str,
         source: &FieldSource,
-        row: &Row,
-        pointer: &Pointer,
-        cell: &dyn Fn(Value, Option<ByteSpan>) -> Cell,
+        (row, pointer): (&Row, &Pointer),
+        key_span: &dyn Fn() -> Option<Span>,
+        cell: &dyn Fn(Value, Option<Span>) -> Cell,
     ) -> Result<Cell, Stop> {
         let key = |key: &str| -> Result<Value, Stop> {
             self.take_bytes(key.len())?;
@@ -934,12 +959,12 @@ impl<'r> Rows<'r> {
         };
         Ok(match source {
             FieldSource::EntryKey => match pointer.segments().last() {
-                Some(Segment::Key(name)) => cell(key(name)?, row.span),
+                Some(Segment::Key(name)) => cell(key(name)?, key_span()),
                 _ => return Err(not_a_member(name, pointer, self.hide_keys).into()),
             },
             FieldSource::EntryValue => match &row.state {
                 // Shared with the decode, which took its bytes.
-                RowState::Value(value) => cell(value.clone(), row.value_span.or(row.span)),
+                RowState::Value(value) => cell(value.clone(), self.value_span(row, value)),
                 RowState::Error(kind) => {
                     return Err(format!(
                         "`{name}` binds `entry.value`, which is {kind} {}; a field holds a \
@@ -960,8 +985,8 @@ impl<'r> Rows<'r> {
                     .checked_sub(2)
                     .map(|holder| &segments[holder])
                 {
-                    None => cell(Value::Null, row.span),
-                    Some(Segment::Key(parent)) => cell(key(parent)?, row.span),
+                    None => cell(Value::Null, key_span()),
+                    Some(Segment::Key(parent)) => cell(key(parent)?, key_span()),
                     Some(Segment::Index(_)) => {
                         return Err(format!(
                             "`{name}` binds `entry.parent`, but the entry {} is a member of an \
@@ -974,7 +999,7 @@ impl<'r> Rows<'r> {
                 }
             }
             FieldSource::EntryRoot => match pointer.segments().first() {
-                Some(Segment::Key(root)) => cell(key(root)?, row.span),
+                Some(Segment::Key(root)) => cell(key(root)?, key_span()),
                 _ => {
                     return Err(format!(
                         "`{name}` binds `entry.root`, but the entry {} starts in an array, whose \
@@ -989,7 +1014,7 @@ impl<'r> Rows<'r> {
                 self.take_bytes(text.len() + super::shared_pointer_bytes(pointer))?;
                 Cell {
                     path: Some(Arc::new(pointer.clone())),
-                    ..cell(Value::String(text.into()), row.span)
+                    ..cell(Value::String(text.into()), key_span())
                 }
             }
             FieldSource::Path(_)
@@ -1084,8 +1109,8 @@ impl<'r> Rows<'r> {
             // Where the value is written is found only when a finding asks.
             let value_span = value
                 .as_ref()
-                .and(reading)
-                .map(|reading| Span::Read(ReadSpan::new(reading, ordinal)));
+                .zip(reading)
+                .map(|(value, reading)| Span::Read(ReadSpan::new(reading, ordinal, value)));
             let mut cells = Vec::with_capacity(self.relation.fields.len());
             for (position, (name, field)) in self.relation.fields.iter().enumerate() {
                 let (value, span) = match &field.source {
