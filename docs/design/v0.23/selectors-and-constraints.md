@@ -436,7 +436,7 @@ metadata keys, plus these. `assert:` holds exactly one of `equal`, `unique` and 
 | `set.field` | a field name | required | the field whose values form each set |
 | `set.group_by` | a field name | none: the relation is one group | the group of each row |
 | `set.equal_to`, `set.subset_of`, `set.disjoint_from` | `{ group: literal }` or `{ relation: R, field: F }` | exactly one is required | the other set |
-| `set.groups` | a list of literals | `[]` | groups that must exist, rows or not |
+| `set.groups` | a list of literals | `[]` | groups that must exist, rows or not (`equal_to` only) |
 | `set.plurals` | `exact` or `cldr` | `exact` | collapse CLDR plural groups (`{ group: }` targets only) |
 
 ## 7. `when` and row filters (Q15)

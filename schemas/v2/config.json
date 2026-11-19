@@ -187,7 +187,7 @@
           ]
         },
         "groups": {
-          "description": "Groups that must exist, rows or not: literals of the `group_by:` field. A group named only here lacks every value of the other set.",
+          "description": "Groups that must exist, rows or not, with `equal_to:`: literals of the `group_by:` field. A group named only here lacks every value of the other set.",
           "items": {
             "$ref": "#/$defs/ConstraintLiteral"
           },
@@ -2649,7 +2649,7 @@
       "type": "object"
     },
     "rule_constraint": {
-      "description": "An assertion over the rows of a relation: equal values, unique keys, or a set of values per group compared with a reference group.",
+      "description": "An assertion over the rows of a relation: equal values, unique keys, or a set of values per group compared with a reference group or another relation's field.",
       "not": {
         "anyOf": [
           {

@@ -260,7 +260,7 @@ impl<'p> Checker<'p> {
             }
             self.key_paths(&set.field)?;
         }
-        let groups = self.groups(set, &target)?;
+        let groups = self.groups(set, *mode, &target)?;
         let resource_groups = match &set.group_by {
             Some(group_by) => self.resource_groups(group_by)?,
             None => None,
@@ -347,8 +347,9 @@ impl<'p> Checker<'p> {
     }
 
     /// `groups:`: literals of the `group_by:` field, none twice and none the
-    /// reference group, which must have rows anyway.
-    fn groups(&self, set: &options::Set, target: &SetTarget) -> Result<Vec<Value>> {
+    /// reference group, which must have rows anyway, under `equal_to:` (in
+    /// mode `mode`): the only mode in which a group without rows can fail.
+    fn groups(&self, set: &options::Set, mode: SetMode, target: &SetTarget) -> Result<Vec<Value>> {
         let Some(literals) = set.groups.as_ref().filter(|groups| !groups.is_empty()) else {
             return Ok(Vec::new());
         };
@@ -359,6 +360,17 @@ impl<'p> Checker<'p> {
                  `group_by:`",
             ));
         };
+        if mode != SetMode::EqualTo {
+            return Err(self.fail(
+                "assert.set.groups",
+                format!(
+                    "names groups that must exist, which only `equal_to:` checks: under `{}:` a \
+                     group without rows holds no value, so it passes; compare with `equal_to:`, \
+                     or drop `groups:`",
+                    mode.key()
+                ),
+            ));
+        }
         let mut groups: Vec<Value> = Vec::with_capacity(literals.len());
         // Each literal's place, by value.
         let mut seen: HashMap<Value, usize> = HashMap::with_capacity(literals.len());

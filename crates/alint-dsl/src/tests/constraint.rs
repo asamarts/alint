@@ -702,6 +702,21 @@ fn groups_lists_literals_of_the_group_by_field_once_each() {
         "names groups, which are values of the `group_by:` field, and this `set` has no \
          `group_by:`",
     );
+    // `subset_of:` and `disjoint_from:` find nothing in a group without
+    // rows, so a group that must exist needs `equal_to:`.
+    for mode in ["subset_of", "disjoint_from"] {
+        refused(
+            &set(&format!(
+                "group_by: range, {mode}: {{ group: x }}, groups: [y]"
+            )),
+            "assert.set.groups",
+            &format!(
+                "names groups that must exist, which only `equal_to:` checks: under `{mode}:` a \
+                 group without rows holds no value, so it passes; compare with `equal_to:`, or \
+                 drop `groups:`"
+            ),
+        );
+    }
     refused(
         &set("group_by: range, equal_to: { group: x }, groups: [y, z, y]"),
         "assert.set.groups[2]",

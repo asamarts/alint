@@ -915,10 +915,10 @@ A missing reference or literal peer, an unparsable reference or peer, and a `pee
 **Categories:** Cross-file
 
 An assertion over the rows of a relation: equal values, unique keys, or a set of values per group
-compared with a reference group. Version 2 only, and experimental as `version: 2` is: a config of
-`version: 1` that uses it is refused at load with an error that names version 2, and its syntax may
-change before a release declares version 2 stable (v0.24 at the earliest). See
-[Version 2](/docs/configuration/version-2/) for selectors and relations.
+compared with a reference group or another relation's field. Version 2 only, and experimental as
+`version: 2` is: a config of `version: 1` that uses it is refused at load with an error that names
+version 2, and its syntax may change before a release declares version 2 stable (v0.24 at the
+earliest). See [Version 2](/docs/configuration/version-2/) for selectors and relations.
 
 A rule takes `input:`, the relation it reads (a name, bare or qualified by an `extends:` alias as
 `deps.ranges`, or an inline relation written as a relation under `relations:` is, whose values may
@@ -975,10 +975,13 @@ group.
 
 A group is the rows that share a `G` value. When `G` is a `path` field or a path token (`stem`,
 `dir`, ...), every file the relation reads is a group too, rows or not, so a locale file that is
-`{}` lacks every value of the reference group, at that file. `groups: [fr, de]` names groups that
-must exist: a group only `groups:` names lacks every value, in a finding with no path. Each literal
-is a string, or a boolean for a field that can hold one, of `G`'s type; it may not repeat or name
-the reference group, and `groups:` needs `group_by:`.
+`{}` lacks every value of the reference group, at that file; a file whose path alone the relation's
+`where:` rejects is none (its path-token fields are tested after their transforms, and a predicate
+on any other field cannot reject it). With `equal_to:`, `groups: [fr, de]` names groups that must
+exist: a group only `groups:` names lacks every value, in a finding with no path. Each literal is a
+string, or a boolean for a field that can hold one, of `G`'s type; it may not repeat or name the
+reference group, and `groups:` needs `group_by:`. Under `subset_of:` or `disjoint_from:` a group
+without rows passes, so `groups:` is refused there.
 
 `equal_to: { relation: R, field: F2 }` (or `subset_of:`, `disjoint_from:`) compares each group with
 every value of field `F2` across the rows of relation `R`, a name, bare or qualified by an
@@ -986,7 +989,10 @@ every value of field `F2` across the rows of relation `R`, a name, bare or quali
 withholds the rule's findings. A value only `R` holds is a finding at the group's first file,
 related to `R`'s row with it, and `{{row.FIELD}}` shows `<no row>` in its `message:`. `F2` and `F`
 must hold one type, and `R` may hold at most 100,000 distinct values of `F2`; past either, the rule
-has no verdict. A `sensitive` `F2` hides `F`'s values too.
+has no verdict. A `sensitive` `F2` makes `F` sensitive at load, with every field of the input that
+spells the same values (an entry's key fields together, say), so no message, `{{row.FIELD}}` or
+baseline shows them, and `explain` and `list` mark them sensitive. What `R`'s `read:` skipped is
+reported once, with the input's own.
 
 `plurals: cldr` collapses CLDR plural groups before comparing, as `key_parity` does: `F` must be
 an `entry.path` field (with no transform but `strip-root`), and each comparison of a group with

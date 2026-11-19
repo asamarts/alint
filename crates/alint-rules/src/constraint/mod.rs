@@ -89,7 +89,7 @@ struct SetAssertion {
     resource_groups: Option<ResourceGroups>,
     target: SetTarget,
     mode: SetMode,
-    /// `groups:`: the groups that must exist, rows or not.
+    /// `groups:`: the groups that must exist, rows or not (`equal_to:` only).
     groups: Vec<Value>,
     /// `plurals: cldr`: CLDR plural groups of the key paths merge.
     plurals: bool,

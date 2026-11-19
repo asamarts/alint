@@ -422,16 +422,6 @@ fn groups_names_groups_that_must_exist() {
         violation.baseline_key.as_deref(),
         Some("3:set6:string2:de6:string4:home7:missing")
     );
-    // `subset_of:` and `disjoint_from:` find nothing in a group without rows.
-    for mode in ["subset_of", "disjoint_from"] {
-        let config = named_groups("[de]").replace("equal_to", mode);
-        let results = run(&config, &[("messages.json", MESSAGES)]);
-        let found = findings(&results, "c");
-        assert!(
-            found.iter().all(|finding| !finding.contains("\"de\"")),
-            "{found:?}"
-        );
-    }
 }
 
 /// A group the environment names is a literal it wrote: no message or key

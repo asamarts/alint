@@ -115,8 +115,9 @@ pub(super) struct Set {
     pub subset_of: Option<SetTarget>,
     /// Each group's set shares no value with the other set.
     pub disjoint_from: Option<SetTarget>,
-    /// Groups that must exist, rows or not: literals of the `group_by:`
-    /// field. A group named only here lacks every value of the other set.
+    /// Groups that must exist, rows or not, with `equal_to:`: literals of
+    /// the `group_by:` field. A group named only here lacks every value of
+    /// the other set.
     pub groups: Option<Vec<Literal>>,
     /// `exact` compares values as they are; `cldr` collapses CLDR plural
     /// groups of an `entry.path` field, as `key_parity` does (`{ group: }`

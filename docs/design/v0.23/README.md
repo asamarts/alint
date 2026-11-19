@@ -903,13 +903,19 @@ Phase 7 lands in four steps, each a pull request:
     relation).
 - 2026-11-18: phase 7 step 2.
   - The `constraint` kind's `set` is complete. `plurals: cldr` merges CLDR plural groups of an
-    `entry.path` field over each pair of groups, with the plural logic `key_parity` uses, now in
-    one module, `plural_groups.rs`; a comparison decides only the groups around its own keys,
-    so it costs time in the group's keys, not the reference's. A `set` grouped by `path` or a
-    path token gives every resource the relation reads a group, rows or not, and `groups:` names
-    groups that must exist, whose findings have no path. A `set` against `{ relation: R,
-    field: F }` reads `R` before the rule, as an input: `R`'s failures withhold the rule's
-    findings, and the environment redaction covers it. `R` is a name, never an inline relation.
+    `entry.path` field over each pair of groups, with the plural logic `key_parity` uses, now in one
+    module, `plural_groups.rs`. Under `subset_of:` and `disjoint_from:` a comparison decides only
+    the groups around the group's own keys, so it costs time in the group's keys, not the
+    reference's; `equal_to:` merges the reference's keys again for each group, to list the ones the
+    group lacks, so it costs time in the reference's keys per group. A `set` grouped by `path` or a
+    path token gives every resource the relation reads a group, rows or not, except one whose path
+    alone `where:` rejects (its path-token fields after their transforms, any other predicate
+    unknown), and `groups:`, with `equal_to:` only, names groups that must exist, whose findings
+    have no path. A `set` against `{ relation: R, field: F }` reads `R` before the rule, as an
+    input: `R`'s failures withhold the rule's findings, its notes are reported once with the
+    input's, and the environment redaction covers it. A sensitive `F` makes the compared field
+    sensitive at load, with every field that spells the same values, so `explain` and `list` show
+    it. `R` is a name, never an inline relation.
   - Section 6's identity of `unique` without `determines:` now reads as step 1 built it.
   - Next: phase 7 step 3 (the `--changed` trigger scope, and the related-location gate over
     JSON, SARIF and the language server).

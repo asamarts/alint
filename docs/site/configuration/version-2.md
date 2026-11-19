@@ -475,8 +475,9 @@ rules:
     level: error
 ```
 
-A group is the rows that share a `group_by:` value, so `groups:` names the locales that must
-exist: one whose files hold no keys lacks every English key, in findings with no path.
+A group is the rows that share a `group_by:` value, so `groups:` (with `equal_to:` only) names
+the locales that must exist: one whose files hold no keys lacks every English key, in findings
+with no path.
 `plurals: cldr` compares `inbox: { one, other }` with a locale's `inbox: { one, few, many,
 other }` as one key, `inbox`, and `items_one`, `items_other` as `items`. Grouped by a path
 token instead (`fields: { locale: stem, ... }`), every file is a group, and an empty one lacks

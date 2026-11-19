@@ -685,13 +685,16 @@ policy-test package the user does not trust.
     another relation's field (`{ relation: R, field: F }`, a name, bare or qualified, never an
     inline relation), with `plurals: cldr` merging CLDR plural groups of an `entry.path` field
     as `key_parity` does (against a group only).
-  - A `set` grouped by `path` or a path token gives every resource its relation reads a group,
-    rows or not, and `groups:` names groups that must exist: a group with no rows lacks every
-    value of the other set, at its first resource, or without a path when only `groups:` names
-    it. A missing value is related to the row that holds it; an extra one sits at its row; a
-    shared one sits at its row, related to a row of the other set. The other relation is read
-    before the rule, its failures withhold the rule's findings, and its set is bounded by the
-    100,000 distinct-value limit. A sensitive field on either side hides the values of both.
+  - A `set` grouped by `path` or a path token gives every resource its relation reads a group, rows
+    or not, except one `where:` rejects by its path alone, and `groups:` names groups that must
+    exist (with `equal_to:` only; under the other two a group without rows passes, so they refuse it
+    at load): a group with no rows lacks every value of the other set, at its first resource, or
+    without a path when only `groups:` names it. A missing value is related to the row that holds
+    it; an extra one sits at its row; a shared one sits at its row, related to a row of the other
+    set. The other relation is read before the rule, its failures withhold the rule's findings, its
+    notes are reported once, and its set is bounded by the 100,000 distinct-value limit. A sensitive
+    field on either side hides the values of both, and a sensitive field of the other relation makes
+    the compared field sensitive at load, with every field that spells the same values.
   - Values compare by type and text (a number by its lexeme); null and a missing value match
     nothing; a key, group or set comparison across types, a null group, a missing or repeated
     source row and an empty reference group are analysis failures, never a pass, and so is a
