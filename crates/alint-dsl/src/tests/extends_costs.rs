@@ -280,18 +280,14 @@ fn the_extends_source_budget_bounds_a_load() {
         ..RawConfig::default()
     };
     let mut state = LoadState::default();
-    let empty = RawConfig::default();
     state
-        .charge_extends(&empty, &source(loader::MAX_EXTENDS_SOURCE_BYTES / 2))
+        .charge_extends(0, &source(loader::MAX_EXTENDS_SOURCE_BYTES / 2))
         .expect("half the budget");
     state
-        .charge_extends(&empty, &source(loader::MAX_EXTENDS_SOURCE_BYTES / 2))
+        .charge_extends(0, &source(loader::MAX_EXTENDS_SOURCE_BYTES / 2))
         .expect("all of it");
     assert_eq!(
-        state
-            .charge_extends(&empty, &source(1))
-            .unwrap_err()
-            .to_string(),
+        state.charge_extends(0, &source(1)).unwrap_err().to_string(),
         format!(
             "the `extends:` entries of this config merge more than {} bytes of sources in all \
              (each source counted for every entry that merges it, as its text, or as its YAML \
@@ -349,7 +345,7 @@ fn the_extends_budgets_have_their_documented_sizes() {
                 let merged = entries((entry - 1) * rules);
                 state
                     .charge_extends_load(&source)
-                    .and_then(|()| state.charge_extends(&merged, &source))
+                    .and_then(|()| state.charge_extends(merged.merge_size(), &source))
                     .is_err()
             })
             .unwrap()
@@ -363,11 +359,7 @@ fn the_extends_budgets_have_their_documented_sizes() {
         ..RawConfig::default()
     };
     let refused = (1..=65)
-        .find(|_| {
-            state
-                .charge_extends(&RawConfig::default(), &source)
-                .is_err()
-        })
+        .find(|_| state.charge_extends(0, &source).is_err())
         .unwrap();
     assert_eq!(refused, 65);
 }

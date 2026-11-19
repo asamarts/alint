@@ -56,7 +56,7 @@ pub(crate) fn merge_field_origins(existing: &mut Mapping, incoming: &Mapping) {
         return;
     }
     let mut merged = ours
-        .and_then(|value| value.as_mapping().cloned())
+        .and_then(|mut value| value.as_mapping_mut().map(std::mem::take))
         .unwrap_or_default();
     for field in incoming.keys().filter(|field| !is_internal(field)) {
         match theirs.and_then(|origins| origins.get(field)) {

@@ -1,65 +1,41 @@
 //! Merging configs: each `extends:` source onto what its list merged so far,
 //! and each `.alint.d/` drop-in onto the top-level config. Pulled out of
 //! `lib.rs` to keep that file to the public surface and the config's shape.
+//!
+//! A list merges into one [`Merger`], updated in place, so each config pushed
+//! onto it costs what that config brings in, wherever it falls in the list.
+//! The merge it replaced rebuilt what it merged onto for every config, so a
+//! list of N sources cost N times what it merged (#580). The tests
+//! (`merge_tests.rs`) check the two against each other on generated lists.
 
-use alint_core::{ConfigCompatibility, Error, FactSpec, Result};
+use std::borrow::Cow;
+use std::collections::{HashMap, HashSet};
+use std::hash::Hash;
+use std::path::PathBuf;
+
+use alint_core::{ConfigCompatibility, ConfigSourceClass, Error, FactSpec, Result, StableVersion};
 use ayaml::Mapping;
 
-use crate::{RawConfig, loader, merge_mapping_fields};
+use crate::{RawConfig, UntrustedWhenVarRead, merge_mapping_fields};
 
-/// Add each of `incoming` that `target` does not hold yet.
-pub(crate) fn extend_compatibility(
-    target: &mut Vec<ConfigCompatibility>,
-    incoming: impl IntoIterator<Item = ConfigCompatibility>,
-) {
-    for record in incoming {
-        if !target.contains(&record) {
-            target.push(record);
+/// The entries of the list `$field` of `$source`, a `&mut Cow<RawConfig>`
+/// ([`Entries`]).
+macro_rules! entries {
+    ($source:expr, $($field:ident).+) => {
+        match &mut *$source {
+            Cow::Owned(config) => {
+                Entries::Owned(std::mem::take(&mut config.$($field).+).into_iter())
+            }
+            Cow::Borrowed(config) => Entries::Borrowed(config.$($field).+.iter()),
         }
-    }
+    };
 }
-
-fn merged_compatibility(
-    mut current: Vec<ConfigCompatibility>,
-    incoming: Vec<ConfigCompatibility>,
-) -> Vec<ConfigCompatibility> {
-    extend_compatibility(&mut current, incoming);
-    current
-}
-
-/// Facts merged by id: a later fact replaces an earlier one with its id, in
-/// the earlier one's place.
-fn merge_facts(a: Vec<FactSpec>, b: Vec<FactSpec>) -> Vec<FactSpec> {
-    let mut facts_by_id: std::collections::BTreeMap<String, FactSpec> =
-        std::collections::BTreeMap::new();
-    let mut fact_order: Vec<String> = Vec::new();
-    for f in a.into_iter().chain(b) {
-        if !facts_by_id.contains_key(&f.id) {
-            fact_order.push(f.id.clone());
-        }
-        facts_by_id.insert(f.id.clone(), f);
-    }
-    fact_order
-        .into_iter()
-        .map(|id| facts_by_id.remove(&id).unwrap())
-        .collect()
-}
-
 /// The most entries (rules, templates, facts, vars, `ignore:` patterns,
 /// recorded `when` reads, selectors and relations) a config may hold once its
 /// `extends:` chain and drop-ins are merged. Real configs hold hundreds; an
 /// `extends:` diamond that lists one source twice per level once doubled the
 /// lists at each level.
 pub(crate) const MAX_MERGED_ENTRIES: usize = 1 << 20;
-
-/// `items` without repeats, each kept where it first appears.
-fn dedup_in_order<T: Eq + std::hash::Hash + Clone>(items: Vec<T>) -> Vec<T> {
-    let mut seen = std::collections::HashSet::with_capacity(items.len());
-    items
-        .into_iter()
-        .filter(|item| seen.insert(item.clone()))
-        .collect()
-}
 
 impl RawConfig {
     /// The entries [`MAX_MERGED_ENTRIES`] counts.
@@ -74,197 +50,488 @@ impl RawConfig {
     }
 
     /// What an `extends:` merge or load handles of the config
-    /// ([`loader::LoadState::charge_extends`]): its entries, and each version
+    /// ([`crate::loader::LoadState::charge_extends`]): its entries, and each version
     /// 2 source, which a merge looks for among those it holds.
     pub(crate) fn merge_size(&self) -> usize {
         self.entry_count() + self.v2.sources.len()
     }
 }
 
-/// [`merge_unbounded`], refused past [`MAX_MERGED_ENTRIES`].
+/// `b` merged onto `a` ([`Merger`]).
+#[cfg(test)]
 pub(crate) fn merge(a: RawConfig, b: RawConfig) -> Result<RawConfig> {
-    let merged = merge_unbounded(a, b);
-    let objects = merged.v2.object_count();
-    let entries = merged.entry_count();
-    if entries > MAX_MERGED_ENTRIES {
+    let mut merger = Merger::new(a);
+    merger.push(b)?;
+    Ok(merger.finish())
+}
+
+/// Configs merged in order, each onto what the ones before it merged, with
+/// the later one winning on conflicts:
+/// - `rules` dedupe by id; rule mappings are **field-merged**, not replaced:
+///   the later one's keys override the earlier one's individually. So a child
+///   that specifies `{id: X, level: off}` over a parent `{id: X, kind:
+///   file_exists, paths: README.md, level: error}` yields a merged rule with
+///   kind + paths still set and level overridden. Ordering: each id where it
+///   first appears; then the rules without an id (which `finalize` refuses),
+///   each once. `templates` merge the same way.
+/// - `facts` dedupe by id; a later fact replaces an earlier one wholesale, in
+///   its place (fact kinds are a discriminated union: field-merging
+///   `any_file_exists` with `all_files_exist` would produce an invalid fact).
+/// - `vars` merged as a map; later values override. A var's env-derived mark
+///   follows the value that wins: a later literal clears it, a later
+///   interpolated value sets it.
+/// - `ignore`, the recorded `when` reads and `trusted_extends` keep each entry
+///   once, where it first appears, so a source an `extends:` diamond reaches
+///   twice does not double them at every level. The compatibility records,
+///   the environment's values and the version 2 sources (by file) keep the
+///   first config's list as it is and add each later entry they do not hold.
+///   `config_files` keeps every entry.
+/// - `version`, `respect_gitignore`, `fix_size_limit`, `nested_configs`,
+///   `allow_out_of_root` and `baseline` take the later value when it is set,
+///   else keep the earlier one (defaults are applied once, in `finalize`). An
+///   `extends:`'d config's values are dropped before the merge
+///   ([`RawConfig::drop_top_level_settings`]); `allow_out_of_root`,
+///   `baseline` and `trusted_extends` are refused from one before it.
+/// - `extends` is always left empty on the merged result; resolved already.
+///
+/// Each list is kept with what makes adding to it a lookup: rules and
+/// templates with each id's position, the deduplicated lists with a set of
+/// their entries, the version 2 sources with their files. So a push costs
+/// what it brings in, and the merged size is counted as it grows.
+#[derive(Default)]
+pub(crate) struct Merger {
+    /// The config the merge starts from, until another is pushed onto it: a
+    /// merge of nothing leaves it as it is, its lists too.
+    first: Option<RawConfig>,
+    /// What was merged, but for the lists kept below, which [`Self::finish`]
+    /// puts back.
+    merged: RawConfig,
+    rules: ById,
+    templates: ById,
+    facts: Vec<FactSpec>,
+    /// The position of each fact's id in `facts`.
+    fact_positions: HashMap<String, usize>,
+    ignore: Unique<String>,
+    untrusted_when_var_reads: Unique<UntrustedWhenVarRead>,
+    trusted_extends: Unique<String>,
+    environment_values: Unique<String>,
+    /// Each of `merged.compatibility`.
+    compatibility: HashSet<CompatibilityKey>,
+    /// The file of each of `merged.v2.sources`.
+    v2_paths: HashSet<PathBuf>,
+    /// The selectors and relations of `merged.v2.sources`.
+    v2_objects: usize,
+}
+
+impl Merger {
+    /// A merge that starts from `first`.
+    pub(crate) fn new(first: RawConfig) -> Self {
+        Self {
+            first: Some(first),
+            ..Self::default()
+        }
+    }
+
+    /// The `version:` merged so far.
+    pub(crate) fn version(&self) -> Option<u32> {
+        self.first
+            .as_ref()
+            .map_or(self.merged.version, |first| first.version)
+    }
+
+    /// What [`RawConfig::merge_size`] counts of what was merged so far.
+    pub(crate) fn merge_size(&self) -> usize {
+        self.first.as_ref().map_or_else(
+            || self.entry_count() + self.merged.v2.sources.len(),
+            RawConfig::merge_size,
+        )
+    }
+
+    /// Merge `source` onto what was merged so far, moving its entries in.
+    pub(crate) fn push(&mut self, source: RawConfig) -> Result<()> {
+        self.push_from(Cow::Owned(source))
+    }
+
+    /// Merge `source`, which a later entry of its list merges again, onto
+    /// what was merged so far. An entry the merge takes (a rule, a var) is
+    /// copied in; one it holds already (an `ignore:` pattern, a version 2
+    /// source) is only looked up, so the caller need not copy all of it.
+    pub(crate) fn push_held(&mut self, source: &RawConfig) -> Result<()> {
+        self.push_from(Cow::Borrowed(source))
+    }
+
+    /// What was merged.
+    pub(crate) fn finish(self) -> RawConfig {
+        let Self {
+            first,
+            mut merged,
+            rules,
+            templates,
+            facts,
+            ignore,
+            untrusted_when_var_reads,
+            trusted_extends,
+            environment_values,
+            ..
+        } = self;
+        if let Some(first) = first {
+            return first;
+        }
+        merged.rules = rules.into_list();
+        merged.templates = templates.into_list();
+        merged.facts = facts;
+        merged.ignore = ignore.entries;
+        merged.untrusted_when_var_reads = untrusted_when_var_reads.entries;
+        merged.trusted_extends = trusted_extends.entries;
+        merged.environment_values = environment_values.entries;
+        merged
+    }
+
+    /// Take `first` as what a merge merges onto: its settings, its vars and
+    /// the lists a merge does not reduce, as they are; the lists it reduces to
+    /// each entry once, as a later config's.
+    fn start(&mut self, mut first: RawConfig) {
+        self.compatibility = first
+            .compatibility
+            .iter()
+            .map(CompatibilityKey::of)
+            .collect();
+        self.environment_values = Unique::of(std::mem::take(&mut first.environment_values));
+        self.v2_paths = first
+            .v2
+            .sources
+            .iter()
+            .map(|objects| objects.source.path.clone())
+            .collect();
+        self.v2_objects = first.v2.object_count();
+        #[cfg(test)]
+        touch(self.compatibility.len() + self.environment_values.len() + self.v2_paths.len());
+        let mut first = Cow::Owned(first);
+        self.add_reduced(&mut first);
+        self.merged = RawConfig {
+            requires: None,
+            extends: Vec::new(),
+            extends_environment: Vec::new(),
+            ..first.into_owned()
+        };
+    }
+
+    fn push_from(&mut self, mut source: Cow<'_, RawConfig>) -> Result<()> {
+        if let Some(first) = self.first.take() {
+            self.start(first);
+        }
+        // Every field, so a new one is merged here, or said not to be.
+        let RawConfig {
+            version,
+            requires: _,
+            extends: _,
+            ignore: _,
+            respect_gitignore,
+            vars,
+            facts: _,
+            templates: _,
+            rules: _,
+            fix_size_limit,
+            nested_configs,
+            allow_out_of_root,
+            baseline,
+            trusted_extends: _,
+            env_vars,
+            untrusted_when_var_reads: _,
+            compatibility: _,
+            environment_values: _,
+            config_files: _,
+            field_source_names: _,
+            extends_environment: _,
+            source_size,
+            surface,
+            v2: _,
+        } = source.as_ref();
+        let merged = &mut self.merged;
+        // The language follows the version: the source that sets it decides.
+        if version.is_some() {
+            merged.surface = *surface;
+        }
+        merged.version = version.or(merged.version);
+        merged.respect_gitignore = respect_gitignore.or(merged.respect_gitignore);
+        merged.fix_size_limit = fix_size_limit.or(merged.fix_size_limit);
+        merged.nested_configs = nested_configs.or(merged.nested_configs);
+        // `allow_out_of_root` and `baseline` are top-level-only (an
+        // `extends:`'d value is refused upstream); the later config wins when
+        // it sets one.
+        if !allow_out_of_root.is_confined() {
+            merged.allow_out_of_root = allow_out_of_root.clone();
+        }
+        if baseline.is_some() {
+            merged.baseline.clone_from(baseline);
+        }
+        merged.source_size = merged.source_size.saturating_add(*source_size);
+        // The env-derived mark follows the value that wins: a later literal
+        // value clears it, an interpolated one sets it.
+        for name in vars.keys() {
+            match env_vars.get(name) {
+                Some(raw) => merged.env_vars.insert(name.clone(), raw.clone()),
+                None => merged.env_vars.remove(name),
+            };
+        }
+        #[cfg(test)]
+        touch(vars.len());
+        match &mut source {
+            Cow::Owned(config) => merged.vars.extend(std::mem::take(&mut config.vars)),
+            Cow::Borrowed(config) => merged.vars.extend(
+                config
+                    .vars
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.clone())),
+            ),
+        }
+        for record in entries!(&mut source, compatibility) {
+            if self.compatibility.insert(CompatibilityKey::of(&record)) {
+                self.merged.compatibility.push(record.into_owned());
+            }
+        }
+        for value in entries!(&mut source, environment_values) {
+            self.environment_values.add(value);
+        }
+        self.merged
+            .config_files
+            .extend(entries!(&mut source, config_files).map(Cow::into_owned));
+        // Set once, on the top-level result after every merge.
+        if self.merged.field_source_names.is_empty() {
+            self.merged.field_source_names = entries!(&mut source, field_source_names)
+                .map(Cow::into_owned)
+                .collect();
+        }
+        // A file an `extends:` diamond reaches twice declares its objects once.
+        for objects in entries!(&mut source, v2.sources) {
+            if !self.v2_paths.contains(&objects.source.path) {
+                self.v2_paths.insert(objects.source.path.clone());
+                self.v2_objects += objects.object_count();
+                self.merged.v2.sources.push(objects.into_owned());
+            }
+        }
+        self.add_reduced(&mut source);
+        self.check_size()
+    }
+
+    /// Add the entries of `source`'s lists that keep each entry once.
+    fn add_reduced(&mut self, source: &mut Cow<'_, RawConfig>) {
+        for pattern in entries!(source, ignore) {
+            self.ignore.add(pattern);
+        }
+        for read in entries!(source, untrusted_when_var_reads) {
+            self.untrusted_when_var_reads.add(read);
+        }
+        // `trusted_extends:` is top-level-only: consumed at the top before any
+        // merge, and refused from an extended or nested source. Kept so a
+        // stray value still reaches that refusal.
+        for url in entries!(source, trusted_extends) {
+            self.trusted_extends.add(url);
+        }
+        for fact in entries!(source, facts) {
+            let fact = fact.into_owned();
+            if let Some(&at) = self.fact_positions.get(&fact.id) {
+                self.facts[at] = fact;
+            } else {
+                self.fact_positions
+                    .insert(fact.id.clone(), self.facts.len());
+                self.facts.push(fact);
+            }
+        }
+        for template in entries!(source, templates) {
+            self.templates.add(template);
+        }
+        for rule in entries!(source, rules) {
+            self.rules.add(rule);
+        }
+    }
+
+    /// The entries [`RawConfig::entry_count`] counts of what was merged.
+    fn entry_count(&self) -> usize {
+        self.rules.len()
+            + self.templates.len()
+            + self.facts.len()
+            + self.merged.vars.len()
+            + self.ignore.len()
+            + self.untrusted_when_var_reads.len()
+            + self.v2_objects
+    }
+
+    /// Refuse what was merged past [`MAX_MERGED_ENTRIES`].
+    fn check_size(&self) -> Result<()> {
+        let entries = self.entry_count();
+        if entries <= MAX_MERGED_ENTRIES {
+            return Ok(());
+        }
         // A version 1 config's message is unchanged.
-        let held = if objects == 0 {
+        let held = if self.v2_objects == 0 {
             "rules, templates, facts, vars and `ignore:` patterns"
         } else {
             "rules, templates, facts, vars, `ignore:` patterns, selectors and relations"
         };
-        return Err(Error::Other(format!(
+        Err(Error::Other(format!(
             "the merged config holds {entries} entries ({held}), more than the \
              {MAX_MERGED_ENTRIES} supported; flatten the `extends:` chain or split the ruleset"
-        )));
+        )))
     }
-    Ok(merged)
 }
 
-/// Merge `b` into `a`, with `b` winning on conflicts.
-///
-/// Semantics:
-/// - `rules` dedupe by id; rule mappings are **field-merged**,
-///   not replaced — `b`'s keys override `a`'s keys individually.
-///   So a child that specifies `{id: X, level: off}` over a
-///   parent `{id: X, kind: file_exists, paths: README.md, level:
-///   error}` yields a merged rule with kind + paths still set
-///   and level overridden. Ordering: `a`'s entries first (in
-///   order they first appear), then `b`'s new entries.
-/// - `facts` dedupe by id; `b`'s entry replaces `a`'s wholesale
-///   (fact kinds are a discriminated union — field-merging
-///   `any_file_exists` with `all_files_exist` would produce an
-///   invalid fact).
-/// - `vars` merged as a map; `b`'s values override.
-/// - `ignore` concatenated `a` then `b`, each pattern once.
-/// - `version`, `respect_gitignore`, `fix_size_limit` and
-///   `nested_configs` take `b`'s value when `b` sets it, else keep
-///   `a`'s (defaults are applied once, in `finalize`). An
-///   `extends:`'d config's values are dropped before the merge
-///   ([`RawConfig::drop_top_level_settings`]).
-/// - `extends` is always left empty on the merged result;
-///   resolved already.
-fn merge_unbounded(a: RawConfig, b: RawConfig) -> RawConfig {
-    let version = b.version.or(a.version);
-    let respect_gitignore = b.respect_gitignore.or(a.respect_gitignore);
-    let fix_size_limit = b.fix_size_limit.or(a.fix_size_limit);
-    let nested_configs = b.nested_configs.or(a.nested_configs);
-    // `allow_out_of_root` is top-level-only: `b` (the later / child
-    // config) wins when it sets a non-default value; an inherited
-    // (`a`-side) value only survives if the child is silent. Extended
-    // rulesets are rejected upstream (`reject_allow_out_of_root_in`),
-    // so in practice only the user's top-level config carries a
-    // non-default value here.
-    let allow_out_of_root = if b.allow_out_of_root.is_confined() {
-        a.allow_out_of_root
-    } else {
-        b.allow_out_of_root
-    };
-    // `baseline:` is top-level-only (an `extends:`'d value is rejected upstream
-    // by `reject_baseline_in`); the later (child) config wins when it sets one.
-    let baseline = b.baseline.or(a.baseline);
+/// The entries of one list of a config pushed onto a [`Merger`]: moved out of
+/// it, or borrowed from it when it is held for a later entry
+/// ([`Merger::push_held`]).
+enum Entries<'s, T> {
+    Owned(std::vec::IntoIter<T>),
+    Borrowed(std::slice::Iter<'s, T>),
+}
 
-    // Each list keeps one copy of an entry two sources share, so a source an
-    // `extends:` diamond reaches twice does not double it at every level. An
-    // `ignore:` pattern always excludes, so order and repeats do not matter.
-    let mut ignore = a.ignore;
-    ignore.extend(b.ignore);
-    let ignore = dedup_in_order(ignore);
+impl<'s, T: Clone> Iterator for Entries<'s, T> {
+    type Item = Cow<'s, T>;
 
-    // The env-derived mark follows the value that wins: `b` overriding a name
-    // with a literal clears it, with an interpolated value sets it.
-    let mut env_vars = a.env_vars;
-    for name in b.vars.keys() {
-        match b.env_vars.get(name) {
-            Some(raw) => env_vars.insert(name.clone(), raw.clone()),
-            None => env_vars.remove(name),
+    fn next(&mut self) -> Option<Cow<'s, T>> {
+        let entry = match self {
+            Self::Owned(entries) => entries.next().map(Cow::Owned),
+            Self::Borrowed(entries) => entries.next().map(Cow::Borrowed),
         };
+        #[cfg(test)]
+        touch(usize::from(entry.is_some()));
+        entry
     }
-    let mut vars = a.vars;
-    vars.extend(b.vars);
-    let mut untrusted_when_var_reads = a.untrusted_when_var_reads;
-    untrusted_when_var_reads.extend(b.untrusted_when_var_reads);
-    let untrusted_when_var_reads = dedup_in_order(untrusted_when_var_reads);
-    let compatibility = merged_compatibility(a.compatibility, b.compatibility);
-    let mut environment_values = a.environment_values;
-    loader::add_environment_values(&mut environment_values, &b.environment_values);
-    let facts = merge_facts(a.facts, b.facts);
+}
 
-    // Templates merge by id, same shape as rules — later wins
-    // on field-level conflict. A child config can replace an
-    // upstream template's body wholesale by re-defining the id.
-    let mut templates_by_id: std::collections::BTreeMap<String, Mapping> =
-        std::collections::BTreeMap::new();
-    let mut template_order: Vec<String> = Vec::new();
-    let mut template_orphans: Vec<Mapping> = Vec::new();
-    for m in a.templates.into_iter().chain(b.templates) {
-        let Some(id) = m.get("id").and_then(|v| v.as_str()).map(str::to_string) else {
-            template_orphans.push(m);
-            continue;
-        };
-        if let Some(existing) = templates_by_id.get_mut(&id) {
-            merge_mapping_fields(existing, m);
-        } else {
-            template_order.push(id.clone());
-            templates_by_id.insert(id, m);
+/// A list that keeps each entry once, where it first appears, with a set of
+/// its entries beside it: adding one is a lookup, not a scan of the list.
+struct Unique<T> {
+    entries: Vec<T>,
+    held: HashSet<T>,
+}
+
+impl<T> Default for Unique<T> {
+    fn default() -> Self {
+        Self {
+            entries: Vec::new(),
+            held: HashSet::new(),
         }
     }
-    let mut templates: Vec<Mapping> = template_order
-        .into_iter()
-        .map(|id| templates_by_id.remove(&id).unwrap())
-        .collect();
-    templates.extend(dedup_in_order(template_orphans));
+}
 
-    // Rules: field-merge mappings by id. Rules without an id key
-    // can't participate in merge and are passed through unchanged
-    // (the final `finalize` step will reject them — RuleSpec
-    // requires `id`).
-    let mut rules_by_id: std::collections::BTreeMap<String, Mapping> =
-        std::collections::BTreeMap::new();
-    let mut rule_order: Vec<String> = Vec::new();
-    let mut orphans: Vec<Mapping> = Vec::new();
-    for m in a.rules.into_iter().chain(b.rules) {
-        let Some(id) = m.get("id").and_then(|v| v.as_str()).map(str::to_string) else {
-            orphans.push(m);
-            continue;
-        };
-        if let Some(existing) = rules_by_id.get_mut(&id) {
-            // Field-merge: b's keys overwrite a's at the top
-            // level of the rule mapping. Nested structures (e.g.
-            // a `fix:` block or `paths:` include/exclude pair)
-            // are replaced wholesale, which matches user
-            // expectation — overriding `fix.file_create.content`
-            // alone would be too surprising.
-            merge_mapping_fields(existing, m);
-        } else {
-            rule_order.push(id.clone());
-            rules_by_id.insert(id, m);
+impl<T: Clone + Eq + Hash> Unique<T> {
+    /// `entries` as they are, repeats too, each held.
+    fn of(entries: Vec<T>) -> Self {
+        let held = entries.iter().cloned().collect();
+        Self { entries, held }
+    }
+
+    /// Add `entry`, unless it is held already.
+    fn add(&mut self, entry: Cow<'_, T>) {
+        if !self.held.contains(entry.as_ref()) {
+            let entry = entry.into_owned();
+            self.held.insert(entry.clone());
+            self.entries.push(entry);
         }
     }
-    let mut rules: Vec<Mapping> = rule_order
-        .into_iter()
-        .map(|id| rules_by_id.remove(&id).unwrap())
-        .collect();
-    rules.extend(dedup_in_order(orphans));
 
-    // `trusted_extends:` is top-level-only -- consumed at is_top before any merge,
-    // and rejected from an extended / nested source. Concatenate defensively so a
-    // stray non-empty value still survives to the per-source rejection upstream.
-    let mut trusted_extends = a.trusted_extends;
-    trusted_extends.extend(b.trusted_extends);
-    let trusted_extends = dedup_in_order(trusted_extends);
-
-    RawConfig {
-        version,
-        requires: None,
-        extends: Vec::new(),
-        ignore,
-        respect_gitignore,
-        vars,
-        facts,
-        templates,
-        rules,
-        fix_size_limit,
-        nested_configs,
-        allow_out_of_root,
-        baseline,
-        trusted_extends,
-        env_vars,
-        untrusted_when_var_reads,
-        compatibility,
-        environment_values,
-        config_files: [a.config_files, b.config_files].concat(),
-        field_source_names: either_set(a.field_source_names, b.field_source_names),
-        extends_environment: Vec::new(),
-        source_size: a.source_size.saturating_add(b.source_size),
-        // The language follows the version: the source that sets it decides.
-        surface: b.version.map_or(a.surface, |_| b.surface),
-        v2: a.v2.merged(b.v2),
+    fn len(&self) -> usize {
+        self.entries.len()
     }
 }
 
-/// `a`, unless it is empty: for a list set once, on the top-level result
-/// after every merge (`RawConfig::field_source_names`).
-fn either_set<T>(a: Vec<T>, b: Vec<T>) -> Vec<T> {
-    if a.is_empty() { b } else { a }
+/// Rules, or templates, merged by id: a later one field-merges onto the one
+/// with its id, in that one's place.
+#[derive(Default)]
+struct ById {
+    /// Those with an id, in the order the ids first appear.
+    with_id: Vec<Mapping>,
+    /// The position of each id in `with_id`.
+    positions: HashMap<String, usize>,
+    /// Those without an id, each once, after the others: they merge with
+    /// nothing, and `finalize` refuses them.
+    orphans: Unique<Mapping>,
 }
+
+impl ById {
+    fn add(&mut self, mapping: Cow<'_, Mapping>) {
+        let Some(id) = mapping.get("id").and_then(ayaml::Value::as_str) else {
+            self.orphans.add(mapping);
+            return;
+        };
+        if let Some(&at) = self.positions.get(id) {
+            // Nested structures (a `fix:` block, a `paths:` include/exclude
+            // pair) are replaced wholesale: overriding
+            // `fix.file_create.content` alone would be too surprising.
+            merge_mapping_fields(&mut self.with_id[at], mapping.into_owned());
+        } else {
+            self.positions.insert(id.to_owned(), self.with_id.len());
+            self.with_id.push(mapping.into_owned());
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.with_id.len() + self.orphans.len()
+    }
+
+    fn into_list(self) -> Vec<Mapping> {
+        let mut list = self.with_id;
+        list.extend(self.orphans.entries);
+        list
+    }
+}
+
+/// All of a compatibility record, which `==` compares and a set can hold
+/// ([`ConfigCompatibility`] is not `Hash`).
+#[derive(PartialEq, Eq, Hash)]
+struct CompatibilityKey(
+    String,
+    ConfigSourceClass,
+    u32,
+    Option<StableVersion>,
+    Option<u32>,
+);
+
+impl CompatibilityKey {
+    fn of(record: &ConfigCompatibility) -> Self {
+        // Every field, so a new one is compared here too.
+        let ConfigCompatibility {
+            source,
+            source_class,
+            config_version,
+            requires_alint,
+            consumer_version,
+        } = record;
+        Self(
+            source.clone(),
+            *source_class,
+            *config_version,
+            *requires_alint,
+            *consumer_version,
+        )
+    }
+}
+
+/// Add each of `incoming` that `target` does not hold yet.
+pub(crate) fn extend_compatibility(
+    target: &mut Vec<ConfigCompatibility>,
+    incoming: impl IntoIterator<Item = ConfigCompatibility>,
+) {
+    for record in incoming {
+        if !target.contains(&record) {
+            target.push(record);
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many entries the [`Merger`]s on this thread have handled: each of
+    /// a pushed config's lists, its vars, and the lists of the config a merge
+    /// starts from that it reads.
+    pub(crate) static MERGE_TOUCHED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn touch(entries: usize) {
+    MERGE_TOUCHED.with(|touched| touched.set(touched.get() + entries));
+}
+
+#[cfg(test)]
+#[path = "merge_tests.rs"]
+mod tests;

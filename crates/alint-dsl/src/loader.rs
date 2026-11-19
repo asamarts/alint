@@ -12,9 +12,10 @@ use ayaml::Mapping;
 
 use crate::extends;
 use crate::extends::EntryKind as ExtendsEntryKind;
+use crate::merge::Merger;
 use crate::{
-    LoadOptions, RawConfig, apply_rule_filter, merge, reject_allow_out_of_root_in,
-    reject_baseline_in, reject_command_rules_in, reject_spawning_templates_in,
+    LoadOptions, RawConfig, apply_rule_filter, reject_allow_out_of_root_in, reject_baseline_in,
+    reject_command_rules_in, reject_spawning_templates_in,
 };
 
 /// Maximum depth of an `extends:` chain — a recursion-stack guard against a
@@ -1194,10 +1195,10 @@ pub(crate) fn load_recursive(
         _ => confine,
     };
 
-    let mut merged = RawConfig {
+    let mut merging = Merger::new(RawConfig {
         version: config.version,
         ..RawConfig::default()
-    };
+    });
     let keys: Vec<EntryKey<'_>> = extends
         .iter()
         .enumerate()
@@ -1234,11 +1235,11 @@ pub(crate) fn load_recursive(
             repeats.hold(key, parent);
             continue;
         }
-        state.charge_extends(&merged, &parent)?;
-        let parent = repeats.hold_copy(key, parent);
-        merged = merge(merged, parent)?;
+        state.charge_extends(merging.merge_size(), &parent)?;
+        repeats.merge(key, parent, &mut merging)?;
     }
-    merged = merge(merged, config)?;
+    merging.push(config)?;
+    let merged = merging.finish();
     state.visiting.remove(&canonical);
     if let Some(key) = memo_key {
         state.remember(key, &merged);
@@ -1305,12 +1306,21 @@ impl<'k, 'e> Repeats<'k, 'e> {
         }
     }
 
-    /// `source`, after keeping a copy for `key`'s later entries, if it has any.
-    fn hold_copy(&mut self, key: &'k EntryKey<'e>, source: RawConfig) -> RawConfig {
+    /// Merge `source`, `key`'s entry, into `merger`: from where it is kept for
+    /// `key`'s later entries, if it has any, so it is not copied for them.
+    fn merge(
+        &mut self,
+        key: &'k EntryKey<'e>,
+        source: RawConfig,
+        merger: &mut Merger,
+    ) -> Result<()> {
         if self.left.get(key).is_some_and(|left| *left > 0) {
-            self.hold(key, source.clone());
+            merger.push_held(&source)?;
+            self.hold(key, source);
+            Ok(())
+        } else {
+            merger.push(source)
         }
-        source
     }
 }
 

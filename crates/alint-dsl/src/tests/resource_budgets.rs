@@ -735,16 +735,14 @@ fn an_extends_merge_budget_bounds_a_load() {
     };
     let mut state = loader::LoadState::default();
     let large = entries(loader::MAX_EXTENDS_MERGE_WORK / 2);
-    state
-        .charge_extends(&RawConfig::default(), &large)
-        .expect("half the budget");
+    state.charge_extends(0, &large).expect("half the budget");
     // What the merge rebuilds counts, however little it brings in.
     state
-        .charge_extends(&large, &RawConfig::default())
+        .charge_extends(large.merge_size(), &RawConfig::default())
         .expect("all of it");
     assert_eq!(
         state
-            .charge_extends(&RawConfig::default(), &entries(1))
+            .charge_extends(0, &entries(1))
             .unwrap_err()
             .to_string(),
         format!(

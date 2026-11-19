@@ -302,7 +302,7 @@ pub(crate) fn merge_field_sources(existing: &mut Mapping, incoming: &Mapping) {
     let incoming_sources = field_sources(incoming);
     let mut merged = existing
         .remove(FIELD_SOURCES_MARKER)
-        .and_then(|value| value.as_mapping().cloned())
+        .and_then(|mut value| value.as_mapping_mut().map(std::mem::take))
         .unwrap_or_default();
     for key in incoming.keys().filter(|key| !is_internal_field(key)) {
         if let Some(source) = incoming_sources.and_then(|sources| sources.get(key)) {
@@ -340,7 +340,7 @@ pub(crate) fn merge_sensitive_fields(existing: &mut Mapping, incoming: &Mapping)
     let incoming_sensitive = sensitive_fields(incoming);
     let mut merged = existing
         .remove(SENSITIVE_FIELDS_MARKER)
-        .and_then(|value| value.as_mapping().cloned())
+        .and_then(|mut value| value.as_mapping_mut().map(std::mem::take))
         .unwrap_or_default();
     for key in incoming.keys().filter(|key| !is_internal_field(key)) {
         if incoming_sensitive.is_some_and(|fields| fields.contains_key(key)) {

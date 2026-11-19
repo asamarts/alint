@@ -198,15 +198,15 @@ impl LoadState {
         }
     }
 
-    /// Charge an `extends:` merge of `source` onto `merged` (what the list
-    /// merged so far), or of a drop-in onto the config, with its work: the
-    /// entries of both, as a merge rebuilds what it merges onto, and the bytes
-    /// of `source` ([`MAX_EXTENDS_SOURCE_BYTES`]). One load's entries may do
+    /// Charge an `extends:` merge of `source` onto what the list merged so far
+    /// (`merged`, its [`RawConfig::merge_size`]), or of a drop-in onto the
+    /// config, with its work: the entries of both, and the bytes of `source`
+    /// ([`MAX_EXTENDS_SOURCE_BYTES`]). One load's entries may do
     /// [`MAX_EXTENDS_MERGE_WORK`] in all, so they are bounded however its
     /// lists repeat a source (`[a, b, a, b, ...]`) or follow a large one with
     /// many small ones.
-    pub(crate) fn charge_extends(&mut self, merged: &RawConfig, source: &RawConfig) -> Result<()> {
-        self.charge_extends_work(merged.merge_size().saturating_add(source.merge_size()))?;
+    pub(crate) fn charge_extends(&mut self, merged: usize, source: &RawConfig) -> Result<()> {
+        self.charge_extends_work(merged.saturating_add(source.merge_size()))?;
         self.extends_bytes = self.extends_bytes.saturating_add(source.source_size);
         if self.extends_bytes > MAX_EXTENDS_SOURCE_BYTES {
             return Err(Error::Other(format!(

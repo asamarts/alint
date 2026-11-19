@@ -52,7 +52,9 @@ mod v2;
 #[doc(hidden)]
 pub const EXPERIMENTAL_CONFIG_VERSIONS: &[u32] = &[v2::VERSION];
 
-pub(crate) use merge::{MAX_MERGED_ENTRIES, merge};
+pub(crate) use merge::MAX_MERGED_ENTRIES;
+#[cfg(test)]
+pub(crate) use merge::merge;
 pub(crate) use trust::{
     ENV_VARS_MARKER, FIELD_SOURCES_MARKER, PROVENANCE_MARKER, Provenance, SENSITIVE_FIELDS_MARKER,
     SourceClass, UNTRUSTED_FIX_SOURCE_MARKER, UntrustedWhenVarRead, configured_field_source,
@@ -343,7 +345,7 @@ fn resolve_top_level(
     // recursion passes `false`), so an untrusted ruleset can't lift confinement.
     // `&[]` trusted: the top-level config reads its OWN `trusted_extends:` inside
     // `load_recursive` (is_top), so the seed list is empty.
-    let mut raw = loader::load_recursive(
+    let raw = loader::load_recursive(
         path,
         state,
         opts,
@@ -372,6 +374,7 @@ fn resolve_top_level(
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join(alint_core::CONFIG_DROP_IN_DIRECTORY);
+    let mut merger = merge::Merger::new(raw);
     for drop_in_path in collect_drop_ins(&drop_in_dir, opts.config_source.as_ref())? {
         // Drop-ins are trust-equivalent to the top-level config (local,
         // user-controlled), so `is_top: true` — they may open the escape hatch.
@@ -383,14 +386,15 @@ fn resolve_top_level(
             true,
             // is_top: a drop-in reads its own `trusted_extends:`, so seed empty.
             &loader::TrustedExtends::default(),
-            loader::SourceContext::new(alint_core::ConfigSourceClass::DropIn, raw.version),
+            loader::SourceContext::new(alint_core::ConfigSourceClass::DropIn, merger.version()),
         )?;
-        // Each merge rebuilds the whole config, as an `extends:` merge does,
-        // and is charged so (200 empty drop-ins on 50,000 `ignore:` patterns
-        // took ten seconds).
-        state.charge_extends(&raw, &drop_in)?;
-        raw = merge(raw, drop_in)?;
+        // Each merge is charged as an `extends:` merge is (200 empty drop-ins
+        // on 50,000 `ignore:` patterns took ten seconds when a merge rebuilt
+        // the whole config).
+        state.charge_extends(merger.merge_size(), &drop_in)?;
+        merger.push(drop_in)?;
     }
+    let mut raw = merger.finish();
     // With the forms the loader printed an `extends:` entry read from the
     // environment in, which a later error can quote too (`load_extended_source`).
     loader::add_environment_values(
