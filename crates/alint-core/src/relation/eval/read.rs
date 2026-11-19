@@ -1048,7 +1048,10 @@ impl<'r> Rows<'r> {
             let message = if value_sensitive {
                 "skipped a non-literal value".to_string()
             } else {
-                format!("skipped non-literal value {value:?}")
+                format!(
+                    "skipped non-literal value {}",
+                    super::ops::quoted(value, true)
+                )
             };
             self.take_bytes(note_bytes(&Skipped::NonLiteral, &message))?;
             out.notes.push(RelationNote {

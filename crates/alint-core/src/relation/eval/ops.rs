@@ -157,7 +157,7 @@ pub fn render_value(value: &Value) -> String {
 
 /// `text`, escaped and in quotes when `string`, or its first
 /// [`QUOTED_CHARS`] characters and its length: `"abc"... (1048576 bytes)`.
-fn quoted(text: &str, string: bool) -> String {
+pub(super) fn quoted(text: &str, string: bool) -> String {
     let (shown, cut) = match text.char_indices().nth(QUOTED_CHARS) {
         Some((end, _)) => (&text[..end], true),
         None => (text, false),
@@ -1026,10 +1026,7 @@ fn roots_named(named: &[&Segment], count: usize) -> String {
     let shown = named
         .iter()
         .map(|segment| {
-            format!(
-                "`{}`",
-                Pointer::from_segments(vec![(*segment).clone()]).render()
-            )
+            super::failure::key_path(&Pointer::from_segments(vec![(*segment).clone()]), false)
         })
         .collect::<Vec<_>>()
         .join(", ");
@@ -1171,7 +1168,7 @@ impl Evaluator<'_> {
                 let shown = if sensitive {
                     "a key path".to_string()
                 } else {
-                    format!("`{}`", path.render())
+                    super::failure::key_path(path, false)
                 };
                 let resource = resource_of(cell);
                 failures.push(site.failure(

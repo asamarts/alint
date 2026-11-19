@@ -305,6 +305,54 @@ fn strip_root_needs_one_top_level_key_per_resource() {
     );
 }
 
+/// A failure and a note cut a long key or value as every message does: a
+/// `strip-root` failure names a top-level key of 100,000 characters by its
+/// first 64 and its length, alone or beside another, and a note so names a
+/// skipped non-literal value.
+#[test]
+fn a_long_key_or_value_is_cut_in_a_failure_and_a_note() {
+    let config = "version: 2\nrelations:\n  keys:\n    from: { paths: \"*.json\" }\n    \
+                  entries: { format: json, at: \"$\", leaves: true }\n    fields: { key: \
+                  entry.path }\n    transform: { key: [strip-root] }\n  names:\n    from: { \
+                  paths: \"*.json\" }\n    read: { json: \"$.*\" }\n    fields: { name: value }\n";
+    let key = "k".repeat(100_000);
+    let shown = format!("`['{}'... (100000 bytes)]`", "k".repeat(64));
+    let failures = |body: String| setup(config, &[("a.json", &body)]).failures("keys");
+    assert_eq!(
+        failures(format!("{{\"{key}\": \"Hi\"}}")),
+        [format!(
+            "a.json: relation `keys` (.alint.yml): `strip-root` on `key` needs every key path to \
+             have at least two segments, but {shown} has one; read the keys below the top-level \
+             key, or drop `strip-root`"
+        )]
+    );
+    assert_eq!(
+        failures(format!(
+            "{{\"{key}\": {{\"a\": \"x\"}}, \"fr\": {{\"a\": \"y\"}}}}"
+        )),
+        [format!(
+            "a.json: relation `keys` (.alint.yml): `strip-root` on `key` needs one top-level key \
+             in each resource, but this one has {shown}, `fr`; read one top-level object per \
+             file, or drop `strip-root`"
+        )]
+    );
+    let value = format!("${{{}}}", "N".repeat(100_000));
+    let tree = setup(config, &[("a.json", &format!("{{\"a\": \"{value}\"}}"))]);
+    let notes: Vec<String> = tree
+        .rows("names")
+        .notes
+        .iter()
+        .map(|note| note.message.clone())
+        .collect();
+    assert_eq!(
+        notes,
+        [format!(
+            "skipped non-literal value \"${{{}\"... (100003 bytes)",
+            "N".repeat(62)
+        )]
+    );
+}
+
 /// The same keys in every locale (`docs/site/configuration/version-2.md`):
 /// each locale's keys below its top-level key, grouped by locale, or by
 /// file.
