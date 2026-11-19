@@ -126,11 +126,14 @@ occurrence.
 <!-- /alint:since -->
 <!-- alint:since=0.23.0 -->
 A `constraint` finding's fingerprint leaves its path out, as a `<redacted>` path's does. SARIF tells
-apart findings in one run that share a fingerprint as GitLab does, with the same derived values: the
-first keeps the canonical fingerprint the baseline file records, and each later one carries a
-fingerprint derived from it and its occurrence, so each stays its own alert. GitLab Code Quality
-drops entries that share a fingerprint, and GitHub Code Scanning may merge them. A run in which no
-fingerprint repeats is written as before.
+apart findings in one run that share a fingerprint as GitLab does. They are numbered by the path,
+line and column they show, then rule and message, a baselined result before a live one in SARIF.
+The first keeps the canonical fingerprint the baseline file records, and each other carries a
+fingerprint derived from it and its number, so each stays its own alert. Without a baseline, SARIF
+and GitLab give each finding the same value. GitLab numbers findings this way from 0.23.0; before,
+it numbered them in the order it wrote them. GitLab Code Quality drops entries that share a
+fingerprint, and GitHub Code Scanning may merge them. A run in which no fingerprint repeats is
+written as before.
 <!-- /alint:since -->
 
 ## Baseline suppression

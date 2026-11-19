@@ -38,11 +38,15 @@ findings could disappear from the alert list. Audit round 4 after v0.22.1 found 
 
 ## Decision
 
-1. Within one SARIF run, the first result that carries a fingerprint keeps the canonical one, the
-   identity the baseline file and GitLab output give the finding.
-2. The Nth repeat of that fingerprint in the run (N > 0), in the order the results are written,
-   carries the hex SHA-256 of the fingerprint, `:` and N as four little-endian bytes. This is the
-   value GitLab output gives the same repeat, so the two formats agree finding by finding.
+1. Within one SARIF run, the results that share a fingerprint are numbered in an order the
+   results decide, not the order they are written in: baselined results first, then live ones,
+   each by the path, line and column they show, then rule and message (a hidden path sorts as
+   `<redacted>`), equal ones in written order. Number 0 keeps the canonical fingerprint, the
+   identity the baseline file gives the finding.
+2. Number N (N > 0) carries the hex SHA-256 of the fingerprint, `:` and N as four little-endian
+   bytes. GitLab output numbers a report's findings the same way and derives the same values. It
+   holds no baselined findings, so without a baseline the two formats agree finding by finding;
+   under one, a live repeat's SARIF number counts the baselined repeats before it.
 3. The baseline file is unchanged: it records the canonical fingerprint with a count, and matching
    stays by count.
 
@@ -54,10 +58,14 @@ findings could disappear from the alert list. Audit round 4 after v0.22.1 found 
   may open new alerts for findings it had merged into one: a version 1 rule's findings in files the
   environment chose, or two findings on identical content. The CHANGELOG's "Upgrading from 0.22"
   says so.
-- A repeat's fingerprint depends on its place in the run. When one repeat goes away, each later
-  repeat takes the number before its own, so the alert that closes is the last repeat's rather
-  than the fixed finding's; the number of open alerts stays right. GitLab output has numbered
-  repeats this way since v0.14.0.
+- A repeat's fingerprint depends on where it sorts among the results that share its fingerprint.
+  When one goes away, each that sorts after it takes the number before its own, so the alert that
+  closes may be another repeat's; the number of open alerts stays right. The baseline suppresses
+  the first findings of a fingerprint in path, line, column and message order, and SARIF numbers
+  baselined results first, so a baselined repeat keeps its fingerprint while live repeats of its
+  key come and go. GitLab output numbered repeats in written order from v0.14.0 and numbers them
+  as SARIF does from v0.23.0, which can change the fingerprint it gives a version 1 finding that
+  repeats one.
 
 ## Considered Options
 
@@ -70,8 +78,8 @@ findings could disappear from the alert list. Audit round 4 after v0.22.1 found 
 
 ## More Information
 
-- Implementation: `tell_repeated_fingerprints_apart` and `occurrence_fingerprint` in
-  `crates/alint-output/src/sarif.rs`; GitLab's `unique_fingerprint` in
-  `crates/alint-output/src/gitlab.rs`.
+- Implementation: `number_repeated_fingerprints` in `crates/alint-output/src/sarif.rs`;
+  `OccurrenceKey`, `occurrences` and `occurrence_fingerprint` in
+  `crates/alint-output/src/occurrence.rs`; `write_gitlab` in `crates/alint-output/src/gitlab.rs`.
 - Docs: `docs/site/reference/output-formats/index.md` ("Stable fingerprints") and
   `docs/design/baseline.md` open question 7.

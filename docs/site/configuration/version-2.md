@@ -78,8 +78,9 @@ rules: []
 A selector cannot use `changed_since`: the rules that read selectors judge the whole repository,
 under `--changed` too, so what a selector picks must not depend on the diff. Under `--changed`, a
 [`constraint`](/docs/rules/cross-file/constraint/) rule runs when a changed path is one the
-selectors of its relations read; an ignore file (`.gitignore`, `.ignore`), a submodule or a nested
-repository (a directory Git lists whole) in a directory where their `paths:` can match; or a
+selectors of its relations read; an ignore file (`.gitignore`, `.ignore`) the walk reads, in a
+directory below which their `paths:` can match; a submodule added, moved or removed, or an
+untracked repository (a directory Git lists whole), below which they can match; or a
 `has_ancestor` marker or a manifest their `scope_filter:` consults. A manifest `source:` stays
 inside the repository, as a rule's does.
 
@@ -408,6 +409,10 @@ plan:
   cost: linear in the rows of each relation it reads
 ```
 
+With `respect_gitignore: false` or `--no-gitignore`, the walk reads no ignore file, and the
+`trigger:` line names none. A `union:` relation's parts are named by their place from 0
+(`union[0]:`), as a message that names a part names it.
+
 `--format json` gives the same as a `plan` object, where each relation has an `id` (its place in the
 list) by which a join's sides, an `in:` list, the trigger, `input` and `set_target` name it. The
 plan is configuration and shows no value read from a file, except the paths a manifest-derived
@@ -465,9 +470,12 @@ distinct-value limit, which is never truncation.
     (`join_outputs`);
   - 100,000 distinct values of the field a `set` compares against in another relation
     (`distinct_values`).
-- Placing a `constraint` rule's findings reads each file they sit in again, one at a time. That
-  file's bytes count against the run's `bytes_per_run` limit beside what the relations hold; past
-  it the rule reports an analysis failure, not findings without places.
+- Placing a `constraint` rule's findings reads each file they sit in again, one at a time. Each
+  file, with its offsets and what finding its `read:` values' places held, must fit in what the
+  run's relations left of `bytes_per_run`; placing takes nothing from it, so every rule's files are
+  checked against the same amount, whatever other rules hold, and a run holds at most one such
+  file per thread. When a file does not fit, the rule reports an analysis failure, not findings
+  without places.
 - A `set` with `equal_to:` gives one finding per value the reference group holds for each group
   that lacks it, so G empty groups against V reference values give G × V findings, as
   `key_parity` does for files without keys

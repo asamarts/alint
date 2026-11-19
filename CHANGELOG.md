@@ -59,6 +59,10 @@ full below.
   run, such as a rule's findings in files the environment chose (ADR-0030): each repeat now carries
   a fingerprint of its own, where GitHub code scanning may have merged them into one alert
   ([ADR-0047](docs/adr/0047-sarif-tells-apart-a-fingerprint-repeated-within-a-run.md)) (Fixed).
+- GitLab output may give a version 1 finding that shares its fingerprint with another in the report
+  a different fingerprint than 0.22 did: it numbers such findings by path, line and column, not in
+  the order it writes them, so the one that keeps the shared fingerprint may change
+  ([ADR-0047](docs/adr/0047-sarif-tells-apart-a-fingerprint-repeated-within-a-run.md)) (Fixed).
 - Library: `WhenEnv::env` is an `Option<&BTreeMap<String, String>>`; `LspOptions` gains `config`,
   `no_gitignore`, `no_spawn` and `untrusted`, and `LoadOptions` gains `global_git_excludes`, which
   breaks a struct literal; YAML values and errors are alint's own types (`alint_core::yaml`) in
@@ -555,6 +559,11 @@ policy-test package the user does not trust.
   `core.excludesFile`, by default `$XDG_CONFIG_HOME/git/ignore`), which it finds through the
   process's environment. `alint test` sets it, so what a policy test sees no longer depends on the
   host's Git setup; the default keeps it, as before.
+- **`alint_core::git::collect_changed_set`, `collect_changed_set_checked` and `ChangedSet`**
+  (library API). They return a `ChangedSet`: the changed paths, with those Git lists as a
+  directory (a submodule, an untracked repository) marked. `Engine::with_changed_set` takes one;
+  `with_changed_paths` still takes the paths alone and marks none. A `constraint` rule runs on a
+  marked path when its selectors can match below it (see the kind's entry).
 - **A YAML parser facade with test-only reference parsers** (ADR-0041). `alint_core::yaml` decodes
   through a backend. alint-core's `yaml-reference` feature, which no release enables and which is
   not a stable API, adds libyaml (through `yaml_serde` 0.10.7, the parser v0.22 used) and a compare
@@ -734,9 +743,13 @@ policy-test package the user does not trust.
   - Each family generates its message, quoting the keys and values (each cut at 64 characters; a
     key path at 64 per key and 256 in all, then its count of segments); `message:` may use
     `{{row.FIELD}}`, the reported row's value, cut the same way, which a `sensitive` field shows as
-    `<redacted>`. Key paths and `{{row.FIELD}}` escape a control, bidi or zero-width character
-    (`\n`, `\u{202e}`), as a quoted value does. A field that spells an entry's key (`entry.key`,
-    `entry.path`, `entry.parent`, `entry.root`) is sensitive when any of them is. Findings carry
+    `<redacted>`. Key paths, `{{row.FIELD}}` and the files a message names (a row's, a note's, the
+    file that declares a relation) escape a control, bidi or zero-width character (`\n`,
+    `\u{202e}`), as a quoted value does, and so does the rest of the text of a note or an analysis
+    failure. A `strip-root` failure cuts the top-level keys it names, and a note on a skipped
+    non-literal value cuts the value, at 64 characters, as other messages do. A field that spells
+    an entry's key (`entry.key`, `entry.path`, `entry.parent`, `entry.root`) is sensitive when any
+    of them is. Findings carry
     related locations at the other rows involved: at most 20, picked with a row of each other value
     first and listed by path, then a count of the rest, and only those 20 are placed; rows at one
     place (rows of one file without a span) are listed once and the rest counted, so the locations
@@ -747,10 +760,13 @@ policy-test package the user does not trust.
     `read:` value in an array, a path token and a value of a file that is not UTF-8 have none. A
     finding or related location at a sensitive cell, or at any cell while key paths are hidden,
     shows only where it starts, since its end would give away the value's length. Placing the
-    findings reads each file they sit in again, one at a time, and that file's bytes count against
-    the run's `bytes_per_run`; past it the rule reports an analysis failure, not findings without
-    places. A typo in the kind's options gets a "did you mean" for the nearest field, not for the
-    typo itself.
+    findings reads each file they sit in again, one at a time, and each file, with its offsets and
+    what finding its `read:` values' places held, must fit in what the run's relations left of
+    `bytes_per_run`; placing takes none of it, so whether a rule's findings fit does not depend on
+    the rules placing beside it. When a file does not fit, the rule reports an analysis failure,
+    not findings without places. A `read:` value's place is found only in the files a finding or
+    related location sits in. A typo in the kind's options gets a "did you mean" for the nearest
+    field, not for the typo itself.
   - When a relation the rule reads takes a value from the environment anywhere in its definition, a
     field's `where:` and `transform:` included, or reads one that does (a join side, an `in:` list's
     relation, a `set` target), every finding's path and message are redacted, as for a version 1
@@ -773,24 +789,27 @@ policy-test package the user does not trust.
     join, the relations its `in:` and `not_in:` lists probe and the relation its `set` compares
     against), narrowed by their `scope_filter:`, with the manifests that `scope_filter:` reads, and
     the `has_ancestor` markers and `.gitignore` and `.ignore` files in the directories where those
-    selectors' `paths:` can match, and a submodule whose recorded commit moved or an untracked
-    repository there, which Git lists as one changed directory. It then judges the whole snapshot
-    and reports every finding, those in unchanged files included. Outside its trigger scope it does
-    not run and reports nothing, and a change to a configuration file alone runs no rule. An edit to
-    a symlink's target, a file Git ignores under `respect_gitignore: false`, an ignore file Git does
-    not report, and a submodule Git ignores or removes whole run no rule; `docs/rules.md` lists
-    them. A pass decides once which rules the changed paths run, and a selector tests only the
-    changed paths below the literal directories its `paths:` start with, each once: with 200 rules
-    and 10,000 changed files outside every selector, `check --changed` runs 0.79 billion
-    instructions, against 1.56 billion for a full check. `facts.json` lists the kind's dispatch as
-    `full_index` with `path_scope: true`.
+    selectors' `paths:` can match, and a submodule added, moved or removed or an untracked
+    repository below which those selectors' `paths:` can match, which Git lists as one changed
+    directory (an untracked repository on every run without `--base`, until it is committed or
+    ignored). It then judges the whole snapshot and reports every finding, those in unchanged files
+    included. Outside its trigger scope it does not run and reports nothing, and a change to a
+    configuration file alone runs no rule. An edit to a symlink's target, a file Git ignores under
+    `respect_gitignore: false`, an ignore file Git does not report, and a staged or committed change
+    to a submodule Git is told to ignore run no rule; `docs/rules.md` lists them. A pass decides
+    once which rules the changed paths run, and a selector tests only the changed paths below the
+    literal directories its `paths:` start with, each once: with 200 rules and 10,000 changed files
+    outside every selector, `check --changed` runs 0.79 billion instructions, against 1.56 billion
+    for a full check. `facts.json` lists the kind's dispatch as `full_index` with
+    `path_scope: true`.
   - `alint explain <rule>` shows the rule's resolved plan, after its options: the assertion in
     words; every relation the rule reads, in the order a run evaluates them, named as the config
     writes each reference that reaches it (with the file that declares it when two relations would
     read alike, so each reference names one) and marked as the input, an inline input or the `set`
     target; each one's source (a selector with its `paths:`, its `scope_filter:` and the manifests
-    that resolves to, a join with its `left`, `right`, `on` and `unique`, or a union's parts), its
-    reader (`entries:` with its format and `at:`, or `read:` with its query), its fields with their
+    that resolves to, a join with its `left`, `right`, `on` and `unique`, or a union's parts, each
+    named by its place from 0, `union[0]`, as messages and config paths count), its reader
+    (`entries:` with its format and `at:`, or `read:` with its query), its fields with their
     sources, transforms and sensitivity, its `where:`, and the config file that declares it; the
     selectors that run the rule under `--changed`; and its cost class. `--format json` adds the same
     as a `plan` object, which the experimental trace schema's rule document describes key by key
@@ -818,9 +837,10 @@ policy-test package the user does not trust.
     which registers a kind only a config of a given `version:` or later may use, with
     **`RuleRegistry::min_config_version`** and **`KindCatalog::min_config_version`**, the lowest
     `version:` a kind needs; **`alint_core::relation::plan::is_name`**, the name rule the loader
-    and `NamedRelation::is_inline` share; **`ExtractAdapter::with_spans`**, which places the values
-    a `read:` extracts; and `relation::eval::Provenance::empty`, whether an entry's value holds
-    nothing.
+    and `NamedRelation::is_inline` share; **`relation::eval::Span`**, where a cell's value is
+    written (`Span::Bytes`, or `Span::Read` for a `read:` value, found only for a value a finding
+    places), and **`relation::eval::find_spans`**, which finds a resource's `read:` values in its
+    text; and `relation::eval::Provenance::empty`, whether an entry's value holds nothing.
 
 ### Changed
 
@@ -1154,10 +1174,13 @@ policy-test package the user does not trust.
   ([ADR-0047](docs/adr/0047-sarif-tells-apart-a-fingerprint-repeated-within-a-run.md)). A
   `constraint` finding's fingerprint leaves its path out, as does a version 1 finding whose path
   the environment chose, so several findings of one rule could carry one `partialFingerprints`
-  value, which GitHub code scanning may merge into one alert. As in GitLab output, the second and
-  later findings with a fingerprint in a run now carry one derived from it and their occurrence
-  (the value GitLab gives them); the first keeps the canonical fingerprint the baseline file uses.
-  A run in which no fingerprint repeats is written as before.
+  value, which GitHub code scanning may merge into one alert. Findings that share a fingerprint in
+  a run are now numbered by the path, line and column they show, then rule and message, baselined
+  ones before live ones. The first keeps the canonical fingerprint the baseline file uses, and
+  each other carries one derived from it and its number, so a baselined repeat keeps its
+  fingerprint as live repeats come and go. GitLab output numbers its findings the same way
+  (before, it numbered them in the order it wrote them), so without a baseline the two formats
+  agree finding by finding. A run in which no fingerprint repeats is written as before.
 - **An extended config is named by its path under the repository on every platform.** Under a
   root reached through a symlink, from a relative `--config`, or on macOS (where `/var` is
   `/private/var`), a config file an `extends:` entry reads was named by its file name alone

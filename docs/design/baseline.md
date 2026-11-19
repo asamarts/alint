@@ -592,7 +592,10 @@ only files that already produced such a violation, cached per file).
    from it and their occurrence: in GitLab output since v0.14.0 (GitLab Code
    Quality drops entries that share a fingerprint) and in SARIF since v0.23.0
    (GitHub Code Scanning may merge them into one alert; ADR-0047). The first
-   occurrence and the baseline file keep the canonical fingerprint.
+   occurrence and the baseline file keep the canonical fingerprint. From
+   v0.23.0 both formats number the occurrences by the path, line and column
+   each finding shows, then rule and message, SARIF's baselined results first;
+   GitLab output numbered them in the order it wrote them before.
 8. **No-regression "ratchet" + level-aware re-surfacing** — out of scope v1, but
    the two most-requested likely follow-ups (prevent a threshold getting *worse*;
    re-surface a grandfathered finding when its rule is escalated to `error`).

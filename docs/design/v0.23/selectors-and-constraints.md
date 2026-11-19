@@ -622,12 +622,17 @@ file a `has_ancestor` predicate names, in a directory at or below which the sele
 match, or the manifest a manifest-derived predicate reads. A manifest that cannot be read leaves its
 predicate out of the trigger scope: a changed path that the selector's `paths:` and its other
 predicates keep runs the rule, which reports the failure, and a change outside them (a `README.md`
-alone) runs nothing and reports nothing. A selector that does not compile takes every path. An
-ignore file the walk reads (a `.gitignore` or `.ignore`, in any directory) decides which files below
-it are in the index, so a change to one triggers each selector whose `paths:` can match there. Git
-lists a submodule whose recorded commit moved, and an untracked repository, as one changed
-directory rather than by its files, so a changed path the walk holds as a directory triggers each
-selector whose `paths:` can match below it (audit round 4).
+alone) runs nothing and reports nothing. A selector that does not compile takes every path, but
+no change runs no rule. An ignore file the walk reads (a `.gitignore` or `.ignore`, in any
+directory) decides which files below it are in the index, so a change to one triggers each selector
+whose `paths:` can match there. Git lists a submodule added, moved or removed (checked out or not),
+and an untracked repository, as one changed directory rather than by its files: `--changed` and
+`--base` read Git's diffs with `--raw`, a path with a gitlink's mode on either side is a directory,
+and so is one `ls-files --others` lists as `sub/`. Such a path triggers each selector whose `paths:`
+can match below it, whether or not the walk still holds it (audit round 4). A pattern without `**`
+matches paths with as many components as it has, so it can match below a directory only when it
+has more components and its leading ones can match the directory's. Without `--base`, Git lists an
+untracked repository on every run until it is committed or ignored.
 
 The changed set is the paths Git reports, so several kinds of change that can alter a verdict
 trigger nothing, as they skip a per-file rule or a version 1 full-index kind today; a full run
@@ -642,9 +647,8 @@ covers them:
   linted directory when alint lints a subdirectory of a repository;
 - an edit to a file marked `git update-index --assume-unchanged`, or to a `.ignore` file that a
   `.gitignore` ignores, neither of which Git lists;
-- a submodule Git is told to ignore (`submodule.<name>.ignore`, `diff.ignoreSubmodules`), and a
-  submodule removed whole, which leaves no directory behind to trigger a selector that reads only
-  below it.
+- a staged or committed change to a submodule Git is told to ignore (`submodule.<name>.ignore`,
+  `diff.ignoreSubmodules`).
 
 A selector read by a full-index rule may not use `changed_since` (section 4), because what the rule
 sees would then depend on the diff. The other `scope_filter:` predicates are allowed in those
