@@ -901,3 +901,15 @@ Phase 7 lands in four steps, each a pull request:
     dictionary oracle (`redaction.rs`).
   - Next: phase 7 step 2 (`plurals: cldr`, `group_by` on a path, `groups:`, `set` against a
     relation).
+- 2026-11-18: phase 7 step 2.
+  - The `constraint` kind's `set` is complete. `plurals: cldr` merges CLDR plural groups of an
+    `entry.path` field over each pair of groups, with the plural logic `key_parity` uses, now in
+    one module, `plural_groups.rs`; a comparison decides only the groups around its own keys,
+    so it costs time in the group's keys, not the reference's. A `set` grouped by `path` or a
+    path token gives every resource the relation reads a group, rows or not, and `groups:` names
+    groups that must exist, whose findings have no path. A `set` against `{ relation: R,
+    field: F }` reads `R` before the rule, as an input: `R`'s failures withhold the rule's
+    findings, and the environment redaction covers it. `R` is a name, never an inline relation.
+  - Section 6's identity of `unique` without `determines:` now reads as step 1 built it.
+  - Next: phase 7 step 3 (the `--changed` trigger scope, and the related-location gate over
+    JSON, SARIF and the language server).

@@ -388,9 +388,9 @@ distinct-value limit, which is never truncation.
 ## Limits in this release
 
 - Only the `constraint` kind reads a relation, and a rule's `paths:` cannot name a selector.
-- The `constraint` kind has no `plurals: cldr`, no `groups:`, no `set` against another relation's
-  field and no `set` grouped by `path` or a path token yet; each is refused at load. Until
-  `groups:`, a group that has no rows is not checked.
+- A `set`'s `plurals: cldr` takes an `entry.path` field and a `{ group: }` target only, and a
+  `set` against another relation's field names it (bare or qualified), never inline. That
+  relation may hold at most 100,000 distinct values of the field.
 - Only local files may be version 2 (see [the version boundary](#the-version-boundary)).
 - A selector cannot use `changed_since`.
 - Values are scalars: null, booleans, numbers (compared by the text they are written with) and
@@ -465,13 +465,47 @@ rules:
   - id: locale-keys-match-english
     kind: constraint
     input: locale-keys
-    assert: { set: { field: key, group_by: locale, equal_to: { group: en } } }
+    assert:
+      set:
+        field: key
+        group_by: locale
+        equal_to: { group: en }
+        groups: [de, fr, pl]
+        plurals: cldr
     level: error
 ```
 
-A group is the rows that share a `group_by:` value, so a locale whose files hold no keys has no
-rows and no group: it is not checked until `groups:`, not yet supported, names the groups that
-must exist.
+A group is the rows that share a `group_by:` value, so `groups:` names the locales that must
+exist: one whose files hold no keys lacks every English key, in findings with no path.
+`plurals: cldr` compares `inbox: { one, other }` with a locale's `inbox: { one, few, many,
+other }` as one key, `inbox`, and `items_one`, `items_other` as `items`. Grouped by a path
+token instead (`fields: { locale: stem, ... }`), every file is a group, and an empty one lacks
+every key at that file.
+
+**Every dependency approved**, against another relation's field:
+
+```yaml
+version: 2
+relations:
+  dependencies:
+    from: { paths: "packages/*/package.json" }
+    entries: { format: json, at: "$.dependencies" }
+    fields: { manifest: path, dependency: entry.key }
+  approved:
+    from: { paths: approved-dependencies.json }
+    entries: { format: json, at: "$" }
+    fields: { name: entry.key }
+rules:
+  - id: approved-dependencies
+    kind: constraint
+    input: dependencies
+    assert:
+      set:
+        field: dependency
+        group_by: manifest
+        subset_of: { relation: approved, field: name }
+    level: error
+```
 
 **Toolchain pins that agree**: one row per place a Node version is pinned, each compared with the
 row `.nvmrc` gives. A part whose path a file lacks gives a row without a value, which differs from

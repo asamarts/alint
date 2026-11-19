@@ -969,13 +969,31 @@ each group of `G` equals the set of the reference group, the rows whose `G` is `
 reference group holds and a group lacks is a finding at the group's first file, related to the
 reference row with it; a value a group holds that the reference group lacks is a finding at that
 row. `subset_of:` reports only the second, and `disjoint_from:` reports each value a group shares
-with the reference group. Null is in no set. A reference group with no rows is an analysis
-failure. A group is the rows that share a `G` value, so a group that has no rows (a locale file
-that is `{}`) is no group, and is not checked until `groups:` names the groups that must exist.
+with the reference group, at that row, related to the reference row. Null is in no set. A
+reference group with no rows is an analysis failure. Without `group_by:`, the relation is one
+group.
 
-Not yet: `plurals: cldr`, `groups:`, a `set` against another relation's field
-(`{ relation: R, field: F }`) and a `set` grouped by `path` or a path token are refused at load
-until a later release adds them.
+A group is the rows that share a `G` value. When `G` is a `path` field or a path token (`stem`,
+`dir`, ...), every file the relation reads is a group too, rows or not, so a locale file that is
+`{}` lacks every value of the reference group, at that file. `groups: [fr, de]` names groups that
+must exist: a group only `groups:` names lacks every value, in a finding with no path. Each literal
+is a string, or a boolean for a field that can hold one, of `G`'s type; it may not repeat or name
+the reference group, and `groups:` needs `group_by:`.
+
+`equal_to: { relation: R, field: F2 }` (or `subset_of:`, `disjoint_from:`) compares each group with
+every value of field `F2` across the rows of relation `R`, a name, bare or qualified by an
+`extends:` alias (not an inline relation). `R` is read before the rule, and a failure of `R`
+withholds the rule's findings. A value only `R` holds is a finding at the group's first file,
+related to `R`'s row with it, and `{{row.FIELD}}` shows `<no row>` in its `message:`. `F2` and `F`
+must hold one type, and `R` may hold at most 100,000 distinct values of `F2`; past either, the rule
+has no verdict. A `sensitive` `F2` hides `F`'s values too.
+
+`plurals: cldr` collapses CLDR plural groups before comparing, as `key_parity` does: `F` must be
+an `entry.path` field (with no transform but `strip-root`), and each comparison of a group with
+the reference group merges nested CLDR objects (`inbox: { one, other }`), then i18next siblings
+(`items_one`, `items_other`), decided over the two groups together. A merged value is the group's
+key path, at its `other` member, or at its first member when it has no `other`. It takes a
+`{ group: }` target only.
 
 #### Findings and baselines
 

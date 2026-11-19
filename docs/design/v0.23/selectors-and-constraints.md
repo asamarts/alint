@@ -408,7 +408,9 @@ The parts of each finding's key:
 - `unique` with `determines:`: `unique`, the key values, the determined values. A range that
   appears later is a new finding even when the key's earlier disagreement is in the baseline, and
   fixing a range resolves exactly its finding;
-- `unique` without `determines:`: `unique`, `row`, the row;
+- `unique` without `determines:`: `unique` and the key values. The rows that repeat a key share
+  one key and are told apart by their count, so renaming the first file keeps a baselined finding
+  baselined. Phase 7 step 1's review corrected this bullet, which keyed each repeat by its row;
 - `equal` within groups: `equal`, the group, the value;
 - `equal` against a named source row: `equal`, `source`, the row;
 - `equal` within a row: `equal`, `row`, `field:`'s resource path, `field:`'s pointer;

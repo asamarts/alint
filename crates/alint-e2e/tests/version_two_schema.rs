@@ -373,5 +373,5 @@ fn the_version_two_page_examples_load_and_validate() {
         let errors = schema_errors(&config);
         assert!(errors.is_empty(), "line {line}:\n{}", errors.join("\n"));
     }
-    assert_eq!((files.len(), configs.len()), (2, 10));
+    assert_eq!((files.len(), configs.len()), (2, 11));
 }
