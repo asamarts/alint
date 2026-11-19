@@ -1076,15 +1076,39 @@ as #589, step 3 as #590, and step 4 is the last.
       `explain`'s trigger heading names ignore files only when the walk reads them, and names a
       union's parts `union[0]` and on; a `strip-root` failure and a skipped-value note cut what
       they quote; and SARIF numbers a repeated fingerprint by what each finding shows, baselined
-      results first, so a baselined repeat keeps its fingerprint, with GitLab numbering the same
-      way (ADR-0047).
+      results first, with GitLab numbering the same way (ADR-0047). A repeat keeps its
+      fingerprint while the repeats that sort before it stay; the baseline suppresses by count in
+      that order, so a new repeat that sorts first shifts the rest (#601).
+  - A third pass: a review of the second pass found 8 more defects, all fixed.
+    - `may_match_below` ruled out patterns whose class can match `/` (`a[!x]sm` below `a`), so
+      `--changed` skipped a rule it should run. Such a class now leaves the component count
+      unknown, and an exhaustive check over 5,692 patterns holds it to globset.
+    - `diff-files --ignore-submodules=none` ran `git status` inside every submodule on every
+      `--changed` run (326 to 81,789 `stat` calls with four 20,000-file submodules); `=dirty`
+      reports the same commit moves without it.
+    - `alint fix` evaluated relations lazily, so near `bytes_per_run` it could place findings
+      where `check` failed; it now evaluates them at the start of each pass and after each
+      applied fix, and what the relations took counts their rows as well as their decodes.
+    - Placing checks a file's size before finding its `read:` places, counts the parse it reads
+      them from, and places a cell only where the file still holds what was read there (a 32-bit
+      fingerprint in the span), so a file changed during the run is placed nowhere.
+    - `--show-notes` and the language server named an escaped note's file twice; the language
+      server also showed a hidden note's path, as it had since v0.20.0.
+    - The docs said a baselined repeat keeps its fingerprint whatever live repeats do; they now
+      say which repeats keep it. `git submodule deinit`, `update --init` and edits in a
+      submodule's work tree join the list of changes that run no rule.
+    - Two changed lines that CI's mutants found untested (a rename record in `--raw -z` diffs, a
+      JSON parse skipped when placing) have tests.
   - Filed: #592 (two fields of one array element in one row, and a transform that splits a value),
     #593 (a `bound:` query that may match nothing), #594 (a `message:` placeholder for the value a
     `set` finding is about), #595 (placing a finding that a group lacks a value at the file the
     value belongs in), #596 (bounding a rule's findings when every group lacks the whole reference
     set, G × V today), #597 (version 1 nits: list the formats on an unknown `--format`, and name a
     null root in `key_parity`'s `strip_root` error) and #598 (let a stub locale root name its group
-    when `group_by` reads `entry.root`). Left open: #564 to #573, #579 to #585 and #592 to #598.
+    when `group_by` reads `entry.root`), #600 (escape bidi and zero-width characters in JUnit
+    failure text and agent-format messages, from before 0.23) and #601 (keep the findings a
+    baseline suppressed when a new repeat sorts first). Left open: #564 to #573, #579 to #585 and
+    #592 to #601.
   - For phase 8: locale parity written as a version 2 `set` costs about 1.5x the instructions and
     1.9x the peak RSS of `key_parity` (100,000 rows: 6.31G instructions and 144 MB against 4.17G and
     77 MB; Mastodon's YAML locales: 20.5G and 318 MB against 14.5G and 179 MB).
