@@ -29,6 +29,7 @@ mod pointer;
 mod resource;
 mod row;
 mod transform;
+mod trigger;
 mod value;
 
 pub use adapter::{Adapter, AdapterError, AdapterNote, AdapterOutput, check_row_count};
@@ -44,6 +45,7 @@ pub use pointer::{Pointer, Segment};
 pub use resource::{Origin, Resource, ResourceId, ResourceRead, Selection, Selector};
 pub use row::{Cardinality, CardinalityError, Relation, Row, RowState};
 pub use transform::StringTransform;
+pub use trigger::TriggerScope;
 pub use value::{ContractValueError, Number, Value};
 
 #[cfg(test)]

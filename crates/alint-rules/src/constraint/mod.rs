@@ -20,6 +20,10 @@
 //!   literal of `groups:`; `plurals: cldr` collapses CLDR plural groups of
 //!   an `entry.path` field against a reference group, as `key_parity` does.
 //!
+//! Under `--changed`, the rule runs when a changed path is one the
+//! selectors of its relations read, followed through joins and membership
+//! filters ([`TriggerScope`]), and then judges the whole snapshot.
+//!
 //! The engine evaluates the rule's relations (its input, and the relation
 //! its `set` compares against) before rules run, in plan order; the rule
 //! reads their outcomes from the run's memo. A relation that fails gives the
@@ -45,7 +49,7 @@ use std::sync::Arc;
 
 use alint_core::relation::eval::{self, RelationNote, Skipped};
 use alint_core::relation::plan::{PathToken, Plan, RelationId};
-use alint_core::relation::{Resource, StringTransform, Value};
+use alint_core::relation::{Resource, StringTransform, TriggerScope, Value};
 use alint_core::{AnalysisFailureKind, Context, Error, Level, Result, Rule, RuleSpec, Violation};
 
 pub use options::options_schema;
@@ -157,6 +161,9 @@ pub struct ConstraintRule {
     /// them: its input, then the relation its `set` compares against, when
     /// that is another.
     inputs: Vec<RelationId>,
+    /// What makes the rule run under `--changed`: the selectors of every
+    /// relation its plan reads ([`TriggerScope`]).
+    trigger: TriggerScope,
     assertion: Assertion,
     /// The assertion's literals came from the environment, so no message
     /// quotes them.
@@ -186,6 +193,7 @@ fn build_rule(spec: &RuleSpec) -> Result<ConstraintRule> {
     {
         inputs.push(*relation);
     }
+    let trigger = TriggerScope::of(&plan, &inputs);
     Ok(ConstraintRule {
         id: spec.id.clone(),
         level: spec.level,
@@ -193,6 +201,7 @@ fn build_rule(spec: &RuleSpec) -> Result<ConstraintRule> {
         message: spec.message.clone(),
         plan,
         inputs,
+        trigger,
         assertion,
         hide_literals: spec.field_is_environment_derived("assert"),
     })
@@ -250,6 +259,10 @@ impl Rule for ConstraintRule {
 
     fn relation_inputs(&self) -> Option<(&Arc<Plan>, &[RelationId])> {
         Some((&self.plan, &self.inputs))
+    }
+
+    fn trigger_scope(&self) -> Option<&TriggerScope> {
+        Some(&self.trigger)
     }
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
@@ -366,7 +379,7 @@ impl ConstraintRule {
 }
 
 pub static META: alint_core::KindMeta = alint_core::KindMeta {
-    dispatch: alint_core::DispatchClass::FullIndex { path_scope: false },
+    dispatch: alint_core::DispatchClass::FullIndex { path_scope: true },
     paths: alint_core::PathsSupport::Forbidden,
     scope_filter: alint_core::ScopeFilterSupport::Rejected {
         reason: std::borrow::Cow::Borrowed(

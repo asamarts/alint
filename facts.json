@@ -818,7 +818,7 @@
     "constraint": {
       "dispatch": {
         "kind": "full_index",
-        "path_scope": false
+        "path_scope": true
       },
       "paths": "forbidden",
       "scope_filter": {

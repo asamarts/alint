@@ -705,7 +705,9 @@ fn validate_metadata_options(
 fn assert_dispatch_and_content(kind: &str, meta: &KindMeta, rule: &dyn Rule) {
     let per_file = rule.as_per_file().is_some();
     let full_index = rule.requires_full_index();
-    let path_scope = rule.path_scope().is_some();
+    // A rule that reads relations declares its `--changed` skip predicate as
+    // a trigger scope instead.
+    let path_scope = rule.path_scope().is_some() || rule.trigger_scope().is_some();
     let dispatch_matches = match meta.dispatch {
         DispatchClass::PerFile {
             full_index: expected_full_index,

@@ -356,6 +356,15 @@ impl Engine {
         if self.dependency_changed(rule) {
             return false;
         }
+        // A rule that reads relations runs when a changed path is one their
+        // selectors read (design `v0.23/selectors-and-constraints.md` section
+        // 9); it then sees the full index, as every full-index rule does.
+        if let Some(trigger) = rule.trigger_scope() {
+            return !set
+                .iter()
+                .chain(created.into_iter().flatten())
+                .any(|path| trigger.matches(path, index));
+        }
         let Some(scope) = rule.path_scope() else {
             return false;
         };
@@ -400,6 +409,12 @@ impl Engine {
         };
         if self.dependency_changed(rule) {
             return false;
+        }
+        if let Some(trigger) = rule.trigger_scope() {
+            return !set
+                .iter()
+                .chain(created.into_iter().flatten())
+                .any(|path| trigger.matches_without_manifest(path, index));
         }
         let Some(scope) = effective_path_scope(rule) else {
             return false;
@@ -644,6 +659,10 @@ impl Engine {
         // a warning leaves their manifest out.
         let mut secret_groups: std::collections::BTreeSet<String> =
             std::collections::BTreeSet::new();
+        // Groups a rule's own scope reads, which may warn when empty; a
+        // trigger scope's (below) are read only to decide whether a rule runs.
+        let mut scope_groups: std::collections::BTreeSet<String> =
+            std::collections::BTreeSet::new();
         for entry in &self.entries {
             if entry
                 .when
@@ -671,6 +690,20 @@ impl Engine {
                             if secret {
                                 secret_groups.insert(pred.cache_key().to_string());
                             }
+                            scope_groups.insert(pred.cache_key().to_string());
+                            groups
+                                .entry(pred.cache_key().to_string())
+                                .or_default()
+                                .push(pred.clone());
+                        }
+                    }
+                    // Under `--changed`, the manifests a trigger scope's
+                    // selectors read decide whether its rule runs; resolved
+                    // here once, the relations read the same sets.
+                    if self.changed_paths.is_some()
+                        && let Some(trigger) = rule.trigger_scope()
+                    {
+                        for pred in trigger.manifest_predicates() {
                             groups
                                 .entry(pred.cache_key().to_string())
                                 .or_default()
@@ -708,6 +741,7 @@ impl Engine {
             // not duplicate log-only warnings.
             if !failures.contains_key(&key)
                 && set.is_empty()
+                && scope_groups.contains(&key)
                 && group
                     .iter()
                     .any(crate::scope_filter::ManifestPredicate::warns_on_empty)

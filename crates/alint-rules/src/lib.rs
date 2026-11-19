@@ -1127,6 +1127,7 @@ mod registry_tests {
         assert_eq!(
             kinds_where(&|m| matches!(m.dispatch, DispatchClass::FullIndex { path_scope: true })),
             BTreeSet::from([
+                "constraint",
                 "file_absent",
                 "file_exists",
                 "key_parity",

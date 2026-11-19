@@ -75,8 +75,10 @@ rules: []
 | `paths` | required: a glob, a list of globs with `!` excludes, or `{ include, exclude }` |
 | `scope_filter` | optional: `has_ancestor`, `include_manifest_paths` or `exclude_manifest_paths` |
 
-A selector cannot use `changed_since`: the rules that will read selectors judge the whole
-repository, under `--changed` too, so what a selector picks must not depend on the diff. A
+A selector cannot use `changed_since`: the rules that read selectors judge the whole repository,
+under `--changed` too, so what a selector picks must not depend on the diff. Under `--changed`, a
+[`constraint`](/docs/rules/cross-file/constraint/) rule runs when a changed path is one the
+selectors of its relations read, or a marker or manifest their `scope_filter:` consults. A
 manifest `source:` stays inside the repository, as a rule's does.
 
 Wherever a relation names a selector (`from:`), it may write one inline instead, as a map:

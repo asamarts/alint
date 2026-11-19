@@ -925,8 +925,9 @@ A rule takes `input:`, the relation it reads (a name, bare or qualified by an `e
 not read the environment), and `assert:`, which holds exactly one of `equal`, `unique` and `set`.
 It takes the common keys `id`, `level`, `message`, `when`, `policy_url` and `sensitive`, but no
 `paths:` and no `scope_filter:`: the selectors of its relation pick what it reads. It cannot be
-nested under a `for_each_*` kind's `require:`, it has no fix, and under `--changed` it evaluates
-over the full index. Every field it names (and every `{{row.FIELD}}` in its `message:`) must be a
+nested under a `for_each_*` kind's `require:`, it has no fix, and under `--changed` it runs when a
+changed path is one its selectors read (see below), then judges the whole repository. Every field
+it names (and every `{{row.FIELD}}` in its `message:`) must be a
 field of the relation, and a literal must be a string, or a boolean for a field that can hold one;
 a number cannot be written as a literal (YAML does not keep the text it is written with), and null
 matches nothing.
@@ -1031,6 +1032,21 @@ key: every sensitive value is the one word `sensitive`, never a digest, which an
 baseline could test guesses against. Findings that differ only in a sensitive value share a key
 and are told apart by their count: three such findings against a baseline that counted two are one
 new finding.
+
+#### Under `--changed`
+
+`alint check --changed` (and `--base`) runs a `constraint` rule when a changed path, added,
+modified or deleted, is one its trigger scope covers: the selectors of every relation the rule
+reads, which are its `input:`, both sides of each join, the relation each `in:` or `not_in:` list
+probes, and the relation a `set` compares against, followed through every relation they read. A
+selector's `scope_filter:` narrows the trigger scope as it narrows what the selector reads, and a
+change to what it consults also runs the rule: a file named as a `has_ancestor` marker, or the
+manifest an `include_manifest_paths` or `exclude_manifest_paths` predicate reads. The rule then
+judges every file its relations read, changed or not, and reports every finding, so adding a key to
+`locales/en.json` reports the keys `locales/fr.json` lacks though `fr.json` did not change. When no
+changed path is in its trigger scope the rule does not run and reports nothing, not even an
+analysis failure. A change to `.alint.yml` or another configuration file alone runs no rule, as in
+version 1.
 
 ### `every_matching_has`
 
