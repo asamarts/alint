@@ -18,7 +18,7 @@
 //! reads. With neither changed, a predicate's verdict on a deleted path is
 //! the one it had before the change. A selector that does not compile, or
 //! that uses `changed_since` (which the loader refuses), takes every change:
-//! the rule then runs and reports why it cannot read.
+//! the rule then runs and reports why it cannot read. No change runs no rule.
 //!
 //! An ignore file the walk reads ([`IGNORE_FILE_NAMES`]) decides which files
 //! below its directory are in the index, so a change to one triggers every
@@ -130,7 +130,15 @@ impl TriggerScope {
         index: &FileIndex,
         pending: &mut Vec<(usize, usize)>,
     ) -> bool {
+        // No change runs no rule, whatever its selectors.
+        if changed.is_empty() {
+            return false;
+        }
         for (position, selector) in self.selectors.iter().enumerate() {
+            // A selector that does not compile, or reads `changed_since:`,
+            // cannot say which paths it reads, so any change runs the rule
+            // (fail open). The loader rejects both in a version 2 config, so
+            // no config reaches this today.
             let Some(scope) = &selector.scope else {
                 return true;
             };
@@ -477,5 +485,34 @@ mod tests {
                 inline(3, 0),
             ]
         );
+    }
+
+    /// A selector that does not compile takes every change, since it cannot
+    /// say which paths it reads; still, no change runs no rule.
+    #[test]
+    fn an_undecidable_selector_takes_every_change_and_no_change_runs_nothing() {
+        let plan = Plan {
+            sources: vec![PlanSource {
+                display: ".alint.yml".into(),
+                path: PathBuf::from(".alint.yml"),
+                class: ConfigSourceClass::Root,
+                aliases: Vec::new(),
+            }],
+            selectors: Vec::new(),
+            relations: vec![named(Rows::Part(part(SelectorRef::Inline(Box::new(
+                selector("a/[.json"),
+            )))))],
+            rules: Vec::new(),
+        };
+        let trigger = TriggerScope::of(&plan, &[RelationId(0)]);
+        assert!(trigger.selectors[0].scope.is_none());
+        let index = FileIndex::from_entries(Vec::new());
+        let none = std::collections::HashSet::new();
+        let mut pending = Vec::new();
+        let nothing = ChangedPaths::new(std::iter::empty(), &none);
+        assert!(!trigger.hits(&nothing, &index, &mut pending));
+        let anything = ChangedPaths::new([Path::new("src/main.rs")], &none);
+        assert!(trigger.hits(&anything, &index, &mut pending));
+        assert_eq!(pending, []);
     }
 }
