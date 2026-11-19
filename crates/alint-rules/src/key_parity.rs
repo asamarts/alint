@@ -18,7 +18,6 @@
 
 use std::borrow::{Borrow, Cow};
 use std::collections::{BTreeMap, BTreeSet};
-use std::ops::Bound;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -659,16 +658,7 @@ impl KeyParityRule {
                 self.without_ignored(peer.clone()),
             );
         }
-        let nested = nested_plural_groups(&[reference, peer]);
-        let (reference, peer) = (
-            merge_nested_groups(reference, &nested),
-            merge_nested_groups(peer, &nested),
-        );
-        let i18next = i18next_plural_groups(&[&reference, &peer]);
-        let (reference, peer) = (
-            merge_i18next_groups(&reference, &i18next),
-            merge_i18next_groups(&peer, &i18next),
-        );
+        let (reference, peer) = crate::plural_groups::pair(reference, peer);
         (self.without_ignored(reference), self.without_ignored(peer))
     }
 
@@ -1039,7 +1029,7 @@ fn leaf_keys<K: Ord + Borrow<[Segment]>, V>(mut keys: BTreeMap<K, V>) -> BTreeMa
 /// A file's keys in key order. Each borrows its path from the file's decode
 /// (or is part of one there) and is copied only to merge an i18next plural
 /// group, whose key no file holds.
-type Keys<'a> = BTreeMap<Cow<'a, [Segment]>, ByteSpan>;
+type Keys<'a> = crate::plural_groups::Keys<'a, ByteSpan>;
 
 /// A decode's leaf key rows, in key order, a repeated key once (its first
 /// row), each with its key's span. The keys are compared by the paths the
@@ -1091,143 +1081,6 @@ fn strip_root_blocker(file: &KeyFile) -> Option<String> {
 /// (`strip_root_blocker` has accepted the file).
 fn base_keys(file: &KeyFile, strip_root: bool) -> Keys<'_> {
     file.keys(usize::from(strip_root))
-}
-
-fn cldr_category(name: &str) -> bool {
-    matches!(name, "zero" | "one" | "two" | "few" | "many" | "other")
-}
-
-/// The parents merged as nested CLDR plural objects (Rails YAML) in one
-/// comparison: a non-root object with a category-named leaf in either file,
-/// `other` among its members in at least one, and, in every file that has
-/// it, no member but category-named leaves.
-fn nested_plural_groups<'k>(files: &[&'k Keys<'_>]) -> BTreeSet<&'k [Segment]> {
-    let mut candidates: BTreeMap<&[Segment], bool> = BTreeMap::new();
-    for keys in files {
-        for key in keys.keys() {
-            if let Some((Segment::Key(name), parent)) = key.split_last()
-                && !parent.is_empty()
-                && cldr_category(name)
-            {
-                *candidates.entry(parent).or_default() |= &**name == "other";
-            }
-        }
-    }
-    candidates
-        .into_iter()
-        .filter(|(parent, has_other)| {
-            *has_other && files.iter().all(|keys| is_plural_object(keys, parent))
-        })
-        .map(|(parent, _)| parent)
-        .collect()
-}
-
-/// Whether every key below `parent` is a leaf child named for a CLDR category
-/// (vacuously, when the file has no key below it). Keys that share a prefix
-/// are contiguous in the map, so this visits only `parent`'s own keys and
-/// stops at the first that disqualifies it.
-fn is_plural_object(keys: &Keys<'_>, parent: &[Segment]) -> bool {
-    keys.range::<[Segment], _>((Bound::Included(parent), Bound::Unbounded))
-        .take_while(|(key, _)| key.starts_with(parent))
-        .all(|(key, _)| {
-            key.len() == parent.len() + 1
-                && matches!(&key[parent.len()], Segment::Key(name) if cldr_category(name))
-        })
-}
-
-/// Replace each group's members with one key at its parent, located at the
-/// file's `other` member, or at its first member when it has no `other`.
-fn merge_nested_groups<'a>(keys: &Keys<'a>, groups: &BTreeSet<&[Segment]>) -> Keys<'a> {
-    let mut out = Keys::new();
-    let mut merged = Keys::new();
-    for (key, span) in keys {
-        match key.split_last() {
-            Some((Segment::Key(name), parent)) if groups.contains(parent) => {
-                let at = merged.entry(parent_key(key)).or_insert(*span);
-                if &**name == "other" {
-                    *at = *span;
-                }
-            }
-            _ => {
-                out.insert(key.clone(), *span);
-            }
-        }
-    }
-    out.extend(merged);
-    out
-}
-
-/// The key of the object that holds `key`, borrowed when `key` is.
-fn parent_key<'a>(key: &Cow<'a, [Segment]>) -> Cow<'a, [Segment]> {
-    match key {
-        Cow::Borrowed(path) => {
-            let path: &'a [Segment] = path;
-            Cow::Borrowed(&path[..path.len().saturating_sub(1)])
-        }
-        Cow::Owned(path) => Cow::Owned(path[..path.len().saturating_sub(1)].to_vec()),
-    }
-}
-
-/// The `(parent, base)` i18next plural groups (`<base>_<category>` siblings)
-/// merged in one comparison: `<base>_other` in at least one file, a non-empty
-/// base, and `<base>` itself a key in neither, so a merge never hides a key.
-fn i18next_plural_groups<'k>(files: &[&'k Keys<'_>]) -> BTreeSet<(&'k [Segment], &'k str)> {
-    let mut candidates: BTreeMap<(&[Segment], &str), bool> = BTreeMap::new();
-    for keys in files {
-        for key in keys.keys() {
-            if let Some((parent, base, category)) = i18next_member(key) {
-                *candidates.entry((parent, base)).or_default() |= category == "other";
-            }
-        }
-    }
-    candidates
-        .into_iter()
-        .filter(|((parent, base), has_other)| {
-            *has_other && {
-                let mut merged = parent.to_vec();
-                merged.push(Segment::Key((*base).into()));
-                files
-                    .iter()
-                    .all(|keys| !keys.contains_key(merged.as_slice()))
-            }
-        })
-        .map(|(group, _)| group)
-        .collect()
-}
-
-/// A key's i18next plural parts: its parent, base, and CLDR category suffix.
-fn i18next_member(key: &[Segment]) -> Option<(&[Segment], &str, &str)> {
-    let (Segment::Key(last), parent) = key.split_last()? else {
-        return None;
-    };
-    let (base, category) = last.rsplit_once('_')?;
-    (!base.is_empty() && cldr_category(category)).then_some((parent, base, category))
-}
-
-/// Replace each i18next group's members with one `<base>` key, located like
-/// [`merge_nested_groups`] does. No file holds that key's path, so it is
-/// built, once per group.
-fn merge_i18next_groups<'a>(keys: &Keys<'a>, groups: &BTreeSet<(&[Segment], &str)>) -> Keys<'a> {
-    let mut out = Keys::new();
-    let mut merged: BTreeMap<(&[Segment], &str), ByteSpan> = BTreeMap::new();
-    for (key, span) in keys {
-        if let Some((parent, base, category)) = i18next_member(key)
-            && groups.contains(&(parent, base))
-        {
-            let at = merged.entry((parent, base)).or_insert(*span);
-            if category == "other" {
-                *at = *span;
-            }
-        } else {
-            out.insert(key.clone(), *span);
-        }
-    }
-    out.extend(merged.into_iter().map(|((parent, base), span)| {
-        let mut target = parent.to_vec();
-        target.push(Segment::Key(base.into()));
-        (Cow::Owned(target), span)
-    }));
-    out
 }
 
 /// Match a single-name key against a glob: `*` stops at a `.`, `**` crosses

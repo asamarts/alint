@@ -1,4 +1,7 @@
 use super::*;
+use crate::plural_groups::{
+    i18next_plural_groups, merge_i18next_groups, merge_nested_groups, nested_plural_groups,
+};
 use crate::test_support::{ctx, spec_yaml, tempdir_with_files};
 use alint_core::{FindingDisposition, Violation};
 
