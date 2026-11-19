@@ -1277,17 +1277,24 @@ struct Repeats<'k, 'e> {
     left: std::collections::HashMap<&'k EntryKey<'e>, usize>,
     /// The source of each key with entries left.
     held: std::collections::HashMap<&'k EntryKey<'e>, RawConfig>,
+    /// The first entry of each key the list names more than once, which
+    /// tells its source from the others' ([`Merger::push_repeated`]).
+    repeated: std::collections::HashMap<&'k EntryKey<'e>, usize>,
 }
 
 impl<'k, 'e> Repeats<'k, 'e> {
     fn of(keys: &'k [EntryKey<'e>]) -> Self {
         let mut left = std::collections::HashMap::new();
-        for key in keys {
+        let mut repeated = std::collections::HashMap::new();
+        for (index, key) in keys.iter().enumerate() {
             left.entry(key).and_modify(|count| *count += 1).or_insert(0);
+            repeated.entry(key).or_insert(index);
         }
+        repeated.retain(|key, _| left[key] > 0);
         Self {
             left,
             held: std::collections::HashMap::new(),
+            repeated,
         }
     }
 
@@ -1314,12 +1321,15 @@ impl<'k, 'e> Repeats<'k, 'e> {
         source: RawConfig,
         merger: &mut Merger,
     ) -> Result<()> {
+        let Some(&repeated) = self.repeated.get(key) else {
+            return merger.push(source);
+        };
         if self.left.get(key).is_some_and(|left| *left > 0) {
-            merger.push_held(&source)?;
+            merger.push_repeated(std::borrow::Cow::Borrowed(&source), repeated)?;
             self.hold(key, source);
             Ok(())
         } else {
-            merger.push(source)
+            merger.push_repeated(std::borrow::Cow::Owned(source), repeated)
         }
     }
 }

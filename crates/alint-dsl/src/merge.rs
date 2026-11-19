@@ -7,6 +7,11 @@
 //! The merge it replaced rebuilt what it merged onto for every config, so a
 //! list of N sources cost N times what it merged (#580). The tests
 //! (`merge_tests.rs`) check the two against each other on generated lists.
+//!
+//! An `extends:` list can name a source many times (`[a, b, a, b, ...]`,
+//! #567). A rule such a source merged onto last, and nothing since, would
+//! come out of merging it again as it was but for the order of its marker
+//! tables, which [`Remerge`] repeats without merging or copying the rule.
 
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -14,9 +19,12 @@ use std::hash::Hash;
 use std::path::PathBuf;
 
 use alint_core::{ConfigCompatibility, ConfigSourceClass, Error, FactSpec, Result, StableVersion};
-use ayaml::Mapping;
+use ayaml::{Mapping, Value};
 
-use crate::{RawConfig, UntrustedWhenVarRead, merge_mapping_fields};
+use crate::{
+    ENV_VARS_MARKER, FIELD_SOURCES_MARKER, PROVENANCE_MARKER, RawConfig, SENSITIVE_FIELDS_MARKER,
+    UntrustedWhenVarRead, merge_mapping_fields,
+};
 
 /// The entries of the list `$field` of `$source`, a `&mut Cow<RawConfig>`
 /// ([`Entries`]).
@@ -121,6 +129,8 @@ pub(crate) struct Merger {
     v2_paths: HashSet<PathBuf>,
     /// The selectors and relations of `merged.v2.sources`.
     v2_objects: usize,
+    /// The keys a merge looks up in every rule and template.
+    keys: Keys,
 }
 
 impl Merger {
@@ -141,15 +151,22 @@ impl Merger {
 
     /// Merge `source` onto what was merged so far, moving its entries in.
     pub(crate) fn push(&mut self, source: RawConfig) -> Result<()> {
-        self.push_from(Cow::Owned(source))
+        self.push_from(Cow::Owned(source), None)
     }
 
-    /// Merge `source`, which a later entry of its list merges again, onto
-    /// what was merged so far. An entry the merge takes (a rule, a var) is
-    /// copied in; one it holds already (an `ignore:` pattern, a version 2
-    /// source) is only looked up, so the caller need not copy all of it.
-    pub(crate) fn push_held(&mut self, source: &RawConfig) -> Result<()> {
-        self.push_from(Cow::Borrowed(source))
+    /// Merge `source`, which its list names more than once, onto what was
+    /// merged so far; `repeated` is the same for each of its entries, and no
+    /// other source's. Borrowed, while a later entry merges it again, an entry
+    /// the merge takes (a rule, a var) is copied in, and one it holds already
+    /// (an `ignore:` pattern, a version 2 source) is only looked up, so the
+    /// caller need not copy all of it. A rule or template it merged onto last
+    /// is not merged again ([`Remerge`]).
+    pub(crate) fn push_repeated(
+        &mut self,
+        source: Cow<'_, RawConfig>,
+        repeated: usize,
+    ) -> Result<()> {
+        self.push_from(source, Some(repeated))
     }
 
     /// What was merged.
@@ -199,7 +216,7 @@ impl Merger {
         #[cfg(test)]
         touch(self.compatibility.len() + self.environment_values.len() + self.v2_paths.len());
         let mut first = Cow::Owned(first);
-        self.add_reduced(&mut first);
+        self.add_reduced(&mut first, None);
         self.merged = RawConfig {
             requires: None,
             extends: Vec::new(),
@@ -208,7 +225,7 @@ impl Merger {
         };
     }
 
-    fn push_from(&mut self, mut source: Cow<'_, RawConfig>) -> Result<()> {
+    fn push_from(&mut self, mut source: Cow<'_, RawConfig>, repeated: Option<usize>) -> Result<()> {
         if let Some(first) = self.first.take() {
             self.start(first);
         }
@@ -302,12 +319,14 @@ impl Merger {
                 self.merged.v2.sources.push(objects.into_owned());
             }
         }
-        self.add_reduced(&mut source);
+        self.add_reduced(&mut source, repeated);
         self.check_size()
     }
 
     /// Add the entries of `source`'s lists that keep each entry once.
-    fn add_reduced(&mut self, source: &mut Cow<'_, RawConfig>) {
+    /// `repeated` names a source its list names more than once
+    /// ([`Self::push_repeated`]).
+    fn add_reduced(&mut self, source: &mut Cow<'_, RawConfig>, repeated: Option<usize>) {
         for pattern in entries!(source, ignore) {
             self.ignore.add(pattern);
         }
@@ -330,11 +349,12 @@ impl Merger {
                 self.facts.push(fact);
             }
         }
-        for template in entries!(source, templates) {
-            self.templates.add(template);
+        let writer = |index| repeated.map(|source| Writer { source, index });
+        for (index, template) in entries!(source, templates).enumerate() {
+            self.templates.add(template, writer(index), &self.keys);
         }
-        for rule in entries!(source, rules) {
-            self.rules.add(rule);
+        for (index, rule) in entries!(source, rules).enumerate() {
+            self.rules.add(rule, writer(index), &self.keys);
         }
     }
 
@@ -370,7 +390,7 @@ impl Merger {
 
 /// The entries of one list of a config pushed onto a [`Merger`]: moved out of
 /// it, or borrowed from it when it is held for a later entry
-/// ([`Merger::push_held`]).
+/// ([`Merger::push_repeated`]).
 enum Entries<'s, T> {
     Owned(std::vec::IntoIter<T>),
     Borrowed(std::slice::Iter<'s, T>),
@@ -435,25 +455,42 @@ struct ById {
     with_id: Vec<Mapping>,
     /// The position of each id in `with_id`.
     positions: HashMap<String, usize>,
+    /// For each of `with_id`, the entry of a repeated source that merged onto
+    /// it last, or that it is, with nothing merged onto it since.
+    written: Vec<Option<Written>>,
     /// Those without an id, each once, after the others: they merge with
     /// nothing, and `finalize` refuses them.
     orphans: Unique<Mapping>,
 }
 
 impl ById {
-    fn add(&mut self, mapping: Cow<'_, Mapping>) {
-        let Some(id) = mapping.get("id").and_then(ayaml::Value::as_str) else {
+    /// Add `mapping`, the entry `writer` of a repeated source if it is one.
+    fn add(&mut self, mapping: Cow<'_, Mapping>, writer: Option<Writer>, keys: &Keys) {
+        let Some(id) = mapping.get(&keys.id).and_then(Value::as_str) else {
             self.orphans.add(mapping);
             return;
         };
         if let Some(&at) = self.positions.get(id) {
+            if let Some(writer) = writer
+                && let Some(written) = &mut self.written[at]
+                && written.writer == writer
+                && let Some(remerge) = written.remerge(&self.with_id[at], &mapping, keys)
+            {
+                remerge.apply(&mut self.with_id[at], keys);
+                return;
+            }
             // Nested structures (a `fix:` block, a `paths:` include/exclude
             // pair) are replaced wholesale: overriding
             // `fix.file_create.content` alone would be too surprising.
-            merge_mapping_fields(&mut self.with_id[at], mapping.into_owned());
+            #[cfg(test)]
+            count(&MAPPING_MERGES);
+            merge_mapping_fields(&mut self.with_id[at], owned(mapping));
+            self.written[at] = writer.map(|writer| Written::new(writer, true));
         } else {
             self.positions.insert(id.to_owned(), self.with_id.len());
-            self.with_id.push(mapping.into_owned());
+            self.with_id.push(owned(mapping));
+            self.written
+                .push(writer.map(|writer| Written::new(writer, false)));
         }
     }
 
@@ -465,6 +502,170 @@ impl ById {
         let mut list = self.with_id;
         list.extend(self.orphans.entries);
         list
+    }
+}
+
+/// `mapping`, copied if it is borrowed.
+fn owned(mapping: Cow<'_, Mapping>) -> Mapping {
+    #[cfg(test)]
+    if matches!(mapping, Cow::Borrowed(_)) {
+        count(&MAPPING_COPIES);
+    }
+    mapping.into_owned()
+}
+
+/// An entry of a source its list names more than once
+/// ([`Merger::push_repeated`]): the source, and the entry's place in its
+/// rules or templates. Each entry of the list that names the source pushes
+/// the same entries, in the same places.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Writer {
+    source: usize,
+    index: usize,
+}
+
+/// The entry of a repeated source that merged onto a rule or template last,
+/// or that it is, with nothing merged onto it since.
+#[derive(Clone, Copy)]
+struct Written {
+    writer: Writer,
+    /// Whether the entry merged onto it, or it is the entry.
+    merged: bool,
+    /// What merging the entry again does to it, once a later entry of its
+    /// source has worked it out.
+    remerge: Option<Remerge>,
+}
+
+impl Written {
+    fn new(writer: Writer, merged: bool) -> Self {
+        Self {
+            writer,
+            merged,
+            remerge: None,
+        }
+    }
+
+    /// What merging `entry`, the writer's, again does to `written`, the rule
+    /// or template it wrote, if that only moves marker tables.
+    fn remerge(&mut self, written: &Mapping, entry: &Mapping, keys: &Keys) -> Option<Remerge> {
+        if self.remerge.is_none() {
+            self.remerge = if self.merged {
+                Some(Remerge::incoming(entry, keys).held(written, keys))
+            } else {
+                Remerge::of_entry(written, keys)
+            };
+        }
+        self.remerge
+    }
+}
+
+/// What merging an entry again does to the rule or template it merged onto
+/// last, or that it is, with nothing merged onto it since: nothing but move
+/// some of its marker tables to its end, as [`merge_mapping_fields`] does.
+///
+/// That merge takes each of [`Keys::moved`] out of the mapping it merges
+/// onto, swapping the last key into its place ([`Mapping::remove`]), and puts
+/// it back at the end, in that order: the field sources, the sensitive
+/// fields and the field origins when the mapping holds them, the provenance
+/// when the entry carries one, and the environment's vars when the entry
+/// sets `vars:` and carries them. Every other key of the entry is in the
+/// mapping already, with the entry's value, and keeps its place; each table
+/// holds what it did, since the entry wrote it.
+#[derive(Clone, Copy)]
+struct Remerge {
+    /// One bit for each of [`Keys::moved`] the merge takes out and puts back.
+    moved: u8,
+}
+
+impl Remerge {
+    /// The tables a merge of `entry` onto anything moves, of those `entry`
+    /// decides.
+    fn incoming(entry: &Mapping, keys: &Keys) -> Self {
+        let provenance = entry.get(&keys.moved[3]).is_some_and(Value::is_mapping);
+        let environment = entry.contains_key(&keys.vars) && entry.contains_key(&keys.moved[4]);
+        Self {
+            moved: (u8::from(provenance) << 3) | (u8::from(environment) << 4),
+        }
+    }
+
+    /// These and the tables a merge onto `merged` would move, of those
+    /// `merged` decides.
+    fn held(self, merged: &Mapping, keys: &Keys) -> Self {
+        let mut moved = self.moved;
+        for (bit, key) in keys.moved[..3].iter().enumerate() {
+            moved |= u8::from(merged.contains_key(key)) << bit;
+        }
+        Self { moved }
+    }
+
+    /// What merging `entry` again onto itself does, when that only moves
+    /// tables: when each of the field sources, the sensitive fields and the
+    /// field origins it holds is a mapping that is not empty, and each
+    /// sensitive field is marked `true`, as the loader writes them. (Merging
+    /// it would drop an empty table and mark each sensitive field `true`.)
+    fn of_entry(entry: &Mapping, keys: &Keys) -> Option<Self> {
+        let table = |bit: usize| entry.get(&keys.moved[bit]);
+        let sound = (0..3).all(|bit| {
+            table(bit).is_none_or(|table| table.as_mapping().is_some_and(|t| !t.is_empty()))
+        }) && table(1)
+            .and_then(Value::as_mapping)
+            .is_none_or(|fields| fields.values().all(|marked| *marked == Value::Bool(true)));
+        sound.then(|| Self::incoming(entry, keys).held(entry, keys))
+    }
+
+    /// Move the tables in `merged` as merging the entry again would.
+    fn apply(self, merged: &mut Mapping, keys: &Keys) {
+        let is_last = |merged: &Mapping, key: &Value| {
+            merged
+                .len()
+                .checked_sub(1)
+                .and_then(|last| merged.get_index(last))
+                .is_some_and(|(last, _)| last == key)
+        };
+        let count = self.moved.count_ones();
+        if count == 0 {
+            return;
+        }
+        // Moving one table to the end changes nothing when it is there
+        // already; moving two, when the second is, swaps them and back.
+        let highest = 7 - self.moved.leading_zeros() as usize;
+        if count <= 2 && is_last(merged, &keys.moved[highest]) {
+            return;
+        }
+        for (bit, key) in keys.moved.iter().enumerate() {
+            if self.moved & (1 << bit) != 0
+                && !is_last(merged, key)
+                && let Some(table) = merged.remove(key)
+            {
+                merged.insert(key.clone(), table);
+            }
+        }
+    }
+}
+
+/// The keys a merge looks up in each rule and template, made once: a lookup
+/// by a `&str` makes a key of it each time.
+struct Keys {
+    id: Value,
+    vars: Value,
+    /// The tables [`merge_mapping_fields`] takes out of a mapping and puts
+    /// back at its end, in its order ([`Remerge`]).
+    moved: [Value; 5],
+}
+
+impl Default for Keys {
+    fn default() -> Self {
+        Self {
+            id: "id".into(),
+            vars: "vars".into(),
+            moved: [
+                FIELD_SOURCES_MARKER.into(),
+                SENSITIVE_FIELDS_MARKER.into(),
+                crate::v2::FIELD_ORIGINS_MARKER.into(),
+                PROVENANCE_MARKER.into(),
+                ENV_VARS_MARKER.into(),
+            ],
+        }
     }
 }
 
@@ -522,6 +723,21 @@ thread_local! {
 #[cfg(test)]
 fn touch(entries: usize) {
     MERGE_TOUCHED.with(|touched| touched.set(touched.get() + entries));
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many rules and templates the [`Merger`]s on this thread have
+    /// field-merged onto another ([`merge_mapping_fields`]).
+    pub(crate) static MAPPING_MERGES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// How many rules and templates they have copied from a source a later
+    /// entry merges again.
+    pub(crate) static MAPPING_COPIES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn count(counter: &'static std::thread::LocalKey<std::cell::Cell<usize>>) {
+    counter.with(|count| count.set(count.get() + 1));
 }
 
 #[cfg(test)]

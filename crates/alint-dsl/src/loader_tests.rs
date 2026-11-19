@@ -1257,17 +1257,45 @@ fn an_untrusted_load_refuses_allow_out_of_root_before_its_extends_resolve() {
     assert!(crate::load_with(&path, &crate::LoadOptions::default()).is_ok());
 }
 
-/// What loading the config at `root` returned (its `extends:` chain and
-/// drop-ins, before `finalize`), with the work its entries were charged and
-/// the entries its merges handled ([`crate::merge::MERGE_TOUCHED`]).
-fn load_counted(root: &Path) -> (Result<RawConfig>, usize, usize) {
+/// What loading a config returned (its `extends:` chain and drop-ins,
+/// before `finalize`), and what the load did.
+struct Counted {
+    raw: Result<RawConfig>,
+    /// The work its entries were charged.
+    charged: usize,
+    /// The entries its merges handled ([`crate::merge::MERGE_TOUCHED`]).
+    touched: usize,
+    /// The rules and templates its merges field-merged onto another
+    /// ([`crate::merge::MAPPING_MERGES`]).
+    merged_onto: usize,
+    /// The rules and templates they copied from a held source
+    /// ([`crate::merge::MAPPING_COPIES`]).
+    copied: usize,
+}
+
+/// Load the config at `root`, counting what the load did.
+fn load_counted(root: &Path) -> Counted {
     let registry = alint_rules::builtin_registry();
     let options = crate::LoadOptions::with_catalog(registry.catalog());
     let mut state = LoadState::default();
-    let touched = || crate::merge::MERGE_TOUCHED.with(std::cell::Cell::get);
-    let before = touched();
+    let counters = || {
+        [
+            &crate::merge::MERGE_TOUCHED,
+            &crate::merge::MAPPING_MERGES,
+            &crate::merge::MAPPING_COPIES,
+        ]
+        .map(|counter| counter.with(std::cell::Cell::get))
+    };
+    let before = counters();
     let raw = crate::resolve_top_level(root, &options, &mut state);
-    (raw, state.extends_entries, touched() - before)
+    let after = counters();
+    Counted {
+        raw,
+        charged: state.extends_entries,
+        touched: after[0] - before[0],
+        merged_onto: after[1] - before[1],
+        copied: after[2] - before[2],
+    }
 }
 
 /// In `dir`, a ruleset `<name>.yml` of `rules` rules of its own, each with a
@@ -1312,12 +1340,13 @@ fn a_flat_list_of_large_rulesets_loads() {
     let entries: Vec<String> = (0..count)
         .map(|index| write_ruleset(tmp.path(), &format!("r{index}"), rules, 1))
         .collect();
-    let (raw, charged, touched) = load_counted(&write_extending(tmp.path(), &entries));
-    assert_eq!(raw.unwrap().rules.len(), count * rules);
+    let counted = load_counted(&write_extending(tmp.path(), &entries));
+    assert_eq!(counted.raw.unwrap().rules.len(), count * rules);
     // Each ruleset's rules to load it, and again to merge it.
-    assert_eq!(charged, count * 2 * rules);
+    assert_eq!(counted.charged, count * 2 * rules);
     // And the root's own record.
-    assert_eq!(touched, count * (rules + 1) + 1);
+    assert_eq!(counted.touched, count * (rules + 1) + 1);
+    assert_eq!((counted.merged_onto, counted.copied), (0, 0));
 }
 
 /// A list of 2,900 one-rule files loads (#580): the budget refused the
@@ -1329,10 +1358,10 @@ fn a_list_of_many_one_rule_files_loads() {
     let entries: Vec<String> = (0..count)
         .map(|index| write_ruleset(tmp.path(), &format!("r{index}"), 1, 1))
         .collect();
-    let (raw, charged, touched) = load_counted(&write_extending(tmp.path(), &entries));
-    assert_eq!(raw.unwrap().rules.len(), count);
-    assert_eq!(charged, count * 2);
-    assert_eq!(touched, count * 2 + 1);
+    let counted = load_counted(&write_extending(tmp.path(), &entries));
+    assert_eq!(counted.raw.unwrap().rules.len(), count);
+    assert_eq!(counted.charged, count * 2);
+    assert_eq!(counted.touched, count * 2 + 1);
 }
 
 /// An `extends:` list that alternates two rulesets of 2,000 rules each a
@@ -1351,8 +1380,8 @@ fn an_alternating_extends_list_is_refused_in_linear_work() {
         write_ruleset(tmp.path(), "b", rules, 1_000),
     ];
     let entries: Vec<String> = (0..1_000).flat_map(|_| pair.clone()).collect();
-    let (raw, charged, touched) = load_counted(&write_extending(tmp.path(), &entries));
-    let error = raw.unwrap_err().to_string();
+    let counted = load_counted(&write_extending(tmp.path(), &entries));
+    let error = counted.raw.unwrap_err().to_string();
     assert!(error.contains("bytes of sources in all"), "{error}");
     // The rulesets are as large, and the entry that passes the budget is
     // refused before it merges.
@@ -1360,7 +1389,13 @@ fn an_alternating_extends_list_is_refused_in_linear_work() {
     let merged = MAX_EXTENDS_SOURCE_BYTES / usize::try_from(size).unwrap();
     assert_eq!(merged, 31);
     // Loading `a` and `b`, and each entry's merge, the refused one's too.
-    assert_eq!(charged, 2 * rules + (merged + 1) * rules);
+    assert_eq!(counted.charged, 2 * rules + (merged + 1) * rules);
     // Each merged entry's rules and compatibility record, once.
-    assert_eq!(touched, merged * (rules + 1));
+    assert_eq!(counted.touched, merged * (rules + 1));
+    // Each rule is copied once, from the first entry of its ruleset. A later
+    // entry finds it as that ruleset's entry left it, and does not merge it
+    // again ([`crate::merge::Merger::push_repeated`]): before, each entry
+    // copied all of its ruleset, and merged each rule onto itself.
+    assert_eq!(counted.copied, 2 * rules);
+    assert_eq!(counted.merged_onto, 0);
 }

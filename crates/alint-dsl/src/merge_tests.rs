@@ -326,22 +326,31 @@ fn list<T: std::fmt::Debug>(
 }
 
 /// A rule or template: an id of a few, so ids repeat and override, or none;
-/// fields of a few values; and the markers a merge carries.
+/// fields of a few values; the markers a merge carries, in any order, as the
+/// loader writes them; and fields after them, as a merge appends a field.
 fn mapping() -> impl Strategy<Value = Mapping> {
+    let field = || {
+        (
+            prop::sample::select(&["kind", "level", "paths", "message", "vars"][..]),
+            0..3_u8,
+        )
+    };
     (
         prop::option::weighted(0.8, few("id", 4)),
-        list(
-            (
-                prop::sample::select(&["kind", "level", "paths", "message", "vars"][..]),
-                0..3_u8,
-            ),
-            3,
+        list(field(), 3),
+        (
+            prop::option::of(0..3_u64),
+            prop::option::of(1..8_u8),
+            prop::option::of(0..3_usize),
+            prop::option::of((0..3_u8, 0..2_u8)),
+            any::<bool>(),
+            any::<bool>(),
         ),
-        prop::option::of(0..3_u64),
-        any::<bool>(),
-        any::<bool>(),
+        Just((0..6).collect::<Vec<u8>>()).prop_shuffle(),
+        list(field(), 2),
     )
-        .prop_map(|(id, fields, source, untrusted, env_vars)| {
+        .prop_map(|(id, fields, markers, order, late)| {
+            let (source, sensitive, origin, provenance, untrusted, env_vars) = markers;
             let mut mapping = Mapping::new();
             if let Some(id) = id {
                 mapping.insert("id".into(), id.into());
@@ -349,16 +358,58 @@ fn mapping() -> impl Strategy<Value = Mapping> {
             for (field, value) in fields {
                 mapping.insert(field.into(), format!("{field}{value}").into());
             }
-            if let Some(source) = source {
-                crate::mark_field_sources_in(std::slice::from_mut(&mut mapping), &source.into());
+            let marked = std::slice::from_mut(&mut mapping);
+            for marker in order {
+                match marker {
+                    0 => {
+                        if let Some(source) = source {
+                            crate::mark_field_sources_in(marked, &source.into());
+                        }
+                    }
+                    1 => {
+                        // Some of the fields so far, if any.
+                        let fields: Mapping = marked[0]
+                            .keys()
+                            .filter(|key| key.as_str().is_some_and(|key| !key.starts_with("__")))
+                            .enumerate()
+                            .filter(|(at, _)| sensitive.is_some_and(|bits| bits & (1 << at) != 0))
+                            .map(|(_, key)| (key.clone(), true.into()))
+                            .collect();
+                        if !fields.is_empty() {
+                            marked[0].insert(crate::SENSITIVE_FIELDS_MARKER.into(), fields.into());
+                        }
+                    }
+                    2 => {
+                        if let Some(origin) = origin {
+                            crate::v2::mark_field_origins(marked, origin);
+                        }
+                    }
+                    3 => {
+                        if let Some((class, source)) = provenance {
+                            let class = match class {
+                                0 => crate::SourceClass::Extended,
+                                1 => crate::SourceClass::Remote,
+                                _ => crate::SourceClass::UntrustedRemote,
+                            };
+                            crate::mark_provenance_in(marked, class, &format!("s{source}"));
+                        }
+                    }
+                    4 => {
+                        if untrusted {
+                            crate::mark_untrusted_fix_sources_in(marked);
+                        }
+                    }
+                    _ => {
+                        if env_vars {
+                            let mut vars = Mapping::new();
+                            vars.insert("v0".into(), "{{env.V0}}".into());
+                            marked[0].insert(crate::ENV_VARS_MARKER.into(), vars.into());
+                        }
+                    }
+                }
             }
-            if untrusted {
-                crate::mark_untrusted_fix_sources_in(std::slice::from_mut(&mut mapping));
-            }
-            if env_vars {
-                let mut marked = Mapping::new();
-                marked.insert("v0".into(), "{{env.V0}}".into());
-                mapping.insert(crate::ENV_VARS_MARKER.into(), marked.into());
+            for (field, value) in late {
+                mapping.insert(field.into(), format!("{field}{value}").into());
             }
             mapping
         })
@@ -443,7 +494,7 @@ type Lists = (
     Vec<(String, String)>,
     (Vec<String>, Vec<String>),
     Vec<(u8, u8, u8)>,
-    Vec<(String, bool, u32)>,
+    Vec<Record>,
     (Vec<String>, Vec<String>, Vec<String>),
     Vec<(u8, u8)>,
     (usize, Vec<bool>, Vec<String>),
@@ -459,7 +510,16 @@ fn lists() -> impl Strategy<Value = Lists> {
         list((few("f", 3), few("count", 3)), 3),
         (list(few("i", 5), 4), list(few("u", 3), 2)),
         list((0..3_u8, 0..3_u8, 0..2_u8), 2),
-        list((few("c", 2), any::<bool>(), 1..=2_u32), 2),
+        list(
+            (
+                few("c", 2),
+                any::<bool>(),
+                1..=2_u32,
+                prop::option::of(Just(StableVersion::new(0, 1, 0))),
+                prop::option::of(1..=2_u32),
+            ),
+            2,
+        ),
         (
             list(few("e", 4), 3),
             list(few("file", 3), 2),
@@ -564,9 +624,13 @@ fn with_settings(settings: Settings) -> RawConfig {
     }
 }
 
-/// A compatibility record of the source `source`, so two sources' records
-/// can be equal.
-fn record((source, root, config_version): (String, bool, u32)) -> ConfigCompatibility {
+/// A compatibility record as generated: of one of a few sources, so two
+/// sources' records can be equal, and of a few of each field.
+type Record = (String, bool, u32, Option<StableVersion>, Option<u32>);
+
+fn record(
+    (source, root, config_version, requires_alint, consumer_version): Record,
+) -> ConfigCompatibility {
     ConfigCompatibility {
         source,
         source_class: if root {
@@ -575,34 +639,46 @@ fn record((source, root, config_version): (String, bool, u32)) -> ConfigCompatib
             ConfigSourceClass::LocalExtend
         },
         config_version,
-        requires_alint: None,
-        consumer_version: None,
+        requires_alint,
+        consumer_version,
     }
 }
 
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(512))]
 
-    /// A list pushed onto one [`Merger`], each entry moved in or merged from
-    /// where it is held, merges to what the left fold of the old merge gave,
-    /// and counts the entries the fold's result held at every step, which
-    /// [`MAX_MERGED_ENTRIES`] bounds.
+    /// A list pushed onto one [`Merger`] merges to what the left fold of the
+    /// old merge gave, and counts the entries the fold's result held at every
+    /// step, which [`MAX_MERGED_ENTRIES`] bounds. The list names some sources
+    /// more than once, as an `extends:` list can: each is merged from where it
+    /// is held but the last time, and a rule it merged onto last is not merged
+    /// again ([`Remerge`]). A source named once is moved in or merged from
+    /// where it is held.
     #[test]
     fn a_list_merged_in_one_pass_equals_the_fold_of_the_old_merge(
-        configs in prop::collection::vec(config(), 1..=12),
-        held in prop::collection::vec(any::<bool>(), 12),
+        first in config(),
+        sources in prop::collection::vec(config(), 1..=4),
+        entries in prop::collection::vec((0..4_usize, any::<bool>()), 0..=12),
     ) {
-        let mut list = configs.into_iter();
-        let first = list.next().unwrap();
+        let entries: Vec<(usize, bool)> = entries
+            .into_iter()
+            .map(|(source, held)| (source % sources.len(), held))
+            .collect();
         let mut folded = first.clone();
         let mut merger = Merger::new(first);
-        for (source, held) in list.zip(held) {
-            folded = reference::merge(folded, source.clone()).unwrap();
-            if held {
-                merger.push_held(&source).unwrap();
+        for (at, &(source, held)) in entries.iter().enumerate() {
+            folded = reference::merge(folded, sources[source].clone()).unwrap();
+            let named = |entries: &[(usize, bool)]| {
+                entries.iter().filter(|(other, _)| *other == source).count()
+            };
+            let pushed = if named(&entries) == 1 && !held {
+                merger.push(sources[source].clone())
+            } else if named(&entries[at + 1..]) > 0 || held {
+                merger.push_repeated(Cow::Borrowed(&sources[source]), source)
             } else {
-                merger.push(source).unwrap();
-            }
+                merger.push_repeated(Cow::Owned(sources[source].clone()), source)
+            };
+            pushed.unwrap();
             prop_assert_eq!(merger.entry_count(), folded.entry_count());
             prop_assert_eq!(merger.version(), folded.version);
         }
