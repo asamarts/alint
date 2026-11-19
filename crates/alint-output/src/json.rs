@@ -19,9 +19,9 @@ fn lossy_path(path: Option<&Path>) -> Option<Cow<'_, str>> {
 }
 
 /// A finding's related locations, as SARIF's `relatedLocations` and the
-/// language server's `relatedInformation` carry them: each at most 20 the
-/// finding retains, in the order it holds them, and how many more it left
-/// out. Both are omitted when there are none, so a finding without related
+/// language server's `relatedInformation` carry them: the 20 at most that
+/// the finding retains, in the order it holds them, and how many more it
+/// left out. Both are omitted when there are none, so a finding without related
 /// locations renders as before. A finding whose path came from protected
 /// configuration has none here, as in SARIF: a related path could reveal it.
 #[derive(Serialize)]

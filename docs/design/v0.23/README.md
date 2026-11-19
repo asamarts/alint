@@ -919,3 +919,20 @@ Phase 7 lands in four steps, each a pull request:
   - Section 6's identity of `unique` without `determines:` now reads as step 1 built it.
   - Next: phase 7 step 3 (the `--changed` trigger scope, and the related-location gate over
     JSON, SARIF and the language server).
+- 2026-11-18: phase 7 step 3.
+  - Under `--changed`, a `constraint` rule runs when a changed path is in its trigger scope: the
+    selectors of every relation its plan reads, followed through joins, `in:` and `not_in:` lists
+    and a `set`'s other relation. A selector's `scope_filter:` narrows the trigger as it narrows
+    what the selector reads, and a changed `has_ancestor` marker or manifest triggers too (section
+    9 now says so). The rule then judges the whole snapshot. The kind declares
+    `FullIndex { path_scope: true }`, through a trigger scope of its own rather than
+    `Rule::path_scope`, which also drives `expect_matches`, tracing and the sensitive-path checks.
+  - `every_full_index_kind_receives_the_full_index_under_changed` replaces
+    `v010_cross_file_kinds_require_full_index_and_no_path_scope`: over every kind the registry
+    marks full-index (25) and every corpus scenario that configures one, a probe in place of the
+    rule records what the engine hands it under `--changed`, which must be what a full run hands
+    it. Constitution invariant 2 names it.
+  - The JSON report gains `related_locations` and `related_locations_omitted` on each violation,
+    note and baselined finding, left out when empty and for a redacted path. A gate over one
+    fixture with a finding of each family checks that JSON, SARIF and the language server carry
+    every related location the engine produced, in order, with the count of the rest.

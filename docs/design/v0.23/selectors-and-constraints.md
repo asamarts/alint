@@ -603,6 +603,12 @@ full-index rule does today. It reports every finding, not only those located in 
 change to one locale file can make another locale fail. A change to a configuration source alone
 does not trigger a rule, as in v1.
 
+A selector's `scope_filter:` narrows the trigger scope as it narrows what the selector reads, judged
+on the tree after the change, so a change to what a predicate consults also triggers the rule: a
+file a `has_ancestor` predicate names, or the manifest a manifest-derived predicate reads. A
+manifest that cannot be read leaves its predicate out of the trigger scope (the rule then runs and
+reports the failure), and so does a selector that does not compile.
+
 A selector read by a full-index rule may not use `changed_since` (section 4), because what the rule
 sees would then depend on the diff. The other `scope_filter:` predicates are allowed in those
 selectors. A `constraint` rule takes no `scope_filter:` of its own, and the build-time rejection of

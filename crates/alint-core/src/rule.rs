@@ -1181,13 +1181,10 @@ pub trait Rule: Send + Sync + std::fmt::Debug {
         None
     }
 
-    /// In `--changed` mode, the trigger scope of a full-index rule that reads
-    /// relations (the `constraint` kind): it runs when a changed path is one
-    /// a selector of those relations reads, or one their `scope_filter:`
-    /// predicates consult, and then sees the full index
-    /// ([`crate::relation::TriggerScope`]). It replaces
-    /// [`Self::path_scope`] as the skip predicate. Default `None`. Hidden,
-    /// as the relation layer is.
+    /// Under `--changed`, the trigger scope of a full-index rule that reads
+    /// relations ([`crate::relation::TriggerScope`]): in place of
+    /// [`Self::path_scope`], it decides whether the rule runs, never what it
+    /// sees. Default `None`; hidden, as the relation layer is.
     #[doc(hidden)]
     fn trigger_scope(&self) -> Option<&crate::relation::TriggerScope> {
         None
