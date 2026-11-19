@@ -573,43 +573,7 @@ fn write_scope_filter_explain(
             return Ok(());
         }
         writeln!(out, "{dim}scope_filter:{dim:#}")?;
-        if let Some(ha) = &sf.has_ancestor {
-            writeln!(out, "  {dim}has_ancestor: {dim:#} {}", term(&ha.join(", ")))?;
-        }
-        if let Some(cs) = &sf.changed_since {
-            writeln!(out, "  {dim}changed_since:{dim:#} {}", term(cs))?;
-        }
-        if (sf.include_manifest_paths.is_some() || sf.exclude_manifest_paths.is_some())
-            && let Ok(filter) = alint_core::ScopeFilter::from_spec(entry.rule.id(), sf.clone())
-        {
-            for res in filter.resolved_manifest_sets(root) {
-                let key = if res.include {
-                    "include_manifest_paths"
-                } else {
-                    "exclude_manifest_paths"
-                };
-                // Forward-slash every path so `explain` reads identically on
-                // Windows and Unix (matching violation paths / SARIF), not the
-                // OS-native separator a bare `PathBuf` Display would emit.
-                let paths = if res.paths.is_empty() {
-                    "(no paths resolved)".to_string()
-                } else {
-                    res.paths
-                        .iter()
-                        .map(|p| explain_repository_path(root, p))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                };
-                // Both the manifest's own path and the paths it lists (read
-                // from repo content, e.g. package.json) are untrusted.
-                writeln!(
-                    out,
-                    "  {dim}{key}:{dim:#} {} -> {}",
-                    term(&explain_repository_path(root, &res.source)),
-                    term(&paths)
-                )?;
-            }
-        }
+        plan::ScopeFilterView::of(entry.rule.id(), sf, root).write_human(out, "  ")?;
     }
     Ok(())
 }
@@ -1045,6 +1009,9 @@ pub(super) fn cmd_explain(rule_id: &str, options: &ExplainOptions, cli: &Cli) ->
     }
     write_scope_filter_explain(&mut out, entry, &loaded.root)?;
     write_explain_rule_evidence(&mut out, entry, opts.show_docs)?;
+    if let Some(plan) = plan::plan_of(entry, &loaded.root, &super::redact_environment_values) {
+        plan::write_human(&mut out, &plan)?;
+    }
     if let Some(document) = trace_document.as_ref() {
         write_explain_trace_human(&mut out, document, opts.effective_width())?;
     }
@@ -1073,7 +1040,8 @@ fn write_explain_rule_evidence(
         let value = if explain_field_is_sensitive(entry, field) {
             "<redacted>".to_string()
         } else {
-            match serde_json::to_value(value) {
+            match serde_json::to_value(value).map(|value| plan::redact_option(entry, field, value))
+            {
                 Ok(serde_json::Value::String(value)) if !value.contains(['\n', '\r']) => value,
                 Ok(value) => value.to_string(),
                 Err(_) => String::new(),
@@ -1140,31 +1108,8 @@ fn explain_scope_filter_json(
             .map(|_| serde_json::Value::String("<redacted>".to_string()));
     }
     entry.scope_filter().map(|scope| {
-        let manifest_scopes: Vec<_> =
-            alint_core::ScopeFilter::from_spec(entry.rule.id(), scope.clone())
-                .map(|filter| filter.resolved_manifest_sets(root))
-                .unwrap_or_default()
-                .into_iter()
-                .map(|resolved| {
-                    serde_json::json!({
-                        "predicate": if resolved.include {
-                            "include_manifest_paths"
-                        } else {
-                            "exclude_manifest_paths"
-                        },
-                        "source": explain_repository_path(root, &resolved.source),
-                        "paths": resolved.paths
-                            .iter()
-                            .map(|path| explain_repository_path(root, path))
-                            .collect::<Vec<_>>(),
-                    })
-                })
-                .collect();
-        serde_json::json!({
-            "has_ancestor": scope.has_ancestor,
-            "changed_since": scope.changed_since,
-            "manifest_scopes": manifest_scopes,
-        })
+        serde_json::to_value(plan::ScopeFilterView::of(entry.rule.id(), scope, root))
+            .unwrap_or(serde_json::Value::Null)
     })
 }
 
@@ -1190,6 +1135,9 @@ struct ExplainRuleDocument<'a> {
     message: Option<serde_json::Value>,
     options: serde_json::Value,
     paths: Option<serde_json::Value>,
+    /// A rule that reads relations: its resolved plan (`inspect_plan.rs`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    plan: Option<serde_json::Value>,
     policy_url: Option<serde_json::Value>,
     rule_kind: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1263,7 +1211,9 @@ fn explain_rule_json_document<'a>(
                 let value = if sensitive(&key) {
                     redacted()
                 } else {
-                    serde_json::to_value(value).unwrap_or(serde_json::Value::Null)
+                    serde_json::to_value(value).map_or(serde_json::Value::Null, |value| {
+                        plan::redact_option(entry, &key, value)
+                    })
                 };
                 options.insert(key, value);
             }
@@ -1314,6 +1264,8 @@ fn explain_rule_json_document<'a>(
         ),
         options,
         paths,
+        plan: plan::plan_of(entry, root, &super::redact_environment_values)
+            .and_then(|plan| serde_json::to_value(plan).ok()),
         policy_url: evidence("policy_url", entry.rule.policy_url()),
         rule_kind: entry.kind(),
         schema_version: stable_envelope.then_some(1),
@@ -1339,6 +1291,9 @@ fn explain_json(
     out.flush().ok();
     Ok(ExitCode::SUCCESS)
 }
+
+#[path = "inspect_plan.rs"]
+mod plan;
 
 #[cfg(test)]
 #[path = "inspect_tests.rs"]

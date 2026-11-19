@@ -42,8 +42,19 @@ pub struct TriggerScope {
     selectors: Vec<TriggerSelector>,
 }
 
+/// Which selector of a plan a trigger scope holds, as `explain` names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TriggerOrigin {
+    /// A named selector.
+    Named(SelectorId),
+    /// The inline selector of part `part` of relation `relation`: its one
+    /// `from:`, or that of the `union:` part at that index.
+    Inline { relation: RelationId, part: usize },
+}
+
 #[derive(Debug, Clone)]
 struct TriggerSelector {
+    origin: TriggerOrigin,
     /// The selector as the relation layer compiles it; `None` when it does
     /// not compile or uses `changed_since`, and then it takes every path.
     scope: Option<Scope>,
@@ -67,6 +78,13 @@ impl TriggerScope {
         Self {
             selectors: walk.selectors,
         }
+    }
+
+    /// The selectors the scope holds, each once, in the order the walk
+    /// reached them: the relations in the order given, each relation's
+    /// selectors before those of the relations it reads.
+    pub fn origins(&self) -> impl Iterator<Item = TriggerOrigin> + '_ {
+        self.selectors.iter().map(|selector| selector.origin)
     }
 
     /// Whether a change to `path` (root-relative, as `--changed` lists it)
@@ -165,10 +183,10 @@ impl Walk<'_> {
         }
         let relation = &self.plan.relation(id).relation;
         match &relation.rows {
-            Rows::Part(part) => self.selector(&part.from),
+            Rows::Part(part) => self.selector(&part.from, id, 0),
             Rows::Union(parts) => {
-                for part in parts {
-                    self.selector(&part.from);
+                for (index, part) in parts.iter().enumerate() {
+                    self.selector(&part.from, id, index);
                 }
             }
             Rows::Join(join) => {
@@ -190,17 +208,26 @@ impl Walk<'_> {
         }
     }
 
-    fn selector(&mut self, from: &SelectorRef) {
-        let (selector, name) = match from {
+    /// The selector `from` of part `part` of relation `relation`.
+    fn selector(&mut self, from: &SelectorRef, relation: RelationId, part: usize) {
+        let (selector, name, origin) = match from {
             SelectorRef::Named(reached) => {
                 let SelectorId(index) = reached.id;
                 if std::mem::replace(&mut self.selectors_seen[index], true) {
                     return;
                 }
                 let named = self.plan.selector(reached.id);
-                (&named.selector, format!("selector `{}`", named.name))
+                (
+                    &named.selector,
+                    format!("selector `{}`", named.name),
+                    TriggerOrigin::Named(reached.id),
+                )
             }
-            SelectorRef::Inline(selector) => (selector.as_ref(), "the selector".to_string()),
+            SelectorRef::Inline(selector) => (
+                selector.as_ref(),
+                "the selector".to_string(),
+                TriggerOrigin::Inline { relation, part },
+            ),
         };
         let scope = selector.compile(&name).ok().filter(|scope| {
             scope
@@ -215,6 +242,132 @@ impl Walk<'_> {
             .iter()
             .filter_map(|predicate| crate::pathsafe::normalize_confined(predicate.source()))
             .collect();
-        self.selectors.push(TriggerSelector { scope, manifests });
+        self.selectors.push(TriggerSelector {
+            origin,
+            scope,
+            manifests,
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::relation::plan::{
+        Capabilities, FieldDef, FieldSource, JoinDef, JoinSide, NamedRelation, NamedSelector, Part,
+        PlanSource, Reached, Read, Reader, RelationDef, SelectorDef, SourceIndex,
+    };
+    use crate::{ConfigSourceClass, PathsSpec};
+
+    fn selector(glob: &str) -> SelectorDef {
+        SelectorDef {
+            paths: PathsSpec::Single(glob.into()),
+            scope_filter: None,
+        }
+    }
+
+    fn part(from: SelectorRef) -> Part {
+        Part {
+            from,
+            reader: Reader::Read {
+                read: Read::WholeFile,
+                optional: false,
+            },
+        }
+    }
+
+    fn named(rows: Rows) -> NamedRelation {
+        NamedRelation {
+            name: "r".into(),
+            source: SourceIndex(0),
+            relation: RelationDef {
+                rows,
+                fields: vec![(
+                    "f".into(),
+                    FieldDef {
+                        source: FieldSource::Value,
+                        sensitive: false,
+                    },
+                )],
+                transforms: Vec::new(),
+                filters: Vec::new(),
+            },
+            capabilities: Capabilities::default(),
+            reads_environment: false,
+            definition_reads_environment: false,
+        }
+    }
+
+    /// The scope names each selector it holds once, in the order the walk
+    /// reached it, a union's inline ones by their part.
+    #[test]
+    fn the_scope_names_its_selectors_in_walk_order() {
+        let shared = || {
+            SelectorRef::Named(Reached {
+                id: SelectorId(0),
+                alias: None,
+            })
+        };
+        let side = |id: usize| Reached {
+            id: RelationId(id),
+            alias: None,
+        };
+        let mut join = named(Rows::Join(JoinDef {
+            left: side(0),
+            right: side(1),
+            on: vec![("f".into(), "f".into())],
+            unique: JoinSide::Right,
+        }));
+        join.relation.filters = vec![(
+            "f".into(),
+            vec![Predicate::NotIn(vec![Member::Relation {
+                relation: side(3),
+                field: "f".into(),
+            }])],
+        )];
+        let plan = Plan {
+            sources: vec![PlanSource {
+                display: ".alint.yml".into(),
+                path: PathBuf::from(".alint.yml"),
+                class: ConfigSourceClass::Root,
+                aliases: Vec::new(),
+            }],
+            selectors: vec![NamedSelector {
+                name: "s".into(),
+                source: SourceIndex(0),
+                selector: selector("a/*.json"),
+                capabilities: Capabilities::default(),
+                reads_environment: false,
+            }],
+            relations: vec![
+                named(Rows::Part(part(shared()))),
+                named(Rows::Union(vec![
+                    part(SelectorRef::Inline(Box::new(selector("b/*.json")))),
+                    part(shared()),
+                    part(SelectorRef::Inline(Box::new(selector("c/*.json")))),
+                ])),
+                join,
+                named(Rows::Part(part(SelectorRef::Inline(Box::new(selector(
+                    "d.json",
+                )))))),
+            ],
+            rules: Vec::new(),
+        };
+        let origins: Vec<TriggerOrigin> = TriggerScope::of(&plan, &[RelationId(2)])
+            .origins()
+            .collect();
+        let inline = |relation: usize, part: usize| TriggerOrigin::Inline {
+            relation: RelationId(relation),
+            part,
+        };
+        assert_eq!(
+            origins,
+            [
+                TriggerOrigin::Named(SelectorId(0)),
+                inline(1, 0),
+                inline(1, 2),
+                inline(3, 0),
+            ]
+        );
     }
 }

@@ -76,6 +76,55 @@ impl Plan {
         by_source
     }
 
+    /// `ids` and every relation they read, transitively, in the order a run
+    /// evaluates them when these are the only relations its rules read: `ids`
+    /// in plan order, each after the relations it reads
+    /// ([`RelationDef::reads`], in that order), each relation once. `explain`
+    /// lists a rule's relations in this order.
+    #[must_use]
+    pub fn evaluation_order(&self, ids: &[RelationId]) -> Vec<RelationId> {
+        let mut ids = ids.to_vec();
+        ids.sort_unstable();
+        ids.dedup();
+        let mut visited = vec![false; self.relations.len()];
+        let mut order = Vec::new();
+        for id in ids {
+            self.post_order(id, &mut visited, &|_| false, &mut order);
+        }
+        order
+    }
+
+    /// Push onto `order` relation `id` and each relation it reads,
+    /// transitively, that `visited` does not mark and `known` does not
+    /// answer, each after the relations it reads, marking each. The walk
+    /// keeps its own stack, so a long chain of joins cannot exhaust the
+    /// thread's, and it visits each relation once (the plan check refused
+    /// cycles).
+    pub(crate) fn post_order(
+        &self,
+        id: RelationId,
+        visited: &mut [bool],
+        known: &dyn Fn(RelationId) -> bool,
+        order: &mut Vec<RelationId>,
+    ) {
+        let mut stack = vec![(id, false)];
+        while let Some((next, expanded)) = stack.pop() {
+            if expanded {
+                order.push(next);
+                continue;
+            }
+            if std::mem::replace(&mut visited[next.0], true) || known(next) {
+                continue;
+            }
+            stack.push((next, true));
+            for read in self.relation(next).relation.reads().into_iter().rev() {
+                if !visited[read.id.0] {
+                    stack.push((read.id, false));
+                }
+            }
+        }
+    }
+
     /// The references rule `id` makes, if any.
     #[must_use]
     pub fn rule(&self, id: &str) -> Option<&RuleReferences> {
@@ -170,6 +219,12 @@ pub struct NamedRelation {
     /// could echo the value (a key path an `at:` from the environment
     /// selected, say).
     pub reads_environment: bool,
+    /// Whether its own definition, outside its fields' `where:` and
+    /// `transform:` entries, takes a value from the environment: then
+    /// `explain` shows none of the values it holds (an inline selector's
+    /// globs, its reader, a `bound:` path, a join's `unique:`), only its
+    /// names. [`Self::reads_environment`] is this, or what it reads doing so.
+    pub definition_reads_environment: bool,
 }
 
 impl NamedRelation {
@@ -275,6 +330,30 @@ impl RelationDef {
             .iter()
             .find(|(held, _)| held == name)
             .map_or(&[], |(_, transforms)| transforms.as_slice())
+    }
+
+    /// The relations this one reads, as its definition writes them, in the
+    /// order the evaluator reads them: a join's left side, its right side,
+    /// then the relation of each `{ relation, field }` item of its `in:` and
+    /// `not_in:` lists, in the order written.
+    #[must_use]
+    pub fn reads(&self) -> Vec<&Reached<RelationId>> {
+        let mut reads = Vec::new();
+        if let Rows::Join(join) = &self.rows {
+            reads.extend([&join.left, &join.right]);
+        }
+        for (_, predicates) in &self.filters {
+            for predicate in predicates {
+                if let Predicate::In(members) | Predicate::NotIn(members) = predicate {
+                    for member in members {
+                        if let Member::Relation { relation, .. } = member {
+                            reads.push(relation);
+                        }
+                    }
+                }
+            }
+        }
+        reads
     }
 }
 
@@ -482,6 +561,7 @@ mod tests {
             },
             capabilities,
             reads_environment: false,
+            definition_reads_environment: false,
         }
     }
 
@@ -569,6 +649,77 @@ mod tests {
                 .field("nope")
                 .is_none()
         );
+    }
+
+    /// A join of relations `left` and `right` whose `where:` probes
+    /// `probes` through `in:` lists.
+    fn join(name: &str, left: usize, right: usize, probes: &[usize]) -> NamedRelation {
+        let reached = |id: usize| Reached {
+            id: RelationId(id),
+            alias: None,
+        };
+        let mut named = relation(name, Capabilities::default());
+        named.relation.rows = Rows::Join(JoinDef {
+            left: reached(left),
+            right: reached(right),
+            on: vec![("text".into(), "text".into())],
+            unique: JoinSide::Right,
+        });
+        named.relation.filters = vec![(
+            "text".into(),
+            probes
+                .iter()
+                .map(|&id| {
+                    Predicate::In(vec![
+                        Member::Literal(Value::String("x".into())),
+                        Member::Relation {
+                            relation: reached(id),
+                            field: "text".into(),
+                        },
+                    ])
+                })
+                .collect(),
+        )];
+        named
+    }
+
+    /// A run evaluates each relation after those it reads, a join's left
+    /// side, its right side and the relations its lists probe in that order,
+    /// and the relations its rules read in plan order, each once.
+    #[test]
+    fn the_evaluation_order_puts_each_relation_after_those_it_reads() {
+        let plan = Plan {
+            sources: vec![source(".alint.yml", Vec::new())],
+            relations: vec![
+                relation("a", Capabilities::default()),
+                relation("b", Capabilities::default()),
+                join("j", 1, 0, &[4, 3]),
+                relation("c", Capabilities::default()),
+                relation("d", Capabilities::default()),
+                join("k", 2, 3, &[]),
+            ],
+            ..Plan::default()
+        };
+        let order = |ids: &[usize]| -> Vec<usize> {
+            let ids: Vec<RelationId> = ids.iter().copied().map(RelationId).collect();
+            plan.evaluation_order(&ids)
+                .into_iter()
+                .map(|id| id.0)
+                .collect()
+        };
+        let reads: Vec<usize> = plan
+            .relation(RelationId(2))
+            .relation
+            .reads()
+            .into_iter()
+            .map(|read| read.id.0)
+            .collect();
+        assert_eq!(reads, [1, 0, 4, 3]);
+        assert_eq!(order(&[2]), [1, 0, 4, 3, 2]);
+        assert_eq!(order(&[5]), [1, 0, 4, 3, 2, 5]);
+        assert_eq!(order(&[3, 0]), [0, 3]);
+        assert_eq!(order(&[4, 2, 4]), [1, 0, 4, 3, 2]);
+        assert_eq!(order(&[]), Vec::<usize>::new());
     }
 
     #[test]

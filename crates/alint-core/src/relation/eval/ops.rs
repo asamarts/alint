@@ -24,25 +24,9 @@ use crate::relation::transform::StringTransform;
 use crate::relation::value::Value;
 use crate::rule::AnalysisFailureKind;
 
-/// The relations `relation` reads: a join's sides, then its filters'
-/// `{ relation, field }` references, in the order written.
+/// The relations `relation` reads ([`RelationDef::reads`]).
 pub(super) fn reads(relation: &RelationDef) -> Vec<RelationId> {
-    let mut reads = Vec::new();
-    if let Rows::Join(join) = &relation.rows {
-        reads.extend([join.left.id, join.right.id]);
-    }
-    for (_, predicates) in &relation.filters {
-        for predicate in predicates {
-            if let Predicate::In(members) | Predicate::NotIn(members) = predicate {
-                for member in members {
-                    if let Member::Relation { relation, .. } = member {
-                        reads.push(relation.id);
-                    }
-                }
-            }
-        }
-    }
-    reads
+    relation.reads().into_iter().map(|read| read.id).collect()
 }
 
 /// The kind of a value, as comparisons keep types apart.

@@ -88,6 +88,7 @@ fn relation(at: &str) -> Arc<Plan> {
             },
             capabilities: alint_core::relation::plan::Capabilities::default(),
             reads_environment: false,
+            definition_reads_environment: false,
         }],
         rules: Vec::new(),
     })

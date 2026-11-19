@@ -28,6 +28,7 @@ mod config_discovery;
 mod config_error_redaction;
 mod constraint_changed_cli;
 mod constraint_cli;
+mod constraint_explain_cli;
 mod evidence_redaction;
 mod expect_matches;
 mod explain_trace;

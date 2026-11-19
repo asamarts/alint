@@ -446,14 +446,14 @@ impl Engine {
             }
         }
         for plan in plans {
-            let mut ids: Vec<RelationId> = wanted
+            let ids: Vec<RelationId> = wanted
                 .iter()
                 .filter(|(held, _)| Arc::ptr_eq(held, plan))
                 .map(|(_, id)| *id)
                 .collect();
-            ids.sort_unstable();
-            ids.dedup();
-            for id in ids {
+            // In the order `explain` shows: each relation after those it
+            // reads, so evaluating one finds those in the memo.
+            for id in plan.evaluation_order(&ids) {
                 // The outcome, rows or failures, is memoised for the rule.
                 let _ = crate::relation::eval::evaluate(plan, id, ctx);
             }

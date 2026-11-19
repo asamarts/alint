@@ -500,6 +500,7 @@ fn plan_of(relations: Vec<(&str, RelationDef)>) -> Plan {
                 relation,
                 capabilities: Capabilities::default(),
                 reads_environment: false,
+                definition_reads_environment: false,
             })
             .collect(),
         rules: Vec::new(),

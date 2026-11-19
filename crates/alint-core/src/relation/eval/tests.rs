@@ -51,6 +51,7 @@ fn named(name: &str, rows: Rows, fields: &[(&str, FieldSource)]) -> NamedRelatio
         },
         capabilities: crate::relation::plan::Capabilities::default(),
         reads_environment: false,
+        definition_reads_environment: false,
     }
 }
 
@@ -155,6 +156,17 @@ fn rows_per_extractor_is_an_analysis_failure() {
         ]
     );
     assert!(run(&plan, 0, &tree, limit(LimitKind::RowsPerExtractor, 3)).is_ok());
+    // The limit is each file's, not the run's: every file past it fails.
+    let tree = self::tree(&[
+        ("a.json", r#"{"deps": {"x": 1, "y": 2}}"#),
+        ("b.json", r#"{"deps": {"x": 1, "y": 2}}"#),
+    ]);
+    let failed = messages(&run(&plan, 0, &tree, limit(LimitKind::RowsPerExtractor, 2)));
+    let files: Vec<&str> = failed
+        .iter()
+        .map(|message| message.split_once(':').unwrap().0)
+        .collect();
+    assert_eq!(files, ["a.json", "b.json"], "{failed:?}");
 }
 
 #[test]
@@ -208,6 +220,50 @@ fn a_semi_join_set_is_bounded_by_the_distinct_value_limit() {
     );
     let rows = run(&plan, 0, &tree, limit(LimitKind::DistinctValues, 2)).unwrap();
     assert!(rows.rows.is_empty(), "`b` is a workspace name");
+}
+
+/// A relation whose `where:` lists read two relations that fail gives the
+/// failures of both: the first one's, shared until the second's arrive, and
+/// then the second's beside them.
+#[test]
+fn a_where_that_reads_two_failing_relations_gives_both_their_failures() {
+    let mut filtered = deps();
+    let probe = |id: usize| {
+        vec![Member::Relation {
+            relation: reached(id),
+            field: "name".into(),
+        }]
+    };
+    filtered.relation.filters = vec![(
+        "name".into(),
+        vec![Predicate::NotIn(probe(1)), Predicate::In(probe(2))],
+    )];
+    let broken = |name: &str, paths: &str| {
+        named(
+            name,
+            read_json(paths, "$.name"),
+            &[("name", FieldSource::Value)],
+        )
+    };
+    let plan = plan(vec![
+        filtered,
+        broken("first", "*.txt"),
+        broken("second", "*.dat"),
+    ]);
+    let tree = tree(&[
+        ("a.json", r#"{"deps": {"b": 1}}"#),
+        ("b.txt", r#"{"name": "#),
+        ("c.dat", r#"{"name": "#),
+    ]);
+    assert_eq!(
+        messages(&run(&plan, 0, &tree, Limits::default())),
+        [
+            "b.txt: relation `first` (.alint.yml): could not parse the file as JSON: EOF while \
+             parsing a value at line 1 column 9",
+            "c.dat: relation `second` (.alint.yml): could not parse the file as JSON: EOF while \
+             parsing a value at line 1 column 9",
+        ]
+    );
 }
 
 fn joined() -> NamedRelation {
@@ -1032,6 +1088,14 @@ fn rows_that_share_a_key_path_share_what_strip_root_makes_of_it() {
     for row in &rows.rows {
         assert!(Arc::ptr_eq(first, row.cells[0].path.as_ref().unwrap()));
     }
+    // A byte less, and the stripped key path is past the run's bytes.
+    let memo = RunMemo::new(Arc::clone(&plan));
+    let limits = limit(LimitKind::BytesPerRun, unstripped.bytes() + stripped - 1);
+    let failed = messages(&run_with_memo(&plan, 0, &tree, limits, &memo));
+    assert!(
+        failed.len() == 1 && failed[0].contains("`bytes_per_run`"),
+        "{failed:?}"
+    );
 }
 
 /// A run with explicit caches, which the caller inspects.
@@ -1070,6 +1134,81 @@ fn a_part_whose_decode_is_held_reads_nothing() {
     let rows = run_with_caches(&plan, 0, &tree, limits, (&reads, &decodes, &memo)).unwrap();
     assert_eq!(rows.rows.len(), 60);
     assert_eq!((reads.reads(), decodes.decodes()), (1, 1));
+}
+
+/// A decode the run makes takes what it holds from the run's bytes once:
+/// its rows, its notes with their values, and its non-string kinds. A run
+/// that finds the decode held takes nothing for it. The budget a run needs
+/// is exactly what it takes, and the decode needs at least what it holds, by
+/// count; the exact sums after pin the types' sizes too, so an overcount
+/// shows as an undercount does.
+#[test]
+fn a_fresh_decode_takes_what_it_holds_from_the_runs_bytes() {
+    use std::mem::size_of;
+    let tree = tree(&[("a.json", r#"{"v": ["${A}", "${BB}", 1]}"#)]);
+    let plan = plan(vec![named(
+        "values",
+        read_json("*.json", "$.v[*]"),
+        &[("v", FieldSource::Value)],
+    )]);
+    let limits = Limits::default();
+    let (reads, decodes) = (ReadCache::new(), DecodeCache::with_run_limits(&limits));
+    let fresh = RunMemo::new(Arc::clone(&plan));
+    let rows = run_with_caches(&plan, 0, &tree, limits, (&reads, &decodes, &fresh)).unwrap();
+    let held = RunMemo::new(Arc::clone(&plan));
+    run_with_caches(&plan, 0, &tree, limits, (&reads, &decodes, &held)).unwrap();
+    assert_eq!(decodes.decodes(), 1);
+    // The decode the cache holds, found by its adapter, path and limits.
+    let adapter = crate::relation::ExtractAdapter::new(
+        crate::extract::Extract::structured(crate::structured_format::Format::Json, "$.v[*]")
+            .unwrap(),
+    );
+    let output = decodes
+        .decode(&adapter, &rows.resources[0], b"", &limits)
+        .unwrap();
+    assert_eq!((output.rows.len(), output.notes.len()), (0, 2));
+    assert_eq!(output.non_strings.len(), 1);
+    // Exactly what a run takes is enough for it, and a byte less is not.
+    let total = fresh.bytes();
+    let within = |bytes: usize| {
+        let memo = RunMemo::new(Arc::clone(&plan));
+        run_with_memo(&plan, 0, &tree, limit(LimitKind::BytesPerRun, bytes), &memo)
+    };
+    assert!(within(total).is_ok());
+    let failed = messages(&within(total - 1));
+    assert!(
+        failed.len() == 1 && failed[0].contains("`bytes_per_run`"),
+        "{failed:?}"
+    );
+    // The decode needs at least each note, its value's text and each
+    // non-string kind beyond what the notes take: a budget a byte short of
+    // that stops the run.
+    let held_by_decode = output.notes.len() * size_of::<crate::relation::AdapterNote>()
+        + "${A}".len()
+        + "${BB}".len()
+        + output.non_strings.len() * size_of::<crate::extract::NonStringValueKind>();
+    assert!(within(held.bytes() + held_by_decode - 1).is_err());
+    let expected = output.rows.capacity() * size_of::<crate::relation::row::Row>()
+        + output.notes.capacity() * size_of::<crate::relation::AdapterNote>()
+        + "${A}".len()
+        + "${BB}".len()
+        + output.non_strings.capacity() * size_of::<crate::extract::NonStringValueKind>();
+    assert_eq!(fresh.bytes() - held.bytes(), expected);
+    // What the run that found the decode took is its notes: each note,
+    // its message, and the kinds a non-string note counts.
+    let notes: usize = rows
+        .notes
+        .iter()
+        .map(|note| {
+            let kinds = match &note.skipped {
+                Skipped::NonLiteral => 0,
+                Skipped::NonString { kinds, .. } => kinds.len() * size_of_val(&kinds[0]),
+            };
+            size_of::<RelationNote>() + note.message.len() + kinds
+        })
+        .sum();
+    assert_eq!(rows.notes.len(), 3);
+    assert_eq!(held.bytes(), notes);
 }
 
 /// Past the run's decoded rows the relation stops, as it does past its
@@ -1204,6 +1343,53 @@ fn a_non_string_match_is_one_note_and_the_other_files_keep_their_rows() {
         "{}",
         rows.notes[0].message
     );
+}
+
+/// A non-literal value a sensitive `value` field reads is skipped without
+/// being shown; a sensitive field of another source leaves it shown.
+#[test]
+fn a_sensitive_values_non_literal_note_does_not_show_it() {
+    let tree = tree(&[("b.json", r#"{"name": "${NAME}"}"#)]);
+    let notes = |relation: NamedRelation| -> Vec<String> {
+        let rows = run(&plan(vec![relation]), 0, &tree, Limits::default()).unwrap();
+        rows.notes.iter().map(|note| note.message.clone()).collect()
+    };
+    let mut hidden = names();
+    hidden.relation.fields[0].1.sensitive = true;
+    assert_eq!(notes(hidden), ["skipped a non-literal value"]);
+    let mut shown = named(
+        "names",
+        read_json("*.json", "$.name"),
+        &[
+            ("name", FieldSource::Value),
+            ("file", FieldSource::Path(PathToken::Path)),
+        ],
+    );
+    shown.relation.fields[1].1.sensitive = true;
+    assert_eq!(notes(shown), ["skipped non-literal value \"${NAME}\""]);
+}
+
+/// Each path token a relation binds holds its own text.
+#[test]
+fn each_path_token_a_relation_binds_holds_its_own_text() {
+    let tree = tree(&[("a.json", r#"{"name": "x"}"#)]);
+    let relation = named(
+        "names",
+        read_json("*.json", "$.name"),
+        &[
+            ("name", FieldSource::Value),
+            ("ext", FieldSource::Path(PathToken::Ext)),
+            ("path", FieldSource::Path(PathToken::Path)),
+            ("stem", FieldSource::Path(PathToken::Stem)),
+        ],
+    );
+    let rows = run(&plan(vec![relation]), 0, &tree, Limits::default()).unwrap();
+    let cells: Vec<&str> = rows.rows[0]
+        .cells
+        .iter()
+        .map(|cell| &**text(cell))
+        .collect();
+    assert_eq!(cells, ["x", "json", "a.json", "a"]);
 }
 
 /// A join and a `where:` list keep the notes of what they read: a value a
@@ -1350,6 +1536,23 @@ fn strip_root_over_many_roots_fails_fast_naming_a_few() {
         "{}",
         failures[0]
     );
+    // Nor does a field of a relation whose keys another field holds
+    // sensitive.
+    let mut keyed = roots(false);
+    keyed.relation.fields.push((
+        "key".into(),
+        FieldDef {
+            source: FieldSource::EntryKey,
+            sensitive: true,
+        },
+    ));
+    let two = self::tree(&[("two.json", &roots_in(2))]);
+    let failures = messages(&run(&plan(vec![keyed]), 0, &two, Limits::default()));
+    assert!(
+        failures[0].contains("but this one has 2;"),
+        "{}",
+        failures[0]
+    );
 }
 
 /// A repeated join key is quoted to a prefix and its length: a key of a
@@ -1376,5 +1579,40 @@ fn a_repeated_join_key_is_quoted_to_a_prefix() {
     assert_eq!(
         render("é".repeat(65)),
         format!("\"{}\"... (130 bytes)", "é".repeat(64))
+    );
+}
+
+/// A key path a run holds in an `Arc` counts the `Arc`'s two counts, the
+/// pointer and its segments against the run's bytes: 16 bytes of counts on
+/// a 64-bit target, the pointer, and each segment with its key's text.
+#[test]
+fn a_shared_key_path_counts_its_arc_its_pointer_and_its_segments() {
+    let pointer = Pointer::root().key("dependencies").key("left-pad");
+    let segments = 2 * std::mem::size_of::<crate::relation::Segment>() + "dependencies".len() + 8;
+    assert_eq!(pointer.heap_bytes(), segments);
+    assert_eq!(
+        super::shared_pointer_bytes(&pointer),
+        2 * std::mem::size_of::<usize>() + std::mem::size_of::<Pointer>() + segments
+    );
+    assert_eq!(
+        super::shared_pointer_bytes(&Pointer::root()),
+        2 * std::mem::size_of::<usize>() + std::mem::size_of::<Pointer>()
+    );
+}
+
+/// A relation whose rows lack a field it names (which the plan check rules
+/// out) fails saying so, never with an empty list of failures.
+#[test]
+fn a_field_the_rows_lack_fails_the_relation_as_a_bug() {
+    let mut relation = deps();
+    relation.relation.transforms = vec![("missing".into(), vec![Transform::Trim])];
+    let plan = plan(vec![relation]);
+    let tree = tree(&[("a.json", r#"{"deps": {"b": 1}}"#)]);
+    assert_eq!(
+        messages(&run(&plan, 0, &tree, Limits::default())),
+        [
+            "relation `deps` (.alint.yml): the relation names a field its rows do not have; this \
+             is a bug in alint's plan check, so please report it"
+        ]
     );
 }

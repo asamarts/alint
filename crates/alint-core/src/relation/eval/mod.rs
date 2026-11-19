@@ -343,6 +343,9 @@ pub struct RunMemo {
     /// The bytes they hold beyond their cells ([`LimitKind::BytesPerRun`]);
     /// a failed take still counts.
     bytes: AtomicUsize,
+    /// The relations evaluated, in the order they were. Test only.
+    #[cfg(test)]
+    computed: Mutex<Vec<RelationId>>,
 }
 
 impl RunMemo {
@@ -354,6 +357,8 @@ impl RunMemo {
             manifests: Mutex::default(),
             cells: AtomicUsize::new(0),
             bytes: AtomicUsize::new(0),
+            #[cfg(test)]
+            computed: Mutex::default(),
         }
     }
 
@@ -378,6 +383,12 @@ impl RunMemo {
     #[cfg(test)]
     pub(crate) fn bytes(&self) -> usize {
         self.bytes.load(Ordering::Relaxed)
+    }
+
+    /// The relations evaluated so far, in the order they were. Test only.
+    #[cfg(test)]
+    pub(crate) fn computed(&self) -> Vec<RelationId> {
+        self.computed.lock().expect("the memo's order lock").clone()
     }
 }
 
@@ -422,7 +433,15 @@ impl Evaluator<'_> {
     /// the memo does not hold it yet.
     fn relation(&self, id: RelationId) -> Outcome {
         for next in self.order(id) {
-            self.memo.outcomes[next.0].get_or_init(|| self.compute(next));
+            self.memo.outcomes[next.0].get_or_init(|| {
+                #[cfg(test)]
+                self.memo
+                    .computed
+                    .lock()
+                    .expect("the memo's order lock")
+                    .push(next);
+                self.compute(next)
+            });
         }
         self.memo.outcomes[id.0]
             .get()
@@ -431,31 +450,16 @@ impl Evaluator<'_> {
     }
 
     /// `id` and the relations it reads, transitively, each after those it
-    /// reads; those the memo holds are left out. The walk keeps its own
-    /// stack, so a long chain of joins cannot exhaust the thread's, and it
-    /// visits each relation once (the plan check refused cycles).
+    /// reads; those the memo holds are left out ([`Plan::post_order`]).
     fn order(&self, id: RelationId) -> Vec<RelationId> {
         let mut order = Vec::new();
         let mut visited = vec![false; self.plan.relations.len()];
-        let mut stack = vec![(id, false)];
-        while let Some((next, expanded)) = stack.pop() {
-            if expanded {
-                order.push(next);
-                continue;
-            }
-            if std::mem::replace(&mut visited[next.0], true) || self.memo.evaluated(next) {
-                continue;
-            }
-            stack.push((next, true));
-            for read in ops::reads(&self.plan.relation(next).relation)
-                .into_iter()
-                .rev()
-            {
-                if !visited[read.0] {
-                    stack.push((read, false));
-                }
-            }
-        }
+        self.plan.post_order(
+            id,
+            &mut visited,
+            &|next| self.memo.evaluated(next),
+            &mut order,
+        );
         order
     }
 

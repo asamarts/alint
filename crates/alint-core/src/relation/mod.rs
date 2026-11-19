@@ -45,7 +45,7 @@ pub use pointer::{Pointer, Segment};
 pub use resource::{Origin, Resource, ResourceId, ResourceRead, Selection, Selector};
 pub use row::{Cardinality, CardinalityError, Relation, Row, RowState};
 pub use transform::StringTransform;
-pub use trigger::TriggerScope;
+pub use trigger::{TriggerOrigin, TriggerScope};
 pub use value::{ContractValueError, Number, Value};
 
 #[cfg(test)]

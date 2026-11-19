@@ -811,6 +811,16 @@
             }
           ]
         },
+        "plan": {
+          "oneOf": [
+            {
+              "type": "object"
+            },
+            {
+              "const": "<redacted>"
+            }
+          ]
+        },
         "policy_url": {
           "type": [
             "string",

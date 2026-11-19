@@ -300,7 +300,52 @@ fn explain_covers_every_kind_of(fixture: &str, fewest: usize) {
             ev["categories"].as_array().is_some(),
             "explain dropped categories for {id}: {ev}"
         );
+        explain_shows_a_plan_only_for_relation_readers(id, kind, &ev);
     }
+}
+
+/// A rule that reads relations (`constraint`) shows its resolved plan: its
+/// assertion, every relation it reads with its source and fields, and its
+/// trigger; any other rule shows none, so its `explain` is unchanged.
+fn explain_shows_a_plan_only_for_relation_readers(id: &str, kind: &str, ev: &serde_json::Value) {
+    if kind != "constraint" {
+        assert!(ev.get("plan").is_none(), "{id} shows a plan: {ev}");
+        return;
+    }
+    let plan = &ev["plan"];
+    assert!(
+        plan["assertion"]["text"]
+            .as_str()
+            .is_some_and(|text| text.starts_with(plan["assertion"]["family"].as_str().unwrap())),
+        "explain {id} has no assertion: {plan}"
+    );
+    let relations = plan["relations"].as_array().expect("relations");
+    assert!(
+        !relations.is_empty(),
+        "explain {id} reads no relation: {plan}"
+    );
+    for relation in relations {
+        assert!(
+            relation["declared_in"].as_str().is_some()
+                && relation["fields"].as_array().is_some_and(|f| !f.is_empty())
+                && ["from", "union", "join"]
+                    .iter()
+                    .filter(|key| relation.get(**key).is_some())
+                    .count()
+                    == 1,
+            "explain {id} shows a relation without its source: {relation}"
+        );
+    }
+    assert!(
+        relations.iter().any(|relation| relation["roles"]
+            .as_array()
+            .is_some_and(|roles| roles.contains(&serde_json::json!("input")))),
+        "explain {id} marks no input: {plan}"
+    );
+    assert!(
+        plan["trigger"].as_array().is_some_and(|t| !t.is_empty()),
+        "explain {id} has no trigger: {plan}"
+    );
 }
 
 // ─── list human surfaces kind + fixable/conditional markers ────────
@@ -727,6 +772,19 @@ fn explain_surfaces_catalog_detail_of(fixture: &str) {
                 "explain {id} human is missing {label:?}:\n{human}"
             );
         }
+        // The resolved plan, for a rule that reads relations only.
+        let kind = r["kind"].as_str().expect("rule kind");
+        let planned = [
+            "\nplan:\n  assert: ",
+            "\n  relations, in evaluation order:\n    relation ",
+        ]
+        .iter()
+        .all(|label| human.contains(label));
+        assert_eq!(
+            planned,
+            kind == "constraint",
+            "explain {id} human shows a plan only for a constraint rule:\n{human}"
+        );
     }
 }
 

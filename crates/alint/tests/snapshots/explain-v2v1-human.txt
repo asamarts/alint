@@ -1,0 +1,11 @@
+id:         license-present
+kind:       file_exists
+categories: existence
+summary:    Every glob match in paths must correspond to a real file.
+capabilities: git(tracked_set) [when git_tracked_only is set]
+selector fields: none
+fix_ops:     file_create
+docs:       https://alint.org/docs/rules/existence/file_exists/
+level:      error
+paths:      LICENSE, LICENSE.md
+message:    add a license

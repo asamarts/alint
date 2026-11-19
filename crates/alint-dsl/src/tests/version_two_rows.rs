@@ -533,6 +533,26 @@ fn a_bound_path_must_match_once_in_each_resource() {
           resource the relation reads, so make it select one value"
         ]
     );
+    // A bound path selects a scalar, and a number outside an array.
+    let files = &[("a.yaml", "meta: { x: 1 }\nnums: [1]\ndeps:\n  x: '1'\n")];
+    let object = setup(&config.replace("$.name", "$.meta"), files);
+    assert_eq!(
+        object.failures("owned"),
+        [
+            "a.yaml: relation `owned` (.alint.yml): `owner` (`bound: $.meta`) selects an object \
+             at `meta`; a field holds a scalar (null, a boolean, a number or a string), so bind \
+             a path that selects one"
+        ]
+    );
+    let number = setup(&config.replace("$.name", "$.nums[0]"), files);
+    assert_eq!(
+        number.failures("owned"),
+        [
+            "a.yaml: relation `owned` (.alint.yml): `owner` (`bound: $.nums[0]`) selects a \
+             number in an array at `nums[0]`, whose lexeme alint does not keep (`1.10` would read \
+             as `1.1`); bind an object member instead"
+        ]
+    );
     let once = setup(
         &config,
         &[("a.yaml", "name: a\ndeps:\n  x: '1'\n  y: '2'\n")],
@@ -660,6 +680,30 @@ fn a_repeated_key_on_the_unique_side_fails_naming_both_rows() {
           side unique"
         ]
     );
+    // A key either side holds sensitive is not shown.
+    for config in [
+        LINKED.replace(
+            "fields: { dependency: entry.key,",
+            "fields: { dependency: { source: entry.key, sensitive: true },",
+        ),
+        LINKED.replace(
+            "fields: { name: value,",
+            "fields: { name: { source: value, sensitive: true },",
+        ),
+    ] {
+        let tree = setup(
+            &config,
+            &[
+                ("a/package.json", r#"{"name": "x"}"#),
+                ("b/package.json", r#"{"name": "x"}"#),
+            ],
+        );
+        let failures = tree.failures("linked");
+        assert!(
+            failures.len() == 1 && failures[0].contains("`names`) repeats a key: a/package.json"),
+            "{failures:?}"
+        );
+    }
 }
 
 #[test]
@@ -765,6 +809,23 @@ fn a_sensitive_field_keeps_its_values_and_keys_out_of_messages() {
           `deps.a` in package.json with a literal boolean; a value is in a list only beside \
           values of its own type, so compare values of one type (transform the field, or change \
           the list)"
+        ]
+    );
+    // A string literal is named by its type too.
+    let number = setup(
+        &relation(&format!(
+            "{DEPS_AT}    fields: {{ name: entry.key, version: {{ source: entry.value, \
+             sensitive: true }} }}\n    where: {{ version: {{ in: ['1'] }} }}\n"
+        )),
+        &[("package.json", r#"{"deps": {"a": 1}}"#)],
+    );
+    assert_eq!(
+        number.failures("deps"),
+        [
+            "package.json: relation `deps` (.alint.yml): `where.version.in` compares a number at \
+             `deps.a` in package.json with a literal string; a value is in a list only beside \
+             values of its own type, so compare values of one type (transform the field, or \
+             change the list)"
         ]
     );
     let key = setup(
@@ -1057,13 +1118,16 @@ fn the_plan_records_what_the_environment_writes() {
         .map(|named| (named.name.as_str(), named.reads_environment))
         .collect();
     assert_eq!(selectors, [("docs", true), ("plain", false)]);
-    let relations: Vec<(&str, bool, Vec<bool>)> = plan
+    // A relation reads the environment through a selector it reads, too;
+    // its own definition does only where it holds such a value.
+    let relations: Vec<(&str, bool, bool, Vec<bool>)> = plan
         .relations
         .iter()
         .map(|named| {
             (
                 named.name.as_str(),
                 named.reads_environment,
+                named.definition_reads_environment,
                 named
                     .relation
                     .fields
@@ -1076,10 +1140,10 @@ fn the_plan_records_what_the_environment_writes() {
     assert_eq!(
         relations,
         [
-            ("by-selector", true, vec![false]),
-            ("by-read", true, vec![false]),
-            ("by-filter", false, vec![true, false]),
-            ("untouched", false, vec![false]),
+            ("by-selector", true, false, vec![false]),
+            ("by-read", true, true, vec![false]),
+            ("by-filter", false, false, vec![true, false]),
+            ("untouched", false, false, vec![false]),
         ]
     );
 }
@@ -1379,5 +1443,68 @@ fn a_membership_type_clash_fails_only_on_a_row_no_predicate_drops() {
     ] {
         let tree = setup(&filtered(fields, filters), files);
         assert_eq!(tree.failures("r"), [clash], "{filters}");
+    }
+}
+
+/// A list of several types names, for a value of none of them, its first
+/// member in type order (a boolean, a number, then a string): here the
+/// number a relation it reads holds, not its literal.
+#[test]
+fn a_membership_type_clash_names_the_first_member_in_type_order() {
+    let config = format!(
+        "{}  nums:\n    from: {{ paths: nums.json }}\n    entries: {{ format: json, at: \"$\" \
+         }}\n    fields: {{ k: entry.key, n: entry.value }}\n",
+        filtered(
+            "{ k: entry.key, v: entry.value }",
+            "{ v: { in: ['x', { relation: nums, field: n }] } }"
+        )
+    );
+    let files = &[
+        ("x.json", r#"{"a": {"p": true}}"#),
+        ("nums.json", r#"{"one": 1}"#),
+    ];
+    let tree = setup(&config, files);
+    assert_eq!(
+        tree.failures("r"),
+        [
+            "x.json: relation `r` (.alint.yml): `where.v.in` compares a boolean at `a.p` in x.json \
+             with a number at `one` in nums.json; a value is in a list only beside values of its \
+             own type, so compare values of one type (transform the field, or change the list)"
+        ]
+    );
+    // A value at the document root is named by its file alone.
+    let config = "version: 2\nrelations:\n  r:\n    from: { paths: pin.json }\n    read: { json: \
+                  \"$\" }\n    fields: { v: value, b: \"bound: $\" }\n    where: { b: { in: [true] \
+                  } }\n";
+    let tree = setup(config, &[("pin.json", "\"x\"")]);
+    assert_eq!(
+        tree.failures("r"),
+        [
+            "pin.json: relation `r` (.alint.yml): `where.b.in` compares a string in pin.json with \
+             the literal true; a value is in a list only beside values of its own type, so compare \
+             values of one type (transform the field, or change the list)"
+        ]
+    );
+}
+
+/// A `read:` that extracts nothing gives one row whose value is missing,
+/// which no pattern matches and no list holds.
+#[test]
+fn a_missing_value_matches_no_pattern_and_is_in_no_list() {
+    let files = &[("x.json", r#"{"other": "1"}"#)];
+    for (filters, kept) in [
+        ("{ v: { matches: '.' } }", 0),
+        ("{ v: { not_matches: '.' } }", 1),
+        ("{ v: { in: ['1'] } }", 0),
+        ("{ v: { not_in: ['1'] } }", 1),
+    ] {
+        let config = format!(
+            "version: 2\nrelations:\n  r:\n    from: {{ paths: x.json }}\n    read: {{ json: \
+             \"$.name\" }}\n    fields: {{ v: value, p: path }}\n    where: {filters}\n"
+        );
+        let tree = setup(&config, files);
+        let rows = tree.rows("r");
+        assert_eq!(rows.rows.len(), kept, "{filters}");
+        assert!(rows.rows.iter().all(|row| row.cells[0].value.is_none()));
     }
 }
