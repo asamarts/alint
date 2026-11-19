@@ -19,6 +19,10 @@ fixes threshold churn for free and narrows the explicit-key requirement to the
 ~15 kinds whose identity genuinely isn't `(rule_id, path)`. The Decision and
 Consequences below are updated in place; see the design doc's v3 changelog.
 
+SARIF's use of the fingerprint is amended by
+[ADR-0047](0047-sarif-tells-apart-a-fingerprint-repeated-within-a-run.md) (2026-11-19): a
+fingerprint repeated within a run carries an occurrence of its own after the first.
+
 ## Context
 
 alint cannot be adopted as a blocking merge gate on a large existing codebase.
