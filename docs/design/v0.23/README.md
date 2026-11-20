@@ -1087,8 +1087,11 @@ as #589, step 3 as #590, and step 4 is the last.
       `--changed` run (326 to 81,789 `stat` calls with four 20,000-file submodules); `=dirty`
       reports the same commit moves without it.
     - `alint fix` evaluated relations lazily, so near `bytes_per_run` it could place findings
-      where `check` failed; it now evaluates them at the start of each pass and after each
-      applied fix, and what the relations took counts their rows as well as their decodes.
+      where `check` failed; it now evaluates them once a pass, before the first rule that reads
+      one, and checks every rule of the pass against what they took, rows as well as decodes.
+      (The third pass evaluated them again after each applied fix, which read a later relation
+      once per fix and failed `rows_per_run` under `fix --diff`; the fourth pass keeps the
+      pass's record across a fix and clears nothing under `fix --diff`.)
     - Placing checks a file's size before finding its `read:` places, counts the parse it reads
       them from, and places a cell only where the file still holds what was read there (a 32-bit
       fingerprint in the span), so a file changed during the run is placed nowhere.

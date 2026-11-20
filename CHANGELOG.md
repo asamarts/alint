@@ -135,8 +135,9 @@ rulesets you trust and, with a content fix, only on repositories you trust.
 - **The language server's notes hide a path alint hides.** Since v0.20.0, a note of a rule whose
   files a value from the environment picks showed `<redacted>` for its path in `alint check
   --show-notes`, but the language server's notes, which it writes to its log with `--show-notes`,
-  showed the file's path. They now show the path as `alint check` does, `<redacted>` when it is
-  hidden, and a file's name once, with control and bidi characters escaped.
+  showed the file's path. They now hide it as `alint check` does, `<redacted>`, and name a file
+  once, escaped as alint's messages escape text (`\u{1b}`, where `--show-notes` writes the
+  terminal's `\x1b`), with no control, bidi or zero-width character left raw.
 - **Configuration discovery stops at the repository's top.** alint looked for `.alint.yml` from the
   current directory up to the file-system root, so in a repository without a config of its own, or
   from a directory below one, a `.alint.yml` that someone else wrote in a directory above it
@@ -771,19 +772,21 @@ policy-test package the user does not trust.
     shows only where it starts, since its end would give away the value's length. Placing the
     findings reads each file they sit in again, one at a time. Each file must fit in what the run's
     relations left of `bytes_per_run` (the limit less what their decodes and their rows took,
-    counted once they are evaluated, before any rule runs): alone, before its `read:` values' places
-    are looked for, and then with its offsets and what finding those places held (the document
-    parsed again, with what its parser held beside the tree, such as a JSONC file's copy without its
-    comments or the TOML lexer's tokens, and what was read from the parse). Placing takes none of
-    it, so whether a rule's findings fit does not depend on the rules placing beside it, and
-    `alint fix`, which evaluates the relations the same way at the start of each pass and again
-    after a fix changes the tree, places them as `alint check` would. When a file does not fit, the
-    rule reports an analysis failure, not findings without places. A `read:` value's place is found
-    only in the files a finding or related location sits in. A cell is placed only where the file
-    read again still holds what was read there (its value, or its key for an entry's key), so a file
-    changed during the run leaves a finding or related location without a place rather than at other
-    text. A typo in the kind's options gets a "did you mean" for the nearest field, not for the typo
-    itself.
+    counted once they are evaluated, before any rule that reads one runs): alone, before its
+    `read:` values' places are looked for, and then with its offsets and what finding those places
+    held (the document parsed again, with what its parser held beside the tree, such as a JSONC
+    file's copy without its comments or the TOML lexer's tokens, and what was read from the
+    parse). Placing takes none of it, so whether a rule's findings fit does not depend on the
+    rules placing beside it. `alint fix` evaluates the relations once a pass, before the first
+    rule that reads one, and checks every rule of the pass against what they took, though the
+    rules after a fix that changes the tree read their relations again; `fix --dry-run` and
+    `fix --diff`, which change nothing, place findings as `alint check` does. When a file does not
+    fit, the rule reports an analysis failure, not findings without places. A `read:` value's
+    place is found only in the files a finding or related location sits in. A cell is placed only
+    where the file read again still holds what was read there (its value, or its key for an
+    entry's key), so a file changed during the run leaves a finding or related location without a
+    place rather than at other text. A typo in the kind's options gets a "did you mean" for the
+    nearest field, not for the typo itself.
   - When a relation the rule reads takes a value from the environment anywhere in its definition, a
     field's `where:` and `transform:` included, or reads one that does (a join side, an `in:` list's
     relation, a `set` target), every finding's path and message are redacted, as for a version 1

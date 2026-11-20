@@ -476,13 +476,15 @@ distinct-value limit, which is never truncation.
   with its offsets and what finding those places held (the document parsed again, with what its
   parser held beside the tree, such as a JSONC file's copy without its comments or the TOML lexer's
   tokens, and what was read from the parse). The relations are evaluated, and what they took
-  counted, before any rule runs, in `alint check` and at the start of each pass of `alint fix` (and
-  again after a fix changes the tree), so `fix` places findings as `check` would. Placing takes
+  counted, before a rule that reads one runs: in `alint check` before every rule, and in each pass
+  of `alint fix` before the first such rule. When a fix changes the tree, the rules after it read
+  their relations again, but are checked against what the pass's relations took, and `fix
+  --dry-run` and `fix --diff`, which change nothing, place findings as `check` does. Placing takes
   nothing from it, so every rule's files are checked against the same amount, whatever other rules
-  hold, and a run holds at most one such file per thread. When a file does not fit, the rule reports
-  an analysis failure, not findings without places. A cell is placed only where the file read again
-  still holds what was read there, its value or its key, so a file changed during the run leaves a
-  finding or related location without a place.
+  hold, and a run holds at most one such file per thread. When a file does not fit, the rule
+  reports an analysis failure, not findings without places. A cell is placed only where the file
+  read again still holds what was read there, its value or its key, so a file changed during the
+  run leaves a finding or related location without a place.
 - A `set` with `equal_to:` gives one finding per value the reference group holds for each group
   that lacks it, so G empty groups against V reference values give G × V findings, as
   `key_parity` does for files without keys
