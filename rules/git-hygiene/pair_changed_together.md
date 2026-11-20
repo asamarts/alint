@@ -8,6 +8,7 @@ categories: ['git-hygiene', 'cross-file']
 
 If the `<since>...HEAD` diff changes any path matching `if_changed:`, at least one path matching `then_changed:` must change in the same range — the **co-change** gate. Corpus signals: rust's `rustdoc-json-types` `FORMAT_VERSION` must bump when the format struct changes; "`version.txt` and the lockfile change together" release guards. Both globs and `since:` (the base ref) are required. **Directional** — the trigger is `if_changed`, the obligation is `then_changed`; a `then_changed`-only change never fires it, so add a second rule with the globs swapped for a bidirectional pact. The `changeset_requires_path` sibling, built on the same merge-base diff as `alint check --changed`. Git or repository unavailability is a `resource_read` analysis failure; an unchanged `if_changed` set is a normal pass; a `since:` that fails to resolve hard-fails with a shallow-clone hint.
 
+
 ---
 
 ## Options

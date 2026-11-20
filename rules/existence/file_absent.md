@@ -11,7 +11,8 @@ No file matching `paths` may exist in the walked tree. The inverse of `file_exis
 Fix: `file_remove` — delete every violating file.
 
 **Optional `root_only: true`** (like `file_exists`) restricts the check to the repository root: a file forbidden at the root does not fire on nested copies of the same name.
-**Optional `git_tracked_only: true`** restricts the check to files in git's index. With it set, the rule fires only on tracked paths regardless of `.gitignore` state — closing the gap where a `git add -f`'d file slips past the walker's gitignore filter. The config's `ignore:` still excludes what it lists, and alint 0.22 and earlier did not see a tracked file that an ignore file excludes. If Git cannot be run or the lint root is not a Git repository, the rule reports a `resource_read` analysis failure.
+**Optional `git_tracked_only: true`** restricts the check to files in git's index. With it set, the rule fires only on tracked paths regardless of `.gitignore` state — closing the gap where a `git add -f`'d file slips past the walker's gitignore filter. If Git cannot be run or the lint root is not a Git repository, the rule reports a `resource_read` analysis failure.
+
 
 **Optional `content_prefix_hex`** narrows a name match with a content check: a matching file fires only if its bytes begin with one of the listed hex signatures. This separates real binary junk from unrelated files that share a name pattern — macOS AppleDouble sidecars (`._*`) start with `00 05 16 07` and `.DS_Store` with `00 00 00 01` `"Bud1"`, whereas Hadoop writes `._<name>.crc` checksum files that begin with `crc\0`. A file that cannot be read, or is shorter than every signature, does not match; an empty list (the default) keeps the name-only behaviour.
 

@@ -88,13 +88,6 @@ keeps the count of the rest. Each format that has a place for related locations 
 
 - **`human`** lists each related label and path below the finding, then a line `and N more
   related locations`.
-- **`json`** adds `related_locations` to the violation, note or baselined finding: an array of
-  `{ "path", "label" }` objects, each with `line`, `column`, `end_line` and `end_column` when its
-  range is known (1-based, Unicode code points, the end exclusive, as SARIF regions). The names
-  follow the violation's own `line` and `column`, not SARIF's `startLine` and `startColumn`. The
-  count of the rest is `related_locations_omitted`. Both are omitted when there are none, so a
-  finding without related locations keeps its earlier shape, and the report stays
-  `schema_version: 1`. The items of `alint fix --format json` carry no related locations.
 - **`sarif`** projects the primary range into the result's first physical location and emits the
   secondary locations in `relatedLocations`, including regions when known. SARIF columns use
   Unicode code points. The count of the rest is one more related location at the config file,
@@ -113,6 +106,9 @@ and `agent` formats carry one location per finding, or none, and no related loca
 In `sarif`, every result has a location: a finding that isn't tied to one file (a missing `LICENSE`, a tree-level rule) is anchored on line 1 of the config file that loaded the rule, since GitHub Code Scanning drops results without a location. The run declares `columnKind: "unicodeCodePoints"`, because alint counts columns in Unicode characters (in fix regions too), and artifact URIs percent-encode `:` so a file like `a:b.txt` isn't read as a URI scheme. On Unix, URI encoding uses the original filename bytes, so distinct non-UTF-8 paths cannot alias. JSON and agent reports omit the optional `proposed_edit` field when an edit path has no exact JSON string representation; their safe `fix_command` remains available.
 
 `sarif` and `gitlab` attach a stable per-finding fingerprint (SARIF `partialFingerprints`, GitLab `fingerprint`) to every **policy-violation** result — not only when a `--baseline` is active. SARIF's is the canonical `violation_fingerprint`, the same identity the [baseline](/docs/concepts/adoption/baseline/) file records, so an alert keeps one identity across SARIF and the baseline. A finding with a `<redacted>` path carries a fingerprint without its path, which the rule's other such findings share. A finding with a unique fingerprint carries that same identity in GitLab too; GitLab additionally disambiguates genuine within-report duplicates (two findings with byte-identical content), because GitLab Code Quality drops entries that share a fingerprint. GitLab analysis-failure issues receive only the deterministic transport identity its schema requires; SARIF analysis failures have no `partialFingerprints`. GitHub Code Scanning uses policy findings' SARIF fingerprints to correlate alerts across runs — dedupe, and track a finding as fixed or reopened — with no `--baseline` required.
+GitLab tells apart every finding in a report that repeats a fingerprint, not only byte-identical
+ones: the first carries the fingerprint, and each later one a fingerprint derived from it and its
+occurrence.
 
 ## Baseline suppression
 

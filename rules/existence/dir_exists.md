@@ -10,7 +10,8 @@ Directory counterpart of `file_exists`. Every match must correspond to a real di
 
 **Optional `root_only: true`** (like `file_exists`) requires the match to be a
 directory directly at the repository root, not nested.
-**Optional `git_tracked_only: true`** further requires that the directory contain at least one tracked file. A tree with a `docs/` checked out from a stale clone where every file was later removed via `git rm` would fail under this stricter check. A directory with tracked files counts even when an ignore file excludes it (alint 0.22 and earlier did not see it); the config's `ignore:` still excludes what it lists. If Git cannot be run or the lint root is not a Git repository, the rule reports a `resource_read` analysis failure. See [The walker and `.gitignore`](/docs/concepts/targeting/the-walker-and-git/) for the full semantics.
+**Optional `git_tracked_only: true`** further requires that the directory contain at least one tracked file. A tree with a `docs/` checked out from a stale clone where every file was later removed via `git rm` would fail under this stricter check. If Git cannot be run or the lint root is not a Git repository, the rule reports a `resource_read` analysis failure. See [The walker and `.gitignore`](/docs/concepts/targeting/the-walker-and-git/) for the full semantics.
+
 
 **When to use it**: for the directories a repository's tooling or contributors rely on being there: a `docs/` tree the site build reads, `.github/workflows/` for CI, `tests/` next to the sources. Listing several paths accepts any one of them, so `paths: ["doc", "docs"]` passes with either name.
 
