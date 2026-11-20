@@ -1,10 +1,14 @@
 //! What a pass of `fix` reads for the relations its rules read: each file
-//! once, however many fixes come before the rules that read them, in a pass
-//! that writes (`fix`) and in one that stages (`fix --diff`). Evaluating the
-//! relations again after every applied fix read each file once per fix, and
-//! took its rows again from the run's rows each time.
+//! once, however many fixes come before or between the rules that read them,
+//! in a pass that writes (`fix`), one that stages (`fix --diff`, and
+//! `check --format sarif` on `check`'s index) and one that writes nothing
+//! (`fix --dry-run`). Evaluating the relations again after every applied fix
+//! read each file once per fix, and took its rows again from the run's rows
+//! each time; clearing the caches before the relations were evaluated made
+//! the rules before them, and `check`, decode again.
 
 use std::fmt::Write as _;
+use std::sync::Arc;
 
 use alint_core::relation::{LimitKind, Limits};
 use alint_core::{Applicability, Engine, FileIndex, FixReport, WalkOptions, walk};
@@ -56,13 +60,18 @@ fn files() -> Vec<(String, String)> {
         .collect()
 }
 
+/// The rules of `config`, each with its spec, as the CLI builds them: the
+/// engine reads from a rule's `fix:` what its fixes change on disk.
 fn engine(config: &alint_core::Config) -> Engine {
     let mut registry = alint_core::RuleRegistry::new();
     alint_rules::register_builtin(&mut registry);
     let entries = config
         .rules
         .iter()
-        .map(|spec| alint_core::RuleEntry::new(registry.build(spec).unwrap()))
+        .map(|spec| {
+            alint_core::RuleEntry::new(registry.build(spec).unwrap())
+                .with_spec(Arc::new(spec.clone()))
+        })
         .collect();
     Engine::from_entries(entries, registry)
 }
@@ -155,11 +164,12 @@ fn fix_diff_takes_a_relations_rows_once_however_many_fixes_come_first() {
     assert_eq!(failures(&report), Vec::<String>::new());
 }
 
-/// Rule `deps`, a fix, and rule `again` over the same relation: `fix --diff`
-/// writes nothing, so it clears nothing, and `again` reads what `deps` read;
-/// `fix` writes the created file, so `again` reads the tree again.
+/// Rule `deps`, a create, and rule `again` over the same relation: neither
+/// `fix --diff` nor `fix` reads the relation again for `again`. The create
+/// adds a file the pass's index does not list, and the relation selects
+/// from that index, so what `deps` read stays true.
 #[test]
-fn fix_diff_clears_nothing_and_fix_reads_again_after_a_fix() {
+fn a_create_between_two_readers_keeps_what_they_read() {
     let config = config(0)
         + "  - id: make0\n    kind: file_exists\n    paths: MADE0.md\n    level: error\n    fix:\n      \
            file_create:\n        content: \"made\\n\"\n  - id: again\n    kind: constraint\n    \
@@ -179,7 +189,7 @@ fn fix_diff_clears_nothing_and_fix_reads_again_after_a_fix() {
     assert_eq!(index.decode_cache().unwrap().decodes(), MANIFESTS);
 
     let index = index_under(dir.path(), &Limits::default());
-    rules
+    let report = rules
         .fix(
             dir.path(),
             &index,
@@ -188,6 +198,10 @@ fn fix_diff_clears_nothing_and_fix_reads_again_after_a_fix() {
             Applicability::Unsafe,
         )
         .unwrap();
+    assert_eq!(failures(&report), Vec::<String>::new());
     assert!(dir.path().join("MADE0.md").is_file());
-    assert_eq!(index.decode_cache().unwrap().decodes(), 2 * MANIFESTS);
+    assert_eq!(index.decode_cache().unwrap().decodes(), MANIFESTS);
 }
+
+#[path = "constraint_fix_reads.rs"]
+mod reads;

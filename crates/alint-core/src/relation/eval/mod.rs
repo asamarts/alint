@@ -427,6 +427,13 @@ impl RunMemo {
         self.bytes.load(Ordering::Relaxed)
     }
 
+    /// Whether an evaluation read a `scope_filter:` manifest itself, from
+    /// its path on disk, rather than finding the engine's set: a file a fix
+    /// creates may be that manifest, though the index does not list it.
+    pub(crate) fn read_manifests(&self) -> bool {
+        !self.manifests.lock().expect("manifest set lock").is_empty()
+    }
+
     /// The relations evaluated so far, in the order they were. Test only.
     #[cfg(test)]
     pub(crate) fn computed(&self) -> Vec<RelationId> {

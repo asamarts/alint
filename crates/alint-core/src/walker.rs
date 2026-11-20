@@ -1945,6 +1945,9 @@ impl<'s> ParallelVisitorBuilder<'s> for WalkVisitorBuilder {
 #[path = "walker_ignore_files.rs"]
 mod ignore_files;
 
+#[path = "walker_relation_caches.rs"]
+mod relation_caches;
+
 #[cfg(test)]
 #[path = "walker_tests.rs"]
 mod tests;

@@ -950,11 +950,16 @@ impl Engine {
         }
         let manifest_gates = self.manifest_gates_by_entry(index, &when_env)?;
         // The relations the rules read are evaluated once a pass, as `check`
-        // evaluates them, just before the first rule that reads one (below),
-        // and what they take of the run's bytes is recorded then: what a rule
-        // may hold to place its findings is what it is in `check`, not what
-        // the relations of the rules before it took.
-        let mut relations_evaluated = false;
+        // evaluates them, before the first rule (or, in a pass that writes,
+        // just before the first rule that reads one, when a fix before it may
+        // let go of what they read), and what they take of the run's bytes is
+        // recorded then: what a rule may hold to place its findings is what
+        // it is in `check`, not what the relations of the rules before it
+        // took.
+        let relations_at =
+            super::fix_caches::relations_at(&self.entries, !dry_run && stage_ops.is_none());
+        // Whether a fix of this pass removed or moved a file, or may have.
+        let mut moved = false;
         // A `has_ancestor` marker lookup on the `--changed` index must see unchanged
         // files too. Only the changed-set index shares the full tree's file set
         // (the git-tracked indexes are deliberately subsets and must not), and only
@@ -997,19 +1002,11 @@ impl Engine {
         // classification. Unused (empty) when no fix-baseline is active.
         let mut fp_cache: HashMap<PathBuf, Option<Vec<u8>>> = HashMap::new();
         for (rule_index, entry) in self.entries.iter().enumerate() {
-            // Before the first rule that reads a relation, not at the start of
-            // the pass: a fix before it would clear what they decoded, and they
-            // would be decoded twice. The caches are cleared first when a rule
-            // ran before, so they hold nothing a rule or a fix left (what the
-            // relations took is then theirs alone, as in `check`) and the
-            // relations read the tree as it is now; a clear lets go only what
-            // the rules before read through them.
-            if !relations_evaluated && entry.rule.relation_inputs().is_some() {
-                if rule_index > 0 {
-                    index.clear_relation_caches();
-                }
+            // Nothing is cleared first: what the rules before decoded stays
+            // theirs (relations key their decodes apart), and what a fix made
+            // untrue is gone already (below).
+            if relations_at == Some(rule_index) {
                 self.evaluate_read_relations(&full_ctx, &when_env, &pass);
-                relations_evaluated = true;
             }
             // Skip a rule scoped ENTIRELY outside the changed set (plus files this
             // run created), exactly as `check --changed` does, so `fix` and `check`
@@ -1521,22 +1518,24 @@ impl Engine {
                     status,
                 });
             }
-            // A fix may have created, removed, or renamed a file on disk
-            // already (content edits wait in the compose buffer), so a later
-            // rule's relation reads must not come from the caches: each later
-            // rule reads its relations again as it needs them. What the pass's
-            // relations took stays recorded, so every rule of the pass places
-            // its findings against the same amount, as in `check`. A staged
-            // pass (`fix --diff`) writes nothing to disk (whole-file fixes go
-            // to the stage sink, content edits to the compose buffer, and no
-            // rule reads either), so what the caches hold stays true there.
+            // A fix may have created, removed, or moved a file on disk already
+            // (content edits wait in the compose buffer), so a later rule must
+            // not read from the caches what that made untrue: the caches let
+            // go of it, and each later rule reads it again as it needs it.
+            // What the pass's relations took stays recorded, so every rule of
+            // the pass places its findings against the same amount, as in
+            // `check`. A staged pass (`fix --diff`) writes nothing to disk
+            // (whole-file fixes go to the stage sink, content edits to the
+            // compose buffer, and no rule reads either), so what the caches
+            // hold stays true there.
             if !dry_run
                 && stage_ops.is_none()
-                && items
-                    .iter()
-                    .any(|item| matches!(item.status, FixStatus::Applied(_)))
+                && let Some(landed) = super::fix_caches::Landed::of(
+                    entry.spec.as_deref().and_then(|spec| spec.fix.as_ref()),
+                    &items,
+                )
             {
-                index.clear_relation_caches();
+                landed.let_go(index, &mut moved);
             }
             push_fix_result(
                 &mut results,

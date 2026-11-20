@@ -24,6 +24,7 @@ use crate::trace::{
 use crate::walker::FileIndex;
 use crate::when::{WhenEnv, WhenExpr};
 mod fix;
+mod fix_caches;
 mod gates;
 mod preview;
 mod run;

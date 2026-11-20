@@ -439,13 +439,18 @@ impl Engine {
     /// runs, so its relations are evaluated here too.) Each outcome stays in
     /// the run's memo on the index, where the rule reads it.
     ///
-    /// Once they are evaluated, the decode cache records what they took of
-    /// the run's bytes, so a rule that places its findings is checked
-    /// against what the relations left
+    /// Once they are evaluated, the decode cache records what evaluating
+    /// them took of the run's bytes, so a rule that places its findings is
+    /// checked against what the relations left
     /// ([`DecodeCache::may_hold`](crate::relation::DecodeCache::may_hold)).
-    /// `fix` calls it once a pass, before the first rule that reads a
-    /// relation, on caches nothing has used yet, so it records what `check`
-    /// over the same tree records.
+    /// `fix` calls it once a pass, before its first rule as `check` does, or
+    /// in a pass that writes just before the first rule that reads a
+    /// relation, when a fix before that may let go of what they read. A rule
+    /// before it may then have decoded (`key_parity`), so what is recorded is
+    /// what the evaluation added, which is what `check` over the same tree
+    /// records. On an index whose relations it has evaluated already
+    /// (`check --format sarif` stages its fixes on `check`'s), it does
+    /// nothing: the memo holds their outcomes, and the record stands.
     pub(super) fn evaluate_read_relations(
         &self,
         ctx: &Context<'_>,
@@ -453,6 +458,11 @@ impl Engine {
         pass: &super::gates::ChangedPass<'_>,
     ) {
         use crate::relation::plan::{Plan, RelationId};
+        let cache = ctx.index.decode_cache();
+        if cache.is_some_and(crate::relation::DecodeCache::relations_evaluated) {
+            return;
+        }
+        let bytes_before = cache.map_or(0, crate::relation::DecodeCache::bytes_taken);
         let mut wanted: Vec<(&Arc<Plan>, RelationId)> = Vec::new();
         for entry in &self.entries {
             let Some((plan, relations)) = entry.rule.relation_inputs() else {
@@ -471,8 +481,7 @@ impl Engine {
         // One plan per configuration; grouped by plan all the same, in the
         // order each plan first appears.
         let mut plans: Vec<&Arc<Plan>> = Vec::new();
-        // What the memos of the plans hold once their relations are
-        // evaluated.
+        // What evaluating them adds to the memos of the plans.
         let mut memo_bytes = 0usize;
         for (plan, _) in &wanted {
             if !plans.iter().any(|held| Arc::ptr_eq(held, plan)) {
@@ -485,6 +494,7 @@ impl Engine {
                 .filter(|(held, _)| Arc::ptr_eq(held, plan))
                 .map(|(_, id)| *id)
                 .collect();
+            let held = ctx.index.relation_memo(plan).map_or(0, |memo| memo.bytes());
             // In the order `explain` shows: each relation after those it
             // reads, so evaluating one finds those in the memo.
             for id in plan.evaluation_order(&ids) {
@@ -492,11 +502,12 @@ impl Engine {
                 let _ = crate::relation::eval::evaluate(plan, id, ctx);
             }
             if let Some(memo) = ctx.index.relation_memo(plan) {
-                memo_bytes = memo_bytes.saturating_add(memo.bytes());
+                memo_bytes = memo_bytes.saturating_add(memo.bytes().saturating_sub(held));
             }
         }
-        if let Some(cache) = ctx.index.decode_cache() {
-            cache.record_relations(memo_bytes);
+        if let Some(cache) = cache {
+            let decoded = cache.bytes_taken().saturating_sub(bytes_before);
+            cache.record_relations(decoded.saturating_add(memo_bytes));
         }
     }
 
