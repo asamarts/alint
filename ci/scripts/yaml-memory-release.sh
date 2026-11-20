@@ -8,7 +8,7 @@
 #
 # The release preflight runs it. CI's `YAML Compare` job runs the same test
 # (yaml-compare.sh) against each shape's regression bound, its ratio with ayaml
-# 0.1.2 and about 10%.
+# 0.2.2 and about 10%.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"

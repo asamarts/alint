@@ -249,7 +249,7 @@ fn a_parse_costs_its_length_or_its_expansion_s_share() {
     let scan = crate::yaml_depth::scan_guards(&plain);
     assert_eq!(scan.expansion_and_size(&plain).1, 0);
     // A few small aliases stay within the allowance.
-    let anchored = aliases_of(10, 20);
+    let anchored = aliases_of(100, 5);
     let (_, expanded) = crate::yaml_depth::scan_guards(&anchored).expansion_and_size(&anchored);
     assert!(expanded > 0 && parse_cost(anchored.len(), expanded) == anchored.len());
 }

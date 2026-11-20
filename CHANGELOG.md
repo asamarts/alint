@@ -74,7 +74,7 @@ full below.
   `LspOptions` and `LoadOptions` are `#[non_exhaustive]`, as is `alint_core::Error`, so build them
   with their constructors and `with_*` setters; `baseline::Fingerprints`, the six
   `alint_dsl::reject_*_in` functions and `alint_core::template::render_mapping`, `render_value`
-  and `render_nested_options` are no longer public; and the crates pin ayaml exactly (`=0.1.2`)
+  and `render_nested_options` are no longer public; and the crates pin ayaml exactly (`=0.2.2`)
   (Changed, Added, Removed).
 
 ### Security
@@ -933,7 +933,7 @@ policy-test package the user does not trust.
   not resolve either, and the messages now say "missing or ignored". A `registry_paths_resolve`
   entry of the other kind now says so ("resolves to a file, not a directory"), and `php@v1`'s
   Composer rules say an entry must exist and not be ignored. Their baseline keys are unchanged.
-- **alint parses YAML with ayaml 0.1.2, a pure-Rust parser, in place of `yaml_serde` and
+- **alint parses YAML with ayaml 0.2.2, a pure-Rust parser, in place of `yaml_serde` and
   `libyaml-rs`** (#510, ADR-0035). Configurations, `extends:` sources, the `yaml_path_*` rules,
   `json_schema_passes` on YAML and `alint test` packages all read through it. The
   depth limit is that of 0.22 (128 levels), and the 32 MiB size limit 0.22 set on data files now
@@ -990,12 +990,7 @@ policy-test package the user does not trust.
     event ("repetition limit exceeded"); and, in a configuration, `-0` where an unsigned integer
     is expected, as in `fix_size_limit: -0`, which 0.22 refused (``invalid type: integer `0`,
     expected u64``), and a quoted scalar tagged `!!int` where a number is expected, as in
-    `version: !!int '1'`. ayaml also accepts a block scalar header that is not indented past its
-    parent on the line after an anchor, or after a key with an anchor (asamarts/ayaml#132), or
-    after properties alone on their line (asamarts/ayaml#147), and a line that puts a flow
-    indicator right after an anchor name that ends in `:`, with the lines after it at any
-    indentation, so `&a:[: x` followed by `- y` reads as the mapping `{":[": "x - y"}`
-    (asamarts/ayaml#139).
+    `version: !!int '1'`.
   - **Now rejected:** a `#` directly after a token, as in `'x'#c` or `%YAML 1.2#`, which is not a
     comment; a quoted scalar's continuation line that is not indented past its parent; a block
     scalar whose header or content is not indented past its parent, as in `-` followed by `|2` on
@@ -1013,9 +1008,7 @@ policy-test package the user does not trust.
     fact, an `extends:` entry or a policy test, and a `!!` tag outside the core schema where a
     configuration takes a number or a boolean, as in `version: !!timestamp 1`. The error names
     the field and the tag (`` `version` has the YAML tag `!!timestamp` ``). `vars:` and
-    `ignore:` still read their strings through any tag. ayaml also rejects a top-level block
-    scalar whose only lines before a document marker are empty, one of them indented, as `|`, a
-    line of two spaces and `...`, which is valid YAML (asamarts/ayaml#146).
+    `ignore:` still read their strings through any tag.
   - **Errors.** Several parse errors are worded differently, in a `resource_parse` analysis failure
     and in a configuration error. A stream of more than one document reports "more than one document
     in stream at line 2 column 1" for `version: 1`, `---` and `version: 1` on three lines, where
@@ -1027,31 +1020,31 @@ policy-test package the user does not trust.
     expected a string"; a value that is not one of an enum's, as a rule's `level`, a policy test's
     step or an option such as `direction`, lists them, as "level: expected one of `error`,
     `warning`, `info`, `off`, found a mapping", where 0.22 said "invalid type: map, expected a
-    Value::Tagged enum"; and the error an indentation mistake gives, "unexpected content after
-    document", as for a key one space off its siblings, `-id: a` with no space after the `-` or an
-    indented top-level key, ends with "(check this line's indentation against the lines above)". A
-    configuration that is a scalar, not a mapping, is reported as "invalid type: non-mapping YAML
-    value, expected struct RawConfig" when it holds no `{{`, and as "invalid type: string" when it
-    does, where 0.22 quoted the scalar, or, with `{{`, gave only `<redacted>`. An error can also be
-    reported at another place: ayaml checks a stream's syntax before it builds values, so a syntax
-    error later in a file is reported before an earlier duplicate key or type error, and an error
-    about an empty value is reported where what follows starts (the next line's content or the end
-    of the file), where 0.22 reported the place after the key: `respect_gitignore:` with nothing
-    after it on line 2 is reported at line 3, column 1, where 0.22 said line 2, column 19. A
-    character YAML does not allow, such as a C0 control, is reported at its line and column, as
-    "non-printable character U+0001 is not allowed in YAML at line 3 column 4", where 0.22 gave a
-    byte offset ("control characters are not allowed at position 24"). After a byte-order mark, a
-    character that cannot start a token is reported without a line and column (asamarts/ayaml#133).
+    Value::Tagged enum"; an off-by-one indentation mistake reports "this line is indented
+    differently from the mapping at line L column C" (or "sequence"), an indented top-level key
+    reports "a document's first node cannot be indented", and other indentation mistakes reported
+    as "unexpected content after document" (such as `-id: a` with no space after `-`) end with
+    "(check this line's indentation against the lines above)". A configuration that is a scalar,
+    not a mapping, is reported as "invalid type: string ..., expected struct RawConfig" (or
+    "invalid type: string" when it holds `{{`), where 0.22 quoted the scalar, or, with `{{`, gave
+    only `<redacted>`. An error can also be reported at another place: ayaml scans a stream's
+    tokens before parsing and streams parser events into value construction, so a scanner error
+    later in a file is reported before an earlier duplicate key or type error, and an error about
+    an empty value is reported where what follows starts (the next line's content or the end of the
+    file), where 0.22 reported the place after the key: `respect_gitignore:` with nothing after it
+    on line 2 is reported at line 3, column 1, where 0.22 said line 2, column 19. A character YAML
+    does not allow, such as a C0 control, is reported at its line and column, as "non-printable
+    character U+0001 is not allowed in YAML at line 3 column 4", where 0.22 gave a byte offset
+    ("control characters are not allowed at position 24").
 
   Source spans and structured YAML fixes still use saphyr. The checks that refuse deep flow
   nesting and alias bombs before a parse now read YAML as ayaml does, and ayaml's own depth,
-  input and alias limits are set from the same constants (#483). Before v0.23.0 ships, the
-  owner's approval of the harness's documented differences qualifies the parser (ADR-0035).
+  input and alias limits are set from the same constants (#483).
 - **Breaking (library API): YAML values and errors are alint's own types** (#484, #516,
   ADR-0038). No public item of `alint-core`, `alint-dsl` or `alint-testkit` names a YAML parser
   crate any more, so a later change of parser is not a breaking change. The published crates
-  pin ayaml exactly (`=0.1.2`), since the differential harness qualifies one version: a project
-  that depends on them cannot use another ayaml 0.1.x beside them, and each ayaml release
+  pin ayaml exactly (`=0.2.2`), since the differential harness qualifies one version: a project
+  that depends on them cannot use another ayaml 0.2.x beside them, and each ayaml release
   reaches alint's library users only in an alint release. `alint_core::yaml` holds
   `Value`, `Mapping`, `Sequence`, their iterators (`SequenceIter`, `SequenceIterMut`,
   `SequenceIntoIter`, `MappingIter`, `MappingIterMut`, `MappingIntoIter`, `MappingKeys`,
@@ -1156,9 +1149,9 @@ policy-test package the user does not trust.
 - **YAML files over 1 MiB share a budget of 32 MiB of input parsing at once** (ADR-0042). With
   ayaml, one YAML parse at the 32 MiB input cap peaks at 4.5 to 6.2 GB, and every worker thread
   could run one. A parse of a larger file now waits until its size is free in the budget (or, when
-  its aliases expand, a 64th of the expanded size, if that is larger: sixteen 500 KB files of
+  its aliases expand, a 32nd of the expanded size, if that is larger: sixteen 500 KB files of
   aliases peaked at 3.1 GB), so at most one file at the cap parses at a time; a file of 1 MiB or
-  less waits only when its aliases expand past 64 MiB, and findings are unchanged. The budget bounds
+  less waits only when its aliases expand past 32 MiB, and findings are unchanged. The budget bounds
   the parses in flight, not the trees they leave: a tree that copies what aliases name lives outside
   it while a rule holds it, up to the alias guard's 256 MiB each (#582). The `yaml_path_*`
   rules, `json_schema_passes`, the cross-file rules' `extract:`, `pinned_references` and the
@@ -1169,11 +1162,11 @@ policy-test package the user does not trust.
   characters in between. Checking an 8 MB JSONC file with a `json_path_equals` rule peaks at 37 MB
   RSS, against 70 MB, and runs half the instructions; 3,000 small `tsconfig.json` files run 13%
   fewer. What the copy holds is unchanged, so every rule reads the same values.
-- **YAML files of 10 KB and more cost more time and memory to read than in 0.22:** +9% to +54% wall
-  time and 1.3x to 2.9x peak memory. ayaml 0.1.2 holds about 65 bytes of heap per input byte while
-  it parses, where libyaml held 35 to 39 (asamarts/ayaml#163). The v0.23.0 release waits for an
-  ayaml release that brings its peak heap within 1.2x of libyaml's on each of nine document shapes
-  (ADR-0042, ADR-0044).
+- **Decoding YAML into the structured rules' JSON tree uses less peak heap than in 0.22:** across
+  the nine benchmarked document shapes (OpenAPI documents of 37 KB, 1.1 MB and 4.4 MB, and 1 MB
+  block and flow mappings and sequences), ayaml 0.2.2 peaks at 0.517x to 0.965x of libyaml's peak
+  heap (about 21.8 bytes of heap per input byte on OpenAPI-shaped YAML against libyaml's 37.3 to
+  37.8), meeting ADR-0042 and ADR-0044's 1.2x release bound on every shape.
 
 ### Removed
 

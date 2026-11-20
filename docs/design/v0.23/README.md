@@ -1,6 +1,6 @@
 # v0.23: selectors, a first constraint slice, and the YAML groundwork
 
-Status: accepted (2026-11-12, ADR-0032); in progress, phases 0 to 8 done (feature freeze reached; phase 9 waits on an ayaml release).
+Status: accepted (2026-11-12, ADR-0032); in progress, phases 0 to 9 done (feature freeze and ayaml 0.2.2 qualification complete; phase 10 release prep next).
 Decisions: [ADR-0032](../../adr/0032-v023-owner-decisions.md) (the owner decisions and the scope);
 [ADR-0033](../../adr/0033-v023-slice-after-the-corpus-stratum.md) (the slice after the corpus
 stratum, and the #503 fix);
@@ -166,8 +166,9 @@ Out of scope:
   - six `alint-dsl` functions;
   - four `alint-testkit` items.
 
-  alint parses YAML with ayaml 0.1.2 since #510, through `alint_core::yaml`. saphyr and
-  saphyr-parser still give source spans and structured fixes; they leave in v0.24 (ADR-0036).
+  alint parses YAML with ayaml 0.2.2 (bumped from 0.1.2 in phase 9), through `alint_core::yaml`.
+  saphyr and saphyr-parser still give source spans and structured fixes; they leave in v0.24
+  (ADR-0036).
 - **Open structs.**
   - `Violation`, `Context`, `RuleSpec`, `NestedRuleSpec` and `WalkOptions` were built with struct
     literals outside `alint-core` until phase 4 sealed them (#517, #518).
@@ -1200,3 +1201,27 @@ as #589, step 3 as #590, and step 4 is the last.
     v0.23 reaches feature freeze (phases 1 to 8, #503 and #580 complete).
   - Next: phase 9 (ayaml bump once an upstream release carries ADR-0043's compatibility fixes and
     meets ADR-0042/ADR-0044's 1.2x memory gate across all nine shapes), then phase 10 (release).
+- 2026-11-20: phase 9, ayaml 0.2.2 bump and qualification (#481, ADR-0040, ADR-0042, ADR-0043,
+  ADR-0044, ADR-0046 decision 7).
+  - Bumped exact pin from `=0.1.2` to `=0.2.2`, adapted `yaml.rs` (`parse_events_eager_with_limits`)
+    and `yaml_decode.rs` (`Span::start()` + `.with_location`), removed the `#139`/`#140`/`#141`
+    workarounds from `yaml_depth.rs`, removed all four ayaml-defect allowlist entries
+    (`block-scalar-under-an-anchor`, `ayaml-error-without-a-place`,
+    `document-marker-after-indented-empty-lines`,
+    `anchor-name-before-a-colon-and-a-flow-indicator`) and narrowed
+    `byte-order-mark-starting-a-line` (34 deviations, 0 new deviations, 8 location classes), and
+    updated `yaml_differential.rs` for ayaml 0.2.2's streaming parser-to-value error order.
+  - **Qualification runs:** all 12 long runs (`ALINT_YAML_DIFF_SEED=1..12`, 3,848,472 inputs)
+    passed with 0 unexplained differences, 0 panics and 0 vote-only differences; 3× 2,000,000-case
+    runs of both `yaml_depth::tests::scanner_never_misses` properties (12M cases) passed; full
+    workspace `ci/scripts/yaml-compare.sh` passed with all 5 saphyr-vote lines reviewed as
+    documented YAML 1.2 readings.
+  - **Memory gate:** `ci/scripts/yaml-memory-release.sh` passed across all nine shapes (each parser
+    measured in its own child process): `0.578x`, `0.583x`, `0.584x` (OpenAPI 37 KB / 1.1 MB /
+    4.4 MB, ~21.8 B/input byte vs libyaml's 37.3–37.8), `0.673x` (block mapping), `0.626x` (flow
+    mapping), `0.517x` (flow sequence of ints), `0.719x` (flow sequence of `1`), `0.731x` (block
+    sequence of `value N`), and `0.965x` (block sequence of words). Lowered regression bounds to
+    `0.58`–`1.07` and `EXPANSION_BYTES_PER_COST_BYTE` from 64 to 32.
+  - Next: run `corpus-replay.yml` against v0.22.1 via workflow dispatch (Bumping ayaml step 6),
+    then phase 10 (release documentation, `bench-record`, security advisory GHSA-78jj-xfpm-g6px,
+    and v0.23.0 release check).

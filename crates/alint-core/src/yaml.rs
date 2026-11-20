@@ -96,7 +96,7 @@ pub(crate) fn ayaml_from_str_seed<'de, S: serde::de::DeserializeSeed<'de>>(
 /// whole stream with this, and `requires:` is checked on the first
 /// document's events.
 pub(crate) fn stream_events(input: &str) -> Result<Vec<ayaml::Event<'_>>, ayaml::Error> {
-    ayaml::compat::parse_events_with_limits(input, &limits())
+    ayaml::compat::parse_events_eager_with_limits(input, &limits())
 }
 
 /// Decode `value` into `T`, as [`from_str`] decodes a document's value, except

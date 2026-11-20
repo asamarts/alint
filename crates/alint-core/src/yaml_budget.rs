@@ -15,7 +15,7 @@
 //! anchored string of 500 KB and 500 aliases of it peaked at 269 MB, and
 //! sixteen of them at 3.1 GB, when the budget charged the length alone. A file
 //! of 1 MiB or less never waits unless the guard estimates its expanded tree
-//! at more than 64 MiB.
+//! at more than 32 MiB.
 //!
 //! The budget is held while the parser runs, not while the parsed value lives.
 //! A parse's peak is inside the parser, whose events and half-built tree come
@@ -52,14 +52,15 @@ pub const YAML_BUDGET_THRESHOLD_BYTES: usize = 1024 * 1024;
 
 /// The bytes of the alias guard's estimate of an expanded tree that cost as
 /// much as one byte of input: about what a byte of input costs a parse at its
-/// peak (ayaml's peak heap is about 65 bytes per input byte, ADR-0042). The
-/// estimate of a tree that copies what aliases name is close to the parse's
-/// peak, as the copies are most of it, so the trees of the parses in flight
-/// stay within this many times the budget, 2 GiB. The estimate of a document
-/// that holds an alias but replays little is far below its parse's peak (about
-/// 11 bytes per input byte for OpenAPI-shaped YAML), so its cost stays its
-/// length.
-pub const EXPANSION_BYTES_PER_COST_BYTE: usize = 64;
+/// peak (ayaml 0.2.2's peak heap is about 22 bytes per input byte on
+/// OpenAPI-shaped YAML, rounded to a power of two; ADR-0042, ADR-0046
+/// decision 7). The estimate of a tree that copies what aliases name is close
+/// to the parse's peak, as the copies are most of it, so the trees of the
+/// parses in flight stay within this many times the budget, 1 GiB. The
+/// estimate of a document that holds an alias but replays little is far below
+/// its parse's peak (about 11 bytes per input byte for OpenAPI-shaped YAML),
+/// so its cost stays its length.
+pub const EXPANSION_BYTES_PER_COST_BYTE: usize = 32;
 
 /// The process's budget.
 static GLOBAL: Budget = Budget::new(YAML_PARSE_BUDGET_BYTES);

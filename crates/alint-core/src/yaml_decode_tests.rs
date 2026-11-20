@@ -381,18 +381,47 @@ const HINTED: &str = "unexpected content after document (check this line's inden
                       against the lines above)";
 
 /// YAML-1c: the common indentation mistakes end the root collection, and
-/// ayaml reports what follows as content after the document; alint adds a
-/// hint, after the location, which stays where it was.
+/// ayaml reports what follows either with its own indentation message (when
+/// one space off a parent collection) or as content after the document, to
+/// which alint adds a hint after the location.
 #[test]
 fn an_indentation_mistake_gets_a_hint() {
     let rule = "version: 1\nrules:\n  - id: a\n    kind: file_exists\n";
-    for (input, line, column) in [
-        // A key one space less, or more, than its siblings.
+    // Off by one from the parent collection: ayaml 0.2.2 names the parent
+    // collection's line and column directly, so no extra hint is appended.
+    for (input, line, column, expected) in [
         (
             "version: 1\nrules:\n  - id: a\n   kind: file_exists\n",
             4,
             4,
+            "this line is indented differently from the sequence at line 3 column 3",
         ),
+        (
+            &format!("{rule} -id: b\n"),
+            5,
+            2,
+            "this line is indented differently from the mapping at line 2 column 1",
+        ),
+        (
+            "version: 1\n rules: []\n",
+            2,
+            2,
+            "this line is indented differently from the mapping at line 1 column 1",
+        ),
+    ] {
+        let error = from_str::<Value>(input).unwrap_err();
+        assert_eq!(error.message(), expected, "{input:?}");
+        let location = error.location().unwrap();
+        assert_eq!(
+            (location.line(), location.column()),
+            (line, column),
+            "{input:?}"
+        );
+        let error = crate::yaml_backend::json_tree(input).unwrap_err();
+        assert_eq!(error.message(), expected, "{input:?}");
+    }
+    for (input, line, column) in [
+        // A key more than one space off its siblings.
         (
             "version: 1\nrules:\n  - id: a\n     kind: file_exists\n",
             4,
@@ -400,11 +429,9 @@ fn an_indentation_mistake_gets_a_hint() {
         ),
         // A key at the entry's `-`.
         ("version: 1\nrules:\n  - id: a\n  kind: file_exists\n", 4, 3),
-        // `-id` with no space.
+        // `-id` with no space at the entry's `-`.
         (&format!("{rule}  -id: b\n"), 5, 3),
-        (&format!("{rule} -id: b\n"), 5, 2),
-        // A top-level key indented, after or before the others.
-        ("version: 1\n rules: []\n", 2, 2),
+        // A top-level key indented by two, or after an indented first key.
         ("version: 1\n  rules: []\n", 2, 3),
         (" rules: []\nversion: 1\n", 2, 1),
         // A comment between the two lines changes nothing.

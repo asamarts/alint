@@ -97,14 +97,17 @@ pub(crate) fn finish(error: ayaml::Error) -> ayaml::Error {
     if tag.is_empty() || tag.contains(['`', ' ']) {
         return error;
     }
-    let rewritten = ayaml::Error::new(
+    let mut rewritten = ayaml::Error::new(
         error.kind(),
         format!("{subject} {HAS_THE_TAG}{tag}`{TAG_REFUSED}"),
     );
-    match error.span() {
-        Some(span) => rewritten.with_span(span),
-        None => rewritten,
+    if let Some(span) = error.span() {
+        rewritten = rewritten.with_span(span);
     }
+    if let Some(location) = error.location() {
+        rewritten = rewritten.with_location(location);
+    }
+    rewritten
 }
 
 /// A deserializer over ayaml's `D` that reads what `D` reads, but for a
@@ -999,7 +1002,7 @@ pub(crate) fn indentation_hint(input: &str, error: &ayaml::Error) -> bool {
     let Some(span) = error.span() else {
         return false;
     };
-    let at = span.start().index();
+    let at = span.start();
     let (Some(before), Some(rest)) = (input.get(..at), input.get(at..)) else {
         return false;
     };
