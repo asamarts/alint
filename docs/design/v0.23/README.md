@@ -1115,6 +1115,16 @@ as #589, step 3 as #590, and step 4 is the last.
       copy where it made a `char` vector and two strings, which also halves version 1's cost on
       an 8 MB JSONC file (750.6M to 388.8M instructions).
     - Two Windows-only test expectations and the `=dirty` submodule gate were tightened.
+  - A fifth pass: a review of the fourth found that the relation phase cleared decodes that were
+    still valid and threw away what it had read at the next fix (`check --format sarif` +79%
+    when its first rule read no relation, `fix --dry-run` failing `rows_per_run` around
+    `key_parity`, `fix` +38% with a create between two readers). A pass now evaluates its
+    relations before its first rule, as `check` does, records what that phase took, does nothing
+    on an index `check` already evaluated, and after an applied fix lets go only of what the fix
+    made untrue: a move drops its paths' reads and decodes and the relation memo, a command
+    fixer clears everything, and a create or content edit keeps them. Over 72 cells (18 shapes
+    in `fix`, `--diff`, `--dry-run` and SARIF) it costs at most 1.43% more instructions than
+    before the round, and 37 scenarios give identical output, exit codes and trees in 7 modes.
   - Filed: #592 (two fields of one array element in one row, and a transform that splits a value),
     #593 (a `bound:` query that may match nothing), #594 (a `message:` placeholder for the value a
     `set` finding is about), #595 (placing a finding that a group lacks a value at the file the
