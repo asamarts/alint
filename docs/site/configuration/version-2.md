@@ -476,10 +476,12 @@ distinct-value limit, which is never truncation.
   with its offsets and what finding those places held (the document parsed again, with what its
   parser held beside the tree, such as a JSONC file's copy without its comments or the TOML lexer's
   tokens, and what was read from the parse). The relations are evaluated, and what they took
-  counted, before a rule that reads one runs: in `alint check` before every rule, and in each pass
-  of `alint fix` before the first such rule. When a fix changes the tree, the rules after it read
-  their relations again, but are checked against what the pass's relations took, and `fix
-  --dry-run` and `fix --diff`, which change nothing, place findings as `check` does. Placing takes
+  counted, before any rule runs, in `alint check` and in each pass of `alint fix`, so the run's
+  rows and bytes go to them first (in a pass of `fix` where a rule ahead of the first rule that
+  reads one may remove or move a file or run a command, just before that rule). The rules after a
+  fix that removes or moves a file, or runs a command, read their relations again, but every rule
+  of a pass is checked against what the pass's relations took, so `fix --dry-run`, `fix --diff`
+  and a pass that changes nothing place findings as `check` does. Placing takes
   nothing from it, so every rule's files are checked against the same amount, whatever other rules
   hold, and a run holds at most one such file per thread. When a file does not fit, the rule
   reports an analysis failure, not findings without places. A cell is placed only where the file

@@ -772,16 +772,17 @@ policy-test package the user does not trust.
     shows only where it starts, since its end would give away the value's length. Placing the
     findings reads each file they sit in again, one at a time. Each file must fit in what the run's
     relations left of `bytes_per_run` (the limit less what their decodes and their rows took,
-    counted once they are evaluated, before any rule that reads one runs): alone, before its
-    `read:` values' places are looked for, and then with its offsets and what finding those places
+    counted once they are evaluated, before any rule runs): alone, before its `read:` values'
+    places are looked for, and then with its offsets and what finding those places
     held (the document parsed again, with what its parser held beside the tree, such as a JSONC
     file's copy without its comments or the TOML lexer's tokens, and what was read from the
     parse). Placing takes none of it, so whether a rule's findings fit does not depend on the
-    rules placing beside it. `alint fix` evaluates the relations once a pass, before the first
-    rule that reads one, and checks every rule of the pass against what they took, though the
-    rules after a fix that changes the tree read their relations again; `fix --dry-run` and
-    `fix --diff`, which change nothing, place findings as `alint check` does. When a file does not
-    fit, the rule reports an analysis failure, not findings without places. A `read:` value's
+    rules placing beside it. `alint fix` evaluates the relations once a pass, before its first
+    rule as `alint check` does, and checks every rule of the pass against what they took; the
+    rules after a fix that removes or moves a file, or runs a command, read their relations
+    again, and `fix --dry-run`, `fix --diff` and a pass that changes nothing place findings as
+    `alint check` does. When a file does not fit, the rule reports an analysis failure, not
+    findings without places. A `read:` value's
     place is found only in the files a finding or related location sits in. A cell is placed only
     where the file read again still holds what was read there (its value, or its key for an
     entry's key), so a file changed during the run leaves a finding or related location without a
