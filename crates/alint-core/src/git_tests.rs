@@ -216,6 +216,89 @@ fn a_rename_record_adds_both_its_paths_and_the_next_record_still_parses() {
     assert_eq!((set.paths, set.directories), (paths, directories));
 }
 
+/// The working tree's set tells a submodule's commit move apart without a
+/// `git status` inside it: `diff-files --ignore-submodules=none` would walk
+/// every checked-out submodule's work tree on every `--changed` run, for edits
+/// `ls-files --modified` never lists. The set is read in a child test process,
+/// so `GIT_TRACE` reaches the Git commands it starts; Git started with `none`
+/// in the same repository shows that the edit there makes it run one.
+#[test]
+fn the_working_tree_set_runs_no_status_inside_a_dirty_submodule() {
+    const ROOT_ENV: &str = "ALINT_TEST_DIRTY_SUBMODULE_ROOT";
+    if let Some(root) = std::env::var_os(ROOT_ENV) {
+        collect_changed_set(Path::new(&root), None).expect("changed set");
+        return;
+    }
+    let source = make_repo_with_commits(&["submodule"]);
+    let repo = make_repo_with_commits(&["init"]);
+    let root = repo.path();
+    let git = |args: &[&str], trace: Option<&Path>| {
+        let mut command = crate::git::test_git();
+        command.arg("-C").arg(root).args(args);
+        if let Some(trace) = trace {
+            command.env("GIT_TRACE", trace);
+        }
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    git(
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            source.path().to_str().unwrap(),
+            "sub",
+        ],
+        None,
+    );
+    git(&["commit", "-qm", "sub"], None);
+    std::fs::write(root.join("sub").join("edited.txt"), "edited\n").unwrap();
+    let traces = tempfile::tempdir().unwrap();
+    let starts_status = |trace: &Path| {
+        let trace = std::fs::read_to_string(trace).unwrap();
+        assert!(trace.contains("diff-files"), "{trace}");
+        trace
+            .lines()
+            .any(|line| line.split_whitespace().any(|word| word == "status"))
+    };
+
+    let control = traces.path().join("none.txt");
+    git(
+        &["diff-files", "--raw", "--ignore-submodules=none", "-z"],
+        Some(&control),
+    );
+    assert!(starts_status(&control), "`none` must start a status here");
+
+    let trace = traces.path().join("set.txt");
+    let output = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "git::tests::the_working_tree_set_runs_no_status_inside_a_dirty_submodule",
+            "--nocapture",
+        ])
+        .env(ROOT_ENV, root)
+        .env("GIT_TRACE", &trace)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "child failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !starts_status(&trace),
+        "{}",
+        std::fs::read_to_string(&trace).unwrap()
+    );
+}
+
 /// The added set detects renames, and no copies, whatever the repository's
 /// `diff.renames` says: with `false` a moved changelog entry would count as a
 /// new one, and with `copies` a new file copied from a modified one would be

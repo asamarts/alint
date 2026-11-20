@@ -566,6 +566,25 @@ fn a_dirty_submodule_runs_no_status_inside_it() {
         "{\"home\": \"Home\", \"about\": \"About\"}\n",
     );
 
+    let starts_status = |trace: &Path| {
+        let trace = std::fs::read_to_string(trace).unwrap();
+        assert!(trace.contains("diff-files"), "{trace}");
+        trace
+            .lines()
+            .any(|line| line.split_whitespace().any(|word| word == "status"))
+    };
+
+    // The edit makes Git, told to look inside submodules, start a status.
+    let control = tmp.path().join("none.txt");
+    let output = crate::hermetic::git()
+        .args(["diff-files", "--raw", "--ignore-submodules=none", "-z"])
+        .current_dir(&root)
+        .env("GIT_TRACE", &control)
+        .output()
+        .expect("run git");
+    assert!(output.status.success(), "{output:?}");
+    assert!(starts_status(&control), "`none` must start a status here");
+
     let trace = tmp.path().join("trace.txt");
     let output = crate::hermetic::command(env!("CARGO_BIN_EXE_alint"))
         .args(["check", "--changed"])
@@ -575,13 +594,10 @@ fn a_dirty_submodule_runs_no_status_inside_it() {
         .output()
         .expect("run alint");
     assert_eq!(output.status.code(), Some(0), "{output:?}");
-    let trace = std::fs::read_to_string(trace).unwrap();
-    assert!(trace.contains("diff-files"), "{trace}");
     assert!(
-        !trace
-            .lines()
-            .any(|line| line.split_whitespace().any(|word| word == "status")),
-        "{trace}"
+        !starts_status(&trace),
+        "{}",
+        std::fs::read_to_string(&trace).unwrap()
     );
 }
 
