@@ -1,0 +1,106 @@
+test_version: 1
+name: conformance locale key parity over merged per-locale trees (forem-01) fires on missing, extra and empty-stub locale keys
+tags: [check, constraint, cross_file, version_two, conformance, failing]
+
+given:
+  tree:
+    config/locales/en.yml: |
+      en:
+        nav:
+          home: "Home"
+        inbox:
+          one: "1 message"
+          other: "%{count} messages"
+        date:
+          formats:
+            short: "%b %d"
+    config/locales/devise.en.yml: |
+      en:
+        errors:
+          messages:
+            blank: "can't be blank"
+    config/locales/fr.yml: |
+      fr:
+        errors:
+          messages:
+            blank: "doit être rempli"
+        inbox:
+          one: "1 message"
+          many: "%{count} de messages"
+          other: "%{count} messages"
+    config/locales/pt.yml: |
+      pt:
+        nav:
+          home: "Início"
+          legacy: "Antigo"
+        errors:
+          messages:
+            blank: "não pode ficar em branco"
+        inbox:
+          one: "1 mensagem"
+          other: "%{count} mensagens"
+    config/locales/de.yml: |
+      de: {}
+  config: |
+    version: 2
+    selectors:
+      locale-files: { paths: "config/locales/**/*.yml" }
+    relations:
+      locale-keys:
+        from: locale-files
+        entries: { format: yaml, at: "$", leaves: true }
+        fields: { locale: entry.root, key: entry.path }
+        transform: { key: [strip-root] }
+        where: { key: { not_matches: "^(date|devise|views)\\." } }
+    rules:
+      - id: locale-key-parity
+        kind: constraint
+        input: locale-keys
+        assert:
+          set:
+            group_by: locale
+            field: key
+            equal_to: { group: en }
+            groups: [de, fr, pt]
+            plurals: cldr
+        level: error
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - rule: locale-key-parity
+        level: error
+        message:
+          exact: '`locale` "de" lacks `key` "errors.messages.blank", which `locale` "en" holds'
+        related:
+          - {label: "the reference group's row with it", path: config/locales/devise.en.yml, line: 4, column: 7, end_line: 4, end_column: 12}
+      - rule: locale-key-parity
+        level: error
+        message:
+          exact: '`locale` "de" lacks `key` "inbox", which `locale` "en" holds'
+        related:
+          - {label: "the reference group's row with it", path: config/locales/en.yml, line: 6, column: 5, end_line: 6, end_column: 10}
+      - rule: locale-key-parity
+        level: error
+        message:
+          exact: '`locale` "de" lacks `key` "nav.home", which `locale` "en" holds'
+        related:
+          - {label: "the reference group's row with it", path: config/locales/en.yml, line: 3, column: 5, end_line: 3, end_column: 9}
+      - rule: locale-key-parity
+        level: error
+        path: config/locales/fr.yml
+        message:
+          exact: '`locale` "fr" lacks `key` "nav.home", which `locale` "en" holds'
+        related:
+          - {label: "the reference group's row with it", path: config/locales/en.yml, line: 3, column: 5, end_line: 3, end_column: 9}
+      - rule: locale-key-parity
+        level: error
+        path: config/locales/pt.yml
+        line: 4
+        column: 5
+        end_line: 4
+        end_column: 11
+        message:
+          exact: '`locale` "pt" holds `key` "nav.legacy", which `locale` "en" lacks'

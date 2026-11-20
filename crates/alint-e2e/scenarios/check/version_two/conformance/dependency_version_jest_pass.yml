@@ -1,0 +1,64 @@
+test_version: 1
+name: conformance dependency version consistency (jest-23) passes when ranges agree and @types/node is exempt
+tags: [check, constraint, cross_file, version_two, conformance, passing]
+
+given:
+  tree:
+    package.json: |
+      {
+        "name": "jest-root",
+        "devDependencies": {
+          "@types/node": "^22.0.0",
+          "typescript": "^5.5.4"
+        }
+      }
+    packages:
+      jest-core:
+        package.json: |
+          {
+            "name": "jest-core",
+            "dependencies": {
+              "chalk": "^5.3.0"
+            },
+            "devDependencies": {
+              "@types/node": "^20.14.0",
+              "typescript": "^5.5.4"
+            }
+          }
+      jest-util:
+        package.json: |
+          {
+            "name": "jest-util",
+            "dependencies": {
+              "chalk": "^5.3.0"
+            },
+            "optionalDependencies": {
+              "@types/node": "^18.19.0"
+            }
+          }
+  config: |
+    version: 2
+    selectors:
+      workspace-manifests:
+        paths: ["package.json", "packages/*/package.json"]
+    relations:
+      dependency-ranges:
+        from: workspace-manifests
+        entries:
+          format: json
+          at: ["$.dependencies", "$.devDependencies", "$.optionalDependencies"]
+        fields: { field: entry.parent, dependency: entry.key, range: entry.value }
+        where:
+          dependency: { not_in: ["@types/node"] }
+    rules:
+      - id: one-range-per-dependency
+        kind: constraint
+        input: dependency-ranges
+        assert: { unique: { key: [dependency], determines: [range] } }
+        level: error
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

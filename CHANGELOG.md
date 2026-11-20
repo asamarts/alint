@@ -709,8 +709,11 @@ policy-test package the user does not trust.
   - A docs page, `docs/site/configuration/version-2.md`, describes version 2: the version
     boundary, named selectors, relations (`entries:`, `read:`, `union:`, `join:`, fields,
     `transform:` and `where:`), names, aliases and per-file namespaces, what the loader and the
-    draft schema check, trust, the limits of this release and the three policies the `constraint`
-    kind is designed against. A test loads and validates each of its examples.
+    draft schema check, trust, the limits of this release and the three conformance policies
+    (dependency version consistency, locale key parity and toolchain-pin consistency, with the
+    shorter version 1 `key_parity` and `cross_file` spellings shown alongside their version 2
+    forms). A test loads and validates each of its examples, and the three conformance policies
+    ship firing and silent `alint test` cases.
 - **The `constraint` rule kind (version 2 only, experimental)**
   ([design](docs/design/v0.23/selectors-and-constraints.md), sections 6, 8, 10 and 11). A
   `constraint` rule reads one relation, its `input:` (a name, bare or qualified by an `extends:`

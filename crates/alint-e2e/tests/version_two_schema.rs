@@ -338,10 +338,12 @@ fn yaml_blocks(markdown: &str) -> Vec<(usize, String)> {
     blocks
 }
 
-/// Every `yaml` example of the version 2 page loads and validates against
-/// the draft schema. A block whose first line is `# file: <path>` is a file
-/// the others extend (or an `.alint.d/` fragment): it is written there, beside
-/// the `.alint.yml` each other block is loaded as.
+/// Every `yaml` example of the version 2 page loads and validates against the
+/// schema for its declared version (version 1 for the specialized comparison
+/// spellings, the draft version 2 schema for the rest). A block whose first
+/// line is `# file: <path>` is a file the others extend (or an `.alint.d/`
+/// fragment): it is written there, beside the `.alint.yml` each other block is
+/// loaded as.
 #[test]
 fn the_version_two_page_examples_load_and_validate() {
     let page = workspace().join("docs/site/configuration/version-2.md");
@@ -363,15 +365,29 @@ fn the_version_two_page_examples_load_and_validate() {
         assert!(errors.is_empty(), "line {line}:\n{}", errors.join("\n"));
     }
     let root = tmp.path().join(".alint.yml");
+    let v1_tmp = tempfile::tempdir().unwrap();
+    let v1_root = v1_tmp.path().join(".alint.yml");
+    let mut v1_configs = 0;
+    let mut v2_configs = 0;
     for (line, body) in &configs {
-        std::fs::write(&root, body).unwrap();
-        if let Err(error) = support::load(&root) {
+        let config = json_of(body);
+        let target = match config["version"].as_u64() {
+            Some(1) => {
+                v1_configs += 1;
+                &v1_root
+            }
+            Some(2) => {
+                v2_configs += 1;
+                &root
+            }
+            other => panic!("line {line}: unexpected config version {other:?}"),
+        };
+        std::fs::write(target, body).unwrap();
+        if let Err(error) = support::load(target) {
             panic!("the example at line {line} does not load: {error}\n{body}");
         }
-        let config = json_of(body);
-        assert_eq!(config["version"], 2, "line {line}");
         let errors = schema_errors(&config);
         assert!(errors.is_empty(), "line {line}:\n{}", errors.join("\n"));
     }
-    assert_eq!((files.len(), configs.len()), (2, 11));
+    assert_eq!((files.len(), v1_configs, v2_configs), (2, 2, 12));
 }

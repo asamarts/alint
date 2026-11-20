@@ -1,0 +1,78 @@
+test_version: 1
+name: conformance locale key parity over merged per-locale trees (forem-01) passes with relocated keys, CLDR plurals and ignored prefixes
+tags: [check, constraint, cross_file, version_two, conformance, passing]
+
+given:
+  tree:
+    config/locales/en.yml: |
+      en:
+        nav:
+          home: "Home"
+        inbox:
+          one: "1 message"
+          other: "%{count} messages"
+        date:
+          formats:
+            short: "%b %d"
+    config/locales/devise.en.yml: |
+      en:
+        errors:
+          messages:
+            blank: "can't be blank"
+        devise:
+          sessions:
+            signed_in: "Signed in"
+    config/locales/fr.yml: |
+      fr:
+        nav:
+          home: "Accueil"
+        errors:
+          messages:
+            blank: "doit être rempli"
+        inbox:
+          one: "1 message"
+          many: "%{count} de messages"
+          other: "%{count} messages"
+        views:
+          banner: "Français uniquement"
+    config/locales/pt.yml: |
+      pt:
+        nav:
+          home: "Início"
+        inbox:
+          one: "1 mensagem"
+          other: "%{count} mensagens"
+    config/locales/sub/errors.pt.yml: |
+      pt:
+        errors:
+          messages:
+            blank: "não pode ficar em branco"
+  config: |
+    version: 2
+    selectors:
+      locale-files: { paths: "config/locales/**/*.yml" }
+    relations:
+      locale-keys:
+        from: locale-files
+        entries: { format: yaml, at: "$", leaves: true }
+        fields: { locale: entry.root, key: entry.path }
+        transform: { key: [strip-root] }
+        where: { key: { not_matches: "^(date|devise|views)\\." } }
+    rules:
+      - id: locale-key-parity
+        kind: constraint
+        input: locale-keys
+        assert:
+          set:
+            group_by: locale
+            field: key
+            equal_to: { group: en }
+            groups: [fr, pt]
+            plurals: cldr
+        level: error
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

@@ -865,3 +865,133 @@ B-config unit (rushstack-b14).
 - **immich-36** stays D: it runs project code, besides needing the base revision's spec.
 - **nextcloud-50** stays D, with its reason rewritten: it gates when merges may happen, keyed on
   another branch's state, rather than checking content.
+
+## Phase 8 re-scoring (2026-11-20)
+
+Phase 8 audited every unit in ADR-0033's projected slice (69 units: 43 B-config and 26 B-adapter
+with `needs: entry-values` in `equality`, `unique-key` and `set`, plus `forem-01` under grouped
+set equality) against the shipped `version: 2` relation evaluator and `constraint` kind, verifying
+non-trivial shapes directly against the release binary. The committed stratum JSON records under
+[`stratum/`](stratum/) and the `version: 1` configurations under [`../v0.12/corpus/`](../v0.12/corpus/)
+stay unchanged so `xtask corpus-replay` against v0.22.1 and `cargo test -p xtask` keep their
+baselines; this section records the Phase 8 re-scoring.
+
+### Totals against Today and ADR-0033 projections
+
+Percentages are `A / (A + B + C)`. "Phase 8 (projected set)" counts only the units from ADR-0033's
+69-unit projected set that the shipped slice expresses cleanly as A; "Phase 8 (+C->A)" also counts
+four C units that `entries:` promotes to A by replacing layout-dependent key regexes (log finding
+6). Units expressible only awkwardly (self-disjoint `set` to assert emptiness, or a regex over
+frontmatter/Go source) move to C and stay out of A.
+
+| Family | Units | Non-D | Today | ADR-0033 projected | Phase 8 (projected set) | Phase 8 (+C->A) | Moved B->C |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| `locale` | 134 | 114 | 25 (22%) | 40 (35%) | 32 (28%, +7) | 32 (28%, +7) | 2 |
+| `dep-version` | 170 | 104 | 45 (43%) | 63 (61%) | 56 (54%, +11) | 59 (57%, +14) | 1 |
+| `toolchain-pin` | 81 | 65 | 41 (63%) | 41 (63%) | 41 (63%, +0) | 41 (63%, +0) | 0 |
+| `other` | 1,173 | 677 | 376 (56%) | 412 (61%) | 397 (59%, +21) | 398 (59%, +22) | 3 |
+| **Pooled** | 1,558 | 960 | 487 (51%) | 556 (58%) | 526 (55%, +39) | 530 (55%, +43) | 6 |
+
+By stratum:
+
+| Stratum | Family | Units | Non-D | Today | ADR-0033 projected | Phase 8 (projected set) | Phase 8 (+C->A) |
+|---|---|--:|--:|--:|--:|--:|--:|
+| i18n | `locale` | 129 | 109 | 22% | 35% | 28% (+7) | 28% (+7) |
+| i18n | `dep-version` | 57 | 22 | 50% | 55% | 50% (+0) | 55% (+1) |
+| i18n | `toolchain-pin` | 40 | 31 | 65% | 65% | 65% (+0) | 65% (+0) |
+| i18n | `other` | 630 | 354 | 62% | 66% | 63% (+3) | 64% (+4) |
+| i18n | **all** | 856 | 516 | 53% | 59% | 55% (+10) | 56% (+12) |
+| JavaScript monorepo | `locale` | 5 | 5 | 20% | 40% | 20% (+0) | 20% (+0) |
+| JavaScript monorepo | `dep-version` | 113 | 82 | 41% | 62% | 55% (+11) | 57% (+13) |
+| JavaScript monorepo | `toolchain-pin` | 41 | 34 | 62% | 62% | 62% (+0) | 62% (+0) |
+| JavaScript monorepo | `other` | 543 | 323 | 48% | 56% | 54% (+18) | 54% (+18) |
+| JavaScript monorepo | **all** | 702 | 444 | 48% | 57% | 54% (+29) | 55% (+31) |
+
+### Unit-by-unit audit of ADR-0033's 69 projected units
+
+#### `locale` (15 projected: 7 confirmed A, 2 moved B->C, 6 remain B)
+
+- **Confirmed A (7: 6 B-config, 1 entry-values):**
+  - `forem-01` (B-config, merged per-locale YAML trees): `entries: { format: yaml, at: "$", leaves: true }`, `fields: { locale: entry.root, key: entry.path }`, `transform: { key: [strip-root] }`, `where:` prefix filter, `set: equal_to: { group: en }`, `groups: [fr, pt]`, `plurals: cldr`.
+  - `mattermost-03` (B-config): `read: { json: "$[*].id" }`, `unique: { key: [file, id] }`.
+  - `mattermost-09` (B-config): `entries` on `server_plurals.json` (`entry.key`) `set: equal_to` `read: { whole_file: {} }` (`stem`) over non-English `server/i18n/*.json`.
+  - `mattermost-28` (B-config): `i18n/glossary/*.json` stems `set: equal_to` a `union:` of `server/i18n/*.json` and `webapp/channels/src/i18n/*.json` stems.
+  - `mattermost-33` (B-config): `entries` on `i18n/style.json` (`entry.key`) `set: subset_of` the catalog union above.
+  - `rocketchat-10` (B-config): duplicate-aware `entries: { format: json, at: "$" }` over flat `*.i18n.json` files, `unique: { key: [file, key] }`.
+  - `mattermost-21` (entry-values): `en.json` (`entries` at `"$.*"`, `field == "defaultMessage"`, value matches `(?:^|[^'])(?:'')*'(?:<|\{)`) and translation catalogs (`entries` at `"$"`, `where: { key: { in: [{ relation: en-keys, field: key }] }, val: { matches: ... } }` so extra keys absent from `en.json` are skipped as `check_icu.mjs` does), `set: { field: key, group_by: file, subset_of: { relation: en-apos, field: key } }`.
+- **Moved B->C (2, not counted in A):**
+  - `mattermost-b01` (B-config): set equality works via `set: equal_to` (plus `unique:` on the slice), but extracting `supportedLocales` from `i18n.go` relies on a one-layout Go slice regex (same ruling as `mattermost-b02`).
+  - `element-web-06` (entry-values): exact semantics run on the binary via `where: { value: { matches: '(?i)\belement\b' }, key: { not_in: [...] } }` and a self-disjoint `set: disjoint_from` against the filtered relation itself; asserting emptiness that way is awkward and awaits `bounded-count` (`max: 0`) or an inline literal `set` target in v0.24.
+- **Remain B (6: 2 B-config, 4 entry-values):**
+  - `mattermost-27` (`union:` shares one `fields:` map, so `entries:` `entry.key` cannot union with `read:` `$.*.aliases[*]` `value`).
+  - `strapi-21` (needs suffix-strip transform `.singular`/`.plural` -> prefix, #592).
+  - `element-web-05` (needs negated row-level equality `value != key` and `|`-joined key path).
+  - `mattermost-07` (array-of-objects rows #592 and distinguishing scalar vs plural-object value kinds).
+  - `mattermost-32` (sibling `aliases` array fails `entry.value` before `where:` runs; sibling-field rows need #592).
+  - `mattermost-35` (per-entry two-array disjointness with conditional `matchCase` folding).
+
+#### `dep-version` (18 projected: 11 confirmed A, 1 moved B->C, 6 remain B)
+
+- **Confirmed A (11: 3 B-config, 8 entry-values):**
+  - `jest-24`, `rushstack-51`, `trpc-08` (B-config): `entries` over the forbidden dependency maps, `unique: { key: [manifest, dependency] }`.
+  - `jest-23`, `trpc-05`, `yarnpkg-berry-01` (entry-values): the three flagship dependency-version conformance policies (shipped with firing and silent `alint test` cases; `yarnpkg-berry-01` carries the documented `selectors-and-constraints.md` sections 7 and 16 note that the workspace-package exemption covers all non-peer fields rather than dev-only, agreeing at berry's pin because workspace deps use `workspace:^`).
+  - `tq-10` (entry-values): root and `packages/*` minus integrations/examples, ignoring `typescript` and `catalog:/workspace:/npm:`, `unique: { key: [dependency], determines: [range] }`.
+  - `strapi-02` (entry-values): prod and dev dependencies excluding `docs/**` and `test-apps/**`, `where:` exact-semver regex, `unique: { key: [dependency], determines: [range] }`.
+  - `babel-11` (entry-values): non-root, non-internal workspaces, `where: { range: { not_matches: "^(workspace|catalog|link):" } }`, `unique: { key: [dependency], determines: [manifest] }`.
+  - `wsdk-09` (entry-values): non-protocol dependencies (excluding `workerd`) `set: disjoint_from` `pnpm-workspace.yaml` `$.catalog` keys.
+  - `fluentui-17` (entry-values): syncpack source manifests outside the carve-out version groups (`unique: { key: [dependency], determines: [range] }`; if any carve-out in `syncpack.config.js` pairs one package with a multi-package dependency, excluding `fluentui-17` puts `dep-version` at 55/104 = 53% on the projected set and 58/104 = 56% with C->A).
+- **Moved B->C (1, not counted in A):**
+  - `babel-12` (entry-values): exact semantics run on the binary via an inner `join` of `prod-deps` (`range not_matches "^condition:"`) and `dev-deps` on `{ manifest: manifest, dep: dep }` (`unique: right`) plus self-disjoint `set` to assert the join is empty; awaits `bounded-count` (`max: 0`) for clean A.
+- **Remain B (6: 2 B-config, 4 entry-values):**
+  - `fluentui-24`, `trpc-07` (per-manifest key subset; `set` cannot compare two key sets per manifest and `join` is inner-only).
+  - `nextcloud-b02` (the equality half is confirmed via `join` + row-level `equal` `to: { field: spec }`, `selectors-and-constraints.md` section 8, but the `$<name>` reference half needs prefix-strip #592 and `reference` in v0.24; under the tokio ruling the folded unit stays B).
+  - `rushstack-01` (per-dependency `allowedAlternativeVersions` pair allowlist).
+  - `tq-11` (needs a dependency-to-similar-family mapping transform).
+  - `wsdk-06` (allowlist lives in a block-scoped TypeScript array literal beside `IGNORED_DIST_IMPORTS`).
+
+#### `toolchain-pin` (0 projected)
+
+Remains 41/65 (63%), as ADR-0033 projected. All 13 B-adapter units need `version-compare`.
+`signal-desktop-28` (already A via v1 `cross_file` `equals`) is re-expressed as a v2 `constraint`
+conformance policy for the section 12.1 comparison.
+
+#### `other` (36 projected: 21 confirmed A, 3 moved B->C, 12 remain B)
+
+- **Confirmed A (21, all B-config):**
+  - 8 unique workspace/project name units (`read: { json: "$.name" }` + `unique: { key: [name] }`): `babel-B01`, `backstage-69`, `fluentui-25`, `fluentui-26`, `jest-B02`, `strapi-b04`, `tq-35`, `trpc-B05`.
+  - 7 unique JSON array-element value units (`read: { json: ... }` + `unique:`): `ghost-45`, `rushstack-13`, `rushstack-60`, `rushstack-b02`, `rushstack-b14` (pairs with its v1 schema rule), `strapi-24`, `tq-33` (`$.fixed[*][*]`).
+  - 2 regex-extracted unique-value units: `zulip-52` (template element ids, matching the upstream tool's regex minus `IGNORE_IDS`), `fluentui-b08` (`<Meta title>` with `lower`, per the record's note that exact title uniqueness is the faithful key).
+  - 4 cross-file `set` units (each verified on the binary): `immich-20` (`ORDER` lines `equal_to` migration stems), `strapi-62` (`tags.yml` keys `disjoint_from` package leaf folder names, paired with v1 `yaml_path_absent` for the three status literals), `trpc-17` (two-way equality between `.agents/skills/*/SKILL.md` `parent_name` and the union of `skills-lock.json` `$.skills` keys and `.oxfmtrc.json` negated entries via three `set: subset_of` rules: `(skills \ in-repo) subset_of installed`, `installed subset_of skills` and `in-repo subset_of skills`), `wsdk-17` (`optional: true` `$.scripts.build` `dir` `subset_of` `optional: true` `$.tasks.build.outputs[*]` `dir`).
+- **Moved B->C (3, not counted in A):**
+  - `strapi-59`, `trpc-27` (`unique:` expresses uniqueness, but frontmatter values are still read by regex).
+  - `ghost-63` (`followUps` keys `subset_of` `standard` keys and non-empty check are clean A via `set: subset_of`, while the allowed-field check uses self-disjoint `set`).
+- **Remain B (12: 5 B-config, 7 entry-values):**
+  - `mattermost-56`, `zulip-28`: **caught by binary verification.** `entries: { format: yaml, at: "$", leaves: true }` catches duplicate leaf keys, but misses duplicate non-leaf mapping keys with disjoint children (`jobs: { a: 1 }` / `jobs: { b: 2 }`) and never descends into YAML sequence elements (`steps: [{ name: a, name: b }]`). General duplicate-key detection still needs a dedicated `no_duplicate_keys` (gap B1) or document-wide key stream.
+  - `rushstack-47` (`operationName` uniqueness works, but the folded overlapping-output-folders check does not; tokio ruling).
+  - `trpc-24` (composite key from two fields of one array element, #592).
+  - `forem-48` (block-scoped Ruby `%w[]` array literal).
+  - All 7 `other` `entry-values` units (`backstage-20`, `backstage-b07`, `fluentui-19`, `forem-b08`, `ghost-68`, `mattermost-63`, `thunderbird-android-55`): need structured/subtree values, derived keys, array-of-objects pairing (#592), or negated equality (`thunderbird-android-55`).
+
+#### Separate C->A promotions from key selection (4 units)
+
+Because `entries:` reads JSON, YAML and TOML mapping keys directly without layout-dependent line
+regexes (finding 6), four units previously classified C promote cleanly to A (verified on the
+binary): `strapi-06` (`dep-version`, `.yarnrc.yml` `$.catalog` keys), `wsdk-74` (`dep-version`,
+`pnpm-workspace.yaml` `$.catalog` keys), `thunderbird-android-b03` (`dep-version`,
+`gradle/libs.versions.toml` `$.versions` and `$.libraries` keys against `$.libraries.*.version.ref`
+and `$.bundles.*[*]`), and `thunderbird-android-53` (`other`, `$.overrides.*.*` keys against
+`$.flags[*].key`). None of the 11 `reference` B units promotes in v0.23.
+
+### v2 locale parity vs `key_parity` (`selectors-and-constraints.md` section 16)
+
+- **Merged per-locale trees (`forem-01`):** `key_parity` requires 114 per-file rules and gives 8
+  false positives at forem's pin from keys relocated between files across locales. The v2
+  `constraint` `set` policy merges every file per `entry.root`, collapses CLDR plural groups,
+  filters `date.*`, `devise.*` and `views.*` prefixes before plural collapse, and enforces required
+  locales via `groups: [fr, pt]` with zero false positives on relocated keys.
+- **Per-file locales:** `key_parity` remains shorter (8 vs 17 non-comment lines), faster and lower
+  memory (see `general-linter.md` section 12.4 for the Phase 8 benchmark table). `where:` runs
+  before CLDR plural collapse in v2 while `ignore_keys` runs after it in `key_parity`, which agrees
+  for whole-subtree prefix ignores and differs only if a filter drops individual members of a
+  plural object.
+

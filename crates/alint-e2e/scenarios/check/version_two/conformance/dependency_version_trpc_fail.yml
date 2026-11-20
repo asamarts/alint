@@ -1,0 +1,78 @@
+test_version: 1
+name: conformance dependency version consistency (trpc-05) fires on mismatched external ranges while ignoring protocol specifiers
+tags: [check, constraint, cross_file, version_two, conformance, failing]
+
+given:
+  tree:
+    packages:
+      client:
+        package.json: |
+          {
+            "name": "@trpc/client",
+            "dependencies": {
+              "@trpc/server": "workspace:*",
+              "zod": "^3.23.8"
+            },
+            "devDependencies": {
+              "typescript": "catalog:"
+            }
+          }
+      server:
+        package.json: |
+          {
+            "name": "@trpc/server",
+            "dependencies": {
+              "zod": "^3.22.4"
+            },
+            "devDependencies": {
+              "typescript": "^5.9.2"
+            }
+          }
+  config: |
+    version: 2
+    selectors:
+      workspace-manifests:
+        paths: ["package.json", "packages/*/package.json"]
+    relations:
+      dependency-ranges:
+        from: workspace-manifests
+        entries:
+          format: json
+          at: ["$.dependencies", "$.devDependencies", "$.optionalDependencies"]
+        fields: { field: entry.parent, dependency: entry.key, range: entry.value }
+        where:
+          range: { not_matches: "^(catalog|npm|workspace):" }
+    rules:
+      - id: one-range-per-dependency
+        kind: constraint
+        input: dependency-ranges
+        assert: { unique: { key: [dependency], determines: [range] } }
+        level: error
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - rule: one-range-per-dependency
+        level: error
+        path: packages/client/package.json
+        line: 5
+        column: 12
+        end_line: 5
+        end_column: 21
+        message:
+          exact: 'rows with `dependency` "zod" disagree on `range`: "^3.23.8" here; "^3.22.4" in 1 row'
+        related:
+          - {label: a row with another value, path: packages/server/package.json, line: 4, column: 12, end_line: 4, end_column: 21}
+      - rule: one-range-per-dependency
+        level: error
+        path: packages/server/package.json
+        line: 4
+        column: 12
+        end_line: 4
+        end_column: 21
+        message:
+          exact: 'rows with `dependency` "zod" disagree on `range`: "^3.22.4" here; "^3.23.8" in 1 row'
+        related:
+          - {label: a row with another value, path: packages/client/package.json, line: 5, column: 12, end_line: 5, end_column: 21}

@@ -1,6 +1,6 @@
 # v0.23: selectors, a first constraint slice, and the YAML groundwork
 
-Status: accepted (2026-11-12, ADR-0032); in progress, phases 0 to 6 merged.
+Status: accepted (2026-11-12, ADR-0032); in progress, phases 0 to 8 done (feature freeze reached; phase 9 waits on an ayaml release).
 Decisions: [ADR-0032](../../adr/0032-v023-owner-decisions.md) (the owner decisions and the scope);
 [ADR-0033](../../adr/0033-v023-slice-after-the-corpus-stratum.md) (the slice after the corpus
 stratum, and the #503 fix);
@@ -23,7 +23,15 @@ facade with test-only reference parsers);
 [ADR-0042](../../adr/0042-measure-the-yaml-parser-by-memory-and-wall-time.md) (measuring YAML
 memory and wall time, after the audit);
 [ADR-0043](../../adr/0043-trust-and-disclosure-decisions-from-the-post-v0221-audit.md) (the
-trust and disclosure decisions of the audit after v0.22.1).
+trust and disclosure decisions of the audit after v0.22.1);
+[ADR-0044](../../adr/0044-untrusted-runs-git-as-a-process-and-a-wider-memory-gate.md)
+(`--untrusted`, Git as a process, and the wider YAML memory gate);
+[ADR-0045](../../adr/0045-count-the-walks-per-directory-probes-in-the-reference-gate.md) (counting
+the walk's per-directory ignore probes in the reference gate);
+[ADR-0046](../../adr/0046-a-linear-extends-merge-sealed-options-and-the-rounds-open-questions.md)
+(linear `extends:` merge, sealed `LspOptions`/`LoadOptions`, and round-2 open questions);
+[ADR-0047](../../adr/0047-sarif-tells-apart-a-fingerprint-repeated-within-a-run.md) (SARIF
+disambiguating repeated fingerprints within a run).
 
 v0.23 starts Phase 3 of [`general-linter.md`](../general-linter.md) (section 11.6), which v0.22.0
 unblocked by meeting all three gates of Phase 2 (section 11.1, "v0.22 gate results"). Phase 3 is
@@ -1155,3 +1163,40 @@ as #589, step 3 as #590, and step 4 is the last.
   same source wrote last is not merged again, nor charged, so `[a, b]` 1,000 times over rulesets
   of 2,000 rules (#567) is refused by a budget with each later entry looking each rule up.
   - Next: phase 8 (the three conformance policies).
+- 2026-11-20: phase 8, the three conformance policies, section 12.1 measurements and the corpus
+  stratum re-scoring.
+  - **Conformance policy scenarios:** 14 `alint test` cases (7 passing, 7 failing) under
+    `crates/alint-e2e/scenarios/check/version_two/conformance/` cover dependency version
+    consistency (`jest-23`, `trpc-05`, `yarnpkg-berry-01`), merged per-locale key parity
+    (`forem-01`, including relocated keys across files, `strip-root`, `plurals: cldr`, prefix
+    filtering and `groups:`), per-file JSON locale parity, toolchain-pin consistency
+    (`signal-desktop-28`, including missing-pin findings), and aliased local `extends:`
+    composition (`support/shared_deps.yaml`). The scenario inventory grows to 680 (586 general,
+    94 bundled), and `scenario-fingerprints.json` adds only the new findings (zero existing
+    fingerprints changed).
+  - **Documentation and specialized-kind length check (section 12.1):**
+    `docs/site/configuration/version-2.md` now shows both the shorter v1 spellings (`key_parity`,
+    `cross_file` `equals`) and their v2 `constraint` equivalents, all validated by
+    `version_two_schema.rs` (2 extended/fragment files, 2 v1 configs, 12 v2 configs). Specialized
+    v1 spellings stay shorter: 8 vs 17 non-comment lines (158 vs 388 B) for per-file JSON locale
+    parity, 9 vs 18 lines for YAML, 11 vs 15 lines (391 vs 561 B) for `signal-desktop-28`
+    toolchain pins, and 8 vs 15 lines against `toolchain-pins@v1` for multi-surface Node pins.
+  - **Performance (release binary, Linux x86_64):** per-file v2 locale `set` runs at 1.50x to
+    1.83x `Ir` and 1.24x to 1.81x peak RSS of `key_parity` (100k JSON rows: 840.3 ms / 4,703.2M
+    `Ir` / 113.0 MiB against 360.2 ms / 3,134.8M `Ir` / 62.5 MiB); `signal-desktop-28` toolchain
+    pins in a 10k-file tree match `cross_file` within 1% to 3% `Ir` (22.8 ms / 157.3M `Ir`
+    against 22.3 ms / 155.2M `Ir`), and a single multi-surface v2 Node union uses 11% fewer `Ir`
+    than the three bundled Node rules; dependency version consistency scales linearly across 100
+    (4k rows: 39.6 ms / 100.6M `Ir` / 19.1 MiB), 500 (25k rows: 185.3 ms / 539.0M `Ir` /
+    39.3 MiB) and 1,000 packages (50k rows: 379.7 ms / 1,065.7M `Ir` / 64.3 MiB).
+  - **Corpus stratum re-scoring and section 11.1 stop rule:** auditing all 69 units of ADR-0033's
+    projected set against the shipped slice confirms 39 clean A (30 B-config, 9 entry-values),
+    moves 6 from B to C (awkward) and leaves 24 B, with 4 separate C->A promotions from
+    `entries:` key selection (`corpus-stratum-log.md`, `general-linter.md` section 12.4).
+    Coverage moves from Today: `locale` 22% to 28%, `dep-version` 43% to 54% (57% with C->A),
+    `toolchain-pin` 63% to 63%, `other` 56% to 59%, pooled 51% to 55%. Binary verification caught
+    that `entries: leaves: true` misses duplicate non-leaf YAML keys with disjoint children and
+    keys inside sequences (`mattermost-56`, `zulip-28`). The section 11.1 stop rule is met, and
+    v0.23 reaches feature freeze (phases 1 to 8, #503 and #580 complete).
+  - Next: phase 9 (ayaml bump once an upstream release carries ADR-0043's compatibility fixes and
+    meets ADR-0042/ADR-0044's 1.2x memory gate across all nine shapes), then phase 10 (release).

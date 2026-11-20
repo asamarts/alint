@@ -570,6 +570,41 @@ other }` as one key, `inbox`, and `items_one`, `items_other` as `items`. Grouped
 token instead (`fields: { locale: stem, ... }`), every file is a group, and an empty one lacks
 every key at that file.
 
+When each locale lives in one file rather than merged across several, keep the specialized
+version 1 [`key_parity`](/docs/rules/cross-file/key_parity/) kind: it is shorter, faster and uses
+less memory than the `constraint` form. Both spellings for per-file JSON locales:
+
+```yaml
+version: 1
+rules:
+  - id: locale-key-parity
+    kind: key_parity
+    reference: locales/en.json
+    peers: "locales/*.json"
+    plurals: cldr
+    level: error
+```
+
+```yaml
+version: 2
+relations:
+  locale-keys:
+    from: { paths: "locales/*.json" }
+    entries: { format: json, at: "$", leaves: true }
+    fields: { locale: stem, key: entry.path }
+rules:
+  - id: locale-key-parity
+    kind: constraint
+    input: locale-keys
+    assert:
+      set:
+        field: key
+        group_by: locale
+        equal_to: { group: en }
+        plurals: cldr
+    level: error
+```
+
 **Every dependency approved**, against another relation's field:
 
 ```yaml
@@ -595,9 +630,28 @@ rules:
     level: error
 ```
 
-**Toolchain pins that agree**: one row per place a Node version is pinned, each compared with the
+**Toolchain pins that agree**: for exact pins across fixed files, the specialized version 1
+[`cross_file`](/docs/rules/cross-file/cross_file/) `equals` kind (or the bundled
+`alint://bundled/toolchain-pins@v1` ruleset, which also carries `sync_from` fixes) stays shorter
+than the version 2 `union:` spelling. Both spellings for Node pins anchored on `.nvmrc`:
+
+```yaml
+version: 1
+rules:
+  - id: node-pins-agree
+    kind: cross_file
+    source: { file: .nvmrc, extract: { regex: "^v?(\\S+)" } }
+    targets:
+      - { file: package.json, extract: { json: "$.engines.node" } }
+      - { file: package.json, extract: { json: "$.devEngines.runtime.version" } }
+      - { file: package.json, extract: { json: "$.volta.node" } }
+    relation: equals
+    level: error
+```
+
+In version 2, a `union:` gives one row per place a Node version is pinned, each compared with the
 row `.nvmrc` gives. A part whose path a file lacks gives a row without a value, which differs from
-`.nvmrc`'s.
+`.nvmrc`'s, matching `cross_file`'s missing-target finding:
 
 ```yaml
 version: 2

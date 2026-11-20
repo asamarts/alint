@@ -1,0 +1,50 @@
+test_version: 1
+name: conformance per-file locale key parity passes when nested JSON keys and CLDR plural suffixes match
+tags: [check, constraint, cross_file, version_two, conformance, passing]
+
+given:
+  tree:
+    locales/en.json: |
+      {
+        "nav": { "home": "Home" },
+        "items_one": "1 item",
+        "items_other": "{{count}} items"
+      }
+    locales/de.json: |
+      {
+        "nav": { "home": "Startseite" },
+        "items_one": "1 Eintrag",
+        "items_other": "{{count}} Einträge"
+      }
+    locales/pl.json: |
+      {
+        "nav": { "home": "Strona główna" },
+        "items_one": "1 element",
+        "items_few": "{{count}} elementy",
+        "items_many": "{{count}} elementów",
+        "items_other": "{{count}} elementów"
+      }
+  config: |
+    version: 2
+    relations:
+      locale-keys:
+        from: { paths: "locales/*.json" }
+        entries: { format: json, at: "$", leaves: true }
+        fields: { locale: stem, key: entry.path }
+    rules:
+      - id: locale-key-parity
+        kind: constraint
+        input: locale-keys
+        assert:
+          set:
+            field: key
+            group_by: locale
+            equal_to: { group: en }
+            plurals: cldr
+        level: error
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

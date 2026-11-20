@@ -1854,6 +1854,120 @@
     "fingerprint": "a2f257d5622baf01fcbb21263a2c2484b6833897e6fbec169966d3edf6ca1037"
   },
   {
+    "scenario": "check/version_two/conformance/dependency_version_berry_fail.yml",
+    "rule_id": "one-range-per-dependency",
+    "path": "packages/plugin-npm/package.json",
+    "fingerprint": "4a91b7b2fc7b627a242309ea18216e9fa203ba049e8df2df1e338be2699b2578"
+  },
+  {
+    "scenario": "check/version_two/conformance/dependency_version_berry_fail.yml",
+    "rule_id": "one-range-per-dependency",
+    "path": "packages/plugin-patch/package.json",
+    "fingerprint": "5ced70566bbf2bd1644e1f9e29a785a5ae1ad1ad482cec7f3a0b99a7dd0b4492"
+  },
+  {
+    "scenario": "check/version_two/conformance/dependency_version_jest_fail.yml",
+    "rule_id": "one-range-per-dependency",
+    "path": "packages/jest-core/package.json",
+    "fingerprint": "4854a8dce222b80d580b93649f32d3c1a2fb07055bfd793cc551a8dacdb9f4c4"
+  },
+  {
+    "scenario": "check/version_two/conformance/dependency_version_jest_fail.yml",
+    "rule_id": "one-range-per-dependency",
+    "path": "packages/jest-util/package.json",
+    "fingerprint": "5946b016885a912f680f6196513792befd1a1bb307712591f0c8af5720224f37"
+  },
+  {
+    "scenario": "check/version_two/conformance/dependency_version_trpc_fail.yml",
+    "rule_id": "one-range-per-dependency",
+    "path": "packages/client/package.json",
+    "fingerprint": "6428fa7b1eeadeac9a1e312a4f2d1a1bf9e767bf745bc3ee18a03fe80ffaef15"
+  },
+  {
+    "scenario": "check/version_two/conformance/dependency_version_trpc_fail.yml",
+    "rule_id": "one-range-per-dependency",
+    "path": "packages/server/package.json",
+    "fingerprint": "876ebbb87a7f6726ab0559ff6bb4911c094b70505a1fa044d94ec480dbde8d4d"
+  },
+  {
+    "scenario": "check/version_two/conformance/extends_alias_policy_fail.yml",
+    "rule_id": "one-range-per-dependency",
+    "path": "packages/api/package.json",
+    "fingerprint": "6428fa7b1eeadeac9a1e312a4f2d1a1bf9e767bf745bc3ee18a03fe80ffaef15"
+  },
+  {
+    "scenario": "check/version_two/conformance/extends_alias_policy_fail.yml",
+    "rule_id": "one-range-per-dependency",
+    "path": "packages/web/package.json",
+    "fingerprint": "892bfc03cb891158d79e9ecba0a1feb6a60f5358e69b86bea8987832a0197e8a"
+  },
+  {
+    "scenario": "check/version_two/conformance/locale_key_parity_merged_fail.yml",
+    "rule_id": "locale-key-parity",
+    "path": null,
+    "fingerprint": "8c1dcb1ab8e14290d17dddb83c8fdadaed08a771f966d74d168e2bf43fecd69f"
+  },
+  {
+    "scenario": "check/version_two/conformance/locale_key_parity_merged_fail.yml",
+    "rule_id": "locale-key-parity",
+    "path": null,
+    "fingerprint": "950a7e59aecffd71065214e39f8720a2bf2cfee5734880bcb96257df3c1935d9"
+  },
+  {
+    "scenario": "check/version_two/conformance/locale_key_parity_merged_fail.yml",
+    "rule_id": "locale-key-parity",
+    "path": null,
+    "fingerprint": "9957a1e96c87532f8fd8ada58a2984df1e5a887347859d0282ed88e7c9821edc"
+  },
+  {
+    "scenario": "check/version_two/conformance/locale_key_parity_merged_fail.yml",
+    "rule_id": "locale-key-parity",
+    "path": "config/locales/fr.yml",
+    "fingerprint": "61ee6ee2ad6a4d2646beb9c884492fbeb6e8c104a22743239a2031bfb131a3a9"
+  },
+  {
+    "scenario": "check/version_two/conformance/locale_key_parity_merged_fail.yml",
+    "rule_id": "locale-key-parity",
+    "path": "config/locales/pt.yml",
+    "fingerprint": "32c8bf6567b81ea7c2410161869dd17998ae79edebdc8d3f0f1b1d27d53db4f2"
+  },
+  {
+    "scenario": "check/version_two/conformance/locale_key_parity_per_file_fail.yml",
+    "rule_id": "locale-key-parity",
+    "path": "locales/de.json",
+    "fingerprint": "61d93f92186aa0fcf84efc212dc98339d8b7001994f963bc11287b4b0323abb0"
+  },
+  {
+    "scenario": "check/version_two/conformance/locale_key_parity_per_file_fail.yml",
+    "rule_id": "locale-key-parity",
+    "path": "locales/de.json",
+    "fingerprint": "8c1dcb1ab8e14290d17dddb83c8fdadaed08a771f966d74d168e2bf43fecd69f"
+  },
+  {
+    "scenario": "check/version_two/conformance/locale_key_parity_per_file_fail.yml",
+    "rule_id": "locale-key-parity",
+    "path": "locales/fr.json",
+    "fingerprint": "61ee6ee2ad6a4d2646beb9c884492fbeb6e8c104a22743239a2031bfb131a3a9"
+  },
+  {
+    "scenario": "check/version_two/conformance/locale_key_parity_per_file_fail.yml",
+    "rule_id": "locale-key-parity",
+    "path": "locales/fr.json",
+    "fingerprint": "8167dabc3e73ad8ad05c06ab48d480603fc90c95230c177b1a9670e44432c358"
+  },
+  {
+    "scenario": "check/version_two/conformance/toolchain_pin_signal_fail.yml",
+    "rule_id": "node-pins-agree",
+    "path": "package.json",
+    "fingerprint": "6802acfaab7d798616bb9be3070e777a7c3b521b298319848cf739889caf15e6"
+  },
+  {
+    "scenario": "check/version_two/conformance/toolchain_pin_signal_fail.yml",
+    "rule_id": "node-pins-agree",
+    "path": "package.json",
+    "fingerprint": "ce9e564d3a99aefbb1141849ab953505cab417057a73f81442060a653c1de5f5"
+  },
+  {
     "scenario": "check/version_two/drop_in/a_fragment_inherits_version_two.yml",
     "rule_id": "has-changelog",
     "path": null,

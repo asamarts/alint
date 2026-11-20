@@ -1,0 +1,36 @@
+test_version: 1
+name: conformance toolchain-pin consistency (signal-desktop-28) passes when .nvmrc and package.json pins agree
+tags: [check, constraint, cross_file, version_two, conformance, passing]
+
+given:
+  tree:
+    .nvmrc: "v22.14.0\n"
+    package.json: |
+      {
+        "name": "signal-desktop",
+        "engines": { "node": "22.14.0" },
+        "devEngines": { "runtime": { "name": "node", "version": "22.14.0" } },
+        "volta": { "node": "22.14.0" }
+      }
+  config: |
+    version: 2
+    relations:
+      node-pins:
+        union:
+          - { from: { paths: .nvmrc }, read: { regex: "^v?(\\S+)" } }
+          - { from: { paths: package.json }, read: { json: "$.engines.node" } }
+          - { from: { paths: package.json }, read: { json: "$.devEngines.runtime.version" } }
+          - { from: { paths: package.json }, read: { json: "$.volta.node" } }
+        fields: { source: path, version: value }
+    rules:
+      - id: node-pins-agree
+        kind: constraint
+        input: node-pins
+        assert: { equal: { field: version, to: { row: { source: .nvmrc } } } }
+        level: error
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

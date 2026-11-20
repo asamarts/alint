@@ -1,0 +1,73 @@
+test_version: 1
+name: conformance per-file locale key parity fires on missing, extra and empty peer locale files
+tags: [check, constraint, cross_file, version_two, conformance, failing]
+
+given:
+  tree:
+    locales/en.json: |
+      {
+        "nav": { "home": "Home" },
+        "items_one": "1 item",
+        "items_other": "{{count}} items"
+      }
+    locales/de.json: |
+      {
+        "nav": { "legacy": "Alt" },
+        "items_one": "1 Eintrag",
+        "items_other": "{{count}} Einträge"
+      }
+    locales/fr.json: "{}\n"
+  config: |
+    version: 2
+    relations:
+      locale-keys:
+        from: { paths: "locales/*.json" }
+        entries: { format: json, at: "$", leaves: true }
+        fields: { locale: stem, key: entry.path }
+    rules:
+      - id: locale-key-parity
+        kind: constraint
+        input: locale-keys
+        assert:
+          set:
+            field: key
+            group_by: locale
+            equal_to: { group: en }
+            plurals: cldr
+        level: error
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - rule: locale-key-parity
+        level: error
+        path: locales/de.json
+        message:
+          exact: '`locale` "de" lacks `key` "nav.home", which `locale` "en" holds'
+        related:
+          - {label: "the reference group's row with it", path: locales/en.json, line: 2, column: 12, end_line: 2, end_column: 18}
+      - rule: locale-key-parity
+        level: error
+        path: locales/de.json
+        line: 2
+        column: 12
+        end_line: 2
+        end_column: 20
+        message:
+          exact: '`locale` "de" holds `key` "nav.legacy", which `locale` "en" lacks'
+      - rule: locale-key-parity
+        level: error
+        path: locales/fr.json
+        message:
+          exact: '`locale` "fr" lacks `key` "items", which `locale` "en" holds'
+        related:
+          - {label: "the reference group's row with it", path: locales/en.json, line: 4, column: 3, end_line: 4, end_column: 16}
+      - rule: locale-key-parity
+        level: error
+        path: locales/fr.json
+        message:
+          exact: '`locale` "fr" lacks `key` "nav.home", which `locale` "en" holds'
+        related:
+          - {label: "the reference group's row with it", path: locales/en.json, line: 2, column: 12, end_line: 2, end_column: 18}
