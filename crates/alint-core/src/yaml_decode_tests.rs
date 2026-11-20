@@ -380,19 +380,55 @@ fn an_untagged_enum_with_data_still_reads() {
 const HINTED: &str = "unexpected content after document (check this line's indentation \
                       against the lines above)";
 
-/// YAML-1c: the common indentation mistakes end the root collection, and
-/// ayaml reports what follows as content after the document; alint adds a
-/// hint, after the location, which stays where it was.
+/// YAML-1c: the common indentation mistakes end the root collection. ayaml
+/// names the collection whose indentation a line breaks when it is one space
+/// past its parent; where ayaml still reports what follows as content after
+/// the document, alint adds a hint after the location, which stays where it
+/// was.
 #[test]
 fn an_indentation_mistake_gets_a_hint() {
     let rule = "version: 1\nrules:\n  - id: a\n    kind: file_exists\n";
-    for (input, line, column) in [
-        // A key one space less, or more, than its siblings.
+    // Off by one space from its parent: ayaml names the collection itself, so
+    // alint adds no redundant hint.
+    for (input, message, line, column) in [
         (
             "version: 1\nrules:\n  - id: a\n   kind: file_exists\n",
+            "this line is indented differently from the sequence at line 3 column 3",
             4,
             4,
         ),
+        (
+            &format!("{rule} -id: b\n"),
+            "this line is indented differently from the mapping at line 2 column 1",
+            5,
+            2,
+        ),
+        (
+            "version: 1\n rules: []\n",
+            "this line is indented differently from the mapping at line 1 column 1",
+            2,
+            2,
+        ),
+    ] {
+        let error = from_str::<Value>(input).unwrap_err();
+        assert_eq!(error.message(), message, "{input:?}");
+        let location = error.location().unwrap();
+        assert_eq!(
+            (location.line(), location.column()),
+            (line, column),
+            "{input:?}"
+        );
+        assert!(
+            !error.to_string().contains("check this line"),
+            "{input:?}: {error}"
+        );
+        let error = crate::yaml_backend::json_tree(input).unwrap_err();
+        assert_eq!(error.message(), message, "{input:?}");
+    }
+    // Other indentation mistakes that still end the document: alint adds the
+    // hint.
+    for (input, line, column) in [
+        // A key one space more than its siblings.
         (
             "version: 1\nrules:\n  - id: a\n     kind: file_exists\n",
             4,
@@ -400,11 +436,9 @@ fn an_indentation_mistake_gets_a_hint() {
         ),
         // A key at the entry's `-`.
         ("version: 1\nrules:\n  - id: a\n  kind: file_exists\n", 4, 3),
-        // `-id` with no space.
+        // `-id` with no space, at the sequence's column.
         (&format!("{rule}  -id: b\n"), 5, 3),
-        (&format!("{rule} -id: b\n"), 5, 2),
         // A top-level key indented, after or before the others.
-        ("version: 1\n rules: []\n", 2, 2),
         ("version: 1\n  rules: []\n", 2, 3),
         (" rules: []\nversion: 1\n", 2, 1),
         // A comment between the two lines changes nothing.

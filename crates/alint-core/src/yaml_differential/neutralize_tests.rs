@@ -737,30 +737,6 @@ fn a_tab_ayaml_rejects_only_after_another_goes_with_it() {
     );
 }
 
-/// A block scalar header under an anchor, a key with one, or properties
-/// alone on their line moves past the end of the line before it, where the
-/// oracle reads it as the node's.
-#[test]
-fn block_scalar_headers_under_an_anchor_move_past_the_line_before() {
-    assert_eq!(
-        block_scalar_headers("a:\n  b: &x\n>\n  c\n"),
-        ["a:\n  b: &x\n        >\n  c\n"]
-    );
-    assert_eq!(
-        block_scalar_headers("- \n- &b on: \n|\n  \"x"),
-        ["- \n- &b on: \n         |\n  \"x"]
-    );
-    assert_eq!(
-        block_scalar_headers("m:\n  -\n    !t\n>\n"),
-        ["m:\n  -\n    !t\n       >\n"]
-    );
-    assert_eq!(block_scalar_headers("a:\n  b:\n>\n"), Vec::<String>::new());
-    assert_eq!(
-        block_scalar_headers("a:\n  b: &x\n    >\n"),
-        Vec::<String>::new()
-    );
-}
-
 /// A variant of the tab entry's leaves out a tab that starts a line, past
 /// spaces, with the white space after it: ayaml reads the line's
 /// indentation from the spaces, which a space for the tab would add to. Not
@@ -879,26 +855,21 @@ fn quoted_only_characters_keep_the_place_of_ayamls_error() {
     );
 }
 
-/// Where ayaml's reader rejects a C0 control, or its error has no place,
-/// its scanner may have read nothing: only the characters [`places`] reads
-/// in a quoted scalar go. Where its error is about the character there, as
-/// the first U+007F of two, that one stays, though the same error then
-/// follows at the next.
+/// Where ayaml's reader rejects a C0 control before scanning, its scanner
+/// reads nothing: only the characters [`places`] reads in a quoted scalar go.
+/// Where its error is about the character there, as the first U+007F of two,
+/// that one stays, though the same error then follows at the next.
 #[test]
 fn quoted_only_characters_go_from_quoted_scalars_where_ayaml_may_read_none() {
-    for input in [
-        "a: '\u{80}'\nb: c\u{ffff}d\nc: \u{1}\n",
-        "\u{feff}%YAML 1.2\na: '\u{80}'\nb: c\u{ffff}d\n",
-    ] {
-        let rewrites = quoted_only_characters(input);
-        assert_eq!(rewrites.len(), 2, "{input:?}: {rewrites:?}");
-        assert!(
-            rewrites
-                .iter()
-                .all(|rewrite| rewrite.contains('\u{ffff}') && !rewrite.contains('\u{80}')),
-            "{input:?}: {rewrites:?}"
-        );
-    }
+    let input = "a: '\u{80}'\nb: c\u{ffff}d\nc: \u{1}\n";
+    let rewrites = quoted_only_characters(input);
+    assert_eq!(rewrites.len(), 2, "{input:?}: {rewrites:?}");
+    assert!(
+        rewrites
+            .iter()
+            .all(|rewrite| rewrite.contains('\u{ffff}') && !rewrite.contains('\u{80}')),
+        "{input:?}: {rewrites:?}"
+    );
     assert_eq!(
         quoted_only_characters("a: \u{7f}\u{7f}\n"),
         ["a: \u{7f}\n", "a: \u{7f}x\n"]

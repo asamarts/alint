@@ -39,7 +39,7 @@ serde_json = "1"
 # Casts between alint_core::yaml's types and the parser's, behind private
 # functions (ADR-0038). Already in the graph through schemars.
 ref-cast = "1.0.25"
-ayaml = { version = "=0.1.2", features = ["libyaml-compat"] }
+ayaml = { version = "=0.2.1", features = ["libyaml-compat"] }
 # The parser v0.22 read YAML with: the oracle of the differential YAML harness
 # (#482), a dev-dependency of alint-core, and the reference backend behind
 # alint-core's test-only `yaml-reference` feature (#530, ADR-0041).

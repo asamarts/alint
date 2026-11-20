@@ -319,9 +319,6 @@ fn flow_bomb_hidden_by_a_lexer_desync_is_still_rejected() {
         // A flow `?` is the key indicator whatever follows, so a `#` right
         // after it starts a comment that hides the `]`.
         ("flow-key-comment", format!("[?#]\\\n{b}\nc: \"\"\n")),
-        // ...and ayaml ends that comment at a NEL, where every other
-        // comment runs on to the line feed.
-        ("flow-key-comment-nel", format!("[?#\u{85} {b}]\n")),
         // What follows a flow `?` and a blank is the key.
         ("flow-key-indicator", format!("[? {b}]\n")),
         // NEL is content (YAML 1.2), not a line break before a quote.
@@ -353,27 +350,12 @@ fn flow_bomb_hidden_by_a_lexer_desync_is_still_rejected() {
             format!("? a\n: b\n \"\nc: {b}\nd: \"\"\n"),
         ),
         // An alias name gives back a final `:` only, not a quote...
-        ("alias-name-quote", format!("k: [*a', {b}]\n")),
+        ("alias-name-quote", format!("x: &a' 1\nk: [*a', {b}]\n")),
         // ...and the `:` it gives back is a value indicator, so the block
         // scalar ends at the sibling key.
         (
             "alias-key-block-scalar",
             format!("x: &a 1\nk:\n  *a: |\n  b: {b}\n"),
-        ),
-        // ayaml's scanner ends the name `a` at a `:` before a flow
-        // indicator, where its line reader reads on: the value then
-        // continues past a column-0 quote.
-        (
-            "anchor-colon-flow-indicator",
-            format!("&a:[: x\n\"\nb: {b}\nc: \"\"\n"),
-        ),
-        ("anchor-colon-comma", format!("&a:,: x\n'\nb: {b}\nc: ''\n")),
-        // ayaml gives the byte order mark that starts the text no width and
-        // reads a second one as content, the key here, at column 0, so the
-        // `|2` scalar's content indent is 2.
-        (
-            "second-byte-order-mark",
-            format!("\u{feff}\u{feff}  : |2\n  \"\nb: {b}\nc: \"\"\n"),
         ),
         // A `#` WITHOUT preceding space is plain-scalar content (not a comment).
         ("hash-in-plain", format!("a: b#c\nb: {b}\n")),
@@ -421,12 +403,14 @@ fn scalar_and_comment_contents_never_false_reject() {
         format!("&a?#\n{deep}\n"),
         // A key in a complex key holds a block scalar indented past it.
         format!("? k: |\n   {deep}\n"),
-        // A comment after the byte order mark that starts the text.
+        // A comment after the byte order mark that starts the text, or after
+        // a flow `?` containing NEL (which stays comment content).
         format!("\u{feff}# a: {deep}\n"),
-        // Outside a flow collection a `:` after a quoted scalar is not a
-        // value indicator before a `,`: saphyr's reading of what ayaml
-        // reads as one scalar after a second byte order mark.
-        format!("\u{feff}\u{feff}'':, {deep}\n"),
+        format!("\u{feff}\u{feff}# a: {deep}\n"),
+        format!("[?#\u{85} {deep}\n]\n"),
+        // An anchor name ending before `:` and a flow indicator no longer
+        // desyncs the scanner.
+        format!("- &a:, x\n- '{deep}'\n"),
     ];
     for doc in &ok {
         assert!(
@@ -437,24 +421,19 @@ fn scalar_and_comment_contents_never_false_reject() {
     }
 }
 
-/// The known false refusals that `MAX_YAML_FLOW_DEPTH` documents: valid
-/// documents where the scanner counts brackets ayaml reads as text.
+/// The known false refusal that `MAX_YAML_FLOW_DEPTH` documents: a valid
+/// document where the scanner counts brackets ayaml reads as text.
 #[test]
 fn the_documented_false_refusals_still_refuse() {
     let deep = "[".repeat(MAX_YAML_FLOW_DEPTH + 72);
-    for doc in [
-        // After a name ayaml reads two ways, every later bracket counts.
-        format!("- &a:, x\n- '{deep}'\n"),
-        // A `...` after the leading byte order mark ends a document in the
-        // reading that gives the mark no width; to ayaml it is text here.
-        format!("\u{feff}... {deep}\n"),
-    ] {
-        assert!(
-            crate::yaml::ayaml_from_str::<ayaml::Value>(&doc).is_ok(),
-            "{doc:?}"
-        );
-        assert!(!flow_depth_within_limit(&doc), "{doc:?}");
-    }
+    // A `...` after the leading byte order mark ends a document in the
+    // reading that gives the mark no width; to ayaml it is text here.
+    let doc = format!("\u{feff}... {deep}\n");
+    assert!(
+        crate::yaml::ayaml_from_str::<ayaml::Value>(&doc).is_ok(),
+        "{doc:?}"
+    );
+    assert!(!flow_depth_within_limit(&doc), "{doc:?}");
 }
 
 #[test]
@@ -473,6 +452,9 @@ fn alias_hidden_by_a_lexer_desync_is_still_detected() {
         "k: &x|\n  [*undefined_zz]\n",
         "k: !t# [*undefined_zz]\n",
         "? a\n: b\n \"\nc: *undefined_zz\nd: \"\"\n",
+        // A leading tab on the line after a block plain scalar has zero spaces
+        // of indentation, so it ends the scalar rather than swallowing `*a`.
+        "? ----\n\t*a k: |\n  |\n  *undefined_zz\nc: \"\"\n",
     ];
     for doc in fixtures {
         assert!(
@@ -552,24 +534,6 @@ fn check_parity(prefix: &str, sep: &str) -> Result<(), proptest::test_runner::Te
         proptest::prop_assert!(contains_alias(&alias), "missed alias: {alias:?}");
     }
     Ok(())
-}
-
-/// After a name that ayaml's scanner and line reader end in different
-/// places, the scanner counts every later bracket as structure and every
-/// `*` as an alias, quoted or not, and stops scanning.
-#[test]
-fn a_name_ayaml_reads_two_ways_makes_the_scanner_assume_the_worst() {
-    // The `[` of the key `:[` and the three quoted ones.
-    let quoted = format!("&a:[: x\nb: '{}'\n", "[".repeat(3));
-    assert!(!flow_depth_within_limit_with(&quoted, 3));
-    assert!(flow_depth_within_limit_with(&quoted, 4));
-    assert!(contains_alias("&a:{: x\nb: '*'\n"));
-    // A `:` before other text is no such name.
-    assert!(flow_depth_within_limit_with(
-        &format!("&a:b: x\nb: '{}'\n", "[".repeat(3)),
-        0
-    ));
-    assert!(!contains_alias("&a:b: x\nb: '*'\n"));
 }
 
 /// Where an alias name ends: before a final `:`, the value indicator of
@@ -693,11 +657,11 @@ fn lex_reads_a_text_in_each_way_it_needs_and_stops_when_told() {
 }
 
 /// The reading of byte order marks as ayaml reads them nests what ayaml
-/// nests: the mark that starts the text has no width, so a `...` that ends
-/// its line after it ends a document; a second one right after it is content
-/// (asamarts/ayaml#140); and one that starts a later line takes a column,
-/// so a `...` after it is text. The union of the readings hides these
-/// from the guards (see `Bom`), so the test reads this one alone.
+/// nests: a run of marks that starts the text has no width, so a `...` that
+/// ends its line after it ends a document, and a mark that starts a later
+/// line takes a column, so a `...` after it is text. The union of the
+/// readings hides these from the guards (see `Bom`), so the test reads this
+/// one alone.
 #[test]
 fn the_ayaml_reading_of_a_byte_order_mark_nests_what_ayaml_nests() {
     fn nesting(value: &ayaml::Value) -> usize {
@@ -709,7 +673,8 @@ fn the_ayaml_reading_of_a_byte_order_mark_nests_what_ayaml_nests() {
     for (doc, depth) in [
         ("\u{feff}[[1]]\n", 2),
         ("\u{feff}...\n[[1]]\n", 2),
-        ("\u{feff}\u{feff}[[1]]\n", 0),
+        ("\u{feff}\u{feff}[[1]]\n", 2),
+        ("\u{feff}\u{feff}...\n[[1]]\n", 2),
         ("\u{feff}#\n\u{feff}...\n[[1]]\n", 0),
     ] {
         let value = crate::yaml::ayaml_from_str::<ayaml::Value>(doc).unwrap();

@@ -248,8 +248,13 @@ fn a_parse_costs_its_length_or_its_expansion_s_share() {
     let plain = yaml_of_len(4096);
     let scan = crate::yaml_depth::scan_guards(&plain);
     assert_eq!(scan.expansion_and_size(&plain).1, 0);
-    // A few small aliases stay within the allowance.
-    let anchored = aliases_of(10, 20);
+    // A few small aliases in an ordinary document (~25 bytes per node, like
+    // OpenAPI) stay within the allowance.
+    let mut anchored = String::new();
+    for i in 0..20 {
+        let _ = writeln!(anchored, "entry_{i}: \"ordinary scalar value number {i}\"");
+    }
+    anchored.push_str("z: &a \"0123456789\"\nrefs: [*a, *a]\n");
     let (_, expanded) = crate::yaml_depth::scan_guards(&anchored).expansion_and_size(&anchored);
     assert!(expanded > 0 && parse_cost(anchored.len(), expanded) == anchored.len());
 }

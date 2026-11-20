@@ -242,11 +242,6 @@ const TRIGGERS: &[(&str, &str, &[&str])] = &[
         &[UNEXPLAINED_ENTRY],
     ),
     (
-        "anchor-name-before-a-colon-and-a-flow-indicator",
-        "a: '\u{7f}'\n&k:[: x\n",
-        &[UNEXPLAINED_ENTRY],
-    ),
-    (
         "redefined-anchor",
         "a: '\u{7f}'\nb: [&x 1, &x 2, *x]\n",
         &[UNEXPLAINED_ENTRY],
@@ -288,13 +283,6 @@ const TRIGGERS: &[(&str, &str, &[&str])] = &[
         "global-tags",
         "a: '\u{7f}'\nb: '!!'\n# !!x\nc: !!binary aGk=\n",
         &[UNEXPLAINED_ENTRY],
-    ),
-    // The entry covers a case by the oracle's error, at the header, which
-    // comes first: ayaml reads on to the tag.
-    (
-        "block-scalar-under-an-anchor",
-        "b:\n  c: &x\n>\nd: !<!> x\n",
-        &["verbatim-non-specific-tag"],
     ),
     (
         "non-specific-tag",
@@ -403,8 +391,6 @@ fn masking_triggers() -> Vec<String> {
         "m: !<!> x\n",
         "m: [x,\n\t  y]\n",
         "m: [x\n\t]\n",
-        "m:\n  n: &x\n>\n",
-        "m:\n  -\n    !t\n>\n",
         // The narrow entries'.
         "m: [:a]\n",
         "m: [-]\n",
@@ -601,7 +587,7 @@ fn a_split_keeps_a_colon_line_with_its_key() {
 }
 
 /// ayaml's error at `!<!>` in what YAML 1.2 and the oracle read as a plain
-/// scalar's second line: a defect planted where ayaml 0.1.2 reads the text
+/// scalar's second line: a defect planted where ayaml 0.2.1 reads the text
 /// as both do.
 fn verbatim_tag_in_text(input: &str, _: Entry, side: Side) -> Side {
     if input.contains("\n!<!> a") {
@@ -867,9 +853,9 @@ fn a_second_document_hides_no_value_error() {
     );
     let (next, _) = compare("a: x\n---\nb\n", Entry::Value);
     assert!(
-        next.ayaml
-            .as_ref()
-            .is_err_and(|rejection| rejection.message.contains(AYAML_SECOND_DOCUMENT)),
+        next.ayaml.as_ref().is_err_and(|rejection| rejection
+            .message
+            .contains("more than one document in stream")),
         "{next:?}"
     );
     assert_eq!(
@@ -1215,7 +1201,7 @@ fn white_space_wider_than_a_byte_is_stepped_over() {
     ));
 }
 
-/// ayaml 0.1.2 gives its alias errors the kind Composition, and none the
+/// ayaml 0.2.1 gives its alias errors the kind Composition, and none the
 /// kind Alias: a rewrite may move one to where its node starts, as the
 /// oracle's.
 #[test]
@@ -1238,8 +1224,8 @@ fn ayaml_s_alias_errors_are_known_by_their_messages() {
 /// ayaml's errors about a block scalar's indentation are its own, by YAML
 /// 1.2, where the oracle reads the scalar otherwise and rejects what
 /// follows: the entry explains such a case both reject only when ayaml's
-/// error comes first, and never a document marker that ayaml 0.1.2 takes for
-/// a top-level scalar's content, a defect that no entry explains.
+/// error comes first. A document marker after indented empty lines ends a
+/// top-level block scalar too (fixed in ayaml 0.2.1, asamarts/ayaml#146).
 #[test]
 fn a_block_scalar_error_is_ayaml_s_own_only_before_the_oracle_s() {
     let deviation = allowlist::DEVIATIONS
@@ -1253,15 +1239,17 @@ fn a_block_scalar_error_is_ayaml_s_own_only_before_the_oracle_s() {
     let (case, _) = compare("a: '\u{7f}'\nb: |\n   \n  x\n", Entry::Value);
     assert_eq!(case.class, Class::RejectedAtDifferentLocation, "{case:?}");
     assert!(!deviation.covers(&case));
-    // ayaml takes a document marker after the empty lines for content, a
-    // defect of its own.
-    for input in ["|\n  \n...\n", "|\n  \n---\nb\n", "--- |\n  \n--- x\n"] {
+    // A top-level block scalar with indented empty lines ends at a document
+    // marker, just like a nested one.
+    let (case, _) = compare("|\n  \n...\n", Entry::Value);
+    assert_eq!(case.class, Class::SameValue, "{case:?}");
+    for input in ["|\n  \n---\nb\n", "--- |\n  \n--- x\n"] {
         let (case, _) = compare(input, Entry::Value);
-        assert!(case.class.is_difference(), "{case:?}");
+        assert_eq!(case.class, Class::RejectedAtDifferentLocation, "{case:?}");
         assert!(!deviation.covers(&case), "{case:?}");
         assert_eq!(
             explanation(&case),
-            Some(vec!["document-marker-after-indented-empty-lines"]),
+            Some(vec!["after-the-root-node"]),
             "{case:?}"
         );
     }
@@ -1270,20 +1258,21 @@ fn a_block_scalar_error_is_ayaml_s_own_only_before_the_oracle_s() {
     assert_eq!(case.class, Class::SameValue, "{case:?}");
 }
 
-/// Each syntax error message of ayaml 0.1.2, the version the workspace pins,
+/// Each syntax error message of ayaml 0.2.1, the version the workspace pins,
 /// with sample values in place of its format arguments, as compatibility
 /// mode reports it.
 ///
 /// The list is every string literal and `format!` template that ayaml's
 /// scanner and parser pass as an error message (to `Scanner::error_at`,
-/// `Parser::error`, `expect_consumed`, `flow_error`'s `FlowLack` and
-/// `non_printable_error`), and the messages `compat::map_error` puts in their
-/// place, outside their tests: `src/scanner.rs`, `src/scanner/*.rs`,
-/// `src/parser.rs`, `src/parser/*.rs` and `src/lib.rs`. Messages that
-/// compatibility mode replaces are left out ("unexpected token in mapping
-/// value" becomes "mapping values are not allowed in this context"), and so
-/// are internal errors no input reaches ("invalid span position", "invalid
-/// character boundary"). Refresh the list the same way when the pin moves.
+/// `Parser::error`, `expect_consumed`, `compat_indentation_message`,
+/// `flow_error`'s `FlowLack` and `non_printable_error`), and the messages
+/// `compat::map_error` puts in their place, outside their tests:
+/// `src/scanner.rs`, `src/scanner/*.rs`, `src/parser.rs`, `src/parser/*.rs`
+/// and `src/lib.rs`. Messages that compatibility mode replaces are left out
+/// ("unexpected token in mapping value" becomes "mapping values are not
+/// allowed in this context"), and so are internal errors no input reaches
+/// ("invalid span position", "invalid character boundary"). Refresh the list
+/// the same way when the pin moves.
 const AYAML_SYNTAX_MESSAGES: &[&str] = &[
     "%TAG requires a handle and a prefix",
     "'@' is a reserved indicator and cannot start a plain scalar",
@@ -1296,6 +1285,7 @@ const AYAML_SYNTAX_MESSAGES: &[&str] = &[
     "a comment must be separated from the preceding token",
     "a directive cannot contain a byte order mark",
     "a directive needs a name",
+    "a document's first node cannot be indented",
     "a document-start property cannot precede a same-line block mapping key",
     "a flow collection's `?` must be separated from what follows it",
     "a mapping line is missing a `:`",
@@ -1350,6 +1340,7 @@ const AYAML_SYNTAX_MESSAGES: &[&str] = &[
     "tabs cannot be the only flow-collection indentation",
     "tabs cannot be the only quoted-scalar indentation",
     "tag %-escapes do not form valid UTF-8",
+    "this line is indented differently from the mapping at line 1 column 1",
     "undefined primary tag handle",
     "undefined secondary tag handle",
     "undefined tag handle \"!e!\"",
@@ -1831,9 +1822,6 @@ fn the_generator_writes_every_shape() {
         ("the verbatim tag `!<!>`", |input| input.contains("!<!> ")),
         ("a flow line that a tab indents", |input| {
             input.contains(",\n\t  ")
-        }),
-        ("a block scalar header under an anchor", |input| {
-            !predicates::block_scalar_headers_under_an_anchor(input).is_empty()
         }),
         ("a rule key that is not a string", |input| {
             input.contains("rules:\n  -")

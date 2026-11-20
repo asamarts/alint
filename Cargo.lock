@@ -358,9 +358,9 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
 name = "ayaml"
-version = "0.1.2"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8fa4b10832a9ec125b53aa3c63f75914d52f3e96b49a4e4ecad96d0afc18dfa"
+checksum = "1cee245789525aca9a37cf1e6c3c014be229e64ba9eb993526491ab5061bb3b9"
 dependencies = [
  "indexmap",
  "serde",

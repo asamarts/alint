@@ -174,14 +174,29 @@ fn a_tag_a_field_cannot_read_is_named() {
 
 const HINT: &str = "(check this line's indentation against the lines above)";
 
-/// YAML-1c: an indentation mistake ends the root collection, and ayaml
-/// reported what follows only as content after the document.
+/// YAML-1c: an indentation mistake ends the root collection. ayaml names the
+/// collection when the line is one space past its parent, and alint adds a
+/// hint where ayaml still reports unexpected content after the document.
 #[test]
 fn an_indentation_mistake_gets_a_hint() {
+    let text = "version: 1\nrules:\n  - id: a\n   kind: file_exists\n";
+    for error in [
+        load_error(text),
+        crate::parse(text).unwrap_err().to_string(),
+    ] {
+        assert!(
+            error.ends_with(
+                "this line is indented differently from the sequence at line 3 column 3 at line 4 \
+                 column 4"
+            ),
+            "{text:?}: {error}"
+        );
+        assert!(!error.contains(HINT), "{text:?}: {error}");
+    }
     for (text, place) in [
         (
-            "version: 1\nrules:\n  - id: a\n   kind: file_exists\n",
-            "line 4 column 4",
+            "version: 1\nrules:\n  - id: a\n     kind: file_exists\n",
+            "line 4 column 6",
         ),
         (
             "version: 1\nrules:\n  - id: a\n    kind: file_exists\n  -id: b\n",

@@ -1,6 +1,6 @@
 # v0.23: selectors, a first constraint slice, and the YAML groundwork
 
-Status: accepted (2026-11-12, ADR-0032); in progress, phases 0 to 8 done (feature freeze reached; phase 9 waits on an ayaml release).
+Status: accepted (2026-11-12, ADR-0032); in progress, phases 0 to 9 done (feature freeze reached; ayaml 0.2.1 qualified; ready for phase 10 release).
 Decisions: [ADR-0032](../../adr/0032-v023-owner-decisions.md) (the owner decisions and the scope);
 [ADR-0033](../../adr/0033-v023-slice-after-the-corpus-stratum.md) (the slice after the corpus
 stratum, and the #503 fix);
@@ -166,7 +166,8 @@ Out of scope:
   - six `alint-dsl` functions;
   - four `alint-testkit` items.
 
-  alint parses YAML with ayaml 0.1.2 since #510, through `alint_core::yaml`. saphyr and
+  alint parses YAML with ayaml 0.2.1 (moved from `yaml_serde` to 0.1.2 in #510 and bumped to 0.2.1
+  in phase 9), through `alint_core::yaml`. saphyr and
   saphyr-parser still give source spans and structured fixes; they leave in v0.24 (ADR-0036).
 - **Open structs.**
   - `Violation`, `Context`, `RuleSpec`, `NestedRuleSpec` and `WalkOptions` were built with struct
@@ -274,7 +275,7 @@ next. Phases 1, 4 and 5 do not depend on the design and can run alongside phases
 | 6 | The version dispatch, named selectors and relations, per-source namespaces with `extends:` aliases, value-bearing entry rows, the equality join, the draft v2 schema, and `validate-config`, `list`, `explain` and `export-agents-md` for v2 | v2 only |
 | 7 | The `constraint` kind: equality (with row-level `equal`), unique/key and set (with `plurals: cldr`), report-only, and the related-location gate over JSON, SARIF and the language server | v2 only |
 | 8 | The three conformance policies with `alint test` cases, and the section 12.1 measurements | v2 only |
-| 9 | Qualify the cutover that #510 made: #483, and the #482 harness's verdict with an approved allowlist. Otherwise the owner holds the release or reverts #510 (ADR-0035). Approved on 2026-11-15, on condition that v0.23.0 is tagged on an ayaml release that fixes asamarts/ayaml#132, #133 and #137 (ADR-0040). Since 2026-11-16 the condition is an ayaml release with the fixes ayaml's main has for every gap alint filed, #132, #133, #137, #139, #140, #141, #146 and #147, and ADR-0042's condition on memory (ADR-0043). The bump follows `yaml-parser.md`'s "Bumping ayaml" | yes (parser) |
+| 9 | Qualify the cutover that #510 made: #483, and the #482 harness's verdict with an approved allowlist (ADR-0035, ADR-0040, ADR-0042, ADR-0043, ADR-0044). Completed on 2026-11-20 with ayaml `=0.2.1` (all tracked fixes, 34 deviations / 8 location classes with zero new differences, 12-seed long runs, 3 x 2,000,000 depth-guard parity runs, compare mode, and 0.52x to 0.97x peak heap across all nine shapes) | yes (parser) |
 | 10 | Documentation, the CHANGELOG (re-run `alint baseline`; the library migration; the `git_tracked_only` change; the affected versions of item 13's fixes), facts, publishing the security advisory drafted for item 13 (GHSA-78jj-xfpm-g6px, a private draft; ADR-0040, widened by ADR-0043; step 5 of RELEASING.md's documentation checklist), and the release check | no |
 
 Phase 10's release check has one step on alint.org, which this repository cannot make: once the
@@ -1200,3 +1201,41 @@ as #589, step 3 as #590, and step 4 is the last.
     v0.23 reaches feature freeze (phases 1 to 8, #503 and #580 complete).
   - Next: phase 9 (ayaml bump once an upstream release carries ADR-0043's compatibility fixes and
     meets ADR-0042/ADR-0044's 1.2x memory gate across all nine shapes), then phase 10 (release).
+- 2026-11-20: phase 9, ayaml `=0.2.1` bump and full qualification (ADR-0035, ADR-0040, ADR-0042,
+  ADR-0043, ADR-0044, ADR-0046).
+  - **Pin and code updates:** bumped `[workspace.dependencies]` `ayaml` from `=0.1.2` to `=0.2.1`
+    (carrying fixes for asamarts/ayaml#132, #133, #137, #138, #139, #140, #141, #146, #147, #160
+    to #165 and #178). Updated `yaml::stream_events` to `parse_events_eager_with_limits`, dropped
+    `Span::start().index()` and preserved `Error::location()` across `with_span` in `yaml_decode`,
+    and removed the #139/#140/#141 workarounds from `yaml_depth`.
+  - **Allowlist (34 deviations, 8 location classes; zero new differences added by 0.2.1):**
+    removed all four ayaml-defect entries (`block-scalar-under-an-anchor`,
+    `ayaml-error-without-a-place`, `document-marker-after-indented-empty-lines`,
+    `anchor-name-before-a-colon-and-a-flow-indicator`), narrowed
+    `byte-order-mark-starting-a-line`, refreshed `AYAML_SYNTAX_MESSAGES` from ayaml 0.2.1, added
+    its two new indentation messages to `LOCATIONS` (`indentation`), and updated `yaml_differential`
+    fairness/value-error checks for streaming composition and `ErrorKind::DuplicateKey`. Note for
+    owner sign-off before tagging: since ADR-0040 approved 33 deviations + 7 location classes, the
+    four ayaml-defect entries are gone and four non-defect entries added in #530 remain
+    (`empty-flow-implicit-key`, `negative-zero-in-an-unsigned-field`, `rule-that-is-null`, and
+    location class `verbatim-tag-that-names-nothing`).
+  - **Differential long runs (seeds 1 to 12):** 3,848,472 total inputs (320,706 per seed: 300,000
+    generated, 986 repository YAML files, 19,720 mutations), 0 unexplained differences, 0 panics,
+    and 0 differences only saphyr's vote explains (256,013 voted differences, all also covered by
+    the allowlist).
+  - **Depth-guard parity:** three runs of 2,000,000 cases of both `scanner_never_misses`
+    properties (12,000,000 cases total), 0 failures (the initial third run caught `scan_plain_scalar`
+    counting a leading tab toward block indentation; fixed and re-verified across 3 x 2,000,000
+    cases with a regression fixture).
+  - **Workspace compare mode:** `ci/scripts/yaml-compare.sh` passes across the entire workspace;
+    `ALINT_YAML_COMPARE_LOG` reviewed (1,598 allowlist, 5 saphyr vote, 1 unchecked `!!int '1'`
+    into `u8`, 11 not compared at resource limits).
+  - **Memory gate and parse budget:** `ci/scripts/yaml-memory-release.sh` passes on all nine
+    shapes at 0.517x to 0.965x of libyaml's peak heap (OpenAPI 37 KB 0.578x, 1.1 MB 0.583x,
+    4.4 MB 0.584x at 21.8 to 21.9 B/input B; 1 MB block/flow mappings and sequences 0.517x to
+    0.965x). Lowered all nine regression bounds in `yaml_memory.rs` and lowered
+    `EXPANSION_BYTES_PER_COST_BYTE` in `yaml_budget.rs` from 64 to 32 (ADR-0046 decision 7).
+    End-to-end release checks run 0.6% to 8.1% faster on OpenAPI (50 x 37 KB, 1.1 MB, 4.4 MB) at
+    0.74x to 0.81x peak RSS, and 32 MiB peak RSS dropped from 4.5 to 6.2 GB to 0.75 to 1.54 GiB.
+  - Next: phase 10 (release documentation, CHANGELOG final pass, facts regeneration, corpus replay
+    against v0.22.1, GHSA-78jj-xfpm-g6px publication, and v0.23.0 release check).

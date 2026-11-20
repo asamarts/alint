@@ -101,8 +101,12 @@ pub(crate) fn finish(error: ayaml::Error) -> ayaml::Error {
         error.kind(),
         format!("{subject} {HAS_THE_TAG}{tag}`{TAG_REFUSED}"),
     );
-    match error.span() {
+    let rewritten = match error.span() {
         Some(span) => rewritten.with_span(span),
+        None => rewritten,
+    };
+    match error.location() {
+        Some(location) => rewritten.with_location(location),
         None => rewritten,
     }
 }
@@ -999,7 +1003,7 @@ pub(crate) fn indentation_hint(input: &str, error: &ayaml::Error) -> bool {
     let Some(span) = error.span() else {
         return false;
     };
-    let at = span.start().index();
+    let at = span.start();
     let (Some(before), Some(rest)) = (input.get(..at), input.get(at..)) else {
         return false;
     };

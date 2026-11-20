@@ -22,10 +22,9 @@ use super::predicates::{
     ORACLE_READER_ERROR, VERBATIM_NEEDS_A_NAME, ayaml_points_at_a_flow_value_after_a_property,
     ayaml_points_at_a_lone_flow_indicator,
     ayaml_points_at_a_yaml_directive_with_an_adjacent_number_sign, ayaml_rejects,
-    ayaml_rejects_a_nameless_verbatim_tag, ayaml_takes_a_document_marker_for_block_scalar_content,
-    errors_about_one_character, errors_around_an_empty_node, errors_in_an_empty_verbatim_tag,
-    has_tab_line_after_document_end, oracle_points_at_a_block_scalar_under_an_anchor,
-    oracle_points_at_a_flow_form, oracle_points_into_a_tag_at_a_number_sign, oracle_rejects,
+    ayaml_rejects_a_nameless_verbatim_tag, errors_about_one_character, errors_around_an_empty_node,
+    errors_in_an_empty_verbatim_tag, has_tab_line_after_document_end, oracle_points_at_a_flow_form,
+    oracle_points_into_a_tag_at_a_number_sign, oracle_rejects,
     oracle_rejects_in_a_quote_after_a_flow_colon, rejects, root_is_block_scalar,
 };
 use super::{Case, Class, Entry};
@@ -93,16 +92,9 @@ impl Deviation {
     }
 
     /// The ayaml errors that its trigger is documented to hide: removing the
-    /// trigger may make ayaml reject what it read, with one of them, where
-    /// the oracle rejected the case.
+    /// trigger may reveal an earlier parser error that its scanner error hid.
     pub(crate) fn hides(&self) -> Hidden {
         match self.id {
-            // asamarts/ayaml#137.
-            "byte-order-mark-starting-a-line" => Hidden::Messages(&[
-                "quoted scalar continuation must be indented more than its parent",
-            ]),
-            // asamarts/ayaml#139.
-            "anchor-name-before-a-colon-and-a-flow-indicator" => Hidden::AfterTheTrigger,
             // Each is a scanner error.
             "flow-line-tab-indentation" | "verbatim-non-specific-tag" => Hidden::ParserErrors,
             _ => Hidden::Nothing,
@@ -123,11 +115,6 @@ impl Deviation {
 /// The ayaml errors a [`Deviation`]'s trigger hides.
 pub(crate) enum Hidden {
     Nothing,
-    /// The errors with one of these messages.
-    Messages(&'static [&'static str]),
-    /// Any error on a line after the trigger's: the trigger makes ayaml read
-    /// the lines after it as part of a scalar, whatever they hold.
-    AfterTheTrigger,
     /// A parser error, when the trigger is a scanner error: ayaml reads the
     /// whole stream's tokens before it parses them, so a scanner error hides
     /// a parser error before it, which a rewrite that leaves the tokens as
@@ -136,30 +123,6 @@ pub(crate) enum Hidden {
 }
 
 impl Hidden {
-    /// Whether `next`, `case` with the trigger removed, shows an error the
-    /// trigger hid from ayaml.
-    pub(crate) fn shown(&self, case: &Case<'_>, next: &Case<'_>) -> bool {
-        let Err(error) = &next.ayaml else {
-            return false;
-        };
-        match self {
-            Self::Nothing | Self::ParserErrors => false,
-            Self::Messages(messages) => messages
-                .iter()
-                .any(|message| error.message.contains(message)),
-            Self::AfterTheTrigger => {
-                let changed = case
-                    .input
-                    .bytes()
-                    .zip(next.input.bytes())
-                    .position(|(before, after)| before != after)
-                    .unwrap_or(case.input.len().min(next.input.len()));
-                let trigger_line = case.input[..changed].matches('\n').count() + 1;
-                error.location.is_some_and(|(line, _)| line > trigger_line)
-            }
-        }
-    }
-
     /// Whether ayaml's error on `next`, `case` with the trigger removed, is
     /// one that the case's error, the trigger's, hid wherever it was.
     pub(crate) fn revealed(&self, case: &Case<'_>, next: &Case<'_>) -> bool {
@@ -263,18 +226,12 @@ pub(crate) const DEVIATIONS: &[Deviation] = &[
             covers: any,
             neutralize: neutralize::line_start_byte_order_marks,
         },
-        ayaml: "skips a byte-order mark that starts the stream without counting it as a \
-                column, and counts one that starts another line as a column, as the oracle \
-                does; after the one that starts the stream, it does not check that a quoted \
-                scalar's continuation line under a nested parent is indented past it",
-        oracle: "counts the one that starts the stream as a column too, so a structure \
-                 that lines up with the first line is misread or rejected. Both read a \
-                 second mark right after it as content, which YAML 1.2 does not allow \
-                 (asamarts/ayaml#140), so it shifts the first line by one column for the \
-                 oracle only",
-        reason: "a libyaml defect; ayaml reads such files as their author meant. The missed \
-                 indentation check is an ayaml defect in a malformed document \
-                 (asamarts/ayaml#137), which the oracle accepts with or without the mark",
+        ayaml: "skips a run of byte-order marks that starts the stream without counting it as \
+                columns, and counts one that starts another line as a column, as the oracle does",
+        oracle: "counts the first mark that starts the stream as a column too, and reads a \
+                 second mark right after it as content, so a structure that lines up with the \
+                 first line is misread or rejected",
+        reason: "a libyaml defect; ayaml reads such files as their author meant",
         example: "\u{feff}- a\n- b\n",
     },
     Deviation {
@@ -417,24 +374,6 @@ pub(crate) const DEVIATIONS: &[Deviation] = &[
                  `&é x` an error",
         reason: "YAML 1.2 (rule 102) allows the wider set",
         example: "&a\"1 x",
-    },
-    Deviation {
-        id: "anchor-name-before-a-colon-and-a-flow-indicator",
-        classes: ALL_DIFFERENCES,
-        trigger: Trigger::Input {
-            covers: any,
-            neutralize: neutralize::names_ended_at_a_colon_before_a_flow_indicator,
-        },
-        ayaml: "ends an anchor name at a `:` that a flow indicator follows, outside a flow \
-                collection, so `&a:[: x` is the anchor `a` on the key `:[`, as the oracle \
-                reads it; but its line reader, which decides indentation, reads that line \
-                as the anchor `a:` and an unclosed `[`, so the value on it continues onto \
-                lines at any indentation",
-        oracle: "ends the value at a line indented no more than the key",
-        reason: "an ayaml defect in a malformed document: YAML 1.2 does not allow a flow \
-                 indicator right after an anchor name, and ayaml's own reader rejects the \
-                 line (asamarts/ayaml#139)",
-        example: "&a:[: x\n- y\n",
     },
     Deviation {
         id: "redefined-anchor",
@@ -821,30 +760,6 @@ pub(crate) const DEVIATIONS: &[Deviation] = &[
         example: "a: !<!> x\n",
     },
     Deviation {
-        id: "ayaml-error-without-a-place",
-        classes: &[Class::RejectedAtDifferentLocation],
-        trigger: Trigger::Narrow {
-            covers: |case| {
-                case.input.contains('\u{feff}')
-                    && case.ayaml.as_ref().err().is_some_and(|rejection| {
-                        rejection.location.is_none()
-                            && rejection
-                                .message
-                                .contains("found character that cannot start any token")
-                    })
-            },
-            because: "ayaml gives that message without a place only for a reserved indicator \
-                      after a byte-order mark that starts a line (its compatibility mode's \
-                      mapping of that error)",
-        },
-        ayaml: "reports a character that cannot start a token after a byte-order mark \
-                without a line and column",
-        oracle: "reports the same error with its place",
-        reason: "an ayaml defect in a malformed document (asamarts/ayaml#133); the message \
-                 still names the problem. Documented in the 0.23 CHANGELOG",
-        example: "\u{feff}%YAML 1.2\n",
-    },
-    Deviation {
         id: "non-specific-tag",
         classes: &[Class::DifferentValue],
         trigger: Trigger::Input {
@@ -921,25 +836,6 @@ pub(crate) const DEVIATIONS: &[Deviation] = &[
         example: "a: [x,\n\t  b]\n",
     },
     Deviation {
-        id: "block-scalar-under-an-anchor",
-        classes: &[Class::OnlyOracleRejects, Class::RejectedAtDifferentLocation],
-        trigger: Trigger::Input {
-            covers: oracle_points_at_a_block_scalar_under_an_anchor,
-            neutralize: neutralize::block_scalar_headers,
-        },
-        ayaml: "accepts a block scalar header on the line after properties that include an \
-                anchor, as `b: &x` then `>`, after properties alone on their line, as `!t` \
-                then `>`, or after a key with an anchor and no value, as `&x b:` then `>`, \
-                even when it is not indented past its parent",
-        oracle: "rejects it, or reads it as a second document where it is the first line \
-                 indented less than the document's root",
-        reason: "ayaml defects in a malformed document (asamarts/ayaml#132, with the \
-                 anchor on a key in a comment there, and #147 for properties alone on their \
-                 line): with a tag on the line of its key or `-`, ayaml rejects the same \
-                 layout, as YAML 1.2 (section 8.1) does",
-        example: "a:\n  b: &x\n>\n",
-    },
-    Deviation {
         id: "block-scalar-indentation",
         classes: &[Class::OnlyAyamlRejects, Class::RejectedAtDifferentLocation],
         trigger: Trigger::Narrow {
@@ -950,9 +846,8 @@ pub(crate) const DEVIATIONS: &[Deviation] = &[
                         "a block scalar is not indented past its parent",
                         "leading empty block-scalar lines are more indented than the content",
                     ],
-                ) && !ayaml_takes_a_document_marker_for_block_scalar_content(case)
-                    && (case.class != Class::RejectedAtDifferentLocation
-                        || super::first_error(case).is_some_and(|(_, by_ayaml)| by_ayaml))
+                ) && (case.class != Class::RejectedAtDifferentLocation
+                    || super::first_error(case).is_some_and(|(_, by_ayaml)| by_ayaml))
             },
             because: "ayaml's messages name the block scalar's indentation; where both \
                       reject, ayaml's error comes first, and the oracle read its line",
@@ -967,25 +862,6 @@ pub(crate) const DEVIATIONS: &[Deviation] = &[
         reason: "YAML 1.2 (section 8.1.1.1) requires the indentation; documented in the 0.23 \
                  CHANGELOG",
         example: "-\n|2\n  x\n",
-    },
-    Deviation {
-        id: "document-marker-after-indented-empty-lines",
-        classes: &[Class::OnlyAyamlRejects, Class::RejectedAtDifferentLocation],
-        trigger: Trigger::Narrow {
-            covers: ayaml_takes_a_document_marker_for_block_scalar_content,
-            because: "ayaml's message is about the leading empty lines, and the first line \
-                      after them with more than spaces is a document marker",
-        },
-        ayaml: "rejects a top-level block scalar whose only lines before a document marker \
-                (`---` or `...` at column 1) are empty, one of them indented, as `|`, a line \
-                of two spaces and `...`: it takes the marker for content indented less than \
-                they are",
-        oracle: "ends the scalar, empty, at the marker, and reads on, so that `---` and what \
-                 follows it make more than one document",
-        reason: "an ayaml defect in a valid document (asamarts/ayaml#146): a document marker ends \
-                 any node (YAML 1.2, rule 206, `c-forbidden`); a scalar that is not top-level \
-                 ends there in ayaml too",
-        example: "|\n  \n...\n",
     },
 ];
 
@@ -1072,6 +948,8 @@ pub(crate) const LOCATIONS: &[Location] = &[
         messages: &[
             "indented less than its parent",
             "is not indented past its parent",
+            "this line is indented differently from the",
+            "a document's first node cannot be indented",
             "a mapping line is missing",
             "implicit mapping keys must be on one line",
             "a block collection cannot start on",
@@ -1186,9 +1064,9 @@ pub(crate) const LOCATIONS: &[Location] = &[
         ],
         messages: &[],
         places: None,
-        ayaml: "the node a value error is about; ayaml checks the whole stream's syntax \
-                before it builds values, so a later syntax error wins over an earlier \
-                duplicate key, unknown anchor, recursive alias or type error",
+        ayaml: "the node a value error is about; ayaml checks the whole stream's tokens \
+                before it parses or builds values, and then reports the first parsing or \
+                value error (duplicate key, unknown anchor, recursive alias or type error)",
         oracle: "the first error in the input, as it builds values while it reads, at its \
                  own position for a value error (often the start of the enclosing \
                  collection)",

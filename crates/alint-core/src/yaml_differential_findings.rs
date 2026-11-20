@@ -64,12 +64,6 @@ const FINDINGS: &[(&str, Entry, &[&str])] = &[
         Entry::Value,
         &["empty-implicit-key"],
     ),
-    // A block scalar header after a key with an anchor.
-    (
-        "true:\n  &a2 null:\n>\n",
-        Entry::Value,
-        &["block-scalar-under-an-anchor"],
-    ),
     // ayaml's duplicate key, reported where the mapping starts, and the
     // oracle's empty key, which hides it: without the empty key, both give
     // the duplicate key, at the place where each reports it.
@@ -85,57 +79,35 @@ const FINDINGS: &[(&str, Entry, &[&str])] = &[
         Entry::Value,
         &["tab-as-white-space"],
     ),
-    // A leading byte-order mark hides ayaml's error on the quoted scalar's
-    // continuation line (asamarts/ayaml#137); without it, both reject, at
-    // different places, and without the tab, ayaml's error is the
-    // continuation line's. The NEL in the block scalar after it matters to
-    // neither result.
+    // After a leading byte-order mark, ayaml still checks the quoted scalar's
+    // continuation line (fixed in ayaml 0.2.1, asamarts/ayaml#137), so only
+    // the tab and the continuation line explain the difference; the NEL in the
+    // block scalar after it matters to neither result.
     (
         "\u{feff}-\n  -\t\"d\\\n  \\u00e9\\t\"\n  - \"d\\_\\u00e9\\t\"\n  -\n    - |\n      \
          line 0\u{85}\n    - \n- []\n# end",
         Entry::Value,
         &[
-            "byte-order-mark-starting-a-line",
             "tab-as-white-space",
             "quoted-scalar-continuation-indentation",
         ],
     ),
     // Shapes the parser facade's compare mode found in the depth guard's
-    // tests, which the generator had not made. A second leading mark is
-    // content for both, and the first moves it to column 1 for the oracle.
+    // tests, which the generator had not made. ayaml 0.2.1 skips a run of
+    // leading marks (asamarts/ayaml#140), so both parsers reject the first
+    // shape's outdented `b:` (at different places) while in the second only
+    // ayaml reads `|` as a block scalar header (stripping the marks leaves
+    // both rejecting `|k:` at different places).
     (
         "\u{feff}\u{feff}  k: |2 #\nb: [1]\nc: \"\"\n",
         Entry::Value,
-        &["byte-order-mark-starting-a-line"],
+        &["after-the-root-node"],
     ),
     (
         "\u{feff}\u{feff}|k: |2 #x.&ak: |\n  k: \"\nb: [[[1]]]\nc: \"\"\n",
         Entry::Value,
-        &["byte-order-mark-starting-a-line"],
-    ),
-    // ayaml's line reader takes `a:` for the name and the quote line for
-    // the value's continuation (asamarts/ayaml#139).
-    (
-        "&a:[: x\ny\n",
-        Entry::Value,
         &[
-            "anchor-name-before-a-colon-and-a-flow-indicator",
-            "after-the-root-node",
-        ],
-    ),
-    (
-        "&a:[: x\n\"\n",
-        Entry::Value,
-        &[
-            "anchor-name-before-a-colon-and-a-flow-indicator",
-            "where-a-construct-opened",
-        ],
-    ),
-    (
-        "&a:[: x\n\"\nb: [[[1]]]\nc: \"\"\n",
-        Entry::Value,
-        &[
-            "anchor-name-before-a-colon-and-a-flow-indicator",
+            "byte-order-mark-starting-a-line",
             "where-a-construct-opened",
         ],
     ),
@@ -299,25 +271,6 @@ const FINDINGS: &[(&str, Entry, &[&str])] = &[
         Entry::Value,
         &["tab-as-white-space"],
     ),
-    // A block scalar header under an anchor, indented less than the root,
-    // where the oracle ends the document (seed 2).
-    (
-        " a: &a1\n|+\n  line 0\n...\n",
-        Entry::Value,
-        &["block-scalar-under-an-anchor"],
-    ),
-    // The same past a directive and `---`, and under a tag alone on its
-    // line (seeds 7 and 11).
-    (
-        "%YAML 1.2\n---\n a b: &a1\n|+\n  line 0\n\n",
-        Entry::Value,
-        &["block-scalar-under-an-anchor"],
-    ),
-    (
-        "\n  - \n  - \r\n\n\n     \n\n    !!map \n>",
-        Entry::Value,
-        &["block-scalar-under-an-anchor"],
-    ),
     // ayaml's scanner opens a flow collection where YAML 1.2 goes on with a
     // plain scalar, and rejects the tab on its next line (seed 2).
     (
@@ -464,27 +417,6 @@ const FINDINGS: &[(&str, Entry, &[&str])] = &[
         Entry::Value,
         &["yaml-1.2-flow-syntax", "after-the-root-node"],
     ),
-    // A block scalar header after a key with an anchor, past which ayaml
-    // reads to a quote no line ends: with the header past the key, the
-    // oracle does too (seed 4).
-    (
-        "- \n- &b on: \n|\n  \"unterminated?\t|2",
-        Entry::Value,
-        &["block-scalar-under-an-anchor", "where-a-construct-opened"],
-    ),
-    // The same, to a verbatim tag that names nothing (seed 8).
-    (
-        "k1:\n  - 1e3\n  -\n    &a1 true:\n      - &a2 true: &a3\n>\n  line 0\n  line 1\n\n  \
-         line 2\n  \ntrue:\n-\n  -\n    - !<!> null\n    -\t*a2 # c\n  - 's ''q'''\n- \
-         [\"d\"]\n-\n  ? a b\n  :\t.nan\t# c\n  b: \n  k1:\n    a: *a3\n    <<: \
-         18446744073709551616\n    <<: 2001-12-14\n",
-        Entry::Value,
-        &[
-            "verbatim-non-specific-tag",
-            "block-scalar-under-an-anchor",
-            "after-the-root-node",
-        ],
-    ),
     // A tab before the `]` that ends a flow collection's line after a plain
     // scalar's (seeds 4 and 9).
     (
@@ -591,6 +523,44 @@ const FINDINGS: &[(&str, Entry, &[&str])] = &[
          \t%YAML 1.2\n",
         Entry::Json,
         &["tab-as-white-space", "at-the-token"],
+    ),
+    // An empty `!!null` block scalar (which ayaml reads as null and the oracle
+    // rejects) followed by a duplicate key with a non-empty `!!null` block
+    // scalar (which ayaml rejects while streaming before seeing the duplicate
+    // key or a later parser error; seeds 2 and 4).
+    (
+        "---\na: \n<<:\n  k1: &a1 0.5\n  null: !!null |2\n  null: !!null |2\n      line 0\n\t\n    line 1\n---\nb: 2\n",
+        Entry::Value,
+        &["core-tag-on-another-kind", "indentation"],
+    ),
+    (
+        "---\na: \n<<:\n  k1: &a1 0.5\n  null: !!null |2\n  null: !!null |2\n      line 0\n\t\n    line 1\n---\nb: 2\n",
+        Entry::Json,
+        &[
+            "core-tag-on-another-kind",
+            "tab-as-white-space",
+            "after-the-root-node",
+        ],
+    ),
+    (
+        "-\n  <<:\n    k1: !!null |-\n    k1: !!null |-\n        line 0\n      line 1\n    a b: 0.5\n    b: \"d\\\t\\u00e9\\t\"\n  a: !<tag:x,2000:y> 18446744073709551616\n",
+        Entry::Value,
+        &["core-tag-on-another-kind", "after-the-root-node"],
+    ),
+    (
+        "-\n  <<:\n    k1: !!null |-\n    k1: !!null |-\n        line 0\n      line 1\n    a b: 0.5\n    b: \"d\\\t\\u00e9\\t\"\n  a: !<tag:x,2000:y> 18446744073709551616\n",
+        Entry::Json,
+        &["core-tag-on-another-kind"],
+    ),
+    (
+        "&a1 k1:\n  -\n    <<: &a2 !!null >\n    <<: &a2 !!null >\n      line 0\n  - |\n    line 0\nkey: 'q' 'q'\n...\n",
+        Entry::Value,
+        &["core-tag-on-another-kind", "indentation"],
+    ),
+    (
+        "&a1 k1:\n  -\n    <<: &a2 !!null >\n    <<: &a2 !!null >\n      line 0\n  - |\n    line 0\nkey: 'q' 'q'\n...\n",
+        Entry::Json,
+        &["core-tag-on-another-kind"],
     ),
 ];
 
