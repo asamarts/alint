@@ -1256,3 +1256,214 @@ fn an_untrusted_load_refuses_allow_out_of_root_before_its_extends_resolve() {
     assert!(error.contains("an untrusted load"), "{error}");
     assert!(crate::load_with(&path, &crate::LoadOptions::default()).is_ok());
 }
+
+/// What loading a config returned (its `extends:` chain and drop-ins,
+/// before `finalize`), and what the load did.
+struct Counted {
+    raw: Result<RawConfig>,
+    /// The work its entries were charged.
+    charged: usize,
+    /// The entries its merges handled ([`crate::merge::MERGE_TOUCHED`]).
+    touched: usize,
+    /// The rules and templates its merges field-merged onto another
+    /// ([`crate::merge::MAPPING_MERGES`]).
+    merged_onto: usize,
+    /// The rules and templates they copied from a held source
+    /// ([`crate::merge::MAPPING_COPIES`]).
+    copied: usize,
+}
+
+/// Load the config at `root`, counting what the load did.
+fn load_counted(root: &Path) -> Counted {
+    let registry = alint_rules::builtin_registry();
+    let options = crate::LoadOptions::with_catalog(registry.catalog());
+    let mut state = LoadState::default();
+    let counters = || {
+        [
+            &crate::merge::MERGE_TOUCHED,
+            &crate::merge::MAPPING_MERGES,
+            &crate::merge::MAPPING_COPIES,
+        ]
+        .map(|counter| counter.with(std::cell::Cell::get))
+    };
+    let before = counters();
+    let raw = crate::resolve_top_level(root, &options, &mut state);
+    let after = counters();
+    Counted {
+        raw,
+        charged: state.extends_entries,
+        touched: after[0] - before[0],
+        merged_onto: after[1] - before[1],
+        copied: after[2] - before[2],
+    }
+}
+
+/// In `dir`, a ruleset `<name>.yml` of `rules` rules of its own, each with a
+/// message of `message` bytes, and its `extends:` entry.
+fn write_ruleset(dir: &Path, name: &str, rules: usize, message: usize) -> String {
+    use std::fmt::Write as _;
+    let message = "m".repeat(message);
+    let mut text = String::from("version: 1\nrules:\n");
+    for index in 0..rules {
+        writeln!(
+            text,
+            "  - {{id: {name}-{index}, kind: file_exists, paths: x, level: error, \
+             message: '{message}'}}"
+        )
+        .unwrap();
+    }
+    std::fs::write(dir.join(format!("{name}.yml")), text).unwrap();
+    format!("./{name}.yml")
+}
+
+/// In `dir`, a config that extends `entries`, in order.
+fn write_extending(dir: &Path, entries: &[String]) -> PathBuf {
+    let listed = entries.iter().fold(String::new(), |mut listed, entry| {
+        listed.push_str("  - ");
+        listed.push_str(entry);
+        listed.push('\n');
+        listed
+    });
+    let path = dir.join(".alint.yml");
+    std::fs::write(&path, format!("version: 1\nextends:\n{listed}rules: []\n")).unwrap();
+    path
+}
+
+/// A flat list of 100 rulesets of 1,000 rules each loads (#580). Each merge
+/// rebuilt what its list merged so far, and was charged it, so the budget
+/// refused the 91st ruleset. A merge handles what its entry brings in, each
+/// rule and the ruleset's compatibility record once, and is charged that.
+#[test]
+fn a_flat_list_of_large_rulesets_loads() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (count, rules) = (100, 1_000);
+    let entries: Vec<String> = (0..count)
+        .map(|index| write_ruleset(tmp.path(), &format!("r{index}"), rules, 1))
+        .collect();
+    let counted = load_counted(&write_extending(tmp.path(), &entries));
+    assert_eq!(counted.raw.unwrap().rules.len(), count * rules);
+    // Each ruleset's rules to load it, and again to merge it.
+    assert_eq!(counted.charged, count * 2 * rules);
+    // And the root's own record.
+    assert_eq!(counted.touched, count * (rules + 1) + 1);
+    assert_eq!((counted.merged_onto, counted.copied), (0, 0));
+}
+
+/// A list of 2,900 one-rule files loads (#580): the budget refused the
+/// 2,895th, charged what the list merged before it at each merge.
+#[test]
+fn a_list_of_many_one_rule_files_loads() {
+    let tmp = tempfile::tempdir().unwrap();
+    let count = 2_900;
+    let entries: Vec<String> = (0..count)
+        .map(|index| write_ruleset(tmp.path(), &format!("r{index}"), 1, 1))
+        .collect();
+    let counted = load_counted(&write_extending(tmp.path(), &entries));
+    assert_eq!(counted.raw.unwrap().rules.len(), count);
+    assert_eq!(counted.charged, count * 2);
+    assert_eq!(counted.touched, count * 2 + 1);
+}
+
+/// An `extends:` list that alternates two rulesets of 2,000 rules each a
+/// thousand times (#567) rebuilt the 4,000 rules merged so far at every entry
+/// before a budget refused it, some 48 seconds in a debug build. Each entry
+/// now handles the rules it brings in, once, and the list is refused when the
+/// sources its entries merged pass 64 MiB. (Each rule's message makes each
+/// ruleset over 2 MiB, so that is after 31 entries, which keeps the test
+/// short; rules of 60 bytes are refused after 574 entries.)
+#[test]
+fn an_alternating_extends_list_is_refused_in_linear_work() {
+    let tmp = tempfile::tempdir().unwrap();
+    let rules = 2_000;
+    let pair = [
+        write_ruleset(tmp.path(), "a", rules, 1_000),
+        write_ruleset(tmp.path(), "b", rules, 1_000),
+    ];
+    let entries: Vec<String> = (0..1_000).flat_map(|_| pair.clone()).collect();
+    let counted = load_counted(&write_extending(tmp.path(), &entries));
+    let error = counted.raw.unwrap_err().to_string();
+    assert!(error.contains("bytes of sources in all"), "{error}");
+    // The rulesets are as large, and the entry that passes the budget is
+    // refused before it merges.
+    let size = std::fs::metadata(tmp.path().join("a.yml")).unwrap().len();
+    let merged = MAX_EXTENDS_SOURCE_BYTES / usize::try_from(size).unwrap();
+    assert_eq!(merged, 31);
+    // Loading `a` and `b`, and each entry's merge, the refused one's too.
+    assert_eq!(counted.charged, 2 * rules + (merged + 1) * rules);
+    // Each merged entry's rules and compatibility record, once.
+    assert_eq!(counted.touched, merged * (rules + 1));
+    // Each rule is copied once, from the first entry of its ruleset. A later
+    // entry finds it as that ruleset's entry left it, and does not merge it
+    // again ([`crate::merge::Merger::push_repeated`]): before, each entry
+    // copied all of its ruleset, and merged each rule onto itself.
+    assert_eq!(counted.copied, 2 * rules);
+    assert_eq!(counted.merged_onto, 0);
+}
+
+/// An `extends:` list whose sources override each other's rules (`[a, b] x
+/// 10`, `b` setting another level on each rule of `a`) field-merges every rule
+/// at every entry after the first. Each such merge is charged once more, as
+/// the merge that rebuilt what was merged so far charged it: the list is
+/// charged what it was before #580, so it meets the budget where it did.
+#[test]
+fn an_alternating_list_of_overriding_rulesets_is_charged_its_merges() {
+    let tmp = tempfile::tempdir().unwrap();
+    let rules = 100;
+    let ruleset = |name: &str, level: &str| {
+        use std::fmt::Write as _;
+        let mut text = String::from("version: 1\nrules:\n");
+        for index in 0..rules {
+            writeln!(
+                text,
+                "  - {{id: x-{index}, kind: file_exists, paths: x, level: {level}}}"
+            )
+            .unwrap();
+        }
+        std::fs::write(tmp.path().join(format!("{name}.yml")), text).unwrap();
+        format!("./{name}.yml")
+    };
+    let pair = [ruleset("a", "error"), ruleset("b", "warning")];
+    let entries: Vec<String> = (0..10).flat_map(|_| pair.clone()).collect();
+    let counted = load_counted(&write_extending(tmp.path(), &entries));
+    let raw = counted.raw.unwrap();
+    assert_eq!(raw.rules.len(), rules);
+    assert_eq!(raw.rules[0]["level"], ayaml::Value::from("warning"));
+    // Each entry after the first merges each rule onto the other ruleset's.
+    assert_eq!(counted.merged_onto, 19 * rules);
+    // Loading `a` and `b`, what each entry brings in, and those merges: what
+    // each entry was charged before, the rules merged so far and its own.
+    assert_eq!(counted.charged, 2 * rules + 20 * rules + 19 * rules);
+    assert_eq!(counted.charged, 2 * rules + rules + 19 * (rules + rules));
+}
+
+/// A ruleset that repeats a rule's id merges each later copy onto the one
+/// before it, each time an entry merges the ruleset, and each such merge is
+/// charged: the copies of one entry are not the copies of another, so none is
+/// left as it is (`[a, b, a]`, `a` holding 100 copies of one rule).
+#[test]
+fn a_source_that_repeats_a_rule_id_is_charged_each_merge() {
+    use std::fmt::Write as _;
+    let tmp = tempfile::tempdir().unwrap();
+    let copies = 100;
+    let mut text = String::from("version: 1\nrules:\n");
+    for index in 0..copies {
+        writeln!(
+            text,
+            "  - {{id: x, kind: file_exists, paths: x, level: error, message: m{index}}}"
+        )
+        .unwrap();
+    }
+    std::fs::write(tmp.path().join("a.yml"), text).unwrap();
+    let a = "./a.yml".to_string();
+    let entries = [a.clone(), write_ruleset(tmp.path(), "b", 1, 1), a];
+    let counted = load_counted(&write_extending(tmp.path(), &entries));
+    let raw = counted.raw.unwrap();
+    assert_eq!(raw.rules.len(), 2);
+    assert_eq!(raw.rules[0]["message"], ayaml::Value::from("m99"));
+    assert_eq!(counted.merged_onto, (copies - 1) + copies);
+    // Loading `a` and `b`, what each entry brings in, and the merges.
+    assert_eq!(
+        counted.charged,
+        (copies + 1) + (copies + 1 + copies) + (copies - 1) + copies
+    );
+}

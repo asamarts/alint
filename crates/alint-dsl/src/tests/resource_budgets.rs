@@ -639,25 +639,27 @@ fn an_extends_list_that_repeats_a_source_loads_it_once() {
         .collect();
     let filters: Vec<&str> = filters.iter().map(String::as_str).collect();
     // An entry that loads its source is charged the source's entries, and
-    // each merge what was merged so far and what it brings in.
+    // each merge what it brings in, and each rule it merges onto one an
+    // other source merged last once more.
     for (entries, times, parses, charged, rules) in [
         (&["./a.yml"][..], 1_000, 2, 50 + 50, 50),
         (
             &["./a.yml", "./b.yml"][..],
             500,
             3,
-            (50 + 50) + 50 + (50 + 50) + 998 * (100 + 50),
+            (50 + 50) + (50 + 50) + 998 * 50,
             100,
         ),
-        // A filter makes another source of the same file.
+        // A filter makes another source of the same file, whose `a1` each
+        // entry after the first merges onto the other's.
         (
             &["./a.yml", "{url: ./a.yml, only: [a1]}"][..],
             500,
             3,
-            (50 + 50) + 50 + (50 + 1) + 499 * (50 + 50) + 499 * (50 + 1),
+            (50 + 50) + (50 + 1) + 499 * 50 + 499 + 999,
             50,
         ),
-        (&filters[..], 1, 3, 50 * 50 + (1..=50).sum::<usize>(), 50),
+        (&filters[..], 1, 3, 50 * 50 + 50, 50),
     ] {
         let root = list(entries, times);
         let (_tmp, config) = repo(&[(".alint.yml", &root), ("a.yml", &a), ("b.yml", &b)]);
@@ -679,8 +681,8 @@ fn a_version_two_source_counts_in_the_extends_budget() {
     ]);
     let (raw, charge) = merged_with_charge(&config);
     assert_eq!(raw.v2.sources.len(), 3, "the root, `a` and `b`");
-    // Loading `a` and merging it, then loading `b` and merging it onto `a`.
-    assert_eq!(charge, 1 + 1 + 1 + (1 + 1));
+    // Loading `a` and merging it, then loading `b` and merging it.
+    assert_eq!(charge, 1 + 1 + 1 + 1);
 }
 
 /// A source an entry repeats still overrides what came between, as when it
@@ -724,9 +726,10 @@ fn a_repeated_extends_entry_still_overrides_the_entries_before_it() {
 }
 
 /// What the `extends:` merges of one load handle, in all, is held to a
-/// budget, so a list that alternates two sources, or follows a large one with
-/// many small ones, cannot merge without end. (The loader charges every merge
-/// of a list: [`an_extends_list_that_repeats_a_source_loads_it_once`].)
+/// budget, so a list that alternates two sources cannot merge without end.
+/// Each merge is charged what it brings in, and at least one entry. (The
+/// loader charges every merge of a list:
+/// [`an_extends_list_that_repeats_a_source_loads_it_once`].)
 #[test]
 fn an_extends_merge_budget_bounds_a_load() {
     let entries = |count: usize| RawConfig {
@@ -735,24 +738,29 @@ fn an_extends_merge_budget_bounds_a_load() {
     };
     let mut state = loader::LoadState::default();
     let large = entries(loader::MAX_EXTENDS_MERGE_WORK / 2);
+    state.charge_extends(&large).expect("half the budget");
     state
-        .charge_extends(&RawConfig::default(), &large)
-        .expect("half the budget");
-    // What the merge rebuilds counts, however little it brings in.
+        .charge_extends(&entries(loader::MAX_EXTENDS_MERGE_WORK / 2 - 1))
+        .expect("all of it but one entry");
+    // A merge of nothing still counts.
     state
-        .charge_extends(&large, &RawConfig::default())
+        .charge_extends(&RawConfig::default())
         .expect("all of it");
     assert_eq!(
         state
-            .charge_extends(&RawConfig::default(), &entries(1))
+            .charge_extends(&RawConfig::default())
             .unwrap_err()
             .to_string(),
         format!(
             "the `extends:` entries and `.alint.d/` drop-ins of this config load and merge more \
-             than {} entries in all (rules, templates, facts, vars and `ignore:` patterns, counted \
-             for each source an entry loads and at each merge, both what was merged so far and \
-             what the entry or drop-in brings in); list each source once, extend fewer and larger \
-             sources, use fewer drop-ins, or flatten the `extends:` chain",
+             than {} entries in all (rules, templates, facts, vars, `ignore:` patterns, the \
+             `vars.` reads in an untrusted remote's `when:`, and each version 2 source, selector \
+             and relation, counted for each source an entry loads, again for what each entry or \
+             drop-in brings in to a merge, and again for each rule or template a merge combines \
+             with one of its id, but not one an earlier entry naming the same source, with the \
+             same filters, wrote last); list each source once, remove repeated rule and template \
+             ids within a source, extend fewer sources, use fewer drop-ins, or flatten the \
+             `extends:` chain",
             loader::MAX_EXTENDS_MERGE_WORK
         )
     );

@@ -47,6 +47,10 @@ pub(crate) fn mark_field_origins(mappings: &mut [Mapping], source: usize) {
 /// those fields last-wins: a field `incoming` writes takes its origin there,
 /// or loses its origin when `incoming` has none for it (a version 1 source
 /// wrote it). A mapping neither side marked stays unmarked.
+///
+/// The table is taken out and put back at the end, unchanged when `incoming`
+/// merged onto it last: the rule `merge.rs`'s `Remerge` relies on
+/// ([`crate::merge_mapping_fields`]).
 pub(crate) fn merge_field_origins(existing: &mut Mapping, incoming: &Mapping) {
     let theirs = incoming
         .get(FIELD_ORIGINS_MARKER)
@@ -56,7 +60,7 @@ pub(crate) fn merge_field_origins(existing: &mut Mapping, incoming: &Mapping) {
         return;
     }
     let mut merged = ours
-        .and_then(|value| value.as_mapping().cloned())
+        .and_then(|mut value| value.as_mapping_mut().map(std::mem::take))
         .unwrap_or_default();
     for field in incoming.keys().filter(|field| !is_internal(field)) {
         match theirs.and_then(|origins| origins.get(field)) {

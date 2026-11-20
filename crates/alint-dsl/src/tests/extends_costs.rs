@@ -123,7 +123,8 @@ fn a_file_the_environment_chose_costs_each_entry_once() {
 /// `trusted_extends:` list it is checked against, which the memo copied and
 /// hashed in full for each load: 2,000 entries with 20,000 trusted URLs took
 /// 23 seconds. It is keyed by which list it is, and an entry that loads an
-/// empty file costs at least one entry of the budget.
+/// empty file costs at least one entry of the budget to load it, and one to
+/// merge it.
 #[test]
 fn a_memoized_load_does_not_hash_the_trusted_list() {
     let tmp = tempfile::tempdir().unwrap();
@@ -145,7 +146,7 @@ fn a_memoized_load_does_not_hash_the_trusted_list() {
     // A key hashes two paths and a few small fields; the list would add
     // 2,000 URLs to each.
     assert!(hashed < entries * 2_000, "{hashed} bytes hashed");
-    assert_eq!(state.extends_entries, entries);
+    assert_eq!(state.extends_entries, 2 * entries);
 }
 
 /// An entry that names a remote body by another URL (another query) read,
@@ -280,18 +281,14 @@ fn the_extends_source_budget_bounds_a_load() {
         ..RawConfig::default()
     };
     let mut state = LoadState::default();
-    let empty = RawConfig::default();
     state
-        .charge_extends(&empty, &source(loader::MAX_EXTENDS_SOURCE_BYTES / 2))
+        .charge_extends(&source(loader::MAX_EXTENDS_SOURCE_BYTES / 2))
         .expect("half the budget");
     state
-        .charge_extends(&empty, &source(loader::MAX_EXTENDS_SOURCE_BYTES / 2))
+        .charge_extends(&source(loader::MAX_EXTENDS_SOURCE_BYTES / 2))
         .expect("all of it");
     assert_eq!(
-        state
-            .charge_extends(&empty, &source(1))
-            .unwrap_err()
-            .to_string(),
+        state.charge_extends(&source(1)).unwrap_err().to_string(),
         format!(
             "the `extends:` entries of this config merge more than {} bytes of sources in all \
              (each source counted for every entry that merges it, as its text, or as its YAML \
@@ -302,9 +299,10 @@ fn the_extends_source_budget_bounds_a_load() {
     );
 }
 
-/// Each `.alint.d/` drop-in merges onto the whole config, which a merge
-/// rebuilds, and was never charged: 200 empty drop-ins on a config of 50,000
-/// `ignore:` patterns took ten seconds. Each drop-in's merge is charged as an
+/// Each `.alint.d/` drop-in merged onto the whole config, which a merge
+/// rebuilt, and was never charged: 200 empty drop-ins on a config of 50,000
+/// `ignore:` patterns took ten seconds. A drop-in's merge handles what it
+/// brings in (#580), and is charged that, and at least one entry, as an
 /// `extends:` merge is.
 #[test]
 fn each_drop_in_merge_is_charged() {
@@ -319,24 +317,34 @@ fn each_drop_in_merge_is_charged() {
     for name in ["10.yml", "20.yml", "30.yml"] {
         write(tmp.path(), &format!(".alint.d/{name}"), drop_in);
     }
-    let (raw, state) = resolved(&root, &options(&[]));
+    let ((raw, state), touched) = counted(&crate::merge::MERGE_TOUCHED, || {
+        resolved(&root, &options(&[]))
+    });
     raw.unwrap();
-    // Each merge rebuilds the 1,000 patterns and brings in nothing.
-    assert_eq!(state.extends_entries, 3 * 1_000);
+    // Each merge brings in nothing. The 1,000 patterns are read once, as the
+    // first merge starts, with the config's compatibility record and each
+    // drop-in's.
+    assert_eq!(state.extends_entries, 3);
+    assert_eq!(touched, 1_000 + 4);
     assert_eq!(state.extends_bytes, 3 * drop_in.len());
 }
 
 /// The budgets' sizes, and where a flat list of rulesets meets the entry
-/// budget, as the configuration docs' Limits section and the CHANGELOG give
-/// them: about 90 rulesets of 1,000 rules each, or about 2,900 one-rule
-/// files. Each entry of such a list is charged the ruleset it loads, and its
-/// merge what was merged so far and the ruleset.
+/// budget: each entry is charged the ruleset it loads and what it brings in
+/// to its merge, twice the ruleset, so the list stays within the budget while
+/// its rulesets hold at most 2,097,152 entries in all. Rulesets that hold
+/// other entries meet the merged config's size ([`MAX_MERGED_ENTRIES`])
+/// first, at 1,049 rulesets of 1,000 entries each; rulesets that hold the same
+/// entries meet the budget, at 2,098, though they merge to 1,000 entries.
+/// Before #580 each merge was charged what was merged so far too, and the
+/// budget refused the 91st ruleset, or the 2,895th one-rule file.
 #[test]
 fn the_extends_budgets_have_their_documented_sizes() {
     assert_eq!(loader::MAX_EXTENDS_MERGE_WORK, 4_194_304);
     assert_eq!(loader::MAX_EXTENDS_SOURCE_BYTES, 64 * 1024 * 1024);
+    // A ruleset of `count` `ignore:` patterns: the same in each ruleset.
     let entries = |count: usize| RawConfig {
-        ignore: vec![String::new(); count],
+        ignore: (0..count).map(|pattern| pattern.to_string()).collect(),
         ..RawConfig::default()
     };
     // The first entry of a flat list of `rules`-rule rulesets the budget
@@ -344,18 +352,25 @@ fn the_extends_budgets_have_their_documented_sizes() {
     let refused_at = |rules: usize| {
         let mut state = LoadState::default();
         let source = entries(rules);
-        (1..=10_000)
-            .find(|&entry: &usize| {
-                let merged = entries((entry - 1) * rules);
+        (1..=usize::MAX)
+            .find(|_| {
                 state
                     .charge_extends_load(&source)
-                    .and_then(|()| state.charge_extends(&merged, &source))
+                    .and_then(|()| state.charge_extends(&source))
                     .is_err()
             })
             .unwrap()
     };
-    assert_eq!(refused_at(1_000), 91);
-    assert_eq!(refused_at(1), 2_895);
+    assert_eq!(refused_at(1_000), 2_098);
+    assert_eq!(refused_at(1), 2_097_153);
+    assert_eq!(MAX_MERGED_ENTRIES / 1_000 + 1, 1_049);
+    // The 2,097 rulesets the budget takes, of the same 1,000 patterns, merge
+    // to those 1,000.
+    let mut merger = crate::merge::Merger::new(RawConfig::default());
+    for _ in 1..refused_at(1_000) {
+        merger.push(entries(1_000)).unwrap();
+    }
+    assert_eq!(merger.finish().ignore.len(), 1_000);
     // Sources of 1 MiB: the 65th passes 64 MiB.
     let mut state = LoadState::default();
     let source = RawConfig {
@@ -363,11 +378,7 @@ fn the_extends_budgets_have_their_documented_sizes() {
         ..RawConfig::default()
     };
     let refused = (1..=65)
-        .find(|_| {
-            state
-                .charge_extends(&RawConfig::default(), &source)
-                .is_err()
-        })
+        .find(|_| state.charge_extends(&source).is_err())
         .unwrap();
     assert_eq!(refused, 65);
 }

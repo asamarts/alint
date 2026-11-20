@@ -25,30 +25,9 @@ pub(crate) struct Objects {
 }
 
 impl Objects {
-    /// `self`'s sources, then those of `other` that `self` does not hold yet:
-    /// a file an `extends:` diamond reaches twice declares its objects once.
-    pub(crate) fn merged(mut self, other: Self) -> Self {
-        if other.sources.is_empty() {
-            return self;
-        }
-        for source in other.sources {
-            if !self
-                .sources
-                .iter()
-                .any(|held| held.source.path == source.source.path)
-            {
-                self.sources.push(source);
-            }
-        }
-        self
-    }
-
     /// How many selectors and relations the sources declare.
     pub(crate) fn object_count(&self) -> usize {
-        self.sources
-            .iter()
-            .map(|source| source.selectors.len() + source.relations.len())
-            .sum()
+        self.sources.iter().map(SourceObjects::object_count).sum()
     }
 
     /// Whether any version 2 source is recorded.
@@ -106,6 +85,11 @@ pub(crate) struct SourceObjects {
 }
 
 impl SourceObjects {
+    /// How many selectors and relations the source declares.
+    pub(crate) fn object_count(&self) -> usize {
+        self.selectors.len() + self.relations.len()
+    }
+
     #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
         self.selectors.is_empty() && self.relations.is_empty() && self.aliases.is_empty()

@@ -41,9 +41,13 @@ full below.
   `extends:` needs `allow_out_of_root: true` (Security).
 - An `extends:` list's entries and the `.alint.d/` drop-ins may load and merge at most 4,194,304
   entries in all, and the entries at most 64 MiB of sources, each counted for every entry that
-  merges it, as the [configuration limits](docs/site/configuration/index.md#limits) say: a flat
-  list reaches the first at about 90 rulesets of 1,000 rules each, or about 2,900 one-rule files,
-  and the second at 64 entries of a 1 MiB source (Fixed).
+  merges it, as the [configuration limits](docs/site/configuration/index.md#limits) say. A list
+  merges into one config in place (#580), so an entry is charged what it loads, what it brings in,
+  and once more each rule and template it merges onto an earlier one of its id, in its own source
+  too; one that an earlier entry naming the same source wrote last is not merged again, nor
+  charged (#567). A flat list of distinct rulesets that override none of each other's rules or
+  templates, and repeat no id within one, stays within the first bound while they hold at most
+  2,097,152 entries in all; the second is reached at 64 entries of a 1 MiB source (Fixed).
 - On Unix, a `.git` another user owns does not mark a repository's top. Run from a subdirectory
   of a checkout another user owns (as root in a container, say), alint skips that checkout's
   config with a warning; run it from the top or pass `--config` (Security).
@@ -1319,8 +1323,8 @@ policy-test package the user does not trust.
 - **An `extends:` list that names one source many times loads it once,** and the work of a load's
   `extends:` entries is bounded: 2,000 entries naming one 2,000-rule ruleset took 152 s to load. An
   entry is charged the source it loads, before `only:` or `except:` narrows it and at least one
-  entry for an empty one, and each merge, and each `.alint.d/` drop-in's, what was merged so far
-  and what it brings in, up to 4,194,304 entries in all; each entry is also charged its source's
+  entry for an empty one, and each merge, and each `.alint.d/` drop-in's, what it brings in
+  (#580), up to 4,194,304 entries in all; each entry is also charged its source's
   size, up to 64 MiB in all (see the
   [configuration limits](docs/site/configuration/index.md#limits)). A remote source named by other
   URLs with one hash, and a bundled ruleset named with other `only:` or `except:` lists, are parsed
