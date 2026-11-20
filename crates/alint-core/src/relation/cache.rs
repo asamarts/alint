@@ -292,10 +292,11 @@ pub struct DecodeCache {
     limits: Limits,
     /// What the relations the rules read took of the run's bytes, from this
     /// cache's count and the relation memo's together: recorded by the
-    /// engine once it has evaluated them, before any rule runs
-    /// ([`record_relations`](Self::record_relations)), or, when nothing
+    /// engine once it has evaluated them, before any rule that reads one
+    /// runs ([`record_relations`](Self::record_relations)), or, when nothing
     /// recorded it (a rule run alone), this cache's count when the first
-    /// consumer uses it. A clear forgets it.
+    /// consumer uses it. A clear keeps it: the rules after a fix are checked
+    /// against what the relations took when the pass evaluated them.
     relations: Mutex<Option<usize>>,
     /// The most a consumer asked [`may_hold`](Self::may_hold) for at once.
     /// Test/diagnostic only.
@@ -531,16 +532,15 @@ impl DecodeCache {
     /// Forget every decode, with [`ReadCache::clear`]. The rows already taken
     /// stay counted against the run's budget, which bounds the run's decode
     /// work, not only what is kept. The bytes are counted again from none,
-    /// since the decodes that held them are let go, and what the relations
-    /// took is forgotten: the engine evaluates the relations again, and
-    /// records what they take, before a rule uses the cache again, so the
-    /// rules after a clear see the bytes a run over the tree as it is now
-    /// would.
+    /// since the decodes that held them are let go. What the relations took
+    /// is kept: the rules after a clear read their relations again as they
+    /// need them, and what a consumer may hold
+    /// ([`may_hold`](Self::may_hold)) stays what the pass's relations left,
+    /// the same for every rule of the pass, as in `check`.
     pub fn clear(&self) {
         self.slots.lock().expect("decode cache lock").clear();
         *self.bytes.write().expect("decode cache bytes lock") =
             Arc::new(RunBudget::bytes(&self.limits));
-        *self.relations.lock().expect("decode cache relations lock") = None;
     }
 
     /// How many decodes this cache performed. Test/diagnostic only.
@@ -1089,8 +1089,8 @@ mod tests {
     /// them: it takes nothing, and what consumers take after (on other
     /// threads, in any order) never changes the answer, so whether a rule's
     /// files fit is the same in every run. A clear starts the count again
-    /// and forgets the record, so the relations evaluated after it are all
-    /// that counts, as in a run over the tree as it is then.
+    /// and keeps the record, so the rules after a fix, which read their
+    /// relations again, are checked against what the pass's relations took.
     #[test]
     fn what_a_consumer_may_hold_is_what_the_relations_left() {
         let run = Limits::default().with(LimitKind::BytesPerRun, 100).unwrap();
@@ -1113,17 +1113,20 @@ mod tests {
         assert_eq!(cache.may_hold(50), Ok(()));
         assert!(cache.may_hold(51).is_err());
         assert_eq!(cache.largest_held(), 51);
-        // A clear: the count starts again, and the relations evaluated
-        // after it take 5 and hold 15, so 80 is left, whatever came before.
+        // A clear: the count starts again, and the record stands while the
+        // rules after it decode their relations again.
         cache.clear();
         assert_eq!(cache.bytes_taken(), 0);
-        cache.byte_budget().take(5).unwrap();
+        cache.byte_budget().take(45).unwrap();
+        assert_eq!(cache.may_hold(50), Ok(()));
+        assert!(cache.may_hold(51).is_err());
+        // Recorded again (the engine's next relation phase), it is replaced.
         cache.record_relations(15);
-        assert_eq!(cache.may_hold(80), Ok(()));
-        assert!(cache.may_hold(81).is_err());
+        assert_eq!(cache.may_hold(40), Ok(()));
+        assert!(cache.may_hold(41).is_err());
         // With nothing recorded, the first consumer records the cache's
         // count before it: a rule run alone, its relations evaluated first.
-        cache.clear();
+        let cache = DecodeCache::with_run_limits(&run);
         cache.byte_budget().take(25).unwrap();
         assert_eq!(cache.may_hold(75), Ok(()));
         cache.take_bytes(20).unwrap();

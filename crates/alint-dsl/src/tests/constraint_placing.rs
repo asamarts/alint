@@ -1,10 +1,11 @@
 //! Whether a `constraint` rule's findings fit when it places them is the same
 //! in `fix` as in `check`: both evaluate the relations the rules read before
-//! any rule runs, and record what they took of the run's bytes, so a rule is
-//! checked against what the relations left, not against what the relations
-//! of the rules before it took. After a fix clears the caches, the relations
-//! are evaluated again and recorded anew, as a check of the tree as it is
-//! then would.
+//! any rule that reads one runs, and record what they took of the run's
+//! bytes, so a rule is checked against what the relations left, not against
+//! what the relations of the rules before it took. After a fix clears the
+//! caches, the rules after it read their relations again and are checked
+//! against the same record, and `fix --diff`, which writes nothing, clears
+//! nothing.
 
 use alint_core::relation::{DecodeCache, LimitKind, Limits};
 use alint_core::{Applicability, Engine, FileIndex, RuleResult, WalkOptions, walk};
@@ -17,20 +18,44 @@ use super::super::constraint::load_tree;
 /// `create`, rule `make` creates `MADE.md`, a fix applied before the
 /// constraint rules run.
 fn config(create: bool) -> String {
-    let make = if create {
-        "  - id: make\n    kind: file_exists\n    paths: MADE.md\n    level: error\n    fix:\n      \
-         file_create:\n        content: \"made\\n\"\n"
+    if create {
+        config_in(&["make", "a", "b"])
     } else {
-        ""
-    };
-    format!(
-        "version: 2\nrelations:\n  ra:\n    from: {{ paths: a.json }}\n    entries: {{ format: \
-         json, at: \"$\" }}\n    fields: {{ l: entry.value }}\n  rb:\n    from: {{ paths: big.json \
-         }}\n    entries: {{ format: json, at: \"$\" }}\n    fields: {{ k: entry.key }}\nrules:\n\
-         {make}  - id: a\n    kind: constraint\n    input: ra\n    assert: {{ unique: {{ key: [l] \
-         }} }}\n    level: error\n  - id: b\n    kind: constraint\n    input: rb\n    assert: {{ \
-         unique: {{ key: [k] }} }}\n    level: error\n"
-    )
+        config_in(&["a", "b"])
+    }
+}
+
+/// [`config`]'s rules `make`, `a` and `b`, and `kp`, a `key_parity` rule
+/// that decodes `big.json` and `a.json` through the run's caches, in the
+/// order `rules` names them.
+fn config_in(rules: &[&str]) -> String {
+    let mut config = String::from(
+        "version: 2\nrelations:\n  ra:\n    from: { paths: a.json }\n    entries: { format: \
+         json, at: \"$\" }\n    fields: { l: entry.value }\n  rb:\n    from: { paths: big.json \
+         }\n    entries: { format: json, at: \"$\" }\n    fields: { k: entry.key }\nrules:\n",
+    );
+    for rule in rules {
+        config.push_str(match *rule {
+            "make" => {
+                "  - id: make\n    kind: file_exists\n    paths: MADE.md\n    level: error\n    \
+                 fix:\n      file_create:\n        content: \"made\\n\"\n"
+            }
+            "a" => {
+                "  - id: a\n    kind: constraint\n    input: ra\n    assert: { unique: { key: [l] \
+                 } }\n    level: error\n"
+            }
+            "b" => {
+                "  - id: b\n    kind: constraint\n    input: rb\n    assert: { unique: { key: [k] \
+                 } }\n    level: error\n"
+            }
+            "kp" => {
+                "  - id: kp\n    kind: key_parity\n    reference: big.json\n    peers: \"*.json\"\n    \
+                 level: error\n"
+            }
+            other => panic!("no rule {other}"),
+        });
+    }
+    config
 }
 
 fn files() -> Vec<(String, String)> {
@@ -40,6 +65,11 @@ fn files() -> Vec<(String, String)> {
         .collect();
     let big = format!("{{{}}}", keys.join(", "));
     vec![("a.json".into(), a), ("big.json".into(), big)]
+}
+
+/// [`engine`], where a binding named `engine` hides it.
+fn engine_for(config: &alint_core::Config) -> Engine {
+    engine(config)
 }
 
 fn engine(config: &alint_core::Config) -> Engine {
@@ -298,4 +328,125 @@ fn what_the_relations_took_counts_their_rows_with_their_decodes() {
         .with(LimitKind::BytesPerRun, relations + held)
         .unwrap();
     assert_eq!(run(&limits).0, (1, vec![]));
+}
+
+/// Rule `a`'s outcome in a fix report: its items, and the limit its
+/// failures name.
+fn fixed(report: &alint_core::FixReport) -> (usize, Vec<bool>) {
+    report
+        .results
+        .iter()
+        .find(|result| &*result.rule_id == "a")
+        .map_or((0, Vec::new()), |a| {
+            outcome(a.items.len(), &a.analysis_failures)
+        })
+}
+
+/// With `b`, which reads the big relation, before a fix and `a` after it,
+/// `check`, `fix --dry-run` and `fix --diff` place `a`'s finding alike over
+/// a sweep of `bytes_per_run`: from where `a`'s file does not fit beside
+/// both relations to where it does. `fix --diff` cleared the caches after
+/// the staged create and recorded what `a`'s relation alone took, so it
+/// placed the finding where `check` refused it.
+#[test]
+fn check_fix_dry_run_and_fix_diff_place_a_finding_alike_after_a_fix() {
+    let config = config_in(&["b", "make", "a"]);
+    let files = files();
+    let files: Vec<(&str, &str)> = files
+        .iter()
+        .map(|(p, b)| (p.as_str(), b.as_str()))
+        .collect();
+    let (dir, loaded) = load_tree(&config, &files);
+    let engine = engine(&loaded.unwrap());
+    let mut seen = std::collections::BTreeSet::new();
+    for limit in (200_000..=360_000).step_by(8_000) {
+        let limits = Limits::default()
+            .with(LimitKind::BytesPerRun, limit)
+            .unwrap();
+        let index = index_under(dir.path(), &limits);
+        let check = checked(&engine.run(dir.path(), &index).unwrap().results);
+        let index = index_under(dir.path(), &limits);
+        let dry_run = engine
+            .fix(
+                dir.path(),
+                &index,
+                &walk_options(),
+                true,
+                Applicability::Unsafe,
+            )
+            .unwrap();
+        let index = index_under(dir.path(), &limits);
+        let (staged, edits) = engine
+            .stage_fixes(dir.path(), &index, Applicability::Unsafe)
+            .unwrap();
+        assert_eq!(edits.len(), 1, "the create is staged");
+        assert_eq!(
+            (fixed(&dry_run), fixed(&staged)),
+            (check.clone(), check.clone()),
+            "under {limit} bytes"
+        );
+        // A pass that writes clears the caches after the create; `a` reads
+        // its relation again and is checked against what the pass's
+        // relations took, both of them, as in `check`.
+        let (fixing, loaded) = load_tree(&config, &files);
+        let first = index_under(fixing.path(), &limits);
+        engine_for(&loaded.unwrap())
+            .fix(
+                fixing.path(),
+                &first,
+                &walk_options(),
+                false,
+                Applicability::Unsafe,
+            )
+            .unwrap();
+        assert!(fixing.path().join("MADE.md").is_file());
+        assert_eq!(
+            cache(&first).may_hold_refusals(),
+            usize::from(check.0 == 0),
+            "under {limit} bytes"
+        );
+        seen.insert(check);
+    }
+    assert!(!dir.path().join("MADE.md").exists(), "nothing is written");
+    assert!(seen.contains(&(0, vec![true])), "{seen:?}");
+    assert!(seen.contains(&(1, vec![])), "{seen:?}");
+}
+
+/// A rule that decodes through the run's caches before any rule reads a
+/// relation (`kp`, a `key_parity` rule over `big.json`) leaves what the
+/// relations took as `check` records it: `fix --dry-run` places `a`'s
+/// finding as `check` does over the sweep. The relations' record counted
+/// what `kp` took when they were evaluated after it.
+#[test]
+fn a_rule_decoding_before_the_relations_leaves_placing_as_check_has_it() {
+    let config = config_in(&["kp", "a", "b"]);
+    let files = files();
+    let files: Vec<(&str, &str)> = files
+        .iter()
+        .map(|(p, b)| (p.as_str(), b.as_str()))
+        .collect();
+    let (dir, loaded) = load_tree(&config, &files);
+    let engine = engine(&loaded.unwrap());
+    let mut seen = std::collections::BTreeSet::new();
+    for limit in (200_000..=360_000).step_by(8_000) {
+        let limits = Limits::default()
+            .with(LimitKind::BytesPerRun, limit)
+            .unwrap();
+        let index = index_under(dir.path(), &limits);
+        let check = checked(&engine.run(dir.path(), &index).unwrap().results);
+        let index = index_under(dir.path(), &limits);
+        let dry_run = engine
+            .fix(
+                dir.path(),
+                &index,
+                &walk_options(),
+                true,
+                Applicability::Unsafe,
+            )
+            .unwrap();
+        assert_eq!(fixed(&dry_run), check, "under {limit} bytes");
+        seen.insert(check);
+    }
+    assert!(seen.contains(&(0, vec![true])), "{seen:?}");
+    assert!(seen.contains(&(1, vec![])), "{seen:?}");
 }

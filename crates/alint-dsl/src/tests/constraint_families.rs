@@ -16,6 +16,9 @@ mod messages;
 #[path = "constraint_placing.rs"]
 mod placing;
 
+#[path = "constraint_fix_passes.rs"]
+mod fix_passes;
+
 /// The results of running every rule of `config` over `files`.
 pub(super) fn run(config: &str, files: &[(&str, &str)]) -> Vec<RuleResult> {
     run_under(config, files, None, false).0

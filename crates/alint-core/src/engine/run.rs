@@ -439,22 +439,22 @@ impl Engine {
     /// runs, so its relations are evaluated here too.) Each outcome stays in
     /// the run's memo on the index, where the rule reads it.
     ///
-    /// `fix` calls it at the start of each pass and again after a fix
-    /// clears the caches, for the rules after `first` (`first` is 0 for a
-    /// whole run). Once they are evaluated, the decode cache records what
-    /// they took of the run's bytes, so a rule that places its findings is
-    /// checked against what these relations left, as in a run over the tree
-    /// as it is now ([`DecodeCache::may_hold`](crate::relation::DecodeCache::may_hold)).
+    /// Once they are evaluated, the decode cache records what they took of
+    /// the run's bytes, so a rule that places its findings is checked
+    /// against what the relations left
+    /// ([`DecodeCache::may_hold`](crate::relation::DecodeCache::may_hold)).
+    /// `fix` calls it once a pass, before the first rule that reads a
+    /// relation, on caches nothing has used yet, so it records what `check`
+    /// over the same tree records.
     pub(super) fn evaluate_read_relations(
         &self,
         ctx: &Context<'_>,
         when_env: &WhenEnv<'_>,
         pass: &super::gates::ChangedPass<'_>,
-        first: usize,
     ) {
         use crate::relation::plan::{Plan, RelationId};
         let mut wanted: Vec<(&Arc<Plan>, RelationId)> = Vec::new();
-        for entry in &self.entries[first.min(self.entries.len())..] {
+        for entry in &self.entries {
             let Some((plan, relations)) = entry.rule.relation_inputs() else {
                 continue;
             };
@@ -699,7 +699,7 @@ impl Engine {
         let manifest_gates = self.manifest_gates_by_entry(index, &when_env)?;
         // The relations the rules read, in plan order, before they fan out.
         let t_relations = Instant::now();
-        self.evaluate_read_relations(&full_ctx, &when_env, &pass, 0);
+        self.evaluate_read_relations(&full_ctx, &when_env, &pass);
         phase!(t_relations, "evaluate_relations");
         let gate_inputs = RunGateInputs {
             when_env: &when_env,
