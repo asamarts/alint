@@ -1102,6 +1102,19 @@ as #589, step 3 as #590, and step 4 is the last.
       submodule's work tree join the list of changes that run no rule.
     - Two changed lines that CI's mutants found untested (a rename record in `--raw -z` diffs, a
       JSON parse skipped when placing) have tests.
+  - A fourth pass: a review of the third found 3 defects, all fixed.
+    - The third pass's `fix` read every later relation again after each applied fix: with 10
+      creates ahead of a `constraint` rule, `fix` ran 11.15G instructions against 2.01G, and
+      `fix --diff` failed `rows_per_run` on 6,500 manifests. Each pass now evaluates its relations
+      once, before the first rule that reads one, keeps that record across a fix, and clears
+      nothing under `fix --diff`, which writes nothing (2.04G).
+    - `fix --diff` placed a finding where `check` refused; the kept record makes `check`,
+      `fix --dry-run`, `fix --diff` and a real fix's first pass agree at every limit swept.
+    - Placing undercounted a JSONC file's copy without comments (8 MB counted as 464 B) and the
+      TOML lexer's tokens (about 7 times the text); both are counted, and `strip_jsonc` makes one
+      copy where it made a `char` vector and two strings, which also halves version 1's cost on
+      an 8 MB JSONC file (750.6M to 388.8M instructions).
+    - Two Windows-only test expectations and the `=dirty` submodule gate were tightened.
   - Filed: #592 (two fields of one array element in one row, and a transform that splits a value),
     #593 (a `bound:` query that may match nothing), #594 (a `message:` placeholder for the value a
     `set` finding is about), #595 (placing a finding that a group lacks a value at the file the
