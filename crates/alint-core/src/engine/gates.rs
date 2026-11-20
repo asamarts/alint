@@ -2,9 +2,11 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use crate::error::{Error, Result};
 use crate::rule::{Rule, Violation};
+use crate::scope::ChangedPaths;
 use crate::walker::{FileEntry, FileIndex};
 use crate::when::WhenEnv;
 
@@ -21,7 +23,103 @@ std::thread_local! {
     pub(super) static HIDDEN_SEARCHES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+/// What one pass judges `--changed` against: the index, the files this `fix`
+/// run created, and what each top-level rule's trigger scope takes of the
+/// changed paths ([`crate::relation::TriggerScope`]), found once and read by
+/// every gate of the pass, before the manifests are resolved and after.
+pub(super) struct ChangedPass<'a> {
+    pub(super) index: &'a FileIndex,
+    pub(super) created: Option<&'a HashSet<PathBuf>>,
+    /// The changed set, `None` for a full run.
+    changed: Option<&'a HashSet<PathBuf>>,
+    /// Those of the changed paths Git lists as a directory.
+    directories: &'a HashSet<PathBuf>,
+    /// The changed set and the created files, indexed once, when a trigger
+    /// scope first reads them.
+    paths: OnceLock<ChangedPaths<'a>>,
+    /// The address of each top-level rule's trigger scope, with what it takes
+    /// once found. A nested rule's (none is built today) is found anew.
+    triggers: Vec<(usize, OnceLock<TriggerHits>)>,
+}
+
+/// What a trigger scope takes of one pass's changed paths
+/// ([`crate::relation::TriggerScope::hits`]).
+#[derive(Debug)]
+struct TriggerHits {
+    /// A changed path runs the rule whatever the manifests say.
+    runs: bool,
+    /// The changes that run it when the manifests keep them.
+    pending: Vec<(usize, usize)>,
+}
+
+/// The address of a trigger scope, which identifies a top-level rule's for
+/// the length of a pass: the engine holds the rule.
+fn trigger_address(trigger: &crate::relation::TriggerScope) -> usize {
+    std::ptr::from_ref(trigger) as usize
+}
+
+impl ChangedPass<'_> {
+    /// Whether `trigger` runs its rule: with the manifests resolved on the
+    /// index, or with every manifest-derived predicate left out.
+    fn trigger_runs(&self, trigger: &crate::relation::TriggerScope, manifests: bool) -> bool {
+        let Some(changed) = self.changed else {
+            return true;
+        };
+        let paths = self.paths.get_or_init(|| {
+            ChangedPaths::new(
+                changed
+                    .iter()
+                    .chain(self.created.into_iter().flatten())
+                    .map(PathBuf::as_path),
+                self.directories,
+            )
+        });
+        let find = || {
+            let mut pending = Vec::new();
+            let runs = trigger.hits(paths, self.index, &mut pending);
+            TriggerHits { runs, pending }
+        };
+        let address = trigger_address(trigger);
+        let found;
+        let hits = if let Some((_, hits)) = self.triggers.iter().find(|(at, _)| *at == address) {
+            hits.get_or_init(find)
+        } else {
+            found = find();
+            &found
+        };
+        hits.runs
+            || if manifests {
+                trigger.pending_runs(&hits.pending, paths, self.index)
+            } else {
+                !hits.pending.is_empty()
+            }
+    }
+}
+
 impl Engine {
+    /// The `--changed` gates of one pass over `index`, with the files this
+    /// `fix` run created (`None` for `check`).
+    pub(super) fn changed_pass<'a>(
+        &'a self,
+        index: &'a FileIndex,
+        created: Option<&'a HashSet<PathBuf>>,
+    ) -> ChangedPass<'a> {
+        let triggers = self
+            .entries
+            .iter()
+            .filter_map(|entry| entry.rule.trigger_scope())
+            .map(|trigger| (trigger_address(trigger), OnceLock::new()))
+            .collect();
+        ChangedPass {
+            index,
+            created,
+            changed: self.changed_paths.as_ref(),
+            directories: &self.changed_directories,
+            paths: OnceLock::new(),
+            triggers,
+        }
+    }
+
     /// Resolve active Git dependencies from each configured rule tree's
     /// capability metadata. The vector stays aligned with `self.entries`.
     pub(super) fn git_requirements(
@@ -301,8 +399,7 @@ impl Engine {
     /// top-level rules matter.
     pub(super) fn needs_tree_files(
         &self,
-        index: &FileIndex,
-        created: Option<&HashSet<PathBuf>>,
+        pass: &ChangedPass<'_>,
         per_file_on_filtered: bool,
     ) -> bool {
         self.entries.iter().any(|entry| {
@@ -328,7 +425,7 @@ impl Engine {
             rule.git_tracked_mode() == crate::rule::GitTrackedMode::Off
                 && !rule.requires_full_index()
                 && !self.dependency_changed(rule)
-                && !self.skip_for_changed(rule, index, created)
+                && !self.skip_for_changed(rule, pass)
         })
     }
 
@@ -344,12 +441,7 @@ impl Engine {
             .any(|dep| crate::pathsafe::normalize_confined(dep).is_some_and(|p| set.contains(&p)))
     }
 
-    pub(super) fn skip_for_changed(
-        &self,
-        rule: &dyn Rule,
-        index: &FileIndex,
-        created: Option<&HashSet<PathBuf>>,
-    ) -> bool {
+    pub(super) fn skip_for_changed(&self, rule: &dyn Rule, pass: &ChangedPass<'_>) -> bool {
         let Some(set) = &self.changed_paths else {
             return false;
         };
@@ -360,11 +452,9 @@ impl Engine {
         // selectors read (design `v0.23/selectors-and-constraints.md` section
         // 9); it then sees the full index, as every full-index rule does.
         if let Some(trigger) = rule.trigger_scope() {
-            return !set
-                .iter()
-                .chain(created.into_iter().flatten())
-                .any(|path| trigger.matches(path, index));
+            return !pass.trigger_runs(trigger, true);
         }
+        let (index, created) = (pass.index, pass.created);
         let Some(scope) = rule.path_scope() else {
             return false;
         };
@@ -404,8 +494,7 @@ impl Engine {
     pub(super) fn skip_for_changed_without_manifest(
         &self,
         rule: &dyn Rule,
-        index: &FileIndex,
-        created: Option<&HashSet<PathBuf>>,
+        pass: &ChangedPass<'_>,
     ) -> bool {
         let Some(set) = &self.changed_paths else {
             return false;
@@ -414,17 +503,14 @@ impl Engine {
             return false;
         }
         if let Some(trigger) = rule.trigger_scope() {
-            return !set
-                .iter()
-                .chain(created.into_iter().flatten())
-                .any(|path| trigger.matches_without_manifest(path, index));
+            return !pass.trigger_runs(trigger, false);
         }
         let Some(scope) = effective_path_scope(rule) else {
             return false;
         };
         !set.iter()
-            .chain(created.into_iter().flatten())
-            .any(|path| scope.matches_without_manifest(path, index))
+            .chain(pass.created.into_iter().flatten())
+            .any(|path| scope.matches_without_manifest(path, pass.index))
     }
 
     /// Whether a fix for `violation` under `rule` would write OUTSIDE the
@@ -642,10 +728,10 @@ impl Engine {
     pub(super) fn resolve_manifest_paths(
         &self,
         root: &Path,
-        index: &FileIndex,
         when_env: &WhenEnv<'_>,
-        created: Option<&HashSet<PathBuf>>,
+        pass: &ChangedPass<'_>,
     ) -> Result<()> {
+        let index = pass.index;
         if index.manifest_paths_initialized() {
             return Ok(());
         }
@@ -673,7 +759,7 @@ impl Engine {
                 .is_some_and(|expr| !matches!(expr.evaluate(when_env), Ok(true)))
                 || (!entry.expect_matches()
                     && !entry.rule.requires_full_index()
-                    && self.skip_for_changed_without_manifest(entry.rule.as_ref(), index, created))
+                    && self.skip_for_changed_without_manifest(entry.rule.as_ref(), pass))
             {
                 continue;
             }
@@ -707,7 +793,7 @@ impl Engine {
                     // manifest predicate left out) needs none of them read.
                     if self.changed_paths.is_some()
                         && let Some(trigger) = rule.trigger_scope()
-                        && !self.skip_for_changed_without_manifest(rule, index, created)
+                        && !self.skip_for_changed_without_manifest(rule, pass)
                     {
                         for pred in trigger.manifest_predicates() {
                             groups

@@ -211,37 +211,49 @@ pub struct NamedRelation {
     /// What reading its rows needs: its own reads, and those of every
     /// selector and relation it references, transitively.
     pub capabilities: Capabilities,
-    /// Whether its definition, outside its fields' `where:` and `transform:`
-    /// entries (which make those fields sensitive instead), or a named
-    /// selector it reads takes a value from the environment (`{{env.X}}`), or
-    /// a relation it reads (a join side, a membership reference) does,
-    /// transitively: then no analysis failure of it shows its detail, which
-    /// could echo the value (a key path an `at:` from the environment
-    /// selected, say).
+    /// Whether its definition, its fields' `where:` and `transform:` entries
+    /// included (which make those fields sensitive too), or a named selector
+    /// it reads takes a value from the environment (`{{env.X}}`), or a
+    /// relation it reads (a join side, a membership reference) does,
+    /// transitively. Then the environment may have chosen its rows: no
+    /// analysis failure of it shows its detail, which could echo the value (a
+    /// key path an `at:` from the environment selected, say), and a rule
+    /// that reads it shows no path or value of its findings, since the rows
+    /// a filter from the environment keeps say where that value occurs.
     pub reads_environment: bool,
     /// Whether its own definition, outside its fields' `where:` and
     /// `transform:` entries, takes a value from the environment: then
     /// `explain` shows none of the values it holds (an inline selector's
     /// globs, its reader, a `bound:` path, a join's `unique:`), only its
-    /// names. [`Self::reads_environment`] is this, or what it reads doing so.
+    /// names. [`Self::reads_environment`] is this, a `where:` or `transform:`
+    /// entry from the environment, or what it reads doing either.
     pub definition_reads_environment: bool,
 }
 
 impl NamedRelation {
     /// Whether this is a rule's inline `input:` relation, which the loader
     /// plans as a named one under where it is written (`rules[3].input`): a
-    /// name no config can declare, since a declared name starts with an
-    /// ASCII letter or `_` and holds only ASCII letters, digits, `_` and
-    /// `-`.
+    /// name no config can declare, since every declared name is a name
+    /// ([`is_name`]).
     #[must_use]
     pub fn is_inline(&self) -> bool {
-        let mut chars = self.name.chars();
-        let declared = chars
-            .next()
-            .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
-            && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
-        !declared
+        !is_name(&self.name)
     }
+}
+
+/// Whether `text` is a name a config can declare a selector or relation
+/// under: an ASCII letter or `_`, then ASCII letters, digits, `_` and `-`.
+/// A `.` would read as a qualified reference. The loader checks every
+/// declared name with this, and a plan tells a rule's inline `input:`
+/// relation by its name not being one ([`NamedRelation::is_inline`]), so the
+/// two never disagree.
+#[must_use]
+pub fn is_name(text: &str) -> bool {
+    let mut chars = text.chars();
+    chars
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
 /// What reading an object makes alint do, as the trust gates judge it

@@ -61,3 +61,4 @@ in `docs/adr/` is missing from this table.
 | [0044](../adr/0044-untrusted-runs-git-as-a-process-and-a-wider-memory-gate.md) | `--untrusted`, Git as a process, and a wider memory gate | accepted |
 | [0045](../adr/0045-count-the-walks-per-directory-probes-in-the-reference-gate.md) | Count the walk's per-directory probes in the reference gate | accepted |
 | [0046](../adr/0046-a-linear-extends-merge-sealed-options-and-the-rounds-open-questions.md) | A linear `extends:` merge, sealed options, and the round's open questions | accepted |
+| [0047](../adr/0047-sarif-tells-apart-a-fingerprint-repeated-within-a-run.md) | SARIF tells apart a fingerprint repeated within a run by occurrence, as GitLab output does | accepted |

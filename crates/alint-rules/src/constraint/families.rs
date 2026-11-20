@@ -12,11 +12,14 @@ use std::sync::Arc;
 
 use alint_core::relation::Value;
 use alint_core::relation::eval::{Cell, FieldRow, Provenance, RelationRows, located, type_name};
+use alint_core::relation::plan::{
+    FieldSource, JoinSide, Part, Plan, Read, Reader, RelationId, Rows,
+};
 use alint_core::{Context, MAX_RELATED_LOCATIONS, RelatedLocation, Violation};
 
 use super::ConstraintRule;
-use super::places::Places;
-use super::values::{Key, Kind, Scalar};
+use super::places::{Asked, Placed, Places};
+use super::values::{Key, Kind, Scalar, escaped};
 
 #[path = "set.rs"]
 mod set;
@@ -30,10 +33,50 @@ pub(super) struct Run<'r> {
     rows: &'r RelationRows,
     places: Places<'r>,
     /// Key paths stay out of messages and baselines: a field that holds keys
-    /// is sensitive, or the relation's configuration reads the environment.
+    /// is sensitive, or the relation's configuration reads the environment
+    /// (whose findings the engine redacts whole as well, but whose keys and
+    /// places this keeps clean before it does).
     hide_keys: bool,
-    findings: Vec<Violation>,
+    findings: Vec<Pending>,
     failures: Vec<Violation>,
+}
+
+/// A finding whose places wait for [`Places::resolve`]: its own, and each
+/// related location's.
+struct Pending {
+    finding: Violation,
+    at: Option<Asked>,
+    related: Related,
+}
+
+impl Pending {
+    /// The finding, at its places. Each related row is listed or counted:
+    /// rows at one place (a resource's rows without a span) collapse into
+    /// one location, and the others count as left out, so the locations
+    /// listed and the count add up to the rows the message relates to.
+    fn placed(self, placed: &Placed) -> Violation {
+        let mut finding = self.finding;
+        if let Some(asked) = self.at
+            && let Some(range) = placed.range(asked)
+        {
+            finding = if asked.point {
+                finding.with_location(range.start_line(), range.start_column())
+            } else {
+                finding.with_range(range)
+            };
+        }
+        let rows = self.related.locations.len();
+        let locations = self.related.locations.into_iter().map(|(location, asked)| {
+            match asked.and_then(|asked| placed.range(asked)) {
+                Some(range) => location.with_range(range),
+                None => location,
+            }
+        });
+        finding = finding.with_related_locations(locations);
+        let kept = finding.related_locations.len() + finding.related_locations_omitted;
+        finding.related_locations_omitted += self.related.omitted + (rows - kept);
+        finding
+    }
 }
 
 /// Rows that share a value, in the order the first of them appears.
@@ -86,11 +129,33 @@ impl<'r> Run<'r> {
     }
 
     /// `earlier` (findings about the rows, such as values a `read:` skipped)
-    /// and the assertion's findings, or, when the assertion has no verdict,
-    /// its failures alone.
+    /// and the assertion's findings, at their places, or, when the assertion
+    /// has no verdict, its failures alone. Placing them reads the resources
+    /// they sit in, one at a time ([`Places::resolve`]): when the run's bytes
+    /// cannot hold one, the rule has no verdict either.
     pub(super) fn finish(self, mut earlier: Vec<Violation>) -> Vec<Violation> {
-        earlier.extend(self.findings);
-        verdict(earlier, self.failures)
+        let Self {
+            rule,
+            places,
+            findings,
+            mut failures,
+            ..
+        } = self;
+        if failures.is_empty() && !findings.is_empty() {
+            match places.resolve() {
+                Ok(placed) => earlier.extend(findings.into_iter().map(|f| f.placed(&placed))),
+                Err((path, limit)) => failures.push(rule.failure(
+                    Some(path.as_path()),
+                    format!(
+                        "{limit}, so the rule reports no finding rather than findings without \
+                         their places; placing its findings reads each file they sit in, one at \
+                         a time, beside what the run's relations hold, so read fewer or smaller \
+                         files"
+                    ),
+                )),
+            }
+        }
+        verdict(earlier, failures)
     }
 
     // ------------------------------------------------------------------
@@ -120,6 +185,12 @@ impl<'r> Run<'r> {
         self.rows.fields[position].sensitive
     }
 
+    /// Whether a place at a cell of the field at `position` shows only its
+    /// start ([`point`]).
+    fn point(&self, position: usize) -> bool {
+        point(self.rows, position, self.hide_keys)
+    }
+
     fn name(&self, position: usize) -> &str {
         &self.rows.fields[position].name
     }
@@ -139,22 +210,53 @@ impl<'r> Run<'r> {
 
     /// Where a finding about row `row`'s field at `position` sits
     /// ([`spot_in`]).
-    fn spot(&self, row: usize, position: usize) -> Place<'r> {
-        spot_in(self.rows, row, position)
+    fn spot(&self, row: usize, position: usize) -> Spot<'r> {
+        spot_in(self.rows, row, position, self.hide_keys)
     }
 
-    /// Where `place` is, as a message names it.
-    fn located_at(&self, place: Place<'_>) -> String {
-        match place {
-            Place::Cell(cell) => self.located(cell),
-            Place::Row(at) => self.located(&Cell {
+    /// Where `spot` is, as a message names it.
+    fn located_at(&self, spot: Spot<'_>) -> String {
+        match spot {
+            Spot::Cell(cell, _) => self.located(cell),
+            Spot::Row(at) => self.located(&Cell {
                 value: None,
                 at: Arc::clone(at),
                 span: None,
                 path: None,
             }),
-            Place::Resource(path) => crate::slash(path),
-            Place::Nowhere => "no resource".to_string(),
+        }
+    }
+
+    /// Which `union:` part read nothing where row `row`'s field at
+    /// `position` is missing, after a space: ``(`relations.pins.union[2]`,
+    /// `read.json: $.volta.node`, matched nothing)``, so the findings of two
+    /// parts that read nothing in one file differ. The part's query is left
+    /// out when its relation's configuration reads the environment or the
+    /// field is sensitive. Nothing for a value a relation of one part read:
+    /// its resource names the row.
+    fn read_nothing(&self, row: usize, position: usize) -> String {
+        let plan = &self.rule.plan;
+        let id = reading_relation(plan, self.rule.inputs[0], self.name(position));
+        let named = plan.relation(id);
+        let Rows::Union(parts) = &named.relation.rows else {
+            return String::new();
+        };
+        let index = self.cell(row, position).at.part;
+        let Some(part) = usize::try_from(index).ok().and_then(|at| parts.get(at)) else {
+            return String::new();
+        };
+        let at = if named.is_inline() {
+            format!("{}.union[{index}]", named.name)
+        } else {
+            format!("relations.{}.union[{index}]", named.name)
+        };
+        if named.reads_environment || self.sensitive(position) {
+            format!(" (`{at}` matched nothing)")
+        } else {
+            format!(
+                " (`{at}`, `{}`, matched nothing)",
+                escaped(&part_text(part))
+            )
         }
     }
 
@@ -257,9 +359,9 @@ impl<'r> Run<'r> {
     /// locations, which leave out `omitted` more; its message is the rule's
     /// `message:` rendered for row `reported` (none, for a value only another
     /// relation holds), or `generated`.
-    fn report(
+    fn report<'p>(
         &mut self,
-        at: Place<'_>,
+        at: impl Into<Place<'p>>,
         generated: String,
         key: Key,
         related: Related,
@@ -269,26 +371,28 @@ impl<'r> Run<'r> {
             Some(template) => self.render(template, reported.map(|row| &self.rows.rows[row])),
             None => generated,
         };
-        let mut finding = match at {
-            Place::Cell(cell) => {
-                let finding = Violation::new(message).with_path(cell.at.resource.path().as_path());
-                match self.places.range(cell) {
-                    Some(range) => finding.with_range(range),
-                    None => finding,
-                }
-            }
-            Place::Row(row) => Violation::new(message).with_path(row.resource.path().as_path()),
-            Place::Resource(path) => Violation::new(message).with_path(path),
+        let (finding, asked) = match at.into() {
+            Place::At(Spot::Cell(cell, point)) => (
+                Violation::new(message).with_path(cell.at.resource.path().as_path()),
+                self.places.ask(cell, point),
+            ),
+            Place::At(Spot::Row(row)) => (
+                Violation::new(message).with_path(row.resource.path().as_path()),
+                None,
+            ),
+            Place::Resource(path) => (Violation::new(message).with_path(path), None),
             // A group named only in `groups:` has no resource.
-            Place::Nowhere => Violation::new(message),
+            Place::Nowhere => (Violation::new(message), None),
         };
-        finding = finding
+        let finding = finding
             .with_baseline_key(key.into_string())
             .with_path_free_identity()
-            .with_related_locations(related.locations)
             .with_not_fixable();
-        finding.related_locations_omitted += related.omitted;
-        self.findings.push(finding);
+        self.findings.push(Pending {
+            finding,
+            at: asked,
+            related,
+        });
     }
 
     /// The rule's `message:` with each `{{row.FIELD}}` replaced by the
@@ -317,22 +421,38 @@ impl<'r> Run<'r> {
         })
     }
 
-    /// A related location at `place`, labelled `label`.
-    fn related(&mut self, place: Place<'_>, label: &str) -> RelatedLocation {
-        match place {
-            Place::Cell(cell) => self.places.related(cell, label),
-            Place::Row(row) => RelatedLocation::new(row.resource.path().as_path(), label),
-            Place::Resource(path) => RelatedLocation::new(path, label),
-            Place::Nowhere => unreachable!("a related location is at a row or a resource"),
+    /// A related location at `spot`, labelled `label`, and the place it
+    /// asked for.
+    fn related(&mut self, spot: Spot<'_>, label: &str) -> (RelatedLocation, Option<Asked>) {
+        match spot {
+            Spot::Cell(cell, point) => (
+                RelatedLocation::new(cell.at.resource.path().as_path(), label),
+                self.places.ask(cell, point),
+            ),
+            Spot::Row(row) => (
+                RelatedLocation::new(row.resource.path().as_path(), label),
+                None,
+            ),
         }
     }
 
-    /// The related locations at `places`, which leave out `omitted` more.
-    fn related_at(&mut self, places: Vec<(Place<'_>, &str)>, omitted: usize) -> Related {
+    /// The related locations at `spots`, which leave out `omitted` more.
+    ///
+    /// A finding builds no more related locations than it lists
+    /// ([`MAX_RELATED_LOCATIONS`]): a family picks the rows it relates to
+    /// first ([`related_rows`]), and counts the rest. Building one for every
+    /// row and cutting the list after made a finding cost every row, and the
+    /// findings quadratic in the values; a debug build stops there.
+    fn related_at(&mut self, spots: Vec<(Spot<'_>, &str)>, omitted: usize) -> Related {
+        debug_assert!(
+            spots.len() <= MAX_RELATED_LOCATIONS,
+            "a finding builds {} related locations, past the {MAX_RELATED_LOCATIONS} it lists",
+            spots.len()
+        );
         Related {
-            locations: places
+            locations: spots
                 .into_iter()
-                .map(|(place, label)| self.related(place, label))
+                .map(|(spot, label)| self.related(spot, label))
                 .collect(),
             omitted,
         }
@@ -565,6 +685,11 @@ impl<'r> Run<'r> {
                 .collect();
             let related = self.related_at(places, omitted);
             let mut here = format!("{} here", self.show_tuple(fields, value, typed));
+            for (&position, part) in fields.iter().zip(value) {
+                if part.is_missing() {
+                    here.push_str(&self.read_nothing(holders[0], position));
+                }
+            }
             if holders.len() > 1 {
                 let others = holders.len() - 1;
                 write!(here, " and in {others} other {}", rows_word(others))
@@ -593,10 +718,12 @@ impl<'r> Run<'r> {
                 message.push_str("; ");
                 message.push_str(&others.join("; "));
             }
-            if value.iter().any(Scalar::is_null) {
-                message.push_str(
-                    " (null matches nothing, so a row without a value agrees with no row)",
-                );
+            if let Some(nothing) = matches_nothing(value) {
+                write!(
+                    message,
+                    " ({nothing}, so a row without a value agrees with no row)"
+                )
+                .expect("writing to a String cannot fail");
             }
             let mut key = base.clone();
             for (&position, part) in fields.iter().zip(value) {
@@ -657,7 +784,6 @@ impl<'r> Run<'r> {
             if value == expected {
                 continue;
             }
-            let cell = self.cell(row, field_at);
             let typed = value.kind().is_some() && value.kind() != expected.kind();
             let shown = |scalar: &Scalar| {
                 if typed {
@@ -666,14 +792,15 @@ impl<'r> Run<'r> {
                     scalar.show(sensitive)
                 }
             };
-            let here = if cell.value.is_none() {
-                "missing".to_string()
-            } else {
-                shown(&value)
-            };
             let message = format!(
-                "`{field}` is {here} here, but {} in the source row ({source_desc}, at \
+                "`{field}` is {} here{}, but {} in the source row ({source_desc}, at \
                  {source_shown})",
+                shown(&value),
+                if value.is_missing() {
+                    self.read_nothing(row, field_at)
+                } else {
+                    String::new()
+                },
                 shown(&expected),
             );
             let mut key = Key::new("equal");
@@ -763,50 +890,69 @@ impl<'r> Run<'r> {
             if value == theirs && !value.is_null() {
                 continue;
             }
-            let cell = self.cell(row, field_at);
             let other_cell = self.cell(row, other_at);
             let typed =
                 value.kind().is_some() && theirs.kind().is_some() && value.kind() != theirs.kind();
-            let shown = |scalar: &Scalar, cell: &Cell, sensitive: bool| {
-                if cell.value.is_none() {
-                    "missing".to_string()
-                } else if typed {
+            let shown = |scalar: &Scalar, sensitive: bool| {
+                if typed {
                     scalar.show_typed(sensitive)
                 } else {
                     scalar.show(sensitive)
                 }
             };
-            let message = format!(
-                "`{field}` is {} and `{other}` is {} in this row; they must be equal{}",
-                shown(&value, cell, self.sensitive(field_at)),
-                shown(&theirs, other_cell, self.sensitive(other_at)),
-                if value.is_null() || theirs.is_null() {
-                    " (null matches nothing)"
-                } else {
-                    ""
-                }
+            let mut message = format!(
+                "`{field}` is {} and `{other}` is {} in this row",
+                shown(&value, self.sensitive(field_at)),
+                shown(&theirs, self.sensitive(other_at)),
             );
+            for (scalar, position) in [(&value, field_at), (&theirs, other_at)] {
+                if scalar.is_missing() {
+                    message.push_str(&self.read_nothing(row, position));
+                }
+            }
+            message.push_str("; they must be equal");
+            if let Some(nothing) = matches_nothing(&[value.clone(), theirs.clone()]) {
+                write!(message, " ({nothing})").expect("writing to a String cannot fail");
+            }
             let mut key = Key::new("equal");
             key.part("row").row(self.own(row), self.hide_keys);
             let label = format!("`{other}` in this row");
-            let related = self.related_at(vec![(Place::Cell(other_cell), label.as_str())], 0);
+            let other_place = Spot::Cell(other_cell, self.point(other_at));
+            let related = self.related_at(vec![(other_place, label.as_str())], 0);
             let at = self.spot(row, field_at);
             self.report(at, message, key, related, Some(row));
         }
     }
 }
 
-/// Where a finding or a related location sits.
+/// Where a finding about a row, or a related location, sits: always in a
+/// row, so a message can name it ([`Run::located_at`]).
 #[derive(Clone, Copy)]
-enum Place<'p> {
-    /// A cell: its resource, and its span when it has one.
-    Cell(&'p Cell),
+enum Spot<'p> {
+    /// A cell: its resource, and its span when it has one; only the span's
+    /// start when `true`, since the cell holds a sensitive value or key.
+    Cell(&'p Cell, bool),
     /// A row with no cell of its own: its resource.
     Row(&'p Arc<Provenance>),
+}
+
+/// Where a finding sits: in a row, or, for a value no row of the rule's
+/// relation holds (a `set` assertion's), the other relation's resource, or
+/// none.
+#[derive(Clone, Copy)]
+enum Place<'p> {
+    /// In a row ([`Spot`]).
+    At(Spot<'p>),
     /// A resource.
     Resource(&'p Path),
     /// No resource: a group named only in `groups:`.
     Nowhere,
+}
+
+impl<'p> From<Spot<'p>> for Place<'p> {
+    fn from(spot: Spot<'p>) -> Self {
+        Self::At(spot)
+    }
 }
 
 /// Where a finding about row `row`'s field at `position` of `rows` sits: the
@@ -814,24 +960,37 @@ enum Place<'p> {
 /// field of its unique side, or a `bound:` field, which many rows share), the
 /// row's own entry: its first cell there, one with a span first, or its
 /// resource.
-fn spot_in(rows: &RelationRows, row: usize, position: usize) -> Place<'_> {
+///
+/// The end of a cell's span gives away the length of what it spans, so only
+/// its start is shown ([`point`]) when the cell is a sensitive field's, or
+/// when `hide_keys`: then a key could be a sensitive field's value.
+fn spot_in(rows: &RelationRows, row: usize, position: usize, hide_keys: bool) -> Spot<'_> {
     let own = &rows.rows[row].at;
     let is_own = |cell: &Cell| Arc::ptr_eq(&cell.at, own) || cell.at == *own;
     let cells = &rows.rows[row].cells;
-    let cell = &cells[position];
-    if is_own(cell) {
-        return Place::Cell(cell);
+    let at = |position: usize| Spot::Cell(&cells[position], point(rows, position, hide_keys));
+    if is_own(&cells[position]) {
+        return at(position);
     }
     cells
         .iter()
-        .find(|cell| is_own(cell) && cell.span.is_some())
-        .or_else(|| cells.iter().find(|cell| is_own(cell)))
-        .map_or(Place::Row(own), Place::Cell)
+        .position(|cell| is_own(cell) && cell.span.is_some())
+        .or_else(|| cells.iter().position(is_own))
+        .map_or(Spot::Row(own), at)
 }
 
-/// A finding's related locations, and how many more it leaves out.
+/// Whether a place at the cell of field `position` of `rows` shows only its
+/// start: the field is sensitive, or key paths are hidden (a field that
+/// holds keys is sensitive, or the relation's configuration reads the
+/// environment), since a cell's span may be its key's.
+fn point(rows: &RelationRows, position: usize, hide_keys: bool) -> bool {
+    hide_keys || rows.fields[position].sensitive
+}
+
+/// A finding's related locations, each with the place it asked for, and how
+/// many more it leaves out.
 struct Related {
-    locations: Vec<RelatedLocation>,
+    locations: Vec<(RelatedLocation, Option<Asked>)>,
     omitted: usize,
 }
 
@@ -870,6 +1029,57 @@ fn verdict(findings: Vec<Violation>, failures: Vec<Violation>) -> Vec<Violation>
         findings
     } else {
         failures
+    }
+}
+
+/// The relation that read field `name` of relation `id`: `id`, or, for a
+/// join's copy of a field of a side, the relation that read that field.
+fn reading_relation(plan: &Plan, mut id: RelationId, name: &str) -> RelationId {
+    let mut name = name.to_string();
+    loop {
+        let relation = &plan.relation(id).relation;
+        match (
+            &relation.rows,
+            relation.field(&name).map(|field| &field.source),
+        ) {
+            (Rows::Join(join), Some(FieldSource::Side(side, field))) => {
+                id = match side {
+                    JoinSide::Left => join.left.id,
+                    JoinSide::Right => join.right.id,
+                };
+                name.clone_from(field);
+            }
+            _ => return id,
+        }
+    }
+}
+
+/// A `union:` part's query as a message names it: `read.json: $.name`, or
+/// `entries.at: $.a, $.b`.
+fn part_text(part: &Part) -> String {
+    match &part.reader {
+        Reader::Read { read, .. } => match read {
+            Read::Json(query) => format!("read.json: {query}"),
+            Read::Yaml(query) => format!("read.yaml: {query}"),
+            Read::Toml(query) => format!("read.toml: {query}"),
+            Read::Regex(pattern) => format!("read.regex: {pattern}"),
+            Read::Lines { .. } => "read.lines".to_string(),
+            Read::WholeFile => "read.whole_file".to_string(),
+        },
+        Reader::Entries(entries) => format!("entries.at: {}", entries.at.join(", ")),
+    }
+}
+
+/// Why rows holding `values` agree with none: `null matches nothing`, `a
+/// missing value matches nothing`, or both; `None` when they hold neither.
+fn matches_nothing(values: &[Scalar]) -> Option<&'static str> {
+    let null = values.contains(&Scalar::Null);
+    let missing = values.iter().any(Scalar::is_missing);
+    match (null, missing) {
+        (true, true) => Some("null and a missing value match nothing"),
+        (true, false) => Some("null matches nothing"),
+        (false, true) => Some("a missing value matches nothing"),
+        (false, false) => None,
     }
 }
 

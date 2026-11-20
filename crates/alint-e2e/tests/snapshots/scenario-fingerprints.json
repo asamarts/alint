@@ -522,6 +522,42 @@
     "fingerprint": "77efecdae1d9b75cd69efa7546e4e72db0d992a026b4bc4dea4886ec198c9e32"
   },
   {
+    "scenario": "check/cross_file/constraint_shapes_fail.yml",
+    "rule_id": "crate-names-unique",
+    "path": "crates/b/Cargo.toml",
+    "fingerprint": "3f3b5bf0b30dbaf6d550e0dbc2fb010cebc3de501495e012ef6b3cc462ee28d9"
+  },
+  {
+    "scenario": "check/cross_file/constraint_shapes_fail.yml",
+    "rule_id": "notes-unique",
+    "path": "notes/fr/a.txt",
+    "fingerprint": "19bd49eb9dfb031309b39a493ede2633f8af932dce5b8f78647dc4ecb55ec0be"
+  },
+  {
+    "scenario": "check/cross_file/constraint_shapes_fail.yml",
+    "rule_id": "ranges-match-pins",
+    "path": "packages/api/package.json",
+    "fingerprint": "3d154ed412a2da7a1bb6e7cd5b9845d91e7adb2866fff20fa1f1872781a6af7b"
+  },
+  {
+    "scenario": "check/cross_file/constraint_shapes_fail.yml",
+    "rule_id": "ranges-match-pins",
+    "path": "packages/lib/package.json",
+    "fingerprint": "15e5644cfc542abd6dfd55cedc51e35e4fd91a4250f7040b532b28759a04fbcd"
+  },
+  {
+    "scenario": "check/cross_file/constraint_shapes_fail.yml",
+    "rule_id": "vetted-ranges-agree",
+    "path": "packages/lib/package.json",
+    "fingerprint": "ab70c78242eaf3f42749a746040b96c226f65ea93ffb8d835cc0d028a5834f00"
+  },
+  {
+    "scenario": "check/cross_file/constraint_shapes_fail.yml",
+    "rule_id": "vetted-ranges-agree",
+    "path": "packages/web/package.json",
+    "fingerprint": "b828ac72e7f6d2dfb91dcfb1d261e45fa3638e5e64cc40aa49c88ef755a9c296"
+  },
+  {
     "scenario": "check/cross_file/constraint_unique_determines_fail.yml",
     "rule_id": "one-range-per-dependency",
     "path": "packages/app/package.json",

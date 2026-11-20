@@ -8,6 +8,8 @@ mod xml;
 
 pub use entry::EntryRowsAdapter;
 pub(crate) use entry_values::EntryValuesAdapter;
+pub(crate) use entry_values::entry_table;
 pub use extract::ExtractAdapter;
+pub(crate) use extract::{locate, same_reading, table_bytes, walks};
 pub use toml::TomlRowsAdapter;
 pub use xml::{AndroidStringsAdapter, ResxAdapter};

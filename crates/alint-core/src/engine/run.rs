@@ -42,6 +42,7 @@ impl Engine {
             analysis_time_required: OnceLock::new(),
             analysis_time_cache: Mutex::new(None),
             changed_paths: None,
+            changed_directories: HashSet::new(),
             fix_baseline: None,
             config_files: Vec::new(),
         }
@@ -61,6 +62,7 @@ impl Engine {
             analysis_time_required: OnceLock::new(),
             analysis_time_cache: Mutex::new(None),
             changed_paths: None,
+            changed_directories: HashSet::new(),
             fix_baseline: None,
             config_files: Vec::new(),
         }
@@ -175,9 +177,24 @@ impl Engine {
     /// to lint. Rules with `expect_matches: true` still evaluate their full-tree
     /// scope assertion so an empty diff cannot hide a vacuous configuration.
     /// Pass `None` (or omit) to disable `--changed` semantics entirely.
+    ///
+    /// The set replaces any earlier one whole: no path in it is a directory
+    /// Git lists ([`Self::with_changed_set`]).
     #[must_use]
     pub fn with_changed_paths(mut self, set: HashSet<PathBuf>) -> Self {
         self.changed_paths = Some(set);
+        self.changed_directories = HashSet::new();
+        self
+    }
+
+    /// [`Self::with_changed_paths`] with `set`'s paths, knowing which of them
+    /// Git lists as a directory ([`crate::git::ChangedSet::directories`]): a
+    /// change to one runs every `constraint` rule whose selectors can read
+    /// below it, since Git lists none of the files there.
+    #[must_use]
+    pub fn with_changed_set(mut self, set: crate::git::ChangedSet) -> Self {
+        self.changed_paths = Some(set.paths);
+        self.changed_directories = set.directories;
         self
     }
 
@@ -244,7 +261,7 @@ impl Engine {
             env: self.when_environment(),
         };
         if self
-            .resolve_manifest_paths(root, index, &when_env, None)
+            .resolve_manifest_paths(root, &when_env, &self.changed_pass(index, None))
             .is_err()
         {
             return true;
@@ -358,6 +375,7 @@ impl Engine {
             analysis_time_required: OnceLock::new(),
             analysis_time_cache: Mutex::new(None),
             changed_paths: self.changed_paths.clone(),
+            changed_directories: self.changed_directories.clone(),
             fix_baseline: None,
             config_files: self.config_files.clone(),
         };
@@ -420,8 +438,31 @@ impl Engine {
     /// that is off is not built by the CLI; an entry the engine is given
     /// runs, so its relations are evaluated here too.) Each outcome stays in
     /// the run's memo on the index, where the rule reads it.
-    pub(super) fn evaluate_read_relations(&self, ctx: &Context<'_>, when_env: &WhenEnv<'_>) {
+    ///
+    /// Once they are evaluated, the decode cache records what evaluating
+    /// them took of the run's bytes, so a rule that places its findings is
+    /// checked against what the relations left
+    /// ([`DecodeCache::may_hold`](crate::relation::DecodeCache::may_hold)).
+    /// `fix` calls it once a pass, before its first rule as `check` does, or
+    /// in a pass that writes just before the first rule that reads a
+    /// relation, when a fix before that may let go of what they read. A rule
+    /// before it may then have decoded (`key_parity`), so what is recorded is
+    /// what the evaluation added, which is what `check` over the same tree
+    /// records. On an index whose relations it has evaluated already
+    /// (`check --format sarif` stages its fixes on `check`'s), it does
+    /// nothing: the memo holds their outcomes, and the record stands.
+    pub(super) fn evaluate_read_relations(
+        &self,
+        ctx: &Context<'_>,
+        when_env: &WhenEnv<'_>,
+        pass: &super::gates::ChangedPass<'_>,
+    ) {
         use crate::relation::plan::{Plan, RelationId};
+        let cache = ctx.index.decode_cache();
+        if cache.is_some_and(crate::relation::DecodeCache::relations_evaluated) {
+            return;
+        }
+        let bytes_before = cache.map_or(0, crate::relation::DecodeCache::bytes_taken);
         let mut wanted: Vec<(&Arc<Plan>, RelationId)> = Vec::new();
         for entry in &self.entries {
             let Some((plan, relations)) = entry.rule.relation_inputs() else {
@@ -431,7 +472,7 @@ impl Engine {
                 .when
                 .as_ref()
                 .is_some_and(|expr| !matches!(expr.evaluate(when_env), Ok(true)))
-                || self.skip_for_changed(entry.rule.as_ref(), ctx.index, None)
+                || self.skip_for_changed(entry.rule.as_ref(), pass)
             {
                 continue;
             }
@@ -440,6 +481,8 @@ impl Engine {
         // One plan per configuration; grouped by plan all the same, in the
         // order each plan first appears.
         let mut plans: Vec<&Arc<Plan>> = Vec::new();
+        // What evaluating them adds to the memos of the plans.
+        let mut memo_bytes = 0usize;
         for (plan, _) in &wanted {
             if !plans.iter().any(|held| Arc::ptr_eq(held, plan)) {
                 plans.push(plan);
@@ -451,12 +494,20 @@ impl Engine {
                 .filter(|(held, _)| Arc::ptr_eq(held, plan))
                 .map(|(_, id)| *id)
                 .collect();
+            let held = ctx.index.relation_memo(plan).map_or(0, |memo| memo.bytes());
             // In the order `explain` shows: each relation after those it
             // reads, so evaluating one finds those in the memo.
             for id in plan.evaluation_order(&ids) {
                 // The outcome, rows or failures, is memoised for the rule.
                 let _ = crate::relation::eval::evaluate(plan, id, ctx);
             }
+            if let Some(memo) = ctx.index.relation_memo(plan) {
+                memo_bytes = memo_bytes.saturating_add(memo.bytes().saturating_sub(held));
+            }
+        }
+        if let Some(cache) = cache {
+            let decoded = cache.bytes_taken().saturating_sub(bytes_before);
+            cache.record_relations(decoded.saturating_add(memo_bytes));
         }
     }
 
@@ -633,7 +684,10 @@ impl Engine {
         if git_available {
             self.resolve_changed_paths(root, index, &when_env)?;
         }
-        self.resolve_manifest_paths(root, index, &when_env, None)?;
+        // The pass's `--changed` gates, which decide once what each rule's
+        // trigger scope takes of the changed paths.
+        let pass = self.changed_pass(index, None);
+        self.resolve_manifest_paths(root, &when_env, &pass)?;
         let alt_indexes = [
             filtered_index.as_ref(),
             git_tracked_indexes
@@ -656,7 +710,7 @@ impl Engine {
         let manifest_gates = self.manifest_gates_by_entry(index, &when_env)?;
         // The relations the rules read, in plan order, before they fan out.
         let t_relations = Instant::now();
-        self.evaluate_read_relations(&full_ctx, &when_env);
+        self.evaluate_read_relations(&full_ctx, &when_env, &pass);
         phase!(t_relations, "evaluate_relations");
         let gate_inputs = RunGateInputs {
             when_env: &when_env,
@@ -672,7 +726,7 @@ impl Engine {
         // building the set is a pass over the full index that other `--changed`
         // runs should not pay.
         if let Some(fi) = filtered_index.as_ref()
-            && self.needs_tree_files(index, None, false)
+            && self.needs_tree_files(&pass, false)
         {
             fi.share_tree_files_from(index);
         }
@@ -702,8 +756,7 @@ impl Engine {
                     if entry.rule.as_per_file().is_some() {
                         return None;
                     }
-                    let skipped_for_changed =
-                        self.skip_for_changed(entry.rule.as_ref(), full_ctx.index, None);
+                    let skipped_for_changed = self.skip_for_changed(entry.rule.as_ref(), &pass);
                     let ctx = pick_ctx(
                         entry.rule.as_ref(),
                         self.dependency_changed(entry.rule.as_ref()),
@@ -778,8 +831,14 @@ impl Engine {
         // matches. Coalesces N reads of one file across N rules
         // sharing it.
         let t_per_file = Instant::now();
-        let per_file_results =
-            self.run_per_file(root, &full_ctx, filtered_ctx.as_ref(), &gate_inputs, trace);
+        let per_file_results = self.run_per_file(
+            root,
+            &full_ctx,
+            filtered_ctx.as_ref(),
+            &gate_inputs,
+            &pass,
+            trace,
+        );
         phase!(
             t_per_file,
             "per_file_partition",
@@ -833,9 +892,11 @@ impl Engine {
         full_ctx: &'a Context<'a>,
         filtered_ctx: Option<&'a Context<'a>>,
         gate_inputs: &RunGateInputs<'_, '_>,
+        pass: &super::gates::ChangedPass<'_>,
         trace: Option<&TraceSession>,
     ) -> Vec<(usize, RuleResult)> {
-        let (live, gate_results) = self.collect_live_per_file_entries(full_ctx, gate_inputs, trace);
+        let (live, gate_results) =
+            self.collect_live_per_file_entries(full_ctx, gate_inputs, pass, trace);
         if live.is_empty() {
             return gate_results;
         }
@@ -953,6 +1014,7 @@ impl Engine {
         &'a self,
         ctx: &Context<'_>,
         gate_inputs: &RunGateInputs<'_, '_>,
+        pass: &super::gates::ChangedPass<'_>,
         trace: Option<&TraceSession>,
     ) -> LivePerFileEntries<'a> {
         let index = ctx.index;
@@ -966,7 +1028,7 @@ impl Engine {
             // a change outside its scope (a deleted target) can still change its
             // verdict, exactly as for `markdown_links_resolve`.
             let skipped_for_changed = !entry.rule.requires_full_index()
-                && self.skip_for_changed(entry.rule.as_ref(), index, None);
+                && self.skip_for_changed(entry.rule.as_ref(), pass);
             match evaluate_entry_gates(
                 idx,
                 entry,
@@ -1050,7 +1112,8 @@ impl Engine {
         if git_available {
             self.resolve_changed_paths(root, index, &when_env)?;
         }
-        self.resolve_manifest_paths(root, index, &when_env, None)?;
+        let pass = self.changed_pass(index, None);
+        self.resolve_manifest_paths(root, &when_env, &pass)?;
 
         let ctx = Context {
             root,
@@ -1074,7 +1137,8 @@ impl Engine {
             git_available,
             changed_active: self.changed_paths.is_some(),
         };
-        let (live, gate_results) = self.collect_live_per_file_entries(&ctx, &gate_inputs, None);
+        let (live, gate_results) =
+            self.collect_live_per_file_entries(&ctx, &gate_inputs, &pass, None);
 
         // Dispatch each in-scope rule against the supplied bytes. The
         // raw violations (notes included) are bucketed by entry index;

@@ -330,8 +330,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           # check-version-pins.sh proves the documented Action SHA is the
-          # commit behind its release tag, so the Docs job needs tags/history.
+          # commit behind its release tag, and check-docs-overlay-since.py
+          # diffs the overlaid docs against the latest release tag, so the Docs
+          # job needs tags/history.
           fetch-depth: 0
+          fetch-tags: true
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: stable
@@ -354,6 +357,12 @@ jobs:
         # check additionally proves the recorded SHA and baked binary version
         # against the release tag fetched above.
         run: bash ci/scripts/check-version-pins.sh --verify-action-tag
+      - name: unreleased lines in main-overlaid docs sit in since-blocks
+        # docs-bundle.yml publishes the reference and concept pages (and the
+        # rule pages of released kinds) from main, stripping only
+        # `<!-- alint:since=X -->` blocks newer than the release. Every line
+        # added since the latest v* tag in those pages must sit in such a block.
+        run: python3 ci/scripts/check-docs-overlay-since.py
 
   dogfood:
     name: Dogfood

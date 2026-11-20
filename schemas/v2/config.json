@@ -33,36 +33,15 @@
       "minProperties": 1,
       "properties": {
         "equal": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ConstraintEqual"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/ConstraintEqual",
           "description": "Rows agree on a field: within each group, with a named source row, or with another field of the same row."
         },
         "set": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ConstraintSet"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/ConstraintSet",
           "description": "The set of a field's values, per group, is equal to, a subset of or disjoint from another set: a group's, or another relation's field's."
         },
         "unique": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ConstraintUnique"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/ConstraintUnique",
           "description": "No two rows share a key; with `determines:`, rows that share a key agree on the determined fields."
         }
       },
@@ -71,28 +50,24 @@
     "ConstraintEqual": {
       "additionalProperties": false,
       "description": "`assert.equal`.",
+      "not": {
+        "required": [
+          "group_by",
+          "to"
+        ]
+      },
       "properties": {
         "field": {
-          "description": "The compared field.",
-          "type": "string"
+          "$ref": "#/$defs/v2_name",
+          "description": "The compared field."
         },
         "group_by": {
-          "description": "Compare within each group of rows that share this field's value; without it, the relation is one group. Not with `to:`.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "$ref": "#/$defs/v2_name",
+          "description": "Compare within each group of rows that share this field's value; without it, the relation is one group. Not with `to:`."
         },
         "to": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ConstraintEqualTo"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Compare each row with one named source row (`{ row: { FIELD: literal } }`), or with another field of the same row (`{ field: G }`)."
+          "$ref": "#/$defs/ConstraintEqualTo",
+          "description": "Compare each row with one named source row (`{ row: { FIELD: literal } }`, every field holding its literal), or with another field of the same row (`{ field: G }`)."
         }
       },
       "required": [
@@ -107,21 +82,19 @@
       "minProperties": 1,
       "properties": {
         "field": {
-          "description": "Another field of the same row.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "$ref": "#/$defs/v2_name",
+          "description": "Another field of the same row."
         },
         "row": {
           "additionalProperties": {
             "$ref": "#/$defs/ConstraintLiteral"
           },
-          "description": "The source row: the one row whose fields hold these literals.",
-          "type": [
-            "object",
-            "null"
-          ]
+          "description": "The source row: the one row whose fields hold these literals, every one of them.",
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/v2_name"
+          },
+          "type": "object"
         }
       },
       "type": "object"
@@ -151,71 +124,153 @@
     },
     "ConstraintSet": {
       "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              {
+                "properties": {
+                  "equal_to": {
+                    "required": [
+                      "group"
+                    ]
+                  }
+                },
+                "required": [
+                  "equal_to"
+                ]
+              },
+              {
+                "properties": {
+                  "subset_of": {
+                    "required": [
+                      "group"
+                    ]
+                  }
+                },
+                "required": [
+                  "subset_of"
+                ]
+              },
+              {
+                "properties": {
+                  "disjoint_from": {
+                    "required": [
+                      "group"
+                    ]
+                  }
+                },
+                "required": [
+                  "disjoint_from"
+                ]
+              }
+            ]
+          },
+          "then": {
+            "required": [
+              "group_by"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "groups": {
+                "minItems": 1
+              }
+            },
+            "required": [
+              "groups"
+            ]
+          },
+          "then": {
+            "required": [
+              "group_by",
+              "equal_to"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "plurals": {
+                "const": "cldr"
+              }
+            },
+            "required": [
+              "plurals"
+            ]
+          },
+          "then": {
+            "properties": {
+              "disjoint_from": {
+                "required": [
+                  "group"
+                ]
+              },
+              "equal_to": {
+                "required": [
+                  "group"
+                ]
+              },
+              "subset_of": {
+                "required": [
+                  "group"
+                ]
+              }
+            }
+          }
+        }
+      ],
       "description": "`assert.set`.",
+      "oneOf": [
+        {
+          "required": [
+            "equal_to"
+          ]
+        },
+        {
+          "required": [
+            "subset_of"
+          ]
+        },
+        {
+          "required": [
+            "disjoint_from"
+          ]
+        }
+      ],
       "properties": {
         "disjoint_from": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ConstraintSetTarget"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/ConstraintSetTarget",
           "description": "Each group's set shares no value with the other set."
         },
         "equal_to": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ConstraintSetTarget"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/ConstraintSetTarget",
           "description": "Each group's set equals the other set."
         },
         "field": {
-          "description": "The field whose values form each group's set.",
-          "type": "string"
+          "$ref": "#/$defs/v2_name",
+          "description": "The field whose values form each group's set."
         },
         "group_by": {
-          "description": "The field whose value is each row's group; without it, the relation is one group. Grouped by `path` or a path token, every resource the relation reads forms its group, rows or not.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "$ref": "#/$defs/v2_name",
+          "description": "The field whose value is each row's group; without it, the relation is one group. Grouped by `path` or a path token, every resource the relation reads forms its group, rows or not, except one whose path alone the relation's `where:` rejects."
         },
         "groups": {
-          "description": "Groups that must exist, rows or not, with `equal_to:`: literals of the `group_by:` field. A group named only here lacks every value of the other set.",
+          "description": "Groups that must exist, rows or not, with `equal_to:`: literals of the `group_by:` field, none twice. A group named only here lacks every value of the other set.",
           "items": {
             "$ref": "#/$defs/ConstraintLiteral"
           },
-          "type": [
-            "array",
-            "null"
-          ]
+          "type": "array",
+          "uniqueItems": true
         },
         "plurals": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ConstraintPlurals"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/ConstraintPlurals",
           "description": "`exact` compares values as they are; `cldr` collapses CLDR plural groups of an `entry.path` field, as `key_parity` does (`{ group: }` targets only)."
         },
         "subset_of": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ConstraintSetTarget"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/ConstraintSetTarget",
           "description": "Each group's set is a subset of the other set."
         }
       },
@@ -227,31 +282,33 @@
     "ConstraintSetTarget": {
       "additionalProperties": false,
       "description": "The other set: a group of the same relation (`{ group: literal }`), or every value of another relation's field (`{ relation: R, field: F }`).",
-      "properties": {
-        "field": {
-          "description": "That relation's field, whose values are the other set.",
-          "type": [
-            "string",
-            "null"
+      "oneOf": [
+        {
+          "maxProperties": 1,
+          "required": [
+            "group"
           ]
         },
+        {
+          "maxProperties": 2,
+          "required": [
+            "relation",
+            "field"
+          ]
+        }
+      ],
+      "properties": {
+        "field": {
+          "$ref": "#/$defs/v2_name",
+          "description": "That relation's field, whose values are the other set."
+        },
         "group": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ConstraintLiteral"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/ConstraintLiteral",
           "description": "The reference group: the rows whose `group_by:` field holds this literal."
         },
         "relation": {
-          "description": "Another relation: its name, bare or qualified by an `extends:` alias (`ws.names`); not an inline relation.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "$ref": "#/$defs/v2_reference",
+          "description": "Another relation: its name, bare or qualified by an `extends:` alias (`ws.names`); not an inline relation."
         }
       },
       "type": "object"
@@ -263,20 +320,20 @@
         "determines": {
           "description": "The fields the key determines: rows that share the key agree on them.",
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/v2_name"
           },
-          "type": [
-            "array",
-            "null"
-          ]
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
         },
         "key": {
           "description": "The key: one or more field names.",
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/v2_name"
           },
           "minItems": 1,
-          "type": "array"
+          "type": "array",
+          "uniqueItems": true
         }
       },
       "required": [

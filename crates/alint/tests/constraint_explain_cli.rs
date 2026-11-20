@@ -144,7 +144,9 @@ rules:
             "      where:",
             "        range not_matches \"^workspace:\"",
             "        range not_in [\"*\"]",
-            "  trigger: under --changed, a change to what these selectors read runs the rule",
+            "  trigger: under --changed, the rule runs on a change to a path these selectors pick, \
+             to an ignore file, submodule or nested repository where they can match, or to a \
+             marker or manifest their scope_filter: consults",
             "    selector manifests  .alint.yml",
             &format!("      {scope}"),
             "      scope_filter:",
@@ -248,6 +250,53 @@ rules:
 
 /// A join: both sides before it, in evaluation order, the join with its
 /// `left`, `right`, `on` and `unique`, and the trigger through both sides.
+/// A walk that reads no ignore files gives a change to one no say, so the
+/// trigger names none: with `respect_gitignore: false`, and with
+/// `--no-gitignore`.
+#[test]
+fn the_trigger_names_ignore_files_only_when_the_walk_reads_them() {
+    let config = "version: 2\nrelations:\n  names:\n    from: { paths: \"packages/*/package.json\" }\n    \
+                  read: { json: \"$.name\" }\n    fields: { name: value }\nrules:\n  - id: names\n    \
+                  kind: constraint\n    input: names\n    assert: { unique: { key: [name] } }\n    \
+                  level: error\n";
+    let trigger = |ignore_file: &str| {
+        format!(
+            "  trigger: under --changed, the rule runs on a change to a path these selectors \
+             pick, to {ignore_file}submodule or nested repository where they can match, or to \
+             a marker or manifest their scope_filter: consults\n"
+        )
+    };
+    let read = trigger("an ignore file, ");
+    let unread = trigger("a ");
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(root, "packages/a/package.json", &manifest("a", "1.0.0"));
+    for (config, args, expected) in [
+        (config.to_string(), &[][..], &read),
+        (config.to_string(), &["--no-gitignore"][..], &unread),
+        (
+            format!("respect_gitignore: false\n{config}"),
+            &[][..],
+            &unread,
+        ),
+    ] {
+        write(root, ".alint.yml", &config);
+        let mut command = args.to_vec();
+        command.extend(["explain", "names"]);
+        let output = run(root, &command, &[]);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let human = String::from_utf8(output.stdout).unwrap();
+        assert!(
+            plan_block(&human).contains(expected.as_str()),
+            "{args:?}: {human}"
+        );
+    }
+}
+
 #[test]
 fn a_join_shows_both_sides_first_and_its_keys() {
     let dir = tempfile::tempdir().unwrap();
@@ -286,7 +335,9 @@ fn a_join_shows_both_sides_first_and_its_keys() {
             "        dependency: left.dependency",
             "        range: left.range",
             "        manifest: right.manifest",
-            "  trigger: under --changed, a change to what these selectors read runs the rule",
+            "  trigger: under --changed, the rule runs on a change to a path these selectors pick, \
+             to an ignore file, submodule or nested repository where they can match, or to a \
+             marker or manifest their scope_filter: consults",
             "    selector manifests  .alint.yml",
             "      paths: packages/*/package.json",
             "  cost: linear in the rows of each relation it reads",
@@ -333,7 +384,8 @@ fn a_join_shows_both_sides_first_and_its_keys() {
 }
 
 /// A union: each part with its own selector and reader, in the order
-/// written, and each inline selector in the trigger by its part.
+/// written, and each inline selector in the trigger by its part, each named
+/// by its place from 0 (`union[0]`), as a message that names a part does.
 #[test]
 fn a_union_shows_each_part_in_order() {
     let dir = tempfile::tempdir().unwrap();
@@ -370,28 +422,29 @@ rules:
             "  assert: equal: field version, to the source row where source = \".nvmrc\"",
             "  relations, in evaluation order:",
             "    relation pins  .alint.yml  (input)",
-            "      union:",
-            "        part 1:",
-            "          from: inline selector  .alint.yml",
-            "            paths: .nvmrc",
-            "          read: regex \"^v?(\\\\S+)\"",
-            "        part 2:",
-            "          from: inline selector  .alint.yml",
-            "            paths: package.json, packages/*/package.json",
-            "          read: json $.engines.node, optional",
-            "        part 3:",
-            "          from: inline selector  .alint.yml",
-            "            paths: .tool-versions",
-            "          read: lines, comment \"#\"",
+            "      union[0]:",
+            "        from: inline selector  .alint.yml",
+            "          paths: .nvmrc",
+            "        read: regex \"^v?(\\\\S+)\"",
+            "      union[1]:",
+            "        from: inline selector  .alint.yml",
+            "          paths: package.json, packages/*/package.json",
+            "        read: json $.engines.node, optional",
+            "      union[2]:",
+            "        from: inline selector  .alint.yml",
+            "          paths: .tool-versions",
+            "        read: lines, comment \"#\"",
             "      fields:",
             "        source: path",
             "        version: value",
-            "  trigger: under --changed, a change to what these selectors read runs the rule",
-            "    the inline selector of relation pins, part 1  .alint.yml",
+            "  trigger: under --changed, the rule runs on a change to a path these selectors pick, \
+             to an ignore file, submodule or nested repository where they can match, or to a \
+             marker or manifest their scope_filter: consults",
+            "    the inline selector of relation pins, union[0]  .alint.yml",
             "      paths: .nvmrc",
-            "    the inline selector of relation pins, part 2  .alint.yml",
+            "    the inline selector of relation pins, union[1]  .alint.yml",
             "      paths: package.json, packages/*/package.json",
-            "    the inline selector of relation pins, part 3  .alint.yml",
+            "    the inline selector of relation pins, union[2]  .alint.yml",
             "      paths: .tool-versions",
             "  cost: linear in the rows of each relation it reads",
         ])
@@ -438,7 +491,9 @@ fn an_inline_input_is_marked() {
             "      read: json $.name",
             "      fields:",
             "        name: value",
-            "  trigger: under --changed, a change to what these selectors read runs the rule",
+            "  trigger: under --changed, the rule runs on a change to a path these selectors pick, \
+             to an ignore file, submodule or nested repository where they can match, or to a \
+             marker or manifest their scope_filter: consults",
             "    the inline selector of relation rules[0].input  .alint.yml",
             "      paths: packages/*/package.json",
             "  cost: linear in the rows of each relation it reads",
@@ -487,7 +542,9 @@ fn a_qualified_input_names_its_alias_and_source() {
             "      fields:",
             "        dependency: entry.key",
             "        range: entry.value",
-            "  trigger: under --changed, a change to what these selectors read runs the rule",
+            "  trigger: under --changed, the rule runs on a change to a path these selectors pick, \
+             to an ignore file, submodule or nested repository where they can match, or to a \
+             marker or manifest their scope_filter: consults",
             &format!("    selector manifests  {deps}"),
             "      paths: packages/*/package.json",
             "  cost: linear in the rows of each relation it reads",
@@ -653,7 +710,9 @@ fn a_relation_two_aliases_reach_is_listed_once_with_each_spelling() {
             "      join: left common.names, right common.names, on name = name, unique right",
             "      fields:",
             "        name: left.name",
-            "  trigger: under --changed, a change to what these selectors read runs the rule",
+            "  trigger: under --changed, the rule runs on a change to a path these selectors pick, \
+             to an ignore file, submodule or nested repository where they can match, or to a \
+             marker or manifest their scope_filter: consults",
             &format!("    the inline selector of relation common.names  {base}"),
             "      paths: packages/*/package.json",
             "  cost: linear in the rows of each relation it reads",
@@ -824,6 +883,29 @@ fn an_environment_written_relation_definition_is_redacted() {
     assert_eq!(relations[0]["fields"][1]["source"], "bound: <redacted>");
     assert_eq!(relations[2]["join"]["unique"], "<redacted>");
     assert_eq!(relations[2]["join"]["left"], 0);
+
+    // A `read:` and its `optional:`, whether `optional:` is written or not.
+    for optional in ["\n    optional: true", ""] {
+        write(
+            root,
+            ".alint.yml",
+            &format!(
+                "version: 2\nrelations:\n  names:\n    from: {{ paths: \"packages/*/package.json\" \
+                 }}\n    read: {{ json: \"{{{{env.QUERY}}}}\" }}{optional}\n    fields: {{ name: \
+                 value }}\nrules:\n  - id: names\n    kind: constraint\n    input: names\n    \
+                 assert: {{ unique: {{ key: [name] }} }}\n    level: error\n"
+            ),
+        );
+        let (human, json) = explain(root, "names", &[("QUERY", "$.canary_query")]);
+        assert_hidden(&human, &json, &["canary"]);
+        assert!(
+            human.contains("      read: <redacted>, optional: <redacted>\n"),
+            "{optional:?}\n{human}"
+        );
+        let relation = &json["plan"]["relations"][0];
+        assert_eq!(relation["read"], "<redacted>", "{optional:?}");
+        assert_eq!(relation["optional"], "<redacted>", "{optional:?}");
+    }
 }
 
 /// An assertion whose literal the environment writes is `<redacted>` whole,
@@ -1126,42 +1208,320 @@ rules:
     );
 }
 
+/// Rules whose plans hold every key and every `<redacted>` form a plan has:
+/// a named selector with a `scope_filter:` and manifests, each reader and
+/// `read:` form, a union, a join, a `set`'s target, `where:` lists with
+/// literals and a relation's field, a sensitive field, and what the
+/// environment wrote.
+const EVERY_PLAN_SHAPE: &str = r##"version: 2
+selectors:
+  manifests:
+    paths: ["packages/*/package.json", "!packages/legacy/package.json"]
+    scope_filter:
+      has_ancestor: package.json
+      include_manifest_paths:
+        source: package.json
+        extract: { json: "$.workspaces[*]" }
+  chosen:
+    paths: "{{env.DIR}}/*/package.json"
+    scope_filter: { has_ancestor: package.json }
+relations:
+  ranges:
+    from: manifests
+    entries: { format: json, at: ["$.dependencies", "$.devDependencies"], leaves: true }
+    fields: { manifest: path, dependency: entry.key, range: entry.value }
+    transform: { range: [trim, lower] }
+    where: { range: { not_matches: "^workspace:", not_in: ["*"] } }
+  names:
+    from: manifests
+    read: { json: "$.name" }
+    fields: { name: value, manifest: path }
+  joined:
+    join: { left: ranges, right: names, on: { manifest: manifest }, unique: right }
+    fields: { dependency: left.dependency, range: left.range, owner: right.name }
+  pins:
+    union:
+      - from: { paths: .nvmrc }
+        read: { regex: "^v?(\\S+)" }
+      - from: { paths: package.json }
+        read: { json: "$.engines.node" }
+        optional: true
+      - from: { paths: .tool-versions }
+        read: { lines: { comment: "#" } }
+      - from: { paths: .node-version }
+        read: { lines: {} }
+      - from: { paths: node.yaml }
+        read: { yaml: "$.node" }
+      - from: { paths: node.toml }
+        read: { toml: "$.node" }
+      - from: { paths: NODE }
+        read: { whole_file: {} }
+    fields: { source: path, version: value }
+  hidden:
+    from: chosen
+    read: { json: "{{env.QUERY}}" }
+    optional: true
+    fields: { name: value }
+  hidden-entries:
+    from: { paths: "{{env.DIR}}/*.json" }
+    entries: { format: json, at: "{{env.AT}}" }
+    fields: { key: entry.key, owner: "bound: {{env.BOUND}}" }
+  workspaces:
+    from: { paths: "packages/*/package.json" }
+    entries: { format: yaml, at: "$.deps" }
+    fields: { name: entry.key }
+  hidden-joined:
+    join: { left: hidden-entries, right: workspaces, on: { key: name }, unique: "{{env.SIDE}}" }
+    fields: { key: left.key, owner: left.owner }
+  tokens:
+    from: { paths: "secrets/*.json" }
+    entries: { format: toml, at: "$" }
+    fields: { key: entry.key, token: { source: entry.value, sensitive: true }, flag: "bound: $.private" }
+    transform: { token: [trim] }
+    where:
+      token: { not_in: ["x", { relation: workspaces, field: name }], matches: "^t" }
+      flag: { in: [true] }
+      key: { in: ["k"] }
+rules:
+  - id: joined
+    kind: constraint
+    input: joined
+    assert: { unique: { key: [dependency], determines: [range] } }
+    level: error
+  - id: pins
+    kind: constraint
+    input: pins
+    assert: { equal: { field: version, to: { row: { source: .nvmrc } } } }
+    level: error
+  - id: hidden
+    kind: constraint
+    input: hidden
+    assert: { equal: { field: name, to: { row: { name: "{{env.ROW}}" } } } }
+    level: error
+  - id: hidden-joined
+    kind: constraint
+    input: hidden-joined
+    assert: { equal: { field: owner, group_by: key } }
+    level: error
+  - id: tokens
+    kind: constraint
+    input: tokens
+    assert: { set: { field: key, subset_of: { relation: workspaces, field: name } } }
+    level: error
+  - id: inline
+    kind: constraint
+    input:
+      from: { paths: "x/*.json" }
+      read: { json: "$.v" }
+      fields: { v: value }
+    assert: { unique: { key: [v] } }
+    level: error
+  - id: sensitive
+    kind: constraint
+    input: names
+    assert: { unique: { key: [name] } }
+    level: error
+    sensitive: true
+"##;
+
+/// The `explain --trace --format json` document of each rule of
+/// [`EVERY_PLAN_SHAPE`].
+fn every_plan_shape() -> Vec<(&'static str, serde_json::Value)> {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(root, ".alint.yml", EVERY_PLAN_SHAPE);
+    write(
+        root,
+        "package.json",
+        "{\"name\": \"root\", \"workspaces\": [\"packages/a\"]}\n",
+    );
+    write(root, "packages/a/package.json", &manifest("a", "^18.2.0"));
+    let env = [
+        ("DIR", "canary-dir"),
+        ("QUERY", "$.canary_query"),
+        ("AT", "$.canary_at"),
+        ("BOUND", "$.canary_bound"),
+        ("SIDE", "right"),
+        ("ROW", "canary-row"),
+    ];
+    [
+        "joined",
+        "pins",
+        "hidden",
+        "hidden-joined",
+        "tokens",
+        "inline",
+        "sensitive",
+    ]
+    .into_iter()
+    .map(|rule| {
+        let output = run(
+            root,
+            &["explain", rule, "--trace", "--format", "json"],
+            &env,
+        );
+        assert!(output.status.success(), "{rule}: {output:?}");
+        let document: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert!(
+            !document.to_string().contains("canary"),
+            "{rule}: {document}"
+        );
+        (rule, document)
+    })
+    .collect()
+}
+
+/// The JSON pointer of every object in `value`, below `at`.
+fn objects(value: &serde_json::Value, at: &str, out: &mut Vec<String>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            out.push(at.to_string());
+            for (key, child) in map {
+                objects(child, &format!("{at}/{key}"), out);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for (index, item) in items.iter().enumerate() {
+                objects(item, &format!("{at}/{index}"), out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Each key in `value`, and each key (or `key[]` for a list's item) whose
+/// value is `<redacted>`.
+fn keys(
+    value: &serde_json::Value,
+    key: &str,
+    seen: &mut std::collections::BTreeSet<String>,
+    redacted: &mut std::collections::BTreeSet<String>,
+) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (name, child) in map {
+                seen.insert(name.clone());
+                if child == "<redacted>" {
+                    redacted.insert(name.clone());
+                }
+                keys(child, name, seen, redacted);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                if item == "<redacted>" {
+                    redacted.insert(format!("{key}[]"));
+                }
+                keys(item, key, seen, redacted);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Each property name the schema `value` declares.
+fn declared(value: &serde_json::Value, out: &mut std::collections::BTreeSet<String>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some(properties) = map.get("properties").and_then(|p| p.as_object()) {
+                out.extend(properties.keys().cloned());
+            }
+            map.values().for_each(|child| declared(child, out));
+        }
+        serde_json::Value::Array(items) => items.iter().for_each(|item| declared(item, out)),
+        _ => {}
+    }
+}
+
 /// `explain --trace --format json` carries the plan in its rule document,
-/// which the experimental trace schema accepts, whole or `<redacted>`.
+/// which the experimental trace schema describes key by key: every real plan
+/// validates, whole or `<redacted>`; a key renamed or added anywhere in one
+/// fails; and the plans name every key the schema declares for a plan, and
+/// take each `<redacted>` form.
 #[test]
-fn the_trace_carries_the_plan_its_schema_accepts() {
+fn the_trace_schema_describes_the_plan_key_by_key() {
     let schema: serde_json::Value =
         serde_json::from_str(include_str!("../schemas/experimental/rule-trace.json")).unwrap();
     let validator = jsonschema::validator_for(&schema).unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    let root = dir.path();
-    write(root, "packages/a/package.json", &manifest("a", "^18.2.0"));
-    for (config, plan_is_object) in [
-        (JOINED.to_string(), true),
-        (format!("{JOINED}    sensitive: true\n"), false),
-    ] {
-        write(root, ".alint.yml", &config);
-        let output = run(
-            root,
-            &["explain", "one-range", "--trace", "--format", "json"],
-            &[],
-        );
-        assert!(output.status.success(), "{output:?}");
-        let document: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(
-            document["rule"]["plan"].is_object(),
-            plan_is_object,
-            "{document}"
-        );
-        assert!(document["rule"].get("plan").is_some(), "{document}");
-        let errors: Vec<String> = validator
-            .iter_errors(&document)
+    let errors = |document: &serde_json::Value| -> Vec<String> {
+        validator
+            .iter_errors(document)
             .map(|error| error.to_string())
-            .collect();
-        assert!(errors.is_empty(), "schema errors: {errors:#?}");
+            .collect()
+    };
+    let mut seen = std::collections::BTreeSet::new();
+    let mut redacted = std::collections::BTreeSet::new();
+    let mut checked = 0;
+    for (rule, document) in every_plan_shape() {
+        assert!(document["rule"].get("plan").is_some(), "{rule}: {document}");
+        assert!(
+            errors(&document).is_empty(),
+            "{rule}: {:#?}",
+            errors(&document)
+        );
+        let plan = &document["rule"]["plan"];
+        keys(plan, "plan", &mut seen, &mut redacted);
+        if plan == "<redacted>" {
+            redacted.insert("plan".into());
+        }
         // A plan is an object or `<redacted>`, never another string.
         let mut other = document.clone();
         other["rule"]["plan"] = serde_json::Value::from("plan");
         assert!(!validator.is_valid(&other), "{other}");
+        let mut at = Vec::new();
+        objects(plan, "/rule/plan", &mut at);
+        for pointer in at {
+            let names: Vec<String> = document
+                .pointer(&pointer)
+                .and_then(serde_json::Value::as_object)
+                .unwrap()
+                .keys()
+                .cloned()
+                .collect();
+            for name in names.iter().map(Some).chain([None]) {
+                let mut changed = document.clone();
+                let object = changed
+                    .pointer_mut(&pointer)
+                    .and_then(serde_json::Value::as_object_mut)
+                    .unwrap();
+                let change = if let Some(name) = name {
+                    let value = object.remove(name).unwrap();
+                    object.insert(format!("{name}_renamed"), value);
+                    format!("`{name}` renamed")
+                } else {
+                    object.insert("unexpected".into(), serde_json::Value::from(1));
+                    "a key added".into()
+                };
+                assert!(
+                    !validator.is_valid(&changed),
+                    "{rule}: the schema accepts {change} at {pointer}"
+                );
+                checked += 1;
+            }
+        }
     }
+    assert!(checked > 500, "{checked}");
+    let mut plan_schema = std::collections::BTreeSet::new();
+    declared(
+        &schema["properties"]["rule"]["properties"]["plan"],
+        &mut plan_schema,
+    );
+    assert_eq!(seen, plan_schema, "the plans' keys and the schema's");
+    let every_form: std::collections::BTreeSet<String> = [
+        "assertion",
+        "entries",
+        "members[]",
+        "optional",
+        "paths",
+        "pattern",
+        "plan",
+        "read",
+        "scope_filter",
+        "transforms",
+        "unique",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect();
+    assert_eq!(redacted, every_form);
 }

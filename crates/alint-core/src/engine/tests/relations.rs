@@ -287,3 +287,162 @@ fn the_run_evaluates_relations_in_the_order_explain_shows() {
         [RelationId(2), RelationId(1), RelationId(0), RelationId(3)]
     );
 }
+
+/// A plan of one relation over the entries of `locales/*.json`.
+fn locales_plan() -> Arc<Plan> {
+    Arc::new(Plan {
+        sources: vec![PlanSource {
+            display: ".alint.yml".into(),
+            path: std::path::PathBuf::from(".alint.yml"),
+            class: ConfigSourceClass::Root,
+            aliases: Vec::new(),
+        }],
+        selectors: Vec::new(),
+        relations: vec![relation("locales", "locales/*.json")],
+        rules: Vec::new(),
+    })
+}
+
+/// A tree with `locales/en.json`, and `changed` (each path a file the tree
+/// holds).
+fn locales_tree(changed: &[PathBuf]) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    let locales = dir.path().join("locales");
+    std::fs::create_dir_all(&locales).unwrap();
+    std::fs::write(locales.join("en.json"), r#"{"deps": {"x": "1"}}"#).unwrap();
+    for path in changed {
+        let path = dir.path().join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "changed\n").unwrap();
+    }
+    dir
+}
+
+/// A rule that `--changed` skips evaluates no relation before the rules
+/// run: the memo records none (`Engine::evaluate_read_relations`).
+#[test]
+fn a_change_outside_the_trigger_scope_evaluates_no_relation() {
+    let plan = locales_plan();
+    let changed = PathBuf::from("README.md");
+    let dir = locales_tree(std::slice::from_ref(&changed));
+    let index =
+        crate::walker::walk(dir.path(), &crate::walker::WalkOptions::test_default()).unwrap();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let rule = ReadsRelation {
+        id: "locales",
+        level: Level::Error,
+        plan: Arc::clone(&plan),
+        input: [RelationId(0)],
+        seen: Arc::clone(&seen),
+        trigger: Some(crate::relation::TriggerScope::of(&plan, &[RelationId(0)])),
+    };
+    let report = Engine::from_entries(vec![RuleEntry::new(Box::new(rule))], RuleRegistry::new())
+        .with_changed_paths(HashSet::from([changed]))
+        .run(dir.path(), &index)
+        .unwrap();
+    assert!(report.results.is_empty(), "{:?}", report.results);
+    assert!(seen.lock().unwrap().is_empty(), "the rule must not run");
+    let memo = index
+        .relation_memo(&plan)
+        .expect("the run's memo for the plan");
+    assert_eq!(memo.computed(), Vec::<RelationId>::new());
+}
+
+/// Under `--changed`, a pass decides once what a rule's trigger scope takes
+/// of the changed paths, and every gate of the pass reads that decision: a
+/// selector tests each changed path below the directory its `paths:` start
+/// with against its globs once a pass, however many gates ask (manifest
+/// resolution, relation evaluation, dispatch; for `fix`, its own), and a
+/// path outside that directory not at all.
+#[test]
+fn a_trigger_scope_tests_each_changed_path_against_its_globs_at_most_once_a_pass() {
+    let plan = locales_plan();
+    // Below `locales/`, but not what `locales/*.json` matches.
+    let below: Vec<PathBuf> = (0..20)
+        .map(|n| Path::new("locales").join("notes").join(format!("{n}.txt")))
+        .collect();
+    // Outside `locales/`.
+    let outside: Vec<PathBuf> = (0..50)
+        .map(|n| Path::new("src").join(format!("{n}.rs")))
+        .collect();
+    let changed: Vec<PathBuf> = below.iter().chain(&outside).cloned().collect();
+    let dir = locales_tree(&changed);
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    // The glob tests of one `check` run, and of one `fix` preview, with
+    // `changed` changed.
+    let glob_tests = |changed: &[PathBuf], fix: bool| {
+        let index =
+            crate::walker::walk(dir.path(), &crate::walker::WalkOptions::test_default()).unwrap();
+        let trigger = crate::relation::TriggerScope::of(&plan, &[RelationId(0)]);
+        let rule = ReadsRelation {
+            id: "locales",
+            level: Level::Error,
+            plan: Arc::clone(&plan),
+            input: [RelationId(0)],
+            seen: Arc::clone(&seen),
+            trigger: Some(trigger.clone()),
+        };
+        let engine =
+            Engine::from_entries(vec![RuleEntry::new(Box::new(rule))], RuleRegistry::new())
+                .with_changed_paths(changed.iter().cloned().collect());
+        if fix {
+            engine
+                .fix(
+                    dir.path(),
+                    &index,
+                    &crate::WalkOptions::test_default(),
+                    true,
+                    crate::Applicability::Safe,
+                )
+                .unwrap();
+        } else {
+            engine.run(dir.path(), &index).unwrap();
+        }
+        trigger.glob_tests()
+    };
+    assert_eq!(glob_tests(&outside, false), 0);
+    assert_eq!(glob_tests(&outside, true), 0);
+    assert_eq!(glob_tests(&changed, false), below.len());
+    assert_eq!(glob_tests(&changed, true), below.len());
+    assert!(seen.lock().unwrap().is_empty(), "the rule must not run");
+    // A change the selector takes runs the rule, still testing no path twice.
+    let mut taken = changed.clone();
+    taken.push(Path::new("locales").join("en.json"));
+    assert!(glob_tests(&taken, false) <= taken.len() - outside.len());
+    assert_eq!(seen.lock().unwrap().len(), 1, "the rule runs once");
+}
+
+/// `with_changed_paths` replaces the changed set whole: a directory an
+/// earlier `with_changed_set` marked is a plain path after it, so a change
+/// Git listed as a directory no longer runs the rules that read below it.
+#[test]
+fn with_changed_paths_forgets_the_directories_an_earlier_set_marked() {
+    let plan = locales_plan();
+    let dir = locales_tree(&[]);
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let locales = PathBuf::from("locales");
+    let engine = || {
+        let rule = ReadsRelation {
+            id: "locales",
+            level: Level::Error,
+            plan: Arc::clone(&plan),
+            input: [RelationId(0)],
+            seen: Arc::clone(&seen),
+            trigger: Some(crate::relation::TriggerScope::of(&plan, &[RelationId(0)])),
+        };
+        Engine::from_entries(vec![RuleEntry::new(Box::new(rule))], RuleRegistry::new())
+            .with_changed_set(crate::git::ChangedSet::new(
+                HashSet::from([locales.clone()]),
+                HashSet::from([locales.clone()]),
+            ))
+    };
+    let run = |engine: Engine| {
+        let index =
+            crate::walker::walk(dir.path(), &crate::walker::WalkOptions::test_default()).unwrap();
+        engine.run(dir.path(), &index).unwrap();
+    };
+    run(engine());
+    assert_eq!(seen.lock().unwrap().len(), 1, "a directory runs the rule");
+    run(engine().with_changed_paths(HashSet::from([locales.clone()])));
+    assert_eq!(seen.lock().unwrap().len(), 1, "a plain path runs nothing");
+}

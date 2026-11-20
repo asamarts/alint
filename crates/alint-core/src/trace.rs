@@ -12,6 +12,9 @@ use crate::{Error, Result, RuleResult};
 use schemars::JsonSchema;
 use serde::{Serialize, Serializer};
 
+/// The schema of `rule.plan`, the resolved plan of a rule that reads relations.
+mod plan_schema;
+
 #[cfg(test)]
 thread_local! {
     static RECORDERS_CREATED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
@@ -1000,9 +1003,7 @@ fn trace_rule_payload_schema(_: &mut schemars::SchemaGenerator) -> schemars::Sch
             "conditional": { "type": "boolean" },
             "fixable": { "type": "boolean" },
             "fix": { "type": ["string", "null"] },
-            "plan": {
-                "oneOf": [{ "type": "object" }, { "const": "<redacted>" }]
-            },
+            "plan": plan_schema::plan(),
             "analysis_time": {
                 "type": "object",
                 "additionalProperties": false,

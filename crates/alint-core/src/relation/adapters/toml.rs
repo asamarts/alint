@@ -103,6 +103,8 @@ impl Walk<'_> {
         let document = Document::parse(self.text).map_err(|error: toml_edit::TomlError| {
             AdapterError::Parse(parse_error(self.text, &error))
         })?;
+        // The lexer's tokens, held while the document was built.
+        self.entries.parsed += crate::structured_format::toml_tokens(self.text);
         self.table(document.as_table(), PathId::ROOT)
     }
 
@@ -130,7 +132,14 @@ impl Walk<'_> {
             .paths
             .child(parent, Segment::Key(key_text.into()));
         let text = self.text;
-        self.push(path, span, || item_value(item, text))?;
+        let owned = text_of(key_text, item.as_value());
+        self.push(path, span, owned, || item_value(item, text))?;
+        // The walk does not descend an array: what the document holds
+        // below one.
+        self.entries.parsed += match item {
+            Item::Value(Value::Array(_)) | Item::ArrayOfTables(_) => below(item),
+            Item::None | Item::Value(_) | Item::Table(_) => 0,
+        };
 
         match item {
             Item::Table(table) => self.table(table, path)?,
@@ -140,13 +149,18 @@ impl Walk<'_> {
         Ok(())
     }
 
+    /// A row for the member at `path`, whose key (and string value) the
+    /// document holds as `owned` bytes of text.
     fn push(
         &mut self,
         path: PathId,
         span: std::ops::Range<usize>,
+        owned: usize,
         value: impl FnOnce() -> TomlValue,
     ) -> Result<(), AdapterError> {
         check_row_count(self.limits, self.entries.rows.len() + 1)?;
+        // What the document holds for the member.
+        self.entries.parsed += MEMBER + owned;
         let value_span = if self.values {
             let held = value();
             self.entries.values.push(held.value);
@@ -161,6 +175,69 @@ impl Walk<'_> {
         });
         Ok(())
     }
+}
+
+/// Roughly what a `toml_edit` document holds on the heap for one member:
+/// its key, its item, and its place in its table's map, twice over, as a
+/// map that grows by doubling its room may hold twice its members.
+const MEMBER: usize = 2 * (std::mem::size_of::<Key>() + std::mem::size_of::<Item>() + 32);
+
+/// The text a document holds of its own for a member: its key, and its
+/// value when that is a string.
+fn text_of(key: &str, value: Option<&Value>) -> usize {
+    key.len()
+        + match value {
+            Some(Value::String(string)) => string.value().len(),
+            _ => 0,
+        }
+}
+
+/// Roughly what a document holds below `item`, an array or an array of
+/// tables: each element, each table's members and their text, and what is
+/// below those.
+/// An explicit stack, so nesting cannot exhaust the call stack.
+fn below(item: &Item) -> usize {
+    enum Node<'n> {
+        Item(&'n Item),
+        Value(&'n Value),
+    }
+    let mut held = 0;
+    let mut pending = vec![Node::Item(item)];
+    while let Some(node) = pending.pop() {
+        match node {
+            Node::Item(Item::Value(value)) => pending.push(Node::Value(value)),
+            Node::Item(Item::Table(table)) => {
+                for (key, item) in table {
+                    held += MEMBER + key.len();
+                    pending.push(Node::Item(item));
+                }
+            }
+            Node::Item(Item::ArrayOfTables(tables)) => {
+                for table in tables {
+                    held += std::mem::size_of::<Item>();
+                    for (key, item) in table {
+                        held += MEMBER + key.len();
+                        pending.push(Node::Item(item));
+                    }
+                }
+            }
+            Node::Value(Value::Array(array)) => {
+                for value in array {
+                    held += std::mem::size_of::<Item>();
+                    pending.push(Node::Value(value));
+                }
+            }
+            Node::Value(Value::InlineTable(table)) => {
+                for (key, value) in table {
+                    held += MEMBER + key.len();
+                    pending.push(Node::Value(value));
+                }
+            }
+            Node::Value(Value::String(string)) => held += string.value().len(),
+            Node::Item(Item::None) | Node::Value(_) => {}
+        }
+    }
+    held
 }
 
 /// What a table member's item holds.
@@ -238,7 +315,10 @@ impl Walk<'_> {
                     self.entries.paths.child(at, Segment::Key(key.get().into()))
                 });
                 let text = self.text;
-                self.push(at, span, || value_of(value, text))?;
+                // Each key of a dotted path, and the value's text.
+                let owned = path.iter().map(|key| key.get().len()).sum::<usize>()
+                    + text_of("", Some(value));
+                self.push(at, span, owned, || value_of(value, text))?;
                 if let Value::InlineTable(inner) = value {
                     nested.push((at, inner));
                 }
@@ -273,7 +353,9 @@ impl Walk<'_> {
                 .paths
                 .child(prefix, Segment::Key(key_text.into()));
             let text = self.text;
-            self.push(at, span, || value_of(value, text))?;
+            self.push(at, span, text_of(key_text, Some(value)), || {
+                value_of(value, text)
+            })?;
             if let Value::InlineTable(inner) = value {
                 nested.push((at, inner));
             }
@@ -510,5 +592,35 @@ mod tests {
             .extract(&resource(), b"a = 1\nb = 2\n", &limits)
             .unwrap_err();
         assert!(matches!(error, AdapterError::Limit(_)), "{error}");
+    }
+
+    /// What the parse held counts the text the document keeps of its own:
+    /// each key and each string value, in a table, a dotted key, an inline
+    /// table, an array and an array of tables. Beside the lexer's tokens,
+    /// counted by the text's length, a long key and value add their length.
+    #[test]
+    fn the_parse_held_counts_each_key_and_string_the_document_keeps() {
+        const LONG: usize = 1 << 16;
+        for shape in [
+            "@K = \"@V\"\n",
+            "s.@K = '@V'\n",
+            "t = { @K = \"@V\" }\n",
+            "a = [\"@V\", { @K = 1 }]\n",
+            "[[t]]\n@K = \"@V\"\n",
+        ] {
+            // The document with `key` and `value`, padded by a comment to
+            // one length, so the lexer's tokens count alike.
+            let parsed = |key: &str, value: &str| {
+                let text = shape.replace("@K", key).replace("@V", value);
+                let pad = "-".repeat(2 * LONG - key.len() - value.len());
+                let text = format!("{text}# {pad}\n");
+                let entries = TomlRowsAdapter::values(&text, &Limits::default()).unwrap();
+                (entries.parsed, text.len())
+            };
+            let (long, length) = parsed(&"k".repeat(LONG), &"v".repeat(LONG));
+            let (short, same) = parsed("k", "v");
+            assert_eq!(length, same, "{shape}");
+            assert_eq!(long - short, 2 * (LONG - 1), "{shape}");
+        }
     }
 }

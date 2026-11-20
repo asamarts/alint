@@ -1060,8 +1060,15 @@ fn transform_name(transform: Transform) -> &'static str {
     }
 }
 
-/// Human output: the `plan:` block that ends `explain`.
-pub(super) fn write_human(out: &mut impl Write, plan: &ExplainPlan) -> Result<()> {
+/// Human output: the `plan:` block that ends `explain`. `reads_ignore_files`
+/// is whether the walk reads `.gitignore` and `.ignore` files (the config's
+/// `respect_gitignore:`, unless `--no-gitignore`), so that a change to one
+/// runs the rule.
+pub(super) fn write_human(
+    out: &mut impl Write,
+    plan: &ExplainPlan,
+    reads_ignore_files: bool,
+) -> Result<()> {
     let dim = alint_output::style::DIM;
     let plan = match plan {
         Shown::Redacted(marker) => {
@@ -1085,9 +1092,21 @@ pub(super) fn write_human(out: &mut impl Write, plan: &ExplainPlan) -> Result<()
     for relation in &plan.relations {
         write_relation(out, relation, &labels)?;
     }
+    // What a change must touch to run the rule (`TriggerScope::hits`): a
+    // path a selector picks; an ignore file (`.gitignore`, `.ignore`) the walk
+    // reads, or a directory Git lists whole (a submodule, a nested
+    // repository), where its `paths:` can match; a `has_ancestor` marker or a
+    // manifest its `scope_filter:` consults.
+    let ignore_file = if reads_ignore_files {
+        "an ignore file, "
+    } else {
+        "a "
+    };
     writeln!(
         out,
-        "  {dim}trigger:{dim:#} under --changed, a change to what these selectors read runs the rule"
+        "  {dim}trigger:{dim:#} under --changed, the rule runs on a change to a path these \
+         selectors pick, to {ignore_file}submodule or nested repository where they can \
+         match, or to a marker or manifest their scope_filter: consults"
     )?;
     for selector in &plan.trigger {
         write!(out, "    ")?;
@@ -1105,10 +1124,11 @@ fn write_relation(out: &mut impl Write, relation: &RelationView, labels: &[&str]
     match &relation.rows {
         RowsView::Part(part) => write_part(out, "      ", part, labels)?,
         RowsView::Union { union } => {
-            writeln!(out, "      {dim}union:{dim:#}")?;
+            // Each part by its place in `union:`, from 0, as a message that
+            // names a part does (`relations.pins.union[2]`).
             for (index, part) in union.iter().enumerate() {
-                writeln!(out, "        {dim}part {}:{dim:#}", index + 1)?;
-                write_part(out, "          ", part, labels)?;
+                writeln!(out, "      {dim}union[{index}]:{dim:#}")?;
+                write_part(out, "        ", part, labels)?;
             }
         }
         RowsView::Join { join } => {
@@ -1315,7 +1335,7 @@ fn write_selector(
             term(labels[relation]),
             selector
                 .part
-                .map(|part| format!(", part {}", part + 1))
+                .map(|part| format!(", union[{part}]"))
                 .unwrap_or_default()
         )?,
         (None, None) => write!(out, "inline selector")?,

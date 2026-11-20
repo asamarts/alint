@@ -78,8 +78,11 @@ rules: []
 A selector cannot use `changed_since`: the rules that read selectors judge the whole repository,
 under `--changed` too, so what a selector picks must not depend on the diff. Under `--changed`, a
 [`constraint`](/docs/rules/cross-file/constraint/) rule runs when a changed path is one the
-selectors of its relations read, or a marker or manifest their `scope_filter:` consults. A
-manifest `source:` stays inside the repository, as a rule's does.
+selectors of its relations read; an ignore file (`.gitignore`, `.ignore`) the walk reads, in a
+directory below which their `paths:` can match; a submodule added, moved or removed, or an
+untracked repository (a directory Git lists whole), below which they can match; or a
+`has_ancestor` marker or a manifest their `scope_filter:` consults. A manifest `source:` stays
+inside the repository, as a rule's does.
 
 Wherever a relation names a selector (`from:`), it may write one inline instead, as a map:
 `from: { paths: package.json }`. A string there is always a selector's name, never a glob.
@@ -237,7 +240,9 @@ field's value (an entry's key, path and value).
   copy of one;
 - `strip-root`, which drops the first segment of an `entry.path` field (`en.nav.home` becomes
   `nav.home`), or of a join's copy of one that no transform has changed. It comes first in its
-  list, and each file must have one top-level key.
+  list, and each file must have one top-level key. A file whose top-level key holds nothing
+  (`fr:`, `fr: {}`, `fr: []`) has no keys, as an empty file has none; one whose top-level key
+  holds a value (`fr: hello`) is an analysis failure.
 
 ### `where:`
 
@@ -398,11 +403,15 @@ plan:
         dependency: left.dependency
         range: left.range
         manifest: right.manifest
-  trigger: under --changed, a change to what these selectors read runs the rule
+  trigger: under --changed, the rule runs on a change to a path these selectors pick, to an ignore file, submodule or nested repository where they can match, or to a marker or manifest their scope_filter: consults
     selector manifests  .alint.yml
       paths: packages/*/package.json
   cost: linear in the rows of each relation it reads
 ```
+
+With `respect_gitignore: false` or `--no-gitignore`, the walk reads no ignore file, and the
+`trigger:` line names none. A `union:` relation's parts are named by their place from 0
+(`union[0]:`), as a message that names a part names it.
 
 `--format json` gives the same as a `plan` object, where each relation has an `id` (its place in the
 list) by which a join's sides, an `in:` list, the trigger, `input` and `set_target` name it. The
@@ -449,8 +458,39 @@ distinct-value limit, which is never truncation.
 - A join is inner, and one side must be unique on the join key: there is no many-to-many join.
 - The transforms are the five listed; there are no user-defined ones.
 - `in` and `not_in` cannot list null or a number.
-- Reading is bounded by alint's row, join and distinct-value limits; reaching one is an analysis
-  failure, never truncation.
+- Reading is bounded by these limits, which a config cannot change in this release. Reaching one
+  is an analysis failure that names it, never truncation:
+  - 1,000,000 rows from one reader of one file (`rows_per_extractor`);
+  - 5,000,000 rows from every reader in a run (`rows_per_run`);
+  - 5,000,000 cells in the relations a run builds, a row of n fields holding n cells and each file
+    a part reads one more (`cells_per_run`);
+  - 1 GiB that a run's relations hold beyond their cells: the files they decode, and the key
+    paths, path tokens and transformed values they build (`bytes_per_run`);
+  - 1,000,000 rows into each side of a join (`join_inputs`), and 1,000,000 out of it
+    (`join_outputs`);
+  - 100,000 distinct values of the field a `set` compares against in another relation
+    (`distinct_values`).
+- Placing a `constraint` rule's findings reads each file they sit in again, one at a time. Each
+  file must fit in what the run's relations left of `bytes_per_run`, the limit less what their
+  decodes and their rows took: alone, before its `read:` values' places are looked for, and then
+  with its offsets and what finding those places held (the document parsed again, with what its
+  parser held beside the tree, such as a JSONC file's copy without its comments or the TOML lexer's
+  tokens, and what was read from the parse). The relations are evaluated, and what they took
+  counted, before any rule runs, in `alint check` and in each pass of `alint fix`, so the run's
+  rows and bytes go to them first (in a pass of `fix` where a rule ahead of the first rule that
+  reads one may remove or move a file or run a command, just before that rule). The rules after a
+  fix that removes or moves a file, or runs a command, read their relations again, but every rule
+  of a pass is checked against what the pass's relations took, so `fix --dry-run`, `fix --diff`
+  and a pass that changes nothing place findings as `check` does. Placing takes
+  nothing from it, so every rule's files are checked against the same amount, whatever other rules
+  hold, and a run holds at most one such file per thread. When a file does not fit, the rule
+  reports an analysis failure, not findings without places. A cell is placed only where the file
+  read again still holds what was read there, its value or its key, so a file changed during the
+  run leaves a finding or related location without a place.
+- A `set` with `equal_to:` gives one finding per value the reference group holds for each group
+  that lacks it, so G empty groups against V reference values give G × V findings, as
+  `key_parity` does for files without keys
+  ([#596](https://github.com/asamarts/alint/issues/596)).
 
 ## Trust
 
@@ -524,7 +564,7 @@ rules:
 
 A group is the rows that share a `group_by:` value, so `groups:` (with `equal_to:` only) names
 the locales that must exist: one whose files hold no keys lacks every English key, in findings
-with no path.
+with no path. A file that holds only its root (`fr:`, `fr: {}` or `fr: []`) holds no keys.
 `plurals: cldr` compares `inbox: { one, other }` with a locale's `inbox: { one, few, many,
 other }` as one key, `inbox`, and `items_one`, `items_other` as `items`. Grouped by a path
 token instead (`fields: { locale: stem, ... }`), every file is a group, and an empty one lacks
@@ -599,11 +639,17 @@ file needs the version 2 modeline, and so does a version 2 `.alint.d/` fragment 
 `version: 1`.
 
 The draft checks what the loader checks of a single file: every key, value type, name,
-reference, field source, transform, format, `read:` form and count. It cannot check:
+reference, field source, transform, format, `read:` form and count, and the keys that need or
+exclude others (one family in a `constraint` rule's `assert:`, one target in its `set`). It cannot
+check:
 
 - what needs every file loaded: names and aliases that resolve, re-exports, cycles, and the plan
   checks above (fields that exist, union parts that bind every field, transforms that apply, the
   literals in `in` and `not_in`);
+- in a `constraint` rule's `assert:`, what needs its relation or compares two of its values: a
+  field the relation has, a literal of the field's type, a `group_by:` or `to: { field: }` that
+  names the compared field, a `determines:` field that is part of the key, a `groups:` entry that
+  names the reference group, and an `entry.path` field under `plurals: cldr`;
 - a name declared twice across selectors, relations and aliases;
 - regexes, a `read:` regex's capture group and JSONPaths;
 - which files may be version 2, and that a version 1 config does not extend a version 2 one;

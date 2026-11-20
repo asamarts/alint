@@ -195,3 +195,40 @@ xyzqq: "value"
         "expected NO did-you-mean for far-typo `xyzqq`; got:\n{err}",
     );
 }
+
+// --- A message with a prefix of its own ----------------------------
+
+#[test]
+fn a_typo_under_constraint_assert_suggests_the_field_not_itself() {
+    // The `constraint` kind's error starts "invalid `constraint` options:",
+    // which quotes a word of its own before serde's `unknown field`: the
+    // unknown field must not count as an expected one, at distance 0.
+    let yaml = "
+id: unique-owners
+kind: constraint
+level: error
+input: owners
+assert: { unique: { key: [k], determine: [v] } }
+";
+    let err = build_err(yaml);
+    assert!(
+        err.contains("unknown field `determine`") && err.ends_with("did you mean: `determines`?"),
+        "expected did-you-mean for `determine` → `determines`; got:\n{err}",
+    );
+}
+
+#[test]
+fn a_version_1_typo_still_suggests_the_nearest_field() {
+    let yaml = r#"
+id: my-shellcheck
+kind: command
+level: error
+paths: "**/*.sh"
+commnd: ["shellcheck"]
+"#;
+    let err = build_err(yaml);
+    assert!(
+        err.ends_with("did you mean: `command`?"),
+        "expected did-you-mean for `commnd` → `command`; got:\n{err}",
+    );
+}

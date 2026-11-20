@@ -71,11 +71,7 @@ paths:      **/*.md
 options:    max_bytes: 10240
 ```
 
-Pass `--no-docs` to drop the `docs:` line (handy for narrow terminals and screen recordings). Add
-`--format json` to either for the machine shape: `explain <id> --format json` carries `rule_kind`,
-`categories`, `summary`, `docs`, `capabilities`, `selectors`, `fix_ops`, `paths`, `options`,
-`message`, `when`, `conditional`, `fixable`, and `fix`, and for a `constraint` rule its resolved
-`plan`.
+Pass `--no-docs` to drop the `docs:` line (handy for narrow terminals and screen recordings). Add `--format json` to either for the machine shape: `explain <id> --format json` carries `rule_kind`, `categories`, `summary`, `docs`, `capabilities`, `selectors`, `fix_ops`, `paths`, `options`, `message`, `when`, `conditional`, `fixable`, and `fix`, and for a `constraint` rule its resolved `plan`.
 
 Add `--trace` when the static definition is not enough: alint walks the
 repository, evaluates only that effective rule through the production engine,

@@ -10,8 +10,41 @@ use alint_core::{FileIndex, RuleResult, Violation, WalkOptions, walk};
 
 use super::constraint::load_tree;
 
+#[path = "constraint_messages.rs"]
+mod messages;
+
+#[path = "constraint_placing.rs"]
+mod placing;
+
+#[path = "constraint_fix_passes.rs"]
+mod fix_passes;
+
 /// The results of running every rule of `config` over `files`.
 pub(super) fn run(config: &str, files: &[(&str, &str)]) -> Vec<RuleResult> {
+    run_under(config, files, None, false).0
+}
+
+/// The run's bytes, from its decode cache: what the run took of them,
+/// what its relations took as the engine recorded it (their decodes' and
+/// their rows'), and the most a rule asked to hold beside them at once
+/// ([`DecodeCache::largest_held`](alint_core::relation::DecodeCache::largest_held)).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct RunBytes {
+    pub(super) taken: usize,
+    pub(super) relations: usize,
+    pub(super) held: usize,
+}
+
+/// [`run`], the run's relation limits `limits` when given, and its
+/// [`RunBytes`]. With `specs`, each rule's entry carries its spec, as the
+/// CLI's do, so a rule whose configuration reads the environment has its
+/// findings redacted.
+fn run_under(
+    config: &str,
+    files: &[(&str, &str)],
+    limits: Option<&alint_core::relation::Limits>,
+    specs: bool,
+) -> (Vec<RuleResult>, RunBytes) {
     let (dir, loaded) = load_tree(config, files);
     let config = loaded.unwrap_or_else(|error| panic!("the config loads: {error}"));
     let index: FileIndex = walk(
@@ -19,46 +52,68 @@ pub(super) fn run(config: &str, files: &[(&str, &str)]) -> Vec<RuleResult> {
         &WalkOptions::default().with_global_git_excludes(false),
     )
     .unwrap();
+    if let Some(limits) = limits {
+        index.enable_relation_caches_under(limits);
+    }
     let mut registry = alint_core::RuleRegistry::new();
     alint_rules::register_builtin(&mut registry);
     let entries = config
         .rules
         .iter()
         .map(|spec| {
-            alint_core::RuleEntry::new(
+            let entry = alint_core::RuleEntry::new(
                 registry
                     .build(spec)
                     .unwrap_or_else(|error| panic!("{} builds: {error}", spec.id)),
-            )
+            );
+            if specs {
+                entry.with_spec(std::sync::Arc::new(spec.clone()))
+            } else {
+                entry
+            }
         })
         .collect();
     let engine = alint_core::Engine::from_entries(entries, registry);
-    engine.run(dir.path(), &index).unwrap().results
+    let results = engine.run(dir.path(), &index).unwrap().results;
+    let bytes = index
+        .decode_cache()
+        .map_or(RunBytes::default(), |cache| RunBytes {
+            taken: cache.bytes_taken(),
+            relations: cache.relations_recorded().unwrap_or_default(),
+            held: cache.largest_held(),
+        });
+    (results, bytes)
 }
 
 /// Where a finding or related location sits: `path:line:column`, or the
 /// path alone.
-fn place(path: &std::path::Path, range: Option<&alint_core::SourceRange>) -> String {
+fn place(path: &std::path::Path, start: Option<(usize, usize)>) -> String {
     let path = path.display().to_string().replace('\\', "/");
-    match range {
-        Some(range) => format!("{path}:{}:{}", range.start_line(), range.start_column()),
+    match start {
+        Some((line, column)) => format!("{path}:{line}:{column}"),
         None => path,
     }
 }
 
+/// The start of `range`.
+fn start(range: Option<&alint_core::SourceRange>) -> Option<(usize, usize)> {
+    range.map(|range| (range.start_line(), range.start_column()))
+}
+
 /// A finding as `place: message`, each related location on a line of its
-/// own (`  ~ label: place`).
+/// own (`  ~ label: place`). A finding at a sensitive cell has a line and a
+/// column but no range.
 pub(super) fn shown(violation: &Violation) -> String {
     let mut out = match &violation.path {
         Some(path) => format!(
             "{}: {}",
-            place(path, violation.range.as_ref()),
+            place(path, violation.line.zip(violation.column)),
             violation.message
         ),
         None => violation.message.to_string(),
     };
     for related in &violation.related_locations {
-        let at = place(&related.path, related.range.as_ref());
+        let at = place(&related.path, start(related.range.as_ref()));
         write!(out, "\n  ~ {}: {at}", related.label).unwrap();
     }
     if violation.related_locations_omitted > 0 {
@@ -883,25 +938,22 @@ fn distinct_owners(count: usize) -> String {
 }
 
 /// 3,000 distinct values give 3,000 findings, each relating to 20 rows and
-/// counting the 2,979 others, without placing them: building every related
-/// location first made the findings quadratic in the values.
+/// counting the 2,979 others, without building the others: building every
+/// related location first made the findings quadratic in the values (more
+/// than 300 s and 650 MB). A finding that builds more related locations than
+/// it lists stops a debug build at the first one (`Run::related_at`), so this
+/// fails at once rather than slowly.
 #[test]
 fn a_finding_places_no_more_related_locations_than_it_lists() {
     let config = entries("\"$.owners\"", OWNERS, "{ equal: { field: owner } }");
     let body = distinct_owners(3_000);
-    let started = std::time::Instant::now();
     let results = run(&config, &[("owners.json", &body)]);
-    let elapsed = started.elapsed();
     let result = result(&results, "c");
     assert_eq!(result.violations.len(), 3_000);
     for violation in &result.violations {
         assert_eq!(violation.related_locations.len(), 20);
         assert_eq!(violation.related_locations_omitted, 2_979);
     }
-    assert!(
-        elapsed < std::time::Duration::from_secs(10),
-        "3,000 values took {elapsed:?}"
-    );
 }
 
 #[test]

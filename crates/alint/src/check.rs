@@ -33,15 +33,12 @@ impl ChangedMode {
     /// didn't ask for `--changed`. Hard-errors when the user DID
     /// ask but git can't deliver — silently falling back to a
     /// full check would violate the user's intent.
-    pub(super) fn resolve(
-        &self,
-        root: &Path,
-    ) -> Result<Option<std::collections::HashSet<PathBuf>>> {
+    pub(super) fn resolve(&self, root: &Path) -> Result<Option<alint_core::git::ChangedSet>> {
         if !self.enabled {
             return Ok(None);
         }
         let set = if let Some(base) = self.base.as_deref() {
-            match alint_core::git::collect_changed_paths_checked(root, base) {
+            match alint_core::git::collect_changed_set_checked(root, base) {
                 Ok(Some(set)) => set,
                 Ok(None) => {
                     bail!(
@@ -60,7 +57,7 @@ impl ChangedMode {
                 }
             }
         } else {
-            alint_core::git::collect_changed_paths(root, None).ok_or_else(|| {
+            alint_core::git::collect_changed_set(root, None).ok_or_else(|| {
                 anyhow::anyhow!(
                     "--changed requires a git repository (and `git` on PATH); collecting \
                      staged, unstaged, and untracked paths failed at `{}`. Run without \
@@ -187,7 +184,7 @@ pub(super) fn cmd_check(
     }
     let changed_active = match changed.resolve(&root)? {
         Some(set) => {
-            engine = engine.with_changed_paths(set);
+            engine = engine.with_changed_set(set);
             true
         }
         None => false,

@@ -42,6 +42,71 @@ Trailer line, always shown.
     assert_eq!(strip_unreleased_prose(plain, Some((0, 13, 0))), plain);
 }
 
+/// A rule's opening paragraph wrapped in a since-block (a correction to
+/// released prose, which the overlay gate requires) must not put the marker
+/// comment into the summary that the rule index, the meta description and
+/// `alint rules` read.
+#[test]
+fn first_sentence_skips_since_markers() {
+    let body =
+        "<!-- alint:since=0.22.1 -->\nValidate links. More text.\n<!-- /alint:since -->\n\nNext.\n";
+    assert_eq!(first_sentence(body), "Validate links.");
+    let after = "Lead in\n<!-- alint:since=0.23.0 -->\ncontinued.\n<!-- /alint:since -->\n";
+    assert_eq!(first_sentence(after), "Lead in continued.");
+}
+
+/// The rule indexes lead a kind's summary with the config version it needs when
+/// that is not version 1, as `rules list` marks it: `constraint` reads
+/// `Version 2 only, experimental.`, and every kind of version 1 reads as it is.
+#[test]
+fn rule_indexes_mark_the_kinds_a_later_version_needs() {
+    let registry = alint_rules::builtin_registry();
+    assert_eq!(
+        rule_pages::index_summary(&registry, "constraint", "An assertion."),
+        "_Version 2 only, experimental._ An assertion."
+    );
+    assert_eq!(
+        rule_pages::index_summary(&registry, "file_exists", "A file exists."),
+        "A file exists."
+    );
+    let marked: Vec<&str> = registry
+        .canonical_kinds()
+        .filter(|kind| rule_pages::version_note(&registry, kind).is_some())
+        .collect();
+    let later: Vec<&str> = registry
+        .canonical_kinds()
+        .filter(|kind| registry.min_config_version(kind) > 1)
+        .collect();
+    assert_eq!(marked, later);
+    assert!(marked.contains(&"constraint"), "{marked:?}");
+    // In the generated master index and the family table.
+    let workspace = crate::bench_release::workspace_root().expect("workspace_root");
+    let tmp = tempfile::tempdir().expect("tempdir");
+    generate_rules_pages(&workspace, tmp.path(), None, false).expect("generate rules pages");
+    let rules = tmp.path().join("rules");
+    let master = fs::read_to_string(rules.join("index.md")).unwrap();
+    assert!(
+        master.contains(
+            "- [`constraint`](/docs/rules/cross-file/constraint/) — _Version 2 only, \
+             experimental._ An assertion"
+        ),
+        "{master}"
+    );
+    let family = fs::read_to_string(rules.join("cross-file").join("index.md")).unwrap();
+    assert!(
+        family.contains(
+            "| [`constraint`](/docs/rules/cross-file/constraint/) | _Version 2 only, \
+             experimental._ An assertion"
+        ),
+        "{family}"
+    );
+    assert_eq!(
+        master.matches("_Version ").count(),
+        marked.len(),
+        "{master}"
+    );
+}
+
 /// P-REF: `copy_site_tree` release-gates the hand-written docs the same way the
 /// rule pages are gated, so a `<!-- alint:since=X -->` block in a main-overlaid
 /// reference page can't ship ahead of the release. Revert-sensitive.

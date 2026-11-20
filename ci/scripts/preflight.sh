@@ -72,6 +72,9 @@ run() {
 #     snapshots
 #   - doc: ~10s; rustdoc warnings would otherwise bypass
 #     check / test / clippy
+#   - docs-overlay: ~1s; a line added since the latest v* tag
+#     in a page alint.org overlays from main must sit in a
+#     since-block (needs the tags: `git fetch --tags`)
 #   - dogfood: ~5s if release binary is fresh; runs alint
 #     against its own repo
 #
@@ -82,6 +85,7 @@ run fmt           bash ci/scripts/fmt.sh                          || true
 run clippy        bash ci/scripts/clippy.sh                       || true
 run test          bash ci/scripts/test.sh                         || true
 run doc           bash ci/scripts/docs.sh                         || true
+run docs-overlay  python3 ci/scripts/check-docs-overlay-since.py || true
 run version-pins  bash ci/scripts/check-version-pins.sh           || true
 run dep-floors    bash ci/scripts/check-workspace-dep-floors.sh   || true
 run secrets-inv   bash ci/scripts/check-secrets-inventory.sh      || true

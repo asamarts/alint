@@ -9,6 +9,7 @@ mod human;
 mod json;
 mod junit;
 mod markdown;
+mod occurrence;
 mod sanitize;
 mod sarif;
 pub mod style;

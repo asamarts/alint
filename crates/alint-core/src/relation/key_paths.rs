@@ -135,6 +135,22 @@ impl KeyPaths {
         segments
     }
 
+    /// Roughly what the paths hold on the heap: each node, its entry in
+    /// the map of children, and its key's text, held by both.
+    pub(crate) fn heap_bytes(&self) -> usize {
+        let keys: usize = self
+            .nodes
+            .iter()
+            .map(|node| match &node.segment {
+                Segment::Key(key) => key.len(),
+                Segment::Index(_) => 0,
+            })
+            .sum();
+        self.nodes.capacity() * std::mem::size_of::<Node>()
+            + self.children.capacity() * (std::mem::size_of::<((PathId, Segment), PathId)>() + 1)
+            + 2 * keys
+    }
+
     /// `id` as a pointer of its own.
     pub(crate) fn pointer(&self, id: PathId) -> Pointer {
         Pointer::from_segments(self.segments(id).into_iter().cloned().collect())
@@ -211,6 +227,12 @@ pub(crate) struct EntryTable {
     pub(crate) paths: KeyPaths,
     pub(crate) rows: Vec<EntryAt>,
     pub(crate) values: Vec<EntryValue>,
+    /// Roughly what the parse the walk read held on the heap, by its nodes
+    /// (YAML's events, TOML's document; not counted for JSON, whose
+    /// members placing reads from its syntax tree without a table): let go
+    /// once the table is built, it was held with the table while the walk
+    /// built it.
+    pub(crate) parsed: usize,
 }
 
 /// The key-path bytes a decode builds, charged as it builds each [`Pointer`]

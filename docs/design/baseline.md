@@ -588,6 +588,18 @@ only files that already produced such a violation, cached per file).
    / benches / tests). Parity is guarded by
    `gitlab_fingerprint_equals_canonical_baseline_fingerprint` and
    `sarif_fingerprint_equals_canonical_baseline_fingerprint` (§5).
+   Within one run, a repeated fingerprint's later occurrences carry one derived
+   from it and their occurrence: in GitLab output since v0.14.0 (GitLab Code
+   Quality drops entries that share a fingerprint) and in SARIF since v0.23.0
+   (GitHub Code Scanning may merge them into one alert; ADR-0047). The first
+   occurrence and the baseline file keep the canonical fingerprint. From
+   v0.23.0 both formats number the occurrences by the path, line and column
+   each finding shows, then rule and message, SARIF's baselined results first;
+   GitLab output numbered them in the order it wrote them before. A repeat
+   keeps its fingerprint while the repeats that sort before it stay; one that
+   sorts before it, new or gone, shifts it, baselined or not, because §3.3
+   suppresses a fingerprint's first findings in that order, up to its count,
+   so a new repeat can take a baselined one's place.
 8. **No-regression "ratchet" + level-aware re-surfacing** — out of scope v1, but
    the two most-requested likely follow-ups (prevent a threshold getting *worse*;
    re-surface a grandfathered finding when its rule is escalated to `error`).

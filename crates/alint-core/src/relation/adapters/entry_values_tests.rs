@@ -116,6 +116,53 @@ fn an_at_path_that_selects_no_object_is_reported_where_it_points() {
     );
 }
 
+/// An object or array with nothing in it is told apart from one with
+/// members or elements, in each format, and so is null: `strip-root` reads
+/// a top-level key holding one as a file with no keys.
+#[test]
+fn a_member_holding_nothing_says_so() {
+    let documents = [
+        (
+            Format::Json,
+            r#"{"o": {}, "a": [], "n": null, "p": {"k": 1}, "q": [1], "s": ""}"#,
+        ),
+        (
+            Format::Yaml,
+            "o: {}\na: []\nn:\np: { k: 1 }\nq: [1]\ns: ''\n",
+        ),
+        (
+            Format::Toml,
+            "o = {}\na = []\np = { k = 1 }\nq = [1]\ns = ''\n",
+        ),
+    ];
+    for (format, text) in documents {
+        let output = run(format, &["$"], false, &[], text).unwrap();
+        let mut expected = vec![
+            (None, "o".to_string(), error(EMPTY_OBJECT)),
+            (None, "a".to_string(), error(EMPTY_ARRAY)),
+            (None, "n".to_string(), RowState::Value(Value::Null)),
+            (None, "p".to_string(), error(OBJECT)),
+            (None, "q".to_string(), error(ARRAY)),
+            (None, "s".to_string(), string("")),
+        ];
+        if format == Format::Toml {
+            // TOML has no null.
+            expected.remove(2);
+        }
+        assert_eq!(rows(&output), expected, "{format:?}");
+        let nothing: Vec<bool> = output
+            .rows
+            .iter()
+            .map(|row| holds_nothing(&row.state))
+            .collect();
+        let mut held = vec![true, true, true, false, false, false];
+        if format == Format::Toml {
+            held.remove(2);
+        }
+        assert_eq!(nothing, held, "{format:?}");
+    }
+}
+
 #[test]
 fn leaves_stop_at_arrays_and_empty_objects() {
     let text = r#"{"en": {"nav": {"home": "Home", "empty": {}}, "days": ["Mo", {"x": 1}]}}"#;
@@ -124,7 +171,7 @@ fn leaves_stop_at_arrays_and_empty_objects() {
         rows(&output),
         [
             (None, "en.nav.home".into(), string("Home")),
-            (None, "en.nav.empty".into(), error(OBJECT)),
+            (None, "en.nav.empty".into(), error(EMPTY_OBJECT)),
             (None, "en.days".into(), error(ARRAY)),
         ]
     );

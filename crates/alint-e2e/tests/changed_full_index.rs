@@ -11,8 +11,12 @@
 //! [`Probe`] that records what the engine hands it and evaluates nothing (so
 //! no rule spawns a process here), adds an unchanged file to the tree, and runs
 //! the engine once in full and then under `--changed` with each file of the
-//! tree changed alone, and with a deleted path. Whenever the rule runs under
-//! `--changed`, what it received must equal what it received in the full run:
+//! tree changed alone, and with a deleted path. A scenario with a rule that has
+//! a trigger scope (`constraint`) also runs each file changed alone under
+//! `fix`, each directory changed alone (as Git lists a submodule), and each
+//! file deleted and renamed for real, against a full run over the tree so
+//! changed. Whenever the rule runs under `--changed`, what it received must
+//! equal what it received in the full run:
 //! the same index, for a per-file rule the same files, and for a rule that
 //! reads relations the same rows, cell by cell. Every full-index kind must run
 //! under `--changed` in at least one scenario, so a new kind without a
@@ -213,12 +217,22 @@ fn full_index_kinds(registry: &alint_core::RuleRegistry) -> BTreeSet<String> {
         .collect()
 }
 
-/// One run of the scenario's full-index rules over `root`: the ids of the
-/// rules that ran, and what each received.
+/// How a run goes: `check`, or `fix` (which writes nothing here, the probes
+/// reporting no finding).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Verb {
+    Check,
+    Fix,
+}
+
+/// One run of the scenario's full-index rules over `root`, with `changed`
+/// as the changed set, or in full: the ids of the rules that ran, and what
+/// each received.
 fn run(
     root: &Path,
     rules: &[(String, Arc<dyn Rule>)],
-    changed: Option<&Path>,
+    changed: Option<&[PathBuf]>,
+    verb: Verb,
 ) -> (BTreeSet<String>, BTreeMap<String, Seen>) {
     let seen: Vec<Arc<Mutex<Seen>>> = rules.iter().map(|_| Arc::default()).collect();
     let entries = rules
@@ -229,22 +243,166 @@ fn run(
         })
         .collect();
     let mut engine = Engine::from_entries(entries, alint_rules::builtin_registry());
-    if let Some(changed) = changed {
-        engine = engine.with_changed_paths(HashSet::from([changed.to_path_buf()]));
-    }
     let index = walk(root, &support::walk_options()).unwrap();
-    let report = engine.run(root, &index).unwrap();
-    let ran = report
-        .results
-        .iter()
-        .map(|result| result.rule_id.to_string())
-        .collect();
+    if let Some(changed) = changed {
+        // A directory changes as Git lists a submodule or an untracked
+        // repository: by its path, marked as a directory.
+        let directories = changed
+            .iter()
+            .filter(|path| index.dirs().any(|dir| *dir.path == **path))
+            .cloned()
+            .collect();
+        engine = engine.with_changed_set(alint_core::git::ChangedSet::new(
+            changed.iter().cloned().collect::<HashSet<_>>(),
+            directories,
+        ));
+    }
+    let ran = match verb {
+        Verb::Check => engine
+            .run(root, &index)
+            .unwrap()
+            .results
+            .iter()
+            .map(|result| result.rule_id.to_string())
+            .collect(),
+        // A fix report leaves out a rule with nothing to fix: one ran when
+        // its probe was handed an index.
+        Verb::Fix => {
+            engine
+                .fix(
+                    root,
+                    &index,
+                    &support::walk_options(),
+                    false,
+                    alint_core::Applicability::Safe,
+                )
+                .unwrap();
+            rules
+                .iter()
+                .zip(&seen)
+                .filter(|(_, seen)| !seen.lock().unwrap().indexes.is_empty())
+                .map(|((id, _), _)| id.clone())
+                .collect()
+        }
+    };
     let seen = rules
         .iter()
         .zip(seen)
         .map(|((id, _), seen)| (id.clone(), seen.lock().unwrap().clone()))
         .collect();
     (ran, seen)
+}
+
+/// The scenario's full-index rules, with each rule's kind.
+struct Scenario<'s> {
+    path: &'s Path,
+    root: &'s Path,
+    rules: &'s [(String, Arc<dyn Rule>)],
+    kind_of: &'s BTreeMap<&'s str, &'s str>,
+}
+
+impl Scenario<'_> {
+    /// Run `verb` with `changed` as the changed set over the tree as it is,
+    /// and compare what each rule that ran received with what it received
+    /// in `full`, a full run of `verb` over the same tree. Returns the ids
+    /// of the rules that ran.
+    fn compare(
+        &self,
+        changed: &[PathBuf],
+        verb: Verb,
+        full: &BTreeMap<String, Seen>,
+        shape: &str,
+        failures: &mut Vec<String>,
+    ) -> BTreeSet<String> {
+        let (ran, seen) = run(self.root, self.rules, Some(changed), verb);
+        for id in &ran {
+            if seen[id] != full[id] {
+                failures.push(format!(
+                    "{}: rule {id} ({}) under {verb:?} with {changed:?} {shape} received \
+                     {:?}, where a full run received {:?}",
+                    self.path.display(),
+                    self.kind_of[id.as_str()],
+                    seen[id],
+                    full[id]
+                ));
+            }
+        }
+        ran
+    }
+
+    /// The shapes of change besides one file changed under `check`: each
+    /// of `files` changed alone under `fix`, each directory of `index`
+    /// changed alone under `check`, and each of `files` deleted, and renamed
+    /// out of its name (to `<name>.moved`, a change to both its paths). A
+    /// change no rule runs on needs no full run to compare with.
+    fn other_shapes(
+        &self,
+        index: &alint_core::FileIndex,
+        files: &[PathBuf],
+        full: &BTreeMap<String, Seen>,
+        failures: &mut Vec<String>,
+    ) {
+        let (_, full_fix) = run(self.root, self.rules, None, Verb::Fix);
+        for file in files {
+            self.compare(
+                std::slice::from_ref(file),
+                Verb::Fix,
+                &full_fix,
+                "changed",
+                failures,
+            );
+        }
+        for dir in index.dirs() {
+            let dir = [dir.path.to_path_buf()];
+            self.compare(&dir, Verb::Check, full, "changed", failures);
+        }
+        let aside = tempfile::Builder::new()
+            .prefix("alint-full-index-aside-")
+            .tempdir()
+            .unwrap();
+        let kept = aside.path().join("file");
+        for file in files {
+            std::fs::rename(self.root.join(file), &kept).unwrap();
+            self.compare_with_full_run(std::slice::from_ref(file), "deleted", failures);
+            std::fs::rename(&kept, self.root.join(file)).unwrap();
+
+            let mut moved = file.clone().into_os_string();
+            moved.push(".moved");
+            let moved = PathBuf::from(moved);
+            self.rename(file, &moved);
+            self.compare_with_full_run(&[file.clone(), moved.clone()], "renamed", failures);
+            self.rename(&moved, file);
+        }
+    }
+
+    /// [`Self::compare`] under `check` with a full run over the tree as it
+    /// is now, made only when a rule ran.
+    fn compare_with_full_run(&self, changed: &[PathBuf], shape: &str, failures: &mut Vec<String>) {
+        let (ran, seen) = run(self.root, self.rules, Some(changed), Verb::Check);
+        if ran.is_empty() {
+            return;
+        }
+        let (_, full) = run(self.root, self.rules, None, Verb::Check);
+        for id in &ran {
+            if seen[id] != full[id] {
+                failures.push(format!(
+                    "{}: rule {id} ({}) with {changed:?} {shape} received {:?}, where a full \
+                     run received {:?}",
+                    self.path.display(),
+                    self.kind_of[id.as_str()],
+                    seen[id],
+                    full[id]
+                ));
+            }
+        }
+    }
+
+    /// Move `from` to `to` (both root-relative), creating `to`'s directory.
+    fn rename(&self, from: &Path, to: &Path) {
+        let to = self.root.join(to);
+        std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+        std::fs::rename(self.root.join(from), to).unwrap();
+    }
 }
 
 #[test]
@@ -310,33 +468,36 @@ fn every_full_index_kind_receives_the_full_index_under_changed() {
             .iter()
             .map(|spec| (spec.id.as_str(), registry.canonical_kind(&spec.kind)))
             .collect();
-        let (_, full) = run(root, &rules, None);
+        let scenario = Scenario {
+            path: &path,
+            root,
+            rules: &rules,
+            kind_of: &kind_of,
+        };
+        let (_, full) = run(root, &rules, None, Verb::Check);
         let index = walk(root, &support::walk_options()).unwrap();
-        let changes = index
+        let files: Vec<PathBuf> = index
             .files()
             .map(|entry| entry.path.to_path_buf())
             .filter(|path| path != Path::new(SENTINEL) && path != Path::new(".alint.yml"))
-            .chain([PathBuf::from(DELETED)])
-            .collect::<Vec<_>>();
-        for changed in &changes {
-            let (ran, seen) = run(root, &rules, Some(changed));
+            .collect();
+        // Each file changed alone, and a path no tree holds, deleted.
+        for changed in files.iter().cloned().chain([PathBuf::from(DELETED)]) {
+            let ran = scenario.compare(&[changed], Verb::Check, &full, "changed", &mut failures);
             for id in &ran {
-                let kind = kind_of[id.as_str()];
                 covered
-                    .entry(kind.to_string())
+                    .entry(kind_of[id.as_str()].to_string())
                     .or_default()
                     .insert(path.display().to_string());
-                if seen[id] != full[id] {
-                    failures.push(format!(
-                        "{}: rule {id} ({kind}) with {} changed received {:?}, \
-                         where a full run received {:?}",
-                        path.display(),
-                        changed.display(),
-                        seen[id],
-                        full[id]
-                    ));
-                }
             }
+        }
+        // The shapes of change a trigger scope judges (`constraint`), for a
+        // scenario with one: each file changed alone under `fix`, each
+        // directory changed alone (as Git lists a submodule or an untracked
+        // repository), and each file deleted and renamed for real, compared
+        // with a full run over the tree so changed.
+        if rules.iter().any(|(_, rule)| rule.trigger_scope().is_some()) {
+            scenario.other_shapes(&index, &files, &full, &mut failures);
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));

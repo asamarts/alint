@@ -132,6 +132,220 @@ fn every_changed_set_lists_a_rename_under_both_paths_and_none_as_an_addition() {
     );
 }
 
+/// A rename or copy record of `git diff --raw -z` holds two paths after its
+/// status. alint's own diffs pass `--no-renames`, so Git lists a rename as a
+/// removal and an addition, but a record of two paths still reads as one:
+/// both paths are changed, both marked for a submodule, and the record after
+/// it parses, also when the new path starts with `:` as a record does. The
+/// records here are Git's own, renames detected, staged and over a range.
+#[test]
+fn a_rename_record_adds_both_its_paths_and_the_next_record_still_parses() {
+    let source = make_repo_with_commits(&["submodule"]);
+    let repo = make_repo_with_commits(&["init"]);
+    let root = repo.path();
+    let git = |args: &[&str]| {
+        let output = crate::git::test_git()
+            .arg("-C")
+            .arg(root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output.stdout
+    };
+    git(&[
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        "-q",
+        source.path().to_str().unwrap(),
+        "sub",
+    ]);
+    std::fs::write(root.join("old.txt"), "the same contents\n").unwrap();
+    std::fs::write(root.join("gone.txt"), "gone\n").unwrap();
+    std::fs::write(root.join("z.txt"), "z\n").unwrap();
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "base"]);
+    git(&["branch", "base"]);
+    // Windows allows no `:` in a file name.
+    let new = if cfg!(windows) { "new.txt" } else { ":new.txt" };
+    git(&["mv", "sub", "moved"]);
+    git(&["mv", "old.txt", new]);
+    git(&["rm", "-q", "gone.txt"]);
+    std::fs::write(root.join("z.txt"), "zz\n").unwrap();
+    git(&["add", "-A"]);
+
+    let paths: HashSet<PathBuf> = [
+        ".gitmodules",
+        "sub",
+        "moved",
+        "old.txt",
+        new,
+        "gone.txt",
+        "z.txt",
+    ]
+    .into_iter()
+    .map(PathBuf::from)
+    .collect();
+    let directories = HashSet::from([PathBuf::from("sub"), PathBuf::from("moved")]);
+    let read = |stdout: &[u8]| {
+        let mut set = ChangedSet::default();
+        set.add_raw_diff(stdout);
+        (set.paths, set.directories)
+    };
+    let staged = git(&["diff", "--cached", "--raw", "-M", "--relative", "-z"]);
+    assert_eq!(staged.windows(5).filter(|w| w == b" R100").count(), 2);
+    assert_eq!(read(&staged), (paths.clone(), directories.clone()));
+    // And as alint reads the change itself.
+    let set = collect_changed_set(root, None).expect("changed set");
+    assert_eq!(
+        (set.paths, set.directories),
+        (paths.clone(), directories.clone())
+    );
+
+    git(&["commit", "-qm", "rename"]);
+    let range = git(&["diff", "--raw", "-M", "--relative", "-z", "base...HEAD"]);
+    assert_eq!(range.windows(5).filter(|w| w == b" R100").count(), 2);
+    assert_eq!(read(&range), (paths.clone(), directories.clone()));
+    let set = collect_changed_set(root, Some("base")).expect("changed set");
+    assert_eq!((set.paths, set.directories), (paths, directories));
+}
+
+/// The working tree's set tells a submodule's commit move apart without a
+/// `git status` inside it: `diff-files --ignore-submodules=none` would walk
+/// every checked-out submodule's work tree on every `--changed` run, for edits
+/// `ls-files --modified` never lists. The set is read in a child test process,
+/// so `GIT_TRACE` reaches the Git commands it starts; Git started with `none`
+/// in the same repository shows that the edit there makes it run one.
+#[test]
+fn the_working_tree_set_runs_no_status_inside_a_dirty_submodule() {
+    const ROOT_ENV: &str = "ALINT_TEST_DIRTY_SUBMODULE_ROOT";
+    if let Some(root) = std::env::var_os(ROOT_ENV) {
+        collect_changed_set(Path::new(&root), None).expect("changed set");
+        return;
+    }
+    let source = make_repo_with_commits(&["submodule"]);
+    let repo = make_repo_with_commits(&["init"]);
+    let root = repo.path();
+    let git = |args: &[&str], trace: Option<&Path>| {
+        let mut command = crate::git::test_git();
+        command.arg("-C").arg(root).args(args);
+        if let Some(trace) = trace {
+            command.env("GIT_TRACE", trace);
+        }
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    git(
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            source.path().to_str().unwrap(),
+            "sub",
+        ],
+        None,
+    );
+    git(&["commit", "-qm", "sub"], None);
+    std::fs::write(root.join("sub").join("edited.txt"), "edited\n").unwrap();
+    let traces = tempfile::tempdir().unwrap();
+    let starts_status = |trace: &Path| {
+        let trace = std::fs::read_to_string(trace).unwrap();
+        assert!(trace.contains("diff-files"), "{trace}");
+        trace
+            .lines()
+            .any(|line| line.split_whitespace().any(|word| word == "status"))
+    };
+
+    let control = traces.path().join("none.txt");
+    git(
+        &["diff-files", "--raw", "--ignore-submodules=none", "-z"],
+        Some(&control),
+    );
+    assert!(starts_status(&control), "`none` must start a status here");
+
+    let trace = traces.path().join("set.txt");
+    let output = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "git::tests::the_working_tree_set_runs_no_status_inside_a_dirty_submodule",
+            "--nocapture",
+        ])
+        .env(ROOT_ENV, root)
+        .env("GIT_TRACE", &trace)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "child failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !starts_status(&trace),
+        "{}",
+        std::fs::read_to_string(&trace).unwrap()
+    );
+}
+
+/// The added set detects renames, and no copies, whatever the repository's
+/// `diff.renames` says: with `false` a moved changelog entry would count as a
+/// new one, and with `copies` a new file copied from a modified one would be
+/// listed as a copy and not count as added.
+#[test]
+fn the_added_set_detects_renames_and_no_copies_whatever_diff_renames_says() {
+    for setting in ["false", "copies"] {
+        let repo = make_repo_with_commits(&["init"]);
+        let root = repo.path();
+        let run = |args: &[&str]| {
+            let output = crate::git::test_git()
+                .arg("-C")
+                .arg(root)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        run(&["config", "diff.renames", setting]);
+        std::fs::create_dir(root.join("changes")).unwrap();
+        std::fs::write(
+            root.join("changes").join("one.md"),
+            "one\ntwo\nthree\nfour\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("source.txt"), "alpha\nbeta\ngamma\ndelta\n").unwrap();
+        run(&["add", "-A"]);
+        run(&["commit", "-m", "base"]);
+        run(&["branch", "base"]);
+        run(&["mv", "changes/one.md", "changes/two.md"]);
+        let source = "alpha\nbeta\ngamma\ndelta\nepsilon\n";
+        std::fs::write(root.join("source.txt"), source).unwrap();
+        std::fs::write(root.join("copy.txt"), source).unwrap();
+        run(&["add", "-A"]);
+        run(&["commit", "-m", "move one entry, copy a modified file"]);
+        assert_eq!(
+            collect_changed_paths_filtered(root, "base", "A"),
+            Ok(Some(HashSet::from([PathBuf::from("copy.txt")]))),
+            "diff.renames={setting}"
+        );
+    }
+}
+
 #[test]
 #[cfg(unix)]
 fn path_from_git_chunk_preserves_non_utf8() {

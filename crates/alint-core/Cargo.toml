@@ -32,6 +32,12 @@ required-features = ["yaml-reference"]
 name = "relation_memory"
 path = "tests/alloc/relation_memory.rs"
 
+# And for placing a finding: the heap finding where a value is written takes,
+# against the figure placing counts for it.
+[[test]]
+name = "placing_memory"
+path = "tests/alloc/placing_memory.rs"
+
 [dependencies]
 thiserror.workspace = true
 serde.workspace = true

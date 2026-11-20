@@ -39,6 +39,7 @@ EXEMPT = {
     'ci/scripts/supply-chain-artifacts.sh': 'release.yml runs it in its own supply-chain job',
     'ci/scripts/check-secrets-inventory.sh': 'repo-config drift gate; ci.yml runs it unconditionally on the tag',
     'ci/scripts/check-action-pins.sh': 'repo-config drift gate; ci.yml runs it unconditionally on the tag',
+    'ci/scripts/check-docs-overlay-since.py': 'compares main with the latest release tag; on a tag push that tag is HEAD, so no line is new',
 }
 
 # On the preflight side, a script counts as run only where a line of a step

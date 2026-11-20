@@ -107,11 +107,16 @@ fn backticked_token_re() -> &'static Regex {
 }
 
 /// Extract every backtick-quoted token from the serde error message
-/// AFTER the "unknown field" capture. These are the expected fields.
+/// AFTER the "unknown field" match: these are the expected fields. A prefix
+/// before it (the `constraint` kind's "invalid options" prefix) quotes words
+/// of its own, so counting tokens from the start would take the unknown
+/// field itself for an expected one, at distance 0.
 fn extract_expected_fields(msg: &str) -> Vec<&str> {
+    let Some(unknown) = unknown_field_re().find(msg) else {
+        return Vec::new();
+    };
     backticked_token_re()
-        .captures_iter(msg)
-        .skip(1)
+        .captures_iter(&msg[unknown.end()..])
         .filter_map(|c| c.get(1))
         .map(|m| m.as_str())
         .collect()
@@ -421,6 +426,24 @@ mod tests {
         let msg = "unknown field `argv`, expected one of `command`, `paths`, `level`";
         let expected = extract_expected_fields(msg);
         assert_eq!(expected, vec!["command", "paths", "level"]);
+    }
+
+    /// A prefix that quotes words of its own, as the `constraint` kind's
+    /// does, adds none of them, and never the unknown field.
+    #[test]
+    fn extract_expected_reads_only_past_the_unknown_field() {
+        let msg = "invalid `constraint` options: unknown field `determine`, expected `key` or \
+                   `determines`";
+        assert_eq!(extract_expected_fields(msg), vec!["key", "determines"]);
+        assert!(
+            enrich("constraint", msg).ends_with("did you mean: `determines`?"),
+            "{}",
+            enrich("constraint", msg)
+        );
+        assert_eq!(
+            extract_expected_fields("expected `a` or `b`"),
+            [] as [&str; 0]
+        );
     }
 
     #[test]

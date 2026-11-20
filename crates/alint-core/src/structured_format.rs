@@ -99,6 +99,20 @@ impl Format {
     }
 
     pub fn parse(self, text: &str) -> std::result::Result<Value, String> {
+        self.parse_holding(text, &mut 0)
+    }
+
+    /// [`Format::parse`], and roughly the most the parse held at once besides
+    /// `text` and the tree it returns: a JSONC text's copy with its comments
+    /// and trailing commas dropped (none for strict JSON), and the tokens the
+    /// TOML lexer reserves room for.
+    pub(crate) fn parse_held(self, text: &str) -> std::result::Result<(Value, usize), String> {
+        let mut held = 0;
+        let value = self.parse_holding(text, &mut held)?;
+        Ok((value, held))
+    }
+
+    fn parse_holding(self, text: &str, held: &mut usize) -> std::result::Result<Value, String> {
         let raw_text = text;
         // Strip any leading UTF-8 BOM(s) uniformly. Some libraries (serde_json,
         // hcl-rs) reject a `\u{feff}` prefix as a syntax error, so a BOM-prefixed
@@ -151,7 +165,9 @@ impl Format {
             // tolerant retry also fails, surface the *original* strict
             // error so genuinely-broken JSON reports accurately.
             Self::Json => serde_json::from_str(text).or_else(|strict_err| {
-                serde_json::from_str(&strip_jsonc(text)).map_err(|_| strict_err.to_string())
+                let stripped = strip_jsonc(text);
+                *held = stripped.capacity();
+                serde_json::from_str(&stripped).map_err(|_| strict_err.to_string())
             }),
             Self::Yaml => {
                 // Wait for this input's share of the YAML parse budget, held
@@ -192,7 +208,10 @@ impl Format {
                 );
                 yaml_value::yaml_to_value(text)
             }
-            Self::Toml => toml::from_str(text).map_err(|e| e.to_string()),
+            Self::Toml => {
+                *held = toml_tokens(text);
+                toml::from_str(text).map_err(|e| e.to_string())
+            }
             Self::Xml => xml_to_value(text),
             Self::Dotenv => crate::dotenv::parse(raw_text),
             Self::Properties => properties_to_value(text),
@@ -271,17 +290,23 @@ impl Format {
 /// are preserved, so a `"https://…"` URL or a `","` literal is
 /// untouched. Only invoked when strict parsing already failed, so
 /// plain JSON never pays for it.
+///
+/// One pass into one copy of the text: a comma outside a string waits
+/// while only whitespace follows it (a comment drops out as it goes, a
+/// line comment leaving its line break), and a `]` or `}` next drops it,
+/// keeping the whitespace.
 fn strip_jsonc(src: &str) -> String {
-    // Pass 1: remove comments.
-    let mut decommented = String::with_capacity(src.len());
+    let mut out = String::with_capacity(src.len());
+    // Where the comma waiting for a `]` or `}` sits in `out`.
+    let mut comma: Option<usize> = None;
     let mut chars = src.chars().peekable();
     let mut in_string = false;
     while let Some(c) = chars.next() {
         if in_string {
-            decommented.push(c);
+            out.push(c);
             if c == '\\' {
                 if let Some(n) = chars.next() {
-                    decommented.push(n);
+                    out.push(n);
                 }
             } else if c == '"' {
                 in_string = false;
@@ -289,17 +314,14 @@ fn strip_jsonc(src: &str) -> String {
             continue;
         }
         match c {
-            '"' => {
-                in_string = true;
-                decommented.push(c);
-            }
             '/' if chars.peek() == Some(&'/') => {
                 for n in chars.by_ref() {
                     if n == '\n' {
-                        decommented.push('\n');
+                        out.push('\n');
                         break;
                     }
                 }
+                continue;
             }
             '/' if chars.peek() == Some(&'*') => {
                 chars.next();
@@ -310,52 +332,38 @@ fn strip_jsonc(src: &str) -> String {
                     }
                     prev = n;
                 }
-            }
-            _ => decommented.push(c),
-        }
-    }
-    // Pass 2: drop trailing commas (`,` then whitespace then `]`/`}`).
-    let cs: Vec<char> = decommented.chars().collect();
-    let mut out = String::with_capacity(cs.len());
-    let mut in_string = false;
-    let mut i = 0;
-    while i < cs.len() {
-        let c = cs[i];
-        if in_string {
-            out.push(c);
-            if c == '\\' {
-                i += 1;
-                if i < cs.len() {
-                    out.push(cs[i]);
-                }
-            } else if c == '"' {
-                in_string = false;
-            }
-            i += 1;
-            continue;
-        }
-        if c == '"' {
-            in_string = true;
-            out.push(c);
-            i += 1;
-            continue;
-        }
-        if c == ',' {
-            let mut j = i + 1;
-            while j < cs.len() && cs[j].is_whitespace() {
-                j += 1;
-            }
-            if j < cs.len() && (cs[j] == ']' || cs[j] == '}') {
-                // Drop the comma; keep the intervening whitespace.
-                out.extend(&cs[i + 1..j]);
-                i = j;
                 continue;
             }
+            ',' => {
+                comma = Some(out.len());
+                out.push(c);
+                continue;
+            }
+            ']' | '}' => {
+                if let Some(at) = comma.take() {
+                    out.remove(at);
+                }
+            }
+            c if c.is_whitespace() => {
+                out.push(c);
+                continue;
+            }
+            '"' => {
+                in_string = true;
+                comma = None;
+            }
+            _ => comma = None,
         }
         out.push(c);
-        i += 1;
     }
     out
+}
+
+/// Roughly what the TOML lexer holds while a document of `text` is parsed:
+/// room for two tokens per seven bytes of text, which it reserves up front,
+/// each token a kind and a byte span (three words).
+pub(crate) fn toml_tokens(text: &str) -> usize {
+    (text.len() / 7) * 2 * 3 * std::mem::size_of::<usize>()
 }
 
 // ---------------------------------------------------------------
@@ -1862,3 +1870,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "structured_format_jsonc_tests.rs"]
+mod jsonc_tests;

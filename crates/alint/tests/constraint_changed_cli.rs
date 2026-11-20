@@ -383,3 +383,329 @@ fn a_renamed_required_file_runs_a_version_one_full_index_rule() {
         "committed"
     );
 }
+
+/// A locale policy over the locales of `dir`.
+fn locales_below(dir: &str) -> String {
+    format!(
+        "version: 2\nrelations:\n  messages:\n    from: {{ paths: \"{dir}/locales/*.json\" }}\n    \
+         entries: {{ format: json, at: \"$\" }}\n    fields: {{ locale: stem, key: entry.key }}\n\
+         rules:\n  - id: locales-match-english\n    kind: constraint\n    input: messages\n    \
+         assert: {{ set: {{ field: key, group_by: locale, equal_to: {{ group: en }} }} }}\n    \
+         level: error\n"
+    )
+}
+
+/// A committed repository at `root` of English and German locales that
+/// agree.
+fn locale_repository(root: &Path) {
+    write(root, "locales/en.json", "{\"home\": \"Home\"}\n");
+    write(root, "locales/de.json", "{\"home\": \"Start\"}\n");
+    git(root, &["init", "-q"]);
+    git(root, &["config", "commit.gpgsign", "false"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "locales"]);
+}
+
+/// English gains a key in the repository at `root`, committed there.
+fn english_gains_a_key(root: &Path) {
+    write(
+        root,
+        "locales/en.json",
+        "{\"home\": \"Home\", \"about\": \"About\"}\n",
+    );
+    git(root, &["commit", "-qam", "about"]);
+}
+
+/// A policy that the keys `used.json` names are keys of English in the
+/// submodule `sub`.
+const KEYS_IN_SUBMODULE: &str = "version: 2\nrelations:\n  used:\n    from: { paths: used.json }\n    \
+     entries: { format: json, at: \"$\" }\n    fields: { key: entry.key }\n  english:\n    \
+     from: { paths: sub/locales/en.json }\n    entries: { format: json, at: \"$\" }\n    \
+     fields: { key: entry.key }\nrules:\n  - id: keys-in-english\n    kind: constraint\n    \
+     input: used\n    assert: { set: { field: key, subset_of: { relation: english, field: key } } }\n    \
+     level: error\n";
+
+/// Git lists a submodule whose commit moved, or that was removed, by its path
+/// alone, though the walk reads (or read) the files in it: the change runs
+/// every rule whose selectors can match below it, and no other.
+#[test]
+fn a_submodule_change_runs_the_rules_that_read_below_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("source");
+    locale_repository(&source);
+    let root = tmp.path().join("main");
+    write(&root, ".alint.yml", &locales_below("sub"));
+    git(&root, &["init", "-q"]);
+    git(&root, &["config", "commit.gpgsign", "false"]);
+    let source = source.to_str().unwrap();
+    for path in ["sub", "vendor"] {
+        git(
+            &root,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                "-q",
+                source,
+                path,
+            ],
+        );
+    }
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-qm", "base"]);
+    git(&root, &["branch", "base"]);
+
+    // `vendor` moves: no selector reads below it.
+    english_gains_a_key(&root.join("vendor"));
+    git(&root, &["add", "vendor"]);
+    assert_eq!(check(&root, &["--changed"]), (Some(0), Vec::new()));
+
+    // `sub` moves: German, unchanged, now lacks the key English gained.
+    // Checked out, then staged, then committed.
+    english_gains_a_key(&root.join("sub"));
+    let expected = vec![ran("locales-match-english", &["sub/locales/de.json"])];
+    assert_eq!(check(&root, &["--changed"]), (Some(1), expected.clone()));
+    git(&root, &["add", "sub"]);
+    assert_eq!(check(&root, &["--changed"]), (Some(1), expected.clone()));
+    git(&root, &["commit", "-qm", "move sub"]);
+    assert_eq!(check(&root, &["--base", "base"]), (Some(1), expected));
+
+    // `sub` goes, which the walk then holds nothing of: the keys `used.json`
+    // names are no longer English's. Deleted, then removed from the index,
+    // then committed.
+    write(&root, ".alint.yml", KEYS_IN_SUBMODULE);
+    write(&root, "used.json", "{\"home\": 1}\n");
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-qm", "use"]);
+    git(&root, &["branch", "used"]);
+    assert_eq!(
+        check(&root, &[]),
+        (Some(0), vec![ran("keys-in-english", &[])])
+    );
+    std::fs::remove_dir_all(root.join("sub")).unwrap();
+    let expected = vec![ran("keys-in-english", &["used.json"])];
+    assert_eq!(check(&root, &["--changed"]), (Some(1), expected.clone()));
+    git(&root, &["rm", "-q", "sub"]);
+    assert_eq!(check(&root, &["--changed"]), (Some(1), expected.clone()));
+    git(&root, &["commit", "-qm", "remove sub"]);
+    assert_eq!(check(&root, &["--base", "used"]), (Some(1), expected));
+}
+
+/// A submodule whose `.gitmodules` entry says `ignore = all`: Git's diffs
+/// leave it out, but `ls-files --modified` lists it once its checked-out
+/// commit moves, as a submodule, so the rules that read below it run.
+#[test]
+fn an_ignored_submodule_checked_out_anew_runs_the_rules_that_read_below_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("source");
+    locale_repository(&source);
+    let root = tmp.path().join("main");
+    write(&root, ".alint.yml", &locales_below("sub"));
+    git(&root, &["init", "-q"]);
+    git(&root, &["config", "commit.gpgsign", "false"]);
+    let source = source.to_str().unwrap();
+    git(
+        &root,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            source,
+            "sub",
+        ],
+    );
+    git(
+        &root,
+        &["config", "-f", ".gitmodules", "submodule.sub.ignore", "all"],
+    );
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-qm", "base"]);
+    english_gains_a_key(&root.join("sub"));
+    assert_eq!(
+        check(&root, &["--changed"]),
+        (
+            Some(1),
+            vec![ran("locales-match-english", &["sub/locales/de.json"])]
+        )
+    );
+}
+
+/// Telling a submodule's commit move apart runs no `git status` inside its
+/// work tree: an edit there, on the same commit, is not a change `--changed`
+/// sees, so walking a large submodule for it on every run would cost much
+/// and find nothing.
+#[test]
+fn a_dirty_submodule_runs_no_status_inside_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("source");
+    locale_repository(&source);
+    let root = tmp.path().join("main");
+    write(&root, ".alint.yml", &locales_below("sub"));
+    git(&root, &["init", "-q"]);
+    git(&root, &["config", "commit.gpgsign", "false"]);
+    git(
+        &root,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            source.to_str().unwrap(),
+            "sub",
+        ],
+    );
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-qm", "base"]);
+    write(
+        &root,
+        "sub/locales/en.json",
+        "{\"home\": \"Home\", \"about\": \"About\"}\n",
+    );
+
+    let starts_status = |trace: &Path| {
+        let trace = std::fs::read_to_string(trace).unwrap();
+        assert!(trace.contains("diff-files"), "{trace}");
+        trace
+            .lines()
+            .any(|line| line.split_whitespace().any(|word| word == "status"))
+    };
+
+    // The edit makes Git, told to look inside submodules, start a status.
+    let control = tmp.path().join("none.txt");
+    let output = crate::hermetic::git()
+        .args(["diff-files", "--raw", "--ignore-submodules=none", "-z"])
+        .current_dir(&root)
+        .env("GIT_TRACE", &control)
+        .output()
+        .expect("run git");
+    assert!(output.status.success(), "{output:?}");
+    assert!(starts_status(&control), "`none` must start a status here");
+
+    let trace = tmp.path().join("trace.txt");
+    let output = crate::hermetic::command(env!("CARGO_BIN_EXE_alint"))
+        .args(["check", "--changed"])
+        .current_dir(&root)
+        .env("NO_COLOR", "1")
+        .env("GIT_TRACE", &trace)
+        .output()
+        .expect("run alint");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(
+        !starts_status(&trace),
+        "{}",
+        std::fs::read_to_string(&trace).unwrap()
+    );
+}
+
+/// Git lists an untracked repository as `dir/`, and none of its files: the
+/// change runs every rule whose selectors can match below it, and no other.
+#[test]
+fn an_untracked_repository_runs_the_rules_that_read_below_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    write(root, ".alint.yml", &locales_below("nested"));
+    git(root, &["init", "-q"]);
+    git(root, &["config", "commit.gpgsign", "false"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    let elsewhere = root.join("elsewhere");
+    locale_repository(&elsewhere);
+    english_gains_a_key(&elsewhere);
+    assert_eq!(check(root, &["--changed"]), (Some(0), Vec::new()));
+
+    let nested = root.join("nested");
+    locale_repository(&nested);
+    english_gains_a_key(&nested);
+    assert_eq!(
+        check(root, &["--changed"]),
+        (
+            Some(1),
+            vec![ran("locales-match-english", &["nested/locales/de.json"])]
+        )
+    );
+}
+
+/// A class can match a separator: `a[!x]sm/*.json` matches `a/sm/y.json`, so
+/// a change to `a/sm/.gitignore` that lets the walk read `y.json` runs the
+/// rule, as a full check would find.
+#[test]
+fn an_ignore_file_change_runs_a_rule_whose_class_matches_a_separator() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    write(
+        root,
+        ".alint.yml",
+        "version: 2\nrelations:\n  values:\n    from: { paths: \"a[!x]sm/*.json\" }\n    \
+         read: { json: \"$.v\" }\n    fields: { v: value }\nrules:\n  - id: values-unique\n    \
+         kind: constraint\n    input: values\n    assert: { unique: { key: [v] } }\n    \
+         level: error\n",
+    );
+    write(root, "a/sm/x.json", "{\"v\": \"1\"}\n");
+    write(root, "a/sm/y.json", "{\"v\": \"1\"}\n");
+    write(root, "a/sm/.gitignore", "y.json\n");
+    git(root, &["init", "-q"]);
+    git(root, &["config", "commit.gpgsign", "false"]);
+    git(root, &["add", "-A"]);
+    git(root, &["add", "-f", "a/sm/y.json"]);
+    git(root, &["commit", "-qm", "base"]);
+    assert_eq!(check(root, &[]), (Some(0), vec![ran("values-unique", &[])]));
+
+    write(root, "a/sm/.gitignore", "");
+    let full = check(root, &[]);
+    assert_eq!(full.0, Some(1), "{full:?}");
+    assert_eq!(check(root, &["--changed"]), full);
+}
+
+/// A manifest that a trigger scope reads only to decide whether its rule runs
+/// warns of nothing when it lists no paths: the warning that a rule's own
+/// manifest scope selects nothing is not about a selector's, which no full
+/// check warns of either.
+#[test]
+fn a_trigger_scopes_empty_manifest_warns_of_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    write(
+        root,
+        ".alint.yml",
+        "version: 2\nselectors:\n  members:\n    paths: \"workspace/*/member.json\"\n    \
+         scope_filter:\n      include_manifest_paths:\n        source: \"{{env.MANIFEST}}\"\n        \
+         extract: { json: \"$.members[*]\" }\nrelations:\n  names:\n    from: members\n    \
+         read: { json: \"$.name\" }\n    fields: { name: value }\nrules:\n  - id: names-unique\n    \
+         kind: constraint\n    input: names\n    assert: { unique: { key: [name] } }\n    \
+         level: error\n",
+    );
+    write(root, "members.json", "{\"members\": []}\n");
+    write(root, "workspace/a/member.json", "{\"name\": \"a\"}\n");
+    write(root, "workspace/b/member.json", "{\"name\": \"a\"}\n");
+    git(root, &["init", "-q"]);
+    git(root, &["config", "commit.gpgsign", "false"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+    // A path the selector's globs match, outside the manifest's members: the
+    // trigger scope reads the manifest to find that the rule does not run.
+    write(
+        root,
+        "workspace/a/member.json",
+        "{\"name\": \"a\", \"x\": 1}\n",
+    );
+    for args in [&["check", "--changed"][..], &["check"]] {
+        let output = crate::hermetic::command(env!("CARGO_BIN_EXE_alint"))
+            .args(args)
+            .current_dir(root)
+            .env("NO_COLOR", "1")
+            .env("MANIFEST", "members.json")
+            .output()
+            .expect("run alint");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(0), "{args:?}: {stderr}");
+        assert!(
+            !stderr.contains("resolved to no paths"),
+            "{args:?}: {stderr}"
+        );
+    }
+}

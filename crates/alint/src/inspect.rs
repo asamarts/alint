@@ -695,8 +695,8 @@ fn run_explain_trace(
         engine = engine.with_analysis_time_resolution(resolution);
     }
     engine = engine_environment(engine, loaded.untrusted);
-    if let Some(changed_paths) = options.changed.resolve(&loaded.root)? {
-        engine = engine.with_changed_paths(changed_paths);
+    if let Some(changed) = options.changed.resolve(&loaded.root)? {
+        engine = engine.with_changed_set(changed);
     }
 
     let mut extra_ignores = loaded.extra_ignores.clone();
@@ -1010,7 +1010,11 @@ pub(super) fn cmd_explain(rule_id: &str, options: &ExplainOptions, cli: &Cli) ->
     write_scope_filter_explain(&mut out, entry, &loaded.root)?;
     write_explain_rule_evidence(&mut out, entry, opts.show_docs)?;
     if let Some(plan) = plan::plan_of(entry, &loaded.root, &super::redact_environment_values) {
-        plan::write_human(&mut out, &plan)?;
+        plan::write_human(
+            &mut out,
+            &plan,
+            !cli.no_gitignore && loaded.respect_gitignore,
+        )?;
     }
     if let Some(document) = trace_document.as_ref() {
         write_explain_trace_human(&mut out, document, opts.effective_width())?;

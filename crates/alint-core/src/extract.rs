@@ -17,7 +17,9 @@ use crate::relation::Segment;
 use crate::relation::key_paths::{EntryAt, EntryTable, PathId, PathStack};
 use crate::structured_format::Format;
 
+mod json_members;
 mod yaml_rows;
+pub(crate) use json_members::{JsonSyntax, TREE_MEMBER};
 use yaml_rows::yaml_entry_table;
 
 /// Runtime extraction mode, resolved from [`ExtractSpec`].
@@ -543,10 +545,21 @@ fn json_entry_table(
     max_rows: Option<usize>,
     values: bool,
 ) -> std::result::Result<EntryTable, EntryRowsError> {
+    // Reuse the check-side size/depth/dialect guards before the lossless pass.
+    #[cfg(test)]
+    tests::JSON_GUARDS.with(|guards| guards.set(guards.get() + 1));
+    Format::Json.parse(text).map_err(EntryRowsError::Parse)?;
+    json_ast_entry_table(text, max_rows, values)
+}
+
+/// [`json_entry_table`] of a text its guards passed.
+fn json_ast_entry_table(
+    text: &str,
+    max_rows: Option<usize>,
+    values: bool,
+) -> std::result::Result<EntryTable, EntryRowsError> {
     use jsonc_parser::{CollectOptions, CommentCollectionStrategy, parse_to_ast};
 
-    // Reuse the check-side size/depth/dialect guards before the lossless pass.
-    Format::Json.parse(text).map_err(EntryRowsError::Parse)?;
     let stripped = text.trim_start_matches('\u{feff}');
     let offset = text.len() - stripped.len();
     let ast = parse_to_ast(
@@ -1060,7 +1073,14 @@ fn structured(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
+    std::thread_local! {
+        /// How many times the guards have parsed a JSON text before its
+        /// entries were walked, on this thread.
+        pub(crate) static JSON_GUARDS: std::cell::Cell<usize> =
+            const { std::cell::Cell::new(0) };
+    }
+
     use super::{
         EntryPathSegment, EntryRowsError, Extract, extract_entry_rows, extract_entry_rows_bounded,
         extract_entry_rows_strict_yaml, extract_entry_rows_strict_yaml_bounded,

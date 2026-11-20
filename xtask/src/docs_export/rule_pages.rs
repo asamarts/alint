@@ -367,12 +367,14 @@ fn process_family_h3s(
                     .collect()
             })
             .unwrap_or_default();
-        let summary = first_sentence(&clean_body);
         // Release-gate the prose the same way the Options table is gated:
         // drop `<!-- alint:since=X -->` blocks describing capability newer than
         // the released version. Computed once per H3 (a multi-kind heading's
-        // siblings share it). See ADR-0007 / documentation-drift.md P1.
+        // siblings share it). See ADR-0007 / documentation-drift.md P1. The
+        // summary is taken from the gated body, so an unreleased opening
+        // paragraph never becomes the index summary.
         let page_body = strip_unreleased_prose(&clean_body, released);
+        let summary = first_sentence(&page_body);
         for kind in &group_kinds {
             kind_order += 1;
             let siblings: Vec<&str> = group_kinds
@@ -404,12 +406,40 @@ fn process_family_h3s(
                 kind: kind.clone(),
                 family_title: h2.title.clone(),
                 family_slug: family_slug.to_string(),
-                summary: summary.clone(),
+                summary: index_summary(registry, kind, &summary),
                 categories: category_slugs.iter().copied().map(String::from).collect(),
             });
         }
     }
     Ok(())
+}
+
+/// A kind's summary as the rule indexes show it (the master index and each
+/// family's table): led by the config version it needs, as `rules list` marks
+/// it, when that is not version 1, so a reader of the index does not write it
+/// in a version 1 config.
+pub(crate) fn index_summary(
+    registry: &alint_core::RuleRegistry,
+    kind: &str,
+    summary: &str,
+) -> String {
+    match version_note(registry, kind) {
+        Some(note) => format!("_{note}._ {summary}"),
+        None => summary.to_string(),
+    }
+}
+
+/// `Version 2 only, experimental` for a kind only a config of `version: 2`
+/// (experimental) or later may use; nothing for a kind of version 1.
+pub(crate) fn version_note(registry: &alint_core::RuleRegistry, kind: &str) -> Option<String> {
+    let version = registry.min_config_version(kind);
+    let experimental = alint_dsl::EXPERIMENTAL_CONFIG_VERSIONS.contains(&version);
+    (version > 1).then(|| {
+        format!(
+            "Version {version} only{}",
+            if experimental { ", experimental" } else { "" }
+        )
+    })
 }
 
 #[derive(Clone)]
@@ -562,6 +592,8 @@ fn harvest_aliases(src: &str) -> std::collections::HashSet<String> {
 /// mistaken for an abbreviation and correctly ends the sentence. Markdown is
 /// left intact — the website rule index renders it directly; `kind_summary`
 /// (terminal) and `rule_meta_description` (SERP) strip it for their surfaces.
+/// A `<!-- alint:since=X -->` or `<!-- /alint:since -->` marker line is skipped,
+/// so a paragraph wrapped in a since-block never puts the marker in a summary.
 pub(super) fn first_sentence(body: &str) -> String {
     const ABBREV: &[&str] = &[
         "e.g", "i.e", "vs", "cf", "etc", "al", "resp", "approx", "fig", "no",
@@ -577,6 +609,9 @@ pub(super) fn first_sentence(body: &str) -> String {
             continue;
         }
         let trimmed = line.trim();
+        if trimmed.starts_with("<!-- alint:since=") || trimmed == "<!-- /alint:since -->" {
+            continue;
+        }
         if trimmed.is_empty() {
             if !paragraph.is_empty() {
                 break;

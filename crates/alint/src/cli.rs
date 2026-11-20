@@ -260,7 +260,7 @@ pub(crate) enum Command {
         /// Restrict the check to paths changed in Git.
         /// Without `--base`, includes staged, unstaged, and untracked
         /// paths (the right shape for pre-commit). With `--base`, uses
-        /// `git diff --name-only <base>...HEAD` (right shape for
+        /// `git diff --raw --no-renames <base>...HEAD` (right shape for
         /// PR checks). Cross-file rules (`pair`, `for_each_dir`,
         /// `every_matching_has`, `unique_by`, `dir_contains`,
         /// `dir_only_contains`) and existence rules (`file_exists`

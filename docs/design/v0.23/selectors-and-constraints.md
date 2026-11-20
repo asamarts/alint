@@ -238,6 +238,7 @@ strict: aliases, merge keys and complex keys are parse failures, as in every rel
   `optional: true`. A missing row sits at its resource and has no value.
 - A missing value never joins, never forms a key or a group, and is in no set, as
   `Relation::distinct_values` skips it today. `equal` reports it as a difference (section 6).
+  Messages and baseline keys call it `missing`, never `null`.
 
 **Adapters.** Value-bearing rows are new adapter modes with their own adapter ids, so their decodes
 never share a cache entry with the key-only modes. TOML gets its value mode in `TomlRowsAdapter`
@@ -321,7 +322,8 @@ rules:
   (`{ relation: workspace-names, field: name }`, section 8).
   - The groups are the reference group, every group named in `groups:`, and every value of the
     `group_by:` field. When `group_by:` is `path` or a path token, every resource the relation's
-    selectors pick forms its group, rows or not.
+    selectors pick forms its group, rows or not, except one whose path alone the relation's
+    `where:` rejects, which forms none.
   - A group with no rows reports each reference value as missing: at the resource that declared
     it, or without a path for a group named only in `groups:`. `key_parity` does the same for an
     empty peer file.
@@ -343,10 +345,12 @@ rules:
 applied in order; the relation then applies `where:` (section 7). No user-defined functions.
 - `trim`, `lower`, `semver-major`, `semver-minor`: `cross_file`'s `normalize` values, on strings.
 - `strip-root`: on an `entry.path` field, drops the path's first segment, as `key_parity`'s
-  `strip_root` does. Each resource the relation reads must have at most one top-level key, and
-  every row's key path must have at least two segments, so a top-level key that is itself a leaf
-  (`en: hello`, `en: {}`) fails. A resource that breaks either rule is an analysis failure naming
-  the reason. A resource with no keys emits no rows.
+  `strip_root` does. Each resource the relation reads must have at most one top-level key, and every
+  row's key path must have at least two segments, so a top-level key that holds a scalar or a
+  non-empty array (`en: hello`, `en: [a]`) fails; one that holds nothing (`en:`, `en: {}`, `en: []`)
+  reads as a file with no keys, but still counts as its one top-level key. A resource that breaks
+  either rule is an analysis failure naming the reason. A resource with no keys emits no rows. Audit
+  round 4 corrected this bullet, which made a top-level key that holds nothing fail.
 
 **CLDR plurals.** `plurals: cldr` is an option of `set` against a group, and needs `field:` to be an
 `entry.path` field. For each comparison of the reference group with another group, it merges
@@ -379,7 +383,10 @@ today).
   related to the source row. A missing row differs, so a removed `volta.node` fires.
 - **`equal` within a row:** one finding per row whose `field:` differs from its `to: { field: }`,
   at `field:`'s location, with the other field's location as a related location. A join keeps each
-  field's provenance, so the two can sit in different files.
+  field's provenance, so the two can sit in different files. When `field:` is a join's copy from
+  its `unique:` side, or a `bound:` field, many rows share its location, so the finding sits at the
+  row's own entry instead (a join's row is the row of its other side). Audit round 4 corrected
+  this bullet, which put every such finding at `field:`'s location.
 - **`set`:** one finding per missing, extra or shared value per group.
   - A missing value (`equal_to:`; in the other set, not in the group) sits at the group's first
     resource in canonical order, related to the row that holds it, as `key_parity` reports a
@@ -413,7 +420,10 @@ The parts of each finding's key:
   baselined. Phase 7 step 1's review corrected this bullet, which keyed each repeat by its row;
 - `equal` within groups: `equal`, the group, the value;
 - `equal` against a named source row: `equal`, `source`, the row;
-- `equal` within a row: `equal`, `row`, `field:`'s resource path, `field:`'s pointer;
+- `equal` within a row: `equal`, `row`, the resource path and pointer of the row's own entry
+  (for a join, the row of its other side), never of `field:`'s resource, which a `unique:` side
+  or a `bound:` field shares between rows. Audit round 4 corrected this bullet, which named
+  `field:`'s resource;
 - `set`: `set`, the group, the value, and `missing`, `extra` or `shared`.
 
 Related locations never enter a fingerprint.
@@ -612,12 +622,24 @@ file a `has_ancestor` predicate names, in a directory at or below which the sele
 match, or the manifest a manifest-derived predicate reads. A manifest that cannot be read leaves its
 predicate out of the trigger scope: a changed path that the selector's `paths:` and its other
 predicates keep runs the rule, which reports the failure, and a change outside them (a `README.md`
-alone) runs nothing and reports nothing. A selector that does not compile takes every path. An
-ignore file the walk reads (a `.gitignore` or `.ignore`, in any directory) decides which files below
-it are in the index, so a change to one triggers each selector whose `paths:` can match there.
+alone) runs nothing and reports nothing. A selector that does not compile takes every path, but
+no change runs no rule. An ignore file the walk reads (a `.gitignore` or `.ignore`, in any
+directory) decides which files below it are in the index, so a change to one triggers each selector
+whose `paths:` can match there. Git lists a submodule added, moved or removed (checked out or not),
+and an untracked repository, as one changed directory rather than by its files: `--changed` and
+`--base` read Git's diffs with `--raw`, a path with a gitlink's mode on either side is a directory,
+and so is one `ls-files --others` lists as `sub/`. Such a path triggers each selector whose `paths:`
+can match below it, whether or not the walk still holds it (audit round 4). A pattern without `**`
+matches paths with as many components as it has, so it can match below a directory only when it
+has more components and its leading ones can match the directory's. globset lets a class that is
+negated or holds a range match `/` (`a[!x]sm/*.json` matches `a/sm/c.json`), so a pattern with such
+a class, an alternation or an escape counts as one that can match below every directory its leading
+literal directories allow. Without `--base`, Git lists an untracked repository on every run until
+it is committed or ignored.
 
-The changed set is the paths Git reports, so three kinds of change that can alter a verdict trigger
-nothing, as they skip a per-file rule or a version 1 full-index kind today; a full run covers them:
+The changed set is the paths Git reports, so several kinds of change that can alter a verdict
+trigger nothing, as they skip a per-file rule or a version 1 full-index kind today; a full run
+covers them:
 - an edit to the target of a symlink a selector reads through: with `locales/de.json` linked to
   `shared/de.json`, Git reports `shared/de.json` alone. Following links back from their targets
   would need the link-to-target map the walk does not keep, and a deleted target leaves a broken
@@ -625,7 +647,15 @@ nothing, as they skip a per-file rule or a version 1 full-index kind today; a fu
 - with `respect_gitignore: false`, a file Git ignores, which the walk reads and Git never lists as
   untracked (an untracked file under a gitignored directory);
 - a change to `.git/info/exclude`, to the global excludes file, or to an ignore file above the
-  linted directory when alint lints a subdirectory of a repository.
+  linted directory when alint lints a subdirectory of a repository;
+- an edit to a file marked `git update-index --assume-unchanged`, or to a `.ignore` file that a
+  `.gitignore` ignores, neither of which Git lists;
+- a staged or committed change to a submodule Git is told to ignore (`submodule.<name>.ignore`,
+  `diff.ignoreSubmodules`);
+- `git submodule deinit`, which empties a submodule's directory, `git submodule update --init` of
+  one that was not checked out, and an edit inside a submodule's work tree that leaves its
+  checked-out commit where it was: each changes the files the walk reads there, and Git lists
+  none. Finding the edits would mean a `git status` in every submodule on every run.
 
 A selector read by a full-index rule may not use `changed_since` (section 4), because what the rule
 sees would then depend on the diff. The other `scope_filter:` predicates are allowed in those
@@ -641,7 +671,8 @@ amendment records existing practice.
   index and declare no path scope. It cannot cover a kind that declares one, so it is
   **replaced**, not extended: phase 7 adds a test over every full-index kind that asserts the rule
   receives the full index under `--changed`.
-- `metadata_inventory_matches_the_audited_v019_shape` pins the five kinds that declare a scope.
+- `metadata_inventory_matches_the_audited_v019_shape` pins the six kinds that declare a scope:
+  the five above and `constraint`.
 
 ## 10. Names, provenance and trust (Q12)
 

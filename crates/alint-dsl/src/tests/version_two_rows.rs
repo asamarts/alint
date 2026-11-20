@@ -32,7 +32,9 @@ fn setup(config: &str, files: &[(&str, &str)]) -> Tree {
     for (path, body) in files {
         write(dir.path(), path, body);
     }
-    let config = load(&dir.path().join(".alint.yml")).expect("the configuration loads");
+    let loaded = load(&dir.path().join(".alint.yml")).expect("the configuration loads");
+    super::version_two_schema::constraint::assert_valid_when_loaded_builds(config, &loaded);
+    let config = loaded;
     let index = walk(
         dir.path(),
         &WalkOptions::default().with_global_git_excludes(false),
@@ -75,8 +77,9 @@ impl Tree {
             .collect()
     }
 
-    /// The text at `span` in `path`.
-    fn text(&self, path: &str, span: alint_core::ByteSpan) -> String {
+    /// The text at `span`, a span known without reading again, in `path`.
+    fn text(&self, path: &str, span: Option<&eval::Span>) -> String {
+        let span = span.and_then(eval::Span::bytes).expect("a known span");
         let text = std::fs::read_to_string(self.dir.path().join(path)).unwrap();
         text[span.as_range()].to_string()
     }
@@ -197,9 +200,9 @@ fn dependency_ranges_filter_by_pattern_and_workspace_membership() {
             .map(alint_core::relation::Pointer::render),
         Some("dependencies.react".into())
     );
-    assert_eq!(tree.text(manifest, row[1].span.unwrap()), "\"react\"");
-    assert_eq!(tree.text(manifest, row[2].span.unwrap()), "\"^18.2.0\"");
-    assert_eq!(tree.text(manifest, row[0].span.unwrap()), "\"react\"");
+    assert_eq!(tree.text(manifest, row[1].span.as_ref()), "\"react\"");
+    assert_eq!(tree.text(manifest, row[2].span.as_ref()), "\"^18.2.0\"");
+    assert_eq!(tree.text(manifest, row[0].span.as_ref()), "\"react\"");
 }
 
 #[test]
@@ -263,7 +266,7 @@ fn locale_keys_strip_the_locale_and_read_past_arrays() {
     let segments = cell.path.as_ref().unwrap().segments().len();
     assert_eq!(segments, 2);
     assert_eq!(
-        tree.text("config/locales/fr.yml", cell.span.unwrap()),
+        tree.text("config/locales/fr.yml", cell.span.as_ref()),
         "home"
     );
 }
@@ -300,6 +303,336 @@ fn strip_root_needs_one_top_level_key_per_resource() {
           keys below the top-level key, or drop `strip-root`"
         ]
     );
+}
+
+/// A failure and a note cut a long key or value as every message does: a
+/// `strip-root` failure names a top-level key of 100,000 characters by its
+/// first 64 and its length, alone or beside another, and a note so names a
+/// skipped non-literal value.
+#[test]
+fn a_long_key_or_value_is_cut_in_a_failure_and_a_note() {
+    let config = "version: 2\nrelations:\n  keys:\n    from: { paths: \"*.json\" }\n    \
+                  entries: { format: json, at: \"$\", leaves: true }\n    fields: { key: \
+                  entry.path }\n    transform: { key: [strip-root] }\n  names:\n    from: { \
+                  paths: \"*.json\" }\n    read: { json: \"$.*\" }\n    fields: { name: value }\n";
+    let key = "k".repeat(100_000);
+    let shown = format!("`['{}'... (100000 bytes)]`", "k".repeat(64));
+    let failures = |body: String| setup(config, &[("a.json", &body)]).failures("keys");
+    assert_eq!(
+        failures(format!("{{\"{key}\": \"Hi\"}}")),
+        [format!(
+            "a.json: relation `keys` (.alint.yml): `strip-root` on `key` needs every key path to \
+             have at least two segments, but {shown} has one; read the keys below the top-level \
+             key, or drop `strip-root`"
+        )]
+    );
+    assert_eq!(
+        failures(format!(
+            "{{\"{key}\": {{\"a\": \"x\"}}, \"fr\": {{\"a\": \"y\"}}}}"
+        )),
+        [format!(
+            "a.json: relation `keys` (.alint.yml): `strip-root` on `key` needs one top-level key \
+             in each resource, but this one has {shown}, `fr`; read one top-level object per \
+             file, or drop `strip-root`"
+        )]
+    );
+    let value = format!("${{{}}}", "N".repeat(100_000));
+    let tree = setup(config, &[("a.json", &format!("{{\"a\": \"{value}\"}}"))]);
+    let notes: Vec<String> = tree
+        .rows("names")
+        .notes
+        .iter()
+        .map(|note| note.message.clone())
+        .collect();
+    assert_eq!(
+        notes,
+        [format!(
+            "skipped non-literal value \"${{{}\"... (100003 bytes)",
+            "N".repeat(62)
+        )]
+    );
+}
+
+/// The same keys in every locale (`docs/site/configuration/version-2.md`):
+/// each locale's keys below its top-level key, grouped by locale, or by
+/// file.
+const STUB_LOCALES: &str = r#"version: 2
+relations:
+  locale-keys:
+    from: { paths: "config/locales/*.yml" }
+    entries: { format: yaml, at: "$", leaves: true }
+    fields: { locale: entry.root, file: stem, key: entry.path }
+    transform: { key: [strip-root] }
+rules:
+  - id: by-locale
+    kind: constraint
+    input: locale-keys
+    assert:
+      set: { field: key, group_by: locale, equal_to: { group: en }, groups: [de, fr, it, pl] }
+    level: error
+  - id: by-file
+    kind: constraint
+    input: locale-keys
+    assert: { set: { field: key, group_by: file, equal_to: { group: en } } }
+    level: error
+"#;
+
+/// Under `strip-root`, a locale file whose top-level key holds nothing
+/// (`fr: {}`, `it:`, `pl: []`), as 71 of Mastodon's 530 do, has no keys, as
+/// an empty file has none: it lacks every key of the reference locale, and
+/// the rule still reports the others' missing keys.
+#[test]
+fn a_stub_locale_file_has_no_keys_under_strip_root() {
+    let files = &[
+        ("config/locales/en.yml", "en:\n  hello: Hello\n  bye: Bye\n"),
+        ("config/locales/de.yml", "de:\n  hello: Hallo\n"),
+        ("config/locales/fr.yml", "fr: {}\n"),
+        ("config/locales/it.yml", "it:\n"),
+        ("config/locales/pl.yml", "pl: []\n"),
+    ];
+    let tree = setup(STUB_LOCALES, files);
+    assert_eq!(
+        table(&tree.rows("locale-keys")),
+        strings(&[
+            &["de", "de", "hello"],
+            &["en", "en", "hello"],
+            &["en", "en", "bye"],
+        ])
+    );
+    let results = super::constraint_families::run(STUB_LOCALES, files);
+    let missing = |group: &str, key: &str| {
+        format!(
+            "`locale` \"{group}\" lacks `key` \"{key}\", which `locale` \"en\" holds\n  ~ the \
+             reference group's row with it: config/locales/en.yml:{}",
+            if key == "hello" { "2:3" } else { "3:3" }
+        )
+    };
+    let mut expected = vec![format!("config/locales/de.yml: {}", missing("de", "bye"))];
+    for group in ["fr", "it", "pl"] {
+        expected.extend([missing(group, "hello"), missing(group, "bye")]);
+    }
+    assert_eq!(
+        super::constraint_families::findings(&results, "by-locale"),
+        expected
+    );
+    let by_file = super::constraint_families::findings(&results, "by-file");
+    for (file, keys) in [
+        ("de", &["bye"][..]),
+        ("fr", &["hello", "bye"]),
+        ("it", &["hello", "bye"]),
+        ("pl", &["hello", "bye"]),
+    ] {
+        for key in keys {
+            let prefix =
+                format!("config/locales/{file}.yml: `file` \"{file}\" lacks `key` \"{key}\"");
+            assert!(
+                by_file.iter().any(|finding| finding.starts_with(&prefix)),
+                "{prefix}: {by_file:#?}"
+            );
+        }
+    }
+    assert_eq!(by_file.len(), 7, "{by_file:#?}");
+}
+
+/// A top-level key that holds a scalar, or a list with something in it, is
+/// no stub: there are keys below it to compare or none to strip to, so
+/// `strip-root` still fails on it, and a stub still counts as its file's
+/// one top-level key.
+#[test]
+fn a_top_level_key_holding_a_value_still_fails_strip_root() {
+    for (body, shown) in [
+        ("fr: Bonjour\n", "`fr`"),
+        ("fr: [a]\n", "`fr`"),
+        ("fr: 0\n", "`fr`"),
+    ] {
+        let tree = setup(
+            STUB_LOCALES,
+            &[
+                ("config/locales/en.yml", "en:\n  hello: Hello\n"),
+                ("config/locales/fr.yml", body),
+            ],
+        );
+        assert_eq!(
+            tree.failures("locale-keys"),
+            [format!(
+                "config/locales/fr.yml: relation `locale-keys` (.alint.yml): `strip-root` on \
+                 `key` needs every key path to have at least two segments, but {shown} has one; \
+                 read the keys below the top-level key, or drop `strip-root`"
+            )],
+            "{body}"
+        );
+    }
+    let tree = setup(
+        STUB_LOCALES,
+        &[("config/locales/all.yml", "en:\n  hello: Hello\nfr:\n")],
+    );
+    assert_eq!(
+        tree.failures("locale-keys"),
+        [
+            "config/locales/all.yml: relation `locale-keys` (.alint.yml): `strip-root` on `key` \
+             needs one top-level key in each resource, but this one has `en`, `fr`; read one \
+             top-level object per file, or drop `strip-root`"
+        ]
+    );
+}
+
+/// A `read:` row's value keeps its byte span, so a finding about it has a
+/// line and column, as one about an entry's has: a `lines:` value's trimmed
+/// line, a `regex:` value's capture, and a JSON, YAML or TOML value's own
+/// span; a value in an array, and a `whole_file` value, have none.
+#[test]
+fn a_read_value_keeps_its_place() {
+    let cases = [
+        (
+            "{ json: \"$.*\" }",
+            "a.json",
+            "{\"x\": \"dup\",\n  \"y\": \"dup\"}\n",
+            ("1:7", "2:8"),
+        ),
+        (
+            "{ yaml: \"$.*\" }",
+            "a.yml",
+            "x: dup\ny:   'dup'\n",
+            ("1:4", "2:6"),
+        ),
+        (
+            "{ toml: \"$.*\" }",
+            "a.toml",
+            "x = \"dup\"\n\n y = \"dup\"\n",
+            ("1:5", "3:6"),
+        ),
+        (
+            "{ lines: {} }",
+            "a.txt",
+            "  dup  \n# note\n\ndup\n",
+            ("1:3", "4:1"),
+        ),
+        (
+            "{ regex: \"(?m)^v=(\\\\S+)\" }",
+            "a.env",
+            "v=dup\nw=1\n  v=no\nv=dup\n",
+            ("1:3", "4:3"),
+        ),
+    ];
+    for (read, file, body, (first, repeat)) in cases {
+        let config = format!(
+            "version: 2\nrelations:\n  values:\n    from: {{ paths: {file} }}\n    read: \
+             {read}\n    fields: {{ v: value }}\nrules:\n  - id: c\n    kind: constraint\n    \
+             input: values\n    assert: {{ unique: {{ key: [v] }} }}\n    level: error\n"
+        );
+        let results = super::constraint_families::run(&config, &[(file, body)]);
+        let findings = super::constraint_families::findings(&results, "c");
+        assert_eq!(findings.len(), 1, "{read}: {findings:#?}");
+        let (place, related) = findings[0].split_once(": ").unwrap();
+        assert_eq!(place, format!("{file}:{repeat}"), "{read}: {findings:#?}");
+        assert!(
+            related.ends_with(&format!("~ the first row with this key: {file}:{first}")),
+            "{read}: {findings:#?}"
+        );
+    }
+    // A value in an array, and the whole file, have no place.
+    for (read, paths, files, place) in [
+        (
+            "{ json: \"$.a[*]\" }",
+            "a.json",
+            &[("a.json", "{\"a\": [\"dup\", \"dup\"]}\n")][..],
+            "a.json",
+        ),
+        (
+            "{ whole_file: {} }",
+            "\"*.txt\"",
+            &[("b.txt", "same\n"), ("c.txt", "same\n")][..],
+            "c.txt",
+        ),
+    ] {
+        let config = format!(
+            "version: 2\nrelations:\n  values:\n    from: {{ paths: {paths} }}\n    read: \
+             {read}\n    fields: {{ v: value }}\nrules:\n  - id: c\n    kind: constraint\n    \
+             input: values\n    assert: {{ unique: {{ key: [v] }} }}\n    level: error\n"
+        );
+        let results = super::constraint_families::run(&config, files);
+        let findings = super::constraint_families::findings(&results, "c");
+        assert_eq!(findings.len(), 1, "{read}: {findings:#?}");
+        assert!(
+            findings[0].starts_with(&format!("{place}: ")),
+            "{read}: {findings:#?}"
+        );
+    }
+}
+
+/// A `read:` finds where its values are written only for the values a
+/// finding places: over 3,000 `package.json` files whose rows pass, no file
+/// is walked for its values' places, and with one finding, only the file
+/// it sits in is, the finding has its place, and what finding it held (the
+/// document's tree and entries, several times its text) is taken from the
+/// run's bytes.
+#[test]
+fn a_read_finds_the_places_of_only_the_values_a_finding_places() {
+    let config = "version: 2\nrelations:\n  names:\n    from: { paths: \"*/package.json\" }\n    \
+                  read: { json: \"$.name\" }\n    fields: { name: value, package: dir }\nrules:\n  \
+                  - id: c\n    kind: constraint\n    input: names\n    assert: { equal: { field: \
+                  name, to: { field: package } } }\n    level: error\n";
+    // Each package's name; the findings, the walks finding their places
+    // took, and the bytes the run took.
+    let walked = |names: &dyn Fn(usize) -> String| {
+        let files: Vec<(String, String)> = (0..3_000)
+            .map(|index| {
+                (
+                    format!("p{index}/package.json"),
+                    format!(
+                        "{{\n  \"version\": \"1.0.0\",\n  \"name\": \"{}\"\n}}\n",
+                        names(index)
+                    ),
+                )
+            })
+            .collect();
+        let files: Vec<(&str, &str)> = files
+            .iter()
+            .map(|(path, body)| (path.as_str(), body.as_str()))
+            .collect();
+        let (dir, loaded) = super::constraint::load_tree(config, &files);
+        let config = loaded.unwrap();
+        let index = walk(
+            dir.path(),
+            &WalkOptions::default().with_global_git_excludes(false),
+        )
+        .unwrap();
+        index.enable_relation_caches_under(&alint_core::relation::Limits::default());
+        let mut registry = alint_core::RuleRegistry::new();
+        alint_rules::register_builtin(&mut registry);
+        let rule = registry.build(&config.rules[0]).unwrap();
+        // The rule reads and places on this thread, where the walks count.
+        let before = eval::read_span_walks();
+        let findings = rule.evaluate(&Context::new(dir.path(), &index)).unwrap();
+        let findings: Vec<String> = findings
+            .iter()
+            .map(|finding| {
+                let path = finding.path.as_ref().unwrap();
+                let path = path.display().to_string().replace('\\', "/");
+                format!("{path}:{:?}:{:?}", finding.line, finding.column)
+            })
+            .collect();
+        let cache = index.decode_cache().unwrap();
+        let bytes = (cache.bytes_taken(), cache.largest_held());
+        (findings, eval::read_span_walks() - before, bytes)
+    };
+    let (findings, walks, passing) = walked(&|index| format!("p{index}"));
+    assert_eq!((findings, walks, passing.1), (Vec::new(), 0, 0));
+    // "other" is as long as "p1234": the two runs decode alike.
+    let (findings, walks, placing) = walked(&|index| {
+        if index == 1_234 {
+            "other".to_string()
+        } else {
+            format!("p{index}")
+        }
+    });
+    assert_eq!(findings, ["p1234/package.json:Some(3):Some(11)"]);
+    assert_eq!(walks, 1);
+    let text = "{\n  \"version\": \"1.0.0\",\n  \"name\": \"other\"\n}\n".len();
+    // Placing takes none of the run's bytes, but the file it holds, with
+    // what finding the value's span held, must fit in what is left.
+    assert_eq!(placing.0, passing.0);
+    assert!(placing.1 > 3 * text, "{placing:?} {passing:?} {text}");
 }
 
 pub(super) const NODE_PINS: &str = r#"version: 2
@@ -561,7 +894,7 @@ fn a_bound_path_must_match_once_in_each_resource() {
     assert_eq!(table(&rows), strings(&[&["a", "x"], &["a", "y"]]));
     // A bound value's span is its value's.
     assert_eq!(
-        once.text("a.yaml", rows.rows[1].cells[0].span.unwrap()),
+        once.text("a.yaml", rows.rows[1].cells[0].span.as_ref()),
         "a"
     );
 }
@@ -619,7 +952,7 @@ fn a_join_follows_its_non_unique_side_and_keeps_provenance() {
         Some("dependencies.b".to_string())
     );
     assert_eq!(row[0].at.resource.path().as_str(), "a/package.json");
-    assert_eq!(tree.text("a/package.json", row[1].span.unwrap()), "\"^1\"");
+    assert_eq!(tree.text("a/package.json", row[1].span.as_ref()), "\"^1\"");
     assert_eq!(row[2].at.resource.path().as_str(), "b/package.json");
     assert_eq!(row[2].at.pointer, None);
 
@@ -1118,8 +1451,9 @@ fn the_plan_records_what_the_environment_writes() {
         .map(|named| (named.name.as_str(), named.reads_environment))
         .collect();
     assert_eq!(selectors, [("docs", true), ("plain", false)]);
-    // A relation reads the environment through a selector it reads, too;
-    // its own definition does only where it holds such a value.
+    // A relation reads the environment through a selector it reads, too,
+    // and through a `where:` entry, which chooses its rows; its own
+    // definition does only where it holds such a value outside one.
     let relations: Vec<(&str, bool, bool, Vec<bool>)> = plan
         .relations
         .iter()
@@ -1142,7 +1476,7 @@ fn the_plan_records_what_the_environment_writes() {
         [
             ("by-selector", true, false, vec![false]),
             ("by-read", true, true, vec![false]),
-            ("by-filter", false, false, vec![true, false]),
+            ("by-filter", true, false, vec![true, false]),
             ("untouched", false, false, vec![false]),
         ]
     );

@@ -41,9 +41,12 @@ pub(super) fn yaml_entry_table(
     // this module performs any recursive traversal.
     let mut events = Vec::new();
     let mut collection_depth = 0usize;
+    // The text of their own the events' scalars hold.
+    let mut scalars = 0usize;
     for parsed in Parser::new_from_str(stripped) {
         let (event, span) = parsed.map_err(|error| EntryRowsError::Parse(error.to_string()))?;
         match &event {
+            Event::Scalar(std::borrow::Cow::Owned(text), ..) => scalars += text.capacity(),
             Event::SequenceStart(..) | Event::MappingStart(..) => {
                 collection_depth += 1;
                 if collection_depth > crate::yaml_depth::MAX_YAML_FLOW_DEPTH {
@@ -110,6 +113,11 @@ pub(super) fn yaml_entry_table(
         table: EntryTable::default(),
         stack: PathStack::default(),
     };
+    // The parse the table is read from: the events, their scalars' text,
+    // and where each character is in bytes.
+    walk.table.parsed = events.capacity() * std::mem::size_of::<(Event<'_>, saphyr_parser::Span)>()
+        + scalars
+        + byte_offsets.held();
     if index < events.len() {
         walk.node(&mut index, true)?;
     }
@@ -122,6 +130,14 @@ enum YamlByteOffsets {
 }
 
 impl YamlByteOffsets {
+    /// What the offsets hold on the heap.
+    fn held(&self) -> usize {
+        match self {
+            Self::Ascii(_) => 0,
+            Self::Utf8(offsets) => offsets.capacity() * std::mem::size_of::<(usize, usize)>(),
+        }
+    }
+
     fn new(text: &str, events: &[(saphyr_parser::Event<'_>, saphyr_parser::Span)]) -> Self {
         use saphyr_parser::Event;
 

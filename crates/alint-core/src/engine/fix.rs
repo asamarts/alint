@@ -922,7 +922,9 @@ impl Engine {
         if git_available {
             self.resolve_changed_paths(root, index, &when_env)?;
         }
-        self.resolve_manifest_paths(root, index, &when_env, Some(created))?;
+        // The pass's `--changed` gates, with the files this run created.
+        let pass = self.changed_pass(index, Some(created));
+        self.resolve_manifest_paths(root, &when_env, &pass)?;
         // Propagate BOTH resolved caches onto every alternate index the fix loop
         // may `pick_ctx` (see `run`): the `--changed` filtered index and the
         // git-tracked file-only / dir-aware indexes, so `fix` respects manifest
@@ -947,6 +949,17 @@ impl Engine {
             }
         }
         let manifest_gates = self.manifest_gates_by_entry(index, &when_env)?;
+        // The relations the rules read are evaluated once a pass, as `check`
+        // evaluates them, before the first rule (or, in a pass that writes,
+        // just before the first rule that reads one, when a fix before it may
+        // let go of what they read), and what they take of the run's bytes is
+        // recorded then: what a rule may hold to place its findings is what
+        // it is in `check`, not what the relations of the rules before it
+        // took.
+        let relations_at =
+            super::fix_caches::relations_at(&self.entries, !dry_run && stage_ops.is_none());
+        // Whether a fix of this pass removed or moved a file, or may have.
+        let mut moved = false;
         // A `has_ancestor` marker lookup on the `--changed` index must see unchanged
         // files too. Only the changed-set index shares the full tree's file set
         // (the git-tracked indexes are deliberately subsets and must not), and only
@@ -954,7 +967,7 @@ impl Engine {
         // building the set is a pass over the full index that other `--changed`
         // runs should not pay.
         if let Some(fi) = filtered_index.as_ref()
-            && self.needs_tree_files(index, Some(created), true)
+            && self.needs_tree_files(&pass, true)
         {
             fi.share_tree_files_from(index);
         }
@@ -989,6 +1002,12 @@ impl Engine {
         // classification. Unused (empty) when no fix-baseline is active.
         let mut fp_cache: HashMap<PathBuf, Option<Vec<u8>>> = HashMap::new();
         for (rule_index, entry) in self.entries.iter().enumerate() {
+            // Nothing is cleared first: what the rules before decoded stays
+            // theirs (relations key their decodes apart), and what a fix made
+            // untrue is gone already (below).
+            if relations_at == Some(rule_index) {
+                self.evaluate_read_relations(&full_ctx, &when_env, &pass);
+            }
             // Skip a rule scoped ENTIRELY outside the changed set (plus files this
             // run created), exactly as `check --changed` does, so `fix` and `check`
             // run the same rules and agree. A rule with SOME in-scope target still
@@ -997,8 +1016,7 @@ impl Engine {
             // dropped (the old silent behavior, which made `fix` exit 0 while
             // `check` reported them and exited 1). `Some(created)` keeps a rule
             // alive for a file a fix in scope created (its cascade must finish).
-            let skipped_for_changed =
-                self.skip_for_changed(entry.rule.as_ref(), full_ctx.index, Some(created));
+            let skipped_for_changed = self.skip_for_changed(entry.rule.as_ref(), &pass);
             if skipped_for_changed && !entry.expect_matches() {
                 continue;
             }
@@ -1500,15 +1518,24 @@ impl Engine {
                     status,
                 });
             }
-            // A fix may have created, removed, or renamed a file on disk
-            // already (content edits wait in the compose buffer), so a later
-            // rule's relation reads must not come from the caches.
+            // A fix may have created, removed, or moved a file on disk already
+            // (content edits wait in the compose buffer), so a later rule must
+            // not read from the caches what that made untrue: the caches let
+            // go of it, and each later rule reads it again as it needs it.
+            // What the pass's relations took stays recorded, so every rule of
+            // the pass places its findings against the same amount, as in
+            // `check`. A staged pass (`fix --diff`) writes nothing to disk
+            // (whole-file fixes go to the stage sink, content edits to the
+            // compose buffer, and no rule reads either), so what the caches
+            // hold stays true there.
             if !dry_run
-                && items
-                    .iter()
-                    .any(|item| matches!(item.status, FixStatus::Applied(_)))
+                && stage_ops.is_none()
+                && let Some(landed) = super::fix_caches::Landed::of(
+                    entry.spec.as_deref().and_then(|spec| spec.fix.as_ref()),
+                    &items,
+                )
             {
-                index.clear_relation_caches();
+                landed.let_go(index, &mut moved);
             }
             push_fix_result(
                 &mut results,

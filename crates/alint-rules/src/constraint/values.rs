@@ -2,6 +2,7 @@
 //! `v0.23/selectors-and-constraints.md` section 6, "Comparison" and
 //! "Identity").
 
+use std::borrow::Cow;
 use std::fmt::Write as _;
 use std::sync::Arc;
 
@@ -11,9 +12,12 @@ use sha2::{Digest as _, Sha256};
 
 /// A value as the kind compares it: its type and its text. A number compares
 /// by its lexeme (`1.0` is not `1`), and a path is a string. A missing value
-/// (a `read:` that matched nothing) is null: it matches nothing.
+/// (a `read:` that matched nothing) matches nothing, as null does, and a
+/// message calls it missing.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(super) enum Scalar {
+    /// No value: a `read:` that matched nothing in its resource.
+    Missing,
     Null,
     Bool(bool),
     Number(Arc<str>),
@@ -34,7 +38,8 @@ impl Scalar {
     /// comparison takes (`a list`, `a record`, `bytes`).
     pub(super) fn of(cell: &Cell) -> Result<Self, &'static str> {
         match &cell.value {
-            None | Some(Value::Null) => Ok(Self::Null),
+            None => Ok(Self::Missing),
+            Some(Value::Null) => Ok(Self::Null),
             Some(value) => Self::of_value(value),
         }
     }
@@ -55,20 +60,26 @@ impl Scalar {
     /// Its type, when it can match.
     pub(super) fn kind(&self) -> Option<Kind> {
         match self {
-            Self::Null => None,
+            Self::Missing | Self::Null => None,
             Self::Bool(_) => Some(Kind::Bool),
             Self::Number(_) => Some(Kind::Number),
             Self::String(_) => Some(Kind::String),
         }
     }
 
+    /// Whether it matches nothing: null, or a missing value.
     pub(super) fn is_null(&self) -> bool {
-        matches!(self, Self::Null)
+        matches!(self, Self::Missing | Self::Null)
+    }
+
+    pub(super) fn is_missing(&self) -> bool {
+        matches!(self, Self::Missing)
     }
 
     /// The type's word in a baseline key.
     fn type_word(&self) -> &'static str {
         match self {
+            Self::Missing => "missing",
             Self::Null => "null",
             Self::Bool(_) => "bool",
             Self::Number(_) => "number",
@@ -80,7 +91,7 @@ impl Scalar {
     /// `true`/`false`, and nothing for null.
     pub(super) fn text(&self) -> &str {
         match self {
-            Self::Null => "",
+            Self::Missing | Self::Null => "",
             Self::Bool(true) => "true",
             Self::Bool(false) => "false",
             Self::Number(lexeme) => lexeme,
@@ -90,7 +101,7 @@ impl Scalar {
 
     fn value(&self) -> Value {
         match self {
-            Self::Null => Value::Null,
+            Self::Missing | Self::Null => Value::Null,
             Self::Bool(flag) => Value::Bool(*flag),
             Self::Number(lexeme) => alint_core::relation::Number::from_lexeme(lexeme)
                 .map_or_else(|| Value::String(Arc::clone(lexeme)), Value::Number),
@@ -100,35 +111,74 @@ impl Scalar {
 
     /// The text `{{row.FIELD}}` shows: [`Self::text`], cut as a message cuts
     /// a quoted value, at [`SHOWN_CHARS`] characters with its length named
-    /// (`abc... (1048576 bytes)`).
+    /// (`abc... (1048576 bytes)`), and each character a quoted value escapes
+    /// (a control, a bidi control or a zero-width character) escaped as it
+    /// is there (`\n`, `\u{202e}`), so a value can neither add a line to a
+    /// report nor reorder what a reader sees.
     pub(super) fn text_shown(&self) -> String {
         let text = self.text();
-        match text.char_indices().nth(SHOWN_CHARS) {
-            Some((end, _)) => format!("{}... ({} bytes)", &text[..end], text.len()),
-            None => text.to_string(),
+        let (kept, cut) = match text.char_indices().nth(SHOWN_CHARS) {
+            Some((end, _)) => (&text[..end], true),
+            None => (text, false),
+        };
+        let mut shown = escaped(kept).into_owned();
+        if cut {
+            write!(shown, "... ({} bytes)", text.len()).expect("writing to a String cannot fail");
         }
+        shown
     }
 
     /// The value as a message quotes it: `"^18.2.0"`, `1.0`, `true`, `null`,
-    /// or `<redacted>` for a sensitive field's.
+    /// `missing`, or `<redacted>` for a sensitive field's.
     pub(super) fn show(&self, sensitive: bool) -> String {
         if sensitive {
             "<redacted>".to_string()
+        } else if self.is_missing() {
+            "missing".to_string()
         } else {
             render_value(&self.value())
         }
     }
 
     /// The value with its type, for a message about values of several types:
-    /// `the number 1`, `the string "1"`, `null`.
+    /// `the number 1`, `the string "1"`, `null`, `missing`.
     pub(super) fn show_typed(&self, sensitive: bool) -> String {
         match self {
+            Self::Missing => "missing".to_string(),
             Self::Null => "null".to_string(),
             Self::Bool(_) => format!("the boolean {}", self.show(sensitive)),
             Self::Number(_) => format!("the number {}", self.show(sensitive)),
             Self::String(_) => format!("the string {}", self.show(sensitive)),
         }
     }
+}
+
+/// Whether a message writes `c` escaped, as a string's `Debug` form does,
+/// which is how a message quotes a value (`render_value`, and a key path in
+/// `alint_core`'s relation messages): a control character (`\n`), a bidi
+/// control (`\u{202e}`), a zero-width character and the others that form
+/// escapes. Quotes and `\` are not: text shown unquoted keeps them as
+/// written.
+fn escaped_in_message(c: char) -> bool {
+    !matches!(c, '"' | '\'' | '\\') && c.escape_debug().nth(1).is_some()
+}
+
+/// `text` (a value, a path, or words about a file) as a message shows it
+/// unquoted: each character [`escaped_in_message`] names escaped, the others
+/// as they are. Text it escaped already shows the same.
+pub(super) fn escaped(text: &str) -> Cow<'_, str> {
+    if !text.chars().any(escaped_in_message) {
+        return Cow::Borrowed(text);
+    }
+    let mut out = String::with_capacity(text.len() + 8);
+    for c in text.chars() {
+        if escaped_in_message(c) {
+            out.extend(c.escape_debug());
+        } else {
+            out.push(c);
+        }
+    }
+    Cow::Owned(out)
 }
 
 /// A finding's `baseline_key`: parts, each written as its byte length in
@@ -214,11 +264,12 @@ mod tests {
         key.value(&Scalar::String("a:b".into()), false)
             .value(&Scalar::Number("1.0".into()), false)
             .value(&Scalar::Null, false)
+            .value(&Scalar::Missing, false)
             .value(&Scalar::Bool(true), false)
             .value(&Scalar::String("secret".into()), true);
         assert_eq!(
             key.into_string(),
-            "6:unique6:string3:a:b6:number3:1.04:null0:4:bool4:true9:sensitive"
+            "6:unique6:string3:a:b6:number3:1.04:null0:7:missing0:4:bool4:true9:sensitive"
         );
     }
 
@@ -271,6 +322,37 @@ mod tests {
         assert_eq!(
             Scalar::String("é".repeat(64).into()).text_shown(),
             "é".repeat(64)
+        );
+    }
+
+    /// `{{row.FIELD}}` escapes what a quoted value escapes, and only that:
+    /// quotes and `\` stay as written.
+    #[test]
+    fn row_text_escapes_what_a_quoted_value_escapes() {
+        let value = Scalar::String("a\n  ~ related: x\u{1b}[31m\u{202e}b\u{200b}\"q\" C:\\".into());
+        assert_eq!(
+            value.text_shown(),
+            "a\\n  ~ related: x\\u{1b}[31m\\u{202e}b\\u{200b}\"q\" C:\\"
+        );
+        for c in [
+            '\n', '\t', '\u{1b}', '\u{202e}', '\u{2066}', '\u{200b}', '\u{feff}',
+        ] {
+            let quoted = render_value(&Value::String(c.to_string().into()));
+            assert_eq!(
+                Scalar::String(c.to_string().into()).text_shown(),
+                quoted[1..quoted.len() - 1],
+                "{c:?} as a quoted value shows it"
+            );
+        }
+        // Cut first, then escaped: the cut counts characters of the value.
+        let long = Scalar::String(format!("{}{}", "\n".repeat(SHOWN_CHARS), "x").into());
+        assert_eq!(
+            long.text_shown(),
+            format!(
+                "{}... ({} bytes)",
+                "\\n".repeat(SHOWN_CHARS),
+                SHOWN_CHARS + 1
+            )
         );
     }
 }

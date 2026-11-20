@@ -60,7 +60,8 @@ Rust 1.88+ required (the workspace MSRV: `[workspace.package].rust-version` in `
 against pushes to `main`:
 
 ```sh
-ci/scripts/preflight.sh   # fmt + clippy + test + docs + version-pins + dep-floors + dogfood
+ci/scripts/preflight.sh   # fmt + clippy + test + docs + docs-overlay + version-pins
+                          #   + dep-floors + secrets-inv + dogfood
 ```
 
 Under the hood it runs:
@@ -77,6 +78,8 @@ ci/scripts/docs.sh                         # cargo doc -D warnings + public-api-
                                            #   + check-version-pins.sh + likec4 validate
                                            #   + gen-mermaid --check + strip-since tests
                                            #   + test-pin-docs-counts.sh
+ci/scripts/check-docs-overlay-since.py     # lines added since the latest v* tag in the pages
+                                           #   alint.org overlays from main sit in since-blocks
 ci/scripts/check-version-pins.sh           # README/SECURITY/docs/site install snippets + npm pin to workspace version
 ci/scripts/check-workspace-dep-floors.sh   # [workspace.dependencies] floors <= workspace.package.version
 ci/scripts/dogfood.sh                      # cargo build --release + alint check on this repo

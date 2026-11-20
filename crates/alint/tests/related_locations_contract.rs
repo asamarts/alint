@@ -46,10 +46,11 @@ relations:
   node-pins:
     union:
       - from: { paths: .nvmrc }
-        read: { regex: '^v?(\d+\.\d+\.\d+)' }
+        read: { whole_file: {} }
       - from: manifests
         read: { json: "$.engines.node" }
     fields: { source: path, node: value }
+    transform: { node: [trim] }
   aliases:
     from: { paths: exports.json }
     entries: { format: json, at: "$.aliases" }

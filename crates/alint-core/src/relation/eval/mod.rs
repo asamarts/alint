@@ -47,6 +47,7 @@
 mod failure;
 mod ops;
 mod read;
+mod spans;
 
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -60,6 +61,10 @@ pub use failure::RelationFailure;
 pub use failure::{located, type_name};
 pub use ops::render_value;
 pub use read::path_token;
+#[cfg(test)]
+pub(crate) use spans::fingerprint;
+pub(crate) use spans::fingerprint_text;
+pub use spans::{BytesSpan, ReadSpan, find_spans, read_span_walks};
 
 use super::cache::{DecodeCache, ReadCache};
 use super::limits::{LimitExceeded, LimitKind, Limits};
@@ -135,14 +140,45 @@ pub struct Cell {
     /// Where the value is written: the key's span for `entry.key` (and for
     /// the `entry.parent`, `entry.root` and `entry.path` of the entry), the
     /// value's for `entry.value` and a `bound:` field (the key's for a YAML
-    /// block scalar, which has none), none for a path token or a `read:`
-    /// value.
-    pub span: Option<ByteSpan>,
+    /// block scalar, which has none), and, for a `read:` value, wherever its
+    /// reader places it, which is found only when a finding asks
+    /// ([`Span::Read`]); none for a path token, a `whole_file` value and a
+    /// missing value.
+    pub span: Option<Span>,
     /// For an `entry.path` field, the key path's segments, after
     /// `strip-root`, whose [`Pointer::render`] the value is (until a string
     /// transform such as `lower` changes the value; the segments stay).
     /// Shared by the row's `entry.path` fields and their copies.
     pub path: Option<Arc<Pointer>>,
+}
+
+/// Where a cell's value is written ([`Cell::span`]). Placing a cell finds
+/// it in the resource read again, and places the cell only where the text
+/// still holds what it held when the relation read it ([`find_spans`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Span {
+    /// These bytes of the cell's resource: an entry's key or value.
+    Bytes(BytesSpan),
+    /// Where the `read:` that read the value finds it in its resource
+    /// ([`find_spans`]): a `lines:` value's trimmed line, a `regex:` value's
+    /// capture, the value a JSON, YAML or TOML object member holds (its
+    /// key's for a YAML block scalar). A value in an array, a repeated key's
+    /// and a value of a file that is not UTF-8 are found nowhere. Reading
+    /// finds no span, which would cost a structured read several times the
+    /// read itself; a rule finds the spans of the values it places, one
+    /// resource at a time.
+    Read(ReadSpan),
+}
+
+impl Span {
+    /// The bytes, when they are known without reading the resource again.
+    #[must_use]
+    pub const fn bytes(&self) -> Option<ByteSpan> {
+        match self {
+            Self::Bytes(bytes) => Some(bytes.bytes()),
+            Self::Read(_) => None,
+        }
+    }
 }
 
 /// Where a row's value came from. A row is its resource and its pointer,
@@ -161,6 +197,11 @@ pub struct Provenance {
     /// `where:` that drops other rows does not change (0 for a missing
     /// row).
     pub ordinal: u32,
+    /// Whether the entry's value is null, an empty object or an empty array
+    /// (false for a `read:` value and a `bound:` one). `strip-root` reads
+    /// such a top-level key, a stub locale file's (`fr:`, `fr: {}`), as a
+    /// file with no keys: the row is dropped, not a failure.
+    pub empty: bool,
 }
 
 /// What a `read:` skipped in one resource.
@@ -379,10 +420,18 @@ impl RunMemo {
         self.cells.load(Ordering::Relaxed)
     }
 
-    /// The bytes taken so far. Test only.
-    #[cfg(test)]
+    /// The bytes taken so far ([`LimitKind::BytesPerRun`]): what the engine
+    /// records, with the decode cache's, as what the relations took
+    /// ([`DecodeCache::record_relations`](super::DecodeCache::record_relations)).
     pub(crate) fn bytes(&self) -> usize {
         self.bytes.load(Ordering::Relaxed)
+    }
+
+    /// Whether an evaluation read a `scope_filter:` manifest itself, from
+    /// its path on disk, rather than finding the engine's set: a file a fix
+    /// creates may be that manifest, though the index does not list it.
+    pub(crate) fn read_manifests(&self) -> bool {
+        !self.manifests.lock().expect("manifest set lock").is_empty()
     }
 
     /// The relations evaluated so far, in the order they were. Test only.
