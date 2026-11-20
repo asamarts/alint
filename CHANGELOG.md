@@ -771,18 +771,19 @@ policy-test package the user does not trust.
     shows only where it starts, since its end would give away the value's length. Placing the
     findings reads each file they sit in again, one at a time. Each file must fit in what the run's
     relations left of `bytes_per_run` (the limit less what their decodes and their rows took,
-    counted once they are evaluated, before any rule runs): alone, before its `read:` values'
-    places are looked for, and then with its offsets and what finding those places held (the
-    document parsed again, and what was read from the parse). Placing takes none of it, so whether
-    a rule's findings fit does not depend on the rules placing beside it, and `alint fix`, which
-    evaluates the relations the same way at the start of each pass and again after a fix changes
-    the tree, places them as `alint check` would. When a file does not fit, the rule reports an
-    analysis failure, not findings without places. A `read:` value's place is found only in the
-    files a finding or related location sits in. A cell is placed only where the file read again
-    still holds what was read there (its value, or its key for an entry's key), so a file changed
-    during the run leaves a finding or related location without a place rather than at other
-    text. A typo in the kind's options gets a "did you mean" for the nearest field, not for the
-    typo itself.
+    counted once they are evaluated, before any rule runs): alone, before its `read:` values' places
+    are looked for, and then with its offsets and what finding those places held (the document
+    parsed again, with what its parser held beside the tree, such as a JSONC file's copy without its
+    comments or the TOML lexer's tokens, and what was read from the parse). Placing takes none of
+    it, so whether a rule's findings fit does not depend on the rules placing beside it, and
+    `alint fix`, which evaluates the relations the same way at the start of each pass and again
+    after a fix changes the tree, places them as `alint check` would. When a file does not fit, the
+    rule reports an analysis failure, not findings without places. A `read:` value's place is found
+    only in the files a finding or related location sits in. A cell is placed only where the file
+    read again still holds what was read there (its value, or its key for an entry's key), so a file
+    changed during the run leaves a finding or related location without a place rather than at other
+    text. A typo in the kind's options gets a "did you mean" for the nearest field, not for the typo
+    itself.
   - When a relation the rule reads takes a value from the environment anywhere in its definition, a
     field's `where:` and `transform:` included, or reads one that does (a join side, an `in:` list's
     relation, a `set` target), every finding's path and message are redacted, as for a version 1
@@ -1152,6 +1153,11 @@ policy-test package the user does not trust.
   rules, `json_schema_passes`, the cross-file rules' `extract:`, `pinned_references` and the
   structured fixes all take from it, and so does `alint_core::Format::parse`, which may now wait for
   another thread's YAML parse.
+- **A JSONC file (a `.json` file with comments or trailing commas) is read from one copy of its
+  text without them,** where the copy was made in two passes that held the text four times over as
+  characters in between. Checking an 8 MB JSONC file with a `json_path_equals` rule peaks at 37 MB
+  RSS, against 70 MB, and runs half the instructions; 3,000 small `tsconfig.json` files run 13%
+  fewer. What the copy holds is unchanged, so every rule reads the same values.
 - **YAML files of 10 KB and more cost more time and memory to read than in 0.22:** +9% to +54% wall
   time and 1.3x to 2.9x peak memory. ayaml 0.1.2 holds about 65 bytes of heap per input byte while
   it parses, where libyaml held 35 to 39 (asamarts/ayaml#163). The v0.23.0 release waits for an
