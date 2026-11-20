@@ -257,7 +257,9 @@ fn members(
     rows: &mut Rows,
     limits: &Limits,
 ) -> usize {
-    let Ok(tree) = format.parse(text) else {
+    // What the parse held besides the tree: a JSONC text's stripped copy,
+    // TOML's tokens.
+    let Ok((tree, parsing)) = format.parse_held(text) else {
         return 0;
     };
     // The string rows asked for, as the adapter numbered them.
@@ -280,6 +282,7 @@ fn members(
         }
     }
     let (paths, tree_bytes) = key_paths(&tree, &asked);
+    let tree_bytes = tree_bytes + parsing;
     let ordinals: Vec<u32> = asked.iter().map(|(ordinal, _)| *ordinal).collect();
     // The tree is let go before the entries are walked: the paths name
     // what it was asked for.

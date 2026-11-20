@@ -4,7 +4,10 @@
 //! ([`find_spans`]) counts them, so the run's byte budget bounds them.
 //! Its figure once missed the parse its entries are read from (a JSON
 //! syntax tree, YAML's events), most of what placing held: a 13.6 MB JSON
-//! file held about 100 MB more to place one value.
+//! file held about 100 MB more to place one value. It then missed what the
+//! parses hold besides their trees: a JSONC file's copy with its comments
+//! dropped (8 MB held for an 8 MB comment, 464 B counted), and the tokens
+//! the TOML lexer reserves room for, about seven times the text.
 //!
 //! A binary of its own: it installs a counting global allocator, which counts
 //! every allocation in the process. Its one test runs on one thread, so the
@@ -124,18 +127,60 @@ fn first_span(format: &str, small: &str, entry: bool) -> Span {
     }
 }
 
+/// A document of `format` whose first member is `wide`'s (`target`), and
+/// whose second holds `long` as its value: an 8 MB value read whole by
+/// each parse. JSON's is JSONC (a trailing comma, or a comment of 8 MB
+/// when `comment`), which the guards read again with its comments and
+/// trailing commas dropped.
+fn long(format: &str, comment: bool) -> String {
+    let long = "x".repeat(8 << 20);
+    match (format, comment) {
+        ("json", true) => format!("{{\"target\": \"t\",\n\"k0\": \"v0\" /* {long} */}}\n"),
+        ("json", false) => format!("{{\"target\": \"t\",\n\"k0\": \"{long}\",\n}}\n"),
+        _ => format!("target = \"t\"\nk0 = \"{long}\"\n"),
+    }
+}
+
 #[test]
 fn placing_counts_the_parse_it_reads_entries_from() {
-    for (format, entry, width) in [
-        ("json", false, 500_000),
-        ("json", true, 500_000),
-        ("toml", false, 60_000),
-        ("toml", true, 60_000),
-        ("yaml", false, 100_000),
-        ("yaml", true, 100_000),
-    ] {
+    // Each case: what it is, the span to place, the document to place it
+    // in, and whether it has a place there.
+    let mut cases = Vec::new();
+    let mut add = |label: &str, format: &str, entry: bool, large: String| {
         let span = first_span(format, &wide(format, 1), entry);
-        let large = wide(format, width);
+        let kind = if entry { "entry" } else { "read" };
+        cases.push((format!("{label} {kind}"), span, large, true));
+    };
+    for (format, width) in [("json", 500_000), ("toml", 60_000), ("yaml", 100_000)] {
+        for entry in [false, true] {
+            add(
+                &format!("{format} wide"),
+                format,
+                entry,
+                wide(format, width),
+            );
+        }
+    }
+    for (label, format, comment) in [
+        ("jsonc comment", "json", true),
+        ("jsonc string", "json", false),
+        ("toml string", "toml", false),
+    ] {
+        for entry in [false, true] {
+            add(label, format, entry, long(format, comment));
+        }
+    }
+    // A value in an array has no place, but finding so parses the document.
+    let reader = Reader::Read {
+        read: Read::Toml("$.a[*]".into()),
+        optional: false,
+    };
+    let span = span("a.toml", "a = [\"t\"]\n", reader, FieldSource::Value);
+    let large = format!("a = [\"t\", \"{}\"]\n", "x".repeat(8 << 20));
+    cases.push(("toml array read".to_string(), span, large, false));
+
+    let mut under = Vec::new();
+    for (label, span, large, placed) in cases {
         // The allocator keeps the highest count, which cannot be reset: an
         // allocation never written to (so never paged in) lifts the count
         // to it, so placing's own peak passes it and is measured.
@@ -146,13 +191,15 @@ fn placing_counts_the_parse_it_reads_entries_from() {
         let peak = HEAP.max_allocated() - before;
         drop(ballast);
         let line = format!(
-            "{format} {}, {} bytes: placing peaks at {peak} B, counts {held} B",
-            if entry { "entry" } else { "read" },
+            "{label}, {} bytes: placing peaks at {peak} B, counts {held} B",
             large.len()
         );
         eprintln!("{line}");
-        assert!(found[0].is_some(), "{line}");
+        assert_eq!(found[0].is_some(), placed, "{line}");
         assert!(HEAP.max_allocated() > high, "not measured: {line}");
-        assert!(held * FACTOR >= peak, "{line}");
+        if held * FACTOR < peak {
+            under.push(line);
+        }
     }
+    assert!(under.is_empty(), "counted under half the peak: {under:#?}");
 }

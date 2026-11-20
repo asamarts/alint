@@ -28,7 +28,7 @@ impl<'t> JsonSyntax<'t> {
     /// now, so its guards (size, depth and dialect) passed: they do not
     /// read it whole once more.
     pub(crate) fn parsed(text: &'t str) -> Result<Self, EntryRowsError> {
-        Self::read(text, false)
+        Self::read(text, None)
     }
 
     /// The syntax tree of `text`, read through [`Format::parse`]'s guards
@@ -36,11 +36,15 @@ impl<'t> JsonSyntax<'t> {
     pub(crate) fn guarded(text: &'t str) -> Result<Self, EntryRowsError> {
         #[cfg(test)]
         super::tests::JSON_GUARDS.with(|guards| guards.set(guards.get() + 1));
-        Format::Json.parse(text).map_err(EntryRowsError::Parse)?;
-        Self::read(text, true)
+        let (_, copied) = Format::Json
+            .parse_held(text)
+            .map_err(EntryRowsError::Parse)?;
+        Self::read(text, Some(copied))
     }
 
-    fn read(text: &'t str, guarded: bool) -> Result<Self, EntryRowsError> {
+    /// The tree of `text`; `guarded` with what the guards held besides
+    /// their tree (a JSONC text's stripped copy) when they read it first.
+    fn read(text: &'t str, guarded: Option<usize>) -> Result<Self, EntryRowsError> {
         let stripped = text.trim_start_matches('\u{feff}');
         let offset = text.len() - stripped.len();
         let root = parse_to_ast(
@@ -59,7 +63,7 @@ impl<'t> JsonSyntax<'t> {
             held: 0,
         };
         let (tree, guards) = syntax.sizes();
-        syntax.held = if guarded { tree.max(guards) } else { tree };
+        syntax.held = guarded.map_or(tree, |copied| tree.max(guards + copied));
         Ok(syntax)
     }
 
