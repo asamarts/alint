@@ -1823,7 +1823,66 @@ slice projects to:
 | other | 60% | 61% |
 | Pooled | 55% | 58% |
 
-Phase 8 confirms these projections.
+**Phase 8 re-scoring (2026-11-20).** Phase 8 audited all 69 units of ADR-0033's projected set
+(43 B-config and 26 B-adapter with `needs: entry-values`) against the shipped `version: 2`
+relation evaluator and `constraint` kind, verifying non-trivial shapes on the release binary
+([`v0.23/corpus-stratum-log.md`](v0.23/corpus-stratum-log.md), "Phase 8 re-scoring"). 39 units
+are confirmed clean A (30 B-config and 9 entry-values), 6 move from B to C (3 via self-disjoint
+`set` to assert emptiness, awaiting `bounded-count` or inline literal `set` targets; 3 where the
+source reader stays a layout-dependent regex), and 24 remain B. Separately, `entries:` key
+selection promotes 4 C units cleanly to A (`strapi-06`, `wsdk-74`, `thunderbird-android-b03` and
+`thunderbird-android-53`).
+
+| Family | Units | Non-D | Today | ADR-0033 projected | Phase 8 (projected set) | Phase 8 (+C->A) | Moved B->C |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| `locale` | 134 | 114 | 22% | 35% | 28% (+7) | 28% (+7) | 2 |
+| `dep-version` | 170 | 104 | 43% | 61% | 54% (+11) | 57% (+14) | 1 |
+| `toolchain-pin` | 81 | 65 | 63% | 63% | 63% (+0) | 63% (+0) | 0 |
+| other | 1,173 | 677 | 56% | 61% | 59% (+21) | 59% (+22) | 3 |
+| Pooled | 1,558 | 960 | 51% | 58% | 55% (+39) | 55% (+43) | 6 |
+
+The 24 units that stay B account for the gap against ADR-0033's +69 projection and point to six
+concrete v0.24 items: general duplicate-key detection (`mattermost-56` and `zulip-28`, where binary
+verification showed `entries: leaves: true` misses duplicate non-leaf YAML keys with disjoint
+subtrees and keys inside YAML sequences; gap B1), per-manifest two-set comparison and anti-joins
+(`fluentui-24`, `trpc-07`), multi-field array-of-objects extraction and string transforms (#592;
+12 units), negated equality (`element-web-05`, `thunderbird-android-55`), mixed-reader unions and
+folded/pair exemptions (`mattermost-27`, `rushstack-01`, `nextcloud-b02` whose equality half works
+via `join` + row-level `equal`, `rushstack-47`), and block-scoped code literals (`forem-48`,
+`wsdk-06`).
+
+**Phase 8 section 12.1 measurements (2026-11-20).**
+- **Conformance policies and `alint test` cases:** 14 scenarios (7 passing, 7 failing) under
+  `crates/alint-e2e/scenarios/check/version_two/conformance/` cover dependency version consistency
+  (`jest-23`, `trpc-05`, `yarnpkg-berry-01`), merged per-locale key parity (`forem-01`), per-file
+  locale key parity, toolchain-pin consistency (`signal-desktop-28`), and aliased local `extends:`
+  composition.
+- **Specialized v1 spellings stay shorter**, and
+  [`docs/site/configuration/version-2.md`](../site/configuration/version-2.md) shows both:
+  per-file JSON locale parity is 8 non-comment lines (158 B) in v1 `key_parity` vs 17 lines
+  (388 B) in v2 `constraint` `set` (YAML: 9 vs 18 lines); `signal-desktop-28` toolchain pins are
+  11 lines (391 B) in v1 `cross_file` `equals` vs 15 lines (561 B) in v2 `constraint` `union` +
+  `equal` (multi-surface Node pins via `toolchain-pins@v1`: 8 lines vs 15 lines). Dependency
+  version consistency has no v1 spelling and takes 19 to 24 lines in v2.
+- **Performance** (release binary, Linux x86_64; median wall-clock and peak RSS via `hyperfine`
+  `--shell=none`, deterministic instructions `Ir` via Callgrind):
+
+  | Case | v1 median / `Ir` / RSS | v2 median / `Ir` / RSS | v2 / v1 (`Ir`, RSS) |
+  |---|---|---|---|
+  | Locale JSON 10k rows (pass) | 41.6 ms / 284.7M / 20.1 MiB | 61.9 ms / 438.7M / 25.1 MiB | 1.54x `Ir`, 1.25x RSS |
+  | Locale JSON 100k rows (pass) | 360.2 ms / 3,134.8M / 62.5 MiB | 840.3 ms / 4,703.2M / 113.0 MiB | 1.50x `Ir`, 1.81x RSS |
+  | Locale YAML 10k rows (`strip-root`, pass) | 57.6 ms / 347.7M / 20.8 MiB | 117.9 ms / 613.3M / 28.7 MiB | 1.76x `Ir`, 1.38x RSS |
+  | Toolchain pins (`signal-desktop-28`, 10k tree, pass) | 22.3 ms / 155.2M / 16.6 MiB | 22.8 ms / 157.3M / 16.0 MiB | 1.01x `Ir`, 0.96x RSS |
+  | Toolchain pins (multi-surface Node, 10k tree, pass) | 25.5 ms / 188.9M / 17.1 MiB | 24.1 ms / 168.3M / 16.1 MiB | 0.89x `Ir`, 0.94x RSS |
+  | Dependency versions, 100 pkgs (4k rows, pass) | n/a | 39.6 ms / 100.6M / 19.1 MiB | linear scaling |
+  | Dependency versions, 500 pkgs (25k rows, pass) | n/a | 185.3 ms / 539.0M / 39.3 MiB | linear scaling |
+  | Dependency versions, 1,000 pkgs (50k rows, pass) | n/a | 379.7 ms / 1,065.7M / 64.3 MiB | 1.98x `Ir` vs 500 pkgs |
+
+- **Fail-loud, evidence and trust:** Phase 7's mutation sweep left zero empty-success survivors on
+  `constraint`'s error, truncation and type-mismatch paths; `related_locations_contract.rs` holds
+  JSON, SARIF and the language server to every related location across all three assertion
+  families; and `version_two.rs` plus the `version_two` scenarios hold local `extends:` alias
+  resolution and refuse bundled, remote, nested and inline `version: 2` configs.
 
 **The demand is real.**
 - Locale checks are gated in all ten i18n repositories.
@@ -1890,10 +1949,15 @@ before implementation):
    - selecting JSON member names, which would turn line-regex readings of map keys into exact
      rules.
 
-**Stop rule baseline.** Section 11.1's stop rule asks whether the share of demand expressible by
-configuration moves after Phase 3. Its baseline is the Today column above, per family. Phase 8
-re-scores the same units with the shipped slice and compares the result with ADR-0033's
-projections above.
+**Stop rule verdict (2026-11-20).** Section 11.1's stop rule asks whether the share of demand
+expressible by configuration moves after Phase 3. Against the Today baseline above, the shipped
+v0.23 slice moves every targeted family cleanly: `dep-version` moves from 43% to 54% on the
+projected set (57% with `entries:` C->A promotions; 41% to 55%/57% in the JavaScript monorepo
+stratum), `locale` moves from 22% to 28%, `other` moves from 56% to 59%, and pooled coverage moves
+from 51% to 55% (+39 projected units confirmed A, +4 C->A promotions, and +6 moving from B to C),
+while `toolchain-pin` stays at 63% as projected (version comparison waits for a dedicated operator).
+The stop rule is met, and Phase 3 continues into v0.24 for the remaining assertion families and
+adapters.
 
 **Limits of the measurement:**
 - Analysts were agents under the v0.12 protocol. Each repository had an adversarial

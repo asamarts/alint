@@ -1,0 +1,28 @@
+test_version: 1
+name: conformance aliased local extends composes a constraint policy that passes when ranges agree
+tags: [check, constraint, cross_file, version_two, extends, conformance, passing]
+
+given:
+  tree:
+    packages:
+      api:
+        package.json: '{"name": "api", "dependencies": {"zod": "^3.23.8"}}'
+      web:
+        package.json: '{"name": "web", "dependencies": {"zod": "^3.23.8", "api": "workspace:*"}}'
+  config: |
+    version: 2
+    extends:
+      - url: ./support/shared_deps.yaml
+        as: deps
+    rules:
+      - id: one-range-per-dependency
+        kind: constraint
+        input: deps.dependency-ranges
+        assert: { unique: { key: [dependency], determines: [range] } }
+        level: error
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

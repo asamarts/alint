@@ -1,0 +1,50 @@
+test_version: 1
+name: conformance aliased local extends composes a constraint policy that fires on drifted ranges
+tags: [check, constraint, cross_file, version_two, extends, conformance, failing]
+
+given:
+  tree:
+    packages:
+      api:
+        package.json: '{"name": "api", "dependencies": {"zod": "^3.23.8"}}'
+      web:
+        package.json: '{"name": "web", "dependencies": {"zod": "^3.22.0"}}'
+  config: |
+    version: 2
+    extends:
+      - url: ./support/shared_deps.yaml
+        as: deps
+    rules:
+      - id: one-range-per-dependency
+        kind: constraint
+        input: deps.dependency-ranges
+        assert: { unique: { key: [dependency], determines: [range] } }
+        level: error
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - rule: one-range-per-dependency
+        level: error
+        path: packages/api/package.json
+        line: 1
+        column: 41
+        end_line: 1
+        end_column: 50
+        message:
+          exact: 'rows with `dependency` "zod" disagree on `range`: "^3.23.8" here; "^3.22.0" in 1 row'
+        related:
+          - {label: a row with another value, path: packages/web/package.json, line: 1, column: 41, end_line: 1, end_column: 50}
+      - rule: one-range-per-dependency
+        level: error
+        path: packages/web/package.json
+        line: 1
+        column: 41
+        end_line: 1
+        end_column: 50
+        message:
+          exact: 'rows with `dependency` "zod" disagree on `range`: "^3.22.0" here; "^3.23.8" in 1 row'
+        related:
+          - {label: a row with another value, path: packages/api/package.json, line: 1, column: 41, end_line: 1, end_column: 50}

@@ -1,0 +1,14 @@
+version: 2
+selectors:
+  manifests:
+    paths: "packages/*/package.json"
+relations:
+  dependency-ranges:
+    from: manifests
+    entries:
+      format: json
+      at: ["$.dependencies", "$.devDependencies"]
+    fields: { dependency: entry.key, range: entry.value }
+    where:
+      range: { not_matches: "^workspace:" }
+rules: []

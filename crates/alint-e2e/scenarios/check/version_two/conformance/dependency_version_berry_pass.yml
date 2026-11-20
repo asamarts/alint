@@ -1,0 +1,76 @@
+test_version: 1
+name: conformance dependency version consistency (yarnpkg-berry-01) passes when non-docusaurus workspaces agree and workspace packages are exempt
+tags: [check, constraint, cross_file, version_two, conformance, passing]
+
+given:
+  tree:
+    packages:
+      yarnpkg-core:
+        package.json: |
+          {
+            "name": "@yarnpkg/core",
+            "dependencies": {
+              "clipanion": "^4.0.0"
+            }
+          }
+      plugin-npm:
+        package.json: |
+          {
+            "name": "@yarnpkg/plugin-npm",
+            "dependencies": {
+              "clipanion": "^4.0.0"
+            },
+            "devDependencies": {
+              "@yarnpkg/core": "workspace:^"
+            }
+          }
+      plugin-patch:
+        package.json: |
+          {
+            "name": "@yarnpkg/plugin-patch",
+            "dependencies": {
+              "clipanion": "^4.0.0"
+            },
+            "devDependencies": {
+              "@yarnpkg/core": "^4.5.0"
+            }
+          }
+      docusaurus:
+        package.json: |
+          {
+            "name": "@yarnpkg/docusaurus",
+            "dependencies": {
+              "clipanion": "^3.2.1"
+            }
+          }
+  config: |
+    version: 2
+    selectors:
+      workspace-manifests:
+        paths: ["packages/*/package.json", "!packages/docusaurus/package.json"]
+    relations:
+      workspace-names:
+        from: workspace-manifests
+        read: { json: "$.name" }
+        fields: { name: value }
+      dependency-ranges:
+        from: workspace-manifests
+        entries:
+          format: json
+          at: ["$.dependencies", "$.devDependencies", "$.optionalDependencies"]
+        fields: { field: entry.parent, dependency: entry.key, range: entry.value }
+        where:
+          range: { not_matches: "^workspace:" }
+          dependency: { not_in: [{ relation: workspace-names, field: name }] }
+    rules:
+      - id: one-range-per-dependency
+        kind: constraint
+        input: dependency-ranges
+        assert: { unique: { key: [dependency], determines: [range] } }
+        level: error
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

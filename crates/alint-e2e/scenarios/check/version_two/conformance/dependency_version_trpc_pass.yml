@@ -1,0 +1,64 @@
+test_version: 1
+name: conformance dependency version consistency (trpc-05) passes when semver ranges agree and protocol specifiers are ignored
+tags: [check, constraint, cross_file, version_two, conformance, passing]
+
+given:
+  tree:
+    package.json: |
+      {
+        "name": "trpc-root",
+        "devDependencies": {
+          "typescript": "^5.9.2"
+        }
+      }
+    packages:
+      client:
+        package.json: |
+          {
+            "name": "@trpc/client",
+            "dependencies": {
+              "@trpc/server": "workspace:*",
+              "zod": "^3.23.8"
+            },
+            "devDependencies": {
+              "typescript": "catalog:"
+            }
+          }
+      server:
+        package.json: |
+          {
+            "name": "@trpc/server",
+            "dependencies": {
+              "zod": "^3.23.8"
+            },
+            "devDependencies": {
+              "typescript": "^5.9.2",
+              "zod-v3": "npm:zod@^3.22.0"
+            }
+          }
+  config: |
+    version: 2
+    selectors:
+      workspace-manifests:
+        paths: ["package.json", "packages/*/package.json"]
+    relations:
+      dependency-ranges:
+        from: workspace-manifests
+        entries:
+          format: json
+          at: ["$.dependencies", "$.devDependencies", "$.optionalDependencies"]
+        fields: { field: entry.parent, dependency: entry.key, range: entry.value }
+        where:
+          range: { not_matches: "^(catalog|npm|workspace):" }
+    rules:
+      - id: one-range-per-dependency
+        kind: constraint
+        input: dependency-ranges
+        assert: { unique: { key: [dependency], determines: [range] } }
+        level: error
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []
