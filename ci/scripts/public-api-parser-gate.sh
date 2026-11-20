@@ -157,8 +157,13 @@ PLATFORM_ALLOWLIST=(
   # `tracing::debug!`, with a no-op twin for release builds), and the count of
   # the paths `Scope::matches` tests (a private thread-local counter, the
   # statement that adds to it, and the bodies of the hidden
-  # `scope_match_count` that reads it, `None` in a release build). None
+  # `scope_match_count` that reads it, `None` in a release build), and the
+  # check that an `extends:` merge's replay leaves a rule as the real merge
+  # would (a private function comparing two `Mapping`s' debug forms with
+  # `debug_assert_eq!`, the copy it starts from and the call to it). None
   # declares public API or names a parser type.
+  "crates/alint-dsl/src/merge.rs|cfg(debug_assertions)|fn check_replay|debug_assert_eq!, format!"
+  "crates/alint-dsl/src/merge.rs|cfg(debug_assertions)|in fn add"
   "crates/alint-core/src/engine/fix.rs|cfg(debug_assertions)|in fn fix|assert!"
   "crates/alint-core/src/registry.rs|cfg(debug_assertions)|fn assert_dispatch_and_content|assert!, assert_eq!, panic!"
   "crates/alint-core/src/registry.rs|cfg(debug_assertions)|fn assert_instance_conformance|assert!, assert_eq!, matches!"
