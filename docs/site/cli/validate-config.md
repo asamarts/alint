@@ -23,9 +23,9 @@ alint validate-config path/to/.alint.yml
 ```
 
 Check that a config starts no process (no command rule, spawning fix,
-`custom:` fact or rule that runs Git), fetches no remote `extends:` and needs
-no environment value, for example before linting a repository you do not
-trust:
+`custom:` fact or rule that runs Git), fetches no remote `extends:`, does not
+set `allow_out_of_root:`, and needs no environment value, for example before
+linting a repository you do not trust:
 
 ```bash
 alint validate-config --untrusted

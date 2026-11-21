@@ -14,7 +14,12 @@ Accepted (2026-11-15). Settles the security-advisory decision that phase 10 of t
 [ADR-0043](0043-trust-and-disclosure-decisions-from-the-post-v0221-audit.md) (2026-11-16) widens
 decision 1 to the holes the post-v0.22.1 audit found, and corrects its count: #527 fixed eight
 holes, not the three named here. It also widens decision 2's condition to an ayaml release with
-the fixes of every gap alint filed.
+the fixes of every gap alint filed. On 2026-11-20, `ayaml` 0.2.2 (#605) met decision 2's
+condition by fixing every ayaml defect and removing all four defect entries from the allowlist;
+on 2026-11-21, the owner approved the four non-defect entries added after this ADR in #530
+(`empty-flow-implicit-key`, `negative-zero-in-an-unsigned-field`, `rule-that-is-null`, and
+location class `verbatim-tag-that-names-nothing`), completing phase 9 sign-off for the 34
+deviations and 8 location classes shipped in v0.23.0.
 
 ## Context
 

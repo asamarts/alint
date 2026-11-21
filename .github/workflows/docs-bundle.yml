@@ -92,8 +92,7 @@ jobs:
           # behaviour so this can't surface anything unreleased. The whole
           # docs/site/concepts/ tree is overlaid from main (the Phase 6 redesign
           # restructured concepts into grouped subdirs and renamed/folded the old
-          # flat pages), so the concepts ship without a release; getting-started/
-          # installation is overlaid for the same presentation-fix reason. The
+          # flat pages), so the concepts ship without a release. The
           # GitHub Actions guide is also main-tracked because its immutable
           # release-commit pin can only be written after the tag exists. Like
           # reference docs these are release-gated below (strip-since). The one
@@ -124,7 +123,7 @@ jobs:
           # they stay overlaid for released-doc fixes.
           git fetch --quiet origin main
           git checkout origin/main -- docs/site/reference docs/design/ARCHITECTURE.md docs/design/ROADMAP.md roadmap.json \
-            docs/site/about/architecture-diagrams.md docs/site/getting-started/installation.md \
+            docs/site/about/architecture-diagrams.md \
             docs/site/integrations/github-actions.md
           # Concepts: overlay the whole tree from main. `git checkout` adds and
           # overwrites but never DELETES, so remove the tag's obsolete flat
@@ -186,7 +185,6 @@ jobs:
             docs/site/configuration/variable-interpolation.md \
             docs/site/configuration/patterns.md \
             docs/site/cookbook/suggest.md \
-            docs/site/getting-started/installation.md \
             docs/site/integrations/github-actions.md \
             docs/design/ARCHITECTURE.md \
             docs/design/ROADMAP.md

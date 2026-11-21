@@ -140,44 +140,71 @@ command line: it refuses every rule, fix and fact that starts a process or runs 
 `--changed` and `--base`), refuses a remote `extends:` before anything is fetched and a top-level
 `allow_out_of_root:`, which would let the config read and write outside the repository, and gives
 the config an empty environment. `--no-spawn` refuses the processes alone: the config still fetches
-the remote `extends:` it names and reads the environment values it names, and an `extends:` URL
-built from those values carries them to the host it names. The language server (`alint lsp`)
-runs none of these until the editor says the workspace is trusted. Everything else (a nested or
-extended config, and the repository's file contents) is treated as untrusted input. The defensive
-posture is:
+the remote `extends:` it names, honors `allow_out_of_root:`, and reads the environment values it
+names, and an `extends:` URL built from those values carries them to the host it names. The
+language server (`alint lsp`) runs none of these until the editor says the workspace is trusted.
+Everything else (a nested or extended config, and the repository's file contents) is treated as
+untrusted input. The defensive posture is:
 
 - **No network access by default.** The only network-touching feature is
   `extends: https://...` URLs the user explicitly puts in their config; those
-  are SRI-pinned, so a swap on the upstream URL fails verification.
+  are SRI-pinned, so a swap on the upstream URL fails verification. Schemes
+  match case-insensitively (`https://`, `alint://bundled/`), plain `http://`
+  and other `<scheme>://` URLs are refused, and userinfo, query strings and
+  fragments are stripped from error messages.
 - **Path-traversal hardened.** All paths are validated to stay within the
   repo root. Symlinks are honoured per the `no_symlinks` rule's verdict. A
   fix never writes or reads a Git directory (`.git` in the spellings Git's
-  own checks name, such as `.GIT`, `.git.` and `git~1`, or through a symlink
-  to one): a file there would be configuration Git runs commands from. A
-  Windows short name Git's checks do not name (`GIT~2`, or a hashed one)
-  passes. The walk leaves out a symlink whose
+  own checks name, such as `.GIT`, `.git.` and Windows short names
+  `git~1`..`git~4`, or through a symlink to one): a file there would be
+  configuration Git runs commands from. Only a hashed Windows short name past
+  `~4` passes. The walk leaves out a symlink whose
   target is in a Git directory, so no content fix edits `.git/config` under
-  another name. No rule reads a Git directory either, from any configuration:
+  another name. No rule reads a Git directory either, from any configuration
+  (including out-of-root paths under `allow_out_of_root:`):
   `.git/config` can hold credentials (the `http.<url>.extraheader` that
   `actions/checkout` persists). A path a rule names there is a load error, and
   one a symlink leads into is refused when it is read. The baseline file a
   config names (`baseline:`) is read only inside the repo root, outside a Git
-  directory; the `--baseline` flag names one anywhere.
-- **Files read whole are bounded.** The walk reads an ignore file
-  (`.gitignore`, `.ignore`, `info/exclude` and a linked worktree's `.git` file
-  and `commondir` on the way to it, the global excludes file) only when it is
-  a regular file of at most 32 MiB, and stops with an error naming one it will
-  not read (a global excludes file that is not a regular file is skipped
-  instead): a symlink to `/dev/zero` or a FIFO is never read. A baseline file
-  is read only when it is a regular file of at most 256 MiB.
+  directory; `alint baseline` refuses to write into a Git directory directly
+  or through a symlink; the `--baseline` flag names a file anywhere.
+  `alint export-agents-md` writes atomically and refuses symlinks and special
+  files. Nested configs (`nested_configs: true`) confine globs and
+  `{path}`/`{dir}` templates strictly to their subtree, refusing absolute
+  paths, Windows drive prefixes, `..` traversal segments and non-subtree
+  tokens.
+- **Files read whole and parser work are bounded.** The walk reads an ignore
+  file (`.gitignore`, `.ignore`, `info/exclude` and a linked worktree's `.git`
+  file and `commondir` on the way to it, the global excludes file) only when
+  it is a regular file of at most 32 MiB, and stops with an error naming one
+  it will not read (a global excludes file that is not a regular file is
+  skipped instead): a symlink to `/dev/zero` or a FIFO is never read.
+  Configurations, local `extends:` sources, `.alint.d/` drop-ins, nested
+  configs and policy-test YAML files are regular files of at most 32 MiB;
+  `extends:` loading is capped at 64 MiB of sources and 4,194,304 entries,
+  template expansion at 64 MiB total (32 MiB per rendered string), YAML
+  nesting at 128 levels (structured YAML fixes walk parser events iteratively
+  without expanding aliases), and `pinned_references` merge-key and GitLab
+  `extends:` DAG resolution are memoized under a work budget. A baseline file
+  is read only when it is a regular file of at most 256 MiB, `.git/HEAD` up
+  to 64 KiB, and disk reads in `alint lsp` overlays, `alint init`, `alint
+  suggest`, `alint export-agents-md --inline`, `alint fix` and `alint-testkit`
+  are bounded to regular files.
+- **Output and editor links are sanitized.** User- or config-supplied
+  `policy_url` links render as clickable links in LSP hover and
+  `CodeDescription`, Markdown reports, terminal OSC 8 hyperlinks and
+  `export-agents-md` only when their scheme is `http` or `https`; terminal
+  output sanitizes control, bidi and zero-width characters; and findings whose
+  path is redacted omit paths, line/column numbers and related locations
+  across all formats and LSP notes.
 - **Plugin trust gating.** The `command` rule kind shells out to external
   CLIs; it's gated to the user's top-level config (extends'd configs cannot
   introduce a `command` rule). A fix of a rule an `extends:`'d ruleset or a
   nested config shaped never writes alint's own configuration (`.alint.yml`
   and the other discovery names, `.alint.d/`, the policy tests under
   `alint-tests/`, the Windows short name of any of them such as `ALINT~1.YML`,
-  or a file the configuration was loaded from), so it cannot add such a rule
-  for the next run, and never
+  or a file the configuration was loaded from, including alternate Windows and
+  HFS+ spellings), so it cannot add such a rule for the next run, and never
   writes or reads (`content_from`, `sync_from`) outside the repo root,
   whatever `allow_out_of_root` says. Such a rule's check reads nothing
   outside the root either: `allow_out_of_root` grants the user's own
@@ -239,13 +266,15 @@ posture is:
 - **Policy tests start without host authority.** `alint test` runs a rule,
   fixer or custom fact that spawns a process, at any `require:` depth, or
   reads the host keyring, only when the test declares the capability and the
-  command line grants it (`--allow-spawn`, `--allow-host-keyring`). A test's
-  tree, fixture and fixes stay in its sandbox: every symlink in its
+  command line grants it (`--allow-spawn`, `--allow-host-keyring`); both flags
+  are refused alongside `--no-spawn` or `--untrusted`. A test's
+  tree, fixture (capped at 64 MiB copied, counting each hard link) and fixes
+  stay in its sandbox: every symlink in its
   repository leads inside it. The Git commands the runner runs itself get
   none of `given.env` and read only the repository `given.git` makes, which
   each names: Git takes no fixture directory for a repository, a fix cannot
   write one, and without `given.git` no Git runs. A test's conditions read
-  `given.env` and the runner's sandbox values, not the host's environment.
+  only `given.env`, not the host's environment or the runner's sandbox paths.
 - **No telemetry.** alint sends nothing over the network except the
   user-explicit `extends:` URLs above.
 - **Reproducible builds.** `Cargo.lock` is committed. CI installs toolchains

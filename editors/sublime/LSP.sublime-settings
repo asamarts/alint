@@ -15,9 +15,9 @@
       "schemes": ["file"],
       // Until it is told the workspace is trusted, the server runs nothing
       // the repository's config could start (command rules, rules that run
-      // Git, custom facts), fetches no remote `extends:` and reads no
-      // environment value. Set "trusted" to true to trust every workspace
-      // you open.
+      // Git, custom facts), fetches no remote `extends:`, refuses
+      // `allow_out_of_root:`, and reads no environment value. Set "trusted"
+      // to true to trust every workspace you open.
       "initializationOptions": { "trusted": false }
     }
   }

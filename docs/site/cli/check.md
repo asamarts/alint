@@ -120,11 +120,11 @@ block.
   anything is fetched, and `allow_out_of_root:`, which would let the config
   read and write outside the repository; and gives the config an empty
   environment, so `{{env.NAME}}` takes its `default(...)` (or fails to load
-  without one) and `env.NAME` in a `when:` is unset. `--no-spawn` alone leaves those two open:
-  the config still fetches its remote `extends:` and reads the environment,
-  and an `extends:` URL built from environment values carries them to the
-  host it names. Use `--untrusted`, or your own config (`-c`), for a
-  repository you do not trust. The flag is global, like `--no-spawn`.
+  without one) and `env.NAME` in a `when:` is unset. `--no-spawn` alone leaves those three open:
+  the config still fetches its remote `extends:`, may set `allow_out_of_root:`, and reads the
+  environment, and an `extends:` URL built from environment values carries them to the host it
+  names. Use `--untrusted`, or your own config (`-c`), for a repository you do not trust. The flag
+  is global, like `--no-spawn`.
 - **`--as-of YYYY-MM-DD`** sets the UTC reference date for time-dependent
   rules; `ALINT_AS_OF` is the environment equivalent. Without either, alint
   uses the HEAD commit's committer timestamp, so repeated checks of one commit

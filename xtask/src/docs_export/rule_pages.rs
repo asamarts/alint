@@ -108,7 +108,13 @@ pub(super) fn generate_rules_pages(
             continue;
         }
         if lc.starts_with("fix operations") {
-            emit_concept_page(target_dir, "fix-operations", "Fix operations", &h2.body)?;
+            emit_concept_page(
+                target_dir,
+                "fix-operations",
+                "Fix operations",
+                &h2.body,
+                released,
+            )?;
             continue;
         }
         if lc.starts_with("nested") {
@@ -117,6 +123,7 @@ pub(super) fn generate_rules_pages(
                 "nested-configs",
                 "Nested .alint.yml (monorepo layering)",
                 &h2.body,
+                released,
             )?;
             continue;
         }
@@ -1311,7 +1318,13 @@ pub(crate) fn concept_view_id(slug: &str) -> Option<&'static str> {
 /// Emit a non-rule concept page (Fix operations, Nested
 /// configs). Lives under `concepts/` rather than `rules/` so
 /// the rules tree is purely about rule kinds.
-fn emit_concept_page(target_dir: &Path, slug: &str, title: &str, body: &str) -> Result<()> {
+fn emit_concept_page(
+    target_dir: &Path,
+    slug: &str,
+    title: &str,
+    body: &str,
+    released: Option<crate::rule_options_table::Version>,
+) -> Result<()> {
     let dir = target_dir.join("concepts");
     fs::create_dir_all(&dir)?;
     let mut page = String::new();
@@ -1337,7 +1350,8 @@ fn emit_concept_page(target_dir: &Path, slug: &str, title: &str, body: &str) -> 
         let _ = writeln!(&mut page, "<likec4-view view-id=\"{view}\"></likec4-view>");
         let _ = writeln!(&mut page);
     }
-    page.push_str(&promote_concept_headings(body.trim_start_matches('\n')));
+    let gated = strip_unreleased_prose(body, released);
+    page.push_str(&promote_concept_headings(gated.trim_start_matches('\n')));
     if !page.ends_with('\n') {
         page.push('\n');
     }

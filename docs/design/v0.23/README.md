@@ -742,8 +742,8 @@ as #589, step 3 as #590, and step 4 is the last.
     parallel. Parses over 1 MiB now share a budget of 32 MiB of input in flight, held while the
     parser runs: `Format::parse`, `extract`'s entry rows, the structured-fix span resolver and
     `pinned_references`.
-  - A kbench cell for wall time and RSS of mid-size YAML is not added: `bench-scale` records no
-    RSS, and a new scenario needs a results location the published history does not read
+  - A quiet-host benchmark cell for wall time and RSS of mid-size YAML is not added: `bench-scale`
+    records no RSS, and a new scenario needs a results location the published history does not read
     (#550).
 - 2026-11-16: the audit of everything since v0.22.1.
   - Seven reviewers read #490 to #530, 37 commits, on `main` at e7bb08a57: the engine, templates
@@ -1243,9 +1243,18 @@ as #589, step 3 as #590, and step 4 is the last.
     End-to-end release checks run 0.6% to 8.1% faster on OpenAPI (50 x 37 KB, 1.1 MB, 4.4 MB) at
     0.74x to 0.81x peak RSS, and 32 MiB peak RSS dropped from 4.5 to 6.2 GB to 0.75 to 1.54 GiB.
   - **Corpus replay against v0.22.1 (`corpus-replay.yml` run 44844378906):** 130 repositories: 115
-    identical, 4 expected skips, 0 crashes, 11 explained diffs (8 additive `related_locations` from
-    #590, 2 reworded `java-no-tracked-build` from #509, 1 reworded multi-document parse error on
-    `istio/istio` from #510). Zero unexpected ayaml 0.2.2 diffs.
-  - Next: phase 10 (owner sign-off on the four #530 non-defect allowlist entries, release
-    documentation, CHANGELOG final pass, facts regeneration, `bench-record`, security advisory
-    GHSA-78jj-xfpm-g6px publication, and v0.23.0 release check).
+    identical, 4 expected skips (config fails to load in both versions), 0 crashes, 11 explained
+    diffs (8 additive `related_locations` from #590, 2 reworded `java-no-tracked-build` from #509,
+    1 reworded multi-document parse error on `istio/istio` from #510). Zero unexpected ayaml 0.2.2
+    diffs.
+  - **2026-11-21 owner sign-off and pre-v0.23 audit:** the owner approved the four non-defect
+    #530 allowlist entries (`empty-flow-implicit-key`, `negative-zero-in-an-unsigned-field`,
+    `rule-that-is-null`, and location class `verbatim-tag-that-names-nothing`, recorded in
+    ADR-0040), completing phase 9 sign-off. A full pre-v0.23 audit covering everything since
+    v0.22.0 closed remaining gaps in baseline `.git` write refusal, `nested_configs` subtree
+    confinement, `pinned_references` GitLab `extends:` DAG memoization, `--untrusted`/`--no-spawn`
+    vs `--allow-host-keyring`, out-of-root `.git` and alternate-spelling config-write refusals,
+    v2/nested manifest-scope redaction and `constraint` sensitivity propagation, baseline/SARIF
+    path-order parity, YAML/structured-fix edge cases, and release-pipeline/docs hygiene.
+  - Next: phase 10 (release cut `v0.23.0`, `bench-record`, publishing GHSA-78jj-xfpm-g6px, closing
+    #481, and post-tag follow-up PR for Action pin and `alint:since=0.23.0` unwrapping).

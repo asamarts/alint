@@ -98,7 +98,8 @@ runs a script that is neither in `preflight.sh` nor in this list.
 - `ci/scripts/shell-tests.sh`: every `ci/scripts/test-*.sh` harness, about 3 minutes. Run it when
   you change a script under `ci/scripts/`.
 - `ci/scripts/build.sh`: `cargo build --workspace --locked`, which `test.sh` mostly covers.
-- `ci/scripts/deny.sh` and `ci/scripts/audit.sh`: the advisory gates, which need the network (see
+- `ci/scripts/deny.sh`, `ci/scripts/audit.sh` and `ci/scripts/npm-audit.sh`: the advisory gates
+  (RustSec and the VS Code extension's npm dependencies), which need the network (see
   [Dependency advisories](#dependency-advisories)).
 - `ci/scripts/examples-validate.sh`: every `examples/*/.alint.yml` against the schema.
 - `ci/scripts/demo-drift.sh`: the README demo against the release binary.
@@ -173,7 +174,7 @@ alint.org bump fails CI there.
 rule (`install-snippets-match-workspace-version` in `.alint.yml`), so any
 drift fails CI before publish.
 
-All seven must pass before opening a PR. The wrapper falls through on
+All nine must pass before opening a PR. The wrapper falls through on
 failure (rather than fast-exiting on the first one) so a single run shows
 the full set of things to fix instead of fix-rerun-fix-rerun. Skip a
 specific check while debugging: `PREFLIGHT_SKIP=clippy bash ci/scripts/preflight.sh`.
@@ -228,10 +229,12 @@ there before alint.org rebuilds.
 - `crates/alint-rules/`: rule kinds. Adding a rule kind starts here.
 - `crates/alint-dsl/`: config-file parser + `extends:` resolver.
 - `crates/alint-output/`: formatters (human/json/sarif/...).
+- `crates/alint-lsp/`: language server (`alint lsp`).
 - `crates/alint/`: the CLI binary.
 - `crates/alint-bench/`: synthetic-tree generator + criterion micro-benches.
 - `crates/alint-e2e/`: full end-to-end scenarios in `scenarios/check/<family>/`.
 - `crates/alint-testkit/`: proptest strategies + shared test fixtures.
+- `crates/alint-witforge-consumer/`: generated WIT plugin-contract consumer.
 - `xtask/`: meta-tooling (bench-scale, docs-export, publish-benches).
 
 See [`docs/development/rule-authoring.md`](docs/development/rule-authoring.md)

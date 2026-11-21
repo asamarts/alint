@@ -319,14 +319,14 @@ fn copy_site_tree(
             .extension()
             .and_then(|e| e.to_str())
             .is_some_and(|e| e == "md" || e == "mdx");
-        if released.is_some() && is_markdown {
+        if is_markdown {
             // Release-gate hand-written docs the same way the rule pages are:
             // strip `<!-- alint:since=X -->` blocks newer than the released
-            // version. This matters for docs/site/reference/**, which the
-            // docs-bundle overlays from main (the one leak vector among the
-            // otherwise tag-pinned docs/site tree). A no-op for the unmarked
-            // majority (the stripper fast-paths files with no marker). See
-            // ADR-0007 / docs/design/v0.14/documentation-drift.md P-REF.
+            // version, and unwrap the comment markers unconditionally so no
+            // sentinel comment reaches a published bundle (even when built
+            // without `--released-version` from a release tag). A no-op for
+            // the unmarked majority (the stripper fast-paths files with no
+            // marker). See ADR-0007 / docs/design/v0.14/documentation-drift.md P-REF.
             let body =
                 fs::read_to_string(&entry).with_context(|| format!("read {}", entry.display()))?;
             fs::write(&dest, strip_unreleased_prose(&body, released))

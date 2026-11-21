@@ -19,8 +19,9 @@ full below.
   `core.hooksPath` (Changed, Security).
 - `allow_out_of_root` covers your own rules only, not a ruleset's from `extends:` (Security).
 - The language server runs no command rule, `custom:` fact or Git rule, fetches no remote
-  `extends:` and reads no environment value until the editor says the workspace is trusted;
-  editors other than VS Code need the `trusted` initialization option (Changed, Security).
+  `extends:`, refuses `allow_out_of_root:`, and reads no environment value until the editor says
+  the workspace is trusted; editors other than VS Code need the `trusted` initialization option
+  (Changed, Security).
 - The language server lints each workspace folder with the folder's own config, as `alint check`
   run there; a package's nested `.alint.yml` joins only through `nested_configs: true`. `alint lsp
   --config` and `--no-gitignore` now take effect, and the `--config` file must exist when the
@@ -34,8 +35,8 @@ full below.
 - The human and Markdown fix reports count a fix that ran without resolving its violation as
   `unresolved` (Changed).
 - `alint test` asks for the spawn capability for a spawning rule nested in another rule, and a
-  test's `when:` and `${VAR}` read only the test's environment (`given.env` and the sandbox's
-  values), not the host's (Security).
+  test's `when:` and `${VAR}` read only the test's `given.env`, not the host's environment or the
+  runner's sandbox paths (Security).
 - An ignore file over 32 MiB, or one that is not a regular file, stops the walk; a baseline the
   `baseline:` key names must be a regular file inside the repository; and an absolute local
   `extends:` needs `allow_out_of_root: true` (Security).
@@ -44,8 +45,8 @@ full below.
   merges it, as the [configuration limits](docs/site/configuration/index.md#limits) say. A list
   merges into one config in place (#580), so an entry is charged what it loads, what it brings in,
   and once more each rule and template it merges onto an earlier one of its id, in its own source
-  too; one that an earlier entry naming the same source wrote last is not merged again, nor
-  charged (#567). A flat list of distinct rulesets that override none of each other's rules or
+  too; one that an earlier entry naming the same source wrote last is not merged again, though each
+  consecutive repeat of the entry still counts as one entry (#567). A flat list of distinct rulesets that override none of each other's rules or
   templates, and repeat no id within one, stays within the first bound while they hold at most
   2,097,152 entries in all; the second is reached at 64 entries of a 1 MiB source (Fixed).
 - On Unix, a `.git` another user owns does not mark a repository's top. Run from a subdirectory
@@ -68,7 +69,8 @@ full below.
   the order it writes them, so the one that keeps the shared fingerprint may change
   ([ADR-0047](docs/adr/0047-sarif-tells-apart-a-fingerprint-repeated-within-a-run.md)) (Fixed).
 - Library: `WhenEnv::env` is an `Option<&BTreeMap<String, String>>`; `LspOptions` gains `config`,
-  `no_gitignore`, `no_spawn` and `untrusted`, and `LoadOptions` gains `global_git_excludes`, which
+  `no_gitignore`, `no_spawn` and `untrusted`, and `LoadOptions` gains `global_git_excludes` and
+  `out_of_root_policy` (`OutOfRootPolicy`), which
   breaks a struct literal; YAML values and errors are alint's own types (`alint_core::yaml`) in
   place of `yaml_serde`'s; `Violation`, `Context`, `RuleSpec`, `NestedRuleSpec`, `WalkOptions`,
   `LspOptions` and `LoadOptions` are `#[non_exhaustive]`, as is `alint_core::Error`, so build them
@@ -82,30 +84,35 @@ full below.
 GitHub security advisory GHSA-78jj-xfpm-g6px, published with this release, describes the holes
 below in the policy-test sandbox and in the trust alint gives `extends:` rulesets, nested configs
 and editor workspaces ([ADR-0040](docs/adr/0040-the-v023-advisory-and-the-allowlist-approval.md),
-[ADR-0043](docs/adr/0043-trust-and-disclosure-decisions-from-the-post-v0221-audit.md)). No v0.22.x
+[ADR-0043](docs/adr/0043-trust-and-disclosure-decisions-from-the-post-v0221-audit.md),
+[ADR-0044](docs/adr/0044-untrusted-runs-git-as-a-process-and-a-wider-memory-gate.md),
+[ADR-0046](docs/adr/0046-a-linear-extends-merge-sealed-options-and-the-rounds-open-questions.md)). No v0.22.x
 patch release follows: upgrade to v0.23.0. Until then, run `alint test` only on policy-test
-packages whose configurations and `given:` blocks you trust, and `alint fix` only with `extends:`
-rulesets you trust and, with a content fix, only on repositories you trust.
+packages whose configurations and `given:` blocks you trust, `alint check` and `alint lsp` only on
+repositories whose configs you trust (or with your own `-c` config), and `alint fix` only with
+`extends:` rulesets you trust and, with a content fix, only on repositories you trust.
 
 - **The language server runs nothing a workspace's config could start until the editor trusts the
   workspace.** Since v0.11.0, opening a folder in an editor with alint's language server ran that
   repository's `.alint.yml` as `alint check` does: its command rules (`kind: command`,
   `generated_file_fresh`, `command_idempotent`) and `custom:` facts started processes, a remote
-  `extends:` was fetched, and `{{env.*}}` and `env.*` in a `when:` read the editor's environment, so
+  `extends:` was fetched, `allow_out_of_root:` was honored, and `{{env.*}}` and `env.*` in a
+  `when:` read the editor's environment, so
   opening a cloned repository ran its commands. Until the client sends the initialization option
   `{"trusted": true}`, the server now skips every rule of a spawning kind (at any `require:` depth),
   every rule that runs Git (the `git_*` kinds, `changeset_requires_path`, `pair_changed_together`,
   `git_tracked_only`, `scope_filter.changed_since`: Git runs the commands a repository's
   `.git/config` names, such as `core.fsmonitor`) and every
   `custom:` fact, lints a rule whose fix alone spawns (such as `file_absent` with `fix:
-  git_untrack`) without offering that fix, refuses a remote `extends:` with a diagnostic on the
+  git_untrack`) without offering that fix, refuses a remote `extends:` and `allow_out_of_root:`
+  with a diagnostic on the
   config, and reads no environment value. Every other rule lints as usual, and the server says what
   it turned off once, in an information message. The VS Code extension sends VS Code's Workspace
   Trust state and restarts the server when trust is granted, so a trusted VS Code workspace behaves
   as before; other editors opt in through their server settings
   ([editors](docs/site/integrations/editors.md#workspace-trust)). The JetBrains plugin does not send
   the option yet, so command rules do not run there. `alint lsp --untrusted` takes every workspace
-  as untrusted, whatever the editor sends.
+  as untrusted, whatever the editor sends and even when `--config` is passed.
 - **A nested or vendored `.alint.yml` no longer governs files in the language server.** Since
   v0.18.0, the server linted each open file with the nearest `.alint.yml` above it as a
   top-level config. A package under `node_modules/`, which the workspace's `.gitignore` excludes
@@ -220,9 +227,11 @@ rulesets you trust and, with a content fix, only on repositories you trust.
   configuration chooses (a `file_create` target and `content_from`, a `dir_create` target,
   `sync_from` and cross-file sources and targets, `create_and_register` members, `file_rename`
   and `relocate` targets) now refuses a component that names a Git directory in a spelling Git's
-  own checks name (`.GIT`, `.git.`, `git~1`; a short name such as `GIT~2` or a hashed one
-  passes), or that an in-repository symlink leads
-  into one; no rule reads such a path either (below). This affects `alint fix` with a ruleset
+  own checks name (`.GIT`, `.git.`, `git~1`, `git~2` and other `GIT~N` short names; a hashed
+  Windows short name past `~4` still passes), or that an in-repository symlink leads
+  into one; no rule reads such a path either (below), including out-of-root paths resolved under
+  `allow_out_of_root:`. `alint baseline` also refuses to write into a Git directory directly or
+  through a symlink. This affects `alint fix` with a ruleset
   from `extends:` in v0.2.1 to v0.22.1 (`content_from` since v0.5.10), and `alint test` since
   v0.20.0.
 - **No rule reads a file in a Git directory.** A rule could name one, and print what it read:
@@ -265,7 +274,9 @@ rulesets you trust and, with a content fix, only on repositories you trust.
   any case and with the trailing dots, spaces or stream suffix Windows drops, anything under
   `.alint.d/` or `alint-tests/` (where `alint test` finds policy tests, which may run commands), a
   Windows 8.3 short name of any of these (`ALINT~1.YML`), or a file the configuration was loaded
-  from (a `--config` file and local `extends:` targets included). It reports `.alint.yml is an alint
+  from (a `--config` file and local `extends:` targets included, along with their alternate Windows
+  and HFS+ spellings such as trailing dots, NTFS stream suffixes, short names and ignorable code
+  points). It reports `.alint.yml is an alint
   configuration file; a fix from an extended ruleset never writes one`. The user's own rules still
   write configuration, and `trusted_extends` does not lift this (it never let a ruleset spawn). This
   affects `alint fix` with a local ruleset from `extends:` in v0.5.8 to v0.22.1 (a drop-in since
@@ -405,9 +416,9 @@ policy-test package the user does not trust.
   environment.** `env.X` in a `when:` (top-level or nested in `require:`) and the legacy `${VAR}`
   form of `git_commit_message`'s `since:` read the runner's own process environment, so a test
   could tell a CI secret's characters apart through which of its rules fired, and could not see
-  its own `given.env`. Both now read the test's environment: `given.env` and the runner's sandbox
-  values (its home and Git settings), but none of the host's variables. The host's `PATH` and
-  Windows' system variables, which the runner passes a granted command, stay out of it, so
+  its own `given.env`. Both now read `given.env` only: neither host variables nor runner sandbox
+  paths (`PATH`, `HOME`, `GNUPGHOME`, `XDG_CONFIG_HOME`, `GIT_CEILING_DIRECTORIES`, Windows system
+  variables) reach rule evaluation, so
   `when: 'env.PATH matches "^/home/"'` is never true. `alint check` and `alint fix` still read
   the invoking user's environment.
 - **An inline `given.tree` symlink can no longer lead out of a policy test's sandbox.** Since
@@ -446,6 +457,31 @@ policy-test package the user does not trust.
   and `GIT_CONFIG_GLOBAL` does not keep Git from its default global excludes and attributes files
   there (`~/.config/git/ignore`), so `check_changed` missed an untracked file the host's excludes
   listed. The runner's Git commands now get `XDG_CONFIG_HOME` in the sandbox.
+- **Additional pre-v0.23 hardening across trust boundaries, bounded reads, outputs and redaction:**
+  - `nested_configs` confines nested globs and path templates strictly to the nested config's
+    subtree, rejecting leading `/` or `\`, Windows drive prefixes, `..` traversal segments anywhere
+    (including inside `{...}` brace groups or after `{path}`/`{dir}`), non-subtree-anchored tokens
+    (`{**}`, `{basename}`, `{dir}sibling`), and non-string entries in `paths:`.
+  - `pinned_references` memoizes GitLab CI `extends:` DAG lookups under a work budget (preventing
+    exponential blowup on diamond `extends:` graphs) and strips leading UTF-8 BOMs.
+  - `--untrusted` and `--no-spawn` refuse `--allow-host-keyring` on `alint test`, matching
+    `--allow-spawn`.
+  - `policy_url` links in LSP `CodeDescription`, Markdown reports, human OSC 8 hyperlinks and
+    `export-agents-md` accept `http://` and `https://` URLs only; `export-agents-md` uses safe
+    code spans, collapses line breaks and escapes `<!--` in directives, refuses symlinks and
+    special files through atomic safe writes, and caps `--inline` reads; binary diff summaries
+    sanitize terminal control characters; human output omits `related_locations` on hidden-path
+    findings; and all output formats suppress `line`, `column` and ranges when a finding's path is
+    `<redacted>`.
+  - Disk reads in LSP buffer overlays, `alint test` discovery/parsing, `alint init` workspace
+    detection (with root confinement), `alint suggest` scanners, `alint fix` command snapshots and
+    `alint-testkit` artifacts/tree verification are bounded to regular files.
+  - A version 1 config or template extended into a version 2 config cannot supply a `constraint`
+    `assert:` block, preserving v2's literal-name invariant against v1 `{{env.*}}` interpolation.
+  - Nested rules and version 2 selectors with secret-bearing manifest `scope_filter:` redact paths
+    and markers; `constraint` `assert.set` hides end-column spans when either side is sensitive;
+    and `close_sensitivity` propagates explicit `sensitive: true` across sibling fields of
+    non-join relations and across transitive multi-pair joins (`on: { a: x, b: x }`).
 
 ### Added
 
@@ -555,7 +591,8 @@ policy-test package the user does not trust.
   - `alint_dsl::LoadOptions::default()`, `with_catalog(catalog)` and `with_cache(cache)`, as
     before, with `cache` and a `with_*` setter for each other field (`with_kind_catalog`,
     `with_fetcher`, `with_environment`, `with_config_source`, `with_remote_policy`,
-    `with_repository_root` and `with_global_git_excludes`).
+    `with_out_of_root_policy` (with `OutOfRootPolicy`), `with_repository_root` and
+    `with_global_git_excludes`).
   - `Violation::new` and its existing setters are unchanged; its other fields are assigned.
 - **The options structs of 14 fix operations are exported from `alint_core`** (library API,
   ADR-0038): `ChmodFixSpec`, `CommandFixSpec`, `CreateAndRegisterFixSpec`, `DirCreateFixSpec`,
@@ -1136,8 +1173,11 @@ policy-test package the user does not trust.
   output (it was `selectors:`), so the line is not read as a version 2 config's named selectors.
   The JSON key `selectors` is unchanged.
 - The version 1 JSON Schema's descriptions follow the changes above: a path resolves in the walked
-  tree, `git_tracked_only` sees a tracked file only an ignore file hides, and `require:` and
+  tree, `git_tracked_only` sees a tracked file only an ignore file hides, `allow_out_of_root`
+  describes its top-level-only reads, fixes and local `extends:` scope, and `require:` and
   `normalize:` describe their value forms only. No key or type changed.
+- Dependencies updated: `adotenv` 1.5.4, `saphyr-parser` 0.3.4, `jsonschema` 0.61.2, and `rustix`
+  1.1.6 (RUSTSEC-2026-0486 did not affect alint, which uses only `getuid`/`geteuid`).
 
 ### Performance
 
@@ -1349,6 +1389,30 @@ policy-test package the user does not trust.
   (`../b/rules.yml`, `..\b\rules.yml` on Windows) in listings and in errors found in it,** where
   they showed its file name alone; a refusal of an `extends:` entry still names it as the entry
   spells it.
+- **Additional pre-v0.23 audit fixes:**
+  - `baseline::order_key` and SARIF/GitLab `OccurrenceKey` share canonical slash-separated path
+    ordering so repeated fingerprints on paths like `a.json` vs `a/b.json` never swap under
+    `--baseline`.
+  - `constraint` `visit_sensitive_paths` visits matched trigger paths (and sensitive-by-default
+    formats) rather than over-suppressing unrelated files or missing sensitive relation inputs
+    during `fix --diff` and `path_contains_sensitive_evidence`; `TomlRowsAdapter` enforces
+    `MAX_STRUCTURED_BYTES` before parsing; and `unique_table` selects the first key column whose
+    provenance differs when reporting collisions.
+  - Consecutive duplicate `extends:` entries charge the entry budget, reuse cached resolved local
+    targets per URL, and avoid duplicating `config_files`.
+  - `structured_fix::exact::intended` deduplicates repeated sequence removals; TOML `sync_from`
+    verifies edits structurally; `SpanIndex::read` enforces `MAX_STRUCTURED_BYTES`;
+    `yaml::root_is_a_block_collection` scans events lazily past `%YAML`/`%TAG` directives;
+    `yaml_depth` allows column-0 top-level block scalars and ends them at document markers; and
+    `extract::yaml_rows` preserves block-scalar start offsets on non-ASCII UTF-8 files.
+  - `git.rs` strips trailing slashes from untracked nested repository paths, and `git_repository`
+    keys ownership verdicts by `(work_tree, git_dir)` and bypasses the cache when custom
+    environment overrides are supplied.
+  - `xtask docs-export` strips unreleased `alint:since` blocks on concept pages and unwraps
+    released markers consistently; `docs-bundle.yml` drops `installation.md` from the overlay;
+    `release.yml` validates the VS Code extension (`npm ci`, `npm-audit.sh`, `check-types`,
+    `build`) in preflight; and `editors/nvim/lsp/alint.lua` prefers `.git` over nested `.alint.yml`
+    in `root_markers`.
 - **`remove_value` and `replace` on many YAML matches take linear time.** Since v0.17.0, each
   matched node parsed the whole file again to find its bytes, the engine parsed the result again
   to verify each edit, and each edit's splice moved the rest of the file: 2,000 matches took

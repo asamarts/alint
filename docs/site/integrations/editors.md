@@ -6,7 +6,7 @@ sidebar:
 ---
 
 alint ships an LSP server (`alint lsp`, in the `alint-lsp` crate) plus
-extensions, configs, and snippets across nine editors. The server
+extensions, configs, and snippets across eight editors. The server
 streams `.alint.yml` diagnostics into your editor as you type, surfaces
 rule descriptions on hover, and exposes apply-fix code actions for
 auto-fixable rules.
@@ -41,7 +41,7 @@ on `PATH`, and finally a managed download of the latest GitHub release.
 | Editor | What ships in the alint repo |
 |---|---|
 | **Neovim** (0.11+) | [`editors/nvim/lsp/alint.lua`](https://github.com/asamarts/alint/tree/main/editors/nvim) — drop into `~/.config/nvim/lsp/` and `vim.lsp.enable("alint")`. |
-| **Sublime Text** | [`editors/sublime/LSP-alint.sublime-settings`](https://github.com/asamarts/alint/tree/main/editors/sublime) — add to the LSP package's settings. |
+| **Sublime Text** | [`editors/sublime/LSP.sublime-settings`](https://github.com/asamarts/alint/tree/main/editors/sublime) — add to the LSP package's settings. |
 | **Emacs** | [`editors/emacs/alint.el`](https://github.com/asamarts/alint/tree/main/editors/emacs) — uses `lsp-mode` or `eglot`. |
 | **Helix** | [`editors/helix/languages.toml`](https://github.com/asamarts/alint/tree/main/editors/helix) — merge into your `~/.config/helix/languages.toml`. |
 | **Eclipse** | [`editors/eclipse/`](https://github.com/asamarts/alint/tree/main/editors/eclipse) — install LSP4E first, then configure. |
@@ -93,7 +93,8 @@ diagnostics:
   the server runs nothing the repository's config could start: command
   rules, rules that run Git and custom facts are skipped, a rule whose fix
   alone runs a command lints without the fix, a remote `extends:` is not
-  fetched, and environment values are left unset. Everything else lints.
+  fetched, `allow_out_of_root:` is refused, and environment values are left
+  unset. Everything else lints.
   See [Workspace trust](#workspace-trust) below.
 
 ## Configuration
@@ -115,8 +116,9 @@ itself. The editor-side settings are:
 ## Workspace trust
 
 A repository's `.alint.yml` can run commands (`kind: command` and the
-other spawning rules, `custom:` facts), fetch a remote `extends:`, and
-read your environment. The language server turns all of that off until
+other spawning rules, `custom:` facts), fetch a remote `extends:`, set
+`allow_out_of_root:`, and read your environment. The language server turns
+all of that off until
 the editor tells it the workspace is trusted, with the initialization
 option `{"trusted": true}`; with no option the workspace is untrusted.
 The [`alint lsp`](/docs/cli/lsp/#workspace-trust) page lists exactly

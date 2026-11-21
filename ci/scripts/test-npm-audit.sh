@@ -133,8 +133,9 @@ else
 fi
 
 # The committed waivers are well formed.
+printf '{"vulnerabilities": {}}\n' > "$sandbox/empty.json"
 if NPM_AUDIT_WAIVERS="$REPO_ROOT/editors/vscode/npm-audit-waivers.json" \
-  "$GATE" --check-json "$sandbox/waived.json" > "$sandbox/out" 2>&1; then
+  "$GATE" --check-json "$sandbox/empty.json" > "$sandbox/out" 2>&1; then
   ok "the committed waiver list loads"
 else
   bad "the committed waiver list loads"
