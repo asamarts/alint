@@ -161,7 +161,7 @@ expect "a link to alint_core::yaml passes" 0 "no public item" "$doc"
 # An absolute link to the parser's published documentation counts too.
 doc="$sandbox/absolute"
 make_tree "$doc"
-printf '<a href="https://docs.rs/ayaml/0.1.2/ayaml/struct.Error.html">Error</a>\n' \
+printf '<a href="https://docs.rs/ayaml/0.2.2/ayaml/struct.Error.html">Error</a>\n' \
   >>"$doc/alint_core/index.html"
 expect "an absolute link to a parser crate fails" 1 "alint_core/index.html" "$doc"
 

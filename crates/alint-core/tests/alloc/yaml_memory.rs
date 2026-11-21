@@ -324,29 +324,30 @@ fn measure(name: &str, parser: &str) {
         .unwrap_or_else(|| panic!("no shape is named {name:?}"));
     // Whatever the parser allocates once per process, before the counts.
     let warm = "a: [1, {b: c}]\n";
-    let (peak, kept) = match parser {
+    let (len, peak, kept) = match parser {
         "ayaml" => {
             assert!(ayaml_json_tree(warm).is_ok());
             let text = (shape.document)();
+            let len = text.len();
             let (peak, kept, tree) = heap_of(|| ayaml_json_tree(&text));
             let tree = tree.expect("ayaml decodes the document");
             drop(tree);
-            (peak, kept)
+            (len, peak, kept)
         }
         "libyaml" => {
             assert!(libyaml_json_tree(warm).is_ok());
             let text = (shape.document)();
+            let len = text.len();
             let (peak, kept, tree) = heap_of(|| libyaml_json_tree(&text));
             let tree = tree.expect("libyaml decodes the document");
             drop(tree);
-            (peak, kept)
+            (len, peak, kept)
         }
         other => panic!("unknown parser {other:?}"),
     };
     let Peak::Exactly(peak) = peak else {
         panic!("for {name}, {parser}'s peak is not the highest count yet: {peak:?}");
     };
-    let len = (shape.document)().len();
     let measure = SingleMeasure { len, peak, kept };
     println!("{}", measure.line());
 }
@@ -397,6 +398,11 @@ fn ayaml_takes_at_most_the_bound_times_libyamls_heap() {
         measure(&name, &parser);
         return;
     }
+    let warm = "a: [1, {b: c}]\n";
+    assert_eq!(
+        ayaml_json_tree(warm).unwrap(),
+        libyaml_json_tree(warm).unwrap()
+    );
     let release = std::env::var(RELEASE_VARIABLE).is_ok_and(|value| value == "1");
     let mut report = Vec::new();
     let mut over = Vec::new();
