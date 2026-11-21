@@ -1740,10 +1740,10 @@ mod json_ {
 /// JSON): the span covers the scalar token (quotes included for quoted scalars,
 /// trailing comment/whitespace EXCLUDED after the clamp below) and starts after
 /// the scalar's anchor, so the splice never disturbs a neighbour and the anchor
-/// survives. The check side parses YAML via ayaml's compat layer, whose 0.1
-/// releases have no spanned node tree, hence this separate spanned view; a JSON
-/// scalar is valid YAML with the same value+type (YAML is a superset of JSON), so
-/// the serializer reuses `serde_json`.
+/// survives. The check side parses YAML via `ayaml`'s compat layer, while
+/// structured-fix spans stay on `saphyr-parser` until the v0.24 saphyr exit
+/// (ADR-0036); a JSON scalar is valid YAML with the same value+type (YAML is a
+/// superset of JSON), so the serializer reuses `serde_json`.
 ///
 /// The two parsers do not read every document alike (saphyr's anchor names run
 /// through a `:`, and it skips a BOM at the start of a later line), so the check

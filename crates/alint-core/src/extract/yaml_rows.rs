@@ -158,13 +158,14 @@ impl YamlByteOffsets {
                             saphyr_parser::ScalarStyle::Literal
                             | saphyr_parser::ScalarStyle::Folded,
                             ..,
-                        ) => {}
+                        )
+                        | Event::SequenceStart(..)
+                        | Event::MappingStart(..) => {
+                            discovered.push((span.start.index(), usize::MAX));
+                        }
                         Event::Scalar(..) | Event::Alias(..) => {
                             discovered.push((span.start.index(), usize::MAX));
                             discovered.push((span.end.index(), usize::MAX));
-                        }
-                        Event::SequenceStart(..) | Event::MappingStart(..) => {
-                            discovered.push((span.start.index(), usize::MAX));
                         }
                         Event::SequenceEnd | Event::MappingEnd => {
                             discovered.push((span.end.index(), usize::MAX));

@@ -7,13 +7,41 @@ use std::path::Path;
 
 use alint_core::Violation;
 
+/// Slash-normalized path wrapper whose ordering matches
+/// [`alint_core::baseline::canonical_order_path`], keeping baseline suppression
+/// order and SARIF/GitLab repeated-fingerprint occurrence numbering aligned on
+/// every platform (including `"a.json"` vs `"a/b.json"`).
+#[derive(Debug, Clone, Copy)]
+struct SlashPath<'v>(&'v Path);
+
+impl PartialEq for SlashPath<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other).is_eq()
+    }
+}
+
+impl Eq for SlashPath<'_> {}
+
+impl PartialOrd for SlashPath<'_> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for SlashPath<'_> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        alint_core::baseline::canonical_order_path(self.0)
+            .cmp(&alint_core::baseline::canonical_order_path(other.0))
+    }
+}
+
 /// Where a finding stands among those that share its fingerprint: by the
 /// path, line and column it shows, then its rule and message. Only what the
-/// finding shows counts, so a hidden path sorts as `<redacted>`, and whether a
-/// baseline suppresses the finding does not.
+/// finding shows counts, so a hidden path sorts as `<redacted>` with no line
+/// or column, and whether a baseline suppresses the finding does not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct OccurrenceKey<'v> {
-    path: Option<&'v Path>,
+    path: Option<SlashPath<'v>>,
     line: Option<usize>,
     column: Option<usize>,
     rule: &'v str,
@@ -24,9 +52,9 @@ impl<'v> OccurrenceKey<'v> {
     /// The key of `violation`, a finding of rule `rule`.
     pub(crate) fn of(rule: &'v str, violation: &'v Violation) -> Self {
         Self {
-            path: violation.report_path(),
-            line: violation.line,
-            column: violation.column,
+            path: violation.report_path().map(SlashPath),
+            line: violation.report_line(),
+            column: violation.report_column(),
             rule,
             message: &violation.message,
         }
@@ -91,5 +119,18 @@ mod tests {
         let mut reversed = findings;
         reversed.reverse();
         assert_eq!(occurrences(&reversed), [0, 0, 2, 1, 1, 3]);
+    }
+
+    #[test]
+    fn occurrence_key_path_order_matches_baseline_apply_on_dot_vs_slash() {
+        let a_file = Violation::new("dup")
+            .with_path(Path::new("a.json"))
+            .with_baseline_key("k");
+        let a_dir = Violation::new("dup")
+            .with_path(Path::new("a/b.json"))
+            .with_baseline_key("k");
+        // In canonical slash-string order, '.' (0x2E) < '/' (0x2F), so
+        // `a.json` sorts before `a/b.json`, matching `baseline::apply`.
+        assert!(OccurrenceKey::of("r", &a_file) < OccurrenceKey::of("r", &a_dir));
     }
 }

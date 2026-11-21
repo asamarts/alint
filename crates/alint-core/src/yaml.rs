@@ -90,6 +90,31 @@ pub(crate) fn ayaml_from_str_seed<'de, S: serde::de::DeserializeSeed<'de>>(
     ayaml::compat::from_str_seed_with_limits(input, &limits(), seed)
 }
 
+/// Whether the first node of `prefix` (the input up to an error) is a block
+/// collection, inspecting events lazily so the full stream is never buffered.
+pub(crate) fn root_is_a_block_collection(prefix: &str) -> bool {
+    let Ok(events) = ayaml::compat::parse_events_with_limits(prefix, &limits()) else {
+        return false;
+    };
+    for parsed in events {
+        let Ok(event) = parsed else {
+            return false;
+        };
+        match event {
+            ayaml::Event::StreamStart { .. }
+            | ayaml::Event::Directive { .. }
+            | ayaml::Event::DocumentStart { .. }
+            | ayaml::Event::DocumentEnd { .. } => {}
+            ayaml::Event::SequenceStart { style, .. }
+            | ayaml::Event::MappingStart { style, .. } => {
+                return style == ayaml::CollectionStyle::Block;
+            }
+            _ => return false,
+        }
+    }
+    false
+}
+
 /// The events of every document in `input`, from the compatibility reader
 /// [`from_str`] decodes with, under alint's parser limits, whatever parser the
 /// build chose. alint decodes one document; the `yaml_depth` tests read a

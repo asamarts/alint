@@ -4,7 +4,7 @@
 //! implementation. A future parser migration must preserve them or document and
 //! approve a compatibility change.
 
-use ayaml::Value;
+use alint_core::yaml::Value;
 
 #[test]
 fn scalar_resolution_tags_merges_and_aliases_keep_the_supported_semantics() {
@@ -35,11 +35,13 @@ fn scalar_resolution_tags_merges_and_aliases_keep_the_supported_semantics() {
     assert!(document["infinity"].as_f64().is_some_and(f64::is_infinite));
     assert_eq!(document["core_string"].as_str(), Some("123"));
 
-    let Value::Tagged(tagged) = &document["tagged"] else {
-        panic!("custom tags must remain represented in the generic value model");
-    };
-    assert_eq!(tagged.tag.to_string(), "!Custom");
-    assert_eq!(tagged.value["x"].as_u64(), Some(1));
+    let tagged = &document["tagged"];
+    assert_eq!(
+        tagged.tag().as_deref(),
+        Some("!Custom"),
+        "custom tags must remain represented in the generic value model"
+    );
+    assert_eq!(tagged["x"].as_u64(), Some(1));
 
     assert_eq!(document["alias"], document["base"]);
     assert_eq!(document["merged"]["<<"], document["base"]);

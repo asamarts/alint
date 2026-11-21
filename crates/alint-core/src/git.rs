@@ -569,9 +569,12 @@ pub fn collect_changed_set(root: &Path, base: Option<&str>) -> Option<ChangedSet
         if chunk.is_empty() {
             continue;
         }
-        let path = path_from_git_chunk(chunk);
         // An untracked repository is listed as `sub/`, and none of its files.
-        if chunk.ends_with(b"/") || submodules.directories.contains(&path) {
+        // Strip the trailing `/` so `set.paths` and `set.directories` hold the
+        // same canonical relative path shape as `add_raw_diff`.
+        let is_untracked_dir = chunk.ends_with(b"/");
+        let path = path_from_git_chunk(chunk.strip_suffix(b"/").unwrap_or(chunk));
+        if is_untracked_dir || submodules.directories.contains(&path) {
             set.directories.insert(path.clone());
         }
         set.paths.insert(path);

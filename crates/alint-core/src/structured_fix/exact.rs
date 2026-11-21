@@ -54,6 +54,7 @@ pub fn intended(before: &Value, intents: &[(Vec<PathSeg>, Intent)]) -> Option<Va
         .map(|(path, _)| path.as_slice())
         .collect();
     removals.sort_by(|a, b| compare_paths(b, a));
+    removals.dedup();
     for path in removals {
         let (last, parents) = path.split_last()?;
         match (node_mut(&mut after, parents), last) {

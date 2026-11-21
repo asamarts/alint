@@ -15,9 +15,10 @@
 //!   a [`crate::RuleSpec`] with `from_value`, as alint's loader decodes rules,
 //!   each rule a case of its own.
 //!
-//! alint reads no ayaml events in v0.23 (source spans still come from
-//! saphyr), so the event stream joins the harness with the saphyr exit in
-//! v0.24 (ADR-0036).
+//! Source spans still come from `saphyr-parser` in v0.23 (`ayaml` events are
+//! only inspected internally for error hints and `requires:` pre-checks), so
+//! the spanned event stream joins the harness with the saphyr exit in v0.24
+//! (ADR-0036).
 //!
 //! The inputs are generated token soup, generated documents, generated
 //! configurations and mutations of them, the repository's own YAML files, and

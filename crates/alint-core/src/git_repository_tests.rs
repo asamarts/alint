@@ -208,9 +208,12 @@ fn trusted_asks_git_unless_the_current_user_owns_all_three() {
     };
     let refusing = environment(Path::new("/dev/null"));
     let accepting = environment(&safe);
-    // Git's verdict is cached by Git directory; each case asks afresh.
+    // Git's verdict is cached by (work_tree, git_dir) when environment is None;
+    // each case here passes an explicit environment, and we still clear any
+    // entry for cleanliness.
+    let key = (repository.work_tree.clone(), repository.git_dir.clone());
     let ask = |owned: &dyn Fn(&Path) -> Option<bool>, environment| {
-        VERDICTS.lock().unwrap().remove(&repository.git_dir);
+        VERDICTS.lock().unwrap().remove(&key);
         trusted(&repository, &entry, Some(environment), owned)
     };
 
@@ -230,7 +233,7 @@ fn trusted_asks_git_unless_the_current_user_owns_all_three() {
     // No owner read (Windows): Git always decides.
     assert!(!ask(&|_| None, &refusing));
     assert!(ask(&|_| None, &accepting));
-    VERDICTS.lock().unwrap().remove(&repository.git_dir);
+    VERDICTS.lock().unwrap().remove(&key);
 }
 
 #[cfg(unix)]

@@ -126,18 +126,19 @@ jsonc-parser = { version = "0.34.0", features = ["cst"] }
 # Scalar typing for the Phase-2 structured fixers' YAML span resolver (alint-core
 # `structured_fix::yaml_`), which walks `saphyr-parser`'s spanned events, so a YAML
 # scalar edit is a span-splice (like JSON); `saphyr::Scalar` types each scalar as
-# saphyr's loader did. The check side parses YAML via ayaml's compat layer, whose
-# 0.1 releases have no spans, so this is the fix side's spanned view. MIT OR
-# Apache-2.0 (same as the workspace). PINNED because the pre-1.0 `Marker.index`
-# remains a CHAR offset (despite byte-oriented rustdoc); `yaml_` converts it to
-# bytes and the multibyte resolver test guards that contract.
+# saphyr's loader did. The check side parses YAML via ayaml (`=0.2.2`), while
+# structured-fix and entry-extraction spans stay on `saphyr-parser` until the v0.24
+# saphyr exit (ADR-0036). MIT OR Apache-2.0 (same as the workspace). PINNED because
+# the pre-1.0 `Marker.index` is a CHAR offset (as documented in saphyr-parser
+# 0.3.4); `yaml_` converts it to bytes and the multibyte resolver test guards that
+# contract.
 # `default-features = false` drops `encoding` (`load_from_read` only; we load `&str`).
 saphyr = { version = "=0.3.3", default-features = false }
 # Duplicate-aware YAML entry extraction needs the parser event stream before
 # `saphyr::MarkedYaml` rejects duplicate mapping keys, and the structured-fix span
-# resolver walks the same events. Keep this exact version aligned with `saphyr`:
-# mismatched pre-1.0 releases otherwise compile two parser versions into the
-# binary and make direct-event behavior differ from the loader.
+# resolver walks the same events. Pinned at `=0.3.4` (compatible with `saphyr =0.3.3`
+# via `saphyr`'s `^0.3.3` requirement, so Cargo resolves a single `saphyr-parser`
+# version in the workspace).
 saphyr-parser = { version = "=0.3.4", default-features = false }
 roxmltree = "0.20"
 # NOTE: pinned; see structured_fix::json_ for the AST-range API used.

@@ -368,6 +368,9 @@ impl<'t> SpanIndex<'t> {
         // text, then shift each span back into ORIGINAL byte coordinates by the
         // stripped length (the caller splices the raw file bytes, BOM included).
         let stripped = text.trim_start_matches('\u{feff}');
+        if stripped.len() > crate::MAX_STRUCTURED_BYTES {
+            return None;
+        }
         READS.with(|reads| reads.set(reads.get() + 1));
         // This input's share of the YAML parse budget, held while the parser
         // runs (`yaml_budget`, ADR-0042).
@@ -696,10 +699,9 @@ impl<'t> SpanIndex<'t> {
     }
 }
 
-/// Character offsets to byte offsets. saphyr's `Marker::index` counts
-/// characters, despite the `index()` rustdoc claiming bytes (a bump must
-/// re-verify this). ASCII text maps one to one; other text keeps the byte
-/// offset of every [`Self::STRIDE`]th character, so a lookup steps over fewer
+/// Character offsets to byte offsets. `saphyr-parser`'s `Marker::index` counts
+/// characters (not bytes; a bump must re-verify this). ASCII text maps one to
+/// one; other text keeps the byte offset of every [`Self::STRIDE`]th character, so a lookup steps over fewer
 /// than that many characters, and a document of many matches maps each span
 /// without a pass over the text per span.
 enum CharOffsets {

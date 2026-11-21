@@ -359,9 +359,7 @@ impl Fixer for StructuredFixer {
             // The rewrite must leave the tree changed exactly as intended, the
             // check every whole-document format's edits pass (see
             // `structured_fix::is_exact_edit`); otherwise nothing is emitted.
-            let one = |doc: Vec<u8>,
-                       expect: Option<ExpectedValue>,
-                       intents: &[(Vec<PathSeg>, Intent)]| {
+            let one = |doc: Vec<u8>, verify: EditVerifier, intents: &[(Vec<PathSeg>, Intent)]| {
                 if !structured_fix::is_exact_edit(self.format, &value, &doc, intents) {
                     return Vec::new();
                 }
@@ -376,7 +374,7 @@ impl Fixer for StructuredFixer {
                         content,
                     },
                     applicability: self.applicability,
-                    verify: expect.map_or(EditVerifier::None, |expect| self.verifier(expect)),
+                    verify,
                     isolation_group: None,
                 }]
             };
@@ -402,7 +400,12 @@ impl Fixer for StructuredFixer {
                         else {
                             return Vec::new();
                         };
-                        return one(doc, None, &[(segs, Intent::Set(want.clone()))]);
+                        let verify = EditVerifier::Structured {
+                            format: self.format,
+                            query: segs_to_query(&segs),
+                            expect: ExpectedValue::Scalar(want.clone()),
+                        };
+                        return one(doc, verify, &[(segs, Intent::Set(want.clone()))]);
                     }
                     if located.len() != 1 {
                         return Vec::new();
@@ -417,7 +420,7 @@ impl Fixer for StructuredFixer {
                     match structured_fix::document_set(self.format, bytes, &segs, want) {
                         Some(doc) => one(
                             doc,
-                            Some(ExpectedValue::Scalar(want.clone())),
+                            self.verifier(ExpectedValue::Scalar(want.clone())),
                             &[(segs, Intent::Set(want.clone()))],
                         ),
                         None => Vec::new(),
@@ -432,7 +435,7 @@ impl Fixer for StructuredFixer {
                         located.iter().map(|n| to_segs(n.location())).collect();
                     let intents = removals(&paths);
                     match structured_fix::document_remove(self.format, bytes, &paths) {
-                        Some(doc) => one(doc, Some(ExpectedValue::Absent), &intents),
+                        Some(doc) => one(doc, self.verifier(ExpectedValue::Absent), &intents),
                         None => Vec::new(),
                     }
                 }
