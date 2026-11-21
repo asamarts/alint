@@ -203,11 +203,13 @@ impl Expansion {
 /// of a 1 MB scalar -- are rejected in well under a second without
 /// allocating). It builds NO value, so it cannot change the real parse's
 /// output. A document ayaml refuses for another reason (malformed YAML, a
-/// limit other than the alias budget) is [`Expansion::Unparsed`]: ayaml reads
-/// the whole document before the visitor sees a node, so after a syntax error
-/// anywhere nothing was counted, and the guard says so rather than vouch for
-/// it. A real bomb is ordinary scalars / sequences / maps (and tagged nodes,
-/// via `visit_enum`) and is counted.
+/// limit other than the alias budget) is [`Expansion::Unparsed`]: ayaml scans
+/// the whole stream before parsing, and on documents up to 4 KiB builds the
+/// tree before the visitor sees a node, while on larger documents it streams
+/// events into the visitor (so an alias bomb before a later parser error is
+/// still caught as [`Expansion::OverLimit`], and any refusal before the budget
+/// overflows leaves [`Expansion::Unparsed`]). A real bomb is ordinary scalars /
+/// sequences / maps (and tagged nodes, via `visit_enum`) and is counted.
 #[must_use]
 pub fn expansion(text: &str) -> Expansion {
     expansion_with(text, expansion_budget(text.len()))

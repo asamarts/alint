@@ -750,12 +750,13 @@ fn side_fairness(
     match (side(case), side(next)) {
         (_, Ok(_)) => Some(Fairness::Kept),
         // ayaml scans all tokens before parsing or building values, so a
-        // scanner error the rewrite makes hides the value error, wherever each
-        // is. Parser errors run streaming with value building (ayaml 0.2.1), so
-        // a later parser error may already have been hidden and an earlier one
-        // falls into `Fairness::Revealed` below.
+        // scanner error hides any value error, and a parser error hides any
+        // Serde decode error (the document builds before Serde runs, or is
+        // rebuilt on a streaming error). Document-building errors stream with
+        // the parser (ayaml 0.2.1), so an earlier parser error is `Revealed`.
         (Err(before), Err(after))
-            if ayaml_value_error(before) && after.kind == Some(ayaml::ErrorKind::Scanner) =>
+            if (ayaml_value_error(before) && after.kind == Some(ayaml::ErrorKind::Scanner))
+                || (before.kind == Some(ayaml::ErrorKind::Serde) && ayaml_syntax_error(after)) =>
         {
             None
         }
@@ -1324,10 +1325,9 @@ impl Search {
             (&prefix.oracle, &prefix.ayaml)
         };
         // Both parsers reject the prefix's syntax at one place, and the
-        // case's other error is past it: ayaml reads the whole stream's
-        // tokens before it parses, so it reports a scanner error there ahead
-        // of the error the two share. A value error the two share is one
-        // ayaml reports after any syntax error, as it should.
+        // case's other error is past it: ayaml scans the whole stream's tokens
+        // before it parses, so it reports a later scanner error ahead of the
+        // error the two share. A shared value error stays unsplit.
         let shared = prefix.class == Class::RejectedAtSameLocation
             && matches!(&prefix.ayaml, Err(rejection) if ayaml_syntax_error(rejection))
             && later_error.is_some_and(|later| later >= end);

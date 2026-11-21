@@ -1064,9 +1064,10 @@ pub(crate) const LOCATIONS: &[Location] = &[
         ],
         messages: &[],
         places: None,
-        ayaml: "the node a value error is about; ayaml checks the whole stream's tokens \
-                before it parses or builds values, and then reports the first parsing or \
-                value error (duplicate key, unknown anchor, recursive alias or type error)",
+        ayaml: "the node a value error is about; ayaml scans the whole stream's tokens before \
+                it parses or builds values, streams document-building errors (duplicate key, \
+                bad core tag, unknown anchor, recursive alias) with the parser, and reports \
+                typed Serde errors after the document builds",
         oracle: "the first error in the input, as it builds values while it reads, at its \
                  own position for a value error (often the start of the enclosing \
                  collection)",

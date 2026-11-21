@@ -963,11 +963,12 @@ fn a_narrow_entry_does_not_end_a_search_past_a_revealed_error() {
     assert_eq!(explained(true), None);
 }
 
-/// A rewrite that turns a value error of ayaml's into a syntax error hides
-/// the value error, wherever each is: ayaml reads the whole stream's syntax
-/// before it builds a value. Without the core-tag entry, the `!!int` on a
-/// key that ayaml refuses does not stand for the line separator, which the
-/// line-break rewrite turns into a break that ends the quoted scalar.
+/// A rewrite that turns a value error of ayaml's into a scanner error hides
+/// the value error, wherever each is (ayaml scans all tokens first), and a
+/// parser error hides any Serde decode error (the document is built before
+/// Serde runs). Without the core-tag entry, the `!!int` on a key that ayaml
+/// refuses does not stand for the line separator, which the line-break rewrite
+/// turns into a break that ends the quoted scalar.
 #[test]
 fn a_rewrite_must_not_trade_a_value_error_for_a_syntax_error() {
     for input in [
@@ -983,6 +984,54 @@ fn a_rewrite_must_not_trade_a_value_error_for_a_syntax_error() {
             "{case:?}"
         );
     }
+    // A later parser error hides an earlier Serde decode error, so trading a
+    // Serde error for a parser error on a later line is unfair.
+    let (serde_case, _) = compare("version: bad\nb: 1\n", Entry::Config);
+    assert_eq!(
+        serde_case.ayaml.as_ref().unwrap_err().kind,
+        Some(ErrorKind::Serde),
+        "{serde_case:?}"
+    );
+    let (parser_broken, _) = compare("version: bad\nb: [1, 2}\n", Entry::Config);
+    assert_eq!(
+        parser_broken.ayaml.as_ref().unwrap_err().kind,
+        Some(ErrorKind::Parser),
+        "{parser_broken:?}"
+    );
+    assert_eq!(
+        fairness(&serde_case, &parser_broken, &Hidden::Nothing),
+        None
+    );
+    // Document-building errors stream with the parser (ayaml 0.2.1): a later
+    // parser error after removing a resolution error is kept, while an earlier
+    // parser error is revealed.
+    let (res_case, _) = compare("a: !!int x\nb: 1\n", Entry::Value);
+    assert_eq!(
+        res_case.ayaml.as_ref().unwrap_err().kind,
+        Some(ErrorKind::Resolution),
+        "{res_case:?}"
+    );
+    let (later_parser, _) = compare("a: x\nb: [1, 2}\n", Entry::Value);
+    assert_eq!(
+        later_parser.ayaml.as_ref().unwrap_err().kind,
+        Some(ErrorKind::Parser),
+        "{later_parser:?}"
+    );
+    assert_eq!(
+        fairness(&res_case, &later_parser, &Hidden::Nothing),
+        Some(Fairness::Kept)
+    );
+    let (later_res, _) = compare("a: 1\nb: !!int x\n", Entry::Value);
+    let (earlier_parser, _) = compare("a: [1, 2}\nb: !!int x\n", Entry::Value);
+    assert_eq!(
+        earlier_parser.ayaml.as_ref().unwrap_err().kind,
+        Some(ErrorKind::Parser),
+        "{earlier_parser:?}"
+    );
+    assert_eq!(
+        fairness(&later_res, &earlier_parser, &Hidden::Nothing),
+        Some(Fairness::Revealed)
+    );
 }
 
 /// The flow-syntax entry covers an error inside a flow collection only at

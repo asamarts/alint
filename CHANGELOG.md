@@ -1021,18 +1021,20 @@ policy-test package the user does not trust.
     expected a string"; a value that is not one of an enum's, as a rule's `level`, a policy test's
     step or an option such as `direction`, lists them, as "level: expected one of `error`,
     `warning`, `info`, `off`, found a mapping", where 0.22 said "invalid type: map, expected a
-    Value::Tagged enum"; a key or entry one space off its sibling mapping or sequence reports
-    "this line is indented differently from the mapping/sequence at line X column Y", an indented
-    top-level node reports "a document's first node cannot be indented", and remaining "unexpected
-    content after document" mistakes (such as `-id: a` with no space after the `-`) end with
+    Value::Tagged enum"; a key or entry indented one space past a parent mapping or sequence reports
+    "this line is indented differently from the mapping/sequence at line X column Y", a line tabbed
+    as indentation notes that YAML does not count tabs as indentation, and remaining "unexpected
+    content after document" mistakes (such as `-id: a` with no space after the `-`, a key two or
+    more spaces off its siblings, or an indented top-level key before a column-1 key) end with
     "(check this line's indentation against the lines above)". A configuration that is a scalar,
     not a mapping, quotes the scalar when it holds no `{{` (as 0.22 did:
     `invalid type: string "...", expected struct RawConfig`), and reports
     "invalid type: string, expected struct RawConfig" without quoting it when it holds `{{`, where
     0.22 gave only `<redacted>`. An error can also be reported at another place: ayaml scans the
     whole stream's tokens before it parses or builds values, so a scanner error later in a file is
-    reported before an earlier parse or value error, while parser and value errors report whichever
-    comes first, and an error about an empty value is reported where what follows starts (the next
+    reported before an earlier parse or value error; parser and document-building errors (duplicate
+    keys, invalid core tags, undefined or cyclic aliases) report whichever comes first, before
+    typed field errors; and an error about an empty value is reported where what follows starts (the next
     line's content or the end of the file), where 0.22 reported the place after the key:
     `respect_gitignore:` with nothing after it on line 2 is reported at line 3, column 1, where
     0.22 said line 2, column 19. A character YAML does not allow, such as a C0 control, is reported

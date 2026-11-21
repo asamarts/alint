@@ -206,8 +206,9 @@ fn a_variant_with_data_still_reads_from_a_mapping_or_a_tag() {
 }
 
 /// YAML-1a: a value of the wrong type where a string goes, decoded from a
-/// value tree, is named, where ayaml says `non-string YAML value`. From text,
-/// a string reads any scalar's text, as it did.
+/// value tree, is named (including 128-bit integers verbatim, where ayaml 0.1.2
+/// said `non-string YAML value` and 0.2.1 says `integer outside the 64-bit
+/// range`). From text, a string reads any scalar's text, as it did.
 #[test]
 fn a_type_error_names_what_was_found() {
     for (input, found) in [
@@ -248,8 +249,9 @@ fn a_type_error_names_what_was_found() {
             .message(),
         "[\"a b\"]: invalid type: integer `1`, expected a string"
     );
-    // A struct from a value tree names what it found, where ayaml says
-    // `non-mapping YAML value`, and reads past a tag outside YAML's own.
+    // A struct from a value tree names what it found without quoting a string
+    // (where ayaml 0.1.2 said `non-mapping YAML value` and 0.2.1 quotes the
+    // string), and reads past a tag outside YAML's own.
     for (input, found) in [
         ("inner: 1", "integer `1`"),
         ("inner: x", "string"),

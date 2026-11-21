@@ -196,10 +196,12 @@ it must respect:
   differently, and the CHANGELOG lists each difference (ADR-0035 decision 5). The two audits since
   v0.22.1 (ADR-0043, ADR-0044) are the third: their security and correctness fixes change what some
   configurations do, and the CHANGELOG's "Upgrading from 0.22" list names each change a 0.22 setup
-  can notice. Every difference in the replay must come from one of them. The replay of `main` at
-  e7bb08a57 against v0.22.1 (run 43927008138) found three: item 12's reworded
-  `java-no-tracked-build` message in gradle/gradle and quarkusio/quarkus, and the reworded message
-  for a stream of more than one document in istio/istio.
+  can notice. Every difference in the replay must come from one of them. The replay of
+  `feat/p9-ayaml-0.2.1` (7e75eb276) against v0.22.1 (run 44808808817, 130 repositories) found 115
+  identical, 4 expected skips, 0 crashes, and 11 explained diffs: 8 additive `related_locations`
+  fields from #590, item 12's reworded `java-no-tracked-build` message in gradle/gradle and
+  quarkusio/quarkus (#509), and the reworded message for a stream of more than one document in
+  istio/istio (#510).
 - **The version boundary of ADR-0022 holds.** A v2 source may extend v1 sources, never the
   reverse, at any recursive edge.
 - **Trust is no weaker than v1** (section 7.1 rules 9, 11 and 12):
@@ -1237,5 +1239,9 @@ as #589, step 3 as #590, and step 4 is the last.
     `EXPANSION_BYTES_PER_COST_BYTE` in `yaml_budget.rs` from 64 to 32 (ADR-0046 decision 7).
     End-to-end release checks run 0.6% to 8.1% faster on OpenAPI (50 x 37 KB, 1.1 MB, 4.4 MB) at
     0.74x to 0.81x peak RSS, and 32 MiB peak RSS dropped from 4.5 to 6.2 GB to 0.75 to 1.54 GiB.
-  - Next: phase 10 (release documentation, CHANGELOG final pass, facts regeneration, corpus replay
-    against v0.22.1, GHSA-78jj-xfpm-g6px publication, and v0.23.0 release check).
+  - **Corpus replay against v0.22.1 (`corpus-replay.yml` run 44808808817):** 130 repositories: 115
+    identical, 4 expected skips, 0 crashes, 11 explained diffs (8 additive `related_locations` from
+    #590, 2 reworded `java-no-tracked-build` from #509, 1 reworded multi-document parse error on
+    `istio/istio` from #510). Zero unexpected ayaml 0.2.1 diffs.
+  - Next: phase 10 (release documentation, CHANGELOG final pass, facts regeneration, final pre-tag
+    corpus replay against v0.22.1, GHSA-78jj-xfpm-g6px publication, and v0.23.0 release check).

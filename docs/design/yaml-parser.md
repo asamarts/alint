@@ -242,10 +242,13 @@ superseding ADR-0039); the parser facade below uses it as its libyaml backend.
   alias may come earlier, since a parser reports it where its node starts. An error that moves
   to an earlier line shows something the trigger hid, and the search must then reach a rewrite
   both parsers read alike. A rewrite after which one parser keeps its error and the other gives
-  the same value error, or an error at the same place, ends the search. ayaml reads a stream's
-  syntax before it builds values, so a rewrite that turns one of its value errors into a syntax
-  error hides the value error, wherever each is. It also reads the whole stream's tokens before
-  it parses them, so a scanner error hides each parser error before it: a rewrite of a tab that
+  the same value error, or an error at the same place, ends the search. ayaml scans the whole
+  stream's tokens before it parses or builds values, so a rewrite that turns any value error into a
+  scanner error hides the value error, wherever each is; and a parser error hides any typed Serde
+  error, because the document is built before Serde runs (or rebuilt on a streaming error).
+  Document-building value errors (duplicate keys, invalid core tags, alias errors) stream with the
+  parser in ayaml 0.2.1. Because the scanner runs whole-stream first, a scanner error also hides
+  each parser error before it: a rewrite of a tab that
   alone indents a flow line, or of `!<!>`, which ayaml rejects as it scans, may show a parser
   error on an earlier line, which was the case's. One variant of the flow line's rewrite spaces
   only the tabs ayaml rejects, since the oracle may reject a later one, in a plain scalar's
@@ -329,8 +332,9 @@ report lists every entry.
   (asamarts/ayaml#132, #133, #137, #138, #139, #140, #141, #146 and #147) are fixed in ayaml 0.2.1
   and removed from the allowlist.
 - **Error locations.** ayaml scans the whole stream's tokens before it parses or builds values, so
-  a later scanner error wins over an earlier parser or value error; parser and value errors run
-  streaming and report whichever comes first. ayaml reports an error about an empty node where
+  a later scanner error wins over an earlier parser or value error; parser and document-building
+  value errors (duplicate key, bad core tag, alias errors) run streaming and report whichever comes
+  first, before typed Serde errors. ayaml reports an error about an empty node where
   what follows starts, and a character YAML does not allow where it stands; the oracle reports where
   its look-ahead stopped, a disallowed character at line 1, column 1, and once the first
   document ends, "more than one document" with no place. Of a rule both refuse, each may name
@@ -359,10 +363,11 @@ records what landed (2026-11-16: all three phases, in #530).
 - **Decoding.** Every typed decode through ayaml, from text or from a value tree, goes through a
   deserializer of alint's own (`crates/alint-core/src/yaml_decode.rs`) that reads what ayaml
   reads, except that an enum's variant without data takes only its name, as the parser v0.22
-  used read it: ayaml read a one-entry mapping or a tag there as the variant. Where ayaml names
-  only a value's kind, as `non-string YAML value`, it names the value, as ``integer `1` ``; it
-  lists an enum's values, and names a tag a field cannot read. An "unexpected content after
-  document" that is likely an indentation mistake ends with a hint, which `Error::message` and
+  used read it: ayaml read a one-entry mapping or a tag there as the variant. On value-tree
+  decodes, it names 128-bit integers verbatim, refuses a string in a struct's place without quoting
+  the whole string, lists an enum's values, and names a tag a field cannot read. An "unexpected
+  content after document" that is likely an indentation mistake (where ayaml 0.2.1 has not already
+  named the parent collection or tab indentation) ends with a hint, which `Error::message` and
   `Display` include and the harness, reading ayaml's own error, leaves out.
 - **The feature.** `alint-core`'s non-default `yaml-reference` feature compiles libyaml, saphyr's
   backend and compare mode, and makes `yaml_serde` an optional dependency. No release build
@@ -436,9 +441,8 @@ release before alint's users get it. To move the pin (ADR-0040 decision 2):
 2. Run the harness's long run with seeds 1 to 12 (`ALINT_YAML_DIFF_SEED`; see "Runs" above), the
    depth guard's parity properties (`PROPTEST_CASES=2000000 cargo test --release -p alint-core
    --lib yaml_depth::tests::scanner_never_misses`, three times), and the workspace's tests in
-   compare mode (`ci/scripts/yaml-compare.sh`). `yaml_depth` reads two of ayaml's quirks as
-   ayaml does (asamarts/ayaml#140 and #141); a release that fixes them fails the parity
-   properties until the guard follows.
+   compare mode (`ci/scripts/yaml-compare.sh`). Any change to ayaml's lexical rules must be
+   mirrored in `yaml_depth`'s lexer until the parity properties pass cleanly.
 3. Remove each allowlist entry whose defect the release fixes, and narrow each entry that also
    covered one; every entry's example must still be explained by its own entry
    (`every_deviation_example_is_explained_by_its_own_entry`). Review what saphyr's vote explains
@@ -802,5 +806,10 @@ maintained libyaml fork is the lower-risk ownership boundary.
     1 MB: 169.1 ms vs 134.1 ms (+26.1%), 39.7 MiB vs 52.4 MiB RSS (0.76x). At the 32 MiB input
     cap, peak RSS dropped from 4.5 to 6.2 GB (0.1.2) to 764 MiB (32 MiB block mapping, 0.68x
     libyaml), 1.54 GiB (32 MiB flow `[1,1,...]`, 0.61x libyaml, -7.5% wall time), and 401 MiB
-    (16 MiB flow mapping, 0.69x libyaml, -3.9% wall time). All re-evaluation triggers are now
-    met.
+    (16 MiB flow mapping, 0.69x libyaml, -3.9% wall time).
+  - **Corpus replay against v0.22.1 (`corpus-replay.yml` run 44808808817).** Across all 130
+    repositories: 115 identical, 4 expected skips (no manifest / toolchain), 0 crashes, and 11
+    explained diffs (8 additive `related_locations` from #590, 2 reworded `java-no-tracked-build`
+    from #509 in `gradle/gradle` and `quarkusio/quarkus`, and 1 reworded multi-document YAML parse
+    error in `istio/istio` from #510). Zero unexpected ayaml 0.2.1 regressions. All re-evaluation
+    triggers are now met.

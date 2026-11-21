@@ -312,10 +312,11 @@ fn measure(name: &str, parser: &str) {
         .unwrap_or_else(|| panic!("no shape is named {name:?}"));
     // Whatever either parser allocates once per process, before the counts.
     let warm = "a: [1, {b: c}]\n";
-    let (peak, kept) = match parser {
+    let (len, peak, kept) = match parser {
         "libyaml" => {
             let _ = libyaml_json_tree(warm).unwrap();
             let text = (shape.document)();
+            let len = text.len();
             let (peak, kept, tree) = heap_of(|| libyaml_json_tree(&text));
             let tree = tree.expect("libyaml decodes the document");
             drop(tree);
@@ -324,22 +325,22 @@ fn measure(name: &str, parser: &str) {
                     "for {name}, libyaml's peak is not the highest count yet (at most {at_most})"
                 )
             });
-            (peak, kept)
+            (len, peak, kept)
         }
         "ayaml" => {
             let _ = ayaml_json_tree(warm).unwrap();
             let text = (shape.document)();
+            let len = text.len();
             let (peak, kept, tree) = heap_of(|| ayaml_json_tree(&text));
             let tree = tree.expect("ayaml decodes the document");
             drop(tree);
             let peak = peak.unwrap_or_else(|at_most| {
                 panic!("for {name}, ayaml's peak is not the highest count yet (at most {at_most})")
             });
-            (peak, kept)
+            (len, peak, kept)
         }
         other => panic!("unknown parser {other:?}"),
     };
-    let len = (shape.document)().len();
     let measure = SingleMeasure { len, peak, kept };
     println!("{}", measure.line());
 }

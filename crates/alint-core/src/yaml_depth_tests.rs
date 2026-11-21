@@ -999,6 +999,58 @@ fn a_text_ayaml_refuses_is_not_vouched_for() {
     assert_eq!(expansion("a: &a [1]\nb: *a\n"), Expansion::WithinLimit);
 }
 
+/// ayaml 0.2.1 switches to streaming deserialization above 4 KiB
+/// (`SMALL_INPUT_BYTES`), feeding [`NodeBudget`] as events arrive and falling
+/// back to building the tree on any error. Verify all four paths above 4 KiB:
+/// valid within limit, over-limit bomb, syntax error before budget ->
+/// `Unparsed`, bomb before a trailing parser error -> `OverLimit` (the
+/// `exceeded` flag survives the fallback), and a trailing scanner error ->
+/// `Unparsed` (the scanner runs whole-stream first).
+#[test]
+fn streaming_expansion_over_four_kib_counts_and_refuses_unparsed() {
+    let pad = format!("# {}\n", "p".repeat(5_000));
+    assert!(pad.len() > 4 * 1024);
+
+    let valid = format!("{pad}a: &a [1, 2, 3]\nb: [*a, *a]\n");
+    assert_eq!(expansion(&valid), Expansion::WithinLimit);
+    let (verdict, estimated) = scan_guards(&valid).expansion_and_size(&valid);
+    assert_eq!(verdict, Expansion::WithinLimit);
+    assert!(estimated > 0, "streaming pass must charge expanded nodes");
+
+    let anchor = "1,".repeat(50);
+    let refs = "*a,".repeat(40);
+    let bomb = format!("{pad}a: &a [{anchor}]\nb: [{refs}]\n");
+    assert_eq!(
+        expansion_with(&bomb, 500 * YAML_NODE_COST),
+        Expansion::OverLimit
+    );
+
+    let malformed_before_budget = format!("{pad}a: &a [1]\nb: [1, 2}}\nc: *a\n");
+    assert!(
+        matches!(
+            expansion_with(&malformed_before_budget, 500 * YAML_NODE_COST),
+            Expansion::Unparsed(_)
+        ),
+        "parser error before budget must yield Unparsed"
+    );
+
+    let bomb_then_parser_error = format!("{pad}a: &a [{anchor}]\nb: [{refs}]\nc: [1, 2}}\n");
+    assert_eq!(
+        expansion_with(&bomb_then_parser_error, 500 * YAML_NODE_COST),
+        Expansion::OverLimit,
+        "streaming NodeBudget overflow before a trailing parser error must stay OverLimit"
+    );
+
+    let bomb_then_scanner_error = format!("{pad}a: &a [{anchor}]\nb: [{refs}]\nc: 'unterminated\n");
+    assert!(
+        matches!(
+            expansion_with(&bomb_then_scanner_error, 500 * YAML_NODE_COST),
+            Expansion::Unparsed(_)
+        ),
+        "scanner error runs whole-stream first and must yield Unparsed"
+    );
+}
+
 /// ROB-4 / YAML-15: the `requires:` check walked saphyr's reading of the whole
 /// first document recursively, so a value saphyr reads 100,000 levels deep
 /// (ayaml reads a scalar) overflowed the stack, and a text saphyr refuses but

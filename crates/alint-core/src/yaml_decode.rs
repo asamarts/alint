@@ -9,8 +9,9 @@
 //!   one-entry mapping (`level: {error: ~}`) or a tag naming the variant,
 //!   which the parser v0.22 used refused, and so does alint;
 //! - a value of the wrong type where a string or a struct goes, decoded from a
-//!   value tree, is named, as in `invalid type: integer `1`, expected a
-//!   string`, where ayaml says only `non-string YAML value`;
+//!   value tree, names 128-bit integers verbatim, omits quoting the whole
+//!   string in a struct error (avoiding dumping a whole quoted document), and
+//!   names a refused YAML-namespace tag on a struct;
 //! - a YAML tag a typed field cannot read is named, as in `` `version` has the
 //!   YAML tag `!!timestamp` ``, where ayaml's error speaks of an enum.
 //!
@@ -796,8 +797,8 @@ fn wide_integer(value: &dyn fmt::Display) -> String {
 }
 
 /// The visitor of a string decoded from a value tree, where ayaml takes a
-/// string, or a tagged string, and refuses anything else as a `non-string
-/// YAML value`: this names what it found instead.
+/// string, or a tagged string: this preserves exact 128-bit integer naming
+/// (instead of ayaml's generic `integer outside the 64-bit range`).
 struct StringShape<V>(V);
 
 impl<'de, V: Visitor<'de>> Visitor<'de> for StringShape<V> {
@@ -880,9 +881,9 @@ impl<'de, V: Visitor<'de>> DeserializeSeed<'de> for StringSeed<V> {
 }
 
 /// The visitor of a struct decoded from a value tree, where ayaml takes a
-/// mapping, past any tag outside the YAML namespace, and refuses anything
-/// else, a scalar as a `non-mapping YAML value`: this names what it found
-/// instead.
+/// mapping, past any tag outside the YAML namespace: this names 128-bit
+/// integers verbatim, refuses a string without quoting its contents, and
+/// names a refused YAML-namespace tag.
 struct StructShape<V> {
     visitor: V,
     name: &'static str,
@@ -977,9 +978,11 @@ impl<'de, V: Visitor<'de>> DeserializeSeed<'de> for StructSeed<V> {
 /// The hint for an error that is likely an indentation mistake.
 pub(crate) const INDENTATION_HINT: &str = "(check this line's indentation against the lines above)";
 
-/// Whether `error`, from decoding `input`, gets [`INDENTATION_HINT`]. A key
-/// indented one space less or more than its siblings, `-id: b` without a
-/// space, and a top-level key that is indented all end the document's root
+/// Whether `error`, from decoding `input`, gets [`INDENTATION_HINT`]. ayaml
+/// 0.2.1 names the parent collection itself when a line is indented one space
+/// past its parent, and notes tab indentation directly. Other mistakes (a key
+/// indented two or more spaces off its siblings, `-id: b` without a space, or
+/// a top-level key before a column-1 key) still end the document's root
 /// collection, so ayaml reports what follows as content after the document,
 /// which says nothing of indentation. ayaml gives the error no kind of its own
 /// (it is a parser error), so the message tells it. The hint goes on that

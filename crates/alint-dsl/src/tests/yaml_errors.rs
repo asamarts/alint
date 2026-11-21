@@ -98,8 +98,8 @@ fn a_level_is_one_of_the_levels_names() {
     );
 }
 
-/// YAML-1a: a rule's option of the wrong type named only its kind, as
-/// `non-string YAML value`; it names the value, as v0.22.1 did.
+/// YAML-1a: a rule's option of the wrong type names the value it found (where
+/// ayaml 0.1.2 named only `non-string YAML value`), as v0.22.1 did.
 #[test]
 fn a_rule_option_of_the_wrong_type_is_named() {
     let rule = "version: 1\nrules:\n  - id: a\n    kind: file_content_forbidden\n    \
