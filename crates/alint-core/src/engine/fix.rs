@@ -528,13 +528,13 @@ impl Engine {
                 // the mode pair, so leave `old`/`new` empty without reading the
                 // file into memory.
                 FixEdit::SetMode { path, mode } => {
-                    let target = root.join(&path);
                     #[cfg(unix)]
                     let old_mode = {
                         use std::os::unix::fs::PermissionsExt as _;
+                        let target = root.join(&path);
                         std::fs::metadata(&target)
                             .map_err(|source| Error::Io {
-                                path: target.clone(),
+                                path: target,
                                 source,
                             })?
                             .permissions()
