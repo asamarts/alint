@@ -57,12 +57,10 @@
 /// parser still refuses documents the guard passes, nested deep in block
 /// collections.
 ///
-/// The guard refuses a few documents the parser reads, where the lexer counts
-/// more than ayaml nests (see the module docs): after an anchor name that
-/// ayaml reads two ways it counts every later `[` and `{`, quoted or not, so
-/// `- &a:, x\n- '[[[…'` is refused; and it reads a `...` right after the byte
-/// order mark that starts the text as a document end, where ayaml reads
-/// `\u{feff}... [[[…` as one plain scalar. Both are known false refusals.
+/// The guard refuses one documented form the parser reads, where the lexer
+/// counts more than ayaml nests (see the module docs): it reads a `...` right
+/// after a run of byte order marks that starts the text as a document end,
+/// where ayaml reads `\u{feff}... [[[…` as one plain scalar.
 pub const MAX_YAML_FLOW_DEPTH: usize = 128;
 
 /// `true` when the YAML text's flow-collection nesting stays within
@@ -205,11 +203,13 @@ impl Expansion {
 /// of a 1 MB scalar -- are rejected in well under a second without
 /// allocating). It builds NO value, so it cannot change the real parse's
 /// output. A document ayaml refuses for another reason (malformed YAML, a
-/// limit other than the alias budget) is [`Expansion::Unparsed`]: ayaml reads
-/// the whole document before the visitor sees a node, so after a syntax error
-/// anywhere nothing was counted, and the guard says so rather than vouch for
-/// it. A real bomb is ordinary scalars / sequences / maps (and tagged nodes,
-/// via `visit_enum`) and is counted.
+/// limit other than the alias budget) is [`Expansion::Unparsed`]: ayaml scans
+/// the whole stream before parsing, and on documents up to 4 KiB builds the
+/// tree before the visitor sees a node, while on larger documents it streams
+/// events into the visitor (so an alias bomb before a later parser error is
+/// still caught as [`Expansion::OverLimit`], and any refusal before the budget
+/// overflows leaves [`Expansion::Unparsed`]). A real bomb is ordinary scalars /
+/// sequences / maps (and tagged nodes, via `visit_enum`) and is counted.
 #[must_use]
 pub fn expansion(text: &str) -> Expansion {
     expansion_with(text, expansion_budget(text.len()))
@@ -618,12 +618,12 @@ enum Bom {
     /// Every one has no width: the text saphyr parses, after alint strips the
     /// marks that start it.
     Stripped,
-    /// As ayaml reads a text that starts with one: that mark has no width, so
-    /// the first line's indentation counts from column 0 and a `...` after it
-    /// ends a document (one that more text follows on its line is text to
-    /// ayaml, as to libyaml, so there this reading counts more than ayaml);
-    /// another mark right after it is content (asamarts/ayaml#140); and one
-    /// that starts a later line takes a column.
+    /// As ayaml reads a text that starts with one or more byte order marks:
+    /// those marks have no width, so the first line's indentation counts from
+    /// column 0 and a `...` after them ends a document (one that more text
+    /// follows on its line is text to ayaml, as to libyaml, so there this
+    /// reading counts more than ayaml); and one that starts a later line takes
+    /// a column.
     Ayaml,
 }
 
@@ -653,9 +653,6 @@ struct Lexer<'a> {
     after_json_node: bool,
     /// How a byte order mark that starts a line reads (see [`lex`]).
     bom: Bom,
-    /// An anchor or alias name has ended where ayaml's scanner and the line
-    /// reader it decides indentation with disagree (see `scan_anchor`).
-    distrust: bool,
     /// The anchor names so far in this document that end in `:`, which an
     /// alias keeps whole.
     colon_anchors: std::collections::HashSet<&'a [u8]>,
@@ -681,7 +678,6 @@ impl<'a> Lexer<'a> {
             key: None,
             after_json_node: false,
             bom,
-            distrust: false,
             colon_anchors: std::collections::HashSet::new(),
         }
     }
@@ -703,10 +699,6 @@ impl<'a> Lexer<'a> {
 
     fn is_blank_at(&self, k: usize) -> bool {
         matches!(self.at(k), b' ' | b'\t')
-    }
-
-    fn at_nel(&self) -> bool {
-        self.b[self.i.min(self.b.len())..].starts_with("\u{85}".as_bytes())
     }
 
     fn is_breakz_at(&self, k: usize) -> bool {
@@ -788,10 +780,6 @@ impl<'a> Lexer<'a> {
     /// Run the scanner to the end (or until `emit` returns `false`).
     fn run(mut self, mut emit: impl FnMut(Tok) -> bool) {
         loop {
-            if self.distrust {
-                self.assume_the_worst(emit);
-                return;
-            }
             self.scan_to_next_token();
             // `yaml_parser_stale_simple_keys`, by ayaml's rule: a key candidate
             // expires at a new line or more than 1024 characters on, as ayaml
@@ -898,26 +886,6 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// After a name ayaml reads two ways (see `scan_anchor`), what follows
-    /// has no reading to follow: count each later `[` or `{` as a level that
-    /// never closes, and each `*` as an alias.
-    fn assume_the_worst(&self, mut emit: impl FnMut(Tok) -> bool) {
-        let mut depth = self.flow;
-        for &byte in &self.b[self.i..] {
-            let tok = match byte {
-                b'[' | b'{' => {
-                    depth += 1;
-                    Tok::FlowOpen(depth)
-                }
-                b'*' => Tok::Alias,
-                _ => continue,
-            };
-            if !emit(tok) {
-                return;
-            }
-        }
-    }
-
     /// `yaml_parser_scan_to_next_token`: skip blanks, a comment (a `#` at any
     /// token start), and line breaks; a line break in block context re-allows a
     /// simple key. (Tabs are skipped unconditionally: where the parser refuses
@@ -926,9 +894,8 @@ impl<'a> Lexer<'a> {
         loop {
             // A BOM at column 0 is skipped, or read as content (see `Bom`).
             // Read as a character (the column advances to 1), a second BOM
-            // starts a plain scalar. So does a second one in ayaml's reading,
-            // which looks for a mark once per line: the scan returns before
-            // the one right after the first (asamarts/ayaml#140).
+            // starts a plain scalar; ayaml skips a whole run of leading BOMs
+            // at the start of the stream without width.
             if self.col == 0 && self.b[self.i.min(self.b.len())..].starts_with(b"\xEF\xBB\xBF") {
                 match self.bom {
                     Bom::Stripped => {
@@ -936,7 +903,17 @@ impl<'a> Lexer<'a> {
                             self.i += 3;
                         }
                     }
-                    Bom::Ayaml if self.i == 0 => self.i += 3,
+                    Bom::Ayaml if self.i == 0 => {
+                        while self.b[self.i..].starts_with(b"\xEF\xBB\xBF") {
+                            self.i += 3;
+                        }
+                    }
+                    Bom::Column if self.i == 0 => {
+                        while self.b[self.i..].starts_with(b"\xEF\xBB\xBF") {
+                            self.i += 3;
+                        }
+                        self.col = 1;
+                    }
                     Bom::Column | Bom::Ayaml => self.advance(),
                 }
             }
@@ -958,22 +935,12 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// `yaml_parser_fetch_key`: a `?` key indicator. A comment right after a
-    /// flow `?` ends at a NEL too, as ayaml reads it, and it reads on after the
-    /// NEL on the same line (asamarts/ayaml#141).
+    /// `yaml_parser_fetch_key`: a `?` key indicator.
     fn fetch_key(&mut self) {
         self.roll_indent(self.col);
         self.remove_simple_key();
         self.simple_key_allowed = self.flow == 0;
         self.advance();
-        if self.flow != 0 && self.at(0) == b'#' {
-            while !self.is_breakz_at(0) && !self.at_nel() {
-                self.advance();
-            }
-            if self.at_nel() {
-                self.advance();
-            }
-        }
     }
 
     /// `yaml_parser_fetch_value`: a `:` value indicator. In block context it rolls
@@ -1052,13 +1019,6 @@ impl<'a> Lexer<'a> {
     /// after the name's first character that a character other than a blank or a
     /// line break follows. An alias name that ends in `:` gives the `:` back
     /// unless an anchor before it in its document has that whole name.
-    ///
-    /// The line reader ayaml decides indentation with does not stop at a `:`
-    /// that a flow indicator follows, so for `&a:[: x` it reads an unclosed
-    /// `[` where the scanner reads the key `:[`, and lets later lines continue
-    /// the value at any indentation (asamarts/ayaml#139). The lexer does not
-    /// mirror that: it assumes the worst about the rest of the text (see
-    /// `run`).
     fn scan_anchor(&mut self, alias: bool) {
         self.advance();
         let start = self.i;
@@ -1076,7 +1036,6 @@ impl<'a> Lexer<'a> {
                 _ => false,
             };
             if stop {
-                self.distrust |= self.at(0) == b':' && self.is_flow_indicator_at(1);
                 break;
             }
             self.advance();
@@ -1190,15 +1149,31 @@ impl<'a> Lexer<'a> {
             if !(self.is_blank_at(0) || self.is_break_at(0)) {
                 break;
             }
+            // On a continuation line, only leading spaces count toward block
+            // indentation (ayaml counts `take_while(|c| c == ' ')`); a leading
+            // tab has zero spaces of indentation and ends the scalar instead
+            // of swallowing tokens on the next line.
+            let mut indent_spaces: isize = 0;
+            let mut in_indent = false;
             while self.is_blank_at(0) || self.is_break_at(0) {
                 if self.is_blank_at(0) {
+                    if in_indent {
+                        if self.at(0) == b' ' {
+                            indent_spaces += 1;
+                        } else {
+                            in_indent = false;
+                        }
+                    }
                     self.advance();
                 } else {
                     self.skip_line();
                     leading_blanks = true;
+                    indent_spaces = 0;
+                    in_indent = true;
                 }
             }
-            if self.flow == 0 && self.col < min_col {
+            if self.flow == 0 && (self.col < min_col || (leading_blanks && indent_spaces < min_col))
+            {
                 break;
             }
         }

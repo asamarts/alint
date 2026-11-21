@@ -79,8 +79,8 @@ impl Counter {
 /// `input`, as `counter` counts them, when the place is in it or at its end.
 pub(super) fn offset(input: &str, line: usize, column: usize, counter: Counter) -> Option<usize> {
     let mut start = *counter.line_starts(input).get(line.checked_sub(1)?)?;
-    if line == 1 && matches!(counter, Counter::Ayaml) && input.starts_with('\u{feff}') {
-        start = '\u{feff}'.len_utf8();
+    if line == 1 && matches!(counter, Counter::Ayaml) {
+        start = input.len() - input.trim_start_matches('\u{feff}').len();
     }
     let text = &input[start..];
     text.char_indices()
@@ -101,6 +101,25 @@ pub(super) fn error_offset(input: &str, side: &Side) -> Option<usize> {
         ) => offset(input, *line, *column, Counter::of(rejection)),
         _ => None,
     }
+}
+
+/// Whether ayaml parses `input`'s event stream with at most one document.
+pub(super) fn ayaml_accepts_single_document(input: &str) -> bool {
+    crate::yaml::stream_events(input).is_ok_and(|events| {
+        events
+            .iter()
+            .filter(|event| matches!(event, ayaml::Event::DocumentStart { .. }))
+            .count()
+            <= 1
+    })
+}
+
+/// The byte offset of ayaml's parser error on `input`'s event stream, if any.
+pub(super) fn preexisting_ayaml_parser_offset(input: &str) -> Option<usize> {
+    let error = crate::yaml::stream_events(input).err()?;
+    (error.kind() == ayaml::ErrorKind::Parser)
+        .then(|| error_offset(input, &Err(super::ayaml_rejection(&error))))
+        .flatten()
 }
 
 /// The line of `input` where `side` reports its error, as its parser counts
@@ -370,109 +389,6 @@ pub(super) fn has_tab_line_after_document_end(input: &str) -> bool {
         })
 }
 
-/// The one-based lines, as the oracle counts them, that hold a block scalar
-/// header and follow a line that ends with properties that include an
-/// anchor, holds properties alone, or ends with the `:` of a key that has an
-/// anchor, at no greater indentation.
-pub(super) fn block_scalar_headers_under_an_anchor(input: &str) -> Vec<usize> {
-    let indentation = |line: &str| line.len() - line.trim_start_matches(' ').len();
-    let lines = Counter::Oracle.lines(input);
-    (1..lines.len())
-        .filter(|&index| {
-            let (above, line) = (lines[index - 1], lines[index]);
-            let tokens: Vec<&str> = above.split_whitespace().rev().collect();
-            let properties: Vec<&str> = tokens
-                .iter()
-                .copied()
-                .take_while(|token| token.starts_with(['&', '!']))
-                .collect();
-            let anchored_key = tokens.first().is_some_and(|token| token.ends_with(':'))
-                && tokens.iter().any(|token| token.starts_with('&'));
-            let alone = !properties.is_empty() && properties.len() == tokens.len();
-            (properties.iter().any(|token| token.starts_with('&')) || alone || anchored_key)
-                && line.trim_start().starts_with(['|', '>'])
-                && indentation(line) <= indentation(above)
-        })
-        .map(|index| index + 1)
-        .collect()
-}
-
-/// Whether ayaml's error is that a block scalar's leading empty lines are
-/// more indented than its content, and the first line after them with more
-/// than spaces is a document marker (`---` or `...` at column 1, then white
-/// space or the end), which ends the scalar (YAML 1.2, rule 206) and so is
-/// not its content. ayaml 0.1.2 takes it for a top-level scalar's content
-/// and rejects the input, as `|`, a line of two spaces and `...`: a defect
-/// (`document-marker-after-indented-empty-lines`).
-pub(super) fn ayaml_takes_a_document_marker_for_block_scalar_content(case: &Case<'_>) -> bool {
-    if !ayaml_rejects(
-        case,
-        &["leading empty block-scalar lines are more indented than the content"],
-    ) {
-        return false;
-    }
-    let Some(at) = error_offset(case.input, &case.ayaml) else {
-        return false;
-    };
-    case.input[super::line_start(case.input, at)..]
-        .split_inclusive(['\n', '\r'])
-        .map(|line| line.trim_end_matches(['\n', '\r']))
-        .find(|line| !line.trim_start_matches(' ').is_empty())
-        .is_some_and(|line| {
-            ["---", "..."].iter().any(|marker| {
-                line.strip_prefix(marker)
-                    .is_some_and(|after| after.is_empty() || after.starts_with([' ', '\t']))
-            })
-        })
-}
-
-/// Whether the oracle's error is on a block scalar header under an anchor
-/// or properties alone (see [`block_scalar_headers_under_an_anchor`]), or is
-/// its "more than one document" when such a header is the first line
-/// indented less than the document's first, where the oracle ends the
-/// document.
-pub(super) fn oracle_points_at_a_block_scalar_under_an_anchor(case: &Case<'_>) -> bool {
-    let headers = block_scalar_headers_under_an_anchor(case.input);
-    if rejects(&case.oracle, "more than one document") {
-        return first_line_out_of_the_root(case.input).is_some_and(|line| headers.contains(&line));
-    }
-    error_line(case.input, &case.oracle).is_some_and(|(line, _)| headers.contains(&line))
-}
-
-/// The one-based line, as the oracle counts them, of the first line with
-/// content indented less than the first, past directives and a `---` that
-/// only a comment follows on its line, in an input with no other document
-/// marker or byte order mark before it: where the root node ends.
-fn first_line_out_of_the_root(input: &str) -> Option<usize> {
-    let indentation = |line: &str| line.len() - line.trim_start_matches(' ').len();
-    let bare_start = |line: &str| {
-        line.strip_prefix("---").is_some_and(|rest| {
-            let comment = rest.trim_start_matches([' ', '\t']);
-            comment.is_empty() || (comment.starts_with('#') && comment.len() < rest.len())
-        })
-    };
-    let mut root = None;
-    let mut started = false;
-    for (index, line) in Counter::Oracle.lines(input).into_iter().enumerate() {
-        let text = line.trim();
-        if text.is_empty() || text.starts_with('#') {
-            continue;
-        }
-        if root.is_none() && !started && (line.starts_with('%') || bare_start(line)) {
-            started = bare_start(line);
-            continue;
-        }
-        if text.starts_with(['%', '\u{feff}']) || text.starts_with("---") || text.starts_with("...")
-        {
-            return None;
-        }
-        if indentation(line) < *root.get_or_insert(indentation(line)) {
-            return Some(index + 1);
-        }
-    }
-    None
-}
-
 /// Whether the document's root node is a block scalar: the first line with
 /// content, past directives, `---` and the root's properties, starts with `|`
 /// or `>`.
@@ -611,6 +527,8 @@ mod tests {
         assert_eq!(Counter::Oracle.lines("a\u{2028}b"), ["a", "b"]);
         assert_eq!(offset("\u{feff}ab", 1, 2, Counter::Oracle), Some(3));
         assert_eq!(offset("\u{feff}ab", 1, 2, Counter::Ayaml), Some(4));
+        assert_eq!(offset("\u{feff}\u{feff}ab", 1, 2, Counter::Oracle), Some(3));
+        assert_eq!(offset("\u{feff}\u{feff}ab", 1, 2, Counter::Ayaml), Some(7));
     }
 
     #[test]
@@ -706,50 +624,9 @@ mod tests {
         assert!(root_is_block_scalar("%YAML 1.2\n# c\n--- |\nx\n"));
         assert!(root_is_block_scalar("&b  # c\n>\nx\n"));
         assert!(!root_is_block_scalar("a: |\n x\n") && !root_is_block_scalar("- |\n x\n"));
-        assert_eq!(
-            block_scalar_headers_under_an_anchor("a:\n  b: &x\n>\n"),
-            [3]
-        );
-        assert_eq!(
-            block_scalar_headers_under_an_anchor("-\n  <<: &a1 !t\n|-"),
-            [3]
-        );
-        assert_eq!(block_scalar_headers_under_an_anchor("&x\n|\n"), [2]);
-        assert_eq!(
-            block_scalar_headers_under_an_anchor("true:\n  &a2 null: \n>1-"),
-            [3]
-        );
-        // The root ends at the first line indented less, however long.
-        assert_eq!(first_line_out_of_the_root("  a\nbbbbbbbb: c\n"), Some(2));
-        assert_eq!(first_line_out_of_the_root("a\n  bbbbbbbb\nc\n"), None);
-        // Past a `---` that a comment alone follows, after white space.
-        assert_eq!(first_line_out_of_the_root("--- # c\n  a\nb\n"), Some(3));
-        // Not past another marker, a directive or a byte order mark.
-        for other in [
-            "---# c\n  a\nb\n",
-            "--- x\n  a\nb\n",
-            "  a\n---\nb\n",
-            "  a\n...\nb\n",
-            "  a\n%YAML 1.2\nb\n",
-            "  a\n\u{feff}b\n",
-        ] {
-            assert_eq!(first_line_out_of_the_root(other), None, "{other:?}");
-        }
         assert!(has_tab_line_after_document_end("a: 1\n...\n\t# c\n"));
         assert!(has_tab_line_after_document_end("- a\r\n...\r\t\n"));
         assert!(!has_tab_line_after_document_end("a: 1\n...\n# c\t\n"));
-        for other in [
-            "a:\n  b: !t\n|\n",
-            "a: &x\n  |\n  y\n",
-            "a: &x |\n x\n",
-            "a:\n|\n",
-            "&x a\n|\n",
-        ] {
-            assert!(
-                block_scalar_headers_under_an_anchor(other).is_empty(),
-                "{other:?}"
-            );
-        }
     }
 
     fn rejected_at(input: &str, oracle: (usize, usize), ayaml: (usize, usize)) -> Case<'_> {

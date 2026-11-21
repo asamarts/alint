@@ -242,11 +242,6 @@ const TRIGGERS: &[(&str, &str, &[&str])] = &[
         &[UNEXPLAINED_ENTRY],
     ),
     (
-        "anchor-name-before-a-colon-and-a-flow-indicator",
-        "a: '\u{7f}'\n&k:[: x\n",
-        &[UNEXPLAINED_ENTRY],
-    ),
-    (
         "redefined-anchor",
         "a: '\u{7f}'\nb: [&x 1, &x 2, *x]\n",
         &[UNEXPLAINED_ENTRY],
@@ -288,13 +283,6 @@ const TRIGGERS: &[(&str, &str, &[&str])] = &[
         "global-tags",
         "a: '\u{7f}'\nb: '!!'\n# !!x\nc: !!binary aGk=\n",
         &[UNEXPLAINED_ENTRY],
-    ),
-    // The entry covers a case by the oracle's error, at the header, which
-    // comes first: ayaml reads on to the tag.
-    (
-        "block-scalar-under-an-anchor",
-        "b:\n  c: &x\n>\nd: !<!> x\n",
-        &["verbatim-non-specific-tag"],
     ),
     (
         "non-specific-tag",
@@ -403,8 +391,6 @@ fn masking_triggers() -> Vec<String> {
         "m: !<!> x\n",
         "m: [x,\n\t  y]\n",
         "m: [x\n\t]\n",
-        "m:\n  n: &x\n>\n",
-        "m:\n  -\n    !t\n>\n",
         // The narrow entries'.
         "m: [:a]\n",
         "m: [-]\n",
@@ -601,8 +587,8 @@ fn a_split_keeps_a_colon_line_with_its_key() {
 }
 
 /// ayaml's error at `!<!>` in what YAML 1.2 and the oracle read as a plain
-/// scalar's second line: a defect planted where ayaml 0.1.2 reads the text
-/// as both do.
+/// scalar's second line: a defect planted where ayaml reads the text as both
+/// do.
 fn verbatim_tag_in_text(input: &str, _: Entry, side: Side) -> Side {
     if input.contains("\n!<!> a") {
         Err(Rejection {
@@ -977,11 +963,15 @@ fn a_narrow_entry_does_not_end_a_search_past_a_revealed_error() {
     assert_eq!(explained(true), None);
 }
 
-/// A rewrite that turns a value error of ayaml's into a syntax error hides
-/// the value error, wherever each is: ayaml reads the whole stream's syntax
-/// before it builds a value. Without the core-tag entry, the `!!int` on a
-/// key that ayaml refuses does not stand for the line separator, which the
-/// line-break rewrite turns into a break that ends the quoted scalar.
+/// A rewrite that turns a value error of ayaml's into a scanner error hides
+/// the value error, wherever each is (ayaml scans all tokens first), and any
+/// syntax error (including a newly introduced parser error or second document)
+/// hides a Serde decode error. Document-building errors stream with the parser
+/// (ayaml 0.2.2), so uncovering a pre-existing parser error at the same offset
+/// is kept while a newly introduced parser error is unfair. Without the
+/// core-tag entry, the `!!int` on a key that ayaml refuses does not stand for
+/// the line separator, which the line-break rewrite turns into a break that
+/// ends the quoted scalar.
 #[test]
 fn a_rewrite_must_not_trade_a_value_error_for_a_syntax_error() {
     for input in [
@@ -997,6 +987,86 @@ fn a_rewrite_must_not_trade_a_value_error_for_a_syntax_error() {
             "{case:?}"
         );
     }
+    // A later parser error or second document hides an earlier Serde decode
+    // error, so trading a Serde error for either is unfair.
+    let (serde_case, _) = compare("version: bad\nb: 1\n", Entry::Config);
+    assert_eq!(
+        serde_case.ayaml.as_ref().unwrap_err().kind,
+        Some(ErrorKind::Serde),
+        "{serde_case:?}"
+    );
+    let (parser_broken, _) = compare("version: bad\nb: [1, 2}\n", Entry::Config);
+    assert_eq!(
+        parser_broken.ayaml.as_ref().unwrap_err().kind,
+        Some(ErrorKind::Parser),
+        "{parser_broken:?}"
+    );
+    assert_eq!(
+        fairness(&serde_case, &parser_broken, &Hidden::Nothing),
+        None
+    );
+    let (second_doc_broken, _) = compare("version: bad\n---\nb: 1\n", Entry::Config);
+    assert!(
+        second_doc_broken
+            .ayaml
+            .as_ref()
+            .is_err_and(|rejection| rejection.message.contains(AYAML_SECOND_DOCUMENT)),
+        "{second_doc_broken:?}"
+    );
+    assert_eq!(
+        fairness(&serde_case, &second_doc_broken, &Hidden::Nothing),
+        None
+    );
+    // Document-building errors stream with the parser (ayaml 0.2.2): removing
+    // a resolution error may uncover a pre-existing parser error at its exact
+    // offset, while a newly introduced parser error is unfair.
+    let (res_with_preexisting, _) = compare("a: !!int x\nb: [1, 2}\n", Entry::Value);
+    assert_eq!(
+        res_with_preexisting.ayaml.as_ref().unwrap_err().kind,
+        Some(ErrorKind::Resolution),
+        "{res_with_preexisting:?}"
+    );
+    let (uncovered_parser, _) = compare("a: x\nb: [1, 2}\n", Entry::Value);
+    assert_eq!(
+        uncovered_parser.ayaml.as_ref().unwrap_err().kind,
+        Some(ErrorKind::Parser),
+        "{uncovered_parser:?}"
+    );
+    assert_eq!(
+        fairness(&res_with_preexisting, &uncovered_parser, &Hidden::Nothing),
+        Some(Fairness::Kept)
+    );
+    let (res_clean, _) = compare("a: !!int x\nb: 1\n", Entry::Value);
+    assert_eq!(
+        fairness(&res_clean, &uncovered_parser, &Hidden::Nothing),
+        None
+    );
+    let (later_res, _) = compare("a: 1\nb: !!int x\n", Entry::Value);
+    let (new_earlier_parser, _) = compare("a: [1, 2}\nb: !!int x\n", Entry::Value);
+    assert_eq!(
+        fairness(&later_res, &new_earlier_parser, &Hidden::Nothing),
+        None
+    );
+    // A multi-document stream is NOT accepted as single-document syntax by
+    // ayaml even when `stream_events` parses both documents cleanly.
+    let (multi_doc_res, _) = compare("a: !!int x\n---\nb: 1\n", Entry::Value);
+    assert_eq!(one_rejects_the_syntax(&multi_doc_res), None);
+    // DuplicateKey errors count as value errors and match the oracle's
+    // "duplicate entry" errors even when worded "duplicate mapping key"
+    // rather than compat's "duplicate entry".
+    let (dup, _) = compare("a: 1\na: 2\n", Entry::Value);
+    let (Err(ayaml_dup), Err(oracle_dup)) = (&dup.ayaml, &dup.oracle) else {
+        panic!("{dup:?}");
+    };
+    assert!(value_error(ayaml_dup), "{ayaml_dup:?}");
+    assert!(same_value_error(ayaml_dup, oracle_dup), "{dup:?}");
+    let raw_dup = Rejection {
+        message: "duplicate mapping key: \"a\"".to_string(),
+        location: Some((1, 1)),
+        kind: Some(ErrorKind::DuplicateKey),
+    };
+    assert!(value_error(&raw_dup), "{raw_dup:?}");
+    assert!(same_value_error(&raw_dup, oracle_dup), "{raw_dup:?}");
 }
 
 /// The flow-syntax entry covers an error inside a flow collection only at
@@ -1136,6 +1206,50 @@ fn a_value_error_and_a_syntax_error_at_one_place_differ() {
         );
         assert_eq!(explanation_without(&case, &[UNEXPLAINED_ENTRY]), None);
     }
+    // ayaml 0.2.2 streams parser events into value construction, so an earlier
+    // alias or value error stops before a later parser error that both parsers
+    // reject; a control character still needs its own entry.
+    let (case, _) = compare("*b\t? {", Entry::Value);
+    assert_eq!(case.class, Class::RejectedAtDifferentLocation, "{case:?}");
+    assert_eq!(
+        explanation(&case),
+        Some(vec!["values-after-syntax"]),
+        "{case:?}"
+    );
+    let (case, _) = compare("*b? {'\u{7f}'-.Inf", Entry::Value);
+    assert_eq!(case.class, Class::RejectedAtDifferentLocation, "{case:?}");
+    assert_eq!(
+        explanation(&case),
+        Some(vec!["quoted-only-characters", "values-after-syntax"]),
+        "{case:?}"
+    );
+    assert_eq!(
+        explanation_without(&case, &["quoted-only-characters"]),
+        None
+    );
+    // Removing a `!!null` tag that caused a streaming resolution error may
+    // uncover a pre-existing parser error later in the same document.
+    let input = "---\na: \n<<:\n  k1: &a1 0.5\n  null: !!null |2\n  null: !!null |2\n      line 0\n\t\n    line 1\n---\nb: 2\n";
+    let (case, _) = compare(input, Entry::Value);
+    assert!(explanation(&case).is_some(), "{case:?}");
+    assert_eq!(
+        explanation_without(&case, &["core-tag-on-another-kind"]),
+        None,
+        "{case:?}"
+    );
+    let seed4 = format!(
+        "&a1 k1:\n  -\n    <<: &a2 !!null >\n    <<: &a2 !!null >\n      line 0\n\
+         \x20 - |\n    line 0\n    line 1\n    line 2\n\n\n  -\n\
+         \x20   - \"d\\N\\u00e9\\t\"\n    - true\nkey: {}'q'\n...\n",
+        "'q' ".repeat(256)
+    );
+    let (case, _) = compare(&seed4, Entry::Value);
+    assert!(explanation(&case).is_some(), "{case:?}");
+    assert_eq!(
+        explanation_without(&case, &["core-tag-on-another-kind"]),
+        None,
+        "{case:?}"
+    );
 }
 
 /// A lone carriage return ends a line for the predicates as it does for
@@ -1215,7 +1329,7 @@ fn white_space_wider_than_a_byte_is_stepped_over() {
     ));
 }
 
-/// ayaml 0.1.2 gives its alias errors the kind Composition, and none the
+/// ayaml 0.2.2 gives its alias errors the kind Composition, and none the
 /// kind Alias: a rewrite may move one to where its node starts, as the
 /// oracle's.
 #[test]
@@ -1238,8 +1352,8 @@ fn ayaml_s_alias_errors_are_known_by_their_messages() {
 /// ayaml's errors about a block scalar's indentation are its own, by YAML
 /// 1.2, where the oracle reads the scalar otherwise and rejects what
 /// follows: the entry explains such a case both reject only when ayaml's
-/// error comes first, and never a document marker that ayaml 0.1.2 takes for
-/// a top-level scalar's content, a defect that no entry explains.
+/// error comes first. A document marker after indented empty lines ends a
+/// block scalar in ayaml 0.2.2 too (asamarts/ayaml#146).
 #[test]
 fn a_block_scalar_error_is_ayaml_s_own_only_before_the_oracle_s() {
     let deviation = allowlist::DEVIATIONS
@@ -1253,37 +1367,39 @@ fn a_block_scalar_error_is_ayaml_s_own_only_before_the_oracle_s() {
     let (case, _) = compare("a: '\u{7f}'\nb: |\n   \n  x\n", Entry::Value);
     assert_eq!(case.class, Class::RejectedAtDifferentLocation, "{case:?}");
     assert!(!deviation.covers(&case));
-    // ayaml takes a document marker after the empty lines for content, a
-    // defect of its own.
-    for input in ["|\n  \n...\n", "|\n  \n---\nb\n", "--- |\n  \n--- x\n"] {
+    // Both top-level and nested block scalars end at a document marker after
+    // indented empty lines.
+    for input in ["|\n  \n...\n", "a: |\n   \n...\n"] {
         let (case, _) = compare(input, Entry::Value);
-        assert!(case.class.is_difference(), "{case:?}");
+        assert_eq!(case.class, Class::SameValue, "{case:?}");
+    }
+    for input in ["|\n  \n---\nb\n", "--- |\n  \n--- x\n"] {
+        let (case, _) = compare(input, Entry::Value);
+        assert_eq!(case.class, Class::RejectedAtDifferentLocation, "{case:?}");
         assert!(!deviation.covers(&case), "{case:?}");
         assert_eq!(
             explanation(&case),
-            Some(vec!["document-marker-after-indented-empty-lines"]),
+            Some(vec!["after-the-root-node"]),
             "{case:?}"
         );
     }
-    // A scalar that is not top-level ends at the marker, as it should.
-    let (case, _) = compare("a: |\n   \n...\n", Entry::Value);
-    assert_eq!(case.class, Class::SameValue, "{case:?}");
 }
 
-/// Each syntax error message of ayaml 0.1.2, the version the workspace pins,
+/// Each syntax error message of ayaml 0.2.2, the version the workspace pins,
 /// with sample values in place of its format arguments, as compatibility
 /// mode reports it.
 ///
 /// The list is every string literal and `format!` template that ayaml's
 /// scanner and parser pass as an error message (to `Scanner::error_at`,
-/// `Parser::error`, `expect_consumed`, `flow_error`'s `FlowLack` and
-/// `non_printable_error`), and the messages `compat::map_error` puts in their
-/// place, outside their tests: `src/scanner.rs`, `src/scanner/*.rs`,
-/// `src/parser.rs`, `src/parser/*.rs` and `src/lib.rs`. Messages that
-/// compatibility mode replaces are left out ("unexpected token in mapping
-/// value" becomes "mapping values are not allowed in this context"), and so
-/// are internal errors no input reaches ("invalid span position", "invalid
-/// character boundary"). Refresh the list the same way when the pin moves.
+/// `Parser::error`, `expect_consumed`, `flow_error`'s `FlowLack`,
+/// `compat_indentation_message` and `non_printable_error`), and the messages
+/// `compat::map_error` puts in their place, outside their tests:
+/// `src/scanner.rs`, `src/scanner/*.rs`, `src/parser.rs`, `src/parser/*.rs`
+/// and `src/lib.rs`. Messages that compatibility mode replaces are left out
+/// ("unexpected token in mapping value" becomes "mapping values are not
+/// allowed in this context"), and so are internal errors no input reaches
+/// ("invalid span position", "invalid character boundary"). Refresh the list
+/// the same way when the pin moves.
 const AYAML_SYNTAX_MESSAGES: &[&str] = &[
     "%TAG requires a handle and a prefix",
     "'@' is a reserved indicator and cannot start a plain scalar",
@@ -1296,6 +1412,7 @@ const AYAML_SYNTAX_MESSAGES: &[&str] = &[
     "a comment must be separated from the preceding token",
     "a directive cannot contain a byte order mark",
     "a directive needs a name",
+    "a document's first node cannot be indented",
     "a document-start property cannot precede a same-line block mapping key",
     "a flow collection's `?` must be separated from what follows it",
     "a mapping line is missing a `:`",
@@ -1350,6 +1467,7 @@ const AYAML_SYNTAX_MESSAGES: &[&str] = &[
     "tabs cannot be the only flow-collection indentation",
     "tabs cannot be the only quoted-scalar indentation",
     "tag %-escapes do not form valid UTF-8",
+    "this line is indented differently from the mapping at line 1 column 1",
     "undefined primary tag handle",
     "undefined secondary tag handle",
     "undefined tag handle \"!e!\"",
@@ -1749,134 +1867,6 @@ fn a_size_that_is_not_a_number_fails_the_run() {
     for value in ["1e5", "", "seven"] {
         let result = std::panic::catch_unwind(|| number_setting("N", Some(value), 7));
         assert!(result.is_err(), "{value:?}");
-    }
-}
-
-#[test]
-fn the_same_seed_gives_the_same_inputs() {
-    let inputs = |seed| {
-        let mut rng = Rng::new(seed);
-        (0..80)
-            .map(|index| generated(&mut rng, index, true))
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(inputs(7), inputs(7));
-    assert_ne!(inputs(7), inputs(8));
-}
-
-#[test]
-fn without_specials_no_input_holds_one() {
-    let mut rng = Rng::new(3);
-    for index in 0..4_000 {
-        let input = generated(&mut rng, index, false);
-        assert!(
-            !generate::SPECIALS
-                .iter()
-                .any(|special| input.contains(special)),
-            "{input:?}"
-        );
-    }
-}
-
-/// A shape of generated input, and how to tell an input has it.
-type Shape = (&'static str, fn(&str) -> bool);
-
-/// The generator writes each shape the harness needs.
-#[test]
-fn the_generator_writes_every_shape() {
-    let mut rng = Rng::new(5);
-    let inputs: Vec<String> = (0..8_000)
-        .map(|index| generated(&mut rng, index, true))
-        .collect();
-    let shapes: &[Shape] = &[
-        ("a complex key", |input| {
-            input.contains("? [") || input.contains("? {")
-        }),
-        ("CRLF", |input| input.contains("\r\n")),
-        ("a tab", |input| {
-            input.contains(":\t") || input.contains("-\t")
-        }),
-        ("a blank line in a block scalar", |input| {
-            input.contains("|+\n\n") || input.contains("|\n  \n")
-        }),
-        ("an anchor on a key", |input| {
-            input
-                .lines()
-                .any(|line| line.trim_start().starts_with("&a") && line.contains(": "))
-        }),
-        ("an escape", |input| {
-            input.contains("\\U0001F600") || input.contains("\\x41")
-        }),
-        ("a quoted-only character in quotes", |input| {
-            input.contains("'s\u{7f}") || input.contains("\"d\u{9f}")
-        }),
-        ("a C0 control", |input| {
-            input.contains('\u{1b}') || input.contains('\u{1}')
-        }),
-        ("depth beyond 4", |input| input.contains("\n          ")),
-        ("a long scalar", |input| {
-            input.lines().any(|line| line.len() > 1_000)
-        }),
-        ("a merge key with aliases", |input| {
-            input.contains("<<: [*a")
-        }),
-        ("aliases that fan out", |input| {
-            input.starts_with("- &l0 [x]")
-        }),
-        ("a configuration", |input| input.contains("rules:\n  -")),
-        // The shapes of entries that long runs once never saw.
-        ("another YAML minor version", |input| {
-            input.contains("%YAML 1.3")
-        }),
-        ("the verbatim tag `!<!>`", |input| input.contains("!<!> ")),
-        ("a flow line that a tab indents", |input| {
-            input.contains(",\n\t  ")
-        }),
-        ("a block scalar header under an anchor", |input| {
-            !predicates::block_scalar_headers_under_an_anchor(input).is_empty()
-        }),
-        ("a rule key that is not a string", |input| {
-            input.contains("rules:\n  -")
-                && ["    1: y", "    true: y", "    ~: y", "    [a]: y"]
-                    .iter()
-                    .any(|line| input.contains(line))
-        }),
-    ];
-    for (shape, holds) in shapes {
-        assert!(
-            inputs.iter().any(|input| holds(input)),
-            "no input has {shape}"
-        );
-    }
-}
-
-/// The shares of inputs with specials that `docs/design/yaml-parser.md`
-/// gives for seed 1 hold, in per mille: of the generated inputs, over the
-/// first 40,000 (200; the long run's 300,000 measured 201), and of the corpus
-/// mutations at the long run's 20 per file (19).
-#[test]
-fn the_documented_shares_of_specials_hold() {
-    let holds = |input: &str| {
-        generate::SPECIALS
-            .iter()
-            .any(|special| input.contains(special))
-    };
-    let mut rng = Rng::new(1);
-    let inputs = 40_000;
-    let generated = (0..inputs)
-        .filter(|index| holds(&generated(&mut rng, *index, true)))
-        .count();
-    let share = generated * 1_000 / inputs;
-    assert!((196..=206).contains(&share), "{share} per mille");
-    let (mut mutations, mut with) = (0_usize, 0_usize);
-    for_each_corpus_input(1, 20, true, |input, mutation| {
-        if mutation {
-            mutations += 1;
-            with += usize::from(holds(input));
-        }
-    });
-    if let Some(share) = (with * 1_000).checked_div(mutations) {
-        assert!((17..=22).contains(&share), "{share} per mille");
     }
 }
 

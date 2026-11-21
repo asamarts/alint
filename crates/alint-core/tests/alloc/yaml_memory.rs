@@ -6,18 +6,19 @@
 //!
 //! A binary of its own: it installs a counting global allocator, which counts
 //! every allocation in the process, and keeps the highest count, which cannot
-//! be reset. So its one test measures each shape in a process of its own: it
-//! runs this binary again for each, which decodes the shape's document on one
-//! thread, libyaml first, and prints the two peaks. The counts do not depend
-//! on timing, and the test needs alint-core's `yaml-reference` feature, which
-//! brings the reference parser in. The allocator counts a reallocation by the
-//! bytes it adds, as the system allocator may grow a block in place.
+//! be reset. So its one test measures each parser on each shape in a process
+//! of its own: it runs this binary again for each, which decodes the shape's
+//! document on one thread and prints the exact peak and kept bytes. The counts
+//! do not depend on timing, and the test needs alint-core's `yaml-reference`
+//! feature, which brings the reference parser in. The allocator counts a
+//! reallocation by the bytes it adds, as the system allocator may grow a block
+//! in place.
 //!
 //! The ratio of the two peaks must stay within each shape's regression bound,
-//! its ratio with ayaml 0.1.2 and about 10%. With
+//! its ratio with ayaml 0.2.2 and about 10%. With
 //! `ALINT_YAML_MEMORY_RELEASE=1`, as the release preflight runs it, it must be
-//! within [`RELEASE_BOUND`] for every shape: v0.23.0 waits for an ayaml release
-//! whose peak heap is within 1.2x of libyaml's.
+//! within [`RELEASE_BOUND`] for every shape: ADR-0042 requires ayaml's peak
+//! heap to stay within 1.2x of libyaml's.
 
 use std::fmt::Write as _;
 
@@ -37,6 +38,11 @@ const RELEASE_VARIABLE: &str = "ALINT_YAML_MEMORY_RELEASE";
 /// sets it for each run it starts.
 const SHAPE_VARIABLE: &str = "ALINT_YAML_MEMORY_SHAPE";
 
+/// The variable that names which parser (`ayaml` or `libyaml`) a measuring run
+/// of this binary decodes with. Measuring each parser in its own process gives
+/// an exact peak even when ayaml's peak is below libyaml's.
+const PARSER_VARIABLE: &str = "ALINT_YAML_MEMORY_PARSER";
+
 /// The prefix of the line a measuring run prints its peaks on.
 const MEASURED: &str = "yaml-memory-measured:";
 
@@ -44,66 +50,66 @@ const MEASURED: &str = "yaml-memory-measured:";
 struct Shape {
     name: &'static str,
     /// The most ayaml's peak heap may be, as a multiple of libyaml's, in
-    /// every run: the shape's ratio with ayaml 0.1.2, measured on 2026-11-17,
+    /// every run: the shape's ratio with ayaml 0.2.2, measured on 2026-11-20,
     /// and about 10%.
     regression_bound: f64,
     document: fn() -> String,
 }
 
-/// The shapes, each with its ratio with ayaml 0.1.2 in its bound's comment.
+/// The shapes, each with its ratio with ayaml 0.2.2 in its bound's comment.
 const SHAPES: &[Shape] = &[
-    // 1.775
+    // 0.578
     Shape {
         name: "OpenAPI, 37 KB",
-        regression_bound: 1.95,
+        regression_bound: 0.65,
         document: || openapi(40),
     },
-    // 1.726
+    // 0.583
     Shape {
         name: "OpenAPI, 1.1 MB",
-        regression_bound: 1.90,
+        regression_bound: 0.65,
         document: || openapi(1_200),
     },
-    // 1.726
+    // 0.584
     Shape {
         name: "OpenAPI, 4.4 MB",
-        regression_bound: 1.90,
+        regression_bound: 0.65,
         document: || openapi(4_800),
     },
-    // 1.951
+    // 0.673
     Shape {
         name: "block mapping of `kN: 1`, 1 MB",
-        regression_bound: 2.15,
+        regression_bound: 0.75,
         document: block_mapping,
     },
-    // 2.047
+    // 0.626
     Shape {
         name: "flow mapping of `kN: 1`, 1 MB",
-        regression_bound: 2.25,
+        regression_bound: 0.70,
         document: flow_mapping,
     },
-    // 1.773
+    // 0.517
     Shape {
         name: "flow sequence of integers, 1 MB",
-        regression_bound: 1.95,
+        regression_bound: 0.58,
         document: flow_sequence,
     },
-    // 2.876
+    // 0.719
     Shape {
         name: "flow sequence of `1`, 1 MB",
-        regression_bound: 3.16,
+        regression_bound: 0.80,
         document: flow_ones,
     },
-    // 1.730
+    // 0.731
     Shape {
         name: "block sequence of `value N`, 1 MB",
-        regression_bound: 1.90,
+        regression_bound: 0.81,
         document: block_sequence,
     },
-    // 3.061
+    // 0.965
     Shape {
         name: "block sequence of words, 1 MB",
-        regression_bound: 3.37,
+        regression_bound: 1.07,
         document: block_words,
     },
 ];
@@ -243,15 +249,7 @@ enum Peak {
     Exactly(usize),
     /// The process had counted more before, so the decode's peak is at most
     /// this: the allocator keeps the highest count, which cannot be reset.
-    AtMost(usize),
-}
-
-impl Peak {
-    fn bytes(self) -> usize {
-        match self {
-            Self::Exactly(bytes) | Self::AtMost(bytes) => bytes,
-        }
-    }
+    AtMost(#[expect(dead_code, reason = "printed in the panic message if a peak is masked")] usize),
 }
 
 /// The heap `decode` takes at its peak, and what its result keeps.
@@ -268,35 +266,17 @@ fn heap_of<T>(decode: impl FnOnce() -> T) -> (Peak, usize, T) {
     (peak, HEAP.allocated() - before, value)
 }
 
-/// What a measuring run found for a shape.
-struct Measure {
+/// What one parser's measuring run found for a shape.
+struct SingleMeasure {
     len: usize,
-    libyaml: usize,
-    ayaml: Peak,
+    peak: usize,
     kept: usize,
 }
 
-impl Measure {
-    #[expect(clippy::cast_precision_loss, reason = "ratios of heap sizes")]
-    fn ratio(&self) -> f64 {
-        self.ayaml.bytes() as f64 / self.libyaml as f64
-    }
-
-    #[expect(clippy::cast_precision_loss, reason = "ratios of heap sizes")]
-    fn per_byte(&self, bytes: usize) -> f64 {
-        bytes as f64 / self.len as f64
-    }
-
+impl SingleMeasure {
     /// The line a measuring run prints.
     fn line(&self) -> String {
-        let (exactly, ayaml) = match self.ayaml {
-            Peak::Exactly(bytes) => (1, bytes),
-            Peak::AtMost(bytes) => (0, bytes),
-        };
-        format!(
-            "{MEASURED} {} {} {ayaml} {exactly} {}",
-            self.len, self.libyaml, self.kept
-        )
+        format!("{MEASURED} {} {} {}", self.len, self.peak, self.kept)
     }
 
     /// The measure on a line [`Self::line`] printed, after the test
@@ -308,87 +288,121 @@ impl Measure {
             .map(str::parse)
             .collect::<Result<_, _>>()
             .ok()?;
-        let [len, libyaml, ayaml, exactly, kept] = fields[..] else {
+        let [len, peak, kept] = fields[..] else {
             return None;
         };
-        Some(Self {
-            len,
-            libyaml,
-            ayaml: if exactly == 1 {
-                Peak::Exactly(ayaml)
-            } else {
-                Peak::AtMost(ayaml)
-            },
-            kept,
-        })
+        Some(Self { len, peak, kept })
     }
 }
 
-/// Decode the document of the shape named `name` through both parsers, in a
-/// process that has decoded nothing else, and print what they took.
-fn measure(name: &str) {
+/// What both parsers' measuring runs found for a shape.
+struct Measure {
+    len: usize,
+    libyaml: usize,
+    ayaml: usize,
+    kept: usize,
+}
+
+impl Measure {
+    #[expect(clippy::cast_precision_loss, reason = "ratios of heap sizes")]
+    fn ratio(&self) -> f64 {
+        self.ayaml as f64 / self.libyaml as f64
+    }
+
+    #[expect(clippy::cast_precision_loss, reason = "ratios of heap sizes")]
+    fn per_byte(&self, bytes: usize) -> f64 {
+        bytes as f64 / self.len as f64
+    }
+}
+
+/// Decode the document of the shape named `name` through `parser`, in a
+/// process that has decoded nothing else, and print what it took.
+fn measure(name: &str, parser: &str) {
     let shape = SHAPES
         .iter()
         .find(|shape| shape.name == name)
         .unwrap_or_else(|| panic!("no shape is named {name:?}"));
-    // Whatever either parser allocates once per process, before the counts.
+    // Whatever the parser allocates once per process, before the counts.
     let warm = "a: [1, {b: c}]\n";
-    assert_eq!(
-        ayaml_json_tree(warm).unwrap(),
-        libyaml_json_tree(warm).unwrap()
-    );
-    let text = (shape.document)();
-    // libyaml first: its peak, the measure, is then the highest count yet,
-    // and ayaml's is too unless it is at most libyaml's.
-    let (libyaml, libyaml_kept, libyaml_tree) = heap_of(|| libyaml_json_tree(&text));
-    let libyaml_tree = libyaml_tree.expect("libyaml decodes the document");
-    let Peak::Exactly(libyaml) = libyaml else {
-        panic!("for {name}, libyaml's peak is not the highest count yet: {libyaml:?}");
+    let (len, peak, kept) = match parser {
+        "ayaml" => {
+            assert!(ayaml_json_tree(warm).is_ok());
+            let text = (shape.document)();
+            let len = text.len();
+            let (peak, kept, tree) = heap_of(|| ayaml_json_tree(&text));
+            let tree = tree.expect("ayaml decodes the document");
+            drop(tree);
+            (len, peak, kept)
+        }
+        "libyaml" => {
+            assert!(libyaml_json_tree(warm).is_ok());
+            let text = (shape.document)();
+            let len = text.len();
+            let (peak, kept, tree) = heap_of(|| libyaml_json_tree(&text));
+            let tree = tree.expect("libyaml decodes the document");
+            drop(tree);
+            (len, peak, kept)
+        }
+        other => panic!("unknown parser {other:?}"),
     };
-    drop(libyaml_tree);
-    let (ayaml, ayaml_kept, ayaml_tree) = heap_of(|| ayaml_json_tree(&text));
-    let ayaml_tree = ayaml_tree.expect("ayaml decodes the document");
-    assert_eq!(
-        ayaml_kept, libyaml_kept,
-        "the two trees' heap differs for {name}"
-    );
-    drop(ayaml_tree);
-    let measure = Measure {
-        len: text.len(),
-        libyaml,
-        ayaml,
-        kept: ayaml_kept,
+    let Peak::Exactly(peak) = peak else {
+        panic!("for {name}, {parser}'s peak is not the highest count yet: {peak:?}");
     };
+    let measure = SingleMeasure { len, peak, kept };
     println!("{}", measure.line());
 }
 
-/// Run this binary's test again with [`SHAPE_VARIABLE`] set to `name`, and
-/// return what it measured.
-fn measure_apart(name: &str) -> Measure {
+/// Run this binary's test again with [`SHAPE_VARIABLE`] and [`PARSER_VARIABLE`]
+/// set, and return what that parser measured.
+fn measure_parser_apart(name: &str, parser: &str) -> SingleMeasure {
     let test = "ayaml_takes_at_most_the_bound_times_libyamls_heap";
     let output = std::process::Command::new(std::env::current_exe().unwrap())
         .args([test, "--exact", "--nocapture", "--test-threads=1"])
         .env(SHAPE_VARIABLE, name)
+        .env(PARSER_VARIABLE, parser)
         .output()
         .expect("run the test binary for one shape");
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let measure = stdout.lines().find_map(Measure::parse);
+    let measure = stdout.lines().find_map(SingleMeasure::parse);
     match (output.status.success(), measure) {
         (true, Some(measure)) => measure,
         _ => panic!(
-            "measuring {name} failed ({}):\n{stdout}\n{}",
+            "measuring {name} with {parser} failed ({}):\n{stdout}\n{}",
             output.status,
             String::from_utf8_lossy(&output.stderr)
         ),
     }
 }
 
+/// Measure both parsers on `name`, each in a process of its own.
+fn measure_apart(name: &str) -> Measure {
+    let libyaml = measure_parser_apart(name, "libyaml");
+    let ayaml = measure_parser_apart(name, "ayaml");
+    assert_eq!(ayaml.len, libyaml.len, "document length differs for {name}");
+    assert_eq!(
+        ayaml.kept, libyaml.kept,
+        "the two trees' heap differs for {name}"
+    );
+    Measure {
+        len: ayaml.len,
+        libyaml: libyaml.peak,
+        ayaml: ayaml.peak,
+        kept: ayaml.kept,
+    }
+}
+
 #[test]
 fn ayaml_takes_at_most_the_bound_times_libyamls_heap() {
     if let Ok(name) = std::env::var(SHAPE_VARIABLE) {
-        measure(&name);
+        let parser = std::env::var(PARSER_VARIABLE).expect("parser variable is set with shape");
+        measure(&name, &parser);
         return;
     }
+    let warm = "a: [1, {b: c}]\n";
+    assert_eq!(
+        ayaml_json_tree(warm).unwrap(),
+        libyaml_json_tree(warm).unwrap()
+    );
     let release = std::env::var(RELEASE_VARIABLE).is_ok_and(|value| value == "1");
     let mut report = Vec::new();
     let mut over = Vec::new();
@@ -399,19 +413,14 @@ fn ayaml_takes_at_most_the_bound_times_libyamls_heap() {
         } else {
             shape.regression_bound
         };
-        let at_most = if matches!(measure.ayaml, Peak::AtMost(_)) {
-            "at most "
-        } else {
-            ""
-        };
         let line = format!(
-            "{} ({} bytes): ayaml peak {at_most}{} B ({:.1}/input byte), libyaml peak {} B \
-             ({:.1}/input byte), ratio {at_most}{:.3} (bound {bound}); the tree keeps {} B \
+            "{} ({} bytes): ayaml peak {} B ({:.1}/input byte), libyaml peak {} B \
+             ({:.1}/input byte), ratio {:.3} (bound {bound}); the tree keeps {} B \
              ({:.1}/input byte)",
             shape.name,
             measure.len,
-            measure.ayaml.bytes(),
-            measure.per_byte(measure.ayaml.bytes()),
+            measure.ayaml,
+            measure.per_byte(measure.ayaml),
             measure.libyaml,
             measure.per_byte(measure.libyaml),
             measure.ratio(),

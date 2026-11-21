@@ -50,6 +50,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 #[cfg(test)]
 use std::path::Path;
 
+use ayaml::ErrorKind;
 use serde::de::DeserializeSeed;
 
 use allowlist::{Hidden, Trigger};
@@ -536,7 +537,7 @@ fn settle_same_location(case: &mut Case<'_>) {
         && if case.entry == Entry::Rule {
             !rule_errors::same_rule_error(case)
         } else {
-            one_rejects_the_syntax(case).is_some()
+            errors_disagree_on_syntax(case)
         }
     {
         case.class = Class::RejectedAtDifferentLocation;
@@ -576,10 +577,8 @@ fn settle_same_location(case: &mut Case<'_>) {
 /// explains the case. An entry whose rewrite changes neither result is not
 /// listed among the ids.
 ///
-/// One exception: an entry whose trigger is documented to hide an ayaml
-/// error ([`allowlist::Deviation::hides`]) may make ayaml reject with that
-/// error where the oracle rejected the case, so that no two values were
-/// compared.
+/// One exception: an entry whose trigger is documented to hide earlier parser
+/// errors ([`allowlist::Deviation::hides`]) may reveal one when removed.
 fn explanation(case: &Case<'_>) -> Option<Vec<&'static str>> {
     explanation_without(case, &[])
 }
@@ -682,41 +681,41 @@ enum Fairness {
 /// Whether `rejection` is about a value, not the syntax: a duplicate key,
 /// or a decode error of ayaml's or of serde's.
 fn value_error(rejection: &Rejection) -> bool {
-    rejection.kind == Some(ayaml::ErrorKind::Serde)
-        || [
-            "duplicate entry",
-            "invalid value",
-            "invalid type",
-            "invalid length",
-            "unknown variant",
-            "unknown field",
-            "missing field",
-        ]
-        .iter()
-        .any(|message| rejection.message.contains(message))
+    matches!(
+        rejection.kind,
+        Some(ErrorKind::Serde | ErrorKind::DuplicateKey)
+    ) || [
+        "duplicate entry",
+        "invalid value",
+        "invalid type",
+        "invalid length",
+        "unknown variant",
+        "unknown field",
+        "missing field",
+    ]
+    .iter()
+    .any(|message| rejection.message.contains(message))
 }
 
 /// Whether `rejection` is one of ayaml's errors about a value, which it
-/// reports only once the whole stream's syntax is read.
+/// reports only once the whole stream's tokens are scanned.
 fn ayaml_value_error(rejection: &Rejection) -> bool {
-    rejection.kind.is_some_and(|kind| {
-        matches!(
-            kind,
-            ayaml::ErrorKind::Serde
-                | ayaml::ErrorKind::DuplicateKey
-                | ayaml::ErrorKind::Resolution
-                | ayaml::ErrorKind::Composition
-                | ayaml::ErrorKind::Limit
+    matches!(
+        rejection.kind,
+        Some(
+            ErrorKind::Serde
+                | ErrorKind::DuplicateKey
+                | ErrorKind::Resolution
+                | ErrorKind::Composition
+                | ErrorKind::Limit
         )
-    })
+    )
 }
 
 /// Whether `rejection` is one of ayaml's errors about the syntax: its
 /// scanner's and its parser's.
 fn ayaml_syntax_error(rejection: &Rejection) -> bool {
-    rejection
-        .kind
-        .is_some_and(|kind| matches!(kind, ayaml::ErrorKind::Scanner | ayaml::ErrorKind::Parser))
+    matches!(rejection.kind, Some(ErrorKind::Scanner | ErrorKind::Parser))
 }
 
 /// Whether `rejection` is about an alias: ayaml's, which it gives as it
@@ -747,15 +746,19 @@ fn side_fairness(
     let moved = |at| original_offset(case.input, next.input, at);
     match (side(case), side(next)) {
         (_, Ok(_)) => Some(Fairness::Kept),
-        // ayaml reads the whole stream's syntax before it builds a value, so
-        // a syntax error the rewrite makes hides the value error the case
-        // showed, wherever each is. The oracle's errors have no kind. A
-        // second document is the exception: ayaml finds it only once it
-        // built the first one's value, which then held no error.
+        // A syntax error the rewrite makes hides the value error, unless a
+        // document-building error uncovered a second document or the exact
+        // pre-existing parser error masked by streaming value construction.
         (Err(before), Err(after))
             if ayaml_value_error(before)
                 && ayaml_syntax_error(after)
-                && !after.message.contains(AYAML_SECOND_DOCUMENT) =>
+                && !(before.kind != Some(ErrorKind::Serde)
+                    && (after.message.contains(AYAML_SECOND_DOCUMENT)
+                        || (after.kind == Some(ErrorKind::Parser)
+                            && predicates::preexisting_ayaml_parser_offset(case.input)
+                                .is_some_and(|pre| {
+                                    place(next, side).map(moved) == Some(pre)
+                                })))) =>
         {
             None
         }
@@ -849,8 +852,9 @@ fn original_offset(input: &str, rewritten: &str, at: usize) -> usize {
 /// oracle's does after the path to the value.
 fn same_value_error(ayaml: &Rejection, oracle: &Rejection) -> bool {
     let problem = |message: &str| message.rsplit(": ").next().unwrap_or("").to_string();
-    (ayaml.message.contains("duplicate entry") && oracle.message.contains("duplicate entry"))
-        || (ayaml.kind == Some(ayaml::ErrorKind::Serde)
+    ((ayaml.kind == Some(ErrorKind::DuplicateKey) || ayaml.message.contains("duplicate entry"))
+        && oracle.message.contains("duplicate entry"))
+        || (ayaml.kind == Some(ErrorKind::Serde)
             && problem(&ayaml.message) == problem(&oracle.message))
 }
 
@@ -858,12 +862,10 @@ fn same_value_error(ayaml: &Rejection, oracle: &Rejection) -> bool {
 /// `None` when it is not fair. `hides` names the ayaml errors the rewrite's
 /// trigger is documented to hide.
 fn fairness(case: &Case<'_>, next: &Case<'_>, hides: &Hidden) -> Option<Fairness> {
-    let shown = case.ayaml.is_ok() && case.oracle.is_err() && hides.shown(case, next);
     let ayaml = match side_fairness(case, next, |case| &case.ayaml, |case| &case.oracle) {
         Some(Fairness::Revealed) if hides.revealed(case, next) => Some(Fairness::Kept),
         fairness => fairness,
-    }
-    .or(shown.then_some(Fairness::Kept));
+    };
     let oracle = side_fairness(case, next, |case| &case.oracle, |case| &case.ayaml);
     // The two errors are one: the same value error, or, outside a rule,
     // where a place is only the rule's position, the same place.
@@ -898,48 +900,53 @@ fn fairness(case: &Case<'_>, next: &Case<'_>, hides: &Hidden) -> Option<Fairness
 /// `a: !!int x` then `---` and `b`.
 const AYAML_SECOND_DOCUMENT: &str = "more than one document in stream";
 
-/// ayaml's messages about aliases, of kind Composition: ayaml 0.1.2 gives
-/// no error of kind Alias, which names the same errors.
+/// ayaml's messages about aliases, of kind Composition: ayaml gives no error
+/// of kind Alias, which names the same errors.
 const AYAML_ALIAS_MESSAGES: &[&str] = &[
     "unknown anchor",
     "an alias cannot refer to a collection that contains it",
 ];
 
 /// The oracle's messages about aliases, which it checks as it reads the
-/// syntax and ayaml only when it builds values.
+/// syntax and ayaml as it streams events into value construction.
 const ORACLE_ALIAS_MESSAGES: &[&str] = &[
     "unknown anchor",
     "recursion limit exceeded",
     "repetition limit exceeded",
 ];
 
-/// For a case both parsers reject at different places, the class it has
-/// when one parser's error is about the syntax and the other reads the
-/// syntax: ayaml checks it before it builds any value, and the oracle
-/// builds values as it reads, so either can report a value error where the
-/// other reports a syntax error that the first may not share. A location
-/// class would take the two for one error found at two places, and hide a
-/// difference in the syntax. The oracle reads the syntax when it reads the
-/// input into no value; its error is about the syntax when it gives the same
-/// error so, and is not about an alias.
+/// Whether the oracle rejects `input`'s syntax (not an alias error).
+fn oracle_syntax_result(input: &str) -> Result<(), Rejection> {
+    yaml_serde::from_str::<serde::de::IgnoredAny>(input)
+        .map(|_| ())
+        .map_err(|error| oracle_rejection(&error))
+}
+
+fn oracle_about_syntax(syntax: &Result<(), Rejection>, oracle: &Rejection) -> bool {
+    syntax.as_ref().is_err_and(|error| error == oracle)
+        && !ORACLE_ALIAS_MESSAGES
+            .iter()
+            .any(|m| oracle.message.contains(m))
+}
+
+fn errors_disagree_on_syntax(case: &Case<'_>) -> bool {
+    let (Err(ayaml), Err(oracle)) = (&case.ayaml, &case.oracle) else {
+        return false;
+    };
+    ayaml_syntax_error(ayaml) != oracle_about_syntax(&oracle_syntax_result(case.input), oracle)
+}
+
+/// Class when one parser's error is about syntax and the other reads single-document syntax.
 fn one_rejects_the_syntax(case: &Case<'_>) -> Option<Class> {
     let (Err(ayaml), Err(oracle)) = (&case.ayaml, &case.oracle) else {
         return None;
     };
-    let syntax = yaml_serde::from_str::<serde::de::IgnoredAny>(case.input)
-        .map(|_| ())
-        .map_err(|error| oracle_rejection(&error));
-    // ayaml 0.1.2 reports a malformed tag as a scanner error, and gives no
-    // error of kind Tag.
-    let ayaml_syntax = ayaml_syntax_error(ayaml);
-    if ayaml_syntax {
+    let syntax = oracle_syntax_result(case.input);
+    if ayaml_syntax_error(ayaml) {
         return syntax.is_ok().then_some(Class::OnlyAyamlRejects);
     }
-    let about_syntax = syntax.as_ref().is_err_and(|error| error == oracle)
-        && !ORACLE_ALIAS_MESSAGES
-            .iter()
-            .any(|message| oracle.message.contains(message));
-    about_syntax.then_some(Class::OnlyOracleRejects)
+    (oracle_about_syntax(&syntax, oracle) && predicates::ayaml_accepts_single_document(case.input))
+        .then_some(Class::OnlyOracleRejects)
 }
 
 /// What the prefix through the line of a case's first error shows (see
@@ -1317,11 +1324,8 @@ impl Search {
         } else {
             (&prefix.oracle, &prefix.ayaml)
         };
-        // Both parsers reject the prefix's syntax at one place, and the
-        // case's other error is past it: ayaml reads the whole stream's
-        // tokens before it parses, so it reports a scanner error there ahead
-        // of the error the two share. A value error the two share is one
-        // ayaml reports after any syntax error, as it should.
+        // Both reject the prefix's syntax at one place, and the other error is
+        // past it (ayaml scans whole-stream first). Shared value errors stay unsplit.
         let shared = prefix.class == Class::RejectedAtSameLocation
             && matches!(&prefix.ayaml, Err(rejection) if ayaml_syntax_error(rejection))
             && later_error.is_some_and(|later| later >= end);

@@ -19,3 +19,4 @@ cc 728ac18757624bf0010f633e3c39ed667958706ff122507f7ac74d8ed9807657 # shrinks to
 cc 883efea79b72d5aaf6fc4613474a159abe03773dbf202fb2fe75147d02633614 # shrinks to prefix = ["[", "?", "#", "\u{85}"], sep = " "
 cc 6ba742bdbb0129751d14dd0bb376848a6c531825f426f486b877b5fedc5bd311 # shrinks to prefix = ["[", "?", "#", "\u{85}"], sep = " "
 cc 5ecb4a7e96dc942259a8297b03242962628ae443ecf352f7218eb9091ba08bbd # shrinks to prefix = ["!t#"], sep = " "
+cc 7820b22eb03da7220886f9975e0670d9911de57b428b5b768e46890a2eadb360 # shrinks to prefix = ["? ", "-", "---\n", "\t", "*a ", "k: |\n  ", "|"], sep = "\n  "

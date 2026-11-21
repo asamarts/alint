@@ -165,7 +165,8 @@ Surfaced by the pre-v0.16 adversarial audit (rounds 3-4) and closed in it. Every
 - **Parse-tree memory amplification (per-file caps: FIXED).**
   `MAX_ANALYZE_BYTES` (256 MiB, `walker.rs`) bounds input bytes, but a parsed
   tree costs far more RSS: measured up to ~30x for attribute-heavy XML and
-  ~6-10x for JSON, and a YAML parse up to ~190x (6.2 GB at the cap, ADR-0042).
+  ~6-10x for JSON, and ~24-48x for YAML with ayaml 0.2.2 (0.75 to 1.54 GiB at the cap, down from
+  ~190x / 4.5 to 6.2 GB on ayaml 0.1.2, ADR-0042).
   `Format::parse` caps structured input at
   `MAX_STRUCTURED_BYTES` (32 MiB, `structured_format.rs`; HCL keeps its
   tighter 64 KiB cap). Lossless dotenv additionally caps parsed documents at
@@ -196,9 +197,10 @@ Surfaced by the pre-v0.16 adversarial audit (rounds 3-4) and closed in it. Every
 Remaining follow-ups (each needs an extreme input AND a constrained host, and each is invasive relative to its payoff, so deferred to a dedicated robustness pass):
 
 1. **Concurrent-parse memory.** The per-file cap bounds ONE file's tree, but the per-file dispatch is parallel (up to `num_cpus` files at once), so aggregate transient parse memory is still (per-file cap) x fan-out. A concurrent-parse memory semaphore would bound the total, but blocking rayon workers on a semaphore risks pool starvation, so it wants careful design.
-   **YAML: fixed (ADR-0042).** One YAML parse at the 32 MiB cap measured 4.5 to 6.2 GB of peak
-   RSS, so YAML parses over 1 MiB share a process-wide budget of 32 MiB of input in flight
-   (`alint_core::yaml_budget`). A parse holds its share only while the parser runs, and a thread
+   **YAML: fixed (ADR-0042).** One YAML parse at the 32 MiB cap measured 0.75 to 1.54 GiB of peak
+   RSS with ayaml 0.2.2 (down from 4.5 to 6.2 GB on 0.1.2), so YAML parses over 1 MiB share a
+   process-wide budget of 32 MiB of input in flight (`alint_core::yaml_budget`). A parse holds its
+   share only while the parser runs, and a thread
    that holds one never waits for another, so no worker waits while holding budget. XML, JSON and
    the other formats remain (per-file cap) x fan-out.
 2. **XML multi-element attribute residual (bounded, non-quadratic).** The per-element attribute cap (256) restored linear-time parsing; a max-size file of at-cap-width elements still costs a few seconds of CPU (linear in size). A document-wide attribute budget or a parse watchdog would bound wall-clock further; not needed for the sharp DoS, which is closed.

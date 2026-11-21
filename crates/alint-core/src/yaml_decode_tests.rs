@@ -206,8 +206,9 @@ fn a_variant_with_data_still_reads_from_a_mapping_or_a_tag() {
 }
 
 /// YAML-1a: a value of the wrong type where a string goes, decoded from a
-/// value tree, is named, where ayaml says `non-string YAML value`. From text,
-/// a string reads any scalar's text, as it did.
+/// value tree, is named (including 128-bit integers verbatim, where ayaml 0.1.2
+/// said `non-string YAML value` and 0.2.2 says `integer outside the 64-bit
+/// range`). From text, a string reads any scalar's text, as it did.
 #[test]
 fn a_type_error_names_what_was_found() {
     for (input, found) in [
@@ -248,8 +249,9 @@ fn a_type_error_names_what_was_found() {
             .message(),
         "[\"a b\"]: invalid type: integer `1`, expected a string"
     );
-    // A struct from a value tree names what it found, where ayaml says
-    // `non-mapping YAML value`, and reads past a tag outside YAML's own.
+    // A struct from a value tree names what it found without quoting a string
+    // (where ayaml 0.1.2 said `non-mapping YAML value` and 0.2.2 quotes the
+    // string), and reads past a tag outside YAML's own.
     for (input, found) in [
         ("inner: 1", "integer `1`"),
         ("inner: x", "string"),
@@ -381,18 +383,51 @@ const HINTED: &str = "unexpected content after document (check this line's inden
                       against the lines above)";
 
 /// YAML-1c: the common indentation mistakes end the root collection, and
-/// ayaml reports what follows as content after the document; alint adds a
-/// hint, after the location, which stays where it was.
+/// ayaml reports what follows either with its own indentation message (when
+/// one space off a parent collection) or as content after the document, to
+/// which alint adds a hint after the location.
 #[test]
 fn an_indentation_mistake_gets_a_hint() {
     let rule = "version: 1\nrules:\n  - id: a\n    kind: file_exists\n";
-    for (input, line, column) in [
-        // A key one space less, or more, than its siblings.
+    // Off by one from the parent collection: ayaml 0.2.2 names the parent
+    // collection's line and column directly, so no extra hint is appended.
+    for (input, line, column, expected) in [
         (
             "version: 1\nrules:\n  - id: a\n   kind: file_exists\n",
             4,
             4,
+            "this line is indented differently from the sequence at line 3 column 3",
         ),
+        (
+            &format!("{rule} -id: b\n"),
+            5,
+            2,
+            "this line is indented differently from the mapping at line 2 column 1",
+        ),
+        (
+            "version: 1\n rules: []\n",
+            2,
+            2,
+            "this line is indented differently from the mapping at line 1 column 1",
+        ),
+    ] {
+        let error = from_str::<Value>(input).unwrap_err();
+        assert_eq!(error.message(), expected, "{input:?}");
+        let location = error.location().unwrap();
+        assert_eq!(
+            (location.line(), location.column()),
+            (line, column),
+            "{input:?}"
+        );
+        assert!(
+            !error.to_string().contains("check this line"),
+            "{input:?}: {error}"
+        );
+        let error = crate::yaml_backend::json_tree(input).unwrap_err();
+        assert_eq!(error.message(), expected, "{input:?}");
+    }
+    for (input, line, column) in [
+        // A key more than one space off its siblings.
         (
             "version: 1\nrules:\n  - id: a\n     kind: file_exists\n",
             4,
@@ -400,11 +435,9 @@ fn an_indentation_mistake_gets_a_hint() {
         ),
         // A key at the entry's `-`.
         ("version: 1\nrules:\n  - id: a\n  kind: file_exists\n", 4, 3),
-        // `-id` with no space.
+        // `-id` with no space at the entry's `-`.
         (&format!("{rule}  -id: b\n"), 5, 3),
-        (&format!("{rule} -id: b\n"), 5, 2),
-        // A top-level key indented, after or before the others.
-        ("version: 1\n rules: []\n", 2, 2),
+        // A top-level key indented by two, or after an indented first key.
         ("version: 1\n  rules: []\n", 2, 3),
         (" rules: []\nversion: 1\n", 2, 1),
         // A comment between the two lines changes nothing.

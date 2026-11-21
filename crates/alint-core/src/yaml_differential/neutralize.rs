@@ -565,9 +565,9 @@ pub(super) fn line_start_byte_order_marks(input: &str) -> Vec<String> {
 }
 
 /// Without the mark that starts the stream, and with each mark right after
-/// it as `x`. Both parsers read such a mark as content (asamarts/ayaml#140),
-/// so `x` keeps what follows it a scalar's text, where without the first
-/// mark the second would start the stream and be skipped.
+/// it as `x`. The oracle reads a second mark right after the first as content
+/// (while ayaml skips the leading run), so `x` keeps what follows it a scalar's
+/// text where removing only the first mark would let the second start the stream.
 fn second_leading_marks_as_content(input: &str) -> String {
     let Some(rest) = input.strip_prefix('\u{feff}') else {
         return input.to_string();
@@ -857,28 +857,6 @@ pub(super) fn flow_line_tabs(input: &str) -> Vec<String> {
     })
 }
 
-/// With each block scalar header that follows a line with an anchor or
-/// properties alone, at no greater indentation (see
-/// [`super::predicates::block_scalar_headers_under_an_anchor`]), indented
-/// past that line's last character, where YAML 1.2 (section 8.1) and the
-/// oracle read it as the node's, as ayaml reads it where it is
-/// (`block-scalar-under-an-anchor`). Its content's indentation counts from
-/// the node's parent, not the header, so the lines after it read alike.
-pub(super) fn block_scalar_headers(input: &str) -> Vec<String> {
-    let counter = super::predicates::Counter::Oracle;
-    let (starts, lines) = (counter.line_starts(input), counter.lines(input));
-    let edits: Vec<(Range<usize>, String)> =
-        super::predicates::block_scalar_headers_under_an_anchor(input)
-            .into_iter()
-            .map(|line| {
-                let width = lines[line - 2].trim_end().chars().count();
-                let at = starts[line - 1];
-                (at..at, " ".repeat(width + 1))
-            })
-            .collect();
-    apply(input, &edits)
-}
-
 /// Whether `text` starts with `indicator` followed by white space or nothing.
 fn starts_indicator(text: &str, indicator: char) -> bool {
     text.strip_prefix(indicator)
@@ -973,26 +951,6 @@ fn narrowed(name: &str) -> String {
         .collect()
 }
 
-/// With a space after each anchor or alias name that, outside a flow
-/// collection, ends at a `:` that a flow indicator follows, as in `&a:[`:
-/// there ayaml's scanner ends the name and its line reader does not
-/// (asamarts/ayaml#139). Both parsers read the `:` and what follows as
-/// before, and ayaml's readers agree.
-pub(super) fn names_ended_at_a_colon_before_a_flow_indicator(input: &str) -> Vec<String> {
-    let places = places(input);
-    let edits: Vec<(Range<usize>, String)> = tokens(input, &['&', '*'])
-        .into_iter()
-        .filter(|range| {
-            let rest = &input[range.end..];
-            places[range.start].depth == 0
-                && rest.starts_with(':')
-                && rest[1..].starts_with(|ch: char| ",[]{}".contains(ch))
-        })
-        .map(|range| (range.end..range.end, " ".to_string()))
-        .collect();
-    apply(input, &edits)
-}
-
 /// With each anchor or alias name that holds a character other than an
 /// ASCII letter, a digit, `-` or `_` renamed to one that does not, the
 /// aliases to it alike. An alias whose name is a known anchor's followed by
@@ -1011,9 +969,12 @@ pub(super) fn wide_anchor_names(input: &str) -> Vec<String> {
             (renamed != name).then_some((name_range, renamed))
         } else if let Some(renamed) = anchors.get(name) {
             (renamed != name).then(|| (name_range, renamed.clone()))
-        } else if let Some(stem) = name.strip_suffix(':') {
+        } else if let Some(stem) = name.strip_suffix(':')
+            && !stem.is_empty()
+        {
             // The `:` that ends an alias is the value indicator after it,
             // which stays, as for `*b<<: x`, whose name no anchor gave.
+            // A lone `:` (`*:`) is the alias name itself, not a value indicator.
             let renamed = anchors.get(stem).cloned().unwrap_or_else(|| narrowed(stem));
             (renamed != stem).then(|| (name_range.start..name_range.end - 1, renamed))
         } else {

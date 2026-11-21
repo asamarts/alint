@@ -1,6 +1,6 @@
 # v0.23: selectors, a first constraint slice, and the YAML groundwork
 
-Status: accepted (2026-11-12, ADR-0032); in progress, phases 0 to 8 done (feature freeze reached; phase 9 waits on an ayaml release).
+Status: accepted (2026-11-12, ADR-0032); in progress, phases 0 to 9 done (feature freeze and ayaml 0.2.2 qualification complete; phase 10 release prep next).
 Decisions: [ADR-0032](../../adr/0032-v023-owner-decisions.md) (the owner decisions and the scope);
 [ADR-0033](../../adr/0033-v023-slice-after-the-corpus-stratum.md) (the slice after the corpus
 stratum, and the #503 fix);
@@ -166,8 +166,9 @@ Out of scope:
   - six `alint-dsl` functions;
   - four `alint-testkit` items.
 
-  alint parses YAML with ayaml 0.1.2 since #510, through `alint_core::yaml`. saphyr and
-  saphyr-parser still give source spans and structured fixes; they leave in v0.24 (ADR-0036).
+  alint parses YAML with ayaml 0.2.2 (bumped from 0.1.2 in phase 9), through `alint_core::yaml`.
+  saphyr and saphyr-parser still give source spans and structured fixes; they leave in v0.24
+  (ADR-0036).
 - **Open structs.**
   - `Violation`, `Context`, `RuleSpec`, `NestedRuleSpec` and `WalkOptions` were built with struct
     literals outside `alint-core` until phase 4 sealed them (#517, #518).
@@ -195,10 +196,12 @@ it must respect:
   differently, and the CHANGELOG lists each difference (ADR-0035 decision 5). The two audits since
   v0.22.1 (ADR-0043, ADR-0044) are the third: their security and correctness fixes change what some
   configurations do, and the CHANGELOG's "Upgrading from 0.22" list names each change a 0.22 setup
-  can notice. Every difference in the replay must come from one of them. The replay of `main` at
-  e7bb08a57 against v0.22.1 (run 43927008138) found three: item 12's reworded
-  `java-no-tracked-build` message in gradle/gradle and quarkusio/quarkus, and the reworded message
-  for a stream of more than one document in istio/istio.
+  can notice. Every difference in the replay must come from one of them. The replay of
+  `bump-ayaml-0.2.2` against v0.22.1 (run 44844378906, 130 repositories) found 115 identical, 4
+  expected skips, 0 crashes, and 11 explained diffs: 8 additive `related_locations` fields from
+  #590, item 12's reworded `java-no-tracked-build` message in gradle/gradle and
+  quarkusio/quarkus (#509), and the reworded message for a stream of more than one document in
+  istio/istio (#510).
 - **The version boundary of ADR-0022 holds.** A v2 source may extend v1 sources, never the
   reverse, at any recursive edge.
 - **Trust is no weaker than v1** (section 7.1 rules 9, 11 and 12):
@@ -274,7 +277,7 @@ next. Phases 1, 4 and 5 do not depend on the design and can run alongside phases
 | 6 | The version dispatch, named selectors and relations, per-source namespaces with `extends:` aliases, value-bearing entry rows, the equality join, the draft v2 schema, and `validate-config`, `list`, `explain` and `export-agents-md` for v2 | v2 only |
 | 7 | The `constraint` kind: equality (with row-level `equal`), unique/key and set (with `plurals: cldr`), report-only, and the related-location gate over JSON, SARIF and the language server | v2 only |
 | 8 | The three conformance policies with `alint test` cases, and the section 12.1 measurements | v2 only |
-| 9 | Qualify the cutover that #510 made: #483, and the #482 harness's verdict with an approved allowlist. Otherwise the owner holds the release or reverts #510 (ADR-0035). Approved on 2026-11-15, on condition that v0.23.0 is tagged on an ayaml release that fixes asamarts/ayaml#132, #133 and #137 (ADR-0040). Since 2026-11-16 the condition is an ayaml release with the fixes ayaml's main has for every gap alint filed, #132, #133, #137, #139, #140, #141, #146 and #147, and ADR-0042's condition on memory (ADR-0043). The bump follows `yaml-parser.md`'s "Bumping ayaml" | yes (parser) |
+| 9 | Qualify the cutover that #510 made: #483, and the #482 harness's verdict with an approved allowlist (ADR-0035, ADR-0040, ADR-0042, ADR-0043, ADR-0044). Completed on 2026-11-20 with ayaml `=0.2.2` (all tracked fixes, 34 deviations / 8 location classes with zero new differences, 12-seed long runs, 3 x 2,000,000 depth-guard parity runs, compare mode, corpus replay run 44844378906, and 0.52x to 0.97x peak heap across all nine shapes) | yes (parser) |
 | 10 | Documentation, the CHANGELOG (re-run `alint baseline`; the library migration; the `git_tracked_only` change; the affected versions of item 13's fixes), facts, publishing the security advisory drafted for item 13 (GHSA-78jj-xfpm-g6px, a private draft; ADR-0040, widened by ADR-0043; step 5 of RELEASING.md's documentation checklist), and the release check | no |
 
 Phase 10's release check has one step on alint.org, which this repository cannot make: once the
@@ -1200,3 +1203,49 @@ as #589, step 3 as #590, and step 4 is the last.
     v0.23 reaches feature freeze (phases 1 to 8, #503 and #580 complete).
   - Next: phase 9 (ayaml bump once an upstream release carries ADR-0043's compatibility fixes and
     meets ADR-0042/ADR-0044's 1.2x memory gate across all nine shapes), then phase 10 (release).
+- 2026-11-20: phase 9, ayaml `=0.2.2` bump and full qualification (#481, #605, ADR-0035,
+  ADR-0040, ADR-0042, ADR-0043, ADR-0044, ADR-0046 decision 7).
+  - **Pin and code updates:** bumped `[workspace.dependencies]` `ayaml` from `=0.1.2` to `=0.2.2`
+    (carrying fixes for asamarts/ayaml#132, #133, #137, #138, #139, #140, #141, #146, #147, #160
+    to #165, #168, #178 and #191). Updated `yaml::stream_events` to
+    `parse_events_eager_with_limits`, dropped `Span::start().index()` and preserved
+    `Error::location()` across `with_span` in `yaml_decode`, removed the #139/#140/#141 workarounds
+    from `yaml_depth`, fixed `scan_plain_scalar` leading-tab indentation and multi-BOM offsets in
+    `yaml_differential/predicates.rs`, and updated `yaml_differential.rs` for streaming
+    parser-to-value error order, `ErrorKind::DuplicateKey`, and multi-document syntax checks.
+  - **Allowlist (34 deviations, 8 location classes; zero new differences added by 0.2.2):**
+    removed all four ayaml-defect entries (`block-scalar-under-an-anchor`,
+    `ayaml-error-without-a-place`, `document-marker-after-indented-empty-lines`,
+    `anchor-name-before-a-colon-and-a-flow-indicator`), narrowed
+    `byte-order-mark-starting-a-line`, refreshed `AYAML_SYNTAX_MESSAGES` from ayaml 0.2.2, and
+    added its two new indentation messages to `LOCATIONS` (`indentation`). Note for owner sign-off
+    before tagging: since ADR-0040 approved 33 deviations + 7 location classes, the four
+    ayaml-defect entries are gone and four non-defect entries added in #530 remain
+    (`empty-flow-implicit-key`, `negative-zero-in-an-unsigned-field`, `rule-that-is-null`, and
+    location class `verbatim-tag-that-names-nothing`).
+  - **Differential long runs (seeds 1 to 12):** 3,848,472 total inputs (320,706 per seed: 300,000
+    generated, 986 repository YAML files, 19,720 mutations), 0 unexplained differences, 0 panics,
+    and 0 differences only saphyr's vote explains across all 12 seeds (plus 4 `specials=0` seeds =
+    1,282,824 additional inputs, 0 unexplained differences).
+  - **Depth-guard parity:** three runs of 2,000,000 cases of both `scanner_never_misses`
+    properties (12,000,000 cases total), 0 failures (an initial parity run caught
+    `scan_plain_scalar` counting a leading tab toward block indentation; fixed and re-verified
+    across 3 x 2,000,000 cases with a committed regression fixture and proptest seed).
+  - **Workspace compare mode:** `ci/scripts/yaml-compare.sh` passes across the entire workspace
+    with all 5 saphyr-vote lines reviewed as documented YAML 1.2 readings.
+  - **Memory gate and parse budget:** `ci/scripts/yaml-memory-release.sh` passes across all nine
+    shapes (each parser measured in its own child process) at 0.517x to 0.965x of libyaml's peak
+    heap: OpenAPI 37 KB 0.578x, 1.1 MB 0.583x, 4.4 MB 0.584x (21.8 to 21.9 B/input byte vs
+    libyaml's 37.3 to 37.8), block mapping 0.673x, flow mapping 0.626x, flow sequence of ints
+    0.517x, flow sequence of `1` 0.719x, block sequence of `value N` 0.731x, and block sequence of
+    words 0.965x. Lowered regression bounds to 0.58 to 1.07 and lowered
+    `EXPANSION_BYTES_PER_COST_BYTE` in `yaml_budget.rs` from 64 to 32 (ADR-0046 decision 7).
+    End-to-end release checks run 0.6% to 8.1% faster on OpenAPI (50 x 37 KB, 1.1 MB, 4.4 MB) at
+    0.74x to 0.81x peak RSS, and 32 MiB peak RSS dropped from 4.5 to 6.2 GB to 0.75 to 1.54 GiB.
+  - **Corpus replay against v0.22.1 (`corpus-replay.yml` run 44844378906):** 130 repositories: 115
+    identical, 4 expected skips, 0 crashes, 11 explained diffs (8 additive `related_locations` from
+    #590, 2 reworded `java-no-tracked-build` from #509, 1 reworded multi-document parse error on
+    `istio/istio` from #510). Zero unexpected ayaml 0.2.2 diffs.
+  - Next: phase 10 (owner sign-off on the four #530 non-defect allowlist entries, release
+    documentation, CHANGELOG final pass, facts regeneration, `bench-record`, security advisory
+    GHSA-78jj-xfpm-g6px publication, and v0.23.0 release check).
