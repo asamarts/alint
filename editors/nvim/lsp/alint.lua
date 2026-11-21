@@ -35,14 +35,17 @@ return {
     "markdown",
   },
 
-  -- Root is the nearest ancestor holding a config (or the repo root).
-  root_markers = { ".alint.yml", ".git" },
+  -- Prefer the Git root first so a vendored `.alint.yml` in a subdirectory
+  -- does not become its own workspace root; fall back to a config file outside
+  -- a Git repository.
+  root_markers = { { ".git" }, { ".alint.yml", ".alint.yaml", "alint.yml", "alint.yaml" } },
 
   -- Until it is told the workspace is trusted, the server runs nothing the
   -- repository's config could start (command rules, rules that run Git,
-  -- custom facts), fetches no remote `extends:` and reads no environment
-  -- value. To trust every workspace, add this in your own config (never a
-  -- repository's `.nvim.lua`):
+  -- custom facts), fetches no remote `extends:`, refuses
+  -- `allow_out_of_root:`, and reads no environment value. To trust every
+  -- workspace, add this in your own config (never a repository's
+  -- `.nvim.lua`):
   --
   --     vim.lsp.config("alint", { init_options = { trusted = true } })
 }

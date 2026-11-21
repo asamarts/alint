@@ -148,10 +148,7 @@ fn visit_spec(
                     .push(Discrepancy::Missing { path: rel });
             }
             (TreeNode::File(want), _, true, _) => {
-                let got = std::fs::read_to_string(&abs).map_err(|source| Error::Io {
-                    path: abs.clone(),
-                    source,
-                })?;
+                let got = read_verified_text(&abs)?;
                 if &got != want {
                     report.discrepancies.push(Discrepancy::Content {
                         path: rel,
@@ -229,10 +226,7 @@ fn verify_exec(abs: &Path, want: &ExecNode, rel: String, report: &mut VerifyRepo
             .push(Discrepancy::Missing { path: rel });
         return Ok(());
     }
-    let got = std::fs::read_to_string(abs).map_err(|source| Error::Io {
-        path: abs.to_path_buf(),
-        source,
-    })?;
+    let got = read_verified_text(abs)?;
     if got != want.content {
         report.discrepancies.push(Discrepancy::Content {
             path: rel.clone(),
@@ -253,6 +247,18 @@ fn verify_exec(abs: &Path, want: &ExecNode, rel: String, report: &mut VerifyRepo
         }
     }
     Ok(())
+}
+
+fn read_verified_text(abs: &Path) -> Result<String> {
+    let bytes = alint_core::bounded_file::read_regular_capped(abs, alint_core::MAX_ANALYZE_BYTES)
+        .map_err(|source| Error::Io {
+        path: abs.to_path_buf(),
+        source,
+    })?;
+    String::from_utf8(bytes).map_err(|error| Error::Io {
+        path: abs.to_path_buf(),
+        source: std::io::Error::new(std::io::ErrorKind::InvalidData, error),
+    })
 }
 
 /// Recursively list every entry under `root` as a relative path.

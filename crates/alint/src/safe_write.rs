@@ -76,6 +76,12 @@ pub(crate) fn check_target(root: &Path, target: &Path, what: &str) -> Result<Pat
             root.display()
         );
     }
+    if alint_core::path_names_git_directory(repo_part) {
+        bail!(
+            "refusing to write {what} {}: it is in a Git directory (alint never writes there)",
+            target.display()
+        );
+    }
     let target_abs = lexical_normalize(
         &std::path::absolute(target).with_context(|| format!("resolving {}", target.display()))?,
     );
@@ -112,6 +118,16 @@ pub(crate) fn check_target(root: &Path, target: &Path, what: &str) -> Result<Pat
         );
     }
     let resolved = parent_real.join(name);
+    if resolved
+        .strip_prefix(&root_real)
+        .is_ok_and(alint_core::path_names_git_directory)
+    {
+        bail!(
+            "refusing to write {what} {}: it resolves into a Git directory \
+             (alint never writes there)",
+            target.display()
+        );
+    }
     refuse_symlink_or_special(&resolved, what)?;
     Ok(resolved)
 }
@@ -187,6 +203,24 @@ pub(crate) fn check_output(
     what: &str,
 ) -> Result<PathBuf> {
     if explicit {
+        if alint_core::path_names_git_directory(target) {
+            bail!(
+                "refusing to write {what} {}: it is in a Git directory (alint never writes there)",
+                target.display()
+            );
+        }
+        if let Some(name) = target.file_name()
+            && let Ok(abs) = std::path::absolute(target)
+            && let Some(parent) = abs.parent()
+            && let Ok(parent_real) = parent.canonicalize()
+            && alint_core::path_names_git_directory(&parent_real.join(name))
+        {
+            bail!(
+                "refusing to write {what} {}: it resolves into a Git directory \
+                 (alint never writes there)",
+                target.display()
+            );
+        }
         refuse_symlink_or_special(target, what)?;
         Ok(target.to_path_buf())
     } else {
@@ -279,5 +313,45 @@ mod tests {
         std::os::unix::fs::symlink(tmp.path().join("elsewhere.yml"), &link).unwrap();
         assert!(create_new(&link, b"x", "config").is_err());
         assert!(!tmp.path().join("elsewhere.yml").exists());
+    }
+
+    #[test]
+    fn check_target_rejects_git_directory_paths() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("repo");
+        std::fs::create_dir_all(root.join(".git/hooks")).unwrap();
+        for path in [
+            ".git/hooks/pre-commit",
+            ".GIT/config",
+            ".git./hooks/x",
+            "git~1/config",
+            "git~2/config",
+            "sub/.git/config",
+        ] {
+            let err = check_target(&root, &root.join(path), "baseline").unwrap_err();
+            assert!(
+                err.to_string().contains("Git directory"),
+                "{path}: unexpected error {err}"
+            );
+            let explicit_err = check_output(&root, &root.join(path), true, "baseline").unwrap_err();
+            assert!(
+                explicit_err.to_string().contains("Git directory"),
+                "{path} (explicit): unexpected error {explicit_err}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn check_target_rejects_symlink_into_git_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("repo");
+        std::fs::create_dir_all(root.join(".git/hooks")).unwrap();
+        std::os::unix::fs::symlink(".git/hooks", root.join("sub")).unwrap();
+        let err = check_target(&root, &root.join("sub/pre-commit"), "baseline").unwrap_err();
+        assert!(
+            err.to_string().contains("Git directory"),
+            "unexpected error: {err}"
+        );
     }
 }

@@ -288,9 +288,9 @@ impl Landing {
 /// directory. Beyond `.git` in any case, Git's own checks name three more
 /// spellings: Windows drops trailing dots and spaces (`.git.`, `.git `), reads
 /// `name:stream` as a stream of `name` (`.git::$INDEX_ALLOCATION`) and `\` as
-/// a separator (`a\.git`), and its short name for `.git` is `GIT~1`, which
-/// drops them too (`git~1.`); macOS's HFS+ ignores some invisible code points
-/// (`.g\u{200c}it`).
+/// a separator (`a\.git`), and its 8.3 short name for `.git` is `GIT~1` (or
+/// `GIT~2`, ..., when collisions occur), which drops them too (`git~1.`);
+/// macOS's HFS+ ignores some invisible code points (`.g\u{200c}it`).
 ///
 /// A fix never writes or reads a path with such a component: a file it puts
 /// there (`.git/config`, `.git/commondir`, a `.git` file) is configuration
@@ -301,7 +301,7 @@ impl Landing {
 #[must_use]
 pub fn names_git_directory(name: &str) -> bool {
     opens_as(name, |file| {
-        file.eq_ignore_ascii_case(".git") || file.eq_ignore_ascii_case("git~1")
+        file.eq_ignore_ascii_case(".git") || short_name_of(file, ".git")
     })
 }
 
@@ -372,7 +372,7 @@ pub(crate) fn reaches_git_directory_walked(
         return false;
     };
     resolve_existing_prefix(&root.join(path))
-        .is_some_and(|real| in_git_directory(&root_real, &real))
+        .is_some_and(|real| enters_git_directory(&root_real, &real))
 }
 
 /// Whether the OS reaches `path`, relative to `root`, without following a
@@ -465,20 +465,37 @@ pub enum NamedRead {
 #[doc(hidden)]
 #[must_use]
 pub fn resolve_named_read(root: &Path, path: &Path) -> NamedRead {
+    if path_names_git_directory(path) {
+        return NamedRead::GitDirectory;
+    }
     count_check_cost(|costs| costs.resolutions += 1);
     let Ok(root_real) = root.canonicalize() else {
         return NamedRead::OutsideRoot;
     };
     match resolve_existing_prefix(&root.join(path)) {
-        Some(real) if real.starts_with(&root_real) => {
-            if path_names_git_directory(path) || in_git_directory(&root_real, &real) {
-                NamedRead::GitDirectory
-            } else {
-                NamedRead::InRoot
-            }
-        }
+        Some(real) if enters_git_directory(&root_real, &real) => NamedRead::GitDirectory,
+        Some(real) if real.starts_with(&root_real) => NamedRead::InRoot,
         _ => NamedRead::OutsideRoot,
     }
+}
+
+/// Whether `real`, a resolved path, enters a Git directory beyond the longest
+/// common ancestor prefix shared with `root_real`. Covers both `.git` inside
+/// `root_real` and a Git directory reached outside `root_real` (for instance a
+/// parent repo's `../.git` or a linked worktree's common `.git`), without
+/// false-positiving if `root_real` itself sits under a host directory whose
+/// ancestor happens to be named `.git`.
+fn enters_git_directory(root_real: &Path, real: &Path) -> bool {
+    let mut root_comps = root_real.components().peekable();
+    let mut real_comps = real.components().peekable();
+    while root_comps.peek().is_some() && root_comps.peek() == real_comps.peek() {
+        root_comps.next();
+        real_comps.next();
+    }
+    real_comps.any(|component| match component {
+        Component::Normal(name) => names_git_directory(&name.to_string_lossy()),
+        _ => false,
+    })
 }
 
 /// Whether `real`, a resolved path, is inside a Git directory below
@@ -604,10 +621,77 @@ pub fn reaches_alint_config(root: &Path, path: &Path, config_files: &[PathBuf]) 
     reaches_alint_config_walked(root, path, config_files, None)
 }
 
+/// Whether a component uses Windows/HFS+ alternate-spelling syntax that can
+/// alias a simpler filename (trailing `.`/` `, NTFS `:stream`, 8.3 `~`, `\`
+/// separator, or non-ASCII / HFS-ignored code points).
+fn has_alternate_spelling(path: &Path) -> bool {
+    path.components().any(|component| match component {
+        Component::Normal(name) => match name.to_str() {
+            Some(text) => {
+                text.ends_with(['.', ' '])
+                    || text.bytes().any(|b| matches!(b, b':' | b'~' | b'\\'))
+                    || !text.is_ascii()
+            }
+            None => true,
+        },
+        _ => false,
+    })
+}
+
+/// Whether a single filename component `candidate` could be opened by a file
+/// system as `target` (same NTFS/HFS+/8.3 rules as [`path_names_alint_config`]).
+fn component_opens_as(candidate: &str, target: &str) -> bool {
+    opens_as(candidate, |file| {
+        file.eq_ignore_ascii_case(target) || short_name_of(file, target)
+    })
+}
+
+/// Whether `candidate` (a resolved path) could open the same file as `target`
+/// (a canonical config file path), accounting for case-insensitivity and
+/// Windows/HFS+ alternate spellings (`policy.yml.`, `policy.yml::$DATA`,
+/// `POLICY~1.YML`, `pol\u{200c}icy.yml`, or `\`-separated pieces).
+fn path_opens_as_file(candidate: &Path, target: &Path) -> bool {
+    if target
+        .as_os_str()
+        .eq_ignore_ascii_case(candidate.as_os_str())
+    {
+        return true;
+    }
+    if !has_alternate_spelling(candidate) {
+        return false;
+    }
+    // Split any literal `\` inside Normal components on Unix so `dir\policy.yml.`
+    // aligns component-for-component with `dir/policy.yml`.
+    let expand = |path: &Path| -> Vec<String> {
+        let mut out = Vec::new();
+        for component in path.components() {
+            match component {
+                Component::Normal(name) => {
+                    for piece in name.to_string_lossy().split('\\') {
+                        if !piece.is_empty() {
+                            out.push(piece.to_owned());
+                        }
+                    }
+                }
+                other => out.push(other.as_os_str().to_string_lossy().into_owned()),
+            }
+        }
+        out
+    };
+    let cand = expand(candidate);
+    let targ = expand(target);
+    cand.len() == targ.len()
+        && cand
+            .iter()
+            .zip(&targ)
+            .all(|(c, t)| component_opens_as(c, t))
+}
+
 /// [`reaches_alint_config`], asking `index`, the walk of `root`, first. A path
 /// reached without a symlink ([`follows_no_symlink`]) lands at itself below
 /// the real root, where its name is the whole answer unless a loaded file ends
-/// in the same names; only then, or with a symlink on the way, is it resolved.
+/// in the same names (or `path` carries a Windows/HFS+ alternate spelling);
+/// only then, or with a symlink on the way, is it resolved.
 pub(crate) fn reaches_alint_config_walked(
     root: &Path,
     path: &Path,
@@ -624,17 +708,21 @@ pub(crate) fn reaches_alint_config_walked(
                 .is_some_and(|name| name.as_os_str().eq_ignore_ascii_case(component))
         })
     };
-    if follows_no_symlink(root, path, index) && !config_files.iter().any(ends_in_path) {
+    let alternate = has_alternate_spelling(path);
+    if !alternate && follows_no_symlink(root, path, index) && !config_files.iter().any(ends_in_path)
+    {
         return false;
     }
     count_check_cost(|costs| costs.resolutions += 1);
     let Some(real) = resolve_existing_prefix(&root.join(path)) else {
         return false;
     };
-    // Any case: on a case-insensitive file system `POLICY.yml` is `policy.yml`.
+    // Any case or Windows/HFS+ alternate spelling: `POLICY.yml`, `policy.yml.`,
+    // `policy.yml::$DATA`, `POLICY~1.YML`, `pol\u{200c}icy.yml` can all open
+    // `policy.yml`.
     if config_files
         .iter()
-        .any(|file| file.as_os_str().eq_ignore_ascii_case(real.as_os_str()))
+        .any(|file| path_opens_as_file(&real, file))
     {
         return true;
     }
@@ -1067,6 +1155,7 @@ mod tests {
             "a\\.git",
             "GIT~1",
             "git~1",
+            "git~2",
             "git~1.",
             "GIT~1 ",
             "git~1. .",
@@ -1081,7 +1170,7 @@ mod tests {
             ".gitignore",
             "git",
             ".git-blame",
-            "git~2",
+            "git~0",
             "git~1x",
             "a.git",
             ".gi t",
@@ -1298,5 +1387,51 @@ mod tests {
             create_landing(&root.join("new/x.md")),
             root.join("new/x.md")
         );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn out_of_root_git_directory_is_still_refused_as_git_directory() {
+        use super::{NamedRead, reaches_git_directory, resolve_named_read};
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        std::fs::write(tmp.path().join(".git/config"), "[core]\n").unwrap();
+        let repo = tmp.path().join("subrepo");
+        std::fs::create_dir_all(&repo).unwrap();
+        std::os::unix::fs::symlink("../.git/config", repo.join("cfg")).unwrap();
+        assert_eq!(
+            resolve_named_read(&repo, Path::new("cfg")),
+            NamedRead::GitDirectory
+        );
+        assert_eq!(
+            resolve_named_read(&repo, Path::new("../.git/config")),
+            NamedRead::GitDirectory
+        );
+        assert!(reaches_git_directory(&repo, Path::new("cfg")));
+        assert!(reaches_git_directory(&repo, Path::new("../.git/config")));
+    }
+
+    #[test]
+    fn reaches_alint_config_catches_alternate_spellings_of_extended_config() {
+        use super::reaches_alint_config;
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::write(root.join("policy.yml"), "version: 1\nrules: []\n").unwrap();
+        let config = vec![root.canonicalize().unwrap().join("policy.yml")];
+        for spelling in [
+            "policy.yml",
+            "POLICY.YML",
+            "policy.yml.",
+            "policy.yml ",
+            "policy.yml::$DATA",
+            "POLICY~1.YML",
+            "pol\u{200c}icy.yml",
+        ] {
+            assert!(
+                reaches_alint_config(root, Path::new(spelling), &config),
+                "alternate spelling {spelling:?} must be refused"
+            );
+        }
+        assert!(!reaches_alint_config(root, Path::new("other.yml"), &config));
     }
 }

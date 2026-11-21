@@ -42,7 +42,7 @@ struct SelectedTest {
 }
 
 pub(crate) fn run(options: &RunOptions<'_>, cli: &Cli) -> Result<ExitCode> {
-    reject_incompatible_globals(cli, options.allow_spawn)?;
+    reject_incompatible_globals(cli, options.allow_spawn, options.allow_host_keyring)?;
     let current = std::env::current_dir()?;
     let current = current.canonicalize()?;
     let discovered = match discover(options.paths, &current) {
@@ -292,13 +292,22 @@ fn execute_selected(
     })
 }
 
-fn reject_incompatible_globals(cli: &Cli, allow_spawn: bool) -> Result<()> {
+fn reject_incompatible_globals(
+    cli: &Cli,
+    allow_spawn: bool,
+    allow_host_keyring: bool,
+) -> Result<()> {
     // Policy tests refuse spawning unless a test declares it and
-    // `--allow-spawn` grants it; `--no-spawn` keeps that refusal.
-    if let Some(flag) = cli.process_refusal()
-        && allow_spawn
-    {
-        bail!("`{flag}` and `--allow-spawn` contradict each other; drop one");
+    // `--allow-spawn` grants it; `--no-spawn` / `--untrusted` keeps that
+    // refusal, and likewise refuses `--allow-host-keyring` (which exposes
+    // host `HOME`/`GNUPGHOME` to `git verify-commit` / `gpg`).
+    if let Some(flag) = cli.process_refusal() {
+        if allow_spawn {
+            bail!("`{flag}` and `--allow-spawn` contradict each other; drop one");
+        }
+        if allow_host_keyring {
+            bail!("`{flag}` and `--allow-host-keyring` contradict each other; drop one");
+        }
     }
     let incompatible = if !cli.config.is_empty() {
         Some("--config")
@@ -404,10 +413,18 @@ fn collect_path(
                     let yaml = if explicit {
                         None
                     } else {
-                        match std::fs::read_to_string(&canonical) {
+                        match read_policy_test_yaml(&canonical) {
                             Ok(yaml) if has_policy_test_discriminator(&yaml) => Some(yaml),
                             Ok(_) => return,
-                            Err(error) if error.kind() == std::io::ErrorKind::InvalidData => return,
+                            Err(error)
+                                if matches!(
+                                    error.kind(),
+                                    std::io::ErrorKind::InvalidData
+                                        | std::io::ErrorKind::FileTooLarge
+                                ) =>
+                            {
+                                return;
+                            }
                             Err(error) => {
                                 issues.push(path_issue(
                                     "discovery_io",
@@ -479,12 +496,21 @@ fn path_issue(code: &str, path: &Path, detail: &str) -> PolicyTestIssue {
     PolicyTestIssue::new(code, format!("{}: {detail}", path.display()))
 }
 
+fn read_policy_test_yaml(path: &Path) -> std::io::Result<String> {
+    let bytes = alint_core::bounded_file::read_regular_capped(
+        path,
+        alint_core::MAX_STRUCTURED_BYTES as u64,
+    )?;
+    String::from_utf8(bytes)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+}
+
 fn parse_test(source: &DiscoveredTest) -> Result<PolicyTest, Box<PolicyTestRecord>> {
     let owned;
     let yaml = if let Some(yaml) = source.yaml.as_deref() {
         yaml
     } else {
-        owned = std::fs::read_to_string(&source.path).map_err(|error| {
+        owned = read_policy_test_yaml(&source.path).map_err(|error| {
             Box::new(PolicyTestRecord::invalid(
                 source.source.clone(),
                 None,
@@ -817,5 +843,19 @@ mod tests {
             rendered.starts_with("package=<policy-test-package>"),
             "{rendered}"
         );
+    }
+
+    #[test]
+    fn untrusted_and_no_spawn_refuse_allow_host_keyring() {
+        use clap::Parser as _;
+        for flag in ["--untrusted", "--no-spawn"] {
+            let cli = Cli::try_parse_from(["alint", flag, "test"]).unwrap();
+            let err = reject_incompatible_globals(&cli, false, true).unwrap_err();
+            let msg = err.to_string();
+            assert!(
+                msg.contains(flag) && msg.contains("--allow-host-keyring"),
+                "{flag}: unexpected error {msg}"
+            );
+        }
     }
 }

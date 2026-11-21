@@ -160,7 +160,9 @@ fn scan_console_log(scan: &Scan, phase: &crate::progress::Phase) -> Vec<std::pat
         }
         phase.set_message(&format!("scanning {}", path.display()));
         let full = scan.root.join(path);
-        let Ok(bytes) = std::fs::read(&full) else {
+        let Ok(bytes) =
+            alint_core::bounded_file::read_regular_capped(&full, alint_core::MAX_ANALYZE_BYTES)
+        else {
             continue;
         };
         let Ok(text) = std::str::from_utf8(&bytes) else {

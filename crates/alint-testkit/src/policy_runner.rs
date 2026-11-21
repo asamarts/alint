@@ -195,7 +195,7 @@ impl Runner {
         let host_keyring = self.options.allow_host_keyring && test.capabilities.host_keyring;
         let runner_environment = runner_git_environment(sandbox.path(), host_keyring)?;
         let process_environment = granted_process_environment(test, &runner_environment);
-        let condition_environment = condition_environment(test, &runner_environment, host_keyring);
+        let condition_environment = condition_environment(test);
         if let Some(git_spec) = &test.given.git {
             setup_git(&repository, git_spec, &runner_environment)?;
         }
@@ -1131,14 +1131,22 @@ impl alint_dsl::ConfigSourceProvider for PackageConfigSource {
         {
             return Ok(cached);
         }
+        let read_capped = |p: &Path| -> std::io::Result<String> {
+            let bytes = alint_core::bounded_file::read_regular_capped(
+                p,
+                alint_core::MAX_STRUCTURED_BYTES as u64,
+            )?;
+            String::from_utf8(bytes)
+                .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+        };
         let contents = if let Some((inline, contents)) = &self.inline {
             if &canonical == inline {
                 contents.clone()
             } else {
-                std::fs::read_to_string(&canonical)?
+                read_capped(&canonical)?
             }
         } else {
-            std::fs::read_to_string(&canonical)?
+            read_capped(&canonical)?
         };
         self.memo
             .lock()
@@ -1602,7 +1610,8 @@ fn runner_git_environment(sandbox: &Path, host_keyring: bool) -> Result<BTreeMap
 }
 
 /// Windows' system variables, which the runner takes from the host for its
-/// granted commands.
+/// granted commands (read on Windows targets only).
+#[allow(dead_code)]
 const WINDOWS_SYSTEM_VARIABLES: [&str; 6] =
     ["SystemRoot", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP"];
 
@@ -1628,27 +1637,12 @@ fn granted_process_environment(
 }
 
 /// The environment a test's `when:` conditions (`env.X`) and legacy `${VAR}`
-/// expansions read: `given.env` under the runner's own sandbox values,
-/// without the variables the runner takes from the host for its granted
-/// commands (`PATH`, Windows' system variables, and the host's home when the
-/// host keyring is granted). No other host variable reaches a test.
-fn condition_environment(
-    test: &PolicyTest,
-    runner_environment: &BTreeMap<String, String>,
-    host_keyring: bool,
-) -> BTreeMap<String, String> {
-    let from_host = |name: &str| {
-        name == "PATH"
-            || WINDOWS_SYSTEM_VARIABLES.contains(&name)
-            || (host_keyring && matches!(name, "HOME" | "GNUPGHOME"))
-    };
-    let mut environment = test.given.env.clone();
-    for (name, value) in runner_environment {
-        if !from_host(name) {
-            environment.insert(name.clone(), value.clone());
-        }
-    }
-    environment
+/// expansions read: solely `given.env`, matching `FixedEnvironment` for
+/// `{{env.*}}`. Runner-injected host/sandbox paths (`PATH`, `HOME`, `GNUPGHOME`,
+/// `XDG_CONFIG_HOME`, `GIT_CEILING_DIRECTORIES`, Windows system variables)
+/// never reach rule evaluation.
+fn condition_environment(test: &PolicyTest) -> BTreeMap<String, String> {
+    test.given.env.clone()
 }
 
 fn sanitize_observation(observation: &mut StepObservation, context: &ExecutionContext<'_>) {

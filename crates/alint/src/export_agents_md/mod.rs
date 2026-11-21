@@ -25,7 +25,6 @@
 pub(crate) mod markdown;
 mod splice;
 
-use std::fs;
 use std::io::{IsTerminal as _, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -256,7 +255,7 @@ fn write_output(body: &str, opts: &RunOptions) -> Result<()> {
             Ok(())
         }
         (Some(path), false) => {
-            fs::write(path, body).with_context(|| format!("writing {}", path.display()))?;
+            crate::safe_write::write_replacing(path, body.as_bytes(), "AGENTS.md")?;
             Ok(())
         }
         (Some(path), true) => splice::splice_inline(path, body),

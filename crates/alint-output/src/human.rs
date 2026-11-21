@@ -190,7 +190,7 @@ fn write_violation(
     let (first_line, rest) = lines
         .split_first()
         .map_or(("", &[][..]), |(f, r)| (f.as_str(), r));
-    match (violation.line, violation.column) {
+    match (violation.report_line(), violation.report_column()) {
         (Some(line), Some(col)) => {
             writeln!(w, "{MSG_INDENT}{dim}{line}:{col}{dim:#}  {first_line}")?;
         }
@@ -205,42 +205,57 @@ fn write_violation(
         writeln!(w, "{MSG_INDENT}{line}")?;
     }
 
-    for related in &violation.related_locations {
-        let label = sanitize_terminal(&related.label);
-        let lossy_path = related.path.to_string_lossy();
-        let path = sanitize_terminal(&lossy_path);
-        if let Some(range) = &related.range {
+    if !violation.path_is_sensitive() {
+        for related in &violation.related_locations {
+            let label = sanitize_terminal(&related.label);
+            let lossy_path = related.path.to_string_lossy();
+            let path = sanitize_terminal(&lossy_path);
+            if let Some(range) = &related.range {
+                writeln!(
+                    w,
+                    "{MSG_INDENT}{dim}related:{dim:#} {label}: {path}:{}:{}-{}:{}",
+                    range.start_line(),
+                    range.start_column(),
+                    range.end_line(),
+                    range.end_column(),
+                )?;
+            } else {
+                writeln!(w, "{MSG_INDENT}{dim}related:{dim:#} {label}: {path}")?;
+            }
+        }
+        if violation.related_locations_omitted > 0 {
             writeln!(
                 w,
-                "{MSG_INDENT}{dim}related:{dim:#} {label}: {path}:{}:{}-{}:{}",
-                range.start_line(),
-                range.start_column(),
-                range.end_line(),
-                range.end_column(),
+                "{MSG_INDENT}{dim}and {} more related locations{dim:#}",
+                violation.related_locations_omitted,
             )?;
-        } else {
-            writeln!(w, "{MSG_INDENT}{dim}related:{dim:#} {label}: {path}")?;
         }
-    }
-    if violation.related_locations_omitted > 0 {
-        writeln!(
-            w,
-            "{MSG_INDENT}{dim}and {} more related locations{dim:#}",
-            violation.related_locations_omitted,
-        )?;
     }
 
     // Policy URL, if present. Printed once per violation to stay
     // near the relevant message (not once per rule as before —
     // that hid the link below the list). When the terminal
-    // supports OSC 8, we wrap the URL as a clickable hyperlink.
+    // supports OSC 8, we wrap an `http(s)://` URL as a clickable hyperlink;
+    // any other scheme is still printed as sanitized plain text.
     // Suppressed entirely when `opts.show_docs` is `false`
     // (`--no-docs`) so narrow terminals + screen recordings stay
     // visually clean.
     if opts.show_docs
         && let Some(url) = &result.policy_url
     {
-        // Style swap on `opts.hyperlinks`: when OSC 8 is emitted the
+        // The policy_url is also config-controlled; an embedded ESC/BEL would
+        // otherwise close the OSC-8 hyperlink sequence early and let the tail be
+        // interpreted as terminal control. Sanitize before emitting (target +
+        // visible text), and only emit OSC 8 for `http://` or `https://`.
+        let safe_url = sanitize_terminal(url);
+        let linkable = opts.hyperlinks
+            && (safe_url
+                .get(..7)
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("http://"))
+                || safe_url
+                    .get(..8)
+                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case("https://")));
+        // Style swap on `linkable`: when OSC 8 is emitted the
         // terminal handles link styling itself (hover underline +
         // pointer cursor), so emitting our own `\e[4m` on top
         // causes some renderers — notably `asciinema-player` —
@@ -248,18 +263,13 @@ fn write_violation(
         // terminal row. Drop the explicit underline in that path;
         // keep it on the fallback path so non-OSC-8 terminals
         // still get the visual link cue.
-        let docs = if opts.hyperlinks {
+        let docs = if linkable {
             style::DOCS_LINKED
         } else {
             style::DOCS
         };
-        // The policy_url is also config-controlled; an embedded ESC/BEL would
-        // otherwise close the OSC-8 hyperlink sequence early and let the tail be
-        // interpreted as terminal control. Sanitize before emitting (target +
-        // visible text).
-        let safe_url = sanitize_terminal(url);
         write!(w, "{MSG_INDENT}{dim}docs:{dim:#} {docs}")?;
-        write_hyperlink(w, &safe_url, &safe_url, opts.hyperlinks)?;
+        write_hyperlink(w, &safe_url, &safe_url, linkable)?;
         writeln!(w, "{docs:#}")?;
     }
     Ok(())
@@ -282,7 +292,7 @@ fn write_analysis_failure(
 
     let safe_message = sanitize_terminal_multiline(&failure.message);
     let kind = failure.kind.as_str();
-    let message = match (failure.line, failure.column) {
+    let message = match (failure.report_line(), failure.report_column()) {
         (Some(line), Some(column)) => format!("{kind}, {line}:{column}: {safe_message}"),
         (Some(line), None) => format!("{kind}, line {line}: {safe_message}"),
         _ => format!("{kind}: {safe_message}"),
@@ -449,7 +459,7 @@ fn write_human_compact(
             // location. A repo-level or whole-file finding points at nothing,
             // so `:0:0` was misleading noise. Located findings keep the full
             // `path:line:col` an editor / grep jumps on.
-            let loc = match (v.line, v.column) {
+            let loc = match (v.report_line(), v.report_column()) {
                 (Some(line), Some(col)) => format!("{path}:{line}:{col}"),
                 _ => path,
             };
@@ -495,7 +505,7 @@ fn write_human_compact(
                 || "<repo>".to_string(),
                 |p| sanitize_terminal(&p.display().to_string()).into_owned(),
             );
-            let loc = match (failure.line, failure.column) {
+            let loc = match (failure.report_line(), failure.report_column()) {
                 (Some(line), Some(column)) => format!("{path}:{line}:{column}"),
                 (Some(line), None) => format!("{path}:{line}"),
                 _ => path,
@@ -1214,5 +1224,58 @@ mod tests {
             out.contains(", 1 skipped, 0 unfixable, 1 unresolved."),
             "{out}"
         );
+    }
+
+    #[test]
+    fn non_http_policy_url_is_not_wrapped_in_osc8_hyperlink() {
+        let report = Report {
+            results: vec![RuleResult {
+                rule_id: "r1".into(),
+                level: Level::Error,
+                policy_url: Some("file:///etc/passwd".into()),
+                violations: vec![Violation::new("bad").with_path(std::path::PathBuf::from("a.rs"))],
+                notes: Vec::new(),
+                is_fixable: false,
+                analysis_failures: Vec::new(),
+            }],
+        };
+        let mut buf = Vec::new();
+        let opts = HumanOptions {
+            hyperlinks: true,
+            ..HumanOptions::default()
+        };
+        write_human(&report, &mut buf, opts).unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert!(
+            !out.contains("\x1b]8;;"),
+            "non-http(s) policy_url must not emit OSC 8 hyperlink: {out:?}"
+        );
+        assert!(out.contains("file:///etc/passwd"), "{out}");
+    }
+
+    #[test]
+    fn path_sensitive_finding_omits_related_locations_in_human_output() {
+        let mut v = Violation::new("bad")
+            .with_path(std::path::PathBuf::from("secret.env"))
+            .with_related_location(alint_core::RelatedLocation::new(
+                std::path::PathBuf::from("other-secret.env"),
+                "duplicate",
+            ));
+        v.path_sensitive = true;
+        v.related_locations_omitted = 2;
+        let report = Report {
+            results: vec![RuleResult::new(
+                "r1".into(),
+                Level::Error,
+                None,
+                vec![v],
+                false,
+            )],
+        };
+        let mut buf = Vec::new();
+        write_human(&report, &mut buf, HumanOptions::default()).unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert!(!out.contains("other-secret.env"), "{out}");
+        assert!(!out.contains("more related locations"), "{out}");
     }
 }

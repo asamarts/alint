@@ -8,7 +8,6 @@
 //! `.alint.yml`. The split keeps detection unit-testable against
 //! a tempdir without going through the CLI.
 
-use std::fs;
 use std::path::Path;
 
 /// What `detect` figured out about the repo at the path it was
@@ -117,11 +116,24 @@ pub fn detect(root: &Path, with_monorepo: bool) -> Detection {
     }
 }
 
+fn read_root_manifest(root: &Path, name: &str) -> Option<String> {
+    let rel = Path::new(name);
+    if alint_core::resolve_named_read(root, rel) != alint_core::NamedRead::InRoot {
+        return None;
+    }
+    let bytes = alint_core::bounded_file::read_regular_capped(
+        &root.join(rel),
+        alint_core::MAX_STRUCTURED_BYTES as u64,
+    )
+    .ok()?;
+    String::from_utf8(bytes).ok()
+}
+
 fn detect_workspace(root: &Path) -> Option<WorkspaceFlavor> {
     // Cargo: root Cargo.toml has a `[workspace]` table. Read +
     // grep — full TOML parsing is overkill for a string-shape
     // check.
-    if let Ok(content) = fs::read_to_string(root.join("Cargo.toml"))
+    if let Some(content) = read_root_manifest(root, "Cargo.toml")
         && content
             .lines()
             .any(|l| l.trim_start().starts_with("[workspace]"))
@@ -137,7 +149,7 @@ fn detect_workspace(root: &Path) -> Option<WorkspaceFlavor> {
     // Yarn / npm: root package.json contains a `"workspaces"`
     // field. Same string-shape check rather than full JSON
     // parsing.
-    if let Ok(content) = fs::read_to_string(root.join("package.json"))
+    if let Some(content) = read_root_manifest(root, "package.json")
         && content.contains("\"workspaces\"")
     {
         return Some(WorkspaceFlavor::Yarn);

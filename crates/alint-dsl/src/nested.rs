@@ -607,15 +607,42 @@ fn scope_kind_fields(
     Ok(any_scoped)
 }
 
-/// Whether a path value (after an optional `!`) starts with a template token.
-fn starts_with_token(value: &str) -> bool {
-    value.strip_prefix('!').unwrap_or(value).starts_with('{')
+/// Whether a path value (after an optional `!`) is anchored to a subtree-scoped
+/// path token (`{path}` or `{dir}/`), not an arbitrary brace glob or leaf token
+/// (`{basename}`, `{stem}`, `{ext}`, `{parent_name}`).
+fn is_subtree_anchored_token(value: &str) -> bool {
+    let rest = value.strip_prefix('!').unwrap_or(value);
+    rest == "{path}"
+        || rest.starts_with("{path}/")
+        || rest.starts_with("{path}.")
+        || rest == "{dir}"
+        || rest.starts_with("{dir}/")
 }
 
-/// Re-root one path or glob, leaving a token-anchored value inside a `require:`
-/// block untouched (see [`scope_kind_fields`]).
+/// Whether `path` starts with a Windows drive prefix (`C:`, `c:\`, `C:/`).
+fn has_windows_drive_prefix(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
+}
+
+/// Whether `path` contains a `..` parent-directory segment anywhere (including
+/// after `/` or `\`, or inside a brace alternative such as `{..,a}/foo`).
+fn has_parent_escape(path: &str) -> bool {
+    path.split(['/', '\\'])
+        .any(|segment| segment == ".." || segment.split(['{', '}', ',']).any(|part| part == ".."))
+}
+
+/// Re-root one path or glob, leaving a `{path}` / `{dir}/`-anchored value inside
+/// a `require:` block or `PathTemplate` selector untouched (still rejecting any
+/// `..` escape inside it; see [`scope_kind_fields`]).
 fn scope_value_in(value: &str, prefix: &str, in_require: bool) -> Result<String> {
-    if in_require && starts_with_token(value) {
+    if in_require && is_subtree_anchored_token(value) {
+        let rest = value.strip_prefix('!').unwrap_or(value);
+        if has_parent_escape(rest) {
+            return Err(Error::Other(format!(
+                "parent-directory escape {value:?} isn't allowed in a nested config"
+            )));
+        }
         Ok(value.to_string())
     } else {
         scope_glob(value, prefix)
@@ -634,6 +661,12 @@ fn scope_paths_value_in(value: &mut ayaml::Value, prefix: &str, in_require: bool
             for item in seq {
                 if let ayaml::Value::String(s) = item {
                     *s = scope_value_in(s, prefix, true)?;
+                } else {
+                    return Err(Error::Other(
+                        "path array contains a non-string entry; nested scoping only \
+                         supports strings"
+                            .into(),
+                    ));
                 }
             }
         }
@@ -694,7 +727,8 @@ fn scope_paths_value(value: &mut ayaml::Value, prefix: &str) -> Result<()> {
 }
 
 /// Join `prefix` to a single glob. Preserves leading `!` for
-/// negations. Rejects absolute paths and `..` escapes.
+/// negations. Rejects absolute paths (including Windows drive/UNC prefixes)
+/// and `..` escapes anywhere in the pattern.
 pub(crate) fn scope_glob(glob: &str, prefix: &str) -> Result<String> {
     if prefix.is_empty() {
         return Ok(glob.to_string());
@@ -703,13 +737,13 @@ pub(crate) fn scope_glob(glob: &str, prefix: &str) -> Result<String> {
         Some(r) => (true, r),
         None => (false, glob),
     };
-    if rest.starts_with('/') {
+    if rest.starts_with('/') || rest.starts_with('\\') || has_windows_drive_prefix(rest) {
         return Err(Error::Other(format!(
             "absolute path {glob:?} can't be used in a nested config - \
              it would escape the subtree"
         )));
     }
-    if rest.starts_with("../") || rest == ".." {
+    if has_parent_escape(rest) {
         return Err(Error::Other(format!(
             "parent-directory escape {glob:?} isn't allowed in a nested config"
         )));
