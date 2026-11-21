@@ -403,8 +403,14 @@ fn scalar_and_comment_contents_never_false_reject() {
         format!("&a?#\n{deep}\n"),
         // A key in a complex key holds a block scalar indented past it.
         format!("? k: |\n   {deep}\n"),
-        // A comment after the byte order mark that starts the text.
+        // A comment after the byte order mark that starts the text, or after
+        // a flow `?` containing NEL (which stays comment content).
         format!("\u{feff}# a: {deep}\n"),
+        format!("\u{feff}\u{feff}# a: {deep}\n"),
+        format!("[?#\u{85} {deep}\n]\n"),
+        // An anchor name ending before `:` and a flow indicator no longer
+        // desyncs the scanner.
+        format!("- &a:, x\n- '{deep}'\n"),
     ];
     for doc in &ok {
         assert!(
@@ -446,6 +452,9 @@ fn alias_hidden_by_a_lexer_desync_is_still_detected() {
         "k: &x|\n  [*undefined_zz]\n",
         "k: !t# [*undefined_zz]\n",
         "? a\n: b\n \"\nc: *undefined_zz\nd: \"\"\n",
+        // A leading tab on the line after a block plain scalar has zero spaces
+        // of indentation, so it ends the scalar rather than swallowing `*a`.
+        "? ----\n\t*a k: |\n  |\n  *undefined_zz\nc: \"\"\n",
     ];
     for doc in fixtures {
         assert!(
@@ -665,6 +674,7 @@ fn the_ayaml_reading_of_a_byte_order_mark_nests_what_ayaml_nests() {
         ("\u{feff}[[1]]\n", 2),
         ("\u{feff}...\n[[1]]\n", 2),
         ("\u{feff}\u{feff}[[1]]\n", 2),
+        ("\u{feff}\u{feff}...\n[[1]]\n", 2),
         ("\u{feff}#\n\u{feff}...\n[[1]]\n", 0),
     ] {
         let value = crate::yaml::ayaml_from_str::<ayaml::Value>(doc).unwrap();
@@ -987,6 +997,58 @@ fn a_text_ayaml_refuses_is_not_vouched_for() {
     // An alias-free text needs no reading at all, valid or not.
     assert_eq!(expansion("x: !<> y\n"), Expansion::WithinLimit);
     assert_eq!(expansion("a: &a [1]\nb: *a\n"), Expansion::WithinLimit);
+}
+
+/// ayaml 0.2.2 switches to streaming deserialization above 4 KiB
+/// (`SMALL_INPUT_BYTES`), feeding [`NodeBudget`] as events arrive and falling
+/// back to building the tree on any error. Verify all five paths above 4 KiB:
+/// valid within limit, over-limit bomb, syntax error before budget ->
+/// `Unparsed`, bomb before a trailing parser error -> `OverLimit` (the
+/// `exceeded` flag survives the fallback), and a trailing scanner error ->
+/// `Unparsed` (the scanner runs whole-stream first).
+#[test]
+fn streaming_expansion_over_four_kib_counts_and_refuses_unparsed() {
+    let pad = format!("# {}\n", "p".repeat(5_000));
+    assert!(pad.len() > 4 * 1024);
+
+    let valid = format!("{pad}a: &a [1, 2, 3]\nb: [*a, *a]\n");
+    assert_eq!(expansion(&valid), Expansion::WithinLimit);
+    let (verdict, estimated) = scan_guards(&valid).expansion_and_size(&valid);
+    assert_eq!(verdict, Expansion::WithinLimit);
+    assert!(estimated > 0, "streaming pass must charge expanded nodes");
+
+    let anchor = "1,".repeat(50);
+    let refs = "*a,".repeat(40);
+    let bomb = format!("{pad}a: &a [{anchor}]\nb: [{refs}]\n");
+    assert_eq!(
+        expansion_with(&bomb, 500 * YAML_NODE_COST),
+        Expansion::OverLimit
+    );
+
+    let malformed_before_budget = format!("{pad}a: &a [1]\nb: [1, 2}}\nc: *a\n");
+    assert!(
+        matches!(
+            expansion_with(&malformed_before_budget, 500 * YAML_NODE_COST),
+            Expansion::Unparsed(_)
+        ),
+        "parser error before budget must yield Unparsed"
+    );
+
+    let bomb_then_parser_error = format!("{pad}a: &a [{anchor}]\nb: [{refs}]\nc: [1, 2}}\n");
+    assert_eq!(
+        expansion_with(&bomb_then_parser_error, 500 * YAML_NODE_COST),
+        Expansion::OverLimit,
+        "streaming NodeBudget overflow before a trailing parser error must stay OverLimit"
+    );
+
+    let bomb_then_scanner_error = format!("{pad}a: &a [{anchor}]\nb: [{refs}]\nc: 'unterminated\n");
+    assert!(
+        matches!(
+            expansion_with(&bomb_then_scanner_error, 500 * YAML_NODE_COST),
+            Expansion::Unparsed(_)
+        ),
+        "scanner error runs whole-stream first and must yield Unparsed"
+    );
 }
 
 /// ROB-4 / YAML-15: the `requires:` check walked saphyr's reading of the whole

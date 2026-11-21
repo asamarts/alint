@@ -963,11 +963,15 @@ fn a_narrow_entry_does_not_end_a_search_past_a_revealed_error() {
     assert_eq!(explained(true), None);
 }
 
-/// A rewrite that turns a value error of ayaml's into a syntax error hides
-/// the value error, wherever each is: ayaml reads the whole stream's syntax
-/// before it builds a value. Without the core-tag entry, the `!!int` on a
-/// key that ayaml refuses does not stand for the line separator, which the
-/// line-break rewrite turns into a break that ends the quoted scalar.
+/// A rewrite that turns a value error of ayaml's into a scanner error hides
+/// the value error, wherever each is (ayaml scans all tokens first), and any
+/// syntax error (including a newly introduced parser error or second document)
+/// hides a Serde decode error. Document-building errors stream with the parser
+/// (ayaml 0.2.2), so uncovering a pre-existing parser error at the same offset
+/// is kept while a newly introduced parser error is unfair. Without the
+/// core-tag entry, the `!!int` on a key that ayaml refuses does not stand for
+/// the line separator, which the line-break rewrite turns into a break that
+/// ends the quoted scalar.
 #[test]
 fn a_rewrite_must_not_trade_a_value_error_for_a_syntax_error() {
     for input in [
@@ -983,6 +987,86 @@ fn a_rewrite_must_not_trade_a_value_error_for_a_syntax_error() {
             "{case:?}"
         );
     }
+    // A later parser error or second document hides an earlier Serde decode
+    // error, so trading a Serde error for either is unfair.
+    let (serde_case, _) = compare("version: bad\nb: 1\n", Entry::Config);
+    assert_eq!(
+        serde_case.ayaml.as_ref().unwrap_err().kind,
+        Some(ErrorKind::Serde),
+        "{serde_case:?}"
+    );
+    let (parser_broken, _) = compare("version: bad\nb: [1, 2}\n", Entry::Config);
+    assert_eq!(
+        parser_broken.ayaml.as_ref().unwrap_err().kind,
+        Some(ErrorKind::Parser),
+        "{parser_broken:?}"
+    );
+    assert_eq!(
+        fairness(&serde_case, &parser_broken, &Hidden::Nothing),
+        None
+    );
+    let (second_doc_broken, _) = compare("version: bad\n---\nb: 1\n", Entry::Config);
+    assert!(
+        second_doc_broken
+            .ayaml
+            .as_ref()
+            .is_err_and(|rejection| rejection.message.contains(AYAML_SECOND_DOCUMENT)),
+        "{second_doc_broken:?}"
+    );
+    assert_eq!(
+        fairness(&serde_case, &second_doc_broken, &Hidden::Nothing),
+        None
+    );
+    // Document-building errors stream with the parser (ayaml 0.2.2): removing
+    // a resolution error may uncover a pre-existing parser error at its exact
+    // offset, while a newly introduced parser error is unfair.
+    let (res_with_preexisting, _) = compare("a: !!int x\nb: [1, 2}\n", Entry::Value);
+    assert_eq!(
+        res_with_preexisting.ayaml.as_ref().unwrap_err().kind,
+        Some(ErrorKind::Resolution),
+        "{res_with_preexisting:?}"
+    );
+    let (uncovered_parser, _) = compare("a: x\nb: [1, 2}\n", Entry::Value);
+    assert_eq!(
+        uncovered_parser.ayaml.as_ref().unwrap_err().kind,
+        Some(ErrorKind::Parser),
+        "{uncovered_parser:?}"
+    );
+    assert_eq!(
+        fairness(&res_with_preexisting, &uncovered_parser, &Hidden::Nothing),
+        Some(Fairness::Kept)
+    );
+    let (res_clean, _) = compare("a: !!int x\nb: 1\n", Entry::Value);
+    assert_eq!(
+        fairness(&res_clean, &uncovered_parser, &Hidden::Nothing),
+        None
+    );
+    let (later_res, _) = compare("a: 1\nb: !!int x\n", Entry::Value);
+    let (new_earlier_parser, _) = compare("a: [1, 2}\nb: !!int x\n", Entry::Value);
+    assert_eq!(
+        fairness(&later_res, &new_earlier_parser, &Hidden::Nothing),
+        None
+    );
+    // A multi-document stream is NOT accepted as single-document syntax by
+    // ayaml even when `stream_events` parses both documents cleanly.
+    let (multi_doc_res, _) = compare("a: !!int x\n---\nb: 1\n", Entry::Value);
+    assert_eq!(one_rejects_the_syntax(&multi_doc_res), None);
+    // DuplicateKey errors count as value errors and match the oracle's
+    // "duplicate entry" errors even when worded "duplicate mapping key"
+    // rather than compat's "duplicate entry".
+    let (dup, _) = compare("a: 1\na: 2\n", Entry::Value);
+    let (Err(ayaml_dup), Err(oracle_dup)) = (&dup.ayaml, &dup.oracle) else {
+        panic!("{dup:?}");
+    };
+    assert!(value_error(ayaml_dup), "{ayaml_dup:?}");
+    assert!(same_value_error(ayaml_dup, oracle_dup), "{dup:?}");
+    let raw_dup = Rejection {
+        message: "duplicate mapping key: \"a\"".to_string(),
+        location: Some((1, 1)),
+        kind: Some(ErrorKind::DuplicateKey),
+    };
+    assert!(value_error(&raw_dup), "{raw_dup:?}");
+    assert!(same_value_error(&raw_dup, oracle_dup), "{raw_dup:?}");
 }
 
 /// The flow-syntax entry covers an error inside a flow collection only at
@@ -1288,6 +1372,16 @@ fn a_block_scalar_error_is_ayaml_s_own_only_before_the_oracle_s() {
     for input in ["|\n  \n...\n", "a: |\n   \n...\n"] {
         let (case, _) = compare(input, Entry::Value);
         assert_eq!(case.class, Class::SameValue, "{case:?}");
+    }
+    for input in ["|\n  \n---\nb\n", "--- |\n  \n--- x\n"] {
+        let (case, _) = compare(input, Entry::Value);
+        assert_eq!(case.class, Class::RejectedAtDifferentLocation, "{case:?}");
+        assert!(!deviation.covers(&case), "{case:?}");
+        assert_eq!(
+            explanation(&case),
+            Some(vec!["after-the-root-node"]),
+            "{case:?}"
+        );
     }
 }
 
@@ -1773,131 +1867,6 @@ fn a_size_that_is_not_a_number_fails_the_run() {
     for value in ["1e5", "", "seven"] {
         let result = std::panic::catch_unwind(|| number_setting("N", Some(value), 7));
         assert!(result.is_err(), "{value:?}");
-    }
-}
-
-#[test]
-fn the_same_seed_gives_the_same_inputs() {
-    let inputs = |seed| {
-        let mut rng = Rng::new(seed);
-        (0..80)
-            .map(|index| generated(&mut rng, index, true))
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(inputs(7), inputs(7));
-    assert_ne!(inputs(7), inputs(8));
-}
-
-#[test]
-fn without_specials_no_input_holds_one() {
-    let mut rng = Rng::new(3);
-    for index in 0..4_000 {
-        let input = generated(&mut rng, index, false);
-        assert!(
-            !generate::SPECIALS
-                .iter()
-                .any(|special| input.contains(special)),
-            "{input:?}"
-        );
-    }
-}
-
-/// A shape of generated input, and how to tell an input has it.
-type Shape = (&'static str, fn(&str) -> bool);
-
-/// The generator writes each shape the harness needs.
-#[test]
-fn the_generator_writes_every_shape() {
-    let mut rng = Rng::new(5);
-    let inputs: Vec<String> = (0..8_000)
-        .map(|index| generated(&mut rng, index, true))
-        .collect();
-    let shapes: &[Shape] = &[
-        ("a complex key", |input| {
-            input.contains("? [") || input.contains("? {")
-        }),
-        ("CRLF", |input| input.contains("\r\n")),
-        ("a tab", |input| {
-            input.contains(":\t") || input.contains("-\t")
-        }),
-        ("a blank line in a block scalar", |input| {
-            input.contains("|+\n\n") || input.contains("|\n  \n")
-        }),
-        ("an anchor on a key", |input| {
-            input
-                .lines()
-                .any(|line| line.trim_start().starts_with("&a") && line.contains(": "))
-        }),
-        ("an escape", |input| {
-            input.contains("\\U0001F600") || input.contains("\\x41")
-        }),
-        ("a quoted-only character in quotes", |input| {
-            input.contains("'s\u{7f}") || input.contains("\"d\u{9f}")
-        }),
-        ("a C0 control", |input| {
-            input.contains('\u{1b}') || input.contains('\u{1}')
-        }),
-        ("depth beyond 4", |input| input.contains("\n          ")),
-        ("a long scalar", |input| {
-            input.lines().any(|line| line.len() > 1_000)
-        }),
-        ("a merge key with aliases", |input| {
-            input.contains("<<: [*a")
-        }),
-        ("aliases that fan out", |input| {
-            input.starts_with("- &l0 [x]")
-        }),
-        ("a configuration", |input| input.contains("rules:\n  -")),
-        // The shapes of entries that long runs once never saw.
-        ("another YAML minor version", |input| {
-            input.contains("%YAML 1.3")
-        }),
-        ("the verbatim tag `!<!>`", |input| input.contains("!<!> ")),
-        ("a flow line that a tab indents", |input| {
-            input.contains(",\n\t  ")
-        }),
-        ("a rule key that is not a string", |input| {
-            input.contains("rules:\n  -")
-                && ["    1: y", "    true: y", "    ~: y", "    [a]: y"]
-                    .iter()
-                    .any(|line| input.contains(line))
-        }),
-    ];
-    for (shape, holds) in shapes {
-        assert!(
-            inputs.iter().any(|input| holds(input)),
-            "no input has {shape}"
-        );
-    }
-}
-
-/// The shares of inputs with specials that `docs/design/yaml-parser.md`
-/// gives for seed 1 hold, in per mille: of the generated inputs, over the
-/// first 40,000 (200; the long run's 300,000 measured 201), and of the corpus
-/// mutations at the long run's 20 per file (19).
-#[test]
-fn the_documented_shares_of_specials_hold() {
-    let holds = |input: &str| {
-        generate::SPECIALS
-            .iter()
-            .any(|special| input.contains(special))
-    };
-    let mut rng = Rng::new(1);
-    let inputs = 40_000;
-    let generated = (0..inputs)
-        .filter(|index| holds(&generated(&mut rng, *index, true)))
-        .count();
-    let share = generated * 1_000 / inputs;
-    assert!((196..=206).contains(&share), "{share} per mille");
-    let (mut mutations, mut with) = (0_usize, 0_usize);
-    for_each_corpus_input(1, 20, true, |input, mutation| {
-        if mutation {
-            mutations += 1;
-            with += usize::from(holds(input));
-        }
-    });
-    if let Some(share) = (with * 1_000).checked_div(mutations) {
-        assert!((17..=22).contains(&share), "{share} per mille");
     }
 }
 

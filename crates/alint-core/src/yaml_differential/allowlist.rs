@@ -92,8 +92,7 @@ impl Deviation {
     }
 
     /// The ayaml errors that its trigger is documented to hide: removing the
-    /// trigger may make ayaml reject what it read, with one of them, where
-    /// the oracle rejected the case.
+    /// trigger may reveal an earlier parser error that its scanner error hid.
     pub(crate) fn hides(&self) -> Hidden {
         match self.id {
             // Each is a scanner error.
@@ -124,16 +123,6 @@ pub(crate) enum Hidden {
 }
 
 impl Hidden {
-    /// Whether `next`, `case` with the trigger removed, shows an error the
-    /// trigger hid from ayaml.
-    #[expect(
-        clippy::unused_self,
-        reason = "the fairness check keeps the hook for triggers that hide value errors"
-    )]
-    pub(crate) fn shown(&self, _case: &Case<'_>, _next: &Case<'_>) -> bool {
-        false
-    }
-
     /// Whether ayaml's error on `next`, `case` with the trigger removed, is
     /// one that the case's error, the trigger's, hid wherever it was.
     pub(crate) fn revealed(&self, case: &Case<'_>, next: &Case<'_>) -> bool {
@@ -1077,9 +1066,9 @@ pub(crate) const LOCATIONS: &[Location] = &[
         messages: &[],
         places: None,
         ayaml: "the node a value error is about; ayaml scans the whole stream's tokens before \
-                parsing and streams parser events into value construction, so a later scanner \
-                error wins over an earlier value error and an earlier value or alias error can \
-                stop parsing before a later parser error",
+                parsing, streams document-building errors (duplicate key, bad core tag, unknown \
+                anchor, recursive alias) with the parser, and reports typed Serde errors after \
+                the document builds",
         oracle: "the first error in the input, as it builds values while it reads, at its \
                  own position for a value error (often the start of the enclosing \
                  collection)",

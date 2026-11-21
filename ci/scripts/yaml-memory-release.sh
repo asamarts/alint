@@ -3,8 +3,8 @@
 # ayaml's peak heap is within 1.2x of libyaml's (`yaml_serde` 0.10.7, the parser
 # v0.22 used), measured by alint-core's `yaml_memory` test on generated documents
 # of nine shapes: OpenAPI ones of about 37 KB, 1.1 MB and 4.4 MB, and block and
-# flow mappings and sequences of about 1 MB. v0.23.0 waits for an ayaml release
-# that meets it for every shape.
+# flow mappings and sequences of about 1 MB. ayaml 0.2.2 meets it for every
+# shape (0.52x to 0.97x).
 #
 # The release preflight runs it. CI's `YAML Compare` job runs the same test
 # (yaml-compare.sh) against each shape's regression bound, its ratio with ayaml

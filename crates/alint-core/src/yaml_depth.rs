@@ -57,10 +57,10 @@
 /// parser still refuses documents the guard passes, nested deep in block
 /// collections.
 ///
-/// The guard refuses a few documents the parser reads, where the lexer counts
-/// more than ayaml nests (see the module docs): it reads a `...` right after
-/// the byte order mark that starts the text as a document end, where ayaml
-/// reads `\u{feff}... [[[…` as one plain scalar. That is a known false refusal.
+/// The guard refuses one documented form the parser reads, where the lexer
+/// counts more than ayaml nests (see the module docs): it reads a `...` right
+/// after a run of byte order marks that starts the text as a document end,
+/// where ayaml reads `\u{feff}... [[[…` as one plain scalar.
 pub const MAX_YAML_FLOW_DEPTH: usize = 128;
 
 /// `true` when the YAML text's flow-collection nesting stays within
@@ -203,11 +203,13 @@ impl Expansion {
 /// of a 1 MB scalar -- are rejected in well under a second without
 /// allocating). It builds NO value, so it cannot change the real parse's
 /// output. A document ayaml refuses for another reason (malformed YAML, a
-/// limit other than the alias budget) is [`Expansion::Unparsed`]: ayaml reads
-/// the whole document before the visitor sees a node, so after a syntax error
-/// anywhere nothing was counted, and the guard says so rather than vouch for
-/// it. A real bomb is ordinary scalars / sequences / maps (and tagged nodes,
-/// via `visit_enum`) and is counted.
+/// limit other than the alias budget) is [`Expansion::Unparsed`]: ayaml scans
+/// the whole stream before parsing, and on documents up to 4 KiB builds the
+/// tree before the visitor sees a node, while on larger documents it streams
+/// events into the visitor (so an alias bomb before a later parser error is
+/// still caught as [`Expansion::OverLimit`], and any refusal before the budget
+/// overflows leaves [`Expansion::Unparsed`]). A real bomb is ordinary scalars /
+/// sequences / maps (and tagged nodes, via `visit_enum`) and is counted.
 #[must_use]
 pub fn expansion(text: &str) -> Expansion {
     expansion_with(text, expansion_budget(text.len()))
@@ -906,6 +908,12 @@ impl<'a> Lexer<'a> {
                             self.i += 3;
                         }
                     }
+                    Bom::Column if self.i == 0 => {
+                        while self.b[self.i..].starts_with(b"\xEF\xBB\xBF") {
+                            self.i += 3;
+                        }
+                        self.col = 1;
+                    }
                     Bom::Column | Bom::Ayaml => self.advance(),
                 }
             }
@@ -1141,15 +1149,31 @@ impl<'a> Lexer<'a> {
             if !(self.is_blank_at(0) || self.is_break_at(0)) {
                 break;
             }
+            // On a continuation line, only leading spaces count toward block
+            // indentation (ayaml counts `take_while(|c| c == ' ')`); a leading
+            // tab has zero spaces of indentation and ends the scalar instead
+            // of swallowing tokens on the next line.
+            let mut indent_spaces: isize = 0;
+            let mut in_indent = false;
             while self.is_blank_at(0) || self.is_break_at(0) {
                 if self.is_blank_at(0) {
+                    if in_indent {
+                        if self.at(0) == b' ' {
+                            indent_spaces += 1;
+                        } else {
+                            in_indent = false;
+                        }
+                    }
                     self.advance();
                 } else {
                     self.skip_line();
                     leading_blanks = true;
+                    indent_spaces = 0;
+                    in_indent = true;
                 }
             }
-            if self.flow == 0 && self.col < min_col {
+            if self.flow == 0 && (self.col < min_col || (leading_blanks && indent_spaces < min_col))
+            {
                 break;
             }
         }

@@ -565,9 +565,9 @@ pub(super) fn line_start_byte_order_marks(input: &str) -> Vec<String> {
 }
 
 /// Without the mark that starts the stream, and with each mark right after
-/// it as `x`. Both parsers read such a mark as content (asamarts/ayaml#140),
-/// so `x` keeps what follows it a scalar's text, where without the first
-/// mark the second would start the stream and be skipped.
+/// it as `x`. The oracle reads a second mark right after the first as content
+/// (while ayaml skips the leading run), so `x` keeps what follows it a scalar's
+/// text where removing only the first mark would let the second start the stream.
 fn second_leading_marks_as_content(input: &str) -> String {
     let Some(rest) = input.strip_prefix('\u{feff}') else {
         return input.to_string();

@@ -940,9 +940,10 @@ policy-test package the user does not trust.
   holds for configurations too: a configuration, `extends:` source or nested configuration past
   33,554,432 bytes fails with "input exceeds the maximum supported size for a structured document
   (33554432 bytes)" and its path, where 0.22 read it. ayaml reads YAML 1.2, where libyaml read
-  YAML 1.1. A differential harness (#482) compared the two on more than five
-  million generated and mutated documents and on every YAML file in this repository: valid
-  documents decode to the same values, except in the cases below.
+  YAML 1.1. A differential harness (#482) compared the two on more than three
+  million generated and mutated documents (3,848,472 inputs across seeds 1 to 12) and on every YAML
+  file in this repository (986 files): valid documents decode to the same values, except in the
+  cases below.
   - **Read differently:**
     - a plain scalar may contain U+0085 (next line), U+2028 (line separator) or U+2029
       (paragraph separator), which YAML 1.2 reads as content; libyaml read them as line breaks.
@@ -1020,22 +1021,25 @@ policy-test package the user does not trust.
     expected a string"; a value that is not one of an enum's, as a rule's `level`, a policy test's
     step or an option such as `direction`, lists them, as "level: expected one of `error`,
     `warning`, `info`, `off`, found a mapping", where 0.22 said "invalid type: map, expected a
-    Value::Tagged enum"; an off-by-one indentation mistake reports "this line is indented
-    differently from the mapping at line L column C" (or "sequence"), an indented top-level key
-    reports "a document's first node cannot be indented", and other indentation mistakes reported
-    as "unexpected content after document" (such as `-id: a` with no space after `-`) end with
+    Value::Tagged enum"; a key or entry indented one space past a parent mapping or sequence reports
+    "this line is indented differently from the mapping/sequence at line X column Y", a line tabbed
+    as indentation notes that YAML does not count tabs as indentation, and remaining "unexpected
+    content after document" mistakes (such as `-id: a` with no space after the `-`, a key two or
+    more spaces off its siblings, or an indented top-level key before a column-1 key) end with
     "(check this line's indentation against the lines above)". A configuration that is a scalar,
-    not a mapping, is reported as "invalid type: string ..., expected struct RawConfig" (or
-    "invalid type: string" when it holds `{{`), where 0.22 quoted the scalar, or, with `{{`, gave
-    only `<redacted>`. An error can also be reported at another place: ayaml scans a stream's
-    tokens before parsing and streams parser events into value construction, so a scanner error
-    later in a file is reported before an earlier duplicate key or type error, and an error about
-    an empty value is reported where what follows starts (the next line's content or the end of the
-    file), where 0.22 reported the place after the key: `respect_gitignore:` with nothing after it
-    on line 2 is reported at line 3, column 1, where 0.22 said line 2, column 19. A character YAML
-    does not allow, such as a C0 control, is reported at its line and column, as "non-printable
-    character U+0001 is not allowed in YAML at line 3 column 4", where 0.22 gave a byte offset
-    ("control characters are not allowed at position 24").
+    not a mapping, quotes the scalar when it holds no `{{` (as 0.22 did:
+    `invalid type: string "...", expected struct RawConfig`), and reports
+    "invalid type: string, expected struct RawConfig" without quoting it when it holds `{{`, where
+    0.22 gave only `<redacted>`. An error can also be reported at another place: ayaml scans the
+    whole stream's tokens before it parses or builds values, so a scanner error later in a file is
+    reported before an earlier parse or value error; parser and document-building errors (duplicate
+    keys, invalid core tags, undefined or cyclic aliases) report whichever comes first, before
+    typed field errors; and an error about an empty value is reported where what follows starts (the next
+    line's content or the end of the file), where 0.22 reported the place after the key:
+    `respect_gitignore:` with nothing after it on line 2 is reported at line 3, column 1, where
+    0.22 said line 2, column 19. A character YAML does not allow, such as a C0 control, is reported
+    at its line and column, as "non-printable character U+0001 is not allowed in YAML at line 3
+    column 4", where 0.22 gave a byte offset ("control characters are not allowed at position 24").
 
   Source spans and structured YAML fixes still use saphyr. The checks that refuse deep flow
   nesting and alias bombs before a parse now read YAML as ayaml does, and ayaml's own depth,
@@ -1146,27 +1150,31 @@ policy-test package the user does not trust.
   the per-file rules narrow this way, and so does the search for the directories a
   `registry_paths_resolve` glob entry matches (on Windows too, where the entry is joined to its
   registry's directory with `\`).
-- **YAML files over 1 MiB share a budget of 32 MiB of input parsing at once** (ADR-0042). With
-  ayaml, one YAML parse at the 32 MiB input cap peaks at 4.5 to 6.2 GB, and every worker thread
-  could run one. A parse of a larger file now waits until its size is free in the budget (or, when
-  its aliases expand, a 32nd of the expanded size, if that is larger: sixteen 500 KB files of
-  aliases peaked at 3.1 GB), so at most one file at the cap parses at a time; a file of 1 MiB or
-  less waits only when its aliases expand past 32 MiB, and findings are unchanged. The budget bounds
-  the parses in flight, not the trees they leave: a tree that copies what aliases name lives outside
-  it while a rule holds it, up to the alias guard's 256 MiB each (#582). The `yaml_path_*`
-  rules, `json_schema_passes`, the cross-file rules' `extract:`, `pinned_references` and the
-  structured fixes all take from it, and so does `alint_core::Format::parse`, which may now wait for
-  another thread's YAML parse.
+- **YAML files over 1 MiB share a budget of 32 MiB of input parsing at once** (ADR-0042). At the
+  32 MiB input cap, one YAML parse peaks at 0.75 to 1.54 GiB of RSS with ayaml 0.2.2 (down from
+  4.5 to 6.2 GB with ayaml 0.1.2), and every worker thread could run one. A parse of a larger file
+  now waits until its size is free in the budget (or, when its aliases expand, a 32nd of the
+  expanded size, if that is larger: sixteen 500 KB files of aliases peaked at 3.1 GB before the
+  budget), so at most one file at the cap parses at a time; a file of 1 MiB or less waits only when
+  its aliases expand past 32 MiB, and findings are unchanged. The budget bounds the parses in
+  flight, not the trees they leave: a tree that copies what aliases name lives outside it while a
+  rule holds it, up to the alias guard's 256 MiB each (#582). The `yaml_path_*` rules,
+  `json_schema_passes`, the cross-file rules' `extract:`, `pinned_references` and the structured
+  fixes all take from it, and so does `alint_core::Format::parse`, which may now wait for another
+  thread's YAML parse.
 - **A JSONC file (a `.json` file with comments or trailing commas) is read from one copy of its
   text without them,** where the copy was made in two passes that held the text four times over as
   characters in between. Checking an 8 MB JSONC file with a `json_path_equals` rule peaks at 37 MB
   RSS, against 70 MB, and runs half the instructions; 3,000 small `tsconfig.json` files run 13%
   fewer. What the copy holds is unchanged, so every rule reads the same values.
-- **Decoding YAML into the structured rules' JSON tree uses less peak heap than in 0.22:** across
-  the nine benchmarked document shapes (OpenAPI documents of 37 KB, 1.1 MB and 4.4 MB, and 1 MB
-  block and flow mappings and sequences), ayaml 0.2.2 peaks at 0.517x to 0.965x of libyaml's peak
-  heap (about 21.8 bytes of heap per input byte on OpenAPI-shaped YAML against libyaml's 37.3 to
-  37.8), meeting ADR-0042 and ADR-0044's 1.2x release bound on every shape.
+- **YAML parsing uses less memory than in 0.22 across every measured document shape** (ADR-0042,
+  ADR-0044). Decoding into the structured rules' JSON tree, ayaml 0.2.2 peaks at 0.517x to 0.965x
+  of libyaml's peak heap across all nine measured shapes (21.8 to 21.9 bytes of heap per input byte
+  on 37 KB to 4.4 MB OpenAPI documents, against 37.3 to 37.8 for libyaml), meeting ADR-0042 and
+  ADR-0044's 1.2x release bound on every shape. End-to-end release checks on OpenAPI documents
+  (50 x 37 KB, 1.1 MB and 4.4 MB) run 0.6% to 8.1% faster at 0.74x to 0.81x peak RSS; 1 MB
+  block-word sequences run 8.8% faster at 0.91x RSS, while dense 1 MB `kN: 1` block and flow
+  mappings run 10.8% and 26.1% slower at 0.76x RSS.
 
 ### Removed
 

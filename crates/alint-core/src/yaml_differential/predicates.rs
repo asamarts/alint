@@ -79,8 +79,8 @@ impl Counter {
 /// `input`, as `counter` counts them, when the place is in it or at its end.
 pub(super) fn offset(input: &str, line: usize, column: usize, counter: Counter) -> Option<usize> {
     let mut start = *counter.line_starts(input).get(line.checked_sub(1)?)?;
-    if line == 1 && matches!(counter, Counter::Ayaml) && input.starts_with('\u{feff}') {
-        start = '\u{feff}'.len_utf8();
+    if line == 1 && matches!(counter, Counter::Ayaml) {
+        start = input.len() - input.trim_start_matches('\u{feff}').len();
     }
     let text = &input[start..];
     text.char_indices()
@@ -101,6 +101,25 @@ pub(super) fn error_offset(input: &str, side: &Side) -> Option<usize> {
         ) => offset(input, *line, *column, Counter::of(rejection)),
         _ => None,
     }
+}
+
+/// Whether ayaml parses `input`'s event stream with at most one document.
+pub(super) fn ayaml_accepts_single_document(input: &str) -> bool {
+    crate::yaml::stream_events(input).is_ok_and(|events| {
+        events
+            .iter()
+            .filter(|event| matches!(event, ayaml::Event::DocumentStart { .. }))
+            .count()
+            <= 1
+    })
+}
+
+/// The byte offset of ayaml's parser error on `input`'s event stream, if any.
+pub(super) fn preexisting_ayaml_parser_offset(input: &str) -> Option<usize> {
+    let error = crate::yaml::stream_events(input).err()?;
+    (error.kind() == ayaml::ErrorKind::Parser)
+        .then(|| error_offset(input, &Err(super::ayaml_rejection(&error))))
+        .flatten()
 }
 
 /// The line of `input` where `side` reports its error, as its parser counts
@@ -508,6 +527,8 @@ mod tests {
         assert_eq!(Counter::Oracle.lines("a\u{2028}b"), ["a", "b"]);
         assert_eq!(offset("\u{feff}ab", 1, 2, Counter::Oracle), Some(3));
         assert_eq!(offset("\u{feff}ab", 1, 2, Counter::Ayaml), Some(4));
+        assert_eq!(offset("\u{feff}\u{feff}ab", 1, 2, Counter::Oracle), Some(3));
+        assert_eq!(offset("\u{feff}\u{feff}ab", 1, 2, Counter::Ayaml), Some(7));
     }
 
     #[test]

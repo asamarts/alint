@@ -610,14 +610,20 @@ fn bom_prefixed_config_bombs_are_rejected_before_they_expand() {
     );
     for text in [&flow, &alias] {
         std::fs::write(&cfg, text).unwrap();
-        // Both text and value decoding name the string where a config struct is expected.
-        for err in [
-            load(&cfg).unwrap_err().to_string(),
-            crate::parse(text).unwrap_err().to_string(),
+        for (err, expected) in [
+            (
+                load(&cfg).unwrap_err().to_string(),
+                "expected struct RawConfig",
+            ),
+            (
+                crate::parse(text).unwrap_err().to_string(),
+                "expected struct Config",
+            ),
         ] {
             assert!(
-                err.contains("invalid type: string") && err.contains("expected struct "),
-                "BOM quoted shape; got: {err}"
+                err.contains("invalid type: string") && err.contains(expected),
+                "BOM quoted shape; got: {}",
+                &err[..err.len().min(200)]
             );
         }
     }

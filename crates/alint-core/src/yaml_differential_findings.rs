@@ -79,6 +79,19 @@ const FINDINGS: &[(&str, Entry, &[&str])] = &[
         Entry::Value,
         &["tab-as-white-space"],
     ),
+    // After a leading byte-order mark, ayaml still checks the quoted scalar's
+    // continuation line (fixed in ayaml 0.2.x, asamarts/ayaml#137), so only
+    // the tab and the continuation line explain the difference; the NEL in the
+    // block scalar after it matters to neither result.
+    (
+        "\u{feff}-\n  -\t\"d\\\n  \\u00e9\\t\"\n  - \"d\\_\\u00e9\\t\"\n  -\n    - |\n      \
+         line 0\u{85}\n    - \n- []\n# end",
+        Entry::Value,
+        &[
+            "tab-as-white-space",
+            "quoted-scalar-continuation-indentation",
+        ],
+    ),
     // Shapes the parser facade's compare mode found in the depth guard's
     // tests, which the generator had not made. With asamarts/ayaml#140 fixed,
     // ayaml skips both leading marks and rejects `b: [1]` after the indented
@@ -508,6 +521,44 @@ const FINDINGS: &[(&str, Entry, &[&str])] = &[
          \t%YAML 1.2\n",
         Entry::Json,
         &["tab-as-white-space", "at-the-token"],
+    ),
+    // An empty `!!null` block scalar (which ayaml reads as null and the oracle
+    // rejects) followed by a duplicate key with a non-empty `!!null` block
+    // scalar (which ayaml rejects while streaming before seeing the duplicate
+    // key or a later parser error; seeds 2 and 4).
+    (
+        "---\na: \n<<:\n  k1: &a1 0.5\n  null: !!null |2\n  null: !!null |2\n      line 0\n\t\n    line 1\n---\nb: 2\n",
+        Entry::Value,
+        &["core-tag-on-another-kind", "indentation"],
+    ),
+    (
+        "---\na: \n<<:\n  k1: &a1 0.5\n  null: !!null |2\n  null: !!null |2\n      line 0\n\t\n    line 1\n---\nb: 2\n",
+        Entry::Json,
+        &[
+            "core-tag-on-another-kind",
+            "tab-as-white-space",
+            "after-the-root-node",
+        ],
+    ),
+    (
+        "-\n  <<:\n    k1: !!null |-\n    k1: !!null |-\n        line 0\n      line 1\n    a b: 0.5\n    b: \"d\\\t\\u00e9\\t\"\n  a: !<tag:x,2000:y> 18446744073709551616\n",
+        Entry::Value,
+        &["core-tag-on-another-kind", "after-the-root-node"],
+    ),
+    (
+        "-\n  <<:\n    k1: !!null |-\n    k1: !!null |-\n        line 0\n      line 1\n    a b: 0.5\n    b: \"d\\\t\\u00e9\\t\"\n  a: !<tag:x,2000:y> 18446744073709551616\n",
+        Entry::Json,
+        &["core-tag-on-another-kind"],
+    ),
+    (
+        "&a1 k1:\n  -\n    <<: &a2 !!null >\n    <<: &a2 !!null >\n      line 0\n  - |\n    line 0\nkey: 'q' 'q'\n...\n",
+        Entry::Value,
+        &["core-tag-on-another-kind", "indentation"],
+    ),
+    (
+        "&a1 k1:\n  -\n    <<: &a2 !!null >\n    <<: &a2 !!null >\n      line 0\n  - |\n    line 0\nkey: 'q' 'q'\n...\n",
+        Entry::Json,
+        &["core-tag-on-another-kind"],
     ),
 ];
 

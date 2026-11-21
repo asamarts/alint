@@ -1,8 +1,9 @@
 //! The budget of YAML input that parses at once, across the process.
 //!
 //! A YAML parse costs far more memory than its input: at the 32 MiB input cap
-//! ([`crate::MAX_STRUCTURED_BYTES`]) one parse measured 4.5 to 6.2 GB of peak
-//! RSS (ADR-0042), and the per-file rules parse in parallel. So every parse of
+//! ([`crate::MAX_STRUCTURED_BYTES`]) one parse measured 0.75 to 1.54 GiB of
+//! peak RSS with ayaml 0.2.2 (down from 4.5 to 6.2 GB with ayaml 0.1.2,
+//! ADR-0042), and the per-file rules parse in parallel. So every parse of
 //! repository YAML whose cost is over [`YAML_BUDGET_THRESHOLD_BYTES`] first
 //! takes that cost from a process-wide budget of [`YAML_PARSE_BUDGET_BYTES`],
 //! waiting until enough is free, and gives it back when the parse ends: at

@@ -33,15 +33,16 @@ pub(crate) use yaml_value::json_seed;
 /// cap [`crate::walker::MAX_ANALYZE_BYTES`] (256 MiB) bounds bytes, but a parse
 /// costs far more RSS than its input: measured up to ~30x the input for
 /// attribute-heavy XML (roxmltree builds its own arena alongside the
-/// `serde_json::Value` tree), ~6-10x for JSON, and up to ~190x for YAML, whose
-/// parser holds its events and the half-built tree at once. At this cap one YAML
-/// parse peaked at 6.2 GB for a `[1,1,...]` flow sequence, 4.5 GB for `k: 1`
-/// lines and 5.0 GB for a 16 MiB flow mapping (ADR-0042). Lossless dotenv keeps
+/// `serde_json::Value` tree), ~6-10x for JSON, and ~24-48x for YAML with
+/// ayaml 0.2.2's streaming reader. At this cap one YAML parse peaked at 1.54 GiB
+/// for a `[1,1,...]` flow sequence, 764 MiB for `kN: 1` lines and 401 MiB for a
+/// 16 MiB flow mapping (down from 6.2 GB, 4.5 GB and 5.0 GB on ayaml 0.1.2,
+/// ADR-0042). Lossless dotenv keeps
 /// tighter byte and physical-line budgets because retained items and decoded
 /// escape maps amplify input. Capping the structured-parse INPUT at 32 MiB, far
 /// above any real config / manifest (they are KB-MB; even a large `OpenAPI` spec
 /// or SBOM is well under 32 MiB) yet 8x tighter than the read cap, bounds one
-/// parse to those few GB. An oversize structured file is one per-file
+/// parse to under ~1.6 GiB. An oversize structured file is one per-file
 /// parse-error violation. HCL keeps its own tighter `MAX_HCL_BYTES` (64 KiB), and
 /// dotenv has a 4 MiB cap plus a physical-line budget; this is the ceiling for
 /// the rest. The per-file rule dispatch is parallel, so several files parse at
