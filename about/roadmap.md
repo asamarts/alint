@@ -1607,9 +1607,12 @@ Starts Phase 3 of
 [`v0.23/README.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.23/README.md) and
 the owner decisions are
 [ADR-0032](https://github.com/asamarts/alint/blob/main/docs/adr/0032-v023-owner-decisions.md),
-[ADR-0033](https://github.com/asamarts/alint/blob/main/docs/adr/0033-v023-slice-after-the-corpus-stratum.md)
+[ADR-0033](https://github.com/asamarts/alint/blob/main/docs/adr/0033-v023-slice-after-the-corpus-stratum.md),
+[ADR-0034](https://github.com/asamarts/alint/blob/main/docs/adr/0034-v2-version-boundary-and-phase-3-design.md),
+[ADR-0044](https://github.com/asamarts/alint/blob/main/docs/adr/0044-untrusted-runs-git-as-a-process-and-a-wider-memory-gate.md),
+[ADR-0046](https://github.com/asamarts/alint/blob/main/docs/adr/0046-a-linear-extends-merge-sealed-options-and-the-rounds-open-questions.md)
 and
-[ADR-0034](https://github.com/asamarts/alint/blob/main/docs/adr/0034-v2-version-boundary-and-phase-3-design.md).
+[ADR-0047](https://github.com/asamarts/alint/blob/main/docs/adr/0047-sarif-tells-apart-a-fingerprint-repeated-within-a-run.md).
 
 - **Measured demand first.** An i18n stratum and a JavaScript-monorepo stratum join the pinned
   corpus and are scored before the design commits to operators.
@@ -1624,43 +1627,52 @@ and
 - **Three conformance policies** expressed as `version: 2` configuration with `alint test` cases:
   locale key parity, dependency version consistency, and toolchain-pin consistency.
 - **`version: 2` is experimental** in v0.23: opt-in, with a draft schema, and it may change before
-  it is declared stable. `version: 1` configurations are unchanged apart from the fix below.
+  it is declared stable. `version: 1` configurations keep working apart from the security-hardening
+  boundaries, the `git_tracked_only` fix below, and the documented YAML 1.2 differences.
 - **A `git_tracked_only` fix (#503).** A rule with `git_tracked_only: true` sees a file that git
   tracks but an ignore file excludes, as documented, so a configuration that uses it can gain or
   lose findings.
-- **Security fixes, and their advisory.** v0.23.0 closes the ways around the policy-test sandbox
-  that #515, #519, #522 and #527 fixed, among them a spawning rule nested in `require:` that ran
-  without the spawn capability and a test's `given.env` that reached the runner's own Git
-  commands. It also closes the holes the audit after v0.22.1 found: a fix from an `extends:`
-  ruleset that wrote alint's configuration or `.git`, rules that read a Git directory,
+- **Security fixes, `--untrusted` / `--no-spawn`, and their advisory.** v0.23.0 closes the ways
+  around the policy-test sandbox that #515, #519, #522 and #527 fixed, among them a spawning rule
+  nested in `require:` that ran without the spawn capability and a test's `given.env` that reached
+  the runner's own Git commands. It also closes the holes found in the post-v0.22.1 and pre-v0.23
+  audits: a fix from an `extends:` ruleset that wrote alint's configuration or `.git`, baseline
+  writes into `.git`, nested-config confinement bypasses, rules that read a Git directory,
   configuration discovery above the repository, and a language server that ran a repository's
-  commands before the editor trusted the workspace. They ship in v0.23.0 only, with security
-  advisory GHSA-78jj-xfpm-g6px
-  ([ADR-0040](../adr/0040-the-v023-advisory-and-the-allowlist-approval.md),
-  [ADR-0043](../adr/0043-trust-and-disclosure-decisions-from-the-post-v0221-audit.md)).
+  commands before the editor trusted the workspace. Global `--untrusted` and `--no-spawn` flags
+  bring the language server's untrusted mode to the CLI
+  ([ADR-0044](https://github.com/asamarts/alint/blob/main/docs/adr/0044-untrusted-runs-git-as-a-process-and-a-wider-memory-gate.md)).
+  They ship in v0.23.0 only, with security advisory GHSA-78jj-xfpm-g6px
+  ([ADR-0040](https://github.com/asamarts/alint/blob/main/docs/adr/0040-the-v023-advisory-and-the-allowlist-approval.md),
+  [ADR-0043](https://github.com/asamarts/alint/blob/main/docs/adr/0043-trust-and-disclosure-decisions-from-the-post-v0221-audit.md)).
 - **Library API breaks.** YAML parser types leave the public API of `alint-core`, `alint-dsl`
   and `alint-testkit` for alint's own (#484,
   [ADR-0038](https://github.com/asamarts/alint/blob/main/docs/adr/0038-owned-yaml-types-and-the-api-gate.md)).
-  `Violation`, `Context`, `RuleSpec`, `NestedRuleSpec` and `WalkOptions` become
-  `#[non_exhaustive]` with constructors, and `alint_core::Error` becomes `#[non_exhaustive]` too.
+  `Violation`, `Context`, `RuleSpec`, `NestedRuleSpec`, `WalkOptions`, `LspOptions` and
+  `LoadOptions` become `#[non_exhaustive]` with constructors and setters, and `alint_core::Error`
+  becomes `#[non_exhaustive]` too
+  ([ADR-0046](https://github.com/asamarts/alint/blob/main/docs/adr/0046-a-linear-extends-merge-sealed-options-and-the-rounds-open-questions.md)).
   `baseline::Fingerprints` and `baseline::fingerprints`, which matched the v0.21 fingerprint,
   are removed.
-- **A pure-Rust YAML parser.** alint parses YAML with ayaml (#510). A differential harness
-  compares it with the parser v0.22 used (#482), and the checks that refuse YAML bombs before a
-  parse now read YAML as ayaml does (#483). The owner approved the differences the harness
-  documents ([ADR-0035](../adr/0035-keep-the-early-ayaml-cutover.md),
-  [ADR-0040](../adr/0040-the-v023-advisory-and-the-allowlist-approval.md)), on condition that
-  v0.23.0 ships an ayaml release that fixes the defects alint filed
-  ([ADR-0043](../adr/0043-trust-and-disclosure-decisions-from-the-post-v0221-audit.md)).
-- **Baselines.** The v0.21 fingerprint of a hidden-path finding is no longer matched; re-run
-  `alint baseline` before upgrading.
+- **A pure-Rust YAML parser.** alint parses YAML with `ayaml` 0.2.2 (#510, #605). A differential
+  harness compares it with the parser v0.22 used (#482), and the checks that refuse YAML bombs
+  before a parse read YAML as ayaml does (#483). `ayaml` 0.2.2 fixed every upstream defect alint
+  filed and beats libyaml's peak heap across all nine memory shapes (0.52x to 0.97x). The owner
+  approved the documented allowlist differences
+  ([ADR-0035](https://github.com/asamarts/alint/blob/main/docs/adr/0035-keep-the-early-ayaml-cutover.md),
+  [ADR-0040](https://github.com/asamarts/alint/blob/main/docs/adr/0040-the-v023-advisory-and-the-allowlist-approval.md),
+  [ADR-0043](https://github.com/asamarts/alint/blob/main/docs/adr/0043-trust-and-disclosure-decisions-from-the-post-v0221-audit.md)).
+- **Baselines and SARIF.** The v0.21 fingerprint of a hidden-path finding is no longer matched;
+  re-run `alint baseline` before upgrading. SARIF and GitLab output disambiguate repeated
+  fingerprints within a run
+  ([ADR-0047](https://github.com/asamarts/alint/blob/main/docs/adr/0047-sarif-tells-apart-a-fingerprint-repeated-within-a-run.md)).
 
 Later: the remaining assertion families, specialized kinds and templates, and a stable
 `version: 2` (v0.24 or later); plugin hosts start in v0.24. saphyr leaves the release build in
 v0.24, when source spans and structured YAML fixes move to ayaml
-([ADR-0036](../adr/0036-ayaml-issues-and-the-saphyr-exit.md)), and stays only as a test-only
-reference parser
-([ADR-0041](../adr/0041-a-yaml-parser-facade-with-test-only-reference-parsers.md)).
+([ADR-0036](https://github.com/asamarts/alint/blob/main/docs/adr/0036-ayaml-issues-and-the-saphyr-exit.md)),
+and stays only as a test-only reference parser
+([ADR-0041](https://github.com/asamarts/alint/blob/main/docs/adr/0041-a-yaml-parser-facade-with-test-only-reference-parsers.md)).
 
 ## v1.0: Stability
 

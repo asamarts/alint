@@ -62,9 +62,9 @@ Windows and macOS hazard (`no_case_conflicts` is the dedicated kind for exactly 
 checks references against the walked tree: `registry_paths_resolve` requires every path a manifest
 enumerates to be in it, so a path that is missing, or that an ignore file or `ignore:` excludes,
 does not resolve, and `markdown_paths_resolve` does the same for the backticked workspace paths in a
-Markdown file. Most of these read the whole tree, because the answer for one path depends on the
-others, so they opt out of `--changed` filtering; the per-file `markdown_paths_resolve` (each file's
-links are self-contained) is the exception, participating in `--changed` like any per-file rule. The
+Markdown file. These cross-file rules read the whole tree, because the answer for one path depends
+on the others (including which files exist elsewhere in the repository), so they opt out of
+`--changed` filtering and evaluate the whole snapshot. The
 [rules reference](/docs/rules/) carries the complete set.
 
 ## file_graph
