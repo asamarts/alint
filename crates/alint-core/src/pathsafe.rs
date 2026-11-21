@@ -641,9 +641,10 @@ fn has_alternate_spelling(path: &Path) -> bool {
 /// Whether a single filename component `candidate` could be opened by a file
 /// system as `target` (same NTFS/HFS+/8.3 rules as [`path_names_alint_config`]).
 fn component_opens_as(candidate: &str, target: &str) -> bool {
-    opens_as(candidate, |file| {
-        file.eq_ignore_ascii_case(target) || short_name_of(file, target)
-    })
+    candidate.eq_ignore_ascii_case(target)
+        || opens_as(candidate, |file| {
+            file.eq_ignore_ascii_case(target) || short_name_of(file, target)
+        })
 }
 
 /// Whether `candidate` (a resolved path) could open the same file as `target`
@@ -651,6 +652,15 @@ fn component_opens_as(candidate: &str, target: &str) -> bool {
 /// Windows/HFS+ alternate spellings (`policy.yml.`, `policy.yml::$DATA`,
 /// `POLICY~1.YML`, `pol\u{200c}icy.yml`, or `\`-separated pieces).
 fn path_opens_as_file(candidate: &Path, target: &Path) -> bool {
+    enum Piece {
+        /// Non-filename path component (`Prefix` such as `\\?\C:`, `RootDir`,
+        /// etc.): compared literally (case-insensitively) rather than through
+        /// NTFS stream / 8.3 filename rules so `:` in a drive prefix is never
+        /// stripped as an alternate data stream delimiter.
+        Structural(String),
+        Normal(String),
+    }
+
     if target
         .as_os_str()
         .eq_ignore_ascii_case(candidate.as_os_str())
@@ -662,18 +672,20 @@ fn path_opens_as_file(candidate: &Path, target: &Path) -> bool {
     }
     // Split any literal `\` inside Normal components on Unix so `dir\policy.yml.`
     // aligns component-for-component with `dir/policy.yml`.
-    let expand = |path: &Path| -> Vec<String> {
+    let expand = |path: &Path| -> Vec<Piece> {
         let mut out = Vec::new();
         for component in path.components() {
             match component {
                 Component::Normal(name) => {
                     for piece in name.to_string_lossy().split('\\') {
                         if !piece.is_empty() {
-                            out.push(piece.to_owned());
+                            out.push(Piece::Normal(piece.to_owned()));
                         }
                     }
                 }
-                other => out.push(other.as_os_str().to_string_lossy().into_owned()),
+                other => out.push(Piece::Structural(
+                    other.as_os_str().to_string_lossy().into_owned(),
+                )),
             }
         }
         out
@@ -681,10 +693,11 @@ fn path_opens_as_file(candidate: &Path, target: &Path) -> bool {
     let cand = expand(candidate);
     let targ = expand(target);
     cand.len() == targ.len()
-        && cand
-            .iter()
-            .zip(&targ)
-            .all(|(c, t)| component_opens_as(c, t))
+        && cand.iter().zip(&targ).all(|(c, t)| match (c, t) {
+            (Piece::Structural(c), Piece::Structural(t)) => c.eq_ignore_ascii_case(t),
+            (Piece::Normal(c), Piece::Normal(t)) => component_opens_as(c, t),
+            _ => false,
+        })
 }
 
 /// [`reaches_alint_config`], asking `index`, the walk of `root`, first. A path
@@ -1433,5 +1446,13 @@ mod tests {
             );
         }
         assert!(!reaches_alint_config(root, Path::new("other.yml"), &config));
+        assert!(super::path_opens_as_file(
+            Path::new(r"\\?\C:\repo\POLICY~1.YML"),
+            Path::new(r"\\?\C:\repo\policy.yml"),
+        ));
+        assert!(super::path_opens_as_file(
+            Path::new("/repo/sub:dir/POLICY~1.YML"),
+            Path::new("/repo/sub:dir/policy.yml"),
+        ));
     }
 }
