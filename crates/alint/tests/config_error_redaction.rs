@@ -1200,6 +1200,7 @@ fn a_v2_value_read_from_the_environment_reaches_no_output() {
             .map(|chunk| {
                 let root = root.path();
                 scope.spawn(move || {
+                    let root_str = root.to_string_lossy();
                     let mut leaks = Vec::new();
                     for &(index, position, value) in chunk {
                         let dir = root.join(index.to_string());
@@ -1210,9 +1211,15 @@ fn a_v2_value_read_from_the_environment_reaches_no_output() {
                                 String::from_utf8_lossy(&output.stdout),
                                 String::from_utf8_lossy(&output.stderr)
                             );
-                            let lower = text.to_lowercase();
+                            // Strip the random tempdir root path so a tempdir
+                            // suffix like `.tmp0hJIQZ` cannot false-positive on
+                            // the `"QZ"` canary.
+                            let scrubbed = text.replace(root_str.as_ref(), "<root>");
+                            let lower = scrubbed.to_lowercase();
                             let leaked = ["anary", "ecret"].iter().any(|word| lower.contains(word))
-                                || ["QZ", "Q/Z", "$.Q"].iter().any(|word| text.contains(word));
+                                || ["QZ", "Q/Z", "$.Q"]
+                                    .iter()
+                                    .any(|word| scrubbed.contains(word));
                             if leaked {
                                 leaks.push(format!("{position:?} S={value:?} {args:?}:\n{text}"));
                             }

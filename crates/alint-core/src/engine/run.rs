@@ -288,17 +288,13 @@ impl Engine {
             {
                 return false;
             }
-            let explicit = entry
-                .spec
-                .as_deref()
-                .is_some_and(crate::RuleSpec::has_sensitive_evidence);
+            let explicit = Self::has_sensitive_evidence(entry);
             let scope_path = path.strip_prefix(root).unwrap_or(path);
             let scope = entry
                 .rule
                 .path_scope()
                 .or_else(|| entry.rule.as_per_file().map(PerFileRule::path_scope));
-            let manifest_sensitive =
-                scope.is_some_and(|scope| scope.sensitive_manifest_sources().next().is_some());
+            let manifest_sensitive = Self::has_sensitive_manifest_scope(entry.rule.as_ref());
             if (explicit
                 || entry.rule.path_contents_sensitive_by_default()
                 || (entry.rule.as_per_file().is_some() && manifest_sensitive))

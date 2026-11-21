@@ -228,8 +228,8 @@ pub fn write_json_with_baseline(
                 .map(|v| JsonViolation {
                     path: lossy_path(v.report_path()),
                     message: v.message.as_ref(),
-                    line: v.line,
-                    column: v.column,
+                    line: v.report_line(),
+                    column: v.report_column(),
                     fixable: v.is_fixable,
                     proposed_edit: crate::utf8_proposed_edits(v),
                     related: related(v),
@@ -241,8 +241,8 @@ pub fn write_json_with_baseline(
                 .map(|v| JsonNote {
                     path: lossy_path(v.report_path()),
                     message: v.message.as_ref(),
-                    line: v.line,
-                    column: v.column,
+                    line: v.report_line(),
+                    column: v.report_column(),
                     kind: v
                         .note_kind()
                         .unwrap_or(alint_core::NoteKind::Informational)
@@ -269,8 +269,8 @@ pub fn write_json_with_baseline(
                         id: rr.rule_id.as_ref(),
                         path: lossy_path(sf.violation.report_path()),
                         message: sf.violation.message.as_ref(),
-                        line: sf.violation.line,
-                        column: sf.violation.column,
+                        line: sf.violation.report_line(),
+                        column: sf.violation.report_column(),
                         fingerprint: sf.fingerprint.as_str(),
                         related: related(&sf.violation),
                     })
@@ -384,8 +384,8 @@ pub fn write_fix_json_with_mode(
                     JsonFixItem {
                         path: lossy_path(it.violation.report_path()),
                         message: it.violation.message.as_ref(),
-                        line: it.violation.line,
-                        column: it.violation.column,
+                        line: it.violation.report_line(),
+                        column: it.violation.report_column(),
                         status,
                         detail,
                         skip_kind,
@@ -422,8 +422,8 @@ fn json_analysis_failure(failure: &AnalysisFailure) -> JsonAnalysisFailure<'_> {
         kind: failure.kind.as_str(),
         path: lossy_path(failure.report_path()),
         message: failure.message.as_ref(),
-        line: failure.line,
-        column: failure.column,
+        line: failure.report_line(),
+        column: failure.report_column(),
     }
 }
 
@@ -698,5 +698,73 @@ mod tests {
                 .get("relatedLocations")
                 .is_none()
         );
+    }
+
+    #[test]
+    fn a_protected_path_omits_line_and_column_across_formats() {
+        let mut finding = Violation::new("bad")
+            .with_path(Path::new("secret.env"))
+            .with_location(4219, 173);
+        finding.path_sensitive = true;
+        let report = Report {
+            results: vec![RuleResult::new(
+                "r".into(),
+                Level::Error,
+                None,
+                vec![finding],
+                false,
+            )],
+        };
+        let json: serde_json::Value = serde_json::from_str(&render(&report)).unwrap();
+        let violation = &json["results"][0]["violations"][0];
+        assert_eq!(violation["path"], "<redacted>");
+        assert!(violation.get("line").is_none(), "{violation}");
+        assert!(violation.get("column").is_none(), "{violation}");
+
+        for (name, rendered) in [
+            ("human", {
+                let mut buf = Vec::new();
+                crate::write_human(&report, &mut buf, crate::HumanOptions::default()).unwrap();
+                String::from_utf8(buf).unwrap()
+            }),
+            ("markdown", {
+                let mut buf = Vec::new();
+                crate::write_markdown(&report, &mut buf).unwrap();
+                String::from_utf8(buf).unwrap()
+            }),
+            ("github", {
+                let mut buf = Vec::new();
+                crate::write_github(&report, &mut buf).unwrap();
+                String::from_utf8(buf).unwrap()
+            }),
+            ("junit", {
+                let mut buf = Vec::new();
+                crate::write_junit(&report, &mut buf).unwrap();
+                String::from_utf8(buf).unwrap()
+            }),
+            ("agent", {
+                let mut buf = Vec::new();
+                crate::write_agent(&report, &mut buf).unwrap();
+                String::from_utf8(buf).unwrap()
+            }),
+            ("sarif", {
+                let mut buf = Vec::new();
+                crate::write_sarif(&report, &mut buf).unwrap();
+                String::from_utf8(buf).unwrap()
+            }),
+            ("gitlab", {
+                let mut buf = Vec::new();
+                crate::write_gitlab(&report, None, &mut buf).unwrap();
+                let s = String::from_utf8(buf).unwrap();
+                let gl: serde_json::Value = serde_json::from_str(&s).unwrap();
+                assert_eq!(gl[0]["location"]["lines"]["begin"], 1);
+                s
+            }),
+        ] {
+            assert!(
+                !rendered.contains("4219") && !rendered.contains("173"),
+                "{name} leaked hidden path line/column:\n{rendered}"
+            );
+        }
     }
 }

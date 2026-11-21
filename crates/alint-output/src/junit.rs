@@ -137,7 +137,11 @@ fn write_error_case(
         Some(path) => crate::slash_path(path),
         None => "(repository)".to_string(),
     };
-    let body = match (failure.report_path(), failure.line, failure.column) {
+    let body = match (
+        failure.report_path(),
+        failure.report_line(),
+        failure.report_column(),
+    ) {
         (Some(path), Some(line), Some(column)) => format!(
             "{}:{line}:{column}: {}: {}",
             crate::slash_path(path),
@@ -182,10 +186,10 @@ fn format_failure_body(result: &RuleResult, violation: &Violation) -> String {
     let mut s = String::new();
     if let Some(p) = violation.report_path() {
         s.push_str(&crate::slash_path(p));
-        if let Some(line) = violation.line {
+        if let Some(line) = violation.report_line() {
             s.push(':');
             s.push_str(&line.to_string());
-            if let Some(col) = violation.column {
+            if let Some(col) = violation.report_column() {
                 s.push(':');
                 s.push_str(&col.to_string());
             }

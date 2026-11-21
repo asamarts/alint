@@ -32,10 +32,10 @@ pub fn write_github(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
                 if let Some(path) = v.report_path() {
                     props.push(format!("file={}", escape_prop(&crate::slash_path(path))));
                 }
-                if let Some(line) = v.line {
+                if let Some(line) = v.report_line() {
                     props.push(format!("line={line}"));
                 }
-                if let Some(col) = v.column {
+                if let Some(col) = v.report_column() {
                     props.push(format!("col={col}"));
                 }
                 let body = escape_body(&v.message);
@@ -50,10 +50,10 @@ pub fn write_github(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
             if let Some(path) = failure.report_path() {
                 props.push(format!("file={}", escape_prop(&crate::slash_path(path))));
             }
-            if let Some(line) = failure.line {
+            if let Some(line) = failure.report_line() {
                 props.push(format!("line={line}"));
             }
-            if let Some(col) = failure.column {
+            if let Some(col) = failure.report_column() {
                 props.push(format!("col={col}"));
             }
             let body = escape_body(&format!("{}: {}", failure.kind.as_str(), failure.message));

@@ -100,6 +100,13 @@ struct Walk<'w> {
 
 impl Walk<'_> {
     fn document(&mut self) -> Result<(), AdapterError> {
+        let stripped = self.text.trim_start_matches('\u{feff}');
+        if stripped.len() > crate::structured_format::MAX_STRUCTURED_BYTES {
+            return Err(AdapterError::Parse(format!(
+                "TOML input exceeds the maximum supported size ({} bytes)",
+                crate::structured_format::MAX_STRUCTURED_BYTES
+            )));
+        }
         let document = Document::parse(self.text).map_err(|error: toml_edit::TomlError| {
             AdapterError::Parse(parse_error(self.text, &error))
         })?;

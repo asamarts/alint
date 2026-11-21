@@ -520,7 +520,7 @@ pub(super) fn cmd_baseline(
             for failure in &result.analysis_failures {
                 let location = failure.report_path().map_or_else(
                     || "<repo>".to_string(),
-                    |path| match failure.line {
+                    |path| match failure.report_line() {
                         Some(line) => format!("{}:{line}", path.display()),
                         None => path.display().to_string(),
                     },

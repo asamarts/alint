@@ -181,7 +181,7 @@ fn build_issue(
             // than at a specific line. Some consumers reject 0 —
             // bump to 1 (top of file) for those.
             lines: Lines {
-                begin: violation.line.unwrap_or(1).max(1),
+                begin: violation.report_line().unwrap_or(1).max(1),
             },
         },
     }
@@ -209,7 +209,7 @@ fn build_analysis_failure_issue(result: &RuleResult, failure: &AnalysisFailure) 
         location: Location {
             path,
             lines: Lines {
-                begin: failure.line.unwrap_or(1).max(1),
+                begin: failure.report_line().unwrap_or(1).max(1),
             },
         },
     }

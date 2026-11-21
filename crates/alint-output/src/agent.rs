@@ -153,8 +153,8 @@ pub fn write_agent(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
                 rule_id: r.rule_id.as_ref(),
                 severity: severity_str(r.level),
                 file: v.report_path().map(Path::to_string_lossy),
-                line: v.line,
-                column: v.column,
+                line: v.report_line(),
+                column: v.report_column(),
                 human_message: v.message.as_ref(),
                 agent_instruction: build_agent_instruction(r, v),
                 fix_available: v.is_fixable,
@@ -172,8 +172,8 @@ pub fn write_agent(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
                     rule_id: r.rule_id.as_ref(),
                     kind: failure.kind.as_str(),
                     file: failure.report_path().map(Path::to_string_lossy),
-                    line: failure.line,
-                    column: failure.column,
+                    line: failure.report_line(),
+                    column: failure.report_column(),
                     human_message: failure.message.as_ref(),
                 }),
         );
@@ -245,10 +245,10 @@ fn build_agent_instruction(rule: &RuleResult, violation: &Violation) -> String {
         Some(path) => {
             out.push_str("edit ");
             out.push_str(&path.display().to_string());
-            if let Some(line) = violation.line {
+            if let Some(line) = violation.report_line() {
                 out.push(':');
                 out.push_str(&line.to_string());
-                if let Some(column) = violation.column {
+                if let Some(column) = violation.report_column() {
                     out.push(':');
                     out.push_str(&column.to_string());
                 }

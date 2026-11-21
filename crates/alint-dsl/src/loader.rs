@@ -1109,6 +1109,7 @@ fn local_config_display(
 /// it extends. Rules are field-merged at the YAML-Mapping layer
 /// so children can override individual fields without re-stating
 /// the entire rule.
+#[allow(clippy::too_many_lines)]
 pub(crate) fn load_recursive(
     path: &Path,
     state: &mut LoadState,
@@ -1208,6 +1209,8 @@ pub(crate) fn load_recursive(
         })
         .collect();
     let mut repeats = Repeats::of(&keys);
+    let mut resolved_targets: std::collections::HashMap<&str, Option<PathBuf>> =
+        std::collections::HashMap::new();
     for (index, entry) in extends.iter().enumerate() {
         let key = &keys[index];
         let parent = match repeats.take(key) {
@@ -1227,11 +1230,21 @@ pub(crate) fn load_recursive(
         };
         if config.v2.has_sources() {
             let chosen = context.environment_chosen || key.from_environment;
-            record_extended(&mut config.v2, index, entry, &source_dir, opts, chosen);
+            record_extended(
+                &mut config.v2,
+                index,
+                entry,
+                &source_dir,
+                opts,
+                chosen,
+                &mut resolved_targets,
+            );
         }
         // An entry that repeats the one before it merges the same source onto
-        // itself, which changes nothing.
+        // itself, which changes nothing; still charge one entry so a long run
+        // of consecutive repeats cannot bypass the merge budget.
         if index > 0 && keys[index - 1] == *key {
+            state.charge_extends_entry()?;
             repeats.hold(key, parent);
             continue;
         }
@@ -1342,18 +1355,21 @@ impl<'k, 'e> Repeats<'k, 'e> {
 /// resolve a local target (which has just loaded, so it resolves); kept out
 /// of line for the same reason.
 #[inline(never)]
-fn record_extended(
+fn record_extended<'e>(
     objects: &mut crate::v2::Objects,
     index: usize,
-    entry: &crate::v2::ExtendsEntry,
+    entry: &'e crate::v2::ExtendsEntry,
     source_dir: &Path,
     opts: &LoadOptions<'_>,
     chosen: bool,
+    resolved_targets: &mut std::collections::HashMap<&'e str, Option<PathBuf>>,
 ) {
     let url = entry.entry.url();
-    let target = (ExtendsEntryKind::of(url) == ExtendsEntryKind::Local)
-        .then(|| resolve_relative(source_dir, url))
-        .and_then(|target| opts.config_source.canonicalize(&target).ok());
+    let target = resolved_targets.entry(url).or_insert_with(|| {
+        (ExtendsEntryKind::of(url) == ExtendsEntryKind::Local)
+            .then(|| resolve_relative(source_dir, url))
+            .and_then(|target| opts.config_source.canonicalize(&target).ok())
+    });
     objects.record_extended(index, target.as_deref(), chosen);
 }
 

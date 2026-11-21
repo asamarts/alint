@@ -986,6 +986,8 @@ fn close_sensitivity(plan: &mut Plan, order: &[RelationId]) {
                 filtered.insert(Family::of(&field.source, join));
             }
         }
+        let mut exact_sources: Vec<&plan::FieldSource> = Vec::new();
+        let mut path_all_hidden = false;
         if let Some(join) = join {
             let side = |side: plan::JoinSide| match side {
                 plan::JoinSide::Left => join.left.id,
@@ -1000,7 +1002,36 @@ fn close_sensitivity(plan: &mut Plan, order: &[RelationId]) {
             }
             for (left, right) in &join.on {
                 if sensitive(join.left.id, left) || sensitive(join.right.id, right) {
-                    filtered.insert(Family::Side(true, left));
+                    let (is_left, rep) = join_canonical(join, true, left);
+                    filtered.insert(Family::Side(is_left, rep));
+                }
+            }
+        } else {
+            // Propagate explicit `sensitive: true` across sibling fields bound
+            // to the same source in non-join relations (`Part` / `Union`)
+            // without over-tainting `entry.key` when only `entry.value` is
+            // sensitive.
+            for (_, field) in &relation.fields {
+                if !field.sensitive {
+                    continue;
+                }
+                match &field.source {
+                    plan::FieldSource::EntryValue
+                    | plan::FieldSource::Value
+                    | plan::FieldSource::Bound(_) => {
+                        exact_sources.push(&field.source);
+                    }
+                    plan::FieldSource::Path(token) => {
+                        exact_sources.push(&field.source);
+                        if *token == plan::PathToken::Path {
+                            path_all_hidden = true;
+                        }
+                    }
+                    plan::FieldSource::EntryKey
+                    | plan::FieldSource::EntryParent
+                    | plan::FieldSource::EntryRoot
+                    | plan::FieldSource::EntryPath
+                    | plan::FieldSource::Side(_, _) => {}
                 }
             }
         }
@@ -1013,6 +1044,8 @@ fn close_sensitivity(plan: &mut Plan, order: &[RelationId]) {
             .iter()
             .map(|(_, field)| {
                 filtered.contains(&Family::of(&field.source, join))
+                    || exact_sources.contains(&&field.source)
+                    || (path_all_hidden && matches!(field.source, plan::FieldSource::Path(_)))
                     || (keys_hidden && spells_keys(&field.source))
             })
             .collect();
@@ -1110,18 +1143,51 @@ impl<'a> Family<'a> {
             Source::Bound(query) => Self::Bound(query),
             Source::Side(side, field) => {
                 let left = *side == plan::JoinSide::Left;
-                let paired = join.and_then(|join| {
-                    join.on
-                        .iter()
-                        .find(|(l, r)| if left { l == field } else { r == field })
-                });
-                match paired {
-                    Some((left_field, _)) => Self::Side(true, left_field),
+                match join {
+                    Some(join) => {
+                        let (is_left, rep) = join_canonical(join, left, field);
+                        Self::Side(is_left, rep)
+                    }
                     None => Self::Side(left, field),
                 }
             }
         }
     }
+}
+
+/// Canonical `(is_left, field_name)` representative of `(start_left, start_field)`
+/// across the transitive closure of `join.on` equalities, so multi-pair joins
+/// such as `on: { a: x, b: x }` place `left.a`, `right.x`, and `left.b` in one
+/// equivalence class.
+fn join_canonical<'a>(
+    join: &'a plan::JoinDef,
+    start_left: bool,
+    start_field: &'a str,
+) -> (bool, &'a str) {
+    let mut reached = vec![(start_left, start_field)];
+    let mut cursor = 0;
+    while cursor < reached.len() {
+        let (is_left, name) = reached[cursor];
+        cursor += 1;
+        for (l, r) in &join.on {
+            let neighbor = if is_left && l == name {
+                Some((false, r.as_str()))
+            } else if !is_left && r == name {
+                Some((true, l.as_str()))
+            } else {
+                None
+            };
+            if let Some(next) = neighbor
+                && !reached.contains(&next)
+            {
+                reached.push(next);
+            }
+        }
+    }
+    reached
+        .into_iter()
+        .min()
+        .expect("join equivalence class contains its seed")
 }
 
 fn add_capabilities(plan: &mut Plan, order: &[RelationId]) {
@@ -1270,6 +1336,21 @@ impl Resolved<'_> {
             .get("kind")
             .and_then(ayaml::Value::as_str)
             .unwrap_or("");
+        if kind == "constraint" && rule.get("assert").is_some() {
+            let assert_v2 = origins
+                .iter()
+                .find(|(held, _)| held == "assert")
+                .and_then(|(_, file)| config_files.get(*file))
+                .and_then(|path| self.namespaces.source_at(path));
+            if assert_v2.is_none() {
+                return Err(Error::rule_config(
+                    id,
+                    "`assert` belongs to a `constraint` rule, but a version 1 config wrote it; \
+                     only a version 2 config's rules may declare `constraint` assertions (version \
+                     2 keeps field and relation names literal)",
+                ));
+            }
+        }
         let mut references = Vec::new();
         for &field in super::origins::reference_fields(kind) {
             if let Some(value) = rule.get(field) {

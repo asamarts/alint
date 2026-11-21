@@ -57,6 +57,7 @@ mod only_filter;
 mod path_confinement_cli;
 mod pattern_hints_cli;
 mod policy_test_cli;
+mod pre_v023_audit_gates;
 mod pty_color;
 mod related_locations_contract;
 mod relation_names_cli;

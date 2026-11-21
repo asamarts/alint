@@ -196,6 +196,44 @@ impl TriggerScope {
             .flat_map(ScopeFilter::manifest_predicates)
     }
 
+    /// Whether any selector in this trigger scope filters through a
+    /// secret-bearing manifest (such as `.env` or `.properties`).
+    #[must_use]
+    pub fn has_sensitive_manifest_scope(&self) -> bool {
+        self.selectors.iter().any(|selector| {
+            selector
+                .scope
+                .as_ref()
+                .is_some_and(|scope| scope.sensitive_manifest_sources().next().is_some())
+        })
+    }
+
+    /// Visit every repository path matched by any selector in this trigger
+    /// scope, plus every manifest path their `scope_filter` predicates consult.
+    /// A selector whose scope failed to compile fails closed by visiting every
+    /// indexed file.
+    pub fn visit_matched_paths(&self, index: &FileIndex, visit: &mut dyn FnMut(&Path)) {
+        for selector in &self.selectors {
+            for manifest in &selector.manifests {
+                visit(manifest);
+            }
+            match &selector.scope {
+                Some(scope) => {
+                    for entry in &index.entries {
+                        if scope.matches(&entry.path, index) {
+                            visit(&entry.path);
+                        }
+                    }
+                }
+                None => {
+                    for entry in &index.entries {
+                        visit(&entry.path);
+                    }
+                }
+            }
+        }
+    }
+
     /// How many times a selector tested a changed path against its globs.
     #[cfg(test)]
     pub(crate) fn glob_tests(&self) -> usize {

@@ -13,8 +13,9 @@
 //! - every field `transform:` and `where:` name exists, and every
 //!   `{ relation, field }` reference names a field of that relation;
 //! - `strip-root` applies to a field bound to `entry.path`, first and once,
-//!   and `semver-major`/`semver-minor` not to a field bound to a path that
-//!   never holds a version (`path`, `dir`, `ext`, `entry.path`);
+//!   and `semver-major`/`semver-minor` not to a field bound to a path or
+//!   directory token (`path`, `dir`, `ext`, `entry.path`, `entry.parent`,
+//!   `entry.root`);
 //! - the literals of `in`/`not_in` can match: no null (which is in no set),
 //!   no number (a value compares by the text it is written with, which the
 //!   configuration's YAML does not keep), and no boolean for a field that

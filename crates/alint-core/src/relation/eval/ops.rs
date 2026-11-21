@@ -831,7 +831,11 @@ fn unique_table(
         } else {
             format!("the key {}", render_key(&key))
         };
-        let at = keys[0].unique_at;
+        let at = keys
+            .iter()
+            .map(|key| key.unique_at)
+            .find(|&col| unique.rows[first].cells[col].at != row.cells[col].at)
+            .unwrap_or(keys[0].unique_at);
         let earlier = &unique.rows[first].cells[at];
         let later = &row.cells[at];
         failures.push(site.failure(

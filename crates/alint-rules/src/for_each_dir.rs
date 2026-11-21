@@ -627,6 +627,7 @@ fn evaluate_for_each_inner<const TRACE: bool>(
                                 &entry.path,
                                 i,
                                 nested.spec.sensitive,
+                                false,
                                 alint_core::TraceStatus::Skipped,
                             )?;
                         }
@@ -648,6 +649,7 @@ fn evaluate_for_each_inner<const TRACE: bool>(
                                 &entry.path,
                                 i,
                                 nested.spec.sensitive,
+                                false,
                                 alint_core::TraceStatus::AnalysisFailure,
                             )?;
                         }
@@ -681,6 +683,7 @@ fn evaluate_for_each_inner<const TRACE: bool>(
                             &entry.path,
                             i,
                             nested.spec.sensitive,
+                            false,
                             alint_core::TraceStatus::AnalysisFailure,
                         )?;
                     }
@@ -695,6 +698,7 @@ fn evaluate_for_each_inner<const TRACE: bool>(
                     continue;
                 }
             };
+            let nested_manifest_sensitive = rule_has_sensitive_manifest_scope(nested_rule.as_ref());
             let scope_violation = match alint_core::expect_matches_violation(
                 nested_rule.as_ref(),
                 &nested_spec,
@@ -717,7 +721,8 @@ fn evaluate_for_each_inner<const TRACE: bool>(
                             ctx,
                             &entry.path,
                             i,
-                            nested.spec.sensitive,
+                            nested.spec.sensitive || nested_manifest_sensitive,
+                            nested_manifest_sensitive,
                             alint_core::TraceStatus::AnalysisFailure,
                         )?;
                     }
@@ -727,6 +732,7 @@ fn evaluate_for_each_inner<const TRACE: bool>(
                     ))
                     .with_path(entry.path.clone())
                     .as_analysis_failure(AnalysisFailureKind::Evaluation);
+                    redact_manifest_scoped_finding(nested_rule.as_ref(), &mut violation);
                     redact_nested_finding(nested, parent_id, i, &mut violation);
                     violations.push(violation);
                     continue;
@@ -747,7 +753,8 @@ fn evaluate_for_each_inner<const TRACE: bool>(
                         ctx,
                         &entry.path,
                         i,
-                        nested.spec.sensitive,
+                        nested.spec.sensitive || nested_manifest_sensitive,
+                        nested_manifest_sensitive,
                         alint_core::TraceStatus::Violated,
                     )?;
                 }
@@ -757,6 +764,7 @@ fn evaluate_for_each_inner<const TRACE: bool>(
                 if let Some(message) = parent_message {
                     apply_parent_message(&mut violation, message, ctx.analysis_time);
                 }
+                redact_manifest_scoped_finding(nested_rule.as_ref(), &mut violation);
                 redact_nested_finding(nested, parent_id, i, &mut violation);
                 violations.push(violation);
                 continue;
@@ -792,6 +800,8 @@ fn evaluate_for_each_inner<const TRACE: bool>(
             {
                 let nested_violations =
                     evaluate_one_per_file_rule(parent_id, i, &literal, pf, nested_ctx);
+                let nested_manifest_sensitive =
+                    rule_has_sensitive_manifest_scope(nested_rule.as_ref());
                 if TRACE {
                     let status = record_nested_child(&mut trace_counts, &nested_violations)?;
                     record_nested_child_preview(
@@ -799,7 +809,8 @@ fn evaluate_for_each_inner<const TRACE: bool>(
                         ctx,
                         &entry.path,
                         i,
-                        nested.spec.sensitive,
+                        nested.spec.sensitive || nested_manifest_sensitive,
+                        nested_manifest_sensitive,
                         status,
                     )?;
                 }
@@ -829,6 +840,7 @@ fn evaluate_for_each_inner<const TRACE: bool>(
                     .as_analysis_failure(AnalysisFailureKind::Evaluation),
                 ],
             };
+            let nested_manifest_sensitive = rule_has_sensitive_manifest_scope(nested_rule.as_ref());
             if TRACE {
                 let status = record_nested_child(&mut trace_counts, &nested_violations)?;
                 record_nested_child_preview(
@@ -836,7 +848,8 @@ fn evaluate_for_each_inner<const TRACE: bool>(
                     ctx,
                     &entry.path,
                     i,
-                    nested.spec.sensitive,
+                    nested.spec.sensitive || nested_manifest_sensitive,
+                    nested_manifest_sensitive,
                     status,
                 )?;
             }
@@ -849,8 +862,8 @@ fn evaluate_for_each_inner<const TRACE: bool>(
                 {
                     apply_parent_message(&mut v, message, ctx.analysis_time);
                 }
-                redact_nested_finding(nested, parent_id, i, &mut v);
                 redact_manifest_scoped_finding(nested_rule.as_ref(), &mut v);
+                redact_nested_finding(nested, parent_id, i, &mut v);
                 violations.push(v);
             }
         }
@@ -965,6 +978,7 @@ fn record_nested_child_preview(
     path: &Path,
     index: usize,
     sensitive: bool,
+    path_sensitive: bool,
     status: alint_core::TraceStatus,
 ) -> Result<()> {
     let Some(preview) = preview else {
@@ -977,9 +991,14 @@ fn record_nested_child_preview(
         alint_core::TraceStatus::AnalysisFailure => "analysis_failure",
         alint_core::TraceStatus::NotEvaluated => "not_evaluated",
     };
+    let path_origin = if path_sensitive {
+        alint_core::TracePathOrigin::DerivedSensitive
+    } else {
+        ctx.trace_path_origin()
+    };
     preview.push(alint_core::TracePreviewRow::new(
         path,
-        ctx.trace_path_origin(),
+        path_origin,
         None,
         Some(format!("/require/{index}")),
         u64::try_from(index)
@@ -991,18 +1010,17 @@ fn record_nested_child_preview(
     )?)
 }
 
+fn rule_has_sensitive_manifest_scope(rule: &dyn Rule) -> bool {
+    rule.path_scope()
+        .or_else(|| rule.as_per_file().map(alint_core::PerFileRule::path_scope))
+        .is_some_and(|scope| scope.sensitive_manifest_sources().next().is_some())
+}
+
 fn redact_manifest_scoped_finding(rule: &dyn Rule, finding: &mut Violation) {
-    let scope = rule
-        .path_scope()
-        .or_else(|| rule.as_per_file().map(alint_core::PerFileRule::path_scope));
-    if scope.is_none_or(|scope| scope.sensitive_manifest_sources().next().is_none()) {
+    if !rule_has_sensitive_manifest_scope(rule) {
         return;
     }
-    let path = finding
-        .path
-        .as_deref()
-        .map(|path| path.to_string_lossy().into_owned());
-    finding.redact_evidence(rule.id(), "manifest_scope", path.as_deref());
+    finding.redact_manifest_scoped(rule.id());
 }
 
 fn redact_nested_finding(

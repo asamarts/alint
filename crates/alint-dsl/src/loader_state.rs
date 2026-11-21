@@ -250,6 +250,12 @@ impl LoadState {
         self.charge_extends_work(source.merge_size().max(1))
     }
 
+    /// Charge a repeated `extends:` entry that merges no new source (consecutive
+    /// duplicate) so an unbounded list of repeats still hits the merge budget.
+    pub(crate) fn charge_extends_entry(&mut self) -> Result<()> {
+        self.charge_extends_work(1)
+    }
+
     fn charge_extends_work(&mut self, work: usize) -> Result<()> {
         self.extends_entries = self.extends_entries.saturating_add(work);
         if self.extends_entries > MAX_EXTENDS_MERGE_WORK {

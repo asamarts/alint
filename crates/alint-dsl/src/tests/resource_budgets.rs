@@ -642,7 +642,9 @@ fn an_extends_list_that_repeats_a_source_loads_it_once() {
     // each merge what it brings in, and each rule it merges onto one an
     // other source merged last once more.
     for (entries, times, parses, charged, rules) in [
-        (&["./a.yml"][..], 1_000, 2, 50 + 50, 50),
+        // The first entry loads (50) and merges (50); each of the 999
+        // consecutive repeats skips the merge and charges 1 entry for itself.
+        (&["./a.yml"][..], 1_000, 2, 50 + 50 + 999, 50),
         (
             &["./a.yml", "./b.yml"][..],
             500,

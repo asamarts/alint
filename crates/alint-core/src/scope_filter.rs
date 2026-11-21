@@ -322,6 +322,8 @@ impl ManifestPredicate {
 
     pub(crate) fn redacts_by_default(&self) -> bool {
         self.extract.redacts_by_default()
+            || crate::Format::detect_from_path(&self.source)
+                .is_some_and(crate::Format::redacts_by_default)
     }
 
     /// Whether a file this predicate's set does (`in_set`) or does not hold
