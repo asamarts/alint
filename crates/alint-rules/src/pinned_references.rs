@@ -20,6 +20,10 @@ const MAX_YAML_NESTING: usize = 128;
 /// sources reused at every level would otherwise cost `sources^depth`.
 const MAX_MERGE_WORK: usize = 1 << 22;
 const MAX_GITLAB_EXTENDS_DEPTH: usize = 11;
+/// Maximum number of `extends:` edges resolved across one GitLab CI document.
+/// Memoization keeps normal DAGs linear, and this budget bounds pathological
+/// high-fan-out shapes.
+const MAX_GITLAB_EXTENDS_WORK: usize = 1 << 16;
 const MAX_PINNED_REFERENCES_BYTES: usize = alint_core::MAX_STRUCTURED_BYTES;
 const LEGACY_GITHUB_STEPS_PATH: &str = "$.jobs.*.steps[*].uses";
 const LEGACY_GITHUB_PIN_REGEX: &str =
@@ -111,7 +115,7 @@ impl PerFileRule for PinnedReferencesRule {
             explicit => explicit,
         };
         let text = match std::str::from_utf8(bytes) {
-            Ok(text) => text.strip_prefix('\u{feff}').unwrap_or(text),
+            Ok(text) => text.trim_start_matches('\u{feff}'),
             Err(error) => {
                 return Ok(vec![Self::analysis_failure(
                     path,
@@ -345,9 +349,14 @@ struct YamlDocument {
     /// What is left of [`MAX_MERGE_WORK`]; `None` once it ran out, which fails
     /// the analysis rather than leave a lookup unanswered.
     merge_work: std::cell::Cell<Option<usize>>,
+    /// What is left of [`MAX_GITLAB_EXTENDS_WORK`]; `None` once it ran out.
+    gitlab_extends_work: std::cell::Cell<Option<usize>>,
+    /// Memoized `(image, services, max_extends_height)` per GitLab job node.
+    gitlab_extends_cache: std::cell::RefCell<HashMap<NodeId, GitlabExtendsEntry>>,
 }
 
 type NodeId = usize;
+type GitlabExtendsEntry = (Option<YamlRef>, Option<YamlRef>, usize);
 #[derive(Debug, Clone, Copy)]
 struct YamlRef {
     id: NodeId,
@@ -437,6 +446,8 @@ impl YamlDocument {
             anchors: HashMap::new(),
             root: 0,
             merge_work: std::cell::Cell::new(Some(MAX_MERGE_WORK)),
+            gitlab_extends_work: std::cell::Cell::new(Some(MAX_GITLAB_EXTENDS_WORK)),
+            gitlab_extends_cache: std::cell::RefCell::new(HashMap::new()),
         };
         document.root = document.parse_node(&mut parser, 0)?;
         expect_event(
@@ -850,11 +861,26 @@ impl YamlDocument {
         Ok(target)
     }
 
+    fn charge_gitlab_extends_work(&self) -> std::result::Result<(), &'static str> {
+        if let Some(next) = self
+            .gitlab_extends_work
+            .get()
+            .and_then(|n| n.checked_sub(1))
+        {
+            self.gitlab_extends_work.set(Some(next));
+            Ok(())
+        } else {
+            self.gitlab_extends_work.set(None);
+            Err("GitLab extends resolution exceeds the safety limit")
+        }
+    }
+
     fn gitlab_job_references(
         &self,
         job: YamlRef,
     ) -> std::result::Result<(Option<YamlRef>, Option<YamlRef>), &'static str> {
-        self.gitlab_job_references_inner(job, 0, &mut Vec::new())
+        let (image, services, _) = self.gitlab_job_references_inner(job, 0, &mut Vec::new())?;
+        Ok((image, services))
     }
 
     fn gitlab_job_references_inner(
@@ -862,7 +888,8 @@ impl YamlDocument {
         job: YamlRef,
         depth: usize,
         stack: &mut Vec<NodeId>,
-    ) -> std::result::Result<(Option<YamlRef>, Option<YamlRef>), &'static str> {
+    ) -> std::result::Result<(Option<YamlRef>, Option<YamlRef>, usize), &'static str> {
+        self.charge_gitlab_extends_work()?;
         if depth > MAX_GITLAB_EXTENDS_DEPTH {
             return Err("GitLab extends nesting exceeds the supported limit");
         }
@@ -875,9 +902,15 @@ impl YamlDocument {
         if stack.contains(&job.id) {
             return Err("cyclic GitLab extends configuration");
         }
+        if let Some(cached) = self.gitlab_extends_cache.borrow().get(&job.id).copied() {
+            if depth.saturating_add(cached.2) > MAX_GITLAB_EXTENDS_DEPTH {
+                return Err("GitLab extends nesting exceeds the supported limit");
+            }
+            return Ok(cached);
+        }
         stack.push(job.id);
 
-        let mut inherited = (None, None);
+        let mut inherited = (None, None, 0usize);
         if let Some(extends) = self.get(job, "extends")
             && let Some(extends) = self.resolve_gitlab_reference(extends)?
         {
@@ -891,14 +924,18 @@ impl YamlDocument {
                     self.merge_gitlab_parent(parent.value, depth, stack, &mut inherited)?;
                 }
             } else {
+                stack.pop();
                 return Err("GitLab extends must be a scalar or sequence");
             }
         }
 
-        let own_image = self.get(job, "image");
-        let own_services = self.get(job, "services");
+        let own = (self.get(job, "image"), self.get(job, "services"));
         stack.pop();
-        Ok((own_image.or(inherited.0), own_services.or(inherited.1)))
+        let resolved = (own.0.or(inherited.0), own.1.or(inherited.1), inherited.2);
+        self.gitlab_extends_cache
+            .borrow_mut()
+            .insert(job.id, resolved);
+        Ok(resolved)
     }
 
     fn merge_gitlab_parent(
@@ -906,7 +943,7 @@ impl YamlDocument {
         name: &str,
         depth: usize,
         stack: &mut Vec<NodeId>,
-        inherited: &mut (Option<YamlRef>, Option<YamlRef>),
+        inherited: &mut (Option<YamlRef>, Option<YamlRef>, usize),
     ) -> std::result::Result<(), &'static str> {
         let Some(parent) = self.get(self.root(), name) else {
             return if self.get(self.root(), "include").is_some() {
@@ -916,6 +953,7 @@ impl YamlDocument {
             };
         };
         let parent = self.gitlab_job_references_inner(parent, depth + 1, stack)?;
+        inherited.2 = inherited.2.max(parent.2.saturating_add(1));
         if parent.0.is_some() {
             inherited.0 = parent.0;
         }

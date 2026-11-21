@@ -1212,15 +1212,19 @@ impl<'a> Lexer<'a> {
             return;
         }
         self.skip_line();
-        let mut content_indent: isize = if increment == 0 {
-            0
+        let mut content_indent: Option<isize> = if increment == 0 {
+            None
         } else if self.indent >= 0 {
-            self.indent + increment
+            Some(self.indent + increment)
         } else {
-            increment
+            Some(increment)
         };
         self.block_scalar_breaks(&mut content_indent);
-        while self.col == content_indent && !self.eof() {
+        let fixed_indent = content_indent.unwrap_or(0);
+        while self.col == fixed_indent && !self.eof() {
+            if fixed_indent == 0 && self.at_document_marker() {
+                break;
+            }
             while !self.is_breakz_at(0) {
                 self.advance();
             }
@@ -1230,11 +1234,12 @@ impl<'a> Lexer<'a> {
 
     /// `yaml_parser_scan_block_scalar_breaks`: skip indentation (up to the content
     /// indent once known) and empty lines; on first use, auto-detect the content
-    /// indent from the most-indented leading line.
-    fn block_scalar_breaks(&mut self, content_indent: &mut isize) {
+    /// indent from the most-indented leading line (allowing column 0 for a
+    /// root block scalar where `self.indent < 0`).
+    fn block_scalar_breaks(&mut self, content_indent: &mut Option<isize>) {
         let mut max_indent: isize = 0;
         loop {
-            while (*content_indent == 0 || self.col < *content_indent) && self.at(0) == b' ' {
+            while content_indent.is_none_or(|limit| self.col < limit) && self.at(0) == b' ' {
                 self.advance();
             }
             max_indent = max_indent.max(self.col);
@@ -1243,8 +1248,8 @@ impl<'a> Lexer<'a> {
             }
             self.skip_line();
         }
-        if *content_indent == 0 {
-            *content_indent = max_indent.max(self.indent + 1).max(1);
+        if content_indent.is_none() {
+            *content_indent = Some(max_indent.max(self.indent + 1));
         }
     }
 }

@@ -1213,9 +1213,9 @@ fn yaml_value_span_includes_quotes_and_converts_char_offsets_to_bytes() {
     assert_eq!(&dq[yaml_value(dq, &[key("a")])], "\"hi\"");
     let sq = "a: 'hi'\n";
     assert_eq!(&sq[yaml_value(sq, &[key("a")])], "'hi'");
-    // CRITICAL regression: saphyr's `Marker::index` is a CHAR offset (its `index()`
-    // rustdoc wrongly says bytes); the resolver converts to BYTES, so a multibyte
-    // char BEFORE the target must not shift the span. `é`/`ï` are 2 bytes each.
+    // CRITICAL regression: `saphyr-parser`'s `Marker::index` is a CHAR offset;
+    // the resolver converts to BYTES, so a multibyte char BEFORE the target
+    // must not shift the span. `é`/`ï` are 2 bytes each.
     let mb = "note: \"café\"\nport: 42\n";
     assert_eq!(&mb[yaml_value(mb, &[key("port")])], "42");
     let mb2 = "a:\n  x: \"naïve\"\n  y: 7\n";

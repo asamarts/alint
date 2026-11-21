@@ -43,12 +43,11 @@ first pass would apply this", not "this resolves the violation": a fix that
 only makes progress on a later pass, a cascade where one rule's fix creates or
 resolves another's violation, an edit to an existing ignore file, or content a
 fix writes that the rule still rejects. The prediction also leaves out an
-ignore file created outside the root, a created `.git/info/exclude` or nested
+ignore file created outside the root, a created nested
 repository marker, a rule's `root_only`, other names the walk lists a file
-under through in-tree symlinks, a symlink that leads nowhere until another
+under through in-tree symlinks, and a symlink that leads nowhere until another
 create makes the place it points to (one the create's own directories make is
-predicted), and, on a case-insensitive filesystem, a path
-whose case differs from a directory already there. A `dir_exists` or
+predicted). A `dir_exists` or
 `cross_file` rule looks for the path as written, so only that name counts for
 its create. `--diff` shows that first pass's edits
 without the prediction, so its exit code can be `0` where a real `fix` exits
@@ -84,10 +83,12 @@ one), from any configuration, your own top-level one included. A
 `file_create` of `.git/hooks/pre-commit` is reported skipped
 (`.git/hooks/pre-commit is in a Git directory; a fix never writes or reads
 there`); v0.22.0 created it. Keep hooks in a tracked directory and point
-`git config core.hooksPath` at it, or use a hook manager. A fix of a rule a
-ruleset from `extends:` shaped also never writes alint's own configuration
-(`.alint.yml`, `.alint.d/`) or outside the root, whatever `allow_out_of_root`
-says.
+`git config core.hooksPath` at it, or use a hook manager. A fix of a rule an
+extended ruleset or nested config shaped also never writes alint's own
+configuration (`.alint.yml`, `.alint.yaml`, `alint.yml`, `alint.yaml` at any
+depth, `.alint.d/`, `alint-tests/`, Windows 8.3 short names such as
+`ALINT~1.YML`, or any file the configuration was loaded from) or outside the
+root, whatever `allow_out_of_root` says.
 
 ## Reference date for time-dependent rules
 

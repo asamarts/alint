@@ -819,3 +819,23 @@ proptest::proptest! {
         }
     }
 }
+
+#[test]
+fn gitlab_extends_diamond_dag_completes_linearly() {
+    use std::fmt::Write as _;
+    // Without memoization, 10 levels x 10 repeated parent references per level
+    // would visit 10^10 paths even with zero YAML aliases/merge keys.
+    let mut yaml = String::from(".t0:\n  image: alpine:latest\n");
+    for level in 1..=10 {
+        let prev = format!(".t{}", level - 1);
+        let parents = [prev.as_str(); 10].join(", ");
+        let _ = writeln!(yaml, ".t{level}:\n  extends: [{parents}]");
+    }
+    yaml.push_str("build:\n  extends: .t10\n  script: [echo hi]\n");
+
+    let findings = within(std::time::Duration::from_secs(2), move || {
+        run(".gitlab-ci.yml", &yaml, None)
+    });
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert_eq!(findings[0].analysis_failure_kind(), None);
+}

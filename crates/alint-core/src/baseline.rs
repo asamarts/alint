@@ -626,11 +626,24 @@ where
     }
 }
 
-/// Deterministic match-order key for a violation: by path, then line,
-/// column, and message. Used only to order suppression, not the hash.
-fn order_key(v: &Violation) -> (Option<String>, usize, usize, &str) {
+/// Canonical slash-separated path string for deterministic cross-platform
+/// ordering shared between [`apply`] and output occurrence numbering.
+#[doc(hidden)]
+#[must_use]
+pub fn canonical_order_path(path: &Path) -> std::borrow::Cow<'_, str> {
+    let text = path.to_string_lossy();
+    if std::path::MAIN_SEPARATOR == '/' {
+        text
+    } else {
+        std::borrow::Cow::Owned(text.replace(std::path::MAIN_SEPARATOR, "/"))
+    }
+}
+
+/// Deterministic match-order key for a violation: by slash-normalized path,
+/// then line, column, and message. Used only to order suppression, not the hash.
+fn order_key(v: &Violation) -> (Option<std::borrow::Cow<'_, str>>, usize, usize, &str) {
     (
-        v.path.as_ref().map(|p| p.to_string_lossy().into_owned()),
+        v.path.as_deref().map(canonical_order_path),
         v.line.unwrap_or(0),
         v.column.unwrap_or(0),
         v.message.as_ref(),

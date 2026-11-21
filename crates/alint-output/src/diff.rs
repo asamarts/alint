@@ -233,18 +233,20 @@ fn write_hunks(a: &str, b: &str, old: &str, new: &str, w: &mut dyn Write) -> std
 
 /// One-line summary for a staged change whose content isn't UTF-8, per kind.
 fn write_binary_summary(fix: &StagedFix, w: &mut dyn Write) -> std::io::Result<()> {
-    let path = to_slash(&fix.path);
+    let path_slash = to_slash(&fix.path);
+    let path = crate::sanitize::sanitize_terminal(&path_slash);
     match &fix.kind {
         StagedKind::Create => writeln!(w, "Binary file {path} created ({} bytes)", fix.new.len()),
         StagedKind::Delete => writeln!(w, "Binary file {path} deleted ({} bytes)", fix.old.len()),
         StagedKind::Rename { from } => {
+            let from_slash = to_slash(from);
+            let from = crate::sanitize::sanitize_terminal(&from_slash);
             if fix.old == fix.new {
-                writeln!(w, "Binary file renamed {} -> {path}", to_slash(from))
+                writeln!(w, "Binary file renamed {from} -> {path}")
             } else {
                 writeln!(
                     w,
-                    "Binary file renamed {} -> {path} ({} -> {} bytes)",
-                    to_slash(from),
+                    "Binary file renamed {from} -> {path} ({} -> {} bytes)",
                     fix.old.len(),
                     fix.new.len()
                 )
@@ -533,6 +535,23 @@ mod tests {
         assert!(
             !out.contains("+++ /dev/null"),
             "stale hunkless stanza: {out:?}"
+        );
+    }
+
+    #[test]
+    fn binary_summary_sanitizes_terminal_escapes_in_paths() {
+        let staged = vec![StagedFix {
+            path: PathBuf::from("src/\x1b[2Jevil.bin"),
+            old: vec![0xff, 0x00],
+            new: vec![0xfe, 0x01],
+            kind: StagedKind::Rename {
+                from: PathBuf::from("old/\x1b[31mfrom.bin"),
+            },
+        }];
+        let out = render(&staged);
+        assert!(
+            !out.contains('\x1b'),
+            "binary summary leaked raw ESC in path: {out:?}"
         );
     }
 }

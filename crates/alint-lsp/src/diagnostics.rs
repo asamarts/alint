@@ -377,6 +377,7 @@ pub(crate) fn finding_to_diagnostic(
         .policy_url
         .as_deref()
         .and_then(|u| Url::parse(u).ok())
+        .filter(|u| matches!(u.scheme(), "http" | "https"))
         .map(|href| CodeDescription { href });
     Diagnostic {
         range: f.range,

@@ -1143,3 +1143,19 @@ fn the_top_level_plain_scalar_is_read_as_written() {
     }
     assert!(read("version: [\n").is_err());
 }
+
+#[test]
+fn top_level_column_zero_block_scalar_does_not_trip_flow_depth() {
+    let doc = format!("|\n{}\n", "[".repeat(MAX_YAML_FLOW_DEPTH + 10));
+    assert!(
+        flow_depth_within_limit(&doc),
+        "column-0 top-level block scalar content must not be scanned as flow brackets"
+    );
+    // A document marker at column 0 ends the top-level block scalar so a
+    // second document with deep flow brackets is still caught.
+    let two_docs = format!("|\nhello\n---\n{}\n", "[".repeat(MAX_YAML_FLOW_DEPTH + 10));
+    assert!(
+        !flow_depth_within_limit(&two_docs),
+        "document marker at col 0 must terminate block scalar before deep flow brackets"
+    );
+}

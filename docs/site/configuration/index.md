@@ -380,7 +380,7 @@ Only the user's top-level config may set `nested_configs: true`. Nested configs 
 
 ### `allow_out_of_root`
 
-By default alint confines every config-declared path to the repository root: a rule can never read or resolve a path outside the tree it was pointed at. `allow_out_of_root:` is a deliberate, top-level-only opt-in to relax that for *reads*, when a trusted config needs to reference an external file (a shared JSON schema, a manifest in a sibling checkout).
+By default alint confines every config-declared path to the repository root: a rule can never read, write, or resolve a path outside the tree it was pointed at. `allow_out_of_root:` is a deliberate, top-level-only opt-in to relax that for your own rules' reads and fixes (and, with `allow_out_of_root: true`, local `extends:` entries outside the root), when a trusted config needs to reference an external file (a shared JSON schema, a manifest in a sibling checkout).
 
 ```yaml
 allow_out_of_root: true            # every rule may read out-of-root paths
@@ -396,7 +396,7 @@ allow_out_of_root:
 
 Absent or `false` keeps the secure default (full confinement).
 
-**Security.** Like the spawning-rule trust gate, `allow_out_of_root:` is honored **only** from your own top-level config: any `extends:`'d ruleset that declares it is a load-time error, so adopting a published ruleset can never grant it out-of-tree reads. It currently applies to the read kinds `json_schema_passes` (`schema_path:`), `pair_hash` (`target:`), and `registry_paths_resolve` (`source:`); a permitted read emits an informational note so the escape is never silent. Resolve/index existence checks stay confined regardless.
+**Security.** Like the spawning-rule trust gate, `allow_out_of_root:` is honored **only** from your own top-level config: any `extends:`'d ruleset that declares it is a load-time error, so adopting a published ruleset can never grant it out-of-tree access. For check-time reads it currently applies to `json_schema_passes` (`schema_path:`), `pair_hash` (`target:`), and `registry_paths_resolve` (`source:`); a permitted read emits an informational note so the escape is never silent. Resolve/index existence checks stay confined regardless, and paths in a Git directory are always refused.
 
 The option grants your own rules only: the rules your top-level config (and its `.alint.d/`
 drop-ins) declares. A rule an `extends:`'d ruleset or a nested config shaped (it declared the rule,
@@ -445,7 +445,8 @@ A config is untrusted for what it costs to load, so loading it is bounded:
   entry's or a drop-in's, what it brings in, each at least one entry, and one more for each rule
   or template it merges onto an earlier one of its id, in its own source too. A rule or template
   that an earlier entry naming the same source, with the same `only:` and `except:`, wrote last is
-  the exception: it is not merged again, and not charged. A list that repeats a source loads it
+  the exception: it is not merged again (a consecutive repeat of the same entry still counts as one
+  entry). A list that repeats a source loads it
   once (a remote source named by other URLs with one hash, and a bundled ruleset named with other
   `only:` or `except:` lists, too) and is charged for each entry that merges it. A flat list of
   distinct sources that override none of each other's rules or templates, and repeat no id within

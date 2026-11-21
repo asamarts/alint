@@ -104,6 +104,11 @@ jobs:
         run: ci/scripts/yaml-memory-release.sh
       - name: build (cargo build --workspace --locked)
         run: ci/scripts/build.sh
+      # Node 22 is needed both by docs.sh (strip-since tests / likec4) and by
+      # the npm packaging + VS Code extension gates below.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "22"
       - name: docs (cargo doc with -D warnings)
         run: ci/scripts/docs.sh
       - name: verify published Action documentation pin
@@ -135,11 +140,13 @@ jobs:
         run: ci/scripts/packaging-check.sh
       # npm publishes are permanent: install the staged packages from a local
       # registry with npm, pnpm, bun and yarn before anything is published.
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        with:
-          node-version: "22"
       - name: npm packages install end to end (local registry)
         run: ci/scripts/test-npm-install.sh
+      - name: vscode extension (install, audit, typecheck, build)
+        run: |
+          (cd editors/vscode && npm ci)
+          bash ci/scripts/npm-audit.sh
+          (cd editors/vscode && npm run check-types && npm run build)
       - name: deny (licenses + bans + sources + advisories, blocking)
         run: ci/scripts/deny.sh
       - name: audit (RustSec via cargo audit, blocking on vulnerabilities)
@@ -680,7 +687,7 @@ jobs:
       - name: mint a short-lived crates.io token via OIDC
         uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
         id: crates-auth
-      - name: publish all 6 crates in dependency order
+      - name: publish all 7 crates in dependency order
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates-auth.outputs.token }}
         run: ci/scripts/publish-crates.sh

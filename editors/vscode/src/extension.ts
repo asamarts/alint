@@ -9,7 +9,8 @@
 // Workspace trust: the server is told whether the workspace is trusted
 // (`initializationOptions.trusted`). Until it is, the server runs nothing the
 // repository's config could start (command rules, rules that run Git, custom
-// facts), fetches no remote `extends:` and reads no environment value.
+// facts), fetches no remote `extends:`, refuses `allow_out_of_root:`, and
+// reads no environment value.
 // Granting trust restarts the server with `trusted: true`. `alint.path` and `alint.serverArgs` are
 // restricted settings (package.json), so a workspace cannot choose the binary
 // or its arguments while untrusted.
@@ -71,7 +72,7 @@ async function start(context: ExtensionContext): Promise<void> {
       fileEvents: workspace.createFileSystemWatcher("**/.alint.yml"),
     },
     // An untrusted workspace's config runs no command rule, custom fact,
-    // remote `extends:` or environment read until trust is granted.
+    // remote `extends:`, `allow_out_of_root:` or environment read until trust is granted.
     initializationOptions: { trusted: workspace.isTrusted },
     outputChannel: log,
   };
@@ -98,7 +99,7 @@ async function showRules(context: ExtensionContext): Promise<void> {
   // `extends:` and read the environment.
   if (!workspace.isTrusted) {
     window.showInformationMessage(
-      "alint: trust this workspace to list its rules (Workspace Trust). Until then the alint language server lints it without command rules, rules that run Git, custom facts, remote `extends:` or environment values.",
+      "alint: trust this workspace to list its rules (Workspace Trust). Until then the alint language server lints it without command rules, rules that run Git, custom facts, remote `extends:`, `allow_out_of_root:` or environment values.",
     );
     return;
   }

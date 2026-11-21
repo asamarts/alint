@@ -215,6 +215,96 @@ rules:
 }
 
 #[test]
+fn nested_confinement_rejects_embedded_parent_escapes_and_platform_prefixes() {
+    for bad in [
+        "./../../Cargo.toml",
+        "a/../../other/**",
+        r"a\..\..\other\**",
+        r"\server\share\x",
+        "C:/Windows/win.ini",
+        r"C:\Windows\win.ini",
+        "{..,a}/Cargo.toml",
+    ] {
+        let err = load_with_nested(&format!(
+            "version: 1\nrules:\n  - id: esc\n    kind: file_exists\n    paths: {bad:?}\n    level: error\n"
+        ))
+        .unwrap_err();
+        assert!(
+            err.contains("escape") || err.contains("absolute path"),
+            "{bad:?}: unexpected error {err}"
+        );
+    }
+}
+
+#[test]
+fn nested_require_does_not_leave_brace_globs_or_leaf_tokens_unprefixed() {
+    // Arbitrary `{...}` brace globs, non-subtree tokens (`{basename}`, `{stem}`,
+    // `{ext}`, `{parent_name}`), and `{dir}suffix` must be re-rooted under the
+    // nested subtree rather than bypassing prefixing, and `{path}/../..` must
+    // be rejected outright.
+    let cfg = load_with_nested(
+        r#"version: 1
+rules:
+  - id: per-dir
+    kind: for_each_dir
+    select: "sub"
+    require:
+      - kind: file_exists
+        paths: "{**}/*.rs"
+      - kind: file_exists
+        paths: "{Cargo.toml}"
+      - kind: file_exists
+        paths: "{basename}/Cargo.toml"
+      - kind: file_exists
+        paths: "{dir}sibling/secret.txt"
+      - kind: file_exists
+        paths: "{dir}/README.md"
+    level: error
+"#,
+    )
+    .unwrap();
+    let require = format!("{:?}", cfg.rules[0].extra.get("require"));
+    assert!(
+        require.contains("packages/foo/{**}/*.rs"),
+        "brace glob escaped subtree: {require}"
+    );
+    assert!(
+        require.contains("packages/foo/{Cargo.toml}"),
+        "brace filename escaped subtree: {require}"
+    );
+    assert!(
+        require.contains("packages/foo/{basename}/Cargo.toml"),
+        "leaf token escaped subtree: {require}"
+    );
+    assert!(
+        require.contains("packages/foo/{dir}sibling/secret.txt"),
+        "`{{dir}}suffix` escaped subtree: {require}"
+    );
+    assert!(
+        require.contains("\"{dir}/README.md\""),
+        "valid `{{dir}}/` token should stay anchored: {require}"
+    );
+
+    let err = load_with_nested(
+        r#"version: 1
+rules:
+  - id: per-dir
+    kind: for_each_dir
+    select: "sub"
+    require:
+      - kind: file_exists
+        paths: "{path}/../../Cargo.toml"
+    level: error
+"#,
+    )
+    .unwrap_err();
+    assert!(
+        err.contains("escape"),
+        "parent escape after `{{path}}` must be rejected: {err}"
+    );
+}
+
+#[test]
 fn nested_require_unconfinable_kind_is_rejected() {
     let err = load_with_nested(
         r#"version: 1

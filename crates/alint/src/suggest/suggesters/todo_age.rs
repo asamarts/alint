@@ -54,7 +54,8 @@ pub fn propose(scan: &Scan, progress: &Progress) -> Vec<Proposal> {
     for path in &candidates {
         phase.set_message(&format!("scanning {}", path.display()));
         let full = scan.root.join(path);
-        if let Ok(bytes) = std::fs::read(&full)
+        if let Ok(bytes) =
+            alint_core::bounded_file::read_regular_capped(&full, alint_core::MAX_ANALYZE_BYTES)
             && let Ok(text) = std::str::from_utf8(&bytes)
             && pattern.is_match(text)
         {

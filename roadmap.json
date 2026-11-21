@@ -137,7 +137,7 @@
       "version": "0.23",
       "title": "Selectors and a first constraint slice",
       "kind": "release",
-      "blurb": "The first part of version 2 of the config format, as an experimental opt-in: named file selections and a report-only constraint rule, enough to check that locale files, dependency versions and toolchain pins agree across a repository without a dedicated rule. Version 1 configs keep working, apart from a fix to tracked-file checks and the documented differences of the new YAML parser. For library users, the last planned API break before 1.0."
+      "blurb": "The first part of version 2 of the config format, as an experimental opt-in: named file selections and a report-only constraint rule, enough to check that locale files, dependency versions and toolchain pins agree across a repository without a dedicated rule. Also ships --untrusted and --no-spawn modes, extensive trust-boundary hardening, the qualified ayaml 0.2.2 pure-Rust YAML parser, and the last planned library API break before 1.0."
     },
     {
       "version": "1.0",

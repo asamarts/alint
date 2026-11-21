@@ -526,3 +526,14 @@ fn an_applied_structured_edit_changes_only_its_target() {
         assert!(tally.applied > 1_000, "{}: {tally:?}", format.label());
     }
 }
+
+#[test]
+fn intended_dedups_repeated_sequence_removals() {
+    let before = serde_json::json!({ "items": [10, 20, 30] });
+    let intents = vec![
+        (vec![key("items"), idx(0)], Intent::Remove),
+        (vec![key("items"), idx(0)], Intent::Remove),
+    ];
+    let after = intended(&before, &intents).expect("intended succeeds");
+    assert_eq!(after, serde_json::json!({ "items": [20, 30] }));
+}

@@ -499,6 +499,21 @@ given:
             paths: "{path}/MISSING.md"
             when: env.PATH
         level: error
+      - id: from-ceiling
+        kind: file_exists
+        paths: MISSING.md
+        when: env.GIT_CEILING_DIRECTORIES
+        level: error
+      - id: from-sandbox-home
+        kind: file_exists
+        paths: MISSING.md
+        when: env.HOME
+        level: error
+      - id: from-xdg
+        kind: file_exists
+        paths: MISSING.md
+        when: env.XDG_CONFIG_HOME
+        level: error
 when: [check]
 expect:
   - exit: success

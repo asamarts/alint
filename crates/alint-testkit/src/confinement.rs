@@ -660,6 +660,7 @@ mod tests {
             ".git:stream",
             "GIT~1",
             "git~1",
+            "git~2",
             "git~1.",
             "GIT~1 ",
             "git~1. .",
@@ -678,7 +679,7 @@ mod tests {
             ".gitignore",
             "git",
             ".git-blame",
-            "git~2",
+            "git~0",
             "a.git",
             ".gi t",
         ] {

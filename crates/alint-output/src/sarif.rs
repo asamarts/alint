@@ -358,18 +358,16 @@ fn base_result(rule_id: &str, level: Level, v: &Violation, config_uri: &str) -> 
 }
 
 fn finding_locations(v: &Violation, config_uri: &str) -> Vec<SarifLocation> {
-    let region = (!v.path_is_sensitive())
-        .then(|| {
-            v.range.as_ref().map(source_range_to_sarif).or_else(|| {
-                (v.line.is_some() || v.column.is_some()).then_some(SarifRegion {
-                    start_line: v.line,
-                    start_column: v.column,
-                    end_line: None,
-                    end_column: None,
-                })
-            })
+    let region = v.report_range().map(source_range_to_sarif).or_else(|| {
+        let line = v.report_line();
+        let column = v.report_column();
+        (line.is_some() || column.is_some()).then_some(SarifRegion {
+            start_line: line,
+            start_column: column,
+            end_line: None,
+            end_column: None,
         })
-        .flatten();
+    });
     let (uri, region) = if let Some(path) = v.report_path() {
         (path_to_uri(path), region)
     } else {
@@ -378,8 +376,8 @@ fn finding_locations(v: &Violation, config_uri: &str) -> Vec<SarifLocation> {
             config_uri.to_string(),
             region.or_else(|| {
                 Some(SarifRegion {
-                    start_line: Some(v.line.unwrap_or(1)),
-                    start_column: v.column,
+                    start_line: Some(v.report_line().unwrap_or(1)),
+                    start_column: v.report_column(),
                     end_line: None,
                     end_column: None,
                 })

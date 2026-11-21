@@ -1,9 +1,9 @@
 //! Shared structured / line / regex extraction for the
 //! manifest-driven cross-file rules (`registry_paths_resolve`,
 //! `cross_file`, `file_graph`) and core-side predicates. One place so
-//! the one-of decode (`serde_yaml` can't decode an externally-tagged
-//! enum from a `{ key: value }` map; an untagged enum can't tell the
-//! structured `JSONPath` string variants apart) and the non-literal skip
+//! the one-of decode (an externally-tagged YAML enum cannot be decoded cleanly
+//! from a `{ key: value }` map with string variants; an untagged enum can't tell
+//! the structured `JSONPath` string variants apart) and the non-literal skip
 //! can't drift between consumers.
 
 use std::fmt;

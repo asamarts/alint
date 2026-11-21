@@ -116,6 +116,24 @@ impl AnalysisFailure {
         })
     }
 
+    /// 1-based line number safe for public reporters (`None` when the path is
+    /// hidden, so line coordinates cannot fingerprint a redacted file).
+    #[must_use]
+    pub const fn report_line(&self) -> Option<usize> {
+        if self.path_sensitive { None } else { self.line }
+    }
+
+    /// 1-based column number safe for public reporters (`None` when the path is
+    /// hidden).
+    #[must_use]
+    pub const fn report_column(&self) -> Option<usize> {
+        if self.path_sensitive {
+            None
+        } else {
+            self.column
+        }
+    }
+
     pub(crate) fn mark_path_sensitive(&mut self) {
         self.path_sensitive = true;
     }
@@ -399,6 +417,54 @@ impl Violation {
                 path
             }
         })
+    }
+
+    /// 1-based line number safe for public reporters (`None` when the path is
+    /// hidden, so line coordinates cannot fingerprint a redacted file).
+    #[must_use]
+    pub const fn report_line(&self) -> Option<usize> {
+        if self.path_sensitive { None } else { self.line }
+    }
+
+    /// 1-based column number safe for public reporters (`None` when the path is
+    /// hidden).
+    #[must_use]
+    pub const fn report_column(&self) -> Option<usize> {
+        if self.path_sensitive {
+            None
+        } else {
+            self.column
+        }
+    }
+
+    /// Source range safe for public reporters (`None` when the path is hidden).
+    #[must_use]
+    pub const fn report_range(&self) -> Option<&SourceRange> {
+        if self.path_sensitive {
+            None
+        } else {
+            self.range.as_ref()
+        }
+    }
+
+    /// Redact a finding selected through a secret-bearing manifest scope (used
+    /// by nested-rule containers such as `for_each_dir` / `for_each_file` whose
+    /// inner rule's `scope_filter` is invisible to the top-level engine).
+    /// Marks the path sensitive first, re-redacts already-sensitive findings
+    /// and analysis failures without hashing the hidden path, and redacts the
+    /// path out of violation/note evidence.
+    #[doc(hidden)]
+    pub fn redact_manifest_scoped(&mut self, rule_id: &str) {
+        self.mark_path_sensitive();
+        if self.analysis_failure_kind().is_some() || self.is_sensitive() {
+            self.redact_message(rule_id);
+            return;
+        }
+        let path = self
+            .path
+            .as_deref()
+            .map(|path| path.to_string_lossy().into_owned());
+        self.redact_evidence(rule_id, "manifest_scope", path.as_deref());
     }
 
     /// The message without a leading `"{path}: "` that repeats `path`, for a

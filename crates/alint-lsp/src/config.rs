@@ -232,8 +232,10 @@ fn run_config(
 
     // Overlay: an open document whose buffer differs from disk gets its
     // per-file findings from the buffer, not the stale on-disk bytes.
+    // Cap the on-disk read to the buffer's byte length: a larger regular file
+    // cannot equal the buffer, and a FIFO/device is refused before opening.
     for (abs, text) in overlays {
-        let on_disk = std::fs::read(abs).ok();
+        let on_disk = alint_core::bounded_file::read_regular_capped(abs, text.len() as u64).ok();
         if on_disk.as_deref() == Some(text.as_bytes()) {
             continue;
         }

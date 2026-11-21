@@ -207,26 +207,34 @@ pub(super) fn reconcile_snapshot(
         }
         return Ok(None);
     }
-    match std::fs::read_to_string(&target) {
-        Ok(actual) if normalize_lf(&actual) == rendered => {}
-        Ok(_) => mismatches.push(Mismatch {
+    let actual =
+        match alint_core::bounded_file::read_regular_capped(&target, alint_core::MAX_ANALYZE_BYTES)
+        {
+            Ok(bytes) => String::from_utf8(bytes).map_err(|error| Error::Io {
+                path: target.clone(),
+                source: std::io::Error::new(std::io::ErrorKind::InvalidData, error),
+            })?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                mismatches.push(Mismatch {
+                    step: None,
+                    channel: MismatchChannel::Snapshot,
+                    detail: format!("snapshot {snapshot} is missing"),
+                });
+                return Ok(None);
+            }
+            Err(source) => {
+                return Err(Error::Io {
+                    path: target,
+                    source,
+                });
+            }
+        };
+    if normalize_lf(&actual) != rendered {
+        mismatches.push(Mismatch {
             step: None,
             channel: MismatchChannel::Snapshot,
             detail: format!("snapshot {snapshot} differs"),
-        }),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            mismatches.push(Mismatch {
-                step: None,
-                channel: MismatchChannel::Snapshot,
-                detail: format!("snapshot {snapshot} is missing"),
-            });
-        }
-        Err(source) => {
-            return Err(Error::Io {
-                path: target,
-                source,
-            });
-        }
+        });
     }
     Ok(None)
 }

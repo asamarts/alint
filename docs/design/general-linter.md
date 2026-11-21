@@ -1936,7 +1936,7 @@ before implementation):
    1 unit needs `cardinality`. Per-locale set equality (section 7.4) re-expresses key parity
    too. `set` and `reference`, which ADR-0032 deferred to v0.24, account for 28 units: 16
    B-config and 12 that also need entry values. **Decided:** ADR-0033 decision 1 swaps
-   `cardinality` for `set`, which moves to v0.24 with `reference`, `group` and bounded count.
+   `cardinality` (which moves to v0.24 with `reference`, `group` and bounded count) for `set`.
 3. **The toolchain-pin policy's remaining gap is version comparison, not an assertion family.**
    The pins that must agree are A today. All 13 B-adapter units in the family need version
    comparison, most of them to ask whether an exact pin satisfies a declared range.

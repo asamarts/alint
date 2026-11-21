@@ -24,7 +24,8 @@ lets the IDE render the results. All linting logic lives in alint.
 Until the server is told a workspace is trusted, it runs nothing the
 repository's `.alint.yml` could start: command rules, rules that run Git
 and `custom:` facts are skipped, a remote `extends:` is not fetched,
-and `{{env.*}}` values are left unset. Every other rule lints. See
+`allow_out_of_root:` is refused, and `{{env.*}}` values are left unset.
+Every other rule lints. See
 [Workspace trust](https://alint.org/docs/cli/lsp/#workspace-trust).
 
 The plugin does not send the IDE's trusted-project state yet, so the

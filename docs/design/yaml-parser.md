@@ -65,8 +65,8 @@ The selected Serde/value API has no source-span interface; alint therefore retai
 Saphyr 0.2.2 event adapter for YAML edits and duplicate-aware extraction. The RustSec database
 reported no advisory for `yaml_serde`, `libyaml-rs`, `saphyr`, or `saphyr-parser` at evaluation
 time. The comparison explicitly treated an archived or advised transitive parser as disqualifying
-rather than something to waive. (Both Saphyr crates later moved together to 0.3.3, in November
-2026, with the event adapter and the compatibility contract unchanged.)
+rather than something to waive. (`saphyr` later moved to 0.3.3 and `saphyr-parser` to 0.3.4, in
+November 2026, with the event adapter and the compatibility contract unchanged.)
 
 The in-house assessment reused the existing `yaml_depth` lexer and the Saphyr-backed span/event paths
 as the smallest realistic prototype boundary. They demonstrate that alint can own narrow lexical
@@ -308,8 +308,8 @@ superseding ADR-0039); the parser facade below uses it as its libyaml backend.
   exact pin (`=0.2.2`); once main's version moves past it, change the pin as well. A release
   moves the pin as "Bumping ayaml" below describes.
 
-The documented differences fall into four groups (every ayaml defect that 0.1.2 carried is fixed
-in 0.2.2); the report lists every entry.
+The documented differences fall into four active groups (every ayaml defect that 0.1.2 carried is
+fixed in 0.2.2, summarized below); the report lists every entry.
 - **YAML 1.2 where libyaml follows YAML 1.1.** NEL, LS and PS are content; tabs separate. These are
   accepted: empty keys, a stream that starts with `...`, wider anchor names, `#` in a tag, a
   verbatim one too, or a `%TAG` prefix, any `%YAML 1.x` minor version, reserved directives,
@@ -816,9 +816,13 @@ maintained libyaml fork is the lower-risk ownership boundary.
     cap, peak RSS dropped from 4.5 to 6.2 GB (0.1.2) to 764 MiB (32 MiB block mapping, 0.68x
     libyaml), 1.54 GiB (32 MiB flow `[1,1,...]`, 0.61x libyaml, -7.5% wall time), and 401 MiB
     (16 MiB flow mapping, 0.69x libyaml, -3.9% wall time).
-  - **Corpus replay against v0.22.1 (`corpus-replay.yml` run 44844378906).** Across all 130
-    repositories: 115 identical, 4 expected skips (no manifest / toolchain), 0 crashes, and 11
-    explained diffs (8 additive `related_locations` from #590, 2 reworded `java-no-tracked-build`
-    from #509 in `gradle/gradle` and `quarkusio/quarkus`, and 1 reworded multi-document YAML parse
-    error in `istio/istio` from #510). Zero unexpected ayaml 0.2.2 regressions. All re-evaluation
-    triggers are now met.
+  - **Corpus replay against v0.22.1 (`corpus-replay.yml` run 44844378906 and post-dependency-bump
+    re-run 44867718401).** Across all 130 repositories: 115 identical, 4 expected skips (config
+    fails to load in both versions), 0 crashes, and 11 explained diffs (8 additive
+    `related_locations` from #590, 2 reworded `java-no-tracked-build` from #509 in `gradle/gradle`
+    and `quarkusio/quarkus`, and 1 reworded multi-document YAML parse error in `istio/istio` from
+    #510). Zero unexpected ayaml 0.2.2 regressions. On 2026-11-21 the owner also approved the four
+    non-defect allowlist entries added in #530 (`empty-flow-implicit-key`,
+    `negative-zero-in-an-unsigned-field`, `rule-that-is-null`, and location class
+    `verbatim-tag-that-names-nothing`, recorded in ADR-0040). All re-evaluation triggers and
+    release-qualification conditions are now met.

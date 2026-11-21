@@ -184,9 +184,11 @@ fn read_gitfile(path: &Path) -> Option<PathBuf> {
     })
 }
 
-/// Git's verdicts on repositories the current user does not own, by Git
-/// directory, so Git is asked once per repository.
-static VERDICTS: LazyLock<Mutex<HashMap<PathBuf, bool>>> =
+/// Git's verdicts on repositories the current user does not own, by
+/// `(work_tree, git_dir)`, so Git is asked once per repository/worktree pair
+/// in the host environment. Runs with an explicit `ProcessEnvironment` bypass
+/// the cache so sandboxed policy tests never share verdicts with host Git.
+static VERDICTS: LazyLock<Mutex<HashMap<(PathBuf, PathBuf), bool>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Whether alint may name `repository`, whose `.git` is `entry`, to Git. One
@@ -213,16 +215,22 @@ fn trusted(
     if owned {
         return true;
     }
-    if let Some(verdict) = VERDICTS
-        .lock()
-        .ok()
-        .and_then(|verdicts| verdicts.get(&repository.git_dir).copied())
+    let cache_key = environment
+        .is_none()
+        .then(|| (repository.work_tree.clone(), repository.git_dir.clone()));
+    if let Some(key) = &cache_key
+        && let Some(verdict) = VERDICTS
+            .lock()
+            .ok()
+            .and_then(|verdicts| verdicts.get(key).copied())
     {
         return verdict;
     }
     let verdict = git_accepts(repository, environment);
-    if let Ok(mut verdicts) = VERDICTS.lock() {
-        verdicts.insert(repository.git_dir.clone(), verdict);
+    if let Some(key) = cache_key
+        && let Ok(mut verdicts) = VERDICTS.lock()
+    {
+        verdicts.insert(key, verdict);
     }
     verdict
 }
@@ -242,6 +250,9 @@ fn git_accepts(
     let mut command = Command::new("git");
     if let Some(environment) = environment {
         command.env_clear().envs(environment);
+    } else {
+        #[cfg(test)]
+        command.envs(crate::git::TEST_GIT_ENVIRONMENT);
     }
     crate::git::clear_git_repository_env(&mut command, environment);
     if let Some(parent) = repository.work_tree.parent() {

@@ -22,7 +22,6 @@
 //!   `splice_inline` writes nothing — the on-disk bytes are
 //!   already correct, no need to bump mtime.
 
-use std::fs;
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
@@ -71,14 +70,18 @@ pub fn splice_inline_inner(path: &Path, body: &str) -> Result<SpliceOutcome> {
         "rendered body must include the alint markers",
     );
 
-    let existing = match fs::read_to_string(path) {
-        Ok(s) => s,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(e) => {
-            return Err(anyhow::Error::from(e))
-                .with_context(|| format!("reading {}", path.display()));
-        }
-    };
+    crate::safe_write::refuse_symlink_or_special(path, "AGENTS.md")?;
+    let existing =
+        match alint_core::bounded_file::read_regular_capped(path, alint_core::MAX_ANALYZE_BYTES) {
+            Ok(bytes) => String::from_utf8(bytes).map_err(|e| {
+                anyhow::anyhow!("reading {}: file is not valid UTF-8: {e}", path.display())
+            })?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(e) => {
+                return Err(anyhow::Error::from(e))
+                    .with_context(|| format!("reading {}", path.display()));
+            }
+        };
 
     // Find marker pair. Multiple-start / orphan-start cases
     // are user-error and surface as hard errors rather than
@@ -121,7 +124,7 @@ pub fn splice_inline_inner(path: &Path, body: &str) -> Result<SpliceOutcome> {
         }
         new_contents.push_str(inner);
         new_contents.push('\n');
-        fs::write(path, new_contents).with_context(|| format!("writing {}", path.display()))?;
+        crate::safe_write::write_replacing(path, new_contents.as_bytes(), "AGENTS.md")?;
         return Ok(SpliceOutcome::Appended);
     }
 
@@ -144,7 +147,7 @@ pub fn splice_inline_inner(path: &Path, body: &str) -> Result<SpliceOutcome> {
     if new_contents == existing {
         return Ok(SpliceOutcome::UnchangedRoundTrip);
     }
-    fs::write(path, new_contents).with_context(|| format!("writing {}", path.display()))?;
+    crate::safe_write::write_replacing(path, new_contents.as_bytes(), "AGENTS.md")?;
     Ok(SpliceOutcome::Spliced)
 }
 
@@ -249,5 +252,18 @@ mod tests {
         fs::write(&path, format!("only end {END_MARKER}\n")).unwrap();
         let err = splice_inline_inner(&path, &body()).unwrap_err();
         assert!(err.to_string().contains("no matching"), "unexpected: {err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_to_splice_through_a_symlink() {
+        let tmp = td();
+        let target = tmp.path().join("outside.md");
+        fs::write(&target, "untouched\n").unwrap();
+        let link = tmp.path().join("AGENTS.md");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let err = splice_inline_inner(&link, &body()).unwrap_err();
+        assert!(err.to_string().contains("symlink"), "unexpected: {err}");
+        assert_eq!(fs::read_to_string(&target).unwrap(), "untouched\n");
     }
 }

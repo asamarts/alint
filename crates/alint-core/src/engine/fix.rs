@@ -494,10 +494,12 @@ impl Engine {
                 }),
                 FixEdit::DeleteFile { path } => {
                     let target = root.join(&path);
-                    let old = std::fs::read(&target).map_err(|source| Error::Io {
-                        path: target,
-                        source,
-                    })?;
+                    let old =
+                        crate::bounded_file::read_regular_capped(&target, crate::MAX_ANALYZE_BYTES)
+                            .map_err(|source| Error::Io {
+                                path: target,
+                                source,
+                            })?;
                     staged.push(StagedFix {
                         path,
                         old,
@@ -507,7 +509,11 @@ impl Engine {
                 }
                 FixEdit::RenameFile { from, to } => {
                     let source_path = root.join(&from);
-                    let old = std::fs::read(&source_path).map_err(|source| Error::Io {
+                    let old = crate::bounded_file::read_regular_capped(
+                        &source_path,
+                        crate::MAX_ANALYZE_BYTES,
+                    )
+                    .map_err(|source| Error::Io {
                         path: source_path,
                         source,
                     })?;
@@ -518,16 +524,17 @@ impl Engine {
                         kind: StagedKind::Rename { from },
                     });
                 }
-                // A chmod: content is unchanged, so `old`/`new` are the current
-                // bytes and the diff renders the mode change from the recorded pair.
+                // A chmod: content is unchanged and diff rendering only inspects
+                // the mode pair, so leave `old`/`new` empty without reading the
+                // file into memory.
                 FixEdit::SetMode { path, mode } => {
-                    let target = root.join(&path);
                     #[cfg(unix)]
                     let old_mode = {
                         use std::os::unix::fs::PermissionsExt as _;
+                        let target = root.join(&path);
                         std::fs::metadata(&target)
                             .map_err(|source| Error::Io {
-                                path: target.clone(),
+                                path: target,
                                 source,
                             })?
                             .permissions()
@@ -535,14 +542,10 @@ impl Engine {
                     };
                     #[cfg(not(unix))]
                     let old_mode = 0u32;
-                    let content = std::fs::read(&target).map_err(|source| Error::Io {
-                        path: target,
-                        source,
-                    })?;
                     staged.push(StagedFix {
                         path,
-                        new: content.clone(),
-                        old: content,
+                        new: Vec::new(),
+                        old: Vec::new(),
                         kind: StagedKind::Chmod {
                             old_mode,
                             new_mode: mode,
@@ -619,7 +622,13 @@ impl Engine {
                     .violation
                     .path
                     .as_deref()
-                    .and_then(|path| std::fs::read(root.join(path)).ok())
+                    .and_then(|path| {
+                        crate::bounded_file::read_regular_capped(
+                            &root.join(path),
+                            crate::MAX_ANALYZE_BYTES,
+                        )
+                        .ok()
+                    })
                     .unwrap_or_default();
                 if let Some(edit) = fixer.fix_edit(&item.violation, &bytes, root) {
                     Self::insert_fix_targets(root, &edit, &mut targets);
@@ -678,6 +687,9 @@ impl Engine {
         rule.path_scope()
             .or_else(|| rule.as_per_file().map(PerFileRule::path_scope))
             .is_some_and(|scope| scope.sensitive_manifest_sources().next().is_some())
+            || rule
+                .trigger_scope()
+                .is_some_and(crate::relation::TriggerScope::has_sensitive_manifest_scope)
     }
 
     /// Whether a relation the rule reads (a `constraint` rule's `input:`)
@@ -763,12 +775,15 @@ impl Engine {
         root: &Path,
         targets: &mut HashSet<PathBuf>,
     ) {
-        let explicit = entry.spec.as_deref().is_some_and(|spec| spec.sensitive);
+        let explicit = Self::has_sensitive_evidence(entry);
         for finding in result.violations.iter().chain(&result.notes) {
-            if (explicit || finding.is_sensitive())
-                && let Some(path) = finding.path.as_deref()
-            {
-                targets.insert(Self::normalized_write_target(root, path));
+            if explicit || finding.is_sensitive() {
+                if let Some(path) = finding.path.as_deref() {
+                    targets.insert(Self::normalized_write_target(root, path));
+                }
+                for related in &finding.related_locations {
+                    targets.insert(Self::normalized_write_target(root, &related.path));
+                }
             }
         }
         for failure in &result.analysis_failures {
@@ -1125,7 +1140,7 @@ impl Engine {
                     git_dir_aware_ctx.as_ref(),
                 );
                 if stage_ops.is_some() {
-                    let explicit = entry.spec.as_deref().is_some_and(|spec| spec.sensitive);
+                    let explicit = Self::has_sensitive_evidence(entry);
                     entry
                         .rule
                         .visit_sensitive_paths(explicit, ctx, &mut |path| {

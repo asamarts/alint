@@ -47,8 +47,8 @@ command line. This grants native code execution with the invoking user's host
 filesystem and network permissions; it is not an OS sandbox. Host-keyring
 access similarly requires both `host_keyring: true` and
 `--allow-host-keyring`. A custom fact needs the spawn capability too.
-`--no-spawn` (or `--untrusted`) and `--allow-spawn` contradict each other,
-so `alint test` rejects the pair.
+`--no-spawn` (or `--untrusted`) contradicts both `--allow-spawn` and
+`--allow-host-keyring`, so `alint test` rejects either pair.
 
 All selected definitions, package paths, configs, and capability grants are
 preflighted before any rule or user command executes.
@@ -58,33 +58,30 @@ an entry of the tree as the file system resolves it, through any symlink it
 reaches, and no tree entry may sit under a symlink. Every symlink in the
 repository, from a tree or a fixture, must lead inside it, checked again after
 each fix step. A fix never writes or reads a Git directory (`.git` in the
-spellings Git's own checks name, such as `.GIT`, `.git.` and `git~1`; a short
-name such as `GIT~2` or a hashed one passes), and no rule reads one.
+spellings Git's own checks name, such as `.GIT`, `.git.`, `git~1`, `git~2`),
+and no rule reads one.
 
-`given.env` reaches config interpolation, `when:` conditions (`env.X`) and
-granted commands only. A condition also sees the runner's own sandbox values:
-`HOME` and `GNUPGHOME` (unless the host keyring is granted, when they are the
-host's and a condition does not see them), `XDG_CONFIG_HOME`, `LC_ALL`, and the
-`GIT_*` settings below (`GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_GLOBAL`,
-`GIT_TERMINAL_PROMPT`, `GIT_OPTIONAL_LOCKS`, `GIT_CEILING_DIRECTORIES`). It
-never sees the host's `PATH` or any other host variable. A granted command also
-gets the host's `PATH` (and, on Windows, its system variables). The Git commands the runner runs itself, for `given.git` and for
-rules that read Git, run with a fixed environment: a sandboxed home (the host's
-home when the host keyring is granted), no system or global Git configuration,
-no global excludes or attributes file, `PATH`, and the C locale. Each names the
-repository `given.git` made (`--git-dir`, `--work-tree`), so Git never
-discovers one: a fixture shaped like a bare repository stays content whatever
-the Git version, and a test without `given.git` runs no Git at all, so it never
-reads a repository the host's temporary directory is in.
+`given.env` reaches config interpolation, `when:` conditions (`env.X`), legacy
+`${VAR}` expansions, and granted commands only. Conditions and `${VAR}` read
+`given.env` alone — never the host's `PATH`, `HOME`, `GNUPGHOME`,
+`XDG_CONFIG_HOME`, `GIT_CEILING_DIRECTORIES`, or any other host or sandbox
+variable. A granted command also gets the runner's sandbox variables plus the
+host's `PATH` (and, on Windows, its system variables). The Git commands the
+runner runs itself, for `given.git` and for rules that read Git, run with a
+fixed environment: a sandboxed home (the host's home when the host keyring is
+granted), no system or global Git configuration, no global excludes or
+attributes file, `PATH`, and the C locale. Each names the repository
+`given.git` made (`--git-dir`, `--work-tree`), so Git never discovers one: a
+fixture shaped like a bare repository stays content whatever the Git version,
+and a test without `given.git` runs no Git at all, so it never reads a
+repository the host's temporary directory is in.
 
 The walk that lists a test's tree reads no global excludes file, so the host's Git setup never
 hides a file from a test.
 
-<!-- alint:since=0.23 -->
 Neither does the walk that finds `nested_configs:` files (nor a `~/.gitconfig` that names an
 excludes file), so the host's Git setup never hides a nested config from a test either.
 `alint check` still honours the user's global excludes file in both walks.
-<!-- /alint:since -->
 
 ## Exit codes
 

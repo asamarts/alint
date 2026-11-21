@@ -202,12 +202,12 @@ In the repo: [CHANGELOG.md](CHANGELOG.md) for the per-version history, [docs/ben
 ```bash
 git clone https://github.com/asamarts/alint
 cd alint
-cargo test --workspace     # Rust tests plus 578 declarative end-to-end policy tests
+cargo test --workspace     # Rust tests plus 680 declarative end-to-end policy tests
 cargo run -- check         # dogfood: alint lints its own repo
 cargo bench -p alint-bench # criterion micro-benches
 ```
 
-alint is a ten-crate Cargo workspace. Seven crates publish to crates.io: `alint` (the binary),
+alint is an eleven-crate Cargo workspace. Seven crates publish to crates.io: `alint` (the binary),
 `alint-core` (the engine API), `alint-testkit` (the versioned policy-test model and hermetic
 runner), plus the internal implementation crates `alint-dsl`, `alint-rules`, `alint-output`, and
 `alint-lsp`. General policy tests live under `crates/alint-e2e/scenarios/`; bundled ruleset tests

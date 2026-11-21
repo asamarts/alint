@@ -53,9 +53,9 @@ points are explicit.
    section. Add a one-paragraph summary at the top of the new section
    capturing the headline change. Keep the section order 0.18.0 onward
    uses: `### Upgrading from <previous minor>` first when a release needs
-   one, then `### Security` when present, then `Added`, `Changed`,
-   `Performance`, and `Fixed`, with `Deprecated` and `Removed` when a
-   release needs them. Each heading appears once per release.
+   one, then `### Security` when present, then `### Added`, `### Changed`,
+   `### Performance`, and `### Fixed`, with `### Deprecated` and `### Removed`
+   when a release needs them. Each heading appears once per release.
 
 3. **Verify locally.**
 
@@ -143,8 +143,10 @@ points are explicit.
      editors/zed/Cargo.lock editors/zed/extension.toml \
      docs/site/getting-started/installation.md \
      docs/site/integrations/docker.md docs/site/integrations/pre-commit.md
-   # plus every file the steps below touch: unwrapped `alint:since` blocks,
-   # raised dependency floors, the design-doc status
+   # plus every file the steps below touch: raised dependency floors,
+   # the design-doc status (unwrap `alint:since=<x.y.z>` blocks in the
+   # post-tag follow-up PR, once `v<x.y.z>` is tagged, so
+   # `check-docs-overlay-since.py` still passes on this pre-tag PR)
    git commit -m "chore(release): bump workspace to <x.y.z>"
    git push -u origin release/v<x.y.z>
    gh pr create --fill
@@ -190,11 +192,14 @@ checklist so the release-gated pieces land and nothing drifts:
      `schemas/v1/config.json` directly is silently reverted by `gen-schema` and
      fails `--check`. For a hand-authored branch, drop the keyword from
      `config.json`, then `gen-schema`.
-   - **Prose sentinels.** Unwrap every `<!-- alint:since=<ver> -->` block; grep
-     `alint:since=` across `docs/` to find all (`docs/rules.md`,
-     `docs/site/reference/**` and pages such as
-     `docs/site/configuration/variable-interpolation.md` hold them), and stage
-     each file you unwrap.
+   - **Prose sentinels (post-tag follow-up PR).** After `v<ver>` is pushed and
+     reachable on `main`, unwrap every `<!-- alint:since=<ver> -->` block in
+     the post-tag follow-up PR alongside the Action pin refresh (never in the
+     pre-tag bump PR, because `check-docs-overlay-since.py` diffs against the
+     previous release tag until `v<ver>` exists). Grep `alint:since=` across
+     `docs/` to find all (`docs/rules.md`, `docs/site/reference/**`,
+     `docs/site/concepts/**`, and `docs/site/configuration/variable-interpolation.md`
+     hold them), and stage each file you unwrap.
    For v0.14: remove `#[schemars(extend("x-since" = "0.14"))]` from
    `crates/alint-rules/src/{file_absent,dir_absent,dir_exists}.rs` (`root_only`),
    and unwrap the six `alint:since=0.14` blocks: five in `docs/rules.md`
@@ -494,7 +499,7 @@ release job.
 
 ## Editor extensions / IDE plugins
 
-The six editor integrations live under `editors/`. Two distribution
+The eight editor integrations live under `editors/`. Two distribution
 paths:
 
 **Token-published on the tag (automated in `release.yml`):**

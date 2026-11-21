@@ -20,8 +20,8 @@ vim.lsp.enable("alint")
 ```
 
 That's it — `lsp/alint.lua` carries `cmd = { "alint", "lsp" }`,
-`root_markers = { ".alint.yml", ".git" }`, and the filetypes to attach
-to.
+`root_markers = { { ".git" }, { ".alint.yml", ".alint.yaml", "alint.yml", "alint.yaml" } }`,
+and the filetypes to attach to.
 
 ## nvim-lspconfig
 
@@ -35,8 +35,9 @@ use the runtimepath approach above.
 
 Until the server is told a workspace is trusted, it runs nothing the
 repository's `.alint.yml` could start: command rules, rules that run Git
-and `custom:` facts are skipped, a remote `extends:` is not fetched, and
-`{{env.*}}` values are left unset. Every other rule lints. See
+and `custom:` facts are skipped, a remote `extends:` is not fetched,
+`allow_out_of_root:` is refused, and `{{env.*}}` values are left unset.
+Every other rule lints. See
 [Workspace trust](https://alint.org/docs/cli/lsp/#workspace-trust).
 
 To turn them on, add this to your `init.lua`:

@@ -17,8 +17,9 @@ language-server and adds it to a few languages' server lists.
 
 Until the server is told a workspace is trusted, it runs nothing the
 repository's `.alint.yml` could start: command rules, rules that run Git
-and `custom:` facts are skipped, a remote `extends:` is not fetched, and
-`{{env.*}}` values are left unset. Every other rule lints. See
+and `custom:` facts are skipped, a remote `extends:` is not fetched,
+`allow_out_of_root:` is refused, and `{{env.*}}` values are left unset.
+Every other rule lints. See
 [Workspace trust](https://alint.org/docs/cli/lsp/#workspace-trust).
 
 To turn them on, uncomment `config = { trusted = true }` under

@@ -124,8 +124,9 @@ impl Format {
         // rule's job.
         let text = text.trim_start_matches('\u{feff}');
         // Bound the parsed-tree memory FIRST: a parse costs up to ~30x the input in
-        // RSS for XML and ~190x for YAML, so a large file balloons to multiple GB
-        // (see `MAX_STRUCTURED_BYTES`). Reject before
+        // RSS for XML and ~24-48x for YAML (0.75-1.54 GiB at the 32 MiB cap,
+        // ADR-0042), so an unbounded file would balloon to multiple GB (see
+        // `MAX_STRUCTURED_BYTES`). Reject before
         // building it -- and before the whitespace-emptiness scan below, so an oversize
         // all-whitespace file is a fast size rejection rather than an O(n) trim.
         // (HCL's own 64 KiB cap in `hcl_to_value` fires first for HCL.)

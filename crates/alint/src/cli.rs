@@ -84,8 +84,8 @@ pub(crate) struct Cli {
     /// flag; a remote `extends:` is refused before anything is fetched; so is
     /// `allow_out_of_root:`, which would let the config read and write outside
     /// the repository; and `{{env.NAME}}` in the config, `env.*` in a `when:`
-    /// and a legacy `${VAR}` read an empty environment. `--no-spawn` alone leaves the last
-    /// two open. Applies where `--no-spawn` does; `lsp` takes every workspace
+    /// and a legacy `${VAR}` read an empty environment. `--no-spawn` alone leaves those
+    /// three open. Applies where `--no-spawn` does; `lsp` takes every workspace
     /// as untrusted, whatever the client says.
     #[arg(long, global = true)]
     pub(crate) untrusted: bool,

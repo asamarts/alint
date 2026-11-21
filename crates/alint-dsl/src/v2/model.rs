@@ -44,7 +44,9 @@ impl Objects {
     /// recording every entry is not the entries times the aliases.
     pub(crate) fn record_extended(&mut self, entry: usize, target: Option<&Path>, chosen: bool) {
         for source in &mut self.sources {
-            if let Some(target) = target {
+            if let Some(target) = target
+                && source.extended.last().is_none_or(|last| last != target)
+            {
                 source.extended.push(target.to_path_buf());
             }
             let found = source.aliases.binary_search_by_key(&entry, |(_, alias)| {

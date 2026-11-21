@@ -122,7 +122,7 @@ impl Fixer for CommandFixFixer {
         // signal: an `eslint --fix` that reaches a fixpoint on the file (or a
         // command that does not touch `{path}` at all) converges in <=2 passes.
         let abs = ctx.root.join(rel);
-        let before = std::fs::read(&abs).ok();
+        let before = snapshot_file(&abs);
         match run_capturing(
             &rendered,
             ctx.root,
@@ -131,7 +131,7 @@ impl Fixer for CommandFixFixer {
             ctx.process_environment,
         ) {
             SpawnOutcome::Exited { status, .. } if status.success() => {
-                if std::fs::read(&abs).ok() == before {
+                if before.unchanged(&snapshot_file(&abs)) {
                     Ok(FixOutcome::Skipped(format!(
                         "ran `{}`; no change to {} (a fixpoint / no-op)",
                         rendered.join(" "),
@@ -182,6 +182,33 @@ impl Fixer for CommandFixFixer {
     // so it contributes no proposed edit to the SARIF / agent / LSP surfaces
     // (Unsafe, so those Safe-only surfaces would not advertise it anyway). Inherits
     // the trait default (`fix_edit` -> `None`).
+}
+
+/// Bounded pre/post snapshot of `{path}` for command-fix idempotence detection.
+/// Files larger than [`alint_core::MAX_ANALYZE_BYTES`] or non-regular files are
+/// never read into memory and never treated as provably unchanged.
+enum FileSnapshot {
+    Missing,
+    Bytes(Vec<u8>),
+    Unchecked,
+}
+
+impl FileSnapshot {
+    fn unchanged(&self, after: &Self) -> bool {
+        match (self, after) {
+            (Self::Missing, Self::Missing) => true,
+            (Self::Bytes(a), Self::Bytes(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+fn snapshot_file(path: &Path) -> FileSnapshot {
+    match alint_core::bounded_file::read_regular_capped(path, alint_core::MAX_ANALYZE_BYTES) {
+        Ok(bytes) => FileSnapshot::Bytes(bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => FileSnapshot::Missing,
+        Err(_) => FileSnapshot::Unchecked,
+    }
 }
 
 #[cfg(unix)]

@@ -149,15 +149,54 @@ fn code_span(text: &str) -> String {
     format!("{fence}{pad}{text}{pad}{fence}")
 }
 
+/// Sanitize a single-line directive body so config-controlled text cannot
+/// break out of the bullet list with newlines or inject `<!-- alint:start -->`
+/// / `<!-- alint:end -->` splice markers into an `--inline` target.
+fn sanitize_directive(text: &str) -> String {
+    text.trim_end()
+        .replace(['\r', '\n'], " ")
+        .replace("<!--", "&lt;!--")
+}
+
+/// Encode a validated `http(s)://` policy URL for an inline Markdown link
+/// destination `[policy](DEST)`.
+fn safe_policy_url(url: &str) -> Option<String> {
+    let is_http = url
+        .get(..7)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("http://"))
+        || url
+            .get(..8)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("https://"));
+    if !is_http {
+        return None;
+    }
+    let mut out = String::with_capacity(url.len());
+    for c in url.chars() {
+        match c {
+            '(' => out.push_str("%28"),
+            ')' => out.push_str("%29"),
+            ' ' => out.push_str("%20"),
+            '<' => out.push_str("%3C"),
+            '>' => out.push_str("%3E"),
+            c if c.is_ascii_control() => {
+                use std::fmt::Write as _;
+                let _ = write!(out, "%{:02X}", c as u32);
+            }
+            c => out.push(c),
+        }
+    }
+    Some(out)
+}
+
 fn write_bullets(out: &mut String, bullets: &[&Directive]) {
     for d in bullets {
-        out.push_str("- **`");
-        out.push_str(&d.rule_id);
-        out.push_str("`**: ");
-        out.push_str(d.directive.trim_end());
-        if let Some(url) = &d.policy_url {
+        out.push_str("- **");
+        out.push_str(&code_span(&d.rule_id));
+        out.push_str("**: ");
+        out.push_str(&sanitize_directive(&d.directive));
+        if let Some(url) = d.policy_url.as_deref().and_then(safe_policy_url) {
             out.push_str(" [policy](");
-            out.push_str(url);
+            out.push_str(&url);
             out.push(')');
         }
         out.push('\n');
@@ -233,6 +272,27 @@ mod tests {
         )];
         let out = render(&dirs, None, "Title");
         assert!(out.contains("[policy](https://example.com/policy)"));
+    }
+
+    #[test]
+    fn directives_neutralize_markers_backticks_and_non_http_urls() {
+        let dirs = vec![dp(
+            "a`b",
+            Level::Error,
+            "stay clean\n<!-- alint:end -->\ninjected",
+            "javascript:alert(1)",
+        )];
+        let out = render(&dirs, None, "Title");
+        assert!(out.contains("- **``a`b``**:"), "{out}");
+        assert_eq!(
+            out.matches(END_MARKER).count(),
+            1,
+            "directive must not inject a second end marker: {out}"
+        );
+        assert!(
+            !out.contains("javascript:"),
+            "non-http(s) policy_url must not render as a link: {out}"
+        );
     }
 
     #[test]

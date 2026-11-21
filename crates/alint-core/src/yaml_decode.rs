@@ -1037,23 +1037,13 @@ pub(crate) fn indentation_hint(input: &str, error: &ayaml::Error) -> bool {
 /// collection, as ayaml reads it. The prefix holds the first document, which
 /// ended before the error.
 fn root_is_a_block_collection(prefix: &str) -> bool {
-    let Ok(events) = crate::yaml::stream_events(prefix) else {
-        return false;
-    };
-    events.iter().find_map(|event| match event {
-        ayaml::Event::StreamStart { .. }
-        | ayaml::Event::DocumentStart { .. }
-        | ayaml::Event::DocumentEnd { .. } => None,
-        ayaml::Event::SequenceStart { style, .. } | ayaml::Event::MappingStart { style, .. } => {
-            Some(*style == ayaml::CollectionStyle::Block)
-        }
-        _ => Some(false),
-    }) == Some(true)
+    crate::yaml::root_is_a_block_collection(prefix)
 }
 
 /// Whether `line` holds content: it is not blank, a comment, a directive or
 /// a document marker.
 fn holds_content(line: &str) -> bool {
+    let line = line.trim_start_matches('\u{feff}');
     let text = line.trim_start_matches([' ', '\t']);
     !(text.is_empty()
         || text.starts_with('#')
@@ -1067,6 +1057,7 @@ fn holds_content(line: &str) -> bool {
 /// The column, counted from zero, where the content of `line` starts: past
 /// its indentation and any block sequence entries (`- `) it starts with.
 fn content_column(line: &str) -> usize {
+    let line = line.trim_start_matches('\u{feff}');
     let mut column = line.len() - line.trim_start_matches(' ').len();
     let mut rest = &line[column..];
     while let Some(after) = rest.strip_prefix('-')

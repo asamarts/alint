@@ -73,7 +73,7 @@ pub fn write_markdown(report: &Report, w: &mut dyn Write) -> std::io::Result<()>
             for failure in &result.analysis_failures {
                 let location = failure.report_path().map_or_else(
                     || "repository".to_string(),
-                    |path| match (failure.line, failure.column) {
+                    |path| match (failure.report_line(), failure.report_column()) {
                         (Some(line), Some(column)) => format!(
                             "`{}` (line {line}, col {column})",
                             md_inline_code(&path.display().to_string())
@@ -261,14 +261,14 @@ fn write_violation_bullet(
 ) -> std::io::Result<()> {
     let level = level_word(result.level);
     let mut loc = String::new();
-    if let (Some(line), Some(col)) = (violation.line, violation.column) {
+    if let (Some(line), Some(col)) = (violation.report_line(), violation.report_column()) {
         loc = format!(" (line {line}, col {col})");
-    } else if let Some(line) = violation.line {
+    } else if let Some(line) = violation.report_line() {
         loc = format!(" (line {line})");
     }
 
     let rule_part = match &result.policy_url {
-        Some(url) if !url.is_empty() => {
+        Some(url) if is_http_url(url) => {
             format!("[`{}`]({})", md_inline_code(&result.rule_id), md_url(url))
         }
         _ => format!("`{}`", md_inline_code(&result.rule_id)),
@@ -355,8 +355,8 @@ fn bucket_violations(report: &Report) -> BucketedViolations<'_> {
 fn sort_key<'a>(p: &'a (&'a RuleResult, &'a Violation)) -> (&'a str, usize, usize) {
     (
         p.0.rule_id.as_ref(),
-        p.1.line.unwrap_or(0),
-        p.1.column.unwrap_or(0),
+        p.1.report_line().unwrap_or(0),
+        p.1.report_column().unwrap_or(0),
     )
 }
 
@@ -405,6 +405,18 @@ fn md_inline_code(s: &str) -> String {
     // terminal control bytes (ESC/BEL/...) so they can't fire in a terminal preview
     // (audit R2 MED-1); `\r`/`\n` are already collapsed above.
     crate::sanitize::sanitize_terminal(&s.replace(['\r', '\n'], " ").replace('`', "ʼ")).into_owned()
+}
+
+/// Whether `url` uses an `http://` or `https://` scheme (case-insensitive).
+/// Non-HTTP(S) schemes (`javascript:`, `data:`, `file:`, `vscode:`, ...) are
+/// never rendered as clickable Markdown links from a config-controlled
+/// `policy_url`.
+fn is_http_url(url: &str) -> bool {
+    url.get(..7)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("http://"))
+        || url
+            .get(..8)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("https://"))
 }
 
 /// Escape a URL for use in a markdown link target.
@@ -619,6 +631,34 @@ mod tests {
         };
         let out = render(&report);
         assert!(out.contains("[`r1`](https://example.com/policy)"));
+    }
+
+    #[test]
+    fn non_http_policy_url_does_not_render_as_markdown_link() {
+        for scheme in [
+            "javascript:alert(1)",
+            "file:///etc/passwd",
+            "data:text/html,<script>",
+            "vscode://command/evil",
+        ] {
+            let report = Report {
+                results: vec![RuleResult {
+                    rule_id: "r1".into(),
+                    level: Level::Error,
+                    policy_url: Some(scheme.into()),
+                    violations: vec![Violation::new("x").with_path(PathBuf::from("a.rs"))],
+                    notes: Vec::new(),
+                    is_fixable: false,
+                    analysis_failures: Vec::new(),
+                }],
+            };
+            let out = render(&report);
+            assert!(
+                !out.contains("[`r1`]("),
+                "{scheme} must not render as a link: {out}"
+            );
+            assert!(out.contains("- **error** `r1` - x"), "{out}");
+        }
     }
 
     #[test]

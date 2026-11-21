@@ -276,6 +276,43 @@ impl Rule for ConstraintRule {
         Some(&self.trigger)
     }
 
+    fn visit_sensitive_paths(
+        &self,
+        explicit: bool,
+        ctx: &Context<'_>,
+        visit: &mut dyn FnMut(&std::path::Path),
+    ) {
+        let relation_sensitive = explicit
+            || self.trigger.has_sensitive_manifest_scope()
+            || self
+                .plan
+                .evaluation_order(&self.inputs)
+                .into_iter()
+                .any(|id| {
+                    let named = self.plan.relation(id);
+                    named.reads_environment
+                        || named
+                            .relation
+                            .fields
+                            .iter()
+                            .any(|(_, field)| field.sensitive)
+                });
+        if relation_sensitive {
+            self.trigger.visit_matched_paths(ctx.index, visit);
+            return;
+        }
+        // Even on an ordinary constraint rule, a matched file whose structured
+        // format redacts by default (`.env`, `.properties`) carries sensitive
+        // evidence and must stay gated without suppressing unrelated files.
+        self.trigger.visit_matched_paths(ctx.index, &mut |path| {
+            if alint_core::Format::detect_from_path(path)
+                .is_some_and(alint_core::Format::redacts_by_default)
+            {
+                visit(path);
+            }
+        });
+    }
+
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         // A relation the rule reads that fails leaves it without a verdict:
         // its failures, every relation's, and nothing else.
