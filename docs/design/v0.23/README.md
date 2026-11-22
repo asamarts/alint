@@ -1270,6 +1270,14 @@ as #589, step 3 as #590, and step 4 is the last.
     - `xtask bench-scale` (S1 to S4 and SFIX at 1k, 10k, 100k) passed `xtask bench-gate` against
       v0.22.0 (worst gating `min_ms` delta +7.5% on `100k/S1/changed`, well within the +15% gate;
       `100k/S2/full` +0.3%, `100k/S3/full` +0.2% min / -1.8% mean, `100k/SFIX/fix` -0.7% min).
-  - **Post-tag follow-ups:** publish GHSA-78jj-xfpm-g6px once release artifacts land, close #481,
-    refresh `ci/action-doc-pin.env` / Action SHA pins and unwrap `alint:since=0.22.1` / `0.23.0`
-    prose blocks in the follow-up PR, and sync alint.org (`rule-source-files.ts` and version pins).
+  - **Final pre-tag corpus replay against v0.22.1 (`corpus-replay.yml` run 44965570485, `main`
+    `cc0f5a969`):** 130 repositories: 115 identical, 4 expected skips, 0 unavailable, 0 crashes,
+    and 11 CHANGELOG-explained diffs (identical to run 44844378906: 8 additive `related_locations`
+    from #590, 2 reworded `java-no-tracked-build` from #509, 1 reworded multi-document YAML parse
+    error on `istio/istio` from #510).
+  - **Release and post-tag close-out:** `v0.23.0` tagged on `465e70c48` (#617) and published
+    across all channels (`release.yml` run 44972684066, `docs-bundle.yml` run 44972684071),
+    GHSA-78jj-xfpm-g6px published and linked in `SECURITY.md`, #481 closed, `ci/action-doc-pin.env`
+    and Action SHA pins refreshed to `465e70c48ec13774c8cb3bb58856b58b71e3a93d` (`v0.23.0`), and
+    `alint:since=0.22.1` / `0.23.0` prose blocks unwrapped across `docs/`. Remaining site-repo
+    step: sync alint.org (`rule-source-files.ts`, version pins, and `marketing/STATE.md`).
