@@ -3,6 +3,39 @@
   "arch": "linux-x86_64",
   "rows": [
     {
+      "version": "v0.23.0",
+      "date": "2026-11-22",
+      "headline": "v0.23.0 launches Phase 3 of the general-linter program, hardens alint's trust boundaries end to end, switches YAML parsing to pure-Rust `ayaml` 0.2.2, and ships the last planned library API break before 1.0.",
+      "workload_revisions": {
+        "S1": 2,
+        "S2": 2,
+        "S3": 2,
+        "S4": 4
+      },
+      "cells": {
+        "s1_1m_full": {
+          "mean_ms": 4080.2553781333336,
+          "stddev_ms": 40.355596969587864,
+          "display": "4.08 s ± 0.04"
+        },
+        "s2_1m_full": {
+          "mean_ms": 5263.155355486666,
+          "stddev_ms": 12.493642724559592,
+          "display": "5.26 s ± 0.01"
+        },
+        "s3_1m_full": {
+          "mean_ms": 485398.6218185933,
+          "stddev_ms": 20525.138869436025,
+          "display": "485.4 s ± 20.5"
+        },
+        "s4_1m_full": {
+          "mean_ms": 8724.91275308,
+          "stddev_ms": 207.6171159711067,
+          "display": "8.72 s ± 0.21"
+        }
+      }
+    },
+    {
       "version": "v0.22.0",
       "date": "2026-11-07",
       "headline": "v0.22 completes general-linter phase 2.",
