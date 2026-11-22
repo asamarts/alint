@@ -34,9 +34,10 @@ unless you pass `--accept-new`, so a refresh can't quietly grandfather fresh
 violations.
 
 A baseline path that comes from the repository (the `baseline:` config key or
-the default `.alint-baseline.json`) must stay inside the repository, and alint
-refuses to write through a symlink; either case exits 2. Pass `--output` to
-write the file somewhere else on purpose.
+the default `.alint-baseline.json`) must stay inside the repository, outside any
+Git directory (`.git`, or through a symlink to one), and alint refuses to write
+through a symlink; any of these exits 2. Pass `--output` to write the file
+somewhere else on purpose.
 
 Analysis failures are not policy debt and cannot be grandfathered. If any rule
 could not obtain a verdict, `alint baseline` writes nothing, reports each

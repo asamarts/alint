@@ -6,7 +6,7 @@ sidebar:
 ---
 
 alint ships an LSP server (`alint lsp`, in the `alint-lsp` crate) plus
-extensions, configs, and snippets across nine editors. The server
+extensions, configs, and snippets across eight editors. The server
 streams `.alint.yml` diagnostics into your editor as you type, surfaces
 rule descriptions on hover, and exposes apply-fix code actions for
 auto-fixable rules.
@@ -41,7 +41,7 @@ on `PATH`, and finally a managed download of the latest GitHub release.
 | Editor | What ships in the alint repo |
 |---|---|
 | **Neovim** (0.11+) | [`editors/nvim/lsp/alint.lua`](https://github.com/asamarts/alint/tree/main/editors/nvim) — drop into `~/.config/nvim/lsp/` and `vim.lsp.enable("alint")`. |
-| **Sublime Text** | [`editors/sublime/LSP-alint.sublime-settings`](https://github.com/asamarts/alint/tree/main/editors/sublime) — add to the LSP package's settings. |
+| **Sublime Text** | [`editors/sublime/LSP.sublime-settings`](https://github.com/asamarts/alint/tree/main/editors/sublime) — add to the LSP package's settings. |
 | **Emacs** | [`editors/emacs/alint.el`](https://github.com/asamarts/alint/tree/main/editors/emacs) — uses `lsp-mode` or `eglot`. |
 | **Helix** | [`editors/helix/languages.toml`](https://github.com/asamarts/alint/tree/main/editors/helix) — merge into your `~/.config/helix/languages.toml`. |
 | **Eclipse** | [`editors/eclipse/`](https://github.com/asamarts/alint/tree/main/editors/eclipse) — install LSP4E first, then configure. |
@@ -77,26 +77,101 @@ diagnostics:
   path containing `${MODULE}`) are reported after each full check as a
   one-line count on the server's stderr (usually the editor's LSP log);
   launch the server as `alint lsp --show-notes` to list them all.
-- **Auto-discovery.** Each open file is linted by the nearest
-  `.alint.yml` found walking up from its directory, so it works in
-  monorepos and nested package roots without configuration. Under a
-  config with `nested_configs: true`, files get that config's rules plus
-  the nested ones, as `alint check` from the workspace root does. Every
-  workspace folder of a multi-root workspace is linted; files outside
-  all workspace folders are not.
+- **Auto-discovery.** Each workspace folder is linted by its own
+  `.alint.yml`, as `alint check` run in that folder would. A config
+  further down (a package's, or one vendored under `node_modules/`)
+  governs nothing by itself: under a folder config with
+  `nested_configs: true`, files get that config's rules plus the nested
+  ones, as `alint check` from the workspace root does. A folder without
+  a config of its own lints each file with the config at the top of its
+  repository (the nearest directory holding `.git`) inside the folder,
+  so a folder of several repositories lints each by its own config.
+  Every workspace folder of a multi-root workspace is linted; files
+  outside all workspace folders, and files with no config to govern
+  them, are not.
+- **Workspace trust.** Until the editor says the workspace is trusted,
+  the server runs nothing the repository's config could start: command
+  rules, rules that run Git and custom facts are skipped, a rule whose fix
+  alone runs a command lints without the fix, a remote `extends:` is not
+  fetched, `allow_out_of_root:` is refused, and environment values are left
+  unset. Everything else lints.
+  See [Workspace trust](#workspace-trust) below.
 
 ## Configuration
 
 The server reads everything from `.alint.yml` the same way the CLI
-does — no editor-specific configuration is required for the rule set
-itself. The only editor-side settings are:
+does; no editor-specific configuration is required for the rule set
+itself. The editor-side settings are:
 
-- **`alint.path`** — absolute path to the `alint` binary, if not on
+- **`alint.path`**: absolute path to the `alint` binary, if not on
   `PATH`. Auto-resolved by the VS Code + JetBrains extensions on first
   run.
-- **`alint.args`** — extra args to pass to `alint lsp` on launch
-  (unused in normal operation; useful for `--show-notes`, which lists
-  informational notes on the server's stderr).
+- **`alint.serverArgs`**: extra args to pass to `alint lsp` on launch,
+  such as `--show-notes` (lists informational notes on the server's
+  stderr), `--no-spawn`, `--untrusted`, `--no-gitignore` or
+  `-c <your config>`; see
+  [`alint lsp`](/docs/cli/lsp/#flags).
+- **Workspace trust**: the `trusted` initialization option, below.
+
+## Workspace trust
+
+A repository's `.alint.yml` can run commands (`kind: command` and the
+other spawning rules, `custom:` facts), fetch a remote `extends:`, set
+`allow_out_of_root:`, and read your environment. The language server turns
+all of that off until
+the editor tells it the workspace is trusted, with the initialization
+option `{"trusted": true}`; with no option the workspace is untrusted.
+The [`alint lsp`](/docs/cli/lsp/#workspace-trust) page lists exactly
+what is off.
+
+**VS Code** sends its own Workspace Trust state: in Restricted Mode the
+server is untrusted, and granting trust restarts it trusted. Nothing to
+configure. The workspace's own `alint.path` and `alint.serverArgs` are
+ignored in Restricted Mode.
+
+In other editors, opt in per editor in your **user-level** config. Do not
+put it in settings the repository can supply (a workspace
+`.helix/languages.toml`, `.zed/settings.json`, an `exrc` `.nvim.lua`):
+the repository could then trust itself. Each snippet below trusts every
+workspace the editor opens with alint, so use it only if you open
+repositories you trust.
+
+- **Neovim** (0.11+):
+
+  ```lua
+  vim.lsp.config("alint", { init_options = { trusted = true } })
+  ```
+
+- **Helix** (`~/.config/helix/languages.toml`):
+
+  ```toml
+  [language-server.alint]
+  command = "alint"
+  args = ["lsp"]
+  config = { trusted = true }
+  ```
+
+- **Sublime Text** (LSP settings, in `clients.alint`):
+
+  ```json
+  "initializationOptions": { "trusted": true }
+  ```
+
+- **Zed** (user `settings.json`):
+
+  ```json
+  "lsp": { "alint": { "initialization_options": { "trusted": true } } }
+  ```
+
+- **Emacs**, Eglot: add `:initializationOptions (:trusted t)` after the
+  command, for example `("alint" "lsp" :initializationOptions (:trusted t))`
+  (with the bundled `alint.el`, set `alint-trusted` to `t`). lsp-mode:
+  pass `:initialization-options (lambda () (list :trusted t))` to
+  `make-lsp-client`.
+- **JetBrains** and **Eclipse** (LSP4E): the plugin and LSP4E's settings
+  do not send the option yet, so the server stays untrusted there. To
+  lint with command rules, start the server with your own config instead
+  (`alint lsp -c <file>`), which is trusted as `alint check -c` is.
 
 ## Authoring rules with editor support
 

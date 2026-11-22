@@ -22,6 +22,17 @@ A specific file:
 alint validate-config path/to/.alint.yml
 ```
 
+Check that a config starts no process (no command rule, spawning fix,
+`custom:` fact or rule that runs Git), fetches no remote `extends:`, does not
+set `allow_out_of_root:`, and needs no environment value, for example before
+linting a repository you do not trust:
+
+```bash
+alint validate-config --untrusted
+```
+
+`--no-spawn` checks the processes alone.
+
 ## Reference
 
 ```
@@ -41,8 +52,9 @@ Arguments:
 Options:
   -f, --format <FORMAT>
           Output format. `human` prints a one-line success or a rich error trace; `json` emits a
-          stable `{"valid": bool, "rule_count": N, "config_path": ..., "error": "...?"}` envelope
-          for editor / CI consumption
+          stable `{"valid": bool, "rule_count": N, "config_path": ..., "config_version": N, "error":
+          "...?", "warnings": [...]}` envelope for editor / CI consumption (a failure carries no
+          `config_version` or `warnings`)
 
           [default: human]
           [possible values: human, json]

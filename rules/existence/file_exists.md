@@ -12,6 +12,8 @@ Fix: `file_create` — write a declared `content`. With an array of `paths`, the
 
 **Optional `git_tracked_only: true`** further requires that the matching file be in git's index — useful for rules like "every release must commit a CHANGELOG entry" where local-only files shouldn't satisfy the requirement. If Git cannot be run or the lint root is not a Git repository, the rule reports a `resource_read` analysis failure. See [The walker and `.gitignore`](/docs/concepts/targeting/the-walker-and-git/) for the full semantics.
 
+A tracked file counts even when an ignore file excludes it (alint 0.22 and earlier did not see it); the config's `ignore:` still excludes what it lists.
+
 ## Options
 
 | Option | Type | Required | Default | Description |

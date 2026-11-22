@@ -50,9 +50,9 @@ this baseline covers the dominant single-root-package case.
 | --- | --- |
 | [php-composer-name-format](#php-composer-name-format)<br>`warning` | PHP: composer.json `name` must be a lowercase `vendor/package` identifier (Composer/Packagist reject other forms). |
 | [php-composer-psr4-dirs-resolve](#php-composer-psr4-dirs-resolve)<br>`warning` | PHP: every composer.json `autoload.psr-4` directory must exist (Composer cannot build the autoloader otherwise). |
-| [php-composer-autoload-files-resolve](#php-composer-autoload-files-resolve)<br>`warning` | PHP: every composer.json `autoload.files` entry must exist on disk (Composer fatals at autoload time otherwise). |
-| [php-composer-autoload-dev-files-resolve](#php-composer-autoload-dev-files-resolve)<br>`info` | PHP: every composer.json `autoload-dev.files` entry should exist on disk (it is require()'d under --dev). |
-| [php-composer-bin-resolve](#php-composer-bin-resolve)<br>`warning` | PHP: every composer.json `bin` entry must exist on disk (Composer symlinks it as a vendor binary). |
+| [php-composer-autoload-files-resolve](#php-composer-autoload-files-resolve)<br>`warning` | PHP: every composer.json `autoload.files` entry must exist and not be ignored (Composer fatals at autoload time otherwise). |
+| [php-composer-autoload-dev-files-resolve](#php-composer-autoload-dev-files-resolve)<br>`info` | PHP: every composer.json `autoload-dev.files` entry should exist and not be ignored (it is require()'d under --dev). |
+| [php-composer-bin-resolve](#php-composer-bin-resolve)<br>`warning` | PHP: every composer.json `bin` entry must exist and not be ignored (Composer symlinks it as a vendor binary). |
 | [php-no-vendor-committed](#php-no-vendor-committed)<br>`warning` | PHP: Composer's `vendor/` directory must not be committed; add it to .gitignore and run `composer install` to restore it. |
 
 All 6 rules run only when `facts.has_php` holds, so the ruleset stays quiet in repositories it doesn't apply to.
@@ -121,7 +121,7 @@ Every PSR-4 autoload namespace root must exist as a directory — Composer fails
 - **when**: `facts.has_php`
 - **policy**: <https://getcomposer.org/doc/04-schema.md#files>
 
-> PHP: every composer.json `autoload.files` entry must exist on disk (Composer fatals at autoload time otherwise).
+> PHP: every composer.json `autoload.files` entry must exist and not be ignored (Composer fatals at autoload time otherwise).
 
 ```yaml
 - id: php-composer-autoload-files-resolve
@@ -132,8 +132,8 @@ Every PSR-4 autoload namespace root must exist as a directory — Composer fails
   expect: file
   level: warning
   message: >-
-    PHP: every composer.json `autoload.files` entry must exist on
-    disk (Composer fatals at autoload time otherwise).
+    PHP: every composer.json `autoload.files` entry must exist and
+    not be ignored (Composer fatals at autoload time otherwise).
   policy_url: "https://getcomposer.org/doc/04-schema.md#files"
 ```
 
@@ -146,7 +146,7 @@ The dev counterpart (test bootstraps / fixtures). Info-level because it only loa
 - **when**: `facts.has_php`
 - **policy**: <https://getcomposer.org/doc/04-schema.md#files>
 
-> PHP: every composer.json `autoload-dev.files` entry should exist on disk (it is require()'d under --dev).
+> PHP: every composer.json `autoload-dev.files` entry should exist and not be ignored (it is require()'d under --dev).
 
 ```yaml
 - id: php-composer-autoload-dev-files-resolve
@@ -158,7 +158,7 @@ The dev counterpart (test bootstraps / fixtures). Info-level because it only loa
   level: info
   message: >-
     PHP: every composer.json `autoload-dev.files` entry should
-    exist on disk (it is require()'d under --dev).
+    exist and not be ignored (it is require()'d under --dev).
   policy_url: "https://getcomposer.org/doc/04-schema.md#files"
 ```
 
@@ -171,7 +171,7 @@ Declared console binaries (`composer global require` symlinks them into the bin-
 - **when**: `facts.has_php`
 - **policy**: <https://getcomposer.org/doc/articles/vendor-binaries.md>
 
-> PHP: every composer.json `bin` entry must exist on disk (Composer symlinks it as a vendor binary).
+> PHP: every composer.json `bin` entry must exist and not be ignored (Composer symlinks it as a vendor binary).
 
 ```yaml
 - id: php-composer-bin-resolve
@@ -182,8 +182,8 @@ Declared console binaries (`composer global require` symlinks them into the bin-
   expect: file
   level: warning
   message: >-
-    PHP: every composer.json `bin` entry must exist on disk
-    (Composer symlinks it as a vendor binary).
+    PHP: every composer.json `bin` entry must exist and not be
+    ignored (Composer symlinks it as a vendor binary).
   policy_url: "https://getcomposer.org/doc/articles/vendor-binaries.md"
 ```
 

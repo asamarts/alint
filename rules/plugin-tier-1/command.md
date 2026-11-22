@@ -29,6 +29,7 @@ Output is drained while the child runs (a child writing more than a pipe buffer 
 
 **Path confinement + `allow_out_of_root`.** Every config-declared path is confined to the repo root — a rule can't read or resolve a file outside the tree it was pointed at. The top-level-only `allow_out_of_root:` key relaxes this for *reads* (`json_schema_passes` `schema_path:`, `pair_hash` `target:`, `registry_paths_resolve` `source:`) when a trusted config must reference an external file, and, under `alint fix`, for the owning rule's fix paths (`file_create`, `dir_create`, `sync_from`, and `create_and_register` targets, plus `content_from` reads); editor code actions always stay confined. It is **rejected from `extends:`'d rulesets** (same trust model as the spawn gate above) and a permitted read emits a note. See [Configuration → `allow_out_of_root`](/docs/configuration/#allow_out_of_root).
 
+`allow_out_of_root:` is also refused under `--untrusted`, in a language server workspace that is not trusted, and in a policy test.
 
 `--changed` interaction: `command` is a per-file rule, so under `alint check --changed` it spawns only for files in the diff. The expensive check is automatically incremental in CI.
 

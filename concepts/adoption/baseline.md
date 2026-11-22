@@ -57,6 +57,7 @@ So inserting or deleting unrelated lines never churns the baseline. **Editing th
 
 A finding whose path alint hides (`<redacted>`, because a field that chooses files was [read from the environment](/docs/configuration/variable-interpolation/)) is the exception: from v0.22 its fingerprint leaves out the path and the content, so a rule's hidden-path findings share one fingerprint and the baseline matches them by count.
 
+A baseline file written by v0.21 or earlier recorded each of these findings under a fingerprint of its path. v0.22 still matched that form, but v0.23 does not: those entries show as stale and their findings as new. Regenerate the file once. Because `alint baseline` counts the findings as new, the run needs `--accept-new`.
 
 ## The baseline file
 

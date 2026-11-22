@@ -88,6 +88,13 @@ keeps the count of the rest. Each format that has a place for related locations 
 
 - **`human`** lists each related label and path below the finding, then a line `and N more
   related locations`.
+- **`json`** adds `related_locations` to the violation, note or baselined finding: an array of
+  `{ "path", "label" }` objects, each with `line`, `column`, `end_line` and `end_column` when its
+  range is known (1-based, Unicode code points, the end exclusive, as SARIF regions). The names
+  follow the violation's own `line` and `column`, not SARIF's `startLine` and `startColumn`. The
+  count of the rest is `related_locations_omitted`. Both are omitted when there are none, so a
+  finding without related locations keeps its earlier shape, and the report stays
+  `schema_version: 1`. The items of `alint fix --format json` carry no related locations.
 - **`sarif`** projects the primary range into the result's first physical location and emits the
   secondary locations in `relatedLocations`, including regions when known. SARIF columns use
   Unicode code points. The count of the rest is one more related location at the config file,
@@ -106,6 +113,16 @@ per finding, or none, and no related locations.
 In `sarif`, every result has a location: a finding that isn't tied to one file (a missing `LICENSE`, a tree-level rule) is anchored on line 1 of the config file that loaded the rule, since GitHub Code Scanning drops results without a location. The run declares `columnKind: "unicodeCodePoints"`, because alint counts columns in Unicode characters (in fix regions too), and artifact URIs percent-encode `:` so a file like `a:b.txt` isn't read as a URI scheme. On Unix, URI encoding uses the original filename bytes, so distinct non-UTF-8 paths cannot alias. JSON and agent reports omit the optional `proposed_edit` field when an edit path has no exact JSON string representation; their safe `fix_command` remains available.
 
 `sarif` and `gitlab` attach a stable per-finding fingerprint (SARIF `partialFingerprints`, GitLab `fingerprint`) to every **policy-violation** result — not only when a `--baseline` is active. SARIF's is the canonical `violation_fingerprint`, the same identity the [baseline](/docs/concepts/adoption/baseline/) file records, so an alert keeps one identity across SARIF and the baseline. A finding with a `<redacted>` path carries a fingerprint without its path, which the rule's other such findings share. A finding with a unique fingerprint carries that same identity in GitLab too; when multiple findings in one report share a fingerprint, GitLab keeps the canonical fingerprint on the first and derives an occurrence fingerprint for each later one, because GitLab Code Quality drops entries that share a fingerprint. GitLab analysis-failure issues receive only the deterministic transport identity its schema requires; SARIF analysis failures have no `partialFingerprints`. GitHub Code Scanning uses policy findings' SARIF fingerprints to correlate alerts across runs — dedupe, and track a finding as fixed or reopened — with no `--baseline` required.
+A `constraint` finding's fingerprint leaves its path out, as a `<redacted>` path's does. SARIF also
+tells apart findings in one run that share a fingerprint, so GitHub Code Scanning does not merge
+them: both SARIF and GitLab number repeats by the path, line and column they show, then rule and
+message (a baselined result before a live one in SARIF). The first keeps the canonical fingerprint
+the baseline file records, and each other carries a fingerprint derived from it and its number, so
+each stays its own alert. A repeat keeps its fingerprint while the repeats that sort before it
+stay; one that sorts before it, new or gone, shifts it, baselined or not, as the baseline
+suppresses the first findings of a fingerprint in that order, up to its count. Without a baseline,
+SARIF and GitLab give each finding the same value (before 0.23.0, GitLab numbered repeats in the
+order it wrote them). A run in which no fingerprint repeats is written as before.
 
 ## Baseline suppression
 

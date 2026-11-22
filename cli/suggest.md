@@ -22,6 +22,10 @@ Only strong signals, each with the file-level evidence behind it:
 alint suggest --confidence high --explain
 ```
 
+In a repository you do not trust, `--untrusted` (or `--no-spawn`) keeps `suggest` from running
+Git, which runs the commands the repository's `.git/config` names; it then proposes no stale-TODO
+rule, which needs Git to date each line.
+
 ## Reference
 
 ```

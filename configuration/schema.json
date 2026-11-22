@@ -140,7 +140,7 @@
         },
         {
           "const": "no_dangling",
-          "description": "Every path-shaped reference must resolve to a path on disk.",
+          "description": "Every path-shaped reference must resolve to a path in the walked tree.",
           "type": "string"
         },
         {
@@ -223,7 +223,7 @@
           "$ref": "#/$defs/FileGraphRequireMap"
         }
       ],
-      "description": "`require:` is either a bare string (`acyclic`) or a map (`{ forbidden_edges: [...] }`). A scalar and a map are structurally distinct, so an untagged enum decodes them unambiguously (the proven `cross_file_value_equals` `targets:` pattern - not the externally-tagged-enum-from-map trap `crate::extract` documents)."
+      "description": "`require:` is either a bare string (`acyclic`) or a map (`{ forbidden_edges: [...] }`)."
     },
     "FileGraphResolve": {
       "description": "How a content-extracted reference string is turned into a path.",
@@ -471,7 +471,7 @@
           "type": "array"
         }
       ],
-      "description": "`normalize:` accepts a single transform (`trim`) or an ordered list (`[trim, semver-minor]`), applied left-to-right. A scalar vs a sequence are structurally distinct, so an untagged enum decodes them unambiguously."
+      "description": "`normalize:` accepts a single transform (`trim`) or an ordered list (`[trim, semver-minor]`), applied left-to-right."
     },
     "NormalizeTransform": {
       "oneOf": [
@@ -521,10 +521,10 @@
     },
     "RegistryOrphansSpec": {
       "additionalProperties": false,
-      "description": "Enable the reverse-completeness check: on-disk artefacts under the `space` glob that no entry references. Findings use the rule's top-level `level`; omit `orphans` to disable the reverse check.",
+      "description": "Enable the reverse-completeness check: paths in the walked tree under the `space` glob that no entry references. Findings use the rule's top-level `level`; omit `orphans` to disable the reverse check.",
       "properties": {
         "space": {
-          "description": "Glob of on-disk artefacts that should each be referenced.",
+          "description": "Glob of walked paths that should each be referenced.",
           "type": "string"
         }
       },
@@ -563,7 +563,7 @@
         },
         {
           "const": "resolves",
-          "description": "Each extracted source path must exist on disk (file or dir).",
+          "description": "Each extracted source path must resolve to a file or dir in the walked tree.",
           "type": "string"
         },
         {
@@ -2381,7 +2381,7 @@
       "type": "object"
     },
     "rule_cross_file": {
-      "description": "A `source` file must hold a `relation` to one or more `targets` (or the filesystem). Value relations extract values: `equals` (default - every target value equals the single source value; the released `cross_file_value_equals`), `subset` / `superset` / `set_equals` (the source's extracted set vs each target's set). `identical` compares whole files byte-for-byte (no `extract`; optional `skip_header_lines`). `resolves` checks that each path the source extracts exists on disk (`source.extract`, no `targets` - the forward half of `registry_paths_resolve`). `targets` is a `{ files: <glob>, extract }` map or a `[{ file, extract }]` list. `normalize` relaxes value comparison. Non-literal values are skipped, not failed. `cross_file_value_equals` is a byte-compatible alias (relation defaults to equals). The per-relation shape (which of `source.extract` / `targets` is present) is validated at load.",
+      "description": "A `source` file must hold a `relation` to one or more `targets` (or the walked tree). Value relations extract values: `equals` (default - every target value equals the single source value; the released `cross_file_value_equals`), `subset` / `superset` / `set_equals` (the source's extracted set vs each target's set). `identical` compares whole files byte-for-byte (no `extract`; optional `skip_header_lines`). `resolves` checks that each path the source extracts is in the walked tree (`source.extract`, no `targets` - the forward half of `registry_paths_resolve`). `targets` is a `{ files: <glob>, extract }` map or a `[{ file, extract }]` list. `normalize` relaxes value comparison. Non-literal values are skipped, not failed. `cross_file_value_equals` is a byte-compatible alias (relation defaults to equals). The per-relation shape (which of `source.extract` / `targets` is present) is validated at load.",
       "not": {
         "anyOf": [
           {
@@ -2439,7 +2439,7 @@
         },
         "relation": {
           "$ref": "#/$defs/Relation",
-          "description": "The assertion checked between the source and each target: `equals` (default), `subset`, `superset`, `set_equals`, `identical` (whole file byte-for-byte), or `resolves` (each path the source extracts exists on disk)."
+          "description": "The assertion checked between the source and each target: `equals` (default), `subset`, `superset`, `set_equals`, `identical` (whole file byte-for-byte), or `resolves` (each path the source extracts resolves in the walked tree)."
         },
         "skip_header_lines": {
           "default": null,
@@ -2464,7 +2464,7 @@
               "type": "null"
             }
           ],
-          "description": "The file(s) compared against the source, one relation check per target. Absent for `resolves` (the target is the filesystem)."
+          "description": "The file(s) compared against the source, one relation check per target. Absent for `resolves` (the target is the walked tree)."
         }
       },
       "required": [
@@ -2490,7 +2490,7 @@
       "properties": {
         "git_tracked_only": {
           "default": false,
-          "description": "Restrict matches to directories that contain at least one git-tracked file. Repository unavailability is an analysis failure when enabled. Default `false`.",
+          "description": "Restrict matches to directories that contain at least one git-tracked file, including one that only an ignore file hides from the walk. Repository unavailability is an analysis failure when enabled. Default `false`.",
           "type": "boolean"
         },
         "kind": {
@@ -2613,7 +2613,7 @@
         },
         "git_tracked_only": {
           "default": false,
-          "description": "Restrict matches to directories that contain at least one git-tracked file. Repository unavailability is an analysis failure when enabled. Default `false`.",
+          "description": "Restrict matches to directories that contain at least one git-tracked file, including one that only an ignore file hides from the walk. Repository unavailability is an analysis failure when enabled. Default `false`.",
           "type": "boolean"
         },
         "kind": {
@@ -3007,7 +3007,7 @@
         },
         "git_tracked_only": {
           "default": false,
-          "description": "Restrict matches to files tracked in git's index: entries present in the walked tree but not in `git ls-files` are skipped. Repository unavailability is an analysis failure when enabled. Default `false`.",
+          "description": "Restrict matches to files tracked in git's index: entries present in the walked tree but not in `git ls-files` are skipped, and a tracked file that only an ignore file hides from the walk is seen. Repository unavailability is an analysis failure when enabled. Default `false`.",
           "type": "boolean"
         },
         "kind": {
@@ -3170,7 +3170,7 @@
         },
         "git_tracked_only": {
           "default": false,
-          "description": "Restrict matches to files tracked in git's index: entries present in the walked tree but not in `git ls-files` are skipped. Repository unavailability is an analysis failure when enabled. Default `false`.",
+          "description": "Restrict matches to files tracked in git's index: entries present in the walked tree but not in `git ls-files` are skipped, and a tracked file that only an ignore file hides from the walk is seen. Repository unavailability is an analysis failure when enabled. Default `false`.",
           "type": "boolean"
         },
         "kind": {
@@ -6634,7 +6634,7 @@
       "type": "object"
     },
     "rule_registry_paths_resolve": {
-      "description": "A manifest enumerates path entries; each must resolve to an on-disk artefact. `extract` selects how the entry list is pulled (structured-query toml/json/yaml/xml/dotenv/properties/ini/hcl, a line list, or regex capture group 1). Optional `orphans` adds the reverse check: on-disk artefacts under `space` that no entry references. Non-literal entries (interpolation / antiquotation) are skipped, not failed.",
+      "description": "A manifest enumerates path entries; each must resolve to a path in the walked tree, so an entry that an ignore file or `ignore:` excludes does not resolve. `extract` selects how the entry list is pulled (structured-query toml/json/yaml/xml/dotenv/properties/ini/hcl, a line list, or regex capture group 1). Optional `orphans` adds the reverse check: walked paths under `space` that no entry references. Non-literal entries (interpolation / antiquotation) are skipped, not failed.",
       "not": {
         "anyOf": [
           {
@@ -6683,7 +6683,7 @@
         },
         "expect": {
           "$ref": "#/$defs/Expect",
-          "description": "Constrain the kind each entry must resolve to on disk: `any` (default), `file`, or `dir`."
+          "description": "Constrain the kind each entry must resolve to: `any` (default), `file`, or `dir`. Entries resolve against the walked tree, so a path an ignore file or `ignore:` excludes does not resolve."
         },
         "extract": {
           "$ref": "#/$defs/extract_spec",
@@ -7370,7 +7370,7 @@
   "description": "Schema for .alint.yml configuration files. Authoritative reference: docs/design/ARCHITECTURE.md in the alint repository.",
   "properties": {
     "allow_out_of_root": {
-      "description": "Top-level-only escape hatch for path confinement: permit rules to read a config-declared path that escapes the repo root. `true` allows every rule; a map `{ kinds: [...], rules: [...] }` allows only the listed rule kinds / ids. Absent or `false` keeps the secure default (every config-derived path read is confined). REJECTED from `extends:`'d rulesets - only the user's own top-level config may set it. Applies to file reads (currently `registry_paths_resolve` source, `json_schema_passes` schema_path, `pair_hash` target); resolve/index checks stay confined. Permitted reads emit an informational note. See docs/design/v0.12/allow_out_of_root.md.",
+      "description": "Top-level-only escape hatch for path confinement: permit the top-level config's own rules (and their fixes) to read or write a config-declared path outside the repo root, and (with `true`) let local `extends:` resolve outside the repo root. `true` allows every top-level rule; a map `{ kinds: [...], rules: [...] }` allows only the listed rule kinds / ids. Absent or `false` keeps the secure default (every config-derived path read and write is confined). REJECTED from `extends:`'d rulesets, nested configs, `--untrusted`, untrusted LSP workspaces, and `alint test`, and never covers rules shaped by an `extends:` ruleset or nested config or paths inside any Git directory. Permitted rule reads emit an informational note. See docs/design/v0.12/allow_out_of_root.md.",
       "oneOf": [
         {
           "type": "boolean"

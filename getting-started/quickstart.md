@@ -38,7 +38,7 @@ error    needs-readme  file_exists [fix]
 warning  no-bak  file_absent
 ```
 
-`alint explain <id>` resolves a single rule to its full definition — its kind and categories, a one-line `summary:` of what the kind checks plus a `docs:` link to the reference, the kind's host `capabilities:`, kind-specific `selectors:`, accepted `fix_ops:`, the level, the `paths:` scope, any kind-specific `options:`, the author `message:`, the `when:` clause as authored, and a one-line description of the configured auto-fix:
+`alint explain <id>` resolves a single rule to its full definition — its kind and categories, a one-line `summary:` of what the kind checks plus a `docs:` link to the reference, the kind's host `capabilities:`, kind-specific `selector fields:`, accepted `fix_ops:`, the level, the `paths:` scope, any kind-specific `options:`, the author `message:`, the `when:` clause as authored, and a one-line description of the configured auto-fix:
 
 ```text
 id:         needs-readme
@@ -46,7 +46,7 @@ kind:       file_exists
 categories: existence
 summary:    Every glob match in paths must correspond to a real file.
 capabilities: git(tracked_set) [when git_tracked_only is set]
-selectors:   none
+selector fields: none
 fix_ops:     file_create
 docs:       https://alint.org/docs/rules/existence/file_exists/
 level:      error
@@ -63,7 +63,7 @@ kind:       file_max_size
 categories: content, structure
 summary:    File must be at most max_bytes in size.
 capabilities: git(diff) [when scope_filter.changed_since is set]
-selectors:   none
+selector fields: none
 fix_ops:     none
 docs:       https://alint.org/docs/rules/content/file_max_size/
 level:      warning
@@ -71,7 +71,7 @@ paths:      **/*.md
 options:    max_bytes: 10240
 ```
 
-Pass `--no-docs` to drop the `docs:` line (handy for narrow terminals and screen recordings). Add `--format json` to either for the machine shape: `explain <id> --format json` carries `rule_kind`, `categories`, `summary`, `docs`, `capabilities`, `selectors`, `fix_ops`, `paths`, `options`, `message`, `when`, `conditional`, `fixable`, and `fix`.
+Pass `--no-docs` to drop the `docs:` line (handy for narrow terminals and screen recordings). Add `--format json` to either for the machine shape: `explain <id> --format json` carries `rule_kind`, `categories`, `summary`, `docs`, `capabilities`, `selectors`, `fix_ops`, `paths`, `options`, `message`, `when`, `conditional`, `fixable`, and `fix`, and for a `constraint` rule its resolved `plan`.
 
 Add `--trace` when the static definition is not enough: alint walks the
 repository, evaluates only that effective rule through the production engine,
@@ -111,7 +111,7 @@ file_header
   categories: Content
   aliases:    header
   capabilities: git(diff) [when scope_filter.changed_since is set]
-  selectors:    none
+  selector fields: none
   fix_ops:      file_prepend, insert_header
   docs:       https://alint.org/docs/rules/content/file_header/
 ```

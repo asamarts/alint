@@ -8,6 +8,7 @@ categories: ['git-hygiene', 'cross-file']
 
 The `<since>...HEAD` diff must **add** (git status `A`) at least one path matching `add_glob:` — the "did you add a changelog entry?" gate. Three corpus signals: prettier's `changelog_unreleased/`, cpython's `Misc/NEWS.d/next/`, pnpm's `.changeset/*.md`. `since:` (the base ref) is required — the rule asserts about the *set of files a contribution adds*, so it's diff-scoped. An optional `when_changed:` gates the requirement on some other glob having changed (don't demand a changelog for a docs-only PR); with no gate, any non-empty changeset triggers it. Builds on the same `<since>...HEAD` three-dot (merge-base) diff as `alint check --changed`. Git or repository unavailability is a `resource_read` analysis failure; no relevant changes is a normal pass; a `since:` that fails to resolve hard-fails with a shallow-clone hint.
 
+`add_glob:` reads renames itself, whatever Git's `diff.renames` setting says: a moved file is not an added one, and a copied file is. `when_changed:` reads both paths of a rename, so a file renamed out of its glob counts as changed.
 
 ---
 

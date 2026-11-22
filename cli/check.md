@@ -9,7 +9,11 @@ an error-level policy violation or an analysis failure occurs. Run it bare
 locally, with `--changed` as a fast pre-commit or PR gate, and with a machine
 format in CI.
 
-It reads `.alint.yml` from the directory it checks, honours `.gitignore` while
+It reads `.alint.yml` from the directory it checks, or from the nearest one
+above it up to the repository's top (the nearest directory holding `.git`; a
+config above that never governs the repository, and outside every repository a
+config another user owns in a directory above the checked one is skipped with a
+warning), honours `.gitignore` while
 walking, and never modifies a file: repairs are [`alint fix`](/docs/cli/fix/)'s
 job. `alint` with no subcommand runs the same check on the current directory.
 
@@ -102,6 +106,29 @@ block.
 - **`--only <rule-id>`** runs one rule (repeatable), handy while writing or
   debugging a rule.
 - **`--fail-on-warning`** turns warnings into a failing exit code.
+- **`--no-spawn`** refuses a config that would start a process: a rule of a
+  spawning kind such as `kind: command` (at any `require:` depth), a spawning
+  fix such as `git_untrack`, or a `custom:` fact. Git runs the commands a
+  repository's `.git/config` names, so a rule that runs Git (the `git_*`
+  kinds, `changeset_requires_path`, `pair_changed_together`,
+  `git_tracked_only`, `scope_filter.changed_since`) is refused too, and so
+  are `--changed` and `--base`; alint runs no Git. The config fails to
+  load, naming the rule, before anything runs. The flag is global: `fix`,
+  `baseline`, `list`, `explain`, `facts`, `validate-config`,
+  `export-agents-md`, `suggest` (which then runs no Git and skips its
+  stale-TODO suggestion) and `lsp` take it too.
+- **`--untrusted`** lints a repository you do not trust. A repository's own
+  `.alint.yml` is trusted like its `Makefile`; this flag is the language
+  server's untrusted mode for the command line. It refuses everything
+  `--no-spawn` refuses, naming itself; refuses a remote `extends:` before
+  anything is fetched, and `allow_out_of_root:`, which would let the config
+  read and write outside the repository; and gives the config an empty
+  environment, so `{{env.NAME}}` takes its `default(...)` (or fails to load
+  without one) and `env.NAME` in a `when:` is unset. `--no-spawn` alone leaves those three open:
+  the config still fetches its remote `extends:`, may set `allow_out_of_root:`, and reads the
+  environment, and an `extends:` URL built from environment values carries them to the host it
+  names. Use `--untrusted`, or your own config (`-c`), for a repository you do not trust. The flag
+  is global, like `--no-spawn`.
 - **`--as-of YYYY-MM-DD`** sets the UTC reference date for time-dependent
   rules; `ALINT_AS_OF` is the environment equivalent. Without either, alint
   uses the HEAD commit's committer timestamp, so repeated checks of one commit
@@ -162,8 +189,8 @@ Arguments:
 Options:
       --changed
           Restrict the check to paths changed in Git. Without `--base`, includes staged, unstaged,
-          and untracked paths (the right shape for pre-commit). With `--base`, uses `git diff
-          --name-only <base>...HEAD` (right shape for PR checks). Cross-file rules (`pair`,
+          and untracked paths (the right shape for pre-commit). With `--base`, uses `git diff --raw
+          --no-renames <base>...HEAD` (right shape for PR checks). Cross-file rules (`pair`,
           `for_each_dir`, `every_matching_has`, `unique_by`, `dir_contains`, `dir_only_contains`)
           and existence rules (`file_exists` et al.) still consult the full tree by definition
 

@@ -107,7 +107,7 @@ Maven (`pom.xml`) or Gradle (Groovy or Kotlin DSL). Either is fine; mixed setups
 - **level**: `error`
 - **when**: `facts.has_java`
 
-> Maven's `target/` is a build directory and shouldn't be committed. Add `target/` to your `.gitignore`.
+> Maven's `target/` is a build directory and shouldn't be committed. If this one holds build output, untrack it with `git rm -r --cached` and list `target/` in your `.gitignore`.
 
 ```yaml
 - id: java-no-tracked-target
@@ -118,7 +118,8 @@ Maven (`pom.xml`) or Gradle (Groovy or Kotlin DSL). Either is fine; mixed setups
   level: error
   message: >-
     Maven's `target/` is a build directory and shouldn't be
-    committed. Add `target/` to your `.gitignore`.
+    committed. If this one holds build output, untrack it with
+    `git rm -r --cached` and list `target/` in your `.gitignore`.
 ```
 
 ### `java-no-tracked-build`
@@ -127,7 +128,7 @@ Maven (`pom.xml`) or Gradle (Groovy or Kotlin DSL). Either is fine; mixed setups
 - **level**: `error`
 - **when**: `facts.has_java`
 
-> Gradle's `build/` is a build directory and shouldn't be committed. Add `build/` to your `.gitignore`.
+> Gradle's `build/` is a build directory and shouldn't be committed. If this one holds build output, untrack it with `git rm -r --cached` and list `build/` in your `.gitignore`.
 
 ```yaml
 - id: java-no-tracked-build
@@ -138,7 +139,8 @@ Maven (`pom.xml`) or Gradle (Groovy or Kotlin DSL). Either is fine; mixed setups
   level: error
   message: >-
     Gradle's `build/` is a build directory and shouldn't be
-    committed. Add `build/` to your `.gitignore`.
+    committed. If this one holds build output, untrack it with
+    `git rm -r --cached` and list `build/` in your `.gitignore`.
 ```
 
 ### `java-no-class-files`
@@ -147,7 +149,7 @@ Maven (`pom.xml`) or Gradle (Groovy or Kotlin DSL). Either is fine; mixed setups
 - **level**: `error`
 - **when**: `facts.has_java`
 
-> Compiled `.class` files don't belong in version control. Build them from the `.java` sources instead.
+> Compiled `.class` files don't belong in version control. Untrack them with `git rm --cached` and build them from the `.java` sources instead.
 
 ```yaml
 - id: java-no-class-files
@@ -158,7 +160,8 @@ Maven (`pom.xml`) or Gradle (Groovy or Kotlin DSL). Either is fine; mixed setups
   level: error
   message: >-
     Compiled `.class` files don't belong in version control.
-    Build them from the `.java` sources instead.
+    Untrack them with `git rm --cached` and build them from the
+    `.java` sources instead.
 ```
 
 ### `java-sources-pascal-case`

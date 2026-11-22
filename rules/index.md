@@ -6,7 +6,7 @@ sidebar:
   label: 'Index'
 ---
 
-alint ships 114 rule kinds across 13 families (103 distinct rule behaviors plus 11 short-name aliases like `content_matches` → `file_content_matches`). Each rule is one entry in your `.alint.yml` under `rules:`.
+alint ships 115 rule kinds across 13 families (104 distinct rule behaviors plus 11 short-name aliases like `content_matches` → `file_content_matches`). Each rule is one entry in your `.alint.yml` under `rules:`.
 
 ## By family
 
@@ -21,7 +21,7 @@ alint ships 114 rule kinds across 13 families (103 distinct rule behaviors plus 
 - [Portable metadata](/docs/rules/portable-metadata/) — 4 rules
 - [Unix metadata](/docs/rules/unix-metadata/) — 5 rules
 - [Git hygiene](/docs/rules/git-hygiene/) — 13 rules
-- [Cross-file](/docs/rules/cross-file/) — 22 rules
+- [Cross-file](/docs/rules/cross-file/) — 23 rules
 - [Plugin (tier 1)](/docs/rules/plugin-tier-1/) — 1 rule
 
 ## Alphabetical
@@ -30,7 +30,8 @@ alint ships 114 rule kinds across 13 families (103 distinct rule behaviors plus 
 - [`command`](/docs/rules/plugin-tier-1/command/) — Shell out to an external CLI per matched file. _(Plugin (tier 1))_
 - [`command_idempotent`](/docs/rules/cross-file/command_idempotent/) — Run a user-declared formatter/checker in its **`--check` (idempotence) mode** once: exit `0` ⇒ the tree is formatter-clean (silent); non-zero ⇒ violation(s). _(Cross-file)_
 - [`commented_out_code`](/docs/rules/git-hygiene/commented_out_code/) — Heuristic detector for blocks of commented-out source code (as opposed to prose comments, license headers, doc comments, or ASCII banners). _(Git hygiene)_
-- [`cross_file`](/docs/rules/cross-file/cross_file/) — A `source` must hold a `relation` to one or more `targets` (or, for `resolves`, the filesystem). _(Cross-file)_
+- [`constraint`](/docs/rules/cross-file/constraint/) — _Version 2 only, experimental._ An assertion over the rows of a relation: equal values, unique keys, or a set of values per group compared with a reference group or another relation's field. _(Cross-file)_
+- [`cross_file`](/docs/rules/cross-file/cross_file/) — A `source` must hold a `relation` to one or more `targets` (or, for `resolves`, the walked tree). _(Cross-file)_
 - [`dir_absent`](/docs/rules/existence/dir_absent/) — Directory counterpart of `file_absent`. _(Existence)_
 - [`dir_contains`](/docs/rules/cross-file/dir_contains/) — Every directory matching `select:` must contain files matching every glob in `require:`. _(Cross-file)_
 - [`dir_exists`](/docs/rules/existence/dir_exists/) — Directory counterpart of `file_exists`. _(Existence)_
@@ -116,7 +117,7 @@ alint ships 114 rule kinds across 13 families (103 distinct rule behaviors plus 
 - [`properties_path_absent`](/docs/rules/structured-query/properties_path_absent/) — Assert a JSONPath query over the document matches nothing; one file-level violation if present. _(Structured query)_
 - [`properties_path_equals`](/docs/rules/structured-query/properties_path_equals/) — Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value. _(Structured query)_
 - [`properties_path_matches`](/docs/rules/structured-query/properties_path_matches/) — Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. _(Structured query)_
-- [`registry_paths_resolve`](/docs/rules/cross-file/registry_paths_resolve/) — A manifest file enumerates path entries; each must resolve to an on-disk artefact. _(Cross-file)_
+- [`registry_paths_resolve`](/docs/rules/cross-file/registry_paths_resolve/) — A manifest file enumerates path entries; each must resolve to a path in the walked tree, so an entry that an ignore file or `ignore:` excludes does not resolve. _(Cross-file)_
 - [`shebang_has_executable`](/docs/rules/unix-metadata/shebang_has_executable/) — Every file starting with `#!` must have `+x` set. _(Unix metadata)_
 - [`spdx_identifier_valid`](/docs/rules/content/spdx_identifier_valid/) — Validate every `SPDX-License-Identifier:` value as a strict SPDX license expression. _(Content)_
 - [`toml_path_absent`](/docs/rules/structured-query/toml_path_absent/) — Assert a JSONPath query over the document matches nothing; one file-level violation if present. _(Structured query)_

@@ -11,6 +11,7 @@ Directory counterpart of `file_absent`. The match-and-fire semantics are the sam
 **Optional `root_only: true`** (like `dir_exists`) restricts the check to the repository root: a directory forbidden at the root does not fire on nested directories of the same name.
 **Optional `git_tracked_only: true`** restricts the check to directories that contain at least one git-tracked file. With it set, a developer's locally-built `target/` (gitignored, no tracked content) doesn't trigger; a `target/` whose contents made it into git's index does. If Git cannot be run or the lint root is not a Git repository, the rule reports a `resource_read` analysis failure.
 
+A tracked directory fires even when `.gitignore` lists it. The config's `ignore:` still excludes what it lists, and alint 0.22 and earlier did not see a tracked directory that an ignore file excludes.
 
 See [The walker and `.gitignore`](/docs/concepts/targeting/the-walker-and-git/) for the full semantics.
 

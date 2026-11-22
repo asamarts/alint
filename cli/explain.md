@@ -27,7 +27,7 @@ kind:       file_exists
 categories: existence
 summary:    Every glob match in paths must correspond to a real file.
 capabilities: git(tracked_set) [when git_tracked_only is set]
-selectors:   none
+selector fields: none
 fix_ops:     file_create
 docs:       https://alint.org/docs/rules/existence/file_exists/
 level:      warning
@@ -43,8 +43,9 @@ The fields, top to bottom:
   kind, the check this rule is an instance of. The `docs` link is that kind's
   reference page, with every option it accepts.
 - **`capabilities`** lists host access the kind can require and the condition
-  that activates conditional access; **`selectors`** lists accepted
-  kind-specific selector fields; **`fix_ops`** lists compatible fix operations.
+  that activates conditional access; **`selector fields`** lists accepted
+  kind-specific selector fields (`selectors` in JSON); **`fix_ops`** lists
+  compatible fix operations.
 - **`level`** is the effective level. If your config overrides an inherited
   rule (`level: error`, say), the override is what shows here.
 - **`paths`** and **`options`** are this rule's settings: here, any one of the

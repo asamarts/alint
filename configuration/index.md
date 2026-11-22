@@ -34,8 +34,10 @@ root version; if present, it must equal the root version.
 version: 1
 ```
 
-Each source is checked before it is merged. A future v2 consumer may read v1 or v2 sources; a v1
-consumer never accepts v2.
+Each source is checked before it is merged. `version: 2` is experimental: it adds named selectors
+and relations, and may change in any release until one declares it stable (see
+[Version 2 (experimental)](/docs/configuration/version-2/)). A version 2 config may extend version
+1 and version 2 files; a version 1 config never extends a version 2 one.
 
 ### `requires`
 
@@ -81,6 +83,10 @@ extends:
 `only:` and `except:` are mutually exclusive on a single entry. Listing an unknown rule id is a load-time error.
 
 Bundled and HTTPS configs cannot themselves declare `extends:`, because relative-path resolution in a fetched body has no principled base. Nest extends locally instead.
+
+A scheme matches in any case (`HTTPS://` is an HTTPS entry). Plain `http://` is refused, and so is
+any other `<scheme>://` (`ftp://`, `file://`, `ssh://`, `git+https://`): it is a load error
+naming the scheme, never a local path. Errors show a URL without its userinfo, query and fragment.
 
 ### `ignore`
 
@@ -374,7 +380,7 @@ Only the user's top-level config may set `nested_configs: true`. Nested configs 
 
 ### `allow_out_of_root`
 
-By default alint confines every config-declared path to the repository root: a rule can never read or resolve a path outside the tree it was pointed at. `allow_out_of_root:` is a deliberate, top-level-only opt-in to relax that for *reads*, when a trusted config needs to reference an external file (a shared JSON schema, a manifest in a sibling checkout).
+By default alint confines every config-declared path to the repository root: a rule can never read, write, or resolve a path outside the tree it was pointed at. `allow_out_of_root:` is a deliberate, top-level-only opt-in to relax that for your own rules' reads and fixes (and, with `allow_out_of_root: true`, local `extends:` entries outside the root), when a trusted config needs to reference an external file (a shared JSON schema, a manifest in a sibling checkout).
 
 ```yaml
 allow_out_of_root: true            # every rule may read out-of-root paths
@@ -390,7 +396,23 @@ allow_out_of_root:
 
 Absent or `false` keeps the secure default (full confinement).
 
-**Security.** Like the spawning-rule trust gate, `allow_out_of_root:` is honored **only** from your own top-level config: any `extends:`'d ruleset that declares it is a load-time error, so adopting a published ruleset can never grant it out-of-tree reads. It currently applies to the read kinds `json_schema_passes` (`schema_path:`), `pair_hash` (`target:`), and `registry_paths_resolve` (`source:`); a permitted read emits an informational note so the escape is never silent. Resolve/index existence checks stay confined regardless.
+**Security.** Like the spawning-rule trust gate, `allow_out_of_root:` is honored **only** from your own top-level config: any `extends:`'d ruleset that declares it is a load-time error, so adopting a published ruleset can never grant it out-of-tree access. For check-time reads it currently applies to `json_schema_passes` (`schema_path:`), `pair_hash` (`target:`), and `registry_paths_resolve` (`source:`); a permitted read emits an informational note so the escape is never silent. Resolve/index existence checks stay confined regardless, and paths in a Git directory are always refused.
+
+The option grants your own rules only: the rules your top-level config (and its `.alint.d/`
+drop-ins) declares. A rule an `extends:`'d ruleset or a nested config shaped (it declared the rule,
+contributed a field to it, or defined its template) is always confined, whatever the option says:
+`true`, a `kinds:` list naming its kind, and a `rules:` list naming its id all leave it reading only
+inside the root, and overriding such a rule by id in your own config does not make it yours. Its
+check-time read of an out-of-root path reports that the path escapes the repo root.
+
+The option also lets your own rules' fixes leave the root, for the rules it names: a
+`file_create` or `dir_create` target, a `content_from:` or `sync_from` source, and the other paths
+a fix names. A fix of a rule an `extends:`'d ruleset or a nested config shaped never writes or
+reads outside the root, and is reported skipped.
+
+A config that sets the option fails to load under `--untrusted`, in a language server workspace
+that is not trusted, and in a policy test (`alint test`): a repository you do not trust could
+otherwise copy a file from outside it into itself.
 
 ### `baseline`
 
@@ -401,6 +423,42 @@ baseline: .alint-baseline.json
 ```
 
 A `--baseline <path>` flag overrides this key. There is **no silent auto-detect**: a baseline suppresses findings only when it is explicitly opted in (via this key or the flag), never because a baseline file merely exists on disk. Write and refresh the file with `alint baseline`. See [Baseline mode](/docs/concepts/adoption/baseline/) for the full workflow, the fingerprinting semantics, and which output formats are baseline-aware.
+
+## Limits
+
+A config is untrusted for what it costs to load, so loading it is bounded:
+
+- each source (the root, an `extends:` target, a drop-in, a nested config) may be at most 32 MiB
+  (33,554,432 bytes). A larger one fails with "input exceeds the maximum supported size for a
+  structured document (33554432 bytes)" and its path. A source must be a regular file (or a
+  symlink to one): a FIFO or a device is refused unread. One byte order mark that starts a
+  source is dropped, before `---` or `%YAML` too;
+- YAML nests at most 128 levels deep, and aliases may expand a source only so far;
+- an `ignore:` pattern listed more than once, in one source or in several (as when `extends:`
+  reaches one source by two paths), is kept once. The merged config may hold at most 1,048,576
+  entries in all (rules, templates, facts, vars, `ignore:` patterns, the `vars.` reads in an
+  untrusted remote's `when:`, and version 2 selectors and relations);
+- an `extends:` list's entries and the `.alint.d/` drop-ins may load and merge at most 4,194,304
+  entries in all (rules, templates, facts, vars, `ignore:` patterns, the `vars.` reads in an
+  untrusted remote's `when:`, and each version 2 source, selector and relation): an
+  entry is charged the source it loads, before `only:` or `except:` narrows it, and each merge, an
+  entry's or a drop-in's, what it brings in, each at least one entry, and one more for each rule
+  or template it merges onto an earlier one of its id, in its own source too. A rule or template
+  that an earlier entry naming the same source, with the same `only:` and `except:`, wrote last is
+  the exception: it is not merged again (a consecutive repeat of the same entry still counts as one
+  entry). A list that repeats a source loads it
+  once (a remote source named by other URLs with one hash, and a bundled ruleset named with other
+  `only:` or `except:` lists, too) and is charged for each entry that merges it. A flat list of
+  distinct sources that override none of each other's rules or templates, and repeat no id within
+  one source, stays within the bound while they hold at most 2,097,152 entries in all (an empty
+  source counting as one), twice the merged config's limit above;
+- the `extends:` entries may merge at most 64 MiB (67,108,864 bytes) of sources in all. Each
+  entry is charged its source's size: its text, or what its YAML aliases expand to if that is
+  larger, and for a source that extends others, what it merged too. A list reaches the bound at
+  64 entries naming a 1 MiB source, in other spellings or with other filters;
+- all the [`extends_template:`](/docs/configuration/templates/) instances of a config may expand
+  to at most 64 MiB, and no rendered string may be longer than 32 MiB. An error names the budget
+  and the rule.
 
 ## See also
 

@@ -17,8 +17,8 @@ Rule kinds in the **Cross-file** family. Each rule below links to its own page w
 | [`pair_hash`](/docs/rules/cross-file/pair_hash/) | The `algorithm` digest (`sha256` default / `sha512`) of every file matching `source` must appear in the single `target` file, either as an embedded hex substring (`format: contains`, default) or a `<hex>  <path>` manifest line (`format: sums-line`, where the path token must be the source's path; a leading `*` binary marker and a `./` prefix are tolerated). |
 | [`markdown_links_resolve`](/docs/rules/cross-file/markdown_links_resolve/) | Validate live Markdown link, image, and reference-definition destinations against the repository tree. |
 | [`markdown_fragments_resolve`](/docs/rules/cross-file/markdown_fragments_resolve/) | Require every live local Markdown link fragment to name a heading anchor in its resolved target document. |
-| [`registry_paths_resolve`](/docs/rules/cross-file/registry_paths_resolve/) | A manifest file enumerates path entries; each must resolve to an on-disk artefact. |
-| [`cross_file`](/docs/rules/cross-file/cross_file/) | A `source` must hold a `relation` to one or more `targets` (or, for `resolves`, the filesystem). |
+| [`registry_paths_resolve`](/docs/rules/cross-file/registry_paths_resolve/) | A manifest file enumerates path entries; each must resolve to a path in the walked tree, so an entry that an ignore file or `ignore:` excludes does not resolve. |
+| [`cross_file`](/docs/rules/cross-file/cross_file/) | A `source` must hold a `relation` to one or more `targets` (or, for `resolves`, the walked tree). |
 | [`file_graph`](/docs/rules/cross-file/file_graph/) | Assemble the repo's *file → file* reference graph and assert a global structural property the 1-level cross-file kinds can't express. |
 | [`ordered_block`](/docs/rules/cross-file/ordered_block/) | The lines between a `start` / `end` marker pair must stay sorted (and, with `unique: true`, free of duplicates) under `comparator` (`lexical` / `lexical-ci` / `numeric`). |
 | [`for_each_match`](/docs/rules/cross-file/for_each_match/) | For each line matching `select` (a regex), the line must satisfy the nested `require:` predicates. |
@@ -31,4 +31,5 @@ Rule kinds in the **Cross-file** family. Each rule below links to its own page w
 | [`dir_only_contains`](/docs/rules/cross-file/dir_only_contains/) | Every direct-child file of a directory matching `select:` must match at least one glob in `allow:`. |
 | [`unique_by`](/docs/rules/cross-file/unique_by/) | No two files matching `select` may share the value of `key` (a path template; tokens `{path}`/`{dir}`/`{basename}`/`{stem}`/`{ext}`/`{parent_name}`). |
 | [`key_parity`](/docs/rules/cross-file/key_parity/) | One reference file and a glob of peers must declare the same key set. |
+| [`constraint`](/docs/rules/cross-file/constraint/) | _Version 2 only, experimental._ An assertion over the rows of a relation: equal values, unique keys, or a set of values per group compared with a reference group or another relation's field. |
 | [`every_matching_has`](/docs/rules/cross-file/every_matching_has/) | For every file or directory matching `select:`, every nested rule under `require:` must be satisfied. |
