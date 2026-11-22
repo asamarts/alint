@@ -6,6 +6,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-11-22
+
+v0.23.0 launches Phase 3 of the general-linter program, hardens alint's trust boundaries end to
+end, switches YAML parsing to pure-Rust `ayaml` 0.2.2, and ships the last planned library API
+break before 1.0. Opt-in experimental `version: 2` configurations add named `selectors:`,
+`relations:` (`entries:`, `read:`, `union:`, `join:`, `transform:`, `where:`), aliased local
+`extends:`, and the `constraint` rule kind (`equal`, `unique`, `set`), accompanied by a draft
+`schemas/v2/config.json` and 14 conformance policy tests covering locale parity, dependency
+version consistency and toolchain pins. Security hardening (advisory GHSA-78jj-xfpm-g6px) adds
+global `--untrusted` and `--no-spawn` modes, makes `alint lsp` wait for workspace trust, stops
+config discovery at the repository top, blocks Git-directory reads/writes and extended-config
+writes, bounds ignore/config/baseline/overlay/YAML parser work, and hardens the `alint test`
+sandbox. `ayaml` 0.2.2 replaces `yaml_serde`/libyaml at 0.52x to 0.97x peak heap across all nine
+measured shapes and cuts peak RSS by 22% to 25% on multi-megabyte OpenAPI specs. Library users:
+YAML values and errors move to `alint_core::yaml`, key config/option structs and `alint_core::Error`
+are now `#[non_exhaustive]` with constructors and `with_*` setters, and `baseline::Fingerprints` is
+removed (re-run `alint baseline --accept-new` if a baseline was last written by v0.21 or earlier).
+
 ### Upgrading from 0.22
 
 These changes can stop a setup that works with 0.22 from working as it did. Each is described in
@@ -87,7 +105,7 @@ and editor workspaces ([ADR-0040](docs/adr/0040-the-v023-advisory-and-the-allowl
 [ADR-0043](docs/adr/0043-trust-and-disclosure-decisions-from-the-post-v0221-audit.md),
 [ADR-0044](docs/adr/0044-untrusted-runs-git-as-a-process-and-a-wider-memory-gate.md),
 [ADR-0046](docs/adr/0046-a-linear-extends-merge-sealed-options-and-the-rounds-open-questions.md)). No v0.22.x
-patch release follows: upgrade to v0.23.0. Until then, run `alint test` only on policy-test
+patch release follows: upgrade to v0.23.0. Before upgrading, run `alint test` only on policy-test
 packages whose configurations and `given:` blocks you trust, `alint check` and `alint lsp` only on
 repositories whose configs you trust (or with your own `-c` config), and `alint fix` only with
 `extends:` rulesets you trust and, with a content fix, only on repositories you trust.
@@ -1216,20 +1234,6 @@ policy-test package the user does not trust.
   block-word sequences run 8.8% faster at 0.91x RSS, while dense 1 MB `kN: 1` block and flow
   mappings run 10.8% and 26.1% slower at 0.76x RSS.
 
-### Removed
-
-- **Breaking: a baseline no longer matches the fingerprint v0.21 wrote for a hidden-path finding**
-  (#500, ADR-0030 decision 1). A finding's path is hidden when a field that chooses files was read
-  from the environment. v0.22 gave such findings a fingerprint without the path and, for one minor
-  release, still matched the v0.21 form, which hashed the path. If your baseline file was last
-  written by v0.21 or earlier, `check --baseline` and `fix --baseline` now treat those findings as
-  new and their entries as stale, and the language server shows those findings again. Regenerate
-  the file once with `alint baseline --accept-new`; the flag is needed because the findings count
-  as new. A file written by v0.22 is unaffected.
-- **Breaking (library API):** `alint-core` drops `baseline::Fingerprints` and
-  `baseline::fingerprints`, which existed only to match the v0.21 form. `baseline::apply` takes a
-  fingerprinter that returns a `String` again, such as `baseline::fingerprint`.
-
 ### Fixed
 
 - **A rename under `--changed` changes both of its paths.** Git's rename detection listed a
@@ -1426,6 +1430,20 @@ policy-test package the user does not trust.
   parser's message. The check now reads the events alint decodes. A configuration that fails to
   decode is parsed again, to say why a `requires:` is not a literal, only when it spells
   `requires`, so a large one that fails is no longer parsed three times.
+
+### Removed
+
+- **Breaking: a baseline no longer matches the fingerprint v0.21 wrote for a hidden-path finding**
+  (#500, ADR-0030 decision 1). A finding's path is hidden when a field that chooses files was read
+  from the environment. v0.22 gave such findings a fingerprint without the path and, for one minor
+  release, still matched the v0.21 form, which hashed the path. If your baseline file was last
+  written by v0.21 or earlier, `check --baseline` and `fix --baseline` now treat those findings as
+  new and their entries as stale, and the language server shows those findings again. Regenerate
+  the file once with `alint baseline --accept-new`; the flag is needed because the findings count
+  as new. A file written by v0.22 is unaffected.
+- **Breaking (library API):** `alint-core` drops `baseline::Fingerprints` and
+  `baseline::fingerprints`, which existed only to match the v0.21 form. `baseline::apply` takes a
+  fingerprinter that returns a `String` again, such as `baseline::fingerprint`.
 
 ## [0.22.1] - 2026-11-11
 
@@ -10135,7 +10153,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.22.1...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.23.0...HEAD
+[0.23.0]: https://github.com/asamarts/alint/compare/v0.22.1...v0.23.0
 [0.22.1]: https://github.com/asamarts/alint/compare/v0.22.0...v0.22.1
 [0.22.0]: https://github.com/asamarts/alint/compare/v0.21.2...v0.22.0
 [0.21.2]: https://github.com/asamarts/alint/compare/v0.21.1...v0.21.2

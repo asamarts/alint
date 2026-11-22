@@ -10,9 +10,17 @@
 > markers. See [`v0.11/roadmap_generator.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.11/roadmap_generator.md)
 > for the marker syntax and the v0.9.22 migration plan.
 
-**Latest release: v0.22.1** (2026-11-11) changes how alint installs, not what it checks: the npm
-package runs the binary from a per-platform optional dependency instead of downloading it at
-install time, and Windows on ARM gets a native binary on every channel. The prior v0.22.0
+**Latest release: v0.23.0** (2026-11-22) launches general-linter phase 3 with experimental opt-in
+`version: 2` configurations (named `selectors:`, `relations:`, aliased local `extends:` and the
+`constraint` rule kind covering `equal`, `unique` and `set`), switches YAML parsing to pure-Rust
+`ayaml` 0.2.2 (0.52x to 0.97x libyaml peak heap across all nine shapes, 22-25% lower peak RSS on
+large OpenAPI specs), ships `--untrusted` and `--no-spawn` modes alongside comprehensive
+trust-boundary and policy-test sandbox hardening (advisory GHSA-78jj-xfpm-g6px), disambiguates
+repeated fingerprints in SARIF and GitLab output, adds `related_locations` to JSON output, and
+completes the last planned library API break before 1.0 (`alint_core::yaml` owned types and
+`#[non_exhaustive]` option/spec structs). The prior v0.22.1 (2026-11-11) changed how alint installs,
+not what it checks: the npm package runs the binary from a per-platform optional dependency instead
+of downloading it at install time, and Windows on ARM gets a native binary on every channel. The prior v0.22.0
 (2026-11-07) completed general-linter phase 2. `cross_file` reads
 the values it compares through the relation layer and the old reader is gone, with findings
 unchanged on the case-study corpus; `FixContext`, `Config` and `CompiledNestedSpec` in
