@@ -7,5 +7,5 @@
 #
 # To accept a deliberate cost, bump `version` in a reviewed commit and say why
 # in `reason`. Earlier anchors and reasons are in this file's git history.
-version = "v0.20.0"
-reason = "baseline before the v0.18-v0.20 regression fixes; see docs/benchmarks/investigations/2026-10-v0.20-bench-increases/"
+version = "v0.23.0"
+reason = "accept deliberate v0.23.0 security confinement, ADR-0047 fingerprint ordering, and version: 2 / ayaml 0.2.2 costs (bench-record #619, run 44972684089); also restores a non-RESET macro anchor after v0.21.0's r2/r4 workload resets (nested-rule optimization tracked in #620)"
