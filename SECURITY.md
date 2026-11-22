@@ -122,11 +122,11 @@ Published advisories live at
 https://github.com/asamarts/alint/security/advisories. Each one is listed here
 too, with the release that fixes it:
 
-- **GHSA-78jj-xfpm-g6px** (a draft until the 0.23.0 release, which fixes it and
-  publishes it): ways around the policy-test sandbox and the trust given to
-  `extends:` rulesets, nested configs and editor workspaces, in `alint test`,
-  `alint fix`, `alint check` and `alint lsp`. The 0.23.0 entry of the
-  [CHANGELOG](CHANGELOG.md) lists each one under Security.
+- **[GHSA-78jj-xfpm-g6px](https://github.com/asamarts/alint/security/advisories/GHSA-78jj-xfpm-g6px)**
+  (fixed and published in 0.23.0): ways around the policy-test sandbox and the
+  trust given to `extends:` rulesets, nested configs and editor workspaces, in
+  `alint test`, `alint fix`, `alint check` and `alint lsp`. The 0.23.0 entry of
+  the [CHANGELOG](CHANGELOG.md) lists each one under Security.
 
 ## Threat model
 

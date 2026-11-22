@@ -47,7 +47,6 @@ Most rules judge one file at a time. **Cross-file rules** judge a relationship b
 
 ## The relational rules
 
-<!-- alint:since=0.22.1 -->
 The oldest cross-file rules ask about neighbours. `pair` requires that every file matching `primary`
 has a matching `partner` (every `foo.c` a `foo.h`); `pair_hash` is stricter, requiring the partner
 to carry the source file's content digest; and the diff-scoped `pair_changed_together` is
@@ -67,7 +66,6 @@ Markdown file. These cross-file rules read the whole tree, because the answer fo
 on the others (including which files exist elsewhere in the repository), so they opt out of
 `--changed` filtering and evaluate the whole snapshot. The
 [rules reference](/docs/rules/) carries the complete set.
-<!-- /alint:since -->
 
 ## file_graph
 
@@ -77,7 +75,6 @@ Edges resolve **as paths**, which is the point: a `from_content` regex captures 
 
 ## cross_file
 
-<!-- alint:since=0.22.1 -->
 `cross_file` asserts a **relation** between one file's extracted value and one or more targets. Six
 relations: the value relations `equals`, `subset`, `superset`, and `set_equals`; `identical`, a
 whole-file byte match; and `resolves`, which requires each extracted path to be in the walked tree,
@@ -87,7 +84,6 @@ semver-minor` reconciles `4.36-dev`, `4.36.0`, and `>=4.36` to the same `4.36` b
 `engines.node` in every `package.json` be checked against the root without version-string noise.
 `allow_missing_target` tolerates an absent target, and `cross_file_value_equals` is a registered
 alias with `relation: equals`.
-<!-- /alint:since -->
 
 ## key_parity
 

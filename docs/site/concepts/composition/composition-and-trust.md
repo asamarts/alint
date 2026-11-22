@@ -60,14 +60,11 @@ Sources are not equally trusted, and the boundary is drawn at `extends:`. Your o
 - **read outside the repo** (`allow_out_of_root:` is a top-level-only grant), or
 - **choose which findings are suppressed** (`baseline:` is a top-level-only input).
 
-<!-- alint:since=0.23.0 -->
 The `allow_out_of_root:` grant never covers a rule an extended config shaped, even one your
 config overrides by id or names under `rules:`.
-<!-- /alint:since -->
 
 Merging by `id` cannot be used to get around this. A rule whose kind or fix spawns a process must be declared entirely in your own config: if an extended config shares its `id` (contributing a `workdir:`, `paths:`, or any other field) or defines the template it instantiates, loading fails and names that config. Rename your rule to keep it separate.
 
-<!-- alint:since=0.23.0 -->
 Nor can a fix get around it. A fix of a rule an extended config or a nested config shaped (it
 declared the rule, contributed a field to it, or defined its template) never writes alint's own
 configuration: `.alint.yml`, `.alint.yaml`, `alint.yml` or `alint.yaml` at any depth, anything
@@ -76,18 +73,15 @@ under `.alint.d/`, or a file your configuration was loaded from. Such a fix is s
 cannot add a `command` rule for the next run to execute. It also never writes outside the repo,
 or reads a `content_from:` or `sync_from` source there, whatever your `allow_out_of_root:` says.
 Your own rules' fixes still write both, and `trusted_extends:` lifts neither limit.
-<!-- /alint:since -->
 
 An `https://` entry you have not listed under `trusted_extends:` is held to further limits, because each would let it read or reshape your repository without running code: its `when:` / `when_iter:` expressions may not read `env.*` (including through a `{{vars.*}}` placeholder it fills in one of your templates, or through a `vars.*` whose value you interpolated from the environment, such as `token: "{{env.NPM_TOKEN}}"`; literal vars stay readable), its templates may not substitute such an environment-derived value from your rules' own `vars:` into any field, and it may not declare `ignore:`, which hides files from every rule. Listing the URL under `trusted_extends:` lifts them all.
 
-<!-- alint:since=0.23.0 -->
 A local `extends:` entry (a file path) is part of your repository, so it gets none of those
 further limits: like your own `.alint.yml`, it may read `env.*` in a `when:` and declare
 `ignore:`. The limits every extended config has still hold for it: it never spawns a process,
 never has a fix write alint's configuration or outside the root, and never reads a Git directory.
 Vendor a ruleset into your repository only as you would vendor code, after reading it, since what
 it may do is decided by where it sits, not by who wrote it.
-<!-- /alint:since -->
 
 Rules and templates may not use YAML tags (`!tag`), non-string keys, or `<<` merge keys, in any config. alint does not interpret them, and a tag would otherwise let a field slip past the checks above while still being read as that field.
 

@@ -49,9 +49,7 @@ Fix: `file_create` — write a declared `content`. With an array of `paths`, the
 
 **Optional `git_tracked_only: true`** further requires that the matching file be in git's index — useful for rules like "every release must commit a CHANGELOG entry" where local-only files shouldn't satisfy the requirement. If Git cannot be run or the lint root is not a Git repository, the rule reports a `resource_read` analysis failure. See [The walker and `.gitignore`](/docs/concepts/targeting/the-walker-and-git/) for the full semantics.
 
-<!-- alint:since=0.23.0 -->
 A tracked file counts even when an ignore file excludes it (alint 0.22 and earlier did not see it); the config's `ignore:` still excludes what it lists.
-<!-- /alint:since -->
 
 ### `file_absent`
 
@@ -64,9 +62,7 @@ Fix: `file_remove` — delete every violating file.
 **Optional `root_only: true`** (like `file_exists`) restricts the check to the repository root: a file forbidden at the root does not fire on nested copies of the same name.
 **Optional `git_tracked_only: true`** restricts the check to files in git's index. With it set, the rule fires only on tracked paths regardless of `.gitignore` state — closing the gap where a `git add -f`'d file slips past the walker's gitignore filter. If Git cannot be run or the lint root is not a Git repository, the rule reports a `resource_read` analysis failure.
 
-<!-- alint:since=0.23.0 -->
 The config's `ignore:` still excludes what it lists, and alint 0.22 and earlier did not see a tracked file that an ignore file excludes.
-<!-- /alint:since -->
 
 **Optional `content_prefix_hex`** narrows a name match with a content check: a matching file fires only if its bytes begin with one of the listed hex signatures. This separates real binary junk from unrelated files that share a name pattern — macOS AppleDouble sidecars (`._*`) start with `00 05 16 07` and `.DS_Store` with `00 00 00 01` `"Bud1"`, whereas Hadoop writes `._<name>.crc` checksum files that begin with `crc\0`. A file that cannot be read, or is shorter than every signature, does not match; an empty list (the default) keeps the name-only behaviour.
 
@@ -82,9 +78,7 @@ Directory counterpart of `file_exists`. Every match must correspond to a real di
 directory directly at the repository root, not nested.
 **Optional `git_tracked_only: true`** further requires that the directory contain at least one tracked file. A tree with a `docs/` checked out from a stale clone where every file was later removed via `git rm` would fail under this stricter check. If Git cannot be run or the lint root is not a Git repository, the rule reports a `resource_read` analysis failure. See [The walker and `.gitignore`](/docs/concepts/targeting/the-walker-and-git/) for the full semantics.
 
-<!-- alint:since=0.23.0 -->
 A directory with tracked files counts even when an ignore file excludes it (alint 0.22 and earlier did not see it); the config's `ignore:` still excludes what it lists.
-<!-- /alint:since -->
 
 **When to use it**: for the directories a repository's tooling or contributors rely on being there: a `docs/` tree the site build reads, `.github/workflows/` for CI, `tests/` next to the sources. Listing several paths accepts any one of them, so `paths: ["doc", "docs"]` passes with either name.
 
@@ -101,9 +95,7 @@ Directory counterpart of `file_absent`. The match-and-fire semantics are the sam
 **Optional `root_only: true`** (like `dir_exists`) restricts the check to the repository root: a directory forbidden at the root does not fire on nested directories of the same name.
 **Optional `git_tracked_only: true`** restricts the check to directories that contain at least one git-tracked file. With it set, a developer's locally-built `target/` (gitignored, no tracked content) doesn't trigger; a `target/` whose contents made it into git's index does. If Git cannot be run or the lint root is not a Git repository, the rule reports a `resource_read` analysis failure.
 
-<!-- alint:since=0.23.0 -->
 A tracked directory fires even when `.gitignore` lists it. The config's `ignore:` still excludes what it lists, and alint 0.22 and earlier did not see a tracked directory that an ignore file excludes.
-<!-- /alint:since -->
 
 See [The walker and `.gitignore`](/docs/concepts/targeting/the-walker-and-git/) for the full semantics.
 
@@ -647,7 +639,7 @@ jobs:
       - name: alint check
         env:
           ALINT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        uses: asamarts/alint@5054852d00d47affc9ea71440240147d9999f4d3 # v0.22.1
+        uses: asamarts/alint@465e70c48ec13774c8cb3bb58856b58b71e3a93d # v0.23.0
 ```
 
 ### `git_commit_signed_off`
@@ -711,9 +703,7 @@ If Git cannot be run or the lint root is not a Git repository, the rule reports 
 
 The `<since>...HEAD` diff must **add** (git status `A`) at least one path matching `add_glob:` — the "did you add a changelog entry?" gate. Three corpus signals: prettier's `changelog_unreleased/`, cpython's `Misc/NEWS.d/next/`, pnpm's `.changeset/*.md`. `since:` (the base ref) is required — the rule asserts about the *set of files a contribution adds*, so it's diff-scoped. An optional `when_changed:` gates the requirement on some other glob having changed (don't demand a changelog for a docs-only PR); with no gate, any non-empty changeset triggers it. Builds on the same `<since>...HEAD` three-dot (merge-base) diff as `alint check --changed`. Git or repository unavailability is a `resource_read` analysis failure; no relevant changes is a normal pass; a `since:` that fails to resolve hard-fails with a shallow-clone hint.
 
-<!-- alint:since=0.23.0 -->
 `add_glob:` reads renames itself, whatever Git's `diff.renames` setting says: a moved file is not an added one, and a copied file is. `when_changed:` reads both paths of a rename, so a file renamed out of its glob counts as changed.
-<!-- /alint:since -->
 
 ---
 
@@ -723,9 +713,7 @@ The `<since>...HEAD` diff must **add** (git status `A`) at least one path matchi
 
 If the `<since>...HEAD` diff changes any path matching `if_changed:`, at least one path matching `then_changed:` must change in the same range — the **co-change** gate. Corpus signals: rust's `rustdoc-json-types` `FORMAT_VERSION` must bump when the format struct changes; "`version.txt` and the lockfile change together" release guards. Both globs and `since:` (the base ref) are required. **Directional** — the trigger is `if_changed`, the obligation is `then_changed`; a `then_changed`-only change never fires it, so add a second rule with the globs swapped for a bidirectional pact. The `changeset_requires_path` sibling, built on the same merge-base diff as `alint check --changed`. Git or repository unavailability is a `resource_read` analysis failure; an unchanged `if_changed` set is a normal pass; a `since:` that fails to resolve hard-fails with a shallow-clone hint.
 
-<!-- alint:since=0.23.0 -->
 Both paths of a rename count as changed, so renaming the `then_changed` file away satisfies the pair, as deleting it does, and renaming a file out of `if_changed:` triggers it.
-<!-- /alint:since -->
 
 ---
 
@@ -747,9 +735,7 @@ The `algorithm` digest (`sha256` default / `sha512`) of every file matching `sou
 
 **Categories:** Cross-file, Content
 
-<!-- alint:since=0.22.1 -->
 Validate live Markdown link, image, and reference-definition destinations against the repository tree. Relative destinations resolve from the source file's directory after URL percent-decoding; query strings and fragments do not affect the lookup. Both files and directories are valid targets. Destinations resolve against the walked tree, so a path that an ignore file or `ignore:` excludes counts as missing. External URLs and other URI schemes, protocol-relative URLs, and same-page `#fragment` links are intentionally offline/out of scope. Explicit reference uses such as `[guide][install]` and `[guide][]` also report undefined labels.
-<!-- /alint:since -->
 
 The CommonMark-aware scanner skips YAML (`---`) and TOML (`+++`) front matter, fenced and indented code blocks (including nested blocks), inline code spans, and HTML comments, so documentation examples and prose are not mistaken for live links. It recognizes footnote definitions instead of misclassifying their prose as link destinations, while still checking real links inside footnotes. It handles escaped, nested, and multiline link syntax; a real link whose visible text contains inline code, such as ``[`Rule`](../rule.md)``, is still checked. Each bad link is a separate violation at the destination's line and Unicode-scalar column.
 
@@ -769,17 +755,13 @@ The rule shares `markdown_links_resolve`'s CommonMark link parsing, percent-deco
 
 **Categories:** Cross-file
 
-<!-- alint:since=0.22.1 -->
 A manifest file enumerates path entries; each must resolve to a path in the walked tree, so an entry that an ignore file or `ignore:` excludes does not resolve. `extract` pulls the entry list via a structured query (`toml` / `json` / `yaml` / `xml` / `dotenv` / `properties` / `ini` / `hcl` RFC 9535 JSONPath), a physical-line list (`lines`, optional `comment` prefix; LF, CRLF, and lone CR are recognized), or a regex capture (`regex`, group 1). `expect` (`any` / `file` / `dir`) and `must_contain` constrain the resolved kind; `exclude_query` subtracts entries; `entries_are_globs` expands each entry as a glob. A structured query that selects non-string JSON values fails with a type/count diagnostic rather than silently dropping them.
-<!-- /alint:since -->
 
 ### `cross_file` (alias: `cross_file_value_equals`)
 
 **Categories:** Cross-file
 
-<!-- alint:since=0.22.1 -->
 A `source` must hold a `relation` to one or more `targets` (or, for `resolves`, the walked tree). The `source` is a single `{ file, extract }` (for `registered`, a `file` or `files` with no `extract`) — **or**, for the set relations only (`subset` / `superset` / `set_equals`), `{ files: <glob>, extract }`, whose matches are read and whose extracted values are **unioned into one set** (the "every `*hl-X*` across `runtime/doc/*.txt` must equal the `default link X` set in `highlight.c`" shape — symbol-set / cross-language parity). For the value relations, `targets` is either a `{ files: <glob>, extract }` map (one query applied per glob match) or a sequence of `{ file, extract }` (heterogeneous pins); `extract` is the same one-of as `registry_paths_resolve` (`toml`/`json`/`yaml`/`xml` JSONPath, `lines`, `regex` group 1) plus `whole_file: {}` (the entire file content as one value — for byte-level content equality without `identical`'s no-`extract`/no-`normalize` constraint). `relation` (default `equals`) selects the assertion, checked independently per target; the *shape* (which of `source.file`/`source.files`, `source.extract`, `targets` is present) follows the relation and is validated at load:
-<!-- /alint:since -->
 
 Each target glob map or fixed-list entry may add `matches: <regex>`. The predicate runs on each extracted string before the relation and before fixer correlation; non-matching values behave like absent optional values and are never rewritten. This narrows syntactically broad structured queries without changing their source spans.
 
@@ -793,7 +775,6 @@ by the live finding, so a baseline-suppressed duplicate in the same file is unto
 propagation declines more than 10,000 edits or output above the lower of `fix_size_limit` and the
 32 MiB hard ceiling.
 
-<!-- alint:since=0.22.1 -->
 | `relation` | source ⇒ | asserts (per target) |
 |---|---|---|
 | `equals` | exactly one value `v` | every target value `== v` |
@@ -803,7 +784,6 @@ propagation declines more than 10,000 edits or output above the lower of `fix_si
 | `identical` | whole file content | the target is byte-identical (no `extract`; optional `skip_header_lines`) |
 | `resolves` | a set of paths | each path is in the walked tree (no `targets`; the forward half of `registry_paths_resolve`) |
 | `registered` | a set of filesystem paths (`source.file` / `source.files` with no `extract`, templated by the path template `register_as`: `{path}` default, `{dir}`, `{basename}`, `{stem}`, `{ext}`, `{parent_name}`) | each member is an element of every target's extracted list; fixable with `create_and_register` |
-<!-- /alint:since -->
 
 `normalize` relaxes the value comparison — a single transform or an ordered list applied left-to-right (`normalize: [trim, semver-minor]`): `trim`, `lower`, `semver-major` (the leading `MAJOR` band — the dotnet SDK shape), and `semver-minor` (the leading `MAJOR.MINOR` band, each token's leading digits with a non-digit prefix stripped — so `4.36-dev`, `4.36.0`, `pnpm@11.3.0` and `>=22.13` reconcile; the protobuf / pnpm version-format case). `identical` reads whole files byte-for-byte (`normalize`/`extract` do not apply), with an optional `skip_header_lines` to ignore a differing license/header; `resolves` extracts paths from the `source` (no `targets`) and checks each exists relative to the source file's directory. A structured query that selects a non-string reports one value-free violation naming only the count and JSON types; any string matches continue through the relation. Non-literal string values (interpolation / antiquotation) are skipped with an informational note — **except** a `whole_file: {}` source/target, whose single value (the entire file content) is compared verbatim even when it embeds `${…}`/`{{…}}` markers (those mark interpolated *paths*, not content); `whole_file` still honours `normalize`, so it sits between a query-extract and a no-normalize `identical`. `allow_missing_target` controls absent files/values. `equals` requires the `source` to extract **exactly one** value; to pull the latest entry from a multi-match file (e.g. the newest version in a multi-release `CHANGELOG.md`), anchor the regex so it captures only the first match — `regex: '(?s)\A.*?## (\d+\.\d+\.\d+)'` (`(?s)` makes `.` cross newlines, `\A` anchors at the start, `.*?` reaches the first heading lazily) yields a single value (a leading `## Unreleased` is skipped because the version pattern doesn't match it). The released `cross_file_value_equals` is a **byte-compatible alias** (`relation` defaults to `equals`). Cross-file.
 
@@ -811,9 +791,7 @@ propagation declines more than 10,000 edits or output above the lower of `fix_si
 
 **Categories:** Cross-file
 
-<!-- alint:since=0.22.1 -->
 Assemble the repo's *file → file* reference graph and assert a global structural property the 1-level cross-file kinds can't express. `nodes` (a glob) selects the graph's files. The `edges` block takes one of two extractors: `from_content` (extract one reference per match — `extract` is the same one-of as `registry_paths_resolve`: `toml` / `json` / `yaml` / `xml` / `dotenv` / `properties` / `ini` / `hcl` JSONPath, `lines`, `regex` capture group 1 — then `resolve` it to a path, `relative_to_file` default or `relative_to_repo_root`) for the reference-graph modes, or `derive_target` (`{ from: <regex on the node path>, to: <template, e.g. $1.pb.go> }`) for the `fresh` codegen-freshness mode **or** the `no_dangling` derived-sibling-existence mode. A structured edge query that selects a non-string reports one value-free violation naming only the count and JSON types; string references continue. Bare module names, absolute paths, URLs, and computed/interpolated references are **dropped, not mis-resolved** (resolving module *names* is the package-graph non-goal — nodes stay path-based). `require` is a closed set — three bare-string modes and three configured map modes: `acyclic` (no dependency cycle among the nodes, each reported once as a rotation-canonical path list); `no_dangling` (every path-shaped edge must resolve to a path in the walked tree — the doc-cross-link / generic `markdown_paths_resolve` integrity check; with `edges.derive_target` it instead asserts each node's *derived* sibling exists, e.g. every `licenses/X-LICENSE.txt` needs an `X-NOTICE.txt`); `no_orphans` (no node is unreferenced by another node, except those matching a `roots:` glob — the registry / staging orphan detector); `{ forbidden_edges: [{ from, to }] }` (one violation per edge whose source matches `from` and resolved target matches `to` — the whole-repo layering firewall, where `import_gate` is the cheap per-file version); `{ no_orphans: { roots: [...] } }` (the `no_orphans` form with declared entry points); and `{ fresh: { hash, marker } }` (needs `edges.derive_target`: the generated file must embed the source's current `hash` digest, captured by `marker` group 1 — content-hash, never mtime; the alint-native form of generate-then-`git diff`, with no generator run). Pure-parse and extraction-based: it never shells out. Cross-file (whole-index).
-<!-- /alint:since -->
 
 As of v0.18, `acyclic` reports each set of mutually dependent files (a strongly connected component) once, naming every file on any of its cycles; a component that is one simple cycle is still rendered as its path, so existing baselines keep matching.
 
@@ -900,7 +878,6 @@ The `iter` namespace exposes:
 
 **Token values are literal paths.** When a token expands into a nested option that alint compiles as a glob (`paths:`, and per kind options such as `dir_contains`'s `select` / `require`, `dir_only_contains`'s `select` / `allow`, `unique_by`'s `select`, `pair`'s `primary`, or a nested `for_each_*`'s own `select`), its value is glob-escaped, so a directory named `app/[slug]` or `pkgs/*` matches only itself rather than acting as a character class or wildcard. The template text around the token keeps its glob meaning (`"{path}/*.tsx"`). Options that are regexes (`for_each_match`'s `select`, `pattern`) or literal paths (`pair`'s `partner`) receive the value unescaped. Messages show the real path, not its escaped form.
 
-<!-- alint:since=0.23.0 -->
 **A value is substituted once.** The outermost iteration substitutes every token of the rules
 nested in it, and the value it inserts is text: a file or directory name that spells a token,
 such as `x{stem}`, is not substituted again, neither by the iterations below it (a `for_each_dir`
@@ -910,7 +887,6 @@ Likewise a `$` in a value is text in `file_graph`'s `derive_target.to` (`a$1` is
 reference), and a name spelled like a message placeholder (`x{{ctx.primary}}`) is shown as it is
 in the message of a rule that fills such placeholders. In a `command:` argument, a value that
 starts with `-` is passed as a path (`./--write`), as `command` passes a file it matches.
-<!-- /alint:since -->
 
 ### `dir_contains`
 
@@ -938,9 +914,7 @@ One reference file and a glob of peers must declare the same key set. The refere
 
 `direction: both|missing|extra` selects the reported differences. `strip_root: true` (JSON, YAML, and TOML) compares below each file's single top-level key, as Rails locale files do (`en:`, `fr:`); a file with keys that has more than one top-level key, or whose top-level key is a value, is an analysis failure for that file: a failing peer is skipped while the other peers still compare, and a failing reference stops the rule. `plurals: cldr` treats a CLDR plural group — a nested object whose keys are all `zero/one/two/few/many/other`, or i18next's `_<category>` sibling suffixes, with `other` present — as one key. Groups are decided over the reference and each peer together, so a locale with fewer categories (or without `other`) keeps the group, and a base name that is a real key in either file is never merged; exact per-locale category checking is deliberately not in v0.21. `ignore_keys` takes patterns written the way findings show keys: in dotenv, properties, and `.resx` files a pattern matches the key name, where `*` stops at a `.` and `**` crosses it (`app.*`, `app.**`), and a name findings show in bracket form is written that way (`['']`, `['[x']`); in every other format a pattern is a key path, where `*` matches within one segment, a `**` segment matches any number of segments (at the end, at least one), and `['a.b']` names a segment containing a dot (`nav.*` matches `nav.home` and `nav['a.b']`). A malformed path pattern is a configuration error, and so is an index such as `items[0]`, since array elements are values. `format` is inferred from the extension (`.env` / `.env.*` infer dotenv; `.toml` infers TOML; `.resx` infers `resx`) and must be set explicitly for an extensionless reference or an Android `.xml` file (`format: android-strings`). An explicit `format` reads every file in that format, but a file whose extension implies another key model is still refused (see below). Android keys are the pair (element type, name), so `<string name="x">` and `<plurals name="x">` do not collide; `translatable="false"` entries are skipped. `.resx` compares string `<data name>` entries and skips non-string resources and designer metadata; `direction: extra` is its usual setting. Keys are compared by identity, so a flat key named `nav.home` never equals a `home` key nested under `nav`. Findings and baseline keys show a dotenv, properties, or `.resx` key as written (`app.title`, `button1.Text`), and any other key as its path, with bracket notation for a segment that contains a `.`, `[`, `]`, or quote, or is empty (`nav.home`, `nav['a.b']`, `Session['session.save_path']`). Files are compared only within one key model: tree formats together, flat dotenv/properties together, and INI and each XML dialect on its own; a literal peer in another model is a configuration error, and a globbed peer in another model is an analysis failure for that peer.
 
-<!-- alint:since=0.23.0 -->
 In a rule nested under `for_each_file`, `for_each_dir` or `every_matching_has`, a `reference` or literal `peers` path whose key format comes from a path token (`reference: "{path}"`, `peers: "{dir}/fr.{ext}"`) has its format inferred in each iteration, so one rule can cover locale files in several formats. `strip_root` and `ignore_keys` are then checked against each iteration's format too: an iteration whose file has no key format, or whose key model does not allow those options, is a `nested_rule_build` analysis failure for that file. Narrow the parent's `select` to the formats the options suit, or set `format` to read every file in one format. A literal extension (`"{dir}/strings-{stem}.xml"`) is the same in every iteration, so it is still checked at load.
-<!-- /alint:since -->
 
 A missing reference or literal peer, an unparsable reference or peer, and a `peers` glob that matches no file are fail-loud analysis outcomes, never a pass; a peer with no keys reports every reference key as missing. `allow_missing_peers: true` turns an absent peer (a literal `peers` path that does not exist, or a glob that selects nothing) into an informational note, for a file such as `.env` that exists on developer machines but not in CI; a missing reference still fails. Findings quote keys only, never values. The kind has no fix: inserting missing keys waits for the generic edit plan. Under `--changed` the rule is skipped only when neither the reference nor a peer changed, and otherwise evaluates over the full index; a rule with a literal peer runs whenever anything changed, because Git does not report edits to an ignored file such as `.env`.
 
@@ -1031,9 +1005,7 @@ Output is drained while the child runs (a child writing more than a pipe buffer 
 
 **Path confinement + `allow_out_of_root`.** Every config-declared path is confined to the repo root — a rule can't read or resolve a file outside the tree it was pointed at. The top-level-only `allow_out_of_root:` key relaxes this for *reads* (`json_schema_passes` `schema_path:`, `pair_hash` `target:`, `registry_paths_resolve` `source:`) when a trusted config must reference an external file, and, under `alint fix`, for the owning rule's fix paths (`file_create`, `dir_create`, `sync_from`, and `create_and_register` targets, plus `content_from` reads); editor code actions always stay confined. It is **rejected from `extends:`'d rulesets** (same trust model as the spawn gate above) and a permitted read emits a note. See [Configuration → `allow_out_of_root`](/docs/configuration/#allow_out_of_root).
 
-<!-- alint:since=0.23.0 -->
 `allow_out_of_root:` is also refused under `--untrusted`, in a language server workspace that is not trusted, and in a policy test.
-<!-- /alint:since -->
 
 `--changed` interaction: `command` is a per-file rule, so under `alint check --changed` it spawns only for files in the diff. The expensive check is automatically incremental in CI.
 
