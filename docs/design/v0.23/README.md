@@ -1,6 +1,6 @@
 # v0.23: selectors, a first constraint slice, and the YAML groundwork
 
-Status: accepted (2026-11-12, ADR-0032); in progress, phases 0 to 9 done (feature freeze and ayaml 0.2.2 qualification complete; phase 10 release prep next).
+Status: accepted (2026-11-12, ADR-0032); complete, phases 0 to 10 (v0.23.0 released 2026-11-22).
 Decisions: [ADR-0032](../../adr/0032-v023-owner-decisions.md) (the owner decisions and the scope);
 [ADR-0033](../../adr/0033-v023-slice-after-the-corpus-stratum.md) (the slice after the corpus
 stratum, and the #503 fix);
@@ -1247,7 +1247,7 @@ as #589, step 3 as #590, and step 4 is the last.
     diffs (8 additive `related_locations` from #590, 2 reworded `java-no-tracked-build` from #509,
     1 reworded multi-document parse error on `istio/istio` from #510). Zero unexpected ayaml 0.2.2
     diffs.
-  - **2026-11-21 owner sign-off and pre-v0.23 audit:** the owner approved the four non-defect
+  - **2026-11-21 owner sign-off and pre-v0.23 audit (#616):** the owner approved the four non-defect
     #530 allowlist entries (`empty-flow-implicit-key`, `negative-zero-in-an-unsigned-field`,
     `rule-that-is-null`, and location class `verbatim-tag-that-names-nothing`, recorded in
     ADR-0040), completing phase 9 sign-off. A full pre-v0.23 audit covering everything since
@@ -1256,5 +1256,20 @@ as #589, step 3 as #590, and step 4 is the last.
     vs `--allow-host-keyring`, out-of-root `.git` and alternate-spelling config-write refusals,
     v2/nested manifest-scope redaction and `constraint` sensitivity propagation, baseline/SARIF
     path-order parity, YAML/structured-fix edge cases, and release-pipeline/docs hygiene.
-  - Next: phase 10 (release cut `v0.23.0`, `bench-record`, publishing GHSA-78jj-xfpm-g6px, closing
-    #481, and post-tag follow-up PR for Action pin and `alint:since=0.23.0` unwrapping).
+- 2026-11-22: phase 10, pre-tag benchmark verification and v0.23.0 release cut.
+  - **Pre-tag A/B benchmarks on the canonical benchmark host (`cc0f5a969` with ayaml 0.2.2 vs
+    v0.22.1 libyaml and v0.22.0 macro baseline):**
+    - `ci/scripts/yaml-memory-release.sh` passed 9/9 shapes at 0.517x to 0.965x libyaml peak heap
+      (OpenAPI 37 KB 0.578x, 1.1 MB 0.583x, 4.4 MB 0.584x).
+    - End-to-end YAML A/B (17 workloads, ABBA interleaved): OpenAPI 4.4 MB ran 7.4% faster at
+      22.5% lower peak RSS (120.9 to 93.7 MiB), OpenAPI 16 MB ran 11.2% faster at 24.8% lower peak
+      RSS (411.3 to 309.2 MiB), 100-locale YAML `key_parity` ran 34.8% faster, block words 29.8%
+      faster, block scalars 34.0% faster, 1,000 aliases 23.3% faster, and 500 `remove_value` YAML
+      matches 98.8% faster (1,053.9 to 12.8 ms). Dense synthetic 1 MB `kN: 1` block map was +16.2%
+      wall time at 0.673x peak heap.
+    - `xtask bench-scale` (S1 to S4 and SFIX at 1k, 10k, 100k) passed `xtask bench-gate` against
+      v0.22.0 (worst gating `min_ms` delta +7.5% on `100k/S1/changed`, well within the +15% gate;
+      `100k/S2/full` +0.3%, `100k/S3/full` +0.2% min / -1.8% mean, `100k/SFIX/fix` -0.7% min).
+  - **Post-tag follow-ups:** publish GHSA-78jj-xfpm-g6px once release artifacts land, close #481,
+    refresh `ci/action-doc-pin.env` / Action SHA pins and unwrap `alint:since=0.22.1` / `0.23.0`
+    prose blocks in the follow-up PR, and sync alint.org (`rule-source-files.ts` and version pins).
