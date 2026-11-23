@@ -230,8 +230,8 @@ repositories whose configs you trust (or with your own `-c` config), and `alint 
   `user:password@` and a `?token=` included. Schemes now match in any case: such an entry is
   fetched and pinned like any `https://` one, and a plain `http://` one is refused. An entry
   with any other `<scheme>://` (two or more characters, so a Windows drive stays a path) is a
-  load error, `unsupported `extends:` scheme `ftp` (entry "ftp://host/x.yml"); use https://,
-  alint://bundled/ or a local path`. Errors show such an entry without its userinfo, query and
+  load error, ``unsupported `extends:` scheme `ftp` (entry "ftp://host/x.yml"); use https://,
+  alint://bundled/ or a local path``. Errors show such an entry without its userinfo, query and
   fragment. This affects configs with a non-lower-case or other `extends:` scheme in v0.2.1 to
   v0.22.1.
 - **A fix no longer writes or reads a Git directory.** A `file_create` could write `.git/HEAD`,

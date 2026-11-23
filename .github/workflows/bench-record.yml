@@ -382,6 +382,7 @@ jobs:
       # an error annotation and the PR body), not raised, so the results are
       # still published for review.
       - name: bench-gate report
+        id: bench_gate
         env:
           OUT_LABEL: ${{ steps.label.outputs.label }}
           PREV_TAG: ${{ needs.guard.outputs.prev }}
@@ -389,11 +390,30 @@ jobs:
           set -uo pipefail
           arch_dir="docs/benchmarks/macro/results/linux-x86_64"
           args=(--results "${arch_dir}/${OUT_LABEL}/results.json")
+          baseline_tag=""
           if [ -n "$PREV_TAG" ] && [ -f "${arch_dir}/${PREV_TAG}/results.json" ]; then
-            args+=(--baseline "${arch_dir}/${PREV_TAG}/results.json")
-          else
-            echo "::warning title=bench-gate::no committed results for the previous release '${PREV_TAG}'; regression check skipped"
+            baseline_tag="$PREV_TAG"
+          elif [ -n "$PREV_TAG" ]; then
+            # Walk release tags at or older than PREV_TAG in reverse semver order
+            # to skip packaging-only patches (e.g. v0.22.1) whose bench-record run
+            # was skipped (#621).
+            while IFS= read -r candidate; do
+              [ -n "$candidate" ] || continue
+              if [ -f "${arch_dir}/${candidate}/results.json" ]; then
+                baseline_tag="$candidate"
+                break
+              fi
+            done < <(git tag --list 'v*.*.*' --sort=-v:refname | awk -v t="$PREV_TAG" '$0==t{f=1} f{print}')
           fi
+          if [ -n "$baseline_tag" ]; then
+            args+=(--baseline "${arch_dir}/${baseline_tag}/results.json")
+            if [ "$baseline_tag" != "$PREV_TAG" ]; then
+              echo "::notice title=bench-gate::previous release '${PREV_TAG}' has no committed results; falling back to '${baseline_tag}'"
+            fi
+          else
+            echo "::warning title=bench-gate::no committed results for the previous release '${PREV_TAG}' or any older release; regression check skipped"
+          fi
+          echo "${baseline_tag}" > "$RUNNER_TEMP/bench-gate-baseline.txt"
           anchor="$(sed -n 's/^version = "\(.*\)"$/\1/p' docs/benchmarks/ANCHOR 2>/dev/null || true)"
           if [ -n "$anchor" ] && [ -f "${arch_dir}/${anchor}/results.json" ]; then
             args+=(--anchor auto)
@@ -538,6 +558,12 @@ jobs:
           # the reset + rebase below).
           gate_rc="$(cat "$RUNNER_TEMP/bench-gate.rc" 2>/dev/null || echo 'not run')"
           gate_txt="$(cat "$RUNNER_TEMP/bench-gate.txt" 2>/dev/null || echo 'bench-gate did not run')"
+          gate_baseline="$(cat "$RUNNER_TEMP/bench-gate-baseline.txt" 2>/dev/null || true)"
+          if [ -n "$gate_baseline" ] && [ "$gate_baseline" != "${PREV_TAG:-}" ]; then
+            gate_baseline_desc="\`${gate_baseline}\` (fallback from \`${PREV_TAG}\`)"
+          else
+            gate_baseline_desc="\`${gate_baseline:-${PREV_TAG:-none}}\`"
+          fi
           ab_md="$(cat "$RUNNER_TEMP/micro-ab.md" 2>/dev/null || echo '_No same-session comparison in this run._')"
           branch="bench-record/${OUT_LABEL}"
 
@@ -639,8 +665,8 @@ jobs:
 
           ## Release gates (automated)
 
-          - \`bench-gate\` exit **${gate_rc}**, against the previous release
-            \`${PREV_TAG:-none}\` and the long-horizon anchor in
+          - \`bench-gate\` exit **${gate_rc}**, against baseline
+            ${gate_baseline_desc} and the long-horizon anchor in
             \`docs/benchmarks/ANCHOR\`. Non-zero blocks the merge.
 
           \`\`\`
