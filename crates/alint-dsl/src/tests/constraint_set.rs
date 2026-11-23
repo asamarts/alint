@@ -941,3 +941,107 @@ fn a_field_copied_from_the_unique_side_rejects_no_file_by_its_path() {
         ]
     );
 }
+
+/// #596: 1,000 empty files against a 1,000-key reference would otherwise emit
+/// 1,000,000 findings. Under the default `findings_per_rule` cap (10,000),
+/// `constraint` `set` emits 10,000 findings plus one non-baselinable analysis
+/// failure naming the cap and suppressed count.
+#[test]
+fn empty_groups_are_bounded_by_findings_per_rule() {
+    let mut reference = String::from("{");
+    for i in 0..1_000 {
+        if i > 0 {
+            reference.push(',');
+        }
+        write!(reference, "\"k{i:04}\": \"v\"").unwrap();
+    }
+    reference.push('}');
+    let mut owned: Vec<(String, String)> = Vec::with_capacity(1_001);
+    owned.push(("locales/en.json".to_string(), reference));
+    for i in 0..1_000 {
+        owned.push((format!("locales/p{i:04}.json"), "{}".to_string()));
+    }
+    let files: Vec<(&str, &str)> = owned
+        .iter()
+        .map(|(path, body)| (path.as_str(), body.as_str()))
+        .collect();
+    let config = "version: 2\nrelations:\n  keys:\n    from: { paths: \"locales/*.json\" }\n    \
+                  entries: { format: json, at: \"$\", leaves: true }\n    fields: { locale: stem, \
+                  key: entry.path }\nrules:\n  - id: c\n    kind: constraint\n    input: keys\n    \
+                  assert: { set: { field: key, group_by: locale, equal_to: { group: en } } }\n    \
+                  level: error\n";
+    let cap = alint_core::relation::LimitKind::FindingsPerRule.default_value();
+    let started = Instant::now();
+    let results = run(config, &files);
+    let elapsed = started.elapsed();
+    let r = result(&results, "c");
+    assert_eq!(r.violations.len(), cap, "emits exactly the default cap");
+    assert_eq!(
+        r.analysis_failures.len(),
+        1,
+        "emits one truncation analysis failure: {:?}",
+        r.analysis_failures
+    );
+    assert!(
+        r.analysis_failures[0].message.contains(&format!(
+            "relation limit `findings_per_rule` ({cap}) reached"
+        )) && r.analysis_failures[0]
+            .message
+            .contains("suppressed 990000 more"),
+        "truncation message: {}",
+        r.analysis_failures[0].message
+    );
+    assert!(
+        elapsed < Duration::from_secs(20),
+        "1,000 empty groups x 1,000 keys took {elapsed:?}"
+    );
+}
+
+/// Below or at `findings_per_rule`, `constraint` `set` keeps identical findings
+/// and baseline keys; one finding past a configured cap emits the cap plus one
+/// non-baselinable analysis failure.
+#[test]
+fn configured_findings_per_rule_preserves_exact_boundary_and_triggers_one_past() {
+    use alint_core::relation::{LimitKind, Limits};
+    let config = "version: 2\nrelations:\n  keys:\n    from: { paths: \"locales/*.json\" }\n    \
+                  entries: { format: json, at: \"$\", leaves: true }\n    fields: { locale: stem, \
+                  key: entry.path }\nrules:\n  - id: c\n    kind: constraint\n    input: keys\n    \
+                  assert: { set: { field: key, group_by: locale, equal_to: { group: en } } }\n    \
+                  level: error\n";
+    let files = [
+        ("locales/en.json", r#"{"a":1,"b":2,"c":3}"#),
+        ("locales/fr.json", "{}"),
+        ("locales/de.json", "{}"),
+    ];
+    let default_results = run(config, &files);
+    assert_eq!(result(&default_results, "c").violations.len(), 6);
+    assert!(result(&default_results, "c").analysis_failures.is_empty());
+    let default_keys = keys(&default_results, "c");
+
+    // At the exact cap (6): identical baseline keys, no failure.
+    let exact_limits = Limits::default()
+        .with(LimitKind::FindingsPerRule, 6)
+        .unwrap();
+    let (exact_results, _) =
+        super::constraint_families::run_under(config, &files, Some(&exact_limits), false);
+    assert_eq!(keys(&exact_results, "c"), default_keys);
+    assert!(result(&exact_results, "c").analysis_failures.is_empty());
+
+    // One below (5): 5 findings + 1 analysis failure saying 1 suppressed.
+    let tight_limits = Limits::default()
+        .with(LimitKind::FindingsPerRule, 5)
+        .unwrap();
+    let (tight_results, _) =
+        super::constraint_families::run_under(config, &files, Some(&tight_limits), false);
+    let r = result(&tight_results, "c");
+    assert_eq!(r.violations.len(), 5);
+    assert_eq!(r.analysis_failures.len(), 1, "{:?}", r.analysis_failures);
+    assert!(
+        r.analysis_failures[0]
+            .message
+            .contains("relation limit `findings_per_rule` (5) reached")
+            && r.analysis_failures[0].message.contains("suppressed 1 more"),
+        "{}",
+        r.analysis_failures[0].message
+    );
+}

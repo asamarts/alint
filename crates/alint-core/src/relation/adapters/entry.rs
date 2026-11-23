@@ -109,7 +109,7 @@ pub(crate) fn key_rows(
     limits: &Limits,
     budget: &RunBudget,
 ) -> Result<Vec<Row>, AdapterError> {
-    let budget = PathBudget::new(budget);
+    let budget = PathBudget::for_key_rows(budget, limits);
     let mut rows = Vec::with_capacity(entries.rows.len());
     for (ordinal, entry) in entries.rows.iter().enumerate() {
         check_row_count(limits, rows.len() + 1)?;

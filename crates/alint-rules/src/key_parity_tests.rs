@@ -1368,12 +1368,14 @@ fn a_comparison_error_is_an_analysis_failure_not_a_pass() {
     let tight = Limits::default()
         .with(alint_core::relation::LimitKind::RowsPerExtractor, 1)
         .unwrap();
+    let mut budget = FindingBudget::new(tight.get(LimitKind::FindingsPerRule));
     rule.compare(
         &tight,
         &compared,
         &peer,
         &peer_file,
         &peer_keys,
+        &mut budget,
         &mut findings,
     );
     assert_eq!(findings.len(), 1, "{:?}", messages(&findings));
@@ -1404,6 +1406,7 @@ fn a_comparison_error_is_an_analysis_failure_not_a_pass() {
         reference: "en.json".into(),
         peer: "fr.json".into(),
         direction: Direction::Both,
+        max_findings: usize::MAX,
     })
     .analyze("t", &[], &foreign, &Limits::default())
     .unwrap_err();
@@ -1755,6 +1758,7 @@ fn the_analyzer_and_rule_refuse_malformed_comparisons() {
         reference: "en.json".into(),
         peer: "fr.json".into(),
         direction: Direction::Both,
+        max_findings: usize::MAX,
     })
     .analyze("t", &[], &row, &Limits::default())
     .unwrap_err();
@@ -1764,13 +1768,16 @@ fn the_analyzer_and_rule_refuse_malformed_comparisons() {
     assert_eq!(
         classify(&[
             Violation::new("missing\u{0}a"),
-            Violation::new("extra\u{0}b")
+            Violation::new("extra\u{0}b"),
+            Violation::new("truncated\u{0}7"),
         ]),
         Ok((
             BTreeSet::from(["a".to_string()]),
-            BTreeSet::from(["b".to_string()])
+            BTreeSet::from(["b".to_string()]),
+            7,
         ))
     );
+    assert!(classify(&[Violation::new("truncated\u{0}NaN")]).is_err());
     assert!(classify(&[Violation::new("changed\u{0}a")]).is_err());
     assert!(classify(&[Violation::new("no separator")]).is_err());
 }

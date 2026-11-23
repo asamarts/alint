@@ -191,3 +191,146 @@ fn the_run_byte_budget_bounds_every_files_key_paths_together() {
         [""; 0]
     );
 }
+
+/// #596: 1,000 empty peer files against a 1,000-key reference would otherwise
+/// emit 1,000,000 findings. Under the default `findings_per_rule` cap (10,000),
+/// the rule emits 10,000 findings plus one non-baselinable analysis failure
+/// naming the cap and suppressed count.
+#[test]
+fn empty_peers_are_bounded_by_findings_per_rule() {
+    use std::fmt::Write as _;
+    let mut reference = String::from("{");
+    for i in 0..1_000 {
+        if i > 0 {
+            reference.push(',');
+        }
+        write!(reference, "\"k{i:04}\":\"v\"").unwrap();
+    }
+    reference.push('}');
+    let mut files: Vec<(String, Vec<u8>)> = Vec::with_capacity(1_001);
+    files.push(("en.json".to_string(), reference.into_bytes()));
+    for i in 0..1_000 {
+        files.push((format!("p{i:04}.json"), b"{}".to_vec()));
+    }
+    let refs: Vec<(&str, &[u8])> = files
+        .iter()
+        .map(|(name, bytes)| (name.as_str(), bytes.as_slice()))
+        .collect();
+    let (tmp, index) = tempdir_with_files(&refs);
+    index.enable_relation_caches();
+    let rule = rule("id: t\nkind: key_parity\nreference: en.json\npeers: '*.json'\nlevel: error\n");
+    let findings = rule.evaluate(&ctx(tmp.path(), &index)).unwrap();
+    let cap = LimitKind::FindingsPerRule.default_value();
+    let normal: Vec<&Violation> = findings
+        .iter()
+        .filter(|v| matches!(v.disposition, FindingDisposition::Violation))
+        .collect();
+    let failures: Vec<&Violation> = findings
+        .iter()
+        .filter(|v| matches!(v.disposition, FindingDisposition::AnalysisFailure(_)))
+        .collect();
+    assert_eq!(normal.len(), cap, "emits exactly the default cap");
+    assert_eq!(failures.len(), 1, "emits one truncation analysis failure");
+    assert!(
+        failures[0].message.contains(&format!(
+            "relation limit `findings_per_rule` ({cap}) reached"
+        )) && failures[0].message.contains("suppressed 990000 more"),
+        "truncation message: {}",
+        failures[0].message
+    );
+}
+
+/// Below or at `findings_per_rule`, findings and baseline keys stay untouched;
+/// one finding past a configured cap emits the cap plus one analysis failure.
+#[test]
+fn configured_findings_per_rule_preserves_exact_boundary_and_triggers_one_past() {
+    let files: &[(&str, &[u8])] = &[
+        ("en.json", br#"{"a":1,"b":2,"c":3}"#),
+        ("fr.json", b"{}"),
+        ("de.json", b"{}"),
+    ];
+    let rule = rule("id: t\nkind: key_parity\nreference: en.json\npeers: '*.json'\nlevel: error\n");
+    let (tmp, default_index) = tempdir_with_files(files);
+    default_index.enable_relation_caches();
+    let baseline_findings = rule.evaluate(&ctx(tmp.path(), &default_index)).unwrap();
+    assert_eq!(baseline_findings.len(), 6);
+
+    // At the exact cap (6): identical findings and baseline keys, no failure.
+    let (tmp, exact_index) = tempdir_with_files(files);
+    exact_index.enable_relation_caches_under(
+        &Limits::default()
+            .with(LimitKind::FindingsPerRule, 6)
+            .unwrap(),
+    );
+    let exact_findings = rule.evaluate(&ctx(tmp.path(), &exact_index)).unwrap();
+    assert_eq!(exact_findings.len(), 6);
+    assert_eq!(
+        exact_findings
+            .iter()
+            .map(|v| v.baseline_key.clone())
+            .collect::<Vec<_>>(),
+        baseline_findings
+            .iter()
+            .map(|v| v.baseline_key.clone())
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        exact_findings
+            .iter()
+            .all(|v| matches!(v.disposition, FindingDisposition::Violation))
+    );
+
+    // One below (5): 5 findings + 1 analysis failure saying 1 suppressed.
+    let (tmp, tight_index) = tempdir_with_files(files);
+    tight_index.enable_relation_caches_under(
+        &Limits::default()
+            .with(LimitKind::FindingsPerRule, 5)
+            .unwrap(),
+    );
+    let tight_findings = rule.evaluate(&ctx(tmp.path(), &tight_index)).unwrap();
+    let normal_count = tight_findings
+        .iter()
+        .filter(|v| matches!(v.disposition, FindingDisposition::Violation))
+        .count();
+    let failure_msgs: Vec<&str> = tight_findings
+        .iter()
+        .filter(|v| matches!(v.disposition, FindingDisposition::AnalysisFailure(_)))
+        .map(|v| v.message.as_ref())
+        .collect();
+    assert_eq!(normal_count, 5);
+    assert_eq!(failure_msgs.len(), 1, "{failure_msgs:?}");
+    assert!(
+        failure_msgs[0].contains("relation limit `findings_per_rule` (5) reached")
+            && failure_msgs[0].contains("suppressed 1 more"),
+        "{failure_msgs:?}"
+    );
+}
+
+/// #569: under `Limits::default()`, a deep, wide JSON file fails at
+/// `key_path_bytes_per_decode` (32 MiB) rather than holding ~300 MiB of
+/// key-path pointers under the 1 GiB `bytes_per_run` cap.
+#[test]
+fn deep_wide_document_fails_at_default_key_path_decode_cap() {
+    let text = deep_and_wide(120, 20_000);
+    let files: &[(&str, &[u8])] = &[("en.json", text.as_bytes()), ("fr.json", b"{}")];
+    let (tmp, index) = tempdir_with_files(files);
+    index.enable_relation_caches();
+    let rule = rule("id: t\nkind: key_parity\nreference: en.json\npeers: '*.json'\nlevel: error\n");
+    let findings = rule.evaluate(&ctx(tmp.path(), &index)).unwrap();
+    assert_eq!(findings.len(), 1, "{:?}", messages(&findings));
+    assert!(
+        matches!(
+            findings[0].disposition,
+            FindingDisposition::AnalysisFailure(_)
+        ),
+        "{:?}",
+        messages(&findings)
+    );
+    assert!(
+        findings[0]
+            .message
+            .contains("relation limit `key_path_bytes_per_decode`"),
+        "{:?}",
+        messages(&findings)
+    );
+}

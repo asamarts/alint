@@ -10,11 +10,11 @@ use std::fmt::Write as _;
 use std::path::Path;
 use std::sync::Arc;
 
-use alint_core::relation::Value;
 use alint_core::relation::eval::{Cell, FieldRow, Provenance, RelationRows, located, type_name};
 use alint_core::relation::plan::{
     FieldSource, JoinSide, Part, Plan, Read, Reader, RelationId, Rows,
 };
+use alint_core::relation::{LimitKind, Limits, Value};
 use alint_core::{Context, MAX_RELATED_LOCATIONS, RelatedLocation, Violation};
 
 use super::ConstraintRule;
@@ -31,6 +31,7 @@ const LISTED_VALUES: usize = 5;
 pub(super) struct Run<'r> {
     rule: &'r ConstraintRule,
     rows: &'r RelationRows,
+    limits: Limits,
     places: Places<'r>,
     /// Key paths stay out of messages and baselines: a field that holds keys
     /// is sensitive, or the relation's configuration reads the environment
@@ -38,6 +39,11 @@ pub(super) struct Run<'r> {
     /// places this keeps clean before it does).
     hide_keys: bool,
     findings: Vec<Pending>,
+    /// Findings omitted once [`LimitKind::FindingsPerRule`] was reached.
+    suppressed_findings: usize,
+    /// True when the assertion stopped scanning after hitting the finding cap,
+    /// so [`Self::suppressed_findings`] is a lower bound.
+    suppressed_is_lower_bound: bool,
     failures: Vec<Violation>,
 }
 
@@ -118,14 +124,42 @@ impl<'r> Run<'r> {
             rule.plan.relation(id).reads_environment
                 || alint_core::relation::eval::keys_sensitive(&rule.plan, id)
         });
+        let limits = ctx
+            .index
+            .decode_cache()
+            .map_or_else(Limits::default, |cache| *cache.limits());
         Self {
             rule,
             rows,
+            limits,
             places: Places::new(ctx),
             hide_keys,
             findings: Vec::new(),
+            suppressed_findings: 0,
+            suppressed_is_lower_bound: false,
             failures: Vec::new(),
         }
+    }
+
+    fn finding_cap(&self) -> usize {
+        self.limits.get(LimitKind::FindingsPerRule)
+    }
+
+    /// True once the rule has emitted `finding_cap()` findings and any further
+    /// finding would breach [`LimitKind::FindingsPerRule`].
+    fn at_finding_cap(&self) -> bool {
+        self.findings.len() >= self.finding_cap()
+    }
+
+    /// True once at least one finding past `finding_cap()` has been suppressed.
+    fn finding_cap_breached(&self) -> bool {
+        self.suppressed_findings > 0
+    }
+
+    /// Record `count` suppressed findings beyond `finding_cap()`.
+    fn suppress_findings(&mut self, count: usize, lower_bound: bool) {
+        self.suppressed_findings = self.suppressed_findings.saturating_add(count);
+        self.suppressed_is_lower_bound |= lower_bound;
     }
 
     /// `earlier` (findings about the rows, such as values a `read:` skipped)
@@ -136,14 +170,36 @@ impl<'r> Run<'r> {
     pub(super) fn finish(self, mut earlier: Vec<Violation>) -> Vec<Violation> {
         let Self {
             rule,
+            limits,
             places,
             findings,
+            suppressed_findings,
+            suppressed_is_lower_bound,
             mut failures,
             ..
         } = self;
         if failures.is_empty() && !findings.is_empty() {
+            let emitted = findings.len();
             match places.resolve() {
-                Ok(placed) => earlier.extend(findings.into_iter().map(|f| f.placed(&placed))),
+                Ok(placed) => {
+                    earlier.extend(findings.into_iter().map(|f| f.placed(&placed)));
+                    if suppressed_findings > 0 {
+                        let cap = limits.get(LimitKind::FindingsPerRule);
+                        let omitted = if suppressed_is_lower_bound {
+                            format!("at least {suppressed_findings}")
+                        } else {
+                            suppressed_findings.to_string()
+                        };
+                        earlier.push(rule.failure(
+                            None,
+                            format!(
+                                "relation limit `findings_per_rule` ({cap}) reached: emitted \
+                                 {emitted} findings and suppressed {omitted} more; remaining \
+                                 findings were omitted to bound run memory and output"
+                            ),
+                        ));
+                    }
+                }
                 Err((path, limit)) => failures.push(rule.failure(
                     Some(path.as_path()),
                     format!(
@@ -154,6 +210,21 @@ impl<'r> Run<'r> {
                     ),
                 )),
             }
+        } else if failures.is_empty() && suppressed_findings > 0 {
+            let cap = limits.get(LimitKind::FindingsPerRule);
+            let omitted = if suppressed_is_lower_bound {
+                format!("at least {suppressed_findings}")
+            } else {
+                suppressed_findings.to_string()
+            };
+            earlier.push(rule.failure(
+                None,
+                format!(
+                    "relation limit `findings_per_rule` ({cap}) reached: emitted 0 findings \
+                     and suppressed {omitted} more; remaining findings were omitted to bound \
+                     run memory and output"
+                ),
+            ));
         }
         verdict(earlier, failures)
     }
@@ -367,6 +438,10 @@ impl<'r> Run<'r> {
         related: Related,
         reported: Option<usize>,
     ) {
+        if self.at_finding_cap() {
+            self.suppress_findings(1, false);
+            return;
+        }
         let message = match &self.rule.message {
             Some(template) => self.render(template, reported.map(|row| &self.rows.rows[row])),
             None => generated,

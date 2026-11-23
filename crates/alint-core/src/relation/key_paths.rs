@@ -9,10 +9,11 @@
 //! a row an adapter emits, its bytes charged to the run as it is built
 //! ([`PathBudget`]).
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 
-use super::limits::{LimitExceeded, RunBudget};
+use super::limits::{LimitExceeded, LimitKind, Limits, RunBudget};
 use super::pointer::{Pointer, Segment};
 use crate::extract::{ByteSpan, EntryValue};
 
@@ -236,23 +237,51 @@ pub(crate) struct EntryTable {
 }
 
 /// The key-path bytes a decode builds, charged as it builds each [`Pointer`]
-/// to a [`LimitKind::BytesPerRun`](super::LimitKind::BytesPerRun) budget:
-/// the run's, which the decode cache keeps, so the key paths of every decode
-/// the run holds count together, or, for a decode made outside any cache,
-/// one of its own. A decode that would take the budget past its limit fails
-/// as soon as it does, before it holds more.
+/// against the run's [`LimitKind::BytesPerRun`] budget (`run`) and, for
+/// `key_parity`'s key rows ([`Self::for_key_rows`]), against
+/// [`LimitKind::KeyPathBytesPerDecode`] (default 32 MiB) so a single deep, wide
+/// file fails early rather than holding hundreds of megabytes under the 1 GiB
+/// run cap.
 #[derive(Debug)]
 pub(crate) struct PathBudget<'b> {
     run: &'b RunBudget,
+    decode_used: Cell<usize>,
+    decode_limit: Option<usize>,
 }
 
 impl<'b> PathBudget<'b> {
     pub(crate) fn new(run: &'b RunBudget) -> Self {
-        Self { run }
+        Self {
+            run,
+            decode_used: Cell::new(0),
+            decode_limit: None,
+        }
     }
 
-    /// Charge `bytes`, failing once the budget's total exceeds its limit.
+    pub(crate) fn for_key_rows(run: &'b RunBudget, limits: &Limits) -> Self {
+        Self {
+            run,
+            decode_used: Cell::new(0),
+            decode_limit: Some(limits.get(LimitKind::KeyPathBytesPerDecode)),
+        }
+    }
+
+    /// Charge `bytes`, failing once either the per-decode key-row cap (when
+    /// enabled) or the run's byte budget is exceeded.
     pub(crate) fn take(&self, bytes: usize) -> Result<(), LimitExceeded> {
+        if let Some(limit) = self.decode_limit {
+            let next = self.decode_used.get().saturating_add(bytes);
+            if next > limit {
+                return Err(LimitExceeded {
+                    kind: LimitKind::KeyPathBytesPerDecode,
+                    limit,
+                    reached: next,
+                });
+            }
+            self.run.take(bytes)?;
+            self.decode_used.set(next);
+            return Ok(());
+        }
         self.run.take(bytes)
     }
 
@@ -320,5 +349,20 @@ mod tests {
         let limit = budget.pointer(&paths, deep).unwrap_err();
         assert_eq!(limit.kind, LimitKind::BytesPerRun);
         assert_eq!(limit.reached, 4 * paths.pointer_bytes(deep));
+
+        let per_decode = Limits::default()
+            .with(
+                LimitKind::KeyPathBytesPerDecode,
+                2 * paths.pointer_bytes(deep),
+            )
+            .unwrap();
+        let run_default = RunBudget::bytes(&per_decode);
+        let decode_budget = PathBudget::for_key_rows(&run_default, &per_decode);
+        for _ in 0..2 {
+            decode_budget.pointer(&paths, deep).unwrap();
+        }
+        let decode_limit = decode_budget.pointer(&paths, deep).unwrap_err();
+        assert_eq!(decode_limit.kind, LimitKind::KeyPathBytesPerDecode);
+        assert_eq!(decode_limit.reached, 3 * paths.pointer_bytes(deep));
     }
 }
