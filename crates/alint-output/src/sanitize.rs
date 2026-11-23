@@ -45,6 +45,40 @@ pub fn sanitize_terminal_multiline(s: &str) -> Cow<'_, str> {
     sanitize_terminal_impl(s, true)
 }
 
+/// Escape bidi, zero-width, and other display-deceptive characters (plus
+/// DEL/C1 controls) for human-readable XML text such as `JUnit` `<failure>` /
+/// `<error>` messages and bodies (#600).
+///
+/// Leaves C0 control characters untouched so the XML encoder can strip
+/// XML-1.0-illegal C0 bytes (including `ESC`) and normalize `\t`/`\n`/`\r`
+/// according to element vs attribute rules.
+#[must_use]
+pub(crate) fn sanitize_xml_display(s: &str) -> Cow<'_, str> {
+    if s.bytes().all(|b| b < 0x7f) {
+        return Cow::Borrowed(s);
+    }
+    let needs_escape = |c: char| {
+        let cp = c as u32;
+        (0x7f..=0x9f).contains(&cp) || is_deceptive_on_display(c)
+    };
+    if !s.chars().any(needs_escape) {
+        return Cow::Borrowed(s);
+    }
+    let mut out = String::with_capacity(s.len() + 8);
+    for c in s.chars() {
+        use std::fmt::Write as _;
+        let cp = c as u32;
+        if (0x7f..=0x9f).contains(&cp) {
+            let _ = write!(out, "\\x{cp:02x}");
+        } else if is_deceptive_on_display(c) {
+            let _ = write!(out, "\\u{{{cp:04x}}}");
+        } else {
+            out.push(c);
+        }
+    }
+    Cow::Owned(out)
+}
+
 fn sanitize_terminal_impl(s: &str, preserve_newlines: bool) -> Cow<'_, str> {
     // Printable ASCII needs no escaping: every character the slow path escapes
     // is a C0/DEL/C1 control or non-ASCII. Nearly every path, message and rule

@@ -78,9 +78,10 @@ struct AgentViolation<'a> {
     line: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     column: Option<usize>,
-    /// The rule's violation message verbatim, suitable for human
-    /// review. Mirror of the `message` field in `--format=json`.
-    human_message: &'a str,
+    /// The rule's violation message sanitized against terminal escapes, bidi
+    /// controls, and zero-width characters (#600), suitable for human and
+    /// agent review.
+    human_message: Cow<'a, str>,
     /// Templated remediation phrasing optimised for an LLM to act
     /// on. Composed from severity, message, location, fix
     /// availability, and policy URL — see `build_agent_instruction`.
@@ -119,7 +120,7 @@ struct AgentAnalysisFailure<'a> {
     line: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     column: Option<usize>,
-    human_message: &'a str,
+    human_message: Cow<'a, str>,
 }
 
 pub fn write_agent(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
@@ -155,7 +156,7 @@ pub fn write_agent(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
                 file: v.report_path().map(Path::to_string_lossy),
                 line: v.report_line(),
                 column: v.report_column(),
-                human_message: v.message.as_ref(),
+                human_message: crate::sanitize::sanitize_terminal_multiline(v.message.as_ref()),
                 agent_instruction: build_agent_instruction(r, v),
                 fix_available: v.is_fixable,
                 fix_command: v
@@ -174,7 +175,9 @@ pub fn write_agent(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
                     file: failure.report_path().map(Path::to_string_lossy),
                     line: failure.report_line(),
                     column: failure.report_column(),
-                    human_message: failure.message.as_ref(),
+                    human_message: crate::sanitize::sanitize_terminal_multiline(
+                        failure.message.as_ref(),
+                    ),
                 }),
         );
     }
@@ -235,7 +238,9 @@ fn build_agent_instruction(rule: &RuleResult, violation: &Violation) -> String {
     let mut out = String::new();
     out.push_str(severity_str(rule.level));
     out.push_str(": ");
-    out.push_str(&violation.message);
+    out.push_str(&crate::sanitize::sanitize_terminal_multiline(
+        &violation.message,
+    ));
     if !out.ends_with('.') {
         out.push('.');
     }
@@ -244,7 +249,9 @@ fn build_agent_instruction(rule: &RuleResult, violation: &Violation) -> String {
     match violation.report_path() {
         Some(path) => {
             out.push_str("edit ");
-            out.push_str(&path.display().to_string());
+            out.push_str(&crate::sanitize::sanitize_terminal(
+                &path.display().to_string(),
+            ));
             if let Some(line) = violation.report_line() {
                 out.push(':');
                 out.push_str(&line.to_string());
@@ -265,13 +272,13 @@ fn build_agent_instruction(rule: &RuleResult, violation: &Violation) -> String {
 
     if violation.is_fixable {
         out.push_str(" (or run `alint fix --only ");
-        out.push_str(&rule.rule_id);
+        out.push_str(&crate::sanitize::sanitize_terminal(&rule.rule_id));
         out.push_str("` to apply the auto-fix)");
     }
 
     if let Some(url) = rule.policy_url.as_deref() {
         out.push_str(". See ");
-        out.push_str(url);
+        out.push_str(&crate::sanitize::sanitize_terminal(url));
         out.push_str(" for the policy this rule enforces");
     }
 
@@ -521,5 +528,61 @@ mod tests {
         assert_eq!(v["summary"]["total_violations"], 4);
         assert_eq!(v["summary"]["passing_rules"], 1);
         assert_eq!(v["summary"]["failing_rules"], 3);
+    }
+
+    #[test]
+    fn bidi_zero_width_and_esc_escaped_in_agent_messages_but_not_file_field() {
+        use alint_core::{AnalysisFailure, AnalysisFailureKind};
+
+        let raw_path = "a\x1b[31m\u{202E}\u{200B}\u{180E}Z.txt";
+        let raw_msg = format!("file is forbidden: {raw_path}");
+        let result = RuleResult {
+            rule_id: "no-txt".into(),
+            level: Level::Error,
+            policy_url: None,
+            violations: vec![Violation::new(raw_msg.clone()).with_path(PathBuf::from(raw_path))],
+            notes: Vec::new(),
+            is_fixable: false,
+            analysis_failures: vec![
+                AnalysisFailure::new(AnalysisFailureKind::ResourceParse, raw_msg)
+                    .with_path(PathBuf::from(raw_path)),
+            ],
+        };
+        let out = run(vec![result]);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+
+        let viol = &v["violations"][0];
+        assert_eq!(viol["file"].as_str(), Some(raw_path));
+        for field in ["human_message", "agent_instruction"] {
+            let s = viol[field].as_str().unwrap();
+            for raw in ['\x1b', '\u{202E}', '\u{200B}', '\u{180E}'] {
+                assert!(
+                    !s.contains(raw),
+                    "raw U+{:04X} survived in agent.{field}: {s}",
+                    raw as u32
+                );
+            }
+            assert!(s.contains("\\x1b"), "missing ESC escape in {field}: {s}");
+            assert!(
+                s.contains("\\u{202e}"),
+                "missing bidi escape in {field}: {s}"
+            );
+            assert!(
+                s.contains("\\u{200b}"),
+                "missing zwsp escape in {field}: {s}"
+            );
+            assert!(
+                s.contains("\\u{180e}"),
+                "missing mvs escape in {field}: {s}"
+            );
+        }
+
+        let af = &v["analysis_failures"][0];
+        assert_eq!(af["file"].as_str(), Some(raw_path));
+        let af_msg = af["human_message"].as_str().unwrap();
+        assert!(!af_msg.contains('\x1b'));
+        assert!(!af_msg.contains('\u{202E}'));
+        assert!(af_msg.contains("\\x1b"));
+        assert!(af_msg.contains("\\u{202e}"));
     }
 }
