@@ -206,4 +206,33 @@ mod tests {
         let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
         assert!(v.is_empty(), "out-of-scope shouldn't fire: {v:?}");
     }
+
+    #[test]
+    fn evaluate_handles_boms_latin1_nul_free_binary_and_8k_window_boundary() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_is_text\n\
+             paths: \"**/*\"\n\
+             level: warning\n",
+        );
+        let rule = build(&spec).unwrap();
+        let mut nul_at_8191 = vec![b'a'; TEXT_INSPECT_LEN];
+        nul_at_8191[TEXT_INSPECT_LEN - 1] = 0;
+        let mut nul_at_8192 = vec![b'a'; TEXT_INSPECT_LEN + 1];
+        nul_at_8192[TEXT_INSPECT_LEN] = 0;
+
+        let (tmp, idx) = tempdir_with_files(&[
+            ("utf16.txt", b"\xFF\xFEh\x00i\x00"),
+            ("latin1.properties", b"name=caf\xe9\n"),
+            ("bom_pdf.dat", b"\xEF\xBB\xBF%PDF-1.7\n"),
+            ("nul_inside.dat", &nul_at_8191),
+            ("nul_past.dat", &nul_at_8192),
+        ]);
+        let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        let paths: Vec<_> = v
+            .iter()
+            .map(|x| x.path.as_deref().unwrap().to_str().unwrap())
+            .collect();
+        assert_eq!(paths, ["bom_pdf.dat", "nul_inside.dat"]);
+    }
 }

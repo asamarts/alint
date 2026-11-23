@@ -11,7 +11,7 @@ set -euo pipefail
 #
 # Invariant:  deny.allow  ⊆  about.accepted  ⊆  deny.allow ∪ deny.exceptions
 # where deny.exceptions is the set of licenses granted per-crate via
-# deny.toml's [[licenses.exceptions]] (e.g. MPL-2.0 for option-ext). Those are
+# deny.toml's [[licenses.exceptions]] (when any exist). Those are
 # scoped in deny.toml but must be accepted globally in about.toml so the bundle
 # can render that crate's text. The exception set is PARSED from deny.toml (not
 # hard-coded), so dropping the exception there without dropping it from about.toml

@@ -216,7 +216,7 @@ impl Format {
             }
             Self::Xml => xml_to_value(text),
             Self::Dotenv => crate::dotenv::parse(raw_text),
-            Self::Properties => properties_to_value(text),
+            Self::Properties => properties_to_value(raw_text),
             Self::Ini => crate::ini::parse(text),
             Self::Hcl => hcl_to_value(text),
         }

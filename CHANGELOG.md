@@ -56,7 +56,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (#611).
 - Binary/text classification (`alint-rules`) now uses an internal SIMD NUL-byte, BOM, magic-header,
   and 64-bit SWAR control-byte density heuristic, removing unmaintained `content_inspector 0.2.4`
-  from default release builds (#612).
+  from default release builds (it remains transitive dev-only via `trycmd`/`snapbox`, #612).
 - VS Code extension (`editors/vscode`): replaced `node-tar` (`tar`) with Node's built-in
   `node:zlib` (`gunzipSync` with a 256 MiB output cap) and an in-memory USTAR/PAX/GNU-LongName
   single-file extractor (`src/tar.ts`) that rejects symlinks, hardlinks, traversal/absolute paths,

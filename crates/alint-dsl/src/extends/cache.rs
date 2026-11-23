@@ -24,8 +24,28 @@ fn non_empty_abs_path(val: Option<OsString>, is_abs: fn(&Path) -> bool) -> Optio
     is_abs(&path).then_some(path)
 }
 
+/// Resolve a home directory from `var_name`, falling back to `home_fallback`
+/// (OS passwd / profile lookup via `std::env::home_dir()`) ONLY when the
+/// environment variable is unset or empty. An explicitly set relative value is
+/// rejected rather than silently bypassed.
+fn resolve_home(
+    get_env: &impl Fn(&str) -> Option<OsString>,
+    var_name: &str,
+    home_fallback: impl FnOnce() -> Option<PathBuf>,
+    is_abs: fn(&Path) -> bool,
+) -> Option<PathBuf> {
+    match get_env(var_name) {
+        Some(raw) if !raw.is_empty() => {
+            let path = PathBuf::from(raw);
+            is_abs(&path).then_some(path)
+        }
+        _ => home_fallback().filter(|p| is_abs(p)),
+    }
+}
+
 fn resolve_unix_cache_root(
     get_env: impl Fn(&str) -> Option<OsString>,
+    home_fallback: impl FnOnce() -> Option<PathBuf>,
     is_abs: fn(&Path) -> bool,
 ) -> Option<PathBuf> {
     // Per the XDG Base Directory Specification, a relative or empty
@@ -33,15 +53,16 @@ fn resolve_unix_cache_root(
     if let Some(xdg) = non_empty_abs_path(get_env("XDG_CACHE_HOME"), is_abs) {
         return Some(xdg.join("alint").join("rulesets"));
     }
-    let home = non_empty_abs_path(get_env("HOME"), is_abs)?;
+    let home = resolve_home(&get_env, "HOME", home_fallback, is_abs)?;
     Some(home.join(".cache").join("alint").join("rulesets"))
 }
 
 fn resolve_macos_cache_root(
     get_env: impl Fn(&str) -> Option<OsString>,
+    home_fallback: impl FnOnce() -> Option<PathBuf>,
     is_abs: fn(&Path) -> bool,
 ) -> Option<PathBuf> {
-    let home = non_empty_abs_path(get_env("HOME"), is_abs)?;
+    let home = resolve_home(&get_env, "HOME", home_fallback, is_abs)?;
     Some(
         home.join("Library")
             .join("Caches")
@@ -52,10 +73,11 @@ fn resolve_macos_cache_root(
 
 fn resolve_windows_cache_root(
     get_env: impl Fn(&str) -> Option<OsString>,
+    home_fallback: impl FnOnce() -> Option<PathBuf>,
     is_abs: fn(&Path) -> bool,
 ) -> Option<PathBuf> {
     let local_app_data = non_empty_abs_path(get_env("LOCALAPPDATA"), is_abs).or_else(|| {
-        non_empty_abs_path(get_env("USERPROFILE"), is_abs)
+        resolve_home(&get_env, "USERPROFILE", home_fallback, is_abs)
             .map(|home| home.join("AppData").join("Local"))
     })?;
     Some(
@@ -69,11 +91,23 @@ fn resolve_windows_cache_root(
 
 fn user_cache_root() -> Option<PathBuf> {
     if cfg!(target_os = "macos") {
-        resolve_macos_cache_root(|k| std::env::var_os(k), Path::is_absolute)
+        resolve_macos_cache_root(
+            |k| std::env::var_os(k),
+            std::env::home_dir,
+            Path::is_absolute,
+        )
     } else if cfg!(target_os = "windows") {
-        resolve_windows_cache_root(|k| std::env::var_os(k), Path::is_absolute)
+        resolve_windows_cache_root(
+            |k| std::env::var_os(k),
+            std::env::home_dir,
+            Path::is_absolute,
+        )
     } else {
-        resolve_unix_cache_root(|k| std::env::var_os(k), Path::is_absolute)
+        resolve_unix_cache_root(
+            |k| std::env::var_os(k),
+            std::env::home_dir,
+            Path::is_absolute,
+        )
     }
 }
 
@@ -86,9 +120,13 @@ pub struct Cache {
 impl Cache {
     /// Cache under the user's platform-specific cache directory.
     /// Linux:   `$XDG_CACHE_HOME/alint/rulesets/` or
-    ///          `$HOME/.cache/alint/rulesets/`.
-    /// macOS:   `$HOME/Library/Caches/org.asamarts.alint/rulesets/`.
-    /// Windows: `%LOCALAPPDATA%\asamarts\alint\cache\rulesets\`.
+    ///          `$HOME/.cache/alint/rulesets/` (falling back to OS home lookup
+    ///          when `HOME` is unset or empty).
+    /// macOS:   `$HOME/Library/Caches/org.asamarts.alint/rulesets/` (falling
+    ///          back to OS home lookup when `HOME` is unset or empty).
+    /// Windows: `%LOCALAPPDATA%\asamarts\alint\cache\rulesets\` or
+    ///          `%USERPROFILE%\AppData\Local\asamarts\alint\cache\rulesets\`
+    ///          (falling back to OS home lookup when both are unset or empty).
     pub fn user_default() -> Result<Self, CacheError> {
         let root = user_cache_root().ok_or(CacheError::NoCacheDir)?;
         Ok(Self { root })
@@ -273,11 +311,27 @@ mod tests {
             || s.starts_with(r"\\")
     }
 
+    fn no_home() -> Option<PathBuf> {
+        None
+    }
+
+    #[test]
+    fn user_default_smoke_resolves_rulesets_dir() {
+        // Host environment has a user home / cache directory.
+        let cache = Cache::user_default().expect("user_default on host");
+        assert!(cache.root().is_absolute(), "{:?}", cache.root());
+        assert_eq!(
+            cache.root().file_name().and_then(|s| s.to_str()),
+            Some("rulesets")
+        );
+    }
+
     #[test]
     fn unix_cache_root_follows_xdg_spec_and_falls_back_to_home() {
         assert_eq!(
             resolve_unix_cache_root(
                 env_map(&[("XDG_CACHE_HOME", "/var/cache/me"), ("HOME", "/home/alice")]),
+                no_home,
                 unix_is_abs,
             ),
             Some(
@@ -288,14 +342,19 @@ mod tests {
         );
         // XDG_CACHE_HOME alone works even when HOME is unset.
         assert_eq!(
-            resolve_unix_cache_root(env_map(&[("XDG_CACHE_HOME", "/tmp/cache")]), unix_is_abs),
+            resolve_unix_cache_root(
+                env_map(&[("XDG_CACHE_HOME", "/tmp/cache")]),
+                no_home,
+                unix_is_abs,
+            ),
             Some(PathBuf::from("/tmp/cache").join("alint").join("rulesets"))
         );
-        // Relative or empty XDG_CACHE_HOME is ignored per XDG spec.
-        for bad_xdg in ["", "relative/cache", "./cache"] {
+        // Relative, empty, or whitespace-only XDG_CACHE_HOME is ignored per XDG spec.
+        for bad_xdg in ["", "   ", "relative/cache", "./cache"] {
             assert_eq!(
                 resolve_unix_cache_root(
                     env_map(&[("XDG_CACHE_HOME", bad_xdg), ("HOME", "/home/alice")]),
+                    no_home,
                     unix_is_abs,
                 ),
                 Some(
@@ -307,18 +366,59 @@ mod tests {
                 "bad XDG_CACHE_HOME={bad_xdg:?}"
             );
         }
-        // Missing or relative HOME yields None.
-        assert_eq!(resolve_unix_cache_root(env_map(&[]), unix_is_abs), None);
+        // Unset or empty HOME falls back to OS home lookup.
+        for empty_home in [None, Some("")] {
+            let pairs: Vec<(&str, &str)> = empty_home.into_iter().map(|v| ("HOME", v)).collect();
+            assert_eq!(
+                resolve_unix_cache_root(
+                    env_map(&pairs),
+                    || Some(PathBuf::from("/home/passwd-user")),
+                    unix_is_abs,
+                ),
+                Some(
+                    PathBuf::from("/home/passwd-user")
+                        .join(".cache")
+                        .join("alint")
+                        .join("rulesets")
+                ),
+            );
+        }
+        // Explicitly set relative HOME declines rather than silently bypassing to fallback.
         assert_eq!(
-            resolve_unix_cache_root(env_map(&[("HOME", "relative")]), unix_is_abs),
+            resolve_unix_cache_root(
+                env_map(&[("HOME", "relative")]),
+                || Some(PathBuf::from("/home/passwd-user")),
+                unix_is_abs,
+            ),
+            None
+        );
+        // Missing HOME with no fallback, or relative fallback, yields None.
+        assert_eq!(
+            resolve_unix_cache_root(env_map(&[]), no_home, unix_is_abs),
+            None
+        );
+        assert_eq!(
+            resolve_unix_cache_root(
+                env_map(&[]),
+                || Some(PathBuf::from("relative/passwd")),
+                unix_is_abs,
+            ),
             None
         );
     }
 
     #[test]
     fn macos_cache_root_uses_library_caches_bundle_id() {
+        // XDG_CACHE_HOME is ignored on macOS; Library/Caches is always used.
         assert_eq!(
-            resolve_macos_cache_root(env_map(&[("HOME", "/Users/alice")]), unix_is_abs),
+            resolve_macos_cache_root(
+                env_map(&[
+                    ("XDG_CACHE_HOME", "/var/cache/ignored"),
+                    ("HOME", "/Users/alice")
+                ]),
+                no_home,
+                unix_is_abs,
+            ),
             Some(
                 PathBuf::from("/Users/alice")
                     .join("Library")
@@ -327,13 +427,31 @@ mod tests {
                     .join("rulesets")
             )
         );
-        assert_eq!(resolve_macos_cache_root(env_map(&[]), unix_is_abs), None);
+        // Unset or empty HOME falls back to OS home lookup.
         assert_eq!(
-            resolve_macos_cache_root(env_map(&[("HOME", "")]), unix_is_abs),
+            resolve_macos_cache_root(
+                env_map(&[("HOME", "")]),
+                || Some(PathBuf::from("/Users/passwd-user")),
+                unix_is_abs,
+            ),
+            Some(
+                PathBuf::from("/Users/passwd-user")
+                    .join("Library")
+                    .join("Caches")
+                    .join("org.asamarts.alint")
+                    .join("rulesets")
+            )
+        );
+        assert_eq!(
+            resolve_macos_cache_root(env_map(&[]), no_home, unix_is_abs),
             None
         );
         assert_eq!(
-            resolve_macos_cache_root(env_map(&[("HOME", "Users/alice")]), unix_is_abs),
+            resolve_macos_cache_root(
+                env_map(&[("HOME", "Users/alice")]),
+                || Some(PathBuf::from("/Users/passwd-user")),
+                unix_is_abs,
+            ),
             None
         );
     }
@@ -342,7 +460,11 @@ mod tests {
     fn windows_cache_root_uses_localappdata_with_userprofile_fallback() {
         let local = r"C:\Users\alice\AppData\Local";
         assert_eq!(
-            resolve_windows_cache_root(env_map(&[("LOCALAPPDATA", local)]), windows_is_abs),
+            resolve_windows_cache_root(
+                env_map(&[("LOCALAPPDATA", local)]),
+                no_home,
+                windows_is_abs,
+            ),
             Some(
                 PathBuf::from(local)
                     .join("asamarts")
@@ -351,12 +473,38 @@ mod tests {
                     .join("rulesets")
             )
         );
-        // Relative or empty LOCALAPPDATA falls back to USERPROFILE\AppData\Local.
+        // Forward-slash drive paths and UNC paths are valid absolute Windows paths.
+        for valid_local in ["C:/Users/alice/AppData/Local", r"\\server\share\cache"] {
+            assert_eq!(
+                resolve_windows_cache_root(
+                    env_map(&[("LOCALAPPDATA", valid_local)]),
+                    no_home,
+                    windows_is_abs,
+                ),
+                Some(
+                    PathBuf::from(valid_local)
+                        .join("asamarts")
+                        .join("alint")
+                        .join("cache")
+                        .join("rulesets")
+                ),
+                "valid_local={valid_local:?}"
+            );
+        }
+        // Empty, relative, drive-relative, root-relative, or whitespace LOCALAPPDATA
+        // falls back to USERPROFILE\AppData\Local.
         let profile = r"C:\Users\alice";
-        for bad_local in ["", r"AppData\Local"] {
+        for bad_local in [
+            "",
+            "   ",
+            r"AppData\Local",
+            r"C:Users\alice",
+            r"\Users\alice",
+        ] {
             assert_eq!(
                 resolve_windows_cache_root(
                     env_map(&[("LOCALAPPDATA", bad_local), ("USERPROFILE", profile)]),
+                    no_home,
                     windows_is_abs,
                 ),
                 Some(
@@ -371,13 +519,73 @@ mod tests {
                 "bad LOCALAPPDATA={bad_local:?}"
             );
         }
+        // Unset LOCALAPPDATA + unset/empty USERPROFILE falls back to OS home lookup.
         assert_eq!(
-            resolve_windows_cache_root(env_map(&[]), windows_is_abs),
-            None
+            resolve_windows_cache_root(
+                env_map(&[("USERPROFILE", "")]),
+                || Some(PathBuf::from(profile)),
+                windows_is_abs,
+            ),
+            Some(
+                PathBuf::from(profile)
+                    .join("AppData")
+                    .join("Local")
+                    .join("asamarts")
+                    .join("alint")
+                    .join("cache")
+                    .join("rulesets")
+            )
         );
         assert_eq!(
-            resolve_windows_cache_root(env_map(&[("USERPROFILE", "relative")]), windows_is_abs),
+            resolve_windows_cache_root(env_map(&[]), no_home, windows_is_abs),
             None
+        );
+        // Explicitly set relative USERPROFILE declines rather than bypassing to fallback.
+        for bad_profile in ["relative", r"C:Users\alice", r"\Users\alice"] {
+            assert_eq!(
+                resolve_windows_cache_root(
+                    env_map(&[("USERPROFILE", bad_profile)]),
+                    || Some(PathBuf::from(profile)),
+                    windows_is_abs,
+                ),
+                None,
+                "bad USERPROFILE={bad_profile:?}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_cache_root_preserves_non_utf8_osstring() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+
+        let raw_xdg = OsStr::from_bytes(b"/var/cache/\xff/xdg").to_os_string();
+        let resolved = resolve_unix_cache_root(
+            |key| (key == "XDG_CACHE_HOME").then(|| raw_xdg.clone()),
+            no_home,
+            Path::is_absolute,
+        )
+        .expect("non-UTF-8 absolute XDG_CACHE_HOME must resolve");
+        assert_eq!(
+            resolved,
+            PathBuf::from(&raw_xdg).join("alint").join("rulesets")
+        );
+
+        let raw_home = OsStr::from_bytes(b"/home/\xff/alice").to_os_string();
+        let resolved_mac = resolve_macos_cache_root(
+            |key| (key == "HOME").then(|| raw_home.clone()),
+            no_home,
+            Path::is_absolute,
+        )
+        .expect("non-UTF-8 absolute HOME must resolve");
+        assert_eq!(
+            resolved_mac,
+            PathBuf::from(&raw_home)
+                .join("Library")
+                .join("Caches")
+                .join("org.asamarts.alint")
+                .join("rulesets")
         );
     }
 }

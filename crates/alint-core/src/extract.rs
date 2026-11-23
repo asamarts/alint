@@ -1046,20 +1046,20 @@ fn properties_entry_rows(
     text: &str,
     max_rows: Option<usize>,
 ) -> std::result::Result<Vec<StructuredEntryRow>, EntryRowsError> {
-    let entries =
-        crate::properties::parse_entries(text, max_rows).map_err(|error| match error {
-            crate::properties::PropertiesError::Parse(msg) => EntryRowsError::Parse(msg),
-            crate::properties::PropertiesError::Limit { limit } => EntryRowsError::Limit { limit },
-        })?;
-    Ok(entries
-        .into_iter()
-        .map(|entry| StructuredEntryRow {
+    let mut rows = Vec::new();
+    crate::properties::for_each_entry(text, max_rows, false, |entry| {
+        rows.push(StructuredEntryRow {
             parent: Vec::new(),
             key: entry.key,
             key_span: ByteSpan::new(entry.key_span.start, entry.key_span.end),
             value_span: Some(ByteSpan::new(entry.value_span.start, entry.value_span.end)),
-        })
-        .collect())
+        });
+    })
+    .map_err(|error| match error {
+        crate::properties::PropertiesError::Parse(msg) => EntryRowsError::Parse(msg),
+        crate::properties::PropertiesError::Limit { limit } => EntryRowsError::Limit { limit },
+    })?;
+    Ok(rows)
 }
 
 /// Extract values over `text`. Structured modes retain non-string match types
@@ -1501,7 +1501,7 @@ pub(crate) mod tests {
 
     #[test]
     fn dotenv_entry_rows_use_lossless_budgets_and_repeated_bom_offsets() {
-        let text = "\u{feff}\u{feff}KEY=🚀\n";
+        let text = "\u{feff}\u{feff}\u{feff}KEY=🚀\n";
         let rows = extract_entry_rows(Format::Dotenv, text).unwrap();
         assert_eq!(span_text(text, rows[0].key_span), "KEY");
         assert_eq!(span_text(text, rows[0].value_span.unwrap()), "🚀");
@@ -1613,6 +1613,10 @@ pub(crate) mod tests {
                 .collect::<Vec<_>>(),
             ["kept", "continued"]
         );
+
+        let empty_eof_bs = "k=\\\n";
+        let rows = extract_entry_rows(Format::Properties, empty_eof_bs).unwrap();
+        assert_eq!(span_text(empty_eof_bs, rows[0].value_span.unwrap()), "\\");
     }
 
     #[test]

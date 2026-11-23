@@ -6,9 +6,10 @@
 //! range with our bytes; the engine then re-parses and re-runs the query
 //! ([`EditVerifier::Structured`](crate::rule::EditVerifier)) before committing.
 //!
-//! HCL (`hcl::edit`), XML (`roxmltree` node/attribute ranges), and INI +
-//! properties (a hand-rolled re-scan of the raw text, since those parsers keep no
-//! spans) are span-capable today; TOML is document-rewrite (`toml_edit`); dotenv
+//! HCL (`hcl::edit`), XML (`roxmltree` node/attribute ranges), `.properties`
+//! (the internal spanned parser), and INI (a hand-rolled
+//! re-scan of the raw text, since the INI parser keeps no spans) are
+//! span-capable today; TOML is document-rewrite (`toml_edit`); dotenv
 //! consumes `adotenv`'s native verified [`adotenv::TextEdit`] ranges and
 //! replacements (see [`uses_verified_edits`]). Other formats use their
 //! span-resolver or whole-document branches instead. Any unresolved operation
@@ -95,9 +96,9 @@ pub fn resolve_removal_span(
     }
 }
 
-/// [`resolve_value_span`] for each of `paths`, in order. A YAML document is
-/// parsed once for all of them, so a fix with many matches costs one parse,
-/// not one per match; another format resolves each path on its own.
+/// [`resolve_value_span`] for each of `paths`, in order. YAML and `.properties`
+/// documents are parsed once for all of them, so a fix with many matches costs
+/// one parse, not one per match; other formats resolve each path on their own.
 #[must_use]
 pub fn resolve_value_spans(
     format: Format,
@@ -106,6 +107,7 @@ pub fn resolve_value_spans(
 ) -> Vec<Option<Range<usize>>> {
     match (format, std::str::from_utf8(bytes)) {
         (Format::Yaml, Ok(text)) => yaml_::yaml_value_spans(text, paths),
+        (Format::Properties, Ok(text)) => properties::properties_value_spans(text, paths),
         _ => paths
             .iter()
             .map(|path| resolve_value_span(format, bytes, path))
@@ -114,11 +116,11 @@ pub fn resolve_value_spans(
 }
 
 /// [`resolve_removal_span`] for each of `paths`, in order, with one parse of a
-/// YAML document for all of them (see [`resolve_value_spans`]). Each range is
-/// the path's alone: where the paths remove every entry of a YAML block
-/// mapping, deleting all their ranges leaves the mapping's key with no value,
-/// which reads as null, and [`resolve_removal_edits`] gives the edits that
-/// keep it a mapping.
+/// YAML or `.properties` document for all of them (see [`resolve_value_spans`]).
+/// Each range is the path's alone: where the paths remove every entry of a YAML
+/// block mapping, deleting all their ranges leaves the mapping's key with no
+/// value, which reads as null, and [`resolve_removal_edits`] gives the edits
+/// that keep it a mapping.
 #[must_use]
 pub fn resolve_removal_spans(
     format: Format,
@@ -127,11 +129,23 @@ pub fn resolve_removal_spans(
 ) -> Vec<Option<Range<usize>>> {
     match (format, std::str::from_utf8(bytes)) {
         (Format::Yaml, Ok(text)) => yaml_::yaml_removal_spans(text, paths),
+        (Format::Properties, Ok(text)) => properties::properties_removal_spans(text, paths),
         _ => paths
             .iter()
             .map(|path| resolve_removal_span(format, bytes, path))
             .collect(),
     }
+}
+
+/// Context-aware batch value edits for `.properties`: parses the document once
+/// and escapes leading `=` / `:` with `\` when the target entry uses a
+/// whitespace-only separator so the spliced bytes cannot be re-parsed as an
+/// explicit separator.
+pub(super) fn properties_value_edits(
+    text: &str,
+    sets: &[(Vec<PathSeg>, serde_json::Value)],
+) -> Vec<Option<(Range<usize>, Vec<u8>)>> {
+    properties::properties_value_edits(text, sets)
 }
 
 /// The edit `remove_value` makes for each of `paths`, in order: the range it
@@ -910,6 +924,75 @@ mod dotenv {
         Some(document.unique(flat_key(path)?).ok()?.line_span())
     }
 
+    /// Lower-bound preflight before calling `adotenv::Document::edit_with_options`
+    /// so an oversized or escape-/line-amplifying replacement cannot trigger an
+    /// unbounded intermediate encoding allocation inside `adotenv`. Never rejects
+    /// a replacement that could actually fit within `MAX_DOTENV_BYTES` and
+    /// `MAX_PHYSICAL_LINES`.
+    fn within_set_preflight(text: &str, entry: adotenv::Entry<'_>, value: &str) -> bool {
+        let bytes = value.as_bytes();
+        // Reject unrepresentable control chars immediately before allocating.
+        if bytes
+            .iter()
+            .any(|&b| (b < 0x20 && !matches!(b, b'\n' | b'\r' | b'\t')) || b == 0x7f)
+        {
+            return false;
+        }
+        let retained_bytes = text.len() - entry.value_span().map_or(0, |r| r.len());
+        let bare_eq = usize::from(entry.value_span().is_none());
+        if entry.quote() == adotenv::Quote::Single && !bytes.contains(&b'\'') {
+            // Exact retained single-quote encoding: `'value'` with literal line breaks.
+            let needed = retained_bytes.saturating_add(value.len()).saturating_add(2);
+            if needed > crate::dotenv::MAX_DOTENV_BYTES {
+                return false;
+            }
+            let mut breaks = 0usize;
+            let mut i = 0usize;
+            while i < bytes.len() {
+                match bytes[i] {
+                    b'\r' => {
+                        breaks += 1;
+                        i += if bytes.get(i + 1) == Some(&b'\n') {
+                            2
+                        } else {
+                            1
+                        };
+                    }
+                    b'\n' => {
+                        breaks += 1;
+                        i += 1;
+                    }
+                    _ => i += 1,
+                }
+                if breaks >= crate::dotenv::MAX_PHYSICAL_LINES {
+                    return false;
+                }
+            }
+            return true;
+        }
+        let must_double_quote = entry.quote() == adotenv::Quote::Double
+            || matches!(bytes.first(), Some(b' ' | b'\t' | b'"' | b'\'' | b'#'))
+            || matches!(bytes.last(), Some(b' ' | b'\t'))
+            || bytes.iter().any(|&b| matches!(b, b'\n' | b'\r' | b'\t'))
+            || bytes.windows(2).any(|w| matches!(w, [b' ' | b'\t', b'#']));
+        let min_token_len = if must_double_quote {
+            let guaranteed_escapes = bytes
+                .iter()
+                .filter(|&&b| matches!(b, b'\\' | b'"' | b'\n' | b'\r' | b'\t'))
+                .count();
+            value
+                .len()
+                .saturating_add(2)
+                .saturating_add(guaranteed_escapes)
+        } else {
+            value.len()
+        };
+        retained_bytes
+            .saturating_add(bare_eq)
+            .saturating_add(min_token_len)
+            <= crate::dotenv::MAX_DOTENV_BYTES
+    }
+
     /// Produce the exact native edit that assigns `want` to one unique key.
     /// `adotenv` handles both assigned and bare declarations, enforces output
     /// byte/line budgets via [`crate::dotenv::EDIT_OPTIONS`], retains an
@@ -920,9 +1003,15 @@ mod dotenv {
         path: &[PathSeg],
         want: &serde_json::Value,
     ) -> Option<(Range<usize>, Vec<u8>)> {
+        let value = scalar_text(want)?;
+        if value.len() > crate::dotenv::MAX_DOTENV_BYTES {
+            return None;
+        }
         let document = crate::dotenv::parse_document(text).ok()?;
         let entry = document.unique(flat_key(path)?).ok()?;
-        let value = scalar_text(want)?;
+        if !within_set_preflight(text, entry, value.as_ref()) {
+            return None;
+        }
         let verified = document
             .edit_with_options(
                 &[adotenv::Edit::Set {
@@ -941,30 +1030,41 @@ mod dotenv {
     }
 
     /// Produce one verified native removal edit per selected unique flat key.
-    /// Uses `LookupIndex::unique` for linear batch resolution and verifies the
-    /// complete batch atomically via `adotenv` with [`crate::dotenv::EDIT_OPTIONS`].
+    /// Uses `document.unique` for single-key removals, `LookupIndex::unique`
+    /// for linear batch resolution, and verifies the complete batch atomically
+    /// via `adotenv` with [`crate::dotenv::EDIT_OPTIONS`].
     pub(super) fn dotenv_verified_removal_spans(
         text: &str,
         paths: &[Vec<PathSeg>],
     ) -> Vec<Range<usize>> {
+        if paths.is_empty() {
+            return Vec::new();
+        }
         let Ok(document) = crate::dotenv::parse_document(text) else {
             return Vec::new();
         };
-        let index = document.lookup_index();
         let mut item_ids = Vec::with_capacity(paths.len());
-        for path in paths {
-            let Some(key) = flat_key(path) else {
+        if let [only] = paths {
+            let Some(key) = flat_key(only) else {
                 return Vec::new();
             };
-            let Ok(entry) = index.unique(key) else {
+            let Ok(entry) = document.unique(key) else {
                 return Vec::new();
             };
             item_ids.push(entry.item_id());
-        }
-        item_ids.sort_unstable();
-        item_ids.dedup();
-        if item_ids.is_empty() {
-            return Vec::new();
+        } else {
+            let index = document.lookup_index();
+            for path in paths {
+                let Some(key) = flat_key(path) else {
+                    return Vec::new();
+                };
+                let Ok(entry) = index.unique(key) else {
+                    return Vec::new();
+                };
+                item_ids.push(entry.item_id());
+            }
+            item_ids.sort_unstable();
+            item_ids.dedup();
         }
         let operations: Vec<_> = item_ids
             .into_iter()
@@ -1003,8 +1103,8 @@ mod dotenv {
 
 /// INI / `.cfg` span resolution + value serialization.
 ///
-/// Like dotenv, the [`crate::ini`] parser keeps no byte offsets, so this
-/// re-scans the raw text, mirroring the parser (BOM strip, `str::lines()`,
+/// The [`crate::ini`] parser keeps no byte offsets, so this re-scans the raw
+/// text, mirroring the parser (BOM strip, `str::lines()`,
 /// leading `[section]` scope, earliest `=`/`:` split, `trim`ed literal value,
 /// full-line `;`/`#` comments, configparser indentation-continuation). A path is
 /// a GLOBAL key `[Key(k)]` or a SECTION key `[Key(section), Key(key)]`; anything
@@ -1178,7 +1278,7 @@ mod ini {
 }
 
 /// Java `.properties` span resolution + value serialization, backed directly
-/// by [`crate::properties::parse_entries`].
+/// by [`crate::properties::for_each_entry`].
 ///
 /// Because the internal parser preserves exact byte spans across escapes,
 /// backslash line continuations, and `=`/`:`/whitespace separators, both
@@ -1194,15 +1294,85 @@ mod ini {
 /// physical line's content.
 mod properties {
     use super::PathSeg;
+    use crate::properties::{PropertyEntry, Separator};
+    use std::collections::HashMap;
     use std::ops::Range;
 
     pub(super) fn properties_value_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
         let entry = locate_unique(text, single_key(path)?)?;
-        entry.has_separator.then_some(entry.value_span)
+        (entry.separator != Separator::None).then_some(entry.value_span)
     }
 
     pub(super) fn properties_removal_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
         locate_unique(text, single_key(path)?).map(|entry| entry.full_span)
+    }
+
+    pub(super) fn properties_value_spans(
+        text: &str,
+        paths: &[Vec<PathSeg>],
+    ) -> Vec<Option<Range<usize>>> {
+        if paths.is_empty() {
+            return Vec::new();
+        }
+        let Some(index) = index_unique(text) else {
+            return vec![None; paths.len()];
+        };
+        paths
+            .iter()
+            .map(|path| {
+                let entry = index.get(single_key(path)?)?.as_ref()?;
+                (entry.separator != Separator::None).then(|| entry.value_span.clone())
+            })
+            .collect()
+    }
+
+    pub(super) fn properties_removal_spans(
+        text: &str,
+        paths: &[Vec<PathSeg>],
+    ) -> Vec<Option<Range<usize>>> {
+        if paths.is_empty() {
+            return Vec::new();
+        }
+        let Some(index) = index_unique(text) else {
+            return vec![None; paths.len()];
+        };
+        paths
+            .iter()
+            .map(|path| {
+                let entry = index.get(single_key(path)?)?.as_ref()?;
+                Some(entry.full_span.clone())
+            })
+            .collect()
+    }
+
+    pub(super) fn properties_value_edits(
+        text: &str,
+        sets: &[(Vec<PathSeg>, serde_json::Value)],
+    ) -> Vec<Option<(Range<usize>, Vec<u8>)>> {
+        if sets.is_empty() {
+            return Vec::new();
+        }
+        let Some(index) = index_unique(text) else {
+            return vec![None; sets.len()];
+        };
+        sets.iter()
+            .map(|(path, value)| {
+                let entry = index.get(single_key(path)?)?.as_ref()?;
+                if entry.separator == Separator::None {
+                    return None;
+                }
+                let mut bytes = properties_serialize_scalar(value)?;
+                // On a whitespace-separated entry (`key value`), a replacement
+                // starting with `=` or `:` would be re-parsed as an explicit
+                // separator and drop its leading character unless escaped.
+                if entry.separator == Separator::Whitespace
+                    && matches!(bytes.first(), Some(b'=' | b':'))
+                {
+                    bytes.insert(0, b'\\');
+                }
+                Some((entry.value_span.clone(), bytes))
+            })
+            .collect()
     }
 
     /// A properties path is FLAT: exactly one `Key` segment.
@@ -1213,21 +1383,38 @@ mod properties {
         }
     }
 
-    /// Locate the unique logical entry whose decoded key equals `name`.
-    /// Returns `None` if parsing fails, the key is absent, or it appears more
-    /// than once (including when duplicates use different escape spellings).
-    fn locate_unique(text: &str, name: &str) -> Option<crate::properties::PropertyEntry> {
-        let entries = crate::properties::parse_entries(text, None).ok()?;
-        let mut found = None;
-        for entry in entries {
+    /// Locate the unique logical entry whose decoded key equals `name` in O(1)
+    /// memory while still validating the whole document. Returns `None` if
+    /// parsing fails, the key is absent, or it appears more than once
+    /// (including when duplicates use different escape spellings).
+    fn locate_unique(text: &str, name: &str) -> Option<PropertyEntry> {
+        let mut found: Option<PropertyEntry> = None;
+        let mut duplicate = false;
+        crate::properties::for_each_entry(text, None, false, |entry| {
             if entry.key == name {
                 if found.is_some() {
-                    return None;
+                    duplicate = true;
+                } else {
+                    found = Some(entry);
                 }
-                found = Some(entry);
             }
-        }
-        found
+        })
+        .ok()?;
+        if duplicate { None } else { found }
+    }
+
+    /// Parse all entries once into a key -> unique entry index (`None` marks a
+    /// duplicate key) without allocating decoded value strings.
+    fn index_unique(text: &str) -> Option<HashMap<String, Option<PropertyEntry>>> {
+        let mut index: HashMap<String, Option<PropertyEntry>> = HashMap::new();
+        crate::properties::for_each_entry(text, None, false, |entry| {
+            index
+                .entry(entry.key.clone())
+                .and_modify(|slot| *slot = None)
+                .or_insert(Some(entry));
+        })
+        .ok()?;
+        Some(index)
     }
 
     /// Serialize a scalar as a RAW properties value, declining any value that

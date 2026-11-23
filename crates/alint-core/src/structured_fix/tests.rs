@@ -1019,7 +1019,7 @@ fn toml_finalize_preserves_crlf_bom_and_trailing_newline() {
     );
 }
 
-// ---- properties (hand-rolled re-scan; conservative simple key=value) ----
+// ---- properties (internal spanned parser; whole-document verified) ----
 
 fn props_value(src: &str, k: &str) -> std::ops::Range<usize> {
     resolve_value_span(Format::Properties, src.as_bytes(), &[key(k)]).unwrap()
@@ -1117,11 +1117,11 @@ fn properties_serialize_is_raw_and_declines_unrepresentable() {
 
 #[test]
 fn properties_splits_on_bare_cr_crlf_and_lf() {
-    // The line scan must match java-properties: a bare `\r`, `\r\n`, and `\n` all
-    // terminate a line. An LF-only split saw `a=1\rb=2` as ONE line and set/remove
-    // over-DELETED the CR-separated neighbor (a HIGH bug the value-only verify
-    // could not catch). Each key resolves independently; removal takes each line
-    // WITH its own terminator, never the next assignment.
+    // Line splitting matches java.util.Properties: bare `\r`, `\r\n`, and `\n`
+    // all terminate a line. An LF-only split saw `a=1\rb=2` as ONE line and
+    // set/remove over-deleted the CR-separated neighbor. Each key resolves
+    // independently; removal takes each line WITH its own terminator, never
+    // the next assignment.
     let src = "a=1\rb=2\r\nc=3\n"; // bare CR, then CRLF, then LF
     assert_eq!(
         &src[resolve_value_span(Format::Properties, src.as_bytes(), &[key("a")]).unwrap()],
@@ -1143,6 +1143,95 @@ fn properties_splits_on_bare_cr_crlf_and_lf() {
         &src[resolve_removal_span(Format::Properties, src.as_bytes(), &[key("b")]).unwrap()],
         "b=2\r\n"
     );
+}
+
+#[test]
+fn properties_checked_value_edits_escape_leading_separator_on_whitespace_entries() {
+    // On a whitespace-separated entry (`bind.host 0.0.0.0\n`), splicing `::1` or
+    // `=prod` raw would be re-parsed as an explicit `:` / `=` separator, silently
+    // corrupting the value to `:1` / `prod`. `checked_value_edits` escapes the
+    // leading separator byte and verifies the whole document round-trips exactly.
+    let src = "bind.host 0.0.0.0\nexplicit = old\n";
+    let before = Format::Properties.parse(src).unwrap();
+    for (target_key, want, expected_line) in [
+        ("bind.host", "::1", "bind.host \\::1\nexplicit = old\n"),
+        ("bind.host", "=prod", "bind.host \\=prod\nexplicit = old\n"),
+        ("explicit", "::1", "bind.host 0.0.0.0\nexplicit = ::1\n"),
+    ] {
+        let edits = checked_value_edits(
+            Format::Properties,
+            src.as_bytes(),
+            &before,
+            &[(vec![key(target_key)], json!(want))],
+        );
+        let (range, repl) = edits[0].clone().expect("edit should apply");
+        let mut out = src.as_bytes().to_vec();
+        out.splice(range, repl);
+        let out_str = String::from_utf8(out).unwrap();
+        assert_eq!(out_str, expected_line);
+        let after = Format::Properties.parse(&out_str).unwrap();
+        assert_eq!(after[target_key], json!(want));
+    }
+}
+
+#[test]
+fn properties_checked_value_edits_handle_empty_value_eof_backslash_cleanly() {
+    // Empty values ending with a lone continuation backslash (`k=\\\n`, `k=\\`)
+    // include the backslash in `value_span` so splicing `"true"` produces
+    // `k=true`, never `k=\true` (which would decode `\t` as a TAB!).
+    for (src, want, expected) in [
+        ("k=\\\n", "true", "k=true\n"),
+        ("k=\\", "prod", "k=prod"),
+        ("k=   \\\n", "true", "k=   true\n"),
+        ("k=\\\n  \\\n", "prod", "k=\\\n  prod\n"),
+        ("k \\\n", "::1", "k \\::1\n"),
+    ] {
+        let before = Format::Properties.parse(src).unwrap();
+        assert_eq!(before["k"], json!(""), "before {src:?}");
+        let edits = checked_value_edits(
+            Format::Properties,
+            src.as_bytes(),
+            &before,
+            &[(vec![key("k")], json!(want))],
+        );
+        let (range, repl) = edits[0].clone().expect("edit should apply");
+        let mut out = src.as_bytes().to_vec();
+        out.splice(range, repl);
+        let out_str = String::from_utf8(out).unwrap();
+        assert_eq!(out_str, expected, "src={src:?}");
+        assert_eq!(
+            Format::Properties.parse(&out_str).unwrap()["k"],
+            json!(want)
+        );
+    }
+}
+
+#[test]
+fn properties_batch_span_resolution_handles_unique_duplicate_bare_and_missing() {
+    let src = "a=1\nb=2\ndup=x\ndup=y\nbare\n";
+    let paths = vec![
+        vec![key("a")],
+        vec![key("b")],
+        vec![key("dup")],
+        vec![key("bare")],
+        vec![key("missing")],
+    ];
+    let values = resolve_value_spans(Format::Properties, src.as_bytes(), &paths);
+    assert_eq!(values[0].as_ref().map(|r| &src[r.clone()]), Some("1"));
+    assert_eq!(values[1].as_ref().map(|r| &src[r.clone()]), Some("2"));
+    assert!(values[2].is_none(), "duplicate key declines");
+    assert!(values[3].is_none(), "bare key declines value span");
+    assert!(values[4].is_none(), "missing key declines");
+
+    let removals = resolve_removal_spans(Format::Properties, src.as_bytes(), &paths);
+    assert_eq!(removals[0].as_ref().map(|r| &src[r.clone()]), Some("a=1\n"));
+    assert_eq!(removals[1].as_ref().map(|r| &src[r.clone()]), Some("b=2\n"));
+    assert!(removals[2].is_none());
+    assert_eq!(
+        removals[3].as_ref().map(|r| &src[r.clone()]),
+        Some("bare\n")
+    );
+    assert!(removals[4].is_none());
 }
 
 // ---- JSON / JSONC (jsonc-parser AST ranges; SET only, remove deferred) ----
@@ -1752,6 +1841,20 @@ fn dotenv_verified_removal_spans_are_whole_lines_per_key() {
         verified_removal_spans(Format::Dotenv, src, &[vec![key("X")], vec![key("missing")]]),
         Vec::<std::ops::Range<usize>>::new()
     );
+    // Empty selection returns empty; duplicate path selection deduplicates cleanly;
+    // duplicate document key declines the whole batch.
+    assert_eq!(
+        verified_removal_spans(Format::Dotenv, src, &[]),
+        Vec::<std::ops::Range<usize>>::new()
+    );
+    assert_eq!(
+        verified_removal_spans(Format::Dotenv, src, &[vec![key("X")], vec![key("X")]]),
+        vec![0..4]
+    );
+    assert_eq!(
+        verified_removal_spans(Format::Dotenv, b"K=1\nK=2\nA=3\n", &[vec![key("K")]]),
+        Vec::<std::ops::Range<usize>>::new()
+    );
 }
 
 #[test]
@@ -1791,6 +1894,9 @@ fn dotenv_generated_output_is_bounded_before_native_verification() {
     for (source, value) in [
         ("A=\"x\"\n", "\\".repeat(bytes / 2)),
         ("A='x'\n", "\n".repeat(lines)),
+        ("A=x\n", "x".repeat(bytes + 1)),
+        ("A=x\n", "\n".repeat(bytes / 2 + 1)),
+        ("A=x\n", "bad\u{0}nul".to_string()),
     ] {
         assert!(
             verified_set_edit(
