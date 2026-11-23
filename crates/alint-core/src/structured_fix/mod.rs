@@ -662,11 +662,13 @@ mod xml {
     }
 
     pub(super) fn xml_value_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
+        crate::structured_format::xml_within_parse_limits(text).ok()?;
         let doc = Document::parse(text).ok()?;
         resolve(&doc, path)?.value_span
     }
 
     pub(super) fn xml_removal_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
+        crate::structured_format::xml_within_parse_limits(text).ok()?;
         let doc = Document::parse(text).ok()?;
         let target = resolve(&doc, path)?;
         let removal = target.removal_span?;

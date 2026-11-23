@@ -170,7 +170,7 @@ fn nested_decls(levels: usize, decls: impl Fn(usize) -> String, inner: &str) -> 
 
 #[test]
 fn xml_namespace_heavy_document_is_rejected_before_roxmltree_resolves_it() {
-    // Regression: roxmltree 0.20 resolves namespaces in O(P^2) per element that
+    // Regression: `roxmltree` 0.21.2 still resolves namespaces in O(P^2) per element that
     // declares any `xmlns`, in the P bindings in scope. 100 nested elements each
     // binding 256 prefixes, then ten `<x xmlns:z="u"/>` leaves (448 KB, inside
     // the depth + attribute caps) took 32-40 s to parse.

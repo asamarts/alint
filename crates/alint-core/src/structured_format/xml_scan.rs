@@ -11,29 +11,23 @@
 /// parse-error path) rather than recursed into — a crafted or
 /// accidental deeply-nested file must never abort the run. Unlike
 /// HCL, XML parses on the CALLING thread (a rayon worker, ~2 MB
-/// stack by Rust's std-thread default). roxmltree recurses ~1
-/// frame per element; measured overflow is around depth ~350 on a
-/// 2 MB debug stack (the realistic worker) and ~175 on a
-/// constrained 1 MB stack, with far deeper limits in release
-/// (~3100 on 2 MB). 128 keeps a ~2.7x margin on the 2 MB worker
-/// (still ~1.4x even on a 1 MB stack), matching the JSON recursion
-/// limit and the `when`-parser's calibration. The other formats'
-/// parsers carry their own internal recursion limits; this is the
-/// XML arm's equivalent.
+/// stack by Rust's std-thread default). `roxmltree` 0.21.2 parses
+/// element content iteratively, but `element_to_value` (and
+/// `serde_json::Value`'s recursive `Drop`) still descend ~1 frame
+/// per element; 128 keeps wide headroom on both 2 MiB rayon workers
+/// and constrained 1 MiB stacks in debug and release builds, matching
+/// the JSON recursion limit and the `when`-parser's calibration. The
+/// other formats' parsers carry their own internal recursion limits;
+/// this is the XML arm's equivalent.
 pub const MAX_XML_DEPTH: usize = 128;
 
 /// The analytically-safe ceiling for [`MAX_XML_DEPTH`], enforced at compile time
-/// below. roxmltree recurses ~1 frame per element; the smallest stack alint
-/// realistically parses XML on is a ~2 MiB rayon worker, which overflows (debug)
-/// around ~350 elements deep, so ~half of that keeps a >=2x margin. This ceiling is
-/// SCOPED to that 2 MiB production worker; the shipping `MAX_XML_DEPTH = 128` also
-/// survives a constrained 1 MiB stack (~1.4x), but a raise all the way to this
-/// ceiling would erode that non-production 1 MiB margin to ~1.1x (fine on 2 MiB) --
-/// so treat a bump toward 160 as 2-MiB-only. Raising `MAX_XML_DEPTH` PAST this risks
-/// a stack-overflow process-abort even on the 2 MiB worker -- and the depth tests
-/// only exercise the REJECTION path (they run on a >=2 MiB harness stack where even
-/// 300-deep survives), so a careless re-widening would pass every runtime test. This
-/// static bound is the real guard.
+/// below. Even though `roxmltree` 0.21.2 itself parses element content
+/// iteratively, `element_to_value` and `serde_json::Value::drop` still recurse
+/// ~1 frame per element on the calling ~2 MiB rayon worker (and constrained 1 MiB
+/// stacks in tests). Keeping the compile-time ceiling at 160 guarantees safe
+/// stack headroom across debug and release builds and prevents a careless
+/// re-widening from passing only because the test harness has a large stack.
 // Rust 1.88's dead-code analysis does not count this use from an unnamed const;
 // keep the MSRV build warning-free without widening the internal API.
 #[allow(dead_code)]
@@ -41,34 +35,34 @@ const SAFE_MAX_XML_DEPTH: usize = 160;
 const _: () = assert!(
     MAX_XML_DEPTH <= SAFE_MAX_XML_DEPTH,
     "MAX_XML_DEPTH exceeds its analytically-safe ceiling -- a deeply-nested XML \
-     file could overflow the rayon-worker stack inside roxmltree parsing (SIGABRT)."
+     file could overflow the rayon-worker stack during XML conversion or drop (SIGABRT)."
 );
 
 /// Maximum attributes on a single XML element that `xml_to_value` will accept.
-/// roxmltree 0.20 validates per-element attribute UNIQUENESS in O(n^2) -- each new
-/// attribute is compared against every prior attribute on the same element -- so a
-/// single element bearing tens of thousands of distinct attributes turns a tiny
-/// file into MINUTES of parse time (`<r a0=".." a1=".." …/>`: ~64 K attrs ≈ 96 s,
-/// clean quadratic), an algorithmic-complexity `DoS` that NO nesting guard catches
-/// (all the depth guards bound height, not width). Bounding attributes per element
-/// makes total parse cost linear in the input: the aggregate work is
-/// `sum(k_i^2) <= cap * sum(k_i) = cap * total_attrs`, and `total_attrs` is bounded
-/// by the `MAX_ANALYZE_BYTES` (256 MiB) read cap, so the whole document is O(bytes).
-/// The cap ALSO sets the constant: at 256 a crafted attribute-dense file parses at
-/// roughly benign-XML speed (measured ~1.5x a same-size ordinary file, vs ~5x at
-/// 1024), so it no longer costs meaningfully more than any other file of its size --
-/// unlike HCL, XML has no format-specific byte cap (real XML data files can be large
-/// and must not false-error), so the per-element cap is the sole width bound and is
-/// kept tight. 256 is still ~5x beyond even an attribute-heavy real element (an
-/// `MSBuild` `<Csc>`/`<Vbc>` task, the widest common case, exposes ~40; SVG/`.csproj`
-/// nodes have far fewer) -- XML expresses repetition with child ELEMENTS, not
-/// hundreds of attributes on one tag. roxmltree can't be bumped to fix this (0.21
-/// stack-overflows on nesting; pinned at 0.20). An over-cap element is rejected as
-/// one ordinary per-file parse-error violation.
+/// `roxmltree` 0.21.2 still validates per-element attribute UNIQUENESS in O(n^2)
+/// (`resolve_attributes`) -- each new attribute is compared against every prior
+/// attribute on the same element -- so a single element bearing tens of thousands
+/// of distinct attributes turns a tiny file into MINUTES of parse time
+/// (`<r a0=".." a1=".." …/>`: ~64 K attrs ≈ 96 s, clean quadratic), an
+/// algorithmic-complexity `DoS` that NO nesting guard catches (all the depth
+/// guards bound height, not width). Bounding attributes per element makes total
+/// parse cost linear in the input: the aggregate work is
+/// `sum(k_i^2) <= cap * sum(k_i) = cap * total_attrs`, and `total_attrs` is
+/// bounded by the `MAX_ANALYZE_BYTES` (256 MiB) read cap, so the whole document
+/// is O(bytes). The cap ALSO sets the constant: at 256 a crafted attribute-dense
+/// file parses at roughly benign-XML speed (measured ~1.5x a same-size ordinary
+/// file, vs ~5x at 1024), so it no longer costs meaningfully more than any other
+/// file of its size -- unlike HCL, XML has no format-specific byte cap (real XML
+/// data files can be large and must not false-error), so the per-element cap is
+/// the sole width bound and is kept tight. 256 is still ~5x beyond even an
+/// attribute-heavy real element (an `MSBuild` `<Csc>`/`<Vbc>` task, the widest
+/// common case, exposes ~40; SVG/`.csproj` nodes have far fewer) -- XML expresses
+/// repetition with child ELEMENTS, not hundreds of attributes on one tag. An
+/// over-cap element is rejected as one ordinary per-file parse-error violation.
 pub(super) const MAX_XML_ATTRS_PER_ELEMENT: usize = 256;
 
 /// Maximum DISTINCT namespace prefixes (incl. the default namespace) in scope at
-/// any element. roxmltree 0.20 resolves namespaces per element that declares
+/// any element. `roxmltree` 0.21.2 resolves namespaces per element that declares
 /// any `xmlns`: it copies each of the parent's in-scope bindings after a linear
 /// "already redeclared?" scan, so one such element costs O(P^2) in the P
 /// bindings in scope, and every prefixed name lookup costs O(P). Unbounded, the
@@ -92,20 +86,20 @@ const MAX_XML_NAMESPACE_WORK: usize = 512 * 1024 * 1024;
 
 /// Conservatively bound the raw XML's element-nesting DEPTH and per-element
 /// attribute WIDTH BEFORE `roxmltree::Document::parse` sees it, in one linear scan.
-/// `Document::parse` descends recursively per element and overflows the stack —
-/// **aborting the whole process** — on deeply-nested input (tens of thousands of
-/// levels); the `element_to_value` [`MAX_XML_DEPTH`] guard is post-parse, so it
-/// only catches depths the parser already survived. It also validates attribute
-/// uniqueness in O(n^2) per element (see [`MAX_XML_ATTRS_PER_ELEMENT`]), a separate
-/// wall-clock `DoS`, and resolves namespaces in O(P^2) per declaring element (see
-/// [`MAX_XML_NAMESPACES_IN_SCOPE`] / [`MAX_XML_NAMESPACE_WORK`]), a third. A
-/// cheap linear pre-scan rejects an over-deep, over-wide or namespace-heavy
-/// document here (as one ordinary per-file parse-error violation) so a crafted or
-/// accidental `<a><a>…` / `<r a0.. a1..>` file can never abort or hang the run.
-/// Comment / CDATA / PI regions are skipped so their contents don't count toward
-/// depth or attributes. `Ok(())` when within both limits.
+/// `roxmltree` 0.21.2 parses element nesting iteratively (so `Document::parse`
+/// itself cannot stack-overflow on deep nesting), but rejecting over-deep input
+/// upfront avoids building a huge DOM arena only for `element_to_value` to reject
+/// it. `roxmltree` also validates attribute uniqueness in O(n^2) per element (see
+/// [`MAX_XML_ATTRS_PER_ELEMENT`]), a wall-clock `DoS`, and resolves namespaces in
+/// O(P^2) per declaring element (see [`MAX_XML_NAMESPACES_IN_SCOPE`] /
+/// [`MAX_XML_NAMESPACE_WORK`]), a second. A cheap linear pre-scan rejects an
+/// over-deep, over-wide or namespace-heavy document here (as one ordinary
+/// per-file parse-error violation) so a crafted or accidental `<a><a>…` /
+/// `<r a0.. a1..>` file can never abort or hang the run. Comment / CDATA / PI
+/// regions are skipped so their contents don't count toward depth or attributes.
+/// `Ok(())` when within both limits.
 ///
-/// **Lexer parity with roxmltree (0.20) is the security invariant.** Any region
+/// **Lexer parity with `roxmltree` (0.21.2) is the security invariant.** Any region
 /// the scan treats as opaque must end exactly where roxmltree's tokenizer ends it;
 /// if the scan ends it EARLIER, a `</a>` roxmltree sees as PI / comment text is
 /// counted as a close, cancels a real `<a>`, and an arbitrarily deep document
@@ -291,7 +285,7 @@ fn xmlns_prefix(tag_to_eq: &[u8]) -> Option<&[u8]> {
 }
 
 /// The namespace bindings in scope during [`xml_within_limits`]'s scan, mirroring
-/// what roxmltree 0.20 keeps per element: the DISTINCT prefixes bound by the open
+/// what `roxmltree` 0.21.2 keeps per element: the DISTINCT prefixes bound by the open
 /// elements (a redeclared prefix shadows, it doesn't add), and the cumulative
 /// cost of its per-declaring-element resolution (see
 /// [`MAX_XML_NAMESPACE_WORK`]).

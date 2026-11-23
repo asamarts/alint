@@ -53,12 +53,13 @@ impl Adapter for AndroidStringsAdapter {
             if !matches!(element, "string" | "string-array" | "plurals") {
                 continue;
             }
-            let Some(name) = node.attribute_node("name") else {
+            let Some(name) = unprefixed_attribute(node, "name") else {
                 return Err(AdapterError::Parse(format!(
                     "Android <{element}> has no name attribute"
                 )));
             };
-            if node.attribute("translatable") == Some("false") {
+            if unprefixed_attribute(node, "translatable").map(|attr| attr.value()) == Some("false")
+            {
                 continue;
             }
             let span = name.range_value();
@@ -120,10 +121,12 @@ impl Adapter for ResxAdapter {
             .descendants()
             .filter(|node| node.is_element() && node.tag_name().name() == "data")
         {
-            if node.attribute("type").is_some() || node.attribute("mimetype").is_some() {
+            if unprefixed_attribute(node, "type").is_some()
+                || unprefixed_attribute(node, "mimetype").is_some()
+            {
                 continue;
             }
-            let Some(name) = node.attribute_node("name") else {
+            let Some(name) = unprefixed_attribute(node, "name") else {
                 return Err(AdapterError::Parse(
                     ".resx <data> has no name attribute".to_string(),
                 ));
@@ -147,6 +150,19 @@ impl Adapter for ResxAdapter {
         }
         Ok(AdapterOutput::new(rows))
     }
+}
+
+/// Match an un-namespaced attribute by exact local name.
+///
+/// `roxmltree` 0.21 broadened `Node::attribute("foo")` to match any namespace
+/// with local name `"foo"`; Android and `.resx` attribute selectors (`name`,
+/// `translatable`, `type`, `mimetype`) are strictly unprefixed.
+fn unprefixed_attribute<'a, 'input>(
+    node: roxmltree::Node<'a, 'input>,
+    local: &str,
+) -> Option<roxmltree::Attribute<'a, 'input>> {
+    node.attributes()
+        .find(|attr| attr.namespace().is_none() && attr.name() == local)
 }
 
 /// A parse error by position only: roxmltree's messages can quote document
@@ -269,6 +285,27 @@ mod tests {
             .extract(&resource(), text.as_bytes(), &Limits::default())
             .unwrap_err();
         assert!(error.to_string().contains("depth"), "{error}");
+    }
+
+    #[test]
+    fn namespaced_attributes_do_not_shadow_unprefixed_selectors() {
+        let android = rows(
+            &AndroidStringsAdapter::new(),
+            r#"<resources xmlns:tools="http://schemas.android.com/tools">
+                 <string tools:name="wrong" tools:translatable="false" name="real">Hello</string>
+               </resources>"#,
+        );
+        assert_eq!(rendered(&android), ["string.real"]);
+
+        let resx = rows(
+            &ResxAdapter::new(),
+            r#"<root xmlns:custom="http://example.invalid/custom">
+                 <data custom:type="ignore" custom:mimetype="ignore" custom:name="wrong" name="RealKey">
+                   <value>Hello</value>
+                 </data>
+               </root>"#,
+        );
+        assert_eq!(rendered(&resx), ["RealKey"]);
     }
 
     #[test]
