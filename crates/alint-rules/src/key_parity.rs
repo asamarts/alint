@@ -24,7 +24,7 @@ use std::sync::Arc;
 use alint_core::plugin_api::{Analyzer, AnalyzerError, AnalyzerInput, Finding, PointerSegment};
 use alint_core::relation::{
     Adapter, AdapterOutput, AndroidStringsAdapter, ContractAnalyzer, DecodeCache, EntryRowsAdapter,
-    LimitExceeded, Limits, Origin, Pointer, ReadCache, RelPath, Resource, ResourceRead,
+    LimitExceeded, LimitKind, Limits, Origin, Pointer, ReadCache, RelPath, Resource, ResourceRead,
     ResxAdapter, Row, RowState, Segment, Selector, TomlRowsAdapter,
 };
 use alint_core::template::{PathTokens, render_path, render_path_glob};
@@ -305,6 +305,10 @@ struct KeySetAnalyzer {
     reference: String,
     peer: String,
     direction: Direction,
+    /// Remaining findings budget for this comparison; diffs past this count are
+    /// summarized in one `truncated\0<count>` sentinel finding instead of
+    /// allocating unbounded findings.
+    max_findings: usize,
 }
 
 impl Analyzer for KeySetAnalyzer {
@@ -341,7 +345,13 @@ impl Analyzer for KeySetAnalyzer {
             }
         }
         let mut findings = Vec::new();
+        let mut suppressed = 0usize;
+        let max = self.max_findings;
         let mut emit = |key: &str, direction: &str| {
+            if findings.len() >= max {
+                suppressed = suppressed.saturating_add(1);
+                return;
+            }
             findings.push(Finding {
                 path: Some(self.peer.clone()),
                 message: format!("{direction}\u{0}{key}"),
@@ -364,6 +374,20 @@ impl Analyzer for KeySetAnalyzer {
             for key in peer.difference(&reference) {
                 emit(key, "extra");
             }
+        }
+        if suppressed > 0 {
+            findings.push(Finding {
+                path: Some(self.peer.clone()),
+                message: format!("truncated\u{0}{suppressed}"),
+                line: None,
+                column: None,
+                related: Vec::new(),
+                baseline_key: None,
+                sensitive: false,
+                analysis_failure: None,
+                failure_kind: None,
+                not_fixable: false,
+            });
         }
         Ok(findings)
     }
@@ -453,7 +477,7 @@ impl Rule for KeyParityRule {
             let (reads, decodes) = local.insert((ReadCache::new(), DecodeCache::new()));
             (&*reads, &*decodes)
         };
-        let limits = Limits::default();
+        let limits = *decode_cache.limits();
         let mut findings = Vec::new();
 
         let reference = Resource::literal(self.reference.clone());
@@ -608,6 +632,8 @@ impl Rule for KeyParityRule {
             self.reference_format.model(),
             &reference_trace,
         );
+        let finding_cap = limits.get(LimitKind::FindingsPerRule);
+        let mut budget = FindingBudget::new(finding_cap);
         for (peer, file) in &files {
             let peer_base = base_keys(file, self.strip_root);
             let paired;
@@ -631,12 +657,33 @@ impl Rule for KeyParityRule {
                 self.reference_format.model(),
                 &peer_keys,
             );
+            if budget.breached() {
+                if peer_keys.is_empty()
+                    && matches!(self.direction, Direction::Both | Direction::Missing)
+                {
+                    budget.suppress(reference_keys.len(), false);
+                    continue;
+                }
+                budget.suppress(0, true);
+                break;
+            }
             let compared = Compared {
                 file: &reference_file,
                 keys: reference_keys,
                 rows: reference_rows,
             };
-            self.compare(&limits, &compared, peer, file, &peer_keys, &mut findings);
+            self.compare(
+                &limits,
+                &compared,
+                peer,
+                file,
+                &peer_keys,
+                &mut budget,
+                &mut findings,
+            );
+        }
+        if let Some(failure) = budget.truncation_failure(reference_path) {
+            findings.push(failure);
         }
         Ok(findings)
     }
@@ -770,6 +817,7 @@ impl KeyParityRule {
         Some(file)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn compare(
         &self,
         limits: &Limits,
@@ -777,6 +825,7 @@ impl KeyParityRule {
         peer: &Resource,
         peer_file: &KeyFile,
         peer_keys: &Keys<'_>,
+        budget: &mut FindingBudget,
         findings: &mut Vec<Violation>,
     ) {
         let peer_path = Path::new(peer.path().as_str());
@@ -793,6 +842,7 @@ impl KeyParityRule {
             reference: self.reference.as_str().to_string(),
             peer: peer.path().as_str().to_string(),
             direction: self.direction,
+            max_findings: budget.remaining(),
         })
         .analyze("key-parity", &[&self.reference, peer.path()], &rows, limits)
         {
@@ -805,7 +855,7 @@ impl KeyParityRule {
                 return;
             }
         };
-        let (missing, extra) = match classify(&diffs) {
+        let (missing, extra, truncated) = match classify(&diffs) {
             Ok(sets) => sets,
             Err(message) => {
                 findings.push(evaluation_failure(peer_path, message));
@@ -818,6 +868,10 @@ impl KeyParityRule {
         if matches!(self.direction, Direction::Both | Direction::Missing) {
             for (key, span) in reference.keys {
                 if !missing.contains(&render_key(key)) {
+                    continue;
+                }
+                if budget.remaining() == 0 {
+                    budget.suppress(1, false);
                     continue;
                 }
                 let shown = display_key(model, key);
@@ -834,11 +888,16 @@ impl KeyParityRule {
                     );
                 }
                 findings.push(finding);
+                budget.record_emitted();
             }
         }
         if matches!(self.direction, Direction::Both | Direction::Extra) {
             for (key, span) in peer_keys {
                 if !extra.contains(&render_key(key)) {
+                    continue;
+                }
+                if budget.remaining() == 0 {
+                    budget.suppress(1, false);
                     continue;
                 }
                 let shown = display_key(model, key);
@@ -853,7 +912,11 @@ impl KeyParityRule {
                     finding = finding.with_range(range);
                 }
                 findings.push(finding);
+                budget.record_emitted();
             }
+        }
+        if truncated > 0 {
+            budget.suppress(truncated, false);
         }
     }
 
@@ -934,13 +997,72 @@ struct Compared<'a> {
     rows: &'a [Row],
 }
 
-/// Split the analyzer's findings into missing and extra key identities. A
-/// finding of any other shape is an error, never a silently dropped key.
+/// Per-rule finding budget enforcing [`LimitKind::FindingsPerRule`] across
+/// peers without allocating unbounded findings.
+struct FindingBudget {
+    cap: usize,
+    emitted: usize,
+    suppressed: usize,
+    lower_bound: bool,
+}
+
+impl FindingBudget {
+    fn new(cap: usize) -> Self {
+        Self {
+            cap,
+            emitted: 0,
+            suppressed: 0,
+            lower_bound: false,
+        }
+    }
+
+    fn remaining(&self) -> usize {
+        self.cap.saturating_sub(self.emitted)
+    }
+
+    fn breached(&self) -> bool {
+        self.suppressed > 0
+    }
+
+    fn record_emitted(&mut self) {
+        self.emitted = self.emitted.saturating_add(1);
+    }
+
+    fn suppress(&mut self, count: usize, lower_bound: bool) {
+        self.suppressed = self.suppressed.saturating_add(count);
+        self.lower_bound |= lower_bound;
+    }
+
+    fn truncation_failure(&self, reference_path: &Path) -> Option<Violation> {
+        if self.suppressed == 0 {
+            return None;
+        }
+        let omitted = if self.lower_bound {
+            format!("at least {}", self.suppressed)
+        } else {
+            self.suppressed.to_string()
+        };
+        Some(evaluation_failure(
+            reference_path,
+            &format!(
+                "relation limit `findings_per_rule` ({}) reached: emitted {} findings and \
+                 suppressed {omitted} more; remaining findings were omitted to bound run memory \
+                 and output",
+                self.cap, self.emitted
+            ),
+        ))
+    }
+}
+
+/// Split the analyzer's findings into missing and extra key identities plus
+/// any count truncated past the rule's finding cap. A finding of any other
+/// shape is an error, never a silently dropped key.
 fn classify(
     diffs: &[Violation],
-) -> std::result::Result<(BTreeSet<String>, BTreeSet<String>), &'static str> {
+) -> std::result::Result<(BTreeSet<String>, BTreeSet<String>, usize), &'static str> {
     let mut missing = BTreeSet::new();
     let mut extra = BTreeSet::new();
+    let mut truncated = 0usize;
     for finding in diffs {
         match finding.message.split_once('\u{0}') {
             Some(("missing", key)) => {
@@ -949,10 +1071,16 @@ fn classify(
             Some(("extra", key)) => {
                 extra.insert(key.to_string());
             }
+            Some(("truncated", count)) => {
+                let parsed = count
+                    .parse::<usize>()
+                    .map_err(|_| "the key comparison returned an unrecognized finding")?;
+                truncated = truncated.saturating_add(parsed);
+            }
             _ => return Err("the key comparison returned an unrecognized finding"),
         }
     }
-    Ok((missing, extra))
+    Ok((missing, extra, truncated))
 }
 
 /// An analysis failure for a comparison that could not complete: never an

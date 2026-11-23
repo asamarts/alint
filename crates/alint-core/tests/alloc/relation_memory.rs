@@ -144,4 +144,28 @@ fn entry_rows_take_a_small_multiple_of_a_parse_or_fail_at_a_limit() {
     assert!(relation <= BOUND * tree, "{report}");
     assert!(failed, "{report}");
     assert!(key_rows <= BOUND * tree + (8 << 20), "{report}");
+
+    // Under default limits (no lowered `BytesPerRun`), #569's deep, wide
+    // document must still fail early at `KeyPathBytesPerDecode` (32 MiB) well
+    // below the ~300 MiB it would otherwise hold.
+    let (default_key_rows, default_decoded) = peak_of(|| {
+        EntryRowsAdapter::new(Format::Json).unwrap().extract(
+            &resource,
+            text.as_bytes(),
+            &Limits::default(),
+        )
+    });
+    let default_failed = matches!(
+        &default_decoded,
+        Err(AdapterError::Limit(limit)) if limit.kind == LimitKind::KeyPathBytesPerDecode
+    );
+    let default_cap = LimitKind::KeyPathBytesPerDecode.default_value();
+    assert!(
+        default_failed,
+        "expected KeyPathBytesPerDecode failure under Limits::default(), got {default_decoded:?}"
+    );
+    assert!(
+        default_key_rows <= BOUND * tree + 3 * default_cap,
+        "default key_rows peaked at {default_key_rows} B (tree={tree} B, cap={default_cap} B)"
+    );
 }

@@ -23,7 +23,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use alint_core::MAX_RELATED_LOCATIONS;
 use alint_core::relation::eval::{Cell, RelationRows};
-use alint_core::relation::{LimitKind, Limits, Pointer, RelPath, Resource, Value};
+use alint_core::relation::{LimitKind, Pointer, RelPath, Resource, Value};
 
 use super::{Groups, Place, Run, literal_type, spot_in, type_of};
 use crate::constraint::values::{Key, Kind, Scalar};
@@ -137,6 +137,17 @@ impl<'r> Run<'r> {
         for (index, group) in groups.iter().enumerate() {
             if Some(index) == other.group {
                 continue;
+            }
+            if self.finding_cap_breached() {
+                if reference.is_none()
+                    && compared.set.mode == SetMode::EqualTo
+                    && group.rows.is_empty()
+                {
+                    self.suppress_findings(other.held.order.len(), false);
+                    continue;
+                }
+                self.suppress_findings(0, true);
+                break;
             }
             match &reference {
                 Some(reference) => self.plural_group(&compared, group, reference),
@@ -339,7 +350,7 @@ impl<'r> Run<'r> {
             );
             return None;
         };
-        let limits = Limits::default();
+        let limits = self.limits;
         let mut theirs = Groups::new();
         // The first row of each type, in row order.
         let mut kinds: BTreeMap<Kind, usize> = BTreeMap::new();
@@ -570,8 +581,16 @@ impl<'r> Run<'r> {
         let other = compared.other;
         let mode = compared.set.mode;
         if mode == SetMode::EqualTo {
-            for (value, holders) in other.held.iter() {
+            for (idx, (value, holders)) in other.held.iter().enumerate() {
                 if !ours.rows.contains_key(value) {
+                    if self.at_finding_cap() {
+                        if ours.rows.is_empty() {
+                            self.suppress_findings(other.held.order.len() - idx, false);
+                        } else {
+                            self.suppress_findings(1, true);
+                        }
+                        return;
+                    }
                     self.missing(compared, group, &value[0], holders[0]);
                 }
             }
@@ -579,9 +598,17 @@ impl<'r> Run<'r> {
         for (value, holders) in ours.iter() {
             match (mode, other.held.rows.get(value)) {
                 (SetMode::EqualTo | SetMode::SubsetOf, None) => {
+                    if self.at_finding_cap() {
+                        self.suppress_findings(1, true);
+                        return;
+                    }
                     self.extra(compared, group, &value[0], holders[0], &holders[1..]);
                 }
                 (SetMode::DisjointFrom, Some(theirs)) => {
+                    if self.at_finding_cap() {
+                        self.suppress_findings(1, true);
+                        return;
+                    }
                     self.shared(compared, group, &value[0], holders[0], theirs[0]);
                 }
                 _ => {}
@@ -641,7 +668,12 @@ impl<'r> Run<'r> {
                 .map(|(key, theirs)| (theirs, text(&key)))
                 .collect();
             missing.sort_unstable_by_key(|(theirs, _)| *theirs);
-            for (theirs, value) in missing {
+            let total_missing = missing.len();
+            for (idx, (theirs, value)) in missing.into_iter().enumerate() {
+                if self.at_finding_cap() {
+                    self.suppress_findings(total_missing - idx, !merged.is_empty());
+                    return;
+                }
                 self.missing(compared, group, &value, theirs);
             }
         }
@@ -656,7 +688,12 @@ impl<'r> Run<'r> {
             }
         }
         found.sort_unstable_by_key(|(row, ..)| *row);
-        for (row, value, theirs) in found {
+        let total_found = found.len();
+        for (idx, (row, value, theirs)) in found.into_iter().enumerate() {
+            if self.at_finding_cap() {
+                self.suppress_findings(total_found - idx, false);
+                return;
+            }
             if let Some(theirs) = theirs {
                 self.shared(compared, group, &value, row, theirs);
             } else {

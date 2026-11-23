@@ -44,10 +44,23 @@ pub enum LimitKind {
     /// `key_parity` the tables it keeps of its files' keys, so what a run's
     /// decodes hold of key paths is bounded however many files it decodes.
     BytesPerRun,
+    /// Bytes of materialized key-path pointers one decode may build
+    /// ([`PathBudget`](super::key_paths::PathBudget)). A single deep, wide
+    /// file (for example 1 MB of JSON 120 levels deep and 100,000 keys wide)
+    /// expands to ~300 MiB of per-row pointers under a 1 GiB `BytesPerRun`
+    /// cap; this tighter per-decode cap stops such expansion early while still
+    /// allowing large real-world key files.
+    KeyPathBytesPerDecode,
+    /// Findings one relation-backed rule (`constraint`, `key_parity`) may emit
+    /// in a single evaluation. When a rule produces more (for example `G x V`
+    /// missing values across empty groups), it stops emitting further findings
+    /// at this cap and adds one non-baselinable analysis-failure finding
+    /// naming the cap and suppressed count.
+    FindingsPerRule,
 }
 
 impl LimitKind {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 9] = [
         Self::RowsPerExtractor,
         Self::RowsPerRun,
         Self::DistinctValues,
@@ -55,6 +68,8 @@ impl LimitKind {
         Self::JoinOutputs,
         Self::CellsPerRun,
         Self::BytesPerRun,
+        Self::KeyPathBytesPerDecode,
+        Self::FindingsPerRule,
     ];
 
     #[must_use]
@@ -67,14 +82,17 @@ impl LimitKind {
             Self::JoinOutputs => "join_outputs",
             Self::CellsPerRun => "cells_per_run",
             Self::BytesPerRun => "bytes_per_run",
+            Self::KeyPathBytesPerDecode => "key_path_bytes_per_decode",
+            Self::FindingsPerRule => "findings_per_rule",
         }
     }
 
     /// What the limit counts, as [`LimitExceeded`] says it.
     fn unit(self) -> &'static str {
         match self {
-            Self::BytesPerRun => "bytes",
+            Self::BytesPerRun | Self::KeyPathBytesPerDecode => "bytes",
             Self::CellsPerRun => "cells",
+            Self::FindingsPerRule => "findings",
             _ => "rows or values",
         }
     }
@@ -92,6 +110,8 @@ impl LimitKind {
             Self::RowsPerRun | Self::CellsPerRun => 5_000_000,
             Self::DistinctValues => 100_000,
             Self::BytesPerRun => 1 << 30,
+            Self::KeyPathBytesPerDecode => 32 << 20,
+            Self::FindingsPerRule => 10_000,
         }
     }
 
@@ -105,7 +125,10 @@ impl LimitKind {
             | Self::JoinOutputs => 10_000_000,
             Self::RowsPerRun | Self::CellsPerRun => 50_000_000,
             // 16 GiB, or half of what a 32-bit `usize` holds.
-            Self::BytesPerRun => usize::try_from(16u64 << 30).unwrap_or(usize::MAX >> 1),
+            Self::BytesPerRun | Self::KeyPathBytesPerDecode => {
+                usize::try_from(16u64 << 30).unwrap_or(usize::MAX >> 1)
+            }
+            Self::FindingsPerRule => 1_000_000,
         }
     }
 
@@ -298,13 +321,26 @@ mod tests {
             "relation limit `bytes_per_run` (3) reached: 4 bytes"
         );
         assert_eq!(
+            reached(LimitKind::KeyPathBytesPerDecode),
+            "relation limit `key_path_bytes_per_decode` (3) reached: 4 bytes"
+        );
+        assert_eq!(
             reached(LimitKind::CellsPerRun),
             "relation limit `cells_per_run` (3) reached: 4 cells"
         );
-        for kind in LimitKind::ALL
-            .into_iter()
-            .filter(|kind| !matches!(kind, LimitKind::BytesPerRun | LimitKind::CellsPerRun))
-        {
+        assert_eq!(
+            reached(LimitKind::FindingsPerRule),
+            "relation limit `findings_per_rule` (3) reached: 4 findings"
+        );
+        for kind in LimitKind::ALL.into_iter().filter(|kind| {
+            !matches!(
+                kind,
+                LimitKind::BytesPerRun
+                    | LimitKind::KeyPathBytesPerDecode
+                    | LimitKind::CellsPerRun
+                    | LimitKind::FindingsPerRule
+            )
+        }) {
             assert_eq!(
                 reached(kind),
                 format!(

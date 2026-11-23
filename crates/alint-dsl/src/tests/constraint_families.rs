@@ -39,7 +39,7 @@ pub(super) struct RunBytes {
 /// [`RunBytes`]. With `specs`, each rule's entry carries its spec, as the
 /// CLI's do, so a rule whose configuration reads the environment has its
 /// findings redacted.
-fn run_under(
+pub(super) fn run_under(
     config: &str,
     files: &[(&str, &str)],
     limits: Option<&alint_core::relation::Limits>,

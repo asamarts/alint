@@ -384,6 +384,12 @@ impl DecodeCache {
         }
     }
 
+    /// The run's limits, under which this cache and its rules operate.
+    #[must_use]
+    pub fn limits(&self) -> &Limits {
+        &self.limits
+    }
+
     /// The run's byte count since the cache was made or last cleared.
     fn byte_budget(&self) -> Arc<RunBudget> {
         Arc::clone(&self.bytes.read().expect("decode cache bytes lock"))
