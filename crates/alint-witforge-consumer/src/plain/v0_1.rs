@@ -7,8 +7,10 @@
 //! handles; rows are flat value node lists because WIT has no recursive types.
 
 /// Shared contract types.
+/// Stable since WIT version 0.1.0.
 pub mod types {
     /// A confined repository resource.
+    /// Stable since WIT version 0.1.0.
     #[derive(Debug, Clone, PartialEq)]
     pub struct RepoResource {
         /// Normalized `/`-separated repository path.
@@ -20,6 +22,7 @@ pub mod types {
     }
 
     /// One flat value node. Containers name children by index.
+    /// Stable since WIT version 0.1.0.
     #[derive(Debug, Clone, PartialEq)]
     pub enum Node {
         /// Null.
@@ -41,6 +44,7 @@ pub mod types {
     }
 
     /// One record field and its child node.
+    /// Stable since WIT version 0.1.0.
     #[derive(Debug, Clone, PartialEq)]
     pub struct RecordField {
         /// Field name.
@@ -50,6 +54,7 @@ pub mod types {
     }
 
     /// A flat value: node 0 is the root, children follow parents.
+    /// Stable since WIT version 0.1.0.
     #[derive(Debug, Clone, PartialEq)]
     pub struct FlatValue {
         /// Pre-order nodes.
@@ -57,6 +62,7 @@ pub mod types {
     }
 
     /// One pointer segment.
+    /// Stable since WIT version 0.1.0.
     #[derive(Debug, Clone, PartialEq)]
     pub enum PointerSegment {
         /// Object key.
@@ -66,6 +72,7 @@ pub mod types {
     }
 
     /// One row state.
+    /// Stable since WIT version 0.1.0.
     #[derive(Debug, Clone, PartialEq)]
     pub enum RowState {
         /// A value.
@@ -79,6 +86,7 @@ pub mod types {
     }
 
     /// One adapter row.
+    /// Stable since WIT version 0.1.0.
     #[derive(Debug, Clone, PartialEq)]
     pub struct Row {
         /// Resource provenance.
@@ -100,6 +108,7 @@ pub mod types {
     }
 
     /// Adapter output.
+    /// Stable since WIT version 0.1.0.
     #[derive(Debug, Clone, PartialEq)]
     pub struct AdapterOutput {
         /// Rows.
@@ -111,6 +120,7 @@ pub mod types {
     }
 
     /// Adapter input.
+    /// Stable since WIT version 0.1.0.
     #[derive(Debug, Clone, PartialEq)]
     pub struct AdapterInput {
         /// Resource.
@@ -122,6 +132,7 @@ pub mod types {
     }
 
     /// Adapter failure.
+    /// Stable since WIT version 0.1.0.
     #[derive(Debug, Clone, PartialEq)]
     pub enum AdapterError {
         /// Parse failure.
@@ -131,6 +142,7 @@ pub mod types {
     }
 
     /// A reached limit.
+    /// Stable since WIT version 0.1.0.
     #[derive(Debug, Clone, PartialEq)]
     pub struct LimitError {
         /// Configured limit.
@@ -140,6 +152,7 @@ pub mod types {
     }
 
     /// Related location.
+    /// Stable since WIT version 0.1.0.
     #[derive(Debug, Clone, PartialEq)]
     pub struct RelatedLocation {
         /// Path.
@@ -153,6 +166,7 @@ pub mod types {
     }
 
     /// Analyzer finding.
+    /// Stable since WIT version 0.1.0.
     #[derive(Debug, Clone, PartialEq)]
     pub struct Finding {
         /// Primary path.
@@ -178,6 +192,7 @@ pub mod types {
     }
 
     /// Analyzer input.
+    /// Stable since WIT version 0.1.0.
     #[derive(Debug, Clone, PartialEq)]
     pub struct AnalyzerInput {
         /// Rule id.
@@ -189,6 +204,7 @@ pub mod types {
     }
 
     /// Analyzer failure.
+    /// Stable since WIT version 0.1.0.
     #[derive(Debug, Clone, PartialEq)]
     pub enum AnalyzerError {
         /// Invalid input.
@@ -198,6 +214,7 @@ pub mod types {
     }
 
     /// Capabilities a plugin may request.
+    /// Stable since WIT version 0.1.0.
     #[derive(Debug, Clone, PartialEq)]
     pub struct Capabilities {
         /// May spawn a user command.
@@ -207,6 +224,7 @@ pub mod types {
     }
 
     /// Plugin metadata.
+    /// Stable since WIT version 0.1.0.
     #[derive(Debug, Clone, PartialEq)]
     pub struct PluginInfo {
         /// Name.
@@ -221,6 +239,7 @@ pub mod types {
 }
 
 /// Host-pushed resource adapter.
+/// Stable since WIT version 0.1.0.
 pub mod adapter_api {
     /// Type alias `adapter-api/adapter-error`.
     pub type AdapterError = super::types::AdapterError;
@@ -232,14 +251,18 @@ pub mod adapter_api {
     pub type AdapterOutput = super::types::AdapterOutput;
 
     /// Trait for interface `adapter-api`.
+    /// Stable since WIT version 0.1.0.
     pub trait AdapterApi {
         /// Stable adapter id.
+        /// Stable since WIT version 0.1.0.
         fn id(&self) -> ::std::string::String;
 
         /// Whether parse errors may quote sensitive source material.
+        /// Stable since WIT version 0.1.0.
         fn redacts_by_default(&self) -> bool;
 
         /// Decode one resource.
+        /// Stable since WIT version 0.1.0.
         fn extract(
             &self,
             input: AdapterInput,
@@ -248,6 +271,7 @@ pub mod adapter_api {
 }
 
 /// Host-pushed relation analyzer.
+/// Stable since WIT version 0.1.0.
 pub mod analyzer_api {
     /// Type alias `analyzer-api/analyzer-error`.
     pub type AnalyzerError = super::types::AnalyzerError;
@@ -259,11 +283,14 @@ pub mod analyzer_api {
     pub type Finding = super::types::Finding;
 
     /// Trait for interface `analyzer-api`.
+    /// Stable since WIT version 0.1.0.
     pub trait AnalyzerApi {
         /// Stable analyzer id.
+        /// Stable since WIT version 0.1.0.
         fn id(&self) -> ::std::string::String;
 
         /// Analyze host-pushed rows.
+        /// Stable since WIT version 0.1.0.
         fn analyze(
             &self,
             input: AnalyzerInput,

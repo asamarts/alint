@@ -12,6 +12,7 @@ package alint.plugin.v0;
 message Empty {}
 
 // A confined repository resource.
+// Stable since WIT version 0.1.0.
 message TypesRepoResource {
   // Normalized `/`-separated repository path.
   optional string path = 1;
@@ -22,6 +23,7 @@ message TypesRepoResource {
 }
 
 // One flat value node. Containers name children by index.
+// Stable since WIT version 0.1.0.
 message TypesNode {
   oneof witforge_value {
     // Null.
@@ -44,6 +46,7 @@ message TypesNode {
 }
 
 // One record field and its child node.
+// Stable since WIT version 0.1.0.
 message TypesRecordField {
   // Field name.
   optional string name = 1;
@@ -52,12 +55,14 @@ message TypesRecordField {
 }
 
 // A flat value: node 0 is the root, children follow parents.
+// Stable since WIT version 0.1.0.
 message TypesFlatValue {
   // Pre-order nodes.
   repeated TypesNode nodes = 1;
 }
 
 // One pointer segment.
+// Stable since WIT version 0.1.0.
 message TypesPointerSegment {
   oneof witforge_value {
     // Object key.
@@ -68,6 +73,7 @@ message TypesPointerSegment {
 }
 
 // One row state.
+// Stable since WIT version 0.1.0.
 message TypesRowState {
   oneof witforge_value {
     // A value.
@@ -82,6 +88,7 @@ message TypesRowState {
 }
 
 // One adapter row.
+// Stable since WIT version 0.1.0.
 message TypesRow {
   // Resource provenance.
   TypesRepoResource resource = 1;
@@ -102,6 +109,7 @@ message TypesRow {
 }
 
 // Adapter output.
+// Stable since WIT version 0.1.0.
 message TypesAdapterOutput {
   // Rows.
   repeated TypesRow rows = 1;
@@ -112,6 +120,7 @@ message TypesAdapterOutput {
 }
 
 // Adapter input.
+// Stable since WIT version 0.1.0.
 message TypesAdapterInput {
   // Resource.
   TypesRepoResource resource = 1;
@@ -122,6 +131,7 @@ message TypesAdapterInput {
 }
 
 // Adapter failure.
+// Stable since WIT version 0.1.0.
 message TypesAdapterError {
   oneof witforge_value {
     // Parse failure.
@@ -132,6 +142,7 @@ message TypesAdapterError {
 }
 
 // A reached limit.
+// Stable since WIT version 0.1.0.
 message TypesLimitError {
   // Configured limit.
   optional uint32 limit = 1;
@@ -140,6 +151,7 @@ message TypesLimitError {
 }
 
 // Related location.
+// Stable since WIT version 0.1.0.
 message TypesRelatedLocation {
   // Path.
   optional string path = 1;
@@ -152,6 +164,7 @@ message TypesRelatedLocation {
 }
 
 // Analyzer finding.
+// Stable since WIT version 0.1.0.
 message TypesFinding {
   // Primary path.
   optional string path = 1;
@@ -176,6 +189,7 @@ message TypesFinding {
 }
 
 // Analyzer input.
+// Stable since WIT version 0.1.0.
 message TypesAnalyzerInput {
   // Rule id.
   optional string rule_id = 1;
@@ -186,6 +200,7 @@ message TypesAnalyzerInput {
 }
 
 // Analyzer failure.
+// Stable since WIT version 0.1.0.
 message TypesAnalyzerError {
   oneof witforge_value {
     // Invalid input.
@@ -196,6 +211,7 @@ message TypesAnalyzerError {
 }
 
 // Capabilities a plugin may request.
+// Stable since WIT version 0.1.0.
 message TypesCapabilities {
   // May spawn a user command.
   optional bool spawn_user_command = 1;
@@ -204,6 +220,7 @@ message TypesCapabilities {
 }
 
 // Plugin metadata.
+// Stable since WIT version 0.1.0.
 message TypesPluginInfo {
   // Name.
   optional string name = 1;
@@ -216,64 +233,82 @@ message TypesPluginInfo {
 }
 
 // Shared contract types.
+// Stable since WIT version 0.1.0.
 enum TypesMethod {
   TYPES_METHOD_UNSPECIFIED = 0;
 }
 
 // Stable adapter id.
+// Stable since WIT version 0.1.0.
 message AdapterApiIdRequest {
 }
 
+// Stable since WIT version 0.1.0.
 message AdapterApiIdResponse {
   optional string result = 1;
 }
 
 // Whether parse errors may quote sensitive source material.
+// Stable since WIT version 0.1.0.
 message AdapterApiRedactsByDefaultRequest {
 }
 
+// Stable since WIT version 0.1.0.
 message AdapterApiRedactsByDefaultResponse {
   optional bool result = 1;
 }
 
 // Decode one resource.
+// Stable since WIT version 0.1.0.
 message AdapterApiExtractRequest {
   TypesAdapterInput input = 1;
 }
 
+// Stable since WIT version 0.1.0.
 message AdapterApiExtractResponse {
   WitforgeResultOfTypesAdapterOutputAndTypesAdapterError result = 1;
 }
 
 // Host-pushed resource adapter.
+// Stable since WIT version 0.1.0.
 enum AdapterApiMethod {
   ADAPTER_API_METHOD_UNSPECIFIED = 0;
+  // Stable since WIT version 0.1.0.
   ADAPTER_API_METHOD_ID = 1;
+  // Stable since WIT version 0.1.0.
   ADAPTER_API_METHOD_REDACTS_BY_DEFAULT = 2;
+  // Stable since WIT version 0.1.0.
   ADAPTER_API_METHOD_EXTRACT = 3;
 }
 
 // Stable analyzer id.
+// Stable since WIT version 0.1.0.
 message AnalyzerApiIdRequest {
 }
 
+// Stable since WIT version 0.1.0.
 message AnalyzerApiIdResponse {
   optional string result = 1;
 }
 
 // Analyze host-pushed rows.
+// Stable since WIT version 0.1.0.
 message AnalyzerApiAnalyzeRequest {
   TypesAnalyzerInput input = 1;
 }
 
+// Stable since WIT version 0.1.0.
 message AnalyzerApiAnalyzeResponse {
   WitforgeResultOfListOfTypesFindingAndTypesAnalyzerError result = 1;
 }
 
 // Host-pushed relation analyzer.
+// Stable since WIT version 0.1.0.
 enum AnalyzerApiMethod {
   ANALYZER_API_METHOD_UNSPECIFIED = 0;
+  // Stable since WIT version 0.1.0.
   ANALYZER_API_METHOD_ID = 1;
+  // Stable since WIT version 0.1.0.
   ANALYZER_API_METHOD_ANALYZE = 2;
 }
 
