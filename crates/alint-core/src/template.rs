@@ -2144,8 +2144,10 @@ mod tests {
 
         // JSONPath: dot-member rewrites non-shorthand names to bracket form,
         // string literals escape quotes/backslashes, and plain/placeholder
-        // identifiers stay shorthand.
-        let jp_tok = PathTokens::from_path(Path::new("pkgs/a.b'\"[0]\\c"));
+        // identifiers stay shorthand. Set `basename` directly so a literal `\`
+        // is tested even on Windows (where `Path::new` treats `\` as a separator).
+        let mut jp_tok = PathTokens::from_path(Path::new("pkgs/a.b'\"[0]"));
+        jp_tok.basename = r#"a.b'"[0]\c"#.to_string();
         let m = render_nested_options("json_path_equals", yaml("path: \"$.{basename}\""), &jp_tok);
         assert_eq!(get(&m, &["path"]).as_str(), Some(r#"$['a.b\'"[0]\\c']"#));
         assert_eq!(
