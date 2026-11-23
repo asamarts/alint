@@ -142,11 +142,11 @@ jobs:
       # registry with npm, pnpm, bun and yarn before anything is published.
       - name: npm packages install end to end (local registry)
         run: ci/scripts/test-npm-install.sh
-      - name: vscode extension (install, audit, typecheck, build)
+      - name: vscode extension (install, audit, typecheck, unit tests, build)
         run: |
           (cd editors/vscode && npm ci)
           bash ci/scripts/npm-audit.sh
-          (cd editors/vscode && npm run check-types && npm run build)
+          (cd editors/vscode && npm run check-types && npm run test:unit && npm run build)
       - name: deny (licenses + bans + sources + advisories, blocking)
         run: ci/scripts/deny.sh
       - name: audit (RustSec via cargo audit, blocking on vulnerabilities)

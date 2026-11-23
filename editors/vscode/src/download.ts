@@ -7,12 +7,18 @@ import * as https from "node:https";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import * as os from "node:os";
-import * as tar from "tar";
 
+import { extractSingleFileFromTarGz } from "./tar";
 import { binaryName, resolveTarget } from "./target";
 
 const REPO = "asamarts/alint";
+
+export interface DownloadOptions {
+  platform?: string;
+  arch?: string;
+  fetchFn?: (url: string) => Promise<Buffer>;
+  maxArchiveBytes?: number;
+}
 
 /** Follow up to 5 redirects (GitHub Releases hops through S3). */
 function fetch(url: string, redirects = 5): Promise<Buffer> {
@@ -56,8 +62,13 @@ export async function downloadAlint(
   version: string,
   destDir: string,
   log: (msg: string) => void,
+  options?: DownloadOptions,
 ): Promise<string> {
-  const target = resolveTarget(process.platform, process.arch);
+  const platform = options?.platform ?? process.platform;
+  const arch = options?.arch ?? process.arch;
+  const fetchFn = options?.fetchFn ?? fetch;
+
+  const target = resolveTarget(platform, arch);
   const tag = `v${version}`;
   const archive = `alint-${tag}-${target}.tar.gz`;
   const baseUrl = `https://github.com/${REPO}/releases/download/${tag}`;
@@ -65,7 +76,7 @@ export async function downloadAlint(
   const shaUrl = `${tarUrl}.sha256`;
 
   log(`downloading ${archive}`);
-  const [tarBuf, shaBuf] = await Promise.all([fetch(tarUrl), fetch(shaUrl)]);
+  const [tarBuf, shaBuf] = await Promise.all([fetchFn(tarUrl), fetchFn(shaUrl)]);
 
   // The .sha256 file is `<hex>  <filename>`; verify the hex column.
   const expected = shaBuf.toString("utf8").trim().split(/\s+/)[0];
@@ -77,32 +88,35 @@ export async function downloadAlint(
   }
   log("SHA-256 verified");
 
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "alint-vscode-"));
+  const name = binaryName(platform);
+  const expectedEntry = `alint-${tag}-${target}/${name}`;
+  const binaryBytes = extractSingleFileFromTarGz(
+    tarBuf,
+    expectedEntry,
+    options?.maxArchiveBytes,
+  );
+
+  fs.mkdirSync(destDir, { recursive: true });
+  const destBinary = path.join(destDir, name);
+  const tmpBinary = path.join(
+    destDir,
+    `.${name}.${process.pid}.${crypto.randomBytes(6).toString("hex")}.tmp`,
+  );
   try {
-    const tarPath = path.join(tmpDir, archive);
-    fs.writeFileSync(tarPath, tarBuf);
-    await tar.x({ file: tarPath, cwd: tmpDir });
-
-    const name = binaryName(process.platform);
-    const extractedDir = path.join(tmpDir, `alint-${tag}-${target}`);
-    const sourceBinary = path.join(extractedDir, name);
-    if (!fs.existsSync(sourceBinary)) {
-      throw new Error(`extracted tarball missing expected ${name}`);
+    fs.writeFileSync(tmpBinary, binaryBytes);
+    if (platform !== "win32" && process.platform !== "win32") {
+      fs.chmodSync(tmpBinary, 0o755);
     }
-
-    fs.mkdirSync(destDir, { recursive: true });
-    const destBinary = path.join(destDir, name);
-    fs.copyFileSync(sourceBinary, destBinary);
-    if (process.platform !== "win32") {
-      fs.chmodSync(destBinary, 0o755);
-    }
-    log(`installed ${name} (${target})`);
-    return destBinary;
-  } finally {
+    fs.renameSync(tmpBinary, destBinary);
+  } catch (err) {
     try {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
+      fs.rmSync(tmpBinary, { force: true });
     } catch {
-      // tmp is OS-managed; ignore cleanup failures.
+      // Ignore cleanup errors when surfacing the original failure.
     }
+    throw err;
   }
+
+  log(`installed ${name} (${target})`);
+  return destBinary;
 }

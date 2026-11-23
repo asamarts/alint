@@ -11,7 +11,7 @@ given:
   tree:
     src:
       # A null byte in the middle of otherwise-ASCII content is
-      # enough for content_inspector to classify as binary.
+      # enough for the binary classifier to classify as binary.
       accidental_blob.rs: "hello\u0000world"
       clean.rs: "pub fn ok() {}\n"
   config: |

@@ -6,9 +6,7 @@
 # already fails CI on an out-of-policy license). Keep the two in sync: cargo-about
 # FAILS generation if a dependency carries a license not accepted here, so this
 # doubles as an attribution-time check that no surprise license slipped into the
-# graph. deny.toml remains the authoritative *policy* (it scopes MPL-2.0 to the
-# single option-ext crate via a per-crate exception); about.toml accepts MPL-2.0
-# globally only so the bundle can render that crate's text.
+# graph.
 
 accepted = [
     "Apache-2.0",
@@ -24,7 +22,6 @@ accepted = [
     "Unlicense",
     "Zlib",
     "CDLA-Permissive-2.0",
-    "MPL-2.0",
 ]
 
 # Build- and dev-only dependencies are not compiled into the shipped binary, so

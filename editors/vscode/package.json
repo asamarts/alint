@@ -91,7 +91,8 @@
     "audit": "bash ../../ci/scripts/npm-audit.sh",
     "watch": "node esbuild.js --watch",
     "check-types": "tsc --noEmit",
-    "test": "tsc --noEmit",
+    "test:unit": "tsc -p ./tsconfig.test.json && mocha ./out/test/unit/**/*.test.js",
+    "test": "npm run check-types && npm run test:unit",
     "pretest:e2e": "npm run build && tsc -p ./tsconfig.test.json",
     "test:e2e": "node ./out/test/runTest.js",
     "package": "vsce package",
@@ -99,7 +100,6 @@
     "publish:ovsx": "ovsx publish"
   },
   "dependencies": {
-    "tar": "^7.5.23",
     "vscode-languageclient": "^11.0.0"
   },
   "devDependencies": {

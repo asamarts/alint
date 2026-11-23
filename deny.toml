@@ -23,12 +23,11 @@
 all-features = true
 
 [licenses]
-# Every entry below is actually present in the graph as of v0.9.22.
+# Every entry below is actually present in the graph.
 # Copyleft handling:
 #   - r-efi is `MIT OR Apache-2.0 OR LGPL-2.1-or-later`; satisfied by
 #     MIT/Apache, so LGPL-2.1 is deliberately NOT allowed.
-#   - option-ext is MPL-2.0-only — a scoped exception below, not a
-#     global allow, so a future MPL-2.0 dep is flagged for review.
+#   - No copyleft exceptions: the dependency graph is 100% permissive-licensed.
 allow = [
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
@@ -45,15 +44,6 @@ allow = [
     "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.8
-
-# MPL-2.0 is weak (file-level) copyleft. `option-ext` (pulled in
-# transitively via directories -> dirs-sys) is MPL-2.0-only; alint
-# uses it unmodified as a dependency, which MPL-2.0 permits without
-# affecting alint's own licensing. Scoped to this one crate on
-# purpose: a different MPL-2.0 dependency will fail the check.
-[[licenses.exceptions]]
-allow = ["MPL-2.0"]
-crate = "option-ext"
 
 [bans]
 # The graph legitimately carries duplicate major versions of several
