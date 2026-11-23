@@ -14,6 +14,7 @@ given:
         <groupId>com.example</groupId>
         <artifactId>demo</artifactId>
         <version>1.0.0</version></project>
+    "build.gradle": "plugins { id 'java' }\n"
     ".gitignore": "target/\nbuild/\n*.class\n"
     "target":
       "classes":
@@ -30,7 +31,7 @@ given:
         level: off
   git:
     init: true
-    add: [pom.xml, .gitignore]
+    add: [pom.xml, build.gradle, .gitignore]
     add_force: [target/classes/Foo.class, build/classes/Bar.class]
     commit: true
 

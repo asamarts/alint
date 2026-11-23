@@ -1,0 +1,36 @@
+test_version: 1
+name: alint://bundled/java - java-no-tracked-build does not fire in Maven-only repos
+tags: [check, extends, bundled, java, git_tracked_only]
+
+# `java-no-tracked-build` is gated on Gradle presence (`facts.has_gradle`), so
+# a pure Maven repository (`pom.xml` only) with a tracked `build/` directory
+# (e.g. scripts or build helper files) does not trigger Gradle's build-output
+# rule (#546).
+
+given:
+  tree:
+    "pom.xml": |
+      <?xml version="1.0" encoding="UTF-8"?>
+      <project>
+        <modelVersion>4.0.0</modelVersion>
+        <groupId>com.example</groupId>
+        <artifactId>demo</artifactId>
+        <version>1.0.0</version>
+      </project>
+    "mvnw": "#!/bin/sh\nexec mvn \"$@\"\n"
+    "build":
+      "checkstyle.xml": "<module name=\"Checker\"/>\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/java@v1
+  git:
+    init: true
+    add: [pom.xml, mvnw, build]
+    commit: true
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

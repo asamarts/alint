@@ -1,21 +1,23 @@
 //! W6 baseline-identity gate: recompute every policy-finding fingerprint over the
-//! complete scenario corpus and compare it with the checked-in golden file.
+//! scenario corpus and compare it with the checked-in golden file.
 //!
-//! The canonical corpus run is Linux-only because some scenarios intentionally
-//! exercise Unix metadata, shell commands, and case-sensitive filenames, so this
-//! module compiles only on Linux. Refresh after an intentional fingerprint migration with:
+//! On Linux every scenario runs and must match the complete golden snapshot.
+//! On Windows and macOS, scenarios that `alint-testkit` skips for the platform
+//! (Unix permissions, case-sensitive filesystem fixtures, POSIX shell plugins)
+//! are omitted and every portable scenario must produce the exact same
+//! `(rule_id, path, fingerprint)` entries as Linux (#579). Refresh after an
+//! intentional fingerprint migration (on Linux) with:
 //!
 //! `UPDATE_SNAPSHOTS=1 cargo test -p alint-e2e --test it -- fingerprint_golden::`
 
-#![cfg(target_os = "linux")]
-
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use alint_testkit::strategies::with_steps;
-use alint_testkit::{PolicyTest, Runner, RunnerOptions, TestStep, TreeExpectationMode};
-use serde::Serialize;
+use alint_testkit::{PolicyTest, Runner, RunnerOptions, TestStatus, TestStep, TreeExpectationMode};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Serialize)]
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Serialize, Deserialize)]
 struct GoldenFingerprint {
     scenario: String,
     rule_id: String,
@@ -46,7 +48,12 @@ fn slash(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
-fn collect_policy_test(corpus_root: &Path, path: &Path, records: &mut Vec<GoldenFingerprint>) {
+fn collect_policy_test(
+    corpus_root: &Path,
+    path: &Path,
+    records: &mut Vec<GoldenFingerprint>,
+    skipped: &mut BTreeSet<String>,
+) {
     let yaml = std::fs::read_to_string(path)
         .unwrap_or_else(|error| panic!("read policy test {}: {error}", path.display()));
     let policy_test = PolicyTest::from_yaml(&yaml)
@@ -66,16 +73,20 @@ fn collect_policy_test(corpus_root: &Path, path: &Path, records: &mut Vec<Golden
     let run = runner
         .run(&policy_test, path)
         .unwrap_or_else(|error| panic!("run policy test {}: {error}", path.display()));
+    let scenario_path = slash(
+        path.strip_prefix(corpus_root)
+            .expect("policy-test path is below corpus root"),
+    );
+    if run.status == TestStatus::Skipped {
+        skipped.insert(scenario_path);
+        return;
+    }
     let [observation] = run.observations.as_slice() else {
         panic!(
             "forced check did not return one observation: {}",
             path.display()
         );
     };
-    let scenario_path = slash(
-        path.strip_prefix(corpus_root)
-            .expect("policy-test path is below corpus root"),
-    );
     for violation in &observation.violations {
         records.push(GoldenFingerprint {
             scenario: scenario_path.clone(),
@@ -95,11 +106,12 @@ fn policy_test_fingerprints_match_golden() {
         .expect("crates directory")
         .join("alint-dsl/ruleset-tests/v1");
     let mut records = Vec::new();
+    let mut skipped = BTreeSet::new();
     for path in yml_files(&scenarios_dir) {
-        collect_policy_test(&scenarios_dir, &path, &mut records);
+        collect_policy_test(&scenarios_dir, &path, &mut records, &mut skipped);
     }
     for path in yml_files(&ruleset_tests_dir) {
-        collect_policy_test(&ruleset_tests_dir, &path, &mut records);
+        collect_policy_test(&ruleset_tests_dir, &path, &mut records, &mut skipped);
     }
     records.sort();
     assert!(
@@ -107,30 +119,55 @@ fn policy_test_fingerprints_match_golden() {
         "fingerprint gate collected only {} findings; the policy-test run is probably incomplete",
         records.len(),
     );
-
-    let mut actual = serde_json::to_string_pretty(&records).expect("serialize fingerprints");
-    actual.push('\n');
-    let golden = manifest.join("tests/snapshots/scenario-fingerprints.json");
-    if std::env::var_os("UPDATE_SNAPSHOTS").is_some() {
-        std::fs::create_dir_all(golden.parent().expect("snapshot parent"))
-            .expect("create snapshot directory");
-        std::fs::write(&golden, &actual).expect("write fingerprint snapshot");
-        eprintln!("wrote {}", golden.display());
-        return;
-    }
-
-    let expected = std::fs::read_to_string(&golden).unwrap_or_else(|error| {
-        panic!(
-            "read fingerprint snapshot {}: {error}; regenerate with \
-             UPDATE_SNAPSHOTS=1 cargo test -p alint-e2e --test it -- fingerprint_golden::",
-            golden.display(),
-        )
-    });
-    assert_eq!(
-        actual, expected,
-        "scenario fingerprints changed; related locations and presentation metadata MUST NOT alter \
-         baseline identity. If this is an intentional baseline migration, review the complete diff \
-         and refresh with UPDATE_SNAPSHOTS=1 cargo test -p alint-e2e --test it -- \
-         fingerprint_golden::",
+    assert!(
+        records.iter().any(|record| {
+            record.scenario
+                == "check/cross_file/for_each_nested_twice_message_token_spelled_in_a_name.yml"
+        }),
+        "cross-platform path-token scenario (#579) must be covered by the golden gate",
     );
+
+    let golden = manifest.join("tests/snapshots/scenario-fingerprints.json");
+    if cfg!(target_os = "linux") {
+        assert!(
+            skipped.is_empty(),
+            "scenarios unexpectedly skipped on Linux: {skipped:?}",
+        );
+        let mut actual = serde_json::to_string_pretty(&records).expect("serialize fingerprints");
+        actual.push('\n');
+        if std::env::var_os("UPDATE_SNAPSHOTS").is_some() {
+            std::fs::create_dir_all(golden.parent().expect("snapshot parent"))
+                .expect("create snapshot directory");
+            std::fs::write(&golden, &actual).expect("write fingerprint snapshot");
+            eprintln!("wrote {}", golden.display());
+            return;
+        }
+
+        let expected = std::fs::read_to_string(&golden).unwrap_or_else(|error| {
+            panic!(
+                "read fingerprint snapshot {}: {error}; regenerate with \
+                 UPDATE_SNAPSHOTS=1 cargo test -p alint-e2e --test it -- fingerprint_golden::",
+                golden.display(),
+            )
+        });
+        assert_eq!(
+            actual, expected,
+            "scenario fingerprints changed; related locations and presentation metadata MUST NOT alter \
+             baseline identity. If this is an intentional baseline migration, review the complete diff \
+             and refresh with UPDATE_SNAPSHOTS=1 cargo test -p alint-e2e --test it -- \
+             fingerprint_golden::",
+        );
+    } else {
+        let expected_json = std::fs::read_to_string(&golden).unwrap_or_else(|error| {
+            panic!("read fingerprint snapshot {}: {error}", golden.display())
+        });
+        let mut expected: Vec<GoldenFingerprint> =
+            serde_json::from_str(&expected_json).expect("parse golden fingerprint snapshot");
+        expected.retain(|record| !skipped.contains(&record.scenario));
+        expected.sort();
+        assert_eq!(
+            records, expected,
+            "cross-platform scenario fingerprints diverged from Linux golden snapshot (#579)",
+        );
+    }
 }

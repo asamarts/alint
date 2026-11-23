@@ -8,6 +8,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Upgrading from 0.23
 
+- Windows users with baselines containing `for_each_file`, `for_each_dir`, or `every_matching_has`
+  nested rules that reference `{path}` or `{dir}` must regenerate their baseline once with
+  `alint baseline --accept-new`: `{path}` and `{dir}` now always render with `/` separators on
+  every platform so messages, rendered globs, and baseline fingerprints agree across Linux, macOS,
+  and Windows (#579).
+- `alint://bundled/java@v1`'s `java-no-tracked-build` rule is now gated on Gradle presence
+  (`facts.has_gradle`: `build.gradle`, `build.gradle.kts`, `settings.gradle`, `settings.gradle.kts`)
+  and excludes `**/src/**/build`, so pure-Maven repositories and Java/Groovy source packages named
+  `build` are no longer reported (#546).
 - `key_parity` and `constraint` now cap emitted findings at `10,000` per rule by default
   (`limits.findings_per_rule`), emitting one non-baselinable analysis failure naming the cap when
   reached instead of allocating unbounded findings. Raise `limits.findings_per_rule` in your
@@ -31,6 +40,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `roxmltree` upgraded from `0.20` to `0.21.2` (CVE-2026-92987); XML depth scanning (`xml_scan.rs`)
   now also rejects duplicate default `xmlns` attributes on the same element to match `roxmltree`
   0.21.2, and XML attribute value spans are computed directly from attribute byte ranges (#609).
+- Path tokens `{path}` and `{dir}` always render with `/` separators on every platform (matching
+  Linux and macOS), and the cross-platform baseline fingerprint golden gate now runs on Windows and
+  macOS in CI (#579).
+- `alint://bundled/java@v1`'s `java-no-tracked-build` now gates on `facts.has_gradle` and excludes
+  `**/src/**/build` (#546).
+- Unknown `--format` values now list all valid output formats (`human`, `json`, `sarif`, `github`,
+  `markdown`, `junit`, `gitlab`, `agent`), and `key_parity` with `strip_root: true` names a null
+  top-level key explicitly (`but it is null`) while treating an empty-object root (`fr: {}`) as an
+  empty locale (#597).
+- Documented the finite IEEE-754 `f64` number-range limit (`1e400` fails parsing for the whole
+  JSON file) across all JSON-reading rule kinds and version 2 JSON readers (#564).
 - Per-rule finding cap (`findings_per_rule`, default `10,000`) enforced across `key_parity` and all
   `constraint` assertion families (`equal`, `unique`, `set`), and per-decode key-path memory cap
   (`key_path_bytes_per_decode`, default 32 MiB) enforced across JSON, YAML, TOML, dotenv, INI,

@@ -503,6 +503,7 @@ fn ranges_use_a_line_index_and_ignore_the_bom_column() {
         })
         .collect();
     let file = KeyFile {
+        format: KeyFormat::Dotenv,
         decode: Arc::new(AdapterOutput::new(rows)),
         leaves: keys.iter().map(|(_, span)| *span).enumerate().collect(),
         text: Arc::from(text),
@@ -1203,6 +1204,61 @@ fn strip_root_needs_one_object_root_in_every_file() {
         FindingDisposition::AnalysisFailure(_)
     ));
     assert!(leaf[0].message.contains("an object"), "{}", leaf[0].message);
+    assert!(
+        leaf[0].message.contains("but it is a value"),
+        "{}",
+        leaf[0].message
+    );
+    // A YAML or JSON null root (`fr:` / `{"fr": null}`) names null clearly (#597).
+    let yaml_null = strip(&[("en.yml", b"en:\n  a: A\n"), ("fr.yml", b"fr:\n")]);
+    assert_eq!(yaml_null.len(), 1, "{:?}", messages(&yaml_null));
+    assert!(matches!(
+        yaml_null[0].disposition,
+        FindingDisposition::AnalysisFailure(_)
+    ));
+    assert!(
+        yaml_null[0].message.contains("but it is null"),
+        "{}",
+        yaml_null[0].message
+    );
+    let json_null = run(
+        "id: t\nkind: key_parity\nreference: en.json\npeers: '*.json'\nstrip_root: true\nlevel: error\n",
+        &[
+            ("en.json", br#"{"en":{"a":"A"}}"#),
+            ("fr.json", br#"{"fr":null}"#),
+        ],
+    );
+    assert_eq!(json_null.len(), 1, "{:?}", messages(&json_null));
+    assert!(matches!(
+        json_null[0].disposition,
+        FindingDisposition::AnalysisFailure(_)
+    ));
+    assert!(
+        json_null[0].message.contains("but it is null"),
+        "{}",
+        json_null[0].message
+    );
+    // An empty object root (`fr: {}` / `{"fr": {}}`) IS an object with zero keys.
+    let empty_obj_yaml = strip(&[("en.yml", b"en:\n  a: A\n"), ("fr.yml", b"fr: {}\n")]);
+    assert_eq!(
+        messages(&empty_obj_yaml),
+        ["fr.yml: missing key `a` (present in en.yml)"]
+    );
+    assert!(matches!(
+        empty_obj_yaml[0].disposition,
+        FindingDisposition::Violation
+    ));
+    let empty_obj_json = run(
+        "id: t\nkind: key_parity\nreference: en.json\npeers: '*.json'\nstrip_root: true\nlevel: error\n",
+        &[
+            ("en.json", br#"{"en":{"a":"A"}}"#),
+            ("fr.json", br#"{"fr":{}}"#),
+        ],
+    );
+    assert_eq!(
+        messages(&empty_obj_json),
+        ["fr.json: missing key `a` (present in en.json)"]
+    );
     // One file without a single root fails alone; the others still compare.
     let stray = strip(&[
         ("en.yml", b"en:\n  a: A\n  b: B\n"),

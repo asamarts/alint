@@ -168,6 +168,7 @@ crate::options_schema_for!(Options);
 
 #[derive(Debug, Clone)]
 struct KeyFile {
+    format: KeyFormat,
     /// The file's decode, which holds each key path once: the file's keys
     /// borrow their paths from it ([`Self::keys`]) rather than copying them.
     decode: Arc<AdapterOutput>,
@@ -187,14 +188,20 @@ impl KeyFile {
             .map_or(&[], Pointer::segments)
     }
 
+    /// Whether the file has no comparable keys once `strip_root` is applied.
+    fn is_empty_for(&self, strip_root: bool) -> bool {
+        self.leaves.is_empty()
+            || (strip_root && self.leaves.iter().all(|&(row, _)| self.path(row).len() < 2))
+    }
+
     /// The file's keys, each without its first `skip` segments, their paths
     /// borrowed from the decode.
     fn keys(&self, skip: usize) -> Keys<'_> {
         self.leaves
             .iter()
-            .map(|&(row, span)| {
-                let path = self.path(row);
-                (Cow::Borrowed(path.get(skip..).unwrap_or(&[])), span)
+            .filter_map(|&(row, span)| {
+                let path = self.path(row).get(skip..)?;
+                (!path.is_empty()).then_some((Cow::Borrowed(path), span))
             })
             .collect()
     }
@@ -654,7 +661,7 @@ impl Rule for KeyParityRule {
         for (peer, file) in &files {
             if budget.breached() {
                 if self.plurals == Plurals::Exact
-                    && file.leaves.is_empty()
+                    && file.is_empty_for(self.strip_root)
                     && matches!(self.direction, Direction::Both | Direction::Missing)
                 {
                     budget.suppress(reference_trace.len(), false);
@@ -820,6 +827,7 @@ impl KeyParityRule {
             return None;
         };
         let file = KeyFile {
+            format,
             decode: output,
             leaves,
             text: Arc::from(text),
@@ -1212,8 +1220,36 @@ fn leaf_rows(output: &AdapterOutput) -> Vec<(usize, ByteSpan)> {
     leaf_keys(keys).into_values().collect()
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SingleRootKind {
+    EmptyObject,
+    Null,
+    Value,
+}
+
+fn single_root_kind(file: &KeyFile) -> SingleRootKind {
+    let structured = match file.format {
+        KeyFormat::Json => alint_core::Format::Json,
+        KeyFormat::Yaml => alint_core::Format::Yaml,
+        KeyFormat::Toml => alint_core::Format::Toml,
+        _ => return SingleRootKind::Value,
+    };
+    let Ok(serde_json::Value::Object(root)) = structured.parse(&file.text) else {
+        return SingleRootKind::Value;
+    };
+    if root.len() != 1 {
+        return SingleRootKind::Value;
+    }
+    match root.values().next() {
+        Some(serde_json::Value::Object(inner)) if inner.is_empty() => SingleRootKind::EmptyObject,
+        Some(serde_json::Value::Null) => SingleRootKind::Null,
+        _ => SingleRootKind::Value,
+    }
+}
+
 /// Why `strip_root` cannot strip this file, if it cannot: a file with keys
-/// needs exactly one top-level key, and that key must be an object.
+/// needs exactly one top-level key, and that key must be an object (an empty
+/// object such as `fr: {}` is valid and has zero keys below it).
 fn strip_root_blocker(file: &KeyFile) -> Option<String> {
     let mut paths = file.leaves.iter().map(|(row, _)| file.path(*row));
     let roots: BTreeSet<&Segment> = paths.clone().filter_map(<[Segment]>::first).collect();
@@ -1223,9 +1259,18 @@ fn strip_root_blocker(file: &KeyFile) -> Option<String> {
             roots.len()
         ));
     }
-    paths.any(|key| key.len() < 2).then(|| {
-        "`strip_root` needs the top-level key to be an object, but it is a value".to_string()
-    })
+    if !paths.any(|key| key.len() < 2) {
+        return None;
+    }
+    match single_root_kind(file) {
+        SingleRootKind::EmptyObject => None,
+        SingleRootKind::Null => {
+            Some("`strip_root` needs the top-level key to be an object, but it is null".to_string())
+        }
+        SingleRootKind::Value => Some(
+            "`strip_root` needs the top-level key to be an object, but it is a value".to_string(),
+        ),
+    }
 }
 
 /// A file's keys before pairing: below its one root when `strip_root` is set
