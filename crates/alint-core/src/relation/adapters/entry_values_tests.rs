@@ -464,7 +464,13 @@ fn a_leaves_walk_visits_each_member_once_however_many_paths_select_it() {
     text.push_str(&leaves.join(","));
     text.push_str(&"}".repeat(depth + 1));
     MEMBER_STEPS.with(|steps| steps.set(0));
-    let output = run(Format::Json, &["$..*"], true, &[], &text).unwrap();
+    let limits = Limits::default()
+        .with(LimitKind::KeyPathBytesPerDecode, 128 << 20)
+        .unwrap();
+    let adapter = EntryValuesAdapter::new(Format::Json, &["$..*".into()], true, &[]).unwrap();
+    let output = adapter
+        .extract(&resource("doc"), text.as_bytes(), &limits)
+        .unwrap();
     let steps = MEMBER_STEPS.with(std::cell::Cell::get);
     assert_eq!(output.rows.len(), width);
     let entries = depth + width;

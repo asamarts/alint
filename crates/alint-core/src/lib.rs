@@ -78,16 +78,16 @@ pub use compatibility::{
 };
 pub use config::{
     AllowOutOfRoot, CONFIGURATION_MASK, ChmodFixSpec, CommandFixSpec, CompiledNestedSpec, Config,
-    ContentSourceSpec, CreateAndRegisterFixSpec, DirCreateFixSpec, EnvironmentRedactor,
-    ExtendsEntry, FileAppendFinalNewlineFixSpec, FileAppendFixSpec, FileCollapseBlankLinesFixSpec,
-    FileCreateFixSpec, FileNormalizeLineEndingsFixSpec, FilePrependFixSpec, FileRemoveFixSpec,
-    FileRenameFixSpec, FileStripBidiFixSpec, FileStripBomFixSpec, FileStripZeroWidthFixSpec,
-    FileTrimTrailingWhitespaceFixSpec, FixSpec, GitUntrackFixSpec, IndentStyleFixSpec,
-    InsertHeaderFixSpec, InsertLineFixSpec, NestedRuleSpec, NumberMask, PathsSpec,
-    REDACTED_CONFIGURATION_ERROR, RelocateFixSpec, RemoveValueFixSpec, ReplaceFixSpec, RuleSpec,
-    SetValueFixSpec, SortFixSpec, SyncFromFixSpec, configuration_field_may_be_secret,
-    mask_configuration_field, mask_configuration_values, redact_environment_values,
-    redact_environment_values_in_error, resolve_content_source,
+    ConfigLimits, ContentSourceSpec, CreateAndRegisterFixSpec, DirCreateFixSpec,
+    EnvironmentRedactor, ExtendsEntry, FileAppendFinalNewlineFixSpec, FileAppendFixSpec,
+    FileCollapseBlankLinesFixSpec, FileCreateFixSpec, FileNormalizeLineEndingsFixSpec,
+    FilePrependFixSpec, FileRemoveFixSpec, FileRenameFixSpec, FileStripBidiFixSpec,
+    FileStripBomFixSpec, FileStripZeroWidthFixSpec, FileTrimTrailingWhitespaceFixSpec, FixSpec,
+    GitUntrackFixSpec, IndentStyleFixSpec, InsertHeaderFixSpec, InsertLineFixSpec, NestedRuleSpec,
+    NumberMask, PathsSpec, REDACTED_CONFIGURATION_ERROR, RelocateFixSpec, RemoveValueFixSpec,
+    ReplaceFixSpec, RuleSpec, SetValueFixSpec, SortFixSpec, SyncFromFixSpec,
+    configuration_field_may_be_secret, mask_configuration_field, mask_configuration_values,
+    redact_environment_values, redact_environment_values_in_error, resolve_content_source,
 };
 pub use engine::{Engine, RuleEntry, StagedFix, StagedKind};
 pub use error::{Error, Result};

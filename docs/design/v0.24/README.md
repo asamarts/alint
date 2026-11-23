@@ -1,6 +1,6 @@
 # v0.24: saphyr exit, Phase 3 completion, owned walker, LSP rewrite, and backlog drain
 
-Status: accepted (2026-11-22, ADR-0048); in progress (Phase 0 complete, starting Phase 1).
+Status: accepted (2026-11-22, ADR-0048); in progress (Phase 0 and Phase 1 Batch 1 complete, starting Phase 1 Batch 2).
 Decisions: [ADR-0048](../../adr/0048-v024-owner-decisions.md) (owner decisions and scope for v0.24);
 [ADR-0036](../../adr/0036-ayaml-issues-and-the-saphyr-exit.md) and
 [ADR-0041](../../adr/0041-a-yaml-parser-facade-with-test-only-reference-parsers.md) (saphyr exit
@@ -262,3 +262,12 @@ owner ADR approval before implementation starts (matching v0.23's Phase 3 owner 
   and explicit `fetch-tags: true` in `bench-record.yml`, added legacy/wrong-generator header
   controls to `test-witforge-consumer.sh`, and refreshed `witforge-adoption.md`.
   Next: Phase 1 Batch 1 (P0 security and trust: #609, #545, #596, #600, #569, #583, #585).
+- 2026-11-23: Phase 1 Batch 1 complete and audited. Merged #627-#633 closing all 7 P0 security and
+  trust issues (#600, #609, #545, #596, #569, #583, #585). Post-Batch-1 adversarial audit closed
+  remaining gaps in JetBrains trust lifecycle and open-tab reconnection (#634), top-level `limits:`
+  configuration and full per-decode/per-rule enforcement across INI/XML/v2/constraint/key_parity,
+  overlapping-pattern Aho-Corasick redaction and short-value structural masking across `fix`/`lsp`/
+  `extends`, nested option escaping (`key_parity.ignore_keys`, `scope_filter`, JSONPath I-Regexp,
+  `(?x)` whitespace, `git_commit_message.since`), JUnit/agent sanitization, and `roxmltree` 0.21.2
+  duplicate-default-`xmlns` parity and attribute value spans.
+  Next: Phase 1 Batch 2 (Correctness and usability: #579, #546, #601, #564, #547, #597, #581).

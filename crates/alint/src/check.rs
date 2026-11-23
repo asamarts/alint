@@ -138,6 +138,7 @@ pub(super) fn exclude_baseline_from_walk(
     }
 }
 
+#[allow(clippy::too_many_lines)]
 pub(super) fn cmd_check(
     path: &Path,
     changed: &ChangedMode,
@@ -167,6 +168,7 @@ pub(super) fn cmd_check(
     let mut engine = Engine::from_entries(entries, loaded.registry)
         .with_facts(loaded.facts)
         .with_vars(loaded.vars)
+        .with_limits(&loaded.limits)?
         // `check --format sarif/agent/json --include-fixes` runs
         // `attach_proposed_edits`, which gates advertised fixes on the SAME
         // `fix_size_limit` as `fix`; without this it silently used the 1 MiB
@@ -509,7 +511,8 @@ pub(super) fn cmd_baseline(
     report_pattern_hints(&loaded.entries, &loaded.registry, &loaded.facts, cli);
     let mut engine = Engine::from_entries(loaded.entries, loaded.registry)
         .with_facts(loaded.facts)
-        .with_vars(loaded.vars);
+        .with_vars(loaded.vars)
+        .with_limits(&loaded.limits)?;
     engine = with_run_settings(engine, cli);
     let mut extra_ignores = loaded.extra_ignores;
     exclude_baseline_from_walk(&mut extra_ignores, &root, Some(&out_path));

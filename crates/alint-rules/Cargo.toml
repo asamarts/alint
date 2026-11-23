@@ -42,7 +42,6 @@ spdx.workspace = true
 sha2.workspace = true
 serde_json_path.workspace = true
 toml.workspace = true
-roxmltree.workspace = true
 jsonschema.workspace = true
 memchr.workspace = true
 saphyr-parser.workspace = true

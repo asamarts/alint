@@ -715,11 +715,10 @@ fn xml_deeply_nested_is_a_parse_error_not_an_abort() {
 
 #[test]
 fn xml_depth_beyond_parse_recursion_limit_is_rejected_pre_parse_not_aborted() {
-    // The MAX_XML_DEPTH guard above is POST-parse; a document deep enough to
-    // overflow `roxmltree::Document::parse` itself (tens of thousands of
-    // levels) aborts the whole process before that guard runs. The pre-parse
-    // `xml_within_parse_limits` scan must reject it as a parse analysis failure.
-    // (Without the pre-scan this test would SIGABRT the whole test binary.)
+    // Rejecting very deeply nested XML upfront in `xml_within_parse_limits`
+    // avoids building a huge DOM arena only for `element_to_value` to reject it
+    // (or overflowing worker stacks during DOM conversion / drop), returning a
+    // contained parse analysis failure instead.
     let depth = 100_000;
     let xml = format!("{}deep{}", "<a>".repeat(depth), "</a>".repeat(depth));
     let spec = spec_yaml(

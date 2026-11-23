@@ -217,6 +217,13 @@ mod reference {
         trusted_extends.extend(b.trusted_extends);
         let trusted_extends = dedup_in_order(trusted_extends);
 
+        let mut limits = alint_core::ConfigLimits::default();
+        limits.findings_per_rule = b.limits.findings_per_rule.or(a.limits.findings_per_rule);
+        limits.key_path_bytes_per_decode = b
+            .limits
+            .key_path_bytes_per_decode
+            .or(a.limits.key_path_bytes_per_decode);
+
         RawConfig {
             version,
             requires: None,
@@ -228,6 +235,7 @@ mod reference {
             templates,
             rules,
             fix_size_limit,
+            limits,
             nested_configs,
             allow_out_of_root,
             baseline,
@@ -242,6 +250,7 @@ mod reference {
                 .concat(),
             field_source_names: either_set(a.field_source_names, b.field_source_names),
             extends_environment: Vec::new(),
+            extends_filter_environment: Vec::new(),
             source_size: a.source_size.saturating_add(b.source_size),
             // The language follows the version: the source that sets it decides.
             surface: b.version.map_or(a.surface, |_| b.surface),
@@ -290,6 +299,7 @@ fn canonical(config: &RawConfig) -> String {
         templates,
         rules,
         fix_size_limit,
+        limits,
         nested_configs,
         allow_out_of_root,
         baseline,
@@ -303,6 +313,7 @@ fn canonical(config: &RawConfig) -> String {
         environment_config_files,
         field_source_names,
         extends_environment,
+        extends_filter_environment,
         source_size,
         surface,
         v2,
@@ -313,6 +324,7 @@ fn canonical(config: &RawConfig) -> String {
         "version {version:?}\nrequires {requires:?}\nextends {extends:?}\nignore {ignore:?}\n\
          respect_gitignore {respect_gitignore:?}\nvars {vars:?}\nfacts {facts:?}\n\
          templates {templates:?}\nrules {rules:?}\nfix_size_limit {fix_size_limit:?}\n\
+         limits {limits:?}\n\
          nested_configs {nested_configs:?}\nallow_out_of_root {allow_out_of_root:?}\n\
          baseline {baseline:?}\nbaseline_from_environment {baseline_from_environment:?}\n\
          trusted_extends {trusted_extends:?}\nenv_vars {env_vars:?}\n\
@@ -320,7 +332,7 @@ fn canonical(config: &RawConfig) -> String {
          compatibility {compatibility:?}\nenvironment_values {environment_values:?}\n\
          config_files {config_files:?}\nenvironment_config_files {environment_config_files:?}\n\
          field_source_names {field_source_names:?}\n\
-         extends_environment {extends_environment:?}\nsource_size {source_size}\n\
+         extends_environment {extends_environment:?}\nextends_filter_environment {extends_filter_environment:?}\nsource_size {source_size}\n\
          surface {surface:?}\nv2 {v2:?}\n"
     )
 }

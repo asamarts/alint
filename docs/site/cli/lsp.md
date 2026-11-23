@@ -49,9 +49,11 @@ The editor tells the server through the `initialize` request's `initializationOp
 ```
 
 Only the JSON value `true` turns trust on; a missing option, or any other value, leaves the
-workspace untrusted. The VS Code extension sends VS Code's own Workspace Trust state and restarts
-the server when you grant it, so a trusted VS Code workspace behaves as before. In other editors,
-set the option in your user-level server settings (see [Editors](/docs/integrations/editors/)).
+workspace untrusted. The VS Code extension sends VS Code's own Workspace Trust state and the
+JetBrains plugin sends IntelliJ's Trusted Projects state, each restarting the server automatically
+when trust changes, so a trusted VS Code workspace or JetBrains project behaves as before. In other
+editors, set the option in your user-level server settings (see
+[Editors](/docs/integrations/editors/)).
 Set it only where a repository cannot: an editor that applies settings checked into the
 repository (a workspace `.helix/languages.toml`, `.zed/settings.json`, `.nvim.lua` under
 `exrc`) would let a cloned repository turn trust on for itself.

@@ -1881,4 +1881,117 @@ mod registry_tests {
             );
         }
     }
+
+    #[test]
+    fn nested_option_syntax_tables_match_aliases_and_capabilities() {
+        use alint_core::template::{
+            nested_argv_options, nested_glob_options, nested_jsonpath_options,
+            nested_key_pattern_options, nested_keyword_path_options, nested_regex_options,
+            nested_replacement_options, nested_when_options,
+        };
+        let registry = builtin_registry();
+        for kind in registry.known_kinds() {
+            let canonical = registry.canonical_kind(kind);
+            assert_eq!(
+                nested_glob_options(kind),
+                nested_glob_options(canonical),
+                "{kind}"
+            );
+            assert_eq!(
+                nested_regex_options(kind),
+                nested_regex_options(canonical),
+                "{kind}"
+            );
+            assert_eq!(
+                nested_jsonpath_options(kind),
+                nested_jsonpath_options(canonical),
+                "{kind}"
+            );
+            assert_eq!(
+                nested_when_options(kind),
+                nested_when_options(canonical),
+                "{kind}"
+            );
+            assert_eq!(
+                nested_keyword_path_options(kind),
+                nested_keyword_path_options(canonical),
+                "{kind}"
+            );
+            assert_eq!(
+                nested_argv_options(kind),
+                nested_argv_options(canonical),
+                "{kind}"
+            );
+            assert_eq!(
+                nested_replacement_options(kind),
+                nested_replacement_options(canonical),
+                "{kind}"
+            );
+            assert_eq!(
+                nested_key_pattern_options(kind),
+                nested_key_pattern_options(canonical),
+                "{kind}"
+            );
+            let Some(meta) = registry.meta(kind) else {
+                continue;
+            };
+            if meta.nested_rules {
+                assert!(
+                    nested_when_options(kind).contains(&"when_iter"),
+                    "{kind} has nested_rules=true but lacks `when_iter` in nested_when_options"
+                );
+            }
+            if meta
+                .capabilities
+                .iter()
+                .any(|c| matches!(c.capability, alint_core::Capability::SpawnUserCommand))
+            {
+                assert!(
+                    !nested_argv_options(kind).is_empty(),
+                    "{kind} spawns user commands but lacks an entry in nested_argv_options"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn nested_option_syntax_tables_cover_every_structured_format() {
+        use alint_core::template::{nested_jsonpath_options, nested_regex_options};
+        for fmt in alint_core::Format::ALL {
+            let name = match fmt {
+                alint_core::Format::Json => "json",
+                alint_core::Format::Yaml => "yaml",
+                alint_core::Format::Toml => "toml",
+                alint_core::Format::Xml => "xml",
+                alint_core::Format::Dotenv => "dotenv",
+                alint_core::Format::Properties => "properties",
+                alint_core::Format::Ini => "ini",
+                alint_core::Format::Hcl => "hcl",
+            };
+            for suffix in ["path_equals", "path_matches", "path_absent"] {
+                let kind = format!("{name}_{suffix}");
+                assert!(
+                    nested_jsonpath_options(&kind).contains(&"path"),
+                    "{kind} missing `path` in nested_jsonpath_options"
+                );
+            }
+            let matches_kind = format!("{name}_path_matches");
+            assert!(
+                nested_regex_options(&matches_kind).contains(&"matches"),
+                "{matches_kind} missing `matches` in nested_regex_options"
+            );
+            for (kind, prefix) in [
+                ("cross_file", "source.extract"),
+                ("cross_file", "targets.extract"),
+                ("file_graph", "edges.from_content.extract"),
+                ("registry_paths_resolve", "extract"),
+            ] {
+                let key = format!("{prefix}.{name}");
+                assert!(
+                    nested_jsonpath_options(kind).contains(&key.as_str()),
+                    "{kind} missing `{key}` in nested_jsonpath_options"
+                );
+            }
+        }
+    }
 }

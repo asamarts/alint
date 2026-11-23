@@ -154,6 +154,74 @@ pub struct ManifestDeriveTarget {
     pub to: String,
 }
 
+impl ScopeFilterSpec {
+    pub(crate) fn for_each_template<'a>(&'a self, visit: &mut dyn FnMut(&'a str)) {
+        if let Some(ancestors) = &self.has_ancestor {
+            for a in ancestors {
+                visit(a);
+            }
+        }
+        if let Some(since) = &self.changed_since {
+            visit(since);
+        }
+        for manifest in [
+            self.include_manifest_paths.as_ref(),
+            self.exclude_manifest_paths.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            manifest.for_each_template(visit);
+        }
+    }
+
+    pub(crate) fn render_templates(&self, tokens: &crate::template::PathTokens) -> Self {
+        Self {
+            has_ancestor: self.has_ancestor.as_ref().map(|ancestors| {
+                ancestors
+                    .iter()
+                    .map(|a| crate::template::render_path(a, tokens))
+                    .collect()
+            }),
+            changed_since: self
+                .changed_since
+                .as_deref()
+                .map(|s| crate::template::render_path(s, tokens)),
+            include_manifest_paths: self
+                .include_manifest_paths
+                .as_ref()
+                .map(|m| m.render_templates(tokens)),
+            exclude_manifest_paths: self
+                .exclude_manifest_paths
+                .as_ref()
+                .map(|m| m.render_templates(tokens)),
+        }
+    }
+}
+
+impl ManifestPathSpec {
+    fn for_each_template<'a>(&'a self, visit: &mut dyn FnMut(&'a str)) {
+        visit(&self.source);
+        self.extract.for_each_template(visit);
+        if let Some(dt) = &self.derive_target {
+            visit(&dt.from);
+            visit(&dt.to);
+        }
+    }
+
+    fn render_templates(&self, tokens: &crate::template::PathTokens) -> Self {
+        Self {
+            source: crate::template::render_path(&self.source, tokens),
+            extract: self.extract.render_templates(tokens),
+            derive_target: self.derive_target.as_ref().map(|dt| ManifestDeriveTarget {
+                from: crate::template::render_path_regex(&dt.from, tokens),
+                to: crate::template::render_path_replacement(&dt.to, tokens),
+            }),
+            expect_nonempty: self.expect_nonempty,
+        }
+    }
+}
+
 fn deserialize_opt_string_or_list<'de, D>(
     deserializer: D,
 ) -> std::result::Result<Option<Vec<String>>, D::Error>

@@ -878,6 +878,10 @@ The `iter` namespace exposes:
 
 **Token values are literal paths.** When a token expands into a nested option that alint compiles as a glob (`paths:`, and per kind options such as `dir_contains`'s `select` / `require`, `dir_only_contains`'s `select` / `allow`, `unique_by`'s `select`, `pair`'s `primary`, or a nested `for_each_*`'s own `select`), its value is glob-escaped, so a directory named `app/[slug]` or `pkgs/*` matches only itself rather than acting as a character class or wildcard. The template text around the token keeps its glob meaning (`"{path}/*.tsx"`). Options that are regexes (`for_each_match`'s `select`, `pattern`) or literal paths (`pair`'s `partner`) receive the value unescaped. Messages show the real path, not its escaped form.
 
+<!-- alint:since=0.24 -->
+From v0.24, syntax-aware escaping extends to every syntax-bearing nested option: regex options (`pattern`, `shebang`, `for_each_match`'s `select`, `*_path_matches`'s `matches`, `scope_filter` regex extractors, etc.) are regex-escaped (including whitespace for `(?x)` patterns); `JSONPath` options (`*_path_*`'s `path`, `extract.*`, `exclude_query`) quote or escape values inside string literals, dot-members, and `match()`/`search()` I-Regexp arguments; `when_iter:` and nested `when:` expressions escape strings, `iter.has_file(...)` globs, and `matches` regexes; `key_parity`'s `ignore_keys` escapes bracketed segments and bracket-quotes punctuation; keyword-bearing path options (`registry_paths_resolve.base`) prefix `./` if a token expands to a reserved keyword; and `file_graph` / `scope_filter` `derive_target.to` replacement templates double `$` in substituted values. Literal path and text options (`pair`'s `partner`, `cross_file`'s `file`, `message`) remain unescaped.
+<!-- /alint:since -->
+
 **A value is substituted once.** The outermost iteration substitutes every token of the rules
 nested in it, and the value it inserts is text: a file or directory name that spells a token,
 such as `x{stem}`, is not substituted again, neither by the iterations below it (a `for_each_dir`
@@ -918,6 +922,10 @@ In a rule nested under `for_each_file`, `for_each_dir` or `every_matching_has`, 
 
 A missing reference or literal peer, an unparsable reference or peer, and a `peers` glob that matches no file are fail-loud analysis outcomes, never a pass; a peer with no keys reports every reference key as missing. `allow_missing_peers: true` turns an absent peer (a literal `peers` path that does not exist, or a glob that selects nothing) into an informational note, for a file such as `.env` that exists on developer machines but not in CI; a missing reference still fails. Findings quote keys only, never values. The kind has no fix: inserting missing keys waits for the generic edit plan. Under `--changed` the rule is skipped only when neither the reference nor a peer changed, and otherwise evaluates over the full index; a rule with a literal peer runs whenever anything changed, because Git does not report edits to an ignored file such as `.env`.
 
+<!-- alint:since=0.24 -->
+From v0.24, emitted findings per `key_parity` rule are bounded by `limits.findings_per_rule` (default `10,000`), past which remaining findings are omitted and one non-baselinable analysis failure names the cap, and decoded key paths per file are bounded by `limits.key_path_bytes_per_decode` (default 32 MiB). Both limits can be raised in a top-level `.alint.yml` under `limits:`.
+<!-- /alint:since -->
+
 ### `constraint`
 
 **Categories:** Cross-file
@@ -927,6 +935,10 @@ An assertion over the rows of a relation: equal values, unique keys, or a set of
 A rule takes `input:`, the relation it reads (a name, bare or qualified by an `extends:` alias as `deps.ranges`, or an inline relation written as a relation under `relations:` is, whose values may not read the environment), and `assert:`, which holds exactly one of `equal`, `unique` and `set`. An optional key written as null (`equal:` with no value) is refused, never read as left out. It takes the common keys `id`, `level`, `message`, `when`, `policy_url` and `sensitive`, but no `paths:` and no `scope_filter:`: the selectors of its relation pick what it reads. It cannot be nested under a `for_each_*` kind's `require:`, it has no fix, and under `--changed` it runs when a changed path is one its selectors read (see below), then judges the whole repository. Every field it names (and every `{{row.FIELD}}` in its `message:`) must be a field of the relation, and a literal must be a string, or a boolean for a field that can hold one; a number cannot be written as a literal (YAML does not keep the text it is written with), and null matches nothing.
 
 Values compare by their type and their text: a number by its lexeme (`1.0` is not `1`), and a path or path token as a string. Null, and a missing value, match nothing. A message calls a value a `read:` matched nothing `missing`, and a null `null`, in every family. With a `union:` input, the message names the part that read nothing, by its place and its query (`` `relations.node-pins.union[2]`, `read.json: $.volta.node` ``); when that part's relation reads the environment or the field is `sensitive`, it names the place alone. A key, group or membership comparison between two types (a number against a string) is an analysis failure that names both rows, never a silent non-match, and so is a null `group_by:` value; in `equal`, values of two types differ, and the finding shows both types. A relation that fails to evaluate gives the rule its analysis failures, never a pass, and so does one that reaches a relation limit (see [Version 2](/docs/configuration/version-2/#limits-in-this-release) for the limits and their values).
+
+<!-- alint:since=0.24 -->
+From v0.24, `constraint` rules also enforce the per-decode `key_path_bytes_per_decode` limit (default 32 MiB) and the per-rule `findings_per_rule` cap (default `10,000`, emitting one non-baselinable analysis failure after capping emitted findings), both configurable via top-level `limits:`.
+<!-- /alint:since -->
 
 #### `equal`
 

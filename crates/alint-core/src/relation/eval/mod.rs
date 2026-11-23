@@ -322,14 +322,14 @@ fn with_evaluator<T>(
     let decodes = if let Some(cache) = ctx.index.decode_cache() {
         cache
     } else {
-        local_decodes = DecodeCache::new();
+        local_decodes = DecodeCache::with_run_limits(&ctx.index.relation_limits());
         &local_decodes
     };
     then(&Evaluator {
         plan,
         root: ctx.root,
         index: ctx.index,
-        limits: Limits::default(),
+        limits: *decodes.limits(),
         reads,
         decodes,
         memo,

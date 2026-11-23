@@ -124,9 +124,10 @@ proptest::proptest! {
     ) {
         let doc = format!("<r>{}</r>", frags.concat());
         if let Ok(parsed) = roxmltree::Document::parse(&doc) {
-            // roxmltree's RECURSION depth (what overflows): every enclosing
-            // element, plus the element itself when it has content (a
-            // childless element may be `<a/>`, which does not recurse).
+            // Element nesting depth (bounded pre-parse to keep DOM conversion
+            // and `serde_json::Value::drop` safely inside worker stacks): every
+            // enclosing element, plus the element itself when it has content (a
+            // childless element may be `<a/>`).
             let real = parsed
                 .descendants()
                 .filter(roxmltree::Node::is_element)
@@ -249,6 +250,12 @@ fn xml_namespace_count_matches_roxmltree_at_the_cap() {
     assert!(xml_within_parse_limits(&blanks).is_err());
     let blanks = format!("<r{} xmlns:z\n=\n'u'/>", xmlns_decls("q", at));
     assert!(xml_within_parse_limits(&blanks).is_err());
+    // Duplicate default `xmlns` on the same element is accepted by `roxmltree`
+    // 0.21.2 (pushing duplicate entries into its namespace table) and must be
+    // rejected pre-parse so it cannot amplify namespace work.
+    let dup_default = r#"<r xmlns="u" xmlns="u"/>"#;
+    assert!(xml_within_parse_limits(dup_default).is_err());
+    assert!(xml_within_limits(dup_default, usize::MAX, 1).is_err());
 }
 
 proptest::proptest! {
@@ -262,7 +269,7 @@ proptest::proptest! {
         frags in proptest::collection::vec(
             proptest::sample::select(vec![
                 "<a>", "</a>", "<a/>", "<a xmlns:p=\"u\">", "<a xmlns:q='u'>",
-                "<a xmlns=\"u\">", "<a xmlns:p = \"v\">", "<a\nxmlns:r\t=\n'u'/>",
+                "<a xmlns=\"u\">", "<a xmlns=\"u\" xmlns=\"v\">", "<a xmlns:p = \"v\">", "<a\nxmlns:r\t=\n'u'/>",
                 "<p:a xmlns:p=\"u\" xmlns:q=\"u\"/>", "<a b=\"xmlns:s='u'\">",
                 "<!-- <a xmlns:t=\"u\"> -->", "<?p xmlns:u=\"u\" ?>",
                 "<![CDATA[<a xmlns:v=\"u\">]]>", "<a xmlns:p=\"u\" c='>'>",

@@ -91,7 +91,10 @@ impl KeyPaths {
                 let node = Node {
                     parent,
                     depth: holder.depth + 1,
-                    bytes: holder.bytes + std::mem::size_of::<Segment>() + key,
+                    bytes: holder
+                        .bytes
+                        .saturating_add(std::mem::size_of::<Segment>())
+                        .saturating_add(key),
                     segment,
                 };
                 nodes.push(node);
@@ -250,6 +253,7 @@ pub(crate) struct PathBudget<'b> {
 }
 
 impl<'b> PathBudget<'b> {
+    #[cfg(test)]
     pub(crate) fn new(run: &'b RunBudget) -> Self {
         Self {
             run,

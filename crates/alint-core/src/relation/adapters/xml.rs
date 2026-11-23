@@ -6,7 +6,8 @@
 
 use crate::ByteSpan;
 use crate::relation::adapter::{Adapter, AdapterError, AdapterOutput, check_row_count};
-use crate::relation::limits::Limits;
+use crate::relation::key_paths::PathBudget;
+use crate::relation::limits::{Limits, RunBudget};
 use crate::relation::pointer::{Pointer, Segment};
 use crate::relation::resource::Resource;
 use crate::relation::row::{Row, RowState};
@@ -38,6 +39,16 @@ impl Adapter for AndroidStringsAdapter {
         bytes: &[u8],
         limits: &Limits,
     ) -> Result<AdapterOutput, AdapterError> {
+        self.extract_within(resource, bytes, limits, &RunBudget::bytes(limits))
+    }
+
+    fn extract_within(
+        &self,
+        resource: &Resource,
+        bytes: &[u8],
+        limits: &Limits,
+        budget: &RunBudget,
+    ) -> Result<AdapterOutput, AdapterError> {
         let text = xml_text(bytes)?;
         guarded_xml(text)?;
         let document = roxmltree::Document::parse(text).map_err(|error| xml_parse_error(&error))?;
@@ -47,6 +58,7 @@ impl Adapter for AndroidStringsAdapter {
                 "Android string resources must have a <resources> root".to_string(),
             ));
         }
+        let path_budget = PathBudget::for_key_rows(budget, limits);
         let mut rows = Vec::new();
         for node in root.children().filter(roxmltree::Node::is_element) {
             let element = node.tag_name().name();
@@ -62,8 +74,14 @@ impl Adapter for AndroidStringsAdapter {
             {
                 continue;
             }
-            let span = name.range_value();
+            let span = crate::structured_format::xml_attr_value_span(text, name)
+                .unwrap_or_else(|| name.range_value());
             check_row_count(limits, rows.len() + 1)?;
+            let pointer_bytes = 2usize
+                .saturating_mul(std::mem::size_of::<Segment>())
+                .saturating_add(element.len())
+                .saturating_add(name.value().len());
+            path_budget.take(pointer_bytes)?;
             rows.push(
                 Row::new(
                     resource.clone(),
@@ -108,6 +126,16 @@ impl Adapter for ResxAdapter {
         bytes: &[u8],
         limits: &Limits,
     ) -> Result<AdapterOutput, AdapterError> {
+        self.extract_within(resource, bytes, limits, &RunBudget::bytes(limits))
+    }
+
+    fn extract_within(
+        &self,
+        resource: &Resource,
+        bytes: &[u8],
+        limits: &Limits,
+        budget: &RunBudget,
+    ) -> Result<AdapterOutput, AdapterError> {
         let text = xml_text(bytes)?;
         guarded_xml(text)?;
         let document = roxmltree::Document::parse(text).map_err(|error| xml_parse_error(&error))?;
@@ -116,6 +144,7 @@ impl Adapter for ResxAdapter {
                 ".resx resources must have a <root> element".to_string(),
             ));
         }
+        let path_budget = PathBudget::for_key_rows(budget, limits);
         let mut rows = Vec::new();
         for node in document
             .descendants()
@@ -134,8 +163,11 @@ impl Adapter for ResxAdapter {
             if name.value().starts_with(">>") || name.value().starts_with("$this") {
                 continue;
             }
-            let span = name.range_value();
+            let span = crate::structured_format::xml_attr_value_span(text, name)
+                .unwrap_or_else(|| name.range_value());
             check_row_count(limits, rows.len() + 1)?;
+            let pointer_bytes = std::mem::size_of::<Segment>().saturating_add(name.value().len());
+            path_budget.take(pointer_bytes)?;
             rows.push(
                 Row::new(
                     resource.clone(),

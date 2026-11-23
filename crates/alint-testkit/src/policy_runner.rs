@@ -443,7 +443,10 @@ impl Runner {
             .with_facts(config.facts.clone())
             .with_vars(config.vars.clone())
             .with_fix_size_limit(config.fix_size_limit)
+            .with_limits(&config.limits)
+            .map_err(|error| Error::runtime(error.to_string()))?
             .with_config_files(config.config_files.clone())
+            .with_environment_config_files(config.environment_config_files.clone())
             .with_process_environment(context.process_environment.clone())
             .with_condition_environment(context.condition_environment.clone());
         if let Some(as_of) = &context.test.given.as_of {

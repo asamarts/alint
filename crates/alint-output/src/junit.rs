@@ -62,11 +62,12 @@ pub fn write_junit(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
                 // Passing rule → one self-closed testcase. Provides
                 // a "tests run" denominator for consumers that show
                 // pass-rate metrics.
+                let safe_rule = crate::sanitize::sanitize_xml_display(&result.rule_id);
                 writeln!(
                     w,
                     r#"    <testcase classname="alint.{}" name="{}" time="0"/>"#,
-                    xml_attr(&result.rule_id),
-                    xml_attr(&result.rule_id),
+                    xml_attr(&safe_rule),
+                    xml_attr(&safe_rule),
                 )?;
             } else {
                 for violation in &result.violations {
@@ -115,8 +116,8 @@ fn write_failure_case(
     writeln!(
         w,
         r#"    <testcase classname="alint.{rule}" name="{name}" time="0">"#,
-        rule = xml_attr(&result.rule_id),
-        name = xml_attr(&case_name),
+        rule = xml_attr(&crate::sanitize::sanitize_xml_display(&result.rule_id)),
+        name = xml_attr(&crate::sanitize::sanitize_xml_display(&case_name)),
     )?;
     writeln!(
         w,
@@ -167,8 +168,8 @@ fn write_error_case(
     writeln!(
         w,
         r#"    <testcase classname="alint.{rule}" name="{name}" time="0">"#,
-        rule = xml_attr(&result.rule_id),
-        name = xml_attr(&case_name),
+        rule = xml_attr(&crate::sanitize::sanitize_xml_display(&result.rule_id)),
+        name = xml_attr(&crate::sanitize::sanitize_xml_display(&case_name)),
     )?;
     writeln!(
         w,
@@ -209,16 +210,21 @@ fn format_failure_body(result: &RuleResult, violation: &Violation) -> String {
 }
 
 /// Escape a string for XML element content (`<elem>HERE</elem>`).
-/// Strips XML 1.0-illegal control characters; replaces `& < >`
-/// with their entity references. Quotes don't need escaping in
-/// element content but it's harmless to do.
+/// Strips XML 1.0-illegal control characters, normalizes `\r\n` and bare `\r`
+/// to `\n` (matching XML 1.0 §2.11 and preventing terminal line-overwrite
+/// spoofing), and replaces `& < >` with their entity references.
 fn xml_text(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
+    let mut chars = s.chars().peekable();
+    while let Some(ch) = chars.next() {
         if is_xml_illegal_control(ch) {
             continue;
         }
         match ch {
+            '\r' => {
+                let _ = chars.next_if_eq(&'\n');
+                out.push('\n');
+            }
             '&' => out.push_str("&amp;"),
             '<' => out.push_str("&lt;"),
             '>' => out.push_str("&gt;"),
@@ -480,56 +486,53 @@ mod tests {
     }
 
     #[test]
-    fn bidi_and_zero_width_escaped_in_failure_and_error_text() {
+    fn bidi_and_zero_width_escaped_across_entire_junit_document() {
         use alint_core::AnalysisFailureKind;
 
         let bidi_path = PathBuf::from("a\x1b[31m\u{202E}\u{200B}\u{180E}Z.txt");
-        let msg =
-            "file is forbidden (matches [*.txt]): a\x1b[31m\u{202E}\u{200B}\u{180E}\u{0085}Z.txt";
+        let bidi_rule = "rule-\u{202E}\u{200B}\u{009B}id";
+        let msg = "file is forbidden (matches [*.txt]): a\x1b[31m\u{202E}\u{200B}\u{180E}\u{0085}\rfake\r\nZ.txt";
         let report = Report {
-            results: vec![RuleResult {
-                rule_id: "no-txt".into(),
-                level: Level::Error,
-                policy_url: None,
-                violations: vec![Violation::new(msg).with_path(bidi_path.clone())],
-                notes: Vec::new(),
-                is_fixable: false,
-                analysis_failures: vec![
-                    AnalysisFailure::new(AnalysisFailureKind::ResourceParse, msg)
-                        .with_path(bidi_path),
-                ],
-            }],
+            results: vec![
+                RuleResult {
+                    rule_id: bidi_rule.into(),
+                    level: Level::Error,
+                    policy_url: None,
+                    violations: vec![Violation::new(msg).with_path(bidi_path.clone())],
+                    notes: Vec::new(),
+                    is_fixable: false,
+                    analysis_failures: vec![
+                        AnalysisFailure::new(AnalysisFailureKind::ResourceParse, msg)
+                            .with_path(bidi_path),
+                    ],
+                },
+                rule("pass-\u{202E}\u{200B}ok", Level::Error, vec![]),
+            ],
         };
         let out = render(&report);
-        // Extract `<failure ...>...</failure>` and `<error ...>...</error>` segments.
-        let fail_start = out.find("<failure ").expect("failure element");
-        let fail_end = out[fail_start..].find("</failure>").unwrap() + fail_start;
-        let fail_xml = &out[fail_start..fail_end];
-        let err_start = out.find("<error ").expect("error element");
-        let err_end = out[err_start..].find("</error>").unwrap() + err_start;
-        let err_xml = &out[err_start..err_end];
-
-        for snippet in [fail_xml, err_xml] {
-            for raw in ['\x1b', '\u{202E}', '\u{200B}', '\u{180E}', '\u{0085}'] {
-                assert!(
-                    !snippet.contains(raw),
-                    "raw U+{:04X} survived in JUnit snippet: {snippet}",
-                    raw as u32
-                );
-            }
+        // Assert across the ENTIRE JUnit XML document (including `<testcase>` attrs).
+        for raw in [
+            '\x1b', '\r', '\u{202E}', '\u{200B}', '\u{180E}', '\u{0085}', '\u{009B}',
+        ] {
             assert!(
-                snippet.contains("\\u{202e}"),
-                "missing bidi escape: {snippet}"
+                !out.contains(raw),
+                "raw U+{:04X} survived in JUnit output:\n{out}",
+                raw as u32
             );
-            assert!(
-                snippet.contains("\\u{200b}"),
-                "missing zwsp escape: {snippet}"
-            );
-            assert!(
-                snippet.contains("\\u{180e}"),
-                "missing mvs escape: {snippet}"
-            );
-            assert!(snippet.contains("\\x85"), "missing C1 escape: {snippet}");
         }
+        assert!(out.contains("\\u{202e}"), "missing bidi escape: {out}");
+        assert!(out.contains("\\u{200b}"), "missing zwsp escape: {out}");
+        assert!(out.contains("\\u{180e}"), "missing mvs escape: {out}");
+        assert!(out.contains("\\x85"), "missing C1 NEL escape: {out}");
+        assert!(out.contains("\\x9b"), "missing C1 CSI escape: {out}");
+        assert!(out.contains("fake\nZ.txt"), "CR normalized to LF: {out}");
+        assert!(
+            out.contains(r#"classname="alint.rule-\u{202e}\u{200b}\x9bid""#),
+            "testcase classname must be sanitized: {out}"
+        );
+        assert!(
+            out.contains(r#"name="pass-\u{202e}\u{200b}ok""#),
+            "passing testcase name must be sanitized: {out}"
+        );
     }
 }

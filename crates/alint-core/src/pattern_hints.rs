@@ -132,6 +132,17 @@ pub fn environment_fact_hints(
     environment_values: &[String],
 ) -> Vec<ConfigHint> {
     let redactor = crate::EnvironmentRedactor::from_values(environment_values);
+    environment_fact_hints_with(facts, &redactor)
+}
+
+/// [`environment_fact_hints`] reusing a caller's compiled
+/// [`crate::EnvironmentRedactor`] rather than rebuilding its automaton.
+#[doc(hidden)]
+#[must_use]
+pub fn environment_fact_hints_with(
+    facts: &[FactSpec],
+    redactor: &crate::EnvironmentRedactor,
+) -> Vec<ConfigHint> {
     facts
         .iter()
         .filter_map(|fact| match &fact.kind {

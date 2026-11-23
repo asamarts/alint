@@ -298,7 +298,7 @@ fn an_unknown_key_is_reported_against_the_version_two_keys() {
         message(checked("version: 2\nrelation: {}\n")),
         ".alint.yml: unknown key `relation` in a version 2 config; expected one of `version`, \
          `requires`, `extends`, `ignore`, `respect_gitignore`, `vars`, `facts`, `templates`, \
-         `rules`, `fix_size_limit`, `nested_configs`, `allow_out_of_root`, `baseline`, \
+         `rules`, `fix_size_limit`, `nested_configs`, `limits`, `allow_out_of_root`, `baseline`, \
          `trusted_extends`, `selectors`, `relations`"
     );
     assert!(checked("version: 2\nselectors: {}\nrelations: {}\nrules: []\n").is_ok());

@@ -74,8 +74,9 @@ pub(crate) const UNTRUSTED_NOTE: &str = "alint: this workspace is not trusted, s
      `git_tracked_only`, `changed_since`), custom facts, remote `extends:`, \
      `allow_out_of_root:` and environment values (`{{env.*}}`, `env.*` in `when:`) are off; \
      other rules lint as usual. To turn them on, trust the workspace: in VS Code, grant \
-     Workspace Trust; in other editors, start the server with the initialization option \
-     `\"trusted\": true`. See https://alint.org/docs/cli/lsp/#workspace-trust";
+     Workspace Trust; in JetBrains IDEs, trust the project; in other editors, start the server \
+     with the initialization option `\"trusted\": true`. See \
+     https://alint.org/docs/cli/lsp/#workspace-trust";
 
 /// Run every config relevant to the workspace: each workspace folder's
 /// config, which governs every open document in that folder.
@@ -403,7 +404,13 @@ fn load_session_config(
             .iter()
             .filter(|spec| !matches!(spec.level, Level::Off));
         alint_dsl::refuse_spawning(enabled, &config.facts, registry.catalog(), "--no-spawn")
-            .map_err(|error| format!("loading config: {error}"))?;
+            .map_err(|error| {
+                let redactor =
+                    alint_core::EnvironmentRedactor::from_values(&config.environment_values);
+                redactor
+                    .redact(&format!("loading config: {error}"))
+                    .into_owned()
+            })?;
     }
     let asked = !trusted && environment.asked.load(Ordering::Relaxed);
     Ok((config, asked))
@@ -540,16 +547,21 @@ fn build_session_for_config(
         kinds,
         extended: extended_rules,
         withheld: rules_withheld,
-    } = build_entries(&config.rules, &config.allow_out_of_root, trusted, registry)?;
+    } = build_entries(&config.rules, &config.allow_out_of_root, trusted, registry).map_err(
+        |mut error| {
+            error.message = redact(error.message);
+            error
+        },
+    )?;
     withheld |= rules_withheld;
 
     // A fact's id may be read from the environment.
     let pattern_hints: Vec<_> = entries
         .iter()
         .flat_map(|entry| entry.pattern_hints(registry))
-        .chain(alint_core::pattern_hints::environment_fact_hints(
+        .chain(alint_core::pattern_hints::environment_fact_hints_with(
             &facts,
-            environment_redactor.values(),
+            &environment_redactor,
         ))
         .map(|mut hint| {
             hint.id = redact(hint.id);
@@ -559,7 +571,11 @@ fn build_session_for_config(
     let mut engine = Engine::from_entries(entries, registry.clone())
         .with_facts(facts)
         .with_vars(config.vars)
-        .with_fix_size_limit(config.fix_size_limit);
+        .with_limits(&config.limits)
+        .map_err(|error| redact(format!("loading config: {error}")))?
+        .with_fix_size_limit(config.fix_size_limit)
+        .with_config_files(config.config_files.clone())
+        .with_environment_config_files(config.environment_config_files.clone());
     if !trusted {
         // `env.*` in a `when:` and a legacy `${VAR}` read this, not the host.
         engine = engine.with_condition_environment(BTreeMap::new());
@@ -898,5 +914,55 @@ mod note_tests {
         assert_eq!(notes.len(), 1, "{notes:?}");
         assert!(notes[0].starts_with("<redacted>: "), "{notes:?}");
         assert!(!notes[0].contains("falcon"), "{notes:?}");
+    }
+
+    #[test]
+    fn no_spawn_custom_fact_error_redacts_environment_value() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let secret = std::env::var("CARGO_PKG_NAME").expect("cargo sets CARGO_PKG_NAME");
+        std::fs::write(
+            root.join(".alint.yml"),
+            "version: 1\nfacts:\n  - id: '{{env.CARGO_PKG_NAME}}'\n    \
+             custom:\n      argv: ['echo', 'hi']\nrules: []\n",
+        )
+        .unwrap();
+        let settings = Settings {
+            trusted: true,
+            no_spawn: true,
+            ..Settings::default()
+        };
+        let err = build_session_with(root, &settings).unwrap_err();
+        assert!(err.contains("--no-spawn"), "{err}");
+        assert!(err.contains(alint_core::CONFIGURATION_MASK), "{err}");
+        assert!(!err.contains(&secret), "env value leaked: {err}");
+    }
+
+    #[test]
+    fn lsp_session_honors_top_level_limits() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join(".alint.yml"),
+            "version: 1\nlimits:\n  findings_per_rule: 2\nrules:\n  - id: kp\n    \
+             kind: key_parity\n    reference: en.json\n    peers: fr.json\n    level: error\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("en.json"), r#"{"a":"1","b":"2","c":"3","d":"4"}"#).unwrap();
+        std::fs::write(root.join("fr.json"), "{}").unwrap();
+        let check = check_workspace(
+            &[root.to_path_buf()],
+            &[],
+            &Settings {
+                trusted: true,
+                ..Settings::default()
+            },
+            &alint_rules::builtin_registry(),
+        );
+        let (_, run) = &check.runs[0];
+        let run = run.as_ref().unwrap();
+        let total: usize = run.by_path.values().map(Vec::len).sum();
+        // 2 capped findings + 1 truncation analysis failure = 3 diagnostics.
+        assert_eq!(total, 3, "diagnostics: {:?}", run.by_path);
     }
 }

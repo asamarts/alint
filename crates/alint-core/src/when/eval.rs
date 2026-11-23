@@ -202,13 +202,14 @@ fn iter_has_file(iter: Option<&IterEnv<'_>>, pattern: &str) -> Result<bool, When
         return Ok(iter.index.contains_file(&candidate));
     }
     // The iterated path is a real directory name, not a pattern: escape it so a
-    // dir like `app/[slug]` or `pkgs/*` matches only itself (only the user's
-    // `pattern` keeps its glob meaning).
-    let combined = format!(
-        "{}/{}",
-        crate::template::glob_escape(&iter.path.to_string_lossy()),
-        pattern
-    );
+    // dir like `app/[slug]`, `pkgs/*`, or `!special` matches only itself (only
+    // the user's `pattern` keeps its glob meaning).
+    let iter_str = iter.path.to_string_lossy();
+    let escaped_dir = match iter_str.strip_prefix('!') {
+        Some(rest) => format!("{{!}}{}", crate::template::glob_escape(rest)),
+        None => crate::template::glob_escape(&iter_str),
+    };
+    let combined = format!("{escaped_dir}/{pattern}");
     let scope = Scope::from_patterns(std::slice::from_ref(&combined))
         .map_err(|e| WhenError::Eval(format!("iter.has_file: invalid glob: {e}")))?;
     Ok(scope

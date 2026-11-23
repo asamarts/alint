@@ -199,7 +199,7 @@ fn an_unknown_key_in_a_version_two_config_lists_the_version_two_keys() {
         load_error(&path),
         ".alint.yml: unknown key `relation` in a version 2 config; expected one of `version`, \
          `requires`, `extends`, `ignore`, `respect_gitignore`, `vars`, `facts`, `templates`, \
-         `rules`, `fix_size_limit`, `nested_configs`, `allow_out_of_root`, `baseline`, \
+         `rules`, `fix_size_limit`, `nested_configs`, `limits`, `allow_out_of_root`, `baseline`, \
          `trusted_extends`, `selectors`, `relations`"
     );
 }

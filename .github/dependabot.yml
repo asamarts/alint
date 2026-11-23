@@ -40,14 +40,6 @@ updates:
         update-types:
           - patch
           - minor
-    # roxmltree 0.21 regressed deep-nesting parsing: Document::parse
-    # stack-overflows (SIGABRT) on deeply-nested XML instead of returning
-    # a parse error, before alint's MAX_XML_DEPTH guard (post-parse
-    # tree-walk) can fire. alint parses untrusted XML from linted repos,
-    # so hold at 0.20 until a fixed release. Repro in closed PR #44.
-    ignore:
-      - dependency-name: "roxmltree"
-        versions: ["0.21.x"]
     commit-message:
       prefix: "chore(deps)"
 

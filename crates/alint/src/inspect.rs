@@ -690,6 +690,7 @@ fn run_explain_trace(
     let mut engine = Engine::from_entries(loaded.entries.clone(), loaded.registry.clone())
         .with_facts(loaded.facts.clone())
         .with_vars(loaded.vars.clone())
+        .with_limits(&loaded.limits)?
         .with_fix_size_limit(loaded.fix_size_limit);
     if let Some(resolution) = analysis_time.copied() {
         engine = engine.with_analysis_time_resolution(resolution);

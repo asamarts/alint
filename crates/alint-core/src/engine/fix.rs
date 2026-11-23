@@ -1834,6 +1834,9 @@ impl Engine {
             let result_sensitive = entry.is_some_and(Self::has_sensitive_evidence);
             let sensitive_paths =
                 entry.is_some_and(|entry| self.has_sensitive_path_selection(entry));
+            let extended_source = entry
+                .and_then(|entry| entry.spec.as_deref())
+                .is_some_and(|spec| spec.extended_source);
             for failure in &mut result.analysis_failures {
                 if sensitive_paths {
                     failure.mark_path_sensitive();
@@ -1843,8 +1846,32 @@ impl Engine {
                 }
             }
             for item in &mut result.items {
-                if sensitive_paths {
+                let hits_env_config = extended_source
+                    && !self.environment_config_files.is_empty()
+                    && item.violation.path.as_deref().is_some_and(|path| {
+                        crate::pathsafe::reaches_specific_config_walked(
+                            root,
+                            path,
+                            &self.environment_config_files,
+                            None,
+                        )
+                    });
+                if sensitive_paths || hits_env_config {
                     item.violation.mark_path_sensitive();
+                }
+                if hits_env_config && let Some(path) = item.violation.path.as_deref() {
+                    let raw = path.display().to_string();
+                    let slash = raw.replace('\\', "/");
+                    if item.violation.message.contains(&raw)
+                        || item.violation.message.contains(&slash)
+                    {
+                        let replaced = item
+                            .violation
+                            .message
+                            .replace(&raw, CONFIGURATION_MASK)
+                            .replace(&slash, CONFIGURATION_MASK);
+                        item.violation.message = replaced.into();
+                    }
                 }
                 if result_sensitive {
                     item.violation.redact_message(&result.rule_id);

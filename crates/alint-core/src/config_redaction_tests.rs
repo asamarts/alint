@@ -519,3 +519,36 @@ fn environment_redactor_handles_overlapping_widening_and_scales_linearly() {
         std::borrow::Cow::Borrowed(_)
     ));
 }
+
+#[test]
+fn environment_redactor_coalesces_overlapping_patterns_without_leaking_longer_tail() {
+    // Under LeftmostLongest + non-overlapping find_iter, matching `"app-prod"`
+    // consumed bytes 0..8 and caused `"prod/db-password"` (starting at byte 4)
+    // to be missed, leaking `"/db-password"`. Standard + overlapping iteration
+    // must coalesce both spans.
+    let mut redactor = EnvironmentRedactor::new();
+    redactor.extend(&["app-prod".to_string(), "prod/db-password".to_string()]);
+    assert_eq!(redactor.redact_lazy("app-prod/db-password"), "<redacted>");
+    assert_eq!(
+        redactor.redact("connecting to app-prod/db-password failed"),
+        "connecting to <redacted> failed"
+    );
+
+    let mut chain = EnvironmentRedactor::new();
+    chain.extend(&["abcd".to_string(), "bcde-secret".to_string()]);
+    assert_eq!(
+        chain.redact_lazy("prefix abcd-x abcd bcde-secret abcde-secret"),
+        "prefix <redacted>-x <redacted> <redacted> <redacted>"
+    );
+
+    // Multi-line secret whose line overlaps another recorded secret.
+    let mut multi = EnvironmentRedactor::new();
+    multi.extend(&[
+        "alpha-beta".to_string(),
+        "beta/gamma-secret\nsecond-line-secret".to_string(),
+    ]);
+    assert_eq!(
+        multi.redact_lazy("at alpha-beta/gamma-secret and second-line-secret"),
+        "at <redacted> and <redacted>"
+    );
+}

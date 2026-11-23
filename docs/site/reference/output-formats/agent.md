@@ -150,6 +150,10 @@ fixed automatically.
 | `column` | integer | no | 1-based column, when the rule reports one. |
 | `policy_url` | string | no | Documentation URL provided by the rule. |
 
+<!-- alint:since=0.24 -->
+From v0.24, `human_message`, `agent_instruction`, `policy_url`, and `analysis_failures[].human_message` are sanitized of terminal controls, bidi overrides/isolates, zero-width characters, and astral tag characters, while raw machine paths stay intact in `file`.
+<!-- /alint:since -->
+
 `off` rules never produce violations, so `"off"` never appears as a severity.
 
 ## How `agent_instruction` is composed

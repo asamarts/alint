@@ -376,14 +376,39 @@ pub(crate) fn toml_tokens(text: &str) -> usize {
 // `docs/design/v0.10/xml_path.md`.
 // ---------------------------------------------------------------
 
+/// Compute the exact quote-delimited byte range of `attr`'s value inside
+/// `text`, without relying on `roxmltree::Attribute::range_value()`'s
+/// saturating `u16` qname length and `u8` `=`-padding length.
+pub(crate) fn xml_attr_value_span(
+    text: &str,
+    attr: roxmltree::Attribute<'_, '_>,
+) -> Option<std::ops::Range<usize>> {
+    let full = attr.range();
+    let slice = text.get(full.clone())?;
+    let eq = slice.find('=')?;
+    let after_eq = &slice[eq + 1..];
+    let q_rel = after_eq.find(['"', '\''])?;
+    let quote = after_eq.as_bytes()[q_rel];
+    let start = full.start + eq + 1 + q_rel + 1;
+    let end = full.end.checked_sub(1)?;
+    if slice.as_bytes().last() != Some(&quote)
+        || start > end
+        || !text.is_char_boundary(start)
+        || !text.is_char_boundary(end)
+    {
+        return None;
+    }
+    Some(start..end)
+}
+
 /// Parse XML into the same `serde_json::Value` tree the rest of
 /// the family queries. The document maps to
 /// `{ <root-element-name>: <root value> }` so the root element is
 /// the first `JSONPath` segment (`$.Project…`, `$.project…`).
 fn xml_to_value(text: &str) -> std::result::Result<Value, String> {
-    // Reject over-deep, over-wide or namespace-heavy XML before `Document::parse`
-    // can overflow the stack (depth) or hang in O(n^2) attribute validation
-    // (width) or namespace resolution.
+    // Reject over-deep, over-wide or namespace-heavy XML upfront before
+    // `Document::parse` builds a large DOM (depth) or hits O(n^2) attribute
+    // validation (width) or O(P^2) namespace resolution.
     xml_within_parse_limits(text)?;
     let doc = roxmltree::Document::parse(text).map_err(|e| {
         let msg = e.to_string();

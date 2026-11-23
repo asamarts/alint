@@ -108,7 +108,7 @@ struct AgentViolation<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     proposed_edit: Option<&'a [ProposedEdit]>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    policy_url: Option<&'a str>,
+    policy_url: Option<Cow<'a, str>>,
 }
 #[derive(Serialize)]
 struct AgentAnalysisFailure<'a> {
@@ -163,7 +163,10 @@ pub fn write_agent(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
                     .is_fixable
                     .then(|| vec!["fix", "--only", r.rule_id.as_ref()]),
                 proposed_edit: crate::utf8_proposed_edits(v),
-                policy_url: r.policy_url.as_deref(),
+                policy_url: r
+                    .policy_url
+                    .as_deref()
+                    .map(crate::sanitize::sanitize_terminal),
             });
         }
         analysis_failures.extend(
@@ -536,13 +539,16 @@ mod tests {
 
         let raw_path = "a\x1b[31m\u{202E}\u{200B}\u{180E}Z.txt";
         let raw_msg = format!("file is forbidden: {raw_path}");
+        let raw_url = "https://example.invalid/\u{202E}\u{200B}\x1b[31mpolicy";
+        let mut violation = Violation::new(raw_msg.clone()).with_path(PathBuf::from(raw_path));
+        violation.is_fixable = true;
         let result = RuleResult {
-            rule_id: "no-txt".into(),
+            rule_id: "no-\u{202E}txt".into(),
             level: Level::Error,
-            policy_url: None,
-            violations: vec![Violation::new(raw_msg.clone()).with_path(PathBuf::from(raw_path))],
+            policy_url: Some(raw_url.into()),
+            violations: vec![violation],
             notes: Vec::new(),
-            is_fixable: false,
+            is_fixable: true,
             analysis_failures: vec![
                 AnalysisFailure::new(AnalysisFailureKind::ResourceParse, raw_msg)
                     .with_path(PathBuf::from(raw_path)),
@@ -553,7 +559,7 @@ mod tests {
 
         let viol = &v["violations"][0];
         assert_eq!(viol["file"].as_str(), Some(raw_path));
-        for field in ["human_message", "agent_instruction"] {
+        for field in ["human_message", "agent_instruction", "policy_url"] {
             let s = viol[field].as_str().unwrap();
             for raw in ['\x1b', '\u{202E}', '\u{200B}', '\u{180E}'] {
                 assert!(
@@ -571,11 +577,21 @@ mod tests {
                 s.contains("\\u{200b}"),
                 "missing zwsp escape in {field}: {s}"
             );
-            assert!(
-                s.contains("\\u{180e}"),
-                "missing mvs escape in {field}: {s}"
-            );
         }
+        assert!(
+            viol["human_message"]
+                .as_str()
+                .unwrap()
+                .contains("\\u{180e}"),
+            "missing mvs escape in human_message"
+        );
+        assert!(
+            viol["agent_instruction"]
+                .as_str()
+                .unwrap()
+                .contains("no-\\u{202e}txt"),
+            "fix hint rule_id must be sanitized in agent_instruction"
+        );
 
         let af = &v["analysis_failures"][0];
         assert_eq!(af["file"].as_str(), Some(raw_path));

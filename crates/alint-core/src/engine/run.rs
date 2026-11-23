@@ -46,6 +46,7 @@ impl Engine {
             fix_baseline: None,
             config_files: Vec::new(),
             environment_config_files: Vec::new(),
+            relation_limits: Self::default_runtime_limits(),
         }
     }
 
@@ -67,7 +68,28 @@ impl Engine {
             fix_baseline: None,
             config_files: Vec::new(),
             environment_config_files: Vec::new(),
+            relation_limits: Self::default_runtime_limits(),
         }
+    }
+
+    fn default_runtime_limits() -> crate::relation::Limits {
+        crate::relation::Limits::default()
+    }
+
+    /// Configure top-level runtime limits (`limits:` in `.alint.yml`).
+    pub fn with_limits(mut self, limits: &crate::ConfigLimits) -> Result<Self> {
+        self.relation_limits = limits
+            .to_relation_limits()
+            .map_err(|error| Error::Other(error.to_string()))?;
+        Ok(self)
+    }
+
+    /// Set pre-validated relation limits directly.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_relation_limits(mut self, limits: crate::relation::Limits) -> Self {
+        self.relation_limits = limits;
+        self
     }
 
     #[must_use]
@@ -387,6 +409,7 @@ impl Engine {
             fix_baseline: None,
             config_files: self.config_files.clone(),
             environment_config_files: self.environment_config_files.clone(),
+            relation_limits: self.relation_limits,
         };
         let sensitive_evidence = Self::has_sensitive_evidence(entry);
         let sensitive_paths = self.has_sensitive_path_selection(entry);
@@ -426,12 +449,13 @@ impl Engine {
     /// their own (`relation::IterationScope`), so memory and the run's row
     /// budget do not grow with the iterations.
     pub(super) fn enable_relation_caches(&self, index: &FileIndex) {
+        index.set_relation_limits(self.relation_limits);
         if self
             .entries
             .iter()
             .any(|entry| entry.rule.uses_relations() && entry.rule.level() != crate::Level::Off)
         {
-            index.enable_relation_caches();
+            index.enable_relation_caches_under(&self.relation_limits);
         }
     }
 

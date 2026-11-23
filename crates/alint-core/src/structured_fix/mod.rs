@@ -764,7 +764,10 @@ mod xml {
                     return None;
                 }
                 Some(XmlTarget {
-                    value_span: Some(attr.range_value()),
+                    value_span: crate::structured_format::xml_attr_value_span(
+                        elem.document().input_text(),
+                        attr,
+                    ),
                     removal_span: Some(attr.range()),
                     is_attribute: true,
                 })

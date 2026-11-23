@@ -48,6 +48,7 @@ mod git_directory_reads_cli;
 mod git_repository_cli;
 mod hermetic;
 mod hidden_path_baseline;
+mod limits_audit;
 mod lsp_audit;
 mod lsp_protocol;
 mod lsp_smoke;
