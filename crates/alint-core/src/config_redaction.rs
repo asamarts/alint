@@ -182,10 +182,21 @@ const MIN_REDACTED_ENVIRONMENT_VALUE: usize = 4;
 
 /// A compiled multi-pattern matcher for [`EnvironmentRedactor`].
 #[derive(Debug, Clone)]
+enum Matcher {
+    /// No forms meet [`MIN_REDACTED_ENVIRONMENT_VALUE`]; scrubbing is a no-op.
+    Empty,
+    /// Compiled standard Aho-Corasick automaton used with overlapping match
+    /// iteration so an earlier shorter match cannot hide a longer overlapping
+    /// secret starting inside it.
+    Ready(aho_corasick::AhoCorasick),
+    /// Automaton construction failed (for example on an extreme pattern table);
+    /// fail closed rather than emitting potentially unredacted text.
+    Failed,
+}
+
+#[derive(Debug, Clone)]
 struct CompiledRedactor {
-    automaton: Option<aho_corasick::AhoCorasick>,
-    /// Per-pattern `(starts_word, ends_word)` flags for word-widening.
-    word_edges: Vec<(bool, bool)>,
+    matcher: Matcher,
 }
 
 impl CompiledRedactor {
@@ -193,51 +204,63 @@ impl CompiledRedactor {
         let forms = expand_environment_forms(values);
         if forms.is_empty() {
             return Self {
-                automaton: None,
-                word_edges: Vec::new(),
+                matcher: Matcher::Empty,
             };
         }
-        let word_edges = forms
-            .iter()
-            .map(|form| {
-                (
-                    form.chars().next().is_some_and(is_word_char),
-                    form.chars().next_back().is_some_and(is_word_char),
-                )
-            })
-            .collect();
-        let automaton = aho_corasick::AhoCorasickBuilder::new()
-            .match_kind(aho_corasick::MatchKind::LeftmostLongest)
+        let matcher = aho_corasick::AhoCorasickBuilder::new()
+            .match_kind(aho_corasick::MatchKind::Standard)
             .build(&forms)
-            .ok();
-        Self {
-            automaton,
-            word_edges,
-        }
+            .map_or(Matcher::Failed, Matcher::Ready);
+        Self { matcher }
     }
 
     fn redact<'a>(&self, text: &'a str) -> std::borrow::Cow<'a, str> {
-        let Some(ac) = &self.automaton else {
-            return std::borrow::Cow::Borrowed(text);
+        let ac = match &self.matcher {
+            Matcher::Empty => return std::borrow::Cow::Borrowed(text),
+            Matcher::Failed => return std::borrow::Cow::Borrowed(CONFIGURATION_MASK),
+            Matcher::Ready(ac) => ac,
         };
-        let mut replaced = String::new();
-        let mut copied = 0usize;
-        let mut pending: Option<(usize, usize)> = None;
-        for mat in ac.find_iter(text) {
-            let found = mat.start();
-            let mat_end = mat.end();
-            let (starts_word, ends_word) = self.word_edges[mat.pattern().as_usize()];
-            let limit = pending.map_or(copied, |(_, pend_end)| pend_end);
-            let mut start = found;
+        // Collect overlapping matches in monotonic `end` order, coalescing
+        // overlapping raw spans on a stack before word-widening. Because a
+        // longer match ending at the same byte always subsumes a shorter one
+        // even after word-widening, coalescing raw overlaps first is exact and
+        // guarantees each byte of `text` is visited at most twice when
+        // widening.
+        let mut raw: Vec<(usize, usize)> = Vec::new();
+        for mat in ac.find_overlapping_iter(text) {
+            let mut start = mat.start();
+            let end = mat.end();
+            while let Some(&(prev_start, prev_end)) = raw.last() {
+                if start < prev_end {
+                    raw.pop();
+                    start = start.min(prev_start);
+                } else {
+                    break;
+                }
+            }
+            raw.push((start, end));
+        }
+        if raw.is_empty() {
+            return std::borrow::Cow::Borrowed(text);
+        }
+        let mut widened: Vec<(usize, usize)> = Vec::with_capacity(raw.len());
+        for (raw_start, raw_end) in raw {
+            let starts_word = text[raw_start..].chars().next().is_some_and(is_word_char);
+            let ends_word = text[..raw_end]
+                .chars()
+                .next_back()
+                .is_some_and(is_word_char);
+            let mut start = raw_start;
+            let limit = widened.last().map_or(0, |&(_, pe)| pe);
             if starts_word && start > limit {
-                start -= text[limit..found]
+                start -= text[limit..raw_start]
                     .chars()
                     .rev()
                     .take_while(|&c| is_word_char(c))
                     .map(char::len_utf8)
                     .sum::<usize>();
             }
-            let mut end = mat_end;
+            let mut end = raw_end;
             if ends_word && end > limit {
                 end += text[end..]
                     .chars()
@@ -245,29 +268,24 @@ impl CompiledRedactor {
                     .map(char::len_utf8)
                     .sum::<usize>();
             }
-            match pending {
-                Some((pend_start, pend_end)) if start < pend_end => {
-                    pending = Some((pend_start.min(start), pend_end.max(end)));
-                }
-                Some((pend_start, pend_end)) => {
-                    replaced.push_str(&text[copied..pend_start]);
-                    replaced.push_str(CONFIGURATION_MASK);
-                    copied = pend_end;
-                    pending = Some((start, end));
-                }
-                None => {
-                    pending = Some((start, end));
-                }
+            if let Some(last) = widened.last_mut()
+                && start < last.1
+            {
+                last.0 = last.0.min(start);
+                last.1 = last.1.max(end);
+            } else {
+                widened.push((start, end));
             }
         }
-        if let Some((pend_start, pend_end)) = pending {
-            replaced.push_str(&text[copied..pend_start]);
+        let mut replaced = String::with_capacity(text.len());
+        let mut copied = 0usize;
+        for (start, end) in widened {
+            replaced.push_str(&text[copied..start]);
             replaced.push_str(CONFIGURATION_MASK);
-            replaced.push_str(&text[pend_end..]);
-            std::borrow::Cow::Owned(replaced)
-        } else {
-            std::borrow::Cow::Borrowed(text)
+            copied = end;
         }
+        replaced.push_str(&text[copied..]);
+        std::borrow::Cow::Owned(replaced)
     }
 }
 
@@ -289,23 +307,51 @@ fn expand_environment_forms(values: &[String]) -> Vec<String> {
         if matches!(value.trim(), "true" | "false") {
             continue;
         }
-        let mut written_forms = vec![value.as_str(), value.trim(), value.trim_end()];
+        let mut written_forms: Vec<&str> = Vec::with_capacity(4);
+        for candidate in [value.as_str(), value.trim(), value.trim_end()] {
+            if !written_forms.contains(&candidate) {
+                written_forms.push(candidate);
+            }
+        }
         if value.contains('\n') {
-            written_forms.extend(value.lines().map(str::trim));
+            for line in value.lines() {
+                let trimmed = line.trim();
+                if !written_forms.contains(&trimmed) {
+                    written_forms.push(trimmed);
+                }
+            }
         }
         for written in written_forms {
             let mut bare = written;
             while let Some(rest) = bare.strip_prefix("./").or_else(|| bare.strip_prefix(".\\")) {
                 bare = rest;
             }
-            for path in [written, bare] {
-                for printed in [
-                    path.to_string(),
-                    path.replace('/', "\\"),
-                    path.replace('\\', "/"),
-                ] {
+            let path_forms: [&str; 2] = [written, bare];
+            let path_count = if bare == written { 1 } else { 2 };
+            for &path in &path_forms[..path_count] {
+                let mut variants: Vec<String> = Vec::with_capacity(3);
+                variants.push(path.to_string());
+                if path.contains('/') {
+                    let v = path.replace('/', "\\");
+                    if !variants.contains(&v) {
+                        variants.push(v);
+                    }
+                }
+                if path.contains('\\') {
+                    let v = path.replace('\\', "/");
+                    if !variants.contains(&v) {
+                        variants.push(v);
+                    }
+                }
+                for printed in variants {
+                    if printed.chars().count() < MIN_REDACTED_ENVIRONMENT_VALUE {
+                        continue;
+                    }
                     let debug = format!("{printed:?}");
-                    push(debug[1..debug.len() - 1].to_string());
+                    let escaped = &debug[1..debug.len() - 1];
+                    if escaped != printed {
+                        push(escaped.to_string());
+                    }
                     push(printed);
                 }
             }
@@ -360,6 +406,14 @@ impl EnvironmentRedactor {
     pub fn extend(&mut self, values: &[String]) {
         for value in values {
             self.insert(value);
+        }
+    }
+
+    /// Pre-compile the underlying automaton if values have been added since the
+    /// last compile, so subsequent shared [`Self::redact`] calls reuse it.
+    pub fn compile(&mut self) {
+        if !self.values.is_empty() && self.compiled.is_none() {
+            self.compiled = Some(CompiledRedactor::build(&self.values));
         }
     }
 

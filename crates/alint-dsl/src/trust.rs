@@ -1762,6 +1762,21 @@ pub fn reject_baseline_in(baseline: &Option<std::path::PathBuf>, source: &str) -
     Ok(())
 }
 
+/// Reject a `limits:` block in an inherited ruleset. Like
+/// [`reject_baseline_in`], runtime limits are top-level-only so an `extends:`'d
+/// ruleset cannot raise `findings_per_rule` or `key_path_bytes_per_decode` to
+/// exhaust the consumer's memory or output budget.
+pub fn reject_limits_in(limits: &alint_core::ConfigLimits, source: &str) -> Result<()> {
+    if !limits.is_empty() {
+        return Err(Error::Other(format!(
+            "`limits:` is only allowed in the user's top-level config; \
+             declaring it in an extended config ({source}) is refused because it would \
+             let a ruleset raise runtime resource bounds"
+        )));
+    }
+    Ok(())
+}
+
 /// Reject a top-level `ignore:` from an untrusted remote (an `https://` source
 /// not in `trusted_extends:`). `ignore:` removes paths from the walk for EVERY
 /// rule, the user's own included, so a remote ruleset declaring `ignore:

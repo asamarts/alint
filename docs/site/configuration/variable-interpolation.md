@@ -69,7 +69,7 @@ A value read from the environment may be a secret, so alint keeps it out of what
 - A `JSONPath`, or a `when_iter:` or nested rule's `when:` expression, is masked with one that still parses, so an unrelated error after it stays readable.
 - `alint baseline`'s confirmation, and `alint facts` for a fact value (a `custom:` command given the value as an argument can print it), show `<redacted>` in its place.
 
-Two kinds of value are still printed: a boolean, and a value an error prints in fewer than four characters. Removing every occurrence of those would garble the message, and they are too short to be much of a secret. A value for an option with a fixed set of choices (`style: tabs`) cannot be masked with another valid choice, so an unrelated error after it in the same rule stays redacted.
+Two kinds of value are still printed when scrubbed only by text replacement: a boolean, and a value an error prints in fewer than four characters (removing every occurrence of those would garble the message, and they are too short to be much of a secret). Paths and names derived from the environment in `extends:` targets, `extends:` rule filters (`only:` / `except:`), `baseline:` paths, and `alint fix` configuration-file refusals are masked structurally as `<redacted>` regardless of length. A value for an option with a fixed set of choices (`style: tabs`) cannot be masked with another valid choice, so an unrelated error after it in the same rule stays redacted.
 
 These are outside what alint recognizes:
 

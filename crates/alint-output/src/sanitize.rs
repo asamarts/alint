@@ -254,6 +254,31 @@ mod tests {
             "\u{1F468}",
         ] {
             assert!(matches!(sanitize_terminal(s), Cow::Borrowed(_)), "{s:?}");
+            assert!(matches!(sanitize_xml_display(s), Cow::Borrowed(_)), "{s:?}");
         }
+    }
+
+    #[test]
+    fn sanitize_xml_display_escapes_bidi_zw_del_c1_and_tags_while_preserving_c0() {
+        // Pure ASCII < 0x7f (including C0 controls handled by XML encoder) borrows unchanged.
+        let ascii_with_c0 = "line1\n\t\r\x1b[31mplain";
+        assert!(matches!(
+            sanitize_xml_display(ascii_with_c0),
+            Cow::Borrowed(_)
+        ));
+        assert_eq!(sanitize_xml_display(ascii_with_c0), ascii_with_c0);
+
+        // Ordinary non-ASCII borrows unchanged.
+        let benign = "caf\u{e9} \u{1F600}";
+        assert!(matches!(sanitize_xml_display(benign), Cow::Borrowed(_)));
+
+        // DEL, C1 controls (NEL, CSI), bidi overrides/isolates, zero-width, BOM, ALM, and tags.
+        let evil =
+            "a\x7f\u{85}\u{9b}\u{202E}\u{2066}\u{2069}\u{200B}\u{180E}\u{FEFF}\u{061C}\u{E0069}b";
+        let out = sanitize_xml_display(evil);
+        assert_eq!(
+            out,
+            "a\\x7f\\x85\\x9b\\u{202e}\\u{2066}\\u{2069}\\u{200b}\\u{180e}\\u{feff}\\u{061c}\\u{e0069}b"
+        );
     }
 }

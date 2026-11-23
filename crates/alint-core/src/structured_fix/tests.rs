@@ -452,10 +452,21 @@ fn xml_removal_span_removes_element_and_attribute() {
 #[test]
 fn xml_span_resolvers_enforce_parse_limits() {
     use std::fmt::Write as _;
-    let depth = crate::structured_format::MAX_XML_DEPTH + 1;
-    let deep = format!("{}x{}", "<a>".repeat(depth), "</a>".repeat(depth));
-    assert!(resolve_value_span(Format::Xml, deep.as_bytes(), &[key("a")]).is_none());
-    assert!(resolve_removal_span(Format::Xml, deep.as_bytes(), &[key("a")]).is_none());
+    // Positive control at `MAX_XML_DEPTH`: a genuinely resolvable leaf value
+    // and non-root child removal span both succeed.
+    let at_limit = crate::structured_format::MAX_XML_DEPTH;
+    let ok_deep = format!("{}x{}", "<a>".repeat(at_limit), "</a>".repeat(at_limit));
+    let ok_leaf_path: Vec<PathSeg> = vec![key("a"); at_limit];
+    assert!(resolve_value_span(Format::Xml, ok_deep.as_bytes(), &ok_leaf_path).is_some());
+    assert!(resolve_removal_span(Format::Xml, ok_deep.as_bytes(), &[key("a"), key("a")]).is_some());
+
+    // One level past `MAX_XML_DEPTH`: both the resolvable leaf value and child
+    // removal span are refused pre-parse.
+    let over_depth = at_limit + 1;
+    let deep = format!("{}x{}", "<a>".repeat(over_depth), "</a>".repeat(over_depth));
+    let over_leaf_path: Vec<PathSeg> = vec![key("a"); over_depth];
+    assert!(resolve_value_span(Format::Xml, deep.as_bytes(), &over_leaf_path).is_none());
+    assert!(resolve_removal_span(Format::Xml, deep.as_bytes(), &[key("a"), key("a")]).is_none());
 
     let mut wide = String::from("<r");
     for i in 0..300 {
@@ -464,6 +475,12 @@ fn xml_span_resolvers_enforce_parse_limits() {
     wide.push_str(">x</r>");
     assert!(resolve_value_span(Format::Xml, wide.as_bytes(), &[key("r")]).is_none());
     assert!(resolve_removal_span(Format::Xml, wide.as_bytes(), &[key("r"), key("@a0")]).is_none());
+
+    // Attribute with >255 spaces around `=` (saturates `roxmltree`'s `u8 eq_len`)
+    // still resolves the exact quote-delimited value span without panic.
+    let padded = format!("<r k{}=\"val\"/>", " ".repeat(300));
+    let span = resolve_value_span(Format::Xml, padded.as_bytes(), &[key("r"), key("@k")]).unwrap();
+    assert_eq!(&padded[span], "val");
 }
 
 #[test]

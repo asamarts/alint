@@ -212,6 +212,7 @@ fn confine_none_disables_the_check() {
         confine_extends_target(
             Path::new("/etc/shadow"),
             "/etc/shadow",
+            false,
             None,
             &crate::FilesystemConfigSource,
         )
@@ -227,6 +228,7 @@ fn confine_missing_target_is_not_an_escape() {
     let res = confine_extends_target(
         &tmp.path().join("nope.yml"),
         "../nope.yml",
+        false,
         Some(tmp.path()),
         &crate::FilesystemConfigSource,
     );
@@ -346,12 +348,30 @@ fn confine_rejects_target_outside_root() {
     let err = confine_extends_target(
         &outside,
         "../outside.yml",
+        false,
         Some(&root),
         &crate::FilesystemConfigSource,
     )
     .unwrap_err()
     .to_string();
     assert!(err.contains("outside the lint root"), "{err}");
+
+    // When the extends entry came from the environment (`chosen = true`), the
+    // resolved out-of-root path is structurally masked even for short names.
+    let err_chosen = confine_extends_target(
+        &outside,
+        alint_core::CONFIGURATION_MASK,
+        true,
+        Some(&root),
+        &crate::FilesystemConfigSource,
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(
+        err_chosen.contains("resolves to <redacted> which is outside the lint root"),
+        "{err_chosen}"
+    );
+    assert!(!err_chosen.contains("outside.yml"), "{err_chosen}");
 }
 
 #[test]
@@ -363,6 +383,7 @@ fn confine_allows_target_inside_root() {
         confine_extends_target(
             &inside,
             "./base.yml",
+            false,
             Some(tmp.path()),
             &crate::FilesystemConfigSource,
         )

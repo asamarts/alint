@@ -1378,9 +1378,57 @@ fn short_environment_values_stay_out_of_baseline_and_fix_config_messages() {
         "expected structural `<redacted>` refusal details for both `xy.yml` and `sub.yml`, got {details:?}\nfull:\n{stdout}"
     );
     assert!(
-        details
-            .iter()
-            .all(|detail| !detail.contains("xy.yml") && !detail.contains("sub.yml")),
-        "refusal details must not quote env-chosen config paths: {details:?}"
+        !stdout.contains("xy.yml")
+            && !stdout.contains("sub.yml")
+            && !stderr.contains("xy.yml")
+            && !stderr.contains("sub.yml"),
+        "fix JSON output must not leak env-chosen config paths anywhere:\nstdout:\n{stdout}\nstderr:\n{stderr}"
     );
+    for args in [
+        &["fix", "--unsafe-fixes"][..],
+        &["fix", "--unsafe-fixes", "--format", "markdown"][..],
+        &["fix", "--unsafe-fixes", "--dry-run"][..],
+    ] {
+        let out = run(fix_root.path(), args, &[("X", "xy")]);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !stdout.contains("xy.yml")
+                && !stdout.contains("sub.yml")
+                && !stderr.contains("xy.yml")
+                && !stderr.contains("sub.yml"),
+            "{args:?} must not leak env-chosen config paths:\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+    }
+
+    // 6. Short (<4-char) env value in `extends:` `only:` / `except:` rule
+    //    filter and out-of-root extends target stay structurally masked.
+    write(
+        fix_root.path(),
+        ".alint.yml",
+        "version: 1\nextends:\n  - url: './sub.yml'\n    only: ['{{env.R}}']\nrules: []\n",
+    );
+    let out = run(fix_root.path(), &["check"], &[("R", "ab")]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{stderr}");
+    assert!(stderr.contains("<redacted>"), "{stderr}");
+    assert!(!stderr.contains("\"ab\""), "{stderr}");
+
+    let parent_dir = tempfile::tempdir().unwrap();
+    let repo_dir = parent_dir.path().join("repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    write(parent_dir.path(), "ab.yml", "version: 1\nrules: []\n");
+    write(
+        &repo_dir,
+        ".alint.yml",
+        "version: 1\nextends: ['../{{env.X}}.yml']\nrules: []\n",
+    );
+    let out = run(&repo_dir, &["check"], &[("X", "ab")]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("resolves to <redacted> which is outside the lint root"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("ab.yml"), "{stderr}");
 }

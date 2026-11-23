@@ -90,6 +90,10 @@ pub struct GitCommitMessageRule {
     /// evaluate-time so env vars exported by CI steps after rule
     /// load are picked up correctly.
     since_raw: Option<String>,
+    /// Whether legacy `${VAR}` expansion runs on `since_raw`: disabled on
+    /// rendered nested specs so a repository path literally named `${SECRET}`
+    /// cannot become an environment-variable oracle.
+    expand_legacy_env: bool,
     include_merges: bool,
 }
 
@@ -100,9 +104,11 @@ impl Rule for GitCommitMessageRule {
         let mut violations = Vec::new();
 
         // Resolve `since:` once at evaluate-time so `${VAR}` env
-        // expansions reflect the current process environment.
+        // expansions reflect the current process environment (unless this spec
+        // was rendered from a nested-rule iteration).
         let since = match &self.since_raw {
             None => None,
+            Some(raw) if !self.expand_legacy_env => Some(raw.clone()),
             Some(raw) => match expand_env(raw, |name| env_lookup(ctx, name)) {
                 Ok(resolved) => Some(resolved),
                 Err(missing) => {
@@ -437,7 +443,8 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     // at evaluate time by `expand_env`) but warns; v1.0 removes it.
     // Scoped to `since:` because `${VAR}` was never interpolated in
     // any other field — a literal `${` elsewhere is just a literal.
-    if let Some(raw) = &opts.since
+    if !spec.rendered
+        && let Some(raw) = &opts.since
         && raw.contains("${")
     {
         eprintln!("alint: warning: {}", legacy_since_warning(spec, raw));
@@ -462,6 +469,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         subject_max_length: opts.subject_max_length,
         requires_body: opts.requires_body,
         since_raw: opts.since,
+        expand_legacy_env: !spec.rendered,
         include_merges: opts.include_merges,
     }))
 }
@@ -770,5 +778,26 @@ mod tests {
     fn build_accepts_since_with_include_merges() {
         let s = spec("subject_max_length = 50\nsince = \"origin/main\"\ninclude_merges = true\n");
         assert!(build(&s).is_ok());
+    }
+
+    #[test]
+    fn rendered_nested_spec_does_not_expand_legacy_env_in_since() {
+        // A nested `git_commit_message` instantiated from a directory named
+        // `${SECRET}` sets `spec.rendered = true`; `evaluate` must NOT expand
+        // `${SECRET}` against the environment or complain about undefined env.
+        let mut s = spec("requires_body = true\nsince = \"${NESTED_DIR_SECRET}\"\n");
+        s.rendered = true;
+        let rule = build(&s).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let index = alint_core::FileIndex::default();
+        let env = std::collections::BTreeMap::from([(
+            "NESTED_DIR_SECRET".to_string(),
+            "HEAD".to_string(),
+        )]);
+        let ctx = Context::new(tmp.path(), &index).with_process_environment(Some(&env));
+        // Non-git dir -> `commit_messages_in_range` returns `Ok(None)` without
+        // ever returning an "undefined env var" error or reading `env`.
+        let violations = rule.evaluate(&ctx).unwrap();
+        assert!(violations.is_empty(), "{violations:?}");
     }
 }

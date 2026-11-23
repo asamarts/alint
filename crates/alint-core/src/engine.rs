@@ -935,6 +935,8 @@ pub struct Engine {
     /// Subset of `config_files` reachable only through an environment-chosen
     /// `extends:` entry, so fix refusals structurally mask their paths.
     environment_config_files: Vec<PathBuf>,
+    /// Runtime relation limits resolved from top-level `limits:` in `.alint.yml`.
+    relation_limits: crate::relation::Limits,
 }
 
 #[allow(clippy::too_many_lines)]

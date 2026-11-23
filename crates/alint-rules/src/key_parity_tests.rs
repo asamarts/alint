@@ -1358,20 +1358,20 @@ fn a_comparison_error_is_an_analysis_failure_not_a_pass() {
     let reference_keys = base_keys(&reference_file, false);
     let peer_keys = base_keys(&peer_file, false);
     let rows = key_rows(&reference, &reference_keys).unwrap();
-    let compared = Compared {
+    // A row with no key pointer fails the contract analyzer: the rule must
+    // surface an analysis failure rather than a pass.
+    let mut bad_rows = rows.clone();
+    bad_rows[0].pointer = None;
+    let bad_compared = Compared {
         file: &reference_file,
         keys: &reference_keys,
-        rows: &rows,
+        rows: &bad_rows,
     };
-    // Three differences against a one-finding limit: the bridge refuses
-    // the analyzer's output, and the rule must say so.
-    let tight = Limits::default()
-        .with(alint_core::relation::LimitKind::RowsPerExtractor, 1)
-        .unwrap();
-    let mut budget = FindingBudget::new(tight.get(LimitKind::FindingsPerRule));
+    let limits = Limits::default();
+    let mut budget = FindingBudget::new(limits.get(LimitKind::FindingsPerRule));
     rule.compare(
-        &tight,
-        &compared,
+        &limits,
+        &bad_compared,
         &peer,
         &peer_file,
         &peer_keys,

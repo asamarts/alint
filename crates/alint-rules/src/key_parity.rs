@@ -17,7 +17,7 @@
 //! glob selects in another key model is an analysis failure.
 
 use std::borrow::{Borrow, Cow};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -317,8 +317,14 @@ impl Analyzer for KeySetAnalyzer {
     }
 
     fn analyze(&self, input: AnalyzerInput<'_>) -> Result<Vec<Finding>, AnalyzerError> {
-        let mut reference = BTreeSet::new();
-        let mut peer = BTreeSet::new();
+        // Preserve the canonical `[Segment]` order produced by `key_rows` so
+        // truncation under `FindingsPerRule` always keeps the first keys in
+        // segment order rather than `render_key` string order (where bracketed
+        // keys starting with `[` sort after uppercase ASCII).
+        let mut reference_order = Vec::new();
+        let mut reference_set = HashSet::new();
+        let mut peer_order = Vec::new();
+        let mut peer_set = HashSet::new();
         for row in input.rows {
             let Some(pointer) = &row.pointer else {
                 return Err(AnalyzerError::InvalidInput(format!(
@@ -334,9 +340,13 @@ impl Analyzer for KeySetAnalyzer {
             };
             let key = key.as_str();
             if row.resource.path == self.reference {
-                reference.insert(key);
+                if reference_set.insert(key) {
+                    reference_order.push(key);
+                }
             } else if row.resource.path == self.peer {
-                peer.insert(key);
+                if peer_set.insert(key) {
+                    peer_order.push(key);
+                }
             } else {
                 return Err(AnalyzerError::InvalidInput(format!(
                     "a key row of {} belongs to neither compared file",
@@ -346,7 +356,7 @@ impl Analyzer for KeySetAnalyzer {
         }
         let mut findings = Vec::new();
         let mut suppressed = 0usize;
-        let max = self.max_findings;
+        let max = self.max_findings.min(input.max_findings);
         let mut emit = |key: &str, direction: &str| {
             if findings.len() >= max {
                 suppressed = suppressed.saturating_add(1);
@@ -366,13 +376,17 @@ impl Analyzer for KeySetAnalyzer {
             });
         };
         if matches!(self.direction, Direction::Both | Direction::Missing) {
-            for key in reference.difference(&peer) {
-                emit(key, "missing");
+            for key in reference_order {
+                if !peer_set.contains(key) {
+                    emit(key, "missing");
+                }
             }
         }
         if matches!(self.direction, Direction::Both | Direction::Extra) {
-            for key in peer.difference(&reference) {
-                emit(key, "extra");
+            for key in peer_order {
+                if !reference_set.contains(key) {
+                    emit(key, "extra");
+                }
             }
         }
         if suppressed > 0 {
@@ -474,7 +488,10 @@ impl Rule for KeyParityRule {
         {
             (reads, decodes)
         } else {
-            let (reads, decodes) = local.insert((ReadCache::new(), DecodeCache::new()));
+            let (reads, decodes) = local.insert((
+                ReadCache::new(),
+                DecodeCache::with_run_limits(&ctx.index.relation_limits()),
+            ));
             (&*reads, &*decodes)
         };
         let limits = *decode_cache.limits();
@@ -635,6 +652,17 @@ impl Rule for KeyParityRule {
         let finding_cap = limits.get(LimitKind::FindingsPerRule);
         let mut budget = FindingBudget::new(finding_cap);
         for (peer, file) in &files {
+            if budget.breached() {
+                if self.plurals == Plurals::Exact
+                    && file.leaves.is_empty()
+                    && matches!(self.direction, Direction::Both | Direction::Missing)
+                {
+                    budget.suppress(reference_trace.len(), false);
+                    continue;
+                }
+                budget.suppress(0, true);
+                break;
+            }
             let peer_base = base_keys(file, self.strip_root);
             let paired;
             let (reference_keys, reference_rows, peer_keys) = if let Some((keys, rows)) = &shared {
@@ -657,16 +685,6 @@ impl Rule for KeyParityRule {
                 self.reference_format.model(),
                 &peer_keys,
             );
-            if budget.breached() {
-                if peer_keys.is_empty()
-                    && matches!(self.direction, Direction::Both | Direction::Missing)
-                {
-                    budget.suppress(reference_keys.len(), false);
-                    continue;
-                }
-                budget.suppress(0, true);
-                break;
-            }
             let compared = Compared {
                 file: &reference_file,
                 keys: reference_keys,
@@ -1042,10 +1060,15 @@ impl FindingBudget {
         } else {
             self.suppressed.to_string()
         };
+        let noun = if self.emitted == 1 {
+            "finding"
+        } else {
+            "findings"
+        };
         Some(evaluation_failure(
             reference_path,
             &format!(
-                "relation limit `findings_per_rule` ({}) reached: emitted {} findings and \
+                "relation limit `findings_per_rule` ({}) reached: emitted {} {noun} and \
                  suppressed {omitted} more; remaining findings were omitted to bound run memory \
                  and output",
                 self.cap, self.emitted

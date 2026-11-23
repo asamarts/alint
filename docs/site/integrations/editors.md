@@ -129,6 +129,12 @@ server is untrusted, and granting trust restarts it trusted. Nothing to
 configure. The workspace's own `alint.path` and `alint.serverArgs` are
 ignored in Restricted Mode.
 
+**JetBrains** (IntelliJ IDEA, WebStorm, RustRover, PyCharm, and other
+IntelliJ-based IDEs) sends IntelliJ's Trusted Projects state: in Safe Mode
+the server is untrusted, and trusting or revoking trust on the project
+automatically restarts the server and reconnects open editor tabs. Nothing to
+configure.
+
 In other editors, opt in per editor in your **user-level** config. Do not
 put it in settings the repository can supply (a workspace
 `.helix/languages.toml`, `.zed/settings.json`, an `exrc` `.nvim.lua`):
@@ -168,10 +174,10 @@ repositories you trust.
   (with the bundled `alint.el`, set `alint-trusted` to `t`). lsp-mode:
   pass `:initialization-options (lambda () (list :trusted t))` to
   `make-lsp-client`.
-- **JetBrains** and **Eclipse** (LSP4E): the plugin and LSP4E's settings
-  do not send the option yet, so the server stays untrusted there. To
-  lint with command rules, start the server with your own config instead
-  (`alint lsp -c <file>`), which is trusted as `alint check -c` is.
+- **Eclipse** (LSP4E): LSP4E's settings do not send the option yet, so the
+  server stays untrusted there. To lint with command rules, start the server
+  with your own config instead (`alint lsp -c <file>`), which is trusted as
+  `alint check -c` is.
 
 ## Authoring rules with editor support
 

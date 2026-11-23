@@ -73,7 +73,7 @@ pub(crate) use trust::{
 };
 pub use trust::{
     SPAWNING_FIX_OPS, SPAWNING_RULE_KINDS, fact_spawns, refuse_spawning,
-    reject_allow_out_of_root_in, reject_baseline_in, reject_trusted_extends_in,
+    reject_allow_out_of_root_in, reject_baseline_in, reject_limits_in, reject_trusted_extends_in,
     reject_untrusted_ignore_in, rule_git_use, rule_spawn_use,
 };
 
@@ -467,6 +467,11 @@ pub(crate) struct RawConfig {
     fix_size_limit: Option<Option<u64>>,
     #[serde(default, deserialize_with = "deserialize_explicit")]
     nested_configs: Option<bool>,
+    /// `limits:` — top-level runtime limits (`findings_per_rule`,
+    /// `key_path_bytes_per_decode`). Top-level-only (refused from `extends:`
+    /// and nested configs) so an untrusted ruleset cannot raise limits.
+    #[serde(default)]
+    limits: alint_core::ConfigLimits,
     /// `allow_out_of_root:` — the top-level escape hatch for path
     /// confinement. Parsed here (the YAML-facing form); the loader
     /// rejects a non-default value from any `extends:`'d ruleset, and
@@ -535,6 +540,11 @@ pub(crate) struct RawConfig {
     /// schema.
     #[serde(skip)]
     extends_environment: Vec<bool>,
+    /// Parallel to [`Self::extends`]: whether that entry's `only:` or `except:`
+    /// filter read from the environment (so unknown-id errors mask its filter
+    /// values structurally even for short values).
+    #[serde(skip)]
+    extends_filter_environment: Vec<bool>,
     /// The size of the source this config was parsed from, and of each it
     /// merged, in bytes, which the `extends:` budget charges
     /// (`MAX_EXTENDS_SOURCE_BYTES`). Not part of the schema.
@@ -779,6 +789,10 @@ impl RawConfig {
             spec.set_extended_source(extended_source);
             rules.push(spec);
         }
+        // Validate top-level `limits:` overrides against each limit's 1..=hard_cap bounds.
+        self.limits
+            .to_relation_limits()
+            .map_err(|error| Error::Other(error.to_string()))?;
         Ok(Config::new(self.version.unwrap_or(0), rules)
             .with_requires(effective_requirements(&self.compatibility))
             .with_ignore(self.ignore)
@@ -787,6 +801,7 @@ impl RawConfig {
             .with_facts(self.facts)
             .with_fix_size_limit(self.fix_size_limit.unwrap_or(DEFAULT_FIX_SIZE_LIMIT))
             .with_nested_configs(self.nested_configs.unwrap_or(false))
+            .with_limits(self.limits)
             .with_allow_out_of_root(self.allow_out_of_root)
             .with_baseline(self.baseline)
             .with_baseline_from_environment(self.baseline_from_environment)
@@ -1642,6 +1657,7 @@ pub(crate) fn apply_rule_filter(
     rules: Vec<ayaml::Mapping>,
     entry: &alint_core::ExtendsEntry,
     source_display: &str,
+    redact_filter: bool,
 ) -> Result<Vec<ayaml::Mapping>> {
     if entry.only().is_some() && entry.except().is_some() {
         return Err(Error::Other(format!(
@@ -1671,6 +1687,13 @@ pub(crate) fn apply_rule_filter(
         .filter(|id| !available.contains(*id))
         .collect();
     if !unknown.is_empty() {
+        if redact_filter {
+            return Err(Error::Other(format!(
+                "`extends:` entry {source_display:?}: {} references unknown rule id(s) {}",
+                mode.field_name(),
+                alint_core::CONFIGURATION_MASK,
+            )));
+        }
         let mut known: Vec<&String> = available.iter().collect();
         known.sort();
         return Err(Error::Other(format!(

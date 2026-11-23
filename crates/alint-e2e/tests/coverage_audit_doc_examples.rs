@@ -182,6 +182,7 @@ const TOP_KEYS: &[&str] = &[
     "allow_out_of_root:",
     "baseline:",
     "trusted_extends:",
+    "limits:",
 ];
 
 /// Normalise a block into a full `.alint.yml` document, or `None` if it

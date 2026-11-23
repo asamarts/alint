@@ -1576,28 +1576,25 @@ fn junit_and_agent_escape_bidi_and_zero_width_characters() {
     .unwrap();
     std::fs::write(dir.path().join(bad_name), "hi\n").unwrap();
 
-    // JUnit: failure message attr and body escape U+202E / U+200B.
+    // JUnit: entire document (testcase attrs, failure attr, failure body) escapes U+202E / U+200B.
     let junit = run(dir.path(), &["check", "--format", "junit"]);
     assert_eq!(junit.status.code(), Some(1));
     let junit_out = String::from_utf8_lossy(&junit.stdout);
-    let fail_start = junit_out.find("<failure ").expect("junit failure element");
-    let fail_end = junit_out[fail_start..].find("</failure>").unwrap() + fail_start;
-    let fail_xml = &junit_out[fail_start..fail_end];
     assert!(
-        !fail_xml.contains('\u{202E}'),
-        "raw U+202E in junit: {fail_xml}"
+        !junit_out.contains('\u{202E}'),
+        "raw U+202E in junit: {junit_out}"
     );
     assert!(
-        !fail_xml.contains('\u{200B}'),
-        "raw U+200B in junit: {fail_xml}"
+        !junit_out.contains('\u{200B}'),
+        "raw U+200B in junit: {junit_out}"
     );
     assert!(
-        fail_xml.contains("\\u{202e}"),
-        "escaped bidi in junit: {fail_xml}"
+        junit_out.contains("\\u{202e}"),
+        "escaped bidi in junit: {junit_out}"
     );
     assert!(
-        fail_xml.contains("\\u{200b}"),
-        "escaped zwsp in junit: {fail_xml}"
+        junit_out.contains("\\u{200b}"),
+        "escaped zwsp in junit: {junit_out}"
     );
 
     // Agent: human_message and agent_instruction escape U+202E / U+200B; `file` stays raw.
@@ -1621,7 +1618,7 @@ fn junit_and_agent_escape_bidi_and_zero_width_characters() {
         );
     }
 
-    // Machine path fields in json, gitlab, and sarif keep the real path.
+    // Machine path fields in json, gitlab, and sarif keep the real path (SARIF percent-encodes URIs).
     let json = run(dir.path(), &["check", "--format", "json"]);
     let json_val: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
     assert_eq!(
@@ -1631,6 +1628,17 @@ fn junit_and_agent_escape_bidi_and_zero_width_characters() {
     let gitlab = run(dir.path(), &["check", "--format", "gitlab"]);
     let gitlab_val: serde_json::Value = serde_json::from_slice(&gitlab.stdout).unwrap();
     assert_eq!(gitlab_val[0]["location"]["path"].as_str(), Some(bad_name));
+    let sarif = run(dir.path(), &["check", "--format", "sarif"]);
+    let sarif_val: serde_json::Value = serde_json::from_slice(&sarif.stdout).unwrap();
+    let uri =
+        sarif_val["runs"][0]["results"][0]["locations"][0]["physicalLocation"]["artifactLocation"]
+            ["uri"]
+            .as_str()
+            .expect("sarif uri");
+    assert!(
+        uri.contains("%E2%80%AE") && uri.contains("%E2%80%8B") && uri.ends_with("Z.txt"),
+        "expected percent-encoded real path in SARIF artifactLocation.uri, got: {uri}"
+    );
 }
 
 #[cfg(unix)]
@@ -1645,21 +1653,18 @@ fn junit_and_agent_escape_ansi_esc_and_bidi_filenames_unix() {
     .unwrap();
     std::fs::write(dir.path().join(bad_name), "hi\n").unwrap();
 
-    // JUnit strips ESC and escapes U+202E in failure text.
+    // JUnit strips ESC and escapes U+202E across the entire document.
     let junit = run(dir.path(), &["check", "--format", "junit"]);
     assert_eq!(junit.status.code(), Some(1));
     let junit_out = String::from_utf8_lossy(&junit.stdout);
-    let fail_start = junit_out.find("<failure ").expect("junit failure element");
-    let fail_end = junit_out[fail_start..].find("</failure>").unwrap() + fail_start;
-    let fail_xml = &junit_out[fail_start..fail_end];
-    assert!(!fail_xml.contains('\x1b'), "raw ESC in junit: {fail_xml}");
+    assert!(!junit_out.contains('\x1b'), "raw ESC in junit: {junit_out}");
     assert!(
-        !fail_xml.contains('\u{202E}'),
-        "raw U+202E in junit: {fail_xml}"
+        !junit_out.contains('\u{202E}'),
+        "raw U+202E in junit: {junit_out}"
     );
     assert!(
-        fail_xml.contains("\\u{202e}"),
-        "escaped bidi in junit: {fail_xml}"
+        junit_out.contains("\\u{202e}"),
+        "escaped bidi in junit: {junit_out}"
     );
 
     // Agent escapes both ESC and U+202E in human_message and agent_instruction; `file` stays raw.

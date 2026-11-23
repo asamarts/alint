@@ -104,7 +104,7 @@
         "column": { "type": "integer", "minimum": 1 },
         "human_message": {
           "type": "string",
-          "description": "The rule's violation message verbatim, suitable for human review. Mirror of `message` in `--format json`."
+          "description": "The rule's violation message sanitized of terminal controls, bidi overrides/isolates, zero-width characters, and astral tag characters, suitable for human review and LLM consumption."
         },
         "agent_instruction": {
           "type": "string",
@@ -126,7 +126,7 @@
         },
         "policy_url": {
           "type": "string",
-          "description": "Optional documentation URL provided by the rule.",
+          "description": "Optional documentation URL provided by the rule, sanitized of terminal controls and invisible formatting characters.",
           "format": "uri"
         }
       }

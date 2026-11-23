@@ -6,6 +6,57 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Upgrading from 0.23
+
+- `key_parity` and `constraint` now cap emitted findings at `10,000` per rule by default
+  (`limits.findings_per_rule`), emitting one non-baselinable analysis failure naming the cap when
+  reached instead of allocating unbounded findings. Raise `limits.findings_per_rule` in your
+  top-level `.alint.yml` (up to `1,000,000`) if a repository legitimately exceeds the default
+  (#596).
+
+### Added
+
+- Top-level `limits:` configuration section (`limits.findings_per_rule`, default `10,000`, range
+  `1..=1,000,000`; `limits.key_path_bytes_per_decode`, default 32 MiB, range `1..=16 GiB`)
+  supported in top-level configs and `.alint.d/` drop-ins and refused in `extends:` and nested
+  configs (#596, #569).
+- JetBrains IDE plugin (`editors/jetbrains`): forwards IntelliJ Trusted Projects state as
+  `initializationOptions.trusted` (defaulting to untrusted), automatically restarts `alint lsp`
+  and reconnects open editor tabs when project trust is granted or revoked without starting stopped
+  servers or re-enabling disabled ones, and covers both trust states in headless integration tests
+  (#545).
+
+### Changed
+
+- `roxmltree` upgraded from `0.20` to `0.21.2` (CVE-2026-92987); XML depth scanning (`xml_scan.rs`)
+  now also rejects duplicate default `xmlns` attributes on the same element to match `roxmltree`
+  0.21.2, and XML attribute value spans are computed directly from attribute byte ranges (#609).
+- Per-rule finding cap (`findings_per_rule`, default `10,000`) enforced across `key_parity` and all
+  `constraint` assertion families (`equal`, `unique`, `set`), and per-decode key-path memory cap
+  (`key_path_bytes_per_decode`, default 32 MiB) enforced across JSON, YAML, TOML, dotenv, INI,
+  properties, Android strings XML, `.resx`, and version 2 `entries:` (`leaves: true`) (#596, #569).
+- Nested rule token substitution (`for_each_dir`, `for_each_file`, `every_matching_has`) now
+  escapes `{path}`, `{dir}`, `{basename}`, `{stem}`, `{ext}`, and `{parent_name}` according to each
+  option's syntax: Rust regexes (including whitespace for `(?x)` patterns), RFC 9535 `JSONPath`
+  queries (including RFC 9485 I-Regexp arguments to `match()` and `search()`), `when_iter:` /
+  nested `when:` expressions (including leading `!` in `iter.has_file`), `key_parity.ignore_keys`,
+  keyword-bearing paths (`registry_paths_resolve.base`), `scope_filter` manifest extractors at all
+  nesting depths, and disables legacy `${VAR}` expansion on rendered nested
+  `git_commit_message.since` (#583).
+
+### Security
+
+- `--format junit` and `--format agent` now escape terminal controls, bidi overrides/isolates,
+  zero-width characters, and astral tag characters in JUnit `<testcase>` / `<failure>` text and
+  attributes (normalizing bare CR to LF) and in `--format agent` `human_message`,
+  `agent_instruction`, `policy_url`, and `analysis_failures[].human_message`, leaving raw machine
+  `file` paths intact (#600).
+- Environment-value redaction outside the loader now uses a set-backed Aho-Corasick matcher with
+  overlapping-match coalescing (preventing shorter earlier matches from hiding longer overlapping
+  secrets and removing quadratic `O(N^2)` recording/scrubbing loops) and structurally masks short
+  (`<4`-character) environment-derived paths across `extends:`, `baseline:`, rule filters,
+  `alint fix` refusals, and `alint lsp` errors (#585).
+
 ## [0.23.0] - 2026-11-22
 
 v0.23.0 launches Phase 3 of the general-linter program, hardens alint's trust boundaries end to

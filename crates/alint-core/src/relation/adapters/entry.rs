@@ -109,10 +109,36 @@ pub(crate) fn key_rows(
     limits: &Limits,
     budget: &RunBudget,
 ) -> Result<Vec<Row>, AdapterError> {
+    // Check row count and total per-decode key-path bytes BEFORE allocating
+    // `rows` or taking from `RunBudget`: a single deep, wide document that
+    // exceeds `KeyPathBytesPerDecode` fails immediately without pre-allocating
+    // a huge `Vec<Row>` or permanently draining up to 32 MiB per failure from
+    // the run-wide `BytesPerRun` budget.
+    check_row_count(limits, entries.rows.len())?;
+    let decode_limit = limits.get(LimitKind::KeyPathBytesPerDecode);
+    let run_limit = limits.get(LimitKind::BytesPerRun);
+    let mut total_pointer_bytes = 0usize;
+    for entry in &entries.rows {
+        total_pointer_bytes =
+            total_pointer_bytes.saturating_add(entries.paths.pointer_bytes(entry.path));
+        if run_limit < decode_limit && total_pointer_bytes > run_limit {
+            return Err(AdapterError::Limit(LimitExceeded {
+                kind: LimitKind::BytesPerRun,
+                limit: run_limit,
+                reached: total_pointer_bytes,
+            }));
+        }
+        if total_pointer_bytes > decode_limit {
+            return Err(AdapterError::Limit(LimitExceeded {
+                kind: LimitKind::KeyPathBytesPerDecode,
+                limit: decode_limit,
+                reached: total_pointer_bytes,
+            }));
+        }
+    }
     let budget = PathBudget::for_key_rows(budget, limits);
     let mut rows = Vec::with_capacity(entries.rows.len());
     for (ordinal, entry) in entries.rows.iter().enumerate() {
-        check_row_count(limits, rows.len() + 1)?;
         rows.push(
             Row::new(
                 resource.clone(),

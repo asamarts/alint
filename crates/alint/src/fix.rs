@@ -79,6 +79,7 @@ pub(super) fn cmd_fix(
     let mut engine = Engine::from_entries(entries, loaded.registry)
         .with_facts(loaded.facts)
         .with_vars(loaded.vars)
+        .with_limits(&loaded.limits)?
         .with_fix_size_limit(loaded.fix_size_limit)
         .with_config_files(loaded.config_files)
         .with_environment_config_files(loaded.environment_config_files);

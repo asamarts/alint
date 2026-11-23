@@ -211,9 +211,9 @@ impl<A: ContractAnalyzerTrait> ContractAnalyzer<A> {
             .chain(rows.iter().map(|row| row.resource.path().as_str()))
             .collect();
         let rows: Vec<ContractRow> = rows.iter().cloned().map(to_contract_row).collect();
-        // No limit kind bounds findings yet, so an analyzer may return as many
-        // findings as one extractor may return rows.
-        let max_findings = limits.get(LimitKind::RowsPerExtractor);
+        // Bound analyzer findings by `FindingsPerRule` (+1 for a truncation
+        // summary finding emitted when the cap is breached).
+        let max_findings = limits.get(LimitKind::FindingsPerRule);
         let findings = self
             .inner
             .analyze(ContractAnalyzerInput {
@@ -222,7 +222,7 @@ impl<A: ContractAnalyzerTrait> ContractAnalyzer<A> {
                 max_findings,
             })
             .map_err(AnalyzeError::Analyzer)?;
-        if findings.len() > max_findings {
+        if findings.len() > max_findings.saturating_add(1) {
             return Err(AnalyzeError::Analyzer(ContractAnalyzerError::Limit {
                 limit: max_findings,
                 reached: findings.len(),

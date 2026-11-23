@@ -38,6 +38,9 @@ pub(super) struct Run<'r> {
     /// (whose findings the engine redacts whole as well, but whose keys and
     /// places this keeps clean before it does).
     hide_keys: bool,
+    /// Number of pre-existing findings (e.g. `Skipped::NonString` from relation
+    /// reads) that already count toward [`LimitKind::FindingsPerRule`].
+    earlier_findings: usize,
     findings: Vec<Pending>,
     /// Findings omitted once [`LimitKind::FindingsPerRule`] was reached.
     suppressed_findings: usize,
@@ -118,6 +121,7 @@ impl<'r> Run<'r> {
         rule: &'r ConstraintRule,
         rows: &'r RelationRows,
         ctx: &'r Context<'r>,
+        earlier_findings: usize,
     ) -> Self {
         // A key path of any relation the rule reads may reach a message.
         let hide_keys = rule.inputs.iter().any(|&id| {
@@ -127,13 +131,14 @@ impl<'r> Run<'r> {
         let limits = ctx
             .index
             .decode_cache()
-            .map_or_else(Limits::default, |cache| *cache.limits());
+            .map_or_else(|| ctx.index.relation_limits(), |cache| *cache.limits());
         Self {
             rule,
             rows,
             limits,
             places: Places::new(ctx),
             hide_keys,
+            earlier_findings,
             findings: Vec::new(),
             suppressed_findings: 0,
             suppressed_is_lower_bound: false,
@@ -145,15 +150,16 @@ impl<'r> Run<'r> {
         self.limits.get(LimitKind::FindingsPerRule)
     }
 
-    /// True once the rule has emitted `finding_cap()` findings and any further
-    /// finding would breach [`LimitKind::FindingsPerRule`].
+    /// True once the rule has emitted `finding_cap()` findings (including any
+    /// pre-existing relation-read findings) and any further finding would
+    /// breach [`LimitKind::FindingsPerRule`].
     fn at_finding_cap(&self) -> bool {
-        self.findings.len() >= self.finding_cap()
+        self.earlier_findings.saturating_add(self.findings.len()) >= self.finding_cap()
     }
 
     /// True once at least one finding past `finding_cap()` has been suppressed.
     fn finding_cap_breached(&self) -> bool {
-        self.suppressed_findings > 0
+        self.suppressed_findings > 0 || self.earlier_findings > self.finding_cap()
     }
 
     /// Record `count` suppressed findings beyond `finding_cap()`.
@@ -173,58 +179,51 @@ impl<'r> Run<'r> {
             limits,
             places,
             findings,
-            suppressed_findings,
+            mut suppressed_findings,
             suppressed_is_lower_bound,
             mut failures,
             ..
         } = self;
-        if failures.is_empty() && !findings.is_empty() {
-            let emitted = findings.len();
-            match places.resolve() {
-                Ok(placed) => {
-                    earlier.extend(findings.into_iter().map(|f| f.placed(&placed)));
-                    if suppressed_findings > 0 {
-                        let cap = limits.get(LimitKind::FindingsPerRule);
-                        let omitted = if suppressed_is_lower_bound {
-                            format!("at least {suppressed_findings}")
-                        } else {
-                            suppressed_findings.to_string()
-                        };
-                        earlier.push(rule.failure(
-                            None,
-                            format!(
-                                "relation limit `findings_per_rule` ({cap}) reached: emitted \
-                                 {emitted} findings and suppressed {omitted} more; remaining \
-                                 findings were omitted to bound run memory and output"
-                            ),
-                        ));
-                    }
-                }
-                Err((path, limit)) => failures.push(rule.failure(
-                    Some(path.as_path()),
-                    format!(
-                        "{limit}, so the rule reports no finding rather than findings without \
-                         their places; placing its findings reads each file they sit in, one at \
-                         a time, beside what the run's relations hold, so read fewer or smaller \
-                         files"
-                    ),
-                )),
-            }
-        } else if failures.is_empty() && suppressed_findings > 0 {
+        if failures.is_empty() {
             let cap = limits.get(LimitKind::FindingsPerRule);
-            let omitted = if suppressed_is_lower_bound {
-                format!("at least {suppressed_findings}")
-            } else {
-                suppressed_findings.to_string()
-            };
-            earlier.push(rule.failure(
-                None,
-                format!(
-                    "relation limit `findings_per_rule` ({cap}) reached: emitted 0 findings \
-                     and suppressed {omitted} more; remaining findings were omitted to bound \
-                     run memory and output"
-                ),
-            ));
+            if earlier.len() > cap {
+                let overflow = earlier.len() - cap;
+                earlier.truncate(cap);
+                suppressed_findings = suppressed_findings.saturating_add(overflow);
+            }
+            if !findings.is_empty() {
+                match places.resolve() {
+                    Ok(placed) => {
+                        earlier.extend(findings.into_iter().map(|f| f.placed(&placed)));
+                    }
+                    Err((path, limit)) => failures.push(rule.failure(
+                        Some(path.as_path()),
+                        format!(
+                            "{limit}, so the rule reports no finding rather than findings without \
+                             their places; placing its findings reads each file they sit in, one \
+                             at a time, beside what the run's relations hold, so read fewer or \
+                             smaller files"
+                        ),
+                    )),
+                }
+            }
+            if failures.is_empty() && suppressed_findings > 0 {
+                let emitted = earlier.len();
+                let omitted = if suppressed_is_lower_bound {
+                    format!("at least {suppressed_findings}")
+                } else {
+                    suppressed_findings.to_string()
+                };
+                earlier.push(rule.failure(
+                    None,
+                    format!(
+                        "relation limit `findings_per_rule` ({cap}) reached: emitted {emitted} \
+                         {} and suppressed {omitted} more; remaining findings were omitted to \
+                         bound run memory and output",
+                        findings_word(emitted)
+                    ),
+                ));
+            }
         }
         verdict(earlier, failures)
     }
@@ -640,13 +639,21 @@ impl<'r> Run<'r> {
     /// that repeat a key are told apart by their count, so renaming the
     /// first row's file changes none of them.
     fn repeats(&mut self, key_at: &[usize], value: &[Scalar], members: &[usize]) {
+        if self.at_finding_cap() {
+            self.suppress_findings(members.len().saturating_sub(1), false);
+            return;
+        }
         let first = self.spot(members[0], key_at[0]);
         let first_shown = self.located_at(first);
         let mut key = Key::new("unique");
         for (&position, part) in key_at.iter().zip(value) {
             key.value(part, self.sensitive(position));
         }
-        for &row in &members[1..] {
+        for (offset, &row) in members[1..].iter().enumerate() {
+            if self.at_finding_cap() {
+                self.suppress_findings(members.len() - 1 - offset, false);
+                return;
+            }
             let message = format!(
                 "{} is not unique: the first row with it is {first_shown}",
                 self.describe(key_at, value),
@@ -696,6 +703,7 @@ impl<'r> Run<'r> {
     /// distinct value, at the first row with it, related to one row of each
     /// other value and to the other rows with it ([`related_rows`]). Each
     /// finding's key is `base` and the value.
+    #[allow(clippy::too_many_lines)]
     fn disagreements(
         &mut self,
         members: &[usize],
@@ -745,6 +753,10 @@ impl<'r> Run<'r> {
             .map(|(value, rows)| (value.clone(), rows.clone()))
             .collect();
         for (index, (value, holders)) in distinct.iter().enumerate() {
+            if self.at_finding_cap() {
+                self.suppress_findings(distinct.len() - index, false);
+                return;
+            }
             let at = self.spot(holders[0], fields[varying]);
             let (rows, omitted) = related_rows(&distinct, index, MAX_RELATED_LOCATIONS);
             let places = rows
@@ -859,6 +871,10 @@ impl<'r> Run<'r> {
             if value == expected {
                 continue;
             }
+            if self.at_finding_cap() {
+                self.suppress_findings(1, false);
+                continue;
+            }
             let typed = value.kind().is_some() && value.kind() != expected.kind();
             let shown = |scalar: &Scalar| {
                 if typed {
@@ -963,6 +979,10 @@ impl<'r> Run<'r> {
                 return;
             };
             if value == theirs && !value.is_null() {
+                continue;
+            }
+            if self.at_finding_cap() {
+                self.suppress_findings(1, false);
                 continue;
             }
             let other_cell = self.cell(row, other_at);
@@ -1174,6 +1194,10 @@ fn literal_type(literal: &Scalar) -> &'static str {
 
 fn rows_word(count: usize) -> &'static str {
     if count == 1 { "row" } else { "rows" }
+}
+
+fn findings_word(count: usize) -> &'static str {
+    if count == 1 { "finding" } else { "findings" }
 }
 
 #[cfg(test)]

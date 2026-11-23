@@ -122,6 +122,71 @@ pub struct ExtractSpec {
 }
 
 impl ExtractSpec {
+    pub(crate) fn for_each_template<'a>(&'a self, visit: &mut dyn FnMut(&'a str)) {
+        for q in [
+            self.toml.as_deref(),
+            self.json.as_deref(),
+            self.yaml.as_deref(),
+            self.xml.as_deref(),
+            self.dotenv.as_deref(),
+            self.properties.as_deref(),
+            self.ini.as_deref(),
+            self.hcl.as_deref(),
+            self.regex.as_deref(),
+            self.lines.as_ref().map(|l| l.comment.as_str()),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            visit(q);
+        }
+    }
+
+    pub(crate) fn render_templates(&self, tokens: &crate::template::PathTokens) -> Self {
+        Self {
+            toml: self
+                .toml
+                .as_deref()
+                .map(|q| crate::template::render_path_jsonpath(q, tokens)),
+            json: self
+                .json
+                .as_deref()
+                .map(|q| crate::template::render_path_jsonpath(q, tokens)),
+            yaml: self
+                .yaml
+                .as_deref()
+                .map(|q| crate::template::render_path_jsonpath(q, tokens)),
+            xml: self
+                .xml
+                .as_deref()
+                .map(|q| crate::template::render_path_jsonpath(q, tokens)),
+            dotenv: self
+                .dotenv
+                .as_deref()
+                .map(|q| crate::template::render_path_jsonpath(q, tokens)),
+            properties: self
+                .properties
+                .as_deref()
+                .map(|q| crate::template::render_path_jsonpath(q, tokens)),
+            ini: self
+                .ini
+                .as_deref()
+                .map(|q| crate::template::render_path_jsonpath(q, tokens)),
+            hcl: self
+                .hcl
+                .as_deref()
+                .map(|q| crate::template::render_path_jsonpath(q, tokens)),
+            lines: self.lines.as_ref().map(|l| LinesOpts {
+                comment: crate::template::render_path(&l.comment, tokens),
+            }),
+            regex: self
+                .regex
+                .as_deref()
+                .map(|r| crate::template::render_path_regex(r, tokens)),
+            whole_file: self.whole_file.clone(),
+        }
+    }
+
     pub fn resolve(self) -> std::result::Result<Extract, String> {
         let set: Vec<&str> = [
             ("toml", self.toml.is_some()),
@@ -413,8 +478,9 @@ pub(crate) fn entry_table(
         Format::Json | Format::Yaml => {
             nested_entry_table(format, text, true, Some(max_rows), false)
         }
-        Format::Dotenv | Format::Ini | Format::Properties => {
-            // A flat format's rows are at most one section deep.
+        Format::Ini => ini_entry_table(text, Some(max_rows)),
+        Format::Dotenv | Format::Properties => {
+            // A flat format's rows have no section nesting.
             let rows = extract_entry_rows_with(format, text, true, Some(max_rows))?;
             let mut table = EntryTable::default();
             for row in rows {
@@ -698,12 +764,22 @@ fn ini_entry_rows(
     text: &str,
     max_rows: Option<usize>,
 ) -> std::result::Result<Vec<StructuredEntryRow>, EntryRowsError> {
+    ini_entry_table(text, max_rows).map(|table| structured_rows(&table))
+}
+
+/// Parse an INI document directly into a prefix-sharing [`EntryTable`],
+/// storing each `[section]` name once as a [`PathId`] rather than cloning it
+/// onto every row before `PathBudget` / `KeyPathBytesPerDecode` runs (#569).
+fn ini_entry_table(
+    text: &str,
+    max_rows: Option<usize>,
+) -> std::result::Result<EntryTable, EntryRowsError> {
     Format::Ini.parse(text).map_err(EntryRowsError::Parse)?;
     let stripped = text.trim_start_matches('\u{feff}');
     let base = text.len() - stripped.len();
     let bytes = stripped.as_bytes();
-    let mut rows: Vec<StructuredEntryRow> = Vec::new();
-    let mut section: Option<String> = None;
+    let mut table = EntryTable::default();
+    let mut section_path = PathId::ROOT;
     let mut current_row: Option<usize> = None;
     let mut current_indent = 0;
     let mut at = 0;
@@ -732,7 +808,7 @@ fn ini_entry_rows(
         {
             // A continued INI value is discontiguous after trimming indentation;
             // retaining no span is safer than claiming a partial value token.
-            rows[row].value_span = None;
+            table.rows[row].value_span = None;
             at = next_line_start(newline, bytes.len());
             continue;
         }
@@ -742,7 +818,7 @@ fn ini_entry_rows(
                 .strip_suffix(']')
                 .expect("validated INI section")
                 .trim();
-            section = Some(name.to_string());
+            section_path = table.paths.child(PathId::ROOT, Segment::Key(name.into()));
             current_row = None;
         } else {
             let separator = trimmed.find(['=', ':']).expect("validated INI assignment");
@@ -754,19 +830,19 @@ fn ini_entry_rows(
             let value = after.trim();
             let key_start = base + at + trim_start + key_lead;
             let value_start = base + at + trim_start + separator + 1 + value_lead;
-            entry_capacity(rows.len(), max_rows)?;
-            rows.push(StructuredEntryRow {
-                parent: section.iter().cloned().map(EntryPathSegment::Key).collect(),
-                key: key.to_string(),
+            entry_capacity(table.rows.len(), max_rows)?;
+            let path = table.paths.child(section_path, Segment::Key(key.into()));
+            table.rows.push(EntryAt {
+                path,
                 key_span: ByteSpan::new(key_start, key_start + key.len()),
                 value_span: Some(ByteSpan::new(value_start, value_start + value.len())),
             });
-            current_row = Some(rows.len() - 1);
+            current_row = Some(table.rows.len() - 1);
             current_indent = indent;
         }
         at = next_line_start(newline, bytes.len());
     }
-    Ok(rows)
+    Ok(table)
 }
 
 fn properties_entry_rows(

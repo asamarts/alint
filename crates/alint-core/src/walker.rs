@@ -262,6 +262,10 @@ pub struct FileIndex {
     /// indexes share the full index's caches.
     reads: OnceLock<std::sync::Arc<crate::relation::ReadCache>>,
     decodes: OnceLock<std::sync::Arc<crate::relation::DecodeCache>>,
+    /// Configured relation limits for this run, consulted when a relation rule
+    /// runs outside the shared decode cache (for example inside a nested
+    /// iteration or a direct unit-test invocation).
+    relation_limits: OnceLock<crate::relation::Limits>,
     /// The relations a run evaluated ([`crate::relation::eval`]), set by the
     /// first evaluation: a run that evaluates none allocates nothing. Not
     /// shared with a filtered index, whose files select other rows, and
@@ -305,6 +309,7 @@ impl FileIndex {
             facts: OnceLock::new(),
             reads: OnceLock::new(),
             decodes: OnceLock::new(),
+            relation_limits: OnceLock::new(),
             relation_memo: std::sync::Mutex::new(None),
             walk_options: None,
         }
@@ -385,15 +390,30 @@ impl FileIndex {
 
     /// [`enable_relation_caches`](Self::enable_relation_caches), the decode
     /// cache this call sets taking its run-wide row and byte limits from
-    /// `limits` rather than the defaults. Test/diagnostic only: a test
-    /// reaches a run-wide limit with a small tree this way.
+    /// `limits` rather than the defaults.
     #[doc(hidden)]
     pub fn enable_relation_caches_under(&self, limits: &crate::relation::Limits) {
+        self.set_relation_limits(*limits);
         self.reads
             .get_or_init(|| std::sync::Arc::new(crate::relation::ReadCache::new()));
         self.decodes.get_or_init(|| {
             std::sync::Arc::new(crate::relation::DecodeCache::with_run_limits(limits))
         });
+    }
+
+    /// Record the run's configured relation limits so nested iterations (which
+    /// bypass the shared decode cache) and local caches honor them too.
+    #[doc(hidden)]
+    pub fn set_relation_limits(&self, limits: crate::relation::Limits) {
+        let _ = self.relation_limits.set(limits);
+    }
+
+    /// The run's configured relation limits, or [`crate::relation::Limits::default`]
+    /// when none were recorded.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn relation_limits(&self) -> crate::relation::Limits {
+        self.relation_limits.get().copied().unwrap_or_default()
     }
 
     /// This run's relation memo for `plan`, set on first use; `None` inside
@@ -442,6 +462,9 @@ impl FileIndex {
 
     /// Share this index's relation caches with a filtered index built from it.
     pub(crate) fn share_relation_caches(&self, other: &Self) {
+        if let Some(limits) = self.relation_limits.get() {
+            let _ = other.relation_limits.set(*limits);
+        }
         if let Some(cache) = self.reads.get() {
             let _ = other.reads.set(std::sync::Arc::clone(cache));
         }

@@ -311,6 +311,14 @@ impl<'a> NamespaceScope<'a> {
         if own.is_empty() {
             return Ok(());
         }
+        // XML 1.0 + Namespaces forbids declaring the default `xmlns` twice on
+        // the same element, yet `roxmltree` 0.21.2 accepts duplicate `xmlns=`
+        // attributes and pushes every copy into the element's namespace slice,
+        // amplifying O(P^2) namespace resolution if deduplicated here. Reject
+        // duplicate default-namespace declarations upfront.
+        if own.iter().filter(|prefix| prefix.is_empty()).count() > 1 {
+            return Err("an XML element declares the default namespace more than once".to_string());
+        }
         let inherited = self.bound.len();
         for &prefix in own {
             *self.bound.entry(prefix).or_insert(0) += 1;

@@ -458,14 +458,21 @@ distinct-value limit, which is never truncation.
 - A join is inner, and one side must be unique on the join key: there is no many-to-many join.
 - The transforms are the five listed; there are no user-defined ones.
 - `in` and `not_in` cannot list null or a number.
-- Reading is bounded by these limits, which a config cannot change in this release. Reaching one
-  is an analysis failure that names it, never truncation:
+- Reading and reporting are bounded by these limits. Reaching one is an analysis failure that names
+  it (for `findings_per_rule`, after emitting up to the cap; for the others, without partial
+  results). A top-level config (or `.alint.d/` drop-in) may override `findings_per_rule` and
+  `key_path_bytes_per_decode` under top-level `limits:`; extended and nested configs cannot set
+  `limits:`:
   - 1,000,000 rows from one reader of one file (`rows_per_extractor`);
   - 5,000,000 rows from every reader in a run (`rows_per_run`);
   - 5,000,000 cells in the relations a run builds, a row of n fields holding n cells and each file
     a part reads one more (`cells_per_run`);
   - 1 GiB that a run's relations hold beyond their cells: the files they decode, and the key
     paths, path tokens and transformed values they build (`bytes_per_run`);
+  - 32 MiB of decoded key paths retained for one file decode (`key_path_bytes_per_decode`,
+    configurable under top-level `limits:` from 1 byte to 16 GiB);
+  - 10,000 emitted findings per `constraint` or `key_parity` rule (`findings_per_rule`,
+    configurable under top-level `limits:` from 1 to 1,000,000);
   - 1,000,000 rows into each side of a join (`join_inputs`), and 1,000,000 out of it
     (`join_outputs`);
   - 100,000 distinct values of the field a `set` compares against in another relation
@@ -487,10 +494,11 @@ distinct-value limit, which is never truncation.
   reports an analysis failure, not findings without places. A cell is placed only where the file
   read again still holds what was read there, its value or its key, so a file changed during the
   run leaves a finding or related location without a place.
-- A `set` with `equal_to:` gives one finding per value the reference group holds for each group
-  that lacks it, so G empty groups against V reference values give G × V findings, as
-  `key_parity` does for files without keys
-  ([#596](https://github.com/asamarts/alint/issues/596)).
+- A `set` with `equal_to:` emits one finding per value the reference group holds for each group
+  that lacks it, capped at `findings_per_rule` (default `10,000`) per rule: once reached, the rule
+  stops emitting further findings and adds one non-baselinable analysis failure summarizing the
+  omitted count, matching `key_parity` (`limits.findings_per_rule` in a top-level config can raise
+  the cap up to `1,000,000`).
 
 ## Trust
 

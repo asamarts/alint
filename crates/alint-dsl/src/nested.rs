@@ -108,6 +108,7 @@ pub(crate) fn discover_nested(
     let mut discovered: Vec<Mapping> = Vec::new();
     let mut compatibility = Vec::new();
     let mut environment_values = Vec::new();
+    let mut seen_env_values: std::collections::HashSet<String> = std::collections::HashSet::new();
     for entry in &index.entries {
         if entry.is_dir {
             continue;
@@ -150,7 +151,11 @@ pub(crate) fn discover_nested(
             environment,
         )?;
         compatibility.extend(nested_compatibility);
-        crate::loader::add_environment_values(&mut environment_values, &nested_environment_values);
+        for value in nested_environment_values {
+            if !value.is_empty() && seen_env_values.insert(value.clone()) {
+                environment_values.push(value);
+            }
+        }
         for rule in nested_rules {
             if let Some(id) = rule.get("id").and_then(|v| v.as_str())
                 && !seen_ids.insert(id.to_string())
@@ -268,6 +273,12 @@ fn nested_config_rules(
         )));
     }
     reject_nested_execution_settings(&config, source)?;
+    if !config.limits.is_empty() {
+        return Err(Error::Other(format!(
+            "nested config {source} declares `limits:` - runtime limits are \
+             root-only; declare them in the top-level config"
+        )));
+    }
     if config.baseline.is_some() {
         return Err(Error::Other(format!(
             "nested config {source} declares `baseline:` - the baseline is a \

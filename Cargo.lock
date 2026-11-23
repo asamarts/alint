@@ -199,7 +199,6 @@ dependencies = [
  "proptest",
  "pulldown-cmark",
  "regex",
- "roxmltree",
  "saphyr-parser",
  "schemars",
  "serde",

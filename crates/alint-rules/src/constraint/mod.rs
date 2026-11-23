@@ -348,7 +348,7 @@ impl Rule for ConstraintRule {
             );
         }
         let (mut reported, skipped) = Self::notes(&notes);
-        let mut run = families::Run::new(self, rows, ctx);
+        let mut run = families::Run::new(self, rows, ctx, skipped.len());
         match &self.assertion {
             Assertion::Unique { key, determines } => run.unique(key, determines),
             Assertion::EqualGroups { field, group_by } => {

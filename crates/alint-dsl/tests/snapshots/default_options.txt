@@ -1116,6 +1116,7 @@ GitCommitMessageRule {
     subject_max_length: None,
     requires_body: false,
     since_raw: None,
+    expand_legacy_env: true,
     include_merges: false,
 }
 

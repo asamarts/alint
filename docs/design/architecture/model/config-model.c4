@@ -29,6 +29,7 @@ model {
       f_ignore = field 'ignore'
       f_respect_gitignore = field 'respect_gitignore'
       f_fix_size_limit = field 'fix_size_limit'
+      f_limits = field 'limits'
       f_nested_configs = field 'nested_configs'
       f_templates = field 'templates'
       f_allow_out_of_root = field 'allow_out_of_root'

@@ -167,7 +167,7 @@ impl Adapter for EntryValuesAdapter {
             resource,
             limits,
             entries: &entries,
-            budget: PathBudget::new(budget),
+            budget: PathBudget::for_key_rows(budget, limits),
             rows: Vec::new(),
             emitted: vec![false; entries.rows.len()],
             walked: vec![false; entries.paths.len()],

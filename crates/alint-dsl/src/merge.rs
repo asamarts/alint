@@ -231,6 +231,7 @@ impl Merger {
             requires: None,
             extends: Vec::new(),
             extends_environment: Vec::new(),
+            extends_filter_environment: Vec::new(),
             ..first.into_owned()
         };
     }
@@ -252,6 +253,7 @@ impl Merger {
             rules: _,
             fix_size_limit,
             nested_configs,
+            limits,
             allow_out_of_root,
             baseline,
             baseline_from_environment,
@@ -264,6 +266,7 @@ impl Merger {
             environment_config_files: _,
             field_source_names: _,
             extends_environment: _,
+            extends_filter_environment: _,
             source_size,
             surface,
             v2: _,
@@ -277,6 +280,7 @@ impl Merger {
         merged.respect_gitignore = respect_gitignore.or(merged.respect_gitignore);
         merged.fix_size_limit = fix_size_limit.or(merged.fix_size_limit);
         merged.nested_configs = nested_configs.or(merged.nested_configs);
+        merged.limits.merge_from(limits);
         // `allow_out_of_root` and `baseline` are top-level-only (an
         // `extends:`'d value is refused upstream); the later config wins when
         // it sets one.

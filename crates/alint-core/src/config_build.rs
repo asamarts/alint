@@ -85,6 +85,13 @@ impl Config {
         self
     }
 
+    /// Sets [`Self::limits`].
+    #[must_use]
+    pub fn with_limits(mut self, limits: crate::config::ConfigLimits) -> Self {
+        self.limits = limits;
+        self
+    }
+
     /// Sets [`Self::allow_out_of_root`].
     #[must_use]
     pub fn with_allow_out_of_root(mut self, allow_out_of_root: AllowOutOfRoot) -> Self {

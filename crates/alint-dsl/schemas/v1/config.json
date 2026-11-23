@@ -7431,6 +7431,27 @@
       },
       "type": "array"
     },
+    "limits": {
+      "additionalProperties": false,
+      "description": "Top-level-only overrides for relation and key-extraction resource limits. Honored only from the user's own top-level config (and `.alint.d/` drop-ins): refused from `extends:`'d or nested configs.",
+      "properties": {
+        "findings_per_rule": {
+          "default": 10000,
+          "description": "Maximum number of findings emitted per `key_parity` or `constraint` rule before truncation with an analysis failure. Default: 10000; valid range: 1..=1000000.",
+          "maximum": 1000000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "key_path_bytes_per_decode": {
+          "default": 33554432,
+          "description": "Maximum bytes of decoded key paths retained for a single file decode (`key_parity` and version 2 `entries:`). Default: 32 MiB; valid range: 1..=17179869184 (16 GiB).",
+          "maximum": 17179869184,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "nested_configs": {
       "default": false,
       "description": "Opt in to discovery of nested `.alint.yml` / `.alint.yaml` files in subdirectories. When true, the loader walks the tree from this config's directory (honoring `.gitignore` + `ignore`) and finds any nested config files. Each nested rule's path-like scope fields (`paths`, `select`, `primary`) are automatically prefixed with the nested config's relative directory, so rules declared in `packages/frontend/.alint.yml` apply only under `packages/frontend/**`. Id collisions across configs are rejected with a clear error - per-subtree overrides aren't supported in this release (use `when:` on the root rule for that). Only the root config sets this; nested configs can't spawn further nested discovery.",

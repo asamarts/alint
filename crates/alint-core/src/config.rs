@@ -74,6 +74,11 @@ pub struct Config {
     /// configs themselves cannot spawn further nested discovery.
     #[serde(default)]
     pub nested_configs: bool,
+    /// Optional top-level runtime limits (`limits:`), overriding relation
+    /// defaults within each limit's hard cap. Top-level-only (refused from
+    /// `extends:` and nested configs).
+    #[serde(default)]
+    pub limits: ConfigLimits,
     /// Resolved `allow_out_of_root:` policy — which rules may read a
     /// config-declared path that escapes the repo root. Set by the
     /// loader's `finalize()` from the user's *top-level* config only
@@ -135,6 +140,84 @@ pub struct Config {
     #[serde(skip)]
     #[doc(hidden)]
     pub relation_plan: Option<std::sync::Arc<crate::relation::plan::Plan>>,
+}
+
+/// Optional top-level runtime limits declared under `limits:` in `.alint.yml`.
+///
+/// Every configured value must lie in `1..=hard_cap` for its limit
+/// ([`crate::relation::LimitKind::hard_cap`]); zero or values above the hard
+/// cap are rejected at config load. Top-level-only (refused from `extends:`
+/// and nested configs).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct ConfigLimits {
+    /// Maximum findings a relation-backed rule (`constraint`, `key_parity`)
+    /// emits before stopping and adding one non-baselinable analysis failure
+    /// (default: 10,000; hard cap: 1,000,000).
+    #[serde(default)]
+    pub findings_per_rule: Option<usize>,
+    /// Maximum bytes of materialized key-path pointers built for a single
+    /// decode (default: 32 MiB; hard cap: 16 GiB).
+    #[serde(default)]
+    pub key_path_bytes_per_decode: Option<usize>,
+}
+
+impl ConfigLimits {
+    /// Default (all limits unset; each uses its built-in default).
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            findings_per_rule: None,
+            key_path_bytes_per_decode: None,
+        }
+    }
+
+    /// Sets [`Self::findings_per_rule`].
+    #[must_use]
+    pub const fn with_findings_per_rule(mut self, value: Option<usize>) -> Self {
+        self.findings_per_rule = value;
+        self
+    }
+
+    /// Sets [`Self::key_path_bytes_per_decode`].
+    #[must_use]
+    pub const fn with_key_path_bytes_per_decode(mut self, value: Option<usize>) -> Self {
+        self.key_path_bytes_per_decode = value;
+        self
+    }
+
+    /// True when no limit override is set.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.findings_per_rule.is_none() && self.key_path_bytes_per_decode.is_none()
+    }
+
+    /// Merge field-by-field from a later top-level source (e.g. `.alint.d/`
+    /// drop-in): any `Some` in `later` overrides the earlier value.
+    pub fn merge_from(&mut self, later: &Self) {
+        if later.findings_per_rule.is_some() {
+            self.findings_per_rule = later.findings_per_rule;
+        }
+        if later.key_path_bytes_per_decode.is_some() {
+            self.key_path_bytes_per_decode = later.key_path_bytes_per_decode;
+        }
+    }
+
+    /// Validate and resolve into [`crate::relation::Limits`].
+    #[doc(hidden)]
+    pub fn to_relation_limits(
+        &self,
+    ) -> std::result::Result<crate::relation::Limits, crate::relation::LimitConfigError> {
+        let mut limits = crate::relation::Limits::default();
+        if let Some(value) = self.findings_per_rule {
+            limits = limits.with(crate::relation::LimitKind::FindingsPerRule, value)?;
+        }
+        if let Some(value) = self.key_path_bytes_per_decode {
+            limits = limits.with(crate::relation::LimitKind::KeyPathBytesPerDecode, value)?;
+        }
+        Ok(limits)
+    }
 }
 
 // Returning `Option<u64>` (rather than bare `u64`) keeps the
@@ -1735,6 +1818,9 @@ impl NestedRuleSpec {
         if let Some(message) = &self.message {
             visit(message);
         }
+        if let Some(scope_filter) = &self.scope_filter {
+            scope_filter.for_each_template(visit);
+        }
         for (k, v) in self.extra.parser() {
             walk(k, visit);
             walk(v, visit);
@@ -1801,7 +1887,10 @@ impl NestedRuleSpec {
             // `PARENT_FIELDS`, so a nested existence rule doesn't silently
             // inherit either. If/when nested rules need one, drop it from
             // `PARENT_FIELDS` and let it flow into the leaf's option set.
-            scope_filter: self.scope_filter.clone(),
+            scope_filter: self.scope_filter.as_ref().map(|sf| match tokens {
+                Some(tokens) => sf.render_templates(tokens),
+                None => sf.clone(),
+            }),
             // `NestedRuleSpec` doesn't name `id`/`level` (synthesized from the
             // parent) or the top-level-only `fix`/git toggles, so a nested
             // config that supplies them leaves them in `extra`. Strip them

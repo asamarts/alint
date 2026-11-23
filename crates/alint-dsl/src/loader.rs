@@ -15,7 +15,7 @@ use crate::extends::EntryKind as ExtendsEntryKind;
 use crate::merge::Merger;
 use crate::{
     LoadOptions, RawConfig, apply_rule_filter, reject_allow_out_of_root_in, reject_baseline_in,
-    reject_command_rules_in, reject_spawning_templates_in,
+    reject_command_rules_in, reject_limits_in, reject_spawning_templates_in,
 };
 
 /// Maximum depth of an `extends:` chain — a recursion-stack guard against a
@@ -101,15 +101,18 @@ pub(crate) fn parse_config_interpolated_with_environment(
     environment: &dyn crate::EnvironmentProvider,
     origin: &crate::v2::Origin<'_>,
 ) -> Result<RawConfig> {
-    let contents = crate::config_text(contents, &display_path(source))?;
+    let shown_source = if origin.display == alint_core::CONFIGURATION_MASK {
+        origin.display.to_owned()
+    } else {
+        display_path(source)
+    };
+    let contents = crate::config_text(contents, &shown_source)?;
     // Name the file in a YAML/typed error: in an `extends:` chain or a
     // `.alint.d/` drop-in, a bare "at line 2 column 1" reads as if the
     // top-level config were at fault.
     parse_config_interpolated_inner_with_environment(contents, source, environment, origin).map_err(
         |e| match e {
-            Error::Yaml(e) => {
-                Error::Other(format!("{}: YAML parse error: {e}", display_path(source)))
-            }
+            Error::Yaml(e) => Error::Other(format!("{shown_source}: YAML parse error: {e}")),
             other => other,
         },
     )
@@ -645,7 +648,12 @@ fn parse_config_interpolated_inner_with_environment(
     environment: &dyn crate::EnvironmentProvider,
     origin: &crate::v2::Origin<'_>,
 ) -> Result<RawConfig> {
-    let expanded = reject_yaml_bombs(contents, source)?;
+    let shown_source = if origin.display == alint_core::CONFIGURATION_MASK {
+        origin.display.to_owned()
+    } else {
+        display_path(source)
+    };
+    let expanded = reject_yaml_bombs(contents, &shown_source)?;
     parse_guarded(contents, source, environment, origin).map(|config| RawConfig {
         source_size: source_size(contents, expanded),
         ..config
@@ -699,6 +707,7 @@ fn parse_guarded(
         let rule_sensitive_fields = environment_sensitive_fields(value.get("rules"));
         let template_sensitive_fields = environment_sensitive_fields(value.get("templates"));
         let extends_environment = entries_reading_environment(value.get("extends"));
+        let extends_filter_environment = entry_filters_reading_environment(value.get("extends"));
         let baseline_from_environment = value.get("baseline").is_some_and(value_reads_environment);
         let rule_env_vars = rule_env_derived_vars(value.get("rules"));
         // The names the top-level fields other than rules, templates and vars
@@ -720,10 +729,14 @@ fn parse_guarded(
         })
         .map_err(|error| Error::Other(format!("{source}: interpolation error: {error}")))?;
         let read = read.into_inner();
+        let mut seen_env = std::collections::HashSet::new();
         let mut environment_values = Vec::new();
         for name in &top_level_names {
-            if let Some(value) = read.get(name) {
-                add_environment_values(&mut environment_values, std::slice::from_ref(value));
+            if let Some(value) = read.get(name)
+                && !value.is_empty()
+                && seen_env.insert(value.clone())
+            {
+                environment_values.push(value.clone());
             }
         }
         let (mut config, v2_keys) = decode_value(value, surface).map_err(|error| {
@@ -735,6 +748,7 @@ fn parse_guarded(
         config.env_vars = env_vars;
         config.environment_values = environment_values;
         config.extends_environment = extends_environment;
+        config.extends_filter_environment = extends_filter_environment;
         config.baseline_from_environment = baseline_from_environment;
         mark_entries(&mut config.rules, crate::ENV_VARS_MARKER, rule_env_vars);
         mark_entries(
@@ -770,14 +784,13 @@ fn parse_guarded(
 /// Reject a config whose YAML would cost too much to read, before any parser
 /// reads it; the size the alias guard estimated for what its aliases expand
 /// into otherwise ([`source_size`]).
-fn reject_yaml_bombs(contents: &str, source: &Path) -> Result<usize> {
+fn reject_yaml_bombs(contents: &str, source_display: &str) -> Result<usize> {
     // Reject a deeply-nested-flow config before any parser reads it (the parser
     // v0.22 used hung on one) — a DoS reachable through an `extends:`'d ruleset.
     let yaml_guards = alint_core::yaml_depth::scan_guards(contents);
     if !yaml_guards.flow_within_limit() {
         return Err(Error::Other(format!(
-            "{}: YAML flow nesting exceeds the maximum supported depth ({})",
-            source.display(),
+            "{source_display}: YAML flow nesting exceeds the maximum supported depth ({})",
             alint_core::yaml_depth::MAX_YAML_FLOW_DEPTH
         )));
     }
@@ -788,8 +801,7 @@ fn reject_yaml_bombs(contents: &str, source: &Path) -> Result<usize> {
     let (expansion, expanded) = yaml_guards.expansion_and_size(contents);
     if !expansion.within_limit_for_ayaml() {
         return Err(Error::Other(format!(
-            "{}: YAML alias expansion exceeds the maximum supported size",
-            source.display(),
+            "{source_display}: YAML alias expansion exceeds the maximum supported size",
         )));
     }
     Ok(expanded)
@@ -969,6 +981,23 @@ fn entries_reading_environment(entries: Option<&ayaml::Value>) -> Vec<bool> {
             entries
                 .iter()
                 .map(|entry| value_reads_environment(entry.get("url").unwrap_or(entry)))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Parallel to `extends:`: whether each entry's `only:` or `except:` filter
+/// contains an environment interpolation.
+fn entry_filters_reading_environment(entries: Option<&ayaml::Value>) -> Vec<bool> {
+    entries
+        .and_then(ayaml::Value::as_sequence)
+        .map(|entries| {
+            entries
+                .iter()
+                .map(|entry| {
+                    entry.get("only").is_some_and(value_reads_environment)
+                        || entry.get("except").is_some_and(value_reads_environment)
+                })
                 .collect()
         })
         .unwrap_or_default()
@@ -1186,6 +1215,7 @@ pub(crate) fn load_recursive(
 
     let extends = std::mem::take(&mut config.extends);
     let extends_environment = std::mem::take(&mut config.extends_environment);
+    let extends_filter_environment = std::mem::take(&mut config.extends_filter_environment);
     if extends.is_empty() {
         state.visiting.remove(&canonical);
         if let Some(key) = memo_key {
@@ -1236,11 +1266,16 @@ pub(crate) fn load_recursive(
         std::collections::HashMap::new();
     for (index, entry) in extends.iter().enumerate() {
         let key = &keys[index];
+        let filter_from_environment = extends_filter_environment
+            .get(index)
+            .copied()
+            .unwrap_or(false);
         let parent = match repeats.take(key) {
             Some(parent) => parent,
             None => load_extended_source(
                 &entry.entry,
                 key.from_environment,
+                filter_from_environment,
                 &source_dir,
                 state,
                 opts,
@@ -1530,6 +1565,7 @@ fn drop_extended_settings(
 fn load_extended_source(
     entry: &alint_core::ExtendsEntry,
     from_environment: bool,
+    filter_from_environment: bool,
     source_dir: &Path,
     state: &mut LoadState,
     opts: &LoadOptions<'_>,
@@ -1626,6 +1662,7 @@ fn load_extended_source(
         confine_extends_target(
             &target,
             &source_display,
+            chosen,
             confine,
             opts.config_source.as_ref(),
         )?;
@@ -1649,7 +1686,12 @@ fn load_extended_source(
         &source_display,
         chosen,
     );
-    parent.rules = apply_rule_filter(parent.rules, entry, &source_display)?;
+    parent.rules = apply_rule_filter(
+        parent.rules,
+        entry,
+        &source_display,
+        chosen || filter_from_environment,
+    )?;
     if kind == ExtendsEntryKind::Https {
         let base = url.split('#').next().unwrap_or(url);
         if !trusted.contains(base) && !trusted.contains(url) {
@@ -1882,6 +1924,7 @@ fn gate_extended_source(
     crate::reject_fix_promotion_templates_in(&parent.templates, url)?;
     reject_allow_out_of_root_in(&parent.allow_out_of_root, url)?;
     reject_baseline_in(&parent.baseline, url)?;
+    reject_limits_in(&parent.limits, url)?;
     // A ruleset may not allowlist ITSELF into auto-applying content fixers;
     // only the user's top-level config grants that via `trusted_extends:`.
     crate::reject_trusted_extends_in(&parent.trusted_extends, url)?;
@@ -1967,6 +2010,7 @@ fn decode_bundled(body: &str, spec: &str) -> Result<RawConfig> {
 fn confine_extends_target(
     target: &Path,
     entry: &str,
+    chosen: bool,
     confine: Option<&Path>,
     source_provider: &dyn crate::ConfigSourceProvider,
 ) -> Result<()> {
@@ -1978,11 +2022,15 @@ fn confine_extends_target(
         return Ok(());
     };
     if !canon_target.starts_with(&canon_root) {
+        let shown_target = if chosen {
+            alint_core::CONFIGURATION_MASK.to_owned()
+        } else {
+            canon_target.display().to_string()
+        };
         return Err(Error::Other(format!(
-            "`extends:` target {entry:?} resolves to {} which is outside the lint root {}; \
+            "`extends:` target {entry:?} resolves to {shown_target} which is outside the lint root {}; \
              a local `extends:` chain must stay within the linted tree. Set \
              `allow_out_of_root: true` on the top-level config to override.",
-            canon_target.display(),
             canon_root.display(),
         )));
     }

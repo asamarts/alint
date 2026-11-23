@@ -211,8 +211,13 @@ pub fn read_source_for_fix(
 ) -> Result<ReadForFix> {
     let rel = abs.strip_prefix(ctx.root).unwrap_or(abs);
     if crate::pathsafe::reaches_git_directory_walked(ctx.root, rel, ctx.index) {
+        let shown = if ctx.paths_sensitive {
+            Path::new(crate::CONFIGURATION_MASK)
+        } else {
+            rel
+        };
         return Ok(ReadForFix::Skipped(FixOutcome::Skipped(
-            crate::git_directory_refusal(rel),
+            crate::git_directory_refusal(shown),
         )));
     }
     read_checked_for_fix(abs, display_path, ctx)
@@ -247,7 +252,7 @@ fn read_checked_for_fix(
     if std::fs::metadata(abs).is_ok_and(|m| !m.is_file()) {
         return Ok(ReadForFix::Skipped(FixOutcome::Skipped(format!(
             "{} is not a regular file",
-            display_path.display()
+            ctx.shown_path(display_path)
         ))));
     }
     if let Some(outcome) = check_fix_size(abs, display_path, ctx)? {

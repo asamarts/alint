@@ -84,6 +84,7 @@ pub(super) struct LoadedConfig {
     pub(super) respect_gitignore: bool,
     pub(super) extra_ignores: Vec<String>,
     pub(super) fix_size_limit: Option<u64>,
+    pub(super) limits: alint_core::ConfigLimits,
     /// The `baseline:` config key (the raw repo-root-relative path), if set.
     pub(super) baseline: Option<PathBuf>,
     /// Whether `baseline:` came from an environment interpolation (`{{env.*}}`).
@@ -249,10 +250,7 @@ fn validate_config_inner(config_path: &Path, cli: &Cli) -> Result<Validated> {
         }
         count += 1;
     }
-    hints.extend(alint_core::pattern_hints::environment_fact_hints(
-        &config.facts,
-        &config.environment_values,
-    ));
+    hints.extend(fact_pattern_hints(&config.facts));
     Ok(Validated {
         rule_count: count,
         hints,
@@ -603,6 +601,7 @@ pub(super) fn load_rules_for_explain(
         respect_gitignore: config.respect_gitignore,
         extra_ignores: config.ignore,
         fix_size_limit: config.fix_size_limit,
+        limits: config.limits,
         baseline: config.baseline,
         baseline_from_environment: config.baseline_from_environment,
         config_files: config.config_files,

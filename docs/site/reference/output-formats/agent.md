@@ -140,7 +140,7 @@ fixed automatically.
 | --- | --- | --- | --- |
 | `rule_id` | string | yes | Matches the `id:` of a rule in your config. |
 | `severity` | string | yes | `"error"`, `"warning"`, or `"info"`. |
-| `human_message` | string | yes | The rule's message verbatim. Mirror of `message` in `--format json`. |
+| `human_message` | string | yes | The rule's message sanitized of terminal controls, bidi overrides/isolates, zero-width characters, and astral tag characters (raw machine paths remain in `file`). |
 | `agent_instruction` | string | yes | Templated remediation phrasing (see below). |
 | `fix_available` | boolean | yes | `true` when the source rule declares an autofix. |
 | `fix_command` | array of strings | no | Present iff `fix_available`. Exact argv (after `alint`) to auto-fix this one violation — e.g. `["fix", "--only", "final-newline"]`. Run it programmatically instead of parsing the command out of `agent_instruction`. |

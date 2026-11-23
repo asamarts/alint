@@ -279,19 +279,40 @@ pub fn unrender_placeholders<'t>(
     }
     let tokens = PathTokens::placeholder();
     let mut pairs: Vec<(String, String)> = Vec::new();
-    for template in templates {
-        if TokenSet::of(template) == TokenSet::NONE {
-            continue;
+    let mut push_pair = |rendered: String, template: &str| {
+        if rendered == template || rendered.is_empty() {
+            return;
         }
-        let rendered = render_path(template, &tokens);
-        if rendered == template {
-            continue;
+        // Skip forms that only wrapped the entire template in quotes that the
+        // template itself did not have (e.g. `render_path_when_expr("{path}")`
+        // -> `"\"_path_\""`), which would strip surrounding quotes from an
+        // unrelated error message.
+        let added_outer_quotes =
+            (rendered.starts_with('"') && rendered.ends_with('"') && !template.starts_with('"'))
+                || (rendered.starts_with('\'')
+                    && rendered.ends_with('\'')
+                    && !template.starts_with('\''));
+        if added_outer_quotes {
+            return;
         }
         let escaped = debug_escaped(&rendered);
         if escaped != rendered {
             pairs.push((escaped, debug_escaped(template)));
         }
         pairs.push((rendered, template.to_string()));
+    };
+    for template in templates {
+        if TokenSet::of(template) == TokenSet::NONE {
+            continue;
+        }
+        let plain = render_path(template, &tokens);
+        let jsonpath = render_path_jsonpath(template, &tokens);
+        let when_expr = render_path_when_expr(template, &tokens);
+        let key_pat = render_path_key_pattern(template, &tokens);
+        push_pair(plain, template);
+        push_pair(jsonpath, template);
+        push_pair(when_expr, template);
+        push_pair(key_pat, template);
     }
     // An empty value would match everywhere without moving the scan.
     pairs.retain(|(rendered, _)| !rendered.is_empty());
@@ -492,14 +513,155 @@ fn render_path_with(
     out
 }
 
+/// Escape `val` for a Rust regex, including whitespace so patterns that enable
+/// `(?x)` (ignore-whitespace mode) still match literal spaces, tabs, and
+/// newlines in repository paths.
+fn escape_regex_value(val: &str) -> String {
+    use std::fmt::Write as _;
+    let escaped = regex::escape(val);
+    if !escaped.chars().any(char::is_whitespace) {
+        return escaped;
+    }
+    let mut out = String::with_capacity(escaped.len() + 8);
+    for ch in escaped.chars() {
+        match ch {
+            ' ' => out.push_str("\\x20"),
+            '\t' => out.push_str("\\t"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            c if c.is_whitespace() => {
+                let _ = write!(out, "\\u{{{:x}}}", c as u32);
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 /// [`render_path`] for a template compiled as a **Rust regex** (`pattern:`,
 /// `shebang:`, `for_each_match.select`, `*_path_matches.matches`, etc.). Each
-/// substituted token value is escaped with [`regex::escape`] so metacharacters
-/// in a repository path (`.`, `(`, `[`, `+`, `?`, `*`, `^`, `$`, `\`) match
-/// literally while the user-written template text around the tokens keeps its
-/// regex meaning.
+/// substituted token value is escaped for Rust regex syntax (including
+/// whitespace for `(?x)` patterns) so metacharacters in a repository path
+/// (`.`, `(`, `[`, `+`, `?`, `*`, `^`, `$`, `\`, `#`, spaces) match literally
+/// while the user-written template text around the tokens keeps its regex
+/// meaning.
 pub fn render_path_regex(template: &str, t: &PathTokens) -> String {
-    render_path_with(template, t, |v, out| out.push_str(&regex::escape(v)))
+    render_path_with(template, t, |v, out| out.push_str(&escape_regex_value(v)))
+}
+
+/// [`render_path`] for a **regex replacement template** (`edges.derive_target.to`,
+/// `scope_filter.*.derive_target.to`), doubling `$` in substituted values so
+/// `$1` or `${name}` in a repository path is not expanded as a capture group.
+pub(crate) fn render_path_replacement(template: &str, t: &PathTokens) -> String {
+    render_path_with(template, t, |v, out| out.push_str(&v.replace('$', "$$")))
+}
+
+/// Escape `val` for RFC 9485 I-Regexp (used by RFC 9535 `JSONPath` `match()`
+/// and `search()`). Escapes the 14 `SingleCharEsc` metacharacters
+/// (`\ | . - ^ ? * + { } ( ) [ ]`) with `\` and wraps `$` in `[$]` (valid in
+/// strict RFC 9485 while also neutralizing `$` as an end anchor in
+/// `serde_json_path`'s underlying Rust `regex` engine). Unlike Rust
+/// `regex::escape`, characters such as `#`, `&`, and `~` are not escaped after
+/// `\`.
+fn iregexp_escape(val: &str) -> String {
+    let mut out = String::with_capacity(val.len());
+    for ch in val.chars() {
+        if ch == '$' {
+            out.push_str("[$]");
+            continue;
+        }
+        if matches!(
+            ch,
+            '\\' | '|' | '.' | '-' | '^' | '?' | '*' | '+' | '{' | '}' | '(' | ')' | '[' | ']'
+        ) {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out
+}
+
+/// True when `out` ends right at the start of the second argument (the I-Regexp
+/// pattern) of an RFC 9535 `match(...)` or `search(...)` function call.
+fn is_jsonpath_iregexp_arg(out: &str) -> bool {
+    enum Delim {
+        Bracket,
+        Paren { iregexp_fn: bool, commas: usize },
+    }
+    let trimmed = out.trim_end();
+    if !trimmed.ends_with(',') {
+        return false;
+    }
+    let mut stack: Vec<Delim> = Vec::new();
+    let mut quote: Option<char> = None;
+    let mut escape = false;
+    let mut ident_start: Option<usize> = None;
+    let mut last_ident: Option<&str> = None;
+    for (idx, ch) in trimmed.char_indices() {
+        if let Some(q) = quote {
+            if escape {
+                escape = false;
+            } else if ch == '\\' {
+                escape = true;
+            } else if ch == q {
+                quote = None;
+            }
+            continue;
+        }
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            ident_start.get_or_insert(idx);
+            continue;
+        }
+        if let Some(start) = ident_start.take() {
+            last_ident = Some(&trimmed[start..idx]);
+        }
+        match ch {
+            '\'' | '"' => {
+                quote = Some(ch);
+                last_ident = None;
+            }
+            '[' => {
+                stack.push(Delim::Bracket);
+                last_ident = None;
+            }
+            ']' => {
+                if matches!(stack.last(), Some(Delim::Bracket)) {
+                    stack.pop();
+                }
+                last_ident = None;
+            }
+            '(' => {
+                let iregexp_fn = matches!(last_ident.take(), Some("match" | "search"));
+                stack.push(Delim::Paren {
+                    iregexp_fn,
+                    commas: 0,
+                });
+            }
+            ')' => {
+                if matches!(stack.last(), Some(Delim::Paren { .. })) {
+                    stack.pop();
+                }
+                last_ident = None;
+            }
+            ',' => {
+                if let Some(Delim::Paren { commas, .. }) = stack.last_mut() {
+                    *commas += 1;
+                }
+                last_ident = None;
+            }
+            c if c.is_ascii_whitespace() => {}
+            _ => {
+                last_ident = None;
+            }
+        }
+    }
+    matches!(
+        stack.last(),
+        Some(Delim::Paren {
+            iregexp_fn: true,
+            commas: 1,
+        })
+    )
 }
 
 /// Match a recognized `{token}` at the start of `s`, returning `(token, value)`.
@@ -593,12 +755,23 @@ fn scan_jsonpath_dot_member<'a>(rest: &'a str, t: &PathTokens) -> (&'a str, bool
     (&rest[..pos], has_token)
 }
 
+fn push_jsonpath_value(val: &str, quote: char, is_iregexp: bool, out: &mut String) {
+    if is_iregexp {
+        let escaped = iregexp_escape(val);
+        push_jsonpath_escaped(&escaped, quote, out);
+    } else {
+        push_jsonpath_escaped(val, quote, out);
+    }
+}
+
 /// [`render_path`] for a template compiled as an RFC 9535 **`JSONPath`** query
 /// (`json_path_*`, `yaml_path_*`, `toml_path_*`, `extract.json`, etc.).
 ///
 /// - Inside `'...'` or `"..."` string literals, substituted values are escaped
 ///   for that quote delimiter (so quotes, backslashes, and controls cannot
-///   break out of the string or alter a filter expression).
+///   break out of the string or alter a filter expression). Inside the second
+///   argument of RFC 9535 `match()` / `search()`, values are additionally
+///   escaped for RFC 9485 I-Regexp before `JSONPath` string escaping.
 /// - In dot-member position (`.{basename}`, `$.pkg_{stem}`, `$..{basename}`),
 ///   if the rendered member is not a plain identifier, it is bracket-quoted
 ///   (`['...']`) so dots, hyphens, quotes, brackets, or wildcards in a path
@@ -608,10 +781,10 @@ fn scan_jsonpath_dot_member<'a>(rest: &'a str, t: &PathTokens) -> (&'a str, bool
 pub fn render_path_jsonpath(template: &str, t: &PathTokens) -> String {
     let mut out = String::with_capacity(template.len());
     let mut rest = template;
-    let mut quote: Option<char> = None;
+    let mut quote: Option<(char, bool)> = None;
     let mut at_string_start = false;
     while !rest.is_empty() {
-        if let Some(q) = quote {
+        if let Some((q, is_iregexp)) = quote {
             if rest.starts_with('\\') {
                 let mut chars = rest.chars();
                 let slash = chars.next().unwrap();
@@ -639,7 +812,7 @@ pub fn render_path_jsonpath(template: &str, t: &PathTokens) -> String {
                         rest = after;
                     }
                 } else {
-                    push_jsonpath_escaped(val, q, &mut out);
+                    push_jsonpath_value(val, q, is_iregexp, &mut out);
                     at_string_start = false;
                 }
                 continue;
@@ -652,10 +825,11 @@ pub fn render_path_jsonpath(template: &str, t: &PathTokens) -> String {
         }
 
         if rest.starts_with('\'') || rest.starts_with('"') {
+            let is_iregexp = is_jsonpath_iregexp_arg(&out);
             let q = rest.chars().next().unwrap();
             out.push(q);
             rest = &rest[q.len_utf8()..];
-            quote = Some(q);
+            quote = Some((q, is_iregexp));
             at_string_start = true;
             continue;
         }
@@ -687,15 +861,131 @@ pub fn render_path_jsonpath(template: &str, t: &PathTokens) -> String {
             continue;
         }
         if let Some((tok, val)) = match_path_token(rest, t) {
+            let is_iregexp = is_jsonpath_iregexp_arg(&out);
             rest = &rest[tok.len()..];
             out.push('\'');
-            push_jsonpath_escaped(val, '\'', &mut out);
+            push_jsonpath_value(val, '\'', is_iregexp, &mut out);
             out.push('\'');
             continue;
         }
         let ch = rest.chars().next().unwrap();
         out.push(ch);
         rest = &rest[ch.len_utf8()..];
+    }
+    out
+}
+
+/// Escape `value` for a `key_parity.ignore_keys` bracketed `['...']` segment
+/// (where `\` escapes `'` and `\`).
+fn push_key_pattern_bracket_escaped(value: &str, out: &mut String) {
+    for ch in value.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '\'' => out.push_str("\\'"),
+            c => out.push(c),
+        }
+    }
+}
+
+/// [`render_path`] for a `key_parity` `ignore_keys` key-path pattern.
+///
+/// - Inside `['...']` segments, substituted values escape `\` and `'` so a
+///   path containing quotes or backslashes cannot close or break the segment.
+/// - Bare segments containing a token are bracket-quoted (`['...']`) whenever
+///   the rendered value is empty, equals `**`, or contains `.`, `[`, `]`, `'`,
+///   or `\`, so path punctuation stays inside one segment instead of splitting
+///   into extra segments or raising a syntax error.
+pub fn render_path_key_pattern(template: &str, t: &PathTokens) -> String {
+    let mut out = String::with_capacity(template.len());
+    let mut rest = template;
+    while !rest.is_empty() {
+        if let Some(after) = rest.strip_prefix("['") {
+            out.push_str("['");
+            rest = after;
+            let mut at_start = true;
+            while !rest.is_empty() {
+                if rest.starts_with('\\') {
+                    let mut chars = rest.chars();
+                    let slash = chars.next().unwrap();
+                    out.push(slash);
+                    if let Some(next) = chars.next() {
+                        out.push(next);
+                        rest = &rest[slash.len_utf8() + next.len_utf8()..];
+                    } else {
+                        rest = &rest[slash.len_utf8()..];
+                    }
+                    at_start = false;
+                    continue;
+                }
+                if let Some(after_close) = rest.strip_prefix("']") {
+                    out.push_str("']");
+                    rest = after_close;
+                    break;
+                }
+                if let Some((tok, val)) = match_path_token(rest, t) {
+                    rest = &rest[tok.len()..];
+                    if val.is_empty() && (at_start || out.ends_with('/')) {
+                        if let Some(after_slash) = rest.strip_prefix('/') {
+                            rest = after_slash;
+                        }
+                    } else {
+                        push_key_pattern_bracket_escaped(val, &mut out);
+                        at_start = false;
+                    }
+                    continue;
+                }
+                let ch = rest.chars().next().unwrap();
+                out.push(ch);
+                rest = &rest[ch.len_utf8()..];
+                at_start = false;
+            }
+            continue;
+        }
+        if let Some(after_dot) = rest.strip_prefix('.') {
+            out.push('.');
+            rest = after_dot;
+            continue;
+        }
+        if rest.starts_with('[') {
+            out.push('[');
+            rest = &rest[1..];
+            continue;
+        }
+        let mut end = 0usize;
+        let mut has_token = false;
+        while end < rest.len() {
+            let tail = &rest[end..];
+            if let Some((tok, _)) = match_path_token(tail, t) {
+                has_token = true;
+                end += tok.len();
+                continue;
+            }
+            let ch = tail.chars().next().unwrap();
+            if ch == '.' || ch == '[' {
+                break;
+            }
+            end += ch.len_utf8();
+        }
+        let seg = &rest[..end];
+        rest = &rest[end..];
+        if !has_token {
+            out.push_str(seg);
+            continue;
+        }
+        let rendered = render_path(seg, t);
+        let needs_bracket = rendered.is_empty()
+            || rendered == "**"
+            || rendered.contains(['.', '[', ']', '\'', '\\']);
+        if needs_bracket {
+            if out.len() > 1 && out.ends_with('.') {
+                out.pop();
+            }
+            out.push_str("['");
+            push_key_pattern_bracket_escaped(&rendered, &mut out);
+            out.push_str("']");
+        } else {
+            out.push_str(&rendered);
+        }
     }
     out
 }
@@ -725,8 +1015,14 @@ enum WhenStringMode {
 
 fn when_string_mode_before(out: &str) -> WhenStringMode {
     let trimmed = out.trim_end();
-    if let Some(before_lparen) = trimmed.strip_suffix('(')
-        && let Some(before_method) = before_lparen.trim_end().strip_suffix("has_file")
+    let mut before_lparen = trimmed;
+    let mut saw_lparen = false;
+    while let Some(rest) = before_lparen.strip_suffix('(') {
+        saw_lparen = true;
+        before_lparen = rest.trim_end();
+    }
+    if saw_lparen
+        && let Some(before_method) = before_lparen.strip_suffix("has_file")
         && let Some(before_dot) = before_method.trim_end().strip_suffix('.')
         && let Some(before_iter) = before_dot.trim_end().strip_suffix("iter")
         && before_iter
@@ -736,7 +1032,7 @@ fn when_string_mode_before(out: &str) -> WhenStringMode {
     {
         return WhenStringMode::Glob;
     }
-    if let Some(before_kw) = trimmed.strip_suffix("matches")
+    if let Some(before_kw) = before_lparen.strip_suffix("matches")
         && before_kw
             .bytes()
             .last()
@@ -753,15 +1049,26 @@ fn when_string_mode_before(out: &str) -> WhenStringMode {
 ///   syntax (`\\`, `\"`, `\'`, `\n`, `\r`, `\t`), so a path containing quotes
 ///   or backslashes cannot break out of the literal and alter the expression.
 /// - Inside `iter.has_file("...")` string arguments, values are additionally
-///   glob-escaped so glob metacharacters in a path match literally.
+///   glob-escaped so glob metacharacters in a path match literally (including a
+///   leading `!` at string start).
 /// - After the `matches` regex operator, values are additionally regex-escaped.
 /// - Outside string literals, any substituted token is emitted as a safely
 ///   quoted string literal (`"..."`) so a path cannot inject operators.
 pub fn render_path_when_expr(template: &str, t: &PathTokens) -> String {
-    let push_val = |mode: WhenStringMode, val: &str, out: &mut String| match mode {
+    let push_val = |mode: WhenStringMode, val: &str, at_start: bool, out: &mut String| match mode {
         WhenStringMode::Literal => push_when_escaped(val, out),
-        WhenStringMode::Glob => push_when_escaped(&glob_escape(val), out),
-        WhenStringMode::Regex => push_when_escaped(&regex::escape(val), out),
+        WhenStringMode::Glob => {
+            let mut glob = String::new();
+            let v = if at_start && let Some(rest) = val.strip_prefix('!') {
+                glob.push_str("{!}");
+                rest
+            } else {
+                val
+            };
+            push_glob_escaped(&mut glob, v);
+            push_when_escaped(&glob, out);
+        }
+        WhenStringMode::Regex => push_when_escaped(&escape_regex_value(val), out),
     };
     let mut out = String::with_capacity(template.len());
     let mut rest = template;
@@ -796,7 +1103,7 @@ pub fn render_path_when_expr(template: &str, t: &PathTokens) -> String {
                         rest = after;
                     }
                 } else {
-                    push_val(mode, val, &mut out);
+                    push_val(mode, val, at_string_start, &mut out);
                     at_string_start = false;
                 }
                 continue;
@@ -821,7 +1128,7 @@ pub fn render_path_when_expr(template: &str, t: &PathTokens) -> String {
             let mode = when_string_mode_before(&out);
             rest = &rest[tok.len()..];
             out.push('"');
-            push_val(mode, val, &mut out);
+            push_val(mode, val, true, &mut out);
             out.push('"');
             continue;
         }
@@ -1166,10 +1473,11 @@ nested_glob_options_table! {
 }
 
 /// Option keys of a nested rule that hold a **Rust regex**, per kind (aliases
-/// included). Each substituted token value is escaped with [`regex::escape`]
-/// ([`render_path_regex`]) so `.`, `(`, `[`, `+`, `?`, `*`, `^`, `$`, `\` in a
-/// path match literally.
-fn nested_regex_options(kind: &str) -> &'static [&'static str] {
+/// included). Each substituted token value is escaped with [`render_path_regex`]
+/// so metacharacters and whitespace in a path match literally.
+#[doc(hidden)]
+#[must_use]
+pub fn nested_regex_options(kind: &str) -> &'static [&'static str] {
     match kind {
         "file_content_matches"
         | "content_matches"
@@ -1215,7 +1523,9 @@ fn nested_regex_options(kind: &str) -> &'static [&'static str] {
 
 /// Option keys of a nested rule that hold an RFC 9535 **`JSONPath`** query, per
 /// kind (aliases included). Rendered with [`render_path_jsonpath`].
-fn nested_jsonpath_options(kind: &str) -> &'static [&'static str] {
+#[doc(hidden)]
+#[must_use]
+pub fn nested_jsonpath_options(kind: &str) -> &'static [&'static str] {
     match kind {
         "json_path_equals"
         | "json_path_matches"
@@ -1286,7 +1596,9 @@ fn nested_jsonpath_options(kind: &str) -> &'static [&'static str] {
 
 /// Option keys of a nested rule that hold a `when_iter:` expression, per kind.
 /// Rendered with [`render_path_when_expr`].
-fn nested_when_options(kind: &str) -> &'static [&'static str] {
+#[doc(hidden)]
+#[must_use]
+pub fn nested_when_options(kind: &str) -> &'static [&'static str] {
     match kind {
         "for_each_dir" | "for_each_file" | "every_matching_has" => &["when_iter"],
         _ => &[],
@@ -1295,7 +1607,11 @@ fn nested_when_options(kind: &str) -> &'static [&'static str] {
 
 /// Option keys of a nested rule that hold a path OR one of a fixed set of
 /// reserved keywords (such as `registry_paths_resolve.base:`).
-fn nested_keyword_path_options(kind: &str) -> &'static [(&'static str, &'static [&'static str])] {
+#[doc(hidden)]
+#[must_use]
+pub fn nested_keyword_path_options(
+    kind: &str,
+) -> &'static [(&'static str, &'static [&'static str])] {
     match kind {
         "registry_paths_resolve" => &[("base", &["registry_dir", "lint_root"])],
         _ => &[],
@@ -1306,7 +1622,9 @@ fn nested_keyword_path_options(kind: &str) -> &'static [(&'static str, &'static 
 /// Each argument is rendered with [`render_path_argv`], so a value that
 /// starts with `-` (a file named `--write`) reaches the command as a path
 /// (`./--write`), not an option, as in a rule no iteration built.
-fn nested_argv_options(kind: &str) -> &'static [&'static str] {
+#[doc(hidden)]
+#[must_use]
+pub fn nested_argv_options(kind: &str) -> &'static [&'static str] {
     match kind {
         "command" | "command_idempotent" | "generated_file_fresh" => &["command"],
         _ => &[],
@@ -1317,16 +1635,30 @@ fn nested_argv_options(kind: &str) -> &'static [&'static str] {
 /// the rule expands with each match's captures (`$1`, `${name}`), per kind. A
 /// `$` in a substituted value is written `$$`, so a directory named `a$1`
 /// reaches the expansion as text, not a capture reference.
-fn nested_replacement_options(kind: &str) -> &'static [&'static str] {
+#[doc(hidden)]
+#[must_use]
+pub fn nested_replacement_options(kind: &str) -> &'static [&'static str] {
     match kind {
         "file_graph" => &["edges.derive_target.to"],
         _ => &[],
     }
 }
 
+/// Option keys of a nested rule that hold a `key_parity` key-path pattern.
+/// Rendered with [`render_path_key_pattern`].
+#[doc(hidden)]
+#[must_use]
+pub fn nested_key_pattern_options(kind: &str) -> &'static [&'static str] {
+    match kind {
+        "key_parity" => &["ignore_keys"],
+        _ => &[],
+    }
+}
+
 /// The option keys of a nested rule's kind that are not rendered as literal
 /// text: globs, regexes, `JSONPath` queries, `when_iter` expressions,
-/// keyword-guarded paths, command arguments, and replacement templates.
+/// keyword-guarded paths, command arguments, replacement templates, and
+/// key-path patterns.
 #[derive(Clone, Copy)]
 struct OptionSyntax {
     globs: &'static [&'static str],
@@ -1336,6 +1668,7 @@ struct OptionSyntax {
     keyword_paths: &'static [(&'static str, &'static [&'static str])],
     argv: &'static [&'static str],
     replacements: &'static [&'static str],
+    key_patterns: &'static [&'static str],
 }
 
 impl OptionSyntax {
@@ -1348,6 +1681,7 @@ impl OptionSyntax {
             keyword_paths: nested_keyword_path_options(kind),
             argv: nested_argv_options(kind),
             replacements: nested_replacement_options(kind),
+            key_patterns: nested_key_pattern_options(kind),
         }
     }
 }
@@ -1404,6 +1738,34 @@ fn render_options(
     with_paths: bool,
 ) -> ayaml::Mapping {
     const PATHS: &[&str] = &["paths", "paths.include", "paths.exclude"];
+    const SCOPE_FILTER_REGEXES: &[&str] = &[
+        "scope_filter.include_manifest_paths.extract.regex",
+        "scope_filter.include_manifest_paths.derive_target.from",
+        "scope_filter.exclude_manifest_paths.extract.regex",
+        "scope_filter.exclude_manifest_paths.derive_target.from",
+    ];
+    const SCOPE_FILTER_JSONPATHS: &[&str] = &[
+        "scope_filter.include_manifest_paths.extract.json",
+        "scope_filter.include_manifest_paths.extract.yaml",
+        "scope_filter.include_manifest_paths.extract.toml",
+        "scope_filter.include_manifest_paths.extract.xml",
+        "scope_filter.include_manifest_paths.extract.dotenv",
+        "scope_filter.include_manifest_paths.extract.properties",
+        "scope_filter.include_manifest_paths.extract.ini",
+        "scope_filter.include_manifest_paths.extract.hcl",
+        "scope_filter.exclude_manifest_paths.extract.json",
+        "scope_filter.exclude_manifest_paths.extract.yaml",
+        "scope_filter.exclude_manifest_paths.extract.toml",
+        "scope_filter.exclude_manifest_paths.extract.xml",
+        "scope_filter.exclude_manifest_paths.extract.dotenv",
+        "scope_filter.exclude_manifest_paths.extract.properties",
+        "scope_filter.exclude_manifest_paths.extract.ini",
+        "scope_filter.exclude_manifest_paths.extract.hcl",
+    ];
+    const SCOPE_FILTER_REPLACEMENTS: &[&str] = &[
+        "scope_filter.include_manifest_paths.derive_target.to",
+        "scope_filter.exclude_manifest_paths.derive_target.to",
+    ];
     let syntax = OptionSyntax::of(kind);
     let spec_list = NESTED_SPEC_LISTS
         .iter()
@@ -1430,6 +1792,18 @@ fn render_options(
                 ..syntax
             };
             render_keyed(v, &key, paths, tokens)
+        } else if with_paths && key == "scope_filter" {
+            let sf = OptionSyntax {
+                globs: &[],
+                regexes: SCOPE_FILTER_REGEXES,
+                jsonpaths: SCOPE_FILTER_JSONPATHS,
+                when_exprs: &[],
+                keyword_paths: &[],
+                argv: &[],
+                replacements: SCOPE_FILTER_REPLACEMENTS,
+                key_patterns: &[],
+            };
+            render_keyed(v, &key, sf, tokens)
         } else {
             render_keyed(v, &key, syntax, tokens)
         };
@@ -1441,7 +1815,7 @@ fn render_options(
 /// Render `v`, found at dotted key path `at`, as `syntax` says the option at
 /// `at` is read: glob-escaping, regex-escaping, `JSONPath`-escaping,
 /// `when_iter`-escaping, keyword-path disambiguation, command argument,
-/// replacement template, or literally.
+/// replacement template, key-path pattern, or literally.
 fn render_keyed(
     v: ayaml::Value,
     at: &str,
@@ -1469,9 +1843,10 @@ fn render_keyed(
             Value::String(render_path_argv(&s, tokens))
         }
         Value::String(s) if syntax.replacements.contains(&at) => {
-            Value::String(render_path_with(&s, tokens, |v, out| {
-                out.push_str(&v.replace('$', "$$"));
-            }))
+            Value::String(render_path_replacement(&s, tokens))
+        }
+        Value::String(s) if syntax.key_patterns.contains(&at) => {
+            Value::String(render_path_key_pattern(&s, tokens))
         }
         Value::String(s) => {
             if let Some((_, keywords)) = syntax.keyword_paths.iter().find(|(k, _)| *k == at) {
@@ -2005,7 +2380,7 @@ mod tests {
     }
 
     #[test]
-    fn nested_options_escape_globs_per_kind_and_leave_regexes_literal() {
+    fn nested_options_escape_globs_and_regexes_per_kind() {
         let t = PathTokens::from_path(Path::new("app/[slug]"));
         // Globs: escaped (a template `!` exclude survives).
         let m = render_nested_options(
@@ -2377,5 +2752,217 @@ mod tests {
     fn render_message_no_placeholders() {
         let out = render_message("plain text", |_, _| Some("never".into()));
         assert_eq!(out, "plain text");
+    }
+
+    #[test]
+    fn render_path_regex_escapes_whitespace_for_extended_mode() {
+        let t = PathTokens::from_path(Path::new("dir with space/my file#1.txt"));
+        let pat = render_path_regex("(?x)^ {basename} $", &t);
+        let re = regex::Regex::new(&pat).unwrap();
+        assert!(re.is_match("my file#1.txt"), "pattern: {pat}");
+        assert!(!re.is_match("myfile#1.txt"), "pattern: {pat}");
+        // Also works in standard (non-`(?x)`) mode.
+        let pat_plain = render_path_regex("^{basename}$", &t);
+        let re_plain = regex::Regex::new(&pat_plain).unwrap();
+        assert!(re_plain.is_match("my file#1.txt"), "pattern: {pat_plain}");
+    }
+
+    #[test]
+    fn render_path_jsonpath_escapes_iregexp_args_per_rfc9485() {
+        // Contains I-Regexp metachars `.`, `(`, `)`, `[`, `+` AND chars `$`,
+        // `#`, `&`, `~` that RFC 9485 FORBIDS escaping with `\`.
+        let t = PathTokens::from_path(Path::new("pkgs/a.b(c)$#&~+1"));
+        let query = render_path_jsonpath("$[?match(@.name, '{basename}')]", &t);
+        let parsed = serde_json_path::JsonPath::parse(&query)
+            .unwrap_or_else(|e| panic!("RFC 9535 parse failed for {query}: {e}"));
+        let doc = serde_json::json!([
+            {"name": "a.b(c)$#&~+1"},
+            {"name": "aXb(c)$#&~+1"}
+        ]);
+        let found: Vec<_> = parsed.query(&doc).all();
+        assert_eq!(found.len(), 1, "query: {query}, found: {found:?}");
+        assert_eq!(found[0]["name"], "a.b(c)$#&~+1");
+
+        // `search()` with nested function call / comma inside 1st arg quotes.
+        let search_q = render_path_jsonpath("$[?search(@['k,1'], \"{basename}\")]", &t);
+        let parsed_search = serde_json_path::JsonPath::parse(&search_q)
+            .unwrap_or_else(|e| panic!("RFC 9535 parse failed for {search_q}: {e}"));
+        let doc2 = serde_json::json!([
+            {"k,1": "prefix a.b(c)$#&~+1 suffix"},
+            {"k,1": "prefix aXb(c)$#&~+1 suffix"}
+        ]);
+        assert_eq!(
+            parsed_search.query(&doc2).all().len(),
+            1,
+            "query: {search_q}"
+        );
+    }
+
+    #[test]
+    fn render_path_key_pattern_escapes_brackets_and_punctuation() {
+        let dotted = PathTokens::from_path(Path::new("locales/a.b"));
+        assert_eq!(
+            render_path_key_pattern("nav.{basename}", &dotted),
+            "nav['a.b']"
+        );
+        assert_eq!(
+            render_path_key_pattern("{basename}.title", &dotted),
+            "['a.b'].title"
+        );
+        assert_eq!(render_path_key_pattern("meta.**", &dotted), "meta.**");
+
+        let quoted = PathTokens::from_path(Path::new("locales/o'b\\c"));
+        assert_eq!(
+            render_path_key_pattern("nav['{basename}']", &quoted),
+            r"nav['o\'b\\c']"
+        );
+        assert_eq!(
+            render_path_key_pattern("nav.{basename}", &quoted),
+            r"nav['o\'b\\c']"
+        );
+
+        let star_star = PathTokens::from_path(Path::new("locales/**"));
+        assert_eq!(
+            render_path_key_pattern("nav.{basename}", &star_star),
+            "nav['**']"
+        );
+
+        // Wired through `render_nested_options` for `key_parity.ignore_keys`.
+        let m = render_nested_options(
+            "key_parity",
+            yaml("ignore_keys: ['nav.{basename}', \"meta['{basename}']\"]"),
+            &quoted,
+        );
+        assert_eq!(
+            get(&m, &["ignore_keys", "0"]).as_str(),
+            Some(r"nav['o\'b\\c']")
+        );
+        assert_eq!(
+            get(&m, &["ignore_keys", "1"]).as_str(),
+            Some(r"meta['o\'b\\c']")
+        );
+    }
+
+    #[test]
+    fn render_path_when_expr_handles_parenthesized_has_file_and_leading_bang() {
+        let bang = PathTokens::from_path(Path::new("pkgs/!special[1]"));
+        assert_eq!(
+            render_path_when_expr(r#"iter.has_file(("{basename}.ok"))"#, &bang),
+            r#"iter.has_file(("{!}special[[]1[]].ok"))"#
+        );
+        let spaced = PathTokens::from_path(Path::new("pkgs/my dir"));
+        let expr = render_path_when_expr(r#"iter.name matches ("(?x)^{basename}$")"#, &spaced);
+        assert!(expr.contains(r"my\\x20dir"), "{expr}");
+    }
+
+    #[test]
+    fn scope_filter_renders_syntax_at_level_one_and_level_two() {
+        let t = PathTokens::from_path(Path::new("pkgs/a.b(c)$1"));
+        let nested: crate::NestedRuleSpec = crate::yaml::from_str(concat!(
+            "kind: file_content_matches\n",
+            "paths: '{path}/*.txt'\n",
+            "pattern: 'ok'\n",
+            "scope_filter:\n",
+            "  include_manifest_paths:\n",
+            "    source: '{path}/manifest.json'\n",
+            "    extract:\n",
+            "      json: '$.{basename}'\n",
+            "    derive_target:\n",
+            "      from: '^{basename}/(.*)'\n",
+            "      to: '{basename}/$1'\n",
+        ))
+        .unwrap();
+        assert!(nested.path_tokens() != TokenSet::NONE);
+        let spec = nested.instantiate("p", 0, crate::Level::Error, &t);
+        let sf = spec.scope_filter.as_ref().unwrap();
+        let inc = sf.include_manifest_paths.as_ref().unwrap();
+        assert_eq!(inc.source, "pkgs/a.b(c)$1/manifest.json");
+        let resolved = inc.extract.clone().resolve().unwrap();
+        match resolved {
+            crate::extract::Extract::Structured(se) => {
+                assert_eq!(se.query, "$['a.b(c)$1']");
+            }
+            other => panic!("expected structured extract, got {other:?}"),
+        }
+        let dt = inc.derive_target.as_ref().unwrap();
+        assert_eq!(dt.from, r"^a\.b\(c\)\$1/(.*)");
+        assert_eq!(dt.to, "a.b(c)$$1/$1");
+
+        // Level 2+ via `render_nested_options` inside `require:`.
+        let m = render_nested_options(
+            "for_each_dir",
+            yaml(concat!(
+                "select: '{path}/*'\n",
+                "require:\n",
+                "  - kind: file_content_matches\n",
+                "    paths: '{path}/*.txt'\n",
+                "    pattern: ok\n",
+                "    scope_filter:\n",
+                "      exclude_manifest_paths:\n",
+                "        source: '{path}/m.json'\n",
+                "        extract:\n",
+                "          json: '$.{basename}'\n",
+                "        derive_target:\n",
+                "          from: '^{basename}'\n",
+                "          to: '{basename}/$1'\n",
+            )),
+            &t,
+        );
+        assert_eq!(
+            get(
+                &m,
+                &[
+                    "require",
+                    "0",
+                    "scope_filter",
+                    "exclude_manifest_paths",
+                    "extract",
+                    "json"
+                ]
+            )
+            .as_str(),
+            Some("$['a.b(c)$1']")
+        );
+        assert_eq!(
+            get(
+                &m,
+                &[
+                    "require",
+                    "0",
+                    "scope_filter",
+                    "exclude_manifest_paths",
+                    "derive_target",
+                    "from"
+                ]
+            )
+            .as_str(),
+            Some(r"^a\.b\(c\)\$1")
+        );
+        assert_eq!(
+            get(
+                &m,
+                &[
+                    "require",
+                    "0",
+                    "scope_filter",
+                    "exclude_manifest_paths",
+                    "derive_target",
+                    "to"
+                ]
+            )
+            .as_str(),
+            Some("a.b(c)$$1/$1")
+        );
+    }
+
+    #[test]
+    fn unrender_placeholders_reverts_jsonpath_when_and_key_pattern_forms() {
+        let templates = ["$.a[{stem}]", "iter.name == {basename}", "nav.{stem}"];
+        let msg = "invalid query $.a['_stem_'], when iter.name == \"_basename_\", key nav._stem_";
+        let unrendered = unrender_placeholders(msg, templates);
+        assert_eq!(
+            unrendered,
+            "invalid query $.a[{stem}], when iter.name == {basename}, key nav.{stem}"
+        );
     }
 }
