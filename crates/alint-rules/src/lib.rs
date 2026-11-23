@@ -41,7 +41,7 @@ pub(crate) use options_schema_for;
 /// to reported paths.
 #[must_use]
 pub(crate) fn slash(path: impl AsRef<std::path::Path>) -> String {
-    alint_core::baseline::canonical_order_path(path.as_ref()).into_owned()
+    path.as_ref().display().to_string().replace('\\', "/")
 }
 
 /// One policy violation for a structured extractor that selected values a

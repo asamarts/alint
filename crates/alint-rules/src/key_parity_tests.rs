@@ -1310,7 +1310,7 @@ fn strip_root_handles_toml_arrays_null_spellings_and_top_level_non_objects() {
     let empty_ref = strip(&[("en.yml", b"en: {}\n"), ("fr.yml", b"fr:\n  a: A\n")]);
     assert_eq!(
         messages(&empty_ref),
-        ["fr.yml: extra key `a` (not in en.yml)"]
+        ["fr.yml: extra key `a` (absent from en.yml)"]
     );
     let both_empty = strip(&[("en.yml", b"en: {}\n"), ("fr.yml", b"fr: {}\n")]);
     assert!(both_empty.is_empty(), "{:?}", messages(&both_empty));
