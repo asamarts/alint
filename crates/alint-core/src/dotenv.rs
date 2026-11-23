@@ -11,7 +11,7 @@
 //! keys, optional bare declarations, `KEY=VALUE` assignments, `#` comments
 //! (inline only after whitespace on unquoted values), an optional `export`
 //! prefix, multiline single or double quotes, standard double-quote escapes,
-//! no variable expansion, last-wins duplicates, and a retained leading BOM.
+//! no variable expansion, last-wins duplicates, and stripped leading UTF-8 BOMs.
 //! Bare declarations map to JSON `null`; every assigned value maps to a string.
 //! Error diagnostics reject the document as one parse failure, while portability
 //! warnings do not.
@@ -225,6 +225,9 @@ mod tests {
     fn duplicate_keys_last_wins_including_bare_declarations() {
         assert_eq!(obj("K=first\nK=second\n")["K"], json!("second"));
         assert_eq!(obj("K=assigned\nK\n")["K"], Value::Null);
+        assert_eq!(obj("K\nK=assigned\n")["K"], json!("assigned"));
+        assert_eq!(obj("K=\nK\n")["K"], Value::Null);
+        assert_eq!(obj("K\nK=\n")["K"], json!(""));
     }
 
     #[test]

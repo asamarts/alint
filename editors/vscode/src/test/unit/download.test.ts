@@ -1,6 +1,7 @@
 // Unit tests for the dependency-free `.tar.gz` extractor and `downloadAlint`.
 
 import * as assert from "node:assert/strict";
+import * as childProcess from "node:child_process";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -404,5 +405,255 @@ describe("downloadAlint + USTAR extractor", () => {
       () => extractSingleFileFromTarGz(bigArchive, expected, 8 * 1024),
       /maxOutputLength|Cannot create a Buffer|ERR_BUFFER_TOO_LARGE|length/i,
     );
+  });
+
+  it("extracts archives produced by the real system `tar -czf` tool", function () {
+    const tmp = makeTempDir();
+    try {
+      const version = "0.24.0";
+      const baseDir = `alint-v${version}-x86_64-unknown-linux-musl`;
+      const stageDir = path.join(tmp, baseDir);
+      fs.mkdirSync(path.join(stageDir, "docs"), { recursive: true });
+      const payload = crypto.randomBytes(4096);
+      fs.writeFileSync(path.join(stageDir, "alint"), payload, { mode: 0o755 });
+      fs.writeFileSync(path.join(stageDir, "README.md"), "# alint\n");
+      fs.writeFileSync(path.join(stageDir, "THIRD-PARTY-LICENSES.html"), "<html></html>");
+      fs.writeFileSync(path.join(stageDir, "docs", "ARCHITECTURE.md"), "# arch\n");
+
+      const archivePath = path.join(tmp, `${baseDir}.tar.gz`);
+      try {
+        childProcess.execFileSync("tar", ["-czf", archivePath, "-C", tmp, baseDir], {
+          stdio: "ignore",
+        });
+      } catch {
+        this.skip();
+        return;
+      }
+      const archiveBytes = fs.readFileSync(archivePath);
+      const extracted = extractSingleFileFromTarGz(archiveBytes, `${baseDir}/alint`);
+      assert.deepEqual(extracted, payload);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("hardens path normalization, typeflags, PAX/GNU metadata, and archive framing", () => {
+    const expected = "alint-v0.24.0-x86_64-unknown-linux-musl/alint";
+    const goodEntry: TarEntrySpec = { name: expected, content: Buffer.from("bin") };
+
+    // Post-dot-slash absolute/drive paths, empty segments, internal `.`, control chars, trailing slash on file.
+    for (const badPath of [
+      ".//etc/passwd",
+      "././C:/Windows/win.ini",
+      "alint-v0.24.0-x86_64-unknown-linux-musl/./alint",
+      "alint-v0.24.0-x86_64-unknown-linux-musl//alint",
+      "alint-v0.24.0-x86_64-unknown-linux-musl/file/",
+      "alint-v0.24.0-x86_64-unknown-linux-musl/bad\x07name",
+      "",
+    ]) {
+      const archive = buildTarGz([goodEntry, { name: badPath, content: Buffer.from("x") }]);
+      assert.throws(
+        () => extractSingleFileFromTarGz(archive, expected),
+        /empty|absolute|traversal|control|non-canonical/,
+        `expected rejection for ${JSON.stringify(badPath)}`,
+      );
+    }
+
+    // Case-colliding duplicate entry against target path.
+    const caseDup = buildTarGz([
+      goodEntry,
+      { name: "alint-v0.24.0-x86_64-unknown-linux-musl/ALINT", content: Buffer.from("evil") },
+    ]);
+    assert.throws(
+      () => extractSingleFileFromTarGz(caseDup, expected),
+      /duplicate entry/,
+    );
+
+    // Disallowed typeflags (char/block/FIFO/sparse) and non-zero-sized directory.
+    for (const flag of ["3", "4", "6", "S"]) {
+      const badType = buildTarGz([goodEntry, { name: "dir/special", typeflag: flag }]);
+      assert.throws(
+        () => extractSingleFileFromTarGz(badType, expected),
+        /unsupported.*typeflag/,
+        `expected rejection for typeflag ${flag}`,
+      );
+    }
+    const nonZeroDir = buildTarGz([
+      goodEntry,
+      { name: "dir/", typeflag: "5", content: Buffer.from("data") },
+    ]);
+    assert.throws(
+      () => extractSingleFileFromTarGz(nonZeroDir, expected),
+      /non-zero size/,
+    );
+
+    // PAX global header smuggling `path` or `size`, PAX `linkpath`, sparse, empty path.
+    const paxGlobal = zlib.gzipSync(
+      Buffer.concat([
+        buildHeader("pax_global_header", encodePax({ path: expected }).length, "g"),
+        padToBlock(encodePax({ path: expected })),
+        buildHeader("other", 3, "0"),
+        padToBlock(Buffer.from("bin")),
+        Buffer.alloc(1024, 0),
+      ]),
+    );
+    assert.throws(
+      () => extractSingleFileFromTarGz(paxGlobal, expected),
+      /unsupported PAX global key/,
+    );
+
+    const badPaxCases: Array<Record<string, string>> = [
+      { linkpath: "/etc/passwd" },
+      { "GNU.sparse.major": "1" },
+      { "SCHILY.realsize": "999" },
+      { path: "" },
+    ];
+    for (const badPax of badPaxCases) {
+      const archive = buildTarGz([
+        goodEntry,
+        { name: "x", pax: badPax, content: Buffer.from("x") },
+      ]);
+      assert.throws(
+        () => extractSingleFileFromTarGz(archive, expected),
+        /unsupported PAX|empty path override/,
+      );
+    }
+
+    // Stacked duplicate PAX 'x' or GNU 'L' headers, dangling 'x' before EOF, non-NUL tail in 'L'.
+    const paxData = encodePax({ path: expected });
+    const stackedPax = zlib.gzipSync(
+      Buffer.concat([
+        buildHeader("PaxHeaders/1", paxData.length, "x"),
+        padToBlock(paxData),
+        buildHeader("PaxHeaders/2", paxData.length, "x"),
+        padToBlock(paxData),
+        buildHeader("alint", 3, "0"),
+        padToBlock(Buffer.from("bin")),
+        Buffer.alloc(1024, 0),
+      ]),
+    );
+    assert.throws(() => extractSingleFileFromTarGz(stackedPax, expected), /stacked PAX/);
+
+    const danglingPax = zlib.gzipSync(
+      Buffer.concat([
+        buildHeader("alint-v0.24.0-x86_64-unknown-linux-musl/alint", 3, "0"),
+        padToBlock(Buffer.from("bin")),
+        buildHeader("PaxHeaders/dangle", paxData.length, "x"),
+        padToBlock(paxData),
+        Buffer.alloc(1024, 0),
+      ]),
+    );
+    assert.throws(() => extractSingleFileFromTarGz(danglingPax, expected), /dangling/);
+
+    const embeddedNulLong = Buffer.from("a/b\0extra\0", "utf8");
+    const badLong = zlib.gzipSync(
+      Buffer.concat([
+        buildHeader("././@LongLink", embeddedNulLong.length, "L"),
+        padToBlock(embeddedNulLong),
+        buildHeader("short", 3, "0"),
+        padToBlock(Buffer.from("bin")),
+        Buffer.alloc(1024, 0),
+      ]),
+    );
+    assert.throws(() => extractSingleFileFromTarGz(badLong, expected), /embedded NUL/);
+
+    // High-bit byte in PAX length (0xB1 instead of ASCII '1').
+    const highBitPax = Buffer.from([0xb1, 0x30, 0x20, 0x6b, 0x3d, 0x76, 0x0a, 0x0a, 0x0a, 0x0a]);
+    const badPaxLen = zlib.gzipSync(
+      Buffer.concat([
+        buildHeader("PaxHeaders/hi", highBitPax.length, "x"),
+        padToBlock(highBitPax),
+        buildHeader(expected, 3, "0"),
+        padToBlock(Buffer.from("bin")),
+        Buffer.alloc(1024, 0),
+      ]),
+    );
+    assert.throws(() => extractSingleFileFromTarGz(badPaxLen, expected), /PAX/);
+
+    // GNU tar `"ustar  \0"` magic with non-zero bytes at offset 345 (`atime`) must NOT be read as USTAR prefix.
+    const gnuHeader = buildHeader(expected, 3, "0");
+    gnuHeader.write("ustar  \0", 257, 8, "ascii");
+    gnuHeader.write("12345678901\0", 345, 12, "ascii");
+    gnuHeader.fill(0x20, 148, 156);
+    let sum = 0;
+    for (let i = 0; i < 512; i++) {
+      sum += gnuHeader[i];
+    }
+    gnuHeader.write(sum.toString(8).padStart(6, "0"), 148, 6, "ascii");
+    gnuHeader[154] = 0;
+    gnuHeader[155] = 0x20;
+    const gnuMagicArchive = zlib.gzipSync(
+      Buffer.concat([gnuHeader, padToBlock(Buffer.from("bin")), Buffer.alloc(1024, 0)]),
+    );
+    assert.deepEqual(extractSingleFileFromTarGz(gnuMagicArchive, expected), Buffer.from("bin"));
+
+    // Trailing non-zero garbage after a zero block and non-512-multiple framing.
+    const trailingGarbage = zlib.gzipSync(
+      Buffer.concat([
+        buildHeader(expected, 3, "0"),
+        padToBlock(Buffer.from("bin")),
+        Buffer.alloc(512, 0),
+        Buffer.alloc(512, 0x41),
+      ]),
+    );
+    assert.throws(
+      () => extractSingleFileFromTarGz(trailingGarbage, expected),
+      /trailing data after end-of-archive/,
+    );
+
+    const shortTar = zlib.gzipSync(Buffer.alloc(200, 0));
+    assert.throws(
+      () => extractSingleFileFromTarGz(shortTar, expected),
+      /truncated tar archive header/,
+    );
+  });
+
+  it("handles uppercase/malformed .sha256, maxBytes passthrough, and atomic overwrite", async () => {
+    const version = "0.24.0";
+    const target = "x86_64-unknown-linux-musl";
+    const baseDir = `alint-v${version}-${target}`;
+    const archiveName = `${baseDir}.tar.gz`;
+    const payload = Buffer.from("new-binary-v2", "utf8");
+    const archive = buildTarGz([{ name: `${baseDir}/alint`, content: payload }]);
+    const upperHex = crypto.createHash("sha256").update(archive).digest("hex").toUpperCase();
+
+    const destDir = makeTempDir();
+    try {
+      // Pre-existing binary must be atomically replaced.
+      fs.writeFileSync(path.join(destDir, "alint"), Buffer.from("old-binary-v1"));
+      const seenLimits: Array<{ url: string; maxBytes?: number }> = [];
+      const installed = await downloadAlint(version, destDir, () => {}, {
+        platform: "linux",
+        arch: "x64",
+        maxArchiveBytes: 123_456,
+        fetchFn: async (url, maxBytes) => {
+          seenLimits.push({ url, maxBytes });
+          if (url.endsWith(".sha256")) {
+            return Buffer.from(`${upperHex}  ${archiveName}\n`, "utf8");
+          }
+          return archive;
+        },
+      });
+      assert.deepEqual(fs.readFileSync(installed), payload);
+      assert.deepEqual(fs.readdirSync(destDir), ["alint"]);
+      assert.equal(seenLimits.find((x) => x.url.endsWith(".tar.gz"))?.maxBytes, 123_456);
+      assert.equal(seenLimits.find((x) => x.url.endsWith(".sha256"))?.maxBytes, 4096);
+
+      // Malformed .sha256 digest is rejected cleanly.
+      await assert.rejects(
+        () =>
+          downloadAlint(version, destDir, () => {}, {
+            platform: "linux",
+            arch: "x64",
+            fetchFn: async (url) =>
+              url.endsWith(".sha256")
+                ? Buffer.from("not-a-valid-hex-digest  alint.tar.gz\n")
+                : archive,
+          }),
+        /invalid SHA-256 checksum file/,
+      );
+    } finally {
+      fs.rmSync(destDir, { recursive: true, force: true });
+    }
   });
 });

@@ -97,7 +97,7 @@ pub enum Classification {
 /// NUL bytes are still scanned across the full slice passed to
 /// [`classify_bytes`] (up to [`TEXT_INSPECT_LEN`]) and across the entire file
 /// in [`looks_binary`].
-const CONTROL_SCAN_LEN: usize = 128;
+const CONTROL_SCAN_LEN: usize = 256;
 
 /// Binary magic signatures that can appear in a NUL-free prefix.
 const BINARY_MAGIC_PREFIXES: &[&[u8]] = &[
@@ -129,9 +129,10 @@ fn has_binary_magic(bytes: &[u8]) -> bool {
 /// Check whether the leading [`CONTROL_SCAN_LEN`] bytes contain a binary-like
 /// density of non-text C0/DEL control bytes.
 ///
-/// Uses a 64-bit SWAR fast path that tests 8 bytes per iteration for any byte
-/// `< 0x20` (other than `\n`) or `0x7F`; ordinary LF text returns `false`
-/// without entering the exact per-byte counter.
+/// Uses exact, zero-borrow / zero-carry 64-bit SWAR formulas that test 8 bytes
+/// per iteration for any byte `< 0x20` (other than `\n`) or `0x7F`. Ordinary LF
+/// source files (including indented lines after `\n`) return `false` without
+/// entering the per-byte counter.
 fn has_suspicious_control_density(sample: &[u8]) -> bool {
     const LO: u64 = 0x0101_0101_0101_0101;
     const HI: u64 = 0x8080_8080_8080_8080;
@@ -143,21 +144,28 @@ fn has_suspicious_control_density(sample: &[u8]) -> bool {
     let mut maybe_ctl = 0u64;
     for chunk in chunks {
         let w = u64::from_ne_bytes(*chunk);
-        // Bit 7 set in byte `i` when byte `i < 0x20` (conservative on borrow:
-        // never misses a real control byte, only falls through to exact count).
-        let lt20 = w.wrapping_sub(SPACE) & !w & HI;
+        // Zero-borrow / zero-carry per-lane checks (exact on both endiannesses):
+        //   lt20   : bit 7 set in lane i iff byte i < 0x20
+        //   is_nl  : bit 7 set in lane i iff byte i == b'\n'
+        //   is_del : bit 7 set in lane i iff byte i == 0x7F
+        let lt20 = !((w | HI).wrapping_sub(SPACE)) & !w & HI;
         let xnl = w ^ NL;
-        let is_nl = xnl.wrapping_sub(LO) & !xnl & HI;
-        // Bit 7 set when byte `i == 0x7F` (conservative on carry from `0xFF`).
-        let is_del = !w & w.wrapping_add(LO) & HI;
+        let is_nl = !((xnl | HI).wrapping_sub(LO)) & !xnl & HI;
+        let is_del = ((w & !HI).wrapping_add(LO)) & !w & HI;
         maybe_ctl |= (lt20 & !is_nl) | is_del;
     }
     if maybe_ctl == 0 && remainder.iter().all(|&b| !is_non_text_control(b)) {
         return false;
     }
-    let suspicious = prefix.iter().filter(|&&b| is_non_text_control(b)).count();
+    // Terminal logs / OSC-8 hyperlinks use ESC (`\x1b`) paired with BEL
+    // (`\x07`) terminators; exempt BEL when ESC is present in the window.
+    let has_esc = prefix.contains(&0x1B);
+    let suspicious = prefix
+        .iter()
+        .filter(|&&b| is_non_text_control(b) && !(has_esc && b == 0x07))
+        .count();
     (suspicious >= 2 && suspicious.saturating_mul(20) > prefix.len())
-        || suspicious.saturating_mul(10) > prefix.len().saturating_mul(3)
+        || suspicious.saturating_mul(2) > prefix.len()
 }
 
 /// Classify a non-empty, NUL-free, BOM-stripped sample.
@@ -270,11 +278,34 @@ pub(crate) enum CharScan {
     Skip,
 }
 
+/// Strong binary markers (a NUL byte anywhere, a wide UTF-16/UTF-32 BOM, or a
+/// known binary magic header). Used by [`char_scan_mode`] so that an attacker
+/// cannot evade Trojan-Source / secret scanning by planting a handful of C0
+/// control bytes and a single Latin-1 byte in an otherwise executable source
+/// comment.
+fn has_strong_binary_markers(bytes: &[u8]) -> bool {
+    if bytes.is_empty() {
+        return false;
+    }
+    if memchr::memchr(0x00, bytes).is_some() {
+        return true;
+    }
+    let after_utf8_bom = strip_leading_utf8_boms(bytes);
+    if after_utf8_bom.is_empty() {
+        return false;
+    }
+    starts_with_wide_bom(after_utf8_bom) || has_binary_magic(after_utf8_bom)
+}
+
 /// Classify `bytes` for a [`CharScan`].
 pub(crate) fn char_scan_mode(bytes: &[u8]) -> CharScan {
     if !looks_binary(bytes) {
         CharScan::Text
-    } else if std::str::from_utf8(bytes).is_ok() {
+    } else if std::str::from_utf8(bytes).is_ok() || !has_strong_binary_markers(bytes) {
+        // Scan valid UTF-8 (NUL cannot hide Trojan-Source controls) AND
+        // NUL-free/non-magic control-dense files (a few C0 controls + a Latin-1
+        // byte in a source comment cannot hide controls either), while keeping
+        // them non-fixable because `looks_binary` is true.
         CharScan::BinaryUtf8
     } else {
         CharScan::Skip
@@ -567,10 +598,43 @@ mod tests {
                 );
             }
         }
-        // Adjacent 0xFF + 0x7E (SWAR carry) and '\n' + ' ' (SWAR borrow) stay Text.
-        let tricky_text = b"pub fn f() {\n    let x = 1;\n}\n\xFF\x7E\xFF\x7E\r\n\tindented\n";
+        // Adjacent 0xFF + 0x7E (carry), '\n' + ' ' (borrow), '\n' + '\x0B', and
+        // OSC-8 hyperlinks (ESC + BEL) stay Text.
+        let tricky_text = b"pub fn f() {\n    let x = 1;\n\x0b}\n\xFF\x7E\xFF\x7E\r\n\tindented\n";
         assert_eq!(classify_bytes(tricky_text), Classification::Text);
         assert!(!looks_binary(tricky_text));
+        let osc8 = b"\x1b]8;;https://alint.org\x07ok\x1b]8;;\x07\n";
+        assert_eq!(classify_bytes(osc8), Classification::Text);
+        // Short files: single stray control in a 3-byte file stays Text;
+        // majority controls (1/1, 2/3) classify Binary; remainder lengths 7/8/9.
+        assert_eq!(classify_bytes(b"a\x07\n"), Classification::Text);
+        assert_eq!(classify_bytes(b"\x01\x02a"), Classification::Binary);
+        assert_eq!(classify_bytes(b"abcdefg"), Classification::Text);
+        assert_eq!(classify_bytes(b"abcdefgh"), Classification::Text);
+        assert_eq!(classify_bytes(b"abcdefghi"), Classification::Text);
+        // Stacked UTF-8 BOM only, and UTF-8 BOM stacked before UTF-32 BE BOM.
+        assert_eq!(
+            classify_bytes(b"\xEF\xBB\xBF\xEF\xBB\xBF"),
+            Classification::Text
+        );
+        assert!(!looks_binary(b"\xEF\xBB\xBF\xEF\xBB\xBF"));
+        assert_eq!(
+            classify_bytes(b"\xEF\xBB\xBF\x00\x00\xFE\xFF\x00\x00\x00a"),
+            Classification::Text
+        );
+        assert!(looks_binary(b"\xEF\xBB\xBF\x00\x00\xFE\xFF\x00\x00\x00a"));
+    }
+
+    #[test]
+    fn char_scan_mode_does_not_skip_nul_free_c0_plus_latin1_trojan_source() {
+        // Security regression (#612 audit): 7 C0 bytes + 1 Latin-1 byte in a
+        // comment makes `looks_binary` true and `from_utf8` false, but MUST NOT
+        // let an attacker bypass Trojan-Source / secret scanning (`CharScan::Skip`).
+        let mut crafted = b"# coding: latin-1 \x01\x02\x03\x04\x05\x06\x07\xe9\n".to_vec();
+        crafted.extend_from_slice("x = '\u{202E}evil'\n".as_bytes());
+        assert!(looks_binary(&crafted));
+        assert!(std::str::from_utf8(&crafted).is_err());
+        assert_eq!(char_scan_mode(&crafted), CharScan::BinaryUtf8);
     }
 
     #[test]

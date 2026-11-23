@@ -25,6 +25,20 @@ use std::ops::Range;
 
 use serde_json::{Map, Value};
 
+/// Separator kind appearing between a `.properties` key and its value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Separator {
+    /// Bare separator-less key (`flag\n`), where splicing a value at
+    /// `value_span` would fuse into the key token.
+    None,
+    /// Whitespace-only separator (`key value\n`), where a replacement starting
+    /// with `=` or `:` would be re-parsed as an explicit separator unless
+    /// escaped with a leading `\`.
+    Whitespace,
+    /// Explicit `=` or `:` separator (`key=value\n`, `key : value\n`).
+    Explicit,
+}
+
 /// One parsed logical entry from a `.properties` document with exact byte spans
 /// in the original input (including any stripped leading UTF-8 BOMs).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,10 +53,8 @@ pub(crate) struct PropertyEntry {
     /// Raw source span of the value token (after separator and leading value
     /// whitespace, through the end of the final physical line's content).
     pub(crate) value_span: Range<usize>,
-    /// Whether an explicit (`=` / `:`) or whitespace separator appeared after
-    /// the key. False only for a bare separator-less key (`flag\n`), where
-    /// splicing a value at `value_span` would fuse into the key token.
-    pub(crate) has_separator: bool,
+    /// Separator kind between key and value.
+    pub(crate) separator: Separator,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,16 +115,11 @@ impl<'a> LogicalCursor<'a> {
         }
     }
 
-    /// Consume any backslash line continuations (and a lone trailing
-    /// continuation backslash at the end of the logical line) at `self.pos`.
-    fn skip_continuations(&mut self) {
-        while self.pos < self.end && self.bytes[self.pos] == b'\\' {
-            if self.pos + 1 == self.end {
-                // Lone trailing continuation backslash at end of logical line
-                // (EOF or before final EOF newline): strip it per OpenJDK.
-                self.pos = self.end;
-                break;
-            }
+    /// Consume any backslash line continuations (`\` + `\r`/`\n` + leading
+    /// continuation whitespace) at `self.pos`, leaving a lone trailing `\` at
+    /// `self.end` intact so `value_span` covers it on empty-value EOF lines.
+    fn skip_line_continuations(&mut self) {
+        while self.pos + 1 < self.end && self.bytes[self.pos] == b'\\' {
             match self.bytes[self.pos + 1] {
                 b'\r' => {
                     self.pos += 2;
@@ -133,6 +140,15 @@ impl<'a> LogicalCursor<'a> {
                 }
                 _ => break,
             }
+        }
+    }
+
+    /// Consume any backslash line continuations AND strip a lone trailing
+    /// continuation backslash at `self.end` (per `OpenJDK` `Properties.LineReader`).
+    fn skip_continuations(&mut self) {
+        self.skip_line_continuations();
+        if self.pos + 1 == self.end && self.bytes[self.pos] == b'\\' {
+            self.pos = self.end;
         }
     }
 
@@ -234,6 +250,7 @@ impl<'a> LogicalCursor<'a> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn parse_logical_entry(
     body: &str,
     base: usize,
@@ -242,18 +259,23 @@ fn parse_logical_entry(
     content_end: usize,
     next_at: usize,
     entry_line: usize,
+    decode_value: bool,
 ) -> Result<Option<PropertyEntry>, PropertiesError> {
     let bytes = body.as_bytes();
     let mut cursor = LogicalCursor::new(body, first, content_end, entry_line);
-    cursor.skip_continuations();
+    cursor.skip_line_continuations();
     let key_start = cursor.pos;
     let mut key_end = key_start;
     let mut key = String::new();
     let mut saw_key_char = false;
 
     loop {
-        cursor.skip_continuations();
+        cursor.skip_line_continuations();
         if cursor.pos >= cursor.end {
+            break;
+        }
+        if cursor.pos + 1 == cursor.end && bytes[cursor.pos] == b'\\' {
+            // Lone trailing continuation backslash at EOF is stripped, not a key char.
             break;
         }
         match bytes[cursor.pos] {
@@ -276,7 +298,7 @@ fn parse_logical_entry(
 
     let mut has_separator_ws = false;
     loop {
-        cursor.skip_continuations();
+        cursor.skip_line_continuations();
         if cursor.pos < cursor.end && is_prop_ws(bytes[cursor.pos]) {
             has_separator_ws = true;
             cursor.pos += 1;
@@ -286,12 +308,12 @@ fn parse_logical_entry(
     }
 
     let mut has_explicit_sep = false;
-    cursor.skip_continuations();
+    cursor.skip_line_continuations();
     if cursor.pos < cursor.end && matches!(bytes[cursor.pos], b'=' | b':') {
         has_explicit_sep = true;
         cursor.pos += 1;
         loop {
-            cursor.skip_continuations();
+            cursor.skip_line_continuations();
             if cursor.pos < cursor.end && is_prop_ws(bytes[cursor.pos]) {
                 cursor.pos += 1;
             } else {
@@ -306,7 +328,11 @@ fn parse_logical_entry(
         return Ok(None);
     }
 
-    cursor.skip_continuations();
+    // Use `skip_line_continuations` (not `skip_continuations`) before recording
+    // `value_start` so an empty value ending in a lone EOF continuation
+    // backslash (`k=\\\n`, `k=\\`) includes that backslash in `value_span`,
+    // preventing a splice at `value_span` from fusing into `k=\<new>`.
+    cursor.skip_line_continuations();
     let value_start = cursor.pos;
     let mut value = String::new();
     loop {
@@ -316,11 +342,23 @@ fn parse_logical_entry(
         }
         if bytes[cursor.pos] == b'\\' {
             let ch = cursor.decode_escape().map_err(PropertiesError::Parse)?;
-            value.push(ch);
-        } else if let Some(ch) = cursor.next_char() {
+            if decode_value {
+                value.push(ch);
+            }
+        } else if let Some(ch) = cursor.next_char()
+            && decode_value
+        {
             value.push(ch);
         }
     }
+
+    let separator = if has_explicit_sep {
+        Separator::Explicit
+    } else if has_separator_ws {
+        Separator::Whitespace
+    } else {
+        Separator::None
+    };
 
     let value_end = content_end.max(value_start);
     Ok(Some(PropertyEntry {
@@ -329,16 +367,20 @@ fn parse_logical_entry(
         full_span: (base + line_start)..(base + next_at),
         key_span: (base + key_start)..(base + key_end),
         value_span: (base + value_start)..(base + value_end),
-        has_separator: has_explicit_sep || has_separator_ws,
+        separator,
     }))
 }
 
-/// Parse Java `.properties` entries with exact source byte spans and an
-/// optional maximum entry count.
-pub(crate) fn parse_entries(
+/// Stream Java `.properties` entries in source order with exact byte spans and
+/// an optional maximum entry count. When `decode_values` is `false`, value
+/// escapes are still strictly validated without allocating decoded value
+/// strings.
+pub(crate) fn for_each_entry(
     text: &str,
     max_entries: Option<usize>,
-) -> Result<Vec<PropertyEntry>, PropertiesError> {
+    decode_values: bool,
+    mut visit: impl FnMut(PropertyEntry),
+) -> Result<(), PropertiesError> {
     if text.len() > crate::structured_format::MAX_STRUCTURED_BYTES {
         return Err(PropertiesError::Parse(format!(
             "input exceeds the maximum supported size for a structured document ({} bytes)",
@@ -348,7 +390,7 @@ pub(crate) fn parse_entries(
     let body = text.trim_start_matches('\u{feff}');
     let base = text.len() - body.len();
     let bytes = body.as_bytes();
-    let mut entries = Vec::new();
+    let mut count = 0usize;
     let mut at = 0usize;
     let mut line_no = 1usize;
 
@@ -391,28 +433,42 @@ pub(crate) fn parse_entries(
             content_end,
             next_at,
             entry_line,
+            decode_values,
         )? {
             if let Some(limit) = max_entries
-                && entries.len() >= limit
+                && count >= limit
             {
                 return Err(PropertiesError::Limit { limit });
             }
-            entries.push(entry);
+            count += 1;
+            visit(entry);
         }
         at = next_at;
     }
 
+    Ok(())
+}
+
+/// Parse Java `.properties` entries with exact source byte spans and an
+/// optional maximum entry count.
+#[cfg(test)]
+pub(crate) fn parse_entries(
+    text: &str,
+    max_entries: Option<usize>,
+) -> Result<Vec<PropertyEntry>, PropertiesError> {
+    let mut entries = Vec::new();
+    for_each_entry(text, max_entries, true, |entry| entries.push(entry))?;
     Ok(entries)
 }
 
 /// Parse Java `.properties` `text` into a flat `Value::Object` of literal
-/// strings (last-wins on duplicate keys).
+/// strings (last-wins on duplicate keys) in O(unique keys) memory.
 pub(crate) fn parse(text: &str) -> Result<Value, String> {
-    let entries = parse_entries(text, None).map_err(|e| e.to_string())?;
-    let mut map = Map::with_capacity(entries.len());
-    for entry in entries {
+    let mut map = Map::new();
+    for_each_entry(text, None, true, |entry| {
         map.insert(entry.key, Value::String(entry.value));
-    }
+    })
+    .map_err(|e| e.to_string())?;
     Ok(Value::Object(map))
 }
 
@@ -538,5 +594,32 @@ mod tests {
             parse_entries(src, Some(2)).unwrap_err(),
             PropertiesError::Limit { limit: 2 }
         );
+    }
+
+    #[test]
+    fn empty_value_eof_backslash_is_included_in_value_span_and_separator_classified() {
+        for (src, expected_span, expected_sep) in [
+            ("k=\\\n", "\\", Separator::Explicit),
+            ("k=\\", "\\", Separator::Explicit),
+            ("k=   \\\n", "\\", Separator::Explicit),
+            ("k=\\\n  \\\n", "\\", Separator::Explicit),
+            ("k \\\n", "\\", Separator::Whitespace),
+            ("k=\\\n  val\n", "val", Separator::Explicit),
+            ("k=val\\\n", "val\\", Separator::Explicit),
+            ("flag\n", "", Separator::None),
+        ] {
+            let entries = parse_entries(src, None).unwrap();
+            assert_eq!(entries.len(), 1, "{src:?}");
+            assert_eq!(
+                &src[entries[0].value_span.clone()],
+                expected_span,
+                "{src:?}"
+            );
+            assert_eq!(entries[0].separator, expected_sep, "{src:?}");
+        }
+        // Blank continuation-only lines still produce zero entries.
+        assert_eq!(parse_entries("   \\\n  \\\n", None).unwrap(), Vec::new());
+        // Streaming with decode_values=false still rejects bad value escapes.
+        assert!(for_each_entry("k=\\uZZZZ\n", None, false, |_| {}).is_err());
     }
 }

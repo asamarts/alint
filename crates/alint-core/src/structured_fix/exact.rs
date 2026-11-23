@@ -28,12 +28,16 @@ pub enum Intent {
 }
 
 /// Whether an edit in `format` is checked against the whole document: YAML,
-/// JSON and TOML, whose tree is what the structured rules query. The other
-/// formats' trees fold their source (XML's repeated elements become an array,
-/// one of them an object), so a correct edit can change a node's shape.
+/// JSON, TOML, and `.properties`, whose tree is what the structured rules
+/// query. The other formats' trees fold their source (XML's repeated elements
+/// become an array, one of them an object; INI folds duplicates into arrays),
+/// so a correct edit can change a node's shape.
 #[must_use]
 pub fn checks_whole_document(format: Format) -> bool {
-    matches!(format, Format::Yaml | Format::Json | Format::Toml)
+    matches!(
+        format,
+        Format::Yaml | Format::Json | Format::Toml | Format::Properties
+    )
 }
 
 /// `before` with each of `intents` applied: the sets first, then the
@@ -101,12 +105,17 @@ pub fn checked_value_edits(
     before: &Value,
     sets: &[(Vec<PathSeg>, Value)],
 ) -> Vec<Option<(Range<usize>, Vec<u8>)>> {
-    let paths: Vec<Vec<PathSeg>> = sets.iter().map(|(path, _)| path.clone()).collect();
-    let edits: Vec<Option<(Range<usize>, Vec<u8>)>> = resolve_value_spans(format, bytes, &paths)
-        .into_iter()
-        .zip(sets)
-        .map(|(span, (_, value))| Some((span?, serialize_scalar(format, value)?)))
-        .collect();
+    let edits: Vec<Option<(Range<usize>, Vec<u8>)>> =
+        if let (Format::Properties, Ok(text)) = (format, std::str::from_utf8(bytes)) {
+            super::properties_value_edits(text, sets)
+        } else {
+            let paths: Vec<Vec<PathSeg>> = sets.iter().map(|(path, _)| path.clone()).collect();
+            resolve_value_spans(format, bytes, &paths)
+                .into_iter()
+                .zip(sets)
+                .map(|(span, (_, value))| Some((span?, serialize_scalar(format, value)?)))
+                .collect()
+        };
     let intents: Vec<_> = sets
         .iter()
         .zip(&edits)

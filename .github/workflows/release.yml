@@ -1009,6 +1009,7 @@ jobs:
           npm ci
           npm run audit
           npm run check-types
+          npm run test:unit
           npm run build
           # vsce/ovsx read VSCE_PAT/OVSX_PAT from the environment.
           npx --no-install vsce publish --no-dependencies --skip-duplicate
