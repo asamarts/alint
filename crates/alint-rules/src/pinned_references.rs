@@ -4,12 +4,12 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 
+use alint_core::yaml::{LineIndex, SpannedEvents, StreamEvent, parse_spanned_events};
 use alint_core::yaml_depth::Expansion;
 use alint_core::{
-    AnalysisFailureKind, Context, Error, Level, PerFileRule, Result, Rule, RuleSpec, Scope,
-    SourceRange, Violation, eval_per_file,
+    AnalysisFailureKind, ByteSpan, Context, Error, Level, PerFileRule, Result, Rule, RuleSpec,
+    Scope, SourceRange, Violation, eval_per_file,
 };
-use ayaml::{ColumnEncoding, Event, EventStream, LineIndex, Location, ScalarStyle, Span, Tag};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -284,22 +284,14 @@ struct FindingSpan {
 }
 
 impl FindingSpan {
-    fn from_yaml(span: Span, line_index: &LineIndex<'_>) -> Option<Self> {
-        let start = Location::from(
-            line_index
-                .to_position(span.start(), ColumnEncoding::Scalar)
-                .ok()?,
-        );
-        let end = Location::from(
-            line_index
-                .to_position(span.end(), ColumnEncoding::Scalar)
-                .ok()?,
-        );
+    fn from_yaml(span: ByteSpan, line_index: &LineIndex<'_>) -> Option<Self> {
+        let (start_line, start_column) = line_index.line_col(span.start)?;
+        let (end_line, end_column) = line_index.line_col(span.end)?;
         Some(Self {
-            start_line: start.line(),
-            start_column: start.column(),
-            end_line: end.line(),
-            end_column: end.column(),
+            start_line,
+            start_column,
+            end_line,
+            end_column,
         })
     }
 
@@ -369,7 +361,7 @@ type GitlabExtendsEntry = (Option<YamlRef>, Option<YamlRef>, usize);
 #[derive(Debug, Clone, Copy)]
 struct YamlRef {
     id: NodeId,
-    use_span: Option<Span>,
+    use_span: Option<ByteSpan>,
 }
 
 impl YamlRef {
@@ -387,7 +379,7 @@ struct MappingEntry {
 #[derive(Debug)]
 struct YamlNode {
     kind: YamlNodeKind,
-    span: Span,
+    span: ByteSpan,
     plain_scalar: bool,
     explicit_string: bool,
     gitlab_reference: bool,
@@ -404,28 +396,10 @@ enum YamlNodeKind {
 #[derive(Clone, Copy)]
 struct ScalarRef<'a> {
     value: &'a str,
-    span: Span,
+    span: ByteSpan,
 }
 
-fn compat_parse_options() -> ayaml::compat::ParseOptions {
-    use alint_core::yaml_depth::{
-        MAX_YAML_EXPANSION_BYTES, MAX_YAML_FLOW_DEPTH, YAML_EXPANSION_BYTES_PER_INPUT_BYTE,
-        YAML_NODE_COST,
-    };
-    let limits = ayaml::Limits::default()
-        .with_max_input_bytes(MAX_PINNED_REFERENCES_BYTES)
-        .with_max_depth(MAX_YAML_FLOW_DEPTH)
-        .with_max_alias_expansion_bytes(MAX_YAML_EXPANSION_BYTES)
-        .with_alias_bytes_per_input_byte(YAML_EXPANSION_BYTES_PER_INPUT_BYTE)
-        .with_node_cost_bytes(YAML_NODE_COST)
-        .with_max_events(usize::MAX)
-        .with_max_collection_entries(usize::MAX)
-        .with_max_anchors(usize::MAX)
-        .with_max_alias_dereferences(usize::MAX);
-    ayaml::compat::ParseOptions::new().with_limits(limits)
-}
-
-type PeekableEvents<'a> = std::iter::Peekable<EventStream<'a>>;
+type PeekableEvents<'a> = std::iter::Peekable<SpannedEvents<'a>>;
 
 impl YamlDocument {
     fn parse(text: &str) -> std::result::Result<Option<Self>, String> {
@@ -453,24 +427,24 @@ impl YamlDocument {
     /// [`Self::parse`] without the guards, which tests bypass to reach the
     /// lookups' own bounds.
     fn parse_unguarded(text: &str) -> std::result::Result<Option<Self>, String> {
-        let mut events = ayaml::compat::parse_events_with(text, &compat_parse_options())
+        let mut events = parse_spanned_events(text)
             .map_err(|error| yaml_parse_error(&error))?
             .peekable();
         expect_event(
             &mut events,
-            |event| matches!(event, Event::StreamStart { .. }),
+            |event| matches!(event, StreamEvent::StreamStart { .. }),
             "stream start",
         )?;
         skip_directives(&mut events)?;
         if peek_matches(&mut events, |event| {
-            matches!(event, Event::StreamEnd { .. })
+            matches!(event, StreamEvent::StreamEnd { .. })
         })? {
             let _ = next_event(&mut events)?;
             return Ok(None);
         }
         expect_event(
             &mut events,
-            |event| matches!(event, Event::DocumentStart { .. }),
+            |event| matches!(event, StreamEvent::DocumentStart { .. }),
             "document start",
         )?;
         let mut document = Self {
@@ -484,14 +458,14 @@ impl YamlDocument {
         document.root = document.parse_node(&mut events, 0)?;
         expect_event(
             &mut events,
-            |event| matches!(event, Event::DocumentEnd { .. }),
+            |event| matches!(event, StreamEvent::DocumentEnd { .. }),
             "document end",
         )?;
         skip_directives(&mut events)?;
         let event = next_event(&mut events)?;
         match event {
-            Event::StreamEnd { .. } => Ok(Some(document)),
-            Event::DocumentStart { .. } => {
+            StreamEvent::StreamEnd { .. } => Ok(Some(document)),
+            StreamEvent::DocumentStart { .. } => {
                 Err("multiple YAML documents are not supported".to_owned())
             }
             _ => Err("expected stream end".to_owned()),
@@ -509,52 +483,63 @@ impl YamlDocument {
         let event = next_event(events)?;
         let start_span = event.span();
         let (kind, span, anchor, plain_scalar, explicit_string, gitlab_reference) = match event {
-            Event::Scalar {
+            StreamEvent::Scalar {
                 value,
-                style,
+                plain,
                 anchor,
-                tag,
+                explicit_string_tag,
+                local_tag,
                 ..
             } => (
                 YamlNodeKind::Scalar(value.into_owned()),
                 start_span,
-                anchor.map(|a| a.as_str().to_owned()),
-                style == ScalarStyle::Plain,
-                is_explicit_string_tag(tag.as_ref()),
-                is_gitlab_reference_tag(tag.as_ref()),
+                anchor,
+                plain,
+                explicit_string_tag,
+                local_tag.as_deref() == Some("reference"),
             ),
             // An anchor is recorded once its node is complete, so an alias to
             // one still open refers to a collection that contains it: a cycle.
-            Event::Alias { anchor, .. } if !self.anchors.contains_key(anchor.as_str()) => {
+            StreamEvent::Alias { anchor, .. } if !self.anchors.contains_key(anchor.as_str()) => {
                 return Err("a YAML alias refers to a collection that contains it".to_owned());
             }
-            Event::Alias { anchor, .. } => (
-                YamlNodeKind::Alias(anchor.as_str().to_owned()),
+            StreamEvent::Alias { anchor, .. } => (
+                YamlNodeKind::Alias(anchor),
                 start_span,
                 None,
                 false,
                 false,
                 false,
             ),
-            Event::SequenceStart { anchor, tag, .. } => {
-                let gitlab_reference = is_gitlab_reference_tag(tag.as_ref());
+            StreamEvent::SequenceStart {
+                anchor, local_tag, ..
+            } => {
+                let gitlab_reference = local_tag.as_deref() == Some("reference");
                 let (items, end_span) = self.parse_sequence(events, depth + 1)?;
                 (
                     YamlNodeKind::Sequence(items),
-                    Span::new(start_span.start(), end_span.end()),
-                    anchor.map(|a| a.as_str().to_owned()),
+                    ByteSpan {
+                        start: start_span.start,
+                        end: end_span.end,
+                    },
+                    anchor,
                     false,
                     false,
                     gitlab_reference,
                 )
             }
-            Event::MappingStart { anchor, tag, .. } => {
-                let gitlab_reference = is_gitlab_reference_tag(tag.as_ref());
+            StreamEvent::MappingStart {
+                anchor, local_tag, ..
+            } => {
+                let gitlab_reference = local_tag.as_deref() == Some("reference");
                 let (entries, end_span) = self.parse_mapping(events, depth + 1)?;
                 (
                     YamlNodeKind::Mapping(entries),
-                    Span::new(start_span.start(), end_span.end()),
-                    anchor.map(|a| a.as_str().to_owned()),
+                    ByteSpan {
+                        start: start_span.start,
+                        end: end_span.end,
+                    },
+                    anchor,
                     false,
                     false,
                     gitlab_reference,
@@ -580,10 +565,12 @@ impl YamlDocument {
         &mut self,
         events: &mut PeekableEvents<'_>,
         depth: usize,
-    ) -> std::result::Result<(Vec<NodeId>, Span), String> {
+    ) -> std::result::Result<(Vec<NodeId>, ByteSpan), String> {
         let mut items = Vec::new();
         loop {
-            if peek_matches(events, |event| matches!(event, Event::SequenceEnd { .. }))? {
+            if peek_matches(events, |event| {
+                matches!(event, StreamEvent::SequenceEnd { .. })
+            })? {
                 let event = next_event(events)?;
                 return Ok((items, event.span()));
             }
@@ -595,10 +582,12 @@ impl YamlDocument {
         &mut self,
         events: &mut PeekableEvents<'_>,
         depth: usize,
-    ) -> std::result::Result<(Vec<(NodeId, NodeId)>, Span), String> {
+    ) -> std::result::Result<(Vec<(NodeId, NodeId)>, ByteSpan), String> {
         let mut entries = Vec::new();
         loop {
-            if peek_matches(events, |event| matches!(event, Event::MappingEnd { .. }))? {
+            if peek_matches(events, |event| {
+                matches!(event, StreamEvent::MappingEnd { .. })
+            })? {
                 let event = next_event(events)?;
                 return Ok((entries, event.span()));
             }
@@ -1006,7 +995,7 @@ impl YamlDocument {
     }
 }
 
-fn next_event<'a>(events: &mut PeekableEvents<'a>) -> std::result::Result<Event<'a>, String> {
+fn next_event<'a>(events: &mut PeekableEvents<'a>) -> std::result::Result<StreamEvent<'a>, String> {
     events
         .next()
         .ok_or_else(|| "unexpected end of YAML event stream".to_owned())?
@@ -1014,34 +1003,28 @@ fn next_event<'a>(events: &mut PeekableEvents<'a>) -> std::result::Result<Event<
 }
 
 fn skip_directives(events: &mut PeekableEvents<'_>) -> std::result::Result<(), String> {
-    while peek_matches(events, |event| matches!(event, Event::Directive { .. }))? {
+    while peek_matches(events, |event| {
+        matches!(event, StreamEvent::Directive { .. })
+    })? {
         let _ = next_event(events)?;
     }
     Ok(())
 }
 
-fn is_explicit_string_tag(tag: Option<&Tag>) -> bool {
-    tag.is_some_and(|tag| tag.is_core() && tag.suffix() == "str")
-}
-
-fn is_gitlab_reference_tag(tag: Option<&Tag>) -> bool {
-    tag.is_some_and(|tag| tag.handle() == "!" && tag.suffix() == "reference")
-}
-
-fn yaml_parse_error(error: &ayaml::Error) -> String {
+fn yaml_parse_error(error: &alint_core::yaml::Error) -> String {
     match error.location() {
         Some(location) => format!(
             "invalid YAML syntax at line {} column {}",
             location.line(),
             location.column()
         ),
-        None => error.masked().to_string(),
+        None => error.masked_message(),
     }
 }
 
 fn expect_event(
     events: &mut PeekableEvents<'_>,
-    predicate: impl FnOnce(&Event<'_>) -> bool,
+    predicate: impl FnOnce(&StreamEvent<'_>) -> bool,
     expected: &str,
 ) -> std::result::Result<(), String> {
     let event = next_event(events)?;
@@ -1054,7 +1037,7 @@ fn expect_event(
 
 fn peek_matches(
     events: &mut PeekableEvents<'_>,
-    predicate: impl FnOnce(&Event<'_>) -> bool,
+    predicate: impl FnOnce(&StreamEvent<'_>) -> bool,
 ) -> std::result::Result<bool, String> {
     match events.peek() {
         Some(Ok(event)) => Ok(predicate(event)),

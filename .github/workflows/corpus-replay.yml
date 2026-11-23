@@ -57,8 +57,10 @@ jobs:
         with:
           key: corpus-replay
       - name: build alint and xtask
+        env:
+          COMPARE_MODE: ${{ inputs.compare_mode }}
         run: |
-          if [[ "${{ inputs.compare_mode }}" == "true" ]]; then
+          if [[ "${COMPARE_MODE:-}" == "true" ]]; then
             cargo build --release --locked -p alint --features alint-core/yaml-reference
             cargo build --release --locked -p xtask
           else
@@ -76,6 +78,8 @@ jobs:
           (cd "$RUNNER_TEMP/compare" && cargo build --release --locked -p alint)
           echo "COMPARE_BIN=$RUNNER_TEMP/compare/target/release/alint" >> "$GITHUB_ENV"
       - name: replay
+        env:
+          COMPARE_MODE: ${{ inputs.compare_mode }}
         run: |
           args=(--alint target/release/alint
                 --cache "$HOME/.cache/alint-corpus-replay"
@@ -86,7 +90,7 @@ jobs:
           if [[ -n "${COMPARE_BIN:-}" ]]; then
             args+=(--compare "$COMPARE_BIN")
           fi
-          if [[ "${{ inputs.compare_mode }}" == "true" ]]; then
+          if [[ "${COMPARE_MODE:-}" == "true" ]]; then
             args+=(--yaml-compare --yaml-compare-log "$RUNNER_TEMP/yaml-compare.jsonl")
           fi
           target/release/xtask corpus-replay "${args[@]}"

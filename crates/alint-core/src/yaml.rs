@@ -101,6 +101,214 @@ pub(crate) fn parse_events_stream(input: &str) -> Result<ayaml::EventStream<'_>,
     ayaml::compat::parse_events_with(input, &compat_parse_options())
 }
 
+/// Line/column lookup over a YAML source buffer, wrapping the parser's
+/// internal line index without exposing parser types in `alint-core`'s API.
+#[doc(hidden)]
+pub struct LineIndex<'a>(ayaml::LineIndex<'a>);
+
+impl fmt::Debug for LineIndex<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("LineIndex").finish_non_exhaustive()
+    }
+}
+
+impl<'a> LineIndex<'a> {
+    /// Index the line starts of `text`.
+    #[must_use]
+    pub fn new(text: &'a str) -> Self {
+        Self(ayaml::LineIndex::new(text))
+    }
+
+    /// 1-based `(line, column)` counted in Unicode scalar values for `byte_offset`.
+    #[must_use]
+    pub fn line_col(&self, byte_offset: usize) -> Option<(usize, usize)> {
+        let pos = self
+            .0
+            .to_position(byte_offset, ayaml::ColumnEncoding::Scalar)
+            .ok()?;
+        let loc = ayaml::Location::from(pos);
+        Some((loc.line(), loc.column()))
+    }
+
+    /// 0-based `(line, character)` counted in UTF-16 code units for `byte_offset`
+    /// (LSP `Position` coordinates).
+    #[must_use]
+    pub fn utf16_position(&self, byte_offset: usize) -> Option<(u32, u32)> {
+        let pos = self
+            .0
+            .to_position(byte_offset, ayaml::ColumnEncoding::Utf16)
+            .ok()?;
+        let line = u32::try_from(pos.line).ok()?;
+        let column = u32::try_from(pos.column).ok()?;
+        Some((line, column))
+    }
+}
+
+/// One spanned YAML event exposed internally for workspace crates such as
+/// `alint-rules` (`pinned_references`) so every YAML parse in the workspace
+/// goes through `alint_core::yaml` and respects alint's parser limits.
+#[doc(hidden)]
+#[derive(Debug, Clone)]
+pub enum StreamEvent<'a> {
+    StreamStart {
+        span: crate::ByteSpan,
+    },
+    StreamEnd {
+        span: crate::ByteSpan,
+    },
+    DocumentStart {
+        span: crate::ByteSpan,
+    },
+    DocumentEnd {
+        span: crate::ByteSpan,
+    },
+    Directive {
+        span: crate::ByteSpan,
+    },
+    Scalar {
+        value: std::borrow::Cow<'a, str>,
+        plain: bool,
+        anchor: Option<String>,
+        explicit_string_tag: bool,
+        local_tag: Option<String>,
+        span: crate::ByteSpan,
+    },
+    Alias {
+        anchor: String,
+        span: crate::ByteSpan,
+    },
+    SequenceStart {
+        anchor: Option<String>,
+        local_tag: Option<String>,
+        span: crate::ByteSpan,
+    },
+    SequenceEnd {
+        span: crate::ByteSpan,
+    },
+    MappingStart {
+        anchor: Option<String>,
+        local_tag: Option<String>,
+        span: crate::ByteSpan,
+    },
+    MappingEnd {
+        span: crate::ByteSpan,
+    },
+    /// Future non-exhaustive parser event variant.
+    Other {
+        span: crate::ByteSpan,
+    },
+}
+
+impl StreamEvent<'_> {
+    /// Native UTF-8 byte span of this event in the source input.
+    #[must_use]
+    pub const fn span(&self) -> crate::ByteSpan {
+        match self {
+            Self::StreamStart { span }
+            | Self::StreamEnd { span }
+            | Self::DocumentStart { span }
+            | Self::DocumentEnd { span }
+            | Self::Directive { span }
+            | Self::Scalar { span, .. }
+            | Self::Alias { span, .. }
+            | Self::SequenceStart { span, .. }
+            | Self::SequenceEnd { span }
+            | Self::MappingStart { span, .. }
+            | Self::MappingEnd { span }
+            | Self::Other { span } => *span,
+        }
+    }
+}
+
+/// Streaming iterator of [`StreamEvent`]s under alint's unified YAML parser limits.
+#[doc(hidden)]
+pub struct SpannedEvents<'a>(ayaml::EventStream<'a>);
+
+impl fmt::Debug for SpannedEvents<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SpannedEvents").finish_non_exhaustive()
+    }
+}
+
+impl<'a> Iterator for SpannedEvents<'a> {
+    type Item = Result<StreamEvent<'a>, Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0
+            .next()
+            .map(|item| item.map(map_stream_event).map_err(Error::ayaml))
+    }
+}
+
+fn byte_span(span: ayaml::Span) -> crate::ByteSpan {
+    crate::ByteSpan {
+        start: span.start(),
+        end: span.end(),
+    }
+}
+
+fn local_tag_suffix(tag: Option<&ayaml::Tag>) -> Option<String> {
+    tag.filter(|t| t.handle() == "!")
+        .map(|t| t.suffix().to_owned())
+}
+
+fn map_stream_event(event: ayaml::Event<'_>) -> StreamEvent<'_> {
+    let span = byte_span(event.span());
+    match event {
+        ayaml::Event::StreamStart { .. } => StreamEvent::StreamStart { span },
+        ayaml::Event::StreamEnd { .. } => StreamEvent::StreamEnd { span },
+        ayaml::Event::DocumentStart { .. } => StreamEvent::DocumentStart { span },
+        ayaml::Event::DocumentEnd { .. } => StreamEvent::DocumentEnd { span },
+        ayaml::Event::Directive { .. } => StreamEvent::Directive { span },
+        ayaml::Event::Scalar {
+            value,
+            style,
+            anchor,
+            tag,
+            ..
+        } => StreamEvent::Scalar {
+            value,
+            plain: style == ayaml::ScalarStyle::Plain,
+            anchor: anchor.map(|a| a.as_str().to_owned()),
+            explicit_string_tag: tag
+                .as_ref()
+                .is_some_and(|t| t.is_core() && t.suffix() == "str"),
+            local_tag: local_tag_suffix(tag.as_ref()),
+            span,
+        },
+        ayaml::Event::Alias { anchor, .. } => StreamEvent::Alias {
+            anchor: anchor.as_str().to_owned(),
+            span,
+        },
+        ayaml::Event::SequenceStart { anchor, tag, .. } => StreamEvent::SequenceStart {
+            anchor: anchor.map(|a| a.as_str().to_owned()),
+            local_tag: local_tag_suffix(tag.as_ref()),
+            span,
+        },
+        ayaml::Event::SequenceEnd { .. } => StreamEvent::SequenceEnd { span },
+        ayaml::Event::MappingStart { anchor, tag, .. } => StreamEvent::MappingStart {
+            anchor: anchor.map(|a| a.as_str().to_owned()),
+            local_tag: local_tag_suffix(tag.as_ref()),
+            span,
+        },
+        ayaml::Event::MappingEnd { .. } => StreamEvent::MappingEnd { span },
+        _ => StreamEvent::Other { span },
+    }
+}
+
+/// Stream spanned YAML events under alint's unified parser limits.
+///
+/// # Errors
+///
+/// Returns an [`Error`] when `input` violates a parser limit before streaming
+/// starts.
+#[doc(hidden)]
+pub fn parse_spanned_events(input: &str) -> Result<SpannedEvents<'_>, Error> {
+    parse_events_stream(input)
+        .map(SpannedEvents)
+        .map_err(Error::ayaml)
+}
+
 /// Whether the first node of `prefix` (the input up to an error) is a block
 /// collection, inspecting events lazily so the full stream is never buffered.
 pub(crate) fn root_is_a_block_collection(prefix: &str) -> bool {

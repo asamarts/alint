@@ -15,7 +15,7 @@
 //!   a [`crate::RuleSpec`] with `from_value`, as alint's loader decodes rules,
 //!   each rule a case of its own.
 //!
-//! Spanned parser events from `ayaml::compat::parse_events_with` are also
+//! Spanned parser events from `crate::yaml::parse_events_stream` are also
 //! checked against `saphyr-parser` in the differential tests (ADR-0036),
 //! verifying UTF-8 byte-span invariants, event-stream balance, and structural
 //! agreement across the committed YAML corpus and generated YAML documents.

@@ -187,7 +187,6 @@ name = "alint-rules"
 version = "0.23.0"
 dependencies = [
  "alint-core",
- "ayaml",
  "cap",
  "globset",
  "jsonschema",
