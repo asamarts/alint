@@ -29,8 +29,12 @@ Every other rule lints. See
 [Workspace trust](https://alint.org/docs/cli/lsp/#workspace-trust).
 
 The plugin sends the IDE's trusted-project state in `initializationOptions`
-(`"trusted": true` when the project is trusted, `"trusted": false` in Safe Mode)
-and restarts `alint lsp` automatically whenever the project's trust changes.
+(`"trusted": true` when the project is trusted, `"trusted": false` in Safe Mode),
+restarts `alint lsp` automatically whenever the project's trust changes, and
+reconnects open editor tabs. Note that IntelliJ does not publish a project-trust
+event when directories are edited under **Settings -> Build, Execution,
+Deployment -> Trusted Locations**; restart the language server (or reopen the
+project) after changing Trusted Locations for an already-open project.
 
 ## Building locally
 
