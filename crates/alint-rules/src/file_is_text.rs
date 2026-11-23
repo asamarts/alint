@@ -1,8 +1,8 @@
 //! `file_is_text` — every file in scope must be detected as text (not binary).
 //!
-//! Detection uses `content_inspector` on the first 8 KiB of each file
-//! (magic-byte + heuristic analysis). UTF-8, UTF-16 (with BOM), and plain
-//! 7-bit ASCII are treated as text.
+//! Detection uses an internal heuristic on the first 8 KiB of each file
+//! (BOM, NUL-byte, magic-header, and control-byte analysis). UTF-8, UTF-16/32
+//! (with BOM), Latin-1, and plain 7-bit ASCII are treated as text.
 
 use std::path::Path;
 
@@ -33,7 +33,7 @@ impl Rule for FileIsTextRule {
                 continue;
             }
             // Bounded read: only the first TEXT_INSPECT_LEN
-            // bytes feed `content_inspector`. Solo runs read
+            // bytes feed `classify_bytes`. Solo runs read
             // just that prefix; the dispatch-flip path receives
             // the whole file from the engine and inspects only
             // the prefix.
@@ -168,7 +168,7 @@ mod tests {
              level: warning\n",
         );
         let rule = build(&spec).unwrap();
-        // Bytes with NUL + binary tail; content_inspector
+        // Bytes with NUL + binary tail; `classify_bytes`
         // should classify as Binary.
         let mut binary = vec![0u8; 16];
         binary.extend_from_slice(&[0xff, 0xfe, 0xfd, 0xfc]);

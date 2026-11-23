@@ -61,7 +61,6 @@ parking_lot = "0.12"
 clap = { version = "4", features = ["derive", "cargo", "env", "wrap_help"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-content_inspector = "0.2"
 # CommonMark parser for `markdown_links_resolve`. Disable the CLI/HTML default
 # features: the rule only needs the event stream, source spans, and reference
 # definition table.
@@ -93,7 +92,6 @@ cap = { version = "0.1.2", features = ["stats"] }
 trycmd = "1"
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 sha2 = "0.11"
-directories = "6"
 anstyle = "1"
 anstream = "1"
 supports-hyperlinks = "3"

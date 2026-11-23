@@ -27,7 +27,6 @@ path = "tests/main.rs"
 
 [dependencies]
 alint-core.workspace = true
-directories.workspace = true
 serde.workspace = true
 ayaml.workspace = true
 regex.workspace = true

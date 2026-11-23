@@ -93,11 +93,129 @@ pub enum Classification {
     Binary,
 }
 
-pub fn classify_bytes(bytes: &[u8]) -> Classification {
-    match content_inspector::inspect(bytes) {
-        content_inspector::ContentType::BINARY => Classification::Binary,
-        _ => Classification::Text,
+/// Leading byte window scanned for non-text C0/DEL control-byte density.
+/// NUL bytes are still scanned across the full slice passed to
+/// [`classify_bytes`] (up to [`TEXT_INSPECT_LEN`]) and across the entire file
+/// in [`looks_binary`].
+const CONTROL_SCAN_LEN: usize = 128;
+
+/// Binary magic signatures that can appear in a NUL-free prefix.
+const BINARY_MAGIC_PREFIXES: &[&[u8]] = &[
+    b"%PDF",         // PDF document
+    b"\x89PNG",      // PNG image
+    b"\xFF\xD8\xFF", // JPEG image
+    b"\x7FELF",      // ELF executable/object
+];
+
+/// True when `byte` is an ASCII control byte that does not normally appear in
+/// plain text (excluding tab, LF, VT, FF, CR, and ANSI ESC). High bytes
+/// (`0x80..=0xFF`) are intentionally NOT flagged so UTF-8 multibyte text
+/// (including a sequence split at `TEXT_INSPECT_LEN`) and Latin-1 / Windows-1252
+/// text remain classified as text.
+#[inline]
+const fn is_non_text_control(byte: u8) -> bool {
+    matches!(byte, 0x01..=0x08 | 0x0E..=0x1A | 0x1C..=0x1F | 0x7F)
+}
+
+#[inline]
+fn has_binary_magic(bytes: &[u8]) -> bool {
+    // Fast-path first-byte guard avoids 4 prefix compares on normal text.
+    matches!(bytes.first(), Some(b'%' | 0x89 | 0xFF | 0x7F))
+        && BINARY_MAGIC_PREFIXES
+            .iter()
+            .any(|magic| bytes.starts_with(magic))
+}
+
+/// Check whether the leading [`CONTROL_SCAN_LEN`] bytes contain a binary-like
+/// density of non-text C0/DEL control bytes.
+///
+/// Uses a 64-bit SWAR fast path that tests 8 bytes per iteration for any byte
+/// `< 0x20` (other than `\n`) or `0x7F`; ordinary LF text returns `false`
+/// without entering the exact per-byte counter.
+fn has_suspicious_control_density(sample: &[u8]) -> bool {
+    const LO: u64 = 0x0101_0101_0101_0101;
+    const HI: u64 = 0x8080_8080_8080_8080;
+    const SPACE: u64 = 0x20 * LO;
+    const NL: u64 = (b'\n' as u64) * LO;
+
+    let prefix = &sample[..sample.len().min(CONTROL_SCAN_LEN)];
+    let (chunks, remainder) = prefix.as_chunks::<8>();
+    let mut maybe_ctl = 0u64;
+    for chunk in chunks {
+        let w = u64::from_ne_bytes(*chunk);
+        // Bit 7 set in byte `i` when byte `i < 0x20` (conservative on borrow:
+        // never misses a real control byte, only falls through to exact count).
+        let lt20 = w.wrapping_sub(SPACE) & !w & HI;
+        let xnl = w ^ NL;
+        let is_nl = xnl.wrapping_sub(LO) & !xnl & HI;
+        // Bit 7 set when byte `i == 0x7F` (conservative on carry from `0xFF`).
+        let is_del = !w & w.wrapping_add(LO) & HI;
+        maybe_ctl |= (lt20 & !is_nl) | is_del;
     }
+    if maybe_ctl == 0 && remainder.iter().all(|&b| !is_non_text_control(b)) {
+        return false;
+    }
+    let suspicious = prefix.iter().filter(|&&b| is_non_text_control(b)).count();
+    (suspicious >= 2 && suspicious.saturating_mul(20) > prefix.len())
+        || suspicious.saturating_mul(10) > prefix.len().saturating_mul(3)
+}
+
+/// Classify a non-empty, NUL-free, BOM-stripped sample.
+#[inline]
+fn classify_nul_free_sample(sample: &[u8]) -> Classification {
+    if has_binary_magic(sample) || has_suspicious_control_density(sample) {
+        Classification::Binary
+    } else {
+        Classification::Text
+    }
+}
+
+/// Strip leading UTF-8 BOMs only when the first byte matches `0xEF` (fast path
+/// for the common non-BOM case).
+#[inline]
+fn strip_leading_utf8_boms(bytes: &[u8]) -> &[u8] {
+    if bytes.first() == Some(&0xEF) {
+        &bytes[crate::no_bom::utf8_bom_run_len(bytes)..]
+    } else {
+        bytes
+    }
+}
+
+/// True when `bytes` starts with a UTF-16 or UTF-32 BOM (caller has already
+/// stripped leading UTF-8 BOMs).
+#[inline]
+fn starts_with_wide_bom(bytes: &[u8]) -> bool {
+    matches!(bytes.first(), Some(0xFF | 0xFE | 0x00)) && crate::no_bom::detect_bom(bytes).is_some()
+}
+
+/// Classify `bytes` as text or binary using an internal heuristic:
+/// - Empty buffers and UTF-16/UTF-32 BOMs are classified as text (matching
+///   `file_is_text`'s contract; `looks_binary` separately rejects wide BOMs
+///   before calling this so byte-level fixers never corrupt wide encodings).
+/// - Leading UTF-8 BOMs are skipped before inspecting the payload so a BOM
+///   cannot mask binary content.
+/// - Any NUL byte in `bytes` (SIMD `memchr` over the whole passed slice)
+///   classifies as binary.
+/// - Known NUL-free binary magic headers (`%PDF`, PNG, JPEG, ELF) classify as
+///   binary.
+/// - High density of non-text C0/DEL control bytes in the leading window
+///   classifies as binary without penalizing UTF-8 or Latin-1 high bytes.
+pub fn classify_bytes(bytes: &[u8]) -> Classification {
+    if bytes.is_empty() {
+        return Classification::Text;
+    }
+    let after_utf8_bom = strip_leading_utf8_boms(bytes);
+    if after_utf8_bom.is_empty() {
+        return Classification::Text;
+    }
+    // Wide-encoding BOMs legitimately carry NUL bytes in ASCII code units.
+    if starts_with_wide_bom(after_utf8_bom) {
+        return Classification::Text;
+    }
+    if memchr::memchr(0x00, after_utf8_bom).is_some() {
+        return Classification::Binary;
+    }
+    classify_nul_free_sample(after_utf8_bom)
 }
 
 /// Whether `bytes` look like binary content. The byte-level fixers (and their
@@ -106,29 +224,33 @@ pub fn classify_bytes(bytes: &[u8]) -> Classification {
 /// corrupts it.
 ///
 /// A NUL byte ANYWHERE is the definitive binary marker, so the WHOLE slice is
-/// scanned for one (a cheap `memchr`). This is not redundant with
-/// `content_inspector`: that crate caps its own NUL scan at its `MAX_SCAN_SIZE`
-/// (1024 bytes as of 0.2.4) -- so a file that is clean text through the first KiB
-/// but carries a NUL LATER (e.g. a 40 KB text file with a NUL at 28 KB) is
-/// classified TEXT by `content_inspector` and a content fixer silently corrupts it
-/// (reorder / reindent / splice). The explicit full scan closes that (audit R2).
-/// `content_inspector` still supplies the broader statistical heuristics (encoding,
-/// control-char density) over its leading window.
+/// scanned for one via SIMD `memchr`.
 ///
-/// A file that opens with a UTF-16 / UTF-32 byte-order mark counts too, NUL or
-/// not: its code units are 2 / 4 bytes wide, so every byte-level edit these
-/// fixers make (append a `\n`, drop a `0x20` byte, strip the 2-byte mark without
-/// transcoding) desynchronizes or corrupts it -- and UTF-16 text in non-Latin
-/// scripts (`中文` is `2D 4E 87 65`) carries no NUL for the check above to see.
+/// A file that opens with a UTF-16 / UTF-32 byte-order mark (including after
+/// stacked UTF-8 BOMs) counts too, NUL or not: its code units are 2 / 4 bytes
+/// wide, so every byte-level edit these fixers make (append a `\n`, drop a
+/// `0x20` byte, strip the 2-byte mark without transcoding) desynchronizes or
+/// corrupts it -- and UTF-16 text in non-Latin scripts (`中文` is `2D 4E 87 65`)
+/// carries no NUL for the check above to see.
+///
+/// For NUL-free, non-wide-BOM inputs, the leading window is checked for binary
+/// magic headers and non-text control-byte density without repeating the NUL or
+/// BOM scans.
 pub fn looks_binary(bytes: &[u8]) -> bool {
-    if bytes.contains(&0) {
+    if bytes.is_empty() {
+        return false;
+    }
+    if memchr::memchr(0x00, bytes).is_some() {
         return true;
     }
-    if crate::no_bom::detect_bom(bytes).is_some_and(|k| k != crate::no_bom::BomKind::Utf8) {
+    let after_utf8_bom = strip_leading_utf8_boms(bytes);
+    if after_utf8_bom.is_empty() {
+        return false;
+    }
+    if starts_with_wide_bom(after_utf8_bom) {
         return true;
     }
-    let window = &bytes[..bytes.len().min(TEXT_INSPECT_LEN)];
-    classify_bytes(window) == Classification::Binary
+    classify_nul_free_sample(after_utf8_bom) == Classification::Binary
 }
 
 /// How a security-posture character scan (`no_bidi_controls`,
@@ -342,6 +464,113 @@ mod tests {
     fn looks_binary_distinguishes_binary_from_text() {
         assert!(looks_binary(b"\x00\x01\x02\x00binary\x00data\x00"));
         assert!(!looks_binary(b"plain text\nmore text\n"));
+    }
+
+    #[test]
+    fn classify_bytes_handles_utf8_latin1_ansi_and_split_multibyte_windows() {
+        assert_eq!(classify_bytes(b""), Classification::Text);
+        assert_eq!(
+            classify_bytes("Simple UTF-8 string \u{2614} 日本語\n".as_bytes()),
+            Classification::Text
+        );
+        // ANSI escape sequences and normal whitespace stay text.
+        assert_eq!(
+            classify_bytes(b"\x1b[32mPASS\x1b[0m\tline\r\n\x0cpage\n"),
+            Classification::Text
+        );
+        // Latin-1 / Windows-1252 high bytes stay text (structured_path relies on this).
+        let latin1 = b"name=caf\xe9\ncity=M\xfcnchen\n";
+        assert_eq!(classify_bytes(latin1), Classification::Text);
+        assert!(!looks_binary(latin1));
+        // A multibyte UTF-8 sequence split right at TEXT_INSPECT_LEN stays text.
+        let mut split_utf8 = vec![b'a'; TEXT_INSPECT_LEN - 1];
+        split_utf8.extend_from_slice("é".as_bytes()); // 2 bytes straddling boundary
+        assert_eq!(
+            classify_bytes(&split_utf8[..TEXT_INSPECT_LEN]),
+            Classification::Text
+        );
+        assert!(!looks_binary(&split_utf8));
+    }
+
+    #[test]
+    fn classify_bytes_and_looks_binary_handle_boms_and_nul_free_binary_fixtures() {
+        // UTF-8 BOM + text is text; UTF-8 BOM + NUL or PDF magic is binary.
+        assert_eq!(classify_bytes(b"\xEF\xBB\xBFhello\n"), Classification::Text);
+        assert_eq!(
+            classify_bytes(b"\xEF\xBB\xBF\x00binary"),
+            Classification::Binary
+        );
+        assert_eq!(
+            classify_bytes(b"\xEF\xBB\xBF%PDF-1.7\n"),
+            Classification::Binary
+        );
+        // Wide BOMs: classify_bytes treats them as text (file_is_text contract),
+        // while looks_binary refuses them so byte-level fixers never corrupt them.
+        for wide in [
+            b"\xFF\xFEh\x00i\x00".as_slice(),
+            b"\xFE\xFF\x00h\x00i".as_slice(),
+            b"\xFF\xFE\x00\x00h\x00\x00\x00".as_slice(),
+            b"\x00\x00\xFE\xFF\x00\x00\x00h".as_slice(),
+            // NUL-free CJK UTF-16 and UTF-8 BOM stacked before UTF-16 BOM.
+            b"\xFF\xFE\x2D\x4E\x87\x65".as_slice(),
+            b"\xEF\xBB\xBF\xFF\xFE\x2D\x4E".as_slice(),
+        ] {
+            assert_eq!(classify_bytes(wide), Classification::Text);
+            assert!(looks_binary(wide));
+        }
+        // NUL between 1 KiB and 8 KiB is now caught by classify_bytes too.
+        let mut mid_nul = vec![b'x'; 2048];
+        mid_nul[1500] = 0;
+        assert_eq!(classify_bytes(&mid_nul), Classification::Binary);
+        // NUL-free binary magic prefixes.
+        for magic in [
+            b"%PDF-1.7\n1 0 obj\n".as_slice(),
+            b"\x89PNG\r\n\x1a\nIHDR".as_slice(),
+            b"\xFF\xD8\xFF\xE0JFIF".as_slice(),
+            b"\x7FELF\x02\x01\x01".as_slice(),
+        ] {
+            assert_eq!(classify_bytes(magic), Classification::Binary);
+            assert!(looks_binary(magic));
+        }
+        // NUL-free control-heavy binary data is classified binary, while a single
+        // stray control byte in normal text stays text.
+        let nul_free_binary: Vec<u8> = (1u8..=255).cycle().take(512).collect();
+        assert_eq!(classify_bytes(&nul_free_binary), Classification::Binary);
+        assert!(looks_binary(&nul_free_binary));
+        assert_eq!(classify_bytes(b"\x01"), Classification::Binary);
+        assert_eq!(
+            classify_bytes(b"hello\x07world\nmore text here\n"),
+            Classification::Text
+        );
+        // char_scan_mode preserves Text / BinaryUtf8 / Skip semantics.
+        assert_eq!(char_scan_mode(b"hello\n"), CharScan::Text);
+        assert_eq!(char_scan_mode(b"hello\x00world\n"), CharScan::BinaryUtf8);
+        assert_eq!(char_scan_mode(b"\x89PNG\r\n\x1a\n\xFF"), CharScan::Skip);
+    }
+
+    #[test]
+    fn swar_control_scan_matches_exact_count_across_all_byte_lanes() {
+        // Every non-text control byte at every lane 0..8 triggers exact counting
+        // and classifies binary when density exceeds threshold.
+        for ctl in (1u8..=0x1F)
+            .chain(std::iter::once(0x7F))
+            .filter(|&b| is_non_text_control(b))
+        {
+            for lane in 0..8 {
+                let mut buf = [b'a'; 16];
+                buf[lane] = ctl;
+                buf[lane + 8] = ctl; // 2/16 = 12.5% > 5% -> Binary
+                assert_eq!(
+                    classify_bytes(&buf),
+                    Classification::Binary,
+                    "ctl=0x{ctl:02X} lane={lane}"
+                );
+            }
+        }
+        // Adjacent 0xFF + 0x7E (SWAR carry) and '\n' + ' ' (SWAR borrow) stay Text.
+        let tricky_text = b"pub fn f() {\n    let x = 1;\n}\n\xFF\x7E\xFF\x7E\r\n\tindented\n";
+        assert_eq!(classify_bytes(tricky_text), Classification::Text);
+        assert!(!looks_binary(tricky_text));
     }
 
     #[test]
