@@ -2,8 +2,9 @@
 
 Status: done (2026-11-01). All seven steps of section 4 are done: witforge is on crates.io, the
 W2-7 job checks the contract against the pinned release in default CI (#417, against witforge
-0.1.1 at the tag), and W3 (#418) and the v0.21.0 tag (#420) followed. `main` pins witforge 0.5.0
-since #555, which regenerated the consumer's glue.
+0.1.1 at the tag), and W3 (#418) and the v0.21.0 tag (#420) followed. `main` pins witforge 0.6.0
+since #625, which added `# witforge order v1` to `wire.lock`, enforced per-generator ownership
+headers, and regenerated the consumer crate.
 The owner's decisions are in section 3; the contract's status is recorded in
 [ADR-0027](../../adr/0027-plugin-contract-0-1-stays-a-draft.md). The gate this plan clears is
 [ADR-0025](../../adr/0025-v021-pre-release-decisions.md) decision 4: v0.21.0 is not tagged until
@@ -37,6 +38,10 @@ and the WIT draft row in [`r8-readiness.md`](r8-readiness.md), blocked until thi
   validation, the GitHub Action, and release proof without changing output for a valid contract
   accepted by 0.4.1. alint pinned 0.4.3 without changing a generated file, and moved to 0.5.0
   in #555, which regenerated the consumer's glue.
+- **witforge 0.6.0** followed on 2026-11-21. It adds the `# witforge order v1` lockfile section,
+  contract-scoped per-generator ownership headers, cleaner formatted Rust output, and stops
+  emitting empty traits for types-only interfaces. alint pinned 0.6.0 in #625, updating
+  `wire.lock`, the ownership header checks, the generated consumer, and `inventory.rs`.
 - **alint** has the `alint:plugin@0.1.0` WIT draft at `wit/alint-plugin/v0.1/`, the hand-written
   `alint_core::plugin_api` it describes, and, since #409, the consumer crate
   `crates/alint-witforge-consumer` with witforge's output for the draft.
