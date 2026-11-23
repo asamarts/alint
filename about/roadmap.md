@@ -1675,12 +1675,54 @@ and
   fingerprints within a run
   ([ADR-0047](https://github.com/asamarts/alint/blob/main/docs/adr/0047-sarif-tells-apart-a-fingerprint-repeated-within-a-run.md)).
 
-Later: the remaining assertion families, specialized kinds and templates, and a stable
-`version: 2` (v0.24 or later); plugin hosts start in v0.24. saphyr leaves the release build in
-v0.24, when source spans and structured YAML fixes move to ayaml
-([ADR-0036](https://github.com/asamarts/alint/blob/main/docs/adr/0036-ayaml-issues-and-the-saphyr-exit.md)),
-and stays only as a test-only reference parser
-([ADR-0041](https://github.com/asamarts/alint/blob/main/docs/adr/0041-a-yaml-parser-facade-with-test-only-reference-parsers.md)).
+Later: Phase 3 completion and the saphyr exit land in v0.24
+([ADR-0048](https://github.com/asamarts/alint/blob/main/docs/adr/0048-v024-owner-decisions.md));
+plugin hosts and a stable `version: 2` follow in v0.25 at the earliest.
+
+## v0.24: saphyr exit, Phase 3 completion, owned walker, and LSP rewrite
+
+Completes Phase 3 of
+[`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md)
+(section 11.6), finishes the pure-Rust YAML transition, modernizes the walker and language server,
+and drains the 41 open backlog issues (#545 to #621). The plan is
+[`v0.24/README.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.24/README.md) and
+the owner decisions are
+[ADR-0048](https://github.com/asamarts/alint/blob/main/docs/adr/0048-v024-owner-decisions.md).
+
+- **saphyr exit and unified YAML track (#614, #548, #582, #549, #550).** Bumps `ayaml` to 0.2.3,
+  migrates structured YAML fixes, spanned entry extraction, literal-subtree checks, and
+  `pinned_references` onto `ayaml` events and `SpannedTree`, and removes `saphyr` and
+  `saphyr-parser` from default release builds (staying test-only behind `yaml-reference`,
+  ADR-0036 and ADR-0041). Adds a memory-budgeted per-run structured-tree cache, bounds retained
+  memory of alias-expanded YAML trees, wires corpus replay YAML compare mode, adds a mid-size YAML
+  `bench-scale` scenario, and unlocks span-accurate config diagnostics (#572, #566, #571).
+- **Phase 3 completion (`version: 2`, soaking one more release).** Adds `reference`, unified
+  `count` / `bounded-count`, orthogonal multi-field `group_by`, negated equality, inline literal
+  `set` targets, multi-field array-of-objects extraction and split transforms (#592), optional
+  `bound:` (#593), `{{value}}` placeholders (#594), target-file `set` placement (#595), stub
+  locale roots (#598), general duplicate-key detection (gap B1), semver range satisfaction (gap
+  C4), strict-JSON parsing, and bundled `version: 2` rulesets (DEC-8). Remote and nested v2
+  sources wait until `version: 2` stabilizes in v0.25.
+- **Owned parallel walker and nested-dispatch performance (#573, #568, #620, #565, #584).** Owns
+  the parallel directory walker in `alint-core` on top of `ignore::gitignore::Gitignore` so
+  bounded ignore-file checks cost zero per-directory `stat` probes (retiring ADR-0045's allowance),
+  skips bad ignore files above the checked root with a warning, and hoists/narrows remaining
+  nested-rule per-iteration work.
+- **LSP rewrite and supply-chain diet (#607, #609 to #613, #615, #608).** Migrates `alint-lsp`
+  from unmaintained `tower-lsp 0.20` to `lsp-server` (dropping ~80 async crates), upgrades
+  `roxmltree` past CVE-2026-92987 (`0.21.2+`), replaces `directories` (removing the sole MPL-2.0
+  exception), `content_inspector`, `java-properties` (plus `encoding_rs`), and `node-tar` (VS Code
+  extension), adopts `adotenv 1.5.4` APIs, and runs a feasibility spike on HCL2 parsing (#608).
+- **Security, trust, and cross-platform fixes.** JetBrains workspace trust pass-through (#545),
+  per-rule 10,000-finding cap on `constraint` `set` and `key_parity` (#596), JUnit and agent
+  bidi/zero-width escaping (#600), `key_parity` pointer cap (#569), nested-rule option escaping
+  (#583), linear structural env redaction (#585), POSIX-normalized `{path}`/`{dir}` tokens on
+  Windows with cross-platform baseline fingerprint parity (#579), `java-no-tracked-build`
+  false-positive fix (#546), and repeat-fingerprint baseline stability (#601).
+
+Later: plugin hosts Slice P2 (native Rust plugins, `alint build`, and freezing `alint:plugin@0.1.0`)
+and `version: 2` stabilization (including remote and nested v2 sources) move to v0.25 at the
+earliest.
 
 ## v1.0: Stability
 
