@@ -125,6 +125,7 @@ suppresses the first findings of a fingerprint in that order, up to its count. W
 SARIF and GitLab give each finding the same value (before 0.23.0, GitLab numbered repeats in the
 order it wrote them). A run in which no fingerprint repeats is written as before.
 
+
 ## Baseline suppression
 
 When a run is filtered through a [baseline](/docs/concepts/adoption/baseline/), suppression *marks* findings rather than deleting them, and only two formats surface those marks:

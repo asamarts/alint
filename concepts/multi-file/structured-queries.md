@@ -104,7 +104,7 @@ Four things do not transfer unchanged: **XML wraps everything in its root elemen
 
 **Parsing.** A `.json` file may carry comments and trailing commas (JSONC, for `tsconfig.json` and friends) and still parses. An empty file parses to `{}`, which matters for `*_path_absent` and `if_present`. A file that will not parse produces one non-baselinable `resource_parse` **analysis failure** for that file, never a policy violation or silent skip.
 
-JSON numbers must fit within the finite IEEE-754 `f64` range: a number outside that range (such as `1e400`) fails parsing for the entire JSON file across every JSON-reading rule (`json_path_*`, `json_schema_passes`, `key_parity`, `cross_file` `extract: json`, and version 2 JSON readers), even when the rule only reads keys or other members.
+JSON numbers must fit within the finite IEEE-754 `f64` range: a number outside that range (such as `1e400`) fails parsing for the entire JSON file across every JSON-reading rule and selector surface (`json_path_*`, `json_schema_passes` target and schema JSON, `key_parity`, `cross_file` / `file_graph` / `registry_paths_resolve` `extract: { json: ... }`, `scope_filter` manifest extraction, and version 2 JSON readers), even when the rule only reads keys or other members. Under `facts:` `file_content_matches` with `extract: { json: ... }`, a parse failure evaluates to `false`.
 
 **String-only relation extraction.** `cross_file`, `file_graph`, and
 `registry_paths_resolve` consume string references and paths. If their structured
