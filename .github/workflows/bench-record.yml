@@ -155,6 +155,7 @@ jobs:
         with:
           ref: ${{ github.event.inputs.ref || github.ref }}
           fetch-depth: 0
+          fetch-tags: true
       # PINNED, unlike CI's @stable: rustc is part of the bench fingerprint, so
       # the whole bench-host corpus series must stay on one toolchain or numbers stop
       # being cross-version comparable. 1.97.0 matches the v0.10-v0.13 backfill
@@ -403,7 +404,9 @@ jobs:
                 baseline_tag="$candidate"
                 break
               fi
-            done < <(git tag --list 'v*.*.*' --sort=-v:refname | awk -v t="$PREV_TAG" '$0==t{f=1} f{print}')
+            done < <(git -c versionsort.suffix=- tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+              | awk -v t="$PREV_TAG" '$0==t{f=1} f{print}')
           fi
           if [ -n "$baseline_tag" ]; then
             args+=(--baseline "${arch_dir}/${baseline_tag}/results.json")
@@ -546,6 +549,7 @@ jobs:
       # tracked changes before the branch switch and makes the PR self-contained.
 
       - name: open PR with bench results
+        id: open_pr
         env:
           GH_TOKEN: ${{ github.token }}
           OUT_LABEL: ${{ steps.label.outputs.label }}
@@ -561,8 +565,12 @@ jobs:
           gate_baseline="$(cat "$RUNNER_TEMP/bench-gate-baseline.txt" 2>/dev/null || true)"
           if [ -n "$gate_baseline" ] && [ "$gate_baseline" != "${PREV_TAG:-}" ]; then
             gate_baseline_desc="\`${gate_baseline}\` (fallback from \`${PREV_TAG}\`)"
+          elif [ -n "$gate_baseline" ]; then
+            gate_baseline_desc="\`${gate_baseline}\`"
+          elif [ -n "${PREV_TAG:-}" ]; then
+            gate_baseline_desc="\`none\` (no committed results for \`${PREV_TAG}\` or older)"
           else
-            gate_baseline_desc="\`${gate_baseline:-${PREV_TAG:-none}}\`"
+            gate_baseline_desc="\`none\`"
           fi
           ab_md="$(cat "$RUNNER_TEMP/micro-ab.md" 2>/dev/null || echo '_No same-session comparison in this run._')"
           branch="bench-record/${OUT_LABEL}"

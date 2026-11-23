@@ -1,6 +1,6 @@
 # v0.24: saphyr exit, Phase 3 completion, owned walker, LSP rewrite, and backlog drain
 
-Status: accepted (2026-11-22, ADR-0048); in progress (Phase 0).
+Status: accepted (2026-11-22, ADR-0048); in progress (Phase 0 complete, starting Phase 1).
 Decisions: [ADR-0048](../../adr/0048-v024-owner-decisions.md) (owner decisions and scope for v0.24);
 [ADR-0036](../../adr/0036-ayaml-issues-and-the-saphyr-exit.md) and
 [ADR-0041](../../adr/0041-a-yaml-parser-facade-with-test-only-reference-parsers.md) (saphyr exit
@@ -254,3 +254,11 @@ owner ADR approval before implementation starts (matching v0.23's Phase 3 owner 
 - 2026-11-22: Phase 0 started. Owner decisions 1 to 8 settled and recorded in
   [ADR-0048](../../adr/0048-v024-owner-decisions.md); this plan written; #622 filed for `ajson`
   evaluation.
+- 2026-11-22: Phase 0 complete. Merged #623 (ADR-0048, this plan, roadmap/design updates), #626
+  (`url 2.5.9` for RUSTSEC-2026-0592 in `Cargo.lock` and `editors/zed/Cargo.lock`), #625
+  (`witforge 0.6.0` consumer bump), #624 (#621 `bench-record.yml` baseline fallback + test,
+  `release.yml` `actions/attest@v4.2.2`, `CHANGELOG.md:233`), and `asamarts/alint.org#128`.
+  Post-Phase-0 audit closed a PR-body baseline-description edge case, added prerelease filtering
+  and explicit `fetch-tags: true` in `bench-record.yml`, added legacy/wrong-generator header
+  controls to `test-witforge-consumer.sh`, and refreshed `witforge-adoption.md`.
+  Next: Phase 1 Batch 1 (P0 security and trust: #609, #545, #596, #600, #569, #583, #585).
