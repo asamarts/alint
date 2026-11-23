@@ -1,12 +1,12 @@
 ---
 title: 'file_is_text'
-description: 'alint file_is_text rule (content): Content is detected as text (magic bytes + UTF-8 validity check), fails on binary files matched by paths.'
+description: 'alint file_is_text rule (content): Content is detected as text (BOM, NUL-byte, magic-header, and control-byte heuristics over the first 8 KiB), fails...'
 sidebar:
   order: 13
 categories: ['content', 'encoding']
 ---
 
-Content is detected as text (magic bytes + UTF-8 validity check) — fails on binary files matched by `paths`.
+Content is detected as text (BOM, NUL-byte, magic-header, and control-byte heuristics over the first 8 KiB) -- fails on binary files matched by `paths`.
 
 ## Options
 
