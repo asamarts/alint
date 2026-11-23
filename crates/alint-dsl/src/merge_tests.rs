@@ -102,6 +102,7 @@ mod reference {
     ///   ([`RawConfig::drop_top_level_settings`]).
     /// - `extends` is always left empty on the merged result;
     ///   resolved already.
+    #[allow(clippy::too_many_lines)]
     fn merge_unbounded(a: RawConfig, b: RawConfig) -> RawConfig {
         let version = b.version.or(a.version);
         let respect_gitignore = b.respect_gitignore.or(a.respect_gitignore);
@@ -120,7 +121,11 @@ mod reference {
         };
         // `baseline:` is top-level-only (an `extends:`'d value is rejected upstream
         // by `reject_baseline_in`); the later (child) config wins when it sets one.
-        let baseline = b.baseline.or(a.baseline);
+        let (baseline, baseline_from_environment) = if b.baseline.is_some() {
+            (b.baseline, b.baseline_from_environment)
+        } else {
+            (a.baseline, a.baseline_from_environment)
+        };
 
         // Each list keeps one copy of an entry two sources share, so a source an
         // `extends:` diamond reaches twice does not double it at every level. An
@@ -226,12 +231,15 @@ mod reference {
             nested_configs,
             allow_out_of_root,
             baseline,
+            baseline_from_environment,
             trusted_extends,
             env_vars,
             untrusted_when_var_reads,
             compatibility,
             environment_values,
             config_files: [a.config_files, b.config_files].concat(),
+            environment_config_files: [a.environment_config_files, b.environment_config_files]
+                .concat(),
             field_source_names: either_set(a.field_source_names, b.field_source_names),
             extends_environment: Vec::new(),
             source_size: a.source_size.saturating_add(b.source_size),
@@ -285,12 +293,14 @@ fn canonical(config: &RawConfig) -> String {
         nested_configs,
         allow_out_of_root,
         baseline,
+        baseline_from_environment,
         trusted_extends,
         env_vars,
         untrusted_when_var_reads,
         compatibility,
         environment_values,
         config_files,
+        environment_config_files,
         field_source_names,
         extends_environment,
         source_size,
@@ -304,10 +314,12 @@ fn canonical(config: &RawConfig) -> String {
          respect_gitignore {respect_gitignore:?}\nvars {vars:?}\nfacts {facts:?}\n\
          templates {templates:?}\nrules {rules:?}\nfix_size_limit {fix_size_limit:?}\n\
          nested_configs {nested_configs:?}\nallow_out_of_root {allow_out_of_root:?}\n\
-         baseline {baseline:?}\ntrusted_extends {trusted_extends:?}\nenv_vars {env_vars:?}\n\
+         baseline {baseline:?}\nbaseline_from_environment {baseline_from_environment:?}\n\
+         trusted_extends {trusted_extends:?}\nenv_vars {env_vars:?}\n\
          untrusted_when_var_reads {untrusted_when_var_reads:?}\n\
          compatibility {compatibility:?}\nenvironment_values {environment_values:?}\n\
-         config_files {config_files:?}\nfield_source_names {field_source_names:?}\n\
+         config_files {config_files:?}\nenvironment_config_files {environment_config_files:?}\n\
+         field_source_names {field_source_names:?}\n\
          extends_environment {extends_environment:?}\nsource_size {source_size}\n\
          surface {surface:?}\nv2 {v2:?}\n"
     )

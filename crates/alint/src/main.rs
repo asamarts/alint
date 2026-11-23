@@ -83,27 +83,25 @@ fn error_is_internal(err: &anyhow::Error) -> bool {
 /// The values the environment supplied to the loaded config's top-level
 /// fields ([`alint_core::Config::environment_values`]). An error met after the
 /// load (an invalid `ignore:` glob in the walk, a fact that cannot be
-/// evaluated) can quote one, so [`terminal_error`] removes them.
-static ENVIRONMENT_VALUES: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+/// evaluated) can quote one, so [`terminal_error`] removes them via one
+/// set-backed Aho-Corasick redactor.
+static ENVIRONMENT_VALUES: std::sync::LazyLock<std::sync::Mutex<alint_core::EnvironmentRedactor>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(alint_core::EnvironmentRedactor::new()));
 
 /// Record `config`'s environment values for [`redact_environment_values`].
 fn remember_environment_values(config: &alint_core::Config) {
     let mut known = ENVIRONMENT_VALUES
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    for value in &config.environment_values {
-        if !known.contains(value) {
-            known.push(value.clone());
-        }
-    }
+    known.extend(&config.environment_values);
 }
 
 /// `message` without the environment values of any config loaded so far.
 fn redact_environment_values(message: &str) -> std::borrow::Cow<'_, str> {
-    let known = ENVIRONMENT_VALUES
+    let mut known = ENVIRONMENT_VALUES
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    match alint_core::redact_environment_values(message, &known) {
+    match known.redact_lazy(message) {
         std::borrow::Cow::Borrowed(_) => std::borrow::Cow::Borrowed(message),
         std::borrow::Cow::Owned(redacted) => std::borrow::Cow::Owned(redacted),
     }
@@ -118,7 +116,7 @@ fn fact_pattern_hints(
     let known = ENVIRONMENT_VALUES
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    alint_core::pattern_hints::environment_fact_hints(facts, &known)
+    alint_core::pattern_hints::environment_fact_hints(facts, known.values())
 }
 
 /// Render a multi-line top-level error without letting an untrusted newline

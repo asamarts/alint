@@ -57,7 +57,26 @@ fn lexical_normalize(path: &Path) -> PathBuf {
 /// write could still redirect it. Closing that fully needs `openat`-style
 /// directory handles; the threat model here is committed repository
 /// content, which is static while alint runs.
+fn display_target(path: &Path, redact: bool) -> std::borrow::Cow<'_, str> {
+    if redact {
+        std::borrow::Cow::Borrowed(alint_core::CONFIGURATION_MASK)
+    } else {
+        std::borrow::Cow::Owned(path.display().to_string())
+    }
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn check_target(root: &Path, target: &Path, what: &str) -> Result<PathBuf> {
+    check_target_with(root, target, what, false)
+}
+
+fn check_target_with(
+    root: &Path,
+    target: &Path,
+    what: &str,
+    redact_target: bool,
+) -> Result<PathBuf> {
+    let shown = display_target(target, redact_target);
     let root_abs = lexical_normalize(
         &std::path::absolute(root).with_context(|| format!("resolving {}", root.display()))?,
     );
@@ -69,51 +88,47 @@ pub(crate) fn check_target(root: &Path, target: &Path, what: &str) -> Result<Pat
         .any(|c| matches!(c, Component::ParentDir))
     {
         bail!(
-            "refusing to write {what} {}: `..` components are not allowed in a \
+            "refusing to write {what} {shown}: `..` components are not allowed in a \
              repository-provided path (they can resolve outside the repository root {}; \
              pass an explicit `--output` path to write elsewhere)",
-            target.display(),
             root.display()
         );
     }
     if alint_core::path_names_git_directory(repo_part) {
         bail!(
-            "refusing to write {what} {}: it is in a Git directory (alint never writes there)",
-            target.display()
+            "refusing to write {what} {shown}: it is in a Git directory (alint never writes there)"
         );
     }
     let target_abs = lexical_normalize(
-        &std::path::absolute(target).with_context(|| format!("resolving {}", target.display()))?,
+        &std::path::absolute(target).with_context(|| format!("resolving {shown}"))?,
     );
     if !target_abs.starts_with(&root_abs) {
         bail!(
-            "refusing to write {what} {}: it is outside the repository root {} \
+            "refusing to write {what} {shown}: it is outside the repository root {} \
              (pass an explicit `--output` path to write elsewhere)",
-            target.display(),
             root.display()
         );
     }
     let name = target
         .file_name()
-        .with_context(|| format!("{what} path {} has no file name", target.display()))?;
+        .with_context(|| format!("{what} path {shown} has no file name"))?;
     // Resolve the RAW parent (not the lexically normalised one) so the
     // directory validated is the one the OS would use.
     let raw_parent = std::path::absolute(target)
-        .with_context(|| format!("resolving {}", target.display()))?
+        .with_context(|| format!("resolving {shown}"))?
         .parent()
         .map(Path::to_path_buf)
-        .with_context(|| format!("{what} path {} has no parent", target.display()))?;
+        .with_context(|| format!("{what} path {shown} has no parent"))?;
     let parent_real = raw_parent
         .canonicalize()
-        .with_context(|| format!("resolving the directory of {what} {}", target.display()))?;
+        .with_context(|| format!("resolving the directory of {what} {shown}"))?;
     let root_real = root_abs
         .canonicalize()
         .with_context(|| format!("resolving {}", root.display()))?;
     if !parent_real.starts_with(&root_real) {
         bail!(
-            "refusing to write {what} {}: its directory resolves (through a symlink) \
+            "refusing to write {what} {shown}: its directory resolves (through a symlink) \
              outside the repository root {}",
-            target.display(),
             root.display()
         );
     }
@@ -123,27 +138,29 @@ pub(crate) fn check_target(root: &Path, target: &Path, what: &str) -> Result<Pat
         .is_ok_and(alint_core::path_names_git_directory)
     {
         bail!(
-            "refusing to write {what} {}: it resolves into a Git directory \
-             (alint never writes there)",
-            target.display()
+            "refusing to write {what} {shown}: it resolves into a Git directory \
+             (alint never writes there)"
         );
     }
-    refuse_symlink_or_special(&resolved, what)?;
+    refuse_symlink_or_special_with(&resolved, what, redact_target)?;
     Ok(resolved)
 }
 
 /// Refuse a `target` that is a symlink (even dangling) or exists but is
 /// not a regular file.
 pub(crate) fn refuse_symlink_or_special(target: &Path, what: &str) -> Result<()> {
+    refuse_symlink_or_special_with(target, what, false)
+}
+
+fn refuse_symlink_or_special_with(target: &Path, what: &str, redact_target: bool) -> Result<()> {
+    let shown = display_target(target, redact_target);
     match std::fs::symlink_metadata(target) {
         Ok(meta) if meta.file_type().is_symlink() => bail!(
-            "refusing to write {what} {}: it is a symlink; replace it with a regular file",
-            target.display()
+            "refusing to write {what} {shown}: it is a symlink; replace it with a regular file"
         ),
-        Ok(meta) if !meta.is_file() => bail!(
-            "refusing to write {what} {}: it exists and is not a regular file",
-            target.display()
-        ),
+        Ok(meta) if !meta.is_file() => {
+            bail!("refusing to write {what} {shown}: it exists and is not a regular file")
+        }
         _ => Ok(()),
     }
 }
@@ -152,26 +169,37 @@ pub(crate) fn refuse_symlink_or_special(target: &Path, what: &str) -> Result<()>
 /// final path: create a fresh temp file beside it (`create_new`, which
 /// never follows links) and rename it over `target`.
 pub(crate) fn write_replacing(target: &Path, contents: &[u8], what: &str) -> Result<()> {
-    refuse_symlink_or_special(target, what)?;
+    write_replacing_with(target, contents, what, false)
+}
+
+fn write_replacing_with(
+    target: &Path,
+    contents: &[u8],
+    what: &str,
+    redact_target: bool,
+) -> Result<()> {
+    let shown = display_target(target, redact_target);
+    refuse_symlink_or_special_with(target, what, redact_target)?;
     let dir = target
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
     let name = target
         .file_name()
-        .with_context(|| format!("{what} path {} has no file name", target.display()))?;
+        .with_context(|| format!("{what} path {shown} has no file name"))?;
     let mut tmp_name = std::ffi::OsString::from(".");
     tmp_name.push(name);
     tmp_name.push(format!(".alint-tmp-{}", std::process::id()));
     let tmp = dir.join(tmp_name);
+    let shown_tmp = display_target(&tmp, redact_target);
     let result = (|| -> Result<()> {
         let mut file = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&tmp)
-            .with_context(|| format!("creating {}", tmp.display()))?;
+            .with_context(|| format!("creating {shown_tmp}"))?;
         file.write_all(contents)
-            .with_context(|| format!("writing {}", tmp.display()))?;
+            .with_context(|| format!("writing {shown_tmp}"))?;
         file.sync_all().ok();
         drop(file);
         // Keep the replaced file's permissions (e.g. a `chmod 600`
@@ -181,10 +209,9 @@ pub(crate) fn write_replacing(target: &Path, contents: &[u8], what: &str) -> Res
             && meta.is_file()
         {
             std::fs::set_permissions(&tmp, meta.permissions())
-                .with_context(|| format!("setting permissions on {}", tmp.display()))?;
+                .with_context(|| format!("setting permissions on {shown_tmp}"))?;
         }
-        std::fs::rename(&tmp, target)
-            .with_context(|| format!("writing {what} {}", target.display()))
+        std::fs::rename(&tmp, target).with_context(|| format!("writing {what} {shown}"))
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&tmp);
@@ -196,17 +223,31 @@ pub(crate) fn write_replacing(target: &Path, contents: &[u8], what: &str) -> Res
 /// confined to `root` ([`check_target`]); an explicit command-line path
 /// may point anywhere but still never at a symlink. Returns the path to
 /// write (the resolved one for a repo-derived target).
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn check_output(
     root: &Path,
     target: &Path,
     explicit: bool,
     what: &str,
 ) -> Result<PathBuf> {
+    check_output_redacted(root, target, explicit, what, false)
+}
+
+/// Like [`check_output`], masking `target` to `<redacted>` in errors when
+/// `redact_target` is true (e.g. a `baseline:` path interpolated from the
+/// environment).
+pub(crate) fn check_output_redacted(
+    root: &Path,
+    target: &Path,
+    explicit: bool,
+    what: &str,
+    redact_target: bool,
+) -> Result<PathBuf> {
+    let shown = display_target(target, redact_target);
     if explicit {
         if alint_core::path_names_git_directory(target) {
             bail!(
-                "refusing to write {what} {}: it is in a Git directory (alint never writes there)",
-                target.display()
+                "refusing to write {what} {shown}: it is in a Git directory (alint never writes there)"
             );
         }
         if let Some(name) = target.file_name()
@@ -216,28 +257,29 @@ pub(crate) fn check_output(
             && alint_core::path_names_git_directory(&parent_real.join(name))
         {
             bail!(
-                "refusing to write {what} {}: it resolves into a Git directory \
-                 (alint never writes there)",
-                target.display()
+                "refusing to write {what} {shown}: it resolves into a Git directory \
+                 (alint never writes there)"
             );
         }
-        refuse_symlink_or_special(target, what)?;
+        refuse_symlink_or_special_with(target, what, redact_target)?;
         Ok(target.to_path_buf())
     } else {
-        check_target(root, target, what)
+        check_target_with(root, target, what, redact_target)
     }
 }
 
-/// [`check_output`] + [`write_replacing`]: the confined write.
-pub(crate) fn write_output(
+/// [`check_output_redacted`] + [`write_replacing`]: the confined write with
+/// structural redaction of `target` in error messages when `redact_target`.
+pub(crate) fn write_output_redacted(
     root: &Path,
     target: &Path,
     contents: &[u8],
     explicit: bool,
     what: &str,
+    redact_target: bool,
 ) -> Result<()> {
-    let write_to = check_output(root, target, explicit, what)?;
-    write_replacing(&write_to, contents, what)
+    let write_to = check_output_redacted(root, target, explicit, what, redact_target)?;
+    write_replacing_with(&write_to, contents, what, redact_target)
 }
 
 /// Create `target` only if nothing (not even a dangling symlink) exists

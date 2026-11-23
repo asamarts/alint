@@ -157,8 +157,10 @@ pub(super) fn cmd_check(
     // from the walk. The `--baseline` flag (used as given) overrides the key.
     let effective_baseline = cli.baseline.clone().or(config_baseline);
     // A `baseline:` key is repository content: its file is read only inside
-    // the root.
+    // the root. When the key came from the environment, mask its path
+    // structurally in errors even for short (<4-char) values.
     let baseline_root = cli.baseline.is_none().then_some(root.as_path());
+    let redact_baseline = cli.baseline.is_none() && loaded.baseline_from_environment;
     let entries = apply_only_filter(loaded.entries, only)?;
     report_pattern_hints(&entries, &loaded.registry, &loaded.facts, cli);
     let rule_count = entries.len();
@@ -172,7 +174,8 @@ pub(super) fn cmd_check(
         // 2026-09-20). Inert for a plain `check` (no fix derivation runs).
         .with_fix_size_limit(loaded.fix_size_limit)
         // ...and the same configuration files a fix from `extends:` never writes.
-        .with_config_files(loaded.config_files.clone());
+        .with_config_files(loaded.config_files.clone())
+        .with_environment_config_files(loaded.environment_config_files.clone());
     engine = with_run_settings(engine, cli);
     // When a baseline is active, make the engine baseline-aware so the
     // `stage_fixes`-based proposed-edit derivation (for a fix-carrying format)
@@ -180,7 +183,7 @@ pub(super) fn cmd_check(
     // Inert for `engine.run` (check uses no fix baseline), so a plain `check
     // --baseline` is unaffected.
     if let Some(bp) = &effective_baseline {
-        engine = engine.with_fix_baseline(load_baseline(bp, baseline_root)?);
+        engine = engine.with_fix_baseline(load_baseline(bp, baseline_root, redact_baseline)?);
     }
     let changed_active = match changed.resolve(&root)? {
         Some(set) => {
@@ -216,7 +219,7 @@ pub(super) fn cmd_check(
     // GitLab or SARIF output's.
     let mut reader = FileReader::new(&root);
     let (mut report, baseline_marks) = if let Some(baseline_path) = &effective_baseline {
-        let baseline = load_baseline(baseline_path, baseline_root)?;
+        let baseline = load_baseline(baseline_path, baseline_root, redact_baseline)?;
         let applied =
             alint_core::baseline::apply(&report, &baseline, |rid, v| reader.fingerprint(rid, v));
         // Stale-entry detection is only valid on a FULL run. When `--changed`
@@ -402,8 +405,10 @@ fn build_baseline_marks(
 pub(super) fn load_baseline(
     path: &Path,
     repository_root: Option<&Path>,
+    redact_path: bool,
 ) -> Result<alint_core::baseline::Baseline> {
-    alint_core::baseline::Baseline::load_file(path, repository_root).map_err(anyhow::Error::msg)
+    alint_core::baseline::Baseline::load_file_redacted(path, repository_root, redact_path)
+        .map_err(anyhow::Error::msg)
 }
 
 /// Stderr summary for a baseline-applied run: the suppressed count (or
@@ -492,7 +497,14 @@ pub(super) fn cmd_baseline(
     // A repo-derived baseline path (the `baseline:` key or the default) is
     // confined to the repository; an explicit `--output` is not. Neither may
     // be a symlink. Checked up front so a bad target fails before the run.
-    safe_write::check_output(&root, &out_path, output.is_some(), "baseline")?;
+    let redact_baseline = output.is_none() && loaded.baseline_from_environment;
+    safe_write::check_output_redacted(
+        &root,
+        &out_path,
+        output.is_some(),
+        "baseline",
+        redact_baseline,
+    )?;
 
     report_pattern_hints(&loaded.entries, &loaded.registry, &loaded.facts, cli);
     let mut engine = Engine::from_entries(loaded.entries, loaded.registry)
@@ -558,7 +570,11 @@ pub(super) fn cmd_baseline(
     // Regeneration guard: refuse to grandfather NEW debt without
     // --accept-new. Pruning stale entries is always allowed.
     if out_path.exists() && !accept_new {
-        let existing = load_baseline(&out_path, output.is_none().then_some(root.as_path()))?;
+        let existing = load_baseline(
+            &out_path,
+            output.is_none().then_some(root.as_path()),
+            redact_baseline,
+        )?;
         // Compare by OCCURRENCE, not just fingerprint identity: a higher count
         // on an already-baselined finding is fresh debt too, and must not slip
         // in silently. Applying the existing file counts exactly that.
@@ -572,29 +588,41 @@ pub(super) fn cmd_baseline(
             .sum();
         let removed: u64 = applied.stale.iter().map(|e| u64::from(e.count)).sum();
         if added > 0 {
+            let shown_out = if redact_baseline {
+                std::borrow::Cow::Borrowed(alint_core::CONFIGURATION_MASK)
+            } else {
+                std::borrow::Cow::Owned(
+                    crate::redact_environment_values(&out_path.display().to_string()).into_owned(),
+                )
+            };
             bail!(
-                "regenerating {} would grandfather {added} new violation(s) (+{added} / -{removed}); \
-                 fix them, or pass --accept-new to accept them into the baseline",
-                crate::redact_environment_values(&out_path.display().to_string())
+                "regenerating {shown_out} would grandfather {added} new violation(s) (+{added} / -{removed}); \
+                 fix them, or pass --accept-new to accept them into the baseline"
             );
         }
     }
 
-    safe_write::write_output(
+    safe_write::write_output_redacted(
         &root,
         &out_path,
         new_baseline.to_jsonl().as_bytes(),
         output.is_some(),
         "baseline",
+        redact_baseline,
     )?;
     if !cli.quiet {
         let n = new_baseline.entries.len();
         let total = new_baseline.total();
-        eprintln!(
-            "alint: wrote {} ({n} entr{}, {total} occurrence{})",
+        let shown_out = if redact_baseline {
+            alint_core::CONFIGURATION_MASK.to_owned()
+        } else {
             term(&crate::redact_environment_values(
-                &out_path.display().to_string()
-            )),
+                &out_path.display().to_string(),
+            ))
+            .into_owned()
+        };
+        eprintln!(
+            "alint: wrote {shown_out} ({n} entr{}, {total} occurrence{})",
             if n == 1 { "y" } else { "ies" },
             if total == 1 { "" } else { "s" },
         );

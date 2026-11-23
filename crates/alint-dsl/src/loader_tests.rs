@@ -1467,3 +1467,93 @@ fn a_source_that_repeats_a_rule_id_is_charged_each_merge() {
         (copies + 1) + (copies + 1 + copies) + (copies - 1) + copies
     );
 }
+
+#[test]
+fn remote_and_bundled_extends_under_environment_chosen_file_are_structurally_redacted() {
+    let root = tempfile::tempdir().unwrap();
+    // Env value under four characters (`ab`), so text scrub alone would skip it.
+    std::fs::write(
+        root.path().join(".alint.yml"),
+        "version: 1\nextends: ['./{{env.VALUE}}.yml']\nrules: []\n",
+    )
+    .unwrap();
+
+    // 1. Remote HTTPS URL without SRI written inside an environment-chosen file.
+    std::fs::write(
+        root.path().join("ab.yml"),
+        "version: 1\nextends: ['https://example.invalid/xy/secret.yml']\nrules: []\n",
+    )
+    .unwrap();
+    for policy in [crate::RemotePolicy::Deny, crate::RemotePolicy::Allow] {
+        let mut opts = value_options("ab");
+        opts.remote_policy = policy;
+        let err = crate::load_with(&root.path().join(".alint.yml"), &opts)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("<redacted>"), "{policy:?}: {err}");
+        assert!(!err.contains("example.invalid"), "{policy:?}: {err}");
+        assert!(!err.contains("secret.yml"), "{policy:?}: {err}");
+        assert!(!err.contains("xy"), "{policy:?}: {err}");
+    }
+
+    // 2. Unsupported short (<4-char) scheme written inside an environment-chosen file.
+    std::fs::write(
+        root.path().join("ab.yml"),
+        "version: 1\nextends: ['xy://host/p.yml']\nrules: []\n",
+    )
+    .unwrap();
+    let err = crate::load_with(&root.path().join(".alint.yml"), &value_options("ab"))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("<redacted>"), "{err}");
+    assert!(!err.contains("xy"), "{err}");
+    assert!(!err.contains("host"), "{err}");
+
+    // 3. Unknown bundled ruleset (including short name) inside an environment-chosen file.
+    std::fs::write(
+        root.path().join("ab.yml"),
+        "version: 1\nextends: ['alint://bundled/xy@v1']\nrules: []\n",
+    )
+    .unwrap();
+    let err = crate::load_with(&root.path().join(".alint.yml"), &value_options("ab"))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("'<redacted>'"), "{err}");
+    assert!(!err.contains("xy@v1"), "{err}");
+
+    // 4. Parse error inside an environment-chosen file with a <4-char name.
+    std::fs::write(root.path().join("ab.yml"), "version: 1\nrules: [\n").unwrap();
+    let err = crate::load_with(&root.path().join(".alint.yml"), &value_options("ab"))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("<redacted>"), "{err}");
+    assert!(!err.contains("ab.yml"), "{err}");
+
+    // 5. Cycle through an environment-chosen file with a <4-char name.
+    std::fs::write(
+        root.path().join("ab.yml"),
+        "version: 1\nextends: ['./ab.yml']\nrules: []\n",
+    )
+    .unwrap();
+    let err = crate::load_with(&root.path().join(".alint.yml"), &value_options("ab"))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("<redacted>"), "{err}");
+    assert!(!err.contains("ab.yml"), "{err}");
+
+    // 6. Successful load records `environment_config_files` only for env-chosen
+    //    files and tracks `baseline_from_environment`.
+    std::fs::write(root.path().join("pub.yml"), "version: 1\nrules: []\n").unwrap();
+    std::fs::write(root.path().join("ab.yml"), "version: 1\nrules: []\n").unwrap();
+    std::fs::write(
+        root.path().join(".alint.yml"),
+        "version: 1\nbaseline: '{{env.VALUE}}.json'\nextends: ['./pub.yml', './{{env.VALUE}}.yml']\nrules: []\n",
+    )
+    .unwrap();
+    let cfg = crate::load_with(&root.path().join(".alint.yml"), &value_options("ab")).unwrap();
+    assert!(cfg.baseline_from_environment);
+    let ab_canon = root.path().join("ab.yml").canonicalize().unwrap();
+    let pub_canon = root.path().join("pub.yml").canonicalize().unwrap();
+    assert!(cfg.environment_config_files.contains(&ab_canon));
+    assert!(!cfg.environment_config_files.contains(&pub_canon));
+}

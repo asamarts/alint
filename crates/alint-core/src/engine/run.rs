@@ -45,6 +45,7 @@ impl Engine {
             changed_directories: HashSet::new(),
             fix_baseline: None,
             config_files: Vec::new(),
+            environment_config_files: Vec::new(),
         }
     }
 
@@ -65,6 +66,7 @@ impl Engine {
             changed_directories: HashSet::new(),
             fix_baseline: None,
             config_files: Vec::new(),
+            environment_config_files: Vec::new(),
         }
     }
 
@@ -82,6 +84,16 @@ impl Engine {
     #[must_use]
     pub fn with_config_files(mut self, config_files: Vec<PathBuf>) -> Self {
         self.config_files = config_files;
+        self
+    }
+
+    /// The subset of [`Config::config_files`](crate::Config::config_files)
+    /// reachable only via an environment-chosen `extends:` entry
+    /// ([`Config::environment_config_files`](crate::Config::environment_config_files)).
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_environment_config_files(mut self, environment_config_files: Vec<PathBuf>) -> Self {
+        self.environment_config_files = environment_config_files;
         self
     }
 
@@ -374,6 +386,7 @@ impl Engine {
             changed_directories: self.changed_directories.clone(),
             fix_baseline: None,
             config_files: self.config_files.clone(),
+            environment_config_files: self.environment_config_files.clone(),
         };
         let sensitive_evidence = Self::has_sensitive_evidence(entry);
         let sensitive_paths = self.has_sensitive_path_selection(entry);

@@ -180,23 +180,111 @@ impl Config {
 /// of the message, and too short to be much of a secret.
 const MIN_REDACTED_ENVIRONMENT_VALUE: usize = 4;
 
-/// `text` with each of `values` replaced by [`CONFIGURATION_MASK`], in each
-/// form an error may print it: as written; trimmed (a glob parser drops
-/// trailing whitespace); line by line (a regex error quotes a multi-line
-/// pattern so); as a path is printed once joined or on Windows (without a
-/// leading `./`, with either separator); escaped by `{:?}`; or (for a numeric
-/// value, which interpolation re-types) as the number. A form inside a longer
-/// word takes the whole word with it: a value written next to other text
-/// (`x{{env.V}}_tmp`) is printed so, and a value such as `build` turns
-/// `building` into `<redacted>` rather than `<redacted>ing`. A boolean carries
-/// no secret and is left alone, and so is a form shorter than four characters.
-#[doc(hidden)]
-#[must_use]
-pub fn redact_environment_values<'a>(
-    text: &'a str,
-    values: &[String],
-) -> std::borrow::Cow<'a, str> {
+/// A compiled multi-pattern matcher for [`EnvironmentRedactor`].
+#[derive(Debug, Clone)]
+struct CompiledRedactor {
+    automaton: Option<aho_corasick::AhoCorasick>,
+    /// Per-pattern `(starts_word, ends_word)` flags for word-widening.
+    word_edges: Vec<(bool, bool)>,
+}
+
+impl CompiledRedactor {
+    fn build(values: &[String]) -> Self {
+        let forms = expand_environment_forms(values);
+        if forms.is_empty() {
+            return Self {
+                automaton: None,
+                word_edges: Vec::new(),
+            };
+        }
+        let word_edges = forms
+            .iter()
+            .map(|form| {
+                (
+                    form.chars().next().is_some_and(is_word_char),
+                    form.chars().next_back().is_some_and(is_word_char),
+                )
+            })
+            .collect();
+        let automaton = aho_corasick::AhoCorasickBuilder::new()
+            .match_kind(aho_corasick::MatchKind::LeftmostLongest)
+            .build(&forms)
+            .ok();
+        Self {
+            automaton,
+            word_edges,
+        }
+    }
+
+    fn redact<'a>(&self, text: &'a str) -> std::borrow::Cow<'a, str> {
+        let Some(ac) = &self.automaton else {
+            return std::borrow::Cow::Borrowed(text);
+        };
+        let mut replaced = String::new();
+        let mut copied = 0usize;
+        let mut pending: Option<(usize, usize)> = None;
+        for mat in ac.find_iter(text) {
+            let found = mat.start();
+            let mat_end = mat.end();
+            let (starts_word, ends_word) = self.word_edges[mat.pattern().as_usize()];
+            let limit = pending.map_or(copied, |(_, pend_end)| pend_end);
+            let mut start = found;
+            if starts_word && start > limit {
+                start -= text[limit..found]
+                    .chars()
+                    .rev()
+                    .take_while(|&c| is_word_char(c))
+                    .map(char::len_utf8)
+                    .sum::<usize>();
+            }
+            let mut end = mat_end;
+            if ends_word && end > limit {
+                end += text[end..]
+                    .chars()
+                    .take_while(|&c| is_word_char(c))
+                    .map(char::len_utf8)
+                    .sum::<usize>();
+            }
+            match pending {
+                Some((pend_start, pend_end)) if start < pend_end => {
+                    pending = Some((pend_start.min(start), pend_end.max(end)));
+                }
+                Some((pend_start, pend_end)) => {
+                    replaced.push_str(&text[copied..pend_start]);
+                    replaced.push_str(CONFIGURATION_MASK);
+                    copied = pend_end;
+                    pending = Some((start, end));
+                }
+                None => {
+                    pending = Some((start, end));
+                }
+            }
+        }
+        if let Some((pend_start, pend_end)) = pending {
+            replaced.push_str(&text[copied..pend_start]);
+            replaced.push_str(CONFIGURATION_MASK);
+            replaced.push_str(&text[pend_end..]);
+            std::borrow::Cow::Owned(replaced)
+        } else {
+            std::borrow::Cow::Borrowed(text)
+        }
+    }
+}
+
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+/// Expand `values` into every printable form an error may quote, keeping only
+/// forms at least [`MIN_REDACTED_ENVIRONMENT_VALUE`] chars long.
+fn expand_environment_forms(values: &[String]) -> Vec<String> {
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut forms: Vec<String> = Vec::new();
+    let mut push = |form: String| {
+        if form.chars().count() >= MIN_REDACTED_ENVIRONMENT_VALUE && seen.insert(form.clone()) {
+            forms.push(form);
+        }
+    };
     for value in values {
         if matches!(value.trim(), "true" | "false") {
             continue;
@@ -217,65 +305,140 @@ pub fn redact_environment_values<'a>(
                     path.replace('\\', "/"),
                 ] {
                     let debug = format!("{printed:?}");
-                    forms.push(debug[1..debug.len() - 1].to_string());
-                    forms.push(printed);
+                    push(debug[1..debug.len() - 1].to_string());
+                    push(printed);
                 }
             }
         }
         if value.len() <= 64
             && let Ok(ayaml::Value::Number(number)) = crate::yaml::from_str(value)
         {
-            forms.push(number.to_string());
+            push(number.to_string());
         }
     }
-    forms.retain(|form| form.chars().count() >= MIN_REDACTED_ENVIRONMENT_VALUE);
-    // Longest first, so a value that contains another is removed whole.
-    forms.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
-    forms.dedup();
-    let mut redacted = std::borrow::Cow::Borrowed(text);
-    for form in &forms {
-        if let Some(replaced) = replace_occurrences(&redacted, form) {
-            redacted = std::borrow::Cow::Owned(replaced);
-        }
-    }
-    redacted
+    forms
 }
 
-/// `text` with each occurrence of `form` replaced by [`CONFIGURATION_MASK`],
-/// or `None` when there is none. An occurrence that a letter, digit or `_`
-/// touches at an edge where `form` has one is widened to the whole word.
-fn replace_occurrences(text: &str, form: &str) -> Option<String> {
-    let word = |c: char| c.is_alphanumeric() || c == '_';
-    let starts_word = form.chars().next().is_some_and(word);
-    let ends_word = form.chars().next_back().is_some_and(word);
-    let mut replaced = String::new();
-    let mut copied = 0;
-    for (found, _) in text.match_indices(form) {
-        if found < copied {
-            continue;
-        }
-        let mut start = found;
-        if starts_word {
-            start -= text[copied..found]
-                .chars()
-                .rev()
-                .take_while(|&c| word(c))
-                .map(char::len_utf8)
-                .sum::<usize>();
-        }
-        let mut end = found + form.len();
-        if ends_word {
-            end += text[end..]
-                .chars()
-                .take_while(|&c| word(c))
-                .map(char::len_utf8)
-                .sum::<usize>();
-        }
-        replaced.push_str(&text[copied..start]);
-        replaced.push_str(CONFIGURATION_MASK);
-        copied = end;
+/// Set-backed, single-automaton scrubber for environment values. Recording new
+/// values is O(1) per value via a `HashSet`, and scrubbing compiles one
+/// Aho-Corasick automaton once so each message is scanned in linear time.
+#[doc(hidden)]
+#[derive(Debug, Default, Clone)]
+pub struct EnvironmentRedactor {
+    values: Vec<String>,
+    held: std::collections::HashSet<String>,
+    compiled: Option<CompiledRedactor>,
+}
+
+impl EnvironmentRedactor {
+    /// An empty redactor holding no values.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
     }
-    (copied > 0).then(|| replaced + &text[copied..])
+
+    /// Build a compiled redactor from `values`, deduplicating via a set.
+    #[must_use]
+    pub fn from_values(values: &[String]) -> Self {
+        let mut redactor = Self::new();
+        redactor.extend(values);
+        redactor.compiled = Some(CompiledRedactor::build(&redactor.values));
+        redactor
+    }
+
+    /// Record `value` if not already held, invalidating the cached automaton
+    /// only when `value` is new.
+    pub fn insert(&mut self, value: &str) {
+        if !self.held.contains(value) {
+            self.held.insert(value.to_owned());
+            self.values.push(value.to_owned());
+            self.compiled = None;
+        }
+    }
+
+    /// Record each of `values` that is not already held.
+    pub fn extend(&mut self, values: &[String]) {
+        for value in values {
+            self.insert(value);
+        }
+    }
+
+    /// Every recorded value in insertion order.
+    #[must_use]
+    pub fn values(&self) -> &[String] {
+        &self.values
+    }
+
+    /// `text` with every recorded environment value replaced by
+    /// [`CONFIGURATION_MASK`], compiling the automaton on first use if needed.
+    #[must_use]
+    pub fn redact_lazy<'a>(&mut self, text: &'a str) -> std::borrow::Cow<'a, str> {
+        if self.values.is_empty() {
+            return std::borrow::Cow::Borrowed(text);
+        }
+        let compiled = self
+            .compiled
+            .get_or_insert_with(|| CompiledRedactor::build(&self.values));
+        compiled.redact(text)
+    }
+
+    /// `text` with every recorded environment value replaced by
+    /// [`CONFIGURATION_MASK`]. Requires a redactor built with
+    /// [`Self::from_values`] (or after [`Self::redact_lazy`]); if not yet
+    /// compiled, falls back to building a temporary automaton.
+    #[must_use]
+    pub fn redact<'a>(&self, text: &'a str) -> std::borrow::Cow<'a, str> {
+        if self.values.is_empty() {
+            return std::borrow::Cow::Borrowed(text);
+        }
+        if let Some(compiled) = &self.compiled {
+            compiled.redact(text)
+        } else {
+            CompiledRedactor::build(&self.values).redact(text)
+        }
+    }
+
+    /// Like [`redact_environment_values_in_error`], reusing this redactor's
+    /// compiled automaton across the error's message and structured fields.
+    #[must_use]
+    pub fn redact_error(&self, error: crate::Error) -> crate::Error {
+        if self.values.is_empty() || matches!(error, crate::Error::FileNotInIndex { .. }) {
+            return error;
+        }
+        let message = error.to_string();
+        let std::borrow::Cow::Owned(redacted) = self.redact(&message) else {
+            return error;
+        };
+        match error {
+            crate::Error::Internal(inner) => crate::Error::internal(self.redact(&inner)),
+            crate::Error::RuleConfig { rule_id, message } => {
+                crate::Error::rule_config(self.redact(&rule_id), self.redact(&message))
+            }
+            _ => crate::Error::Other(redacted),
+        }
+    }
+}
+
+/// `text` with each of `values` replaced by [`CONFIGURATION_MASK`], in each
+/// form an error may print it: as written; trimmed (a glob parser drops
+/// trailing whitespace); line by line (a regex error quotes a multi-line
+/// pattern so); as a path is printed once joined or on Windows (without a
+/// leading `./`, with either separator); escaped by `{:?}`; or (for a numeric
+/// value, which interpolation re-types) as the number. A form inside a longer
+/// word takes the whole word with it: a value written next to other text
+/// (`x{{env.V}}_tmp`) is printed so, and a value such as `build` turns
+/// `building` into `<redacted>` rather than `<redacted>ing`. A boolean carries
+/// no secret and is left alone, and so is a form shorter than four characters.
+#[doc(hidden)]
+#[must_use]
+pub fn redact_environment_values<'a>(
+    text: &'a str,
+    values: &[String],
+) -> std::borrow::Cow<'a, str> {
+    if values.is_empty() {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    CompiledRedactor::build(values).redact(text)
 }
 
 /// `error` with each of `values` removed from its message
@@ -286,23 +449,10 @@ fn replace_occurrences(text: &str, form: &str) -> Option<String> {
 #[doc(hidden)]
 #[must_use]
 pub fn redact_environment_values_in_error(error: crate::Error, values: &[String]) -> crate::Error {
-    if matches!(error, crate::Error::FileNotInIndex { .. }) {
+    if values.is_empty() || matches!(error, crate::Error::FileNotInIndex { .. }) {
         return error;
     }
-    let message = error.to_string();
-    let std::borrow::Cow::Owned(redacted) = redact_environment_values(&message, values) else {
-        return error;
-    };
-    match error {
-        crate::Error::Internal(inner) => {
-            crate::Error::internal(redact_environment_values(&inner, values))
-        }
-        crate::Error::RuleConfig { rule_id, message } => crate::Error::rule_config(
-            redact_environment_values(&rule_id, values),
-            redact_environment_values(&message, values),
-        ),
-        _ => crate::Error::Other(redacted),
-    }
+    EnvironmentRedactor::from_values(values).redact_error(error)
 }
 
 impl RuleSpec {

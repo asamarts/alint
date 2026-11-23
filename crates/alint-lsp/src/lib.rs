@@ -282,10 +282,11 @@ struct Session {
     kinds: HashMap<String, String>,
     /// Load-time pattern hints, shown as warnings on the config file.
     pattern_hints: Vec<alint_core::pattern_hints::ConfigHint>,
-    /// The config's [`alint_core::Config::environment_values`], removed from
-    /// any error the session reports (a rule run that fails on an `ignore:`
-    /// or `facts:` value read from the environment).
-    environment_values: Vec<String>,
+    /// Set-backed, single-automaton scrubber built from
+    /// [`alint_core::Config::environment_values`], removed from any error the
+    /// session reports (a rule run that fails on an `ignore:` or `facts:`
+    /// value read from the environment).
+    environment_redactor: alint_core::EnvironmentRedactor,
     /// The session is untrusted and left out something this config uses: a
     /// rule or fact that spawns, or an environment value (see
     /// [`config::UNTRUSTED_NOTE`]).
@@ -297,12 +298,15 @@ struct Session {
     /// The resolved local files the configuration came from
     /// ([`alint_core::Config::config_files`]).
     config_files: Vec<PathBuf>,
+    /// Subset of `config_files` reachable only via an environment-chosen
+    /// `extends:` entry ([`alint_core::Config::environment_config_files`]).
+    environment_config_files: Vec<PathBuf>,
 }
 
 impl Session {
     /// `message` without the config's environment values.
     fn redact(&self, message: &str) -> String {
-        alint_core::redact_environment_values(message, &self.environment_values).into_owned()
+        self.environment_redactor.redact(message).into_owned()
     }
 
     /// Why a code action of `rule_id` may not edit `path` (root-relative), as
@@ -313,6 +317,7 @@ impl Session {
         alint_core::FixContext::new(&self.root, false)
             .with_extended_source(self.extended_rules.contains(rule_id))
             .with_config_files(&self.config_files)
+            .with_environment_config_files(&self.environment_config_files)
             .write_refusal(path)
     }
 

@@ -660,7 +660,11 @@ fn parse_guarded(
     origin: &crate::v2::Origin<'_>,
 ) -> Result<RawConfig> {
     let source_path = source;
-    let source = display_path(source);
+    let source = if origin.display == alint_core::CONFIGURATION_MASK {
+        origin.display.to_owned()
+    } else {
+        display_path(source)
+    };
     let text_decode = match decode_from_text(contents, &source, origin) {
         std::ops::ControlFlow::Break(settled) => return settled,
         std::ops::ControlFlow::Continue(text_decode) => text_decode,
@@ -695,6 +699,7 @@ fn parse_guarded(
         let rule_sensitive_fields = environment_sensitive_fields(value.get("rules"));
         let template_sensitive_fields = environment_sensitive_fields(value.get("templates"));
         let extends_environment = entries_reading_environment(value.get("extends"));
+        let baseline_from_environment = value.get("baseline").is_some_and(value_reads_environment);
         let rule_env_vars = rule_env_derived_vars(value.get("rules"));
         // The names the top-level fields other than rules, templates and vars
         // read (`extends:`, `ignore:`, `facts:`, `baseline:` and the rest). The
@@ -730,6 +735,7 @@ fn parse_guarded(
         config.env_vars = env_vars;
         config.environment_values = environment_values;
         config.extends_environment = extends_environment;
+        config.baseline_from_environment = baseline_from_environment;
         mark_entries(&mut config.rules, crate::ENV_VARS_MARKER, rule_env_vars);
         mark_entries(
             &mut config.rules,
@@ -1059,15 +1065,16 @@ fn environment_sensitive_fields(entries: Option<&ayaml::Value>) -> Vec<Mapping> 
 }
 
 /// Put `canonical` on the current `extends:` path (`visiting`), refusing a
-/// cycle and a chain deeper than [`MAX_EXTENDS_DEPTH`].
+/// cycle and a chain deeper than [`MAX_EXTENDS_DEPTH`]. Errors name `display`
+/// (which is `<redacted>` when the environment chose the file).
 fn enter_extends_chain(
     visiting: &mut std::collections::HashSet<PathBuf>,
     canonical: &Path,
+    display: &str,
 ) -> Result<()> {
     if !visiting.insert(canonical.to_path_buf()) {
         return Err(Error::Other(format!(
-            "cycle in `extends` chain at {}",
-            display_path(canonical)
+            "cycle in `extends` chain at {display}"
         )));
     }
     // Bound the depth of an *acyclic* chain (the cycle guard above only catches
@@ -1078,9 +1085,8 @@ fn enter_extends_chain(
     // real composition (root → team → org → bundled is ~4).
     if visiting.len() > MAX_EXTENDS_DEPTH {
         return Err(Error::Other(format!(
-            "`extends:` chain exceeds the maximum depth of {MAX_EXTENDS_DEPTH} (at {}); \
+            "`extends:` chain exceeds the maximum depth of {MAX_EXTENDS_DEPTH} (at {display}); \
              flatten the chain or split the ruleset",
-            display_path(canonical),
         )));
     }
     Ok(())
@@ -1130,20 +1136,37 @@ pub(crate) fn load_recursive(
             state.environment_values.add(&display_path(path));
         }
         Error::Io {
-            path: path.to_path_buf(),
+            path: if context.environment_chosen {
+                PathBuf::from(alint_core::CONFIGURATION_MASK)
+            } else {
+                path.to_path_buf()
+            },
             source,
         }
     })?;
     // Diamond chains reload a shared file once per DAG path (2^depth); a
     // non-top-level load is a pure function of its `MemoKey`, so reuse it.
     let memo_key = (!is_top).then(|| MemoKey::new(&canonical, confine, trusted, &context));
-    let file = state.record_config_file(&canonical);
+    let file = state.record_config_file(&canonical, context.environment_chosen);
     if let Some(cached) = state.cached(memo_key.as_ref()) {
         return Ok(cached);
     }
-    enter_extends_chain(&mut state.visiting, &canonical)?;
-
     let display = local_config_display(&canonical, confine, state, context.environment_chosen);
+    let cycle_display = if context.environment_chosen {
+        display.as_str()
+    } else {
+        // Preserve canonical display for non-environment-chosen cycles/depths.
+        ""
+    };
+    let canonical_display;
+    let chain_display = if cycle_display.is_empty() {
+        canonical_display = display_path(&canonical);
+        canonical_display.as_str()
+    } else {
+        cycle_display
+    };
+    enter_extends_chain(&mut state.visiting, &canonical, chain_display)?;
+
     let mut config = read_local_config(&canonical, file, &display, state, opts, context)?;
     refuse_out_of_root(is_top, &config.allow_out_of_root, &display, opts)?;
 
@@ -1386,7 +1409,14 @@ fn read_local_config(
     let contents = opts
         .config_source
         .read_to_string(canonical)
-        .map_err(|source| config_read_error(canonical, source))?;
+        .map_err(|source| {
+            let err_path = if context.environment_chosen {
+                Path::new(display)
+            } else {
+                canonical
+            };
+            config_read_error(err_path, source)
+        })?;
     // Checked in place, and returned as parsed: a config is large to move.
     let mut parsed = parse_config_interpolated_with_environment(
         &contents,
@@ -1438,6 +1468,7 @@ fn refuse_out_of_root(
 fn refuse_unloadable(
     kind: ExtendsEntryKind<'_>,
     source_display: &str,
+    chosen: bool,
     opts: &LoadOptions<'_>,
 ) -> Result<()> {
     if kind == ExtendsEntryKind::PlainHttp {
@@ -1447,10 +1478,14 @@ fn refuse_unloadable(
         )));
     }
     if let ExtendsEntryKind::Unsupported(scheme) = kind {
-        return Err(Error::Other(format!(
-            "unsupported `extends:` scheme `{}` (entry {source_display:?}); use https://, \
-             alint://bundled/ or a local path",
+        let shown_scheme = if chosen {
+            alint_core::CONFIGURATION_MASK.to_owned()
+        } else {
             scheme.to_ascii_lowercase()
+        };
+        return Err(Error::Other(format!(
+            "unsupported `extends:` scheme `{shown_scheme}` (entry {source_display:?}); \
+             use https://, alint://bundled/ or a local path",
         )));
     }
     if kind == ExtendsEntryKind::Https && opts.remote_policy == crate::RemotePolicy::Deny {
@@ -1491,7 +1526,7 @@ fn drop_extended_settings(
 /// value as written (a remote URL without its credentials, query and fragment;
 /// a local path canonical, or relative to the root). `context` is the
 /// local-target context, with the extending config's version and name.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn load_extended_source(
     entry: &alint_core::ExtendsEntry,
     from_environment: bool,
@@ -1505,20 +1540,32 @@ fn load_extended_source(
     let consumer_version = context.consumer_version;
     let url = entry.url();
     let kind = ExtendsEntryKind::of(url);
+    let context = context.chosen_by_environment(from_environment);
+    let chosen = context.environment_chosen;
     let mut source_display = if kind.is_url() {
         remote_source_display(url)
     } else {
         url.to_string()
     };
-    if from_environment {
+    if chosen {
         state.environment_values.add(&source_display);
+        if let ExtendsEntryKind::Bundled(spec) = kind {
+            state
+                .environment_values
+                .add(&format!("alint://bundled/{spec}"));
+            state.environment_values.add(spec);
+        }
+        alint_core::CONFIGURATION_MASK.clone_into(&mut source_display);
     }
-    // A local target the environment chose, or one a source it chose extends.
-    let mut chosen = false;
     let mut local_target = None;
-    refuse_unloadable(kind, &source_display, opts)?;
+    refuse_unloadable(kind, &source_display, chosen, opts)?;
     let mut parent = if kind == ExtendsEntryKind::Https {
-        let mut remote = load_remote(url, opts, state)?;
+        let mut remote = load_remote(
+            url,
+            chosen.then_some(alint_core::CONFIGURATION_MASK),
+            opts,
+            state,
+        )?;
         validate_source_compatibility(
             &mut remote,
             &source_display,
@@ -1536,8 +1583,12 @@ fn load_extended_source(
         crate::reject_env_expansion_in(&remote.rules, &remote.templates, &source_display)?;
         remote
     } else if let ExtendsEntryKind::Bundled(spec) = kind {
-        let mut bundled = state.bundled_source(spec, || load_bundled(spec))?;
-        let bundled_display = format!("alint://bundled/{spec}");
+        let bundled_display = if chosen {
+            alint_core::CONFIGURATION_MASK.to_owned()
+        } else {
+            format!("alint://bundled/{spec}")
+        };
+        let mut bundled = state.bundled_source(spec, || load_bundled(spec, &bundled_display))?;
         validate_source_compatibility(
             &mut bundled,
             &bundled_display,
@@ -1548,7 +1599,7 @@ fn load_extended_source(
         reject_kinds_newer_than_source(&bundled, &bundled_display, opts.kind_catalog)?;
         if !bundled.extends.is_empty() {
             return Err(Error::internal(format!(
-                "bundled ruleset '{spec}' declares its own `extends:`"
+                "bundled ruleset '{bundled_display}' declares its own `extends:`"
             )));
         }
         bundled
@@ -1558,11 +1609,6 @@ fn load_extended_source(
         // prints its path in are recorded with the environment's values, for
         // an error from below, resolved (once per file, however it is spelled;
         // `load_recursive` records it as joined when it does not resolve).
-        let context = context.chosen_by_environment(from_environment);
-        chosen = context.environment_chosen;
-        if chosen {
-            alint_core::CONFIGURATION_MASK.clone_into(&mut source_display);
-        }
         // Decided on the text, before any file-system call reaches the path.
         if confine.is_some() && names_a_path_of_its_own(url) {
             return Err(path_of_its_own_refusal(&source_display));
@@ -1712,8 +1758,13 @@ fn sanitized_remote_resolution_error(source: &str, error: &extends::ResolveError
 /// The remote `entry`, parsed. A body is pinned by its hash, so entries that
 /// name one body by other URLs (another query, say) read, hash and parse it
 /// once ([`LoadState::remote_source`]).
-fn load_remote(entry: &str, opts: &LoadOptions<'_>, state: &mut LoadState) -> Result<RawConfig> {
-    let source = remote_source_display(entry);
+fn load_remote(
+    entry: &str,
+    display_override: Option<&str>,
+    opts: &LoadOptions<'_>,
+    state: &mut LoadState,
+) -> Result<RawConfig> {
+    let source = display_override.map_or_else(|| remote_source_display(entry), str::to_owned);
     let (url, sri) = extends::split_url_and_sri(entry).map_err(|_| {
         Error::Other(format!(
             "remote `extends` entry {source:?} has invalid integrity metadata; \
@@ -1726,7 +1777,7 @@ fn load_remote(entry: &str, opts: &LoadOptions<'_>, state: &mut LoadState) -> Re
              HTTPS extends require `#sha256-<hex>` in the URL fragment"
         )));
     };
-    let source = remote_source_display(&url);
+    let source = display_override.map_or_else(|| remote_source_display(&url), str::to_owned);
     state.remote_source(&sri.encoded(), |state| {
         parse_remote(&url, &sri, &source, opts, &mut state.visiting)
     })
@@ -1838,13 +1889,13 @@ fn gate_extended_source(
 /// Load an `alint://bundled/<name>@<rev>` ruleset from the
 /// in-binary registry. Bundled rulesets can't themselves extend
 /// anything — they're static, leaf-only fragments.
-fn load_bundled(spec: &str) -> Result<RawConfig> {
+fn load_bundled(spec: &str, display: &str) -> Result<RawConfig> {
     let body = crate::bundled::resolve(spec).ok_or_else(|| {
         let shipped: Vec<String> = crate::bundled::catalog()
             .map(|(n, r)| format!("alint://bundled/{n}@{r}"))
             .collect();
         Error::Other(format!(
-            "unknown bundled ruleset 'alint://bundled/{spec}'; \
+            "unknown bundled ruleset '{display}'; \
              this build ships: [{}]",
             shipped.join(", "),
         ))

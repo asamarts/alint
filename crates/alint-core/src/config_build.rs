@@ -99,6 +99,14 @@ impl Config {
         self
     }
 
+    /// Sets [`Self::baseline_from_environment`].
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_baseline_from_environment(mut self, baseline_from_environment: bool) -> Self {
+        self.baseline_from_environment = baseline_from_environment;
+        self
+    }
+
     /// Sets [`Self::compatibility`].
     #[must_use]
     pub fn with_compatibility(mut self, compatibility: Vec<crate::ConfigCompatibility>) -> Self {
@@ -118,6 +126,14 @@ impl Config {
     #[must_use]
     pub fn with_config_files(mut self, config_files: Vec<PathBuf>) -> Self {
         self.config_files = config_files;
+        self
+    }
+
+    /// Sets [`Self::environment_config_files`].
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_environment_config_files(mut self, environment_config_files: Vec<PathBuf>) -> Self {
+        self.environment_config_files = environment_config_files;
         self
     }
 

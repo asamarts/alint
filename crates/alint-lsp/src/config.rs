@@ -268,9 +268,7 @@ pub(crate) fn eval_buffer(
     let results = session
         .engine
         .run_for_file(&session.root, &session.index, rel, text.as_bytes())
-        .map_err(|error| {
-            alint_core::redact_environment_values_in_error(error, &session.environment_values)
-        })?;
+        .map_err(|error| session.environment_redactor.redact_error(error))?;
     let results = apply_baseline(session, results, Some((rel, text.as_bytes())));
     let mut texts = TextSource::with_overlays(HashMap::from([(abs.to_path_buf(), text)]));
     let mut by_path = group_findings(&session.group_ctx(), &results, &mut texts);
@@ -528,10 +526,9 @@ fn build_session_for_config(
     let (config, mut withheld) = load_session_config(config_path, settings, registry)?;
     // A top-level value read from the environment can reach an error below
     // (an unreadable `baseline:`, an invalid `ignore:` glob in the walk).
-    let environment_values = config.environment_values.clone();
-    let redact = |message: String| {
-        alint_core::redact_environment_values(&message, &environment_values).into_owned()
-    };
+    let environment_redactor =
+        alint_core::EnvironmentRedactor::from_values(&config.environment_values);
+    let redact = |message: String| environment_redactor.redact(&message).into_owned();
     let mut facts = config.facts;
     if !trusted {
         let before = facts.len();
@@ -552,7 +549,7 @@ fn build_session_for_config(
         .flat_map(|entry| entry.pattern_hints(registry))
         .chain(alint_core::pattern_hints::environment_fact_hints(
             &facts,
-            &environment_values,
+            environment_redactor.values(),
         ))
         .map(|mut hint| {
             hint.id = redact(hint.id);
@@ -576,7 +573,14 @@ fn build_session_for_config(
     // "suppress nothing".
     let baseline_path = config.baseline.as_ref().map(|b| effective_root.join(b));
     let baseline = match &baseline_path {
-        Some(path) => Some(Baseline::load_file(path, Some(&effective_root)).map_err(redact)?),
+        Some(path) => Some(
+            Baseline::load_file_redacted(
+                path,
+                Some(&effective_root),
+                config.baseline_from_environment,
+            )
+            .map_err(redact)?,
+        ),
         None => None,
     };
     let mut extra_ignores = config.ignore;
@@ -603,10 +607,11 @@ fn build_session_for_config(
         baseline,
         kinds,
         pattern_hints,
-        environment_values,
+        environment_redactor,
         withheld,
         extended_rules,
         config_files: config.config_files,
+        environment_config_files: config.environment_config_files,
     })
 }
 

@@ -80,7 +80,8 @@ pub(super) fn cmd_fix(
         .with_facts(loaded.facts)
         .with_vars(loaded.vars)
         .with_fix_size_limit(loaded.fix_size_limit)
-        .with_config_files(loaded.config_files);
+        .with_config_files(loaded.config_files)
+        .with_environment_config_files(loaded.environment_config_files);
     engine = with_run_settings(engine, cli);
     if let Some(set) = changed.resolve(&root)? {
         engine = engine.with_changed_set(set);
@@ -103,7 +104,8 @@ pub(super) fn cmd_fix(
     if let Some(baseline_path) = &effective_baseline {
         // A `baseline:` key is repository content: read only inside the root.
         let baseline_root = cli.baseline.is_none().then_some(root.as_path());
-        let baseline = load_baseline(baseline_path, baseline_root)?;
+        let redact_baseline = cli.baseline.is_none() && loaded.baseline_from_environment;
+        let baseline = load_baseline(baseline_path, baseline_root, redact_baseline)?;
         engine = engine.with_fix_baseline(baseline);
     }
     let mut extra_ignores = loaded.extra_ignores;

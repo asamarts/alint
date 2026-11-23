@@ -1095,9 +1095,11 @@ mod tests {
             nested_configs: false,
             allow_out_of_root: crate::AllowOutOfRoot::default(),
             baseline: None,
+            baseline_from_environment: false,
             compatibility: Vec::new(),
             environment_values: Vec::new(),
             config_files: Vec::new(),
+            environment_config_files: Vec::new(),
             relation_plan: None,
         };
         let err = reject_custom_facts(&config, "./base.yml").unwrap_err();
@@ -1121,9 +1123,11 @@ mod tests {
             nested_configs: false,
             allow_out_of_root: crate::AllowOutOfRoot::default(),
             baseline: None,
+            baseline_from_environment: false,
             compatibility: Vec::new(),
             environment_values: Vec::new(),
             config_files: Vec::new(),
+            environment_config_files: Vec::new(),
             relation_plan: None,
         };
         assert!(reject_custom_facts(&config, "./base.yml").is_ok());

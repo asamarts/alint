@@ -27,16 +27,36 @@ impl FixContext<'_> {
     pub fn write_refusal(&self, path: &Path) -> Option<String> {
         let path = path.strip_prefix(self.root).unwrap_or(path);
         if crate::pathsafe::reaches_git_directory_walked(self.root, path, self.index) {
-            return Some(crate::git_directory_refusal(path));
+            let shown = if self.paths_sensitive {
+                Path::new(crate::CONFIGURATION_MASK)
+            } else {
+                path
+            };
+            return Some(crate::git_directory_refusal(shown));
         }
-        (self.extended_source
+        if self.extended_source
             && crate::pathsafe::reaches_alint_config_walked(
                 self.root,
                 path,
                 self.config_files,
                 self.index,
-            ))
-        .then(|| crate::alint_config_refusal(path))
+            )
+        {
+            let redact = self.paths_sensitive
+                || crate::pathsafe::reaches_specific_config_walked(
+                    self.root,
+                    path,
+                    self.environment_config_files,
+                    self.index,
+                );
+            let shown = if redact {
+                Path::new(crate::CONFIGURATION_MASK)
+            } else {
+                path
+            };
+            return Some(crate::alint_config_refusal(shown));
+        }
+        None
     }
 
     /// Persist a whole-file write of `bytes` for the file whose absolute path

@@ -930,6 +930,7 @@ impl Engine {
             .with_stage_ops(stage_ops)
             .with_process_environment(self.process_environment.as_ref())
             .with_config_files(&self.config_files)
+            .with_environment_config_files(&self.environment_config_files)
             .with_index(Some(index));
 
         // Same dependency resolution as `run`, so a fix pass respects per-rule
@@ -993,9 +994,10 @@ impl Engine {
         // so unchanged secret bytes cannot leak through a sibling edit.
         let mut sensitive_paths = HashSet::new();
         // The resolved files of findings whose path is `<redacted>` in reports
-        // (`paths_sensitive` below): the engine's stderr warnings leave them
-        // out the same way.
-        let mut hidden_paths: HashSet<PathBuf> = HashSet::new();
+        // (`paths_sensitive` below) plus any environment-chosen config files:
+        // the engine's stderr warnings leave them out the same way.
+        let mut hidden_paths: HashSet<PathBuf> =
+            self.environment_config_files.iter().cloned().collect();
         // Accumulator for the located-edit regime, filled by fixers that opt in
         // via `collects_located_edits` and applied once per file after the loop.
         // Phase 0 stays empty (no shipped fixer opts in), so the located pass is

@@ -410,6 +410,24 @@ impl Baseline {
     /// A message naming `path` (as given) for a file that is refused, cannot
     /// be read or does not parse.
     pub fn load_file(path: &Path, repository_root: Option<&Path>) -> Result<Self, String> {
+        Self::load_file_redacted(path, repository_root, false)
+    }
+
+    /// Like [`Self::load_file`], replacing `path` with
+    /// [`crate::CONFIGURATION_MASK`] in every error message when `redact_path`
+    /// is true (e.g. a top-level `baseline:` value interpolated from the
+    /// environment, including values shorter than four characters).
+    #[doc(hidden)]
+    pub fn load_file_redacted(
+        path: &Path,
+        repository_root: Option<&Path>,
+        redact_path: bool,
+    ) -> Result<Self, String> {
+        let shown = if redact_path {
+            std::borrow::Cow::Borrowed(crate::CONFIGURATION_MASK)
+        } else {
+            std::borrow::Cow::Owned(path.display().to_string())
+        };
         if let Some(root) = repository_root {
             let refusal = match crate::resolve_named_read(root, path) {
                 crate::NamedRead::InRoot => None,
@@ -423,23 +441,17 @@ impl Baseline {
                 ),
             };
             if let Some(refusal) = refusal {
-                return Err(format!("baseline file {} {refusal}", path.display()));
+                return Err(format!("baseline file {shown} {refusal}"));
             }
         }
         let bytes = crate::bounded_file::read_regular_capped(path, crate::MAX_ANALYZE_BYTES)
             .map_err(|e| {
-                format!(
-                    "reading baseline file {} (run `alint baseline` to create it): {e}",
-                    path.display()
-                )
+                format!("reading baseline file {shown} (run `alint baseline` to create it): {e}")
             })?;
         let text = String::from_utf8(bytes).map_err(|_| {
-            format!(
-                "reading baseline file {}: stream did not contain valid UTF-8",
-                path.display()
-            )
+            format!("reading baseline file {shown}: stream did not contain valid UTF-8")
         })?;
-        Self::load(&text).map_err(|e| format!("invalid baseline file {}: {e}", path.display()))
+        Self::load(&text).map_err(|e| format!("invalid baseline file {shown}: {e}"))
     }
 
     /// Parse a baseline from JSON-Lines text. The first non-empty line is

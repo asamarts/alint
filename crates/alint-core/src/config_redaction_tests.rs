@@ -493,3 +493,29 @@ fn a_masked_nested_condition_still_parses() {
     mask_configuration_values(&mut plain, NumberMask::Up);
     assert_eq!(plain["when"], CONFIGURATION_MASK);
 }
+
+#[test]
+fn environment_redactor_handles_overlapping_widening_and_scales_linearly() {
+    // Overlapping word-widened spans merge rather than skipping the second match.
+    let mut redactor = EnvironmentRedactor::new();
+    redactor.extend(&["foox".to_string(), "secret-token".to_string()]);
+    assert_eq!(redactor.redact_lazy("foox_secret-token_bar"), "<redacted>");
+    assert_eq!(redactor.redact("foox_secret-token_bar"), "<redacted>");
+
+    // Set deduplication keeps repeated inserts cheap and avoids duplicate entries.
+    let values: Vec<String> = (0..2_000).map(|i| format!("env-secret-{i:04}")).collect();
+    let mut many = EnvironmentRedactor::new();
+    many.extend(&values);
+    many.extend(&values);
+    assert_eq!(many.values().len(), 2_000);
+
+    // Scrubbing many messages reuses one compiled Aho-Corasick automaton.
+    for i in (0..2_000).step_by(4) {
+        let msg = format!("error touching env-secret-{i:04} in rule");
+        assert_eq!(many.redact_lazy(&msg), "error touching <redacted> in rule");
+    }
+    assert!(matches!(
+        many.redact_lazy("plain message without any recorded secret"),
+        std::borrow::Cow::Borrowed(_)
+    ));
+}
