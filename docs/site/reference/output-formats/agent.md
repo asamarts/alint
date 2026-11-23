@@ -140,7 +140,7 @@ fixed automatically.
 | --- | --- | --- | --- |
 | `rule_id` | string | yes | Matches the `id:` of a rule in your config. |
 | `severity` | string | yes | `"error"`, `"warning"`, or `"info"`. |
-| `human_message` | string | yes | The rule's message sanitized of terminal controls, bidi overrides/isolates, zero-width characters, and astral tag characters (raw machine paths remain in `file`). |
+| `human_message` | string | yes | The rule's message verbatim. Mirror of `message` in `--format json`. |
 | `agent_instruction` | string | yes | Templated remediation phrasing (see below). |
 | `fix_available` | boolean | yes | `true` when the source rule declares an autofix. |
 | `fix_command` | array of strings | no | Present iff `fix_available`. Exact argv (after `alint`) to auto-fix this one violation — e.g. `["fix", "--only", "final-newline"]`. Run it programmatically instead of parsing the command out of `agent_instruction`. |
@@ -149,6 +149,10 @@ fixed automatically.
 | `line` | integer | no | 1-based line, when the rule reports one. |
 | `column` | integer | no | 1-based column, when the rule reports one. |
 | `policy_url` | string | no | Documentation URL provided by the rule. |
+
+<!-- alint:since=0.24 -->
+From v0.24, `human_message`, `agent_instruction`, `policy_url`, and `analysis_failures[].human_message` are sanitized of terminal controls, bidi overrides/isolates, zero-width characters, and astral tag characters, while raw machine paths stay intact in `file`.
+<!-- /alint:since -->
 
 `off` rules never produce violations, so `"off"` never appears as a severity.
 

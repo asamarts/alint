@@ -5,7 +5,7 @@
 
 use std::fmt::Write as _;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Output;
 
 fn alint_bin() -> &'static str {
     env!("CARGO_BIN_EXE_alint")
@@ -20,7 +20,7 @@ fn write(root: &Path, rel: &str, body: &str) {
 }
 
 fn run(root: &Path, args: &[&str]) -> Output {
-    Command::new(alint_bin())
+    crate::hermetic::command(alint_bin())
         .current_dir(root)
         .args(args)
         .output()

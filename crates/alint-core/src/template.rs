@@ -2811,7 +2811,14 @@ mod tests {
         );
         assert_eq!(render_path_key_pattern("meta.**", &dotted), "meta.**");
 
-        let quoted = PathTokens::from_path(Path::new("locales/o'b\\c"));
+        let quoted = PathTokens {
+            path: r"locales/o'b\c".to_string(),
+            dir: "locales".to_string(),
+            basename: r"o'b\c".to_string(),
+            stem: r"o'b\c".to_string(),
+            ext: String::new(),
+            parent_name: "locales".to_string(),
+        };
         assert_eq!(
             render_path_key_pattern("nav['{basename}']", &quoted),
             r"nav['o\'b\\c']"
