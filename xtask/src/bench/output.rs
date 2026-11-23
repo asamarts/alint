@@ -122,25 +122,51 @@ fn render_index(report: &Report) -> String {
     let _ = writeln!(&mut out);
     let _ = writeln!(&mut out, "## Summary (mean ± stddev, ms)");
     let _ = writeln!(&mut out);
-    let _ = writeln!(
-        &mut out,
-        "| Tool | Size | Scenario | Mode | Mean | Stddev | Min | Max | Samples |"
-    );
-    let _ = writeln!(&mut out, "|---|---|---|---|---:|---:|---:|---:|---:|");
-    for r in &report.rows {
+    let has_rss = report.rows.iter().any(|r| r.peak_rss_kb.is_some());
+    if has_rss {
         let _ = writeln!(
             &mut out,
-            "| {tool} | {size} | {scen} | {mode} | {mean:.1} | {stddev:.1} | {min:.1} | {max:.1} | {samples} |",
-            tool = r.tool,
-            size = r.size_label,
-            scen = r.scenario,
-            mode = r.mode,
-            mean = r.mean_ms,
-            stddev = r.stddev_ms,
-            min = r.min_ms,
-            max = r.max_ms,
-            samples = r.samples,
+            "| Tool | Size | Scenario | Mode | Mean | Stddev | Min | Max | Peak RSS (MiB) | Samples |"
         );
+        let _ = writeln!(&mut out, "|---|---|---|---|---:|---:|---:|---:|---:|---:|");
+    } else {
+        let _ = writeln!(
+            &mut out,
+            "| Tool | Size | Scenario | Mode | Mean | Stddev | Min | Max | Samples |"
+        );
+        let _ = writeln!(&mut out, "|---|---|---|---|---:|---:|---:|---:|---:|");
+    }
+    for r in &report.rows {
+        if has_rss {
+            let rss = format_rss_mib(r.peak_rss_kb);
+            let _ = writeln!(
+                &mut out,
+                "| {tool} | {size} | {scen} | {mode} | {mean:.1} | {stddev:.1} | {min:.1} | {max:.1} | {rss} | {samples} |",
+                tool = r.tool,
+                size = r.size_label,
+                scen = r.scenario,
+                mode = r.mode,
+                mean = r.mean_ms,
+                stddev = r.stddev_ms,
+                min = r.min_ms,
+                max = r.max_ms,
+                samples = r.samples,
+            );
+        } else {
+            let _ = writeln!(
+                &mut out,
+                "| {tool} | {size} | {scen} | {mode} | {mean:.1} | {stddev:.1} | {min:.1} | {max:.1} | {samples} |",
+                tool = r.tool,
+                size = r.size_label,
+                scen = r.scenario,
+                mode = r.mode,
+                mean = r.mean_ms,
+                stddev = r.stddev_ms,
+                min = r.min_ms,
+                max = r.max_ms,
+                samples = r.samples,
+            );
+        }
     }
     out
 }
@@ -153,24 +179,54 @@ fn render_per_size(report: &Report, size: Size) -> String {
     let _ = writeln!(&mut out);
     let _ = writeln!(&mut out, "## Rows");
     let _ = writeln!(&mut out);
-    let _ = writeln!(
-        &mut out,
-        "| Tool | Scenario | Mode | Mean (ms) | Stddev | Min | Max | Samples |"
-    );
-    let _ = writeln!(&mut out, "|---|---|---|---:|---:|---:|---:|---:|");
-    for r in report.rows.iter().filter(|r| r.size_label == size.label()) {
+    let size_rows: Vec<&Row> = report
+        .rows
+        .iter()
+        .filter(|r| r.size_label == size.label())
+        .collect();
+    let has_rss = size_rows.iter().any(|r| r.peak_rss_kb.is_some());
+    if has_rss {
         let _ = writeln!(
             &mut out,
-            "| {tool} | {scen} | {mode} | {mean:.1} | {stddev:.1} | {min:.1} | {max:.1} | {samples} |",
-            tool = r.tool,
-            scen = r.scenario,
-            mode = r.mode,
-            mean = r.mean_ms,
-            stddev = r.stddev_ms,
-            min = r.min_ms,
-            max = r.max_ms,
-            samples = r.samples,
+            "| Tool | Scenario | Mode | Mean (ms) | Stddev | Min | Max | Peak RSS (MiB) | Samples |"
         );
+        let _ = writeln!(&mut out, "|---|---|---|---:|---:|---:|---:|---:|---:|");
+    } else {
+        let _ = writeln!(
+            &mut out,
+            "| Tool | Scenario | Mode | Mean (ms) | Stddev | Min | Max | Samples |"
+        );
+        let _ = writeln!(&mut out, "|---|---|---|---:|---:|---:|---:|---:|");
+    }
+    for r in size_rows {
+        if has_rss {
+            let rss = format_rss_mib(r.peak_rss_kb);
+            let _ = writeln!(
+                &mut out,
+                "| {tool} | {scen} | {mode} | {mean:.1} | {stddev:.1} | {min:.1} | {max:.1} | {rss} | {samples} |",
+                tool = r.tool,
+                scen = r.scenario,
+                mode = r.mode,
+                mean = r.mean_ms,
+                stddev = r.stddev_ms,
+                min = r.min_ms,
+                max = r.max_ms,
+                samples = r.samples,
+            );
+        } else {
+            let _ = writeln!(
+                &mut out,
+                "| {tool} | {scen} | {mode} | {mean:.1} | {stddev:.1} | {min:.1} | {max:.1} | {samples} |",
+                tool = r.tool,
+                scen = r.scenario,
+                mode = r.mode,
+                mean = r.mean_ms,
+                stddev = r.stddev_ms,
+                min = r.min_ms,
+                max = r.max_ms,
+                samples = r.samples,
+            );
+        }
     }
     let _ = writeln!(&mut out);
     let _ = writeln!(
@@ -181,6 +237,14 @@ fn render_per_size(report: &Report, size: Size) -> String {
         total = size.file_count(),
     );
     out
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn format_rss_mib(peak_rss_kb: Option<u64>) -> String {
+    peak_rss_kb.map_or_else(
+        || "-".to_string(),
+        |kb| format!("{:.1}", kb as f64 / 1024.0),
+    )
 }
 
 fn write_fingerprint_block(out: &mut String, fp: &fingerprint::Fingerprint, args: &ReportArgs) {

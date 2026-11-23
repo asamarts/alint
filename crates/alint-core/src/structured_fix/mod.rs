@@ -1784,52 +1784,40 @@ mod json_ {
     }
 }
 
-/// YAML span resolution + value serialization over `saphyr-parser`'s events.
+/// YAML span resolution + value serialization over `ayaml`'s spanned events.
 ///
 /// The resolver parses the document once into a flat tree (collections hold node
 /// indices) and resolves every path against it, so a fix with many matches parses
 /// the file once. `set_value` is a SPAN-splice of the target scalar's range (like
-/// JSON): the span covers the scalar token (quotes included for quoted scalars,
-/// trailing comment/whitespace EXCLUDED after the clamp below) and starts after
-/// the scalar's anchor, so the splice never disturbs a neighbour and the anchor
-/// survives. The check side parses YAML via `ayaml`'s compat layer, while
-/// structured-fix spans stay on `saphyr-parser` until the v0.24 saphyr exit
-/// (ADR-0036); a JSON scalar is valid YAML with the same value+type (YAML is a
-/// superset of JSON), so the serializer reuses `serde_json`.
+/// JSON): `ayaml` reports native UTF-8 byte spans tight to the scalar token
+/// (quotes included for quoted scalars, trailing comment/whitespace excluded, and
+/// leading `&anchor` / `!tag` properties outside the scalar span), so the splice
+/// never disturbs a neighbour and the anchor survives. Both the check side and
+/// structured-fix spans read YAML through `ayaml`'s compatibility reader; a JSON
+/// scalar is valid YAML with the same value+type (YAML is a superset of JSON),
+/// so the serializer reuses `serde_json`.
 ///
-/// The two parsers do not read every document alike (saphyr's anchor names run
-/// through a `:`, and it skips a BOM at the start of a later line), so the check
-/// side's guards do not protect this resolver, and it bounds itself: it walks
-/// saphyr's events iteratively (never its recursive loader), declines a document
-/// that nests past 128 levels, block or flow (the check side's limit), stops at a
-/// second document, and keeps an alias as one node, never a copy of what it
-/// names. A deep document and an alias bomb each cost one pass over their events.
+/// The resolver walks `ayaml`'s event stream iteratively (never recursively),
+/// declines a document that nests past 128 levels, block or flow (the check
+/// side's limit), stops at a second document, and keeps an alias as one node,
+/// never a copy of what it names. A deep document and an alias bomb each cost
+/// one pass over their events.
 ///
 /// CONSERVATIVE by design: for SET the resolver declines a multi-document stream, a
 /// non-scalar target, a path through or onto an alias (an edit inside the anchored
 /// node would change every alias of it; a splice over `*ref` would replace the
-/// reference with a literal), a document whose mapping repeats a key (as saphyr's
-/// loader refused one), a non-string mapping key, a scalar under a tag outside the
-/// core schema or one its core tag cannot read, a BLOCK (`|` / `>`) or line-folded
-/// scalar (multi-line span), an IMPLICIT null (`x:`: saphyr's zero-width span sits at
-/// the colon), and a core tag written before an anchor. A set keeps the anchor (`&a 5`
-/// becomes `&a 6`) and replaces a core-schema tag with the value, whose serialized
-/// form carries its own type (`!!str 5` set to the number 6 becomes `6`).
-/// `remove_value` (`removal_span`) deletes a single-line
-/// block-mapping entry's whole line (saphyr is read-only, so this is a hand-rolled
-/// line scan kept provably minimal: it declines a sequence-element path, a
-/// multi-line / non-scalar value, and a flow member whose key does not own its line).
-///
-/// THREE `saphyr` quirks handled here (all verified empirically + gated; re-checked
-/// on 0.3.3, which, like 0.2.2, types an empty plain scalar as null): (1)
-/// `Marker::index` is a CHAR offset despite the `index()` rustdoc claiming bytes, so
-/// spans are converted char->byte; a bump must re-verify this.
-/// (2) a QUOTED scalar's `span.end` runs to end-of-line (past a trailing comment),
-/// so `clamp_quoted_scalar_span` tightens it to the closing quote, else a splice
-/// silently deletes the comment (the audit's HIGH finding; a plain scalar's end is
-/// already tight). (3) a scalar's span starts at its anchor or tag, so the set span
-/// starts past them. A leading BOM is stripped + offset (the check side strips it
-/// but saphyr rejects it).
+/// reference with a literal), a document whose mapping repeats a key, a
+/// non-string mapping key, a scalar under a tag outside the core schema or one
+/// its core tag cannot read, a BLOCK (`|` / `>`) or line-folded scalar
+/// (multi-line span), an IMPLICIT null (`x:`: zero-width span), a property
+/// abutting a plain scalar without intervening whitespace, and a core tag
+/// written before an anchor. A set keeps the anchor (`&a 5` becomes `&a 6`) and
+/// replaces a core-schema tag with the value, whose serialized form carries its
+/// own type (`!!str 5` set to the number 6 becomes `6`).
+/// `remove_value` (`removal_span`) deletes a single-line block-mapping entry's
+/// whole line (a hand-rolled line scan kept provably minimal: it declines a
+/// sequence-element path, a multi-line / non-scalar value, and a flow member
+/// whose key does not own its line). A leading BOM is stripped + offset.
 mod yaml_;
 
 #[cfg(test)]

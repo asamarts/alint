@@ -1736,10 +1736,10 @@ pub(crate) mod tests {
             rows.iter().map(|row| row.key.as_str()).collect::<Vec<_>>(),
             ["deps", "block\n", "plain", "folded\n"]
         );
-        for (row, written) in [(&rows[1], "block"), (&rows[3], "folded")] {
+        for (row, indicator) in [(&rows[1], "|"), (&rows[3], ">")] {
             assert_eq!(row.parent, [EntryPathSegment::Key("deps".into())]);
             assert!(row.key_span.is_empty(), "{row:?}");
-            assert!(text[row.key_span.start..].starts_with(written), "{row:?}");
+            assert!(text[row.key_span.start..].starts_with(indicator), "{row:?}");
         }
         let empty = extract_entry_rows_strict_yaml(Format::Yaml, "? \n: 1\nb: 2\n").unwrap();
         assert_eq!(
@@ -1805,12 +1805,19 @@ flow: [é, 🚀]
         let error = extract_entry_rows(Format::Yaml, &amplified).unwrap_err();
         assert!(error.to_string().contains("alias expansion"), "{error}");
 
-        // ROB-1: saphyr reads what ayaml, which the alias guard measures with,
-        // refuses, so such a text is refused rather than walked unbounded.
-        for refused in ["a: &a [*a]\nb: v\n", "x: !<> y\nm: &m {a: 1}\nn: *m\n"] {
-            let error = extract_entry_rows(Format::Yaml, refused).unwrap_err();
-            assert!(error.to_string().contains("cannot be bounded"), "{error}");
-        }
+        // Cyclic aliases are refused by the alias guard; malformed YAML such as
+        // an empty verbatim tag (`!<>`) is refused directly by ayaml at parse time.
+        let cycle_err = extract_entry_rows(Format::Yaml, "a: &a [*a]\nb: v\n").unwrap_err();
+        assert!(
+            cycle_err.to_string().contains("cannot be bounded"),
+            "{cycle_err}"
+        );
+        let syntax_err =
+            extract_entry_rows(Format::Yaml, "x: !<> y\nm: &m {a: 1}\nn: *m\n").unwrap_err();
+        assert!(
+            matches!(syntax_err, EntryRowsError::Parse(_)),
+            "{syntax_err}"
+        );
     }
 
     #[test]

@@ -468,6 +468,10 @@ impl EnvironmentRedactor {
             crate::Error::RuleConfig { rule_id, message } => {
                 crate::Error::rule_config(self.redact(&rule_id), self.redact(&message))
             }
+            crate::Error::Yaml(yaml_error) => crate::Error::Other(format!(
+                "YAML parse error ({}): {CONFIGURATION_MASK}",
+                yaml_error.masked_message()
+            )),
             _ => crate::Error::Other(redacted),
         }
     }

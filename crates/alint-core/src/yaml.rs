@@ -47,6 +47,11 @@ fn limits() -> ayaml::Limits {
         .with_max_alias_dereferences(usize::MAX)
 }
 
+/// Compatibility parse options carrying alint's unified parser limits.
+pub(crate) fn compat_parse_options() -> ayaml::compat::ParseOptions {
+    ayaml::compat::ParseOptions::new().with_limits(limits())
+}
+
 /// Decode one YAML document into `T`, under alint's parser limits.
 ///
 /// The parser is ayaml, unless a build with `alint-core`'s `yaml-reference`
@@ -72,9 +77,9 @@ pub fn from_str<'de, T: Deserialize<'de>>(input: &'de str) -> Result<T, Error> {
 /// [`from_str`] through ayaml, whatever parser the build chose, and through
 /// alint's own decoding layer (see [`crate::yaml_decode`]).
 pub(crate) fn ayaml_from_str<'de, T: Deserialize<'de>>(input: &'de str) -> Result<T, Error> {
-    ayaml::compat::from_str_seed_with_limits(
+    ayaml::compat::from_str_seed_with(
         input,
-        &limits(),
+        &compat_parse_options(),
         crate::yaml_decode::TextSeed::<T>::new(),
     )
     .map_err(|error| Error::from_text(input, crate::yaml_decode::finish(error)))
@@ -87,13 +92,227 @@ pub(crate) fn ayaml_from_str_seed<'de, S: serde::de::DeserializeSeed<'de>>(
     input: &'de str,
     seed: S,
 ) -> Result<S::Value, ayaml::Error> {
-    ayaml::compat::from_str_seed_with_limits(input, &limits(), seed)
+    ayaml::compat::from_str_seed_with(input, &compat_parse_options(), seed)
+}
+
+/// Stream the spanned parser events of `input` lazily under alint's parser
+/// limits, using ayaml's compatibility reader.
+pub(crate) fn parse_events_stream(input: &str) -> Result<ayaml::EventStream<'_>, ayaml::Error> {
+    ayaml::compat::parse_events_with(input, &compat_parse_options())
+}
+
+/// Line/column lookup over a YAML source buffer, wrapping the parser's
+/// internal line index without exposing parser types in `alint-core`'s API.
+#[doc(hidden)]
+pub struct LineIndex<'a>(ayaml::LineIndex<'a>);
+
+impl fmt::Debug for LineIndex<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("LineIndex").finish_non_exhaustive()
+    }
+}
+
+impl<'a> LineIndex<'a> {
+    /// Index the line starts of `text`.
+    #[must_use]
+    pub fn new(text: &'a str) -> Self {
+        Self(ayaml::LineIndex::new(text))
+    }
+
+    /// 1-based `(line, column)` counted in Unicode scalar values for `byte_offset`.
+    #[must_use]
+    pub fn line_col(&self, byte_offset: usize) -> Option<(usize, usize)> {
+        let pos = self
+            .0
+            .to_position(byte_offset, ayaml::ColumnEncoding::Scalar)
+            .ok()?;
+        let loc = ayaml::Location::from(pos);
+        Some((loc.line(), loc.column()))
+    }
+
+    /// 0-based `(line, character)` counted in UTF-16 code units for `byte_offset`
+    /// (LSP `Position` coordinates).
+    #[must_use]
+    pub fn utf16_position(&self, byte_offset: usize) -> Option<(u32, u32)> {
+        let pos = self
+            .0
+            .to_position(byte_offset, ayaml::ColumnEncoding::Utf16)
+            .ok()?;
+        let line = u32::try_from(pos.line).ok()?;
+        let column = u32::try_from(pos.column).ok()?;
+        Some((line, column))
+    }
+}
+
+/// One spanned YAML event exposed internally for workspace crates such as
+/// `alint-rules` (`pinned_references`) so every YAML parse in the workspace
+/// goes through `alint_core::yaml` and respects alint's parser limits.
+#[doc(hidden)]
+#[derive(Debug, Clone)]
+pub enum StreamEvent<'a> {
+    StreamStart {
+        span: crate::ByteSpan,
+    },
+    StreamEnd {
+        span: crate::ByteSpan,
+    },
+    DocumentStart {
+        span: crate::ByteSpan,
+    },
+    DocumentEnd {
+        span: crate::ByteSpan,
+    },
+    Directive {
+        span: crate::ByteSpan,
+    },
+    Scalar {
+        value: std::borrow::Cow<'a, str>,
+        plain: bool,
+        anchor: Option<String>,
+        explicit_string_tag: bool,
+        local_tag: Option<String>,
+        span: crate::ByteSpan,
+    },
+    Alias {
+        anchor: String,
+        span: crate::ByteSpan,
+    },
+    SequenceStart {
+        anchor: Option<String>,
+        local_tag: Option<String>,
+        span: crate::ByteSpan,
+    },
+    SequenceEnd {
+        span: crate::ByteSpan,
+    },
+    MappingStart {
+        anchor: Option<String>,
+        local_tag: Option<String>,
+        span: crate::ByteSpan,
+    },
+    MappingEnd {
+        span: crate::ByteSpan,
+    },
+    /// Future non-exhaustive parser event variant.
+    Other {
+        span: crate::ByteSpan,
+    },
+}
+
+impl StreamEvent<'_> {
+    /// Native UTF-8 byte span of this event in the source input.
+    #[must_use]
+    pub const fn span(&self) -> crate::ByteSpan {
+        match self {
+            Self::StreamStart { span }
+            | Self::StreamEnd { span }
+            | Self::DocumentStart { span }
+            | Self::DocumentEnd { span }
+            | Self::Directive { span }
+            | Self::Scalar { span, .. }
+            | Self::Alias { span, .. }
+            | Self::SequenceStart { span, .. }
+            | Self::SequenceEnd { span }
+            | Self::MappingStart { span, .. }
+            | Self::MappingEnd { span }
+            | Self::Other { span } => *span,
+        }
+    }
+}
+
+/// Streaming iterator of [`StreamEvent`]s under alint's unified YAML parser limits.
+#[doc(hidden)]
+pub struct SpannedEvents<'a>(ayaml::EventStream<'a>);
+
+impl fmt::Debug for SpannedEvents<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SpannedEvents").finish_non_exhaustive()
+    }
+}
+
+impl<'a> Iterator for SpannedEvents<'a> {
+    type Item = Result<StreamEvent<'a>, Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0
+            .next()
+            .map(|item| item.map(map_stream_event).map_err(Error::ayaml))
+    }
+}
+
+fn byte_span(span: ayaml::Span) -> crate::ByteSpan {
+    crate::ByteSpan {
+        start: span.start(),
+        end: span.end(),
+    }
+}
+
+fn local_tag_suffix(tag: Option<&ayaml::Tag>) -> Option<String> {
+    tag.filter(|t| t.handle() == "!")
+        .map(|t| t.suffix().to_owned())
+}
+
+fn map_stream_event(event: ayaml::Event<'_>) -> StreamEvent<'_> {
+    let span = byte_span(event.span());
+    match event {
+        ayaml::Event::StreamStart { .. } => StreamEvent::StreamStart { span },
+        ayaml::Event::StreamEnd { .. } => StreamEvent::StreamEnd { span },
+        ayaml::Event::DocumentStart { .. } => StreamEvent::DocumentStart { span },
+        ayaml::Event::DocumentEnd { .. } => StreamEvent::DocumentEnd { span },
+        ayaml::Event::Directive { .. } => StreamEvent::Directive { span },
+        ayaml::Event::Scalar {
+            value,
+            style,
+            anchor,
+            tag,
+            ..
+        } => StreamEvent::Scalar {
+            value,
+            plain: style == ayaml::ScalarStyle::Plain,
+            anchor: anchor.map(|a| a.as_str().to_owned()),
+            explicit_string_tag: tag
+                .as_ref()
+                .is_some_and(|t| t.is_core() && t.suffix() == "str"),
+            local_tag: local_tag_suffix(tag.as_ref()),
+            span,
+        },
+        ayaml::Event::Alias { anchor, .. } => StreamEvent::Alias {
+            anchor: anchor.as_str().to_owned(),
+            span,
+        },
+        ayaml::Event::SequenceStart { anchor, tag, .. } => StreamEvent::SequenceStart {
+            anchor: anchor.map(|a| a.as_str().to_owned()),
+            local_tag: local_tag_suffix(tag.as_ref()),
+            span,
+        },
+        ayaml::Event::SequenceEnd { .. } => StreamEvent::SequenceEnd { span },
+        ayaml::Event::MappingStart { anchor, tag, .. } => StreamEvent::MappingStart {
+            anchor: anchor.map(|a| a.as_str().to_owned()),
+            local_tag: local_tag_suffix(tag.as_ref()),
+            span,
+        },
+        ayaml::Event::MappingEnd { .. } => StreamEvent::MappingEnd { span },
+        _ => StreamEvent::Other { span },
+    }
+}
+
+/// Stream spanned YAML events under alint's unified parser limits.
+///
+/// # Errors
+///
+/// Returns an [`Error`] when `input` violates a parser limit before streaming
+/// starts.
+#[doc(hidden)]
+pub fn parse_spanned_events(input: &str) -> Result<SpannedEvents<'_>, Error> {
+    parse_events_stream(input)
+        .map(SpannedEvents)
+        .map_err(Error::ayaml)
 }
 
 /// Whether the first node of `prefix` (the input up to an error) is a block
 /// collection, inspecting events lazily so the full stream is never buffered.
 pub(crate) fn root_is_a_block_collection(prefix: &str) -> bool {
-    let Ok(events) = ayaml::compat::parse_events_with_limits(prefix, &limits()) else {
+    let Ok(events) = parse_events_stream(prefix) else {
         return false;
     };
     for parsed in events {
@@ -121,7 +340,187 @@ pub(crate) fn root_is_a_block_collection(prefix: &str) -> bool {
 /// whole stream with this, and `requires:` is checked on the first
 /// document's events.
 pub(crate) fn stream_events(input: &str) -> Result<Vec<ayaml::Event<'_>>, ayaml::Error> {
-    ayaml::compat::parse_events_eager_with_limits(input, &limits())
+    ayaml::compat::parse_events_eager_with(input, &compat_parse_options())
+}
+
+/// A scalar resolved under the YAML 1.2 core schema, with canonical integer
+/// and float representations suitable for value-equality mapping-key checks.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum CoreScalar {
+    Null,
+    Bool(bool),
+    /// Strictly negative integer (`< 0`). Non-negative integers use [`Self::Uint`].
+    NegInt(i128),
+    /// Non-negative integer (`>= 0`).
+    Uint(u128),
+    /// Canonical IEEE-754 float bits (`-0.0` normalized to `+0.0`, all NaNs to
+    /// `f64::NAN`).
+    Float(u64),
+    String(String),
+}
+
+/// Whether `tag` is one of the five YAML 1.2 core-schema scalar tags.
+pub(crate) fn is_core_scalar_tag(tag: &ayaml::Tag) -> bool {
+    tag.is_core() && matches!(tag.suffix(), "str" | "int" | "float" | "bool" | "null")
+}
+
+/// Whether `tag` is a YAML 1.2 core-schema collection tag (`!!seq`, `!!map`,
+/// `!!set`, `!!omap`, `!!pairs`) that leaves a collection plain.
+pub(crate) fn is_core_collection_tag(tag: &ayaml::Tag) -> bool {
+    tag.is_core() && matches!(tag.suffix(), "seq" | "map" | "set" | "omap" | "pairs")
+}
+
+/// Resolve an untagged or core-scalar-tagged scalar event under the YAML 1.2
+/// core schema. Returns `None` for any non-core tag (including `!` and
+/// unknown `!!` names like `!!binary`) and for a core tag whose text does not
+/// fit it (`!!int abc`).
+pub(crate) fn resolve_core_scalar(
+    text: &str,
+    style: ayaml::ScalarStyle,
+    tag: Option<&ayaml::Tag>,
+) -> Option<CoreScalar> {
+    if let Some(tag) = tag {
+        if !is_core_scalar_tag(tag) {
+            return None;
+        }
+        return resolve_explicit_core_scalar(text, tag.suffix());
+    }
+    Some(resolve_untagged_scalar(text, style))
+}
+
+/// Resolve a scalar event's payload under the YAML 1.2 core schema, looking
+/// through custom tags (`!` forces string; other non-core tags resolve their
+/// payload as if untagged), matching `ayaml::Value` accessors. Returns `None`
+/// only when an explicit core scalar tag cannot read the text (`!!int abc`).
+pub(crate) fn resolve_scalar_payload(
+    text: &str,
+    style: ayaml::ScalarStyle,
+    tag: Option<&ayaml::Tag>,
+) -> Option<CoreScalar> {
+    if let Some(tag) = tag {
+        if is_core_scalar_tag(tag) {
+            return resolve_explicit_core_scalar(text, tag.suffix());
+        }
+        if tag.handle() == "!" && tag.suffix().is_empty() {
+            return Some(CoreScalar::String(text.to_owned()));
+        }
+        if tag.is_core() {
+            // Unknown core tags like `!!binary` carry string payloads in ayaml.
+            return Some(CoreScalar::String(text.to_owned()));
+        }
+    }
+    Some(resolve_untagged_scalar(text, style))
+}
+
+fn resolve_untagged_scalar(text: &str, style: ayaml::ScalarStyle) -> CoreScalar {
+    if style != ayaml::ScalarStyle::Plain {
+        return CoreScalar::String(text.to_owned());
+    }
+    if is_core_null(text) {
+        return CoreScalar::Null;
+    }
+    if let Some(flag) = parse_core_bool(text) {
+        return CoreScalar::Bool(flag);
+    }
+    if let Some(int) = parse_core_int(text, false) {
+        return int;
+    }
+    if let Some(float) = parse_core_float(text, false) {
+        return float;
+    }
+    CoreScalar::String(text.to_owned())
+}
+
+fn resolve_explicit_core_scalar(text: &str, suffix: &str) -> Option<CoreScalar> {
+    match suffix {
+        "str" => Some(CoreScalar::String(text.to_owned())),
+        "int" => parse_core_int(text, true),
+        "float" => parse_core_float(text, true),
+        "bool" => parse_core_bool(text).map(CoreScalar::Bool),
+        "null" => is_core_null(text).then_some(CoreScalar::Null),
+        _ => None,
+    }
+}
+
+pub(crate) fn is_core_null(text: &str) -> bool {
+    matches!(text, "" | "~" | "null" | "Null" | "NULL")
+}
+
+fn parse_core_bool(text: &str) -> Option<bool> {
+    match text {
+        "true" | "True" | "TRUE" => Some(true),
+        "false" | "False" | "FALSE" => Some(false),
+        _ => None,
+    }
+}
+
+fn parse_core_int(text: &str, allow_leading_zero: bool) -> Option<CoreScalar> {
+    let (negative, digits) = match text.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, text.strip_prefix('+').unwrap_or(text)),
+    };
+    if digits.is_empty() || digits.starts_with(['+', '-']) {
+        return None;
+    }
+    let (radix, digits) = if let Some(rest) = digits.strip_prefix("0b") {
+        (2, rest)
+    } else if let Some(rest) = digits.strip_prefix("0o") {
+        (8, rest)
+    } else if let Some(rest) = digits.strip_prefix("0x") {
+        (16, rest)
+    } else {
+        (10, digits)
+    };
+    if digits.is_empty() || digits.starts_with(['+', '-']) {
+        return None;
+    }
+    if !allow_leading_zero && radix == 10 && digits.len() > 1 && digits.starts_with('0') {
+        return None;
+    }
+    let magnitude = u128::from_str_radix(digits, radix).ok()?;
+    if magnitude == 0 {
+        return Some(CoreScalar::Uint(0));
+    }
+    if negative {
+        0_i128
+            .checked_sub_unsigned(magnitude)
+            .map(CoreScalar::NegInt)
+    } else {
+        Some(CoreScalar::Uint(magnitude))
+    }
+}
+
+fn canonical_float(value: f64) -> CoreScalar {
+    let bits = if value.is_nan() {
+        f64::NAN.to_bits()
+    } else if value == 0.0 {
+        0.0_f64.to_bits()
+    } else {
+        value.to_bits()
+    };
+    CoreScalar::Float(bits)
+}
+
+fn parse_core_float(text: &str, allow_leading_zero: bool) -> Option<CoreScalar> {
+    match text {
+        ".inf" | ".Inf" | ".INF" | "+.inf" | "+.Inf" | "+.INF" => {
+            return Some(canonical_float(f64::INFINITY));
+        }
+        "-.inf" | "-.Inf" | "-.INF" => return Some(canonical_float(f64::NEG_INFINITY)),
+        ".nan" | ".NaN" | ".NAN" => return Some(canonical_float(f64::NAN)),
+        _ => {}
+    }
+    let digits = text.strip_prefix(['+', '-']).unwrap_or(text);
+    let decimal_int_like = !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit());
+    if decimal_int_like {
+        if !allow_leading_zero && digits.len() > 1 && digits.starts_with('0') {
+            return None;
+        }
+    } else if !text.contains(['.', 'e', 'E']) {
+        return None;
+    }
+    let value = text.parse::<f64>().ok()?;
+    value.is_finite().then(|| canonical_float(value))
 }
 
 /// Decode `value` into `T`, as [`from_str`] decodes a document's value, except
@@ -1125,6 +1524,25 @@ impl Error {
         }
     }
 
+    /// A redacted diagnostic without document text, naming only the error
+    /// category, error code (when available), and source location.
+    #[must_use]
+    pub fn masked_message(&self) -> String {
+        match &self.0 {
+            ErrorRepr::Ayaml(error) => error.masked().to_string(),
+            ErrorRepr::Hinted(hinted) => hinted.0.masked().to_string(),
+            #[cfg(feature = "yaml-reference")]
+            ErrorRepr::Libyaml(_, _) => match self.location() {
+                Some(location) => format!(
+                    "YAML parse error at line {} column {}",
+                    location.line(),
+                    location.column()
+                ),
+                None => "YAML parse error".to_string(),
+            },
+        }
+    }
+
     /// Where in the document the error is, if it has a place there.
     #[must_use]
     pub fn location(&self) -> Option<Location> {
@@ -1474,7 +1892,8 @@ mod tests {
         let spec: Spec = from_str(text).unwrap();
         assert_eq!(spec.kind, "k");
         let parser: ayaml::Mapping =
-            ayaml::compat::from_str_with_limits("pattern: x\nlimits: [1, 2]\n", &limits()).unwrap();
+            ayaml::compat::from_str_with("pattern: x\nlimits: [1, 2]\n", &compat_parse_options())
+                .unwrap();
         assert_eq!(format!("{:?}", spec.extra), format!("{parser:?}"));
         assert_eq!(
             format!("{:?}", spec.extra["limits"]),
@@ -1946,6 +2365,61 @@ mod tests {
         assert_eq!(
             to_string(&value).unwrap(),
             "kind: k\nlimits:\n- 1\n- 2.5\nflag: true\nnone: null\nt: !x y\n"
+        );
+    }
+
+    #[test]
+    fn masked_message_strips_document_text_and_keeps_location() {
+        let error = ayaml_from_str::<u32>("top-secret-canary-token").unwrap_err();
+        let masked = error.masked_message();
+        assert!(!masked.contains("top-secret-canary-token"), "{masked}");
+        assert_ne!(masked, "");
+
+        let syntax = ayaml_from_str::<Value>("secret-key: [unclosed\n").unwrap_err();
+        let masked = syntax.masked_message();
+        assert!(!masked.contains("secret-key"), "{masked}");
+        assert!(!masked.contains("unclosed"), "{masked}");
+        assert!(masked.contains("line 2"), "{masked}");
+    }
+
+    #[test]
+    fn core_scalar_resolution_matches_yaml_1_2_core_schema() {
+        use ayaml::{ScalarStyle, Tag};
+        assert_eq!(
+            resolve_core_scalar("1", ScalarStyle::Plain, None),
+            resolve_core_scalar("0x1", ScalarStyle::Plain, None)
+        );
+        assert_eq!(
+            resolve_core_scalar("0", ScalarStyle::Plain, None),
+            resolve_core_scalar("-0", ScalarStyle::Plain, None)
+        );
+        assert_eq!(
+            resolve_core_scalar("0123", ScalarStyle::Plain, None),
+            Some(CoreScalar::String("0123".into()))
+        );
+        assert_eq!(
+            resolve_core_scalar("0123", ScalarStyle::Plain, Some(&Tag::core("int"))),
+            Some(CoreScalar::Uint(123))
+        );
+        assert_eq!(
+            resolve_core_scalar("abc", ScalarStyle::Plain, Some(&Tag::core("int"))),
+            None
+        );
+        assert_eq!(
+            resolve_core_scalar("foo", ScalarStyle::Plain, Some(&Tag::local("Ref"))),
+            None
+        );
+        assert_eq!(
+            resolve_scalar_payload("1", ScalarStyle::Plain, Some(&Tag::local(""))),
+            Some(CoreScalar::String("1".into()))
+        );
+        assert_eq!(
+            resolve_scalar_payload("foo", ScalarStyle::Plain, Some(&Tag::local("Ref"))),
+            Some(CoreScalar::String("foo".into()))
+        );
+        assert_eq!(
+            resolve_scalar_payload("abc", ScalarStyle::Plain, Some(&Tag::core("int"))),
+            None
         );
     }
 }

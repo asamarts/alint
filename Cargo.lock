@@ -187,7 +187,6 @@ name = "alint-rules"
 version = "0.23.0"
 dependencies = [
  "alint-core",
- "ayaml",
  "cap",
  "globset",
  "jsonschema",
@@ -195,7 +194,6 @@ dependencies = [
  "proptest",
  "pulldown-cmark",
  "regex",
- "saphyr-parser",
  "schemars",
  "serde",
  "serde_json",
@@ -354,9 +352,9 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
 name = "ayaml"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c47176b22adc477a2dc84304641c651e5478fbdee8a0090ed293220d0d9130f9"
+checksum = "815269782f3815288f23f1effff6d1b66a502f24fc3ebabdf1985a727d16e598"
 dependencies = [
  "indexmap",
  "serde",

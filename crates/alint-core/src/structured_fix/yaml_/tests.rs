@@ -29,30 +29,42 @@ fn on_small_stack<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> 
         .expect("the resolver must return, not panic")
 }
 
-/// ROB-2: three documents that ayaml reads as one plain scalar (so the check
-/// side's guards pass them) and saphyr reads as a block sequence 100,000 levels
-/// deep. saphyr's recursive loader overflowed the stack on each (`alint fix`
-/// aborted at 30,000 levels, the language server at 3,000). The resolver walks
-/// the events iteratively and declines past 128 levels, or at the second
-/// document.
+/// ROB-2: deeply nested block sequences and the three documents that saphyr
+/// previously read 100,000 levels deep while ayaml reads them as a single
+/// plain scalar. The resolver now uses ayaml's iterative event stream, so
+/// genuine 100,000-level nesting declines cleanly on a 2 MiB stack, and the
+/// historical ROB-2 inputs never overflow the stack or resolve deep paths.
 #[test]
 fn documents_saphyr_reads_deeper_than_ayaml_decline_on_a_small_stack() {
     const N: usize = 100_000;
     let deep = "- ".repeat(N);
+    let true_deep = format!("{deep}x\n");
+    let declined = on_small_stack(move || {
+        let bytes = true_deep.as_bytes();
+        let deep_path = vec![idx(0); 4];
+        [
+            resolve_value_span(Format::Yaml, bytes, &[]),
+            resolve_value_span(Format::Yaml, bytes, &deep_path),
+            resolve_removal_span(Format::Yaml, bytes, &[key("x")]),
+            resolve_value_spans(Format::Yaml, bytes, std::slice::from_ref(&deep_path))[0].clone(),
+            resolve_removal_spans(Format::Yaml, bytes, &[vec![key("x")]])[0].clone(),
+        ]
+        .iter()
+        .all(Option::is_none)
+    });
+    assert!(declined, "a document nested past the limit must decline");
+
     let inputs = [
-        // ayaml's anchor name stops at `:`, saphyr's does not.
+        // ayaml reads all three as a single plain scalar, never 100k deep.
         format!("&ak:---\n{deep}x\n"),
-        // saphyr skips a BOM at a later line start and reads `...` as the end
-        // of a first document.
         format!("a\n\u{feff}...\n{deep}x\n"),
         format!("\r\n\u{feff}\u{feff}{deep}x\n"),
     ];
     for input in inputs {
-        let declined = on_small_stack(move || {
+        let safe = on_small_stack(move || {
             let bytes = input.as_bytes();
             let deep_path = vec![idx(0); 4];
             [
-                resolve_value_span(Format::Yaml, bytes, &[]),
                 resolve_value_span(Format::Yaml, bytes, &deep_path),
                 resolve_removal_span(Format::Yaml, bytes, &[key("x")]),
                 resolve_value_spans(Format::Yaml, bytes, std::slice::from_ref(&deep_path))[0]
@@ -62,7 +74,10 @@ fn documents_saphyr_reads_deeper_than_ayaml_decline_on_a_small_stack() {
             .iter()
             .all(Option::is_none)
         });
-        assert!(declined, "a document nested past the limit must decline");
+        assert!(
+            safe,
+            "ROB-2 input must stay stack-safe and decline deep paths"
+        );
     }
 }
 
@@ -137,10 +152,19 @@ fn an_alias_bomb_declines_quickly() {
 
 /// The deterministic bound behind [`an_alias_bomb_declines_quickly`]: the
 /// walk records one node per scalar, alias and collection event, so the tree
-/// of the bomb is no larger than its text.
+/// of an alias bomb is no larger than its text.
 #[test]
 fn an_alias_bomb_is_read_in_one_pass_over_its_events() {
-    let bomb = alias_bomb();
+    let mut bomb = String::from("- &a0 [x,x,x,x,x,x,x,x,x,x]\n");
+    for level in 0..12 {
+        let refs = vec![format!("*b{level}"); 10].join(",");
+        writeln!(
+            bomb,
+            "- &b{level} {{? *a{level}}}\n- &a{} [{refs}]",
+            level + 1
+        )
+        .unwrap();
+    }
     let index = SpanIndex::read(&bomb).expect("the bomb is one valid document");
     assert!(
         index.nodes.len() <= bomb.len(),
@@ -192,12 +216,10 @@ fn a_set_keeps_the_anchor() {
         assert_eq!(set(src, &path, "6").as_deref(), Some(want), "{src:?}");
         Format::Yaml.parse(want).unwrap();
     }
-    // An anchor name saphyr reads past a `:` (ayaml does not, so the check
-    // side cannot read this file, but the span is still exact).
-    assert_eq!(
-        set("a: &x:y 1\n", &[key("a")], "6").as_deref(),
-        Some("a: &x:y 6\n")
-    );
+    // In ayaml's compat mode, `&x:y 1` parses as anchor `&x` directly abutting
+    // the plain scalar `:y 1` with no intervening whitespace: splicing over
+    // `:y 1` would corrupt the anchor name, so the resolver cleanly declines.
+    assert_eq!(set("a: &x:y 1\n", &[key("a")], "6"), None);
     // A core tag before the anchor cannot be dropped with the anchor kept;
     // an anchor with no scalar after it has nothing to replace; a scalar
     // under a tag outside the core schema still declines.
@@ -318,24 +340,29 @@ fn many_paths_resolve_from_one_parse() {
     }
 }
 
-/// Character offsets map to bytes at every stride boundary and between them.
-#[test]
-fn char_offsets_map_to_bytes_around_the_stride() {
-    let text = "é".repeat(200) + "x";
-    let offsets = CharOffsets::new(&text);
-    for index in 0..=201 {
-        let byte = text
-            .char_indices()
-            .nth(index)
-            .map_or(text.len(), |(b, _)| b);
-        assert_eq!(offsets.byte(&text, index), Some(byte), "char {index}");
+/// Clamp a quoted scalar's span end to just after its closing quote for
+/// `saphyr`'s reference resolver, which over-extends quoted spans to EOL.
+fn clamp_quoted_scalar_span(text: &str, span: Range<usize>) -> Range<usize> {
+    let bytes = text.as_bytes();
+    let open = bytes[span.start];
+    if open != b'"' && open != b'\'' {
+        return span;
     }
-    assert_eq!(offsets.byte(&text, 202), None);
-    let ascii = CharOffsets::new("abc");
-    assert_eq!(
-        (ascii.byte("abc", 3), ascii.byte("abc", 4)),
-        (Some(3), None)
-    );
+    let mut i = span.start + 1;
+    while i < span.end {
+        match bytes[i] {
+            b'\\' if open == b'"' => i += 2,
+            b if b == open => {
+                if open == b'\'' && bytes.get(i + 1) == Some(&b'\'') {
+                    i += 2;
+                } else {
+                    return span.start..i + 1;
+                }
+            }
+            _ => i += 1,
+        }
+    }
+    span
 }
 
 /// The resolver v0.22.1 shipped, over saphyr's recursive loader: the reference

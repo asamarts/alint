@@ -1,0 +1,21 @@
+# Bench scenario SYAML — opt-in mid-size YAML structured parsing & RSS anchor (#550).
+#
+# Evaluates two structured YAML rules across the planted `yaml_mid/` overlay:
+# 50 OpenAPI-shaped YAML documents (~37 KB each) plus 3 large (~1 MB) ones.
+# Kept opt-in (excluded from default `--scenarios S1,S2,S3,S4,SFIX` and
+# published history/trajectory) until it has a committed baseline.
+version: 1
+rules:
+  - id: openapi-version-equals
+    kind: yaml_path_equals
+    level: error
+    paths: "yaml_mid/**/*.yml"
+    path: "$.openapi"
+    equals: "3.0.0"
+
+  - id: openapi-info-title-matches
+    kind: yaml_path_matches
+    level: error
+    paths: "yaml_mid/**/*.yml"
+    path: "$.info.title"
+    matches: "^[a-z0-9-]+$"

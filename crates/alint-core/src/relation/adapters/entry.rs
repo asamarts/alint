@@ -271,7 +271,7 @@ mod tests {
             .collect();
         assert_eq!(pointers, ["deps", "deps.block\n", "deps.plain"]);
         let block = output.rows[1].span.unwrap();
-        assert!(text[block.start..].starts_with("block"), "{block:?}");
+        assert!(text[block.start..].starts_with('|'), "{block:?}");
     }
 
     #[test]

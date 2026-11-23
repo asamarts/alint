@@ -63,12 +63,11 @@ toml_edit.workspace = true
 jsonc-parser.workspace = true
 roxmltree.workspace = true
 hcl.workspace = true
-saphyr.workspace = true
-saphyr-parser.workspace = true
 adotenv.workspace = true
-# The parser facade's reference backend (ADR-0041), behind the test-only
-# `yaml-reference` feature, which no release build enables.
+# The parser facade's reference backends (ADR-0036, ADR-0041), behind the
+# test-only `yaml-reference` feature, which no release build enables.
 yaml_serde = { workspace = true, optional = true }
+saphyr = { workspace = true, optional = true }
 
 [target.'cfg(unix)'.dependencies]
 rustix.workspace = true
@@ -79,11 +78,13 @@ rustix.workspace = true
 # not a stable API: a crate that depends on alint-core must not enable it. If
 # any crate in a build's dependency graph enables it, `ALINT_YAML_PARSER`
 # chooses the parser of every YAML decode in the process, for every crate.
-yaml-reference = ["dep:yaml_serde"]
+yaml-reference = ["dep:yaml_serde", "dep:saphyr"]
 
 [dev-dependencies]
 tempfile.workspace = true
 yaml_serde.workspace = true
+saphyr.workspace = true
+saphyr-parser.workspace = true
 proptest.workspace = true
 syn.workspace = true
 proc-macro2.workspace = true

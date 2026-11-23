@@ -508,6 +508,7 @@ fn run_one(
         .context("hyperfine produced no results")?
         .wall_clock()?;
     let times_ms = times.iter().map(|seconds| seconds * 1000.0).collect();
+    let peak_rss_kb = measure_peak_rss_kb(&cmd_str, ignored_codes);
 
     Ok(Row {
         tool: tool.name().into(),
@@ -522,7 +523,65 @@ fn run_one(
         max_ms: r.max * 1000.0,
         samples: times.len(),
         times_ms,
+        peak_rss_kb,
         command,
+    })
+}
+
+/// Measure peak resident set size (max RSS in KiB) of `command` on a single
+/// post-hyperfine probe run using `/usr/bin/time`, so timed wall-clock runs
+/// incur zero wrapper overhead. Returns `None` if `/usr/bin/time` is absent,
+/// unsupported on this OS, or the output cannot be parsed.
+fn measure_peak_rss_kb(command: &str, allowed_nonzero: &[i32]) -> Option<u64> {
+    if !Path::new("/usr/bin/time").is_file() {
+        return None;
+    }
+    if cfg!(target_os = "linux") {
+        let rss_file = tempfile::NamedTempFile::new().ok()?;
+        let output = Command::new("/usr/bin/time")
+            .args(["-f", "%M", "-o"])
+            .arg(rss_file.path())
+            .args(["--", "sh", "-c", command])
+            .output()
+            .ok()?;
+        let code = output.status.code()?;
+        if code != 0 && !allowed_nonzero.contains(&code) {
+            return None;
+        }
+        let raw = fs::read_to_string(rss_file.path()).ok()?;
+        parse_time_rss_kb(&raw, false)
+    } else if cfg!(target_os = "macos") {
+        let output = Command::new("/usr/bin/time")
+            .args(["-l", "sh", "-c", command])
+            .output()
+            .ok()?;
+        let code = output.status.code()?;
+        if code != 0 && !allowed_nonzero.contains(&code) {
+            return None;
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        parse_time_rss_kb(&stderr, true)
+    } else {
+        None
+    }
+}
+
+/// Parse max RSS in KiB from `/usr/bin/time` output: when `bytes_unit` is
+/// false (Linux GNU `time -f '%M'`), parses a single KiB integer; when true
+/// (macOS `time -l`), parses `<bytes>  maximum resident set size` and converts
+/// to KiB.
+fn parse_time_rss_kb(text: &str, bytes_unit: bool) -> Option<u64> {
+    if !bytes_unit {
+        return text
+            .lines()
+            .rev()
+            .find_map(|line| line.trim().parse::<u64>().ok());
+    }
+    text.lines().find_map(|line| {
+        let trimmed = line.trim();
+        let bytes_str = trimmed.strip_suffix("maximum resident set size")?.trim();
+        let bytes = bytes_str.parse::<u64>().ok()?;
+        Some(bytes.div_ceil(1024))
     })
 }
 
@@ -638,6 +697,12 @@ fn readiness_probe(tool: Tool, scenario: Scenario, mode: Mode) -> Option<Readine
             path: "alint_bench_probe.rs",
             contents: "// TODO: benchmark readiness probe\n",
             needle: "no-todo-rust",
+            expected_exit: 1,
+        }),
+        (Tool::Alint, Scenario::Syaml) => Some(ReadinessProbe {
+            path: "yaml_mid/alint_bench_probe.yml",
+            contents: "openapi: \"2.0.0\"\ninfo:\n  title: probe\n",
+            needle: "openapi-version-equals",
             expected_exit: 1,
         }),
         _ => None,
@@ -810,6 +875,7 @@ mod tests {
             max_ms: mean_ms,
             samples: 1,
             times_ms: vec![mean_ms],
+            peak_rss_kb: None,
             command: String::new(),
         }
     }
@@ -847,6 +913,7 @@ mod tests {
             (Tool::Alint, Scenario::S2, 1, "ts-no-debugger"),
             (Tool::GrepPipeline, Scenario::S2, 0, "alint_bench_probe.rs"),
             (Tool::Repolinter, Scenario::S2, 1, "no-todo-rust"),
+            (Tool::Alint, Scenario::Syaml, 1, "openapi-version-equals"),
         ];
         for (tool, scenario, expected_exit, needle) in cases {
             let probe = readiness_probe(tool, scenario, Mode::Full).unwrap();
@@ -939,5 +1006,43 @@ mod tests {
             &[Scenario::Sfix],
             &[Mode::Fix]
         ));
+        assert!(tool_supports_any_cell(
+            Tool::Alint,
+            &[Scenario::Syaml],
+            &[Mode::Full]
+        ));
+        assert!(!tool_supports_any_cell(
+            Tool::LsLint,
+            &[Scenario::Syaml],
+            &[Mode::Full]
+        ));
+    }
+
+    #[test]
+    fn peak_rss_parsing_handles_linux_and_macos_time_output() {
+        assert_eq!(parse_time_rss_kb("18432\n", false), Some(18_432));
+        assert_eq!(
+            parse_time_rss_kb("Command exited with non-zero status 1\n24576\n", false),
+            Some(24_576)
+        );
+        assert_eq!(parse_time_rss_kb("not-a-number\n", false), None);
+
+        let macos = "\
+        0.12 real         0.08 user         0.02 sys
+          16777216  maximum resident set size
+                 0  average shared memory size
+";
+        assert_eq!(parse_time_rss_kb(macos, true), Some(16_384));
+        assert_eq!(parse_time_rss_kb("no rss line\n", true), None);
+
+        if Path::new("/usr/bin/time").is_file()
+            && (cfg!(target_os = "linux") || cfg!(target_os = "macos"))
+        {
+            let rss = measure_peak_rss_kb("true", &[]);
+            assert!(
+                rss.is_some_and(|kb| kb > 0),
+                "expected positive RSS, got {rss:?}"
+            );
+        }
     }
 }
