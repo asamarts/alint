@@ -438,7 +438,7 @@ slice that runs a first real external plugin is **about 12 to 18**.
 |---|---|---|---|
 | P0 | now, parallel | contract-compiler repository: subset checker, Rust and protobuf emitters, lockfile, gates | it generates a sample contract's Rust and protobuf bindings with all gates green |
 | P1 | v0.21, with Phase 2 | contract `0.x` in WIT; the plugin traits in a doc-hidden `alint-core` module (ADR-0023); registry injection; the built-in row adapters and the `key_parity` pilot on the same traits | a built-in adapter and analyzer run through the plugin traits with no behaviour change |
-| P2 | v0.24 at the earliest ([ADR-0032](../adr/0032-v023-owner-decisions.md) decision 4) | native Rust plugins and `alint build` | an external crate adds a kind and an adapter to a custom binary, with scenarios |
+| P2 | v0.25 at the earliest ([ADR-0048](../adr/0048-v024-owner-decisions.md) decision 2) | native Rust plugins and `alint build` | an external crate adds a kind and an adapter to a custom binary, with scenarios |
 | P3 | after P2 | process host (Linux and macOS, then Windows), Rust process SDK, trust and `alint.lock` | the same plugin crate runs as a process with identical findings |
 | P4 | after P3 | WASM host and glue | the same plugin runs as a component with identical findings |
 | P5 | after P4 | Python, Go, TypeScript SDKs; conformance kit; docs | one example plugin per language passes the conformance kit |

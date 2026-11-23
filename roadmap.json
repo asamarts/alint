@@ -140,6 +140,12 @@
       "blurb": "The first part of version 2 of the config format, as an experimental opt-in: named file selections and a report-only constraint rule, enough to check that locale files, dependency versions and toolchain pins agree across a repository without a dedicated rule. Also ships --untrusted and --no-spawn modes, extensive trust-boundary hardening, the qualified ayaml 0.2.2 pure-Rust YAML parser, and the last planned library API break before 1.0."
     },
     {
+      "version": "0.24",
+      "title": "saphyr exit, Phase 3 completion, owned walker, and LSP rewrite",
+      "kind": "release",
+      "blurb": "Completes general-linter phase 3 (reference, count, multi-field group_by, array-of-objects extraction, semver range satisfaction, duplicate-key detection, strict JSON, and bundled v2 rulesets, with version: 2 soaking one more release), removes saphyr from default release builds on ayaml 0.2.3 with a bounded shared parse cache, replaces tower-lsp with lsp-server and ignore's walker with an owned parallel walker, and drains the v0.23 backlog across security, cross-platform parity, and supply-chain diet."
+    },
+    {
       "version": "1.0",
       "title": "Stability",
       "kind": "release",
