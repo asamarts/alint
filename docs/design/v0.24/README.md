@@ -1,7 +1,8 @@
 # v0.24: saphyr exit, Phase 3 completion, owned walker, LSP rewrite, and backlog drain
 
-Status: accepted (2026-11-22, ADR-0048); in progress (Phase 0 and Phase 1 Batch 1 complete, starting Phase 1 Batch 2).
+Status: accepted (2026-11-22, ADR-0048); in progress (Phase 0, Phase 1 Batch 1, and Phase 1 Batch 2 complete; starting Phase 1 Batch 3).
 Decisions: [ADR-0048](../../adr/0048-v024-owner-decisions.md) (owner decisions and scope for v0.24);
+[ADR-0049](../../adr/0049-baseline-preferred-paths-for-repeated-fingerprints.md) (baseline preferred visible paths for repeated fingerprints);
 [ADR-0036](../../adr/0036-ayaml-issues-and-the-saphyr-exit.md) and
 [ADR-0041](../../adr/0041-a-yaml-parser-facade-with-test-only-reference-parsers.md) (saphyr exit
 and test-only reference parsers);

@@ -166,6 +166,9 @@ Available fact kinds: `any_file_exists`, `all_files_exist`, `count_files`, `file
 map accepts exactly one RFC 9535 JSONPath for `json`, `yaml`, `toml`, `xml`, `dotenv`,
 `properties`, `ini`, or `hcl`, and applies the pattern to each selected string instead.
 Non-string selections, malformed input, and missing paths are non-matches.
+<!-- alint:since=0.23.0 -->
+For JSON extraction, numbers outside the finite IEEE-754 `f64` range (such as `1e400`) also fail JSON parsing and therefore evaluate as non-matches (`false`).
+<!-- /alint:since -->
 Against raw content, `^` and `$` anchor to the whole file, not to each line; see
 [Regex patterns and anchors](/docs/configuration/patterns/).
 

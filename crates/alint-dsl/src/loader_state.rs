@@ -38,7 +38,8 @@ pub(crate) struct LoadState {
     public_config_files: HashSet<PathBuf>,
     /// Files in `config_files` reached ONLY through an environment-chosen path.
     env_chosen_config_files: HashSet<PathBuf>,
-    /// The `extends:` sources the rules' field-source markers name.
+    /// The `extends:` sources the rules' and templates' field-source and
+    /// provenance markers name by index.
     pub(crate) field_source_names: crate::trust::FieldSourceNames,
     /// The work of every `extends:` merge so far, in entries
     /// ([`LoadState::charge_extends`]).

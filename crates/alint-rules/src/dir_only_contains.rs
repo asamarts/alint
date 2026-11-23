@@ -98,9 +98,9 @@ impl Rule for DirOnlyContainsRule {
 
 impl DirOnlyContainsRule {
     fn format_message(&self, dir: &Path, file: &Path, basename: &str) -> String {
+        let dir_str = crate::slash(dir);
+        let file_str = crate::slash(file);
         if let Some(user) = self.message.as_deref() {
-            let dir_str = dir.display().to_string();
-            let file_str = file.display().to_string();
             let basename_str = basename.to_string();
             return alint_core::template::render_message(user, |ns, key| match (ns, key) {
                 ("ctx", "dir") => Some(dir_str.clone()),
@@ -110,9 +110,7 @@ impl DirOnlyContainsRule {
             });
         }
         format!(
-            "{} is not allowed in {} (allow: [{}])",
-            file.display(),
-            dir.display(),
+            "{file_str} is not allowed in {dir_str} (allow: [{}])",
             self.allow_globs.join(", "),
         )
     }

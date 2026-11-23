@@ -40,6 +40,14 @@ pub(super) fn cmd_list(category: Option<&str>, cli: &Cli) -> Result<ExitCode> {
         );
     }
 
+    let format = match Format::parse_for(&cli.format, &[Format::Human, Format::Json]) {
+        Ok(Ok(fmt)) => fmt,
+        Ok(Err(_)) => bail!(
+            "`alint list` supports only `--format human` or `--format json` (got {:?})",
+            cli.format
+        ),
+        Err(msg) => bail!("{msg}"),
+    };
     let mut loaded = load_rules(Path::new("."), cli)?;
     let loaded_any = !loaded.entries.is_empty();
 
@@ -60,18 +68,8 @@ pub(super) fn cmd_list(category: Option<&str>, cli: &Cli) -> Result<ExitCode> {
         Some(_) => None,
     };
 
-    // `list` honours --format for machine consumers: `json` emits a
-    // stable rule-inventory envelope (the effective rule set, post
-    // extends/overrides). Any other machine format is an explicit
-    // error rather than a silent fall-through to human output.
-    let format: Format = cli.format.parse().map_err(|e: String| anyhow::anyhow!(e))?;
-    match format {
-        Format::Human => {}
-        Format::Json => return list_json(&loaded, objects),
-        _ => bail!(
-            "`alint list` supports only `--format human` or `--format json` (got {:?})",
-            cli.format
-        ),
+    if format == Format::Json {
+        return list_json(&loaded, objects);
     }
 
     let (mut out, opts) = render_env(cli)?;
@@ -372,6 +370,14 @@ fn list_json(loaded: &LoadedConfig, objects: Option<&Plan>) -> Result<ExitCode> 
 }
 
 pub(super) fn cmd_facts(path: &Path, cli: &Cli) -> Result<ExitCode> {
+    let format = match Format::parse_for(&cli.format, &[Format::Human, Format::Json]) {
+        Ok(Ok(fmt)) => fmt,
+        Ok(Err(_)) => bail!(
+            "`alint facts` supports only `--format human` or `--format json` (got {:?})",
+            cli.format
+        ),
+        Err(msg) => bail!("{msg}"),
+    };
     let loaded = load_rules(path, cli)?;
     let root = loaded.root.clone();
     let effective_gitignore = if cli.no_gitignore {
@@ -386,16 +392,6 @@ pub(super) fn cmd_facts(path: &Path, cli: &Cli) -> Result<ExitCode> {
     let values =
         alint_core::evaluate_facts(&loaded.facts, &root, &index).context("evaluating facts")?;
 
-    let format: Format = cli.format.parse().map_err(|e: String| anyhow::anyhow!(e))?;
-    // `facts` has only a human and a json shape; reject other formats rather
-    // than silently degrading them to human (matching `list`/`explain`).
-    match format {
-        Format::Human | Format::Json => {}
-        _ => bail!(
-            "`alint facts` supports only `--format human` or `--format json` (got {:?})",
-            cli.format
-        ),
-    }
     let (mut out, _opts) = render_env(cli)?;
     render_facts(&loaded.facts, &values, format, &mut out)?;
     out.flush().ok();
@@ -943,6 +939,14 @@ pub(super) fn cmd_explain(rule_id: &str, options: &ExplainOptions, cli: &Cli) ->
     use alint_core::Level;
     use alint_output::style;
 
+    let format = match Format::parse_for(&cli.format, &[Format::Human, Format::Json]) {
+        Ok(Ok(fmt)) => fmt,
+        Ok(Err(_)) => bail!(
+            "`alint explain` supports only `--format human` or `--format json` (got {:?})",
+            cli.format
+        ),
+        Err(msg) => bail!("{msg}"),
+    };
     let loaded = load_rules_for_explain(Path::new("."), cli, options.trace.then_some(rule_id))?;
     let Some(entry) = loaded.entries.iter().find(|e| e.rule.id() == rule_id) else {
         bail!("no rule with id {rule_id:?} found in the effective config");
@@ -955,17 +959,6 @@ pub(super) fn cmd_explain(rule_id: &str, options: &ExplainOptions, cli: &Cli) ->
     let analysis_time =
         analysis_time_for_explain(&loaded.root, entry, &loaded.registry, cli.as_of)?;
 
-    // `explain` honours --format for machine consumers, matching `list`:
-    // `json` emits the rule's wire-shape; any other machine format is an
-    // explicit error rather than silently printing the human block.
-    let format: Format = cli.format.parse().map_err(|e: String| anyhow::anyhow!(e))?;
-    match format {
-        Format::Human | Format::Json => {}
-        _ => bail!(
-            "`alint explain` supports only `--format human` or `--format json` (got {:?})",
-            cli.format
-        ),
-    }
     let trace_document = build_explain_trace_document(
         &loaded,
         entry,

@@ -516,3 +516,97 @@ fn yaml_token_span(
     }
     Some(ByteSpan::new(start + offset, end + offset))
 }
+
+/// Inspect a YAML document's root shape in O(1) memory by stopping the event
+/// stream at the first root value (or first single-key mapping value), never
+/// materializing a value tree. Used by `key_parity`'s `strip_root` gate (#597).
+pub(super) fn yaml_strip_root_shape(text: &str) -> super::StripRootShape {
+    use super::StripRootShape;
+    use saphyr_parser::{Event, Parser, ScalarStyle};
+
+    fn is_core_null_scalar(
+        value: &str,
+        style: ScalarStyle,
+        tag: Option<&saphyr_parser::Tag>,
+    ) -> bool {
+        if let Some(tag) = tag {
+            if tag.is_yaml_core_schema() {
+                return tag.suffix == "null";
+            }
+            return false;
+        }
+        style == ScalarStyle::Plain && matches!(value, "" | "~" | "null" | "Null" | "NULL")
+    }
+
+    let stripped = text.trim_start_matches('\u{feff}');
+    let mut parser = Parser::new_from_str(stripped);
+    let mut next_event = || loop {
+        match parser.next()? {
+            Ok((Event::StreamStart | Event::DocumentStart(_) | Event::Nothing, _)) => {}
+            Ok((event, _)) => return Some(Ok(event)),
+            Err(err) => return Some(Err(err)),
+        }
+    };
+
+    let Some(Ok(root)) = next_event() else {
+        return StripRootShape::EmptyDocument;
+    };
+    match root {
+        Event::DocumentEnd | Event::StreamEnd => StripRootShape::EmptyDocument,
+        Event::SequenceStart(..) => StripRootShape::TopLevelArray,
+        Event::Scalar(val, style, _, tag) => {
+            if style == ScalarStyle::Plain && tag.is_none() && val.is_empty() {
+                StripRootShape::EmptyDocument
+            } else if is_core_null_scalar(&val, style, tag.as_deref()) {
+                StripRootShape::TopLevelNull
+            } else {
+                StripRootShape::TopLevelValue
+            }
+        }
+        Event::MappingStart(..) => {
+            // Inspect the first key in the top-level mapping.
+            let Some(Ok(key_ev)) = next_event() else {
+                return StripRootShape::EmptyObject;
+            };
+            if matches!(key_ev, Event::MappingEnd) {
+                return StripRootShape::EmptyObject;
+            }
+            // Skip any nested collection inside a complex key so we land on
+            // the key's value event.
+            let mut key_depth = usize::from(matches!(
+                key_ev,
+                Event::MappingStart(..) | Event::SequenceStart(..)
+            ));
+            while key_depth > 0 {
+                let Some(Ok(ev)) = next_event() else {
+                    return StripRootShape::SingleRootValue;
+                };
+                match ev {
+                    Event::MappingStart(..) | Event::SequenceStart(..) => key_depth += 1,
+                    Event::MappingEnd | Event::SequenceEnd => key_depth -= 1,
+                    _ => {}
+                }
+            }
+            // Now inspect the value event of that single top-level key.
+            let Some(Ok(val_ev)) = next_event() else {
+                return StripRootShape::SingleRootNull;
+            };
+            match val_ev {
+                Event::MappingStart(..) => match next_event() {
+                    Some(Ok(Event::MappingEnd)) => StripRootShape::SingleRootEmptyObject,
+                    _ => StripRootShape::Object,
+                },
+                Event::SequenceStart(..) => StripRootShape::SingleRootArray,
+                Event::Scalar(val, style, _, tag) => {
+                    if is_core_null_scalar(&val, style, tag.as_deref()) {
+                        StripRootShape::SingleRootNull
+                    } else {
+                        StripRootShape::SingleRootValue
+                    }
+                }
+                _ => StripRootShape::SingleRootValue,
+            }
+        }
+        _ => StripRootShape::TopLevelValue,
+    }
+}

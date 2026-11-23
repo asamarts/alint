@@ -452,6 +452,9 @@ fn marker_size(mapping: &Mapping, marker: &str) -> usize {
 fn a_rule_marker_does_not_grow_with_its_source_path() {
     const RULE: &str = "rules:\n  - {id: r, kind: file_exists, paths: x, level: error, \
                         message: m}\n";
+    const TEMPLATE_AND_RULE: &str = "templates:\n  - {id: t, kind: file_exists, paths: x, level: error, \
+                                     message: m}\nrules:\n  - {id: r, kind: file_exists, paths: x, level: error, \
+                                     message: m}\n";
     let origins_at = |dir: &str| {
         let tmp = tempfile::tempdir().unwrap();
         let config = tmp.path().join(dir).join(".alint.yml");
@@ -462,31 +465,87 @@ fn a_rule_marker_does_not_grow_with_its_source_path() {
     assert_eq!(origins_at("s"), origins_at(&deep_dir()));
 
     // The entry's text, written as long as the platform's paths allow, names
-    // an extended file's fields and provenance by interned index (#581).
+    // an extended file's fields and provenance by interned index (#581) on
+    // both rules and templates.
     let sources_of = |entry: &str| {
         let (_tmp, config) = repo(&[
             (".alint.yml", &format!("version: 1\nextends: ['{entry}']\n")),
-            ("base.yml", &format!("version: 1\n{RULE}")),
+            ("base.yml", &format!("version: 1\n{TEMPLATE_AND_RULE}")),
         ]);
         let raw = raw_at(&config);
         // Its text is still what an error about a field or provenance quotes.
         let mut rule = raw.rules[0].clone();
         crate::trust::name_field_sources(&mut rule, &raw.field_source_names);
         assert_eq!(configured_field_source(&rule, "paths"), Some(entry));
-        assert_eq!(
-            crate::trust::Provenance::read(&raw.rules[0], &raw.field_source_names)
-                .extended
-                .as_deref(),
-            Some(entry)
-        );
+        for mapping in [&raw.rules[0], &raw.templates[0]] {
+            assert_eq!(
+                crate::trust::Provenance::read(mapping, &raw.field_source_names)
+                    .extended
+                    .as_deref(),
+                Some(entry)
+            );
+        }
         (
             marker_size(&raw.rules[0], FIELD_SOURCES_MARKER),
             marker_size(&raw.rules[0], crate::trust::PROVENANCE_MARKER),
+            marker_size(&raw.templates[0], crate::trust::PROVENANCE_MARKER),
         )
     };
     assert_eq!(
         sources_of("./base.yml"),
         sources_of(&format!("{}base.yml", "./".repeat(deep_dir().len() / 2)))
+    );
+
+    // Remote `extends:` writes 2 classes (`extended`, `remote`) when trusted
+    // and 3 (`extended`, `remote`, `untrusted_remote`) when untrusted; marker
+    // size must remain constant regardless of URL length on both rules and
+    // templates (#581).
+    let remote_sources_of = |path_segment: &str, trusted: bool| {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = extends::Cache::at(tmp.path().join("cache"));
+        let body = format!("version: 1\n{TEMPLATE_AND_RULE}");
+        let seeded = seed_remote(&cache, &body);
+        let (_, fragment) = seeded.split_once('#').unwrap();
+        let display_url = format!("https://example.invalid/{path_segment}/remote.yml");
+        let full_url = format!("{display_url}#{fragment}");
+        let trust_block = if trusted {
+            "trusted_extends:\n  - \"https://example.invalid/**\"\n"
+        } else {
+            ""
+        };
+        let config = tmp.path().join(".alint.yml");
+        std::fs::write(
+            &config,
+            format!("version: 1\n{trust_block}extends: [\"{full_url}\"]\n"),
+        )
+        .unwrap();
+        let raw = load_top_level_raw(
+            &config,
+            &LoadOptions {
+                kind_catalog: Some(test_catalog()),
+                cache: Some(cache),
+                ..LoadOptions::default()
+            },
+        )
+        .expect("remote raw loads");
+        for mapping in [&raw.rules[0], &raw.templates[0]] {
+            let prov = crate::trust::Provenance::read(mapping, &raw.field_source_names);
+            assert_eq!(prov.extended.as_deref(), Some(display_url.as_str()));
+        }
+        (
+            marker_size(&raw.rules[0], FIELD_SOURCES_MARKER),
+            marker_size(&raw.rules[0], crate::trust::PROVENANCE_MARKER),
+            marker_size(&raw.templates[0], crate::trust::PROVENANCE_MARKER),
+        )
+    };
+    let long_seg = "a".repeat(2048);
+    assert_eq!(
+        remote_sources_of("s", false),
+        remote_sources_of(&long_seg, false)
+    );
+    assert_eq!(
+        remote_sources_of("s", true),
+        remote_sources_of(&long_seg, true)
     );
 }
 

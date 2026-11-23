@@ -1283,6 +1283,132 @@ fn strip_root_needs_one_object_root_in_every_file() {
 }
 
 #[test]
+fn strip_root_handles_toml_arrays_null_spellings_and_top_level_non_objects() {
+    let strip = |files: &[(&str, &[u8])]| {
+        run(
+            "id: t\nkind: key_parity\nreference: en.yml\npeers: '*.yml'\nstrip_root: true\nlevel: error\n",
+            files,
+        )
+    };
+    // TOML empty table (`[fr]` / `fr = {}`) is also an empty object root (#597).
+    let empty_obj_toml = run(
+        "id: t\nkind: key_parity\nreference: en.toml\npeers: '*.toml'\nstrip_root: true\nlevel: error\n",
+        &[
+            ("en.toml", b"[en]\na = \"A\"\n"),
+            ("fr.toml", b"[fr]\n"),
+            ("de.toml", b"de = {}\n"),
+        ],
+    );
+    assert_eq!(
+        messages(&empty_obj_toml),
+        [
+            "de.toml: missing key `a` (present in en.toml)",
+            "fr.toml: missing key `a` (present in en.toml)",
+        ]
+    );
+    // Empty-object reference vs populated peer (extra key) and both empty (clean pass).
+    let empty_ref = strip(&[("en.yml", b"en: {}\n"), ("fr.yml", b"fr:\n  a: A\n")]);
+    assert_eq!(
+        messages(&empty_ref),
+        ["fr.yml: extra key `a` (not in en.yml)"]
+    );
+    let both_empty = strip(&[("en.yml", b"en: {}\n"), ("fr.yml", b"fr: {}\n")]);
+    assert!(both_empty.is_empty(), "{:?}", messages(&both_empty));
+
+    // Explicit YAML null spellings (`fr: null`, `fr: ~`) report null.
+    for raw in [b"fr: null\n".as_slice(), b"fr: ~\n".as_slice()] {
+        let f = strip(&[("en.yml", b"en:\n  a: A\n"), ("fr.yml", raw)]);
+        assert_eq!(f.len(), 1, "{:?}", messages(&f));
+        assert!(f[0].message.contains("but it is null"), "{}", f[0].message);
+    }
+
+    // Array roots (`fr: []`, `{"fr": []}`, `fr: [{a: 1}]`, `[[fr]]`) report "an array".
+    for raw in [b"fr: []\n".as_slice(), b"fr:\n  - a: 1\n".as_slice()] {
+        let f = strip(&[("en.yml", b"en:\n  a: A\n"), ("fr.yml", raw)]);
+        assert_eq!(f.len(), 1, "{:?}", messages(&f));
+        assert!(matches!(
+            f[0].disposition,
+            FindingDisposition::AnalysisFailure(_)
+        ));
+        assert!(
+            f[0].message.contains("but it is an array"),
+            "{}",
+            f[0].message
+        );
+    }
+    let json_arr_root = run(
+        "id: t\nkind: key_parity\nreference: en.json\npeers: '*.json'\nstrip_root: true\nlevel: error\n",
+        &[
+            ("en.json", br#"{"en":{"a":"A"}}"#),
+            ("fr.json", br#"{"fr":[]}"#),
+        ],
+    );
+    assert_eq!(json_arr_root.len(), 1);
+    assert!(
+        json_arr_root[0].message.contains("but it is an array"),
+        "{}",
+        json_arr_root[0].message
+    );
+    let toml_arr_root = run(
+        "id: t\nkind: key_parity\nreference: en.toml\npeers: '*.toml'\nstrip_root: true\nlevel: error\n",
+        &[
+            ("en.toml", b"[en]\na = \"A\"\n"),
+            ("fr.toml", b"[[fr]]\na = 1\n"),
+        ],
+    );
+    assert_eq!(toml_arr_root.len(), 1);
+    assert!(
+        toml_arr_root[0].message.contains("but it is an array"),
+        "{}",
+        toml_arr_root[0].message
+    );
+}
+
+#[test]
+fn strip_root_rejects_top_level_non_object_files() {
+    let strip = |files: &[(&str, &[u8])]| {
+        run(
+            "id: t\nkind: key_parity\nreference: en.yml\npeers: '*.yml'\nstrip_root: true\nlevel: error\n",
+            files,
+        )
+    };
+    // Top-level non-object files (`null`, `[]`, `[{"a": 1}]`, scalars) are
+    // rejected loudly instead of silently passing as empty locales.
+    for (raw, needle) in [
+        (b"null\n".as_slice(), "file is null"),
+        (b"[]\n".as_slice(), "file is an array"),
+        (b"- a: 1\n".as_slice(), "file is an array"),
+        (b"\"text\"\n".as_slice(), "file is a value"),
+        (b"123\n".as_slice(), "file is a value"),
+    ] {
+        let f = strip(&[("en.yml", b"en: {}\n"), ("fr.yml", raw)]);
+        assert_eq!(f.len(), 1, "{:?}", messages(&f));
+        assert!(matches!(
+            f[0].disposition,
+            FindingDisposition::AnalysisFailure(_)
+        ));
+        assert!(f[0].message.contains(needle), "{}", f[0].message);
+    }
+    for (raw, needle) in [
+        (b"null".as_slice(), "file is null"),
+        (b"[]".as_slice(), "file is an array"),
+        (br#"[{"a":1}]"#.as_slice(), "file is an array"),
+        (br#""text""#.as_slice(), "file is a value"),
+    ] {
+        let f = run(
+            "id: t\nkind: key_parity\nreference: en.json\npeers: '*.json'\nstrip_root: true\nlevel: error\n",
+            &[("en.json", br#"{"en":{}}"#), ("fr.json", raw)],
+        );
+        assert_eq!(f.len(), 1, "{:?}", messages(&f));
+        assert!(matches!(
+            f[0].disposition,
+            FindingDisposition::AnalysisFailure(_)
+        ));
+        assert!(f[0].message.contains(needle), "{}", f[0].message);
+    }
+}
+
+#[test]
 fn an_explicit_format_still_refuses_another_key_model() {
     let error = build(&spec_yaml(
         "id: t\nkind: key_parity\nreference: en.yml\npeers: fr.properties\nformat: yaml\nlevel: error\n",

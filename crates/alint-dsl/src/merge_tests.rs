@@ -439,7 +439,7 @@ fn mapping() -> impl Strategy<Value = Mapping> {
                             crate::mark_provenance_in(
                                 marked,
                                 class,
-                                &ayaml::Value::from(format!("s{source}")),
+                                &ayaml::Value::from(u64::from(source)),
                             );
                         }
                     }

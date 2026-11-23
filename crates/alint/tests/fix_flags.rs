@@ -752,9 +752,10 @@ fn dry_run_agrees_with_fix_for_a_member_written_back_into_the_root() {
 #[cfg(unix)]
 #[test]
 fn dry_run_agrees_with_fix_for_a_member_written_with_a_backslash() {
-    // On Unix `crates\b` is one name, which the rule looks for, but the
-    // finding's key writes it `crates/b`. Creating that would leave the
-    // finding standing, so both runs decline and write nothing.
+    // On Unix `crates\b` is a single directory name containing a literal `\`.
+    // Preserving literal backslashes on Unix (#579) keeps the finding's key
+    // and `create_and_register` target aligned at `crates\b/Cargo.toml`, so
+    // both dry-run and real fix apply cleanly without splitting into `crates/`.
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     std::fs::write(root.join("Cargo.toml"), "[workspace]\nmembers = []\n").unwrap();
@@ -773,11 +774,18 @@ fn dry_run_agrees_with_fix_for_a_member_written_with_a_backslash() {
          \x20   create_and_register: {content: \"[package]\\n\", applicability: safe}\n",
     )
     .unwrap();
-    let expected = outcomes(&[("member", "declined")]);
+    let expected = outcomes(&[("member", "applied")]);
     let [dry, real] = dry_and_real(root, &[]);
-    assert_eq!(dry, (expected.clone(), Some(1)), "dry run");
-    assert_eq!(real, (expected, Some(1)), "real fix");
-    assert!(!root.join("crates").exists(), "nothing is created");
+    assert_eq!(dry, (expected.clone(), Some(0)), "dry run");
+    assert_eq!(real, (expected, Some(0)), "real fix");
+    assert!(
+        root.join("crates\\b/Cargo.toml").is_file(),
+        "real fix creates the literal-backslash directory on Unix"
+    );
+    assert!(
+        !root.join("crates").exists(),
+        "must not split Unix literal backslash into a `crates/` directory"
+    );
 }
 
 #[test]

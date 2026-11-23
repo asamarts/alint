@@ -111,7 +111,7 @@ fn eval_iter_value(name: &str, iter: Option<&IterEnv<'_>>) -> Value {
         return Value::Null;
     };
     match name {
-        "path" => Value::String(iter.path.to_string_lossy().into_owned()),
+        "path" => Value::String(crate::baseline::canonical_order_path(iter.path).into_owned()),
         "basename" => match iter.path.file_name().and_then(|s| s.to_str()) {
             Some(s) => Value::String(s.to_string()),
             None => Value::Null,
@@ -204,7 +204,7 @@ fn iter_has_file(iter: Option<&IterEnv<'_>>, pattern: &str) -> Result<bool, When
     // The iterated path is a real directory name, not a pattern: escape it so a
     // dir like `app/[slug]`, `pkgs/*`, or `!special` matches only itself (only
     // the user's `pattern` keeps its glob meaning).
-    let iter_str = iter.path.to_string_lossy();
+    let iter_str = crate::baseline::canonical_order_path(iter.path);
     let escaped_dir = match iter_str.strip_prefix('!') {
         Some(rest) => format!("{{!}}{}", crate::template::glob_escape(rest)),
         None => crate::template::glob_escape(&iter_str),

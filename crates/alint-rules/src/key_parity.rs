@@ -1220,37 +1220,53 @@ fn leaf_rows(output: &AdapterOutput) -> Vec<(usize, ByteSpan)> {
     leaf_keys(keys).into_values().collect()
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SingleRootKind {
-    EmptyObject,
-    Null,
-    Value,
-}
-
-fn single_root_kind(file: &KeyFile) -> SingleRootKind {
+fn root_shape(file: &KeyFile) -> alint_core::extract::StripRootShape {
     let structured = match file.format {
         KeyFormat::Json => alint_core::Format::Json,
         KeyFormat::Yaml => alint_core::Format::Yaml,
         KeyFormat::Toml => alint_core::Format::Toml,
-        _ => return SingleRootKind::Value,
+        _ => return alint_core::extract::StripRootShape::SingleRootValue,
     };
-    let Ok(serde_json::Value::Object(root)) = structured.parse(&file.text) else {
-        return SingleRootKind::Value;
-    };
-    if root.len() != 1 {
-        return SingleRootKind::Value;
-    }
-    match root.values().next() {
-        Some(serde_json::Value::Object(inner)) if inner.is_empty() => SingleRootKind::EmptyObject,
-        Some(serde_json::Value::Null) => SingleRootKind::Null,
-        _ => SingleRootKind::Value,
-    }
+    alint_core::extract::strip_root_shape(structured, &file.text)
 }
 
-/// Why `strip_root` cannot strip this file, if it cannot: a file with keys
-/// needs exactly one top-level key, and that key must be an object (an empty
-/// object such as `fr: {}` is valid and has zero keys below it).
+/// Why `strip_root` cannot strip this file, if it cannot: a non-empty file
+/// must have a top-level object with at most one root key, and that key must
+/// be an object (an empty object such as `fr: {}`, `{"fr": {}}`, or `[fr]` is
+/// valid and has zero keys below it). Top-level non-object documents (`null`,
+/// arrays, scalars) are rejected instead of silently passing as empty locales.
 fn strip_root_blocker(file: &KeyFile) -> Option<String> {
+    use alint_core::extract::StripRootShape;
+
+    if file.leaves.is_empty() {
+        return match root_shape(file) {
+            StripRootShape::EmptyDocument
+            | StripRootShape::EmptyObject
+            | StripRootShape::Object
+            | StripRootShape::SingleRootEmptyObject => None,
+            StripRootShape::TopLevelNull => {
+                Some("`strip_root` needs a top-level object, but the file is null".to_string())
+            }
+            StripRootShape::TopLevelArray => {
+                Some("`strip_root` needs a top-level object, but the file is an array".to_string())
+            }
+            StripRootShape::TopLevelValue => {
+                Some("`strip_root` needs a top-level object, but the file is a value".to_string())
+            }
+            StripRootShape::SingleRootNull => Some(
+                "`strip_root` needs the top-level key to be an object, but it is null".to_string(),
+            ),
+            StripRootShape::SingleRootArray => Some(
+                "`strip_root` needs the top-level key to be an object, but it is an array"
+                    .to_string(),
+            ),
+            StripRootShape::SingleRootValue => Some(
+                "`strip_root` needs the top-level key to be an object, but it is a value"
+                    .to_string(),
+            ),
+        };
+    }
+
     let mut paths = file.leaves.iter().map(|(row, _)| file.path(*row));
     let roots: BTreeSet<&Segment> = paths.clone().filter_map(<[Segment]>::first).collect();
     if roots.len() > 1 {
@@ -1262,12 +1278,15 @@ fn strip_root_blocker(file: &KeyFile) -> Option<String> {
     if !paths.any(|key| key.len() < 2) {
         return None;
     }
-    match single_root_kind(file) {
-        SingleRootKind::EmptyObject => None,
-        SingleRootKind::Null => {
+    match root_shape(file) {
+        StripRootShape::SingleRootEmptyObject => None,
+        StripRootShape::SingleRootNull => {
             Some("`strip_root` needs the top-level key to be an object, but it is null".to_string())
         }
-        SingleRootKind::Value => Some(
+        StripRootShape::SingleRootArray => Some(
+            "`strip_root` needs the top-level key to be an object, but it is an array".to_string(),
+        ),
+        _ => Some(
             "`strip_root` needs the top-level key to be an object, but it is a value".to_string(),
         ),
     }

@@ -529,13 +529,13 @@ fn build_fixes(rule_id: &str, v: &Violation) -> Vec<SarifFix> {
 /// single alert. The results that share a fingerprint are numbered in an
 /// order the results decide, not the order they are written in: the baselined
 /// ones first, then the live ones, each by the path, line and column they
-/// show, then rule and message ([`OccurrenceKey`]). The baseline suppresses
-/// the first findings of a fingerprint in path, line, column and message
-/// order, up to its count, so the baselined results come first by their key
-/// anyway, but for a hidden path, which shows as `<redacted>`. A repeat then
-/// keeps its number while the repeats that sort before it stay; one that
-/// sorts before it shifts it, baselined or not, as the new one can take a
-/// baselined place. The first keeps the canonical fingerprint, the identity
+/// show, then rule and message ([`OccurrenceKey`]). Under ADR-0049, a baseline
+/// entry with preferred visible `paths` suppresses those paths before filling
+/// any remaining count in deterministic order, so adding a new visible repeat
+/// that sorts earlier leaves the unchanged baselined findings in the baselined
+/// bucket and preserves their occurrence numbers. Older baselines without
+/// `paths`, and hidden-path entries (ADR-0030), continue to suppress by count
+/// in deterministic order. The first keeps the canonical fingerprint, the identity
 /// the baseline gives the finding; the Nth (N > 0) gets
 /// [`occurrence_fingerprint`]. A run with no repeat is written unchanged.
 fn number_repeated_fingerprints(
@@ -1744,12 +1744,11 @@ mod tests {
         shown
     }
 
-    /// The results that share a fingerprint are numbered baselined first, then
-    /// by what they show, not by the order they are written in. The baseline
-    /// suppresses a fingerprint's first findings by path, line, column and
-    /// message, up to its count: a repeat keeps its fingerprint while the
-    /// repeats that sort before it stay, and a repeat that sorts before it
-    /// shifts it, baselined or not, as it can take its place in the baseline.
+    /// Without preferred `paths` (pre-v0.24 baselines and hidden-path entries),
+    /// results that share a fingerprint are numbered baselined first, then by
+    /// what they show, and the baseline suppresses the first findings in path,
+    /// line, column, and message order up to its count. With preferred `paths`
+    /// (ADR-0049), see `preferred_paths_keep_baselined_sarif_fingerprints_stable_when_earlier_repeat_arrives`.
     #[test]
     fn a_repeat_keeps_its_fingerprint_while_the_repeats_before_it_stay() {
         use alint_core::baseline::{Baseline, FingerprintedViolation};

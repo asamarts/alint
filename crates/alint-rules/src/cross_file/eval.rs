@@ -155,8 +155,7 @@ impl CrossFileRule {
     /// forward-slash spelling manifests use on every platform.
     fn registered_members(&self, ctx: &Context<'_>) -> Vec<(std::path::PathBuf, String)> {
         let render_value = |p: &Path| -> String {
-            let slashed = crate::slash(p);
-            let tokens = PathTokens::from_path(Path::new(&slashed));
+            let tokens = PathTokens::from_path(p);
             match &self.register_as {
                 Some(template) => template.render(&tokens).into_owned(),
                 None => render_path("{path}", &tokens),

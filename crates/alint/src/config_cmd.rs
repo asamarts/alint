@@ -155,12 +155,13 @@ pub(super) fn cmd_validate_config(
     // regardless of position (a global `--format sarif` before the subcommand
     // is merged into this `format` by clap). validate-config has only a human
     // and a json renderer.
-    let fmt: Format = format.parse().map_err(|e: String| anyhow::anyhow!(e))?;
-    if !matches!(fmt, Format::Human | Format::Json) {
-        bail!(
+    let fmt = match Format::parse_for(format, &[Format::Human, Format::Json]) {
+        Ok(Ok(fmt)) => fmt,
+        Ok(Err(_)) => bail!(
             "`alint validate-config` supports only `--format human` or `--format json` (got {format:?})"
-        );
-    }
+        ),
+        Err(msg) => bail!("{msg}"),
+    };
 
     // Resolve the config path. Three sources, in priority order:
     // 1. positional `path` arg — file path or directory (most explicit;
@@ -179,7 +180,7 @@ pub(super) fn cmd_validate_config(
                      (run `alint init` there to scaffold one)",
                     p.display()
                 );
-                return emit_validate_failure(&err, None, format);
+                return emit_validate_failure(&err, None, fmt);
             }
         } else {
             p
@@ -194,20 +195,20 @@ pub(super) fn cmd_validate_config(
              (run `alint init` to scaffold one)",
             Path::new(".").display()
         );
-        return emit_validate_failure(&err, None, format);
+        return emit_validate_failure(&err, None, fmt);
     };
 
     if !config_path.exists() {
         let err = anyhow::anyhow!("config file not found: {}", config_path.display());
-        return emit_validate_failure(&err, Some(&config_path), format);
+        return emit_validate_failure(&err, Some(&config_path), fmt);
     }
 
     // Same load + build + when-parse path as `check`, with the
     // failures plumbed back as a Result for the validate handler
     // rather than aborting the run.
     match validate_config_inner(&config_path, cli) {
-        Ok(validated) => emit_validate_success(&validated, &config_path, format, cli),
-        Err(e) => emit_validate_failure(&e, Some(&config_path), format),
+        Ok(validated) => emit_validate_success(&validated, &config_path, fmt, cli),
+        Err(e) => emit_validate_failure(&e, Some(&config_path), fmt),
     }
 }
 
@@ -261,7 +262,7 @@ fn validate_config_inner(config_path: &Path, cli: &Cli) -> Result<Validated> {
 fn emit_validate_success(
     validated: &Validated,
     config_path: &Path,
-    format: &str,
+    format: Format,
     cli: &Cli,
 ) -> Result<ExitCode> {
     let Validated {
@@ -270,7 +271,7 @@ fn emit_validate_success(
         config_version,
     } = validated;
     let experimental = experimental_version_warning(*config_version, config_path);
-    if format == "json" {
+    if format == Format::Json {
         // Pattern hints are advisory: the config is still valid.
         // A fact's id may be read from the environment.
         let warnings: Vec<String> = experimental
@@ -354,9 +355,9 @@ pub(super) fn warn_if_experimental_version(version: u32, config_path: &Path) {
 fn emit_validate_failure(
     err: &anyhow::Error,
     config_path: Option<&Path>,
-    format: &str,
+    format: Format,
 ) -> Result<ExitCode> {
-    if format == "json" {
+    if format == Format::Json {
         // Render the error chain as a single string so editors get
         // the full context including did-you-mean hints.
         let chain = redact_environment_values(&format!("{err:#}")).into_owned();

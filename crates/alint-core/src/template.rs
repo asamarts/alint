@@ -110,17 +110,22 @@ impl PathTokens {
     /// so messages, globs, and baseline fingerprints agree across Linux, macOS,
     /// and Windows. On Unix a literal `\` is a filename character and is kept.
     pub fn from_path_with(rel: &Path, needed: TokenSet) -> Self {
-        let rel_slash = normalize_token_path(rel);
-        let needed = if needs_glob_escape(&rel_slash) {
+        let rel_lossy = rel.to_string_lossy();
+        let needed = if needs_glob_escape(&rel_lossy) {
             TokenSet::ALL
         } else {
             needed
+        };
+        let path = if needed.has(TokenSet::PATH) {
+            normalize_token_path_with_sep(rel_lossy, std::path::MAIN_SEPARATOR).into_owned()
+        } else {
+            String::new()
         };
         let derive = |bit, f: &dyn Fn() -> String| {
             if needed.has(bit) { f() } else { String::new() }
         };
         Self {
-            path: derive(TokenSet::PATH, &|| rel_slash.clone().into_owned()),
+            path,
             dir: derive(TokenSet::DIR, &|| {
                 rel.parent()
                     .map(|p| normalize_token_path(p).into_owned())
@@ -3006,6 +3011,16 @@ mod tests {
             normalize_token_path_with_sep(Cow::Borrowed(r"packages\x{stem}\en.json"), '/'),
             r"packages\x{stem}\en.json"
         );
+        // Exercise `PathTokens::from_path` directly with backslashes in the
+        // `Path`: normalized to `/` on Windows, preserved literally on Unix.
+        let with_backslash = PathTokens::from_path(Path::new(r"packages\x{stem}\en.json"));
+        if cfg!(windows) {
+            assert_eq!(with_backslash.path, "packages/x{stem}/en.json");
+            assert_eq!(with_backslash.dir, "packages/x{stem}");
+        } else {
+            assert_eq!(with_backslash.path, r"packages\x{stem}\en.json");
+            assert_eq!(with_backslash.dir, "");
+        }
         let tokens = PathTokens::from_path(Path::new("packages/x{stem}/en.json"));
         assert_eq!(tokens.path, "packages/x{stem}/en.json");
         assert_eq!(tokens.dir, "packages/x{stem}");

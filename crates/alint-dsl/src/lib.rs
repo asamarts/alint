@@ -530,9 +530,10 @@ pub(crate) struct RawConfig {
     /// part of the schema.
     #[serde(skip)]
     environment_config_files: Vec<PathBuf>,
-    /// The `extends:` sources the rules' field-source markers name by index
-    /// ([`trust::FIELD_SOURCES_MARKER`]), set on the top-level result. Not
-    /// part of the schema.
+    /// The `extends:` sources the rules' and templates' field-source and
+    /// provenance markers name by index ([`trust::FIELD_SOURCES_MARKER`],
+    /// [`trust::PROVENANCE_MARKER`]), set on the top-level result. Not part of
+    /// the schema.
     #[serde(skip)]
     field_source_names: Vec<String>,
     /// Whether each of [`Self::extends`] read the environment, recorded by the

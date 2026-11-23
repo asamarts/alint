@@ -78,6 +78,16 @@ fn collect_policy_test(
             .expect("policy-test path is below corpus root"),
     );
     if run.status == TestStatus::Skipped {
+        const PLATFORM_SKIP_TAGS: &[&str] =
+            &["linux-only", "unix-only", "requires-case-sensitive-fs"];
+        assert!(
+            policy_test
+                .tags
+                .iter()
+                .any(|tag| PLATFORM_SKIP_TAGS.contains(&tag.as_str())),
+            "portable scenario {scenario_path} unexpectedly returned Skipped (tags: {:?})",
+            policy_test.tags,
+        );
         skipped.insert(scenario_path);
         return;
     }
@@ -115,7 +125,7 @@ fn policy_test_fingerprints_match_golden() {
     }
     records.sort();
     assert!(
-        records.len() >= 100,
+        records.len() >= 550,
         "fingerprint gate collected only {} findings; the policy-test run is probably incomplete",
         records.len(),
     );

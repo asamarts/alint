@@ -353,7 +353,7 @@ impl Rule for RegistryPathsResolveRule {
                 for p in &covered {
                     if let Some(reason) = self.existence_problem(ctx, p, &dir_set) {
                         violations.push(
-                            self.violation(&registry_rel, &p.display().to_string(), &reason)
+                            self.violation(&registry_rel, &crate::slash(p), &reason)
                                 .with_related_location(RelatedLocation::new(p, "resolved target")),
                         );
                     }
@@ -619,15 +619,15 @@ impl RegistryPathsResolveRule {
     }
 
     fn violation(&self, registry: &Path, entry: &str, reason: &Reason) -> Violation {
+        let reg_slash = crate::slash(registry);
         let msg = self
             .message
             .clone()
-            .unwrap_or_else(|| format!("{}: entry {entry:?} {}", registry.display(), reason.shown));
+            .unwrap_or_else(|| format!("{reg_slash}: entry {entry:?} {}", reason.shown));
         let mut finding = Violation::new(msg)
             .with_path(registry.to_path_buf())
             .with_baseline_key(format!(
-                "entry\u{0}{}\u{0}{entry}\u{0}{}",
-                crate::slash(registry),
+                "entry\u{0}{reg_slash}\u{0}{entry}\u{0}{}",
                 reason.key
             ));
         self.redact_extracted(

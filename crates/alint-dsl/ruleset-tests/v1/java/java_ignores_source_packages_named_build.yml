@@ -12,21 +12,37 @@ given:
     "build.gradle": "plugins { id 'java' }\n"
     "gradlew": "#!/bin/sh\nexec gradle \"$@\"\n"
     "src":
+      "build":
+        "RootBuild.java": "package build;\npublic class RootBuild {}\n"
       "main":
         "java":
           "org":
             "example":
               "build":
                 "BuildHelper.java": "package org.example.build;\npublic class BuildHelper {}\n"
+      "test":
+        "java":
+          "org":
+            "example":
+              "build":
+                "BuildTest.java": "package org.example.build;\npublic class BuildTest {}\n"
     "platforms":
       "core":
         "src":
+          "build":
+            "NestedDirect.java": "package build;\npublic class NestedDirect {}\n"
           "main":
             "groovy":
               "org":
                 "example":
                   "build":
                     "Fixture.groovy": "package org.example.build\nclass Fixture {}\n"
+    "subproject":
+      "build":
+        "classes.txt": "nested gradle output\n"
+    "buildSrc":
+      "build":
+        "cache.txt": "buildSrc gradle output\n"
     "build":
       "output.txt": "committed gradle output\n"
   config: |
@@ -35,7 +51,7 @@ given:
       - alint://bundled/java@v1
   git:
     init: true
-    add: [build.gradle, gradlew, src, platforms, build]
+    add: [build.gradle, gradlew, src, platforms, subproject, buildSrc, build]
     commit: true
 
 when: [check]
@@ -44,3 +60,5 @@ expect:
   - exit: policy_failure
     violations:
       - {rule: java-no-tracked-build, level: error, path: build}
+      - {rule: java-no-tracked-build, level: error, path: buildSrc/build}
+      - {rule: java-no-tracked-build, level: error, path: subproject/build}

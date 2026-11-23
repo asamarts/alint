@@ -31,10 +31,10 @@ alint baseline
 Re-running `alint baseline` drops the entries that no longer fail. If the tree
 has any violation the file doesn't already hold, it writes nothing and exits 2
 unless you pass `--accept-new`, so a refresh can't quietly grandfather fresh
-violations. (Upgrading from v0.23 on Windows with a baseline covering
-`for_each_*` nested rules that use `{path}` or `{dir}` needs one
-`alint baseline --accept-new` regeneration because path tokens now render with
-`/` on every platform.)
+violations. (Upgrading from v0.23 or earlier on Windows with a baseline covering
+`for_each_file`, `for_each_dir`, `every_matching_has`, or `unique_by` rules that
+use `{path}` or `{dir}` needs one `alint baseline --accept-new` regeneration
+because path tokens now render with `/` on every platform.)
 
 A baseline path that comes from the repository (the `baseline:` config key or
 the default `.alint-baseline.json`) must stay inside the repository, outside any

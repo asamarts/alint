@@ -136,10 +136,53 @@ pub enum Format {
     Agent,
 }
 
-impl FromStr for Format {
-    type Err = String;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_ascii_lowercase().as_str() {
+impl Format {
+    /// Every supported output format in canonical CLI display order.
+    /// Single source of truth for error messages and format allowlists (#597).
+    pub const ALL: &'static [Self] = &[
+        Self::Human,
+        Self::Json,
+        Self::Sarif,
+        Self::Github,
+        Self::Markdown,
+        Self::Junit,
+        Self::Gitlab,
+        Self::Agent,
+    ];
+
+    /// Canonical CLI flag name for this format.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Human => "human",
+            Self::Json => "json",
+            Self::Sarif => "sarif",
+            Self::Github => "github",
+            Self::Markdown => "markdown",
+            Self::Junit => "junit",
+            Self::Gitlab => "gitlab",
+            Self::Agent => "agent",
+        }
+    }
+
+    /// Format a comma-separated list of valid format names for diagnostics.
+    #[must_use]
+    pub fn list_names(formats: &[Self]) -> String {
+        formats
+            .iter()
+            .map(|f| f.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    /// Parse `raw` as a format, reporting only `allowed` in the unknown-format
+    /// error so format-limited subcommands never advertise unsupported formats.
+    /// Returns `Ok(Ok(fmt))` if `raw` parses and is in `allowed`,
+    /// `Ok(Err(fmt))` if `raw` is a known format outside `allowed`, and
+    /// `Err(msg)` if `raw` is unknown.
+    #[doc(hidden)]
+    pub fn parse_for(raw: &str, allowed: &[Self]) -> Result<Result<Self, Self>, String> {
+        let parsed = match raw.to_ascii_lowercase().as_str() {
             "human" | "pretty" | "text" => Ok(Self::Human),
             "json" => Ok(Self::Json),
             "sarif" => Ok(Self::Sarif),
@@ -148,10 +191,30 @@ impl FromStr for Format {
             "junit" | "junit-xml" => Ok(Self::Junit),
             "gitlab" | "gitlab-codequality" | "code-quality" => Ok(Self::Gitlab),
             "agent" | "agentic" | "ai" => Ok(Self::Agent),
-            other => Err(format!(
-                "unknown output format: {other} (valid formats: human, json, sarif, github, markdown, junit, gitlab, agent)"
-            )),
+            _ => {
+                let shown = if raw.is_empty() || raw.trim() != raw {
+                    format!("{raw:?}")
+                } else {
+                    raw.to_string()
+                };
+                Err(format!(
+                    "unknown output format: {shown} (valid formats: {})",
+                    Self::list_names(allowed)
+                ))
+            }
+        }?;
+        if allowed.contains(&parsed) {
+            Ok(Ok(parsed))
+        } else {
+            Ok(Err(parsed))
         }
+    }
+}
+
+impl FromStr for Format {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse_for(s, Self::ALL).map(|res| res.expect("all formats are in Format::ALL"))
     }
 }
 
@@ -163,11 +226,39 @@ mod format_parse_tests {
     fn unknown_format_lists_valid_formats() {
         let err = "bogus".parse::<Format>().unwrap_err();
         assert!(err.contains("unknown output format: bogus"), "{err}");
-        for valid in [
-            "human", "json", "sarif", "github", "markdown", "junit", "gitlab", "agent",
-        ] {
-            assert!(err.contains(valid), "missing `{valid}` in: {err}");
+        for valid in Format::ALL {
+            assert!(
+                err.contains(valid.as_str()),
+                "missing `{}` in: {err}",
+                valid.as_str()
+            );
         }
+
+        // Original case is preserved; empty/whitespace values are quoted cleanly.
+        let upper = "BOGUS".parse::<Format>().unwrap_err();
+        assert!(upper.contains("unknown output format: BOGUS"), "{upper}");
+        let empty = "".parse::<Format>().unwrap_err();
+        assert!(empty.contains("unknown output format: \"\""), "{empty}");
+        let padded = " json ".parse::<Format>().unwrap_err();
+        assert!(
+            padded.contains("unknown output format: \" json \""),
+            "{padded}"
+        );
+
+        // Format-limited subcommands only advertise their supported formats.
+        let limited = Format::parse_for("bogus", &[Format::Human, Format::Json]).unwrap_err();
+        assert_eq!(
+            limited,
+            "unknown output format: bogus (valid formats: human, json)"
+        );
+        assert_eq!(
+            Format::parse_for("SARIF", &[Format::Human, Format::Json]),
+            Ok(Err(Format::Sarif))
+        );
+        assert_eq!(
+            Format::parse_for("JSON", &[Format::Human, Format::Json]),
+            Ok(Ok(Format::Json))
+        );
     }
 }
 
