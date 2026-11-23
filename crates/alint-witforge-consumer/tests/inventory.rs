@@ -60,10 +60,6 @@ pub(crate) const GENERATED: &[(&str, Generated)] = &[
             &["name", "version", "contract", "capabilities"],
         ),
     ),
-    (
-        "types::Types",
-        Unpaired("the `types` interface declares types only", &[]),
-    ),
     ("adapter_api::AdapterApi", Pair("Adapter")),
     ("analyzer_api::AnalyzerApi", Pair("Analyzer")),
 ];
