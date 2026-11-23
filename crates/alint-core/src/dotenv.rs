@@ -36,59 +36,59 @@ pub(crate) const MAX_DOTENV_BYTES: usize = 4 * 1024 * 1024;
 /// Short repeated declarations can otherwise retain hundreds of bytes per line.
 pub(crate) const MAX_PHYSICAL_LINES: usize = 100_000;
 
-/// Check raw bytes (or a conservative output bound) and physical lines without
-/// joining prospective source fragments. CRLF counts once even across fragments,
-/// and a terminal line ending does not create a phantom empty line.
-pub(crate) fn check_budget<'a>(
-    byte_len: usize,
-    parts: impl IntoIterator<Item = &'a str>,
-) -> Result<(), String> {
-    let max_bytes = MAX_DOTENV_BYTES;
-    if byte_len > max_bytes {
-        return Err(format!(
-            "dotenv input exceeds the maximum supported size ({max_bytes} bytes)"
-        ));
+/// Portable `.env` dialect with multi-BOM stripping handled natively by `adotenv`.
+pub(crate) const DIALECT: adotenv::Dialect =
+    adotenv::Dialect::PORTABLE.with_bom(adotenv::BomPolicy::StripAll);
+
+/// Native `adotenv` input limits applied to both read-only and lossless parses.
+pub(crate) const PARSE_OPTIONS: adotenv::ParseOptions = adotenv::ParseOptions::new()
+    .with_max_input_bytes(MAX_DOTENV_BYTES)
+    .with_max_lines(MAX_PHYSICAL_LINES);
+
+/// Native `adotenv` output and verification limits for structured edits.
+pub(crate) const EDIT_OPTIONS: adotenv::EditOptions = adotenv::EditOptions::new()
+    .with_max_output_bytes(MAX_DOTENV_BYTES)
+    .with_max_output_lines(MAX_PHYSICAL_LINES)
+    .with_parse_limits(PARSE_OPTIONS);
+
+fn format_parse_error(error: &adotenv::Diagnostic) -> String {
+    if let Some(limit) = error.limit() {
+        return match limit.kind() {
+            adotenv::LimitKind::InputBytes => format!(
+                "dotenv input exceeds the maximum supported size ({} bytes)",
+                limit.limit()
+            ),
+            adotenv::LimitKind::Lines => format!(
+                "dotenv input exceeds the maximum supported physical line count ({})",
+                limit.limit()
+            ),
+            _ => error.to_string(),
+        };
     }
-    let mut bytes = parts.into_iter().flat_map(str::bytes).peekable();
-    let mut lines = usize::from(bytes.peek().is_some());
-    while let Some(byte) = bytes.next() {
-        let ends_line = byte == b'\n' || (byte == b'\r' && bytes.peek() != Some(&b'\n'));
-        if ends_line && bytes.peek().is_some() {
-            lines += 1;
-            if lines > MAX_PHYSICAL_LINES {
-                return Err(format!(
-                    "dotenv input exceeds the maximum supported physical line count ({MAX_PHYSICAL_LINES})"
-                ));
-            }
-        }
-    }
-    Ok(())
+    error.to_string()
 }
 
-/// Construct the shared lossless document only after checking the original raw
-/// source budget. Retain one leading BOM for native parsing and skip any others;
-/// callers translate native ranges by the returned prefix length.
-pub(crate) fn parse_document(text: &str) -> Result<(adotenv::Document<'_>, usize), String> {
-    check_budget(text.len(), [text])?;
-    let bom_bytes = text.len() - text.trim_start_matches('\u{feff}').len();
-    let skipped = bom_bytes.saturating_sub('\u{feff}'.len_utf8());
-    adotenv::parse_strict(&text[skipped..])
-        .map(|document| (document, skipped))
-        .map_err(|error| error.to_string())
+/// Construct the shared lossless document with native byte/line budgets and
+/// multi-BOM stripping; every emitted span uses original `text` byte offsets.
+pub(crate) fn parse_document(text: &str) -> Result<adotenv::Document<'_>, String> {
+    adotenv::parse_strict_with_options(text, DIALECT, PARSE_OPTIONS)
+        .map_err(|error| format_parse_error(&error))
 }
 
 /// Parse `.env` `text` into a flat `Value::Object`, with no variable
-/// expansion. Assigned values are strings and bare declarations are `null`.
+/// expansion, using `adotenv`'s compact bare-preserving read-only parser.
+/// Assigned values are strings and bare declarations are `null`.
 /// Returns the first error-severity diagnostic on malformed input; portability
 /// warnings remain accepted.
 pub(crate) fn parse(text: &str) -> Result<Value, String> {
-    let (doc, _) = parse_document(text)?;
-    let mut map = Map::new();
-    for entry in doc.entries() {
-        let value = entry
-            .value()
-            .map_or(Value::Null, |value| Value::String(value.to_owned()));
-        map.insert(entry.key().to_owned(), value);
+    let entries = adotenv::parse_entries_compact_with_options(text, DIALECT, PARSE_OPTIONS)
+        .map_err(|error| format_parse_error(&error))?;
+    let mut map = Map::with_capacity(entries.len());
+    for (key, value) in entries.iter() {
+        map.insert(
+            key.to_owned(),
+            value.map_or(Value::Null, |value| Value::String(value.to_owned())),
+        );
     }
     Ok(Value::Object(map))
 }
@@ -112,12 +112,16 @@ mod tests {
     }
 
     #[test]
-    fn fragmented_budget_counts_crlf_once_and_ignores_terminal_endings() {
-        let prefix = "#\r\n".repeat(MAX_PHYSICAL_LINES - 1);
-        assert!(check_budget(prefix.len() + 3, [prefix.as_str(), "A", "\r", "\n"]).is_ok());
-        assert!(check_budget(prefix.len() + 4, [prefix.as_str(), "A", "\r", "\n#"]).is_err());
-        assert!(check_budget(MAX_DOTENV_BYTES, ["A"]).is_ok());
-        assert!(check_budget(MAX_DOTENV_BYTES + 1, ["A"]).is_err());
+    fn multi_bom_and_parse_options_preserve_original_spans() {
+        let src = "\u{feff}\u{feff}\u{feff}PORT=8080\nBARE\n";
+        let value = obj(src);
+        assert_eq!(value["PORT"], json!("8080"));
+        assert_eq!(value["BARE"], Value::Null);
+        let doc = parse_document(src).expect("parse multi-bom document");
+        assert_eq!(doc.bom_span(), Some(0..9));
+        let port = doc.unique("PORT").unwrap();
+        assert_eq!(&src[port.key_span()], "PORT");
+        assert_eq!(&src[port.value_span().unwrap()], "8080");
     }
 
     #[test]

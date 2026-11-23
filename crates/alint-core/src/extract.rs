@@ -935,7 +935,7 @@ fn dotenv_entry_rows(
     text: &str,
     max_rows: Option<usize>,
 ) -> std::result::Result<Vec<StructuredEntryRow>, EntryRowsError> {
-    let (document, offset) = crate::dotenv::parse_document(text).map_err(EntryRowsError::Parse)?;
+    let document = crate::dotenv::parse_document(text).map_err(EntryRowsError::Parse)?;
     let mut rows = Vec::new();
     for entry in document.entries() {
         entry_capacity(rows.len(), max_rows)?;
@@ -944,10 +944,10 @@ fn dotenv_entry_rows(
         rows.push(StructuredEntryRow {
             parent: Vec::new(),
             key,
-            key_span: ByteSpan::new(key_span.start + offset, key_span.end + offset),
+            key_span: ByteSpan::new(key_span.start, key_span.end),
             value_span: entry
                 .value_span()
-                .map(|span| ByteSpan::new(span.start + offset, span.end + offset)),
+                .map(|span| ByteSpan::new(span.start, span.end)),
         });
     }
     Ok(rows)
@@ -1046,173 +1046,20 @@ fn properties_entry_rows(
     text: &str,
     max_rows: Option<usize>,
 ) -> std::result::Result<Vec<StructuredEntryRow>, EntryRowsError> {
-    let stripped = text.trim_start_matches('\u{feff}');
-    let base = text.len() - stripped.len();
-    let decoded_keys = properties_decoded_keys(stripped, max_rows)?;
-    if decoded_keys.is_empty() {
-        return Ok(Vec::new());
-    }
-    let expected_rows = decoded_keys.len();
-
-    let bytes = stripped.as_bytes();
-    let mut rows = Vec::with_capacity(expected_rows);
-    let mut decoded = decoded_keys.into_iter();
-    let mut at = 0;
-    while at < bytes.len() {
-        let (physical_end, physical_next) = properties_physical_line(bytes, at);
-        let first_content = bytes[at..physical_end]
-            .iter()
-            .position(|byte| !matches!(byte, b' ' | b'\t' | 0x0c))
-            .map(|indent| at + indent);
-        if first_content.is_none_or(|cursor| matches!(bytes[cursor], b'#' | b'!')) {
-            // Java-properties comments are always one physical line. In
-            // particular, a trailing backslash in a comment is not a
-            // continuation marker.
-            at = physical_next;
-            continue;
-        }
-        let (logical_end, next) = properties_logical_line(bytes, at);
-        let Some(logical_end) = logical_end else {
-            // The dependency discards a logical line whose final physical line
-            // ends in an unpaired continuation backslash.
-            at = next;
-            continue;
-        };
-        let mut cursor = at;
-        while cursor < logical_end && matches!(bytes[cursor], b' ' | b'\t' | 0x0c) {
-            cursor += 1;
-        }
-        let key_start = cursor;
-        while cursor < logical_end {
-            match bytes[cursor] {
-                b'\\' if cursor + 1 < logical_end => {
-                    cursor += 1;
-                    match bytes[cursor] {
-                        b'\r' => {
-                            cursor += 1;
-                            if cursor < logical_end && bytes[cursor] == b'\n' {
-                                cursor += 1;
-                            }
-                            while cursor < logical_end
-                                && matches!(bytes[cursor], b' ' | b'\t' | 0x0c)
-                            {
-                                cursor += 1;
-                            }
-                        }
-                        b'\n' => {
-                            cursor += 1;
-                            while cursor < logical_end
-                                && matches!(bytes[cursor], b' ' | b'\t' | 0x0c)
-                            {
-                                cursor += 1;
-                            }
-                        }
-                        _ => cursor += 1,
-                    }
-                }
-                b'=' | b':' | b' ' | b'\t' | 0x0c => break,
-                _ => cursor += 1,
-            }
-        }
-        let key_end = cursor;
-        while cursor < logical_end && matches!(bytes[cursor], b' ' | b'\t' | 0x0c) {
-            cursor += 1;
-        }
-        if cursor < logical_end && matches!(bytes[cursor], b'=' | b':') {
-            cursor += 1;
-        }
-        while cursor < logical_end && matches!(bytes[cursor], b' ' | b'\t' | 0x0c) {
-            cursor += 1;
-        }
-        let key = decoded.next().ok_or_else(|| {
-            EntryRowsError::Parse("properties entry/span count diverged".to_string())
+    let entries =
+        crate::properties::parse_entries(text, max_rows).map_err(|error| match error {
+            crate::properties::PropertiesError::Parse(msg) => EntryRowsError::Parse(msg),
+            crate::properties::PropertiesError::Limit { limit } => EntryRowsError::Limit { limit },
         })?;
-        entry_capacity(rows.len(), max_rows)?;
-        rows.push(StructuredEntryRow {
+    Ok(entries
+        .into_iter()
+        .map(|entry| StructuredEntryRow {
             parent: Vec::new(),
-            key,
-            key_span: ByteSpan::new(base + key_start, base + key_end),
-            value_span: Some(ByteSpan::new(base + cursor, base + logical_end)),
-        });
-        at = next;
-    }
-    if decoded.next().is_some() || rows.len() != expected_rows {
-        return Err(EntryRowsError::Parse(
-            "properties entry/span count diverged".to_string(),
-        ));
-    }
-    Ok(rows)
-}
-fn properties_decoded_keys(
-    text: &str,
-    max_rows: Option<usize>,
-) -> std::result::Result<Vec<String>, EntryRowsError> {
-    if text.len() > crate::structured_format::MAX_STRUCTURED_BYTES {
-        return Err(EntryRowsError::Parse(format!(
-            "input exceeds the maximum supported size for a structured document ({} bytes)",
-            crate::structured_format::MAX_STRUCTURED_BYTES
-        )));
-    }
-    let mut keys = Vec::new();
-    let mut limit_hit = false;
-    java_properties::PropertiesIter::new_with_encoding(text.as_bytes(), encoding_rs::UTF_8)
-        .read_into(|key, _| {
-            if let Some(limit) = max_rows
-                && keys.len() >= limit
-            {
-                limit_hit = true;
-                return;
-            }
-            keys.push(key);
+            key: entry.key,
+            key_span: ByteSpan::new(entry.key_span.start, entry.key_span.end),
+            value_span: Some(ByteSpan::new(entry.value_span.start, entry.value_span.end)),
         })
-        .map_err(|error| EntryRowsError::Parse(error.to_string()))?;
-    if limit_hit {
-        return Err(EntryRowsError::Limit {
-            limit: max_rows.unwrap_or_default(),
-        });
-    }
-    Ok(keys)
-}
-
-fn properties_logical_line(bytes: &[u8], start: usize) -> (Option<usize>, usize) {
-    let mut line_start = start;
-    loop {
-        let (content_end, next) = properties_physical_line(bytes, line_start);
-        let trailing_backslashes = bytes[line_start..content_end]
-            .iter()
-            .rev()
-            .take_while(|byte| **byte == b'\\')
-            .count();
-        if trailing_backslashes % 2 == 0 {
-            return (Some(content_end), next);
-        }
-        if next == bytes.len() {
-            // `java-properties` synthesizes one final empty physical line
-            // after a real line terminator, so only an unterminated odd
-            // backslash is an incomplete logical line.
-            return if content_end < bytes.len() {
-                (Some(content_end), next)
-            } else {
-                (None, next)
-            };
-        }
-        line_start = next;
-    }
-}
-
-fn properties_physical_line(bytes: &[u8], start: usize) -> (usize, usize) {
-    let mut end = start;
-    while end < bytes.len() && !matches!(bytes[end], b'\r' | b'\n') {
-        end += 1;
-    }
-    let next = if bytes.get(end) == Some(&b'\r') && bytes.get(end + 1) == Some(&b'\n') {
-        end + 2
-    } else if end < bytes.len() {
-        end + 1
-    } else {
-        end
-    };
-    (end, next)
+        .collect())
 }
 
 /// Extract values over `text`. Structured modes retain non-string match types
@@ -1739,7 +1586,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn properties_comments_never_continue_and_dangling_logical_lines_are_dropped() {
+    fn properties_comments_never_continue_and_eof_trailing_backslashes_are_kept() {
         let text = "# comment\\\nreal=one\n  ! another comment\\\nnext=two\n";
         let rows = extract_entry_rows(Format::Properties, text).unwrap();
         assert_eq!(
@@ -1749,13 +1596,12 @@ pub(crate) mod tests {
         assert_eq!(span_text(text, rows[0].value_span.unwrap()), "one");
         assert_eq!(span_text(text, rows[1].value_span.unwrap()), "two");
 
-        for dangling in [
-            "kept=ok\ndropped=value\\",
-            "kept=ok\ndropped=first\\\n  second\\",
-        ] {
-            let rows = extract_entry_rows(Format::Properties, dangling).unwrap();
-            assert_eq!(rows.len(), 1);
-            assert_eq!(rows[0].key, "kept");
+        for trailing_eof in ["kept=ok\neof=value\\", "kept=ok\neof=first\\\n  second\\"] {
+            let rows = extract_entry_rows(Format::Properties, trailing_eof).unwrap();
+            assert_eq!(
+                rows.iter().map(|row| row.key.as_str()).collect::<Vec<_>>(),
+                ["kept", "eof"]
+            );
         }
 
         let terminated_continuation =

@@ -33,6 +33,7 @@ pub mod pattern_hints;
 #[doc(hidden)]
 pub mod plugin_api;
 pub mod process;
+mod properties;
 pub mod proposed_fix;
 mod redaction;
 mod registry;

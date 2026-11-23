@@ -1048,17 +1048,43 @@ fn properties_removal_span_is_the_whole_line() {
 }
 
 #[test]
-fn properties_declines_complex_lines_but_skips_comments() {
-    // A backslash (escape / continuation), a whitespace-ONLY separator, an escaped
-    // key, and a duplicate all decline.
-    let cont = "cont=a\\\n  b\n";
-    assert!(resolve_removal_span(Format::Properties, cont.as_bytes(), &[key("cont")]).is_none());
+fn properties_resolves_multiline_escaped_and_space_separated_lines_and_declines_duplicates() {
+    // Spanned internal parser (#610) resolves multiline continuations,
+    // whitespace-separated assignments, and escaped keys/values safely.
+    let cont = "keep=1\ncont=a\\\n  b\nafter=2\n";
+    let rem = resolve_removal_span(Format::Properties, cont.as_bytes(), &[key("cont")]).unwrap();
+    assert_eq!(&cont[rem], "cont=a\\\n  b\n");
+    let val = resolve_value_span(Format::Properties, cont.as_bytes(), &[key("cont")]).unwrap();
+    assert_eq!(&cont[val], "a\\\n  b");
+
     let space = "app.name value here\n";
-    assert!(resolve_value_span(Format::Properties, space.as_bytes(), &[key("app.name")]).is_none());
-    let esc = "a\\:b=v\n";
-    assert!(resolve_value_span(Format::Properties, esc.as_bytes(), &[key("a:b")]).is_none());
+    assert_eq!(
+        &space
+            [resolve_value_span(Format::Properties, space.as_bytes(), &[key("app.name")]).unwrap()],
+        "value here"
+    );
+
+    let esc = "a\\:b=caf\\u00e9\n";
+    assert_eq!(
+        &esc[resolve_value_span(Format::Properties, esc.as_bytes(), &[key("a:b")]).unwrap()],
+        "caf\\u00e9"
+    );
+
+    // Bare separator-less key declines value_span (splicing would fuse into key),
+    // but removal_span still deletes its full line cleanly.
+    let bare = "flag\nkeep=1\n";
+    assert!(resolve_value_span(Format::Properties, bare.as_bytes(), &[key("flag")]).is_none());
+    assert_eq!(
+        &bare[resolve_removal_span(Format::Properties, bare.as_bytes(), &[key("flag")]).unwrap()],
+        "flag\n"
+    );
+
+    // Duplicates (including across different escape spellings) still decline.
     let dup = "k=1\nk=2\n";
     assert!(resolve_value_span(Format::Properties, dup.as_bytes(), &[key("k")]).is_none());
+    let esc_dup = "a\\:b=1\na\\u003ab=2\n";
+    assert!(resolve_value_span(Format::Properties, esc_dup.as_bytes(), &[key("a:b")]).is_none());
+
     // `#` / `!` comment lines are skipped, so a real assignment still resolves.
     let cmt = "# k=nope\n! also\nk=real\n";
     assert_eq!(
@@ -1859,11 +1885,19 @@ fn dotenv_single_quote_fallback_escapes_lines_before_budgeting() {
 }
 
 #[test]
-fn dotenv_conservative_byte_estimate_can_decline_a_shorter_valid_encoding() {
-    // Unquoted output would fit exactly, but the preflight intentionally budgets
-    // the double-quoted upper bound instead of allocating native output to learn it.
-    let value = "x".repeat(crate::dotenv::MAX_DOTENV_BYTES - 2);
-    assert!(verified_set_edit(Format::Dotenv, b"A=x", &[key("A")], &json!(value)).is_none());
+fn dotenv_exact_byte_budget_accepts_exact_fit_and_declines_one_byte_over() {
+    // `adotenv::Document::edit_with_options` budgets the exact planned edit size
+    // before allocating the output string, so an exact-cap unquoted value fits
+    // while one byte over still declines cleanly.
+    let exact = "x".repeat(crate::dotenv::MAX_DOTENV_BYTES - 2);
+    let (range, replacement) =
+        verified_set_edit(Format::Dotenv, b"A=x", &[key("A")], &json!(exact))
+            .expect("exact-cap unquoted output fits");
+    assert_eq!(range, 2..3);
+    assert_eq!(replacement.len(), crate::dotenv::MAX_DOTENV_BYTES - 2);
+
+    let over = "x".repeat(crate::dotenv::MAX_DOTENV_BYTES - 1);
+    assert!(verified_set_edit(Format::Dotenv, b"A=x", &[key("A")], &json!(over)).is_none());
 }
 
 #[test]

@@ -899,125 +899,64 @@ mod dotenv {
     /// The original value-token range for one uniquely assigned flat key.
     /// A bare declaration has no value token and therefore no value span.
     pub(super) fn dotenv_value_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
-        let (document, offset) = crate::dotenv::parse_document(text).ok()?;
-        let range = document.unique(flat_key(path)?).ok()?.value_span()?;
-        Some(range.start + offset..range.end + offset)
+        let document = crate::dotenv::parse_document(text).ok()?;
+        document.unique(flat_key(path)?).ok()?.value_span()
     }
 
     /// The whole statement range for one unique flat key. Multiline quoted
     /// assignments include every physical line in the statement.
     pub(super) fn dotenv_removal_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
-        let (document, offset) = crate::dotenv::parse_document(text).ok()?;
-        let range = document.unique(flat_key(path)?).ok()?.line_span();
-        Some(range.start + offset..range.end + offset)
-    }
-
-    /// Bound the complete prospective source before native serialization and
-    /// verification allocate tokens, a new document, or decoded escape maps.
-    /// Double-quoted size is a conservative upper bound for other styles, except
-    /// preserved single quotes whose literal body and size are known exactly.
-    fn set_within_budget(
-        text: &str,
-        entry: adotenv::Entry<'_>,
-        offset: usize,
-        value: &str,
-    ) -> bool {
-        let range = entry
-            .value_span()
-            .unwrap_or_else(|| entry.key_span().end..entry.key_span().end);
-        let Some(token_len) = value.len().checked_add(2) else {
-            return false;
-        };
-        if token_len > crate::dotenv::MAX_DOTENV_BYTES {
-            return false;
-        }
-        let single = entry.quote() == adotenv::Quote::Single && !value.contains('\'');
-        let escapes = if single {
-            0
-        } else {
-            value
-                .bytes()
-                .filter(|&byte| matches!(byte, b'\\' | b'"' | b'\n' | b'\r' | b'\t'))
-                .count()
-        };
-        let separator = entry
-            .tokens()
-            .inline_comment
-            .as_ref()
-            .is_some_and(|comment| comment.start == range.end);
-        let Some(byte_len) = text
-            .len()
-            .checked_sub(range.len())
-            .and_then(|len| len.checked_add(token_len))
-            .and_then(|len| len.checked_add(escapes))
-            .and_then(|len| len.checked_add(usize::from(entry.value_span().is_none())))
-            .and_then(|len| len.checked_add(usize::from(separator)))
-        else {
-            return false;
-        };
-        // Quotes stand in for all non-line-ending syntax, including '=' and any
-        // comment separator. Only a preserved single-quoted body has raw CR/LF.
-        crate::dotenv::check_budget(
-            byte_len,
-            [
-                &text[..range.start + offset],
-                "'",
-                if single { value } else { "" },
-                "'",
-                &text[range.end + offset..],
-            ],
-        )
-        .is_ok()
+        let document = crate::dotenv::parse_document(text).ok()?;
+        Some(document.unique(flat_key(path)?).ok()?.line_span())
     }
 
     /// Produce the exact native edit that assigns `want` to one unique key.
-    /// `adotenv` handles both assigned and bare declarations, retaining an
-    /// existing exact quote style when possible and selecting a context-safe
+    /// `adotenv` handles both assigned and bare declarations, enforces output
+    /// byte/line budgets via [`crate::dotenv::EDIT_OPTIONS`], retains an
+    /// existing exact quote style when possible, and selects a context-safe
     /// representation otherwise.
     pub(super) fn dotenv_verified_set(
         text: &str,
         path: &[PathSeg],
         want: &serde_json::Value,
     ) -> Option<(Range<usize>, Vec<u8>)> {
-        let (document, offset) = crate::dotenv::parse_document(text).ok()?;
+        let document = crate::dotenv::parse_document(text).ok()?;
         let entry = document.unique(flat_key(path)?).ok()?;
         let value = scalar_text(want)?;
-        if !set_within_budget(text, entry, offset, value.as_ref()) {
-            return None;
-        }
         let verified = document
-            .edit(&[adotenv::Edit::Set {
-                entry: entry.id(),
-                value: value.as_ref(),
-            }])
+            .edit_with_options(
+                &[adotenv::Edit::Set {
+                    entry: entry.id(),
+                    value: value.as_ref(),
+                }],
+                crate::dotenv::EDIT_OPTIONS,
+            )
             .ok()?;
         let mut edits = verified.into_edits();
         if edits.len() != 1 {
             return None;
         }
         let edit = edits.pop()?;
-        Some((
-            edit.range.start + offset..edit.range.end + offset,
-            edit.replacement.into_bytes(),
-        ))
+        Some((edit.range, edit.replacement.into_bytes()))
     }
 
     /// Produce one verified native removal edit per selected unique flat key.
-    /// The complete batch is verified atomically by `adotenv`; if any combined
-    /// removal would reinterpret unselected source, no spans are returned.
+    /// Uses `LookupIndex::unique` for linear batch resolution and verifies the
+    /// complete batch atomically via `adotenv` with [`crate::dotenv::EDIT_OPTIONS`].
     pub(super) fn dotenv_verified_removal_spans(
         text: &str,
         paths: &[Vec<PathSeg>],
     ) -> Vec<Range<usize>> {
-        let Ok((document, offset)) = crate::dotenv::parse_document(text) else {
+        let Ok(document) = crate::dotenv::parse_document(text) else {
             return Vec::new();
         };
+        let index = document.lookup_index();
         let mut item_ids = Vec::with_capacity(paths.len());
         for path in paths {
             let Some(key) = flat_key(path) else {
                 return Vec::new();
             };
-            let Ok(entry) = document.unique(key) else {
+            let Ok(entry) = index.unique(key) else {
                 return Vec::new();
             };
             item_ids.push(entry.item_id());
@@ -1031,7 +970,8 @@ mod dotenv {
             .into_iter()
             .map(|item| adotenv::Edit::Remove { item })
             .collect();
-        let Ok(verified) = document.edit(&operations) else {
+        let Ok(verified) = document.edit_with_options(&operations, crate::dotenv::EDIT_OPTIONS)
+        else {
             return Vec::new();
         };
         let mut edits = verified.into_edits();
@@ -1039,10 +979,7 @@ mod dotenv {
             return Vec::new();
         }
         edits.sort_unstable_by_key(|edit| edit.range.start);
-        edits
-            .into_iter()
-            .map(|edit| edit.range.start + offset..edit.range.end + offset)
-            .collect()
+        edits.into_iter().map(|edit| edit.range).collect()
     }
 
     /// The text of a scalar (`null` and non-scalars have none in dotenv).
@@ -1240,45 +1177,32 @@ mod ini {
     }
 }
 
-/// Java `.properties` span resolution + value serialization (CONSERVATIVE).
+/// Java `.properties` span resolution + value serialization, backed directly
+/// by [`crate::properties::parse_entries`].
 ///
-/// The parse uses `java-properties` (escape-aware; `=`/`:`/whitespace separators,
-/// `\`-continuation, `\uXXXX`) and keeps no spans, so this re-scans the raw text.
-/// It is DELIBERATELY conservative -- it resolves ONLY a simple single physical
-/// line `key = value` / `key : value` with NO backslash (no escaped separator, no
-/// continuation, no `\uXXXX`) and an EXPLICIT `=`/`:` separator, and DECLINES
-/// everything else (a whitespace-only separator, a `\`-continuation or escaped
-/// line, a duplicate key) so an ambiguous edit degrades to a Suggestion. Escaped
-/// / continued / space-separated properties are deferred. These are all
-/// DOCUMENT-dependent declines, so `check`'s static `can_fix` (which cannot
-/// inspect the file) may advertise such a key "fixable" while `fix` then skips it
-/// -- the tolerated over-promise in the safe direction (check never claims LESS
-/// than fix resolves), which the conservative resolver simply hits more often
-/// here (a `\uXXXX` value is common). It never corrupts: fix skips, exit stays 1.
+/// Because the internal parser preserves exact byte spans across escapes,
+/// backslash line continuations, and `=`/`:`/whitespace separators, both
+/// `set_value` and `remove_value` resolve unique entries directly without a
+/// separate conservative re-scanner. Duplicate keys still decline (ambiguous),
+/// and a bare separator-less key (`flag\n`) declines `set_value` because
+/// splicing at its empty value span would fuse into the key token.
 ///
-/// Properties is FLAT (a path is one `Key`), and each simple key owns its physical
-/// line. The parser strips LEADING value whitespace but keeps TRAILING whitespace,
-/// so the value span runs from after the separator to the END of the line. Lines
-/// split on `\r\n` / bare `\r` / `\n` -- `java-properties`'s line model (see
-/// `locate`), so a CR-separated neighbor is never over-deleted.
+/// Properties is FLAT (a path is one `Key`), and each logical entry owns its
+/// full span across continuations and its trailing `\r\n` / `\r` / `\n`.
+/// Leading value whitespace is stripped while trailing whitespace is kept, so
+/// the value span runs from after the separator to the end of the final
+/// physical line's content.
 mod properties {
     use super::PathSeg;
     use std::ops::Range;
 
-    /// A located simple assignment line.
-    struct Located {
-        /// The whole physical line INCLUDING its trailing newline (removal).
-        full: Range<usize>,
-        /// The value span (after the separator, to end of line).
-        value: Range<usize>,
-    }
-
     pub(super) fn properties_value_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
-        locate(text, single_key(path)?).map(|l| l.value)
+        let entry = locate_unique(text, single_key(path)?)?;
+        entry.has_separator.then_some(entry.value_span)
     }
 
     pub(super) fn properties_removal_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
-        locate(text, single_key(path)?).map(|l| l.full)
+        locate_unique(text, single_key(path)?).map(|entry| entry.full_span)
     }
 
     /// A properties path is FLAT: exactly one `Key` segment.
@@ -1289,85 +1213,21 @@ mod properties {
         }
     }
 
-    /// Scan for the UNIQUE simple assignment line of `name`. `None` if it is
-    /// absent, appears more than once, or is a complex (escaped / continued /
-    /// space-separated) line the conservative resolver declines.
-    ///
-    /// Lines are split on `\r\n`, a bare `\r`, OR `\n` -- `java-properties`'s line
-    /// model. This MUST match the parser: a bare `\r` (classic-Mac / hand-edited
-    /// files) is a line terminator there, so splitting on `\n` only would see two
-    /// CR-separated assignments as one line and OVER-DELETE the neighbor (the span
-    /// runs to end-of-line). Byte-scanning for `\r`/`\n` is UTF-8-safe -- both are
-    /// ASCII and never occur inside a multibyte char.
-    fn locate(text: &str, name: &str) -> Option<Located> {
-        let (body, base) = match text.strip_prefix('\u{feff}') {
-            Some(rest) => (rest, '\u{feff}'.len_utf8()),
-            None => (text, 0),
-        };
-        let bytes = body.as_bytes();
-        let mut found: Option<Located> = None;
-        let mut i = 0usize; // byte offset of the current line's start within `body`
-        while i < bytes.len() {
-            // Content runs to the next `\r` or `\n` (or EOF).
-            let mut j = i;
-            while j < bytes.len() && bytes[j] != b'\n' && bytes[j] != b'\r' {
-                j += 1;
+    /// Locate the unique logical entry whose decoded key equals `name`.
+    /// Returns `None` if parsing fails, the key is absent, or it appears more
+    /// than once (including when duplicates use different escape spellings).
+    fn locate_unique(text: &str, name: &str) -> Option<crate::properties::PropertyEntry> {
+        let entries = crate::properties::parse_entries(text, None).ok()?;
+        let mut found = None;
+        for entry in entries {
+            if entry.key == name {
+                if found.is_some() {
+                    return None;
+                }
+                found = Some(entry);
             }
-            // Terminator: `\r\n` (2), a lone `\r`/`\n` (1), or none at EOF (0).
-            let term = if j >= bytes.len() {
-                0
-            } else if bytes[j] == b'\r' && bytes.get(j + 1) == Some(&b'\n') {
-                2
-            } else {
-                1
-            };
-            let content = &body[i..j];
-            let line_start = base + i;
-            let line_end = base + j + term;
-            i = j + term;
-            let Some(value) = value_span_in_line(content, name) else {
-                continue;
-            };
-            if found.is_some() {
-                return None; // a second occurrence -> ambiguous, decline
-            }
-            found = Some(Located {
-                full: line_start..line_end,
-                value: line_start + value.start..line_start + value.end,
-            });
         }
         found
-    }
-
-    /// If `content` is a SIMPLE `key = value` / `key : value` line for `name`
-    /// (no backslash, an explicit `=`/`:` separator), return the value span as a
-    /// range WITHIN `content`; else `None`.
-    fn value_span_in_line(content: &str, name: &str) -> Option<Range<usize>> {
-        // Any backslash means an escape or a line-continuation -- too complex for
-        // the conservative resolver, decline the whole line.
-        if content.contains('\\') {
-            return None;
-        }
-        let trimmed = content.trim_start();
-        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with('!') {
-            return None;
-        }
-        let lead = content.len() - trimmed.len();
-        // The key runs to the first separator character (`=`, `:`, or whitespace).
-        let key_end = trimmed.find(|c: char| c == '=' || c == ':' || c.is_whitespace())?;
-        if trimmed[..key_end] != *name {
-            return None;
-        }
-        // The separator must be an explicit `=`/`:` (with optional surrounding
-        // whitespace); a whitespace-ONLY separator is declined.
-        let after_key = &trimmed[key_end..];
-        let ws1 = after_key.len() - after_key.trim_start().len();
-        let after_sep = after_key.trim_start().strip_prefix(['=', ':'])?;
-        let ws2 = after_sep.len() - after_sep.trim_start().len();
-        // Value: leading whitespace stripped, TRAILING whitespace kept -> to the
-        // end of the line. `=`/`:` are 1 ASCII byte.
-        let vstart = lead + key_end + ws1 + 1 + ws2;
-        Some(vstart..content.len())
     }
 
     /// Serialize a scalar as a RAW properties value, declining any value that

@@ -2,8 +2,8 @@ test_version: 1
 name: set_value rewrites a properties value (both separators), keeping siblings
 tags: [fix, properties_path_equals, set_value, properties]
 
-# The sixth structured format (hand-rolled re-scan; the java-properties parser
-# keeps no spans). `set_value` overwrites only the value token at `$['db.host']`,
+# The sixth structured format (spanned internal `.properties` parser).
+# `set_value` overwrites only the value token at `$['db.host']`,
 # so the leading comment, the sibling `db.port` (a `:` separator with its spacing
 # preserved), and everything else survive. Dotted keys are ONE key, queried with
 # bracket notation. Safe (a scalar replacing an existing scalar).

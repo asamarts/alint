@@ -1,6 +1,6 @@
 # v0.24: saphyr exit, Phase 3 completion, owned walker, LSP rewrite, and backlog drain
 
-Status: accepted (2026-11-22, ADR-0048); in progress (Phase 0, Phase 1 Batch 1, and Phase 1 Batch 2 complete; starting Phase 1 Batch 3).
+Status: accepted (2026-11-22, ADR-0048); in progress (Phase 0 and Phase 1 complete -- all 19/19 Phase 1 issues closed; starting Phase 2).
 Decisions: [ADR-0048](../../adr/0048-v024-owner-decisions.md) (owner decisions and scope for v0.24);
 [ADR-0049](../../adr/0049-baseline-preferred-paths-for-repeated-fingerprints.md) (baseline preferred visible paths for repeated fingerprints);
 [ADR-0036](../../adr/0036-ayaml-issues-and-the-saphyr-exit.md) and
@@ -87,7 +87,7 @@ items:
     `alint-rules/src/io.rs`) with an internal text/binary heuristic.
   - **#613:** replace `node-tar` in `editors/vscode/src/download.ts` with built-in `node:zlib` and
     a minimal USTAR single-file extractor.
-  - **#615:** adopt `adotenv 1.5.4` `ParseOptions`, multi-BOM, `EditOptions`, compact bare-entry
+  - **#615:** adopt `adotenv 1.6.0` `ParseOptions`, multi-BOM, `EditOptions`, compact bare-entry
     parsing, and indexed unique lookup, dropping local dotenv workarounds.
   - **#610:** replace `java-properties 2.0.0` with an internal dependency-free spanned
     `.properties` parser, dropping 14 transitive crates (including direct `encoding_rs` and
@@ -271,11 +271,28 @@ owner ADR approval before implementation starts (matching v0.23's Phase 3 owner 
   `extends`, nested option escaping (`key_parity.ignore_keys`, `scope_filter`, JSONPath I-Regexp,
   `(?x)` whitespace, `git_commit_message.since`), JUnit/agent sanitization, and `roxmltree` 0.21.2
   duplicate-default-`xmlns` parity and attribute value spans (#635).
-- 2026-11-23: Phase 1 Batch 2 complete (#636, #637; 7 correctness and usability issues: #579 `/` path tokens +
-  cross-platform Windows/macOS fingerprint golden gates + Windows baseline regeneration docs, #546
-  `java@v1` `java-no-tracked-build` `has_gradle` gate + `**/src/**/build` exclusion, #601 ADR-0049
-  preferred visible paths on baseline entries preserving suppressed repeats and SARIF fingerprints,
-  #564 IEEE-754 `f64` JSON number-range documentation, #547 pre-0.22 hidden-path baseline
-  regeneration hint, #597 `--format` valid-format list + `key_parity` `strip_root` null-root error
-  and empty-object root support, #581 interned `PROVENANCE_MARKER` source strings).
-  Next: Phase 1 Batch 3 (Quick supply-chain cleanups: #611, #612, #613, #615, #610).
+- 2026-11-23: Phase 1 Batch 2 complete and audited (#636, #637, #643; 7 correctness and usability
+  issues: #579 `/` path tokens + cross-platform Windows/macOS fingerprint golden gates + Windows
+  baseline regeneration docs, #546 `java@v1` `java-no-tracked-build` `has_gradle` gate +
+  `**/src/**/build` exclusion, #601 ADR-0049 preferred visible paths on baseline entries preserving
+  suppressed repeats and SARIF fingerprints, #564 IEEE-754 `f64` JSON number-range documentation,
+  #547 pre-0.22 hidden-path baseline regeneration hint, #597 `--format` valid-format list +
+  `key_parity` `strip_root` null-root error and empty-object root support, #581 interned
+  `PROVENANCE_MARKER` source strings). Post-Batch-2 adversarial audit (#643) fixed O(K^2)
+  duplicate-merge sorting, bounded baseline `paths` deserialization, hardened ADR-0030 forged-rule
+  stripping, tightened pre-0.22 SemVer parsing and false-hint gating, normalized remaining Windows
+  message/redaction/locator paths, validated `--format` up front across all subcommands, and
+  replaced unbudgeted `single_root_kind` with O(1)-memory `strip_root_shape`.
+- 2026-11-23: Phase 1 Batch 3 complete (#644, PR for #615/#610; 5 quick supply-chain cleanups --
+  completing all 19/19 Phase 1 issues): #611 replaced `directories` with an internal platform cache
+  helper and removed the sole MPL-2.0 copyleft exception (`option-ext`) from `deny.toml` and
+  `about.toml`; #612 replaced `content_inspector 0.2.4` with an internal SIMD NUL/BOM/magic +
+  64-bit SWAR control-byte classifier; #613 replaced `node-tar` in `editors/vscode` with built-in
+  `node:zlib` and a bounded in-memory USTAR/PAX/GNU-LongName single-file extractor plus unit tests;
+  #615 adopted `adotenv 1.6.0` (`ParseOptions::with_max_lines`, `BomPolicy::StripAll`,
+  `Document::edit_with_options`, `parse_entries_compact_with_options`, `LookupIndex::unique`);
+  #610 replaced `java-properties 2.0.0` and `encoding_rs` with an internal dependency-free spanned
+  `.properties` parser supporting UTF-16 surrogate pairs, trailing EOF backslashes, and spanned
+  multiline/escaped/whitespace-separated edits.
+  Next: Phase 2 (Unified YAML track and span-enabled diagnostics: #614, #549, #550, #548, #582,
+  #572, #566, #571).
