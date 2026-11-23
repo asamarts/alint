@@ -133,7 +133,7 @@ jsonc-parser = { version = "0.34.0", features = ["cst"] }
 # differential checks. MIT OR Apache-2.0 (same as the workspace).
 # Pinned because `saphyr-parser`'s pre-1.0 `Marker.index` is a CHAR offset.
 # `default-features = false` drops `encoding` (`load_from_read` only; we load `&str`).
-saphyr = { version = "=0.3.3", default-features = false }
+saphyr = { version = "=0.3.4", default-features = false }
 saphyr-parser = { version = "=0.3.4", default-features = false }
 roxmltree = "0.21.2"
 hcl = { package = "hcl-rs", version = "0.18" }
