@@ -45,7 +45,7 @@ pub enum LimitKind {
     /// decodes hold of key paths is bounded however many files it decodes.
     BytesPerRun,
     /// Bytes of materialized key-path pointers one decode may build
-    /// ([`PathBudget`](super::key_paths::PathBudget)). A single deep, wide
+    /// (`PathBudget`). A single deep, wide
     /// file (for example 1 MB of JSON 120 levels deep and 100,000 keys wide)
     /// expands to ~300 MiB of per-row pointers under a 1 GiB `BytesPerRun`
     /// cap; this tighter per-decode cap stops such expansion early while still
