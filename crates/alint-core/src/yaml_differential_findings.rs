@@ -64,13 +64,14 @@ const FINDINGS: &[(&str, Entry, &[&str])] = &[
         Entry::Value,
         &["empty-implicit-key"],
     ),
-    // ayaml's duplicate key, reported where the mapping starts, and the
-    // oracle's empty key, which hides it: without the empty key, both give
-    // the duplicate key, at the place where each reports it.
+    // ayaml's duplicate key, relocated to the repeated key itself (#572), and
+    // the oracle's empty key, which hides it: without the empty key, both give
+    // the duplicate key, at the repeated key (ayaml) vs the mapping start
+    // (oracle).
     (
         "key: {key: x}\n: \n? key\n",
         Entry::Value,
-        &["empty-implicit-key"],
+        &["empty-implicit-key", "values-after-syntax"],
     ),
     // A tab before a comment, or a tab line after a CR, after `...`.
     ("a: 1\n...\n\t# c\n", Entry::Value, &["tab-as-white-space"]),

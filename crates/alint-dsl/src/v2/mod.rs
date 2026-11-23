@@ -472,23 +472,27 @@ fn needs_v2(origin: &Origin<'_>, declared: &Declared, key: &str) -> Error {
 
 /// Check a version 2 `document` (as written, before interpolation) where its
 /// typed decode cannot: every top-level key and every `extends:` entry key is
-/// one v2 knows, so an unknown key is reported against the v2 surface, and no
-/// name, alias or reference is interpolated.
-pub(crate) fn check_document(document: &Value, display: &str) -> Result<()> {
+/// one v2 knows, so an unknown key is reported against the v2 surface (with
+/// 1-based line and column for unknown top-level keys, #566), and no name,
+/// alias or reference is interpolated.
+pub(crate) fn check_document(document: &Value, contents: &str, display: &str) -> Result<()> {
     let Some(root) = document.as_mapping() else {
         return Ok(());
     };
     let v1_keys = document::v1_keys();
     let known = |key: &str| v1_keys.contains(&key) || document::V2_ONLY_KEYS.contains(&key);
-    for key in root.keys() {
+    for (entry_index, key) in root.keys().enumerate() {
         if !key.as_str().is_some_and(known) {
             let expected: Vec<&str> = v1_keys
                 .iter()
                 .chain(document::V2_ONLY_KEYS)
                 .copied()
                 .collect();
+            let place = unknown_top_level_key_location(contents, key, entry_index)
+                .map(|(line, column)| format!(" at line {line} column {column}"))
+                .unwrap_or_default();
             return Err(Error::Other(format!(
-                "{display}: unknown key `{}` in a version 2 config; expected one of {}",
+                "{display}: unknown key `{}` in a version 2 config; expected one of {}{place}",
                 decode::key_text(key),
                 decode::listed(&expected)
             )));
@@ -525,6 +529,25 @@ pub(crate) fn check_document(document: &Value, display: &str) -> Result<()> {
         }
     }
     reject_interpolated_names(document, display)
+}
+
+/// 1-based `(line, column)` of an unknown top-level `key` at `entry_index` in
+/// `contents` (#566).
+fn unknown_top_level_key_location(
+    contents: &str,
+    key: &Value,
+    entry_index: usize,
+) -> Option<(usize, usize)> {
+    let span = key
+        .as_str()
+        .and_then(|text| {
+            alint_core::yaml::locate_config_path_span(
+                contents,
+                &[alint_core::yaml::ConfigPathSegment::Key(text.to_owned())],
+            )
+        })
+        .or_else(|| alint_core::yaml::locate_top_level_key_span(contents, entry_index))?;
+    alint_core::yaml::LineIndex::new(contents).line_col(span.start)
 }
 
 #[cfg(test)]

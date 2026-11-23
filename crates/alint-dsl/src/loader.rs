@@ -688,7 +688,7 @@ fn parse_guarded(
     if surface == crate::v2::Surface::V2
         && let Some(document) = &document
     {
-        crate::v2::check_document(document, origin.display)?;
+        crate::v2::check_document(document, contents, origin.display)?;
     }
     let v2_environment = v2_environment_of(surface, contents, document.as_ref());
     let (mut config, v2_keys, masked) = if let Some(decoded) = text_decode {

@@ -16,4 +16,4 @@ expect:
   - exit: configuration_error
     configuration_error:
       message:
-        exact: ".an_unknown_key_lists_the_version_two_keys.inline.alint.yml: unknown key `relation` in a version 2 config; expected one of `version`, `requires`, `extends`, `ignore`, `respect_gitignore`, `vars`, `facts`, `templates`, `rules`, `fix_size_limit`, `nested_configs`, `limits`, `allow_out_of_root`, `baseline`, `trusted_extends`, `selectors`, `relations`"
+        exact: ".an_unknown_key_lists_the_version_two_keys.inline.alint.yml: unknown key `relation` in a version 2 config; expected one of `version`, `requires`, `extends`, `ignore`, `respect_gitignore`, `vars`, `facts`, `templates`, `rules`, `fix_size_limit`, `nested_configs`, `limits`, `allow_out_of_root`, `baseline`, `trusted_extends`, `selectors`, `relations` at line 2 column 1"

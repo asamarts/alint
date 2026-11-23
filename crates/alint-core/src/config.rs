@@ -14,6 +14,48 @@ where
     T::deserialize(deserializer).map(Some)
 }
 
+/// Deserialize a `HashMap<String, String>` while rejecting duplicate keys so
+/// `vars:` matches every other YAML mapping in a config (#572).
+///
+/// # Errors
+///
+/// Returns a deserialization error when the mapping repeats a key or holds a
+/// non-string key or value.
+#[doc(hidden)]
+pub fn deserialize_unique_string_map<'de, D>(
+    deserializer: D,
+) -> std::result::Result<HashMap<String, String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct UniqueStringMapVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for UniqueStringMapVisitor {
+        type Value = HashMap<String, String>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("a map of unique string keys to string values")
+        }
+
+        fn visit_map<A>(self, mut map: A) -> std::result::Result<Self::Value, A::Error>
+        where
+            A: serde::de::MapAccess<'de>,
+        {
+            let mut out = HashMap::with_capacity(map.size_hint().unwrap_or(0));
+            while let Some((key, value)) = map.next_entry::<String, String>()? {
+                if out.insert(key.clone(), value).is_some() {
+                    return Err(serde::de::Error::custom(format!(
+                        "duplicate entry with key {key:?}"
+                    )));
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    deserializer.deserialize_map(UniqueStringMapVisitor)
+}
+
 /// Parsed form of a `.alint.yml` file.
 ///
 /// Outside deserialization, built with [`Config::new`] and the `with_*`
@@ -43,7 +85,7 @@ pub struct Config {
     pub respect_gitignore: bool,
     /// Free-form string variables referenced from rule messages and
     /// `when` expressions as `{{vars.<name>}}` and `vars.<name>`.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_unique_string_map")]
     pub vars: HashMap<String, String>,
     /// Repository properties evaluated once per run and referenced from
     /// `when` clauses as `facts.<id>`.

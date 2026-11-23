@@ -88,8 +88,9 @@ pub use config::{
     GitUntrackFixSpec, IndentStyleFixSpec, InsertHeaderFixSpec, InsertLineFixSpec, NestedRuleSpec,
     NumberMask, PathsSpec, REDACTED_CONFIGURATION_ERROR, RelocateFixSpec, RemoveValueFixSpec,
     ReplaceFixSpec, RuleSpec, SetValueFixSpec, SortFixSpec, SyncFromFixSpec,
-    configuration_field_may_be_secret, mask_configuration_field, mask_configuration_values,
-    redact_environment_values, redact_environment_values_in_error, resolve_content_source,
+    configuration_field_may_be_secret, deserialize_unique_string_map, mask_configuration_field,
+    mask_configuration_values, redact_environment_values, redact_environment_values_in_error,
+    resolve_content_source,
 };
 pub use engine::{Engine, RuleEntry, StagedFix, StagedKind};
 pub use error::{Error, Result};

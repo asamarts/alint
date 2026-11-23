@@ -445,7 +445,10 @@ pub(crate) struct RawConfig {
     ignore: Vec<String>,
     #[serde(default, deserialize_with = "deserialize_explicit")]
     respect_gitignore: Option<bool>,
-    #[serde(default)]
+    #[serde(
+        default,
+        deserialize_with = "alint_core::deserialize_unique_string_map"
+    )]
     vars: std::collections::HashMap<String, String>,
     #[serde(default)]
     facts: Vec<FactSpec>,

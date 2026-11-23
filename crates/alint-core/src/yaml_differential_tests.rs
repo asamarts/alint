@@ -1191,17 +1191,31 @@ fn a_moved_error_is_kept_revealed_or_agreed_on() {
 }
 
 /// A value error and a syntax error at one place are two errors: ayaml's
-/// duplicate key of the root mapping and the oracle's control character
-/// are both reported at 1:1, and the control character stays the quoted
-/// scalar's difference.
+/// value/composition error at 1:1 and the oracle's control character are both
+/// reported at 1:1, and the control character stays the quoted scalar's
+/// difference. With duplicate keys relocated to the repeated key (#572), ayaml
+/// reports the duplicate key at the repeated entry rather than 1:1 while the
+/// oracle keeps reporting it at the mapping start, so both
+/// `quoted-only-characters` and `values-after-syntax` explain those inputs.
 #[test]
 fn a_value_error_and_a_syntax_error_at_one_place_differ() {
+    // Both parsers report at 1:1 (ayaml's unknown-anchor composition error vs
+    // the oracle's control-character reader error), exercising
+    // `settle_same_location`.
+    let (case, _) = compare("*missing: '\u{7f}'\n", Entry::Value);
+    assert_eq!(case.class, Class::RejectedAtDifferentLocation, "{case:?}");
+    assert_eq!(
+        explanation(&case),
+        Some(vec![UNEXPLAINED_ENTRY]),
+        "{case:?}"
+    );
+    assert_eq!(explanation_without(&case, &[UNEXPLAINED_ENTRY]), None);
     for input in ["a: 1\na: 2\nb: '\u{7f}'\n", "b: '\u{7f}'\na: 1\na: 2\n"] {
         let (case, _) = compare(input, Entry::Value);
         assert_eq!(case.class, Class::RejectedAtDifferentLocation, "{case:?}");
         assert_eq!(
             explanation(&case),
-            Some(vec![UNEXPLAINED_ENTRY]),
+            Some(vec![UNEXPLAINED_ENTRY, "values-after-syntax"]),
             "{case:?}"
         );
         assert_eq!(explanation_without(&case, &[UNEXPLAINED_ENTRY]), None);

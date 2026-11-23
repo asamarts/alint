@@ -309,6 +309,714 @@ pub fn parse_spanned_events(input: &str) -> Result<SpannedEvents<'_>, Error> {
         .map_err(Error::ayaml)
 }
 
+/// One step of a YAML configuration path used to place diagnostics on source
+/// spans (#566, #571, #572).
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigPathSegment {
+    /// A mapping key (e.g. `rules`, `paths`, `relations`, `at`).
+    Key(String),
+    /// A 0-based sequence index (e.g. `[3]` in `rules[3].paths`).
+    Index(usize),
+    /// A mapping element inside a sequence whose `id:` field equals this value
+    /// (e.g. a rule or fact named by id).
+    RuleId(String),
+}
+
+/// Parse a dot-and-bracket configuration path such as `rules[3].paths`,
+/// `relations.r.fields.name.at`, or `extends[0].as` into [`ConfigPathSegment`]s.
+#[doc(hidden)]
+#[must_use]
+pub fn parse_config_path(path: &str) -> Vec<ConfigPathSegment> {
+    let mut segments = Vec::new();
+    let bytes = path.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'.' {
+            i += 1;
+            continue;
+        }
+        if bytes[i] == b'[' {
+            let start = i + 1;
+            if let Some(rel_end) = path[start..].find(']') {
+                let inner = &path[start..start + rel_end];
+                if let Ok(index) = inner.parse::<usize>() {
+                    segments.push(ConfigPathSegment::Index(index));
+                } else {
+                    let unquoted = inner
+                        .strip_prefix('"')
+                        .and_then(|s| s.strip_suffix('"'))
+                        .or_else(|| inner.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')))
+                        .unwrap_or(inner);
+                    if !unquoted.is_empty() {
+                        segments.push(ConfigPathSegment::Key(unquoted.to_owned()));
+                    }
+                }
+                i = start + rel_end + 1;
+                continue;
+            }
+            break;
+        }
+        let start = i;
+        while i < bytes.len() && bytes[i] != b'.' && bytes[i] != b'[' {
+            i += 1;
+        }
+        if i > start {
+            segments.push(ConfigPathSegment::Key(path[start..i].to_owned()));
+        }
+    }
+    segments
+}
+
+/// Locate the UTF-8 [`crate::ByteSpan`] of the YAML key or sequence item named
+/// by `path` in `input` (#566, #571).
+///
+/// For a path ending in [`ConfigPathSegment::Key`], returns the key token's
+/// span; for a path ending in [`ConfigPathSegment::Index`], returns the start
+/// token's span of that sequence element; for [`ConfigPathSegment::RuleId`],
+/// locates the sequence element whose `id:` scalar equals the id (and continues
+/// resolving any trailing segments inside that element).
+#[doc(hidden)]
+#[must_use]
+pub fn locate_config_path_span(input: &str, path: &[ConfigPathSegment]) -> Option<crate::ByteSpan> {
+    if path.is_empty() {
+        return None;
+    }
+    if let Some(pos) = path
+        .iter()
+        .position(|seg| matches!(seg, ConfigPathSegment::RuleId(_)))
+    {
+        let ConfigPathSegment::RuleId(target_id) = &path[pos] else {
+            unreachable!()
+        };
+        let index = find_sequence_entry_by_id(input, &path[..pos], target_id)?;
+        let mut resolved = Vec::with_capacity(path.len());
+        resolved.extend_from_slice(&path[..pos]);
+        resolved.push(ConfigPathSegment::Index(index));
+        if pos + 1 == path.len() {
+            // Point directly at the `id:` key of the matching entry when no
+            // sub-field was specified.
+            resolved.push(ConfigPathSegment::Key("id".to_owned()));
+            return locate_concrete_path_span(input, &resolved)
+                .or_else(|| locate_concrete_path_span(input, &resolved[..resolved.len() - 1]));
+        }
+        resolved.extend_from_slice(&path[pos + 1..]);
+        return locate_concrete_path_span(input, &resolved).or_else(|| {
+            // Sub-field may be inherited from an `extends:` or template; fall
+            // back to the entry's own `id:` key.
+            let mut fallback = resolved[..=pos].to_vec();
+            fallback.push(ConfigPathSegment::Key("id".to_owned()));
+            locate_concrete_path_span(input, &fallback)
+        });
+    }
+    locate_concrete_path_span(input, path)
+}
+
+/// Locate the UTF-8 [`crate::ByteSpan`] of the `entry_index`-th top-level
+/// mapping key in `input` (fallback for non-string top-level keys in #566).
+#[doc(hidden)]
+#[must_use]
+pub fn locate_top_level_key_span(input: &str, entry_index: usize) -> Option<crate::ByteSpan> {
+    let events = parse_events_stream(input).ok()?;
+    let mut depth = 0_usize;
+    let mut in_root_mapping = false;
+    let mut at_key = true;
+    let mut seen_keys = 0_usize;
+    for parsed in events {
+        let Ok(event) = parsed else {
+            return None;
+        };
+        match event {
+            ayaml::Event::DocumentEnd { .. } | ayaml::Event::StreamEnd { .. } => return None,
+            ayaml::Event::MappingStart { span, .. } => {
+                if in_root_mapping {
+                    if depth == 0 && at_key {
+                        if seen_keys == entry_index {
+                            return Some(byte_span(span));
+                        }
+                        seen_keys += 1;
+                    }
+                    depth += 1;
+                } else {
+                    in_root_mapping = true;
+                }
+            }
+            ayaml::Event::SequenceStart { span, .. } => {
+                if !in_root_mapping {
+                    return None;
+                }
+                if depth == 0 && at_key {
+                    if seen_keys == entry_index {
+                        return Some(byte_span(span));
+                    }
+                    seen_keys += 1;
+                }
+                depth += 1;
+            }
+            ayaml::Event::MappingEnd { .. } | ayaml::Event::SequenceEnd { .. } => {
+                let next_depth = depth.checked_sub(1)?;
+                depth = next_depth;
+                if depth == 0 {
+                    at_key = !at_key;
+                }
+            }
+            ayaml::Event::Scalar { span, .. } | ayaml::Event::Alias { span, .. } => {
+                if !in_root_mapping {
+                    return None;
+                }
+                if depth == 0 {
+                    if at_key {
+                        if seen_keys == entry_index {
+                            return Some(byte_span(span));
+                        }
+                        seen_keys += 1;
+                    }
+                    at_key = !at_key;
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+#[derive(Debug)]
+enum PathWalkFrame {
+    Mapping {
+        /// Whether this mapping itself sits at `path[..depth]` (`Some(depth)`).
+        matched_depth: Option<usize>,
+        at_key: bool,
+        /// When `at_key` just transitioned to `false`, the matched depth for the
+        /// upcoming value node (`Some(depth + 1)` if the key matched `path[depth]`).
+        value_depth: Option<usize>,
+    },
+    Sequence {
+        matched_depth: Option<usize>,
+        next_index: usize,
+    },
+}
+
+#[allow(clippy::too_many_lines)]
+fn locate_concrete_path_span(input: &str, path: &[ConfigPathSegment]) -> Option<crate::ByteSpan> {
+    let events = parse_events_stream(input).ok()?;
+    let mut stack: Vec<PathWalkFrame> = Vec::new();
+    let mut scalar_anchors: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+
+    for parsed in events {
+        let Ok(event) = parsed else {
+            return None;
+        };
+        let next_node_depth = match stack.last() {
+            None => Some(0),
+            Some(
+                PathWalkFrame::Mapping { at_key: true, .. }
+                | PathWalkFrame::Sequence {
+                    matched_depth: None,
+                    ..
+                },
+            ) => None,
+            Some(PathWalkFrame::Mapping {
+                at_key: false,
+                value_depth,
+                ..
+            }) => *value_depth,
+            Some(PathWalkFrame::Sequence {
+                matched_depth: Some(depth),
+                next_index,
+            }) => match path.get(*depth) {
+                Some(ConfigPathSegment::Index(target)) if *target == *next_index => Some(depth + 1),
+                _ => None,
+            },
+        };
+
+        match event {
+            ayaml::Event::DocumentEnd { .. } | ayaml::Event::StreamEnd { .. } => return None,
+            ayaml::Event::MappingStart { span, .. } => {
+                if next_node_depth == Some(path.len()) {
+                    return Some(byte_span(span));
+                }
+                stack.push(PathWalkFrame::Mapping {
+                    matched_depth: next_node_depth,
+                    at_key: true,
+                    value_depth: None,
+                });
+                continue;
+            }
+            ayaml::Event::SequenceStart { span, .. } => {
+                if next_node_depth == Some(path.len()) {
+                    return Some(byte_span(span));
+                }
+                stack.push(PathWalkFrame::Sequence {
+                    matched_depth: next_node_depth,
+                    next_index: 0,
+                });
+                continue;
+            }
+            ayaml::Event::MappingEnd { .. } | ayaml::Event::SequenceEnd { .. } => {
+                stack.pop()?;
+            }
+            ayaml::Event::Scalar {
+                value,
+                anchor,
+                span,
+                ..
+            } => {
+                if let Some(anchor) = anchor {
+                    scalar_anchors.insert(anchor.as_str().to_owned(), value.to_string());
+                }
+                if next_node_depth == Some(path.len()) {
+                    return Some(byte_span(span));
+                }
+                if let Some(PathWalkFrame::Mapping {
+                    matched_depth,
+                    at_key: at_key @ true,
+                    value_depth,
+                }) = stack.last_mut()
+                {
+                    let matched = matched_depth.and_then(|depth| match path.get(depth) {
+                        Some(ConfigPathSegment::Key(target)) if target == value.as_ref() => {
+                            Some(depth + 1)
+                        }
+                        _ => None,
+                    });
+                    if matched == Some(path.len()) {
+                        return Some(byte_span(span));
+                    }
+                    *value_depth = matched;
+                    *at_key = false;
+                    continue;
+                }
+            }
+            ayaml::Event::Alias { anchor, span, .. } => {
+                if next_node_depth == Some(path.len()) {
+                    return Some(byte_span(span));
+                }
+                if let Some(PathWalkFrame::Mapping {
+                    matched_depth,
+                    at_key: at_key @ true,
+                    value_depth,
+                }) = stack.last_mut()
+                {
+                    let resolved = scalar_anchors.get(anchor.as_str());
+                    let matched = matched_depth.and_then(|depth| match path.get(depth) {
+                        Some(ConfigPathSegment::Key(target))
+                            if resolved.is_some_and(|s| s == target) =>
+                        {
+                            Some(depth + 1)
+                        }
+                        _ => None,
+                    });
+                    if matched == Some(path.len()) {
+                        return Some(byte_span(span));
+                    }
+                    *value_depth = matched;
+                    *at_key = false;
+                    continue;
+                }
+            }
+            _ => continue,
+        }
+
+        // A node completed inside its parent container.
+        match stack.last_mut() {
+            Some(PathWalkFrame::Mapping {
+                at_key,
+                value_depth,
+                ..
+            }) => {
+                if *at_key {
+                    // Non-scalar key completed; its value cannot match a string key.
+                    *value_depth = None;
+                    *at_key = false;
+                } else {
+                    *value_depth = None;
+                    *at_key = true;
+                }
+            }
+            Some(PathWalkFrame::Sequence { next_index, .. }) => {
+                *next_index += 1;
+            }
+            None => return None,
+        }
+    }
+    None
+}
+
+/// Find the 0-based index of the mapping element inside the sequence at
+/// `seq_path` whose `id:` scalar equals `target_id`.
+#[allow(clippy::too_many_lines)]
+fn find_sequence_entry_by_id(
+    input: &str,
+    seq_path: &[ConfigPathSegment],
+    target_id: &str,
+) -> Option<usize> {
+    let events = parse_events_stream(input).ok()?;
+    let mut stack: Vec<PathWalkFrame> = Vec::new();
+    let mut scalar_anchors: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    let mut current_entry_index: Option<usize> = None;
+    let mut reading_id_value = false;
+
+    for parsed in events {
+        let Ok(event) = parsed else {
+            return None;
+        };
+        let next_node_depth = match stack.last() {
+            None => Some(0),
+            Some(
+                PathWalkFrame::Mapping { at_key: true, .. }
+                | PathWalkFrame::Sequence {
+                    matched_depth: None,
+                    ..
+                },
+            ) => None,
+            Some(PathWalkFrame::Mapping {
+                at_key: false,
+                value_depth,
+                ..
+            }) => *value_depth,
+            Some(PathWalkFrame::Sequence {
+                matched_depth: Some(depth),
+                next_index,
+            }) => {
+                if *depth == seq_path.len() {
+                    current_entry_index = Some(*next_index);
+                    Some(depth + 1)
+                } else {
+                    match seq_path.get(*depth) {
+                        Some(ConfigPathSegment::Index(target)) if *target == *next_index => {
+                            Some(depth + 1)
+                        }
+                        _ => None,
+                    }
+                }
+            }
+        };
+
+        match event {
+            ayaml::Event::DocumentEnd { .. } | ayaml::Event::StreamEnd { .. } => return None,
+            ayaml::Event::MappingStart { .. } => {
+                reading_id_value = false;
+                stack.push(PathWalkFrame::Mapping {
+                    matched_depth: next_node_depth,
+                    at_key: true,
+                    value_depth: None,
+                });
+                continue;
+            }
+            ayaml::Event::SequenceStart { .. } => {
+                reading_id_value = false;
+                stack.push(PathWalkFrame::Sequence {
+                    matched_depth: next_node_depth,
+                    next_index: 0,
+                });
+                continue;
+            }
+            ayaml::Event::MappingEnd { .. } | ayaml::Event::SequenceEnd { .. } => {
+                reading_id_value = false;
+                if matches!(
+                    stack.last(),
+                    Some(PathWalkFrame::Mapping {
+                        matched_depth: Some(d),
+                        ..
+                    }) if *d == seq_path.len() + 1
+                ) {
+                    current_entry_index = None;
+                }
+                stack.pop()?;
+            }
+            ayaml::Event::Scalar { value, anchor, .. } => {
+                if let Some(anchor) = anchor {
+                    scalar_anchors.insert(anchor.as_str().to_owned(), value.to_string());
+                }
+                if reading_id_value {
+                    reading_id_value = false;
+                    if value.as_ref() == target_id
+                        && let Some(idx) = current_entry_index
+                    {
+                        return Some(idx);
+                    }
+                } else if let Some(PathWalkFrame::Mapping {
+                    matched_depth,
+                    at_key: at_key @ true,
+                    value_depth,
+                }) = stack.last_mut()
+                {
+                    if *matched_depth == Some(seq_path.len() + 1) {
+                        reading_id_value = value.as_ref() == "id";
+                        *value_depth = None;
+                    } else {
+                        *value_depth = matched_depth.and_then(|depth| match seq_path.get(depth) {
+                            Some(ConfigPathSegment::Key(target)) if target == value.as_ref() => {
+                                Some(depth + 1)
+                            }
+                            _ => None,
+                        });
+                    }
+                    *at_key = false;
+                    continue;
+                }
+            }
+            ayaml::Event::Alias { anchor, .. } => {
+                let resolved = scalar_anchors.get(anchor.as_str()).map(String::as_str);
+                if reading_id_value {
+                    reading_id_value = false;
+                    if resolved == Some(target_id)
+                        && let Some(idx) = current_entry_index
+                    {
+                        return Some(idx);
+                    }
+                } else if let Some(PathWalkFrame::Mapping {
+                    matched_depth,
+                    at_key: at_key @ true,
+                    value_depth,
+                }) = stack.last_mut()
+                {
+                    if *matched_depth == Some(seq_path.len() + 1) {
+                        reading_id_value = resolved == Some("id");
+                        *value_depth = None;
+                    } else {
+                        *value_depth = matched_depth.and_then(|depth| match seq_path.get(depth) {
+                            Some(ConfigPathSegment::Key(target))
+                                if resolved == Some(target.as_str()) =>
+                            {
+                                Some(depth + 1)
+                            }
+                            _ => None,
+                        });
+                    }
+                    *at_key = false;
+                    continue;
+                }
+            }
+            _ => continue,
+        }
+
+        match stack.last_mut() {
+            Some(PathWalkFrame::Mapping {
+                at_key,
+                value_depth,
+                ..
+            }) => {
+                *value_depth = None;
+                *at_key = !*at_key;
+            }
+            Some(PathWalkFrame::Sequence { next_index, .. }) => {
+                *next_index += 1;
+            }
+            None => return None,
+        }
+    }
+    None
+}
+
+/// Extract `(parent_path, duplicate_key_text)` from a duplicate-key or
+/// duplicate-field YAML decode error message (#572).
+fn parse_duplicate_key_error(message: &str) -> Option<(Vec<ConfigPathSegment>, String)> {
+    if let Some(at) = message.find("duplicate entry with key ") {
+        let prefix = message[..at].strip_suffix(": ").unwrap_or(&message[..at]);
+        let tail = message[at + "duplicate entry with key ".len()..].trim();
+        let key = if tail.starts_with('"') {
+            serde_json::from_str::<String>(tail).ok()?
+        } else {
+            tail.to_owned()
+        };
+        let parent = if prefix.is_empty() {
+            Vec::new()
+        } else {
+            parse_config_path(prefix)
+        };
+        return Some((parent, key));
+    }
+    if let Some(at) = message.find("duplicate field `") {
+        let prefix = message[..at].strip_suffix(": ").unwrap_or(&message[..at]);
+        let rest = &message[at + "duplicate field `".len()..];
+        let end = rest.find('`')?;
+        let key = rest[..end].to_owned();
+        let parent = if prefix.is_empty() {
+            Vec::new()
+        } else {
+            parse_config_path(prefix)
+        };
+        return Some((parent, key));
+    }
+    None
+}
+
+/// Locate the second occurrence of `dup_key` inside the mapping at `parent_path`
+/// so duplicate-entry / duplicate-field errors point at the repeated key rather
+/// than the mapping's first key (#572).
+#[allow(clippy::too_many_lines)]
+fn locate_repeated_key_span(
+    input: &str,
+    parent_path: &[ConfigPathSegment],
+    dup_key: &str,
+) -> Option<ayaml::Span> {
+    let events = parse_events_stream(input).ok()?;
+    let mut stack: Vec<PathWalkFrame> = Vec::new();
+    let mut scalar_anchors: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    let mut seen_target_key = false;
+
+    for parsed in events {
+        let Ok(event) = parsed else {
+            return None;
+        };
+        let next_node_depth = match stack.last() {
+            None => Some(0),
+            Some(
+                PathWalkFrame::Mapping { at_key: true, .. }
+                | PathWalkFrame::Sequence {
+                    matched_depth: None,
+                    ..
+                },
+            ) => None,
+            Some(PathWalkFrame::Mapping {
+                at_key: false,
+                value_depth,
+                ..
+            }) => *value_depth,
+            Some(PathWalkFrame::Sequence {
+                matched_depth: Some(depth),
+                next_index,
+            }) => match parent_path.get(*depth) {
+                Some(ConfigPathSegment::Index(target)) if *target == *next_index => Some(depth + 1),
+                _ => None,
+            },
+        };
+
+        match event {
+            ayaml::Event::DocumentEnd { .. } | ayaml::Event::StreamEnd { .. } => return None,
+            ayaml::Event::MappingStart { .. } => {
+                if next_node_depth == Some(parent_path.len()) {
+                    seen_target_key = false;
+                }
+                stack.push(PathWalkFrame::Mapping {
+                    matched_depth: next_node_depth,
+                    at_key: true,
+                    value_depth: None,
+                });
+                continue;
+            }
+            ayaml::Event::SequenceStart { .. } => {
+                stack.push(PathWalkFrame::Sequence {
+                    matched_depth: next_node_depth,
+                    next_index: 0,
+                });
+                continue;
+            }
+            ayaml::Event::MappingEnd { .. } | ayaml::Event::SequenceEnd { .. } => {
+                stack.pop()?;
+            }
+            ayaml::Event::Scalar {
+                value,
+                anchor,
+                span,
+                ..
+            } => {
+                if let Some(anchor) = anchor {
+                    scalar_anchors.insert(anchor.as_str().to_owned(), value.to_string());
+                }
+                if let Some(PathWalkFrame::Mapping {
+                    matched_depth,
+                    at_key: at_key @ true,
+                    value_depth,
+                }) = stack.last_mut()
+                {
+                    if *matched_depth == Some(parent_path.len()) {
+                        if value.as_ref() == dup_key {
+                            if seen_target_key {
+                                return Some(span);
+                            }
+                            seen_target_key = true;
+                        }
+                        *value_depth = None;
+                    } else {
+                        *value_depth =
+                            matched_depth.and_then(|depth| match parent_path.get(depth) {
+                                Some(ConfigPathSegment::Key(target))
+                                    if target == value.as_ref() =>
+                                {
+                                    Some(depth + 1)
+                                }
+                                _ => None,
+                            });
+                    }
+                    *at_key = false;
+                    continue;
+                }
+            }
+            ayaml::Event::Alias { anchor, span, .. } => {
+                if let Some(PathWalkFrame::Mapping {
+                    matched_depth,
+                    at_key: at_key @ true,
+                    value_depth,
+                }) = stack.last_mut()
+                {
+                    let resolved = scalar_anchors.get(anchor.as_str()).map(String::as_str);
+                    if *matched_depth == Some(parent_path.len()) {
+                        if resolved == Some(dup_key) {
+                            if seen_target_key {
+                                return Some(span);
+                            }
+                            seen_target_key = true;
+                        }
+                        *value_depth = None;
+                    } else {
+                        *value_depth =
+                            matched_depth.and_then(|depth| match parent_path.get(depth) {
+                                Some(ConfigPathSegment::Key(target))
+                                    if resolved == Some(target.as_str()) =>
+                                {
+                                    Some(depth + 1)
+                                }
+                                _ => None,
+                            });
+                    }
+                    *at_key = false;
+                    continue;
+                }
+            }
+            _ => continue,
+        }
+
+        match stack.last_mut() {
+            Some(PathWalkFrame::Mapping {
+                at_key,
+                value_depth,
+                ..
+            }) => {
+                *value_depth = None;
+                *at_key = !*at_key;
+            }
+            Some(PathWalkFrame::Sequence { next_index, .. }) => {
+                *next_index += 1;
+            }
+            None => return None,
+        }
+    }
+    None
+}
+
+/// If `error` is a duplicate-key or duplicate-field error, relocate its span
+/// and line/column to the repeated key itself rather than the mapping start
+/// (#572).
+fn relocate_duplicate_key_error(input: &str, error: ayaml::Error) -> ayaml::Error {
+    let Some((parent_path, dup_key)) = parse_duplicate_key_error(error.message()) else {
+        return error;
+    };
+    let Some(span) = locate_repeated_key_span(input, &parent_path, &dup_key) else {
+        return error;
+    };
+    let line_index = ayaml::LineIndex::new(input);
+    let Ok(pos) = line_index.to_position(span.start(), ayaml::ColumnEncoding::Scalar) else {
+        return error;
+    };
+    let location = ayaml::Location::from(pos);
+    error.with_span(span).with_location(location)
+}
+
 /// Whether the first node of `prefix` (the input up to an error) is a block
 /// collection, inspecting events lazily so the full stream is never buffered.
 pub(crate) fn root_is_a_block_collection(prefix: &str) -> bool {
@@ -1461,9 +2169,11 @@ impl Error {
         Self(ErrorRepr::Ayaml(error))
     }
 
-    /// ayaml's error from decoding `input`, with a hint when it is likely an
-    /// indentation mistake (see [`crate::yaml_decode::indentation_hint`]).
+    /// ayaml's error from decoding `input`, with duplicate-key errors placed at
+    /// the repeated key (#572) and a hint when it is likely an indentation
+    /// mistake (see [`crate::yaml_decode::indentation_hint`]).
     pub(crate) fn from_text(input: &str, error: ayaml::Error) -> Self {
+        let error = relocate_duplicate_key_error(input, error);
         if crate::yaml_decode::indentation_hint(input, &error) {
             let message = format!(
                 "{} {}",

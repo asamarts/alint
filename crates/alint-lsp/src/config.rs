@@ -49,8 +49,9 @@ pub(crate) struct SessionKey {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ConfigError {
     pub(crate) message: String,
-    /// Where in the config file the error is, when the file itself is not
-    /// valid YAML; otherwise the diagnostic goes at its start.
+    /// Where in the config file the error is, when the file itself has a YAML
+    /// error or the error names a key path in this file; otherwise the
+    /// diagnostic goes at its start.
     pub(crate) range: Option<Range>,
     /// The workspace's untrusted limits caused the error: a remote
     /// `extends:` or an environment value the session would not resolve.
@@ -340,26 +341,315 @@ impl alint_dsl::EnvironmentProvider for UntrustedEnvironment {
     }
 }
 
-/// Where in `config` its YAML error is, when the file itself does not parse.
-/// An error from another file of the chain (an `extends:` target, a drop-in)
-/// or from a later stage keeps the diagnostic at the file's start.
-fn yaml_error_range(config: &Path) -> Option<Range> {
+/// Where in `config` a config load or build error sits (#571):
+/// 1. If `config` itself does not parse as YAML (syntax or duplicate key),
+///    places the diagnostic at the YAML error's line and column.
+/// 2. Otherwise, if `message` belongs to `config` (not another file in an
+///    `extends:` chain or `.alint.d/` drop-in) and names a key path
+///    (`rules[3].paths`, `relations.r.fields.name.at`, `selectors.s.paths`,
+///    `extends[0].as`, an unknown key, or a rule/fact/template id), resolves
+///    that path in `config` to its UTF-16 LSP [`Range`].
+/// 3. Falls back to an inline `at line L column C` location when attributed to
+///    `config`, else `None` (file start).
+fn config_error_range(config: &Path, message: &str) -> Option<Range> {
     use alint_dsl::ConfigSourceProvider as _;
     // Read as the loader reads a config: only a regular file within the size
     // cap, so a config refused for its size (or a FIFO) is not read whole here.
     let text = alint_dsl::FilesystemConfigSource
         .read_to_string(config)
         .ok()?;
-    let error = alint_core::yaml::from_str::<alint_core::yaml::Value>(&text).err()?;
-    let location = error.location()?;
-    let line_index = location.line().checked_sub(1)?;
+    config_error_range_in_text(config, &text, message)
+}
+
+fn config_error_range_in_text(config: &Path, text: &str, message: &str) -> Option<Range> {
+    if let Err(error) = alint_core::yaml::from_str::<alint_core::yaml::Value>(text)
+        && let Some(location) = error.location()
+    {
+        return line_col_to_range(text, location.line(), location.column());
+    }
+    let body = strip_own_file_prefix(config, message)?;
+    if let Some(segments) = extract_error_key_path(body)
+        && let Some(span) = alint_core::yaml::locate_config_path_span(text, &segments)
+        && let Some(range) = byte_span_to_range(text, span)
+    {
+        return Some(range);
+    }
+    let (line, col) = extract_line_column(body)?;
+    line_col_to_range(text, line, col)
+}
+
+fn line_col_to_range(text: &str, line: usize, column: usize) -> Option<Range> {
+    let line_index = line.checked_sub(1)?;
     let line_text = text.lines().nth(line_index).unwrap_or_default();
-    let (character, width) = crate::diagnostics::utf16_column(line_text, location.column());
+    let (character, width) = crate::diagnostics::utf16_column(line_text, column);
     let line = u32::try_from(line_index).ok()?;
     Some(Range::new(
         Position::new(line, character),
         Position::new(line, character.saturating_add(width)),
     ))
+}
+
+fn byte_span_to_range(text: &str, span: alint_core::ByteSpan) -> Option<Range> {
+    let index = alint_core::yaml::LineIndex::new(text);
+    let (start_line, start_col) = index.utf16_position(span.start)?;
+    let end_offset = span.end.max(span.start);
+    let (end_line, end_col) = index
+        .utf16_position(end_offset)
+        .unwrap_or((start_line, start_col));
+    let (end_line, end_col) = if (end_line, end_col) == (start_line, start_col) {
+        (start_line, start_col.saturating_add(1))
+    } else {
+        (end_line, end_col)
+    };
+    Some(Range::new(
+        Position::new(start_line, start_col),
+        Position::new(end_line, end_col),
+    ))
+}
+
+/// Strip a leading `"loading config: "` wrapper and, if the error starts with
+/// a file path, ensure that path names `config` itself rather than an
+/// `extends:` target or `.alint.d/` drop-in (returning `None` for other files).
+fn strip_own_file_prefix<'a>(config: &Path, message: &'a str) -> Option<&'a str> {
+    let first_line = message.lines().next().unwrap_or(message);
+    let rest = first_line
+        .strip_prefix("loading config: ")
+        .unwrap_or(first_line);
+    if let Some((prefix, tail)) = rest.split_once(": ") {
+        let looks_like_file = Path::new(prefix)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("yml") || ext.eq_ignore_ascii_case("yaml"))
+            || prefix.contains('/')
+            || prefix.contains('\\')
+            || prefix.starts_with("alint://")
+            || prefix.starts_with("https://");
+        if looks_like_file {
+            if !prefix_names_config(config, prefix) {
+                return None;
+            }
+            let tail = tail.strip_prefix("YAML parse error: ").unwrap_or(tail);
+            return Some(tail);
+        }
+    }
+    Some(rest.strip_prefix("YAML parse error: ").unwrap_or(rest))
+}
+
+fn prefix_names_config(config: &Path, prefix: &str) -> bool {
+    let norm = |s: &str| s.replace('\\', "/");
+    let p = norm(prefix);
+    let p = p.strip_prefix("./").unwrap_or(&p);
+    let full = norm(&config.display().to_string());
+    if p == full {
+        return true;
+    }
+    if let Some(name) = config.file_name().and_then(|n| n.to_str())
+        && p == name
+    {
+        return true;
+    }
+    std::fs::canonicalize(config).is_ok_and(|canon| {
+        let c = norm(&canon.display().to_string());
+        let c = c.strip_prefix("//?/").unwrap_or(&c);
+        p == c
+    })
+}
+
+/// Extract the YAML configuration path named by a loader or rule-build error.
+fn extract_error_key_path(body: &str) -> Option<Vec<alint_core::yaml::ConfigPathSegment>> {
+    use alint_core::yaml::{ConfigPathSegment, parse_config_path};
+
+    // 1. Named rule / fact / template errors:
+    //    - `building rule "id": ...`
+    //    - `rule "id": ...` / `rule "id" (...): ...`
+    //    - `fact "id": ...`
+    //    - `template "id": ...`
+    for (prefix, section) in [
+        ("building rule \"", "rules"),
+        ("rule \"", "rules"),
+        ("fact \"", "facts"),
+        ("template \"", "templates"),
+    ] {
+        if let Some(after) = body.strip_prefix(prefix)
+            && let Some((id, tail)) = extract_quoted_id(after)
+        {
+            let mut segments = vec![
+                ConfigPathSegment::Key(section.to_owned()),
+                ConfigPathSegment::RuleId(id),
+            ];
+            append_rule_subkey(&mut segments, tail);
+            return Some(segments);
+        }
+    }
+
+    // 2. Backticked key path at the start of the error:
+    //    - `` `relations.r.fields.name.at`: ... ``
+    //    - `` `selectors.s.paths`: ... ``
+    //    - `` `extends[0].as`: ... ``
+    //    - `` `rules[3].input`: ... ``
+    //    - `` `version:` ... ``
+    if let Some(after) = body.strip_prefix('`')
+        && let Some((raw_path, rest)) = after.split_once('`')
+    {
+        let cleaned = raw_path.trim_end_matches(':');
+        if is_plausible_key_path(cleaned) {
+            let mut segments = parse_config_path(cleaned);
+            if let Some(unknown) = extract_unknown_field_name(rest) {
+                segments.push(ConfigPathSegment::Key(unknown));
+            }
+            if !segments.is_empty() {
+                return Some(segments);
+            }
+        }
+    }
+
+    // 3. Top-level unknown key/field without a parent prefix:
+    //    - ``unknown key `relation` in a version 2 config...``
+    //    - ``unknown field `bogus`, expected one of ...``
+    if (body.starts_with("unknown key `") || body.starts_with("unknown field `"))
+        && let Some(name) = extract_unknown_field_name(body)
+    {
+        return Some(vec![ConfigPathSegment::Key(name)]);
+    }
+
+    // 4. Unquoted colon-delimited path prefix from serde / ayaml / dsl:
+    //    - `rules[3].paths: ...`
+    //    - `vars.a: ...`
+    //    - `facts[0].cmd: ...`
+    //    - `limits.findings_per_rule: ...`
+    if let Some((head, rest)) = body.split_once(": ")
+        && is_plausible_key_path(head)
+    {
+        let mut segments = parse_config_path(head);
+        if let Some(unknown) = extract_unknown_field_name(rest) {
+            segments.push(ConfigPathSegment::Key(unknown));
+        }
+        if !segments.is_empty() {
+            return Some(segments);
+        }
+    }
+
+    // 5. Top-level keyword fallbacks (e.g. `baseline`, `ignore`, `limits`).
+    if body.contains("baseline") {
+        return Some(vec![ConfigPathSegment::Key("baseline".to_owned())]);
+    }
+    if body.contains("ignore") {
+        return Some(vec![ConfigPathSegment::Key("ignore".to_owned())]);
+    }
+    if body.contains("limit") {
+        return Some(vec![ConfigPathSegment::Key("limits".to_owned())]);
+    }
+
+    None
+}
+
+fn extract_quoted_id(after_opening_quote: &str) -> Option<(String, &str)> {
+    let mut escaped = false;
+    let mut out = String::new();
+    for (idx, ch) in after_opening_quote.char_indices() {
+        if escaped {
+            out.push(ch);
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '\\' => escaped = true,
+            '"' => return Some((out, &after_opening_quote[idx + 1..])),
+            _ => out.push(ch),
+        }
+    }
+    None
+}
+
+fn append_rule_subkey(segments: &mut Vec<alint_core::yaml::ConfigPathSegment>, tail: &str) {
+    use alint_core::yaml::{ConfigPathSegment, parse_config_path};
+
+    let tail = tail.trim_start();
+    // e.g. `rule "tracked" (git_tracked_only) ...`
+    if let Some(after_paren) = tail.strip_prefix('(')
+        && let Some((inside, _)) = after_paren.split_once(')')
+    {
+        let field = inside
+            .strip_prefix("kind: ")
+            .map_or(inside, |_| "kind")
+            .trim();
+        if is_plausible_key_path(field) {
+            segments.extend(parse_config_path(field));
+            return;
+        }
+    }
+    let tail = tail.strip_prefix(':').unwrap_or(tail).trim_start();
+    if tail.contains("parsing `when`") {
+        segments.push(ConfigPathSegment::Key("when".to_owned()));
+        return;
+    }
+    if let Some(unknown) = extract_unknown_field_name(tail) {
+        segments.push(ConfigPathSegment::Key(unknown));
+        return;
+    }
+    if tail.contains("unknown rule kind") || tail.contains("unknown kind") {
+        segments.push(ConfigPathSegment::Key("kind".to_owned()));
+        return;
+    }
+    // Unwrap wrapper phrases like `could not deserialize merged rule: level: ...`
+    // or `invalid options: YAML parse error: pattern: ...`.
+    let inner = tail
+        .strip_prefix("could not deserialize merged rule: ")
+        .or_else(|| tail.strip_prefix("invalid options: YAML parse error: "))
+        .or_else(|| tail.strip_prefix("invalid options: "))
+        .unwrap_or(tail);
+    if let Some(after_bt) = inner.strip_prefix('`')
+        && let Some((field, _)) = after_bt.split_once('`')
+    {
+        let field = field.trim_end_matches(':');
+        if is_plausible_key_path(field) {
+            segments.extend(parse_config_path(field));
+            return;
+        }
+    }
+    if let Some((field, _)) = inner.split_once(": ")
+        && is_plausible_key_path(field)
+    {
+        segments.extend(parse_config_path(field));
+    }
+}
+
+fn extract_unknown_field_name(text: &str) -> Option<String> {
+    for marker in ["unknown key `", "unknown field `"] {
+        if let Some(at) = text.find(marker) {
+            let rest = &text[at + marker.len()..];
+            if let Some(end) = rest.find('`') {
+                let name = &rest[..end];
+                if !name.is_empty() {
+                    return Some(name.to_owned());
+                }
+            }
+        }
+    }
+    None
+}
+
+fn is_plausible_key_path(token: &str) -> bool {
+    if token.is_empty() || token.contains(char::is_whitespace) {
+        return false;
+    }
+    let first_segment = token.split(['.', '[']).next().unwrap_or_default();
+    !first_segment.is_empty()
+        && first_segment
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
+}
+
+fn extract_line_column(text: &str) -> Option<(usize, usize)> {
+    let at = text.rfind("at line ")?;
+    let rest = &text[at + "at line ".len()..];
+    let (line_str, after_line) = rest.split_once(" column ")?;
+    let line = line_str.parse::<usize>().ok()?;
+    let col_str: String = after_line
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect();
+    let col = col_str.parse::<usize>().ok()?;
+    Some((line, col))
 }
 
 /// Load `config_path` as [`build_session_for_config`] needs it: untrusted,
@@ -382,19 +672,20 @@ fn load_session_config(
         load_options.out_of_root_policy = alint_dsl::OutOfRootPolicy::Deny;
     }
     let config = alint_dsl::load_with(config_path, &load_options).map_err(|error| {
-        let message = error.to_string();
+        let raw_message = error.to_string();
         let untrusted = !trusted
             && (environment.asked.load(Ordering::Relaxed)
-                || message.contains("remote `extends` is disabled")
-                || message.contains("an untrusted load"));
-        let mut message = format!("loading config: {message}");
+                || raw_message.contains("remote `extends` is disabled")
+                || raw_message.contains("an untrusted load"));
+        let range = config_error_range(config_path, &raw_message);
+        let mut message = format!("loading config: {raw_message}");
         if untrusted {
             message.push_str("\n\n");
             message.push_str(UNTRUSTED_NOTE);
         }
         ConfigError {
             message,
-            range: yaml_error_range(config_path),
+            range,
             untrusted,
         }
     })?;
@@ -407,9 +698,15 @@ fn load_session_config(
             .map_err(|error| {
                 let redactor =
                     alint_core::EnvironmentRedactor::from_values(&config.environment_values);
-                redactor
+                let message = redactor
                     .redact(&format!("loading config: {error}"))
-                    .into_owned()
+                    .into_owned();
+                let range = config_error_range(config_path, &message);
+                ConfigError {
+                    message,
+                    range,
+                    untrusted: false,
+                }
             })?;
     }
     let asked = !trusted && environment.asked.load(Ordering::Relaxed);
@@ -522,6 +819,15 @@ fn build_entries(
 /// and gives `env.*` in a `when:` an empty environment. Everything else lints
 /// as it would trusted. [`Session::withheld`] records whether any of that
 /// changed what this config does.
+fn session_config_error(config_path: &Path, message: String) -> ConfigError {
+    let range = config_error_range(config_path, &message);
+    ConfigError {
+        message,
+        range,
+        untrusted: false,
+    }
+}
+
 fn build_session_for_config(
     key: &SessionKey,
     settings: &Settings,
@@ -550,6 +856,9 @@ fn build_session_for_config(
     } = build_entries(&config.rules, &config.allow_out_of_root, trusted, registry).map_err(
         |mut error| {
             error.message = redact(error.message);
+            if error.range.is_none() {
+                error.range = config_error_range(config_path, &error.message);
+            }
             error
         },
     )?;
@@ -572,7 +881,9 @@ fn build_session_for_config(
         .with_facts(facts)
         .with_vars(config.vars)
         .with_limits(&config.limits)
-        .map_err(|error| redact(format!("loading config: {error}")))?
+        .map_err(|error| {
+            session_config_error(config_path, redact(format!("loading config: {error}")))
+        })?
         .with_fix_size_limit(config.fix_size_limit)
         .with_config_files(config.config_files.clone())
         .with_environment_config_files(config.environment_config_files.clone());
@@ -595,7 +906,7 @@ fn build_session_for_config(
                 Some(&effective_root),
                 config.baseline_from_environment,
             )
-            .map_err(redact)?,
+            .map_err(|error| session_config_error(config_path, redact(error)))?,
         ),
         None => None,
     };
@@ -612,8 +923,9 @@ fn build_session_for_config(
         .with_respect_gitignore(config.respect_gitignore && !settings.no_gitignore)
         .with_global_git_excludes(!cfg!(test))
         .with_extra_ignores(extra_ignores);
-    let index = walk(&effective_root, &walk_opts)
-        .map_err(|e| redact(format!("walking repository: {e}")))?;
+    let index = walk(&effective_root, &walk_opts).map_err(|e| {
+        session_config_error(config_path, redact(format!("walking repository: {e}")))
+    })?;
 
     Ok(Session {
         root: effective_root,
@@ -966,5 +1278,112 @@ mod note_tests {
         let total: usize = run.by_path.values().map(Vec::len).sum();
         // 2 capped findings + 1 truncation analysis failure = 3 diagnostics.
         assert_eq!(total, 3, "diagnostics: {:?}", run.by_path);
+    }
+
+    #[test]
+    fn config_load_errors_place_diagnostics_at_their_key_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let cfg = root.join(".alint.yml");
+        let settings = Settings {
+            trusted: true,
+            ..Settings::default()
+        };
+        let registry = alint_rules::builtin_registry();
+        let run_err = |yaml: &str| -> ConfigError {
+            std::fs::write(&cfg, yaml).unwrap();
+            let key = SessionKey {
+                config: cfg.clone(),
+                root: root.to_path_buf(),
+            };
+            build_session_for_config(&key, &settings, &registry).unwrap_err()
+        };
+
+        // 1. Unknown top-level key in version 2 points at `relation` (line 2, col 0..8).
+        let err = run_err("version: 2\nrelation: {}\nrules: []\n");
+        assert_eq!(
+            err.range,
+            Some(Range::new(Position::new(1, 0), Position::new(1, 8))),
+            "v2 unknown key: {err:?}"
+        );
+
+        // 2. Version 2 selector key path (`selectors.s.paths`) highlights `bogus` on line 5.
+        let err = run_err("version: 2\nselectors:\n  s:\n    paths:\n      bogus: 1\nrules: []\n");
+        assert_eq!(
+            err.range,
+            Some(Range::new(Position::new(4, 6), Position::new(4, 11))),
+            "v2 selector unknown key: {err:?}"
+        );
+
+        // 3. Version 2 relation key path (`relations.r.entries`) highlights `depth` on line 6.
+        let err = run_err(
+            "version: 2\nrelations:\n  r:\n    from: { paths: '*.yml' }\n    entries:\n      \
+             depth: 1\nrules: []\n",
+        );
+        assert_eq!(
+            err.range,
+            Some(Range::new(Position::new(5, 6), Position::new(5, 11))),
+            "v2 relation unknown key: {err:?}"
+        );
+
+        // 4. Version 2 `extends[0].as` highlights `as` on line 4.
+        let err = run_err("version: 2\nextends:\n  - url: ./base.yml\n    as: [bad]\nrules: []\n");
+        assert_eq!(
+            err.range,
+            Some(Range::new(Position::new(3, 4), Position::new(3, 6))),
+            "v2 extends[0].as: {err:?}"
+        );
+
+        // 5. Rule build error (unknown rule kind) points at `kind` of that rule (line 7).
+        let err = run_err(
+            "version: 1\nrules:\n  - id: ok\n    kind: file_exists\n    paths: README.md\n    \
+             level: error\n  - id: broken\n    kind: no_such_kind\n    paths: a\n    level: \
+             error\n",
+        );
+        assert_eq!(
+            err.range,
+            Some(Range::new(Position::new(7, 4), Position::new(7, 8))),
+            "unknown rule kind: {err:?}"
+        );
+
+        // 6. Rule `when:` parse error points at `when` inside that rule (line 6).
+        let err = run_err(
+            "version: 1\nrules:\n  - id: bad-when\n    kind: file_exists\n    paths: a\n    \
+             level: error\n    when: '(((broken'\n",
+        );
+        assert_eq!(
+            err.range,
+            Some(Range::new(Position::new(6, 4), Position::new(6, 8))),
+            "bad when: {err:?}"
+        );
+
+        // 7. Duplicate key in `vars:` points at the repeated key (`a` on line 5 col 2).
+        let err = run_err("version: 1\nvars:\n  a: one\n  b: two\n  a: three\nrules: []\n");
+        assert_eq!(
+            err.range,
+            Some(Range::new(Position::new(4, 2), Position::new(4, 3))),
+            "duplicate vars key: {err:?}"
+        );
+
+        // 8. UTF-16 surrogate pair before key in flow mapping converts columns in UTF-16 units.
+        //    `vars: {😀: 1, ` -> 7 ASCII + 2 UTF-16 units for 😀 + 5 ASCII = col 14.
+        let err = run_err("version: 1\nvars: {😀: 1, 😀: 2}\nrules: []\n");
+        assert_eq!(
+            err.range,
+            Some(Range::new(Position::new(1, 14), Position::new(1, 16))),
+            "UTF-16 surrogate pair column: {err:?}"
+        );
+
+        // 9. Error originating from an `extends:` target falls back to `None` (file start).
+        std::fs::write(
+            root.join("base.yml"),
+            "version: 2\nselectors:\n  s:\n    bad: 1\nrules: []\n",
+        )
+        .unwrap();
+        let err = run_err("version: 2\nextends:\n  - ./base.yml\nrules: []\n");
+        assert_eq!(
+            err.range, None,
+            "extends child error must fall back to file start: {err:?}"
+        );
     }
 }
