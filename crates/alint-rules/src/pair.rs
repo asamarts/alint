@@ -73,7 +73,7 @@ impl Rule for PairRule {
                     Violation::new(format!(
                         "partner template {:?} resolved to an empty path for {}",
                         self.partner_template.as_str(),
-                        entry.path.display(),
+                        crate::slash(&entry.path),
                     ))
                     .with_path(entry.path.clone()),
                 );
@@ -90,7 +90,7 @@ impl Rule for PairRule {
                             "partner template {:?} resolves outside the repository root for {} \
                          ({partner_rel})",
                             self.partner_template.as_str(),
-                            entry.path.display(),
+                            crate::slash(&entry.path),
                         ))
                         .with_path(entry.path.clone()),
                     );
@@ -103,7 +103,7 @@ impl Rule for PairRule {
                         "partner template {:?} resolves to the primary file itself ({}) - \
                          check that the template differs from the primary",
                         self.partner_template.as_str(),
-                        entry.path.display(),
+                        crate::slash(&entry.path),
                     ))
                     .with_path(entry.path.clone()),
                 );
@@ -174,8 +174,8 @@ fn resolves_to_self(partner: &Path, primary: &Path) -> bool {
 
 impl PairRule {
     fn format_message(&self, primary: &Path, partner: &Path) -> String {
-        let primary_str = primary.display().to_string();
-        let partner_str = partner.display().to_string();
+        let primary_str = crate::slash(primary);
+        let partner_str = crate::slash(partner);
         if let Some(user_msg) = self.message.as_deref() {
             return render_message(user_msg, |ns, key| match (ns, key) {
                 ("ctx", "primary") => Some(primary_str.clone()),

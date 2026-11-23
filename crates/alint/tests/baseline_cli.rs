@@ -902,6 +902,37 @@ fn sarif_content_discriminator_fingerprint_matches_baseline() {
 /// must report `p13/package.json` as new while keeping all 16 unchanged
 /// baselined findings suppressed with their exact prior SARIF occurrence
 /// fingerprints.
+fn sarif_baseline_state(root: &Path) -> std::collections::BTreeMap<String, (String, String)> {
+    let out = run(
+        root,
+        &[
+            "check",
+            "--baseline",
+            ".alint-baseline.json",
+            "--format",
+            "sarif",
+        ],
+    );
+    let sarif: serde_json::Value = serde_json::from_slice(&out.stdout).expect("sarif");
+    sarif["runs"][0]["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| {
+            let uri = r["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            let state = r["baselineState"].as_str().unwrap().to_string();
+            let fp = r["partialFingerprints"]["alint/v1"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            (uri, (state, fp))
+        })
+        .collect()
+}
+
 #[test]
 fn constraint_unique_baseline_preserves_suppressed_findings_when_earlier_repeat_added() {
     let d = tempfile::tempdir().unwrap();
@@ -948,38 +979,7 @@ fn constraint_unique_baseline_preserves_suppressed_findings_when_earlier_repeat_
         "baseline entry must record all 16 visible paths: {bl_entry}"
     );
 
-    let sarif_state = |root: &Path| -> std::collections::BTreeMap<String, (String, String)> {
-        let out = run(
-            root,
-            &[
-                "check",
-                "--baseline",
-                ".alint-baseline.json",
-                "--format",
-                "sarif",
-            ],
-        );
-        let sarif: serde_json::Value = serde_json::from_slice(&out.stdout).expect("sarif");
-        sarif["runs"][0]["results"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|r| {
-                let uri = r["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
-                    .as_str()
-                    .unwrap()
-                    .to_string();
-                let state = r["baselineState"].as_str().unwrap().to_string();
-                let fp = r["partialFingerprints"]["alint/v1"]
-                    .as_str()
-                    .unwrap()
-                    .to_string();
-                (uri, (state, fp))
-            })
-            .collect()
-    };
-
-    let before = sarif_state(root);
+    let before = sarif_baseline_state(root);
     assert_eq!(before.len(), 16);
     assert!(before.values().all(|(state, _)| state == "unchanged"));
 
@@ -990,7 +990,7 @@ fn constraint_unique_baseline_preserves_suppressed_findings_when_earlier_repeat_
     let check = run(root, &["check", "--baseline", ".alint-baseline.json"]);
     assert_eq!(code(&check), 1, "new repeat must fail the gate");
 
-    let after = sarif_state(root);
+    let after = sarif_baseline_state(root);
     assert_eq!(after.len(), 17);
     assert_eq!(
         after["p13/package.json"].0, "new",
@@ -1003,4 +1003,39 @@ fn constraint_unique_baseline_preserves_suppressed_findings_when_earlier_repeat_
             "unchanged baselined finding {uri} must keep state and SARIF fingerprint"
         );
     }
+
+    // Adding `p00` sorting BEFORE `p10` (the kept row) shifts `p10` into the
+    // violations list, yet every unchanged baselined finding `p14..p60` STILL
+    // stays suppressed with identical SARIF fingerprints.
+    std::fs::remove_dir_all(root.join("p13")).unwrap();
+    std::fs::create_dir_all(root.join("p00")).unwrap();
+    std::fs::write(root.join("p00/package.json"), r#"{"name": "dup"}"#).unwrap();
+    let after_p00 = sarif_baseline_state(root);
+    assert_eq!(after_p00.len(), 17);
+    assert_eq!(after_p00["p10/package.json"].0, "new");
+    for (uri, (state, fp)) in &before {
+        assert_eq!(
+            after_p00.get(uri),
+            Some(&(state.clone(), fp.clone())),
+            "unchanged baselined finding {uri} must keep state and SARIF fingerprint when p00 becomes kept row"
+        );
+    }
+
+    // Renaming a baselined file (`p14` -> `p99`) with unchanged count stays
+    // suppressed via Pass 2, and `alint baseline` (without `--accept-new`)
+    // refreshes `paths` cleanly.
+    std::fs::remove_dir_all(root.join("p00")).unwrap();
+    std::fs::rename(root.join("p14"), root.join("p99")).unwrap();
+    let check_renamed = run(root, &["check", "--baseline", ".alint-baseline.json"]);
+    assert_eq!(code(&check_renamed), 0, "rename must remain suppressed");
+    let regen_renamed = run(root, &["baseline"]);
+    assert_eq!(
+        code(&regen_renamed),
+        0,
+        "refreshing renamed paths must succeed without --accept-new: {}",
+        String::from_utf8_lossy(&regen_renamed.stderr)
+    );
+    let refreshed = std::fs::read_to_string(root.join(".alint-baseline.json")).unwrap();
+    assert!(refreshed.contains("p99/package.json"), "{refreshed}");
+    assert!(!refreshed.contains("p14/package.json"), "{refreshed}");
 }

@@ -8,15 +8,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Upgrading from 0.23
 
-- Windows users with baselines containing `for_each_file`, `for_each_dir`, or `every_matching_has`
-  nested rules that reference `{path}` or `{dir}` must regenerate their baseline once with
+- Windows users with baselines containing `for_each_file`, `for_each_dir`, `every_matching_has`, or
+  `unique_by` rules that reference `{path}` or `{dir}` must regenerate their baseline once with
   `alint baseline --accept-new`: `{path}` and `{dir}` now always render with `/` separators on
-  every platform so messages, rendered globs, and baseline fingerprints agree across Linux, macOS,
-  and Windows (#579).
-- `alint://bundled/java@v1`'s `java-no-tracked-build` rule is now gated on Gradle presence
-  (`facts.has_gradle`: `build.gradle`, `build.gradle.kts`, `settings.gradle`, `settings.gradle.kts`)
-  and excludes `**/src/**/build`, so pure-Maven repositories and Java/Groovy source packages named
-  `build` are no longer reported (#546).
+  every platform so messages, rendered globs, rendered `unique_by` keys, and baseline fingerprints
+  agree across Linux, macOS, and Windows (#579).
+- `alint://bundled/java@v1`'s `java-no-tracked-build` rule is now gated on both `facts.has_java`
+  and Gradle presence (`facts.has_gradle`: `build.gradle`, `build.gradle.kts`, `settings.gradle`,
+  `settings.gradle.kts`, plus their `**/` monorepo companions) and excludes `**/src/**/build`, so
+  pure-Maven repositories and Java/Groovy source packages named `build` are no longer reported
+  (#546).
+- Library users (`alint-core`): `baseline::BaselineEntry` gains `pub paths: Vec<String>` and
+  `baseline::FingerprintedViolation` gains `pub path_free_identity: bool` (ADR-0049; prefer
+  `FingerprintedViolation::from_violation` when constructing violations, #601).
 - `key_parity` and `constraint` now cap emitted findings at `10,000` per rule by default
   (`limits.findings_per_rule`), emitting one non-baselinable analysis failure naming the cap when
   reached instead of allocating unbounded findings. Raise `limits.findings_per_rule` in your
@@ -53,10 +57,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   macOS in CI (#579).
 - `alint://bundled/java@v1`'s `java-no-tracked-build` now gates on `facts.has_gradle` and excludes
   `**/src/**/build` (#546).
-- Unknown `--format` values now list all valid output formats (`human`, `json`, `sarif`, `github`,
-  `markdown`, `junit`, `gitlab`, `agent`), and `key_parity` with `strip_root: true` names a null
-  top-level key explicitly (`but it is null`) while treating an empty-object root (`fr: {}`) as an
-  empty locale (#597).
+- Unknown `--format` values now list the valid output formats for the active subcommand (and
+  validate `--format` up front before loading config, walking, or running tests/snapshot updates,
+  with case-insensitive `--format JSON validate-config` fixed), and `key_parity` with
+  `strip_root: true` names null and array roots explicitly (`but it is null` / `but it is an
+  array`), rejects top-level non-object files (`null`, arrays, scalars), and treats empty-object
+  roots (`fr: {}`, `{"fr": {}}`, TOML `[fr]` / `fr = {}`) as empty locales (#597).
 - Documented the finite IEEE-754 `f64` number-range limit (`1e400` fails parsing for the whole
   JSON file) across all JSON-reading rule kinds and version 2 JSON readers (#564).
 - Interned `PROVENANCE_MARKER` source strings in `alint-dsl` into the load's `FieldSourceNames`

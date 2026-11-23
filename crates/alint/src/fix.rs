@@ -62,16 +62,22 @@ pub(super) fn cmd_fix(
     // `--format sarif` alongside `--diff` still yields the diff, matching the
     // flag's documented "regardless of --format"). The string is still parsed so
     // a genuine typo (`--format bogus`) fails loudly either way.
-    let format: Format = cli.format.parse().map_err(|e: String| anyhow::anyhow!(e))?;
-    if !diff && !matches!(format, Format::Human | Format::Json | Format::Markdown) {
-        bail!(
+    let allowed = if diff {
+        Format::ALL
+    } else {
+        &[Format::Human, Format::Json, Format::Markdown]
+    };
+    let format = match Format::parse_for(&cli.format, allowed) {
+        Ok(Ok(fmt)) => fmt,
+        Ok(Err(_)) => bail!(
             "`alint fix` supports only `--format human`, `--format json`, or \
              `--format markdown` (got {fmt:?}); the SARIF/GitHub/JUnit/GitLab/agent \
              formats describe findings, not fixes - run `alint check --format {fmt}` \
              for those",
             fmt = cli.format,
-        );
-    }
+        ),
+        Err(msg) => bail!("{msg}"),
+    };
     let loaded = load_rules(path, cli)?;
     let root = loaded.root.clone();
     let entries = apply_only_filter(loaded.entries, only)?;

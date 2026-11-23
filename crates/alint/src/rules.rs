@@ -258,13 +258,14 @@ const fn selector_type_name(selector_type: SelectorType) -> &'static str {
 }
 
 pub(crate) fn run(command: &RulesCommand, cli: &Cli) -> Result<ExitCode> {
-    let format: Format = cli.format.parse().map_err(|e: String| anyhow::anyhow!(e))?;
-    if !matches!(format, Format::Human | Format::Json) {
-        bail!(
+    let format = match Format::parse_for(&cli.format, &[Format::Human, Format::Json]) {
+        Ok(Ok(fmt)) => fmt,
+        Ok(Err(_)) => bail!(
             "`alint rules` supports only `--format human` or `--format json` (got {:?})",
             cli.format
-        );
-    }
+        ),
+        Err(msg) => bail!("{msg}"),
+    };
     let registry = cli.registry();
     let mut out = std::io::stdout().lock();
     match command {

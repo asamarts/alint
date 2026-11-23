@@ -125,6 +125,15 @@ suppresses the first findings of a fingerprint in that order, up to its count. W
 SARIF and GitLab give each finding the same value (before 0.23.0, GitLab numbered repeats in the
 order it wrote them). A run in which no fingerprint repeats is written as before.
 
+<!-- alint:since=0.24 -->
+From v0.24 (ADR-0049), baseline entries for non-hidden repeated fingerprints record an optional
+`paths` list of the visible paths they suppressed, and `baseline::apply` suppresses those paths
+before filling any remaining count in deterministic order. Adding a new visible repeat that sorts
+earlier therefore leaves unchanged baselined findings suppressed and preserves their SARIF
+occurrence fingerprints. Older baselines without `paths`, and hidden-path entries, keep count-order
+matching.
+<!-- /alint:since -->
+
 ## Baseline suppression
 
 When a run is filtered through a [baseline](/docs/concepts/adoption/baseline/), suppression *marks* findings rather than deleting them, and only two formats surface those marks:

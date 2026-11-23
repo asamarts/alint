@@ -6,7 +6,7 @@ per-format SARIF suppression marking + JSON `baselined_suppressed` (§3.8 — th
 final piece). The last sub-item — unifying the `gitlab.rs` fingerprint onto
 `violation_fingerprint` — is now **RESOLVED** (v0.14 deferral close-out,
 2026-07-05; §5, §7). (Draft | Implemented | Superseded by <doc>.)
-Decisions: [ADR-0006](../adr/0006-baseline-suppression.md) — **Accepted (2026-06-21)** (new persistent suppression mechanism; affects pass/fail semantics).
+Decisions: [ADR-0006](../adr/0006-baseline-suppression.md) -- **Accepted (2026-06-21)** (new persistent suppression mechanism; affects pass/fail semantics); [ADR-0030](../adr/0030-v022-owner-decisions.md) (hidden-path fingerprints); [ADR-0047](../adr/0047-sarif-tells-apart-a-fingerprint-repeated-within-a-run.md) (SARIF occurrence fingerprints); [ADR-0049](../adr/0049-baseline-preferred-paths-for-repeated-fingerprints.md) (optional `paths` for repeated visible-path fingerprints).
 Demand evidence: External adoption evaluation, §4.1 — *"the single feature that makes ESLint/RuboCop/etc. adoptable on legacy code, and its absence is the #1 thing that stops a team from flipping alint on as a merge gate."* Reproduced firsthand against alint 0.13.0.
 Status detail: Implemented and merged to `main` (#88–#94, 2026-06-24); landed after the v0.13.0 cut, so it ships in the next release. All of §7 is RESOLVED — Q7 (`gitlab.rs` fingerprint unification) closed in the v0.14 deferral close-out (2026-07-05; §5, §7).
 
@@ -96,8 +96,15 @@ entries, sorted by `(rule_id, path, fingerprint)`:
 
 - `fingerprint` — the full 64-hex SHA-256 (§3.1). **Not truncated** (a fingerprint
   collision is a *silent mis-suppression*, strictly worse than a normal hash
-  collision; resolves §7-Q6). It is the **only** field used for matching.
+  collision; resolves §7-Q6). Matched together with `count`, and (from v0.24,
+  ADR-0049) optional `paths` for non-hidden repeated fingerprints.
 - `count` — collapses identical fingerprints (§3.2).
+- `paths` -- optional sorted multiset of visible slash-normalized paths (from
+  v0.24, ADR-0049, keeping `schema_version: 1`). Populated only for non-hidden
+  entries that span multiple distinct paths or carry a path-free fingerprint
+  (such as `constraint` findings); always omitted for hidden-path entries
+  (ADR-0030). Used in Pass 1 of `apply` to prefer unchanged baselined paths
+  before filling remaining budget in deterministic order.
 - `path` — repo-relative, forward-slashed, or `null` for repo-level violations.
   (Only Windows `\` separators are rewritten to `/`; on unix a `\` is a legal
   filename byte and is kept, so `a\b.txt` and `a/b.txt` never share a
@@ -279,8 +286,12 @@ SARIF or GitLab file could confirm a guessed path. v0.22 still matched that form
 for one minor release, in `check --baseline`, `fix --baseline`, the language
 server and `alint baseline`'s regeneration guard. v0.23 matches only the
 path-free form, so an entry in the old form is stale and its finding is new until
-`alint baseline --accept-new` rewrites the file. The engine's own per-finding key
-within a `fix` run keeps the path, so two hidden-path findings stay apart there.
+`alint baseline --accept-new` rewrites the file. From v0.24 (#547), when a loaded
+baseline's `alint_version` header is below `0.22.0` and at least one unmatched
+entry accompanies live hidden-path findings, `check --baseline` prints a one-line
+stderr hint and `alint baseline` notes the pre-0.22 change on refusal. The
+engine's own per-finding key within a `fix` run keeps the path, so two
+hidden-path findings stay apart there.
 
 ### 3.2 Counting identical fingerprints
 
@@ -299,11 +310,13 @@ price of line-content (vs line-number) keying. (The path-keyed first-offender
 rules of §2.4 deliberately accept a *wider*, file-level window instead — see
 §4.)
 
-`Baseline::load` **sums** the counts of any duplicate fingerprints it reads, so a
-file with two entries for one fingerprint (e.g. a git merge of two branches that
-each ran `alint baseline` for the same finding, or a hand-edit) suppresses the
-*total*, not the last writer's count. A freshly written file never has duplicates
-(`from_fingerprints` collapses them), so loading and re-writing is idempotent.
+`Baseline::load` **sums** the counts of any duplicate fingerprints it reads and
+merges/sorts their non-hidden `paths` (ADR-0049; stripping `paths` on hidden-path
+entries), so a file with two entries for one fingerprint (e.g. a git merge of two
+branches that each ran `alint baseline` for the same finding, or a hand-edit)
+suppresses the *total*, not the last writer's count. A freshly written file never
+has duplicates (`from_fingerprints` collapses them), so loading and re-writing is
+idempotent.
 
 ### 3.3 Enforcement pass (`check --baseline`)
 
@@ -315,8 +328,12 @@ the formatters, alongside the notes-partition step:
    match order is deterministic regardless of the engine's parallel
    (`par_iter`) collection order (review H8).
 3. Build the current fingerprint multiset.
-4. For each fingerprint, **mark** the first `min(k, baseline_count)` occurrences
-   (in the sorted order) as suppressed; the rest stay live. Suppressed violations
+4. For each fingerprint, **mark** up to `min(k, baseline_count)` occurrences as
+   suppressed in two passes (ADR-0049): Pass 1 suppresses visible-path findings
+   matching the entry's recorded `paths` multiset (never for hidden-path
+   findings, ADR-0030); Pass 2 fills any remaining count in sorted deterministic
+   order (preserving v0.23 behavior for older baselines without `paths` and for
+   renames). The rest stay live. Suppressed violations
    are partitioned into a parallel `RuleResult.suppressed: Vec<Violation>` (like
    `notes`) — **marked, not removed** (§3.8). Record the per-fingerprint unfilled
    remainder for stale reporting (§3.6).

@@ -28,6 +28,6 @@ expect:
   - exit: policy_failure
     violations: []
     analysis_failures:
-      # The message quotes the reference as the index spells it, with `/` on
-      # every OS, though the rendered `{path}` is `notes\en.txt` on Windows.
+      # Both `{path}` (#579) and the message quote the reference with `/` on
+      # every OS (`notes/en.txt`).
       - {rule: locale-parity, kind: nested_rule_build, path: notes/en.txt, message: {regex: 'cannot infer the key format of `reference` "notes/en\.txt": the name is not'}}

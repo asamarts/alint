@@ -221,9 +221,9 @@ rules: []
 
 A document `read:` is one with `json:`, `yaml:` or `toml:`; one with `regex:`, `lines:` or
 `whole_file:` reads the file as text and binds no `bound:` field. JSON readers (`read: { json: ... }`
-and `entries: json`) require every JSON number in the document to fit within the finite IEEE-754
-`f64` range; a number outside that range (such as `1e400`) produces a `resource_parse` analysis
-failure for the file even if the rule only reads keys or other fields. In a `union:`, a part binds
+and `entries: { format: json, at: ... }`) require every JSON number in the document to fit within the
+finite IEEE-754 `f64` range; a number outside that range (such as `1e400`) produces a
+`resource_parse` analysis failure for the file even if the rule only reads keys or other fields. In a `union:`, a part binds
 `entry.*` only with `entries:`, `value` only with `read:`, and `bound:` as a relation of its one
 part would. A `bound:` path must match exactly once in each file. `sensitive: true` keeps a
 field's values out of messages, the JSON report and baselines. A field that shows a sensitive

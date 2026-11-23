@@ -127,7 +127,7 @@ impl UniqueByRule {
     fn format_message(&self, key: &str, paths: &[std::sync::Arc<std::path::Path>]) -> String {
         let paths_joined = paths
             .iter()
-            .map(|p| p.display().to_string())
+            .map(crate::slash)
             .collect::<Vec<_>>()
             .join(", ");
         if let Some(user) = self.message.as_deref() {

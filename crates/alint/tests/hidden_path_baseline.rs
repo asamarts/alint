@@ -218,9 +218,14 @@ fn a_v021_baseline_no_longer_matches() {
     // writes the current form.
     let regenerate = alint(root, &["baseline", "--output", "old.json", "."]);
     assert!(!regenerate.status.success(), "{regenerate:?}");
+    let regen_err = String::from_utf8_lossy(&regenerate.stderr);
     assert!(
-        String::from_utf8_lossy(&regenerate.stderr).contains("2 new violation(s) (+2 / -2)"),
-        "{regenerate:?}"
+        regen_err.contains("2 new violation(s) (+2 / -2)"),
+        "{regen_err}"
+    );
+    assert!(
+        regen_err.contains("before 0.22"),
+        "alint baseline refusal should explain pre-0.22 hidden-path change: {regen_err}"
     );
     let regenerate = alint(
         root,
@@ -296,5 +301,60 @@ fn current_version_baseline_prints_no_pre_022_hint() {
     assert!(
         !stderr.contains("before 0.22"),
         "current baseline must not show pre-0.22 hint: {stderr}"
+    );
+}
+
+/// Pre-0.22 hint respects `--quiet`, keeps `--format json` stdout clean when
+/// configured via `.alint.yml` `baseline:`, and does not falsely recommend
+/// `--accept-new` when all hidden-path findings were fixed (#547).
+#[test]
+fn pre_022_hint_works_with_config_baseline_json_quiet_and_fixed_findings() {
+    let tmp = tree(&["alpha.txt"]);
+    let root = tmp.path();
+    std::fs::write(
+        root.join(".alint.yml"),
+        format!("baseline: old.json\n{CONFIG}"),
+    )
+    .unwrap();
+    write_v021_baseline(root, &["alpha.txt"]);
+
+    // With `baseline:` in `.alint.yml` and `--format json`, stdout is valid JSON
+    // and stderr carries the pre-0.22 hint.
+    let json_run = alint(root, &["check", "--format", "json", "."]);
+    assert_eq!(json_run.status.code(), Some(1), "{json_run:?}");
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&json_run.stdout).expect("stdout must remain valid JSON");
+    assert_eq!(
+        parsed["results"][0]["violations"].as_array().unwrap().len(),
+        1
+    );
+    assert!(
+        String::from_utf8_lossy(&json_run.stderr).contains("before 0.22"),
+        "{}",
+        String::from_utf8_lossy(&json_run.stderr)
+    );
+
+    // `--quiet` suppresses the hint.
+    let quiet_run = alint(root, &["check", "--quiet", "."]);
+    assert_eq!(quiet_run.status.code(), Some(1), "{quiet_run:?}");
+    assert!(
+        !String::from_utf8_lossy(&quiet_run.stderr).contains("before 0.22"),
+        "{}",
+        String::from_utf8_lossy(&quiet_run.stderr)
+    );
+
+    // Fixing the finding leaves 0 live hidden-path violations: stale warning
+    // still prints, but no misleading `--accept-new` hint.
+    std::fs::write(root.join("alpha.txt"), "a\nb\n").unwrap();
+    let fixed_run = alint(root, &["check", "."]);
+    assert_eq!(fixed_run.status.code(), Some(0), "{fixed_run:?}");
+    let fixed_err = String::from_utf8_lossy(&fixed_run.stderr);
+    assert!(
+        fixed_err.contains("1 baseline entry no longer fires"),
+        "{fixed_err}"
+    );
+    assert!(
+        !fixed_err.contains("before 0.22"),
+        "fixed finding must not print --accept-new hint: {fixed_err}"
     );
 }

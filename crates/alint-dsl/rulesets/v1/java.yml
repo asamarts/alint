@@ -18,6 +18,11 @@
 # checked with `git_tracked_only: true` so a developer's
 # locally-built artefacts don't trigger the rule — only
 # committed contents do, and those are what the rule checks.
+# `java-no-tracked-build` is additionally gated on
+# `facts.has_gradle` (`build.gradle`, `build.gradle.kts`,
+# `settings.gradle`, `settings.gradle.kts`) and excludes
+# `**/src/**/build` so pure-Maven repositories and Java/Groovy
+# source packages named `build` are not flagged.
 
 version: 1
 
@@ -99,7 +104,7 @@ rules:
       `git rm -r --cached` and list `target/` in your `.gitignore`.
 
   - id: java-no-tracked-build
-    when: facts.has_gradle
+    when: facts.has_java and facts.has_gradle
     kind: dir_absent
     paths:
       include:

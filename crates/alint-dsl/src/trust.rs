@@ -69,11 +69,12 @@ pub(crate) struct FieldSourceNames {
 impl FieldSourceNames {
     /// The marker value that names `source`.
     pub(crate) fn intern(&mut self, source: &str) -> ayaml::Value {
-        let next = self.names.len();
-        let index = *self.index.entry(source.to_string()).or_insert(next);
-        if index == next {
-            self.names.push(source.to_string());
+        if let Some(&index) = self.index.get(source) {
+            return ayaml::Value::from(index);
         }
+        let index = self.names.len();
+        self.names.push(source.to_string());
+        self.index.insert(source.to_string(), index);
         ayaml::Value::from(index)
     }
 
@@ -866,7 +867,7 @@ pub(crate) fn reject_untrusted_env_instance_vars(
         });
     };
     for (k, v) in template {
-        if k.as_str() != Some(PROVENANCE_MARKER) {
+        if !is_internal_field(k) {
             strings(v, &mut probe);
         }
     }
@@ -1960,5 +1961,57 @@ fn find_ambiguous_yaml_in_value(v: &ayaml::Value, path: &mut String) -> Option<S
             found
         }),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod provenance_unit_tests {
+    use super::*;
+
+    #[test]
+    fn provenance_read_falls_back_safely_on_malformed_or_oob_indices() {
+        let names = vec!["https://example.invalid/base.yml".to_string()];
+        let malformed_values = [
+            ayaml::Value::from(99u64),
+            ayaml::Value::from(-1i64),
+            ayaml::Value::from(1.5f64),
+            ayaml::Value::from(true),
+            ayaml::Value::Null,
+            ayaml::Value::Sequence(vec![ayaml::Value::from(0u64)]),
+            ayaml::Value::Mapping(Mapping::new()),
+        ];
+        for bad in malformed_values {
+            let mut prov = Mapping::new();
+            prov.insert("extended".into(), bad.clone());
+            prov.insert("remote".into(), bad.clone());
+            prov.insert("untrusted_remote".into(), bad);
+            let mut rule = Mapping::new();
+            rule.insert(PROVENANCE_MARKER.into(), ayaml::Value::Mapping(prov));
+            let read = Provenance::read(&rule, &names);
+            assert_eq!(read.extended.as_deref(), Some("an extended config"));
+            assert_eq!(read.remote.as_deref(), Some("an extended config"));
+            assert_eq!(read.untrusted_remote.as_deref(), Some("an extended config"));
+        }
+
+        // Valid index resolves to the interned source name.
+        let mut valid_prov = Mapping::new();
+        valid_prov.insert("extended".into(), ayaml::Value::from(0u64));
+        valid_prov.insert("remote".into(), ayaml::Value::from(0u64));
+        valid_prov.insert("untrusted_remote".into(), ayaml::Value::from(0u64));
+        let mut valid_rule = Mapping::new();
+        valid_rule.insert(PROVENANCE_MARKER.into(), ayaml::Value::Mapping(valid_prov));
+        let resolved = Provenance::read(&valid_rule, &names);
+        assert_eq!(
+            resolved.extended.as_deref(),
+            Some("https://example.invalid/base.yml")
+        );
+        assert_eq!(
+            resolved.remote.as_deref(),
+            Some("https://example.invalid/base.yml")
+        );
+        assert_eq!(
+            resolved.untrusted_remote.as_deref(),
+            Some("https://example.invalid/base.yml")
+        );
     }
 }

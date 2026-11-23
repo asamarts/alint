@@ -43,6 +43,20 @@ struct SelectedTest {
 
 pub(crate) fn run(options: &RunOptions<'_>, cli: &Cli) -> Result<ExitCode> {
     reject_incompatible_globals(cli, options.allow_spawn, options.allow_host_keyring)?;
+    // Validate `--format` BEFORE discovering/running tests or committing
+    // `--update-snapshots` writes (global `--format` before `test` bypasses
+    // clap's subcommand `PossibleValuesParser`).
+    let format = match alint_output::Format::parse_for(
+        options.format,
+        &[alint_output::Format::Human, alint_output::Format::Json],
+    ) {
+        Ok(Ok(fmt)) => fmt,
+        Ok(Err(_)) => bail!(
+            "`alint test` supports only `--format human` or `--format json` (got {:?})",
+            options.format
+        ),
+        Err(msg) => bail!("{msg}"),
+    };
     let current = std::env::current_dir()?;
     let current = current.canonicalize()?;
     let discovered = match discover(options.paths, &current) {
@@ -50,7 +64,7 @@ pub(crate) fn run(options: &RunOptions<'_>, cli: &Cli) -> Result<ExitCode> {
         Err(issues) => {
             render_report(
                 &PolicyTestReport::with_issues(0, Vec::new(), issues),
-                options.format,
+                format,
             )?;
             return Ok(ExitCode::from(2));
         }
@@ -70,7 +84,7 @@ pub(crate) fn run(options: &RunOptions<'_>, cli: &Cli) -> Result<ExitCode> {
                     format!("no policy-test YAML documents found below {source}"),
                 )],
             ),
-            options.format,
+            format,
         )?;
         return Ok(ExitCode::from(2));
     }
@@ -100,7 +114,7 @@ pub(crate) fn run(options: &RunOptions<'_>, cli: &Cli) -> Result<ExitCode> {
                     "policy-test filters selected no documents",
                 )],
             ),
-            options.format,
+            format,
         )?;
         return Ok(ExitCode::from(2));
     }
@@ -121,18 +135,18 @@ pub(crate) fn run(options: &RunOptions<'_>, cli: &Cli) -> Result<ExitCode> {
     let mut operational_issues = Vec::new();
     collect_preflight_issues(&mut parsed, &runner, &mut invalid, &mut operational_issues);
     if let Some(exit) =
-        render_preflight_failures(invalid, operational_issues, selected_count, options.format)?
+        render_preflight_failures(invalid, operational_issues, selected_count, format)?
     {
         return Ok(exit);
     }
-    execute_selected(&parsed, &runner, options, selected_count)
+    execute_selected(&parsed, &runner, options, format, selected_count)
 }
 
 fn render_preflight_failures(
     mut invalid: Vec<PolicyTestRecord>,
     operational_issues: Vec<PolicyTestIssue>,
     selected_count: usize,
-    format: &str,
+    format: alint_output::Format,
 ) -> Result<Option<ExitCode>> {
     if invalid.is_empty() && operational_issues.is_empty() {
         return Ok(None);
@@ -207,6 +221,7 @@ fn execute_selected(
     candidates: &[SelectedTest],
     runner: &Runner,
     options: &RunOptions<'_>,
+    format: alint_output::Format,
     selected_count: usize,
 ) -> Result<ExitCode> {
     let mut runs = Vec::with_capacity(selected_count);
@@ -244,7 +259,7 @@ fn execute_selected(
                     ));
                 }
                 let report = PolicyTestReport::with_issues(selected_count, records, report_issues);
-                render_report(&report, options.format)?;
+                render_report(&report, format)?;
                 return Ok(ExitCode::from(if operational { 3 } else { 2 }));
             }
         }
@@ -273,7 +288,7 @@ fn execute_selected(
                         ),
                     )],
                 );
-                render_report(&report, options.format)?;
+                render_report(&report, format)?;
                 return Ok(ExitCode::from(3));
             }
         }
@@ -284,7 +299,7 @@ fn execute_selected(
         executed_records(candidates, &runs),
         Vec::new(),
     );
-    render_report(&report, options.format)?;
+    render_report(&report, format)?;
     Ok(if failed {
         ExitCode::from(1)
     } else {
@@ -648,15 +663,18 @@ fn executed_records(
         .collect()
 }
 
-fn render_report(report: &PolicyTestReport, format: &str) -> Result<()> {
+fn render_report(report: &PolicyTestReport, format: alint_output::Format) -> Result<()> {
     match format {
-        "json" => {
+        alint_output::Format::Json => {
             let rendered = serde_json::to_string_pretty(report)?;
             crate::print_stdout_line(&rendered)
         }
-        "human" => crate::print_stdout_line(&render_human(report)),
+        alint_output::Format::Human => crate::print_stdout_line(&render_human(report)),
         other => {
-            bail!("`alint test` supports only `--format human` or `--format json` (got {other:?})")
+            bail!(
+                "`alint test` supports only `--format human` or `--format json` (got {:?})",
+                other.as_str()
+            )
         }
     }
 }

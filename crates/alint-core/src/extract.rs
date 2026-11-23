@@ -597,13 +597,210 @@ pub(crate) fn json_parse_options() -> jsonc_parser::ParseOptions {
     }
 }
 
-fn entry_capacity(rows: usize, max_rows: Option<usize>) -> std::result::Result<(), EntryRowsError> {
+pub(crate) fn entry_capacity(
+    rows: usize,
+    max_rows: Option<usize>,
+) -> std::result::Result<(), EntryRowsError> {
     if let Some(limit) = max_rows
         && rows >= limit
     {
         return Err(EntryRowsError::Limit { limit });
     }
     Ok(())
+}
+
+/// Root-level structural classification for `key_parity` `strip_root: true`,
+/// computed in O(1) memory without materializing a full `serde_json::Value`
+/// tree (#597).
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StripRootShape {
+    /// Empty or comment-only document (valid 0-key locale).
+    EmptyDocument,
+    /// Top-level empty object `{}` (valid 0-key locale).
+    EmptyObject,
+    /// Non-empty object whose first root key is itself a non-empty object.
+    Object,
+    /// Top-level `null` document (not an object).
+    TopLevelNull,
+    /// Top-level array document (not an object).
+    TopLevelArray,
+    /// Top-level scalar document (not an object).
+    TopLevelValue,
+    /// Single top-level key whose value is an empty object (`fr: {}`, `{"fr": {}}`, `[fr]`).
+    SingleRootEmptyObject,
+    /// Single top-level key whose value is `null` (`fr:`, `{"fr": null}`).
+    SingleRootNull,
+    /// Single top-level key whose value is an array (`fr: []`, `{"fr": []}`, `[[fr]]`).
+    SingleRootArray,
+    /// Single top-level key whose value is a non-null scalar (`fr: "x"`, `fr: 123`).
+    SingleRootValue,
+}
+
+/// Classify a JSON, YAML, or TOML document's top-level / single-root value
+/// shape in O(1) memory without constructing a `serde_json::Value` tree.
+/// Callers pass documents that have already passed structured decoding.
+#[doc(hidden)]
+#[must_use]
+pub fn strip_root_shape(format: Format, text: &str) -> StripRootShape {
+    match format {
+        Format::Json => json_strip_root_shape(text),
+        Format::Yaml => yaml_rows::yaml_strip_root_shape(text),
+        Format::Toml => toml_strip_root_shape(text),
+        _ => StripRootShape::SingleRootValue,
+    }
+}
+
+fn skip_jsonc_ws_and_comments(bytes: &[u8], mut at: usize) -> usize {
+    while at < bytes.len() {
+        if bytes[at].is_ascii_whitespace() {
+            at += 1;
+        } else if bytes.get(at..at + 2) == Some(b"//") {
+            at += 2;
+            while at < bytes.len() && bytes[at] != b'\n' {
+                at += 1;
+            }
+        } else if bytes.get(at..at + 2) == Some(b"/*") {
+            at += 2;
+            while at + 1 < bytes.len() && &bytes[at..at + 2] != b"*/" {
+                at += 1;
+            }
+            at = (at + 2).min(bytes.len());
+        } else {
+            break;
+        }
+    }
+    at
+}
+
+fn json_strip_root_shape(text: &str) -> StripRootShape {
+    let stripped = text.trim_start_matches('\u{feff}');
+    let bytes = stripped.as_bytes();
+    let at = skip_jsonc_ws_and_comments(bytes, 0);
+    let Some(&first) = bytes.get(at) else {
+        return StripRootShape::EmptyDocument;
+    };
+    match first {
+        b'[' => StripRootShape::TopLevelArray,
+        b'n' => StripRootShape::TopLevelNull,
+        b'{' => {
+            let mut cursor = skip_jsonc_ws_and_comments(bytes, at + 1);
+            match bytes.get(cursor).copied() {
+                Some(b'}') | None => return StripRootShape::EmptyObject,
+                Some(b'"') => {
+                    cursor += 1;
+                    while cursor < bytes.len() {
+                        match bytes[cursor] {
+                            b'\\' => cursor = (cursor + 2).min(bytes.len()),
+                            b'"' => {
+                                cursor += 1;
+                                break;
+                            }
+                            _ => cursor += 1,
+                        }
+                    }
+                }
+                _ => return StripRootShape::SingleRootValue,
+            }
+            cursor = skip_jsonc_ws_and_comments(bytes, cursor);
+            if bytes.get(cursor) != Some(&b':') {
+                return StripRootShape::SingleRootValue;
+            }
+            cursor = skip_jsonc_ws_and_comments(bytes, cursor + 1);
+            match bytes.get(cursor).copied() {
+                Some(b'{') => {
+                    let after_open = skip_jsonc_ws_and_comments(bytes, cursor + 1);
+                    if bytes.get(after_open) == Some(&b'}') {
+                        StripRootShape::SingleRootEmptyObject
+                    } else {
+                        StripRootShape::Object
+                    }
+                }
+                Some(b'[') => StripRootShape::SingleRootArray,
+                Some(b'n') => StripRootShape::SingleRootNull,
+                _ => StripRootShape::SingleRootValue,
+            }
+        }
+        _ => StripRootShape::TopLevelValue,
+    }
+}
+
+fn toml_strip_root_shape(text: &str) -> StripRootShape {
+    let stripped = text.trim_start_matches('\u{feff}');
+    let bytes = stripped.as_bytes();
+    let mut at = 0;
+    while at < bytes.len() {
+        if bytes[at].is_ascii_whitespace() {
+            at += 1;
+        } else if bytes[at] == b'#' {
+            while at < bytes.len() && bytes[at] != b'\n' {
+                at += 1;
+            }
+        } else {
+            break;
+        }
+    }
+    if at >= bytes.len() {
+        return StripRootShape::EmptyDocument;
+    }
+    if bytes.get(at..at + 2) == Some(b"[[") {
+        return StripRootShape::SingleRootArray;
+    }
+    if bytes[at] == b'[' {
+        return StripRootShape::SingleRootEmptyObject;
+    }
+    // Scan past key (handling single/double-quoted TOML keys) to `=`.
+    let mut cursor = at;
+    while cursor < bytes.len() {
+        match bytes[cursor] {
+            b'"' => {
+                cursor += 1;
+                while cursor < bytes.len() {
+                    match bytes[cursor] {
+                        b'\\' => cursor = (cursor + 2).min(bytes.len()),
+                        b'"' => {
+                            cursor += 1;
+                            break;
+                        }
+                        _ => cursor += 1,
+                    }
+                }
+            }
+            b'\'' => {
+                cursor += 1;
+                while cursor < bytes.len() && bytes[cursor] != b'\'' {
+                    cursor += 1;
+                }
+                if cursor < bytes.len() {
+                    cursor += 1;
+                }
+            }
+            b'=' => {
+                cursor += 1;
+                break;
+            }
+            b'\n' => return StripRootShape::SingleRootValue,
+            _ => cursor += 1,
+        }
+    }
+    while cursor < bytes.len() && matches!(bytes[cursor], b' ' | b'\t') {
+        cursor += 1;
+    }
+    match bytes.get(cursor).copied() {
+        Some(b'{') => {
+            let mut inner = cursor + 1;
+            while inner < bytes.len() && bytes[inner].is_ascii_whitespace() {
+                inner += 1;
+            }
+            if bytes.get(inner) == Some(&b'}') {
+                StripRootShape::SingleRootEmptyObject
+            } else {
+                StripRootShape::Object
+            }
+        }
+        Some(b'[') => StripRootShape::SingleRootArray,
+        _ => StripRootShape::SingleRootValue,
+    }
 }
 
 fn json_entry_table(

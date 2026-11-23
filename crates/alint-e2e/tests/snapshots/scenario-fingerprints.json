@@ -3192,10 +3192,28 @@
     "fingerprint": "313125ac4fa2e43059e4b4a75ebaab479611ab57ae1acfb5d40e4c2fec8e2f30"
   },
   {
+    "scenario": "java/java_gradle_kotlin_and_nested_manifest.yml",
+    "rule_id": "java-no-tracked-build",
+    "path": "services/api/build",
+    "fingerprint": "c0de654d714ce5a642241215be6966f97d44b775110cbf106b0f3c424cf8406b"
+  },
+  {
     "scenario": "java/java_ignores_source_packages_named_build.yml",
     "rule_id": "java-no-tracked-build",
     "path": "build",
     "fingerprint": "83243e5e3c3d7df78d6b0a741d3d96ab0caac5ac3ad354816840be321d626231"
+  },
+  {
+    "scenario": "java/java_ignores_source_packages_named_build.yml",
+    "rule_id": "java-no-tracked-build",
+    "path": "buildSrc/build",
+    "fingerprint": "d163d27c4d7fd0191f42c2450b7b8430b47bbdc3b4e8c59a47c0894a26e79da8"
+  },
+  {
+    "scenario": "java/java_ignores_source_packages_named_build.yml",
+    "rule_id": "java-no-tracked-build",
+    "path": "subproject/build",
+    "fingerprint": "003a19e39bce897ee271b1a224bb3d403c140ab02b14a25a6d4a6e653a5f3517"
   },
   {
     "scenario": "monorepo/cargo-workspace/cargo_workspace_fires_on_missing_members.yml",

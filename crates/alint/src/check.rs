@@ -146,6 +146,8 @@ pub(super) fn cmd_check(
     cli: &Cli,
 ) -> Result<ExitCode> {
     require_directory(path)?;
+    // Validate `--format` before loading config, walking the tree, or running rules.
+    let format: Format = cli.format.parse().map_err(|e: String| anyhow::anyhow!(e))?;
     let loaded = load_rules(path, cli)?;
     let root = loaded.root.clone();
     // Path-less findings are anchored on the config file in SARIF.
@@ -179,14 +181,16 @@ pub(super) fn cmd_check(
         .with_config_files(loaded.config_files.clone())
         .with_environment_config_files(loaded.environment_config_files.clone());
     engine = with_run_settings(engine, cli);
-    // When a baseline is active, make the engine baseline-aware so the
-    // `stage_fixes`-based proposed-edit derivation (for a fix-carrying format)
-    // advertises fixes ONLY for the live (new) findings, never grandfathered ones.
-    // Inert for `engine.run` (check uses no fix baseline), so a plain `check
-    // --baseline` is unaffected.
-    if let Some(bp) = &effective_baseline {
-        engine = engine.with_fix_baseline(load_baseline(bp, baseline_root, redact_baseline)?);
-    }
+    // Load the baseline once up front and reuse it for both fix staging (when
+    // proposing edits) and post-run suppression, avoiding double parsing and
+    // TOCTOU between the two phases.
+    let loaded_baseline = if let Some(bp) = &effective_baseline {
+        let bl = load_baseline(bp, baseline_root, redact_baseline)?;
+        engine = engine.with_fix_baseline(bl.clone());
+        Some(bl)
+    } else {
+        None
+    };
     let changed_active = match changed.resolve(&root)? {
         Some(set) => {
             engine = engine.with_changed_set(set);
@@ -212,18 +216,15 @@ pub(super) fn cmd_check(
 
     let report = engine.run(&root, &index).context("running rules")?;
 
-    let format: Format = cli.format.parse().map_err(|e: String| anyhow::anyhow!(e))?;
-
     // Baseline suppression (when --baseline is in effect): grandfather
     // recorded violations, leaving only new ones to format + gate on.
     let mut strict_stale_fail = false;
     // One read cache for every fingerprint below: the baseline's and the
     // GitLab or SARIF output's.
     let mut reader = FileReader::new(&root);
-    let (mut report, baseline_marks) = if let Some(baseline_path) = &effective_baseline {
-        let baseline = load_baseline(baseline_path, baseline_root, redact_baseline)?;
+    let (mut report, baseline_marks) = if let Some(baseline) = &loaded_baseline {
         let applied =
-            alint_core::baseline::apply(&report, &baseline, |rid, v| reader.fingerprint(rid, v));
+            alint_core::baseline::apply(&report, baseline, |rid, v| reader.fingerprint(rid, v));
         // Stale-entry detection is only valid on a FULL run. When `--changed`
         // or `--only` restricts what was evaluated, a baseline entry for an
         // out-of-scope file/rule legitimately "doesn't fire this run" but is
@@ -231,7 +232,7 @@ pub(super) fn cmd_check(
         // Reporting/failing on those red-lights the documented
         // `--changed --baseline --strict-baseline` PR-gate recipe.
         let scoped = changed_active || !only.is_empty();
-        report_baseline_summary(&baseline, &applied, cli, !scoped);
+        report_baseline_summary(baseline, &applied, cli, !scoped);
         if cli.strict_baseline && !scoped && !applied.stale.is_empty() {
             strict_stale_fail = true;
         }
@@ -458,8 +459,9 @@ fn report_baseline_summary(
                 ""
             }
         );
-        if baseline.has_unmatched_pre_022_hidden_path_entries(applied) {
-            let version = baseline.alint_version.as_deref().unwrap_or("pre-0.22");
+        if baseline.has_unmatched_pre_022_hidden_path_entries(applied)
+            && let Some(version) = baseline.alint_version.as_deref()
+        {
             eprintln!(
                 "alint: hint: baseline was written by alint {} (before 0.22); hidden-path \
                  fingerprints changed in 0.22/0.23, run `alint baseline --accept-new` to regenerate it",
@@ -605,8 +607,18 @@ pub(super) fn cmd_baseline(
                     crate::redact_environment_values(&out_path.display().to_string()).into_owned(),
                 )
             };
+            let pre_022_note = if existing.has_unmatched_pre_022_hidden_path_entries(&applied)
+                && let Some(version) = existing.alint_version.as_deref()
+            {
+                format!(
+                    " (this baseline was written by alint {version}, before 0.22; hidden-path \
+                     fingerprints changed in 0.22/0.23)"
+                )
+            } else {
+                String::new()
+            };
             bail!(
-                "regenerating {shown_out} would grandfather {added} new violation(s) (+{added} / -{removed}); \
+                "regenerating {shown_out} would grandfather {added} new violation(s) (+{added} / -{removed}){pre_022_note}; \
                  fix them, or pass --accept-new to accept them into the baseline"
             );
         }

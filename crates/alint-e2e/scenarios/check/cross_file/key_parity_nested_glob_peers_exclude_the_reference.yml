@@ -2,10 +2,10 @@ test_version: 1
 name: a nested key_parity leaves its templated reference out of the peers its glob selects
 tags: [check, key_parity, for_each_file, cross_file, nested]
 
-# `{path}` renders with the OS separator (`solo\en.json` on Windows), and the
-# index joins names with `/`. key_parity reads the reference as the index
-# spells it on every OS, so it is no peer of itself, and a glob that selects
-# only the reference is an evaluation failure.
+# `{path}` and `{dir}` render with `/` on every platform (#579), matching the
+# index's normalized paths. key_parity reads the reference as the index spells
+# it on every OS, so it is no peer of itself, and a glob that selects only the
+# reference is an evaluation failure.
 
 given:
   tree:

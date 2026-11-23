@@ -408,6 +408,11 @@ fn remote_yaml_tags_cannot_hide_fields_from_the_trust_gates() {
              __alint_internal_field_sources: {paths: forged}",
             "reserved internal field",
         ),
+        (
+            "kind: file_exists\n    paths: README.md\n    \
+             __alint_internal_provenance: {extended: 999}",
+            "reserved internal field",
+        ),
     ];
     for (fields, needle) in cases {
         let remote = format!("version: 1\nrules:\n  - id: r\n    level: error\n    {fields}\n");
@@ -682,6 +687,10 @@ fn untrusted_remote_when_cannot_read_the_environment() {
         vars: {cond: \"env.FAKE_SECRET matches '^g'\"}\n";
     let err = try_load_extending(remote, top).unwrap_err().to_string();
     assert!(err.contains("reads `env.FAKE_SECRET`"), "{err}");
+    assert!(
+        err.contains("example.invalid"),
+        "error should resolve interned provenance source: {err}"
+    );
 
     // Unaffected: a remote `when` on facts, and a remote instance of a template
     // whose env read the user wrote literally.
@@ -818,6 +827,10 @@ fn untrusted_remote_when_cannot_read_an_env_derived_var() {
     assert!(
         err.contains("rule `probe`: `when:` reads `vars.token`"),
         "{err}"
+    );
+    assert!(
+        err.contains("example.invalid"),
+        "error should resolve interned provenance source: {err}"
     );
 }
 

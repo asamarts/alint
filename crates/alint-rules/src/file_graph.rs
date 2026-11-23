@@ -359,7 +359,7 @@ impl Rule for FileGraphRule {
             if explicit
                 && let EdgeSource::DeriveTarget { from, to } = &self.edges
                 && let Some(target) =
-                    alint_core::derive_target(from, to, &entry.path.to_string_lossy())
+                    alint_core::derive_target(from, to, &crate::slash(&entry.path))
             {
                 visit(&target);
             }
@@ -522,7 +522,7 @@ impl FileGraphRule {
         out: &mut Vec<Violation>,
     ) -> Vec<PathBuf> {
         if let EdgeSource::DeriveTarget { from, to } = &self.edges {
-            let node_str = node.to_string_lossy();
+            let node_str = crate::slash(node);
             if let Some(target) = alint_core::derive_target(from, to, &node_str) {
                 return vec![target];
             }
@@ -618,7 +618,7 @@ impl FileGraphRule {
         };
         let mut out = Vec::new();
         for source in nodes {
-            let src_str = source.to_string_lossy();
+            let src_str = crate::slash(source);
             let Some(caps) = from.captures(&src_str) else {
                 continue; // not a codegen source this template covers
             };

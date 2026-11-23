@@ -375,7 +375,7 @@ impl StructuredPathRule {
                 let locator = format!(
                     "{}\0{}\0{}\0{category}",
                     self.format.label(),
-                    path.display(),
+                    crate::slash(path),
                     self.path_src
                 );
                 finding.redact_evidence(&self.id, &locator, evidence.iter().map(String::as_str));

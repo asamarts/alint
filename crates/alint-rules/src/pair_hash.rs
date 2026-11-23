@@ -217,20 +217,19 @@ impl PairHashRule {
     /// `None` ⇒ the source's digest is properly present in the
     /// target; `Some(desc)` ⇒ a violation description.
     fn check(&self, src: &Path, digest: &str, b: &str, b_lower: &str) -> Option<String> {
+        let src_slash = crate::slash(src);
         match self.format {
             Format::Contains => {
                 if b_lower.contains(digest) {
                     return None;
                 }
                 Some(format!(
-                    "{} of {} ({digest}) not found in {}",
+                    "{} of {src_slash} ({digest}) not found in {}",
                     self.algorithm.label(),
-                    src.display(),
                     self.target,
                 ))
             }
             Format::SumsLine => {
-                let want = src.to_string_lossy();
                 for line in b.lines() {
                     let mut tok = line.split_whitespace();
                     let (Some(a), Some(rest)) = (tok.next(), tok.next()) else {
@@ -261,24 +260,22 @@ impl PairHashRule {
                     // formats in scope are forward-slash.
                     let path_tok = path_tok.strip_prefix('*').unwrap_or(path_tok);
                     let path_tok = path_tok.strip_prefix("./").unwrap_or(path_tok);
-                    if path_tok != want {
+                    if path_tok != src_slash {
                         continue;
                     }
                     return if hex.eq_ignore_ascii_case(digest) {
                         None
                     } else {
                         Some(format!(
-                            "{} digest mismatch for {} in {}: manifest has {hex}, \
+                            "{} digest mismatch for {src_slash} in {}: manifest has {hex}, \
                              file hashes to {digest}",
                             self.algorithm.label(),
-                            src.display(),
                             self.target,
                         ))
                     };
                 }
                 Some(format!(
-                    "{} is not listed in manifest {}",
-                    src.display(),
+                    "{src_slash} is not listed in manifest {}",
                     self.target,
                 ))
             }

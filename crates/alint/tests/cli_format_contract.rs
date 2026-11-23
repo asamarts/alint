@@ -1689,41 +1689,176 @@ fn junit_and_agent_escape_ansi_esc_and_bidi_filenames_unix() {
 #[test]
 fn unknown_format_lists_valid_formats() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join(".alint.yml"),
-        "version: 1\nrules:\n  - id: r\n    kind: file_exists\n    paths: README.md\n    level: error\n",
-    )
-    .unwrap();
-    let out = run(dir.path(), &["check", "--format", "bogus"]);
-    assert_eq!(out.status.code(), Some(2));
-    let stderr = String::from_utf8_lossy(&out.stderr);
+    // `check --format bogus` fails up front even with NO `.alint.yml` present.
+    let no_cfg = run(dir.path(), &["check", "--format", "bogus"]);
+    assert_eq!(no_cfg.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&no_cfg.stderr);
     assert!(stderr.contains("unknown output format: bogus"), "{stderr}");
     for valid in [
         "human", "json", "sarif", "github", "markdown", "junit", "gitlab", "agent",
     ] {
         assert!(stderr.contains(valid), "missing `{valid}` in: {stderr}");
     }
+
+    // Format-limited subcommands list ONLY the formats they support.
+    let list_bad = run(dir.path(), &["list", "--format", "bogus"]);
+    assert_eq!(list_bad.status.code(), Some(2));
+    let list_err = String::from_utf8_lossy(&list_bad.stderr);
+    assert!(
+        list_err.contains("valid formats: human, json"),
+        "list must only advertise human, json: {list_err}"
+    );
+    assert!(!list_err.contains("sarif"), "{list_err}");
+
+    let fix_bad = run(dir.path(), &["fix", "--format", "bogus"]);
+    assert_eq!(fix_bad.status.code(), Some(2));
+    let fix_err = String::from_utf8_lossy(&fix_bad.stderr);
+    assert!(
+        fix_err.contains("valid formats: human, json, markdown"),
+        "fix must only advertise human, json, markdown: {fix_err}"
+    );
+    assert!(!fix_err.contains("sarif"), "{fix_err}");
+
+    // Global `--format JSON validate-config` emits JSON (case-insensitive).
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        "version: 1\nrules:\n  - id: r\n    kind: file_exists\n    paths: README.md\n    level: error\n",
+    )
+    .unwrap();
+    let vc = run(dir.path(), &["--format", "JSON", "validate-config"]);
+    assert_eq!(
+        vc.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&vc.stderr)
+    );
+    let vc_json: serde_json::Value =
+        serde_json::from_slice(&vc.stdout).expect("--format JSON validate-config must emit JSON");
+    assert_eq!(vc_json["valid"].as_bool(), Some(true));
+
+    // Global `--format bogus test --update-snapshots` fails up front before
+    // touching disk or running tests.
+    let test_bad = run(
+        dir.path(),
+        &["--format", "bogus", "test", "--update-snapshots"],
+    );
+    assert_eq!(test_bad.status.code(), Some(2));
+    let test_err = String::from_utf8_lossy(&test_bad.stderr);
+    assert!(
+        test_err.contains("valid formats: human, json"),
+        "test must reject unknown format up front: {test_err}"
+    );
 }
+
+const JSON_F64_OVERFLOW_CONFIG: &str = r"version: 2
+facts:
+  - id: saw_ok
+    file_content_matches:
+      paths: data.json
+      extract: { json: '$.ok' }
+      pattern: '.*'
+selectors:
+  data:
+    paths: data.json
+relations:
+  r_read:
+    from: data
+    read: { json: '$.ok' }
+    fields:
+      val: value
+  r_entries:
+    from: data
+    entries: { format: json, at: '$' }
+    fields:
+      k: entry.key
+rules:
+  - id: v1-json-path
+    kind: json_path_equals
+    paths: data.json
+    path: '$.ok'
+    equals: true
+    level: error
+  - id: v1-key-parity
+    kind: key_parity
+    reference: en.json
+    peers: data.json
+    level: error
+  - id: v1-json-schema
+    kind: json_schema_passes
+    paths: data.json
+    schema_path: schema.json
+    level: error
+  - id: v2-read
+    kind: constraint
+    input: r_read
+    assert: { equal: { field: val } }
+    level: error
+  - id: v2-entries
+    kind: constraint
+    input: r_entries
+    assert: { unique: { key: [k] } }
+    level: error
+  - id: fact-gated
+    when: facts.saw_ok
+    kind: file_exists
+    paths: never-exists.txt
+    level: error
+";
 
 #[test]
 fn json_number_outside_f64_range_fails_parse_loudly() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
-        dir.path().join(".alint.yml"),
-        "version: 1\nrules:\n  - id: r\n    kind: json_path_equals\n    paths: data.json\n    path: '$.ok'\n    equals: true\n    level: error\n",
-    )
-    .unwrap();
-    std::fs::write(
         dir.path().join("data.json"),
         r#"{"ok": true, "huge": 1e400}"#,
     )
     .unwrap();
+    std::fs::write(dir.path().join("en.json"), r#"{"ok": "yes"}"#).unwrap();
+    std::fs::write(
+        dir.path().join("schema.json"),
+        r#"{"type": "object", "properties": {"ok": {"type": "boolean"}}}"#,
+    )
+    .unwrap();
+    std::fs::write(dir.path().join(".alint.yml"), JSON_F64_OVERFLOW_CONFIG).unwrap();
+
     let out = run(dir.path(), &["check", "--format", "json"]);
     assert_eq!(out.status.code(), Some(1));
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid json");
-    let failures = v["results"][0]["analysis_failures"]
-        .as_array()
-        .expect("analysis_failures array");
-    assert_eq!(failures.len(), 1, "{v}");
-    assert_eq!(failures[0]["kind"].as_str(), Some("resource_parse"), "{v}");
+    let results = v["results"].as_array().expect("results array");
+    for rule_id in [
+        "v1-json-path",
+        "v1-key-parity",
+        "v1-json-schema",
+        "v2-read",
+        "v2-entries",
+    ] {
+        let entry = results
+            .iter()
+            .find(|r| r["id"].as_str() == Some(rule_id))
+            .unwrap_or_else(|| panic!("missing result for {rule_id}: {v}"));
+        assert!(
+            entry["violations"].as_array().unwrap().is_empty(),
+            "{rule_id} should have 0 violations: {entry}"
+        );
+        let failures = entry["analysis_failures"].as_array().unwrap();
+        assert_eq!(failures.len(), 1, "{rule_id}: {entry}");
+        assert_eq!(
+            failures[0]["kind"].as_str(),
+            Some("resource_parse"),
+            "{rule_id}: {entry}"
+        );
+        assert_eq!(
+            failures[0]["path"].as_str(),
+            Some("data.json"),
+            "{rule_id}: {entry}"
+        );
+    }
+    // `facts:` `file_content_matches` treats malformed/out-of-range JSON as
+    // `false`, so `fact-gated` does not run.
+    assert!(
+        results
+            .iter()
+            .all(|r| r["id"].as_str() != Some("fact-gated")),
+        "fact-gated should be skipped because facts.saw_ok is false: {v}"
+    );
 }

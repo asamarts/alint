@@ -460,11 +460,12 @@ impl Violation {
             self.redact_message(rule_id);
             return;
         }
-        let path = self
-            .path
-            .as_deref()
-            .map(|path| path.to_string_lossy().into_owned());
-        self.redact_evidence(rule_id, "manifest_scope", path.as_deref());
+        let evidence = path_redaction_evidence(self.path.as_deref());
+        self.redact_evidence(
+            rule_id,
+            "manifest_scope",
+            evidence.iter().map(String::as_str),
+        );
     }
 
     /// The message without a leading `"{path}: "` that repeats `path`, for a
@@ -476,7 +477,7 @@ impl Violation {
         fn after<'m>(message: &'m str, path: &str) -> Option<&'m str> {
             message.strip_prefix(path)?.strip_prefix(": ")
         }
-        let shown = path.to_string_lossy().replace('\\', "/");
+        let shown = crate::baseline::canonical_order_path(path);
         after(&self.message, &shown)
             .or_else(|| after(&self.message, &Self::escaped_for_message(&shown)))
             .unwrap_or(&self.message)
@@ -778,12 +779,9 @@ impl RuleResult {
             .chain(&mut self.notes)
             .enumerate()
         {
-            let path = finding
-                .path
-                .as_deref()
-                .map(|path| path.to_string_lossy().into_owned());
+            let evidence = path_redaction_evidence(finding.path.as_deref());
             let locator = format!("manifest_scope\0{index}");
-            finding.redact_evidence(&self.rule_id, &locator, path.as_deref());
+            finding.redact_evidence(&self.rule_id, &locator, evidence.iter().map(String::as_str));
         }
         for failure in &mut self.analysis_failures {
             failure.redact_message(&self.rule_id);
@@ -803,13 +801,30 @@ impl RuleResult {
     }
 }
 
+/// Both the slash-normalized and OS-native renderings of a secret-manifest
+/// path (deduplicated when identical, as on Unix) so evidence redaction always
+/// catches paths rendered via `{path}` (`/`), `slash()`, or `Path::display()`
+/// on every platform (#579).
+fn path_redaction_evidence(path: Option<&Path>) -> Vec<String> {
+    let Some(path) = path else {
+        return Vec::new();
+    };
+    let native = path.to_string_lossy().into_owned();
+    let slash = crate::baseline::canonical_order_path(path).into_owned();
+    if slash == native {
+        vec![native]
+    } else {
+        vec![slash, native]
+    }
+}
+
 /// `path` as a redaction locator names it. A path alint hides is left out:
 /// a marker that hashed it would tell anyone who can list the repository's
 /// files which one it is.
 pub(crate) fn locator_path(path: Option<&Path>, hidden: bool) -> String {
     match path {
         Some(_) if hidden => crate::CONFIGURATION_MASK.to_string(),
-        Some(path) => path.to_string_lossy().into_owned(),
+        Some(path) => crate::baseline::canonical_order_path(path).into_owned(),
         None => String::new(),
     }
 }

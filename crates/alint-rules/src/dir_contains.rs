@@ -132,8 +132,8 @@ impl Rule for DirContainsRule {
 
 impl DirContainsRule {
     fn format_message(&self, dir: &Path, glob: &str) -> String {
+        let dir_str = crate::slash(dir);
         if let Some(user) = self.message.as_deref() {
-            let dir_str = dir.display().to_string();
             let glob_str = glob.to_string();
             return alint_core::template::render_message(user, |ns, key| match (ns, key) {
                 ("ctx", "dir") => Some(dir_str.clone()),
@@ -141,7 +141,7 @@ impl DirContainsRule {
                 _ => None,
             });
         }
-        format!("{} is missing a child matching {:?}", dir.display(), glob)
+        format!("{dir_str} is missing a child matching {glob:?}")
     }
 }
 

@@ -4,9 +4,8 @@ tags: [check, key_parity, for_each_file, cross_file, nested]
 
 # `peers: "{dir}/en.json"` and `reference: "{path}"` name the same file. The
 # load-time check cannot tell (`{path}` need not end in `en.json`), so each
-# iteration's build reports it. `{path}` renders with the OS separator
-# (`web\en.json` on Windows); key_parity reads it as the index spells it, so
-# the two paths are equal on every OS.
+# iteration's build reports it. `{path}` and `{dir}` render with `/` on every
+# platform (#579), matching the index's normalized path representation.
 
 given:
   tree:

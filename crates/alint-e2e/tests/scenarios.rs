@@ -9,7 +9,7 @@ use dir_test::{Fixture, dir_test};
 use crate::support;
 
 const EXPECTED_GENERAL_SCENARIOS: usize = 586;
-const EXPECTED_BUNDLED_SCENARIOS: usize = 96;
+const EXPECTED_BUNDLED_SCENARIOS: usize = 97;
 
 #[test]
 fn every_migrated_document_uses_the_public_v1_parser() {
@@ -50,7 +50,10 @@ fn every_migrated_document_uses_the_public_v1_parser() {
             }
         }
     }
-    assert_eq!(total, 682);
+    assert_eq!(
+        total,
+        EXPECTED_GENERAL_SCENARIOS + EXPECTED_BUNDLED_SCENARIOS
+    );
 }
 
 #[dir_test(
