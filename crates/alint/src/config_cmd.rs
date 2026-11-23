@@ -86,9 +86,14 @@ pub(super) struct LoadedConfig {
     pub(super) fix_size_limit: Option<u64>,
     /// The `baseline:` config key (the raw repo-root-relative path), if set.
     pub(super) baseline: Option<PathBuf>,
+    /// Whether `baseline:` came from an environment interpolation (`{{env.*}}`).
+    pub(super) baseline_from_environment: bool,
     /// The resolved local files the configuration came from, which a fix from
     /// an `extends:`'d ruleset never writes.
     pub(super) config_files: Vec<PathBuf>,
+    /// Subset of `config_files` reachable only via an environment-chosen
+    /// `extends:` entry, so fix refusals structurally mask their paths.
+    pub(super) environment_config_files: Vec<PathBuf>,
     /// A version 2 configuration's resolved selectors and relations (`None`
     /// for version 1), which `list` shows after the rules.
     pub(super) relation_plan: Option<std::sync::Arc<alint_core::relation::plan::Plan>>,
@@ -599,7 +604,9 @@ pub(super) fn load_rules_for_explain(
         extra_ignores: config.ignore,
         fix_size_limit: config.fix_size_limit,
         baseline: config.baseline,
+        baseline_from_environment: config.baseline_from_environment,
         config_files: config.config_files,
+        environment_config_files: config.environment_config_files,
         relation_plan: config.relation_plan,
         untrusted: cli.untrusted,
         config_path,

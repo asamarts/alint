@@ -1284,3 +1284,103 @@ fn a_v2_error_beside_an_unmaskable_value_elsewhere_stays_readable() {
         }
     }
 }
+
+/// Environment values shorter than four characters (which the text scrubber
+/// skips) must stay out of baseline load/write/regeneration/refusal messages
+/// and out of extended-rule fix refusal messages on environment-chosen config
+/// files.
+#[test]
+fn short_environment_values_stay_out_of_baseline_and_fix_config_messages() {
+    let root = tempfile::tempdir().unwrap();
+    write(root.path(), "a.txt", "bad\n");
+    write(
+        root.path(),
+        ".alint.yml",
+        "version: 1\nbaseline: '{{env.B}}.json'\nrules:\n  - id: no-bad\n    \
+         kind: file_content_forbidden\n    paths: '*.txt'\n    pattern: bad\n    level: error\n",
+    );
+
+    // 1. Missing baseline on `check` with a 2-char env value (`xy`).
+    let out = run(root.path(), &["check"], &[("B", "xy")]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{stderr}");
+    assert!(stderr.contains("<redacted>"), "{stderr}");
+    assert!(!stderr.contains("xy.json"), "{stderr}");
+
+    // 2. Writing baseline (`alint baseline`) prints `<redacted>`, not `xy.json`.
+    let out = run(root.path(), &["baseline"], &[("B", "xy")]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stderr}");
+    assert!(stderr.contains("wrote <redacted>"), "{stderr}");
+    assert!(!stderr.contains("xy.json"), "{stderr}");
+    assert!(root.path().join("xy.json").is_file());
+
+    // 3. Regeneration guard (`alint baseline` after adding a new violation).
+    write(root.path(), "b.txt", "bad\n");
+    let out = run(root.path(), &["baseline"], &[("B", "xy")]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{stderr}");
+    assert!(stderr.contains("regenerating <redacted>"), "{stderr}");
+    assert!(!stderr.contains("xy.json"), "{stderr}");
+
+    // 4. Out-of-root `..` baseline refusal via `alint baseline`.
+    write(
+        root.path(),
+        ".alint.yml",
+        "version: 1\nbaseline: '../{{env.B}}.json'\nrules: []\n",
+    );
+    let out = run(root.path(), &["baseline"], &[("B", "xy")]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{stderr}");
+    assert!(stderr.contains("baseline <redacted>"), "{stderr}");
+    assert!(!stderr.contains("xy.json"), "{stderr}");
+
+    // 5. Extended-rule fix refusing to write an environment-chosen config file
+    //    named with a 2-char env value (`xy.yml`) and a file it extends
+    //    (`sub.yml`): refusal details structurally name `<redacted>` instead of
+    //    `xy.yml` or `sub.yml`.
+    let fix_root = tempfile::tempdir().unwrap();
+    write(fix_root.path(), "sub.yml", "version: 1\nrules: []\n");
+    write(
+        fix_root.path(),
+        "xy.yml",
+        "version: 1\nextends: ['./sub.yml']\nrules:\n  - id: fix-ext\n    \
+         kind: file_content_forbidden\n    paths: '**/*.yml'\n    pattern: version\n    \
+         level: error\n    fix:\n      replace:\n        replacement: ver\n",
+    );
+    write(
+        fix_root.path(),
+        ".alint.yml",
+        "version: 1\nextends: ['./{{env.X}}.yml']\nrules: []\n",
+    );
+    let out = run(
+        fix_root.path(),
+        &["fix", "--unsafe-fixes", "--format", "json"],
+        &[("X", "xy")],
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let parsed: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("invalid json ({e}):\nstdout:\n{stdout}\nstderr:\n{stderr}"));
+    let details: Vec<&str> = parsed["results"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|r| r["items"].as_array().into_iter().flatten())
+        .filter_map(|item| item["detail"].as_str())
+        .collect();
+    let redacted_count = details
+        .iter()
+        .filter(|detail| detail.contains("<redacted> is an alint configuration file"))
+        .count();
+    assert_eq!(
+        redacted_count, 2,
+        "expected structural `<redacted>` refusal details for both `xy.yml` and `sub.yml`, got {details:?}\nfull:\n{stdout}"
+    );
+    assert!(
+        details
+            .iter()
+            .all(|detail| !detail.contains("xy.yml") && !detail.contains("sub.yml")),
+        "refusal details must not quote env-chosen config paths: {details:?}"
+    );
+}

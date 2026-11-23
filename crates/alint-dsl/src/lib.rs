@@ -403,6 +403,7 @@ fn resolve_top_level(
     );
     // Every local file the configuration came from, which a fix from an
     // `extends:`'d ruleset must not rewrite.
+    raw.environment_config_files = state.environment_config_files();
     raw.config_files = std::mem::take(&mut state.config_files);
     raw.field_source_names = std::mem::take(&mut state.field_source_names).into_names();
     Ok(raw)
@@ -480,6 +481,11 @@ pub(crate) struct RawConfig {
     /// `docs/design/baseline.md` §2.3.
     #[serde(default)]
     baseline: Option<std::path::PathBuf>,
+    /// Whether [`Self::baseline`] came from an environment interpolation
+    /// (`{{env.*}}`), carried to [`Config::baseline_from_environment`]. Not
+    /// part of the schema.
+    #[serde(skip)]
+    baseline_from_environment: bool,
     /// `trusted_extends:` -- remote `extends:` URLs whose CONTENT-injecting fixers
     /// (`replace` / `file_create` / `file_prepend` / `file_append`) are honored at
     /// their declared tier instead of demoted to a suggestion. Top-level-only (the
@@ -514,6 +520,11 @@ pub(crate) struct RawConfig {
     /// [`Config::config_files`]. Not part of the schema.
     #[serde(skip)]
     config_files: Vec<PathBuf>,
+    /// Subset of [`Self::config_files`] reachable only via an environment-chosen
+    /// `extends:` entry, carried to [`Config::environment_config_files`]. Not
+    /// part of the schema.
+    #[serde(skip)]
+    environment_config_files: Vec<PathBuf>,
     /// The `extends:` sources the rules' field-source markers name by index
     /// ([`trust::FIELD_SOURCES_MARKER`]), set on the top-level result. Not
     /// part of the schema.
@@ -642,6 +653,7 @@ impl RawConfig {
     /// `{{vars.<name>}}` placeholders substituted from the
     /// instance's `vars:` map, and the instance's own
     /// non-template fields field-merge on top.
+    #[allow(clippy::too_many_lines)]
     fn finalize(self, catalog: Option<alint_core::KindCatalog<'_>>) -> Result<Config> {
         self.reject_unsafe_templates(catalog)?;
         // An untrusted remote's `when` may read ordinary vars, but not one the
@@ -777,9 +789,11 @@ impl RawConfig {
             .with_nested_configs(self.nested_configs.unwrap_or(false))
             .with_allow_out_of_root(self.allow_out_of_root)
             .with_baseline(self.baseline)
+            .with_baseline_from_environment(self.baseline_from_environment)
             .with_compatibility(self.compatibility)
             .with_environment_values(self.environment_values)
             .with_config_files(self.config_files)
+            .with_environment_config_files(self.environment_config_files)
             .with_relation_plan(resolved.map(v2::Resolved::into_plan)))
     }
 }

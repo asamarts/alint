@@ -932,6 +932,9 @@ pub struct Engine {
     /// The resolved files the configuration came from, which a fix from an
     /// `extends:`'d rule never writes. See [`Engine::with_config_files`].
     config_files: Vec<PathBuf>,
+    /// Subset of `config_files` reachable only through an environment-chosen
+    /// `extends:` entry, so fix refusals structurally mask their paths.
+    environment_config_files: Vec<PathBuf>,
 }
 
 #[allow(clippy::too_many_lines)]

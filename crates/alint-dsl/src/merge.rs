@@ -254,12 +254,14 @@ impl Merger {
             nested_configs,
             allow_out_of_root,
             baseline,
+            baseline_from_environment,
             trusted_extends: _,
             env_vars,
             untrusted_when_var_reads: _,
             compatibility: _,
             environment_values: _,
             config_files: _,
+            environment_config_files: _,
             field_source_names: _,
             extends_environment: _,
             source_size,
@@ -283,6 +285,7 @@ impl Merger {
         }
         if baseline.is_some() {
             merged.baseline.clone_from(baseline);
+            merged.baseline_from_environment = *baseline_from_environment;
         }
         merged.source_size = merged.source_size.saturating_add(*source_size);
         // The env-derived mark follows the value that wins: a later literal
@@ -315,6 +318,9 @@ impl Merger {
         self.merged
             .config_files
             .extend(entries!(&mut source, config_files).map(Cow::into_owned));
+        self.merged
+            .environment_config_files
+            .extend(entries!(&mut source, environment_config_files).map(Cow::into_owned));
         // Set once, on the top-level result after every merge.
         if self.merged.field_source_names.is_empty() {
             self.merged.field_source_names = entries!(&mut source, field_source_names)

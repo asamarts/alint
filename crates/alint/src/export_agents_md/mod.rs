@@ -93,9 +93,8 @@ pub fn run(opts: &RunOptions, cli: &crate::cli::Cli) -> Result<ExitCode> {
     // as in `list`; a version 1 config has none and its output is unchanged.
     let plan = config.relation_plan.as_deref();
     // A source's display can be an `extends:` path read from the environment.
-    let values = &config.environment_values;
-    let redact: crate::inspect::Redact<'_> =
-        &|text| alint_core::redact_environment_values(text, values);
+    let redactor = alint_core::EnvironmentRedactor::from_values(&config.environment_values);
+    let redact: crate::inspect::Redact<'_> = &|text| redactor.redact(text);
     let body = match opts.format {
         OutputFormat::Markdown => {
             let objects = plan.map(|plan| crate::inspect::NamedObjects::of(plan, redact));

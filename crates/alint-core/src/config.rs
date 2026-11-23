@@ -93,6 +93,13 @@ pub struct Config {
     /// `docs/design/baseline.md` §2.3.
     #[serde(skip)]
     pub baseline: Option<PathBuf>,
+    /// Whether [`Self::baseline`] came from an environment interpolation
+    /// (`{{env.*}}`), recorded by the loader so baseline load/write/regen
+    /// messages structurally display `<redacted>` even for values shorter than
+    /// four characters.
+    #[serde(skip)]
+    #[doc(hidden)]
+    pub baseline_from_environment: bool,
     /// Per-source compatibility records retained by the recursive loader.
     /// Source-local requirements never participate in config precedence.
     #[serde(skip)]
@@ -112,6 +119,13 @@ pub struct Config {
     /// one ([`crate::FixContext::config_files`]).
     #[serde(skip)]
     pub config_files: Vec<PathBuf>,
+    /// The subset of [`Self::config_files`] reachable only through an
+    /// environment-chosen `extends:` entry, so fix refusal messages
+    /// structurally display `<redacted>` even for values shorter than four
+    /// characters.
+    #[serde(skip)]
+    #[doc(hidden)]
+    pub environment_config_files: Vec<PathBuf>,
     /// The resolved selectors and relations of a version 2 configuration
     /// (`None` for version 1), recorded by the loader once every name has
     /// resolved and the plan has been checked. Hidden from the documented
@@ -1809,7 +1823,7 @@ impl NestedRuleSpec {
 mod redaction;
 #[doc(hidden)]
 pub use redaction::{
-    CONFIGURATION_MASK, NumberMask, REDACTED_CONFIGURATION_ERROR,
+    CONFIGURATION_MASK, EnvironmentRedactor, NumberMask, REDACTED_CONFIGURATION_ERROR,
     configuration_field_may_be_secret, mask_configuration_field, mask_configuration_values,
     redact_environment_values, redact_environment_values_in_error,
 };

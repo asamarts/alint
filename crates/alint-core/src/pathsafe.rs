@@ -745,6 +745,39 @@ pub(crate) fn reaches_alint_config_walked(
     })
 }
 
+/// Whether `path` (below `root`) resolves to one of the specific canonical
+/// files in `config_files`, ignoring default configuration names. Used to tell
+/// when a refused configuration file was chosen via the environment so its path
+/// is structurally masked to `<redacted>`.
+pub(crate) fn reaches_specific_config_walked(
+    root: &Path,
+    path: &Path,
+    config_files: &[PathBuf],
+    index: Option<&crate::walker::FileIndex>,
+) -> bool {
+    if config_files.is_empty() {
+        return false;
+    }
+    let ends_in_path = |file: &PathBuf| {
+        let mut file = file.components().rev();
+        path.components().rev().all(|component| {
+            file.next()
+                .is_some_and(|name| name.as_os_str().eq_ignore_ascii_case(component))
+        })
+    };
+    let alternate = has_alternate_spelling(path);
+    if !alternate && follows_no_symlink(root, path, index) && !config_files.iter().any(ends_in_path)
+    {
+        return false;
+    }
+    let Some(real) = resolve_existing_prefix(&root.join(path)) else {
+        return false;
+    };
+    config_files
+        .iter()
+        .any(|file| path_opens_as_file(&real, file))
+}
+
 /// Why a fix from an `extends:`'d ruleset or a nested config declines a path
 /// that reaches alint's configuration ([`reaches_alint_config`]).
 #[doc(hidden)]

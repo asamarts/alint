@@ -1636,6 +1636,11 @@ pub struct FixContext<'a> {
     /// default; files with a name configuration discovery accepts are refused
     /// regardless.
     pub config_files: &'a [PathBuf],
+    /// Subset of [`Self::config_files`] reachable only via an environment-chosen
+    /// `extends:` entry: a refusal on one of these structurally displays
+    /// `<redacted>` instead of quoting the path.
+    #[doc(hidden)]
+    pub environment_config_files: &'a [PathBuf],
     /// The walk of [`Self::root`], while it still matches the tree: a file it
     /// reached without a symlink needs no file system call to tell that a fix
     /// stays out of a Git directory ([`Self::write_refusal`]). The engine sets
@@ -1662,6 +1667,7 @@ impl<'a> FixContext<'a> {
             paths_sensitive: false,
             extended_source: false,
             config_files: &[],
+            environment_config_files: &[],
             index: None,
         }
     }
@@ -1725,6 +1731,17 @@ impl<'a> FixContext<'a> {
     #[must_use]
     pub fn with_config_files(mut self, config_files: &'a [PathBuf]) -> Self {
         self.config_files = config_files;
+        self
+    }
+
+    /// Sets [`Self::environment_config_files`].
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_environment_config_files(
+        mut self,
+        environment_config_files: &'a [PathBuf],
+    ) -> Self {
+        self.environment_config_files = environment_config_files;
         self
     }
 

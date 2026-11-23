@@ -131,6 +131,7 @@ pub fn environment_fact_hints(
     facts: &[FactSpec],
     environment_values: &[String],
 ) -> Vec<ConfigHint> {
+    let redactor = crate::EnvironmentRedactor::from_values(environment_values);
     facts
         .iter()
         .filter_map(|fact| match &fact.kind {
@@ -141,12 +142,7 @@ pub fn environment_fact_hints(
             }
             _ => None,
         })
-        .filter(|(_, pattern)| {
-            matches!(
-                crate::redact_environment_values(pattern, environment_values),
-                std::borrow::Cow::Borrowed(_)
-            )
-        })
+        .filter(|(_, pattern)| matches!(redactor.redact(pattern), std::borrow::Cow::Borrowed(_)))
         .flat_map(|(fact, pattern)| {
             pattern_hints(pattern, PatternTarget::File)
                 .into_iter()

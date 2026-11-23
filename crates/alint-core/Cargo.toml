@@ -51,6 +51,7 @@ rayon.workspace = true
 parking_lot.workspace = true
 regex.workspace = true
 regex-syntax.workspace = true
+aho-corasick.workspace = true
 tracing.workspace = true
 # Structured-document extract machinery hoisted from alint-rules:
 # TOML/XML/JSONPath parsing behind `Format`/`ExtractSpec`, whose

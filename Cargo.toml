@@ -52,6 +52,10 @@ regex = "1"
 # (alint-core `pattern_hints`). Already in the tree via `regex`, so this
 # promotes an existing transitive crate to a direct dep, adding none.
 regex-syntax = "0.8"
+# Multi-pattern linear string matcher for `EnvironmentRedactor`
+# (alint-core `config_redaction`). Already in the tree via `regex`, so this
+# promotes an existing transitive crate to a direct dep, adding none.
+aho-corasick = "1"
 rayon = "1"
 parking_lot = "0.12"
 clap = { version = "4", features = ["derive", "cargo", "env", "wrap_help"] }

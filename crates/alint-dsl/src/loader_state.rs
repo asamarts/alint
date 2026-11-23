@@ -34,6 +34,10 @@ pub(crate) struct LoadState {
     pub(crate) config_files: Vec<PathBuf>,
     /// Each of `config_files` with its index there.
     config_file_indices: HashMap<PathBuf, usize>,
+    /// Files in `config_files` reached through a non-environment-chosen path.
+    public_config_files: HashSet<PathBuf>,
+    /// Files in `config_files` reached ONLY through an environment-chosen path.
+    env_chosen_config_files: HashSet<PathBuf>,
     /// The `extends:` sources the rules' field-source markers name.
     pub(crate) field_source_names: crate::trust::FieldSourceNames,
     /// The work of every `extends:` merge so far, in entries
@@ -68,6 +72,8 @@ impl Default for LoadState {
             environment_values: EnvironmentValues::default(),
             config_files: Vec::new(),
             config_file_indices: HashMap::new(),
+            public_config_files: HashSet::new(),
+            env_chosen_config_files: HashSet::new(),
             field_source_names: crate::trust::FieldSourceNames::default(),
             extends_entries: 0,
             extends_bytes: 0,
@@ -81,32 +87,30 @@ impl Default for LoadState {
 }
 
 /// The values the environment gave one load, in the order recorded, each
-/// once: a set beside the list makes recording one a lookup, not a scan of
-/// all of them.
+/// once: backed by [`alint_core::EnvironmentRedactor`] so recording is a set
+/// lookup and scrubbing compiles one Aho-Corasick automaton.
 #[derive(Default)]
 pub(crate) struct EnvironmentValues {
-    values: Vec<String>,
-    held: HashSet<String>,
+    redactor: alint_core::EnvironmentRedactor,
 }
 
 impl EnvironmentValues {
     /// Record `value`, unless it is recorded already.
     pub(crate) fn add(&mut self, value: &str) {
-        if !self.held.contains(value) {
-            self.held.insert(value.to_owned());
-            self.values.push(value.to_owned());
-        }
+        self.redactor.insert(value);
     }
 
     /// Record each of `values`.
     pub(crate) fn extend(&mut self, values: &[String]) {
-        for value in values {
-            self.add(value);
-        }
+        self.redactor.extend(values);
     }
 
     pub(crate) fn as_slice(&self) -> &[String] {
-        &self.values
+        self.redactor.values()
+    }
+
+    pub(crate) fn redact<'t>(&mut self, text: &'t str) -> std::borrow::Cow<'t, str> {
+        self.redactor.redact_lazy(text)
     }
 }
 
@@ -185,8 +189,21 @@ pub(crate) const MAX_EXTENDS_SOURCE_BYTES: usize = 2 * alint_core::MAX_STRUCTURE
 
 impl LoadState {
     /// Note `canonical` among the files the configuration came from: its
-    /// index there.
-    pub(crate) fn record_config_file(&mut self, canonical: &Path) -> usize {
+    /// index there. Tracks whether `canonical` is only reachable via an
+    /// environment-chosen `extends:` entry (`environment_chosen`).
+    pub(crate) fn record_config_file(
+        &mut self,
+        canonical: &Path,
+        environment_chosen: bool,
+    ) -> usize {
+        if environment_chosen {
+            if !self.public_config_files.contains(canonical) {
+                self.env_chosen_config_files.insert(canonical.to_path_buf());
+            }
+        } else {
+            self.env_chosen_config_files.remove(canonical);
+            self.public_config_files.insert(canonical.to_path_buf());
+        }
         if let Some(&index) = self.config_file_indices.get(canonical) {
             return index;
         }
@@ -195,6 +212,16 @@ impl LoadState {
         self.config_file_indices
             .insert(canonical.to_path_buf(), index);
         index
+    }
+
+    /// The subset of [`Self::config_files`] reachable only via an
+    /// environment-chosen `extends:` entry, in load order.
+    pub(crate) fn environment_config_files(&self) -> Vec<PathBuf> {
+        self.config_files
+            .iter()
+            .filter(|path| self.env_chosen_config_files.contains(*path))
+            .cloned()
+            .collect()
     }
 
     /// `urls`, a top-level config's `trusted_extends:`, as the loads below it
@@ -351,10 +378,10 @@ impl LoadState {
     }
 
     /// `text` without the environment's values recorded so far.
-    pub(crate) fn redact<'t>(&self, text: &'t str) -> std::borrow::Cow<'t, str> {
+    pub(crate) fn redact<'t>(&mut self, text: &'t str) -> std::borrow::Cow<'t, str> {
         #[cfg(test)]
         REDACTIONS.with(|redactions| redactions.set(redactions.get() + 1));
-        alint_core::redact_environment_values(text, self.environment_values.as_slice())
+        self.environment_values.redact(text)
     }
 }
 

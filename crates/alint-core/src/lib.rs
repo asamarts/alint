@@ -78,8 +78,8 @@ pub use compatibility::{
 };
 pub use config::{
     AllowOutOfRoot, CONFIGURATION_MASK, ChmodFixSpec, CommandFixSpec, CompiledNestedSpec, Config,
-    ContentSourceSpec, CreateAndRegisterFixSpec, DirCreateFixSpec, ExtendsEntry,
-    FileAppendFinalNewlineFixSpec, FileAppendFixSpec, FileCollapseBlankLinesFixSpec,
+    ContentSourceSpec, CreateAndRegisterFixSpec, DirCreateFixSpec, EnvironmentRedactor,
+    ExtendsEntry, FileAppendFinalNewlineFixSpec, FileAppendFixSpec, FileCollapseBlankLinesFixSpec,
     FileCreateFixSpec, FileNormalizeLineEndingsFixSpec, FilePrependFixSpec, FileRemoveFixSpec,
     FileRenameFixSpec, FileStripBidiFixSpec, FileStripBomFixSpec, FileStripZeroWidthFixSpec,
     FileTrimTrailingWhitespaceFixSpec, FixSpec, GitUntrackFixSpec, IndentStyleFixSpec,
