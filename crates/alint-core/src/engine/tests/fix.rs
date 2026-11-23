@@ -1114,6 +1114,7 @@ fn fix_against_baseline(sensitive: bool, grandfathered: &Violation) -> (bool, bo
             path: Some("x.txt".into()),
             fingerprint: crate::baseline::fingerprint("removes", grandfathered, None),
             message: None,
+            path_free_identity: false,
         }],
     );
     let report = Engine::from_entries(

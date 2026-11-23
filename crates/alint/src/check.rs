@@ -231,7 +231,7 @@ pub(super) fn cmd_check(
         // Reporting/failing on those red-lights the documented
         // `--changed --baseline --strict-baseline` PR-gate recipe.
         let scoped = changed_active || !only.is_empty();
-        report_baseline_summary(&applied, cli, !scoped);
+        report_baseline_summary(&baseline, &applied, cli, !scoped);
         if cli.strict_baseline && !scoped && !applied.stale.is_empty() {
             strict_stale_fail = true;
         }
@@ -418,6 +418,7 @@ pub(super) fn load_baseline(
 /// `report_stale` is false on a scoped (`--changed`/`--only`) run, where
 /// out-of-scope entries can't be judged stale (see `cmd_check`).
 fn report_baseline_summary(
+    baseline: &alint_core::baseline::Baseline,
     applied: &alint_core::baseline::AppliedBaseline,
     cli: &Cli,
     report_stale: bool,
@@ -457,6 +458,14 @@ fn report_baseline_summary(
                 ""
             }
         );
+        if baseline.has_unmatched_pre_022_hidden_path_entries(applied) {
+            let version = baseline.alint_version.as_deref().unwrap_or("pre-0.22");
+            eprintln!(
+                "alint: hint: baseline was written by alint {} (before 0.22); hidden-path \
+                 fingerprints changed in 0.22/0.23, run `alint baseline --accept-new` to regenerate it",
+                term(version)
+            );
+        }
     }
 }
 
@@ -557,14 +566,12 @@ pub(super) fn cmd_baseline(
     let mut items: Vec<FingerprintedViolation> = Vec::new();
     for result in &report.results {
         for v in &result.violations {
-            items.push(FingerprintedViolation {
-                rule_id: result.rule_id.to_string(),
-                path: v
-                    .report_path()
-                    .map(|p| p.to_string_lossy().replace('\\', "/")),
-                fingerprint: reader.fingerprint(&result.rule_id, v),
-                message: Some(v.message.to_string()),
-            });
+            let fp = reader.fingerprint(&result.rule_id, v);
+            items.push(FingerprintedViolation::from_violation(
+                result.rule_id.as_ref(),
+                v,
+                fp,
+            ));
         }
     }
     let new_baseline =

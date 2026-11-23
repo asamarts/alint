@@ -61,6 +61,7 @@ fn write_v021_baseline(root: &Path, paths: &[&str]) {
                 fingerprint: v021(path),
                 count: 1,
                 message: None,
+                paths: Vec::new(),
             })
             .collect(),
     };
@@ -96,6 +97,11 @@ fn the_written_fingerprint_says_nothing_about_the_path() {
         assert_eq!(written.len(), 1, "one entry per rule: {written:?}");
         assert_eq!(written[0].count, 2);
         assert_eq!(written[0].path.as_deref(), Some("<redacted>"));
+        assert_eq!(
+            written[0].paths,
+            Vec::<String>::new(),
+            "hidden-path baseline entry must never store paths (ADR-0030/ADR-0049)"
+        );
         fingerprints.push(written[0].fingerprint.clone());
 
         let check = alint(root, &["check", "--baseline", "bl.json", "."]);
@@ -192,11 +198,17 @@ fn a_v021_baseline_no_longer_matches() {
     write_v021_baseline(root, &["alpha.txt", "beta.txt"]);
 
     // Both findings are new, and both old entries are stale.
+    // Because the baseline was written before 0.22 and has unmatched
+    // hidden-path entries, alint prints a one-line regeneration hint (#547).
     let check = alint(root, &["check", "--baseline", "old.json", "."]);
     assert_eq!(check.status.code(), Some(1), "{check:?}");
     let stderr = String::from_utf8_lossy(&check.stderr);
     assert!(stderr.contains("2 baseline entr"), "{stderr}");
     assert!(stderr.contains("no longer fire"), "{stderr}");
+    assert!(
+        stderr.contains("before 0.22") && stderr.contains("alint baseline"),
+        "expected pre-0.22 regeneration hint on stderr: {stderr}"
+    );
     assert!(
         !stderr.contains("baselined violation(s) suppressed"),
         "{stderr}"
@@ -260,4 +272,29 @@ fn fix_still_tells_hidden_paths_apart() {
             "{file}"
         );
     }
+}
+
+/// A current-version baseline with unmatched hidden-path entries (for example
+/// after the findings were fixed) does NOT print the pre-0.22 regeneration
+/// hint (#547).
+#[test]
+fn current_version_baseline_prints_no_pre_022_hint() {
+    let tmp = tree(&["alpha.txt"]);
+    let root = tmp.path();
+    let out = alint(root, &["baseline", "--output", "cur.json", "."]);
+    assert!(out.status.success(), "{out:?}");
+
+    // Fix the finding so the hidden-path entry becomes stale/unmatched.
+    std::fs::write(root.join("alpha.txt"), "a\nb\n").unwrap();
+    let check = alint(root, &["check", "--baseline", "cur.json", "."]);
+    assert_eq!(check.status.code(), Some(0), "{check:?}");
+    let stderr = String::from_utf8_lossy(&check.stderr);
+    assert!(
+        stderr.contains("1 baseline entry no longer fires"),
+        "{stderr}"
+    );
+    assert!(
+        !stderr.contains("before 0.22"),
+        "current baseline must not show pre-0.22 hint: {stderr}"
+    );
 }

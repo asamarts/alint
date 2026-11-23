@@ -894,3 +894,113 @@ fn sarif_content_discriminator_fingerprint_matches_baseline() {
          sarif={sarif_fps:?}\ncanonical={canonical:?}",
     );
 }
+
+/// Issue #601 / ADR-0049 end-to-end repro: 17 packages named `dup` under a
+/// `constraint` `unique` rule produce 16 findings sharing one path-free
+/// fingerprint. Baselining them records their 16 visible paths in `paths`.
+/// Adding a new repeat at `p13/package.json` (which sorts before `p14..p60`)
+/// must report `p13/package.json` as new while keeping all 16 unchanged
+/// baselined findings suppressed with their exact prior SARIF occurrence
+/// fingerprints.
+#[test]
+fn constraint_unique_baseline_preserves_suppressed_findings_when_earlier_repeat_added() {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path();
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 2\n\
+         selectors:\n\
+         \x20 pkgs:\n\
+         \x20   paths: 'p*/package.json'\n\
+         relations:\n\
+         \x20 pkg_names:\n\
+         \x20   from: pkgs\n\
+         \x20   read: { json: '$.name' }\n\
+         \x20   fields: { name: value }\n\
+         rules:\n\
+         \x20 - id: names-unique\n\
+         \x20   kind: constraint\n\
+         \x20   input: pkg_names\n\
+         \x20   assert: { unique: { key: [name] } }\n\
+         \x20   level: error\n",
+    )
+    .unwrap();
+    // Create p10 (the first/kept row) plus 16 repeats p14..=p29 (with p60 at the end).
+    let mut initial_pkgs = vec!["p10".to_string()];
+    for i in 14..=28 {
+        initial_pkgs.push(format!("p{i}"));
+    }
+    initial_pkgs.push("p60".to_string());
+    assert_eq!(initial_pkgs.len(), 17);
+    for pkg in &initial_pkgs {
+        let dir = root.join(pkg);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("package.json"), r#"{"name": "dup"}"#).unwrap();
+    }
+
+    assert_eq!(code(&run(root, &["baseline"])), 0, "write baseline");
+    let bl_raw = std::fs::read_to_string(root.join(".alint-baseline.json")).unwrap();
+    let bl_entry: serde_json::Value = serde_json::from_str(bl_raw.lines().nth(1).unwrap()).unwrap();
+    assert_eq!(bl_entry["count"], 16);
+    assert_eq!(
+        bl_entry["paths"].as_array().map(Vec::len),
+        Some(16),
+        "baseline entry must record all 16 visible paths: {bl_entry}"
+    );
+
+    let sarif_state = |root: &Path| -> std::collections::BTreeMap<String, (String, String)> {
+        let out = run(
+            root,
+            &[
+                "check",
+                "--baseline",
+                ".alint-baseline.json",
+                "--format",
+                "sarif",
+            ],
+        );
+        let sarif: serde_json::Value = serde_json::from_slice(&out.stdout).expect("sarif");
+        sarif["runs"][0]["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| {
+                let uri = r["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+                    .as_str()
+                    .unwrap()
+                    .to_string();
+                let state = r["baselineState"].as_str().unwrap().to_string();
+                let fp = r["partialFingerprints"]["alint/v1"]
+                    .as_str()
+                    .unwrap()
+                    .to_string();
+                (uri, (state, fp))
+            })
+            .collect()
+    };
+
+    let before = sarif_state(root);
+    assert_eq!(before.len(), 16);
+    assert!(before.values().all(|(state, _)| state == "unchanged"));
+
+    // Add p13/package.json (sorts before all 16 baselined repeats).
+    std::fs::create_dir_all(root.join("p13")).unwrap();
+    std::fs::write(root.join("p13/package.json"), r#"{"name": "dup"}"#).unwrap();
+
+    let check = run(root, &["check", "--baseline", ".alint-baseline.json"]);
+    assert_eq!(code(&check), 1, "new repeat must fail the gate");
+
+    let after = sarif_state(root);
+    assert_eq!(after.len(), 17);
+    assert_eq!(
+        after["p13/package.json"].0, "new",
+        "newly added p13 must be reported as new: {after:?}"
+    );
+    for (uri, (state, fp)) in &before {
+        assert_eq!(
+            after.get(uri),
+            Some(&(state.clone(), fp.clone())),
+            "unchanged baselined finding {uri} must keep state and SARIF fingerprint"
+        );
+    }
+}

@@ -687,6 +687,7 @@ mod baseline_tests {
                             Some(&bytes),
                         ),
                         message: None,
+                        path_free_identity: false,
                     }
                 })
             }),
@@ -741,6 +742,7 @@ mod baseline_tests {
             fingerprint,
             count: 1,
             message: None,
+            paths: Vec::new(),
         };
         std::fs::write(
             root.join(".alint.yml"),

@@ -298,10 +298,16 @@ struct Header {
     alint_version: Option<String>,
 }
 
-/// One grandfathered violation. Matching uses **only** `fingerprint`
-/// (and `count`); `rule_id`, `path`, and `message` are advisory — they
-/// exist so a reviewer reading the file's diff can see what is being
-/// suppressed.
+/// The canonical path-free fingerprint for a hidden-path finding of `rule_id`
+/// (ADR-0030 decision 1).
+fn hidden_path_fingerprint(rule_id: &str) -> String {
+    hash_components([rule_id.as_bytes(), HIDDEN_PATH, b"sensitive"])
+}
+
+/// One grandfathered violation. Matching uses `fingerprint` and `count`,
+/// preferring visible paths listed in `paths` when present (ADR-0049);
+/// `rule_id`, `path`, and `message` are advisory — they exist so a reviewer
+/// reading the file's diff can see what is being suppressed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BaselineEntry {
     pub rule_id: String,
@@ -313,6 +319,12 @@ pub struct BaselineEntry {
     /// Never matched on; may drift freely between regenerations.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// Optional sorted multiset of visible slash-normalized paths suppressed
+    /// by this entry when a fingerprint can repeat across files (e.g.
+    /// `constraint` rules; ADR-0049). Omitted for ordinary path-bound single-
+    /// file entries and always empty for hidden-path entries (ADR-0030).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paths: Vec<String>,
 }
 
 /// A parsed baseline: an advisory header plus the suppressed entries,
@@ -326,43 +338,71 @@ pub struct Baseline {
 impl Baseline {
     /// Build a baseline by aggregating fingerprinted violations: entries
     /// with the same fingerprint collapse into one with a `count`. The
-    /// advisory `rule_id`/`path` are invariant within a fingerprint; the
-    /// advisory `message` is the lexicographically smallest of the group, so
-    /// the file is byte-identical across regenerations regardless of the
-    /// order the engine collected violations in. Output entries are sorted
-    /// for a deterministic, merge-friendly file.
+    /// advisory `path` and `message` are pinned to the lexicographically
+    /// smallest of the group, so the file is byte-identical across
+    /// regenerations regardless of the order the engine collected violations
+    /// in. Non-hidden entries that span multiple visible paths or come from a
+    /// `path_free_identity` finding also record their sorted visible paths in
+    /// [`BaselineEntry::paths`] (ADR-0049). Output entries are sorted for a
+    /// deterministic, merge-friendly file.
     pub fn from_fingerprints<I>(alint_version: Option<String>, items: I) -> Self
     where
         I: IntoIterator<Item = FingerprintedViolation>,
     {
-        // Group by fingerprint. `rule_id` and `path` are invariant within a
-        // fingerprint (both are hashed into it), but the advisory `message`
-        // is NOT — a path-identity or shared-key group can collapse
-        // violations whose messages differ, and `items` arrives in the
-        // engine's collection order. Pin the lexicographically smallest
-        // message so the committed file is byte-identical across
-        // regenerations even if that order ever shifts.
-        let mut by_fp: BTreeMap<String, BaselineEntry> = BTreeMap::new();
+        struct Group {
+            entry: BaselineEntry,
+            visible_paths: Vec<String>,
+            any_path_free: bool,
+        }
+
+        let mut by_fp: BTreeMap<String, Group> = BTreeMap::new();
         for item in items {
-            if let Some(e) = by_fp.get_mut(&item.fingerprint) {
-                e.count += 1;
-                if item.message < e.message {
-                    e.message = item.message;
-                }
-            } else {
-                by_fp.insert(
-                    item.fingerprint.clone(),
-                    BaselineEntry {
-                        rule_id: item.rule_id,
-                        path: item.path,
-                        fingerprint: item.fingerprint,
-                        count: 1,
-                        message: item.message,
+            let is_hidden = item.fingerprint == hidden_path_fingerprint(&item.rule_id);
+            let group = by_fp
+                .entry(item.fingerprint.clone())
+                .or_insert_with(|| Group {
+                    entry: BaselineEntry {
+                        rule_id: item.rule_id.clone(),
+                        path: item.path.clone(),
+                        fingerprint: item.fingerprint.clone(),
+                        count: 0,
+                        message: item.message.clone(),
+                        paths: Vec::new(),
                     },
-                );
+                    visible_paths: Vec::new(),
+                    any_path_free: false,
+                });
+            group.entry.count = group.entry.count.saturating_add(1);
+            if item.path < group.entry.path {
+                group.entry.path.clone_from(&item.path);
+            }
+            if item.message < group.entry.message {
+                group.entry.message = item.message;
+            }
+            if !is_hidden {
+                group.any_path_free |= item.path_free_identity;
+                if let Some(path) = item.path {
+                    group.visible_paths.push(path);
+                }
             }
         }
-        let mut entries: Vec<BaselineEntry> = by_fp.into_values().collect();
+        let mut entries: Vec<BaselineEntry> = by_fp
+            .into_values()
+            .map(|mut group| {
+                if !group.visible_paths.is_empty() {
+                    group.visible_paths.sort();
+                    let multiple_distinct = group
+                        .visible_paths
+                        .first()
+                        .zip(group.visible_paths.last())
+                        .is_some_and(|(first, last)| first != last);
+                    if group.any_path_free || multiple_distinct {
+                        group.entry.paths = group.visible_paths;
+                    }
+                }
+                group.entry
+            })
+            .collect();
         entries.sort_by(|a, b| {
             a.rule_id
                 .cmp(&b.rule_id)
@@ -491,7 +531,17 @@ impl Baseline {
                 })?;
             if let Some(&i) = pos.get(&entry.fingerprint) {
                 entries[i].count = entries[i].count.saturating_add(entry.count);
+                if !entry.paths.is_empty()
+                    && entry.fingerprint != hidden_path_fingerprint(&entries[i].rule_id)
+                {
+                    entries[i].paths.extend(entry.paths);
+                    entries[i].paths.sort();
+                }
             } else {
+                let mut entry = entry;
+                if entry.fingerprint == hidden_path_fingerprint(&entry.rule_id) {
+                    entry.paths.clear();
+                }
                 pos.insert(entry.fingerprint.clone(), entries.len());
                 entries.push(entry);
             }
@@ -507,6 +557,47 @@ impl Baseline {
     pub fn total(&self) -> u64 {
         self.entries.iter().map(|e| u64::from(e.count)).sum()
     }
+
+    /// Whether this baseline's `alint_version` header is below `0.22` and at
+    /// least one of its hidden-path entries matched nothing in `applied`
+    /// (#547).
+    #[must_use]
+    pub fn has_unmatched_pre_022_hidden_path_entries(&self, applied: &AppliedBaseline) -> bool {
+        if !self
+            .alint_version
+            .as_deref()
+            .is_some_and(is_pre_022_version)
+        {
+            return false;
+        }
+        let stale_by_fp: std::collections::HashMap<&str, u32> = applied
+            .stale
+            .iter()
+            .map(|e| (e.fingerprint.as_str(), e.count))
+            .collect();
+        self.entries.iter().any(|entry| {
+            entry.count > 0
+                && entry.path.as_deref() == Some(crate::CONFIGURATION_MASK)
+                && stale_by_fp.get(entry.fingerprint.as_str()).copied() == Some(entry.count)
+        })
+    }
+}
+
+/// Whether `version` parses as an alint version earlier than `0.22.0`.
+fn is_pre_022_version(version: &str) -> bool {
+    let trimmed = version.trim().strip_prefix('v').unwrap_or(version.trim());
+    let mut parts = trimmed.split('.');
+    let Some(major) = parts.next().and_then(|s| s.parse::<u64>().ok()) else {
+        return false;
+    };
+    let Some(minor_raw) = parts.next() else {
+        return false;
+    };
+    let minor_digits = minor_raw.split(['-', '+']).next().unwrap_or(minor_raw);
+    let Ok(minor) = minor_digits.parse::<u64>() else {
+        return false;
+    };
+    (major, minor) < (0, 22)
 }
 
 /// A single fingerprinted violation, the input to [`Baseline::from_fingerprints`].
@@ -516,6 +607,31 @@ pub struct FingerprintedViolation {
     pub path: Option<String>,
     pub fingerprint: String,
     pub message: Option<String>,
+    /// Whether this violation's fingerprint leaves out its visible path (e.g.
+    /// `constraint` findings), so even a single-occurrence baseline entry
+    /// records its visible path in [`BaselineEntry::paths`] (ADR-0049).
+    pub path_free_identity: bool,
+}
+
+impl FingerprintedViolation {
+    /// Build a [`FingerprintedViolation`] from a [`Violation`] and its
+    /// computed canonical `fingerprint`.
+    #[must_use]
+    pub fn from_violation(
+        rule_id: impl Into<String>,
+        violation: &Violation,
+        fingerprint: String,
+    ) -> Self {
+        Self {
+            rule_id: rule_id.into(),
+            path: violation
+                .report_path()
+                .map(|p| canonical_order_path(p).into_owned()),
+            fingerprint,
+            message: Some(violation.message.to_string()),
+            path_free_identity: violation.path_free_identity && !violation.path_is_sensitive(),
+        }
+    }
 }
 
 /// A violation suppressed by the baseline, with the id of the rule that
@@ -577,6 +693,17 @@ where
         .iter()
         .map(|e| (e.fingerprint.as_str(), e.count))
         .collect();
+    // Preferred visible paths per fingerprint (ADR-0049): suppressed in Pass 1
+    // before filling any remaining count in deterministic order in Pass 2.
+    let mut preferred: HashMap<&str, HashMap<&str, u32>> = HashMap::new();
+    for e in &baseline.entries {
+        if !e.paths.is_empty() && e.fingerprint != hidden_path_fingerprint(&e.rule_id) {
+            let counts = preferred.entry(e.fingerprint.as_str()).or_default();
+            for path in &e.paths {
+                *counts.entry(path.as_str()).or_insert(0) += 1;
+            }
+        }
+    }
 
     let mut suppressed = Vec::new();
     let mut suppressed_total = 0u64;
@@ -591,11 +718,55 @@ where
         let mut ordered: Vec<&Violation> = result.violations.iter().collect();
         ordered.sort_by_cached_key(|v| order_key(v));
 
+        // Compute every violation's fingerprint once.
+        let fps: Vec<String> = ordered
+            .iter()
+            .map(|v| fingerprint_of(&result.rule_id, v))
+            .collect();
+
+        // Pass 1 (ADR-0049): suppress visible-path findings that match a
+        // preferred path recorded on the baseline entry. Hidden-path findings
+        // never enter Pass 1 (ADR-0030).
+        let mut matched_preferred = vec![false; ordered.len()];
+        if !preferred.is_empty() {
+            for (index, (v, fp)) in ordered.iter().zip(&fps).enumerate() {
+                if v.path_is_sensitive() {
+                    continue;
+                }
+                let Some(path) = v.path.as_deref() else {
+                    continue;
+                };
+                if remaining.get(fp.as_str()).copied().unwrap_or(0) == 0 {
+                    continue;
+                }
+                let slash = canonical_order_path(path);
+                if let Some(pref_count) = preferred
+                    .get_mut(fp.as_str())
+                    .and_then(|paths| paths.get_mut(slash.as_ref()))
+                    .filter(|c| **c > 0)
+                {
+                    *pref_count -= 1;
+                    if let Some(rem) = remaining.get_mut(fp.as_str()) {
+                        *rem -= 1;
+                    }
+                    matched_preferred[index] = true;
+                }
+            }
+        }
+
+        // Pass 2: emit Pass-1 suppressions and fill any remaining budget in
+        // deterministic order so both `suppressed` and `live` preserve order.
         let mut live = Vec::new();
         let mut live_fps = Vec::new();
-        for v in ordered {
-            let fp = fingerprint_of(&result.rule_id, v);
-            if let Some(count) = remaining.get_mut(fp.as_str()).filter(|c| **c > 0) {
+        for ((v, fp), from_pass1) in ordered.into_iter().zip(fps).zip(matched_preferred) {
+            if from_pass1 {
+                suppressed_total += 1;
+                suppressed.push(SuppressedViolation {
+                    rule_id: result.rule_id.clone(),
+                    violation: v.clone(),
+                    fingerprint: fp,
+                });
+            } else if let Some(count) = remaining.get_mut(fp.as_str()).filter(|c| **c > 0) {
                 *count -= 1;
                 suppressed_total += 1;
                 suppressed.push(SuppressedViolation {
@@ -1175,6 +1346,7 @@ mod tests {
             path: path.map(str::to_string),
             fingerprint: fp.into(),
             message: Some("m".into()),
+            path_free_identity: false,
         }
     }
 
@@ -1312,6 +1484,7 @@ mod tests {
             path: Some("a.rs".into()),
             fingerprint: "shared".into(),
             message: Some(msg.into()),
+            path_free_identity: false,
         };
         let one = Baseline::from_fingerprints(None, vec![mk("zeta"), mk("alpha")]);
         let two = Baseline::from_fingerprints(None, vec![mk("alpha"), mk("zeta")]);
@@ -1361,6 +1534,7 @@ mod tests {
             fingerprint: fp.into(),
             count,
             message: None,
+            paths: Vec::new(),
         }
     }
 
@@ -1648,5 +1822,264 @@ mod tests {
         assert!(out.live.results[0].violations.is_empty());
         assert_eq!(out.live.results[0].analysis_failures.len(), 1);
         assert!(out.live.has_errors(), "baseline cannot downgrade a failure");
+    }
+
+    #[test]
+    fn preferred_paths_keep_baselined_repeats_suppressed_when_new_repeat_sorts_first() {
+        let mk_v = |path: &str| {
+            Violation::new("dup")
+                .with_path(Path::new(path))
+                .with_baseline_key("dup")
+                .with_path_free_identity()
+        };
+        let fp = fingerprint("names-unique", &mk_v("p14/package.json"), None);
+        // Baseline records p14 and p60 (count 2, paths ["p14/...", "p60/..."]).
+        let baseline = Baseline::from_fingerprints(
+            Some("0.24.0".into()),
+            [
+                FingerprintedViolation::from_violation(
+                    "names-unique",
+                    &mk_v("p60/package.json"),
+                    fp.clone(),
+                ),
+                FingerprintedViolation::from_violation(
+                    "names-unique",
+                    &mk_v("p14/package.json"),
+                    fp.clone(),
+                ),
+            ],
+        );
+        assert_eq!(baseline.entries.len(), 1);
+        assert_eq!(baseline.entries[0].count, 2);
+        assert_eq!(
+            baseline.entries[0].path.as_deref(),
+            Some("p14/package.json"),
+            "advisory path is pinned deterministically"
+        );
+        assert_eq!(
+            baseline.entries[0].paths,
+            ["p14/package.json", "p60/package.json"]
+        );
+
+        // Add p13 (sorts before p14 and p60): p14 and p60 stay suppressed, p13 is live.
+        let rep = Report {
+            results: vec![RuleResult::new(
+                std::sync::Arc::from("names-unique"),
+                Level::Error,
+                None,
+                vec![
+                    mk_v("p13/package.json"),
+                    mk_v("p14/package.json"),
+                    mk_v("p60/package.json"),
+                ],
+                false,
+            )],
+        };
+        let out = apply(&rep, &baseline, |r, v| fingerprint(r, v, None));
+        assert_eq!(out.suppressed_total, 2);
+        let supp_paths: Vec<&Path> = out
+            .suppressed
+            .iter()
+            .filter_map(|s| s.violation.path.as_deref())
+            .collect();
+        assert_eq!(
+            supp_paths,
+            [Path::new("p14/package.json"), Path::new("p60/package.json")]
+        );
+        let live_paths: Vec<&Path> = out.live.results[0]
+            .violations
+            .iter()
+            .filter_map(|v| v.path.as_deref())
+            .collect();
+        assert_eq!(live_paths, [Path::new("p13/package.json")]);
+
+        // Rename fallback (Pass 2): if p60 is renamed to p13 (2 total findings),
+        // Pass 1 suppresses p14 and Pass 2 fills the remaining slot with p13.
+        let renamed = Report {
+            results: vec![RuleResult::new(
+                std::sync::Arc::from("names-unique"),
+                Level::Error,
+                None,
+                vec![mk_v("p13/package.json"), mk_v("p14/package.json")],
+                false,
+            )],
+        };
+        let out_renamed = apply(&renamed, &baseline, |r, v| fingerprint(r, v, None));
+        assert_eq!(out_renamed.suppressed_total, 2);
+        assert!(out_renamed.live.results[0].violations.is_empty());
+    }
+
+    #[test]
+    fn single_count_path_free_entry_preserves_original_when_earlier_repeat_added() {
+        let mk_v = |path: &str| {
+            Violation::new("dup")
+                .with_path(Path::new(path))
+                .with_baseline_key("dup")
+                .with_path_free_identity()
+        };
+        let fp = fingerprint("names-unique", &mk_v("p60/package.json"), None);
+        let single = Baseline::from_fingerprints(
+            Some("0.24.0".into()),
+            [FingerprintedViolation::from_violation(
+                "names-unique",
+                &mk_v("p60/package.json"),
+                fp,
+            )],
+        );
+        assert_eq!(single.entries[0].paths, ["p60/package.json"]);
+        let two = Report {
+            results: vec![RuleResult::new(
+                std::sync::Arc::from("names-unique"),
+                Level::Error,
+                None,
+                vec![mk_v("p13/package.json"), mk_v("p60/package.json")],
+                false,
+            )],
+        };
+        let out_single = apply(&two, &single, |r, v| fingerprint(r, v, None));
+        assert_eq!(
+            out_single.suppressed[0].violation.path.as_deref(),
+            Some(Path::new("p60/package.json"))
+        );
+        assert_eq!(
+            out_single.live.results[0].violations[0].path.as_deref(),
+            Some(Path::new("p13/package.json"))
+        );
+    }
+
+    #[test]
+    fn preferred_paths_never_widen_count_and_never_store_or_match_hidden_paths() {
+        // Hand-edited entry with more paths than count still caps at count.
+        let cap_entry = BaselineEntry {
+            rule_id: "r".into(),
+            path: Some("a.json".into()),
+            fingerprint: "dup".into(),
+            count: 1,
+            message: None,
+            paths: vec!["b.json".into(), "c.json".into()],
+        };
+        let rep = Report {
+            results: vec![RuleResult::new(
+                std::sync::Arc::from("r"),
+                Level::Error,
+                None,
+                vec![
+                    Violation::new("dup").with_path(Path::new("a.json")),
+                    Violation::new("dup").with_path(Path::new("b.json")),
+                    Violation::new("dup").with_path(Path::new("c.json")),
+                ],
+                false,
+            )],
+        };
+        let out = apply(
+            &rep,
+            &Baseline {
+                alint_version: None,
+                entries: vec![cap_entry],
+            },
+            by_message,
+        );
+        assert_eq!(out.suppressed_total, 1);
+        assert_eq!(
+            out.suppressed[0].violation.path.as_deref(),
+            Some(Path::new("b.json"))
+        );
+
+        // Hidden-path entries store no `paths` and never match `paths` even if hand-edited.
+        let h1 = hidden("secret-a.txt");
+        let h2 = hidden("secret-b.txt");
+        let hfp = fingerprint("rule", &h1, None);
+        let hidden_base = Baseline::from_fingerprints(
+            Some("0.24.0".into()),
+            [
+                FingerprintedViolation::from_violation("rule", &h1, hfp.clone()),
+                FingerprintedViolation::from_violation("rule", &h2, hfp.clone()),
+            ],
+        );
+        assert_eq!(hidden_base.entries[0].paths, Vec::<String>::new());
+        assert!(!hidden_base.to_jsonl().contains("\"paths\""));
+
+        // Even if someone hand-edits `paths: ["secret-b.txt"]` on a hidden-path entry,
+        // `Baseline::load` drops it and `apply` ignores `paths` for sensitive paths.
+        let crafted = format!(
+            "{{\"schema_version\":{SCHEMA_VERSION}}}\n\
+             {{\"rule_id\":\"rule\",\"path\":\"<redacted>\",\"fingerprint\":\"{hfp}\",\"count\":1,\"paths\":[\"secret-b.txt\"]}}\n"
+        );
+        let loaded = Baseline::load(&crafted).unwrap();
+        assert_eq!(loaded.entries[0].paths, Vec::<String>::new());
+
+        let direct_crafted = Baseline {
+            alint_version: None,
+            entries: vec![BaselineEntry {
+                rule_id: "rule".into(),
+                path: Some("<redacted>".into()),
+                fingerprint: hfp,
+                count: 1,
+                message: None,
+                paths: vec!["secret-b.txt".into()],
+            }],
+        };
+        let hidden_rep = Report {
+            results: vec![RuleResult::new(
+                std::sync::Arc::from("rule"),
+                Level::Error,
+                None,
+                vec![h1, h2],
+                false,
+            )],
+        };
+        let out_hidden = apply(&hidden_rep, &direct_crafted, |r, v| fingerprint(r, v, None));
+        assert_eq!(out_hidden.suppressed_total, 1);
+        assert_eq!(
+            out_hidden.suppressed[0].violation.path.as_deref(),
+            Some(Path::new("secret-a.txt")),
+            "hidden-path matching must ignore preferred paths and use Pass 2 order"
+        );
+    }
+
+    #[test]
+    fn load_merges_duplicate_entry_paths_and_pre_022_hint_checks_version_and_hidden_paths() {
+        let merged_text = format!(
+            "{{\"schema_version\":{SCHEMA_VERSION}}}\n\
+             {{\"rule_id\":\"r\",\"fingerprint\":\"ff\",\"count\":1,\"paths\":[\"z.json\"]}}\n\
+             {{\"rule_id\":\"r\",\"fingerprint\":\"ff\",\"count\":1,\"paths\":[\"a.json\"]}}\n"
+        );
+        let merged = Baseline::load(&merged_text).unwrap();
+        assert_eq!(merged.entries.len(), 1);
+        assert_eq!(merged.entries[0].count, 2);
+        assert_eq!(merged.entries[0].paths, ["a.json", "z.json"]);
+
+        // Version predicate (#547).
+        assert!(is_pre_022_version("0.21.2"));
+        assert!(is_pre_022_version("0.21.0"));
+        assert!(is_pre_022_version("0.19.5-rc.1"));
+        assert!(is_pre_022_version("v0.21.0"));
+        assert!(!is_pre_022_version("0.22.0"));
+        assert!(!is_pre_022_version("0.23.0"));
+        assert!(!is_pre_022_version("1.0.0"));
+        assert!(!is_pre_022_version("dev"));
+
+        let empty_report = Report { results: vec![] };
+        let hidden_stale = BaselineEntry {
+            rule_id: "r".into(),
+            path: Some("<redacted>".into()),
+            fingerprint: "old-fp".into(),
+            count: 1,
+            message: None,
+            paths: Vec::new(),
+        };
+        let old_base = Baseline {
+            alint_version: Some("0.21.2".into()),
+            entries: vec![hidden_stale.clone()],
+        };
+        let applied_old = apply(&empty_report, &old_base, by_message);
+        assert!(old_base.has_unmatched_pre_022_hidden_path_entries(&applied_old));
+
+        let current_base = Baseline {
+            alint_version: Some("0.23.0".into()),
+            entries: vec![hidden_stale],
+        };
+        let applied_cur = apply(&empty_report, &current_base, by_message);
+        assert!(!current_base.has_unmatched_pre_022_hidden_path_entries(&applied_cur));
     }
 }

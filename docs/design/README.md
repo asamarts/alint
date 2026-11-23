@@ -63,3 +63,4 @@ in `docs/adr/` is missing from this table.
 | [0046](../adr/0046-a-linear-extends-merge-sealed-options-and-the-rounds-open-questions.md) | A linear `extends:` merge, sealed options, and the round's open questions | accepted |
 | [0047](../adr/0047-sarif-tells-apart-a-fingerprint-repeated-within-a-run.md) | SARIF tells apart a fingerprint repeated within a run by occurrence, as GitLab output does | accepted |
 | [0048](../adr/0048-v024-owner-decisions.md) | v0.24 owner decisions: saphyr exit, Phase 3 completion, owned walker, LSP rewrite, backlog drain, and plugins to v0.25 | accepted |
+| [0049](../adr/0049-baseline-preferred-paths-for-repeated-fingerprints.md) | Baseline entries record visible preferred paths for repeated fingerprints | accepted |

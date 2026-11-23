@@ -1672,12 +1672,7 @@ fn load_extended_source(
     };
     gate_extended_source(state, &parent, &source_display, opts.kind_catalog)?;
     let field_source = state.field_source_names.intern(&source_display);
-    mark_extended_provenance(
-        &mut parent,
-        &source_display,
-        &field_source,
-        kind == ExtendsEntryKind::Https,
-    );
+    mark_extended_provenance(&mut parent, &field_source, kind == ExtendsEntryKind::Https);
     drop_extended_settings(
         &mut parent,
         state,
@@ -1695,30 +1690,30 @@ fn load_extended_source(
     if kind == ExtendsEntryKind::Https {
         let base = url.split('#').next().unwrap_or(url);
         if !trusted.contains(base) && !trusted.contains(url) {
-            cap_untrusted_remote(&mut parent, &source_display, opts.kind_catalog)?;
+            cap_untrusted_remote(
+                &mut parent,
+                &source_display,
+                &field_source,
+                opts.kind_catalog,
+            )?;
         }
     }
     Ok(parent)
 }
 
-/// Record that the `extends:` source `url` (fetched when `remote`) shaped
-/// `parent`'s rules / templates, so `finalize` can judge the EFFECTIVE rule
-/// after the id-based field-merge has blurred where each field came from (e.g.
-/// refuse any contribution to a spawning rule, or a remote-assembled `${` env
-/// reference). `field_source` names `url` in the field-source marker.
-fn mark_extended_provenance(
-    parent: &mut RawConfig,
-    url: &str,
-    field_source: &ayaml::Value,
-    remote: bool,
-) {
+/// Record that the `extends:` source named by interned `field_source` (fetched
+/// when `remote`) shaped `parent`'s rules / templates, so `finalize` can judge
+/// the EFFECTIVE rule after the id-based field-merge has blurred where each
+/// field came from (e.g. refuse any contribution to a spawning rule, or a
+/// remote-assembled `${` env reference).
+fn mark_extended_provenance(parent: &mut RawConfig, field_source: &ayaml::Value, remote: bool) {
     let classes: &[crate::SourceClass] = if remote {
         &[crate::SourceClass::Extended, crate::SourceClass::Remote]
     } else {
         &[crate::SourceClass::Extended]
     };
-    crate::trust::mark_extended_source_in(&mut parent.rules, url, field_source, classes);
-    crate::trust::mark_extended_source_in(&mut parent.templates, url, field_source, classes);
+    crate::trust::mark_extended_source_in(&mut parent.rules, field_source, classes);
+    crate::trust::mark_extended_source_in(&mut parent.templates, field_source, classes);
 }
 
 /// Apply the restrictions on a remote `extends:` the user has NOT listed in
@@ -1726,6 +1721,7 @@ fn mark_extended_provenance(
 fn cap_untrusted_remote(
     parent: &mut RawConfig,
     url: &str,
+    field_source: &ayaml::Value,
     catalog: Option<alint_core::KindCatalog<'_>>,
 ) -> Result<()> {
     // It may not read the consumer's environment through a `when:` (a boolean
@@ -1736,13 +1732,17 @@ fn cap_untrusted_remote(
     // config has merged).
     parent.untrusted_when_var_reads =
         crate::reject_env_reads_in_when(&parent.rules, &parent.templates, url)?;
-    crate::mark_provenance_in(&mut parent.rules, crate::SourceClass::UntrustedRemote, url);
+    crate::mark_provenance_in(
+        &mut parent.rules,
+        crate::SourceClass::UntrustedRemote,
+        field_source,
+    );
     // ...and a template it shapes may not splice an env-derived instance var
     // (`{{vars.token}}`) into the rule a user's instance expands it into.
     crate::mark_provenance_in(
         &mut parent.templates,
         crate::SourceClass::UntrustedRemote,
-        url,
+        field_source,
     );
     // It may not hide files from every rule (yours included) with `ignore:`.
     crate::reject_untrusted_ignore_in(&parent.ignore, url)?;

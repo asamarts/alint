@@ -462,18 +462,27 @@ fn a_rule_marker_does_not_grow_with_its_source_path() {
     assert_eq!(origins_at("s"), origins_at(&deep_dir()));
 
     // The entry's text, written as long as the platform's paths allow, names
-    // an extended file's fields.
+    // an extended file's fields and provenance by interned index (#581).
     let sources_of = |entry: &str| {
         let (_tmp, config) = repo(&[
             (".alint.yml", &format!("version: 1\nextends: ['{entry}']\n")),
             ("base.yml", &format!("version: 1\n{RULE}")),
         ]);
         let raw = raw_at(&config);
-        // Its text is still what an error about a field quotes.
+        // Its text is still what an error about a field or provenance quotes.
         let mut rule = raw.rules[0].clone();
         crate::trust::name_field_sources(&mut rule, &raw.field_source_names);
         assert_eq!(configured_field_source(&rule, "paths"), Some(entry));
-        marker_size(&raw.rules[0], FIELD_SOURCES_MARKER)
+        assert_eq!(
+            crate::trust::Provenance::read(&raw.rules[0], &raw.field_source_names)
+                .extended
+                .as_deref(),
+            Some(entry)
+        );
+        (
+            marker_size(&raw.rules[0], FIELD_SOURCES_MARKER),
+            marker_size(&raw.rules[0], crate::trust::PROVENANCE_MARKER),
+        )
     };
     assert_eq!(
         sources_of("./base.yml"),

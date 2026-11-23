@@ -698,9 +698,25 @@ impl RawConfig {
                 .get("id")
                 .and_then(|v| v.as_str())
                 .map_or_else(|| "<anonymous>".to_string(), str::to_string);
-            reject_remote_assembled_env_refs(m, &templates_by_id, &id_hint)?;
-            reject_untrusted_assembled_when(m, &templates_by_id, &id_hint, &self.env_vars)?;
-            reject_untrusted_env_instance_vars(m, &templates_by_id, &id_hint)?;
+            reject_remote_assembled_env_refs(
+                m,
+                &templates_by_id,
+                &id_hint,
+                &self.field_source_names,
+            )?;
+            reject_untrusted_assembled_when(
+                m,
+                &templates_by_id,
+                &id_hint,
+                &self.env_vars,
+                &self.field_source_names,
+            )?;
+            reject_untrusted_env_instance_vars(
+                m,
+                &templates_by_id,
+                &id_hint,
+                &self.field_source_names,
+            )?;
             // An unknown template's error quotes `extends_template:`, which may
             // be read from the environment.
             let masked_instance = masked_rule_mappings(m);
@@ -740,7 +756,7 @@ impl RawConfig {
             // Remove the private marker before RuleSpec deserialization so it never
             // leaks into the public DSL or runtime model.
             let untrusted_fix_source = take_untrusted_fix_source(&mut expanded);
-            let provenance = Provenance::read(&expanded);
+            let provenance = Provenance::read(&expanded, &self.field_source_names);
             expanded.remove(PROVENANCE_MARKER);
             // Neither an extended source nor a nested config (whose rules carry
             // the untrusted-fix marker) may spawn, so neither may have a fix

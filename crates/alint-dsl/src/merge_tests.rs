@@ -436,7 +436,11 @@ fn mapping() -> impl Strategy<Value = Mapping> {
                                 1 => crate::SourceClass::Remote,
                                 _ => crate::SourceClass::UntrustedRemote,
                             };
-                            crate::mark_provenance_in(marked, class, &format!("s{source}"));
+                            crate::mark_provenance_in(
+                                marked,
+                                class,
+                                &ayaml::Value::from(format!("s{source}")),
+                            );
                         }
                     }
                     4 => {

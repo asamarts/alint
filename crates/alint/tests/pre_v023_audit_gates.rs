@@ -466,6 +466,7 @@ fn sarif_repeated_fingerprints_with_baseline_do_not_swap_dot_vs_slash_paths() {
             path: Some("a.json".into()),
             fingerprint: canonical_fp.clone(),
             message: Some("dup".into()),
+            path_free_identity: false,
         }],
     );
     let applied = apply_baseline(&report, &baseline, |rid, v| {

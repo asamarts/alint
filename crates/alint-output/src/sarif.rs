@@ -1765,6 +1765,7 @@ mod tests {
                     path: None,
                     fingerprint: path_free("names-unique", violation),
                     message: Some(violation.message.to_string()),
+                    path_free_identity: false,
                 }),
         );
         let shown = |findings: &[(&str, usize)]| shown_under(&baseline, findings);
@@ -1815,5 +1816,49 @@ mod tests {
         assert_eq!(at(&first, "a/package.json"), b, "{first:?}");
         assert_eq!(at(&first, "b/package.json"), d, "{first:?}");
         assert!(!at(&first, "d/package.json").1, "{first:?}");
+    }
+
+    /// With ADR-0049 preferred paths recorded in the baseline, adding a repeat
+    /// that sorts earlier (`a/package.json`) or between (`c/package.json`)
+    /// keeps both original baselined findings suppressed AND preserves their
+    /// exact prior SARIF occurrence fingerprints (#601).
+    #[test]
+    fn preferred_paths_preserve_baselined_sarif_fingerprints_when_new_repeat_sorts_first() {
+        use alint_core::baseline::{Baseline, FingerprintedViolation};
+        let written = repeats(&[("b/package.json", 1), ("d/package.json", 5)]);
+        let baseline = Baseline::from_fingerprints(
+            Some("0.24.0".into()),
+            written.results[0].violations.iter().map(|violation| {
+                FingerprintedViolation::from_violation(
+                    "names-unique",
+                    violation,
+                    path_free("names-unique", violation),
+                )
+            }),
+        );
+        let shown = |findings: &[(&str, usize)]| shown_under(&baseline, findings);
+        let at = |shown: &BTreeMap<String, (String, bool)>, path: &str| shown[path].clone();
+        let alone = shown(&[("b/package.json", 1), ("d/package.json", 5)]);
+        let (b, d) = (at(&alone, "b/package.json"), at(&alone, "d/package.json"));
+        assert_eq!(b, ("fp-x".to_string(), true));
+        assert!(d.1, "{alone:?}");
+
+        for extra in ["a/package.json", "c/package.json", "e/package.json"] {
+            let with_extra = shown(&[(extra, 1), ("b/package.json", 1), ("d/package.json", 5)]);
+            assert_eq!(
+                at(&with_extra, "b/package.json"),
+                b,
+                "{extra}: {with_extra:?}"
+            );
+            assert_eq!(
+                at(&with_extra, "d/package.json"),
+                d,
+                "{extra}: {with_extra:?}"
+            );
+            assert!(
+                !at(&with_extra, extra).1,
+                "{extra} must be live: {with_extra:?}"
+            );
+        }
     }
 }

@@ -22,7 +22,8 @@ pub(crate) const UNTRUSTED_FIX_SOURCE_MARKER: &str = "__alint_internal_untrusted
 
 /// Internal raw-mapping marker recording which kinds of `extends:` source
 /// contributed to a rule or template: a mapping from a [`SourceClass`] key to
-/// the first such source's name (for the error message). Like
+/// the first such source's interned index in [`FieldSourceNames`] (or direct
+/// text in standalone unit tests), resolved by [`Provenance::read`]. Like
 /// [`UNTRUSTED_FIX_SOURCE_MARKER`] it is monotonic across [`merge`](crate::merge) and template
 /// expansion, and [`RawConfig::finalize`] removes it before deserializing the
 /// effective rule. It lets the finalize-time checks ask "did an extended / a
@@ -57,8 +58,8 @@ pub(crate) const SENSITIVE_FIELDS_MARKER: &str = "__alint_internal_sensitive_fie
 /// the entry's text in each (a deep path, say) cost a multiple of the config.
 pub(crate) const FIELD_SOURCES_MARKER: &str = "__alint_internal_field_sources";
 
-/// The `extends:` sources one load names in [`FIELD_SOURCES_MARKER`], each
-/// held once, by the index the marker carries.
+/// The `extends:` sources one load names in [`FIELD_SOURCES_MARKER`] and
+/// [`PROVENANCE_MARKER`], each held once, by the index the marker carries.
 #[derive(Debug, Default)]
 pub(crate) struct FieldSourceNames {
     names: Vec<String>,
@@ -80,6 +81,18 @@ impl FieldSourceNames {
     pub(crate) fn into_names(self) -> Vec<String> {
         self.names
     }
+}
+
+/// Resolve an interned source index (or direct string) against `names`.
+fn resolve_source_name<'a>(value: &'a ayaml::Value, names: &'a [String]) -> Option<&'a str> {
+    if let Some(name) = value
+        .as_u64()
+        .and_then(|index| usize::try_from(index).ok())
+        .and_then(|index| names.get(index))
+    {
+        return Some(name.as_str());
+    }
+    value.as_str()
 }
 
 /// Write each `extends:` source `mapping`'s [`FIELD_SOURCES_MARKER`] names by
@@ -131,14 +144,16 @@ pub(crate) struct Provenance {
 }
 
 impl Provenance {
-    pub(crate) fn read(mapping: &Mapping) -> Self {
+    pub(crate) fn read(mapping: &Mapping, source_names: &[String]) -> Self {
         let marker = mapping
             .get(PROVENANCE_MARKER)
             .and_then(ayaml::Value::as_mapping);
         let source = |class: SourceClass| {
-            marker
-                .and_then(|m| m.get(class.key()))
-                .map(|v| v.as_str().unwrap_or("an extended config").to_string())
+            marker.and_then(|m| m.get(class.key())).map(|v| {
+                resolve_source_name(v, source_names)
+                    .unwrap_or("an extended config")
+                    .to_string()
+            })
         };
         Self {
             extended: source(SourceClass::Extended),
@@ -148,18 +163,23 @@ impl Provenance {
     }
 }
 
-/// Record that `source` (of class `class`) contributed every mapping in
+/// Record that `source` (of class `class`, an interned index in
+/// [`FieldSourceNames`] or a direct string) contributed every mapping in
 /// `mappings`. An earlier record of the same class is kept: the first source
 /// named is as good as any for the error, and keeping it makes the mark
 /// idempotent across a re-merge.
-pub(crate) fn mark_provenance_in(mappings: &mut [Mapping], class: SourceClass, source: &str) {
+pub(crate) fn mark_provenance_in(
+    mappings: &mut [Mapping],
+    class: SourceClass,
+    source: &ayaml::Value,
+) {
     for mapping in mappings {
         let mut marker = match mapping.remove(PROVENANCE_MARKER) {
             Some(ayaml::Value::Mapping(m)) => m,
             _ => Mapping::new(),
         };
         if !marker.contains_key(class.key()) {
-            marker.insert(class.key().into(), source.into());
+            marker.insert(class.key().into(), source.clone());
         }
         mapping.insert(PROVENANCE_MARKER.into(), marker.into());
     }
@@ -172,16 +192,15 @@ pub(crate) fn mark_provenance_in(mappings: &mut [Mapping], class: SourceClass, s
 /// only changed values are replaced, and a provenance marker that is already
 /// the last key is not removed and re-inserted.
 ///
-/// The provenance marker names `source`; the field-source marker holds
-/// `field_source`, the value that names it there ([`FieldSourceNames`]).
+/// Both markers carry `source`, the interned index in [`FieldSourceNames`] (or
+/// direct text in standalone unit tests).
 pub(crate) fn mark_extended_source_in(
     mappings: &mut [Mapping],
-    source: &str,
-    field_source: &ayaml::Value,
+    source: &ayaml::Value,
     classes: &[SourceClass],
 ) {
     for mapping in mappings {
-        mark_field_sources_one(mapping, field_source);
+        mark_field_sources_one(mapping, source);
         for &class in classes {
             mark_provenance_one(mapping, class, source);
         }
@@ -208,7 +227,7 @@ fn mark_field_sources_one(mapping: &mut Mapping, source: &ayaml::Value) {
     }
 }
 
-fn mark_provenance_one(mapping: &mut Mapping, class: SourceClass, source: &str) {
+fn mark_provenance_one(mapping: &mut Mapping, class: SourceClass, source: &ayaml::Value) {
     let last_is_marker = mapping
         .keys()
         .last()
@@ -217,7 +236,7 @@ fn mark_provenance_one(mapping: &mut Mapping, class: SourceClass, source: &str) 
         && let Some(ayaml::Value::Mapping(marker)) = mapping.get_mut(PROVENANCE_MARKER)
     {
         if !marker.contains_key(class.key()) {
-            marker.insert(class.key().into(), source.into());
+            marker.insert(class.key().into(), source.clone());
         }
         return;
     }
@@ -561,8 +580,9 @@ pub(crate) fn reject_remote_assembled_env_refs(
     rule: &Mapping,
     templates_by_id: &std::collections::HashMap<String, &Mapping>,
     id: &str,
+    source_names: &[String],
 ) -> Result<()> {
-    let Some(source) = Provenance::read(rule).remote else {
+    let Some(source) = Provenance::read(rule, source_names).remote else {
         return Ok(());
     };
     let Some(template) = rule
@@ -774,8 +794,9 @@ pub(crate) fn reject_untrusted_assembled_when(
     templates_by_id: &std::collections::HashMap<String, &Mapping>,
     id: &str,
     env_vars: &std::collections::HashMap<String, String>,
+    source_names: &[String],
 ) -> Result<()> {
-    let Some(source) = Provenance::read(rule).untrusted_remote else {
+    let Some(source) = Provenance::read(rule, source_names).untrusted_remote else {
         return Ok(());
     };
     let Some(template) = rule
@@ -806,6 +827,7 @@ pub(crate) fn reject_untrusted_env_instance_vars(
     rule: &Mapping,
     templates_by_id: &std::collections::HashMap<String, &Mapping>,
     id: &str,
+    source_names: &[String],
 ) -> Result<()> {
     fn strings(v: &ayaml::Value, f: &mut impl FnMut(&str)) {
         match v {
@@ -825,9 +847,9 @@ pub(crate) fn reject_untrusted_env_instance_vars(
     else {
         return Ok(());
     };
-    let Some(source) = Provenance::read(rule)
+    let Some(source) = Provenance::read(rule, source_names)
         .untrusted_remote
-        .or_else(|| Provenance::read(template).untrusted_remote)
+        .or_else(|| Provenance::read(template, source_names).untrusted_remote)
     else {
         return Ok(());
     };
