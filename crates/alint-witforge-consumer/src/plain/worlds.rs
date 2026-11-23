@@ -19,9 +19,21 @@ pub mod v0_1 {
     ///
     /// Adapter plugin world.
     ///
+    /// World `adapter` stability: Stable since WIT version 0.1.0.
+    ///
+    /// World `adapter` import `types` stability: Stable since WIT version 0.1.0.
+    ///
+    /// World `adapter` export `adapter-api` stability: Stable since WIT version 0.1.0.
+    ///
     /// World `analyzer`:
     ///
     /// Analyzer plugin world.
+    ///
+    /// World `analyzer` stability: Stable since WIT version 0.1.0.
+    ///
+    /// World `analyzer` import `types` stability: Stable since WIT version 0.1.0.
+    ///
+    /// World `analyzer` export `analyzer-api` stability: Stable since WIT version 0.1.0.
     pub const WORLDS: &[super::World] = &[
         super::World {
             name: "adapter",
