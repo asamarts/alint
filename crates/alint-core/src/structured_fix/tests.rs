@@ -450,6 +450,23 @@ fn xml_removal_span_removes_element_and_attribute() {
 }
 
 #[test]
+fn xml_span_resolvers_enforce_parse_limits() {
+    use std::fmt::Write as _;
+    let depth = crate::structured_format::MAX_XML_DEPTH + 1;
+    let deep = format!("{}x{}", "<a>".repeat(depth), "</a>".repeat(depth));
+    assert!(resolve_value_span(Format::Xml, deep.as_bytes(), &[key("a")]).is_none());
+    assert!(resolve_removal_span(Format::Xml, deep.as_bytes(), &[key("a")]).is_none());
+
+    let mut wide = String::from("<r");
+    for i in 0..300 {
+        write!(wide, " a{i}=\"v\"").unwrap();
+    }
+    wide.push_str(">x</r>");
+    assert!(resolve_value_span(Format::Xml, wide.as_bytes(), &[key("r")]).is_none());
+    assert!(resolve_removal_span(Format::Xml, wide.as_bytes(), &[key("r"), key("@a0")]).is_none());
+}
+
+#[test]
 fn xml_serialize_escapes_entities_and_controls() {
     assert_eq!(
         serialize_scalar(Format::Xml, &json!("a & b < c > d \" e")).unwrap(),

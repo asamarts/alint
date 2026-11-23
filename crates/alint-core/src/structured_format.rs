@@ -908,7 +908,7 @@ mod tests {
 
     #[test]
     fn xml_scan_bounds_attribute_width_to_prevent_quadratic_parse() {
-        // roxmltree 0.20 validates per-element attribute uniqueness in O(n^2), so
+        // `roxmltree` 0.21.2 validates per-element attribute uniqueness in O(n^2), so
         // one element with tens of thousands of attributes is a wall-clock DoS the
         // depth guard can't see. The pre-scan must reject an over-wide element as
         // an ordinary parse error -- NOT hand it to roxmltree to grind on.
@@ -1521,28 +1521,52 @@ mod tests {
     fn xml_at_max_depth_parses_on_a_worker_sized_stack() {
         // The depth REJECTION path is tested elsewhere; this gates the other half
         // -- that a document AT `MAX_XML_DEPTH` actually PARSES without overflowing
-        // on the stack alint really parses XML on (a ~2 MiB rayon worker), not just
-        // on the test harness's larger stack. roxmltree recurses ~1 frame/element.
-        // NOTE this proves at-limit safety for the CURRENT value; it does NOT by
-        // itself catch a re-widening: a 2 MiB debug stack survives to ~350 deep, so
-        // a regression to e.g. 256 would still PASS here. The compile-time
-        // `SAFE_MAX_XML_DEPTH = 160` assert is what blocks such a raise (`256 > 160`
-        // = build error); this runtime test is the empirical at-limit backstop that
-        // the ceiling isn't fantasy.
+        // on both a constrained 1 MiB stack and a ~2 MiB rayon worker stack, not
+        // just on the test harness's larger stack. `roxmltree` 0.21.2 parses
+        // element nesting iteratively, while `element_to_value` and
+        // `serde_json::Value::drop` still recurse ~1 frame/element.
         let deep = format!(
             "{}x{}",
             "<a>".repeat(MAX_XML_DEPTH),
             "</a>".repeat(MAX_XML_DEPTH)
         );
-        let ok = std::thread::Builder::new()
-            .stack_size(2 * 1024 * 1024)
-            .spawn(move || Format::Xml.parse(&deep).is_ok())
-            .expect("spawn worker-sized thread")
+        for stack_bytes in [1024 * 1024, 2 * 1024 * 1024] {
+            let input = deep.clone();
+            let ok = std::thread::Builder::new()
+                .stack_size(stack_bytes)
+                .spawn(move || Format::Xml.parse(&input).is_ok())
+                .expect("spawn worker-sized thread")
+                .join()
+                .expect("the parse thread must return, not abort the process");
+            assert!(
+                ok,
+                "an at-limit XML document must parse on a {stack_bytes}-byte stack"
+            );
+        }
+    }
+
+    #[test]
+    fn roxmltree_parses_deep_xml_iteratively_on_1mib_stack() {
+        // Guard the `roxmltree` 0.21.2 iterative-parsing fix: even a 10,000-deep
+        // document parsed directly by `roxmltree` must not stack-overflow on a
+        // constrained 1 MiB stack, and `Format::Xml.parse` still rejects it
+        // cleanly via the pre-scan depth limit.
+        let deep = format!("{}x{}", "<a>".repeat(10_000), "</a>".repeat(10_000));
+        let input = deep.clone();
+        let raw_ok = std::thread::Builder::new()
+            .stack_size(1024 * 1024)
+            .spawn(move || roxmltree::Document::parse(&input).is_ok())
+            .expect("spawn 1 MiB thread")
             .join()
-            .expect("the parse thread must return, not abort the process");
+            .expect("roxmltree 0.21.2 must not stack-overflow");
         assert!(
-            ok,
-            "an at-limit XML document must parse on a 2 MiB worker stack"
+            raw_ok,
+            "roxmltree 0.21.2 parses 10,000-deep XML iteratively"
+        );
+        let err = Format::Xml.parse(&deep).unwrap_err();
+        assert!(
+            err.contains("depth"),
+            "Format::Xml rejects over-deep XML: {err}"
         );
     }
 
