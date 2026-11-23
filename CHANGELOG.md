@@ -29,6 +29,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `1..=1,000,000`; `limits.key_path_bytes_per_decode`, default 32 MiB, range `1..=16 GiB`)
   supported in top-level configs and `.alint.d/` drop-ins and refused in `extends:` and nested
   configs (#596, #569).
+- Baseline entries for non-hidden repeated fingerprints (such as `constraint` rules) now record an
+  optional sorted `paths` field (keeping `schema_version: 1`, ADR-0049): `baseline::apply`
+  suppresses matching visible paths first before filling any remaining count in deterministic
+  order, keeping unchanged baselined findings and their SARIF occurrence fingerprints stable when
+  a new repeat sorts earlier; older baselines keep count-order matching and hidden-path entries
+  store no `paths` (#601).
+- `alint check --baseline` prints a one-line regeneration hint on stderr when a loaded baseline's
+  `alint_version` header is below `0.22` and at least one hidden-path entry matches nothing (#547).
 - JetBrains IDE plugin (`editors/jetbrains`): forwards IntelliJ Trusted Projects state as
   `initializationOptions.trusted` (defaulting to untrusted), automatically restarts `alint lsp`
   and reconnects open editor tabs when project trust is granted or revoked without starting stopped
@@ -51,6 +59,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   empty locale (#597).
 - Documented the finite IEEE-754 `f64` number-range limit (`1e400` fails parsing for the whole
   JSON file) across all JSON-reading rule kinds and version 2 JSON readers (#564).
+- Interned `PROVENANCE_MARKER` source strings in `alint-dsl` into the load's `FieldSourceNames`
+  table (resolved by `Provenance::read`), matching `FIELD_SOURCES_MARKER` so marker memory no
+  longer scales with the length of extended source paths or URLs (#581).
 - Per-rule finding cap (`findings_per_rule`, default `10,000`) enforced across `key_parity` and all
   `constraint` assertion families (`equal`, `unique`, `set`), and per-decode key-path memory cap
   (`key_path_bytes_per_decode`, default 32 MiB) enforced across JSON, YAML, TOML, dotenv, INI,

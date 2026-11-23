@@ -269,5 +269,12 @@ owner ADR approval before implementation starts (matching v0.23's Phase 3 owner 
   overlapping-pattern Aho-Corasick redaction and short-value structural masking across `fix`/`lsp`/
   `extends`, nested option escaping (`key_parity.ignore_keys`, `scope_filter`, JSONPath I-Regexp,
   `(?x)` whitespace, `git_commit_message.since`), JUnit/agent sanitization, and `roxmltree` 0.21.2
-  duplicate-default-`xmlns` parity and attribute value spans.
-  Next: Phase 1 Batch 2 (Correctness and usability: #579, #546, #601, #564, #547, #597, #581).
+  duplicate-default-`xmlns` parity and attribute value spans (#635).
+- 2026-11-23: Phase 1 Batch 2 complete (#636, #637; 7 correctness and usability issues: #579 `/` path tokens +
+  cross-platform Windows/macOS fingerprint golden gates + Windows baseline regeneration docs, #546
+  `java@v1` `java-no-tracked-build` `has_gradle` gate + `**/src/**/build` exclusion, #601 ADR-0049
+  preferred visible paths on baseline entries preserving suppressed repeats and SARIF fingerprints,
+  #564 IEEE-754 `f64` JSON number-range documentation, #547 pre-0.22 hidden-path baseline
+  regeneration hint, #597 `--format` valid-format list + `key_parity` `strip_root` null-root error
+  and empty-object root support, #581 interned `PROVENANCE_MARKER` source strings).
+  Next: Phase 1 Batch 3 (Quick supply-chain cleanups: #611, #612, #613, #615, #610).

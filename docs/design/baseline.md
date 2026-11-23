@@ -595,11 +595,16 @@ only files that already produced such a violation, cached per file).
    occurrence and the baseline file keep the canonical fingerprint. From
    v0.23.0 both formats number the occurrences by the path, line and column
    each finding shows, then rule and message, SARIF's baselined results first;
-   GitLab output numbered them in the order it wrote them before. A repeat
-   keeps its fingerprint while the repeats that sort before it stay; one that
-   sorts before it, new or gone, shifts it, baselined or not, because §3.3
-   suppresses a fingerprint's first findings in that order, up to its count,
-   so a new repeat can take a baselined one's place.
+   GitLab output numbered them in the order it wrote them before. From v0.24
+   (ADR-0049), non-hidden baseline entries that can repeat across files (such as
+   `constraint` findings) carry an optional sorted `paths` array of the visible
+   paths they suppressed. `apply` suppresses findings matching `paths` first
+   (Pass 1), then fills any remaining count in `(path, line, column, message)`
+   order (Pass 2), so adding a new repeat that sorts earlier reports the new
+   finding as live and preserves both the baselined state and SARIF occurrence
+   fingerprints of the unchanged baselined repeats, while older baselines without
+   `paths` retain count-order matching and hidden-path entries store no `paths`
+   (ADR-0030).
 8. **No-regression "ratchet" + level-aware re-surfacing** — out of scope v1, but
    the two most-requested likely follow-ups (prevent a threshold getting *worse*;
    re-surface a grandfathered finding when its rule is escalated to `error`).

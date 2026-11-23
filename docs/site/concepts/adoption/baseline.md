@@ -60,6 +60,8 @@ A finding whose path alint hides (`<redacted>`, because a field that chooses fil
 A baseline file written by v0.21 or earlier recorded each of these findings under a fingerprint of its path. v0.22 still matched that form, but v0.23 does not: those entries show as stale and their findings as new. Regenerate the file once. Because `alint baseline` counts the findings as new, the run needs `--accept-new`.
 
 <!-- alint:since=0.24 -->
+From v0.24, when `alint check --baseline` loads a baseline whose `alint_version` header is below 0.22 and at least one hidden-path entry matches nothing, alint prints a one-line hint reminding you to regenerate it with `alint baseline --accept-new`.
+
 From v0.24, `{path}` and `{dir}` path tokens in `for_each_file`, `for_each_dir`, and `every_matching_has` always render with `/` separators on every platform (matching Linux and macOS). If a baseline was generated on Windows in v0.23 or earlier and contains findings from nested `for_each_*` rules referencing `{path}` or `{dir}`, regenerate it once with `alint baseline --accept-new` so its fingerprints match across all operating systems.
 <!-- /alint:since -->
 
@@ -74,6 +76,10 @@ From v0.24, `{path}` and `{dir}` path tokens in `for_each_file`, `for_each_dir`,
 ```
 
 One entry per line (not a JSON array) is deliberately **merge-friendly**, and the sorted order makes an unchanged tree regenerate byte-for-byte. Only `fingerprint` and `count` are matched; `rule_id`, `path`, and `message` are advisory, there so a reviewer reading the diff can see what is being grandfathered. The `count` is a **budget**: identical findings collapse into one entry, and if the tree later holds *more* occurrences than recorded, the excess is reported as new; if *fewer*, the remainder is pruned as stale.
+
+<!-- alint:since=0.24 -->
+From v0.24 (ADR-0049), non-hidden entries whose fingerprint can repeat across distinct files (such as `constraint` findings) also record an optional `paths` array of the visible paths they suppressed. On subsequent runs, alint suppresses those paths first before filling any remaining count in deterministic order, so adding a new repeat that sorts earlier leaves the unchanged baselined findings suppressed and keeps their SARIF occurrence fingerprints stable. Existing baseline files without `paths` continue to work unchanged, and hidden-path entries never store `paths`.
+<!-- /alint:since -->
 
 ## Keeping the baseline honest
 
