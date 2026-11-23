@@ -1,30 +1,37 @@
 package org.alint.lsp
 
+import com.intellij.ide.impl.isTrusted
+import com.intellij.ide.trustedProjects.TrustedProjectsListener
 import com.intellij.notification.NotificationAction
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.vfs.VirtualFile
 import com.redhat.devtools.lsp4ij.LanguageServerFactory
+import com.redhat.devtools.lsp4ij.LanguageServerManager
+import com.redhat.devtools.lsp4ij.ServerStatus
 import com.redhat.devtools.lsp4ij.server.ProcessStreamConnectionProvider
 import com.redhat.devtools.lsp4ij.server.StreamConnectionProvider
+
+internal const val ALINT_SERVER_ID = "alint"
 
 /**
  * Registers `alint lsp` with LSP4IJ. Wired in `plugin.xml` under the
  * `com.redhat.devtools.lsp4ij` server extension point.
  *
  * Uses LSP4IJ's `ProcessStreamConnectionProvider` (`setCommands` /
- * `setWorkingDirectory`) and the `LanguageServerFactory` interface; the
- * editors CI job (`./gradlew buildPlugin verifyPlugin`) catches API
- * drift in the pinned LSP4IJ version.
+ * `setWorkingDirectory` / `getInitializationOptions`) and the
+ * `LanguageServerFactory` interface; the editors CI job (`./gradlew buildPlugin
+ * verifyPlugin`) catches API drift in the pinned LSP4IJ version.
  */
 class AlintLanguageServerFactory : LanguageServerFactory {
     override fun createConnectionProvider(project: Project): StreamConnectionProvider =
         AlintConnectionProvider(project)
 }
 
-private class AlintConnectionProvider(project: Project) : ProcessStreamConnectionProvider() {
+private class AlintConnectionProvider(private val project: Project) : ProcessStreamConnectionProvider() {
     init {
         val binary = AlintBinary.resolve()
         if (binary != null) {
@@ -33,6 +40,43 @@ private class AlintConnectionProvider(project: Project) : ProcessStreamConnectio
         } else {
             thisLogger().warn("alint binary not found on PATH or in settings; server not started")
             AlintNotifier.binaryMissing(project)
+        }
+    }
+
+    /**
+     * Forward the IDE's trusted-project state in `initializationOptions` so
+     * `alint lsp` unlocks command rules, Git rules, custom facts, remote
+     * `extends:`, and `{{env.*}}` only when the user has trusted the project.
+     * Computed dynamically on each initialize so restarts pick up changes.
+     */
+    override fun getInitializationOptions(rootUri: VirtualFile?): Any =
+        mapOf("trusted" to project.isTrusted())
+}
+
+/**
+ * Restarts a running `alint` language server whenever the IDE's trusted-project
+ * state changes so the new session re-initializes with updated `trusted`
+ * `initializationOptions`. Registered as an application listener in `plugin.xml`
+ * because `TrustedProjectsListener.TOPIC` is application-scoped.
+ */
+class AlintTrustedProjectsListener : TrustedProjectsListener {
+    override fun onProjectTrusted(project: Project) {
+        restartIfRunning(project)
+    }
+
+    override fun onProjectUntrusted(project: Project) {
+        restartIfRunning(project)
+    }
+
+    private fun restartIfRunning(project: Project) {
+        if (project.isDisposed) return
+        val manager = LanguageServerManager.getInstance(project)
+        val status = manager.getServerStatus(ALINT_SERVER_ID)
+        if (status == ServerStatus.starting || status == ServerStatus.started) {
+            // In LSP4IJ, `start()` on a running server invokes
+            // `LanguageServerWrapper.restart()`, spawning a fresh process that
+            // re-reads `getInitializationOptions` with the updated trust state.
+            manager.start(ALINT_SERVER_ID)
         }
     }
 }

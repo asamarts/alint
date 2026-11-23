@@ -28,9 +28,9 @@ and `custom:` facts are skipped, a remote `extends:` is not fetched,
 Every other rule lints. See
 [Workspace trust](https://alint.org/docs/cli/lsp/#workspace-trust).
 
-The plugin does not send the IDE's trusted-project state yet, so the
-server stays untrusted in JetBrains IDEs: command rules, rules that run
-Git and custom facts do not run there.
+The plugin sends the IDE's trusted-project state in `initializationOptions`
+(`"trusted": true` when the project is trusted, `"trusted": false` in Safe Mode)
+and restarts `alint lsp` automatically whenever the project's trust changes.
 
 ## Building locally
 

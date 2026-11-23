@@ -38,4 +38,10 @@
     <extensions defaultExtensionNs="com.intellij">
         <notificationGroup id="alint" displayType="BALLOON"/>
     </extensions>
+
+    <applicationListeners>
+        <listener
+            class="org.alint.lsp.AlintTrustedProjectsListener"
+            topic="com.intellij.ide.trustedProjects.TrustedProjectsListener"/>
+    </applicationListeners>
 </idea-plugin>
