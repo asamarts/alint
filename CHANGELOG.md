@@ -49,6 +49,29 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Remote `extends:` cache directory resolution (`alint-dsl`) now uses an internal platform helper
+  (`XDG_CACHE_HOME` / `HOME` on Unix, `Library/Caches/org.asamarts.alint` on macOS,
+  `LOCALAPPDATA` / `USERPROFILE` on Windows), removing `directories`, `dirs-sys`, `option-ext`,
+  and the workspace's sole MPL-2.0 copyleft license exception from `deny.toml` and `about.toml`
+  (#611).
+- Binary/text classification (`alint-rules`) now uses an internal SIMD NUL-byte, BOM, magic-header,
+  and 64-bit SWAR control-byte density heuristic, removing unmaintained `content_inspector 0.2.4`
+  from default release builds (#612).
+- VS Code extension (`editors/vscode`): replaced `node-tar` (`tar`) with Node's built-in
+  `node:zlib` (`gunzipSync` with a 256 MiB output cap) and an in-memory USTAR/PAX/GNU-LongName
+  single-file extractor (`src/tar.ts`) that rejects symlinks, hardlinks, traversal/absolute paths,
+  corrupt checksums, and duplicate entries, leaving `vscode-languageclient` as the extension's sole
+  runtime dependency (#613).
+- Adopted `adotenv 1.6.0` across `alint-core`: delegated dotenv byte/physical-line limits to
+  `ParseOptions::with_max_lines`, multi-BOM stripping to `BomPolicy::StripAll`, bounded verified
+  edits to `Document::edit_with_options` / `EditOptions`, read-only bare-preserving queries to
+  `parse_entries_compact_with_options`, and batch removal lookups to `LookupIndex::unique`,
+  dropping local budget pre-scans and BOM offset translation (#615).
+- Replaced `java-properties 2.0.0` and `encoding_rs` with an internal dependency-free, span-native
+  Java `.properties` parser (`alint-core`), supporting UTF-16 surrogate pairs (`\uXXXX\uYYYY`) and
+  retaining entries ending with a trailing backslash at EOF, unifying entry-row extraction and
+  unlocking safe structured fixes for multiline continuations, escaped keys/values, and
+  whitespace-separated `.properties` lines (#610).
 - `roxmltree` upgraded from `0.20` to `0.21.2` (CVE-2026-92987); XML depth scanning (`xml_scan.rs`)
   now also rejects duplicate default `xmlns` attributes on the same element to match `roxmltree`
   0.21.2, and XML attribute value spans are computed directly from attribute byte ranges (#609).

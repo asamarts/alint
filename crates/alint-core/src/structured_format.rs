@@ -491,27 +491,14 @@ fn element_to_value(node: roxmltree::Node, depth: usize) -> std::result::Result<
 }
 
 /// Java `.properties` -> a flat `{ key: "value" }` object of literal strings
-/// (via `java-properties`, decoded as UTF-8; it handles `=`/`:`/space separators,
-/// `#`/`!` comments, backslash line-continuations, and `\uXXXX` escapes). Dotted
-/// keys (`a.b.c`) stay ONE opaque key, faithful to Java -- query with `$['a.b.c']`.
+/// (via [`crate::properties`], decoded as UTF-8; handles `=`/`:`/space
+/// separators, `#`/`!` comments, backslash line-continuations including EOF,
+/// and `\uXXXX` escapes including UTF-16 surrogate pairs). Dotted keys
+/// (`a.b.c`) stay ONE opaque key, faithful to Java -- query with `$['a.b.c']`.
 /// Values are literal: `${...}` placeholders are resolved by the application,
-/// not the file, so they are kept verbatim. Duplicate keys: last wins. Two
-/// upstream quirks vs Java's `Properties`: a `\uXXXX` surrogate PAIR (an emoji,
-/// say) is rejected as a parse error, and a trailing backslash at EOF drops that
-/// line.
+/// not the file, so they are kept verbatim. Duplicate keys: last wins.
 fn properties_to_value(text: &str) -> std::result::Result<Value, String> {
-    // Decode as UTF-8: alint holds the file as UTF-8 (the caller lossy-decodes its
-    // bytes), but `java_properties::read` defaults to WINDOWS_1252, which would
-    // mojibake any non-ASCII value (`café` -> `cafÃ©`). A leading BOM is stripped
-    // so it cannot land on the first key.
-    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
-    let mut map = serde_json::Map::new();
-    java_properties::PropertiesIter::new_with_encoding(text.as_bytes(), encoding_rs::UTF_8)
-        .read_into(|k, v| {
-            map.insert(k, Value::String(v));
-        })
-        .map_err(|e| e.to_string())?;
-    Ok(Value::Object(map))
+    crate::properties::parse(text)
 }
 
 /// Maximum HCL structural (`{` / `[`) nesting depth `hcl_to_value` will parse.
@@ -1196,8 +1183,17 @@ mod tests {
 
     #[test]
     fn properties_malformed_unicode_escape_is_an_error() {
-        // The parse-error path: java-properties rejects a bad `\u` escape.
         assert!(Format::Properties.parse("k=\\uZZZZ\n").is_err());
+        assert!(Format::Properties.parse("k=\\uD83D\n").is_err());
+    }
+
+    #[test]
+    fn properties_surrogate_pairs_and_trailing_eof_backslash() {
+        let v = Format::Properties
+            .parse("emoji=\\uD83D\\uDE00\neof=kept\\")
+            .expect("parse surrogate pair and EOF trailing backslash");
+        assert_eq!(v["emoji"], json!("😀"));
+        assert_eq!(v["eof"], json!("kept"));
     }
 
     #[test]

@@ -120,7 +120,7 @@ rustix = { version = "1.1", default-features = false, features = ["std", "proces
 # Lossless literal `.env` parsing, diagnostics, spans, and native verified edits
 # for `Format::Dotenv` (alint-core `dotenv`, `structured_fix`). Extracted from
 # alint into asamarts/adotenv; no runtime dependencies of its own.
-adotenv = "1.4.0"
+adotenv = "1.6.0"
 # Span-capable JSONC AST for the Phase-2 structured `set_value`/`remove_value`
 # fixers (alint-core `structured_fix`): `parse_to_ast` yields node byte ranges, so
 # JSON edits are span-splices (disjoint, one-pass) and JSONC comments / trailing
@@ -145,9 +145,6 @@ saphyr = { version = "=0.3.3", default-features = false }
 # version in the workspace).
 saphyr-parser = { version = "=0.3.4", default-features = false }
 roxmltree = "0.21.2"
-# NOTE: pinned; see structured_fix::json_ for the AST-range API used.
-java-properties = "2"
-encoding_rs = "0.8"
 hcl = { package = "hcl-rs", version = "0.18" }
 # Line-level unified diffs for `alint fix --diff`.
 similar = "3"
