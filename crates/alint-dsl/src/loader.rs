@@ -1547,7 +1547,7 @@ fn load_extended_source(
     } else {
         url.to_string()
     };
-    if chosen {
+    if from_environment || (chosen && kind != ExtendsEntryKind::Local) {
         state.environment_values.add(&source_display);
         if let ExtendsEntryKind::Bundled(spec) = kind {
             state
@@ -1555,6 +1555,8 @@ fn load_extended_source(
                 .add(&format!("alint://bundled/{spec}"));
             state.environment_values.add(spec);
         }
+    }
+    if chosen {
         alint_core::CONFIGURATION_MASK.clone_into(&mut source_display);
     }
     let mut local_target = None;
