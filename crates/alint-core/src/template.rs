@@ -12,9 +12,22 @@
 //! no dynamic parser. Unknown tokens are preserved literally so a typo
 //! surfaces in output rather than silently blanking out.
 
+use std::borrow::Cow;
 use std::path::Path;
 
 use crate::config::PathsSpec;
+
+fn normalize_token_path(path: &Path) -> Cow<'_, str> {
+    normalize_token_path_with_sep(path.to_string_lossy(), std::path::MAIN_SEPARATOR)
+}
+
+fn normalize_token_path_with_sep(text: Cow<'_, str>, separator: char) -> Cow<'_, str> {
+    if separator == '/' || !text.contains(separator) {
+        text
+    } else {
+        Cow::Owned(text.replace(separator, "/"))
+    }
+}
 
 /// Token values derived from a relative path. Consumed by
 /// [`render_path`] and by cross-file rules to resolve partner paths.
@@ -92,8 +105,13 @@ impl PathTokens {
     /// same result as with every token derived. A path containing a glob
     /// metacharacter derives every token, so [`unescape_token_values`] (which
     /// consults all six) also behaves exactly as with [`Self::from_path`].
+    ///
+    /// `{path}` and `{dir}` always use `/` separators on every platform (#579)
+    /// so messages, globs, and baseline fingerprints agree across Linux, macOS,
+    /// and Windows. On Unix a literal `\` is a filename character and is kept.
     pub fn from_path_with(rel: &Path, needed: TokenSet) -> Self {
-        let needed = if needs_glob_escape(&rel.to_string_lossy()) {
+        let rel_slash = normalize_token_path(rel);
+        let needed = if needs_glob_escape(&rel_slash) {
             TokenSet::ALL
         } else {
             needed
@@ -102,10 +120,10 @@ impl PathTokens {
             if needed.has(bit) { f() } else { String::new() }
         };
         Self {
-            path: derive(TokenSet::PATH, &|| rel.display().to_string()),
+            path: derive(TokenSet::PATH, &|| rel_slash.clone().into_owned()),
             dir: derive(TokenSet::DIR, &|| {
                 rel.parent()
-                    .map(|p| p.display().to_string())
+                    .map(|p| normalize_token_path(p).into_owned())
                     .unwrap_or_default()
             }),
             basename: derive(TokenSet::BASENAME, &|| {
@@ -2971,5 +2989,25 @@ mod tests {
             unrendered,
             "invalid query $.a[{stem}], when iter.name == {basename}, key nav.{stem}"
         );
+    }
+
+    #[test]
+    fn path_tokens_normalize_windows_separators_and_preserve_unix_backslashes() {
+        assert_eq!(
+            normalize_token_path_with_sep(Cow::Borrowed(r"packages\x{stem}\en.json"), '\\'),
+            "packages/x{stem}/en.json"
+        );
+        assert_eq!(
+            normalize_token_path_with_sep(Cow::Borrowed(r"packages\x{stem}"), '\\'),
+            "packages/x{stem}"
+        );
+        // On a `/` platform, `\` is a legal filename byte and must stay literal.
+        assert_eq!(
+            normalize_token_path_with_sep(Cow::Borrowed(r"packages\x{stem}\en.json"), '/'),
+            r"packages\x{stem}\en.json"
+        );
+        let tokens = PathTokens::from_path(Path::new("packages/x{stem}/en.json"));
+        assert_eq!(tokens.path, "packages/x{stem}/en.json");
+        assert_eq!(tokens.dir, "packages/x{stem}");
     }
 }

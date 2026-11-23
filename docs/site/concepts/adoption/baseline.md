@@ -59,6 +59,10 @@ A finding whose path alint hides (`<redacted>`, because a field that chooses fil
 
 A baseline file written by v0.21 or earlier recorded each of these findings under a fingerprint of its path. v0.22 still matched that form, but v0.23 does not: those entries show as stale and their findings as new. Regenerate the file once. Because `alint baseline` counts the findings as new, the run needs `--accept-new`.
 
+<!-- alint:since=0.24 -->
+From v0.24, `{path}` and `{dir}` path tokens in `for_each_file`, `for_each_dir`, and `every_matching_has` always render with `/` separators on every platform (matching Linux and macOS). If a baseline was generated on Windows in v0.23 or earlier and contains findings from nested `for_each_*` rules referencing `{path}` or `{dir}`, regenerate it once with `alint baseline --accept-new` so its fingerprints match across all operating systems.
+<!-- /alint:since -->
+
 ## The baseline file
 
 `.alint-baseline.json` is **JSON Lines**: a header, then one sorted entry per grandfathered finding.

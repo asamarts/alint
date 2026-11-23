@@ -1685,3 +1685,45 @@ fn junit_and_agent_escape_ansi_esc_and_bidi_filenames_unix() {
         );
     }
 }
+
+#[test]
+fn unknown_format_lists_valid_formats() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        "version: 1\nrules:\n  - id: r\n    kind: file_exists\n    paths: README.md\n    level: error\n",
+    )
+    .unwrap();
+    let out = run(dir.path(), &["check", "--format", "bogus"]);
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("unknown output format: bogus"), "{stderr}");
+    for valid in [
+        "human", "json", "sarif", "github", "markdown", "junit", "gitlab", "agent",
+    ] {
+        assert!(stderr.contains(valid), "missing `{valid}` in: {stderr}");
+    }
+}
+
+#[test]
+fn json_number_outside_f64_range_fails_parse_loudly() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        "version: 1\nrules:\n  - id: r\n    kind: json_path_equals\n    paths: data.json\n    path: '$.ok'\n    equals: true\n    level: error\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("data.json"),
+        r#"{"ok": true, "huge": 1e400}"#,
+    )
+    .unwrap();
+    let out = run(dir.path(), &["check", "--format", "json"]);
+    assert_eq!(out.status.code(), Some(1));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid json");
+    let failures = v["results"][0]["analysis_failures"]
+        .as_array()
+        .expect("analysis_failures array");
+    assert_eq!(failures.len(), 1, "{v}");
+    assert_eq!(failures[0]["kind"].as_str(), Some("resource_parse"), "{v}");
+}

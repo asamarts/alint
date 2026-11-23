@@ -3192,6 +3192,12 @@
     "fingerprint": "313125ac4fa2e43059e4b4a75ebaab479611ab57ae1acfb5d40e4c2fec8e2f30"
   },
   {
+    "scenario": "java/java_ignores_source_packages_named_build.yml",
+    "rule_id": "java-no-tracked-build",
+    "path": "build",
+    "fingerprint": "83243e5e3c3d7df78d6b0a741d3d96ab0caac5ac3ad354816840be321d626231"
+  },
+  {
     "scenario": "monorepo/cargo-workspace/cargo_workspace_fires_on_missing_members.yml",
     "rule_id": "cargo-workspace-members-declared",
     "path": "Cargo.toml",

@@ -35,6 +35,17 @@ facts:
       - settings.gradle.kts
       - "**/settings.gradle.kts"
 
+  - id: has_gradle
+    any_file_exists:
+      - build.gradle
+      - "**/build.gradle"
+      - build.gradle.kts
+      - "**/build.gradle.kts"
+      - settings.gradle
+      - "**/settings.gradle"
+      - settings.gradle.kts
+      - "**/settings.gradle.kts"
+
 rules:
   # --- Manifest -----------------------------------------------------
   - id: java-manifest-exists
@@ -88,9 +99,13 @@ rules:
       `git rm -r --cached` and list `target/` in your `.gitignore`.
 
   - id: java-no-tracked-build
-    when: facts.has_java
+    when: facts.has_gradle
     kind: dir_absent
-    paths: "**/build"
+    paths:
+      include:
+        - "**/build"
+      exclude:
+        - "**/src/**/build"
     git_tracked_only: true
     level: error
     message: >-

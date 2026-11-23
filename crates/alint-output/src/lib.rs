@@ -148,7 +148,25 @@ impl FromStr for Format {
             "junit" | "junit-xml" => Ok(Self::Junit),
             "gitlab" | "gitlab-codequality" | "code-quality" => Ok(Self::Gitlab),
             "agent" | "agentic" | "ai" => Ok(Self::Agent),
-            other => Err(format!("unknown output format: {other}")),
+            other => Err(format!(
+                "unknown output format: {other} (valid formats: human, json, sarif, github, markdown, junit, gitlab, agent)"
+            )),
+        }
+    }
+}
+
+#[cfg(test)]
+mod format_parse_tests {
+    use super::*;
+
+    #[test]
+    fn unknown_format_lists_valid_formats() {
+        let err = "bogus".parse::<Format>().unwrap_err();
+        assert!(err.contains("unknown output format: bogus"), "{err}");
+        for valid in [
+            "human", "json", "sarif", "github", "markdown", "junit", "gitlab", "agent",
+        ] {
+            assert!(err.contains(valid), "missing `{valid}` in: {err}");
         }
     }
 }
