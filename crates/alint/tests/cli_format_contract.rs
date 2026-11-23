@@ -1564,3 +1564,119 @@ fn list_names_each_config_by_its_path_under_the_root() {
         );
     }
 }
+
+#[test]
+fn junit_and_agent_escape_bidi_and_zero_width_characters() {
+    let dir = tempfile::tempdir().unwrap();
+    let bad_name = "a\u{202E}\u{200B}Z.txt";
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        "version: 1\nrules:\n  - id: no-txt\n    kind: file_absent\n    paths: \"*.txt\"\n    level: error\n",
+    )
+    .unwrap();
+    std::fs::write(dir.path().join(bad_name), "hi\n").unwrap();
+
+    // JUnit: failure message attr and body escape U+202E / U+200B.
+    let junit = run(dir.path(), &["check", "--format", "junit"]);
+    assert_eq!(junit.status.code(), Some(1));
+    let junit_out = String::from_utf8_lossy(&junit.stdout);
+    let fail_start = junit_out.find("<failure ").expect("junit failure element");
+    let fail_end = junit_out[fail_start..].find("</failure>").unwrap() + fail_start;
+    let fail_xml = &junit_out[fail_start..fail_end];
+    assert!(
+        !fail_xml.contains('\u{202E}'),
+        "raw U+202E in junit: {fail_xml}"
+    );
+    assert!(
+        !fail_xml.contains('\u{200B}'),
+        "raw U+200B in junit: {fail_xml}"
+    );
+    assert!(
+        fail_xml.contains("\\u{202e}"),
+        "escaped bidi in junit: {fail_xml}"
+    );
+    assert!(
+        fail_xml.contains("\\u{200b}"),
+        "escaped zwsp in junit: {fail_xml}"
+    );
+
+    // Agent: human_message and agent_instruction escape U+202E / U+200B; `file` stays raw.
+    let agent = run(dir.path(), &["check", "--format", "agent"]);
+    assert_eq!(agent.status.code(), Some(1));
+    let agent_json: serde_json::Value =
+        serde_json::from_slice(&agent.stdout).expect("valid agent JSON");
+    let v = &agent_json["violations"][0];
+    assert_eq!(v["file"].as_str(), Some(bad_name));
+    for field in ["human_message", "agent_instruction"] {
+        let s = v[field].as_str().expect(field);
+        assert!(!s.contains('\u{202E}'), "raw U+202E in agent.{field}: {s}");
+        assert!(!s.contains('\u{200B}'), "raw U+200B in agent.{field}: {s}");
+        assert!(
+            s.contains("\\u{202e}"),
+            "escaped bidi in agent.{field}: {s}"
+        );
+        assert!(
+            s.contains("\\u{200b}"),
+            "escaped zwsp in agent.{field}: {s}"
+        );
+    }
+
+    // Machine path fields in json, gitlab, and sarif keep the real path.
+    let json = run(dir.path(), &["check", "--format", "json"]);
+    let json_val: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert_eq!(
+        json_val["results"][0]["violations"][0]["path"].as_str(),
+        Some(bad_name)
+    );
+    let gitlab = run(dir.path(), &["check", "--format", "gitlab"]);
+    let gitlab_val: serde_json::Value = serde_json::from_slice(&gitlab.stdout).unwrap();
+    assert_eq!(gitlab_val[0]["location"]["path"].as_str(), Some(bad_name));
+}
+
+#[cfg(unix)]
+#[test]
+fn junit_and_agent_escape_ansi_esc_and_bidi_filenames_unix() {
+    let dir = tempfile::tempdir().unwrap();
+    let bad_name = "a\x1b[31m\u{202E}Z.txt";
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        "version: 1\nrules:\n  - id: no-txt\n    kind: file_absent\n    paths: \"*.txt\"\n    level: error\n",
+    )
+    .unwrap();
+    std::fs::write(dir.path().join(bad_name), "hi\n").unwrap();
+
+    // JUnit strips ESC and escapes U+202E in failure text.
+    let junit = run(dir.path(), &["check", "--format", "junit"]);
+    assert_eq!(junit.status.code(), Some(1));
+    let junit_out = String::from_utf8_lossy(&junit.stdout);
+    let fail_start = junit_out.find("<failure ").expect("junit failure element");
+    let fail_end = junit_out[fail_start..].find("</failure>").unwrap() + fail_start;
+    let fail_xml = &junit_out[fail_start..fail_end];
+    assert!(!fail_xml.contains('\x1b'), "raw ESC in junit: {fail_xml}");
+    assert!(
+        !fail_xml.contains('\u{202E}'),
+        "raw U+202E in junit: {fail_xml}"
+    );
+    assert!(
+        fail_xml.contains("\\u{202e}"),
+        "escaped bidi in junit: {fail_xml}"
+    );
+
+    // Agent escapes both ESC and U+202E in human_message and agent_instruction; `file` stays raw.
+    let agent = run(dir.path(), &["check", "--format", "agent"]);
+    assert_eq!(agent.status.code(), Some(1));
+    let agent_json: serde_json::Value =
+        serde_json::from_slice(&agent.stdout).expect("valid agent JSON");
+    let v = &agent_json["violations"][0];
+    assert_eq!(v["file"].as_str(), Some(bad_name));
+    for field in ["human_message", "agent_instruction"] {
+        let s = v[field].as_str().expect(field);
+        assert!(!s.contains('\x1b'), "raw ESC in agent.{field}: {s}");
+        assert!(!s.contains('\u{202E}'), "raw U+202E in agent.{field}: {s}");
+        assert!(s.contains("\\x1b"), "escaped ESC in agent.{field}: {s}");
+        assert!(
+            s.contains("\\u{202e}"),
+            "escaped bidi in agent.{field}: {s}"
+        );
+    }
+}

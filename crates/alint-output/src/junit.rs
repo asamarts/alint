@@ -121,8 +121,10 @@ fn write_failure_case(
     writeln!(
         w,
         r#"      <failure message="{msg}" type="{level_attr}">{body}</failure>"#,
-        msg = xml_attr(&violation.message),
-        body = xml_text(&format_failure_body(result, violation)),
+        msg = xml_attr(&crate::sanitize::sanitize_xml_display(&violation.message)),
+        body = xml_text(&crate::sanitize::sanitize_xml_display(
+            &format_failure_body(result, violation)
+        )),
     )?;
     writeln!(w, "    </testcase>")?;
     Ok(())
@@ -171,8 +173,8 @@ fn write_error_case(
     writeln!(
         w,
         r#"      <error message="{message}" type="analysis_failure">{body}</error>"#,
-        message = xml_attr(&failure.message),
-        body = xml_text(&body),
+        message = xml_attr(&crate::sanitize::sanitize_xml_display(&failure.message)),
+        body = xml_text(&crate::sanitize::sanitize_xml_display(&body)),
     )?;
     writeln!(w, "    </testcase>")?;
     Ok(())
@@ -475,5 +477,59 @@ mod tests {
             )],
         };
         assert_eq!(render(&report), render(&report));
+    }
+
+    #[test]
+    fn bidi_and_zero_width_escaped_in_failure_and_error_text() {
+        use alint_core::AnalysisFailureKind;
+
+        let bidi_path = PathBuf::from("a\x1b[31m\u{202E}\u{200B}\u{180E}Z.txt");
+        let msg =
+            "file is forbidden (matches [*.txt]): a\x1b[31m\u{202E}\u{200B}\u{180E}\u{0085}Z.txt";
+        let report = Report {
+            results: vec![RuleResult {
+                rule_id: "no-txt".into(),
+                level: Level::Error,
+                policy_url: None,
+                violations: vec![Violation::new(msg).with_path(bidi_path.clone())],
+                notes: Vec::new(),
+                is_fixable: false,
+                analysis_failures: vec![
+                    AnalysisFailure::new(AnalysisFailureKind::ResourceParse, msg)
+                        .with_path(bidi_path),
+                ],
+            }],
+        };
+        let out = render(&report);
+        // Extract `<failure ...>...</failure>` and `<error ...>...</error>` segments.
+        let fail_start = out.find("<failure ").expect("failure element");
+        let fail_end = out[fail_start..].find("</failure>").unwrap() + fail_start;
+        let fail_xml = &out[fail_start..fail_end];
+        let err_start = out.find("<error ").expect("error element");
+        let err_end = out[err_start..].find("</error>").unwrap() + err_start;
+        let err_xml = &out[err_start..err_end];
+
+        for snippet in [fail_xml, err_xml] {
+            for raw in ['\x1b', '\u{202E}', '\u{200B}', '\u{180E}', '\u{0085}'] {
+                assert!(
+                    !snippet.contains(raw),
+                    "raw U+{:04X} survived in JUnit snippet: {snippet}",
+                    raw as u32
+                );
+            }
+            assert!(
+                snippet.contains("\\u{202e}"),
+                "missing bidi escape: {snippet}"
+            );
+            assert!(
+                snippet.contains("\\u{200b}"),
+                "missing zwsp escape: {snippet}"
+            );
+            assert!(
+                snippet.contains("\\u{180e}"),
+                "missing mvs escape: {snippet}"
+            );
+            assert!(snippet.contains("\\x85"), "missing C1 escape: {snippet}");
+        }
     }
 }
