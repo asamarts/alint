@@ -1465,11 +1465,6 @@ fn render_keyed(
         Value::String(s) if syntax.when_exprs.contains(&at) => {
             Value::String(render_path_when_expr(&s, tokens))
         }
-        Value::String(s)
-            if let Some((_, keywords)) = syntax.keyword_paths.iter().find(|(k, _)| *k == at) =>
-        {
-            Value::String(render_path_keyword_path(&s, tokens, keywords))
-        }
         Value::String(s) if syntax.argv.contains(&at) => {
             Value::String(render_path_argv(&s, tokens))
         }
@@ -1478,7 +1473,13 @@ fn render_keyed(
                 out.push_str(&v.replace('$', "$$"));
             }))
         }
-        Value::String(s) => Value::String(render_path(&s, tokens)),
+        Value::String(s) => {
+            if let Some((_, keywords)) = syntax.keyword_paths.iter().find(|(k, _)| *k == at) {
+                Value::String(render_path_keyword_path(&s, tokens, keywords))
+            } else {
+                Value::String(render_path(&s, tokens))
+            }
+        }
         Value::Sequence(seq) => Value::Sequence(
             seq.into_iter()
                 .map(|e| render_keyed(e, at, syntax, tokens))
