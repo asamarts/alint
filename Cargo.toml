@@ -137,7 +137,7 @@ jsonc-parser = { version = "0.34.0", features = ["cst"] }
 # 0.3.4); `yaml_` converts it to bytes and the multibyte resolver test guards that
 # contract.
 # `default-features = false` drops `encoding` (`load_from_read` only; we load `&str`).
-saphyr = { version = "=0.3.3", default-features = false }
+saphyr = { version = "=0.3.4", default-features = false }
 # Duplicate-aware YAML entry extraction needs the parser event stream before
 # `saphyr::MarkedYaml` rejects duplicate mapping keys, and the structured-fix span
 # resolver walks the same events. Pinned at `=0.3.4` (compatible with `saphyr =0.3.3`
