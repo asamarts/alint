@@ -1416,8 +1416,11 @@ mod tests {
 
     #[test]
     fn runtime_nested_failures_are_structural_and_ordered() {
+        // `{ext}` validates with placeholder `_ext_`, then renders empty on
+        // extensionless directory `src/(` so `pair::build` rejects the empty
+        // `partner:` at runtime (`NestedRuleBuild`).
         let build_failure: NestedRuleSpec = alint_core::yaml::from_str(
-            "kind: filename_regex\npaths: \"{path}/**\"\npattern: \"{basename}\"\n",
+            "kind: pair\nprimary: \"{path}/*.rs\"\npartner: \"{ext}\"\n",
         )
         .unwrap();
         let condition_failure: NestedRuleSpec = alint_core::yaml::from_str(
@@ -1752,5 +1755,203 @@ require:
         assert_eq!(nested.counts.failed_children, 0);
         assert_eq!(nested.counts.analysis_failures, 1);
         assert_eq!(nested.reason, alint_core::TraceReason::NestedFailed);
+    }
+
+    #[test]
+    fn nested_options_escape_metacharacters_across_when_iter_regex_jsonpath_and_base() {
+        let tmp = tempfile::tempdir().unwrap();
+        // 1. Regex metacharacters in directory name: `pkg.a+(1)` must match
+        //    only literal `pkg.a+(1)`, not `pkgXaa1`.
+        let regex_dir = tmp.path().join("re/pkg.a+(1)");
+        std::fs::create_dir_all(&regex_dir).unwrap();
+        std::fs::write(regex_dir.join("bad.txt"), "pkgXaa1\n").unwrap();
+        std::fs::write(regex_dir.join("good.txt"), "pkg.a+(1)\n").unwrap();
+
+        // 2. JSONPath metacharacters in directory name: `a.b[0]` must query
+        //    literal key `"a.b[0]"` rather than nested `a -> b -> [0]`.
+        let jp_dir = tmp.path().join("jp/a.b[0]");
+        std::fs::create_dir_all(&jp_dir).unwrap();
+        std::fs::write(
+            jp_dir.join("data.json"),
+            r#"{"a.b[0]": "ok", "a": {"b": ["wrong"]}}"#,
+        )
+        .unwrap();
+
+        // 3. `registry_paths_resolve.base: "{path}"` with directories literally
+        //    named `lint_root` and `registry_dir`: entries must resolve under
+        //    those subdirectories, NOT the repo root or manifest directory.
+        std::fs::create_dir_all(tmp.path().join("lint_root")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("registry_dir")).unwrap();
+        std::fs::write(tmp.path().join("lint_root/inside.txt"), "hi\n").unwrap();
+        std::fs::write(tmp.path().join("registry_dir/inside.txt"), "hi\n").unwrap();
+        std::fs::write(
+            tmp.path().join("lint_root/manifest.json"),
+            r#"{"files": ["inside.txt"]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            tmp.path().join("registry_dir/manifest.json"),
+            r#"{"files": ["inside.txt"]}"#,
+        )
+        .unwrap();
+
+        // 4. Inner `for_each_dir` `when_iter:` with `iter.has_file("{basename}.ok")`
+        //    and glob metacharacters `a[0]` (must NOT match `a0.ok`).
+        let wi_dir = tmp.path().join("wi/a[0]/sub");
+        std::fs::create_dir_all(&wi_dir).unwrap();
+        std::fs::write(wi_dir.join("a0.ok"), "").unwrap();
+
+        let index = alint_core::walk(tmp.path(), &crate::test_support::walk_options()).unwrap();
+        let registry = crate::builtin_registry();
+
+        let facts = alint_core::FactValues::new();
+        let vars = std::collections::HashMap::new();
+        let ctx = Context::new(tmp.path(), &index)
+            .with_registry(Some(&registry))
+            .with_facts(Some(&facts))
+            .with_vars(Some(&vars));
+
+        // Regex test: bad.txt fails (no literal `pkg.a+(1)`), good.txt passes.
+        let regex_spec: RuleSpec = alint_core::yaml::from_str(
+            r#"
+id: nested-regex
+kind: for_each_dir
+level: error
+select: "re/*"
+require:
+  - kind: file_content_matches
+    paths: "{path}/*.txt"
+    pattern: "{basename}"
+"#,
+        )
+        .unwrap();
+        let regex_rule = registry.build(&regex_spec).unwrap();
+        let regex_v = regex_rule.evaluate(&ctx).unwrap();
+        assert_eq!(
+            regex_v.len(),
+            1,
+            "expected only bad.txt to fail: {regex_v:?}"
+        );
+        assert!(
+            regex_v[0].path.as_deref() == Some(Path::new("re/pkg.a+(1)/bad.txt")),
+            "{regex_v:?}"
+        );
+
+        // JSONPath test: dot-member `$.{basename}` and bracket `$['{basename}']`
+        // both resolve literal key `"a.b[0]"` == `"ok"`.
+        let jp_spec: RuleSpec = alint_core::yaml::from_str(
+            r#"
+id: nested-jsonpath
+kind: for_each_dir
+level: error
+select: "jp/*"
+require:
+  - kind: json_path_equals
+    paths: "{path}/data.json"
+    path: "$.{basename}"
+    equals: "ok"
+  - kind: json_path_equals
+    paths: "{path}/data.json"
+    path: "$['{basename}']"
+    equals: "ok"
+"#,
+        )
+        .unwrap();
+        let jp_rule = registry.build(&jp_spec).unwrap();
+        let jp_v = jp_rule.evaluate(&ctx).unwrap();
+        assert!(
+            jp_v.is_empty(),
+            "expected literal JSONPath lookup to pass: {jp_v:?}"
+        );
+
+        // `registry_paths_resolve.base: "{path}"` with `lint_root` and `registry_dir`.
+        let base_spec: RuleSpec = alint_core::yaml::from_str(
+            r#"
+id: nested-base
+kind: for_each_dir
+level: error
+select: ["lint_root", "registry_dir"]
+require:
+  - kind: registry_paths_resolve
+    source: "{path}/manifest.json"
+    extract: { json: "$.files[*]" }
+    base: "{path}"
+"#,
+        )
+        .unwrap();
+        let base_rule = registry.build(&base_spec).unwrap();
+        let base_v = base_rule.evaluate(&ctx).unwrap();
+        assert!(
+            base_v.is_empty(),
+            "expected lint_root/registry_dir base to resolve inside subdirs: {base_v:?}"
+        );
+
+        // Inner `when_iter:` with `iter.has_file("{basename}.ok")`: `a0.ok` must
+        // NOT satisfy `iter.has_file("a[0].ok")`, so the nested `file_exists` is skipped.
+        let wi_spec: RuleSpec = alint_core::yaml::from_str(
+            r#"
+id: nested-when-iter
+kind: for_each_dir
+level: error
+select: "wi/*"
+require:
+  - kind: for_each_dir
+    select: "{path}/*"
+    when_iter: 'iter.has_file("{basename}.ok")'
+    require:
+      - kind: file_exists
+        paths: "{path}/MUST_NOT_RUN"
+"#,
+        )
+        .unwrap();
+        let wi_rule = registry.build(&wi_spec).unwrap();
+        let wi_v = wi_rule.evaluate(&ctx).unwrap();
+        assert!(
+            wi_v.is_empty(),
+            "a0.ok must not match escaped iter.has_file(\"a[[]0[]].ok\"): {wi_v:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn nested_when_iter_escapes_double_quote_in_directory_name_unix() {
+        let tmp = tempfile::tempdir().unwrap();
+        // A directory literally named `x" or true or "` must NOT break out of
+        // the outer string literal in an inner `when_iter:` expression.
+        let evil = tmp.path().join("wi/x\" or true or \"/sub");
+        std::fs::create_dir_all(&evil).unwrap();
+        let index = alint_core::walk(tmp.path(), &crate::test_support::walk_options()).unwrap();
+        let registry = crate::builtin_registry();
+        let spec: RuleSpec = alint_core::yaml::from_str(
+            r#"
+id: nested-when-iter-quote
+kind: for_each_dir
+level: error
+select: "wi/*"
+require:
+  - kind: for_each_dir
+    select: "{path}/*"
+    when_iter: 'iter.basename == "{basename}"'
+    require:
+      - kind: file_exists
+        paths: "{path}/MUST_NOT_RUN"
+"#,
+        )
+        .unwrap();
+        let facts = alint_core::FactValues::new();
+        let vars = std::collections::HashMap::new();
+        let rule = registry.build(&spec).unwrap();
+        let violations = rule
+            .evaluate(
+                &Context::new(tmp.path(), &index)
+                    .with_registry(Some(&registry))
+                    .with_facts(Some(&facts))
+                    .with_vars(Some(&vars)),
+            )
+            .unwrap();
+        assert!(
+            violations.is_empty(),
+            "quote in dir name must not inject `or true` into when_iter: {violations:?}"
+        );
     }
 }

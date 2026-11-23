@@ -492,6 +492,364 @@ fn render_path_with(
     out
 }
 
+/// [`render_path`] for a template compiled as a **Rust regex** (`pattern:`,
+/// `shebang:`, `for_each_match.select`, `*_path_matches.matches`, etc.). Each
+/// substituted token value is escaped with [`regex::escape`] so metacharacters
+/// in a repository path (`.`, `(`, `[`, `+`, `?`, `*`, `^`, `$`, `\`) match
+/// literally while the user-written template text around the tokens keeps its
+/// regex meaning.
+pub fn render_path_regex(template: &str, t: &PathTokens) -> String {
+    render_path_with(template, t, |v, out| out.push_str(&regex::escape(v)))
+}
+
+/// Match a recognized `{token}` at the start of `s`, returning `(token, value)`.
+fn match_path_token<'a>(s: &str, t: &'a PathTokens) -> Option<(&'static str, &'a str)> {
+    let tokens: [(&str, &str); 6] = [
+        ("{parent_name}", &t.parent_name),
+        ("{basename}", &t.basename),
+        ("{path}", &t.path),
+        ("{stem}", &t.stem),
+        ("{dir}", &t.dir),
+        ("{ext}", &t.ext),
+    ];
+    tokens.into_iter().find(|(tok, _)| s.starts_with(tok))
+}
+
+/// Escape `value` for an RFC 9535 `JSONPath` string literal delimited by `quote`
+/// (`'` or `"`).
+fn push_jsonpath_escaped(value: &str, quote: char, out: &mut String) {
+    use std::fmt::Write as _;
+    for ch in value.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            c if c == quote => {
+                out.push('\\');
+                out.push(quote);
+            }
+            '\u{08}' => out.push_str("\\b"),
+            '\u{0C}' => out.push_str("\\f"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => {
+                let _ = write!(out, "\\u{:04x}", c as u32);
+            }
+            c => out.push(c),
+        }
+    }
+}
+
+/// True when `s` is a safe ASCII RFC 9535 `member-name-shorthand` (`$.foo_1`).
+fn is_jsonpath_member_shorthand(s: &str) -> bool {
+    let mut bytes = s.bytes();
+    let Some(first) = bytes.next() else {
+        return false;
+    };
+    (first.is_ascii_alphabetic() || first == b'_')
+        && bytes.all(|b| b.is_ascii_alphanumeric() || b == b'_')
+}
+
+/// Consume a dot-member template run starting at `rest` (after `.` or `..`),
+/// stopping before the next `JSONPath` delimiter while keeping recognized
+/// `{token}` markers intact. Returns `(run, contains_token)`.
+fn scan_jsonpath_dot_member<'a>(rest: &'a str, t: &PathTokens) -> (&'a str, bool) {
+    let mut pos = 0usize;
+    let mut has_token = false;
+    while pos < rest.len() {
+        let tail = &rest[pos..];
+        if let Some((tok, _)) = match_path_token(tail, t) {
+            has_token = true;
+            pos += tok.len();
+            continue;
+        }
+        let ch = tail.chars().next().expect("pos < len");
+        if ch.is_ascii_whitespace()
+            || matches!(
+                ch,
+                '.' | '['
+                    | ']'
+                    | '('
+                    | ')'
+                    | '\''
+                    | '"'
+                    | ','
+                    | ';'
+                    | '?'
+                    | '@'
+                    | '!'
+                    | '='
+                    | '<'
+                    | '>'
+                    | '&'
+                    | '|'
+                    | '*'
+                    | ':'
+            )
+        {
+            break;
+        }
+        pos += ch.len_utf8();
+    }
+    (&rest[..pos], has_token)
+}
+
+/// [`render_path`] for a template compiled as an RFC 9535 **`JSONPath`** query
+/// (`json_path_*`, `yaml_path_*`, `toml_path_*`, `extract.json`, etc.).
+///
+/// - Inside `'...'` or `"..."` string literals, substituted values are escaped
+///   for that quote delimiter (so quotes, backslashes, and controls cannot
+///   break out of the string or alter a filter expression).
+/// - In dot-member position (`.{basename}`, `$.pkg_{stem}`, `$..{basename}`),
+///   if the rendered member is not a plain identifier, it is bracket-quoted
+///   (`['...']`) so dots, hyphens, quotes, brackets, or wildcards in a path
+///   match the literal key rather than becoming path operators.
+/// - Outside quotes and outside dot-member position, a substituted token is
+///   emitted as a single-quoted string literal (`'...'`).
+pub fn render_path_jsonpath(template: &str, t: &PathTokens) -> String {
+    let mut out = String::with_capacity(template.len());
+    let mut rest = template;
+    let mut quote: Option<char> = None;
+    let mut at_string_start = false;
+    while !rest.is_empty() {
+        if let Some(q) = quote {
+            if rest.starts_with('\\') {
+                let mut chars = rest.chars();
+                let slash = chars.next().unwrap();
+                out.push(slash);
+                if let Some(next) = chars.next() {
+                    out.push(next);
+                    rest = &rest[slash.len_utf8() + next.len_utf8()..];
+                } else {
+                    rest = &rest[slash.len_utf8()..];
+                }
+                at_string_start = false;
+                continue;
+            }
+            if rest.starts_with(q) {
+                out.push(q);
+                rest = &rest[q.len_utf8()..];
+                quote = None;
+                at_string_start = false;
+                continue;
+            }
+            if let Some((tok, val)) = match_path_token(rest, t) {
+                rest = &rest[tok.len()..];
+                if val.is_empty() && (at_string_start || out.ends_with('/')) {
+                    if let Some(after) = rest.strip_prefix('/') {
+                        rest = after;
+                    }
+                } else {
+                    push_jsonpath_escaped(val, q, &mut out);
+                    at_string_start = false;
+                }
+                continue;
+            }
+            let ch = rest.chars().next().unwrap();
+            out.push(ch);
+            rest = &rest[ch.len_utf8()..];
+            at_string_start = false;
+            continue;
+        }
+
+        if rest.starts_with('\'') || rest.starts_with('"') {
+            let q = rest.chars().next().unwrap();
+            out.push(q);
+            rest = &rest[q.len_utf8()..];
+            quote = Some(q);
+            at_string_start = true;
+            continue;
+        }
+        if rest.starts_with('.') {
+            let (dots, after_dots) = if let Some(after) = rest.strip_prefix("..") {
+                ("..", after)
+            } else {
+                (".", &rest[1..])
+            };
+            let (member, has_token) = scan_jsonpath_dot_member(after_dots, t);
+            if has_token {
+                let rendered = render_path(member, t);
+                if is_jsonpath_member_shorthand(&rendered) {
+                    out.push_str(dots);
+                    out.push_str(&rendered);
+                } else {
+                    if dots == ".." {
+                        out.push_str("..");
+                    }
+                    out.push_str("['");
+                    push_jsonpath_escaped(&rendered, '\'', &mut out);
+                    out.push_str("']");
+                }
+                rest = &after_dots[member.len()..];
+                continue;
+            }
+            out.push_str(dots);
+            rest = after_dots;
+            continue;
+        }
+        if let Some((tok, val)) = match_path_token(rest, t) {
+            rest = &rest[tok.len()..];
+            out.push('\'');
+            push_jsonpath_escaped(val, '\'', &mut out);
+            out.push('\'');
+            continue;
+        }
+        let ch = rest.chars().next().unwrap();
+        out.push(ch);
+        rest = &rest[ch.len_utf8()..];
+    }
+    out
+}
+
+/// Escape `value` for a `when` / `when_iter` string literal (supports `\\`,
+/// `\"`, `\'`, `\n`, `\r`, `\t`).
+fn push_when_escaped(value: &str, out: &mut String) {
+    for ch in value.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\'' => out.push_str("\\'"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c => out.push(c),
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WhenStringMode {
+    Literal,
+    Glob,
+    Regex,
+}
+
+fn when_string_mode_before(out: &str) -> WhenStringMode {
+    let trimmed = out.trim_end();
+    if let Some(before_lparen) = trimmed.strip_suffix('(')
+        && let Some(before_method) = before_lparen.trim_end().strip_suffix("has_file")
+        && let Some(before_dot) = before_method.trim_end().strip_suffix('.')
+        && let Some(before_iter) = before_dot.trim_end().strip_suffix("iter")
+        && before_iter
+            .bytes()
+            .last()
+            .is_none_or(|b| !(b.is_ascii_alphanumeric() || b == b'_' || b == b'.'))
+    {
+        return WhenStringMode::Glob;
+    }
+    if let Some(before_kw) = trimmed.strip_suffix("matches")
+        && before_kw
+            .bytes()
+            .last()
+            .is_none_or(|b| !(b.is_ascii_alphanumeric() || b == b'_'))
+    {
+        return WhenStringMode::Regex;
+    }
+    WhenStringMode::Literal
+}
+
+/// [`render_path`] for an inner `for_each_*` rule's **`when_iter:`** expression.
+///
+/// - Inside string literals, substituted values are escaped for `when` string
+///   syntax (`\\`, `\"`, `\'`, `\n`, `\r`, `\t`), so a path containing quotes
+///   or backslashes cannot break out of the literal and alter the expression.
+/// - Inside `iter.has_file("...")` string arguments, values are additionally
+///   glob-escaped so glob metacharacters in a path match literally.
+/// - After the `matches` regex operator, values are additionally regex-escaped.
+/// - Outside string literals, any substituted token is emitted as a safely
+///   quoted string literal (`"..."`) so a path cannot inject operators.
+pub fn render_path_when_expr(template: &str, t: &PathTokens) -> String {
+    let push_val = |mode: WhenStringMode, val: &str, out: &mut String| match mode {
+        WhenStringMode::Literal => push_when_escaped(val, out),
+        WhenStringMode::Glob => push_when_escaped(&glob_escape(val), out),
+        WhenStringMode::Regex => push_when_escaped(&regex::escape(val), out),
+    };
+    let mut out = String::with_capacity(template.len());
+    let mut rest = template;
+    let mut quote: Option<(char, WhenStringMode)> = None;
+    let mut at_string_start = false;
+    while !rest.is_empty() {
+        if let Some((q, mode)) = quote {
+            if rest.starts_with('\\') {
+                let mut chars = rest.chars();
+                let slash = chars.next().unwrap();
+                out.push(slash);
+                if let Some(next) = chars.next() {
+                    out.push(next);
+                    rest = &rest[slash.len_utf8() + next.len_utf8()..];
+                } else {
+                    rest = &rest[slash.len_utf8()..];
+                }
+                at_string_start = false;
+                continue;
+            }
+            if rest.starts_with(q) {
+                out.push(q);
+                rest = &rest[q.len_utf8()..];
+                quote = None;
+                at_string_start = false;
+                continue;
+            }
+            if let Some((tok, val)) = match_path_token(rest, t) {
+                rest = &rest[tok.len()..];
+                if val.is_empty() && (at_string_start || out.ends_with('/')) {
+                    if let Some(after) = rest.strip_prefix('/') {
+                        rest = after;
+                    }
+                } else {
+                    push_val(mode, val, &mut out);
+                    at_string_start = false;
+                }
+                continue;
+            }
+            let ch = rest.chars().next().unwrap();
+            out.push(ch);
+            rest = &rest[ch.len_utf8()..];
+            at_string_start = false;
+            continue;
+        }
+
+        if rest.starts_with('\'') || rest.starts_with('"') {
+            let mode = when_string_mode_before(&out);
+            let q = rest.chars().next().unwrap();
+            out.push(q);
+            rest = &rest[q.len_utf8()..];
+            quote = Some((q, mode));
+            at_string_start = true;
+            continue;
+        }
+        if let Some((tok, val)) = match_path_token(rest, t) {
+            let mode = when_string_mode_before(&out);
+            rest = &rest[tok.len()..];
+            out.push('"');
+            push_val(mode, val, &mut out);
+            out.push('"');
+            continue;
+        }
+        let ch = rest.chars().next().unwrap();
+        out.push(ch);
+        rest = &rest[ch.len_utf8()..];
+    }
+    out
+}
+
+/// [`render_path`] for a path option that also accepts reserved keywords (such
+/// as `registry_paths_resolve.base:` accepting `registry_dir` / `lint_root`).
+/// A literal template with no path tokens keeps its keyword meaning; when a
+/// template contains path tokens and renders to a reserved keyword, `./` is
+/// prefixed so the consumer resolves it as an explicit relative path instead of
+/// the keyword.
+fn render_path_keyword_path(template: &str, t: &PathTokens, keywords: &[&str]) -> String {
+    if TokenSet::of(template) == TokenSet::NONE {
+        return template.to_owned();
+    }
+    let rendered = render_path(template, t);
+    if keywords.contains(&rendered.as_str()) {
+        format!("./{rendered}")
+    } else {
+        rendered
+    }
+}
+
 /// [`render_path`] for a **command argv** element. If substituting a path token
 /// turns a non-flag template into a leading-dash string, the matched repo file
 /// name is masquerading as an option to the spawned tool — e.g. a file named
@@ -764,10 +1122,13 @@ macro_rules! nested_glob_options_table {
         /// Option keys (beyond `paths:`, which is rendered by [`render_paths_spec`])
         /// whose values are compiled as **globs**, per rule kind (aliases included).
         /// A dotted key is a path into nested mappings (sequence elements are walked
-        /// through), e.g. `targets.files`. Every other string option is rendered
-        /// LITERALLY: a regex (`for_each_match.select`, `pattern`), a literal path or
-        /// template (`pair.partner`, `pair_hash.target`, `cross_file`'s `file`), a
-        /// message. Glob-escaping a regex or a literal path would corrupt it.
+        /// through), e.g. `targets.files`. Other syntax-bearing options (regexes,
+        /// `JSONPath` queries, `when_iter:` / nested `when:` expressions,
+        /// keyword-guarded paths, command arguments, and replacement templates)
+        /// are escaped for their own syntax when nested rules are rendered; plain
+        /// literal paths and text options (`pair.partner`, `pair_hash.target`,
+        /// `cross_file`'s `file`, messages) are rendered literally so glob-escaping
+        /// does not corrupt them.
         pub const NESTED_GLOB_OPTIONS: &[(&[&str], &[&str])] = &[$((&[$($kind),+], &[$($key),*])),*];
 
         /// The glob-typed option keys of `kind` (see [`NESTED_GLOB_OPTIONS`]).
@@ -804,6 +1165,143 @@ nested_glob_options_table! {
     ["registry_paths_resolve"] => ["source", "orphans.space"],
 }
 
+/// Option keys of a nested rule that hold a **Rust regex**, per kind (aliases
+/// included). Each substituted token value is escaped with [`regex::escape`]
+/// ([`render_path_regex`]) so `.`, `(`, `[`, `+`, `?`, `*`, `^`, `$`, `\` in a
+/// path match literally.
+fn nested_regex_options(kind: &str) -> &'static [&'static str] {
+    match kind {
+        "file_content_matches"
+        | "content_matches"
+        | "file_content_forbidden"
+        | "content_forbidden"
+        | "file_header"
+        | "header"
+        | "file_footer"
+        | "footer"
+        | "filename_regex"
+        | "git_commit_message"
+        | "git_commit_signed_off"
+        | "git_blame_age" => &["pattern"],
+        "file_shebang" | "shebang" => &["shebang"],
+        "git_commit_subject_matches"
+        | "json_path_matches"
+        | "yaml_path_matches"
+        | "toml_path_matches"
+        | "xml_path_matches"
+        | "dotenv_path_matches"
+        | "properties_path_matches"
+        | "ini_path_matches"
+        | "hcl_path_matches" => &["matches"],
+        "git_commit_author_allowlist" => &["email_pattern", "name_pattern"],
+        "command_idempotent" => &["files_pattern"],
+        "import_gate" => &["import_pattern", "forbid"],
+        "ordered_block" => &["select"],
+        "for_each_match" => &["select", "require.matches", "require.forbid"],
+        "cross_file" | "cross_file_value_equals" => &[
+            "source.extract.regex",
+            "targets.extract.regex",
+            "targets.matches",
+        ],
+        "file_graph" => &[
+            "edges.from_content.extract.regex",
+            "edges.derive_target.from",
+            "require.fresh.marker",
+        ],
+        "registry_paths_resolve" => &["extract.regex"],
+        _ => &[],
+    }
+}
+
+/// Option keys of a nested rule that hold an RFC 9535 **`JSONPath`** query, per
+/// kind (aliases included). Rendered with [`render_path_jsonpath`].
+fn nested_jsonpath_options(kind: &str) -> &'static [&'static str] {
+    match kind {
+        "json_path_equals"
+        | "json_path_matches"
+        | "json_path_absent"
+        | "yaml_path_equals"
+        | "yaml_path_matches"
+        | "yaml_path_absent"
+        | "toml_path_equals"
+        | "toml_path_matches"
+        | "toml_path_absent"
+        | "xml_path_equals"
+        | "xml_path_matches"
+        | "xml_path_absent"
+        | "dotenv_path_equals"
+        | "dotenv_path_matches"
+        | "dotenv_path_absent"
+        | "properties_path_equals"
+        | "properties_path_matches"
+        | "properties_path_absent"
+        | "ini_path_equals"
+        | "ini_path_matches"
+        | "ini_path_absent"
+        | "hcl_path_equals"
+        | "hcl_path_matches"
+        | "hcl_path_absent" => &["path"],
+        "cross_file" | "cross_file_value_equals" => &[
+            "source.extract.json",
+            "source.extract.yaml",
+            "source.extract.toml",
+            "source.extract.xml",
+            "source.extract.dotenv",
+            "source.extract.properties",
+            "source.extract.ini",
+            "source.extract.hcl",
+            "targets.extract.json",
+            "targets.extract.yaml",
+            "targets.extract.toml",
+            "targets.extract.xml",
+            "targets.extract.dotenv",
+            "targets.extract.properties",
+            "targets.extract.ini",
+            "targets.extract.hcl",
+        ],
+        "file_graph" => &[
+            "edges.from_content.extract.json",
+            "edges.from_content.extract.yaml",
+            "edges.from_content.extract.toml",
+            "edges.from_content.extract.xml",
+            "edges.from_content.extract.dotenv",
+            "edges.from_content.extract.properties",
+            "edges.from_content.extract.ini",
+            "edges.from_content.extract.hcl",
+        ],
+        "registry_paths_resolve" => &[
+            "extract.json",
+            "extract.yaml",
+            "extract.toml",
+            "extract.xml",
+            "extract.dotenv",
+            "extract.properties",
+            "extract.ini",
+            "extract.hcl",
+            "exclude_query",
+        ],
+        _ => &[],
+    }
+}
+
+/// Option keys of a nested rule that hold a `when_iter:` expression, per kind.
+/// Rendered with [`render_path_when_expr`].
+fn nested_when_options(kind: &str) -> &'static [&'static str] {
+    match kind {
+        "for_each_dir" | "for_each_file" | "every_matching_has" => &["when_iter"],
+        _ => &[],
+    }
+}
+
+/// Option keys of a nested rule that hold a path OR one of a fixed set of
+/// reserved keywords (such as `registry_paths_resolve.base:`).
+fn nested_keyword_path_options(kind: &str) -> &'static [(&'static str, &'static [&'static str])] {
+    match kind {
+        "registry_paths_resolve" => &[("base", &["registry_dir", "lint_root"])],
+        _ => &[],
+    }
+}
+
 /// Option keys of a nested rule that hold a command's arguments, per kind.
 /// Each argument is rendered with [`render_path_argv`], so a value that
 /// starts with `-` (a file named `--write`) reaches the command as a path
@@ -827,10 +1325,15 @@ fn nested_replacement_options(kind: &str) -> &'static [&'static str] {
 }
 
 /// The option keys of a nested rule's kind that are not rendered as literal
-/// text: globs, command arguments and replacement templates.
+/// text: globs, regexes, `JSONPath` queries, `when_iter` expressions,
+/// keyword-guarded paths, command arguments, and replacement templates.
 #[derive(Clone, Copy)]
 struct OptionSyntax {
     globs: &'static [&'static str],
+    regexes: &'static [&'static str],
+    jsonpaths: &'static [&'static str],
+    when_exprs: &'static [&'static str],
+    keyword_paths: &'static [(&'static str, &'static [&'static str])],
     argv: &'static [&'static str],
     replacements: &'static [&'static str],
 }
@@ -839,6 +1342,10 @@ impl OptionSyntax {
     fn of(kind: &str) -> Self {
         Self {
             globs: nested_glob_options(kind),
+            regexes: nested_regex_options(kind),
+            jsonpaths: nested_jsonpath_options(kind),
+            when_exprs: nested_when_options(kind),
+            keyword_paths: nested_keyword_path_options(kind),
             argv: nested_argv_options(kind),
             replacements: nested_replacement_options(kind),
         }
@@ -846,14 +1353,16 @@ impl OptionSyntax {
 }
 
 /// Render a nested rule's option mapping (`extra`) for one iteration. Like
-/// [`render_mapping`], every string gets the iterated entry's tokens, but a
-/// glob-typed option of `kind` ([`NESTED_GLOB_OPTIONS`]) is rendered with
-/// [`render_path_glob`] (a leading template `!` exclude is kept), a command
-/// argument with [`render_path_argv`], a replacement template with each `$`
-/// of a value doubled, and a nested rule-spec list (`for_each_dir.require`,
-/// ...) is rendered per element for that element's own kind. So a directory
-/// named `app/[slug]` reaches a nested `dir_contains` `select: "{path}"` as the
-/// literal `app/[[]slug[]]`, not a character class that matches `app/s`.
+/// [`render_mapping`], every string gets the iterated entry's tokens, but each
+/// syntax-bearing option of `kind` is escaped for the syntax it holds:
+/// glob-typed options ([`NESTED_GLOB_OPTIONS`]) with [`render_path_glob`],
+/// regex options with [`render_path_regex`], `JSONPath` queries with
+/// [`render_path_jsonpath`], `when_iter:` expressions with
+/// [`render_path_when_expr`], keyword-bearing path options (such as
+/// `registry_paths_resolve.base:`) with `./` disambiguation, command arguments
+/// with [`render_path_argv`], replacement templates with each `$` of a value
+/// doubled, and nested rule-spec lists (`for_each_dir.require`, ...) rendered
+/// recursively per element for that element's own kind.
 #[must_use]
 pub(crate) fn render_nested_options(
     kind: &str,
@@ -910,6 +1419,11 @@ fn render_options(
             && let ayaml::Value::String(message) = &v
         {
             ayaml::Value::String(render_nested_message(kind, message, tokens))
+        } else if with_paths
+            && key == "when"
+            && let ayaml::Value::String(when) = &v
+        {
+            ayaml::Value::String(render_path_when_expr(when, tokens))
         } else if with_paths && key == "paths" {
             let paths = OptionSyntax {
                 globs: PATHS,
@@ -925,8 +1439,9 @@ fn render_options(
 }
 
 /// Render `v`, found at dotted key path `at`, as `syntax` says the option at
-/// `at` is read: glob-escaping, as a command argument, as a replacement
-/// template, or literally.
+/// `at` is read: glob-escaping, regex-escaping, `JSONPath`-escaping,
+/// `when_iter`-escaping, keyword-path disambiguation, command argument,
+/// replacement template, or literally.
 fn render_keyed(
     v: ayaml::Value,
     at: &str,
@@ -941,6 +1456,15 @@ fn render_keyed(
                 None => render_path_glob(&s, tokens),
             })
         }
+        Value::String(s) if syntax.regexes.contains(&at) => {
+            Value::String(render_path_regex(&s, tokens))
+        }
+        Value::String(s) if syntax.jsonpaths.contains(&at) => {
+            Value::String(render_path_jsonpath(&s, tokens))
+        }
+        Value::String(s) if syntax.when_exprs.contains(&at) => {
+            Value::String(render_path_when_expr(&s, tokens))
+        }
         Value::String(s) if syntax.argv.contains(&at) => {
             Value::String(render_path_argv(&s, tokens))
         }
@@ -949,7 +1473,13 @@ fn render_keyed(
                 out.push_str(&v.replace('$', "$$"));
             }))
         }
-        Value::String(s) => Value::String(render_path(&s, tokens)),
+        Value::String(s) => {
+            if let Some((_, keywords)) = syntax.keyword_paths.iter().find(|(k, _)| *k == at) {
+                Value::String(render_path_keyword_path(&s, tokens, keywords))
+            } else {
+                Value::String(render_path(&s, tokens))
+            }
+        }
         Value::Sequence(seq) => Value::Sequence(
             seq.into_iter()
                 .map(|e| render_keyed(e, at, syntax, tokens))
@@ -1507,10 +2037,10 @@ mod tests {
             get(&m, &["require", "forbidden_edges", "0", "from"]).as_str(),
             Some("app/[[]slug[]]/a")
         );
-        // A regex (`for_each_match.select`) and a literal path template
-        // (`pair.partner`) are NOT glob-escaped.
+        // A regex (`for_each_match.select`) is regex-escaped (not glob-escaped),
+        // and a literal path template (`pair.partner`) stays literal.
         let m = render_nested_options("for_each_match", yaml("select: \"{path}\""), &t);
-        assert_eq!(get(&m, &["select"]).as_str(), Some("app/[slug]"));
+        assert_eq!(get(&m, &["select"]).as_str(), Some(r"app/\[slug\]"));
         let m = render_nested_options(
             "pair",
             yaml("primary: \"{path}/*.c\"\npartner: \"{path}/x.h\""),
@@ -1556,7 +2086,8 @@ mod tests {
             Some("--in=--x{stem}$1")
         );
         // A replacement template: the value's `$` is text; the template's is
-        // a capture reference. The regex beside it takes the value as it is.
+        // a capture reference. The regex beside it regex-escapes the token value
+        // while keeping the template's `(.*)` capture intact.
         let m = render_nested_options(
             "file_graph",
             yaml("edges:\n  derive_target:\n    from: \"{path}(.*)\"\n    to: \"{path}/$1\""),
@@ -1568,7 +2099,7 @@ mod tests {
         );
         assert_eq!(
             get(&m, &["edges", "derive_target", "from"]).as_str(),
-            Some("--x{stem}$1(.*)")
+            Some(r"\-\-x\{stem\}\$1(.*)")
         );
         // A message a kind renders again holds each `{` of a value marked, and
         // the marks come out of the finding's message; another kind's message
@@ -1597,6 +2128,113 @@ mod tests {
         assert_eq!(
             render_nested_message("file_exists", "{basename}", &t),
             "--x{stem}$1"
+        );
+    }
+
+    #[test]
+    fn nested_options_escape_regex_jsonpath_when_iter_and_registry_base() {
+        // Regex metacharacters in token values are escaped; surrounding pattern
+        // syntax stays intact.
+        let re_tok = PathTokens::from_path(Path::new("pkgs/a.b+(c)[0]"));
+        let m = render_nested_options(
+            "file_content_matches",
+            yaml("pattern: \"^{basename}$\""),
+            &re_tok,
+        );
+        assert_eq!(get(&m, &["pattern"]).as_str(), Some(r"^a\.b\+\(c\)\[0\]$"));
+
+        // JSONPath: dot-member rewrites non-shorthand names to bracket form,
+        // string literals escape quotes/backslashes, and plain/placeholder
+        // identifiers stay shorthand. Set `basename` directly so a literal `\`
+        // is tested even on Windows (where `Path::new` treats `\` as a separator).
+        let mut jp_tok = PathTokens::from_path(Path::new("pkgs/a.b'\"[0]"));
+        jp_tok.basename = r#"a.b'"[0]\c"#.to_string();
+        let m = render_nested_options("json_path_equals", yaml("path: \"$.{basename}\""), &jp_tok);
+        assert_eq!(get(&m, &["path"]).as_str(), Some(r#"$['a.b\'"[0]\\c']"#));
+        assert_eq!(
+            render_path_jsonpath("$['{basename}']", &jp_tok),
+            r#"$['a.b\'"[0]\\c']"#
+        );
+        assert_eq!(
+            render_path_jsonpath("$[\"{basename}\"]", &jp_tok),
+            r#"$["a.b'\"[0]\\c"]"#
+        );
+        assert_eq!(
+            render_path_jsonpath("$.{stem}", &PathTokens::placeholder()),
+            "$._stem_"
+        );
+        assert_eq!(
+            render_path_jsonpath("$..{basename}", &jp_tok),
+            r#"$..['a.b\'"[0]\\c']"#
+        );
+
+        // `when_iter:`: escapes quotes/backslashes in string literals, glob-escapes
+        // inside `iter.has_file(...)`, regex-escapes after `matches`, and quotes
+        // bare tokens.
+        let quote_tok = PathTokens::from_path(Path::new("pkgs/x\" or true or \""));
+        let m = render_nested_options(
+            "for_each_dir",
+            yaml("when_iter: 'iter.basename == \"{basename}\"'"),
+            &quote_tok,
+        );
+        assert_eq!(
+            get(&m, &["when_iter"]).as_str(),
+            Some(r#"iter.basename == "x\" or true or \"""#)
+        );
+        let glob_tok = PathTokens::from_path(Path::new("pkgs/a[0]*"));
+        assert_eq!(
+            render_path_when_expr(r#"iter.has_file("{basename}.toml")"#, &glob_tok),
+            r#"iter.has_file("a[[]0[]][*].toml")"#
+        );
+        assert_eq!(
+            render_path_when_expr(r#"iter.basename matches "^{basename}-""#, &re_tok),
+            r#"iter.basename matches "^a\\.b\\+\\(c\\)\\[0\\]-""#
+        );
+        assert_eq!(
+            render_path_when_expr("iter.basename == {basename}", &quote_tok),
+            r#"iter.basename == "x\" or true or \"""#
+        );
+
+        // `registry_paths_resolve.base:`: literal keywords keep their meaning,
+        // while interpolated paths colliding with keywords get a `./` prefix.
+        let kw_tok = PathTokens::from_path(Path::new("lint_root"));
+        let m = render_nested_options("registry_paths_resolve", yaml("base: \"{path}\""), &kw_tok);
+        assert_eq!(get(&m, &["base"]).as_str(), Some("./lint_root"));
+        let m = render_nested_options(
+            "registry_paths_resolve",
+            yaml("base: \"lint_root\""),
+            &kw_tok,
+        );
+        assert_eq!(get(&m, &["base"]).as_str(), Some("lint_root"));
+        let dir_kw_tok = PathTokens::from_path(Path::new("registry_dir"));
+        let m = render_nested_options(
+            "registry_paths_resolve",
+            yaml("base: \"{path}\""),
+            &dir_kw_tok,
+        );
+        assert_eq!(get(&m, &["base"]).as_str(), Some("./registry_dir"));
+
+        // `cross_file.targets.matches` is regex-escaped in both glob and list forms,
+        // and `when:` on a nested-in-nested rule spec is escaped as a `when_iter` expr.
+        let m = render_nested_options(
+            "cross_file",
+            yaml("targets:\n  files: \"{path}/*.txt\"\n  matches: \"^{basename}$\""),
+            &re_tok,
+        );
+        assert_eq!(
+            get(&m, &["targets", "matches"]).as_str(),
+            Some(r"^a\.b\+\(c\)\[0\]$")
+        );
+        let m = render_nested_options(
+            "for_each_dir",
+            yaml(
+                "require:\n  - kind: file_exists\n    paths: \"{path}/x\"\n    when: 'iter.has_file(\"{basename}.ok\")'",
+            ),
+            &glob_tok,
+        );
+        assert_eq!(
+            get(&m, &["require", "0", "when"]).as_str(),
+            Some(r#"iter.has_file("a[[]0[]][*].ok")"#)
         );
     }
 
