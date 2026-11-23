@@ -15,11 +15,8 @@
 //! itself, so it refuses a flow bomb before any parser reads it. The alias
 //! guard measures with ayaml, so it vouches only for a text ayaml reads: when
 //! ayaml refuses the text first, the guard says so ([`Expansion::Unparsed`]),
-//! and a caller that reads the text with another parser must refuse it too.
-//! saphyr, which reads YAML for source spans and structured fixes, refuses a
-//! 256th level of flow nesting of its own (its flow level is a `u8`), but does
-//! not bound block nesting, and accepts documents ayaml refuses, an alias to a
-//! collection that contains it among them.
+//! and a caller that reads the text with another parser (such as the test-only
+//! reference parsers behind `yaml-reference`) must refuse it too.
 //!
 //! **The scan follows the parser's token boundaries** (`Lexer`), not a
 //! heuristic. Both guards are only as sound as the scanner's agreement with the

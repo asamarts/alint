@@ -39,7 +39,7 @@ serde_json = "1"
 # Casts between alint_core::yaml's types and the parser's, behind private
 # functions (ADR-0038). Already in the graph through schemars.
 ref-cast = "1.0.25"
-ayaml = { version = "=0.2.2", features = ["libyaml-compat"] }
+ayaml = { version = "=0.2.3", features = ["libyaml-compat"] }
 # The parser v0.22 read YAML with: the oracle of the differential YAML harness
 # (#482), a dev-dependency of alint-core, and the reference backend behind
 # alint-core's test-only `yaml-reference` feature (#530, ADR-0041).
@@ -125,22 +125,15 @@ adotenv = "1.6.0"
 # commas survive. The check side parses JSON via serde_json (+ `strip_jsonc`); this
 # is the fix side's spanned view.
 jsonc-parser = { version = "0.34.0", features = ["cst"] }
-# Scalar typing for the Phase-2 structured fixers' YAML span resolver (alint-core
-# `structured_fix::yaml_`), which walks `saphyr-parser`'s spanned events, so a YAML
-# scalar edit is a span-splice (like JSON); `saphyr::Scalar` types each scalar as
-# saphyr's loader did. The check side parses YAML via ayaml (`=0.2.2`), while
-# structured-fix and entry-extraction spans stay on `saphyr-parser` until the v0.24
-# saphyr exit (ADR-0036). MIT OR Apache-2.0 (same as the workspace). PINNED because
-# the pre-1.0 `Marker.index` is a CHAR offset (as documented in saphyr-parser
-# 0.3.4); `yaml_` converts it to bytes and the multibyte resolver test guards that
-# contract.
+# Test-only YAML 1.2 reference parsers (ADR-0036, ADR-0041): never compiled
+# into default release builds (enforced by `ci/scripts/yaml-reference-gate.sh`).
+# `saphyr` is enabled only under `alint-core`'s test-only `yaml-reference`
+# feature (and `[dev-dependencies]`) for differential voting against `ayaml`
+# and `yaml_serde`; `saphyr-parser` is in `[dev-dependencies]` for event-stream
+# differential checks. MIT OR Apache-2.0 (same as the workspace).
+# Pinned because `saphyr-parser`'s pre-1.0 `Marker.index` is a CHAR offset.
 # `default-features = false` drops `encoding` (`load_from_read` only; we load `&str`).
 saphyr = { version = "=0.3.3", default-features = false }
-# Duplicate-aware YAML entry extraction needs the parser event stream before
-# `saphyr::MarkedYaml` rejects duplicate mapping keys, and the structured-fix span
-# resolver walks the same events. Pinned at `=0.3.4` (compatible with `saphyr =0.3.3`
-# via `saphyr`'s `^0.3.3` requirement, so Cargo resolves a single `saphyr-parser`
-# version in the workspace).
 saphyr-parser = { version = "=0.3.4", default-features = false }
 roxmltree = "0.21.2"
 hcl = { package = "hcl-rs", version = "0.18" }

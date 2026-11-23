@@ -50,6 +50,7 @@ const SCENARIO_S2: &str = include_str!("scenarios/s2_content.yml");
 const SCENARIO_S3: &str = include_str!("scenarios/s3_relational.yml");
 const SCENARIO_S4: &str = include_str!("scenarios/s4_workspace.yml");
 const SCENARIO_SFIX: &str = include_str!("scenarios/sfix_all.yml");
+const SCENARIO_SYAML: &str = include_str!("scenarios/syaml_mid.yml");
 
 /// Parameters parsed from CLI flags. Defaults pick the
 /// "publish-grade run" — full size matrix (excluding 1m), all
@@ -175,6 +176,11 @@ pub enum Scenario {
     /// runs it under `Mode::Fix` and nothing else. Replaces the old S5
     /// (4-op fix pass) and the deterministic `sfix_trim`.
     Sfix,
+    /// Opt-in mid-size YAML workload (#550): 50 ~37 KB plus 3 ~1 MB
+    /// OpenAPI-shaped YAML documents evaluated by two structured YAML rules
+    /// (`yaml_path_equals` and `yaml_path_matches`). Excluded from default
+    /// `--scenarios` and published history until baselined.
+    Syaml,
 }
 
 impl Scenario {
@@ -185,7 +191,10 @@ impl Scenario {
             "S3" => Ok(Self::S3),
             "S4" => Ok(Self::S4),
             "SFIX" | "SFIX_ALL" => Ok(Self::Sfix),
-            other => bail!("unknown scenario {other:?}; expected one of S1, S2, S3, S4, SFIX"),
+            "SYAML" | "SYAML_MID" => Ok(Self::Syaml),
+            other => {
+                bail!("unknown scenario {other:?}; expected one of S1, S2, S3, S4, SFIX, SYAML")
+            }
         }
     }
 
@@ -196,7 +205,15 @@ impl Scenario {
             Self::S3 => "S3",
             Self::S4 => "S4",
             Self::Sfix => "SFIX",
+            Self::Syaml => "SYAML",
         }
+    }
+
+    /// Whether this scenario is opt-in (excluded from the default `--scenarios`
+    /// list and published benchmark history until it has a committed baseline).
+    #[allow(dead_code)]
+    pub fn is_opt_in(self) -> bool {
+        matches!(self, Self::Syaml)
     }
 
     /// Semantic workload revision for cross-release comparisons.
@@ -209,6 +226,7 @@ impl Scenario {
         match self {
             Self::S4 => 4,
             Self::S1 | Self::S2 | Self::S3 | Self::Sfix => 2,
+            Self::Syaml => 1,
         }
     }
 
@@ -229,6 +247,9 @@ impl Scenario {
             Self::Sfix => {
                 "Auto-fix — fix --unsafe-fixes --dry-run over all 24 non-spawn fix ops on the planted sfix/ fixture"
             }
+            Self::Syaml => {
+                "Mid-size YAML (opt-in) -- 50 ~37 KB + 3 ~1 MB OpenAPI-shaped YAML files with 2 structured YAML rules"
+            }
         }
     }
 
@@ -239,6 +260,7 @@ impl Scenario {
             Self::S3 => SCENARIO_S3,
             Self::S4 => SCENARIO_S4,
             Self::Sfix => SCENARIO_SFIX,
+            Self::Syaml => SCENARIO_SYAML,
         }
     }
 
@@ -269,9 +291,16 @@ impl Scenario {
     /// Every value of the enum, in declaration order. Drives
     /// the `xtask bench-scale` "all scenarios" default + the
     /// parse-validation unit test in this module.
-    #[allow(dead_code)] // exercised by `#[cfg(test)]` only today; retained for the publish-grade default.
+    #[allow(dead_code)] // exercised by `#[cfg(test)]` only today; retained for the parse/load contract tests.
     pub fn all() -> &'static [Scenario] {
-        &[Self::S1, Self::S2, Self::S3, Self::S4, Self::Sfix]
+        &[
+            Self::S1,
+            Self::S2,
+            Self::S3,
+            Self::S4,
+            Self::Sfix,
+            Self::Syaml,
+        ]
     }
 
     /// Materialise this scenario's fixture overlay into the
@@ -334,6 +363,9 @@ impl Scenario {
             // Sfix (auto-fix) — the planted `sfix/` fixture (one
             // deterministic violation per `sfix/`-scoped fix op).
             Self::Sfix => setup_sfix_fixture(root)?,
+            // Syaml (opt-in mid-size YAML) -- 50 ~37 KB + 3 ~1 MB OpenAPI-shaped
+            // YAML documents under `yaml_mid/`.
+            Self::Syaml => setup_syaml_fixture(root)?,
             Self::S1 | Self::S4 => {}
         }
         Ok(())
@@ -359,7 +391,7 @@ impl Scenario {
         match self {
             Self::S2 => &["sample.csproj"],
             Self::S3 => &["manifest.sha256", ".gff_target", ".v012_editions"],
-            Self::S1 | Self::S4 | Self::Sfix => &[],
+            Self::S1 | Self::S4 | Self::Sfix | Self::Syaml => &[],
         }
     }
 
@@ -369,6 +401,7 @@ impl Scenario {
         match self {
             Self::S3 => &["graph"],
             Self::Sfix => &["sfix"],
+            Self::Syaml => &["yaml_mid"],
             Self::S1 | Self::S2 | Self::S4 => &[],
         }
     }
@@ -492,6 +525,90 @@ fn setup_sfix_fixture(root: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Deterministic xorshift64* generator for [`setup_syaml_fixture`].
+struct YamlFixtureRng(u64);
+
+impl YamlFixtureRng {
+    fn below(&mut self, below: usize) -> usize {
+        self.0 ^= self.0 >> 12;
+        self.0 ^= self.0 << 25;
+        self.0 ^= self.0 >> 27;
+        let value = self.0.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 33;
+        usize::try_from(value).unwrap() % below
+    }
+
+    fn word(&mut self) -> &'static str {
+        const WORDS: [&str; 10] = [
+            "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota", "kappa",
+        ];
+        WORDS[self.below(WORDS.len())]
+    }
+}
+
+/// Generate one deterministic OpenAPI-shaped YAML document with `paths` path
+/// items (~920 bytes per path item).
+fn openapi_yaml_fixture(title: &str, paths: usize, seed: u64) -> String {
+    use std::fmt::Write as _;
+    let mut rng = YamlFixtureRng(seed);
+    let mut out = String::with_capacity(paths * 950 + 128);
+    writeln!(
+        out,
+        "openapi: 3.0.0\ninfo:\n  title: {title}\n  version: 1.0.0\npaths:"
+    )
+    .unwrap();
+    for i in 0..paths {
+        writeln!(out, "  /api/v1/{}/{i}:", rng.word()).unwrap();
+        for verb in ["get", "post"] {
+            let summary: Vec<&str> = (0..6).map(|_| rng.word()).collect();
+            writeln!(
+                out,
+                "    {verb}:\n      operationId: op{verb}{i}\n      summary: \"{}\"\n      \
+                 tags: [{}, {}]\n      parameters:",
+                summary.join(" "),
+                rng.word(),
+                rng.word()
+            )
+            .unwrap();
+            for p in 0..3 {
+                writeln!(
+                    out,
+                    "        - name: p{p}\n          in: query\n          \
+                     schema: {{type: string, maxLength: {}}}",
+                    1 + rng.below(99)
+                )
+                .unwrap();
+            }
+            out.push_str("      responses:\n        '200':\n          description: ok\n");
+        }
+    }
+    out
+}
+
+/// Plant the `yaml_mid/` fixture for [`Scenario::Syaml`]: 50 OpenAPI-shaped
+/// YAML files of ~37 KB each plus 3 larger ~1 MB documents.
+fn setup_syaml_fixture(root: &Path) -> Result<()> {
+    let dir = root.join("yaml_mid");
+    std::fs::create_dir_all(&dir)
+        .with_context(|| format!("creating yaml_mid/ in {}", root.display()))?;
+    for i in 0u64..50 {
+        let name = format!("service-{i:02}.yml");
+        let body = openapi_yaml_fixture(&format!("service-{i:02}"), 40, 0x0A11_E47A_11E4_7A11 ^ i);
+        std::fs::write(dir.join(&name), body)
+            .with_context(|| format!("writing yaml_mid/{name}"))?;
+    }
+    for i in 0u64..3 {
+        let name = format!("large-{i:02}.yml");
+        let body = openapi_yaml_fixture(
+            &format!("large-{i:02}"),
+            1_100,
+            0x5EED_0F1A_7E6E_2500 ^ (i + 1),
+        );
+        std::fs::write(dir.join(&name), body)
+            .with_context(|| format!("writing yaml_mid/{name}"))?;
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Mode {
     Full,
@@ -545,6 +662,10 @@ pub struct Row {
     /// this additive field, so keep deserialization backward-compatible.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub times_ms: Vec<f64>,
+    /// Peak resident set size (max RSS) in KiB measured on a dedicated probe
+    /// run of the benchmark command. Older reports predate this additive field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peak_rss_kb: Option<u64>,
     pub command: String,
 }
 
@@ -680,6 +801,7 @@ mod tests {
             (Scenario::S3, 2, 16),
             (Scenario::S4, 4, 85),
             (Scenario::Sfix, 2, 24),
+            (Scenario::Syaml, 1, 2),
         ];
         let tmp = tempfile::tempdir().expect("tempdir");
         let registry = alint_rules::builtin_registry();
@@ -797,5 +919,42 @@ mod tests {
             s.teardown_overlay(tmp.path()).expect("first teardown");
             s.teardown_overlay(tmp.path()).expect("second teardown");
         }
+    }
+
+    #[test]
+    fn syaml_overlay_produces_mid_size_and_one_megabyte_docs_and_row_rss_is_backward_compatible() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        Scenario::Syaml.setup_overlay(tmp.path()).expect("setup");
+        let dir = tmp.path().join("yaml_mid");
+        let service_len = std::fs::metadata(dir.join("service-00.yml")).unwrap().len();
+        let large_len = std::fs::metadata(dir.join("large-00.yml")).unwrap().len();
+        assert!(
+            (30_000..=50_000).contains(&service_len),
+            "service-00.yml was {service_len} bytes"
+        );
+        assert!(
+            (900_000..=1_200_000).contains(&large_len),
+            "large-00.yml was {large_len} bytes"
+        );
+        assert!(Scenario::Syaml.is_opt_in());
+        assert!(!Scenario::S1.is_opt_in());
+        Scenario::Syaml.teardown_overlay(tmp.path()).unwrap();
+        assert!(!dir.exists());
+
+        // Legacy Row JSON without `peak_rss_kb` still deserializes cleanly.
+        let legacy = r#"{"tool":"alint","size_files":1000,"size_label":"1k","scenario":"S1",
+            "mode":"full","mean_ms":10.0,"stddev_ms":0.5,"median_ms":10.0,"min_ms":9.5,
+            "max_ms":10.5,"samples":3,"command":"alint check ."}"#;
+        let parsed: Row = serde_json::from_str(legacy).unwrap();
+        assert_eq!(parsed.peak_rss_kb, None);
+
+        let with_rss = Row {
+            peak_rss_kb: Some(42_000),
+            ..parsed
+        };
+        let encoded = serde_json::to_string(&with_rss).unwrap();
+        assert!(encoded.contains("\"peak_rss_kb\":42000"), "{encoded}");
+        let roundtrip: Row = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(roundtrip.peak_rss_kb, Some(42_000));
     }
 }

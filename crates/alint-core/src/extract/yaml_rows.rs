@@ -1,9 +1,12 @@
-//! Duplicate-aware entry rows of a YAML document, walked over the parser's
-//! events (see [`super::extract_entry_rows`]), with each row's value when a
-//! value-bearing relation asks for it ([`super::extract_entry_values_bounded`]).
+//! Duplicate-aware entry rows of a YAML document, walked over `ayaml`'s
+//! spanned events (see [`super::extract_entry_rows`]), with each row's value
+//! when a value-bearing relation asks for it
+//! ([`super::extract_entry_values_bounded`]).
 
 use super::{ByteSpan, EntryAt, EntryRowsError, EntryTable, EntryValue, PathStack, entry_capacity};
 use crate::relation::Segment;
+use crate::yaml::{CoreScalar, is_core_null, resolve_scalar_payload};
+use ayaml::{CollectionStyle, Event, ScalarStyle, Span};
 
 pub(super) fn yaml_entry_table(
     text: &str,
@@ -11,8 +14,6 @@ pub(super) fn yaml_entry_table(
     max_rows: Option<usize>,
     values: bool,
 ) -> std::result::Result<EntryTable, EntryRowsError> {
-    use saphyr_parser::{Event, Parser};
-
     let stripped = text.trim_start_matches('\u{feff}');
     let offset = text.len() - stripped.len();
     if stripped.len() > crate::structured_format::MAX_STRUCTURED_BYTES {
@@ -24,10 +25,8 @@ pub(super) fn yaml_entry_table(
     // This input's share of the YAML parse budget, held until the rows are
     // built (`yaml_budget`, ADR-0042).
     let _budget = crate::yaml_budget::reserve(stripped.len());
-    // Keep the lexical flow guard ahead of saphyr's scanner, which refuses a
-    // 256th level of flow nesting of its own but does not bound block nesting
-    // (the event loop below bounds both): this one refuses flow nesting past
-    // 128, as the parser alint decodes with does.
+    // Keep the lexical flow guard ahead of the event stream so deeply nested
+    // flow collections fail before allocating parser state.
     let yaml_guards = crate::yaml_depth::scan_guards(stripped);
     if !yaml_guards.flow_within_limit() {
         return Err(EntryRowsError::Parse(
@@ -35,46 +34,10 @@ pub(super) fn yaml_entry_table(
         ));
     }
 
-    // Iterate the parser's non-recursive event interface rather than `load`,
-    // whose receiver walk recursively descends collections. This bounds block
-    // and flow collections, including compact `- -` / `- key:` forms, before
-    // this module performs any recursive traversal.
-    let mut events = Vec::new();
-    let mut collection_depth = 0usize;
-    // The text of their own the events' scalars hold.
-    let mut scalars = 0usize;
-    for parsed in Parser::new_from_str(stripped) {
-        let (event, span) = parsed.map_err(|error| EntryRowsError::Parse(error.to_string()))?;
-        match &event {
-            Event::Scalar(std::borrow::Cow::Owned(text), ..) => scalars += text.capacity(),
-            Event::SequenceStart(..) | Event::MappingStart(..) => {
-                collection_depth += 1;
-                if collection_depth > crate::yaml_depth::MAX_YAML_FLOW_DEPTH {
-                    return Err(EntryRowsError::Parse(
-                        "YAML nesting exceeds the supported limit".to_string(),
-                    ));
-                }
-            }
-            Event::SequenceEnd | Event::MappingEnd => {
-                collection_depth = collection_depth.saturating_sub(1);
-            }
-            _ => {}
-        }
-        events.push((event, span));
-    }
-    let documents = events
-        .iter()
-        .filter(|(event, _)| matches!(event, Event::DocumentStart(_)))
-        .count();
-    if documents > 1 {
-        return Err(EntryRowsError::Parse(
-            "multi-document YAML is not supported for entry extraction".to_string(),
-        ));
-    }
-    // This guard drives a recursive discard-only deserializer when aliases are
-    // present, so run it only after collection depth is known safe and before
-    // traversing or materializing the parser result. saphyr reads what ayaml
-    // may refuse, so a text the guard could not read is refused too.
+    // Iterate `ayaml`'s lazy event stream, bounding block and flow collection
+    // nesting before performing any recursive walk over the buffered events.
+    let (events, owned_bytes) = collect_yaml_events(stripped)?;
+    // Bound alias expansion before walking the document.
     match yaml_guards.expansion(stripped) {
         crate::yaml_depth::Expansion::WithinLimit => {}
         crate::yaml_depth::Expansion::OverLimit => {
@@ -89,22 +52,20 @@ pub(super) fn yaml_entry_table(
         }
     }
 
-    let byte_offsets = YamlByteOffsets::new(stripped, &events);
     let mut index = events
         .iter()
-        .position(|(event, _)| {
+        .position(|event| {
             matches!(
                 event,
-                Event::Scalar(..)
-                    | Event::SequenceStart(..)
-                    | Event::MappingStart(..)
-                    | Event::Alias(..)
+                Event::Scalar { .. }
+                    | Event::SequenceStart { .. }
+                    | Event::MappingStart { .. }
+                    | Event::Alias { .. }
             )
         })
         .unwrap_or(events.len());
     let mut walk = YamlWalk {
         events: &events,
-        byte_offsets: &byte_offsets,
         offset,
         text: stripped,
         reject_yaml_features,
@@ -113,113 +74,85 @@ pub(super) fn yaml_entry_table(
         table: EntryTable::default(),
         stack: PathStack::default(),
     };
-    // The parse the table is read from: the events, their scalars' text,
-    // and where each character is in bytes.
-    walk.table.parsed = events.capacity() * std::mem::size_of::<(Event<'_>, saphyr_parser::Span)>()
-        + scalars
-        + byte_offsets.held();
+    // The parse the table is read from: the events and any owned text they hold.
+    walk.table.parsed = events.capacity() * std::mem::size_of::<Event<'_>>() + owned_bytes;
     if index < events.len() {
         walk.node(&mut index, true)?;
     }
     Ok(walk.table)
 }
 
-enum YamlByteOffsets {
-    Ascii(usize),
-    Utf8(Vec<(usize, usize)>),
-}
-
-impl YamlByteOffsets {
-    /// What the offsets hold on the heap.
-    fn held(&self) -> usize {
-        match self {
-            Self::Ascii(_) => 0,
-            Self::Utf8(offsets) => offsets.capacity() * std::mem::size_of::<(usize, usize)>(),
-        }
-    }
-
-    fn new(text: &str, events: &[(saphyr_parser::Event<'_>, saphyr_parser::Span)]) -> Self {
-        use saphyr_parser::Event;
-
-        // Delay endpoint allocation until the first non-ASCII character. Before
-        // that point character and byte indices are identical, so an all-ASCII
-        // document needs no mapping allocation and a UTF-8 document is still
-        // mapped in one pass over its source.
-        let mut endpoints: Option<Vec<(usize, usize)>> = None;
-        let mut needed = 0;
-        let mut character_len = 0;
-        for (character, (byte, value)) in text.char_indices().enumerate() {
-            if endpoints.is_none() && !value.is_ascii() {
-                let mut discovered = Vec::with_capacity(events.len() * 2);
-                for (event, span) in events {
-                    match event {
-                        Event::Scalar(
-                            _,
-                            saphyr_parser::ScalarStyle::Literal
-                            | saphyr_parser::ScalarStyle::Folded,
-                            ..,
-                        )
-                        | Event::SequenceStart(..)
-                        | Event::MappingStart(..) => {
-                            discovered.push((span.start.index(), usize::MAX));
-                        }
-                        Event::Scalar(..) | Event::Alias(..) => {
-                            discovered.push((span.start.index(), usize::MAX));
-                            discovered.push((span.end.index(), usize::MAX));
-                        }
-                        Event::SequenceEnd | Event::MappingEnd => {
-                            discovered.push((span.end.index(), usize::MAX));
-                        }
-                        _ => {}
-                    }
-                }
-                discovered.sort_unstable_by_key(|(endpoint, _)| *endpoint);
-                discovered.dedup_by_key(|(endpoint, _)| *endpoint);
-                while discovered
-                    .get(needed)
-                    .is_some_and(|(endpoint, _)| *endpoint <= character)
-                {
-                    discovered[needed].1 = discovered[needed].0;
-                    needed += 1;
-                }
-                endpoints = Some(discovered);
-            }
-            if let Some(endpoints) = endpoints.as_mut() {
-                while endpoints
-                    .get(needed)
-                    .is_some_and(|(endpoint, _)| *endpoint == character)
-                {
-                    endpoints[needed].1 = byte;
-                    needed += 1;
-                }
-            }
-            character_len = character + 1;
-        }
-        let Some(mut endpoints) = endpoints else {
-            return Self::Ascii(text.len());
-        };
-        while endpoints
-            .get(needed)
-            .is_some_and(|(endpoint, _)| *endpoint == character_len)
+fn collect_yaml_events(
+    stripped: &str,
+) -> std::result::Result<(Vec<Event<'_>>, usize), EntryRowsError> {
+    let mut events = Vec::new();
+    let mut collection_depth = 0usize;
+    let mut documents = 0usize;
+    let mut owned_bytes = 0usize;
+    let map_ayaml_err = |error: ayaml::Error| {
+        if error
+            .limit()
+            .is_some_and(|limit| limit.kind() == ayaml::LimitKind::Depth)
         {
-            endpoints[needed].1 = text.len();
-            needed += 1;
+            EntryRowsError::Parse(format!("YAML nesting exceeds the supported limit: {error}"))
+        } else {
+            EntryRowsError::Parse(error.to_string())
         }
-        Self::Utf8(endpoints)
-    }
-
-    fn byte(&self, character: usize) -> Option<usize> {
-        match self {
-            Self::Ascii(len) => (character <= *len).then_some(character),
-            Self::Utf8(endpoints) => endpoints
-                .binary_search_by_key(&character, |(endpoint, _)| *endpoint)
-                .ok()
-                .and_then(|index| {
-                    let byte = endpoints[index].1;
-                    (byte != usize::MAX).then_some(byte)
-                }),
+    };
+    let stream = crate::yaml::parse_events_stream(stripped).map_err(map_ayaml_err)?;
+    for parsed in stream {
+        let event = parsed.map_err(map_ayaml_err)?;
+        match &event {
+            Event::DocumentStart { .. } => {
+                documents += 1;
+                if documents > 1 {
+                    return Err(EntryRowsError::Parse(
+                        "multi-document YAML is not supported for entry extraction".to_string(),
+                    ));
+                }
+            }
+            Event::Scalar {
+                value,
+                raw,
+                tag,
+                anchor,
+                ..
+            } => {
+                if let std::borrow::Cow::Owned(text) = value {
+                    owned_bytes += text.capacity();
+                }
+                if let std::borrow::Cow::Owned(text) = raw {
+                    owned_bytes += text.capacity();
+                }
+                if let Some(tag) = tag {
+                    owned_bytes += tag.handle().len() + tag.suffix().len();
+                }
+                if let Some(anchor) = anchor {
+                    owned_bytes += anchor.as_str().len();
+                }
+            }
+            Event::SequenceStart { tag, anchor, .. } | Event::MappingStart { tag, anchor, .. } => {
+                collection_depth += 1;
+                if collection_depth > crate::yaml_depth::MAX_YAML_FLOW_DEPTH {
+                    return Err(EntryRowsError::Parse(
+                        "YAML nesting exceeds the supported limit".to_string(),
+                    ));
+                }
+                if let Some(tag) = tag {
+                    owned_bytes += tag.handle().len() + tag.suffix().len();
+                }
+                if let Some(anchor) = anchor {
+                    owned_bytes += anchor.as_str().len();
+                }
+            }
+            Event::SequenceEnd { .. } | Event::MappingEnd { .. } => {
+                collection_depth = collection_depth.saturating_sub(1);
+            }
+            _ => {}
         }
+        events.push(event);
     }
+    Ok((events, owned_bytes))
 }
 
 struct YamlNode {
@@ -228,7 +161,7 @@ struct YamlNode {
     /// Where the node's event starts: a key's location when it has no span
     /// (a block scalar, or an empty key).
     start: Option<usize>,
-    style: Option<saphyr_parser::ScalarStyle>,
+    style: Option<ScalarStyle>,
     /// What the node holds, when the walk records values.
     value: Option<EntryValue>,
 }
@@ -236,8 +169,7 @@ struct YamlNode {
 /// One walk over a document's events, emitting a row per mapping entry and,
 /// when `values` is set, each row's value beside it.
 struct YamlWalk<'w, 'e> {
-    events: &'w [(saphyr_parser::Event<'e>, saphyr_parser::Span)],
-    byte_offsets: &'w YamlByteOffsets,
+    events: &'w [Event<'e>],
     offset: usize,
     text: &'w str,
     reject_yaml_features: bool,
@@ -247,29 +179,22 @@ struct YamlWalk<'w, 'e> {
     stack: PathStack,
 }
 
-/// What a scalar event holds, typed as saphyr's loader types it under the
-/// core schema: a quoted or block scalar is a string, a plain one is null, a
-/// boolean, a number (kept as written: `1.10` is not `1.1`) or a string, and a
-/// core tag that cannot read its scalar (`!!int abc`) leaves it unreadable.
-fn scalar_value(
-    text: &str,
-    style: saphyr_parser::ScalarStyle,
-    tag: Option<&std::borrow::Cow<'_, saphyr_parser::Tag>>,
-) -> EntryValue {
+/// What a scalar event holds, typed under the YAML 1.2 core schema: a quoted
+/// or block scalar is a string, a plain one is null, a boolean, a number (kept
+/// as written: `1.10` is not `1.1`) or a string, and a core tag that cannot
+/// read its scalar (`!!int abc`) leaves it unreadable.
+fn scalar_value(text: &str, style: ScalarStyle, tag: Option<&ayaml::Tag>) -> EntryValue {
     use crate::relation::{Number, Value};
-    match saphyr::Scalar::parse_from_cow_and_metadata(std::borrow::Cow::Borrowed(text), style, tag)
-    {
-        Some(saphyr::Scalar::Null) => EntryValue::Scalar(Value::Null),
-        Some(saphyr::Scalar::Boolean(flag)) => EntryValue::Scalar(Value::Bool(flag)),
-        Some(saphyr::Scalar::Integer(_) | saphyr::Scalar::FloatingPoint(_)) => {
+    match resolve_scalar_payload(text, style, tag) {
+        Some(CoreScalar::Null) => EntryValue::Scalar(Value::Null),
+        Some(CoreScalar::Bool(flag)) => EntryValue::Scalar(Value::Bool(flag)),
+        Some(CoreScalar::NegInt(_) | CoreScalar::Uint(_) | CoreScalar::Float(_)) => {
             Number::from_lexeme(text).map_or_else(
                 || EntryValue::Scalar(Value::String(text.into())),
                 |number| EntryValue::Scalar(Value::Number(number)),
             )
         }
-        Some(saphyr::Scalar::String(string)) => {
-            EntryValue::Scalar(Value::String(string.as_ref().into()))
-        }
+        Some(CoreScalar::String(string)) => EntryValue::Scalar(Value::String(string.into())),
         None => EntryValue::Unreadable,
     }
 }
@@ -281,26 +206,24 @@ impl YamlWalk<'_, '_> {
         index: &mut usize,
         emit: bool,
     ) -> std::result::Result<YamlNode, EntryRowsError> {
-        use saphyr_parser::Event;
-
-        let (events, byte_offsets, offset, text) =
-            (self.events, self.byte_offsets, self.offset, self.text);
+        let (events, offset, text) = (self.events, self.offset, self.text);
         let reject_yaml_features = self.reject_yaml_features;
         let max_rows = self.max_rows;
-        let Some((event, event_span)) = events.get(*index) else {
+        let Some(event) = events.get(*index) else {
             return Err(EntryRowsError::Parse(
                 "unexpected end of YAML event stream".to_string(),
             ));
         };
-        let event_start = byte_offsets
-            .byte(event_span.start.index())
-            .map(|start| start + offset);
+        let event_span = event.span();
+        let event_start = Some(event_span.start() + offset);
         match event {
-            Event::Scalar(value, style, _, tag) => {
+            Event::Scalar {
+                value, style, tag, ..
+            } => {
                 *index += 1;
                 Ok(YamlNode {
                     scalar: Some(value.to_string()),
-                    span: yaml_scalar_span(*event_span, *style, byte_offsets, offset, text),
+                    span: yaml_scalar_span(event_span, *style, offset),
                     start: event_start,
                     style: Some(*style),
                     value: self
@@ -308,7 +231,7 @@ impl YamlWalk<'_, '_> {
                         .then(|| scalar_value(value, *style, tag.as_ref())),
                 })
             }
-            Event::Alias(_) => {
+            Event::Alias { .. } => {
                 if reject_yaml_features {
                     return Err(EntryRowsError::Parse(
                         "YAML aliases are not supported for key extraction".to_string(),
@@ -317,49 +240,45 @@ impl YamlWalk<'_, '_> {
                 *index += 1;
                 Ok(YamlNode {
                     scalar: None,
-                    span: yaml_token_span(*event_span, byte_offsets, offset, text, false),
+                    span: yaml_token_span(event_span, offset),
                     start: event_start,
                     style: None,
                     value: Some(EntryValue::Unreadable),
                 })
             }
-            Event::SequenceStart(..) => {
-                let start = *event_span;
+            Event::SequenceStart { style, .. } => {
+                let start = event_span;
+                let flow = *style == CollectionStyle::Flow;
                 *index += 1;
                 let mut item = 0;
-                while !matches!(events.get(*index), Some((Event::SequenceEnd, _))) {
+                while !matches!(events.get(*index), Some(Event::SequenceEnd { .. })) {
                     self.stack.enter(Segment::Index(item));
                     self.node(index, emit)?;
                     self.stack.leave();
                     item += 1;
                 }
-                let end = events[*index].1;
+                let end = events[*index].span();
                 *index += 1;
                 Ok(YamlNode {
                     scalar: None,
-                    span: yaml_flow_container_span(
-                        start,
-                        end,
-                        byte_offsets,
-                        offset,
-                        text,
-                        b'[',
-                        b']',
-                    ),
+                    span: flow
+                        .then(|| yaml_flow_container_span(start, end, offset, text, b'[', b']'))
+                        .flatten(),
                     start: event_start,
                     style: None,
                     value: Some(EntryValue::Array),
                 })
             }
-            Event::MappingStart(..) => {
-                let start = *event_span;
+            Event::MappingStart { style, .. } => {
+                let start = event_span;
+                let flow = *style == CollectionStyle::Flow;
                 *index += 1;
-                while !matches!(events.get(*index), Some((Event::MappingEnd, _))) {
+                while !matches!(events.get(*index), Some(Event::MappingEnd { .. })) {
                     let key = self.node(index, false)?;
                     if let Some(key_text) = key.scalar {
                         if reject_yaml_features
                             && key_text == "<<"
-                            && key.style == Some(saphyr_parser::ScalarStyle::Plain)
+                            && key.style == Some(ScalarStyle::Plain)
                         {
                             return Err(EntryRowsError::Parse(
                                 "YAML merge keys are not supported for key extraction".to_string(),
@@ -415,19 +334,13 @@ impl YamlWalk<'_, '_> {
                         self.node(index, emit)?;
                     }
                 }
-                let end = events[*index].1;
+                let end = events[*index].span();
                 *index += 1;
                 Ok(YamlNode {
                     scalar: None,
-                    span: yaml_flow_container_span(
-                        start,
-                        end,
-                        byte_offsets,
-                        offset,
-                        text,
-                        b'{',
-                        b'}',
-                    ),
+                    span: flow
+                        .then(|| yaml_flow_container_span(start, end, offset, text, b'{', b'}'))
+                        .flatten(),
                     start: event_start,
                     style: None,
                     value: Some(EntryValue::Object),
@@ -441,22 +354,18 @@ impl YamlWalk<'_, '_> {
 }
 
 fn yaml_flow_container_span(
-    start: saphyr_parser::Span,
-    end: saphyr_parser::Span,
-    byte_offsets: &YamlByteOffsets,
+    start: Span,
+    end: Span,
     offset: usize,
     text: &str,
     open: u8,
     close: u8,
 ) -> Option<ByteSpan> {
-    let start = byte_offsets.byte(start.start.index())?;
+    let start = start.start();
     if text.as_bytes().get(start) != Some(&open) {
-        // Block container event spans are token boundaries, not complete node
-        // spans (indentless sequences can even start after their first dash).
-        // Decline them rather than claiming a partial or whitespace-padded value.
         return None;
     }
-    let parser_end = byte_offsets.byte(end.end.index())?;
+    let parser_end = end.end();
     let close_at = text
         .as_bytes()
         .get(start..parser_end)?
@@ -469,52 +378,22 @@ fn yaml_flow_container_span(
     Some(ByteSpan::new(start + offset, close_at + 1 + offset))
 }
 
-fn yaml_scalar_span(
-    span: saphyr_parser::Span,
-    style: saphyr_parser::ScalarStyle,
-    byte_offsets: &YamlByteOffsets,
-    offset: usize,
-    text: &str,
-) -> Option<ByteSpan> {
-    if matches!(
-        style,
-        saphyr_parser::ScalarStyle::Literal | saphyr_parser::ScalarStyle::Folded
-    ) {
-        // Saphyr's scalar event does not span the complete indicator plus body.
+fn yaml_scalar_span(span: Span, style: ScalarStyle, offset: usize) -> Option<ByteSpan> {
+    if matches!(style, ScalarStyle::Literal | ScalarStyle::Folded) {
+        // Keep block scalars unspanned so placement and replacement stay
+        // consistent with single-token spans.
         return None;
     }
-    yaml_token_span(span, byte_offsets, offset, text, true)
+    yaml_token_span(span, offset)
 }
 
-fn yaml_token_span(
-    span: saphyr_parser::Span,
-    byte_offsets: &YamlByteOffsets,
-    offset: usize,
-    text: &str,
-    clamp_quoted: bool,
-) -> Option<ByteSpan> {
-    let start = byte_offsets.byte(span.start.index())?;
-    let mut end = byte_offsets.byte(span.end.index())?;
-    if start == end {
-        // Implicit empty mapping values are represented by a zero-width scalar
-        // event at the `:` boundary; that is not a value token.
+fn yaml_token_span(span: Span, offset: usize) -> Option<ByteSpan> {
+    if span.is_empty() {
+        // Implicit empty mapping values have a zero-width scalar span; that is
+        // not a value token.
         return None;
     }
-    if clamp_quoted && let Some(open @ (b'"' | b'\'')) = text.as_bytes().get(start).copied() {
-        let mut at = start + 1;
-        while at < end {
-            match text.as_bytes()[at] {
-                b'\\' if open == b'"' => at += 2,
-                b'\'' if open == b'\'' && text.as_bytes().get(at + 1) == Some(&b'\'') => at += 2,
-                byte if byte == open => {
-                    end = at + 1;
-                    break;
-                }
-                _ => at += 1,
-            }
-        }
-    }
-    Some(ByteSpan::new(start + offset, end + offset))
+    Some(ByteSpan::new(span.start() + offset, span.end() + offset))
 }
 
 /// Inspect a YAML document's root shape in O(1) memory by stopping the event
@@ -522,28 +401,24 @@ fn yaml_token_span(
 /// materializing a value tree. Used by `key_parity`'s `strip_root` gate (#597).
 pub(super) fn yaml_strip_root_shape(text: &str) -> super::StripRootShape {
     use super::StripRootShape;
-    use saphyr_parser::{Event, Parser, ScalarStyle};
 
-    fn is_core_null_scalar(
-        value: &str,
-        style: ScalarStyle,
-        tag: Option<&saphyr_parser::Tag>,
-    ) -> bool {
+    fn is_core_null_scalar(value: &str, style: ScalarStyle, tag: Option<&ayaml::Tag>) -> bool {
         if let Some(tag) = tag {
-            if tag.is_yaml_core_schema() {
-                return tag.suffix == "null";
-            }
-            return false;
+            return tag.is_core() && tag.suffix() == "null";
         }
-        style == ScalarStyle::Plain && matches!(value, "" | "~" | "null" | "Null" | "NULL")
+        style == ScalarStyle::Plain && is_core_null(value)
     }
 
     let stripped = text.trim_start_matches('\u{feff}');
-    let mut parser = Parser::new_from_str(stripped);
+    let Ok(mut stream) = crate::yaml::parse_events_stream(stripped) else {
+        return StripRootShape::EmptyDocument;
+    };
     let mut next_event = || loop {
-        match parser.next()? {
-            Ok((Event::StreamStart | Event::DocumentStart(_) | Event::Nothing, _)) => {}
-            Ok((event, _)) => return Some(Ok(event)),
+        match stream.next()? {
+            Ok(
+                Event::StreamStart { .. } | Event::Directive { .. } | Event::DocumentStart { .. },
+            ) => {}
+            Ok(event) => return Some(Ok(event)),
             Err(err) => return Some(Err(err)),
         }
     };
@@ -552,38 +427,40 @@ pub(super) fn yaml_strip_root_shape(text: &str) -> super::StripRootShape {
         return StripRootShape::EmptyDocument;
     };
     match root {
-        Event::DocumentEnd | Event::StreamEnd => StripRootShape::EmptyDocument,
-        Event::SequenceStart(..) => StripRootShape::TopLevelArray,
-        Event::Scalar(val, style, _, tag) => {
-            if style == ScalarStyle::Plain && tag.is_none() && val.is_empty() {
+        Event::DocumentEnd { .. } | Event::StreamEnd { .. } => StripRootShape::EmptyDocument,
+        Event::SequenceStart { .. } => StripRootShape::TopLevelArray,
+        Event::Scalar {
+            value, style, tag, ..
+        } => {
+            if style == ScalarStyle::Plain && tag.is_none() && value.is_empty() {
                 StripRootShape::EmptyDocument
-            } else if is_core_null_scalar(&val, style, tag.as_deref()) {
+            } else if is_core_null_scalar(&value, style, tag.as_ref()) {
                 StripRootShape::TopLevelNull
             } else {
                 StripRootShape::TopLevelValue
             }
         }
-        Event::MappingStart(..) => {
+        Event::MappingStart { .. } => {
             // Inspect the first key in the top-level mapping.
             let Some(Ok(key_ev)) = next_event() else {
                 return StripRootShape::EmptyObject;
             };
-            if matches!(key_ev, Event::MappingEnd) {
+            if matches!(key_ev, Event::MappingEnd { .. }) {
                 return StripRootShape::EmptyObject;
             }
             // Skip any nested collection inside a complex key so we land on
             // the key's value event.
             let mut key_depth = usize::from(matches!(
                 key_ev,
-                Event::MappingStart(..) | Event::SequenceStart(..)
+                Event::MappingStart { .. } | Event::SequenceStart { .. }
             ));
             while key_depth > 0 {
                 let Some(Ok(ev)) = next_event() else {
                     return StripRootShape::SingleRootValue;
                 };
                 match ev {
-                    Event::MappingStart(..) | Event::SequenceStart(..) => key_depth += 1,
-                    Event::MappingEnd | Event::SequenceEnd => key_depth -= 1,
+                    Event::MappingStart { .. } | Event::SequenceStart { .. } => key_depth += 1,
+                    Event::MappingEnd { .. } | Event::SequenceEnd { .. } => key_depth -= 1,
                     _ => {}
                 }
             }
@@ -592,13 +469,15 @@ pub(super) fn yaml_strip_root_shape(text: &str) -> super::StripRootShape {
                 return StripRootShape::SingleRootNull;
             };
             match val_ev {
-                Event::MappingStart(..) => match next_event() {
-                    Some(Ok(Event::MappingEnd)) => StripRootShape::SingleRootEmptyObject,
+                Event::MappingStart { .. } => match next_event() {
+                    Some(Ok(Event::MappingEnd { .. })) => StripRootShape::SingleRootEmptyObject,
                     _ => StripRootShape::Object,
                 },
-                Event::SequenceStart(..) => StripRootShape::SingleRootArray,
-                Event::Scalar(val, style, _, tag) => {
-                    if is_core_null_scalar(&val, style, tag.as_deref()) {
+                Event::SequenceStart { .. } => StripRootShape::SingleRootArray,
+                Event::Scalar {
+                    value, style, tag, ..
+                } => {
+                    if is_core_null_scalar(&value, style, tag.as_ref()) {
                         StripRootShape::SingleRootNull
                     } else {
                         StripRootShape::SingleRootValue

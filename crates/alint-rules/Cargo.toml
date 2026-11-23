@@ -43,12 +43,11 @@ serde_json_path.workspace = true
 toml.workspace = true
 jsonschema.workspace = true
 memchr.workspace = true
-saphyr-parser.workspace = true
+ayaml.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
 tempfile.workspace = true
-ayaml.workspace = true
 cap.workspace = true
 
 [lints]

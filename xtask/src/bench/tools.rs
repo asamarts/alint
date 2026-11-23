@@ -233,8 +233,8 @@ impl Tool {
             Self::GrepPipeline => match scenario {
                 Scenario::S1 => grep_pipeline_s1(&root, false),
                 Scenario::S2 => grep_pipeline_s2(&root, false),
-                Scenario::S3 | Scenario::S4 | Scenario::Sfix => {
-                    unreachable!("supports() filters S3/S4/SFIX out for GrepPipeline")
+                Scenario::S3 | Scenario::S4 | Scenario::Sfix | Scenario::Syaml => {
+                    unreachable!("supports() filters S3/S4/SFIX/SYAML out for GrepPipeline")
                 }
             },
             // `repolinter lint <root>` reads `repolinter.json`
@@ -264,8 +264,8 @@ impl Tool {
         match scenario {
             Scenario::S1 => grep_pipeline_s1(&root, true),
             Scenario::S2 => grep_pipeline_s2(&root, true),
-            Scenario::S3 | Scenario::S4 | Scenario::Sfix => {
-                unreachable!("supports() filters S3/S4/SFIX out for GrepPipeline")
+            Scenario::S3 | Scenario::S4 | Scenario::Sfix | Scenario::Syaml => {
+                unreachable!("supports() filters S3/S4/SFIX/SYAML out for GrepPipeline")
             }
         }
     }

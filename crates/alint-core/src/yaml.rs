@@ -47,6 +47,11 @@ fn limits() -> ayaml::Limits {
         .with_max_alias_dereferences(usize::MAX)
 }
 
+/// Compatibility parse options carrying alint's unified parser limits.
+pub(crate) fn compat_parse_options() -> ayaml::compat::ParseOptions {
+    ayaml::compat::ParseOptions::new().with_limits(limits())
+}
+
 /// Decode one YAML document into `T`, under alint's parser limits.
 ///
 /// The parser is ayaml, unless a build with `alint-core`'s `yaml-reference`
@@ -72,9 +77,9 @@ pub fn from_str<'de, T: Deserialize<'de>>(input: &'de str) -> Result<T, Error> {
 /// [`from_str`] through ayaml, whatever parser the build chose, and through
 /// alint's own decoding layer (see [`crate::yaml_decode`]).
 pub(crate) fn ayaml_from_str<'de, T: Deserialize<'de>>(input: &'de str) -> Result<T, Error> {
-    ayaml::compat::from_str_seed_with_limits(
+    ayaml::compat::from_str_seed_with(
         input,
-        &limits(),
+        &compat_parse_options(),
         crate::yaml_decode::TextSeed::<T>::new(),
     )
     .map_err(|error| Error::from_text(input, crate::yaml_decode::finish(error)))
@@ -87,13 +92,19 @@ pub(crate) fn ayaml_from_str_seed<'de, S: serde::de::DeserializeSeed<'de>>(
     input: &'de str,
     seed: S,
 ) -> Result<S::Value, ayaml::Error> {
-    ayaml::compat::from_str_seed_with_limits(input, &limits(), seed)
+    ayaml::compat::from_str_seed_with(input, &compat_parse_options(), seed)
+}
+
+/// Stream the spanned parser events of `input` lazily under alint's parser
+/// limits, using ayaml's compatibility reader.
+pub(crate) fn parse_events_stream(input: &str) -> Result<ayaml::EventStream<'_>, ayaml::Error> {
+    ayaml::compat::parse_events_with(input, &compat_parse_options())
 }
 
 /// Whether the first node of `prefix` (the input up to an error) is a block
 /// collection, inspecting events lazily so the full stream is never buffered.
 pub(crate) fn root_is_a_block_collection(prefix: &str) -> bool {
-    let Ok(events) = ayaml::compat::parse_events_with_limits(prefix, &limits()) else {
+    let Ok(events) = parse_events_stream(prefix) else {
         return false;
     };
     for parsed in events {
@@ -121,7 +132,187 @@ pub(crate) fn root_is_a_block_collection(prefix: &str) -> bool {
 /// whole stream with this, and `requires:` is checked on the first
 /// document's events.
 pub(crate) fn stream_events(input: &str) -> Result<Vec<ayaml::Event<'_>>, ayaml::Error> {
-    ayaml::compat::parse_events_eager_with_limits(input, &limits())
+    ayaml::compat::parse_events_eager_with(input, &compat_parse_options())
+}
+
+/// A scalar resolved under the YAML 1.2 core schema, with canonical integer
+/// and float representations suitable for value-equality mapping-key checks.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum CoreScalar {
+    Null,
+    Bool(bool),
+    /// Strictly negative integer (`< 0`). Non-negative integers use [`Self::Uint`].
+    NegInt(i128),
+    /// Non-negative integer (`>= 0`).
+    Uint(u128),
+    /// Canonical IEEE-754 float bits (`-0.0` normalized to `+0.0`, all NaNs to
+    /// `f64::NAN`).
+    Float(u64),
+    String(String),
+}
+
+/// Whether `tag` is one of the five YAML 1.2 core-schema scalar tags.
+pub(crate) fn is_core_scalar_tag(tag: &ayaml::Tag) -> bool {
+    tag.is_core() && matches!(tag.suffix(), "str" | "int" | "float" | "bool" | "null")
+}
+
+/// Whether `tag` is a YAML 1.2 core-schema collection tag (`!!seq`, `!!map`,
+/// `!!set`, `!!omap`, `!!pairs`) that leaves a collection plain.
+pub(crate) fn is_core_collection_tag(tag: &ayaml::Tag) -> bool {
+    tag.is_core() && matches!(tag.suffix(), "seq" | "map" | "set" | "omap" | "pairs")
+}
+
+/// Resolve an untagged or core-scalar-tagged scalar event under the YAML 1.2
+/// core schema. Returns `None` for any non-core tag (including `!` and
+/// unknown `!!` names like `!!binary`) and for a core tag whose text does not
+/// fit it (`!!int abc`).
+pub(crate) fn resolve_core_scalar(
+    text: &str,
+    style: ayaml::ScalarStyle,
+    tag: Option<&ayaml::Tag>,
+) -> Option<CoreScalar> {
+    if let Some(tag) = tag {
+        if !is_core_scalar_tag(tag) {
+            return None;
+        }
+        return resolve_explicit_core_scalar(text, tag.suffix());
+    }
+    Some(resolve_untagged_scalar(text, style))
+}
+
+/// Resolve a scalar event's payload under the YAML 1.2 core schema, looking
+/// through custom tags (`!` forces string; other non-core tags resolve their
+/// payload as if untagged), matching `ayaml::Value` accessors. Returns `None`
+/// only when an explicit core scalar tag cannot read the text (`!!int abc`).
+pub(crate) fn resolve_scalar_payload(
+    text: &str,
+    style: ayaml::ScalarStyle,
+    tag: Option<&ayaml::Tag>,
+) -> Option<CoreScalar> {
+    if let Some(tag) = tag {
+        if is_core_scalar_tag(tag) {
+            return resolve_explicit_core_scalar(text, tag.suffix());
+        }
+        if tag.handle() == "!" && tag.suffix().is_empty() {
+            return Some(CoreScalar::String(text.to_owned()));
+        }
+        if tag.is_core() {
+            // Unknown core tags like `!!binary` carry string payloads in ayaml.
+            return Some(CoreScalar::String(text.to_owned()));
+        }
+    }
+    Some(resolve_untagged_scalar(text, style))
+}
+
+fn resolve_untagged_scalar(text: &str, style: ayaml::ScalarStyle) -> CoreScalar {
+    if style != ayaml::ScalarStyle::Plain {
+        return CoreScalar::String(text.to_owned());
+    }
+    if is_core_null(text) {
+        return CoreScalar::Null;
+    }
+    if let Some(flag) = parse_core_bool(text) {
+        return CoreScalar::Bool(flag);
+    }
+    if let Some(int) = parse_core_int(text, false) {
+        return int;
+    }
+    if let Some(float) = parse_core_float(text, false) {
+        return float;
+    }
+    CoreScalar::String(text.to_owned())
+}
+
+fn resolve_explicit_core_scalar(text: &str, suffix: &str) -> Option<CoreScalar> {
+    match suffix {
+        "str" => Some(CoreScalar::String(text.to_owned())),
+        "int" => parse_core_int(text, true),
+        "float" => parse_core_float(text, true),
+        "bool" => parse_core_bool(text).map(CoreScalar::Bool),
+        "null" => is_core_null(text).then_some(CoreScalar::Null),
+        _ => None,
+    }
+}
+
+pub(crate) fn is_core_null(text: &str) -> bool {
+    matches!(text, "" | "~" | "null" | "Null" | "NULL")
+}
+
+fn parse_core_bool(text: &str) -> Option<bool> {
+    match text {
+        "true" | "True" | "TRUE" => Some(true),
+        "false" | "False" | "FALSE" => Some(false),
+        _ => None,
+    }
+}
+
+fn parse_core_int(text: &str, allow_leading_zero: bool) -> Option<CoreScalar> {
+    let (negative, digits) = match text.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, text.strip_prefix('+').unwrap_or(text)),
+    };
+    if digits.is_empty() || digits.starts_with(['+', '-']) {
+        return None;
+    }
+    let (radix, digits) = if let Some(rest) = digits.strip_prefix("0b") {
+        (2, rest)
+    } else if let Some(rest) = digits.strip_prefix("0o") {
+        (8, rest)
+    } else if let Some(rest) = digits.strip_prefix("0x") {
+        (16, rest)
+    } else {
+        (10, digits)
+    };
+    if digits.is_empty() || digits.starts_with(['+', '-']) {
+        return None;
+    }
+    if !allow_leading_zero && radix == 10 && digits.len() > 1 && digits.starts_with('0') {
+        return None;
+    }
+    let magnitude = u128::from_str_radix(digits, radix).ok()?;
+    if magnitude == 0 {
+        return Some(CoreScalar::Uint(0));
+    }
+    if negative {
+        0_i128
+            .checked_sub_unsigned(magnitude)
+            .map(CoreScalar::NegInt)
+    } else {
+        Some(CoreScalar::Uint(magnitude))
+    }
+}
+
+fn canonical_float(value: f64) -> CoreScalar {
+    let bits = if value.is_nan() {
+        f64::NAN.to_bits()
+    } else if value == 0.0 {
+        0.0_f64.to_bits()
+    } else {
+        value.to_bits()
+    };
+    CoreScalar::Float(bits)
+}
+
+fn parse_core_float(text: &str, allow_leading_zero: bool) -> Option<CoreScalar> {
+    match text {
+        ".inf" | ".Inf" | ".INF" | "+.inf" | "+.Inf" | "+.INF" => {
+            return Some(canonical_float(f64::INFINITY));
+        }
+        "-.inf" | "-.Inf" | "-.INF" => return Some(canonical_float(f64::NEG_INFINITY)),
+        ".nan" | ".NaN" | ".NAN" => return Some(canonical_float(f64::NAN)),
+        _ => {}
+    }
+    let digits = text.strip_prefix(['+', '-']).unwrap_or(text);
+    let decimal_int_like = !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit());
+    if decimal_int_like {
+        if !allow_leading_zero && digits.len() > 1 && digits.starts_with('0') {
+            return None;
+        }
+    } else if !text.contains(['.', 'e', 'E']) {
+        return None;
+    }
+    let value = text.parse::<f64>().ok()?;
+    value.is_finite().then(|| canonical_float(value))
 }
 
 /// Decode `value` into `T`, as [`from_str`] decodes a document's value, except
@@ -1125,6 +1316,25 @@ impl Error {
         }
     }
 
+    /// A redacted diagnostic without document text, naming only the error
+    /// category, error code (when available), and source location.
+    #[must_use]
+    pub fn masked_message(&self) -> String {
+        match &self.0 {
+            ErrorRepr::Ayaml(error) => error.masked().to_string(),
+            ErrorRepr::Hinted(hinted) => hinted.0.masked().to_string(),
+            #[cfg(feature = "yaml-reference")]
+            ErrorRepr::Libyaml(_, _) => match self.location() {
+                Some(location) => format!(
+                    "YAML parse error at line {} column {}",
+                    location.line(),
+                    location.column()
+                ),
+                None => "YAML parse error".to_string(),
+            },
+        }
+    }
+
     /// Where in the document the error is, if it has a place there.
     #[must_use]
     pub fn location(&self) -> Option<Location> {
@@ -1474,7 +1684,8 @@ mod tests {
         let spec: Spec = from_str(text).unwrap();
         assert_eq!(spec.kind, "k");
         let parser: ayaml::Mapping =
-            ayaml::compat::from_str_with_limits("pattern: x\nlimits: [1, 2]\n", &limits()).unwrap();
+            ayaml::compat::from_str_with("pattern: x\nlimits: [1, 2]\n", &compat_parse_options())
+                .unwrap();
         assert_eq!(format!("{:?}", spec.extra), format!("{parser:?}"));
         assert_eq!(
             format!("{:?}", spec.extra["limits"]),
@@ -1946,6 +2157,61 @@ mod tests {
         assert_eq!(
             to_string(&value).unwrap(),
             "kind: k\nlimits:\n- 1\n- 2.5\nflag: true\nnone: null\nt: !x y\n"
+        );
+    }
+
+    #[test]
+    fn masked_message_strips_document_text_and_keeps_location() {
+        let error = ayaml_from_str::<u32>("top-secret-canary-token").unwrap_err();
+        let masked = error.masked_message();
+        assert!(!masked.contains("top-secret-canary-token"), "{masked}");
+        assert_ne!(masked, "");
+
+        let syntax = ayaml_from_str::<Value>("secret-key: [unclosed\n").unwrap_err();
+        let masked = syntax.masked_message();
+        assert!(!masked.contains("secret-key"), "{masked}");
+        assert!(!masked.contains("unclosed"), "{masked}");
+        assert!(masked.contains("line 2"), "{masked}");
+    }
+
+    #[test]
+    fn core_scalar_resolution_matches_yaml_1_2_core_schema() {
+        use ayaml::{ScalarStyle, Tag};
+        assert_eq!(
+            resolve_core_scalar("1", ScalarStyle::Plain, None),
+            resolve_core_scalar("0x1", ScalarStyle::Plain, None)
+        );
+        assert_eq!(
+            resolve_core_scalar("0", ScalarStyle::Plain, None),
+            resolve_core_scalar("-0", ScalarStyle::Plain, None)
+        );
+        assert_eq!(
+            resolve_core_scalar("0123", ScalarStyle::Plain, None),
+            Some(CoreScalar::String("0123".into()))
+        );
+        assert_eq!(
+            resolve_core_scalar("0123", ScalarStyle::Plain, Some(&Tag::core("int"))),
+            Some(CoreScalar::Uint(123))
+        );
+        assert_eq!(
+            resolve_core_scalar("abc", ScalarStyle::Plain, Some(&Tag::core("int"))),
+            None
+        );
+        assert_eq!(
+            resolve_core_scalar("foo", ScalarStyle::Plain, Some(&Tag::local("Ref"))),
+            None
+        );
+        assert_eq!(
+            resolve_scalar_payload("1", ScalarStyle::Plain, Some(&Tag::local(""))),
+            Some(CoreScalar::String("1".into()))
+        );
+        assert_eq!(
+            resolve_scalar_payload("foo", ScalarStyle::Plain, Some(&Tag::local("Ref"))),
+            Some(CoreScalar::String("foo".into()))
+        );
+        assert_eq!(
+            resolve_scalar_payload("abc", ScalarStyle::Plain, Some(&Tag::core("int"))),
+            None
         );
     }
 }

@@ -422,6 +422,7 @@ mod tests {
             max_ms: mean + sd,
             samples: 10,
             times_ms: Vec::new(),
+            peak_rss_kb: None,
             command: format!("alint ({size}/{scen}/{mode})"),
         }
     }

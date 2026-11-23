@@ -1944,3 +1944,204 @@ fn config_form_orders_hashed_collections() {
         "{first}"
     );
 }
+
+/// Normalized structural event for comparing `ayaml` and `saphyr-parser`
+/// event streams (ADR-0036).
+#[derive(Debug, PartialEq, Eq)]
+enum NormEvent {
+    DocumentStart,
+    DocumentEnd,
+    SequenceStart,
+    SequenceEnd,
+    MappingStart,
+    MappingEnd,
+    Scalar { value: String, style: &'static str },
+    Alias,
+}
+
+fn ayaml_norm_events(input: &str) -> Result<Vec<NormEvent>, String> {
+    let mut out = Vec::new();
+    let mut open_collections = 0usize;
+    let mut open_docs = 0usize;
+    let mut saw_stream_start = false;
+    let mut saw_stream_end = false;
+    let stream = crate::yaml::parse_events_stream(input).map_err(|e| e.to_string())?;
+    for parsed in stream {
+        let event = parsed.map_err(|e| e.to_string())?;
+        let span = event.span();
+        assert!(
+            span.start() <= span.end() && span.end() <= input.len(),
+            "span out of bounds {span:?} for input len {}",
+            input.len()
+        );
+        assert!(
+            input.is_char_boundary(span.start()) && input.is_char_boundary(span.end()),
+            "span {span:?} not on UTF-8 char boundaries in {input:?}"
+        );
+        match event {
+            ayaml::Event::StreamStart { .. } => saw_stream_start = true,
+            ayaml::Event::StreamEnd { .. } => saw_stream_end = true,
+            ayaml::Event::DocumentStart { .. } => {
+                open_docs += 1;
+                out.push(NormEvent::DocumentStart);
+            }
+            ayaml::Event::DocumentEnd { .. } => {
+                assert!(open_docs > 0, "unbalanced DocumentEnd in {input:?}");
+                open_docs -= 1;
+                out.push(NormEvent::DocumentEnd);
+            }
+            ayaml::Event::SequenceStart { .. } => {
+                open_collections += 1;
+                out.push(NormEvent::SequenceStart);
+            }
+            ayaml::Event::SequenceEnd { .. } => {
+                assert!(open_collections > 0, "unbalanced SequenceEnd in {input:?}");
+                open_collections -= 1;
+                out.push(NormEvent::SequenceEnd);
+            }
+            ayaml::Event::MappingStart { .. } => {
+                open_collections += 1;
+                out.push(NormEvent::MappingStart);
+            }
+            ayaml::Event::MappingEnd { .. } => {
+                assert!(open_collections > 0, "unbalanced MappingEnd in {input:?}");
+                open_collections -= 1;
+                out.push(NormEvent::MappingEnd);
+            }
+            ayaml::Event::Scalar {
+                value, style, span, ..
+            } => {
+                let slice = &input[span.start()..span.end()];
+                match style {
+                    ayaml::ScalarStyle::SingleQuoted => {
+                        assert!(
+                            slice.starts_with('\'') && slice.ends_with('\'') && slice.len() >= 2,
+                            "single-quoted span {slice:?} not tight in {input:?}"
+                        );
+                    }
+                    ayaml::ScalarStyle::DoubleQuoted => {
+                        assert!(
+                            slice.starts_with('"') && slice.ends_with('"') && slice.len() >= 2,
+                            "double-quoted span {slice:?} not tight in {input:?}"
+                        );
+                    }
+                    _ => {}
+                }
+                let style_name = match style {
+                    ayaml::ScalarStyle::Plain => "plain",
+                    ayaml::ScalarStyle::SingleQuoted => "single",
+                    ayaml::ScalarStyle::DoubleQuoted => "double",
+                    ayaml::ScalarStyle::Literal => "literal",
+                    ayaml::ScalarStyle::Folded => "folded",
+                    _ => "other",
+                };
+                out.push(NormEvent::Scalar {
+                    value: value.into_owned(),
+                    style: style_name,
+                });
+            }
+            ayaml::Event::Alias { span, .. } => {
+                let slice = &input[span.start()..span.end()];
+                assert!(
+                    slice.starts_with('*'),
+                    "alias span {slice:?} missing leading `*` in {input:?}"
+                );
+                out.push(NormEvent::Alias);
+            }
+            _ => {}
+        }
+    }
+    assert!(
+        saw_stream_start && saw_stream_end,
+        "missing StreamStart/StreamEnd in {input:?}"
+    );
+    assert_eq!(open_docs, 0, "unclosed document in {input:?}");
+    assert_eq!(open_collections, 0, "unclosed collection in {input:?}");
+    Ok(out)
+}
+
+fn saphyr_norm_events(input: &str) -> Result<Vec<NormEvent>, String> {
+    use saphyr_parser::{Event, Parser, ScalarStyle};
+    let mut out = Vec::new();
+    for parsed in Parser::new_from_str(input) {
+        let (event, _) = parsed.map_err(|e| e.to_string())?;
+        match event {
+            Event::StreamStart | Event::StreamEnd | Event::Nothing => {}
+            Event::DocumentStart(_) => out.push(NormEvent::DocumentStart),
+            Event::DocumentEnd => out.push(NormEvent::DocumentEnd),
+            Event::SequenceStart(..) => out.push(NormEvent::SequenceStart),
+            Event::SequenceEnd => out.push(NormEvent::SequenceEnd),
+            Event::MappingStart(..) => out.push(NormEvent::MappingStart),
+            Event::MappingEnd => out.push(NormEvent::MappingEnd),
+            Event::Scalar(value, style, ..) => {
+                let style_name = match style {
+                    ScalarStyle::Plain => "plain",
+                    ScalarStyle::SingleQuoted => "single",
+                    ScalarStyle::DoubleQuoted => "double",
+                    ScalarStyle::Literal => "literal",
+                    ScalarStyle::Folded => "folded",
+                };
+                out.push(NormEvent::Scalar {
+                    value: value.into_owned(),
+                    style: style_name,
+                });
+            }
+            Event::Alias(_) => out.push(NormEvent::Alias),
+        }
+    }
+    Ok(out)
+}
+
+/// Spanned event-stream differential check (ADR-0036): across the committed
+/// YAML corpus and generated YAML documents that both `ayaml` and `saphyr`
+/// decode to the same value tree, `ayaml`'s compat event stream must uphold
+/// byte-span and nesting invariants and emit the same normalized event
+/// sequence as `saphyr-parser`.
+#[test]
+fn event_stream_agrees_with_saphyr_on_corpus_and_generated_documents() {
+    let mut inputs: Vec<String> = corpus().into_iter().map(|(_, text)| text).collect();
+    let mut rng = Rng::new(BOUNDED_SEED ^ 0xE7E0_7570);
+    for index in 0..500 {
+        let input = match index % 3 {
+            0 => generate::document(&mut rng, false),
+            1 => generate::configuration(&mut rng),
+            _ => {
+                let doc = generate::document(&mut rng, false);
+                generate::mutate(&mut rng, &doc, false)
+            }
+        };
+        inputs.push(input);
+    }
+
+    let mut compared = 0usize;
+    for input in &inputs {
+        let stripped = input.trim_start_matches('\u{feff}');
+        let Ok(ayaml_events) = ayaml_norm_events(stripped) else {
+            continue;
+        };
+        // Only require exact event-stream parity when both value loaders read
+        // the document to the exact same value tree (otherwise known YAML
+        // 1.1/1.2 or parser-limit differences already explain divergence).
+        let Ok(ayaml_val) = crate::yaml::ayaml_from_str::<crate::yaml::Value>(stripped) else {
+            continue;
+        };
+        let Ok(saphyr_val) = run_saphyr(stripped) else {
+            continue;
+        };
+        if format!("{:?}", from_ayaml(ayaml_val.parser())) != saphyr_val {
+            continue;
+        }
+        let Ok(saphyr_events) = saphyr_norm_events(stripped) else {
+            continue;
+        };
+        assert_eq!(
+            ayaml_events, saphyr_events,
+            "event stream diverged on input whose value trees agree:\n{stripped:?}"
+        );
+        compared += 1;
+    }
+    assert!(
+        compared >= 200,
+        "too few documents compared in event-stream differential test: {compared}"
+    );
+}

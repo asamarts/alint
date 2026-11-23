@@ -15,10 +15,10 @@
 //!   a [`crate::RuleSpec`] with `from_value`, as alint's loader decodes rules,
 //!   each rule a case of its own.
 //!
-//! Source spans still come from `saphyr-parser` in v0.23 (`ayaml` events are
-//! only inspected internally for error hints and `requires:` pre-checks), so
-//! the spanned event stream joins the harness with the saphyr exit in v0.24
-//! (ADR-0036).
+//! Spanned parser events from `ayaml::compat::parse_events_with` are also
+//! checked against `saphyr-parser` in the differential tests (ADR-0036),
+//! verifying UTF-8 byte-span invariants, event-stream balance, and structural
+//! agreement across the committed YAML corpus and generated YAML documents.
 //!
 //! The inputs are generated token soup, generated documents, generated
 //! configurations and mutations of them, the repository's own YAML files, and

@@ -94,6 +94,21 @@ pub struct Args {
     /// Append the Markdown report here (e.g. `$GITHUB_STEP_SUMMARY`).
     #[arg(long)]
     pub summary: Option<PathBuf>,
+    /// Run `--alint` with `ALINT_YAML_PARSER=compare` (requires a binary built
+    /// with `--features alint-core/yaml-reference`).
+    #[arg(long)]
+    pub yaml_compare: bool,
+    /// Path passed as `ALINT_YAML_COMPARE_LOG` when `--yaml-compare` is set.
+    #[arg(long, requires = "yaml_compare")]
+    pub yaml_compare_log: Option<PathBuf>,
+}
+
+/// Optional YAML compare-mode environment forwarded into the primary `--alint`
+/// process (which otherwise runs under `.env_clear()`).
+#[derive(Debug, Clone, Copy, Default)]
+struct YamlCompare<'a> {
+    enabled: bool,
+    log: Option<&'a Path>,
 }
 
 /// One row of `pins.tsv`.
@@ -393,6 +408,14 @@ pub fn run(args: &Args) -> Result<()> {
         .transpose()?;
     let alint = absolute(&args.alint)?;
     let compare = args.compare.as_deref().map(absolute).transpose()?;
+    let yaml_compare_log = args.yaml_compare_log.as_deref().map(absolute).transpose()?;
+    if let Some(parent) = yaml_compare_log.as_deref().and_then(Path::parent) {
+        std::fs::create_dir_all(parent)?;
+    }
+    let yaml_compare = YamlCompare {
+        enabled: args.yaml_compare,
+        log: yaml_compare_log.as_deref(),
+    };
     let mut versions = Vec::new();
     for bin in std::iter::once(&alint).chain(compare.as_ref()) {
         if !bin.is_file() {
@@ -428,6 +451,7 @@ pub fn run(args: &Args) -> Result<()> {
                         compare.as_deref(),
                         catalog,
                         args.offline,
+                        yaml_compare,
                     );
                     eprintln!("corpus-replay: {:<40} {}", pin.repo, result.verdict);
                     results.lock().unwrap().push(result);
@@ -474,6 +498,7 @@ fn write_reports(
     let report = render_markdown(
         results,
         args.compare.is_some(),
+        args.yaml_compare,
         versions,
         expectation_failures,
     );
@@ -546,6 +571,7 @@ fn version_of(bin: &Path) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn replay_one(
     pin: &Pin,
     corpus: &Path,
@@ -554,6 +580,7 @@ fn replay_one(
     compare: Option<&Path>,
     catalog: KindCatalog<'_>,
     offline: bool,
+    yaml_compare: YamlCompare<'_>,
 ) -> RepoResult {
     let started = Instant::now();
     let mut result = RepoResult {
@@ -617,6 +644,7 @@ fn replay_one(
         cache,
         &pin.slug(),
         baselines.as_deref(),
+        yaml_compare,
     );
     let second = compare.map(|bin| {
         check(
@@ -626,6 +654,7 @@ fn replay_one(
             cache,
             &pin.slug(),
             baselines.as_deref(),
+            YamlCompare::default(),
         )
     });
     if let Err(reason) = ensure_pristine(&checkout) {
@@ -881,6 +910,27 @@ fn absolute_path_entries(entries: &std::ffi::OsStr) -> std::ffi::OsString {
         .unwrap_or_default()
 }
 
+/// Configure the scrubbed environment for one `alint` child process.
+fn configure_alint_env(
+    command: &mut Command,
+    home: &Path,
+    path_env: &std::ffi::OsStr,
+    yaml_compare: YamlCompare<'_>,
+) {
+    command
+        .env_clear()
+        .env("PATH", absolute_path_entries(path_env))
+        .env("HOME", home)
+        .env("LANG", "C.UTF-8")
+        .env("NO_COLOR", "1");
+    if yaml_compare.enabled {
+        command.env("ALINT_YAML_PARSER", "compare");
+        if let Some(log) = yaml_compare.log {
+            command.env("ALINT_YAML_COMPARE_LOG", log);
+        }
+    }
+}
+
 /// One alint invocation in a scrubbed environment with its own fresh `HOME`.
 fn run_alint(
     bin: &Path,
@@ -888,23 +938,20 @@ fn run_alint(
     checkout: &Path,
     cache: &Path,
     slug: &str,
+    yaml_compare: YamlCompare<'_>,
 ) -> Result<Output, String> {
     let home = tempfile::Builder::new()
         .prefix(&format!("{slug}-"))
         .tempdir_in(cache.join("home"))
         .map_err(|error| format!("create a run HOME: {error}"))?;
     let mut command = Command::new(bin);
-    command
-        .args(args)
-        .current_dir(checkout)
-        .env_clear()
-        .env(
-            "PATH",
-            absolute_path_entries(&std::env::var_os("PATH").unwrap_or_default()),
-        )
-        .env("HOME", home.path())
-        .env("LANG", "C.UTF-8")
-        .env("NO_COLOR", "1");
+    command.args(args).current_dir(checkout);
+    configure_alint_env(
+        &mut command,
+        home.path(),
+        &std::env::var_os("PATH").unwrap_or_default(),
+        yaml_compare,
+    );
     run_with_timeout(&mut command, RUN_TIMEOUT)
 }
 
@@ -931,13 +978,14 @@ fn check(
     cache: &Path,
     slug: &str,
     baselines: Option<&Path>,
+    yaml_compare: YamlCompare<'_>,
 ) -> Outcome {
     let args: Vec<&std::ffi::OsStr> = ["check", "--format", "json", "--include-fixes", "--config"]
         .iter()
         .map(std::ffi::OsStr::new)
         .chain([config.as_os_str()])
         .collect();
-    let output = match run_alint(bin, &args, checkout, cache, slug) {
+    let output = match run_alint(bin, &args, checkout, cache, slug, yaml_compare) {
         Ok(output) => output,
         Err(reason) => return Outcome::Crashed { reason },
     };
@@ -974,7 +1022,7 @@ fn check(
         }
     };
     if let (Some(dir), Outcome::Checked { fingerprints, .. }) = (baselines, &mut outcome) {
-        match baseline_entries(bin, checkout, config, cache, slug, dir) {
+        match baseline_entries(bin, checkout, config, cache, slug, dir, yaml_compare) {
             Ok(entries) => *fingerprints = Some(entries),
             Err(reason) => return Outcome::Crashed { reason },
         }
@@ -990,6 +1038,7 @@ fn baseline_entries(
     cache: &Path,
     slug: &str,
     dir: &Path,
+    yaml_compare: YamlCompare<'_>,
 ) -> Result<Json, String> {
     let file = tempfile::Builder::new()
         .prefix(&format!("{slug}-"))
@@ -1007,7 +1056,7 @@ fn baseline_entries(
         "--output".as_ref(),
         path.as_os_str(),
     ];
-    let output = run_alint(bin, &args, checkout, cache, slug)?;
+    let output = run_alint(bin, &args, checkout, cache, slug, yaml_compare)?;
     let text = std::fs::read_to_string(&path);
     let _ = std::fs::remove_file(&path);
     if output.code != Some(0) {
@@ -1102,6 +1151,7 @@ fn run_with_timeout(command: &mut Command, timeout: Duration) -> Result<Output, 
 fn render_markdown(
     results: &[RepoResult],
     compared: bool,
+    yaml_compare: bool,
     versions: &[String],
     expectation_failures: &[String],
 ) -> String {
@@ -1114,6 +1164,9 @@ fn render_markdown(
     let mut out = String::new();
     let _ = writeln!(out, "### Corpus replay\n");
     let _ = writeln!(out, "Binaries: {}.\n", versions.join(" against "));
+    if yaml_compare {
+        let _ = writeln!(out, "YAML compare mode: `ALINT_YAML_PARSER=compare`.\n");
+    }
     let _ = writeln!(
         out,
         "{} {}: {replayed} replayed ({with_equals} with `cross_file` `equals` rules), \
@@ -1759,5 +1812,72 @@ rules:
                 .unwrap();
         let kept: Vec<PathBuf> = std::env::split_paths(&absolute_path_entries(&joined)).collect();
         assert_eq!(kept, [absolute]);
+    }
+
+    #[test]
+    fn yaml_compare_env_is_forwarded_only_when_enabled() {
+        let envs_of = |yaml_compare: YamlCompare<'_>| -> BTreeMap<String, String> {
+            let mut cmd = Command::new("alint");
+            configure_alint_env(
+                &mut cmd,
+                Path::new("/tmp/home"),
+                std::ffi::OsStr::new("/usr/bin:."),
+                yaml_compare,
+            );
+            cmd.get_envs()
+                .filter_map(|(k, v)| {
+                    Some((
+                        k.to_string_lossy().into_owned(),
+                        v?.to_string_lossy().into_owned(),
+                    ))
+                })
+                .collect()
+        };
+
+        let off = envs_of(YamlCompare::default());
+        assert!(!off.contains_key("ALINT_YAML_PARSER"), "{off:?}");
+        assert!(!off.contains_key("ALINT_YAML_COMPARE_LOG"), "{off:?}");
+
+        let on = envs_of(YamlCompare {
+            enabled: true,
+            log: None,
+        });
+        assert_eq!(
+            on.get("ALINT_YAML_PARSER").map(String::as_str),
+            Some("compare")
+        );
+        assert!(!on.contains_key("ALINT_YAML_COMPARE_LOG"), "{on:?}");
+
+        let with_log = envs_of(YamlCompare {
+            enabled: true,
+            log: Some(Path::new("/var/log/yaml-compare.jsonl")),
+        });
+        assert_eq!(
+            with_log.get("ALINT_YAML_PARSER").map(String::as_str),
+            Some("compare")
+        );
+        assert_eq!(
+            with_log.get("ALINT_YAML_COMPARE_LOG").map(String::as_str),
+            Some("/var/log/yaml-compare.jsonl")
+        );
+    }
+
+    #[test]
+    fn corpus_replay_workflow_wires_compare_mode_input() {
+        let root = crate::workspace_root().unwrap();
+        let workflow =
+            std::fs::read_to_string(root.join(".github/workflows/corpus-replay.yml")).unwrap();
+        for snippet in [
+            "compare_mode:",
+            "--features alint-core/yaml-reference",
+            "--yaml-compare",
+            "--yaml-compare-log",
+            "yaml-compare.jsonl",
+        ] {
+            assert!(
+                workflow.contains(snippet),
+                "corpus-replay.yml missing {snippet:?}"
+            );
+        }
     }
 }

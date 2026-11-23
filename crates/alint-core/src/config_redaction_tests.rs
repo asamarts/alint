@@ -552,3 +552,16 @@ fn environment_redactor_coalesces_overlapping_patterns_without_leaking_longer_ta
         "at <redacted> and <redacted>"
     );
 }
+
+#[test]
+fn yaml_error_redaction_uses_masked_diagnostic_without_document_text() {
+    let yaml_err = crate::yaml::from_str::<u32>("canary-secret-token").unwrap_err();
+    let redacted = redact_environment_values_in_error(
+        crate::Error::Yaml(yaml_err),
+        &["canary-secret-token".to_string()],
+    );
+    let shown = redacted.to_string();
+    assert!(!shown.contains("canary-secret-token"), "{shown}");
+    assert!(shown.contains("<redacted>"), "{shown}");
+    assert!(shown.starts_with("YAML parse error ("), "{shown}");
+}

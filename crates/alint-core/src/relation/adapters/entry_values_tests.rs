@@ -192,9 +192,16 @@ fn yaml_scalars_are_typed_as_the_core_schema_reads_them() {
             (None, "f".into(), number("0x1F")),
             (None, "g".into(), string("12")),
             (None, "h".into(), string("block\n")),
-            (None, "i".into(), error(UNREADABLE)),
+            (None, "i".into(), number("0x1F")),
         ]
     );
+    // An invalid core tag is refused by ayaml at parse time rather than
+    // silently diverging between check-side value loading and event extraction.
+    let bad = run(Format::Yaml, &["$"], false, &[], "j: !!int nope\n").unwrap_err();
+    assert!(bad.to_string().contains("invalid !!int scalar"), "{bad}");
+    let extracted =
+        crate::extract::extract_entry_values_bounded(Format::Yaml, "j: !!int nope\n", 16).unwrap();
+    assert_eq!(extracted.values, [crate::extract::EntryValue::Unreadable]);
     // A block scalar has no value span; a plain one has.
     let h = &output.rows[7];
     assert_eq!(h.value_span, None);
@@ -522,7 +529,7 @@ fn a_yaml_block_scalar_key_is_a_row() {
     );
     let block = output.rows[0].span.unwrap();
     assert!(
-        block.is_empty() && text[block.start..].starts_with("block"),
+        block.is_empty() && text[block.start..].starts_with('|'),
         "{block:?}"
     );
 }

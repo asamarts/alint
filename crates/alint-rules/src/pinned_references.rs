@@ -9,7 +9,7 @@ use alint_core::{
     AnalysisFailureKind, Context, Error, Level, PerFileRule, Result, Rule, RuleSpec, Scope,
     SourceRange, Violation, eval_per_file,
 };
-use saphyr_parser::{Event, Parser, ScalarStyle, ScanError, Span, StrInput, Tag};
+use ayaml::{ColumnEncoding, Event, EventStream, LineIndex, Location, ScalarStyle, Span, Tag};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -144,7 +144,8 @@ impl PinnedReferencesRule {
                 )];
             }
         };
-        let mut collector = Collector::new(self, path, &document);
+        let line_index = LineIndex::new(text);
+        let mut collector = Collector::new(self, path, &document, &line_index);
         let collection = match format {
             InputFormat::GithubActions => {
                 collect_github_actions(&mut collector);
@@ -283,15 +284,23 @@ struct FindingSpan {
 }
 
 impl FindingSpan {
-    fn from_yaml(span: Span) -> Self {
-        // saphyr-parser documents columns as one-based but initializes them at zero and formats
-        // diagnostics with `col + 1`; normalize to alint's one-based SourceRange contract.
-        Self {
-            start_line: span.start.line(),
-            start_column: span.start.col() + 1,
-            end_line: span.end.line(),
-            end_column: span.end.col() + 1,
-        }
+    fn from_yaml(span: Span, line_index: &LineIndex<'_>) -> Option<Self> {
+        let start = Location::from(
+            line_index
+                .to_position(span.start(), ColumnEncoding::Scalar)
+                .ok()?,
+        );
+        let end = Location::from(
+            line_index
+                .to_position(span.end(), ColumnEncoding::Scalar)
+                .ok()?,
+        );
+        Some(Self {
+            start_line: start.line(),
+            start_column: start.column(),
+            end_line: end.line(),
+            end_column: end.column(),
+        })
     }
 
     fn source_range(self) -> Option<SourceRange> {
@@ -344,7 +353,7 @@ fn matches_extension(name: &str, extensions: &[&str]) -> bool {
 #[derive(Debug)]
 struct YamlDocument {
     nodes: Vec<YamlNode>,
-    anchors: HashMap<usize, NodeId>,
+    anchors: HashMap<String, NodeId>,
     root: NodeId,
     /// What is left of [`MAX_MERGE_WORK`]; `None` once it ran out, which fails
     /// the analysis rather than leave a lookup unanswered.
@@ -389,7 +398,7 @@ enum YamlNodeKind {
     Scalar(String),
     Sequence(Vec<NodeId>),
     Mapping(Vec<(NodeId, NodeId)>),
-    Alias(usize),
+    Alias(String),
 }
 
 #[derive(Clone, Copy)]
@@ -397,6 +406,26 @@ struct ScalarRef<'a> {
     value: &'a str,
     span: Span,
 }
+
+fn compat_parse_options() -> ayaml::compat::ParseOptions {
+    use alint_core::yaml_depth::{
+        MAX_YAML_EXPANSION_BYTES, MAX_YAML_FLOW_DEPTH, YAML_EXPANSION_BYTES_PER_INPUT_BYTE,
+        YAML_NODE_COST,
+    };
+    let limits = ayaml::Limits::default()
+        .with_max_input_bytes(MAX_PINNED_REFERENCES_BYTES)
+        .with_max_depth(MAX_YAML_FLOW_DEPTH)
+        .with_max_alias_expansion_bytes(MAX_YAML_EXPANSION_BYTES)
+        .with_alias_bytes_per_input_byte(YAML_EXPANSION_BYTES_PER_INPUT_BYTE)
+        .with_node_cost_bytes(YAML_NODE_COST)
+        .with_max_events(usize::MAX)
+        .with_max_collection_entries(usize::MAX)
+        .with_max_anchors(usize::MAX)
+        .with_max_alias_dereferences(usize::MAX);
+    ayaml::compat::ParseOptions::new().with_limits(limits)
+}
+
+type PeekableEvents<'a> = std::iter::Peekable<EventStream<'a>>;
 
 impl YamlDocument {
     fn parse(text: &str) -> std::result::Result<Option<Self>, String> {
@@ -407,8 +436,6 @@ impl YamlDocument {
         if !yaml_guards.flow_within_limit() {
             return Err("flow collection nesting exceeds the safety limit".to_owned());
         }
-        // saphyr reads what ayaml may refuse, so only a text the guard read
-        // whole has a bounded alias expansion.
         match yaml_guards.expansion(text) {
             Expansion::WithinLimit => {}
             Expansion::OverLimit => {
@@ -426,19 +453,24 @@ impl YamlDocument {
     /// [`Self::parse`] without the guards, which tests bypass to reach the
     /// lookups' own bounds.
     fn parse_unguarded(text: &str) -> std::result::Result<Option<Self>, String> {
-        let mut parser = Parser::new_from_str(text);
+        let mut events = ayaml::compat::parse_events_with(text, &compat_parse_options())
+            .map_err(|error| yaml_parse_error(&error))?
+            .peekable();
         expect_event(
-            &mut parser,
-            |event| matches!(event, Event::StreamStart),
+            &mut events,
+            |event| matches!(event, Event::StreamStart { .. }),
             "stream start",
         )?;
-        if peek_matches(&mut parser, |event| matches!(event, Event::StreamEnd))? {
-            let _ = next_event(&mut parser)?;
+        skip_directives(&mut events)?;
+        if peek_matches(&mut events, |event| {
+            matches!(event, Event::StreamEnd { .. })
+        })? {
+            let _ = next_event(&mut events)?;
             return Ok(None);
         }
         expect_event(
-            &mut parser,
-            |event| matches!(event, Event::DocumentStart(_)),
+            &mut events,
+            |event| matches!(event, Event::DocumentStart { .. }),
             "document start",
         )?;
         let mut document = Self {
@@ -449,70 +481,80 @@ impl YamlDocument {
             gitlab_extends_work: std::cell::Cell::new(Some(MAX_GITLAB_EXTENDS_WORK)),
             gitlab_extends_cache: std::cell::RefCell::new(HashMap::new()),
         };
-        document.root = document.parse_node(&mut parser, 0)?;
+        document.root = document.parse_node(&mut events, 0)?;
         expect_event(
-            &mut parser,
-            |event| matches!(event, Event::DocumentEnd),
+            &mut events,
+            |event| matches!(event, Event::DocumentEnd { .. }),
             "document end",
         )?;
-        let (event, _) = next_event(&mut parser)?;
+        skip_directives(&mut events)?;
+        let event = next_event(&mut events)?;
         match event {
-            Event::StreamEnd => Ok(Some(document)),
-            Event::DocumentStart(_) => Err("multiple YAML documents are not supported".to_owned()),
+            Event::StreamEnd { .. } => Ok(Some(document)),
+            Event::DocumentStart { .. } => {
+                Err("multiple YAML documents are not supported".to_owned())
+            }
             _ => Err("expected stream end".to_owned()),
         }
     }
 
-    fn parse_node<'a>(
+    fn parse_node(
         &mut self,
-        parser: &mut Parser<'a, StrInput<'a>>,
+        events: &mut PeekableEvents<'_>,
         depth: usize,
     ) -> std::result::Result<NodeId, String> {
         if depth > MAX_YAML_NESTING {
             return Err("YAML nesting exceeds the safety limit".to_owned());
         }
-        let (event, start_span) = next_event(parser)?;
+        let event = next_event(events)?;
+        let start_span = event.span();
         let (kind, span, anchor, plain_scalar, explicit_string, gitlab_reference) = match event {
-            Event::Scalar(value, style, anchor, tag) => (
+            Event::Scalar {
+                value,
+                style,
+                anchor,
+                tag,
+                ..
+            } => (
                 YamlNodeKind::Scalar(value.into_owned()),
                 start_span,
-                anchor,
+                anchor.map(|a| a.as_str().to_owned()),
                 style == ScalarStyle::Plain,
-                is_explicit_string_tag(tag.as_deref()),
-                is_gitlab_reference_tag(tag.as_deref()),
+                is_explicit_string_tag(tag.as_ref()),
+                is_gitlab_reference_tag(tag.as_ref()),
             ),
             // An anchor is recorded once its node is complete, so an alias to
             // one still open refers to a collection that contains it: a cycle.
-            Event::Alias(anchor) if !self.anchors.contains_key(&anchor) => {
+            Event::Alias { anchor, .. } if !self.anchors.contains_key(anchor.as_str()) => {
                 return Err("a YAML alias refers to a collection that contains it".to_owned());
             }
-            Event::Alias(anchor) => (
-                YamlNodeKind::Alias(anchor),
+            Event::Alias { anchor, .. } => (
+                YamlNodeKind::Alias(anchor.as_str().to_owned()),
                 start_span,
-                0,
+                None,
                 false,
                 false,
                 false,
             ),
-            Event::SequenceStart(anchor, tag) => {
-                let gitlab_reference = is_gitlab_reference_tag(tag.as_deref());
-                let (items, end_span) = self.parse_sequence(parser, depth + 1)?;
+            Event::SequenceStart { anchor, tag, .. } => {
+                let gitlab_reference = is_gitlab_reference_tag(tag.as_ref());
+                let (items, end_span) = self.parse_sequence(events, depth + 1)?;
                 (
                     YamlNodeKind::Sequence(items),
-                    Span::new(start_span.start, end_span.end),
-                    anchor,
+                    Span::new(start_span.start(), end_span.end()),
+                    anchor.map(|a| a.as_str().to_owned()),
                     false,
                     false,
                     gitlab_reference,
                 )
             }
-            Event::MappingStart(anchor, tag) => {
-                let gitlab_reference = is_gitlab_reference_tag(tag.as_deref());
-                let (entries, end_span) = self.parse_mapping(parser, depth + 1)?;
+            Event::MappingStart { anchor, tag, .. } => {
+                let gitlab_reference = is_gitlab_reference_tag(tag.as_ref());
+                let (entries, end_span) = self.parse_mapping(events, depth + 1)?;
                 (
                     YamlNodeKind::Mapping(entries),
-                    Span::new(start_span.start, end_span.end),
-                    anchor,
+                    Span::new(start_span.start(), end_span.end()),
+                    anchor.map(|a| a.as_str().to_owned()),
                     false,
                     false,
                     gitlab_reference,
@@ -528,40 +570,40 @@ impl YamlDocument {
             explicit_string,
             gitlab_reference,
         });
-        if anchor != 0 {
+        if let Some(anchor) = anchor {
             self.anchors.insert(anchor, id);
         }
         Ok(id)
     }
 
-    fn parse_sequence<'a>(
+    fn parse_sequence(
         &mut self,
-        parser: &mut Parser<'a, StrInput<'a>>,
+        events: &mut PeekableEvents<'_>,
         depth: usize,
     ) -> std::result::Result<(Vec<NodeId>, Span), String> {
         let mut items = Vec::new();
         loop {
-            if peek_matches(parser, |event| matches!(event, Event::SequenceEnd))? {
-                let (_, span) = next_event(parser)?;
-                return Ok((items, span));
+            if peek_matches(events, |event| matches!(event, Event::SequenceEnd { .. }))? {
+                let event = next_event(events)?;
+                return Ok((items, event.span()));
             }
-            items.push(self.parse_node(parser, depth)?);
+            items.push(self.parse_node(events, depth)?);
         }
     }
 
-    fn parse_mapping<'a>(
+    fn parse_mapping(
         &mut self,
-        parser: &mut Parser<'a, StrInput<'a>>,
+        events: &mut PeekableEvents<'_>,
         depth: usize,
     ) -> std::result::Result<(Vec<(NodeId, NodeId)>, Span), String> {
         let mut entries = Vec::new();
         loop {
-            if peek_matches(parser, |event| matches!(event, Event::MappingEnd))? {
-                let (_, span) = next_event(parser)?;
-                return Ok((entries, span));
+            if peek_matches(events, |event| matches!(event, Event::MappingEnd { .. }))? {
+                let event = next_event(events)?;
+                return Ok((entries, event.span()));
             }
-            let key = self.parse_node(parser, depth)?;
-            let value = self.parse_node(parser, depth)?;
+            let key = self.parse_node(events, depth)?;
+            let value = self.parse_node(events, depth)?;
             entries.push((key, value));
         }
     }
@@ -964,37 +1006,45 @@ impl YamlDocument {
     }
 }
 
-fn next_event<'a>(
-    parser: &mut Parser<'a, StrInput<'a>>,
-) -> std::result::Result<(Event<'a>, Span), String> {
-    parser
-        .next_event()
+fn next_event<'a>(events: &mut PeekableEvents<'a>) -> std::result::Result<Event<'a>, String> {
+    events
+        .next()
         .ok_or_else(|| "unexpected end of YAML event stream".to_owned())?
-        .map_err(|error| yaml_scan_error(&error))
+        .map_err(|error| yaml_parse_error(&error))
 }
+
+fn skip_directives(events: &mut PeekableEvents<'_>) -> std::result::Result<(), String> {
+    while peek_matches(events, |event| matches!(event, Event::Directive { .. }))? {
+        let _ = next_event(events)?;
+    }
+    Ok(())
+}
+
 fn is_explicit_string_tag(tag: Option<&Tag>) -> bool {
-    tag.is_some_and(|tag| tag.is_yaml_core_schema() && tag.suffix == "str")
+    tag.is_some_and(|tag| tag.is_core() && tag.suffix() == "str")
 }
 
 fn is_gitlab_reference_tag(tag: Option<&Tag>) -> bool {
-    tag.is_some_and(|tag| tag.handle == "!" && tag.suffix == "reference")
+    tag.is_some_and(|tag| tag.handle() == "!" && tag.suffix() == "reference")
 }
 
-fn yaml_scan_error(error: &ScanError) -> String {
-    let marker = error.marker();
-    format!(
-        "invalid YAML syntax at line {} column {}",
-        marker.line(),
-        marker.col() + 1
-    )
+fn yaml_parse_error(error: &ayaml::Error) -> String {
+    match error.location() {
+        Some(location) => format!(
+            "invalid YAML syntax at line {} column {}",
+            location.line(),
+            location.column()
+        ),
+        None => error.masked().to_string(),
+    }
 }
 
-fn expect_event<'a>(
-    parser: &mut Parser<'a, StrInput<'a>>,
+fn expect_event(
+    events: &mut PeekableEvents<'_>,
     predicate: impl FnOnce(&Event<'_>) -> bool,
     expected: &str,
 ) -> std::result::Result<(), String> {
-    let (event, _) = next_event(parser)?;
+    let event = next_event(events)?;
     if predicate(&event) {
         Ok(())
     } else {
@@ -1002,13 +1052,13 @@ fn expect_event<'a>(
     }
 }
 
-fn peek_matches<'a>(
-    parser: &mut Parser<'a, StrInput<'a>>,
+fn peek_matches(
+    events: &mut PeekableEvents<'_>,
     predicate: impl FnOnce(&Event<'_>) -> bool,
 ) -> std::result::Result<bool, String> {
-    match parser.peek() {
-        Some(Ok((event, _))) => Ok(predicate(event)),
-        Some(Err(error)) => Err(yaml_scan_error(&error)),
+    match events.peek() {
+        Some(Ok(event)) => Ok(predicate(event)),
+        Some(Err(error)) => Err(yaml_parse_error(error)),
         None => Err("unexpected end of YAML event stream".to_owned()),
     }
 }
@@ -1017,16 +1067,23 @@ struct Collector<'a> {
     rule: &'a PinnedReferencesRule,
     path: Arc<Path>,
     document: &'a YamlDocument,
+    line_index: &'a LineIndex<'a>,
     findings: Vec<Violation>,
     seen_spans: HashSet<(usize, usize, usize, usize, String)>,
 }
 
 impl<'a> Collector<'a> {
-    fn new(rule: &'a PinnedReferencesRule, path: &Path, document: &'a YamlDocument) -> Self {
+    fn new(
+        rule: &'a PinnedReferencesRule,
+        path: &Path,
+        document: &'a YamlDocument,
+        line_index: &'a LineIndex<'a>,
+    ) -> Self {
         Self {
             rule,
             path: Arc::from(path),
             document,
+            line_index,
             findings: Vec::new(),
             seen_spans: HashSet::new(),
         }
@@ -1129,7 +1186,9 @@ impl<'a> Collector<'a> {
     }
 
     fn push(&mut self, reference: ScalarRef<'_>, selector: &str, message: &'static str) {
-        let span = FindingSpan::from_yaml(reference.span);
+        let Some(span) = FindingSpan::from_yaml(reference.span, self.line_index) else {
+            return;
+        };
         let key = (
             span.start_line,
             span.start_column,

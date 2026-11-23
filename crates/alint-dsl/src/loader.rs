@@ -577,14 +577,15 @@ fn reproduce_or_redact(
     if reproduced {
         error.into()
     } else {
-        redact_interpolated_error(source)
+        redact_interpolated_error(source, &error)
     }
 }
 
-fn redact_interpolated_error(source: &str) -> Error {
+fn redact_interpolated_error(source: &str, error: &alint_core::yaml::Error) -> Error {
     Error::Other(format!(
-        "{source}: could not deserialize interpolated config: <redacted> (the error could quote \
-         a value read from the environment)"
+        "{source}: could not deserialize interpolated config ({}): <redacted> (the error could \
+         quote a value read from the environment)",
+        error.masked_message()
     ))
 }
 
