@@ -1069,7 +1069,23 @@ pub fn extract_values(
     extract: &Extract,
     text: &str,
 ) -> std::result::Result<ExtractedValues, String> {
-    extract_values_with_limit(extract, text, None).map_err(|error| error.to_string())
+    extract_values_with_limit(None, extract, text, None).map_err(|error| error.to_string())
+}
+
+/// [`extract_values`] using `ctx`'s per-run structured-tree cache for
+/// structured formats so multiple rules reading `path` share one parse (#548).
+///
+/// # Errors
+///
+/// Returns the same parse or regex error message as [`extract_values`].
+pub fn extract_values_with_context(
+    ctx: &crate::Context<'_>,
+    path: &std::path::Path,
+    extract: &Extract,
+    text: &str,
+) -> std::result::Result<ExtractedValues, String> {
+    extract_values_with_limit(Some((ctx, path)), extract, text, None)
+        .map_err(|error| error.to_string())
 }
 
 /// Extract at most `max_values` values, failing before allocating the value
@@ -1081,7 +1097,8 @@ pub fn extract_values_bounded(
     text: &str,
     max_values: usize,
 ) -> std::result::Result<ExtractedValues, String> {
-    extract_values_with_limit(extract, text, Some(max_values)).map_err(|error| error.to_string())
+    extract_values_with_limit(None, extract, text, Some(max_values))
+        .map_err(|error| error.to_string())
 }
 
 /// [`extract_values_bounded`] with the failure class preserved, for callers
@@ -1092,7 +1109,7 @@ pub(crate) fn extract_values_bounded_typed(
     text: &str,
     max_values: usize,
 ) -> std::result::Result<ExtractedValues, ExtractFailure> {
-    extract_values_with_limit(extract, text, Some(max_values))
+    extract_values_with_limit(None, extract, text, Some(max_values))
 }
 
 /// Why a bounded extraction could not produce values.
@@ -1105,12 +1122,13 @@ pub(crate) enum ExtractFailure {
 }
 
 fn extract_values_with_limit(
+    cache_ctx: Option<(&crate::Context<'_>, &std::path::Path)>,
     extract: &Extract,
     text: &str,
     max_values: Option<usize>,
 ) -> std::result::Result<ExtractedValues, ExtractFailure> {
     let values = match extract {
-        Extract::Structured(extract) => structured(extract, text, max_values)?,
+        Extract::Structured(extract) => structured(cache_ctx, extract, text, max_values)?,
         Extract::Lines(opts) => {
             let mut values = ExtractedValues::default();
             for line in crate::physical_lines(text)
@@ -1172,11 +1190,16 @@ fn extract_limit_error(max_values: usize) -> ExtractFailure {
 }
 
 fn structured(
+    cache_ctx: Option<(&crate::Context<'_>, &std::path::Path)>,
     extract: &StructuredExtract,
     text: &str,
     max_values: Option<usize>,
 ) -> std::result::Result<ExtractedValues, ExtractFailure> {
-    let value = extract.format.parse(text).map_err(ExtractFailure::Parse)?;
+    let value = match cache_ctx {
+        Some((ctx, path)) => ctx.parse_structured(path, extract.format, text),
+        None => extract.format.parse_shared(text),
+    }
+    .map_err(ExtractFailure::Parse)?;
     let mut values = ExtractedValues::default();
     for value in extract.path.query(&value).iter() {
         ensure_extract_capacity(&values, max_values)?;

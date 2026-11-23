@@ -38,6 +38,12 @@ path = "tests/alloc/relation_memory.rs"
 name = "placing_memory"
 path = "tests/alloc/placing_memory.rs"
 
+# And for sixteen parallel alias-heavy YAML parses holding their expanded trees
+# alive under the YAML parse budget (#582).
+[[test]]
+name = "alias_parallel_memory"
+path = "tests/alloc/alias_parallel_memory.rs"
+
 [dependencies]
 thiserror.workspace = true
 serde.workspace = true

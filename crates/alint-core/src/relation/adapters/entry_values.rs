@@ -161,7 +161,10 @@ impl Adapter for EntryValuesAdapter {
         // The `JSONPath`s run over the parsed tree, as every structured
         // extract does; the entries give what the tree loses (each key's
         // span, a number's lexeme, a repeated key, the members' order).
-        let tree = self.format.parse(text).map_err(AdapterError::Parse)?;
+        let tree = self
+            .format
+            .parse_shared(text)
+            .map_err(AdapterError::Parse)?;
         let document = Document::new(&entries, &tree);
         let mut out = Output {
             resource,

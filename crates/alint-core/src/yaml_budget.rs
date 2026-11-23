@@ -18,31 +18,31 @@
 //! of 1 MiB or less never waits unless the guard estimates its expanded tree
 //! at more than 32 MiB.
 //!
-//! The budget is held while the parser runs, not while the parsed value lives.
-//! A parse's peak is inside the parser, whose events and half-built tree come
-//! to several times the finished value, and the code that holds a value may
-//! parse another file (a fixer re-reads the document it edits), which would
-//! wait on itself if values held budget. Within a reservation nothing reserves
-//! again: the parsers run no rule code and start no rayon work. A reservation
-//! a thread asks for while it holds one takes nothing and never waits, so a
-//! nested parse cannot deadlock either.
-//!
-//! That leaves a limit. A tree that copies what aliases name is about its
-//! whole estimate, not a fraction of its parse's peak, and it lives outside
-//! the budget for as long as a rule holds it: with one per worker thread, up
-//! to the alias guard's cap ([`crate::yaml_depth::MAX_YAML_EXPANSION_BYTES`])
-//! each. Bounding those trees is asamarts/alint#582.
+//! The budget is held while the parser runs, and -- for an alias-amplified
+//! document whose finished tree is roughly as large as its parse peak --
+//! retained alongside the returned [`crate::SharedValue`] until the last handle
+//! drops (`RetainedLease`, asamarts/alint#582). For alias-free documents (or
+//! documents whose alias expansion stays within the threshold or their own
+//! length), a parse peaks far above the value it leaves, so the budget is
+//! returned as soon as parsing ends (ADR-0042 decision 4). Within a parse
+//! reservation nothing reserves again: the parsers run no rule code and start
+//! no rayon work. A reservation a thread asks for while it already holds an
+//! in-flight reservation takes nothing and never waits, and if a thread is the
+//! sole holder of retained budget on the process and asks to parse again (for
+//! example, a fixer re-reading a document), it likewise proceeds without
+//! waiting on itself so single-thread re-entry cannot deadlock.
 //!
 //! The entry points that parse repository YAML take a reservation:
-//! [`crate::Format::parse`], the entry rows of [`crate::extract`], the
-//! structured-fix span resolver and `pinned_references`. Only the first copies
-//! what an alias names; the others keep an alias as one node, so their cost is
-//! their input's length. Configuration files are read one at a time and take
-//! none.
+//! [`crate::Format::parse`] / [`crate::Format::parse_shared`], the entry rows
+//! of [`crate::extract`], the structured-fix span resolver and
+//! `pinned_references`. Only the first copies what an alias names; the others
+//! keep an alias as one node, so their cost is their input's length.
+//! Configuration files are read one at a time and take none.
 
 use std::cell::Cell;
 use std::marker::PhantomData;
 use std::sync::{Condvar, Mutex, PoisonError};
+use std::thread::ThreadId;
 
 /// The YAML input, in bytes, that may be parsing at once: one file at the
 /// structured-input cap.
@@ -109,6 +109,20 @@ pub const fn parse_cost(input_len: usize, expanded: usize) -> usize {
     }
 }
 
+/// Bytes of the YAML parse budget an alias-expanded tree retains while alive:
+/// `0` when the document has no alias amplification past its own length or
+/// stays at or below [`YAML_BUDGET_THRESHOLD_BYTES`]; otherwise
+/// `expanded / EXPANSION_BYTES_PER_COST_BYTE` (#582).
+#[must_use]
+pub const fn retained_alias_cost(input_len: usize, expanded: usize) -> usize {
+    let expansion = expanded / EXPANSION_BYTES_PER_COST_BYTE;
+    if expansion > YAML_BUDGET_THRESHOLD_BYTES && expansion > input_len {
+        expansion
+    } else {
+        0
+    }
+}
+
 /// `held`, when it holds at least `bytes` (or all of the budget), and
 /// otherwise a reservation of `bytes` in its place, waiting until they are
 /// free: for a parse that learns it costs more than it reserved, once the
@@ -139,6 +153,7 @@ pub fn reservations_on_this_thread() -> usize {
 pub struct Reservation {
     budget: &'static Budget,
     bytes: usize,
+    released: bool,
     /// Dropped on the thread that took it, which [`HELD`] describes.
     _not_send: PhantomData<*const ()>,
 }
@@ -151,10 +166,61 @@ impl std::fmt::Debug for Reservation {
     }
 }
 
+impl Reservation {
+    /// Transition this in-flight parse reservation atomically into a
+    /// `Send + Sync` [`RetainedLease`] holding `retained_bytes` (clamped to
+    /// the reservation's own bytes) without transiently freeing the budget.
+    /// Clears this thread's in-flight `HELD` flag. Returns `None` (releasing
+    /// the whole reservation) when `retained_bytes == 0`.
+    #[must_use = "the retained budget is given back when dropped"]
+    pub fn into_retained(mut self, retained_bytes: usize) -> Option<RetainedLease> {
+        let keep = retained_bytes.min(self.bytes);
+        if keep == 0 {
+            return None;
+        }
+        let owner = std::thread::current().id();
+        self.budget.transition_to_retained(self.bytes, keep, owner);
+        self.released = true;
+        HELD.with(|held| held.set(false));
+        Some(RetainedLease {
+            budget: self.budget,
+            bytes: keep,
+            owner,
+        })
+    }
+}
+
 impl Drop for Reservation {
     fn drop(&mut self) {
-        HELD.with(|held| held.set(false));
-        self.budget.release(self.bytes);
+        if !self.released {
+            HELD.with(|held| held.set(false));
+            self.budget.release(self.bytes);
+        }
+    }
+}
+
+/// Bytes of the YAML parse budget retained by a live alias-expanded value tree
+/// after parsing ends (#582). Unlike [`Reservation`], this type is
+/// `Send + Sync` so a shared `Arc` tree can cross threads and release its
+/// budget when the last handle drops.
+#[must_use = "the retained budget is given back when dropped"]
+pub struct RetainedLease {
+    budget: &'static Budget,
+    bytes: usize,
+    owner: ThreadId,
+}
+
+impl std::fmt::Debug for RetainedLease {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RetainedLease")
+            .field("bytes", &self.bytes)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Drop for RetainedLease {
+    fn drop(&mut self) {
+        self.budget.release_retained(self.bytes, self.owner);
     }
 }
 
@@ -168,11 +234,46 @@ pub(crate) struct Budget {
 #[derive(Default)]
 struct State {
     in_flight: usize,
-    /// Threads waiting for bytes, and the most bytes ever in flight, for tests.
+    retained: usize,
+    retained_by: Vec<(ThreadId, usize)>,
+    /// Threads waiting for bytes, and the most bytes ever held (`in_flight + retained`), for tests.
     #[cfg(test)]
     waiting: usize,
     #[cfg(test)]
     max_in_flight: usize,
+}
+
+impl State {
+    const fn total(&self) -> usize {
+        self.in_flight + self.retained
+    }
+
+    fn retained_of(&self, tid: ThreadId) -> usize {
+        self.retained_by
+            .iter()
+            .find(|(id, _)| *id == tid)
+            .map_or(0, |(_, bytes)| *bytes)
+    }
+
+    fn add_retained(&mut self, tid: ThreadId, bytes: usize) {
+        self.retained += bytes;
+        if let Some((_, held)) = self.retained_by.iter_mut().find(|(id, _)| *id == tid) {
+            *held += bytes;
+        } else {
+            self.retained_by.push((tid, bytes));
+        }
+    }
+
+    fn sub_retained(&mut self, tid: ThreadId, bytes: usize) {
+        self.retained -= bytes;
+        if let Some(pos) = self.retained_by.iter().position(|(id, _)| *id == tid) {
+            let held = &mut self.retained_by[pos].1;
+            *held -= bytes;
+            if *held == 0 {
+                self.retained_by.swap_remove(pos);
+            }
+        }
+    }
 }
 
 impl Budget {
@@ -181,6 +282,8 @@ impl Budget {
             capacity,
             state: Mutex::new(State {
                 in_flight: 0,
+                retained: 0,
+                retained_by: Vec::new(),
                 #[cfg(test)]
                 waiting: 0,
                 #[cfg(test)]
@@ -195,13 +298,25 @@ impl Budget {
             return None;
         }
         let bytes = input_len.min(self.capacity);
+        let current_thread = std::thread::current().id();
         // The lock guards only counters, so a poisoned one is still sound.
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         #[cfg(test)]
         {
             state.waiting += 1;
         }
-        while state.in_flight + bytes > self.capacity {
+        while state.total() + bytes > self.capacity {
+            let own_retained = state.retained_of(current_thread);
+            if own_retained > 0 && state.total() == own_retained {
+                // Only this thread's own retained lease(s) hold budget;
+                // waiting on itself would deadlock (e.g. a holder re-reading
+                // the document it edits). Treat like a nested reservation.
+                #[cfg(test)]
+                {
+                    state.waiting -= 1;
+                }
+                return None;
+            }
             state = self
                 .freed
                 .wait(state)
@@ -211,7 +326,7 @@ impl Budget {
         #[cfg(test)]
         {
             state.waiting -= 1;
-            state.max_in_flight = state.max_in_flight.max(state.in_flight);
+            state.max_in_flight = state.max_in_flight.max(state.total());
         }
         drop(state);
         HELD.with(|held| held.set(true));
@@ -219,6 +334,7 @@ impl Budget {
         Some(Reservation {
             budget: self,
             bytes,
+            released: false,
             _not_send: PhantomData,
         })
     }
@@ -226,6 +342,24 @@ impl Budget {
     fn release(&self, bytes: usize) {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         state.in_flight -= bytes;
+        drop(state);
+        self.freed.notify_all();
+    }
+
+    fn transition_to_retained(&self, in_flight_bytes: usize, keep_bytes: usize, owner: ThreadId) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.in_flight -= in_flight_bytes;
+        state.add_retained(owner, keep_bytes);
+        let freed_any = keep_bytes < in_flight_bytes;
+        drop(state);
+        if freed_any {
+            self.freed.notify_all();
+        }
+    }
+
+    fn release_retained(&self, bytes: usize, owner: ThreadId) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.sub_retained(owner, bytes);
         drop(state);
         self.freed.notify_all();
     }

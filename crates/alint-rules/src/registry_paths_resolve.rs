@@ -28,7 +28,7 @@ use std::path::{Path, PathBuf};
 
 use alint_core::{
     AnalysisFailureKind, Context, Error, Extract, ExtractSpec, Format, Level, RelatedLocation,
-    Result, Rule, RuleSpec, Scope, Violation, extract_values, is_non_literal,
+    Result, Rule, RuleSpec, Scope, Violation, extract_values_with_context, is_non_literal,
     unreadable_file_violation,
 };
 use regex::Regex;
@@ -231,22 +231,23 @@ impl Rule for RegistryPathsResolveRule {
                 }
             };
 
-            let (entries, skipped, non_strings) = match self.extract_entries(&text) {
-                Ok(v) => v,
-                Err(e) => {
-                    let mut finding = Violation::new(format!(
-                        "registry file {} could not be parsed for `extract`: {e}",
-                        registry_rel.display()
-                    ))
-                    .with_path(registry_rel.clone())
-                    .as_analysis_failure(AnalysisFailureKind::ResourceParse);
-                    if self.extract.redacts_by_default() {
-                        finding.redact_message(&self.id);
+            let (entries, skipped, non_strings) =
+                match self.extract_entries(ctx, &registry_rel, &text) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        let mut finding = Violation::new(format!(
+                            "registry file {} could not be parsed for `extract`: {e}",
+                            registry_rel.display()
+                        ))
+                        .with_path(registry_rel.clone())
+                        .as_analysis_failure(AnalysisFailureKind::ResourceParse);
+                        if self.extract.redacts_by_default() {
+                            finding.redact_message(&self.id);
+                        }
+                        violations.push(finding);
+                        continue;
                     }
-                    violations.push(finding);
-                    continue;
-                }
-            };
+                };
             if let Some(mut violation) =
                 crate::non_string_extract_violation(&registry_rel, "registry extract", &non_strings)
             {
@@ -261,7 +262,7 @@ impl Rule for RegistryPathsResolveRule {
             }
             self.note_skipped(&registry_rel, &skipped, &mut violations);
 
-            let excluded = match self.excluded_entries(&text) {
+            let excluded = match self.excluded_entries(ctx, &registry_rel, &text) {
                 Ok(values) => values,
                 Err(e) => {
                     let mut finding = Violation::new(format!(
@@ -392,8 +393,13 @@ impl RegistryPathsResolveRule {
         }
     }
 
-    fn extract_entries(&self, text: &str) -> std::result::Result<RegistryEntries, String> {
-        let raw = extract_values(&self.extract, text)?;
+    fn extract_entries(
+        &self,
+        ctx: &Context<'_>,
+        registry_rel: &Path,
+        text: &str,
+    ) -> std::result::Result<RegistryEntries, String> {
+        let raw = extract_values_with_context(ctx, registry_rel, &self.extract, text)?;
         // Non-literal (computed/interpolated) entries can't be
         // statically resolved; they're surfaced as notes, not failed.
         let (skipped, kept): (Vec<String>, Vec<String>) =
@@ -403,12 +409,14 @@ impl RegistryPathsResolveRule {
 
     fn excluded_entries(
         &self,
+        ctx: &Context<'_>,
+        registry_rel: &Path,
         text: &str,
     ) -> std::result::Result<alint_core::ExtractedValues, String> {
         let Some(extract) = &self.exclude_extract else {
             return Ok(alint_core::ExtractedValues::default());
         };
-        extract_values(extract, text)
+        extract_values_with_context(ctx, registry_rel, extract, text)
     }
 
     /// Reverse-completeness: walked paths under `orphans.space`

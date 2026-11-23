@@ -312,6 +312,7 @@ impl Engine {
             process_environment: self.process_environment.as_ref(),
             condition_environment: self.condition_environment.as_ref(),
             trace: None,
+            structured_cache: None,
         };
         let target = Self::normalized_write_target(root, path);
         self.entries.iter().any(|entry| {
@@ -640,6 +641,29 @@ impl Engine {
             built = u64::from(git_tracked_indexes.is_some()),
         );
 
+        // Create a run-scoped structured-tree cache only when cross-file rules
+        // can share parsed documents with other cross-file rules or per-file
+        // rules (#548). Per-file-only runs share trees per file inside
+        // `dispatch_per_file` with zero cross-worker contention or retained
+        // memory across files.
+        let has_cross_file = self
+            .entries
+            .iter()
+            .any(|entry| entry.rule.as_per_file().is_none());
+        let may_share_across_rules = self.entries.len() >= 2
+            || self
+                .entries
+                .iter()
+                .any(|entry| !entry.rule.nested_rule_specs().is_empty());
+        let run_structured_cache = (has_cross_file && may_share_across_rules).then(|| {
+            crate::structured_cache::StructuredCache::new(
+                crate::yaml_budget::YAML_PARSE_BUDGET_BYTES,
+            )
+        });
+        let structured_cache = run_structured_cache
+            .as_ref()
+            .map(crate::structured_cache::StructuredCacheRef::Run);
+
         let full_ctx = Context {
             root,
             index,
@@ -652,6 +676,7 @@ impl Engine {
             process_environment: self.process_environment.as_ref(),
             condition_environment: self.condition_environment.as_ref(),
             trace: trace.map(|trace| trace as &dyn TraceSink),
+            structured_cache,
         };
         let filtered_ctx = filtered_index.as_ref().map(|fi| Context {
             root,
@@ -665,6 +690,7 @@ impl Engine {
             process_environment: self.process_environment.as_ref(),
             condition_environment: self.condition_environment.as_ref(),
             trace: trace.map(|trace| trace as &dyn TraceSink),
+            structured_cache,
         });
         let git_file_only_ctx = git_tracked_indexes
             .as_ref()
@@ -681,6 +707,7 @@ impl Engine {
                 process_environment: self.process_environment.as_ref(),
                 condition_environment: self.condition_environment.as_ref(),
                 trace: trace.map(|trace| trace as &dyn TraceSink),
+                structured_cache,
             });
         let git_dir_aware_ctx = git_tracked_indexes
             .as_ref()
@@ -697,6 +724,7 @@ impl Engine {
                 process_environment: self.process_environment.as_ref(),
                 condition_environment: self.condition_environment.as_ref(),
                 trace: trace.map(|trace| trace as &dyn TraceSink),
+                structured_cache,
             });
 
         // Resolve active `scope_filter.changed_since:` diffs + manifest path
@@ -1114,6 +1142,7 @@ impl Engine {
     /// cached `index` — distinct from "ran but found nothing." The
     /// caller reads it as "this file is excluded from linting"
     /// (`.gitignore` / `ignore:` / outside the walked tree).
+    #[allow(clippy::too_many_lines)]
     pub fn run_for_file(
         &self,
         root: &Path,
@@ -1160,6 +1189,7 @@ impl Engine {
             process_environment: self.process_environment.as_ref(),
             condition_environment: self.condition_environment.as_ref(),
             trace: None,
+            structured_cache: None,
         };
 
         let manifest_gates = self.manifest_gates_by_entry(index, &when_env)?;
@@ -1173,27 +1203,35 @@ impl Engine {
         let (live, gate_results) =
             self.collect_live_per_file_entries(&ctx, &gate_inputs, &pass, None);
 
-        // Dispatch each in-scope rule against the supplied bytes. The
-        // raw violations (notes included) are bucketed by entry index;
-        // `RuleResult::new` partitions notes out below. A rule that is
-        // applicable but emits nothing leaves no bucket entry → no
-        // result, matching `run`'s "passing rules omitted" semantics.
+        // Dispatch each in-scope rule against the supplied bytes, sharing the
+        // parsed structured tree across matching per-file rules (#548).
+        let matching: Vec<(usize, &dyn PerFileRule)> = live
+            .iter()
+            .filter_map(|(idx, entry)| {
+                let pf = entry
+                    .rule
+                    .as_per_file()
+                    .expect("live entries are per-file rules by construction");
+                pf.path_scope()
+                    .matches(file_path, index)
+                    .then_some((*idx, pf))
+            })
+            .collect();
+        let file_cache =
+            (matching.len() >= 2).then(|| crate::structured_cache::FileStructuredCache::new(None));
+        let file_ctx = file_cache
+            .as_ref()
+            .map(|cache| ctx.with_file_structured_cache(cache));
+        let eval_ctx = file_ctx.as_ref().unwrap_or(&ctx);
         let mut bucket: HashMap<usize, Vec<Violation>> = HashMap::new();
-        for (idx, entry) in &live {
-            let pf = entry
-                .rule
-                .as_per_file()
-                .expect("live entries are per-file rules by construction");
-            if !pf.path_scope().matches(file_path, index) {
-                continue;
-            }
-            match pf.evaluate_file(&ctx, file_path, bytes) {
+        for (idx, pf) in matching {
+            match pf.evaluate_file(eval_ctx, file_path, bytes) {
                 Ok(vs) => {
                     if !vs.is_empty() {
-                        bucket.entry(*idx).or_default().extend(vs);
+                        bucket.entry(idx).or_default().extend(vs);
                     }
                 }
-                Err(e) => bucket.entry(*idx).or_default().push(
+                Err(e) => bucket.entry(idx).or_default().push(
                     Violation::new(format!("rule evaluation failed: {e}"))
                         .with_path(file_path)
                         .as_analysis_failure(AnalysisFailureKind::Evaluation),

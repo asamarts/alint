@@ -12,10 +12,21 @@ fn budget(capacity: usize) -> &'static Budget {
     Box::leak(Box::new(Budget::new(capacity)))
 }
 
-/// `(in flight, waiting, most ever in flight)`.
+/// `(in flight + retained, waiting, most ever held)`.
 fn counters(budget: &Budget) -> (usize, usize, usize) {
     let state = budget.state.lock().unwrap();
-    (state.in_flight, state.waiting, state.max_in_flight)
+    (state.total(), state.waiting, state.max_in_flight)
+}
+
+/// `(in flight, retained, waiting, most ever held)`.
+fn detailed_counters(budget: &Budget) -> (usize, usize, usize, usize) {
+    let state = budget.state.lock().unwrap();
+    (
+        state.in_flight,
+        state.retained,
+        state.waiting,
+        state.max_in_flight,
+    )
 }
 
 /// A YAML mapping of exactly `len` bytes: `key<i>: value <i>` lines, then a
@@ -276,4 +287,161 @@ fn a_reservation_grows_by_being_taken_anew() {
     });
     assert_eq!(taken, 3);
     assert_eq!(counters(budget), (0, 0, 3 * MIB));
+}
+
+/// #582: an alias-amplified tree retains its budget lease while alive, so a
+/// second alias-heavy parse waits until the first tree drops rather than
+/// running concurrently outside the budget.
+#[test]
+fn alias_heavy_second_parse_waits_while_first_tree_is_alive() {
+    use std::sync::mpsc;
+
+    let budget = budget(2 * MIB);
+    // ~143 KB input: one 140 KB anchored string and 500 aliases (~70.3 MB expanded).
+    let text: &'static str = Box::leak(aliases_of(140_000, 500).into_boxed_str());
+    let (_, expanded) = crate::yaml_depth::scan_guards(text).expansion_and_size(text);
+    let retained = retained_alias_cost(text.len(), expanded);
+    assert!(
+        retained > 2 * MIB,
+        "expected retained cost > 2 MiB, got {retained}"
+    );
+
+    let (ready_tx, ready_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let first = std::thread::spawn(move || {
+        with_budget(budget, || {
+            let tree = Format::Yaml.parse_shared(text).unwrap();
+            assert_eq!(tree["b"].as_array().map(Vec::len), Some(500));
+            ready_tx.send(()).unwrap();
+            // Hold `tree` alive until the test signals release.
+            release_rx.recv().unwrap();
+            drop(tree);
+        });
+    });
+    ready_rx.recv().unwrap();
+    // Parse ended (`in_flight == 0`), but the live alias-expanded tree still
+    // holds the entire 2 MiB budget in `retained`.
+    assert_eq!(detailed_counters(budget), (0, 2 * MIB, 0, 2 * MIB));
+
+    let second = std::thread::spawn(move || {
+        with_budget(budget, || {
+            let tree = Format::Yaml.parse_shared(text).unwrap();
+            tree["b"].as_array().map_or(0, Vec::len)
+        })
+    });
+    wait_until("second alias-heavy parse waits", || {
+        detailed_counters(budget).2 == 1
+    });
+    assert!(
+        !second.is_finished(),
+        "second parse must wait while first alias-expanded tree is alive"
+    );
+
+    release_tx.send(()).unwrap();
+    wait_until("both parses finish", || {
+        first.is_finished() && second.is_finished()
+    });
+    first.join().unwrap();
+    assert_eq!(second.join().unwrap(), 500);
+    assert_eq!(detailed_counters(budget), (0, 0, 0, 2 * MIB));
+}
+
+/// #582: a retained lease moves across threads with its `SharedValue` and a
+/// holder that parses again on the same thread does not self-deadlock.
+#[test]
+fn alias_heavy_retained_lease_moves_across_threads_and_same_thread_reentry_does_not_deadlock() {
+    use std::sync::mpsc;
+
+    let budget = budget(2 * MIB);
+    let text: &'static str = Box::leak(aliases_of(140_000, 500).into_boxed_str());
+
+    let (tree_tx, tree_rx) = mpsc::channel();
+    let (drop_tx, drop_rx) = mpsc::channel();
+
+    // Thread 1 parses and also re-enters on the same thread while holding the
+    // tree, then transfers the `SharedValue` across threads to Thread 2.
+    let producer = std::thread::spawn(move || {
+        with_budget(budget, || {
+            let tree = Format::Yaml.parse_shared(text).unwrap();
+            assert_eq!(detailed_counters(budget).1, 2 * MIB);
+            // Same-thread re-entry must not deadlock on its own retained lease.
+            assert!(Format::Yaml.parse(text).is_ok());
+            tree_tx.send(tree).unwrap();
+        });
+    });
+
+    let holder = std::thread::spawn(move || {
+        let tree = tree_rx.recv().unwrap();
+        drop_rx.recv().unwrap();
+        drop(tree);
+    });
+
+    wait_until("producer ends while holder keeps tree alive", || {
+        producer.is_finished()
+    });
+    producer.join().unwrap();
+    assert_eq!(detailed_counters(budget).1, 2 * MIB);
+
+    // Another thread still waits while `holder` owns the transferred tree.
+    let waiter =
+        std::thread::spawn(move || with_budget(budget, || Format::Yaml.parse_shared(text).is_ok()));
+    wait_until("waiter blocks on transferred tree", || {
+        detailed_counters(budget).2 == 1
+    });
+    assert!(!waiter.is_finished());
+
+    drop_tx.send(()).unwrap();
+    wait_until("holder and waiter finish", || {
+        holder.is_finished() && waiter.is_finished()
+    });
+    holder.join().unwrap();
+    assert!(waiter.join().unwrap());
+    assert_eq!(detailed_counters(budget), (0, 0, 0, 2 * MIB));
+}
+
+/// #582: sixteen parallel workers parsing alias-heavy YAML documents stay
+/// strictly within the budget while holding their trees during rule evaluation.
+#[test]
+fn sixteen_parallel_alias_heavy_parses_never_exceed_budget() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let budget = budget(6 * MIB);
+    // ~143 KB -> ~70.3 MB expanded -> retained cost ~2.19 MB (~2.09 MiB), so
+    // at most 2 trees fit in 6 MiB simultaneously across all 16 threads.
+    let text: &'static str = Box::leak(aliases_of(140_000, 500).into_boxed_str());
+    let live = Arc::new(AtomicUsize::new(0));
+    let max_live = Arc::new(AtomicUsize::new(0));
+    let barrier = Arc::new(std::sync::Barrier::new(16));
+
+    let threads: Vec<_> = (0..16)
+        .map(|_| {
+            let live = Arc::clone(&live);
+            let max_live = Arc::clone(&max_live);
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                with_budget(budget, || {
+                    barrier.wait();
+                    let tree = Format::Yaml.parse_shared(text).unwrap();
+                    let now = live.fetch_add(1, Ordering::SeqCst) + 1;
+                    max_live.fetch_max(now, Ordering::SeqCst);
+                    assert_eq!(tree["b"].as_array().map(Vec::len), Some(500));
+                    std::thread::yield_now();
+                    live.fetch_sub(1, Ordering::SeqCst);
+                    drop(tree);
+                });
+            })
+        })
+        .collect();
+    for handle in threads {
+        handle.join().unwrap();
+    }
+    let (in_flight, retained, waiting, peak) = detailed_counters(budget);
+    assert_eq!((in_flight, retained, waiting), (0, 0, 0));
+    assert!(peak <= 6 * MIB, "peak budget {peak} exceeded 6 MiB");
+    assert!(
+        max_live.load(Ordering::SeqCst) <= 2,
+        "at most 2 trees should be live concurrently under 6 MiB, saw {}",
+        max_live.load(Ordering::SeqCst)
+    );
 }

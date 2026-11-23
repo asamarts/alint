@@ -1116,3 +1116,204 @@ fn tracked_views_search_for_hidden_paths_only_when_the_walk_left_one_out() {
         (1, vec!["a.txt".into()], vec!["a.txt".into()])
     );
 }
+
+#[derive(Debug)]
+struct StructuredPerFileProbe {
+    id: String,
+    scope: Scope,
+    seen: Arc<parking_lot::Mutex<Vec<(PathBuf, usize, bool)>>>,
+}
+
+impl Rule for StructuredPerFileProbe {
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn level(&self) -> Level {
+        Level::Error
+    }
+    fn evaluate(&self, _ctx: &Context<'_>) -> Result<Vec<Violation>> {
+        Ok(Vec::new())
+    }
+    fn as_per_file(&self) -> Option<&dyn crate::rule::PerFileRule> {
+        Some(self)
+    }
+}
+
+impl crate::rule::PerFileRule for StructuredPerFileProbe {
+    fn path_scope(&self) -> &Scope {
+        &self.scope
+    }
+    fn evaluate_file(
+        &self,
+        ctx: &Context<'_>,
+        path: &Path,
+        bytes: &[u8],
+    ) -> Result<Vec<Violation>> {
+        let text = String::from_utf8_lossy(bytes);
+        let parsed = ctx
+            .parse_structured(path, crate::Format::Yaml, &text)
+            .expect("valid yaml");
+        let addr = std::ptr::from_ref(&*parsed) as usize;
+        self.seen
+            .lock()
+            .push((path.to_path_buf(), addr, ctx.structured_cache.is_some()));
+        Ok(Vec::new())
+    }
+}
+
+#[derive(Debug)]
+struct StructuredCrossFileProbe {
+    id: String,
+    scope: Scope,
+    seen: Arc<parking_lot::Mutex<Vec<(PathBuf, usize)>>>,
+}
+
+impl Rule for StructuredCrossFileProbe {
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn level(&self) -> Level {
+        Level::Error
+    }
+    fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
+        for entry in self.scope.candidate_files(ctx.index) {
+            if !self.scope.matches(&entry.path, ctx.index) {
+                continue;
+            }
+            let bytes = std::fs::read(ctx.root.join(&entry.path)).unwrap();
+            let text = String::from_utf8_lossy(&bytes);
+            let parsed = ctx
+                .parse_structured(&entry.path, crate::Format::Yaml, &text)
+                .expect("valid yaml");
+            let addr = std::ptr::from_ref(&*parsed) as usize;
+            self.seen.lock().push((entry.path.to_path_buf(), addr));
+        }
+        Ok(Vec::new())
+    }
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn structured_rules_share_parsed_trees_per_file_across_partitions_and_skip_single_rule() {
+    let tmp = tempfile::tempdir().unwrap();
+    for i in 0..8 {
+        std::fs::write(
+            tmp.path().join(format!("svc-{i}.yml")),
+            format!("name: svc-{i}\nport: {}\n", 8000 + i),
+        )
+        .unwrap();
+    }
+    let index = crate::walk(tmp.path(), &crate::WalkOptions::test_default()).unwrap();
+
+    // 1. Seven per-file rules share one parsed `Arc` per file (1 parse per
+    //    file, not 7).
+    let seen = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let rules: Vec<Box<dyn Rule>> = (0..7)
+        .map(|i| {
+            Box::new(StructuredPerFileProbe {
+                id: format!("r-{i}"),
+                scope: Scope::from_patterns(&["*.yml".to_string()]).unwrap(),
+                seen: Arc::clone(&seen),
+            }) as Box<dyn Rule>
+        })
+        .collect();
+    let engine = Engine::new(rules, RuleRegistry::new());
+    engine.run(tmp.path(), &index).unwrap();
+    let records = seen.lock();
+    assert_eq!(records.len(), 7 * 8);
+    let mut by_file: HashMap<PathBuf, HashSet<usize>> = HashMap::new();
+    for (path, addr, has_cache) in records.iter() {
+        assert!(
+            *has_cache,
+            "multi-rule per-file dispatch attaches file cache"
+        );
+        by_file.entry(path.clone()).or_default().insert(*addr);
+    }
+    assert_eq!(by_file.len(), 8);
+    for (path, addrs) in &by_file {
+        assert_eq!(
+            addrs.len(),
+            1,
+            "{path:?} must be parsed once across all 7 rules, got {} distinct allocations",
+            addrs.len()
+        );
+    }
+    drop(records);
+
+    // 2. Single per-file rule skips caching completely.
+    let single_seen = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let single_engine = Engine::new(
+        vec![Box::new(StructuredPerFileProbe {
+            id: "only".into(),
+            scope: Scope::from_patterns(&["*.yml".to_string()]).unwrap(),
+            seen: Arc::clone(&single_seen),
+        })],
+        RuleRegistry::new(),
+    );
+    single_engine.run(tmp.path(), &index).unwrap();
+    assert!(
+        single_seen
+            .lock()
+            .iter()
+            .all(|(_, _, has_cache)| !has_cache),
+        "single-rule run must skip structured caching"
+    );
+
+    // 3. Cross-file rule + per-file rule share the exact same `Arc` pointer
+    //    via the run-scoped structured cache.
+    let cross_seen = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let per_seen = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let mixed_engine = Engine::new(
+        vec![
+            Box::new(StructuredCrossFileProbe {
+                id: "cross".into(),
+                scope: Scope::from_patterns(&["*.yml".to_string()]).unwrap(),
+                seen: Arc::clone(&cross_seen),
+            }),
+            Box::new(StructuredPerFileProbe {
+                id: "per".into(),
+                scope: Scope::from_patterns(&["*.yml".to_string()]).unwrap(),
+                seen: Arc::clone(&per_seen),
+            }),
+        ],
+        RuleRegistry::new(),
+    );
+    mixed_engine.run(tmp.path(), &index).unwrap();
+    let cross_map: HashMap<PathBuf, usize> = cross_seen.lock().iter().cloned().collect();
+    assert_eq!(cross_map.len(), 8);
+    for (path, addr, _) in per_seen.lock().iter() {
+        assert_eq!(
+            cross_map.get(path),
+            Some(addr),
+            "per-file rule must reuse the cross-file cached tree for {path:?}"
+        );
+    }
+
+    // 4. `run_for_file` (LSP buffer evaluation) shares one parse across 3 rules.
+    let buf_seen = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let buf_rules: Vec<Box<dyn Rule>> = (0..3)
+        .map(|i| {
+            Box::new(StructuredPerFileProbe {
+                id: format!("lsp-{i}"),
+                scope: Scope::from_patterns(&["*.yml".to_string()]).unwrap(),
+                seen: Arc::clone(&buf_seen),
+            }) as Box<dyn Rule>
+        })
+        .collect();
+    let buf_engine = Engine::new(buf_rules, RuleRegistry::new());
+    buf_engine
+        .run_for_file(
+            tmp.path(),
+            &index,
+            Path::new("svc-0.yml"),
+            b"name: edited\n",
+        )
+        .unwrap();
+    let buf_addrs: HashSet<usize> = buf_seen.lock().iter().map(|(_, addr, _)| *addr).collect();
+    assert_eq!(buf_seen.lock().len(), 3);
+    assert_eq!(
+        buf_addrs.len(),
+        1,
+        "run_for_file must parse edited buffer once across matching rules"
+    );
+}

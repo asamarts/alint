@@ -1095,6 +1095,24 @@ fn dispatch_per_file<const TRACE: bool>(
     path: &Path,
     bytes: &[u8],
 ) -> Vec<(usize, Violation)> {
+    // When two or more per-file rules evaluate the same file, share parsed
+    // structured trees in a stack-local cache that drops as soon as this file
+    // finishes (zero cross-worker contention and zero retained memory after the
+    // file completes; #548). Single-rule files skip caching entirely unless a
+    // cross-file rule already populated the run-scoped cache on `ctx`.
+    let file_cache = (applicable.len() >= 2)
+        .then(|| crate::structured_cache::FileStructuredCache::new(ctx.run_structured_cache()));
+    let read_only_ctx;
+    let file_ctx;
+    let eval_ctx = if let Some(cache) = file_cache.as_ref() {
+        file_ctx = ctx.with_file_structured_cache(cache);
+        &file_ctx
+    } else if ctx.run_structured_cache().is_some() {
+        read_only_ctx = ctx.with_read_only_run_cache();
+        &read_only_ctx
+    } else {
+        ctx
+    };
     let mut out = Vec::new();
     for (entry_idx, entry) in applicable {
         let pf = entry
@@ -1102,9 +1120,9 @@ fn dispatch_per_file<const TRACE: bool>(
             .as_per_file()
             .expect("live entries are per-file rules by construction");
         let result = if TRACE {
-            pf.evaluate_file_traced(ctx, path, bytes)
+            pf.evaluate_file_traced(eval_ctx, path, bytes)
         } else {
-            pf.evaluate_file(ctx, path, bytes)
+            pf.evaluate_file(eval_ctx, path, bytes)
         };
         match result {
             Ok(violations) => {

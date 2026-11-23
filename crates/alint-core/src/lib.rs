@@ -43,6 +43,7 @@ mod report;
 mod rule;
 mod scope;
 mod scope_filter;
+mod structured_cache;
 pub mod structured_fix;
 mod structured_format;
 pub mod template;
@@ -96,7 +97,8 @@ pub use extract::{
     ByteSpan, EntryPathSegment, EntryRowsError, Extract, ExtractSpec, ExtractedValues, LinesOpts,
     NonStringValueKind, StructuredEntryRow, StructuredExtract, WholeFileOpts, extract_entry_rows,
     extract_entry_rows_bounded, extract_entry_rows_strict_yaml,
-    extract_entry_rows_strict_yaml_bounded, extract_values, extract_values_bounded, is_non_literal,
+    extract_entry_rows_strict_yaml_bounded, extract_values, extract_values_bounded,
+    extract_values_with_context, is_non_literal,
 };
 pub use facts::{FactKind, FactSpec, FactValue, FactValues, evaluate_facts};
 pub use kind_meta::{
@@ -135,7 +137,7 @@ pub use scope_filter::{
     reject_scope_filter_on_cross_file, reject_scope_filter_with_reason,
 };
 pub use structured_format::MAX_STRUCTURED_BYTES;
-pub use structured_format::{Format, MAX_XML_DEPTH};
+pub use structured_format::{Format, MAX_XML_DEPTH, SharedValue};
 #[doc(hidden)]
 pub use trace::{
     RuleTrace, RuleTraceDocument, TraceAnalysisFailure, TraceCounts, TraceExecution,

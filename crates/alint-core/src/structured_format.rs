@@ -58,7 +58,7 @@ pub const MAX_STRUCTURED_BYTES: usize = 32 * 1024 * 1024;
 const _: () = assert!((MAX_STRUCTURED_BYTES as u64) < crate::walker::MAX_ANALYZE_BYTES / 2);
 
 /// Which config format the target file is parsed as.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Format {
     Json,
@@ -69,6 +69,118 @@ pub enum Format {
     Properties,
     Ini,
     Hcl,
+}
+
+/// A parsed structured document shared across rules via `Arc`.
+///
+/// For alias-amplified YAML documents whose expanded tree exceeds the YAML
+/// parse budget threshold, `SharedValue` also retains the tree's share of the
+/// YAML parse budget until the last clone drops so parallel workers cannot hold
+/// unbounded alias-expanded trees simultaneously.
+#[derive(Clone)]
+pub struct SharedValue {
+    inner: std::sync::Arc<SharedValueInner>,
+}
+
+pub(crate) struct SharedValueInner {
+    value: Value,
+    lease: Option<crate::yaml_budget::RetainedLease>,
+}
+
+impl std::fmt::Debug for SharedValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SharedValue")
+            .field("value", &self.inner.value)
+            .field("retained_lease", &self.inner.lease.is_some())
+            .finish()
+    }
+}
+
+impl std::ops::Deref for SharedValue {
+    type Target = Value;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner.value
+    }
+}
+
+impl AsRef<Value> for SharedValue {
+    fn as_ref(&self) -> &Value {
+        &self.inner.value
+    }
+}
+
+impl SharedValue {
+    /// Wrap an already-parsed value with no retained budget lease.
+    #[must_use]
+    pub fn new(value: Value) -> Self {
+        Self::with_lease(value, None)
+    }
+
+    pub(crate) fn with_lease(
+        value: Value,
+        lease: Option<crate::yaml_budget::RetainedLease>,
+    ) -> Self {
+        Self {
+            inner: std::sync::Arc::new(SharedValueInner { value, lease }),
+        }
+    }
+
+    pub(crate) fn from_inner(inner: std::sync::Arc<SharedValueInner>) -> Self {
+        Self { inner }
+    }
+
+    pub(crate) fn downgrade(&self) -> std::sync::Weak<SharedValueInner> {
+        std::sync::Arc::downgrade(&self.inner)
+    }
+
+    /// Whether this tree retains a YAML alias-expansion budget lease.
+    pub(crate) fn has_retained_lease(&self) -> bool {
+        self.inner.lease.is_some()
+    }
+
+    /// Whether two handles point to the exact same shared allocation.
+    #[must_use]
+    pub fn ptr_eq(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.inner, &other.inner)
+    }
+}
+
+/// Iterative upper-bound estimate of heap bytes retained by a `serde_json::Value`
+/// tree, used to bound the per-run structured-tree cache.
+pub(crate) fn estimate_value_bytes(root: &Value) -> usize {
+    let mut total = std::mem::size_of::<SharedValueInner>();
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        match node {
+            Value::Null | Value::Bool(_) | Value::Number(_) => {}
+            Value::String(text) => {
+                total = total.saturating_add(text.capacity());
+            }
+            Value::Array(items) => {
+                total = total.saturating_add(
+                    items
+                        .capacity()
+                        .saturating_mul(std::mem::size_of::<Value>()),
+                );
+                for item in items {
+                    stack.push(item);
+                }
+            }
+            Value::Object(entries) => {
+                // Account for the map's BTree/IndexMap node overhead plus each
+                // owned key string and value slot.
+                const PER_ENTRY_OVERHEAD: usize =
+                    std::mem::size_of::<String>() + std::mem::size_of::<Value>() + 48;
+                total = total.saturating_add(entries.len().saturating_mul(PER_ENTRY_OVERHEAD));
+                for (key, value) in entries {
+                    total = total.saturating_add(key.capacity());
+                    stack.push(value);
+                }
+            }
+        }
+    }
+    total
 }
 
 impl Format {
@@ -100,7 +212,20 @@ impl Format {
     }
 
     pub fn parse(self, text: &str) -> std::result::Result<Value, String> {
-        self.parse_holding(text, &mut 0)
+        self.parse_holding(text, &mut 0).map(|(value, _)| value)
+    }
+
+    /// Parse `text` into a [`SharedValue`] that can be shared across rules via
+    /// `Arc` and retains the YAML alias-expansion budget lease for as long as
+    /// an alias-amplified tree stays alive.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same format-specific parse or limit error message as
+    /// [`Format::parse`].
+    pub fn parse_shared(self, text: &str) -> std::result::Result<SharedValue, String> {
+        let (value, lease) = self.parse_holding(text, &mut 0)?;
+        Ok(SharedValue::with_lease(value, lease))
     }
 
     /// [`Format::parse`], and roughly the most the parse held at once besides
@@ -109,11 +234,15 @@ impl Format {
     /// TOML lexer reserves room for.
     pub(crate) fn parse_held(self, text: &str) -> std::result::Result<(Value, usize), String> {
         let mut held = 0;
-        let value = self.parse_holding(text, &mut held)?;
+        let (value, _lease) = self.parse_holding(text, &mut held)?;
         Ok((value, held))
     }
 
-    fn parse_holding(self, text: &str, held: &mut usize) -> std::result::Result<Value, String> {
+    fn parse_holding(
+        self,
+        text: &str,
+        held: &mut usize,
+    ) -> std::result::Result<(Value, Option<crate::yaml_budget::RetainedLease>), String> {
         let raw_text = text;
         // Strip any leading UTF-8 BOM(s) uniformly. Some libraries (serde_json,
         // hcl-rs) reject a `\u{feff}` prefix as a syntax error, so a BOM-prefixed
@@ -156,7 +285,7 @@ impl Format {
             .trim_matches(|c: char| c == '\u{feff}' || c.is_whitespace())
             .is_empty()
         {
-            return Ok(Value::Object(serde_json::Map::new()));
+            return Ok((Value::Object(serde_json::Map::new()), None));
         }
         match self {
             // Try strict JSON first (the common, fast path — plain
@@ -166,11 +295,13 @@ impl Format {
             // `.json` files (tsconfig.json, `.vscode/*.json`). If the
             // tolerant retry also fails, surface the *original* strict
             // error so genuinely-broken JSON reports accurately.
-            Self::Json => serde_json::from_str(text).or_else(|strict_err| {
-                let stripped = strip_jsonc(text);
-                *held = stripped.capacity();
-                serde_json::from_str(&stripped).map_err(|_| strict_err.to_string())
-            }),
+            Self::Json => serde_json::from_str(text)
+                .or_else(|strict_err| {
+                    let stripped = strip_jsonc(text);
+                    *held = stripped.capacity();
+                    serde_json::from_str(&stripped).map_err(|_| strict_err.to_string())
+                })
+                .map(|v| (v, None)),
             Self::Yaml => {
                 // Wait for this input's share of the YAML parse budget, held
                 // until the parse below ends, the guards' passes included
@@ -204,21 +335,29 @@ impl Format {
                 // The value copies what each alias names, so a small file of
                 // many aliases costs what its expanded tree does: its share of
                 // the budget grows to that before the parse.
-                let _budget = crate::yaml_budget::reserve_at_least(
+                let budget = crate::yaml_budget::reserve_at_least(
                     budget,
                     crate::yaml_budget::parse_cost(text.len(), expanded),
                 );
-                yaml_value::yaml_to_value(text)
+                let value = yaml_value::yaml_to_value(text)?;
+                // An alias-amplified tree stays roughly as big as its parse
+                // peak, so transition the reservation atomically into a
+                // `Send + Sync` lease held with the returned tree (#582).
+                let retained = crate::yaml_budget::retained_alias_cost(text.len(), expanded);
+                let lease = budget.and_then(|res| res.into_retained(retained));
+                Ok((value, lease))
             }
             Self::Toml => {
                 *held = toml_tokens(text);
-                toml::from_str(text).map_err(|e| e.to_string())
+                toml::from_str(text)
+                    .map(|v| (v, None))
+                    .map_err(|e| e.to_string())
             }
-            Self::Xml => xml_to_value(text),
-            Self::Dotenv => crate::dotenv::parse(raw_text),
-            Self::Properties => properties_to_value(raw_text),
-            Self::Ini => crate::ini::parse(text),
-            Self::Hcl => hcl_to_value(text),
+            Self::Xml => xml_to_value(text).map(|v| (v, None)),
+            Self::Dotenv => crate::dotenv::parse(raw_text).map(|v| (v, None)),
+            Self::Properties => properties_to_value(raw_text).map(|v| (v, None)),
+            Self::Ini => crate::ini::parse(text).map(|v| (v, None)),
+            Self::Hcl => hcl_to_value(text).map(|v| (v, None)),
         }
     }
 
