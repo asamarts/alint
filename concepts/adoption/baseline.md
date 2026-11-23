@@ -72,6 +72,7 @@ A baseline file written by v0.21 or earlier recorded each of these findings unde
 
 One entry per line (not a JSON array) is deliberately **merge-friendly**, and the sorted order makes an unchanged tree regenerate byte-for-byte. Only `fingerprint` and `count` are matched; `rule_id`, `path`, and `message` are advisory, there so a reviewer reading the diff can see what is being grandfathered. The `count` is a **budget**: identical findings collapse into one entry, and if the tree later holds *more* occurrences than recorded, the excess is reported as new; if *fewer*, the remainder is pruned as stale.
 
+
 ## Keeping the baseline honest
 
 Re-running `alint baseline` on a repo that already has one **will not silently grandfather new debt**. If the re-run would add any new fingerprint (or a higher count), it refuses to write and tells you to fix them or opt in:
