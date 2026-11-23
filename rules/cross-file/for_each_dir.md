@@ -26,6 +26,7 @@ The `iter` namespace exposes:
 
 **Token values are literal paths.** When a token expands into a nested option that alint compiles as a glob (`paths:`, and per kind options such as `dir_contains`'s `select` / `require`, `dir_only_contains`'s `select` / `allow`, `unique_by`'s `select`, `pair`'s `primary`, or a nested `for_each_*`'s own `select`), its value is glob-escaped, so a directory named `app/[slug]` or `pkgs/*` matches only itself rather than acting as a character class or wildcard. The template text around the token keeps its glob meaning (`"{path}/*.tsx"`). Options that are regexes (`for_each_match`'s `select`, `pattern`) or literal paths (`pair`'s `partner`) receive the value unescaped. Messages show the real path, not its escaped form.
 
+
 **A value is substituted once.** The outermost iteration substitutes every token of the rules
 nested in it, and the value it inserts is text: a file or directory name that spells a token,
 such as `x{stem}`, is not substituted again, neither by the iterations below it (a `for_each_dir`

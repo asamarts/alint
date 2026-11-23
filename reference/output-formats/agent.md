@@ -150,6 +150,7 @@ fixed automatically.
 | `column` | integer | no | 1-based column, when the rule reports one. |
 | `policy_url` | string | no | Documentation URL provided by the rule. |
 
+
 `off` rules never produce violations, so `"off"` never appears as a severity.
 
 ## How `agent_instruction` is composed
