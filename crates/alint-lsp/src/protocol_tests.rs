@@ -5,18 +5,22 @@ use std::time::Duration;
 
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, RequestId};
 use lsp_types::notification::{
-    DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, DidSaveTextDocument, Exit,
-    Initialized, LogMessage, Notification as _, PublishDiagnostics,
+    DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, Exit, Initialized,
+    Notification as _, PublishDiagnostics,
 };
+#[cfg(unix)]
+use lsp_types::notification::{DidSaveTextDocument, LogMessage};
 use lsp_types::request::{CodeActionRequest, HoverRequest, Initialize, Shutdown};
 use lsp_types::{
     CodeActionContext, CodeActionParams, CodeActionResponse, DidChangeTextDocumentParams,
-    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams, Hover,
-    HoverParams, InitializeParams, InitializeResult, InitializedParams, LogMessageParams,
-    PartialResultParams, PublishDiagnosticsParams, TextDocumentContentChangeEvent,
-    TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, Url,
-    VersionedTextDocumentIdentifier, WorkDoneProgressParams, WorkspaceFolder,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, Hover, HoverParams, InitializeParams,
+    InitializeResult, InitializedParams, PartialResultParams, PublishDiagnosticsParams,
+    TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
+    TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier, WorkDoneProgressParams,
+    WorkspaceFolder,
 };
+#[cfg(unix)]
+use lsp_types::{DidSaveTextDocumentParams, LogMessageParams};
 
 use super::{LspOptions, run_connection};
 
