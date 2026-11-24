@@ -169,17 +169,24 @@ fn owned_walker_matches_ignore_walk_builder_on_complex_tree() {
 }
 
 /// Deep directory chains (hundreds of nested directories, each with its
-/// own `.gitignore`) must traverse and drop iteratively without
-/// overflowing a 2 MiB thread stack.
+/// own `.gitignore`) and deep `IgnoreNode` / `ExplicitAncestor` chains must
+/// traverse and drop iteratively without overflowing a small thread stack.
 #[test]
 fn deep_directory_tree_does_not_overflow_stack() {
     let tmp = td();
     let root = tmp.path().join("deep");
     let mut cur = root.clone();
     std::fs::create_dir_all(&cur).unwrap();
-    // Keep path length safe on Windows too by using single-char segments
-    // and moderate depth on Windows; deeper on Unix where PATH_MAX >= 4096.
-    let depth: usize = if cfg!(windows) { 60 } else { 600 };
+    // Stay safely inside each OS's `PATH_MAX` (Linux 4096, macOS 1024,
+    // Windows 260 without verbatim prefix) while exercising deep traversal
+    // on a 1 MiB stack.
+    let depth: usize = if cfg!(windows) {
+        50
+    } else if cfg!(target_os = "linux") {
+        600
+    } else {
+        350
+    };
     for i in 0..depth {
         cur.push("d");
         std::fs::create_dir(&cur).unwrap();
@@ -191,7 +198,7 @@ fn deep_directory_tree_does_not_overflow_stack() {
     std::fs::write(cur.join("drop.tmp"), b"no").unwrap();
 
     let handle = std::thread::Builder::new()
-        .stack_size(2 * 1024 * 1024)
+        .stack_size(1024 * 1024)
         .spawn(move || {
             let idx = walk(&root, &WalkOptions::test_default()).unwrap();
             assert!(
@@ -204,6 +211,28 @@ fn deep_directory_tree_does_not_overflow_stack() {
                     .iter()
                     .any(|e| { e.path.file_name() == Some(OsStr::new("drop.tmp")) })
             );
+
+            // Also prove `IgnoreNode` and `ExplicitAncestor` drop iteratively
+            // at depths far exceeding any OS `PATH_MAX`.
+            let mut ignore_head: Option<Arc<IgnoreNode>> = None;
+            let mut ancestor_head: Option<Arc<ExplicitAncestor>> = None;
+            for _ in 0..20_000 {
+                ignore_head = Some(Arc::new(IgnoreNode {
+                    dir: DirIgnores {
+                        dot_ignore: None,
+                        git_ignore: None,
+                        exclude: None,
+                        repository: false,
+                    },
+                    parent: ignore_head,
+                }));
+                ancestor_head = Some(Arc::new(ExplicitAncestor {
+                    canonical: PathBuf::from("d"),
+                    parent: ancestor_head,
+                }));
+            }
+            drop(ignore_head);
+            drop(ancestor_head);
         })
         .unwrap();
     handle.join().unwrap();
