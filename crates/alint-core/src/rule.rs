@@ -879,6 +879,8 @@ pub struct Context<'a> {
     pub condition_environment: Option<&'a std::collections::BTreeMap<String, String>>,
     #[doc(hidden)]
     pub trace: Option<&'a dyn crate::trace::TraceSink>,
+    /// Per-run or per-file structured-tree cache shared across rules (#548).
+    pub(crate) structured_cache: Option<crate::structured_cache::StructuredCacheRef<'a>>,
 }
 
 impl<'a> Context<'a> {
@@ -899,6 +901,7 @@ impl<'a> Context<'a> {
             process_environment: None,
             condition_environment: None,
             trace: None,
+            structured_cache: None,
         }
     }
 
@@ -987,9 +990,66 @@ impl<'a> Context<'a> {
         self.trace = trace;
         self
     }
+
+    pub(crate) fn run_structured_cache(
+        &self,
+    ) -> Option<&'a crate::structured_cache::StructuredCache> {
+        self.structured_cache
+            .and_then(crate::structured_cache::StructuredCacheRef::run_cache)
+    }
+
+    pub(crate) fn with_read_only_run_cache(&self) -> Self {
+        let mut copy = self.clone();
+        copy.structured_cache = self
+            .run_structured_cache()
+            .map(crate::structured_cache::StructuredCacheRef::RunReadOnly);
+        copy
+    }
+
+    pub(crate) fn with_file_structured_cache<'b>(
+        &'b self,
+        file_cache: &'b crate::structured_cache::FileStructuredCache<'b>,
+    ) -> Context<'b> {
+        Context {
+            root: self.root,
+            index: self.index,
+            registry: self.registry,
+            facts: self.facts,
+            vars: self.vars,
+            git_tracked: self.git_tracked,
+            git_blame: self.git_blame,
+            analysis_time: self.analysis_time,
+            process_environment: self.process_environment,
+            condition_environment: self.condition_environment,
+            trace: self.trace,
+            structured_cache: Some(crate::structured_cache::StructuredCacheRef::File(
+                file_cache,
+            )),
+        }
+    }
 }
 
 impl Context<'_> {
+    /// Parse `text` at `path` as `format`, reusing the per-run or per-file
+    /// structured-tree cache when multiple rules inspect the same document
+    /// (#548) and retaining alias-expansion budget leases while live (#582).
+    ///
+    /// # Errors
+    ///
+    /// Returns the same format-specific parse or limit error as
+    /// [`crate::Format::parse`].
+    pub fn parse_structured(
+        &self,
+        path: &Path,
+        format: crate::Format,
+        text: &str,
+    ) -> std::result::Result<crate::SharedValue, String> {
+        if let Some(cache) = self.structured_cache {
+            cache.get_or_parse(path, format, text)
+        } else {
+            format.parse_shared(text)
+        }
+    }
     /// True if `rel_path` is in git's index. Returns `false` when no tracked set
     /// was supplied. Production engine dispatch fails an active Git-dependent
     /// owning rule before this method is reached when repository probing failed;

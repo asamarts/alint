@@ -392,7 +392,7 @@ impl StructuredPathRule {
         // mis-globbed textual file there yields a junk tree (the query just finds no
         // match), not a parse error -- keep the glob narrow for those formats.
         let text = String::from_utf8_lossy(bytes);
-        let root_value = match self.format.parse(&text) {
+        let root_value = match ctx.parse_structured(path, self.format, &text) {
             Ok(v) => v,
             Err(err) => {
                 if TRACE {

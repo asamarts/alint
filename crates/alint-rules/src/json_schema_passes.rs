@@ -234,7 +234,7 @@ impl Rule for JsonSchemaPassesRule {
                 continue;
             };
 
-            let parsed = match format.parse(&text) {
+            let parsed = match ctx.parse_structured(&entry.path, format, &text) {
                 Ok(v) => v,
                 Err(err) => {
                     violations.push(

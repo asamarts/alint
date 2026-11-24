@@ -55,7 +55,8 @@ use std::slice;
 
 use alint_core::{
     AnalysisFailureKind, Context, Error, Extract, ExtractSpec, Level, RelatedLocation, Result,
-    Rule, RuleSpec, Scope, Violation, extract_values, is_non_literal, unreadable_file_violation,
+    Rule, RuleSpec, Scope, Violation, extract_values_with_context, is_non_literal,
+    unreadable_file_violation,
 };
 use regex::Regex;
 use serde::Deserialize;
@@ -559,7 +560,7 @@ impl FileGraphRule {
                 return Vec::new();
             }
         };
-        let refs = match extract_values(extract, &text) {
+        let refs = match extract_values_with_context(ctx, node, extract, &text) {
             Ok(v) => v,
             Err(e) => {
                 let mut finding = Violation::new(format!("edge extraction failed: {e}"))
