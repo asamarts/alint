@@ -129,6 +129,14 @@ impl<'de, A: MapAccess<'de>> MapAccess<'de> for TakeMap<'_, A> {
                 None => return Ok(None),
                 Some(Key::Passed(key)) => return Ok(Some(key)),
                 Some(Key::Taken(name)) => {
+                    if self
+                        .taken
+                        .borrow()
+                        .iter()
+                        .any(|(existing, _)| existing == name)
+                    {
+                        return Err(serde::de::Error::duplicate_field(name));
+                    }
                     let value: ayaml::Value = self.inner.next_value()?;
                     self.taken.borrow_mut().push((name.to_string(), value));
                 }

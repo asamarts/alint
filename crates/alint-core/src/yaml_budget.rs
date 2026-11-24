@@ -110,17 +110,38 @@ pub const fn parse_cost(input_len: usize, expanded: usize) -> usize {
 }
 
 /// Bytes of the YAML parse budget an alias-expanded tree retains while alive:
-/// `0` when the document has no alias amplification past its own length or
-/// stays at or below [`YAML_BUDGET_THRESHOLD_BYTES`]; otherwise
-/// `expanded / EXPANSION_BYTES_PER_COST_BYTE` (#582).
+/// `0` when the alias-replayed bytes stay at or below
+/// `YAML_BUDGET_THRESHOLD_BYTES * EXPANSION_BYTES_PER_COST_BYTE` (32 MiB);
+/// otherwise `alias_replayed / EXPANSION_BYTES_PER_COST_BYTE` (#582).
+///
+/// Basing the retained cost on alias-replayed bytes (rather than comparing
+/// total expansion against `input_len`) bounds alias-amplified trees across all
+/// file sizes up to the 32 MiB input cap while leaving alias-light documents
+/// uncharged.
 #[must_use]
-pub const fn retained_alias_cost(input_len: usize, expanded: usize) -> usize {
-    let expansion = expanded / EXPANSION_BYTES_PER_COST_BYTE;
-    if expansion > YAML_BUDGET_THRESHOLD_BYTES && expansion > input_len {
-        expansion
+pub const fn retained_alias_cost(alias_replayed: usize) -> usize {
+    let cost = alias_replayed / EXPANSION_BYTES_PER_COST_BYTE;
+    if cost > YAML_BUDGET_THRESHOLD_BYTES {
+        cost
     } else {
         0
     }
+}
+
+/// Charge `retained_bytes` directly to the active budget as a [`RetainedLease`]
+/// when a re-entrant parse ran without an in-flight [`Reservation`], ensuring
+/// re-entrant alias-expanded trees never escape the budget or enter idle LRU
+/// caches (#582).
+#[must_use = "the retained budget is given back when dropped"]
+pub(crate) fn retain_unreserved(retained_bytes: usize) -> Option<RetainedLease> {
+    if retained_bytes == 0 {
+        return None;
+    }
+    #[cfg(test)]
+    if let Some(budget) = TEST_BUDGET.with(Cell::get) {
+        return budget.retain_unreserved(retained_bytes);
+    }
+    GLOBAL.retain_unreserved(retained_bytes)
 }
 
 /// `held`, when it holds at least `bytes` (or all of the budget), and
@@ -178,14 +199,12 @@ impl Reservation {
         if keep == 0 {
             return None;
         }
-        let owner = std::thread::current().id();
-        self.budget.transition_to_retained(self.bytes, keep, owner);
+        self.budget.transition_to_retained(self.bytes, keep);
         self.released = true;
         HELD.with(|held| held.set(false));
         Some(RetainedLease {
             budget: self.budget,
             bytes: keep,
-            owner,
         })
     }
 }
@@ -207,7 +226,21 @@ impl Drop for Reservation {
 pub struct RetainedLease {
     budget: &'static Budget,
     bytes: usize,
-    owner: ThreadId,
+}
+
+impl RetainedLease {
+    /// Register a per-handle affinity token on the calling thread so re-entrant
+    /// parses on a thread holding a live `SharedValue` handle do not deadlock,
+    /// while dropping that thread's handle immediately clears its affinity even
+    /// if other threads keep cloned handles alive.
+    pub(crate) fn register_holder(&self) -> LeaseHolder {
+        let origin = std::thread::current().id();
+        self.budget.add_holder(origin);
+        LeaseHolder {
+            budget: self.budget,
+            origin,
+        }
+    }
 }
 
 impl std::fmt::Debug for RetainedLease {
@@ -220,7 +253,22 @@ impl std::fmt::Debug for RetainedLease {
 
 impl Drop for RetainedLease {
     fn drop(&mut self) {
-        self.budget.release_retained(self.bytes, self.owner);
+        self.budget.release_retained(self.bytes);
+    }
+}
+
+/// Per-`SharedValue` handle token tracking that `origin` holds a live
+/// alias-leased tree handle. Dropping this token decrements `origin`'s count
+/// regardless of which thread drops it, preventing leaks and stale bypasses
+/// after cross-thread sharing.
+pub(crate) struct LeaseHolder {
+    budget: &'static Budget,
+    origin: ThreadId,
+}
+
+impl Drop for LeaseHolder {
+    fn drop(&mut self) {
+        self.budget.remove_holder(self.origin);
     }
 }
 
@@ -235,7 +283,10 @@ pub(crate) struct Budget {
 struct State {
     in_flight: usize,
     retained: usize,
-    retained_by: Vec<(ThreadId, usize)>,
+    /// Per-thread count of live `SharedValue` handles referencing a retained
+    /// lease, used to avoid self-deadlock and multi-thread AB-BA cycles when a
+    /// thread holding a retained lease initiates another budgeted parse.
+    holders_by_thread: Vec<(ThreadId, usize)>,
     /// Threads waiting for bytes, and the most bytes ever held (`in_flight + retained`), for tests.
     #[cfg(test)]
     waiting: usize,
@@ -245,32 +296,30 @@ struct State {
 
 impl State {
     const fn total(&self) -> usize {
-        self.in_flight + self.retained
+        self.in_flight.saturating_add(self.retained)
     }
 
-    fn retained_of(&self, tid: ThreadId) -> usize {
-        self.retained_by
+    fn holders_of(&self, tid: ThreadId) -> usize {
+        self.holders_by_thread
             .iter()
             .find(|(id, _)| *id == tid)
-            .map_or(0, |(_, bytes)| *bytes)
+            .map_or(0, |(_, count)| *count)
     }
 
-    fn add_retained(&mut self, tid: ThreadId, bytes: usize) {
-        self.retained += bytes;
-        if let Some((_, held)) = self.retained_by.iter_mut().find(|(id, _)| *id == tid) {
-            *held += bytes;
+    fn add_holder(&mut self, tid: ThreadId) {
+        if let Some((_, count)) = self.holders_by_thread.iter_mut().find(|(id, _)| *id == tid) {
+            *count += 1;
         } else {
-            self.retained_by.push((tid, bytes));
+            self.holders_by_thread.push((tid, 1));
         }
     }
 
-    fn sub_retained(&mut self, tid: ThreadId, bytes: usize) {
-        self.retained -= bytes;
-        if let Some(pos) = self.retained_by.iter().position(|(id, _)| *id == tid) {
-            let held = &mut self.retained_by[pos].1;
-            *held -= bytes;
-            if *held == 0 {
-                self.retained_by.swap_remove(pos);
+    fn remove_holder(&mut self, tid: ThreadId) {
+        if let Some(pos) = self.holders_by_thread.iter().position(|(id, _)| *id == tid) {
+            let count = &mut self.holders_by_thread[pos].1;
+            *count -= 1;
+            if *count == 0 {
+                self.holders_by_thread.swap_remove(pos);
             }
         }
     }
@@ -283,7 +332,7 @@ impl Budget {
             state: Mutex::new(State {
                 in_flight: 0,
                 retained: 0,
-                retained_by: Vec::new(),
+                holders_by_thread: Vec::new(),
                 #[cfg(test)]
                 waiting: 0,
                 #[cfg(test)]
@@ -305,12 +354,14 @@ impl Budget {
         {
             state.waiting += 1;
         }
-        while state.total() + bytes > self.capacity {
-            let own_retained = state.retained_of(current_thread);
-            if own_retained > 0 && state.total() == own_retained {
-                // Only this thread's own retained lease(s) hold budget;
-                // waiting on itself would deadlock (e.g. a holder re-reading
-                // the document it edits). Treat like a nested reservation.
+        while state.total().saturating_add(bytes) > self.capacity {
+            if state.holders_of(current_thread) > 0 {
+                // This thread already holds at least one live alias-expanded
+                // `SharedValue` handle. Blocking here can deadlock either on
+                // itself (single holder) or in a multi-thread AB-BA cycle
+                // across partial holders. Proceed without waiting; any new
+                // alias-expanded tree still charges its retained lease via
+                // `retain_unreserved`.
                 #[cfg(test)]
                 {
                     state.waiting -= 1;
@@ -346,10 +397,10 @@ impl Budget {
         self.freed.notify_all();
     }
 
-    fn transition_to_retained(&self, in_flight_bytes: usize, keep_bytes: usize, owner: ThreadId) {
+    fn transition_to_retained(&self, in_flight_bytes: usize, keep_bytes: usize) {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         state.in_flight -= in_flight_bytes;
-        state.add_retained(owner, keep_bytes);
+        state.retained = state.retained.saturating_add(keep_bytes);
         let freed_any = keep_bytes < in_flight_bytes;
         drop(state);
         if freed_any {
@@ -357,11 +408,39 @@ impl Budget {
         }
     }
 
-    fn release_retained(&self, bytes: usize, owner: ThreadId) {
+    fn retain_unreserved(&'static self, retained_bytes: usize) -> Option<RetainedLease> {
+        let keep = retained_bytes.min(self.capacity);
+        if keep == 0 {
+            return None;
+        }
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-        state.sub_retained(owner, bytes);
+        state.retained = state.retained.saturating_add(keep);
+        #[cfg(test)]
+        {
+            state.max_in_flight = state.max_in_flight.max(state.total());
+        }
+        drop(state);
+        Some(RetainedLease {
+            budget: self,
+            bytes: keep,
+        })
+    }
+
+    fn release_retained(&self, bytes: usize) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.retained = state.retained.saturating_sub(bytes);
         drop(state);
         self.freed.notify_all();
+    }
+
+    fn add_holder(&self, origin: ThreadId) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.add_holder(origin);
+    }
+
+    fn remove_holder(&self, origin: ThreadId) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.remove_holder(origin);
     }
 }
 

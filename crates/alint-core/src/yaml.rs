@@ -248,8 +248,16 @@ fn byte_span(span: ayaml::Span) -> crate::ByteSpan {
 }
 
 fn local_tag_suffix(tag: Option<&ayaml::Tag>) -> Option<String> {
-    tag.filter(|t| t.handle() == "!")
-        .map(|t| t.suffix().to_owned())
+    let tag = tag?;
+    if tag.is_core() {
+        return None;
+    }
+    let rest = tag.handle().strip_prefix('!')?;
+    if rest.is_empty() {
+        Some(tag.suffix().to_owned())
+    } else {
+        Some(format!("{rest}{}", tag.suffix()))
+    }
 }
 
 fn map_stream_event(event: ayaml::Event<'_>) -> StreamEvent<'_> {
@@ -323,11 +331,63 @@ pub enum ConfigPathSegment {
     RuleId(String),
 }
 
-/// Parse a dot-and-bracket configuration path such as `rules[3].paths`,
-/// `relations.r.fields.name.at`, or `extends[0].as` into [`ConfigPathSegment`]s.
-#[doc(hidden)]
-#[must_use]
-pub fn parse_config_path(path: &str) -> Vec<ConfigPathSegment> {
+/// Decode a double-quoted Rust/`ayaml` key literal starting at `input[0] == '"'`,
+/// handling `\"`, `\\`, `\n`, `\r`, `\t`, `\0`, `\'`, and `\u{HEX}`. Returns
+/// `(decoded, bytes_consumed)` including both quotes.
+fn unescape_quoted_key(input: &str) -> Option<(String, usize)> {
+    let mut chars = input.char_indices();
+    if chars.next()?.1 != '"' {
+        return None;
+    }
+    let mut out = String::new();
+    while let Some((idx, ch)) = chars.next() {
+        match ch {
+            '"' => return Some((out, idx + 1)),
+            '\\' => {
+                let (_, esc) = chars.next()?;
+                match esc {
+                    '"' => out.push('"'),
+                    '\\' => out.push('\\'),
+                    '\'' => out.push('\''),
+                    'n' => out.push('\n'),
+                    'r' => out.push('\r'),
+                    't' => out.push('\t'),
+                    '0' => out.push('\0'),
+                    'u' => {
+                        let (_, open) = chars.next()?;
+                        if open != '{' {
+                            return None;
+                        }
+                        let mut hex = String::new();
+                        loop {
+                            let (_, h) = chars.next()?;
+                            if h == '}' {
+                                break;
+                            }
+                            if hex.len() >= 6 || !h.is_ascii_hexdigit() {
+                                return None;
+                            }
+                            hex.push(h);
+                        }
+                        if hex.is_empty() {
+                            return None;
+                        }
+                        let code = u32::from_str_radix(&hex, 16).ok()?;
+                        out.push(char::from_u32(code)?);
+                    }
+                    _ => return None,
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    None
+}
+
+/// Strict parser for dot-and-bracket YAML paths emitted by `ayaml` and `alint`,
+/// returning `None` if a bracket segment is malformed or an unquoted
+/// non-integer placeholder such as `ayaml`'s `[?]` collection-key marker.
+fn parse_config_path_inner(path: &str, strict: bool) -> Option<Vec<ConfigPathSegment>> {
     let mut segments = Vec::new();
     let bytes = path.as_bytes();
     let mut i = 0;
@@ -338,24 +398,46 @@ pub fn parse_config_path(path: &str) -> Vec<ConfigPathSegment> {
         }
         if bytes[i] == b'[' {
             let start = i + 1;
-            if let Some(rel_end) = path[start..].find(']') {
-                let inner = &path[start..start + rel_end];
-                if let Ok(index) = inner.parse::<usize>() {
-                    segments.push(ConfigPathSegment::Index(index));
-                } else {
-                    let unquoted = inner
-                        .strip_prefix('"')
-                        .and_then(|s| s.strip_suffix('"'))
-                        .or_else(|| inner.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')))
-                        .unwrap_or(inner);
-                    if !unquoted.is_empty() {
-                        segments.push(ConfigPathSegment::Key(unquoted.to_owned()));
-                    }
+            if start >= bytes.len() {
+                return if strict { None } else { Some(segments) };
+            }
+            if bytes[start] == b'"' {
+                let Some((decoded, consumed)) = unescape_quoted_key(&path[start..]) else {
+                    return if strict { None } else { Some(segments) };
+                };
+                let close = start + consumed;
+                if bytes.get(close) != Some(&b']') {
+                    return if strict { None } else { Some(segments) };
                 }
-                i = start + rel_end + 1;
+                segments.push(ConfigPathSegment::Key(decoded));
+                i = close + 1;
                 continue;
             }
-            break;
+            if bytes[start] == b'\'' {
+                let rest = &path[start + 1..];
+                let Some(rel_quote) = rest.find("']") else {
+                    return if strict { None } else { Some(segments) };
+                };
+                segments.push(ConfigPathSegment::Key(rest[..rel_quote].to_owned()));
+                i = start + 1 + rel_quote + 2;
+                continue;
+            }
+            let Some(rel_end) = path[start..].find(']') else {
+                return if strict { None } else { Some(segments) };
+            };
+            let inner = &path[start..start + rel_end];
+            if let Ok(index) = inner.parse::<usize>() {
+                segments.push(ConfigPathSegment::Index(index));
+            } else if strict || inner == "?" {
+                // Reject `ayaml`'s `[?]` collection-key placeholder and
+                // unquoted non-integer brackets so they never alias a literal
+                // `"?"` mapping key.
+                return if strict { None } else { Some(segments) };
+            } else if !inner.is_empty() {
+                segments.push(ConfigPathSegment::Key(inner.to_owned()));
+            }
+            i = start + rel_end + 1;
+            continue;
         }
         let start = i;
         while i < bytes.len() && bytes[i] != b'.' && bytes[i] != b'[' {
@@ -365,7 +447,15 @@ pub fn parse_config_path(path: &str) -> Vec<ConfigPathSegment> {
             segments.push(ConfigPathSegment::Key(path[start..i].to_owned()));
         }
     }
-    segments
+    Some(segments)
+}
+
+/// Parse a dot-and-bracket configuration path such as `rules[3].paths`,
+/// `relations.r.fields.name.at`, or `extends[0].as` into [`ConfigPathSegment`]s.
+#[doc(hidden)]
+#[must_use]
+pub fn parse_config_path(path: &str) -> Vec<ConfigPathSegment> {
+    parse_config_path_inner(path, false).unwrap_or_default()
 }
 
 /// Locate the UTF-8 [`crate::ByteSpan`] of the YAML key or sequence item named
@@ -532,7 +622,10 @@ fn locate_concrete_path_span(input: &str, path: &[ConfigPathSegment]) -> Option<
 
         match event {
             ayaml::Event::DocumentEnd { .. } | ayaml::Event::StreamEnd { .. } => return None,
-            ayaml::Event::MappingStart { span, .. } => {
+            ayaml::Event::MappingStart { anchor, span, .. } => {
+                if let Some(anchor) = anchor {
+                    scalar_anchors.remove(anchor.as_str());
+                }
                 if next_node_depth == Some(path.len()) {
                     return Some(byte_span(span));
                 }
@@ -543,7 +636,10 @@ fn locate_concrete_path_span(input: &str, path: &[ConfigPathSegment]) -> Option<
                 });
                 continue;
             }
-            ayaml::Event::SequenceStart { span, .. } => {
+            ayaml::Event::SequenceStart { anchor, span, .. } => {
+                if let Some(anchor) = anchor {
+                    scalar_anchors.remove(anchor.as_str());
+                }
                 if next_node_depth == Some(path.len()) {
                     return Some(byte_span(span));
                 }
@@ -696,7 +792,10 @@ fn find_sequence_entry_by_id(
 
         match event {
             ayaml::Event::DocumentEnd { .. } | ayaml::Event::StreamEnd { .. } => return None,
-            ayaml::Event::MappingStart { .. } => {
+            ayaml::Event::MappingStart { anchor, .. } => {
+                if let Some(anchor) = anchor {
+                    scalar_anchors.remove(anchor.as_str());
+                }
                 reading_id_value = false;
                 stack.push(PathWalkFrame::Mapping {
                     matched_depth: next_node_depth,
@@ -705,7 +804,10 @@ fn find_sequence_entry_by_id(
                 });
                 continue;
             }
-            ayaml::Event::SequenceStart { .. } => {
+            ayaml::Event::SequenceStart { anchor, .. } => {
+                if let Some(anchor) = anchor {
+                    scalar_anchors.remove(anchor.as_str());
+                }
                 reading_id_value = false;
                 stack.push(PathWalkFrame::Sequence {
                     matched_depth: next_node_depth,
@@ -811,53 +913,185 @@ fn find_sequence_entry_by_id(
     None
 }
 
-/// Extract `(parent_path, duplicate_key_text)` from a duplicate-key or
+/// Structured description of the repeated key reported by a duplicate-key or
+/// duplicate-field error (#572).
+#[derive(Debug, Clone)]
+enum DuplicateKeyMatcher {
+    /// Serde ``duplicate field `name` `` (untagged or `!!str` string key).
+    FieldName(String),
+    /// `duplicate entry with key "..."` (string key; `truncated` is true when
+    /// `ayaml::value::push_quoted_key` truncated past 63 chars with `'…'`).
+    QuotedString { text: String, truncated: bool },
+    /// Unquoted typed scalar key (`null`, `true`, `false`, int, float).
+    TypedScalar(CoreScalar),
+    /// Tagged key such as `!t "a"` or `!t 1`.
+    Tagged {
+        tag: String,
+        payload: Box<DuplicateKeyMatcher>,
+    },
+}
+
+/// Snapshot of a YAML scalar key for typed/tagged duplicate-key matching.
+#[derive(Debug, Clone)]
+struct KeySnapshot {
+    raw: String,
+    tag_text: Option<String>,
+    core: Option<CoreScalar>,
+    payload: Option<CoreScalar>,
+}
+
+impl KeySnapshot {
+    fn from_event(value: &str, style: ayaml::ScalarStyle, tag: Option<&ayaml::Tag>) -> Self {
+        let non_core_tag = tag
+            .filter(|t| !(is_core_scalar_tag(t) || (t.handle() == "!" && t.suffix().is_empty())));
+        Self {
+            raw: value.to_owned(),
+            tag_text: non_core_tag.map(ToString::to_string),
+            core: resolve_core_scalar(value, style, tag),
+            payload: resolve_scalar_payload(value, style, tag),
+        }
+    }
+}
+
+impl DuplicateKeyMatcher {
+    fn parse_key_tail(tail: &str) -> Option<Self> {
+        if tail.starts_with('"') {
+            let (decoded, consumed) = unescape_quoted_key(tail)?;
+            if tail[consumed..].trim().is_empty() {
+                let truncated = decoded.ends_with('\u{2026}') && decoded.chars().count() == 64;
+                return Some(Self::QuotedString {
+                    text: decoded,
+                    truncated,
+                });
+            }
+            return None;
+        }
+        if tail.starts_with('!')
+            && let Some((tag, rest)) = tail.split_once(' ')
+        {
+            let payload = Self::parse_key_tail(rest.trim())?;
+            return Some(Self::Tagged {
+                tag: tag.to_owned(),
+                payload: Box::new(payload),
+            });
+        }
+        let scalar = resolve_core_scalar(tail, ayaml::ScalarStyle::Plain, None)?;
+        Some(Self::TypedScalar(scalar))
+    }
+
+    fn matches_strict(&self, key: &KeySnapshot) -> bool {
+        match self {
+            Self::FieldName(name) => key.tag_text.is_none() && key.raw == *name,
+            Self::QuotedString { text, truncated } => {
+                if key.tag_text.is_some() {
+                    return false;
+                }
+                let Some(CoreScalar::String(actual)) = &key.payload else {
+                    return false;
+                };
+                if *truncated {
+                    let prefix = text.strip_suffix('\u{2026}').unwrap_or(text);
+                    actual.starts_with(prefix) && actual.chars().count() >= 64
+                } else {
+                    actual == text
+                }
+            }
+            Self::TypedScalar(expected) => {
+                key.tag_text.is_none() && key.core.as_ref() == Some(expected)
+            }
+            Self::Tagged { tag, payload } => {
+                if key.tag_text.as_deref() != Some(tag.as_str()) {
+                    return false;
+                }
+                match payload.as_ref() {
+                    Self::QuotedString { text, truncated } => {
+                        let Some(CoreScalar::String(actual)) = &key.payload else {
+                            return false;
+                        };
+                        if *truncated {
+                            let prefix = text.strip_suffix('\u{2026}').unwrap_or(text);
+                            actual.starts_with(prefix) && actual.chars().count() >= 64
+                        } else {
+                            actual == text
+                        }
+                    }
+                    Self::TypedScalar(expected) => key.payload.as_ref() == Some(expected),
+                    _ => false,
+                }
+            }
+        }
+    }
+
+    /// Coerced-string fallback for `vars:` maps (`deserialize_unique_string_map`)
+    /// where a plain scalar key such as `1` is deserialized as `"1"` and collides
+    /// with a quoted `"1"` key.
+    fn matches_coerced_string(&self, key: &KeySnapshot) -> bool {
+        matches!(self, Self::QuotedString { text, truncated: false } if key.tag_text.is_none() && key.raw == *text)
+    }
+}
+
+/// Split `message` at the final `": <needle>"` or leading `"<needle>"` so a
+/// parent mapping key whose own text contains `needle` cannot hijack matching.
+fn split_error_suffix<'a>(message: &'a str, needle: &str) -> Option<(&'a str, &'a str)> {
+    if let Some(rest) = message.strip_prefix(needle) {
+        return Some(("", rest));
+    }
+    let marker = format!(": {needle}");
+    let at = message.rfind(&marker)?;
+    Some((&message[..at], &message[at + marker.len()..]))
+}
+
+/// Extract `(parent_path, duplicate_key_matcher)` from a duplicate-key or
 /// duplicate-field YAML decode error message (#572).
-fn parse_duplicate_key_error(message: &str) -> Option<(Vec<ConfigPathSegment>, String)> {
-    if let Some(at) = message.find("duplicate entry with key ") {
-        let prefix = message[..at].strip_suffix(": ").unwrap_or(&message[..at]);
-        let tail = message[at + "duplicate entry with key ".len()..].trim();
-        let key = if tail.starts_with('"') {
-            serde_json::from_str::<String>(tail).ok()?
-        } else {
-            tail.to_owned()
-        };
+fn parse_duplicate_key_error(
+    message: &str,
+) -> Option<(Vec<ConfigPathSegment>, DuplicateKeyMatcher)> {
+    if let Some((prefix, rest)) = split_error_suffix(message, "duplicate entry with key ") {
+        let tail = rest.trim();
+        let matcher = DuplicateKeyMatcher::parse_key_tail(tail)?;
         let parent = if prefix.is_empty() {
             Vec::new()
         } else {
-            parse_config_path(prefix)
+            parse_config_path_inner(prefix, true)?
         };
-        return Some((parent, key));
+        return Some((parent, matcher));
     }
-    if let Some(at) = message.find("duplicate field `") {
-        let prefix = message[..at].strip_suffix(": ").unwrap_or(&message[..at]);
-        let rest = &message[at + "duplicate field `".len()..];
+    if let Some((prefix, rest)) = split_error_suffix(message, "duplicate field `") {
         let end = rest.find('`')?;
         let key = rest[..end].to_owned();
         let parent = if prefix.is_empty() {
             Vec::new()
         } else {
-            parse_config_path(prefix)
+            parse_config_path_inner(prefix, true)?
         };
-        return Some((parent, key));
+        return Some((parent, DuplicateKeyMatcher::FieldName(key)));
     }
     None
 }
 
-/// Locate the second occurrence of `dup_key` inside the mapping at `parent_path`
-/// so duplicate-entry / duplicate-field errors point at the repeated key rather
-/// than the mapping's first key (#572).
+/// Locate the second occurrence of a duplicate key inside the mapping at
+/// `parent_path` so duplicate-entry / duplicate-field errors point at the
+/// repeated key rather than the mapping's first key (#572).
 #[allow(clippy::too_many_lines)]
-fn locate_repeated_key_span(
+fn locate_repeated_key_span_pass(
     input: &str,
     parent_path: &[ConfigPathSegment],
-    dup_key: &str,
+    matcher: &DuplicateKeyMatcher,
+    coerced_fallback: bool,
 ) -> Option<ayaml::Span> {
     let events = parse_events_stream(input).ok()?;
     let mut stack: Vec<PathWalkFrame> = Vec::new();
-    let mut scalar_anchors: std::collections::HashMap<String, String> =
+    let mut scalar_anchors: std::collections::HashMap<String, KeySnapshot> =
         std::collections::HashMap::new();
     let mut seen_target_key = false;
+
+    let key_matches = |snapshot: &KeySnapshot| {
+        if coerced_fallback {
+            matcher.matches_coerced_string(snapshot)
+        } else {
+            matcher.matches_strict(snapshot)
+        }
+    };
 
     for parsed in events {
         let Ok(event) = parsed else {
@@ -888,7 +1122,10 @@ fn locate_repeated_key_span(
 
         match event {
             ayaml::Event::DocumentEnd { .. } | ayaml::Event::StreamEnd { .. } => return None,
-            ayaml::Event::MappingStart { .. } => {
+            ayaml::Event::MappingStart { anchor, .. } => {
+                if let Some(anchor) = anchor {
+                    scalar_anchors.remove(anchor.as_str());
+                }
                 if next_node_depth == Some(parent_path.len()) {
                     seen_target_key = false;
                 }
@@ -899,7 +1136,10 @@ fn locate_repeated_key_span(
                 });
                 continue;
             }
-            ayaml::Event::SequenceStart { .. } => {
+            ayaml::Event::SequenceStart { anchor, .. } => {
+                if let Some(anchor) = anchor {
+                    scalar_anchors.remove(anchor.as_str());
+                }
                 stack.push(PathWalkFrame::Sequence {
                     matched_depth: next_node_depth,
                     next_index: 0,
@@ -911,12 +1151,15 @@ fn locate_repeated_key_span(
             }
             ayaml::Event::Scalar {
                 value,
+                style,
                 anchor,
+                tag,
                 span,
                 ..
             } => {
+                let snapshot = KeySnapshot::from_event(value.as_ref(), style, tag.as_ref());
                 if let Some(anchor) = anchor {
-                    scalar_anchors.insert(anchor.as_str().to_owned(), value.to_string());
+                    scalar_anchors.insert(anchor.as_str().to_owned(), snapshot.clone());
                 }
                 if let Some(PathWalkFrame::Mapping {
                     matched_depth,
@@ -925,7 +1168,7 @@ fn locate_repeated_key_span(
                 }) = stack.last_mut()
                 {
                     if *matched_depth == Some(parent_path.len()) {
-                        if value.as_ref() == dup_key {
+                        if key_matches(&snapshot) {
                             if seen_target_key {
                                 return Some(span);
                             }
@@ -936,7 +1179,8 @@ fn locate_repeated_key_span(
                         *value_depth =
                             matched_depth.and_then(|depth| match parent_path.get(depth) {
                                 Some(ConfigPathSegment::Key(target))
-                                    if target == value.as_ref() =>
+                                    if snapshot.tag_text.is_none()
+                                        && target == snapshot.raw.as_str() =>
                                 {
                                     Some(depth + 1)
                                 }
@@ -954,9 +1198,9 @@ fn locate_repeated_key_span(
                     value_depth,
                 }) = stack.last_mut()
                 {
-                    let resolved = scalar_anchors.get(anchor.as_str()).map(String::as_str);
+                    let resolved = scalar_anchors.get(anchor.as_str());
                     if *matched_depth == Some(parent_path.len()) {
-                        if resolved == Some(dup_key) {
+                        if resolved.is_some_and(&key_matches) {
                             if seen_target_key {
                                 return Some(span);
                             }
@@ -967,7 +1211,9 @@ fn locate_repeated_key_span(
                         *value_depth =
                             matched_depth.and_then(|depth| match parent_path.get(depth) {
                                 Some(ConfigPathSegment::Key(target))
-                                    if resolved == Some(target.as_str()) =>
+                                    if resolved.is_some_and(|s| {
+                                        s.tag_text.is_none() && s.raw == *target
+                                    }) =>
                                 {
                                     Some(depth + 1)
                                 }
@@ -999,14 +1245,68 @@ fn locate_repeated_key_span(
     None
 }
 
+fn locate_repeated_key_span(
+    input: &str,
+    parent_path: &[ConfigPathSegment],
+    matcher: &DuplicateKeyMatcher,
+) -> Option<ayaml::Span> {
+    locate_repeated_key_span_pass(input, parent_path, matcher, false).or_else(|| {
+        matches!(
+            matcher,
+            DuplicateKeyMatcher::QuotedString {
+                truncated: false,
+                ..
+            }
+        )
+        .then(|| locate_repeated_key_span_pass(input, parent_path, matcher, true))
+        .flatten()
+    })
+}
+
+/// Locate the full UTF-8 [`crate::ByteSpan`] of a repeated key described by a
+/// duplicate-key / duplicate-field error message (#571, #572), accepting either
+/// raw `Error::message()` text or formatted strings ending with
+/// ` at line L column C`.
+#[doc(hidden)]
+#[must_use]
+pub fn locate_duplicate_key_span(input: &str, message: &str) -> Option<crate::ByteSpan> {
+    let trimmed = strip_trailing_line_column(message);
+    let (parent_path, matcher) = parse_duplicate_key_error(trimmed)?;
+    locate_repeated_key_span(input, &parent_path, &matcher).map(byte_span)
+}
+
+fn strip_trailing_line_column(message: &str) -> &str {
+    let Some(at) = message.rfind(" at line ") else {
+        return message;
+    };
+    let tail = &message[at + " at line ".len()..];
+    let Some((line, col)) = tail.split_once(" column ") else {
+        return message;
+    };
+    let line_ok = !line.is_empty() && line.bytes().all(|b| b.is_ascii_digit());
+    let col_digits = col.split_whitespace().next().unwrap_or_default();
+    let col_ok = !col_digits.is_empty() && col_digits.bytes().all(|b| b.is_ascii_digit());
+    if line_ok && col_ok {
+        &message[..at]
+    } else {
+        message
+    }
+}
+
 /// If `error` is a duplicate-key or duplicate-field error, relocate its span
 /// and line/column to the repeated key itself rather than the mapping start
 /// (#572).
 fn relocate_duplicate_key_error(input: &str, error: ayaml::Error) -> ayaml::Error {
-    let Some((parent_path, dup_key)) = parse_duplicate_key_error(error.message()) else {
+    if !matches!(
+        error.kind(),
+        ayaml::ErrorKind::Serde | ayaml::ErrorKind::DuplicateKey
+    ) {
+        return error;
+    }
+    let Some((parent_path, matcher)) = parse_duplicate_key_error(error.message()) else {
         return error;
     };
-    let Some(span) = locate_repeated_key_span(input, &parent_path, &dup_key) else {
+    let Some(span) = locate_repeated_key_span(input, &parent_path, &matcher) else {
         return error;
     };
     let line_index = ayaml::LineIndex::new(input);
@@ -3131,5 +3431,68 @@ mod tests {
             resolve_scalar_payload("abc", ScalarStyle::Plain, Some(&Tag::core("int"))),
             None
         );
+    }
+
+    #[test]
+    fn duplicate_key_relocation_distinguishes_types_tags_escapes_and_redefined_anchors() {
+        let loc = |src: &str| {
+            let err = ayaml_from_str::<Value>(src).unwrap_err();
+            let loc = err
+                .location()
+                .unwrap_or_else(|| panic!("no location: {err}"));
+            (loc.line(), loc.column())
+        };
+
+        // Typed vs quoted keys must not cross-match onto the first occurrence.
+        assert_eq!(loc("\"1\": a\n1: b\n1: c\n"), (3, 1));
+        assert_eq!(loc("1: a\n\"1\": b\n\"1\": c\n"), (3, 1));
+        assert_eq!(loc("\"null\": a\nnull: b\nnull: c\n"), (3, 1));
+        assert_eq!(loc("null: a\n\"null\": b\n\"null\": c\n"), (3, 1));
+        assert_eq!(loc("\"true\": a\ntrue: b\ntrue: c\n"), (3, 1));
+        assert_eq!(loc(": a\n\"\": b\n\"\": c\n"), (3, 1));
+        assert_eq!(loc("!t a: 0\na: 1\na: 2\n"), (3, 1));
+
+        // Core-schema equivalents and tagged duplicates relocate to line 2.
+        assert_eq!(loc("~: 1\n~: 2\n"), (2, 1));
+        assert_eq!(loc("null: 1\n~: 2\n"), (2, 1));
+        assert_eq!(loc("true: 1\nTRUE: 2\n"), (2, 1));
+        assert_eq!(loc("0x1: 1\n1: 2\n"), (2, 1));
+        assert_eq!(loc("1.0: 1\n1e0: 2\n"), (2, 1));
+        // Tagged scalar `Event::Scalar` span starts at the scalar `a` (col 4 after `!t `).
+        assert_eq!(loc("!t a: 1\n!t a: 2\n"), (2, 4));
+
+        // Keys > 63 chars (truncated with `…` in ayaml error messages).
+        let long_key = "k".repeat(80);
+        let long_doc = format!("{long_key}: 1\n{long_key}: 2\n");
+        assert_eq!(loc(&long_doc), (2, 1));
+
+        // Escaped control chars (`\0`, `\u{7f}`) and special bracket parent keys.
+        assert_eq!(loc("\"a\\0b\": 1\n\"a\\0b\": 2\n"), (2, 1));
+        assert_eq!(loc("\"a\\x7fb\": 1\n\"a\\x7fb\": 2\n"), (2, 1));
+        assert_eq!(loc("\"\":\n  a: 1\n  a: 2\n"), (3, 3));
+        assert_eq!(loc("\"a]b\":\n  x: 1\n  x: 2\n"), (3, 3));
+        assert_eq!(loc("\"a\\\"b\":\n  x: 1\n  x: 2\n"), (3, 3));
+        assert_eq!(
+            loc("'duplicate entry with key \"x\"':\n  a: 1\n  a: 2\n"),
+            (3, 3)
+        );
+
+        // `[?]` collection-key placeholder must NOT relocate into an unrelated `"?"` map.
+        let coll_key = "[1, 2]:\n  a: 1\n  a: 2\n\"?\":\n  a: 1\n  a: 2\n";
+        let (coll_line, _) = loc(coll_key);
+        assert!(
+            coll_line <= 3,
+            "must not relocate `[?]` duplicate into unrelated `\"?\"` map at line {coll_line}"
+        );
+
+        // Redefined collection anchor `&k []` evicts earlier scalar anchor `&k a`.
+        let redefined = "x: &k a\ny: &k []\n*k: 1\na: 2\na: 3\n";
+        assert_eq!(loc(redefined), (5, 1));
+
+        // Coerced `vars:` key (`1` vs `"1"`) still relocates to the repeated entry.
+        let vars_cfg = "version: 1\nvars:\n  1: a\n  \"1\": b\nrules: []\n";
+        let err = ayaml_from_str::<crate::Config>(vars_cfg).unwrap_err();
+        let vars_loc = err.location().unwrap();
+        assert_eq!((vars_loc.line(), vars_loc.column()), (4, 3), "{err}");
     }
 }

@@ -31,12 +31,26 @@ fn aliases_of(len: usize, copies: usize) -> String {
 
 #[test]
 fn sixteen_parallel_alias_heavy_files_keep_peak_heap_bounded() {
-    let doc = Arc::new(aliases_of(500_000, 500));
+    // In `ALINT_YAML_PARSER=compare` mode (`yaml-compare.sh`, only active when
+    // compiled with `yaml-reference`), each parse runs ayaml twice, runs
+    // libyaml, and formats two full `Debug` strings (~4-5x single-parser heap).
+    // Scale down the compare-mode stress check so differential validation still
+    // exercises parallel alias-heavy parses without risking OOM on 7 GB CI
+    // runners, while enforcing the full 16x 500 KB x 500-alias peak-heap
+    // ceiling in normal builds.
+    let compare_mode = cfg!(feature = "yaml-reference")
+        && std::env::var("ALINT_YAML_PARSER").as_deref() == Ok("compare");
+    let (threads, len, copies) = if compare_mode {
+        (4, 50_000, 50)
+    } else {
+        (16, 500_000, 500)
+    };
+    let doc = Arc::new(aliases_of(len, copies));
     assert!(doc.len() < 1024 * 1024, "input stays below 1 MiB threshold");
 
     let before = HEAP.allocated();
-    let barrier = Arc::new(Barrier::new(16));
-    let handles: Vec<_> = (0..16)
+    let barrier = Arc::new(Barrier::new(threads));
+    let handles: Vec<_> = (0..threads)
         .map(|_| {
             let doc = Arc::clone(&doc);
             let barrier = Arc::clone(&barrier);
@@ -44,8 +58,8 @@ fn sixteen_parallel_alias_heavy_files_keep_peak_heap_bounded() {
                 barrier.wait();
                 let tree = Format::Yaml.parse_shared(&doc).expect("alias doc parses");
                 // Simulate a rule inspecting the tree while holding it alive.
-                let copies = tree["b"].as_array().map_or(0, Vec::len);
-                assert_eq!(copies, 500);
+                let found = tree["b"].as_array().map_or(0, Vec::len);
+                assert_eq!(found, copies);
                 std::thread::sleep(std::time::Duration::from_millis(5));
                 drop(tree);
             })
@@ -56,12 +70,6 @@ fn sixteen_parallel_alias_heavy_files_keep_peak_heap_bounded() {
     }
 
     let peak_above_baseline = HEAP.max_allocated().saturating_sub(before);
-    // In `ALINT_YAML_PARSER=compare` mode (`yaml-compare.sh`), each parse runs
-    // ayaml twice, runs libyaml, and formats two full `Debug` strings (~4-5x
-    // single-parser heap) while holding the returned value alive. Still run the
-    // 16-thread stress check above to catch differential panics, and assert the
-    // single-parser peak-heap ceiling outside compare mode.
-    let compare_mode = std::env::var("ALINT_YAML_PARSER").as_deref() == Ok("compare");
     if !compare_mode {
         assert!(
             peak_above_baseline <= MAX_PARALLEL_HEAP_BYTES,

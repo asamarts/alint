@@ -283,9 +283,21 @@ pub fn evaluate_facts_with_environment(
     index: &FileIndex,
     process_environment: Option<&std::collections::BTreeMap<String, String>>,
 ) -> Result<FactValues> {
+    evaluate_facts_with_cache(facts, root, index, process_environment, None)
+}
+
+/// Evaluate facts while optionally populating a run-scoped structured-tree
+/// cache so rules reading the same files reuse parsed trees (#548).
+pub(crate) fn evaluate_facts_with_cache(
+    facts: &[FactSpec],
+    root: &Path,
+    index: &FileIndex,
+    process_environment: Option<&std::collections::BTreeMap<String, String>>,
+    structured_cache: Option<&crate::structured_cache::StructuredCache>,
+) -> Result<FactValues> {
     let mut out = FactValues::new();
     for spec in facts {
-        let value = evaluate_one(spec, root, index, process_environment)?;
+        let value = evaluate_one(spec, root, index, process_environment, structured_cache)?;
         out.insert(spec.id.clone(), value);
     }
     Ok(out)
@@ -309,8 +321,10 @@ fn literal_paths(patterns: &[String]) -> Option<Vec<PathBuf>> {
 fn file_content_matches_entry(
     entry: &FileEntry,
     root: &Path,
+    index: &FileIndex,
     regex: &Regex,
     extract: Option<&Extract>,
+    structured_cache: Option<&crate::structured_cache::StructuredCache>,
 ) -> bool {
     // Cap the read (M3): a fact content-predicate must not read a multi-GB
     // in-scope file unbounded. Gates on the walk-time size and bounds the actual
@@ -325,8 +339,14 @@ fn file_content_matches_entry(
     let Some(extract) = extract else {
         return regex.is_match(text);
     };
-    extract_values(extract, text)
-        .is_ok_and(|values| values.strings.iter().any(|value| regex.is_match(value)))
+    let extracted = if let Some(cache) = structured_cache {
+        let mut ctx = crate::Context::new(root, index);
+        ctx.structured_cache = Some(crate::structured_cache::StructuredCacheRef::Run(cache));
+        crate::extract::extract_values_with_context(&ctx, &entry.path, extract, text)
+    } else {
+        extract_values(extract, text)
+    };
+    extracted.is_ok_and(|values| values.strings.iter().any(|value| regex.is_match(value)))
 }
 
 fn evaluate_one(
@@ -334,6 +354,7 @@ fn evaluate_one(
     root: &Path,
     index: &FileIndex,
     process_environment: Option<&std::collections::BTreeMap<String, String>>,
+    structured_cache: Option<&crate::structured_cache::StructuredCache>,
 ) -> Result<FactValue> {
     match &spec.kind {
         FactKind::AnyFileExists { any_file_exists } => {
@@ -374,46 +395,7 @@ fn evaluate_one(
         }
         FactKind::FileContentMatches {
             file_content_matches: spec,
-        } => {
-            let patterns = spec.paths.as_slice();
-            let literal_paths = literal_paths(patterns);
-            // Preserve validation precedence: a malformed glob is reported
-            // before a malformed content regex, as it was on the scan path.
-            let scope = literal_paths
-                .is_none()
-                .then(|| Scope::from_patterns(patterns))
-                .transpose()?;
-            let regex = Regex::new(&spec.pattern)
-                .map_err(|e| Error::Other(format!("fact pattern /{}/: {e}", spec.pattern)))?;
-            let extract = spec
-                .extract
-                .as_deref()
-                .cloned()
-                .map(ExtractSpec::resolve)
-                .transpose()
-                .map_err(|e| Error::Other(format!("fact extract: {e}")))?
-                .map(|extract| match extract {
-                    Extract::Structured(_) => Ok(extract),
-                    _ => Err(Error::Other(
-                        "fact extract must use one of json/yaml/toml/xml/dotenv/properties/ini/hcl"
-                            .to_string(),
-                    )),
-                })
-                .transpose()?;
-            let any = if let Some(paths) = literal_paths {
-                paths
-                    .iter()
-                    .filter_map(|path| index.find_file(path))
-                    .any(|entry| file_content_matches_entry(entry, root, &regex, extract.as_ref()))
-            } else {
-                let scope = scope.expect("non-literal patterns compile a scope");
-                index
-                    .files()
-                    .filter(|entry| scope.matches(&entry.path, index))
-                    .any(|entry| file_content_matches_entry(entry, root, &regex, extract.as_ref()))
-            };
-            Ok(FactValue::Bool(any))
-        }
+        } => evaluate_file_content_matches(spec, root, index, structured_cache),
         FactKind::GitBranch { git_branch: _ } => Ok(FactValue::String(read_git_branch(root))),
         FactKind::Custom { custom } => Ok(FactValue::String(run_custom(
             custom,
@@ -421,6 +403,70 @@ fn evaluate_one(
             process_environment,
         ))),
     }
+}
+
+fn evaluate_file_content_matches(
+    spec: &FileContentMatchesFact,
+    root: &Path,
+    index: &FileIndex,
+    structured_cache: Option<&crate::structured_cache::StructuredCache>,
+) -> Result<FactValue> {
+    let patterns = spec.paths.as_slice();
+    let literal_paths = literal_paths(patterns);
+    // Preserve validation precedence: a malformed glob is reported before a
+    // malformed content regex, as it was on the scan path.
+    let scope = literal_paths
+        .is_none()
+        .then(|| Scope::from_patterns(patterns))
+        .transpose()?;
+    let regex = Regex::new(&spec.pattern)
+        .map_err(|e| Error::Other(format!("fact pattern /{}/: {e}", spec.pattern)))?;
+    let extract = spec
+        .extract
+        .as_deref()
+        .cloned()
+        .map(ExtractSpec::resolve)
+        .transpose()
+        .map_err(|e| Error::Other(format!("fact extract: {e}")))?
+        .map(|extract| match extract {
+            Extract::Structured(_) => Ok(extract),
+            _ => Err(Error::Other(
+                "fact extract must use one of json/yaml/toml/xml/dotenv/properties/ini/hcl"
+                    .to_string(),
+            )),
+        })
+        .transpose()?;
+    let any = if let Some(paths) = literal_paths {
+        paths
+            .iter()
+            .filter_map(|path| index.find_file(path))
+            .any(|entry| {
+                file_content_matches_entry(
+                    entry,
+                    root,
+                    index,
+                    &regex,
+                    extract.as_ref(),
+                    structured_cache,
+                )
+            })
+    } else {
+        let scope = scope.expect("non-literal patterns compile a scope");
+        index
+            .files()
+            .filter(|entry| scope.matches(&entry.path, index))
+            .any(|entry| {
+                file_content_matches_entry(
+                    entry,
+                    root,
+                    index,
+                    &regex,
+                    extract.as_ref(),
+                    structured_cache,
+                )
+            })
+    };
+    Ok(FactValue::Bool(any))
 }
 
 /// How long a `custom` fact's process may run before it is killed and the

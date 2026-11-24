@@ -140,11 +140,22 @@ impl Adapter for EntryValuesAdapter {
         bytes: &[u8],
         limits: &Limits,
     ) -> Result<AdapterOutput, AdapterError> {
-        self.extract_within(resource, bytes, limits, &RunBudget::bytes(limits))
+        self.extract_in_context(None, resource, bytes, limits, &RunBudget::bytes(limits))
     }
 
     fn extract_within(
         &self,
+        resource: &Resource,
+        bytes: &[u8],
+        limits: &Limits,
+        budget: &RunBudget,
+    ) -> Result<AdapterOutput, AdapterError> {
+        self.extract_in_context(None, resource, bytes, limits, budget)
+    }
+
+    fn extract_in_context(
+        &self,
+        ctx: Option<&crate::Context<'_>>,
         resource: &Resource,
         bytes: &[u8],
         limits: &Limits,
@@ -161,10 +172,11 @@ impl Adapter for EntryValuesAdapter {
         // The `JSONPath`s run over the parsed tree, as every structured
         // extract does; the entries give what the tree loses (each key's
         // span, a number's lexeme, a repeated key, the members' order).
-        let tree = self
-            .format
-            .parse_shared(text)
-            .map_err(AdapterError::Parse)?;
+        let tree = match ctx {
+            Some(ctx) => ctx.parse_structured(resource.path().as_path(), self.format, text),
+            None => self.format.parse_shared(text),
+        }
+        .map_err(AdapterError::Parse)?;
         let document = Document::new(&entries, &tree);
         let mut out = Output {
             resource,

@@ -299,8 +299,9 @@ fn alias_heavy_second_parse_waits_while_first_tree_is_alive() {
     let budget = budget(2 * MIB);
     // ~143 KB input: one 140 KB anchored string and 500 aliases (~70.3 MB expanded).
     let text: &'static str = Box::leak(aliases_of(140_000, 500).into_boxed_str());
-    let (_, expanded) = crate::yaml_depth::scan_guards(text).expansion_and_size(text);
-    let retained = retained_alias_cost(text.len(), expanded);
+    let (_, _, alias_replayed) =
+        crate::yaml_depth::scan_guards(text).expansion_and_alias_sizes(text);
+    let retained = retained_alias_cost(alias_replayed);
     assert!(
         retained > 2 * MIB,
         "expected retained cost > 2 MiB, got {retained}"
@@ -444,4 +445,150 @@ fn sixteen_parallel_alias_heavy_parses_never_exceed_budget() {
         "at most 2 trees should be live concurrently under 6 MiB, saw {}",
         max_live.load(Ordering::SeqCst)
     );
+}
+
+/// #582 audit: once Thread A shares an alias-leased tree to Thread B via
+/// `StructuredCache` and drops its own handle, Thread A no longer holds handle
+/// affinity and must wait on the budget while Thread B keeps the tree alive.
+#[test]
+fn producer_waits_after_dropping_shared_alias_tree_held_by_another_thread() {
+    use std::path::Path;
+    use std::sync::{Arc, mpsc};
+
+    let budget = budget(2 * MIB);
+    let text: &'static str = Box::leak(aliases_of(140_000, 500).into_boxed_str());
+    let cache = Arc::new(crate::structured_cache::StructuredCache::new(64 * MIB));
+
+    let (shared_tx, shared_rx) = mpsc::channel();
+    let (dropped_a_tx, dropped_a_rx) = mpsc::channel();
+    let (release_b_tx, release_b_rx) = mpsc::channel();
+
+    let cache_b = Arc::clone(&cache);
+    let holder_b = std::thread::spawn(move || {
+        shared_rx.recv().unwrap();
+        let tree_b = with_budget(budget, || {
+            cache_b
+                .get_or_parse(Path::new("alias.yml"), Format::Yaml, text)
+                .unwrap()
+        });
+        assert!(tree_b.has_retained_lease());
+        dropped_a_tx.send(()).unwrap();
+        release_b_rx.recv().unwrap();
+        drop(tree_b);
+    });
+
+    let cache_a = Arc::clone(&cache);
+    let worker_a = std::thread::spawn(move || {
+        with_budget(budget, || {
+            let tree_a = cache_a
+                .get_or_parse(Path::new("alias.yml"), Format::Yaml, text)
+                .unwrap();
+            assert!(tree_a.has_retained_lease());
+            shared_tx.send(()).unwrap();
+            // Wait until Thread B upgraded its own handle, then drop Thread A's
+            // handle and attempt a fresh alias-heavy parse of another file.
+            dropped_a_rx.recv().unwrap();
+            drop(tree_a);
+            let tree_a2 = cache_a
+                .get_or_parse(Path::new("other.yml"), Format::Yaml, text)
+                .unwrap();
+            assert!(tree_a2.has_retained_lease());
+            drop(tree_a2);
+        });
+    });
+
+    wait_until("Thread A waits on Thread B's live tree", || {
+        detailed_counters(budget).2 == 1
+    });
+    assert!(
+        !worker_a.is_finished(),
+        "producer must not bypass the budget after dropping its handle"
+    );
+
+    release_b_tx.send(()).unwrap();
+    wait_until("both threads finish cleanly", || {
+        holder_b.is_finished() && worker_a.is_finished()
+    });
+    holder_b.join().unwrap();
+    worker_a.join().unwrap();
+    assert_eq!(detailed_counters(budget), (0, 0, 0, 2 * MIB));
+}
+
+/// #582 audit: two threads holding partial retained leases that together fill
+/// the budget must not AB-BA deadlock when both initiate another budgeted
+/// parse, and any re-entrant alias-heavy `parse_shared` still retains a lease.
+#[test]
+fn multi_thread_partial_holders_reenter_without_deadlock_and_retain_lease() {
+    use std::sync::{Arc, Barrier};
+
+    // Budget fits two ~2.09 MiB leases (total ~4.18 MiB) but not a third parse.
+    let budget = budget(5 * MIB);
+    let text: &'static str = Box::leak(aliases_of(140_000, 500).into_boxed_str());
+    let barrier = Arc::new(Barrier::new(2));
+
+    let handles: Vec<_> = (0..2)
+        .map(|_| {
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                with_budget(budget, || {
+                    let first = Format::Yaml.parse_shared(text).unwrap();
+                    assert!(first.has_retained_lease());
+                    // Both threads hold partial leases simultaneously.
+                    barrier.wait();
+                    // Re-entering on both threads simultaneously must not AB-BA
+                    // deadlock, AND the second tree must still carry a retained
+                    // lease after `first` drops.
+                    let second = Format::Yaml.parse_shared(text).unwrap();
+                    assert!(second.has_retained_lease());
+                    drop(first);
+                    assert!(
+                        detailed_counters(budget).1 > 0,
+                        "re-entrant alias-expanded tree must remain charged after first drops"
+                    );
+                    drop(second);
+                });
+            })
+        })
+        .collect();
+    for handle in handles {
+        handle.join().unwrap();
+    }
+    assert_eq!(detailed_counters(budget).0, 0);
+    assert_eq!(detailed_counters(budget).1, 0);
+    assert_eq!(detailed_counters(budget).2, 0);
+}
+
+/// #582 audit: `retained_alias_cost` charges alias-amplified trees even on
+/// `>= 16 MiB` inputs while leaving large alias-light documents uncharged.
+#[test]
+fn retained_alias_cost_covers_large_files_and_skips_alias_light_docs() {
+    // 17 MiB input padded with comments + one 1 MiB anchored string × 64
+    // aliases (~64 MiB alias-replayed bytes -> ~2 MiB retained cost > 1 MiB).
+    let mut padded = String::with_capacity(18 * MIB);
+    for _ in 0..17 {
+        padded.push('#');
+        padded.extend(std::iter::repeat_n('c', MIB - 2));
+        padded.push('\n');
+    }
+    padded.push_str("a: &a \"");
+    padded.extend(std::iter::repeat_n('x', MIB));
+    padded.push_str("\"\nb:\n");
+    for _ in 0..64 {
+        padded.push_str("  - *a\n");
+    }
+    assert!(padded.len() > 16 * MIB);
+    let (expansion, _, alias_replayed) =
+        crate::yaml_depth::scan_guards(&padded).expansion_and_alias_sizes(&padded);
+    assert_eq!(expansion, crate::yaml_depth::Expansion::WithinLimit);
+    let cost = retained_alias_cost(alias_replayed);
+    assert!(
+        cost >= 2 * MIB,
+        "17 MiB alias-amplified document must retain >= 2 MiB budget, got {cost}"
+    );
+
+    // A document with one tiny alias replays only a few hundred bytes -> 0.
+    let tiny_alias = "a: &a short\nb: *a\n";
+    let (_, _, tiny_replayed) =
+        crate::yaml_depth::scan_guards(tiny_alias).expansion_and_alias_sizes(tiny_alias);
+    assert_eq!(retained_alias_cost(tiny_replayed), 0);
 }

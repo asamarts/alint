@@ -73,13 +73,35 @@ pub enum Format {
 
 /// A parsed structured document shared across rules via `Arc`.
 ///
-/// For alias-amplified YAML documents whose expanded tree exceeds the YAML
-/// parse budget threshold, `SharedValue` also retains the tree's share of the
-/// YAML parse budget until the last clone drops so parallel workers cannot hold
-/// unbounded alias-expanded trees simultaneously.
-#[derive(Clone)]
+/// For alias-amplified YAML documents whose alias-replayed expansion exceeds
+/// the YAML parse budget threshold, `SharedValue` also retains the tree's share
+/// of the YAML parse budget until the last clone drops so parallel workers
+/// cannot hold unbounded alias-expanded trees simultaneously. Sharing across
+/// threads via `Clone` on the receiving thread or [`crate::Context::parse_structured`]
+/// tracks each receiving thread's handle affinity; moving a `SharedValue` to
+/// another thread without cloning retains its affinity on the creating thread
+/// until dropped, so a receiver should drop a moved handle before starting
+/// another budget-sized YAML parse.
 pub struct SharedValue {
+    // Field order matters: drop `inner` (deallocating the `Value` heap and, on
+    // the final handle, releasing `RetainedLease` bytes) before releasing the
+    // per-handle thread affinity token.
     inner: std::sync::Arc<SharedValueInner>,
+    _holder: Option<crate::yaml_budget::LeaseHolder>,
+}
+
+impl Clone for SharedValue {
+    fn clone(&self) -> Self {
+        let holder = self
+            .inner
+            .lease
+            .as_ref()
+            .map(crate::yaml_budget::RetainedLease::register_holder);
+        Self {
+            inner: std::sync::Arc::clone(&self.inner),
+            _holder: holder,
+        }
+    }
 }
 
 pub(crate) struct SharedValueInner {
@@ -92,7 +114,7 @@ impl std::fmt::Debug for SharedValue {
         f.debug_struct("SharedValue")
             .field("value", &self.inner.value)
             .field("retained_lease", &self.inner.lease.is_some())
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -121,13 +143,24 @@ impl SharedValue {
         value: Value,
         lease: Option<crate::yaml_budget::RetainedLease>,
     ) -> Self {
+        let holder = lease
+            .as_ref()
+            .map(crate::yaml_budget::RetainedLease::register_holder);
         Self {
             inner: std::sync::Arc::new(SharedValueInner { value, lease }),
+            _holder: holder,
         }
     }
 
     pub(crate) fn from_inner(inner: std::sync::Arc<SharedValueInner>) -> Self {
-        Self { inner }
+        let holder = inner
+            .lease
+            .as_ref()
+            .map(crate::yaml_budget::RetainedLease::register_holder);
+        Self {
+            inner,
+            _holder: holder,
+        }
     }
 
     pub(crate) fn downgrade(&self) -> std::sync::Weak<SharedValueInner> {
@@ -212,7 +245,8 @@ impl Format {
     }
 
     pub fn parse(self, text: &str) -> std::result::Result<Value, String> {
-        self.parse_holding(text, &mut 0).map(|(value, _)| value)
+        self.parse_holding(text, &mut 0, false)
+            .map(|(value, _)| value)
     }
 
     /// Parse `text` into a [`SharedValue`] that can be shared across rules via
@@ -224,24 +258,29 @@ impl Format {
     /// Returns the same format-specific parse or limit error message as
     /// [`Format::parse`].
     pub fn parse_shared(self, text: &str) -> std::result::Result<SharedValue, String> {
-        let (value, lease) = self.parse_holding(text, &mut 0)?;
+        let (value, lease) = self.parse_holding(text, &mut 0, true)?;
         Ok(SharedValue::with_lease(value, lease))
     }
 
-    /// [`Format::parse`], and roughly the most the parse held at once besides
-    /// `text` and the tree it returns: a JSONC text's copy with its comments
-    /// and trailing commas dropped (none for strict JSON), and the tokens the
-    /// TOML lexer reserves room for.
-    pub(crate) fn parse_held(self, text: &str) -> std::result::Result<(Value, usize), String> {
+    /// [`Format::parse_shared`], and roughly the most the parse held at once
+    /// besides `text` and the tree it returns: a JSONC text's copy with its
+    /// comments and trailing commas dropped (none for strict JSON), and the
+    /// tokens the TOML lexer reserves room for. Retains the YAML alias-tree
+    /// lease until the returned [`SharedValue`] drops.
+    pub(crate) fn parse_held(
+        self,
+        text: &str,
+    ) -> std::result::Result<(SharedValue, usize), String> {
         let mut held = 0;
-        let (value, _lease) = self.parse_holding(text, &mut held)?;
-        Ok((value, held))
+        let (value, lease) = self.parse_holding(text, &mut held, true)?;
+        Ok((SharedValue::with_lease(value, lease), held))
     }
 
     fn parse_holding(
         self,
         text: &str,
         held: &mut usize,
+        retain_lease: bool,
     ) -> std::result::Result<(Value, Option<crate::yaml_budget::RetainedLease>), String> {
         let raw_text = text;
         // Strip any leading UTF-8 BOM(s) uniformly. Some libraries (serde_json,
@@ -326,25 +365,39 @@ impl Format {
                 // this guard's is stricter than, and this guard stays as defense
                 // in depth (`yaml_depth`). Cheap discard-only pre-count;
                 // alias-free text short-circuits for free.
-                let (expansion, expanded) = yaml_guards.expansion_and_size(text);
+                let (expansion, expanded, alias_replayed) =
+                    yaml_guards.expansion_and_alias_sizes(text);
                 if !expansion.within_limit_for_ayaml() {
                     return Err(
                         "YAML alias expansion exceeds the maximum supported size".to_string()
                     );
                 }
+                let retained = if retain_lease {
+                    crate::yaml_budget::retained_alias_cost(alias_replayed)
+                } else {
+                    0
+                };
                 // The value copies what each alias names, so a small file of
                 // many aliases costs what its expanded tree does: its share of
                 // the budget grows to that before the parse.
                 let budget = crate::yaml_budget::reserve_at_least(
                     budget,
-                    crate::yaml_budget::parse_cost(text.len(), expanded),
+                    crate::yaml_budget::parse_cost(text.len(), expanded).max(retained),
                 );
                 let value = yaml_value::yaml_to_value(text)?;
                 // An alias-amplified tree stays roughly as big as its parse
                 // peak, so transition the reservation atomically into a
-                // `Send + Sync` lease held with the returned tree (#582).
-                let retained = crate::yaml_budget::retained_alias_cost(text.len(), expanded);
-                let lease = budget.and_then(|res| res.into_retained(retained));
+                // `Send + Sync` lease held with the returned tree (#582). If a
+                // re-entrant parse ran without an in-flight reservation, still
+                // charge the retained lease so the tree never escapes the
+                // budget or enters an idle LRU cache.
+                let lease = if retained == 0 {
+                    None
+                } else if let Some(res) = budget {
+                    res.into_retained(retained)
+                } else {
+                    crate::yaml_budget::retain_unreserved(retained)
+                };
                 Ok((value, lease))
             }
             Self::Toml => {

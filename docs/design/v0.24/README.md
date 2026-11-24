@@ -101,23 +101,26 @@ Executed in three ordered steps (ADR-0048 decision 8):
   - **#614:** bump `ayaml` from `=0.2.2` to `=0.2.3`, migrate deprecated `*_with_limits` calls to
     `ParseOptions` / `*_with`, adopt `Error::masked()` on redacted paths, migrate all four `saphyr`
     call sites (`structured_fix::yaml_`, `extract.rs`, `yaml_depth::mapping_subtree_is_literal`,
-    `pinned_references`) onto `ayaml` events and `SpannedTree`, remove `saphyr` and `saphyr-parser`
-    from default release builds (staying test-only behind `yaml-reference` per ADR-0041), enforce
-    zero default-build dependency in `ci/scripts/yaml-reference-gate.sh`, and add event-stream
-    comparison to the #482 differential harness.
+    `pinned_references`) onto `ayaml`'s spanned event stream (`parse_events_with` + `LineIndex`),
+    remove `saphyr` and `saphyr-parser` from default release builds (staying test-only behind
+    `yaml-reference` per ADR-0041), enforce zero default-build dependency in
+    `ci/scripts/yaml-reference-gate.sh`, and add event-stream comparison to the #482 differential
+    harness.
   - **#549:** add an optional `compare_mode` input to `.github/workflows/corpus-replay.yml`.
   - **#550:** add a `bench-scale` wall-time and peak-RSS scenario over mid-size YAML files (e.g.,
     50 OpenAPI-shaped documents).
 - **Step 2b -- bounded shared parse cache and alias-tree memory (#548, #582):**
-  - **#548 + #582:** add a memory-budgeted per-run structured-tree cache (`Arc<Value>`, skipping
-    caching when only one structured rule is active, with LRU eviction under a byte budget) and
-    bound retained memory of alias-expanded YAML trees (#582). Verify peak RSS on 100k/1M and #550.
+  - **#548 + #582:** add a memory-budgeted per-run structured-tree cache (`SharedValue`, skipping
+    run-level caching on per-file-only runs while sharing per file across 2+ rules, with LRU
+    eviction under a byte budget) and bound retained memory of alias-expanded YAML trees (#582).
+    Verify peak RSS on 100k/1M and #550.
 - **Step 2c -- span-enabled config diagnostics (#572, #566, #571):**
   - **#572:** reject duplicate keys in `vars:`, and point duplicate-entry errors at the repeated
     key rather than the mapping's first key (using `ayaml` spans).
   - **#566:** report unknown top-level keys in `version: 2` configs with line and column.
   - **#571:** in `alint-lsp`, map config load errors with key paths (`rules[3].paths`,
-    `relations.r.fields.name.at`) to their exact range in `.alint.yml` via `ayaml::SpannedTree`.
+    `relations.r.fields.name.at`) to their exact range in `.alint.yml` via `ayaml`'s spanned event
+    stream and `LineIndex`.
 
 ### Phase 3: Nested-rule performance and owned parallel walker (5 issues)
 
@@ -296,6 +299,20 @@ owner ADR approval before implementation starts (matching v0.23's Phase 3 owner 
   `parse_entries_compact_with_options`, `LookupIndex::unique`) with pre-encode budget guards;
   #610 replaced `java-properties 2.0.0` and `encoding_rs` with an internal streaming, span-native
   `.properties` parser supporting UTF-16 surrogate pairs, trailing EOF backslashes, whole-document
-  verified edits, and whitespace-separated `=`/`:` value escaping.
-  Next: Phase 2 (Unified YAML track and span-enabled diagnostics: #614, #549, #550, #548, #582,
-  #572, #566, #571).
+  verified edits, and whitespace-separated `=`/`:` value escaping (#646 closed the Batch 3 audit).
+- 2026-11-23: Phase 2 complete and audited (#648, #649, #650, plus Phase 2 audit follow-up; all
+  8/8 unified YAML and span-enabled diagnostic issues closed): Step 2a (#648) bumped `ayaml` to
+  `=0.2.3`, migrated all four span-dependent paths (`structured_fix::yaml_`, `extract/yaml_rows`,
+  `yaml_depth::mapping_subtree_is_literal`, `pinned_references`) onto `ayaml`'s spanned event
+  stream via `alint_core::yaml`, removed `saphyr` and `saphyr-parser` from default release builds
+  (#614, enforced by `yaml-reference-gate.sh` and `.alint.yml`), added `compare_mode` to
+  `corpus-replay.yml` (#549), and added `peak_rss_kb` plus the opt-in `SYAML` mid-size YAML
+  scenario to `bench-scale` (#550). Step 2b (#649) added content-addressed per-run and per-file
+  structured-tree sharing via `SharedValue` and `Context::parse_structured` across rules,
+  relations, manifest predicates, and structured facts (#548) and a `Send + Sync` `RetainedLease`
+  bound by alias-replayed bytes across all input sizes (#582). Step 2c (#650) rejected duplicate
+  `vars:` keys and relocated duplicate-key/field errors to the repeated key (#572), added line and
+  column locations to `version: 2` unknown top-level keys (#566), and mapped `alint-lsp` config
+  load, rule-build, `when:`, `limits`, `baseline`, and `--no-spawn` errors to their UTF-16 key-path
+  spans (#571).
+  Next: Phase 3 (Nested-rule performance and owned parallel walker: #620, #565, #584, #573, #568).

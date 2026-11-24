@@ -536,6 +536,17 @@ impl DecodeCache {
         bytes: &[u8],
         limits: &Limits,
     ) -> (DecodeResult, bool) {
+        self.decode_fresh_in_context(None, adapter, resource, bytes, limits)
+    }
+
+    pub(crate) fn decode_fresh_in_context(
+        &self,
+        ctx: Option<&crate::Context<'_>>,
+        adapter: &dyn Adapter,
+        resource: &Resource,
+        bytes: &[u8],
+        limits: &Limits,
+    ) -> (DecodeResult, bool) {
         let key = (adapter.id().to_string(), resource.path().clone(), *limits);
         let slot = {
             let mut slots = self.slots.lock().expect("decode cache lock");
@@ -550,8 +561,13 @@ impl DecodeCache {
                 fresh = true;
                 self.budget.spent()?;
                 self.decodes.fetch_add(1, Ordering::Relaxed);
-                let output =
-                    adapter.extract_within(resource, bytes, limits, &self.byte_budget())?;
+                let output = adapter.extract_in_context(
+                    ctx,
+                    resource,
+                    bytes,
+                    limits,
+                    &self.byte_budget(),
+                )?;
                 self.budget.take(output.rows.len())?;
                 Ok(Arc::new(output))
             })

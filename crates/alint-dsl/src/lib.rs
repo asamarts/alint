@@ -1324,7 +1324,8 @@ impl ConfigSourceProvider for FilesystemConfigSource {
     /// cap, so a file that grows meanwhile cannot make it unbounded.
     fn read_to_string(&self, path: &Path) -> std::io::Result<String> {
         use std::io::Read as _;
-        if !fs::metadata(path)?.is_file() {
+        let meta = fs::metadata(path)?;
+        if !meta.is_file() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "not a regular file",
@@ -1332,6 +1333,12 @@ impl ConfigSourceProvider for FilesystemConfigSource {
         }
         // A leading byte order mark does not count, as in [`config_text`].
         let cap = alint_core::MAX_STRUCTURED_BYTES + '\u{feff}'.len_utf8();
+        if meta.len() > cap as u64 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::FileTooLarge,
+                config_too_large_message(),
+            ));
+        }
         let mut bytes = Vec::new();
         fs::File::open(path)?
             .take(cap as u64 + 1)

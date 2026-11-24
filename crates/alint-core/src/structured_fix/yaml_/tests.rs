@@ -877,3 +877,27 @@ proptest::proptest! {
         }
     }
 }
+
+#[test]
+fn leading_properties_handles_anchor_ending_with_gt_and_bare_cr() {
+    // Anchor name ending in `>` must not trigger verbatim-tag scanning back
+    // into an earlier string containing `!<`.
+    let src = r#"{a: "!<x", b: &foo> 1}"#;
+    let span = resolve_value_span(Format::Yaml, src.as_bytes(), &[key("b")]);
+    assert_eq!(span.as_ref().map(|r| &src[r.clone()]), Some("1"));
+
+    // Core tag before anchor ending in `>` must decline cleanly rather than
+    // scanning backward across spaces into the mapping key.
+    let bad_order = "\" &x !<k\": !!str &foo> val\n";
+    assert_eq!(
+        resolve_value_span(Format::Yaml, bad_order.as_bytes(), &[key(" &x !<k")]),
+        None
+    );
+
+    // Bare CR (`\r`) line breaks inside a scalar decline single-line splice.
+    let cr_scalar = "a: \"x\ry\"\n";
+    assert_eq!(
+        resolve_value_span(Format::Yaml, cr_scalar.as_bytes(), &[key("a")]),
+        None
+    );
+}

@@ -731,6 +731,16 @@ impl Engine {
         when_env: &WhenEnv<'_>,
         pass: &ChangedPass<'_>,
     ) -> Result<()> {
+        self.resolve_manifest_paths_with_context(root, when_env, pass, None)
+    }
+
+    pub(super) fn resolve_manifest_paths_with_context(
+        &self,
+        root: &Path,
+        when_env: &WhenEnv<'_>,
+        pass: &ChangedPass<'_>,
+        cache_ctx: Option<&crate::Context<'_>>,
+    ) -> Result<()> {
         let index = pass.index;
         if index.manifest_paths_initialized() {
             return Ok(());
@@ -820,7 +830,7 @@ impl Engine {
             // typed failure before policy evaluation.
             let rep = &group[0];
             let resolution = crate::scope_filter::read_manifest_confined(root, rep.source())
-                .and_then(|text| rep.resolve_set(&text));
+                .and_then(|text| rep.resolve_set_with_context(cache_ctx, &text));
             let set = match resolution {
                 Ok(resolved) => crate::scope_filter::ManifestSet::from_paths(resolved),
                 Err(failure) => {

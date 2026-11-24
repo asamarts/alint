@@ -602,12 +602,40 @@ impl Engine {
             });
         }
 
+        // Create a run-scoped structured-tree cache whenever cross-file rules
+        // or structured facts can share parsed documents with other rules,
+        // manifest predicates, or multi-query passes (#548). Per-file-only
+        // runs without structured facts share trees per file inside
+        // `dispatch_per_file` with zero cross-worker contention or retained
+        // memory across files.
+        let has_cross_file = self
+            .entries
+            .iter()
+            .any(|entry| entry.rule.as_per_file().is_none());
+        let has_structured_fact = self.facts.iter().any(|fact| {
+            matches!(
+                &fact.kind,
+                crate::facts::FactKind::FileContentMatches {
+                    file_content_matches,
+                } if file_content_matches.extract.is_some()
+            )
+        });
+        let run_structured_cache = (has_cross_file || has_structured_fact).then(|| {
+            crate::structured_cache::StructuredCache::new(
+                crate::yaml_budget::YAML_PARSE_BUDGET_BYTES,
+            )
+        });
+        let structured_cache = run_structured_cache
+            .as_ref()
+            .map(crate::structured_cache::StructuredCacheRef::Run);
+
         let t_facts = Instant::now();
-        let fact_values = evaluate_facts_with_environment(
+        let fact_values = crate::facts::evaluate_facts_with_cache(
             &self.facts,
             root,
             index,
             self.process_environment.as_ref(),
+            run_structured_cache.as_ref(),
         )?;
         phase!(t_facts, "evaluate_facts", facts = self.facts.len() as u64);
         let when_env = WhenEnv {
@@ -640,29 +668,6 @@ impl Engine {
             "build_git_tracked_indexes",
             built = u64::from(git_tracked_indexes.is_some()),
         );
-
-        // Create a run-scoped structured-tree cache only when cross-file rules
-        // can share parsed documents with other cross-file rules or per-file
-        // rules (#548). Per-file-only runs share trees per file inside
-        // `dispatch_per_file` with zero cross-worker contention or retained
-        // memory across files.
-        let has_cross_file = self
-            .entries
-            .iter()
-            .any(|entry| entry.rule.as_per_file().is_none());
-        let may_share_across_rules = self.entries.len() >= 2
-            || self
-                .entries
-                .iter()
-                .any(|entry| !entry.rule.nested_rule_specs().is_empty());
-        let run_structured_cache = (has_cross_file && may_share_across_rules).then(|| {
-            crate::structured_cache::StructuredCache::new(
-                crate::yaml_budget::YAML_PARSE_BUDGET_BYTES,
-            )
-        });
-        let structured_cache = run_structured_cache
-            .as_ref()
-            .map(crate::structured_cache::StructuredCacheRef::Run);
 
         let full_ctx = Context {
             root,
@@ -748,7 +753,7 @@ impl Engine {
         // The pass's `--changed` gates, which decide once what each rule's
         // trigger scope takes of the changed paths.
         let pass = self.changed_pass(index, None);
-        self.resolve_manifest_paths(root, &when_env, &pass)?;
+        self.resolve_manifest_paths_with_context(root, &when_env, &pass, Some(&full_ctx))?;
         let alt_indexes = [
             filtered_index.as_ref(),
             git_tracked_indexes

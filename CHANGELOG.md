@@ -72,11 +72,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ci/scripts/yaml-reference-gate.sh` and verified by an `ayaml` vs `saphyr-parser` event-stream
   differential check, #614).
 - Structured-document rules (`*_path_*`, `json_schema_passes`, `file_graph`,
-  `registry_paths_resolve`) now share parsed `Arc`-backed document trees (`SharedValue`) across
-  rules via `Context::parse_structured`: multi-rule per-file dispatch and `Engine::run_for_file`
-  share a stack-local per-file cache with zero cross-worker contention, single-rule files bypass
-  caching, and cross-file runs share a memory-budgeted LRU cache bounded by
-  `YAML_PARSE_BUDGET_BYTES` (#548).
+  `registry_paths_resolve`, plus structured facts, manifest/selector filters, and relations) now
+  share parsed `Arc`-backed document trees (`SharedValue`) via `Context::parse_structured`:
+  multi-rule per-file dispatch and `Engine::run_for_file` share a stack-local per-file cache with
+  zero cross-worker contention, single-rule files bypass caching, and cross-file runs share a
+  content-addressed, memory-budgeted LRU cache bounded by `YAML_PARSE_BUDGET_BYTES` (#548).
 - Alias-amplified YAML documents parsed via `Format::parse_shared` / `Context::parse_structured`
   now transition their parse reservation atomically into a `Send + Sync` `RetainedLease` held for
   the lifetime of the live `SharedValue` (and are never pinned strongly in the idle LRU cache),

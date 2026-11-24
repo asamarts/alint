@@ -384,6 +384,22 @@ struct Report<'a> {
     expectation_failures: Vec<String>,
 }
 
+fn prepare_yaml_compare_log(path: Option<&Path>) -> Result<Option<PathBuf>> {
+    let log_path = path.map(absolute).transpose()?;
+    if let Some(log_path) = log_path.as_deref() {
+        if let Some(parent) = log_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        // Truncate any stale log from a previous local run so verdict counts
+        // and uploaded artifacts reflect only this replay.
+        if log_path.exists() {
+            std::fs::remove_file(log_path)
+                .with_context(|| format!("remove stale compare log {}", log_path.display()))?;
+        }
+    }
+    Ok(log_path)
+}
+
 pub fn run(args: &Args) -> Result<()> {
     let root = crate::workspace_root()?;
     let pins_text =
@@ -408,10 +424,7 @@ pub fn run(args: &Args) -> Result<()> {
         .transpose()?;
     let alint = absolute(&args.alint)?;
     let compare = args.compare.as_deref().map(absolute).transpose()?;
-    let yaml_compare_log = args.yaml_compare_log.as_deref().map(absolute).transpose()?;
-    if let Some(parent) = yaml_compare_log.as_deref().and_then(Path::parent) {
-        std::fs::create_dir_all(parent)?;
-    }
+    let yaml_compare_log = prepare_yaml_compare_log(args.yaml_compare_log.as_deref())?;
     let yaml_compare = YamlCompare {
         enabled: args.yaml_compare,
         log: yaml_compare_log.as_deref(),
@@ -425,6 +438,9 @@ pub fn run(args: &Args) -> Result<()> {
             );
         }
         versions.push(version_of(bin)?);
+    }
+    if yaml_compare.enabled {
+        verify_yaml_reference_enabled(&alint)?;
     }
     let cache = absolute(&args.cache)?;
     for sub in ["repos", "configs", "home", "baselines"] {
@@ -499,6 +515,7 @@ fn write_reports(
         results,
         args.compare.is_some(),
         args.yaml_compare,
+        args.yaml_compare_log.as_deref(),
         versions,
         expectation_failures,
     );
@@ -1148,10 +1165,67 @@ fn run_with_timeout(command: &mut Command, timeout: Duration) -> Result<Output, 
     })
 }
 
+/// Confirm that `alint` was compiled with `alint-core/yaml-reference`: a build
+/// without the feature ignores `ALINT_YAML_PARSER`, whereas a `yaml-reference`
+/// build panics on an unknown parser name during its first YAML decode.
+fn verify_yaml_reference_enabled(alint: &Path) -> Result<()> {
+    let dir = tempfile::tempdir().context("create yaml-compare probe dir")?;
+    let cfg = dir.path().join(".alint.yml");
+    std::fs::write(&cfg, "version: 1\nrules: []\n")?;
+    let output = Command::new(alint)
+        .args(["check", "--config"])
+        .arg(&cfg)
+        .arg(dir.path())
+        .env("ALINT_YAML_PARSER", "__probe_invalid_parser__")
+        .output()
+        .with_context(|| format!("probe {} for yaml-reference feature", alint.display()))?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if output.status.success() || !stderr.contains("ALINT_YAML_PARSER") {
+        bail!(
+            "{} was not built with `--features alint-core/yaml-reference` \
+             (ALINT_YAML_PARSER was ignored); rebuild with `cargo build --release \
+             -p alint --features alint-core/yaml-reference` before running `--yaml-compare`",
+            alint.display()
+        );
+    }
+    Ok(())
+}
+
+/// Summarize JSONL verdict counts from `ALINT_YAML_COMPARE_LOG`, if present.
+fn summarize_yaml_compare_log(path: &Path) -> Option<String> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    let mut saphyr = 0usize;
+    let mut allowlist = 0usize;
+    let mut uncompared = 0usize;
+    let mut other = 0usize;
+    for line in raw.lines().filter(|l| !l.trim().is_empty()) {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+            other += 1;
+            continue;
+        };
+        match value.get("verdict").and_then(|v| v.as_str()) {
+            Some("saphyr") => saphyr += 1,
+            Some("allowlist") => allowlist += 1,
+            Some("uncompared") => uncompared += 1,
+            _ => other += 1,
+        }
+    }
+    let total = saphyr + allowlist + uncompared + other;
+    Some(format!(
+        "{total} logged entries ({saphyr} saphyr-agreed, {allowlist} allowlist-explained, {uncompared} uncompared{})",
+        if other > 0 {
+            format!(", {other} other")
+        } else {
+            String::new()
+        }
+    ))
+}
+
 fn render_markdown(
     results: &[RepoResult],
     compared: bool,
     yaml_compare: bool,
+    yaml_compare_log: Option<&Path>,
     versions: &[String],
     expectation_failures: &[String],
 ) -> String {
@@ -1165,7 +1239,14 @@ fn render_markdown(
     let _ = writeln!(out, "### Corpus replay\n");
     let _ = writeln!(out, "Binaries: {}.\n", versions.join(" against "));
     if yaml_compare {
-        let _ = writeln!(out, "YAML compare mode: `ALINT_YAML_PARSER=compare`.\n");
+        let log_note = yaml_compare_log
+            .and_then(summarize_yaml_compare_log)
+            .map(|summary| format!("; compare log: {summary}"))
+            .unwrap_or_default();
+        let _ = writeln!(
+            out,
+            "YAML compare mode: `ALINT_YAML_PARSER=compare`{log_note}.\n"
+        );
     }
     let _ = writeln!(
         out,

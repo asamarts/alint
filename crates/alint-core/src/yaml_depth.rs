@@ -172,9 +172,9 @@ pub enum Expansion {
     /// than the alias budget, such as the input cap. The guard does not know
     /// what the aliases expand to. A caller whose real parse is that same
     /// parser may go on, as the parse refuses the text with the proper error;
-    /// a caller that reads the text with another parser (saphyr), which may
-    /// accept what ayaml refused, must refuse the text, or it reads aliases
-    /// nothing has bounded.
+    /// a caller that reads the text with another parser (such as a test-only
+    /// reference parser), which may accept what ayaml refused, must refuse the
+    /// text, or it reads aliases nothing has bounded.
     Unparsed(String),
 }
 
@@ -318,6 +318,88 @@ impl GuardScan {
             (Expansion::WithinLimit, 0)
         }
     }
+
+    /// [`Self::expansion_and_size`], plus the estimated bytes contributed
+    /// specifically by replaying `*alias` nodes (`alias_replayed_bytes`).
+    ///
+    /// Separating alias-replayed bytes from document-literal nodes allows
+    /// [`crate::yaml_budget::retained_alias_cost`] to bound alias-amplified
+    /// trees of every input size (including `16..=32 MiB` files) without
+    /// penalizing large alias-light documents.
+    #[must_use]
+    pub(crate) fn expansion_and_alias_sizes(self, text: &str) -> (Expansion, usize, usize) {
+        let (expansion, expanded) = self.expansion_and_size(text);
+        if !matches!(expansion, Expansion::WithinLimit) {
+            return (expansion, expanded, 0);
+        }
+        // Only perform the linear event scan when the total expanded tree can
+        // exceed the retained-lease threshold (`> 32 MiB` expanded bytes).
+        let threshold = crate::yaml_budget::YAML_BUDGET_THRESHOLD_BYTES
+            .saturating_mul(crate::yaml_budget::EXPANSION_BYTES_PER_COST_BYTE);
+        let alias_replayed = if self.has_alias && expanded > threshold {
+            alias_replayed_bytes(text)
+        } else {
+            0
+        };
+        (expansion, expanded, alias_replayed)
+    }
+}
+
+/// Linear event-stream estimate of bytes materialized specifically by replaying
+/// `*alias` nodes in the first YAML document of `text`.
+pub(crate) fn alias_replayed_bytes(text: &str) -> usize {
+    let Ok(events) = crate::yaml::parse_events_stream(text) else {
+        return 0;
+    };
+    let mut anchor_costs: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    let mut stack: Vec<(Option<String>, usize)> = Vec::new();
+    let mut replayed: usize = 0;
+
+    for parsed in events {
+        let Ok(event) = parsed else {
+            return 0;
+        };
+        match event {
+            ayaml::Event::DocumentEnd { .. } | ayaml::Event::StreamEnd { .. } => break,
+            ayaml::Event::Scalar { value, anchor, .. } => {
+                let cost = YAML_NODE_COST.saturating_add(value.len());
+                if let Some(anchor) = anchor {
+                    anchor_costs.insert(anchor.as_str().to_owned(), cost);
+                }
+                if let Some((_, parent)) = stack.last_mut() {
+                    *parent = parent.saturating_add(cost);
+                }
+            }
+            ayaml::Event::SequenceStart { anchor, .. }
+            | ayaml::Event::MappingStart { anchor, .. } => {
+                stack.push((anchor.map(|a| a.as_str().to_owned()), YAML_NODE_COST));
+            }
+            ayaml::Event::SequenceEnd { .. } | ayaml::Event::MappingEnd { .. } => {
+                let Some((anchor, cost)) = stack.pop() else {
+                    break;
+                };
+                if let Some(anchor) = anchor {
+                    anchor_costs.insert(anchor, cost);
+                }
+                if let Some((_, parent)) = stack.last_mut() {
+                    *parent = parent.saturating_add(cost);
+                }
+            }
+            ayaml::Event::Alias { anchor, .. } => {
+                let cost = anchor_costs
+                    .get(anchor.as_str())
+                    .copied()
+                    .unwrap_or(YAML_NODE_COST);
+                replayed = replayed.saturating_add(cost);
+                if let Some((_, parent)) = stack.last_mut() {
+                    *parent = parent.saturating_add(cost);
+                }
+            }
+            _ => {}
+        }
+    }
+    replayed
 }
 
 /// Scan `text` once for both guards; see [`GuardScan`].
@@ -612,8 +694,8 @@ enum Bom {
     /// that starts any line but the first, and for the `---` check after the
     /// one that starts the text: `\u{feff}---` is text to it.
     Column,
-    /// Every one has no width: the text saphyr parses, after alint strips the
-    /// marks that start it.
+    /// Every one has no width: a text whose leading byte order marks have been
+    /// stripped before scanning.
     Stripped,
     /// As ayaml reads a text that starts with one or more byte order marks:
     /// those marks have no width, so the first line's indentation counts from

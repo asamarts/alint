@@ -1,9 +1,10 @@
 # YAML parser replacement
 
 Status: Accepted and implemented (2026-10-19). Superseded by ayaml 0.1.2 (#510,
-[ADR-0035](../adr/0035-keep-the-early-ayaml-cutover.md)) and bumped to ayaml 0.2.2 in phase 9:
-the decision below is the one of 2026-10-19, and the re-evaluation log records the move and its
-qualification.
+[ADR-0035](../adr/0035-keep-the-early-ayaml-cutover.md)), bumped to ayaml 0.2.2 in phase 9,
+and bumped to ayaml 0.2.3 in v0.24 Phase 2 (#614, removing `saphyr` and `saphyr-parser` from
+default release builds): the decision below is the one of 2026-10-19, and the re-evaluation
+log records the move and its qualification.
 Tracking: [#334](https://github.com/asamarts/alint/issues/334).
 
 ## Decision
@@ -104,8 +105,9 @@ alint and run before materialization:
 - byte-weighted alias expansion allowance capped independently of parser dereference counting;
 - literal compatibility metadata checks through ayaml's event stream, with a stack of their own;
 - depth/event checks for duplicate-aware YAML extraction;
-- the structured-fix span resolver's own bounds on the Saphyr event stream: an iterative walk that
-  declines past 128 levels, block or flow, stops at a second document, and never expands an alias;
+- the structured-fix span resolver's own bounds on ayaml's event stream (migrated from Saphyr
+  in #614): an iterative walk that declines past 128 levels, block or flow, stops at a second
+  document, and never expands an alias;
 - extends-chain depth, memoization, remote-size, and source-confinement limits.
 
 ayaml enforces the input cap, a depth cap and an alias budget itself, in time linear in the input,
@@ -128,19 +130,17 @@ reads the raw text itself, so it refuses a flow bomb before any parser reads it.
 measures with ayaml, so it vouches only for a text ayaml reads whole: when ayaml refuses the text
 first (a syntax error, or a limit other than the alias budget), the guard's verdict is
 `Expansion::Unparsed`, not "within budget". A caller whose real parse is ayaml goes on, as that
-parse refuses the text; a caller that reads the text with saphyr refuses it, since saphyr accepts
-documents ayaml refuses (an alias to a collection that contains it among them), and its reading
-was never measured. The cost is one linear pass over text that holds a `[`, `{` or `*`, and a
-second parse of a document that uses an alias.
+parse refuses the text; a caller that reads the text with another parser (such as the test-only
+reference parsers behind `yaml-reference`) refuses it, since another parser may accept documents
+ayaml refuses (an alias to a collection that contains it among them), and its reading was never
+measured. The cost is one linear pass over text that holds a `[`, `{` or `*`, and a second parse
+of a document that uses an alias.
 
-The guards read the text as ayaml does, and saphyr, which reads YAML for source spans and
-structured fixes, does not always read it alike: its anchor names run through a `:`, and it skips
-a byte-order mark at the start of a later line. A document the guards pass can therefore nest
-100,000 levels deep, or hold an alias bomb, in saphyr's reading. saphyr refuses a 256th level of
-flow nesting of its own (its flow level is a `u8`) but bounds neither block nesting nor what its
-loader copies for an alias, so no span reader uses its loader: the structured-fix resolver and the
-entry extraction walk its events and decline past 128 levels themselves, and the resolver keeps an
-alias as one node.
+With #614, all production source-span, structured-fix, duplicate-aware extraction, and
+pinned-reference walks run directly on ayaml's spanned event stream under the same parser and
+resource limits. `saphyr` stays test-only behind the `yaml-reference` feature (for compare-mode
+voting and the `ayaml` vs `saphyr-parser` event-stream differential check), where its event walker
+still bounds nesting independently because `saphyr` does not share ayaml's limits.
 
 The pre-scanner's lexer began as a port of libyaml-rs 0.3.0's scanner, and #483 moved it to the
 token boundaries of ayaml's compatibility reader:
@@ -305,7 +305,7 @@ superseding ADR-0039); the parser facade below uses it as its libyaml backend.
   allowlist.
 - **Another ayaml.** To qualify ayaml's main branch, point a `[patch.crates-io]` entry at it and
   run the long run. Cargo applies the patch only while main's version satisfies the workspace's
-  exact pin (`=0.2.2`); once main's version moves past it, change the pin as well. A release
+  exact pin (`=0.2.3`); once main's version moves past it, change the pin as well. A release
   moves the pin as "Bumping ayaml" below describes.
 
 The documented differences fall into four active groups (every ayaml defect that 0.1.2 carried is
@@ -375,10 +375,11 @@ records what landed (2026-11-16: all three phases, in #530).
   not already named the parent collection or tab indentation) ends with a hint, which
   `Error::message` and `Display` include and the harness, reading ayaml's own error, leaves out.
 - **The feature.** `alint-core`'s non-default `yaml-reference` feature compiles libyaml, saphyr's
-  backend and compare mode, and makes `yaml_serde` an optional dependency. No release build
-  enables it. `ci/scripts/yaml-reference-gate.sh` checks that no workspace crate depends on
-  `yaml_serde` with default features, on any target, other than as a dev-dependency, and that
-  the same query finds it with the feature. The feature is for alint's own tests, and a crate
+  backend and compare mode, and makes `yaml_serde`, `saphyr`, and `saphyr-parser` optional /
+  dev-only dependencies. No release build enables it. `ci/scripts/yaml-reference-gate.sh` checks
+  that no workspace crate depends on `yaml_serde`, `saphyr`, or `saphyr-parser` with default
+  features, on any target, other than as a dev-dependency, and that the same query finds
+  `yaml_serde` and `saphyr` with the feature. The feature is for alint's own tests, and a crate
   that depends on alint-core must not enable it: `ALINT_YAML_PARSER` then chooses the parser of
   every decode in the process, for every crate in it.
 - **Choosing a backend.** With the feature, `ALINT_YAML_PARSER` is read once per process:
@@ -423,8 +424,8 @@ records what landed (2026-11-16: all three phases, in #530).
   CHANGELOG's record of what changed from v0.22 (ADR-0035 decision 5).
 - **The dogfood rule.** Beside the rule that fails on a direct ayaml decode outside
   `alint_core::yaml` (ADR-0035 decision 4), `yaml-reference-parsers-stay-behind-the-facade`
-  fails on `yaml_serde::` outside the backends and the harness. saphyr's span uses stay until
-  they leave in v0.24.
+  fails on `yaml_serde::`, `saphyr::`, and `saphyr_parser::` outside the backends, the harness,
+  and the `ayaml` vs `saphyr-parser` differential test (`structured_fix/yaml_/tests.rs`).
 - **Phases.**
   1. The backends, the variable and compare mode with the vote and the allowlist, as a module
      beside `yaml.rs`; the harness's comparison tree and explanation compile with the feature as
@@ -435,7 +436,7 @@ records what landed (2026-11-16: all three phases, in #530).
 
 ## Bumping ayaml
 
-The workspace pins ayaml exactly (`=0.2.2` in `[workspace.dependencies]`), because the harness
+The workspace pins ayaml exactly (`=0.2.3` in `[workspace.dependencies]`), because the harness
 qualifies one version. The published crates carry the same pin, so a project that depends on
 them gets that ayaml and cannot use another 0.2.x beside it, and each ayaml release needs an alint
 release before alint's users get it. To move the pin (ADR-0040 decision 2):
@@ -760,7 +761,8 @@ maintained libyaml fork is the lower-risk ownership boundary.
     the guard's estimate of its expanded size over 64, the most bytes of tree per byte the
     budget lets through. The budget still ends with the parse, as ADR-0042 decision 4 set, and a
     tree that copies what aliases name is about its whole estimate, so it lives outside the
-    budget while a rule holds it, up to the guard's 256 MiB each; #582 tracks bounding it.
+    budget while a rule holds it, up to the guard's 256 MiB each; resolved in v0.24 Phase 2
+    (#582) with a retained alias-tree lease on live `SharedValue` instances.
   - **A harness false failure.** On a line that continues the root's plain scalar, a `%` in
     column 0 is the scalar's text, not a directive; `places()` read it as a directive, which
     seed 17 found. Seeds 1 to 20 at 100,000 inputs each pass.
@@ -826,3 +828,28 @@ maintained libyaml fork is the lower-risk ownership boundary.
     `negative-zero-in-an-unsigned-field`, `rule-that-is-null`, and location class
     `verbatim-tag-that-names-nothing`, recorded in ADR-0040). All re-evaluation triggers and
     release-qualification conditions are now met.
+- **2026-11-23: v0.24 Phase 2, ayaml 0.2.3, saphyr exit, structured cache, retained alias lease,
+  and span/LSP diagnostics (#614, #549, #550, #548, #582, #572, #566, #571).**
+  - **ayaml 0.2.3 & saphyr exit (#614).** Bumped the exact pin from `=0.2.2` to `=0.2.3`,
+    migrated deprecated `*_with_limits` calls onto `compat::ParseOptions::with_limits`, adopted
+    `ayaml::Error::masked()` on redacted error paths, and migrated `structured_fix::yaml_`,
+    `extract::yaml_rows`, and `pinned_references` onto ayaml's spanned event stream. Removed
+    `saphyr` and `saphyr-parser` from default release builds (`yaml-reference-gate.sh` and
+    `yaml-reference-parsers-stay-behind-the-facade` enforce this); `saphyr` stays test-only
+    behind `alint-core/yaml-reference`.
+  - **Compare-mode corpus replay & SYAML scaling (#549, #550).** Added opt-in `--yaml-compare` /
+    `--yaml-compare-log` support to `xtask corpus-replay` and `.github/workflows/corpus-replay.yml`,
+    and added optional `peak_rss_kb` recording and an opt-in full-mode `SYAML` scenario to
+    `xtask bench-scale`.
+  - **Shared structured-tree cache & retained alias-tree lease (#548, #582).** Added
+    `SharedValue` (`Arc`-backed parsed trees) and `StructuredCache` (`FileStructuredCache` for
+    per-file multi-rule reuse and a memory-budgeted cross-file LRU cache across rules, facts,
+    selectors, gates, and relations). Alias-amplified YAML trees atomically transition their
+    parse reservation into a `RetainedLease` held for the lifetime of live `SharedValue` handles
+    (tracked per calling thread to prevent cross-thread deadlocks) and are never strongly pinned
+    in idle caches.
+  - **Duplicate keys, v2 unknown-key spans, and LSP config ranges (#572, #566, #571).** Rejected
+    duplicate keys in `vars:`, relocated duplicate-entry and duplicate-field YAML errors to the
+    exact repeated key (including typed, tagged, and escaped keys), added 1-based line/column
+    reporting for unknown top-level keys in version 2 configs, and placed `alint lsp` config
+    load and rule-build errors at their exact UTF-16 key-path ranges in `.alint.yml`.

@@ -26,37 +26,55 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock, Weak};
 
 use parking_lot::Mutex;
+use sha2::{Digest as _, Sha256};
 
 use crate::structured_format::{Format, SharedValue, SharedValueInner, estimate_value_bytes};
 
 /// What a cached parse stores: the shared tree or the deterministic parse error.
 type ParseOutcome = Result<SharedValue, String>;
 
-/// Normalized cache key for `(repo-relative path, Format)`.
+/// Content-addressed cache key for `(repo-relative path, Format, text digest)`.
+///
+/// Including `(text_len, sha256)` guarantees that calling the public
+/// [`crate::Context::parse_structured`] with transformed/companion text or a
+/// modified file can never silently return a stale tree from different bytes.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct CacheKey {
     path: PathBuf,
     format: Format,
+    text_len: usize,
+    text_sha256: [u8; 32],
 }
 
 impl CacheKey {
-    fn new(path: &Path, format: Format) -> Self {
+    fn new(path: &Path, format: Format, text: &str) -> Self {
         Self {
             path: normalize_key_path(path),
             format,
+            text_len: text.len(),
+            text_sha256: Sha256::digest(text.as_bytes()).into(),
         }
     }
 }
 
-/// Normalize a repo-relative path to `/`-separated components so `a\b.yml` and
-/// `a/b.yml` share one entry on Windows while non-UTF-8 paths keep their OS
-/// representation.
+/// Normalize a repo-relative path to `/`-separated components (skipping
+/// redundant `./` segments) so `a\b.yml`, `./a/b.yml`, and `a/b.yml` share one
+/// entry while out-of-root or non-UTF-8 paths keep their OS representation.
 fn normalize_key_path(relative: &Path) -> PathBuf {
     let mut parts = Vec::new();
     for component in relative.components() {
         match component {
+            Component::CurDir => {}
             Component::Normal(part) => match part.to_str() {
-                Some(part) => parts.push(part),
+                Some(part) => {
+                    // Normalize embedded backslashes too (e.g. Windows-style
+                    // paths supplied on Unix).
+                    for segment in part.split('\\') {
+                        if !segment.is_empty() && segment != "." {
+                            parts.push(segment);
+                        }
+                    }
+                }
                 None => return relative.to_path_buf(),
             },
             _ => return relative.to_path_buf(),
@@ -187,11 +205,16 @@ impl StructuredCache {
     }
 
     /// Look up an already-cached entry without parsing on a miss.
-    pub(crate) fn get_cached(&self, path: &Path, format: Format) -> Option<ParseOutcome> {
+    pub(crate) fn get_cached(
+        &self,
+        path: &Path,
+        format: Format,
+        text: &str,
+    ) -> Option<ParseOutcome> {
         if !self.is_populated() {
             return None;
         }
-        let key = CacheKey::new(path, format);
+        let key = CacheKey::new(path, format, text);
         let mut state = self.state.lock();
         if let Some(outcome) = state.touch(&key) {
             self.hits.fetch_add(1, Ordering::Relaxed);
@@ -207,15 +230,15 @@ impl StructuredCache {
         None
     }
 
-    /// Return the cached tree for `(path, format)`, parsing at most once across
-    /// concurrent callers and retaining non-alias-leased results under the byte
-    /// budget.
+    /// Return the cached tree for `(path, format, text)`, parsing at most once
+    /// across concurrent callers and retaining non-alias-leased results under
+    /// the byte budget.
     pub(crate) fn get_or_parse(&self, path: &Path, format: Format, text: &str) -> ParseOutcome {
         if self.budget_bytes == 0 {
             self.parses.fetch_add(1, Ordering::Relaxed);
             return format.parse_shared(text);
         }
-        let key = CacheKey::new(path, format);
+        let key = CacheKey::new(path, format, text);
         let (slot, is_owner) = {
             let mut state = self.state.lock();
             if let Some(outcome) = state.touch(&key) {
@@ -239,13 +262,22 @@ impl StructuredCache {
         };
 
         if !is_owner {
-            self.hits.fetch_add(1, Ordering::Relaxed);
-            return slot
+            let mut parsed_here = false;
+            let outcome = slot
                 .get_or_init(|| {
+                    parsed_here = true;
                     self.parses.fetch_add(1, Ordering::Relaxed);
                     format.parse_shared(text)
                 })
                 .clone();
+            if parsed_here {
+                // Non-owner won the `OnceLock` race (or took over after an
+                // owner panic); publish so subsequent lookups reuse the tree.
+                self.publish_outcome(key, &outcome);
+            } else {
+                self.hits.fetch_add(1, Ordering::Relaxed);
+            }
+            return outcome;
         }
 
         let mut guard = InFlightGuard {
@@ -253,39 +285,47 @@ impl StructuredCache {
             key: Some(key.clone()),
         };
 
+        let mut parsed_here = false;
         let outcome = slot
             .get_or_init(|| {
+                parsed_here = true;
                 self.parses.fetch_add(1, Ordering::Relaxed);
                 format.parse_shared(text)
             })
             .clone();
 
-        // Publish into LRU or weak-leased table and clear in-flight slot under
-        // one lock so waiting readers transition smoothly.
-        self.publish_outcome(key, &outcome);
-        guard.key = None;
+        if parsed_here {
+            // Publish into LRU or weak-leased table and clear in-flight slot
+            // under one lock so waiting readers transition smoothly.
+            self.publish_outcome(key, &outcome);
+            guard.key = None;
+        }
         outcome
     }
 
     fn publish_outcome(&self, key: CacheKey, outcome: &ParseOutcome) {
+        // Estimate tree size BEFORE acquiring the global cache mutex so walking
+        // a large JSON tree never stalls other rayon workers.
+        let non_leased_bytes = match outcome {
+            Ok(shared) if shared.has_retained_lease() => None,
+            Ok(shared) => Some(estimate_value_bytes(shared)),
+            Err(message) => Some(message.capacity().saturating_add(64)),
+        };
+
         let mut state = self.state.lock();
         state.in_flight.remove(&key);
-        match outcome {
-            Ok(shared) if shared.has_retained_lease() => {
+        match (outcome, non_leased_bytes) {
+            (Ok(shared), None) => {
                 // Never strongly pin an alias-leased tree in the idle LRU:
                 // only share it weakly while active readers keep it alive.
                 state.weak_leased.retain(|_, weak| weak.strong_count() > 0);
                 state.weak_leased.insert(key, shared.downgrade());
                 self.populated.store(true, Ordering::Release);
             }
-            Ok(shared) => {
-                let entry_bytes = estimate_value_bytes(shared);
+            (_, Some(entry_bytes)) => {
                 self.insert_lru_locked(&mut state, key, outcome, entry_bytes);
             }
-            Err(message) => {
-                let entry_bytes = message.capacity().saturating_add(64);
-                self.insert_lru_locked(&mut state, key, outcome, entry_bytes);
-            }
+            (Err(_), None) => {}
         }
     }
 
@@ -344,10 +384,13 @@ impl StructuredCache {
 /// Uncontended (owned by the thread running `dispatch_per_file` /
 /// `Engine::run_for_file`) and dropped immediately once that file's rules
 /// finish, keeping peak memory proportional to worker count rather than file
-/// count.
+/// count. Keyed by `(path, format, text digest)` so companion or modified reads
+/// never collide, and never strongly pins alias-leased `SharedValue`s across
+/// subsequent rules (preventing hold-and-wait against non-structured rules such
+/// as `pinned_references`).
 pub(crate) struct FileStructuredCache<'a> {
     run: Option<&'a StructuredCache>,
-    slots: Mutex<Vec<(Format, ParseOutcome)>>,
+    slots: Mutex<Vec<(CacheKey, ParseOutcome)>>,
 }
 
 impl std::fmt::Debug for FileStructuredCache<'_> {
@@ -369,22 +412,29 @@ impl<'a> FileStructuredCache<'a> {
     }
 
     pub(crate) fn get_or_parse(&self, path: &Path, format: Format, text: &str) -> ParseOutcome {
+        let key = CacheKey::new(path, format, text);
         {
             let slots = self.slots.lock();
-            if let Some((_, outcome)) = slots.iter().find(|(fmt, _)| *fmt == format) {
+            if let Some((_, outcome)) = slots.iter().find(|(k, _)| *k == key) {
                 return outcome.clone();
             }
         }
-        let outcome = if let Some(hit) = self.run.and_then(|run| run.get_cached(path, format)) {
+        let outcome = if let Some(hit) = self.run.and_then(|run| run.get_cached(path, format, text))
+        {
             hit
         } else {
             format.parse_shared(text)
         };
+        // Never strongly pin an alias-leased tree across unrelated per-file
+        // rules (e.g., `yaml_path_*` followed by `pinned_references`).
+        if matches!(&outcome, Ok(shared) if shared.has_retained_lease()) {
+            return outcome;
+        }
         let mut slots = self.slots.lock();
-        if let Some((_, existing)) = slots.iter().find(|(fmt, _)| *fmt == format) {
+        if let Some((_, existing)) = slots.iter().find(|(k, _)| *k == key) {
             return existing.clone();
         }
-        slots.push((format, outcome.clone()));
+        slots.push((key, outcome.clone()));
         outcome
     }
 }
@@ -412,7 +462,7 @@ impl<'a> StructuredCacheRef<'a> {
         match self {
             Self::Run(run) => run.get_or_parse(path, format, text),
             Self::RunReadOnly(run) => {
-                if let Some(hit) = run.get_cached(path, format) {
+                if let Some(hit) = run.get_cached(path, format, text) {
                     hit
                 } else {
                     format.parse_shared(text)
@@ -442,18 +492,30 @@ mod tests {
         assert_eq!(cache.parses(), 1);
         assert_eq!(cache.hits(), 1);
 
-        // Windows-style separator normalizes to the same cache key.
+        // Redundant `./` and Windows-style `\` separators normalize to the same key.
+        let dot_alt = cache
+            .get_or_parse(Path::new("./config/app.yml"), Format::Yaml, text)
+            .unwrap();
+        assert!(first.ptr_eq(&dot_alt));
         let slash_alt = cache
-            .get_or_parse(Path::new("config/app.yml"), Format::Yaml, text)
+            .get_or_parse(Path::new(r"config\app.yml"), Format::Yaml, text)
             .unwrap();
         assert!(first.ptr_eq(&slash_alt));
         assert_eq!(cache.parses(), 1);
-        assert_eq!(cache.hits(), 2);
+        assert_eq!(cache.hits(), 3);
+
+        // Different text under the same `(path, format)` does not collide.
+        let different = cache
+            .get_or_parse(path, Format::Yaml, "name: other\nport: 9090\n")
+            .unwrap();
+        assert!(!first.ptr_eq(&different));
+        assert_eq!(different["name"], "other");
+        assert_eq!(cache.parses(), 2);
 
         // Distinct format on the same path parses separately.
         let json_res = cache.get_or_parse(path, Format::Json, "{\"name\": \"alint\"}");
         assert!(json_res.is_ok());
-        assert_eq!(cache.parses(), 2);
+        assert_eq!(cache.parses(), 3);
     }
 
     #[test]
@@ -481,9 +543,9 @@ mod tests {
         assert_eq!(cache.evictions(), 1);
 
         // `a` is still cached; `b` was evicted.
-        assert!(cache.get_cached(a, Format::Yaml).is_some());
-        assert!(cache.get_cached(b, Format::Yaml).is_none());
-        assert!(cache.get_cached(c, Format::Yaml).is_some());
+        assert!(cache.get_cached(a, Format::Yaml, &payload).is_some());
+        assert!(cache.get_cached(b, Format::Yaml, &payload).is_none());
+        assert!(cache.get_cached(c, Format::Yaml, &payload).is_some());
     }
 
     #[test]
@@ -502,12 +564,12 @@ mod tests {
         assert_eq!(big_val["k"].as_str().unwrap().len(), 4096);
         assert!(
             cache
-                .get_cached(Path::new("big.yml"), Format::Yaml)
+                .get_cached(Path::new("big.yml"), Format::Yaml, &big)
                 .is_none()
         );
         assert!(
             cache
-                .get_cached(Path::new("small.yml"), Format::Yaml)
+                .get_cached(Path::new("small.yml"), Format::Yaml, small)
                 .is_some()
         );
     }
@@ -551,6 +613,18 @@ mod tests {
         let a = file_cache.get_or_parse(p, Format::Yaml, text).unwrap();
         let b = file_cache.get_or_parse(p, Format::Yaml, text).unwrap();
         assert!(a.ptr_eq(&b));
+        // Distinct path or distinct text in the same `FileStructuredCache` must
+        // not collide with the primary file's entry.
+        let companion = file_cache
+            .get_or_parse(Path::new("other.yml"), Format::Yaml, "openapi: 3.1.0\n")
+            .unwrap();
+        assert!(!a.ptr_eq(&companion));
+        assert_eq!(companion["openapi"], "3.1.0");
+        let modified = file_cache
+            .get_or_parse(p, Format::Yaml, "openapi: 3.2.0\n")
+            .unwrap();
+        assert!(!a.ptr_eq(&modified));
+        assert_eq!(modified["openapi"], "3.2.0");
         // Per-file-only parses do not retain entries in the run cache.
         assert!(!run.is_populated());
 
@@ -583,10 +657,18 @@ mod tests {
             "alias-leased tree is not pinned in LRU"
         );
 
+        // `FileStructuredCache` also refuses to strongly pin alias-leased trees
+        // across subsequent rules.
+        let file_cache = FileStructuredCache::new(None);
+        let from_file = file_cache.get_or_parse(path, Format::Yaml, &text).unwrap();
+        assert!(from_file.has_retained_lease());
+        assert_eq!(file_cache.slots.lock().len(), 0);
+        drop(from_file);
+
         // Once every caller drops it, the weak entry expires and nothing holds
         // the `RetainedLease` idle in the cache.
         drop(first);
         drop(second);
-        assert!(cache.get_cached(path, Format::Yaml).is_none());
+        assert!(cache.get_cached(path, Format::Yaml, &text).is_none());
     }
 }

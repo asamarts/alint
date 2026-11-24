@@ -779,10 +779,10 @@ fn rule_json_path_absent_remove_value() -> impl Strategy<Value = String> {
 
 /// A `yaml_path_equals` rule fixed via the located `set_value` op (Phase 2):
 /// rewrites the scalar at `$.region` (planted as "OLD" only in `_trig/sv.yaml`)
-/// to "NEW" via a span-splice over the range saphyr's parser events give. YAML is
-/// TYPED, but the target here is a STRING so a bare `Fix` applies it -- exercising
-/// the spanned YAML resolver (incl. its char->byte offset conversion) against
-/// arbitrary co-resident trees.
+/// to "NEW" via a span-splice over the native UTF-8 byte range ayaml's parser
+/// events give. YAML is TYPED, but the target here is a STRING so a bare `Fix`
+/// applies it -- exercising the spanned YAML resolver against arbitrary
+/// co-resident trees.
 fn rule_yaml_path_equals_set_value() -> impl Strategy<Value = String> {
     rule_id("ysetv").prop_map(|id| {
         format!(
@@ -793,9 +793,10 @@ fn rule_yaml_path_equals_set_value() -> impl Strategy<Value = String> {
 
 /// A `yaml_path_absent` rule fixed via the located `remove_value` op: deletes the
 /// single-line `$.banned` block-mapping entry (planted only in `_trig/rv.yaml`) by
-/// removing its whole physical line (a conservative hand-rolled scan -- saphyr is
-/// read-only). Unsafe by default, so *suggested* under a bare `Fix` and *applied*
-/// under `FixUnsafe` -- exercising the YAML line removal across arbitrary trees.
+/// removing its whole physical line (a conservative line-scan over ayaml's
+/// spanned events). Unsafe by default, so *suggested* under a bare `Fix` and
+/// *applied* under `FixUnsafe` -- exercising the YAML line removal across
+/// arbitrary trees.
 fn rule_yaml_path_absent_remove_value() -> impl Strategy<Value = String> {
     rule_id("yremv").prop_map(|id| {
         format!(
