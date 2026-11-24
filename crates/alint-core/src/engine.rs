@@ -823,7 +823,23 @@ fn nested_rule_can_activate(
         return false;
     }
 
-    for entry in index.dirs().chain(index.files()) {
+    let candidates: Box<dyn Iterator<Item = &crate::walker::FileEntry> + '_> = match select {
+        Some(scope) => {
+            let ranges = scope.candidate_ranges(index);
+            let dirs = ranges
+                .clone()
+                .into_iter()
+                .flat_map(|r| &index.entries[r])
+                .filter(|e| e.is_dir);
+            let files = ranges
+                .into_iter()
+                .flat_map(|r| &index.entries[r])
+                .filter(|e| !e.is_dir);
+            Box::new(dirs.chain(files))
+        }
+        None => Box::new(index.dirs().chain(index.files())),
+    };
+    for entry in candidates {
         if !nested_iteration_accepts_entry(parent_spec, entry.is_dir)
             || select.is_some_and(|scope| !scope.matches(&entry.path, index))
         {
@@ -1424,18 +1440,18 @@ fn trace_selection(trace: Option<&TraceSession>, entry: &RuleEntry, ctx: &Contex
     };
     let considered = u64::try_from(ctx.index.entries.len()).expect("index length fits u64");
     let matched = if let Some(per_file) = entry.rule.as_per_file() {
+        let scope = per_file.path_scope();
         u64::try_from(
-            ctx.index
-                .files()
-                .filter(|file| per_file.path_scope().matches(&file.path, ctx.index))
+            scope
+                .candidate_files(ctx.index)
+                .filter(|file| scope.matches(&file.path, ctx.index))
                 .count(),
         )
         .expect("index length fits u64")
     } else if let Some(scope) = entry.rule.path_scope() {
         u64::try_from(
-            ctx.index
-                .entries
-                .iter()
+            scope
+                .candidates(ctx.index)
                 .filter(|candidate| scope.matches(&candidate.path, ctx.index))
                 .count(),
         )

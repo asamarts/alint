@@ -354,9 +354,16 @@ impl GeneratedFileFreshRule {
             }
         }
         // New in-scope files the generator created (register them so
-        // the restorer deletes them, then flag them).
+        // the restorer deletes them, then flag them). Narrow the rescan to
+        // `outputs`'s literal directory prefixes when available so a nested
+        // `generated_file_fresh` rescans only its iterated subtree instead of
+        // walking the whole repository per iteration (#584).
         let walk_opts = WalkOptions::default();
-        match walk(ctx.root, &walk_opts) {
+        let rescan = match outputs.narrow_prefixes() {
+            Some(prefixes) => alint_core::walk_subtrees(ctx.root, &prefixes, &walk_opts),
+            None => walk(ctx.root, &walk_opts),
+        };
+        match rescan {
             Ok(after_index) => {
                 for entry in outputs.candidate_files(&after_index) {
                     if outputs.matches(&entry.path, &after_index) && !restorer.has(&entry.path) {

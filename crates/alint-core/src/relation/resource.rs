@@ -306,7 +306,9 @@ mod tests {
             ("./locales/*.json", None),
             ("/locales/*.json", None),
             ("!locales/*.json", None),
-            ("en.json", None),
+            ("en.json", Some("en.json")),
+            ("locales/en.json", Some("locales/en.json")),
+            ("locales", Some("locales")),
         ] {
             assert_eq!(
                 crate::scope::literal_dir_prefix(pattern).as_deref(),

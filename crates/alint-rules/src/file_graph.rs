@@ -459,14 +459,12 @@ impl FileGraphRule {
     /// reference-integrity check, not a module resolver.
     fn check_no_dangling(&self, ctx: &Context<'_>, nodes: &[PathBuf]) -> Vec<Violation> {
         let mut out = Vec::new();
-        let dirs: HashSet<&Path> = ctx.index.dirs().map(|e| &*e.path).collect();
         for node in nodes {
             let mut targets = self.node_targets(ctx, node, &mut out);
             targets.sort_unstable();
             targets.dedup();
             for target in &targets {
-                let exists = ctx.index.contains_file(target) || dirs.contains(target.as_path());
-                if !exists {
+                if !ctx.index.contains_path(target) {
                     out.push(self.dangling_violation(node, target));
                 }
             }

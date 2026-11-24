@@ -1563,6 +1563,21 @@ impl RuleSpec {
         Ok(crate::yaml::from_value(self.extra.clone().into())?)
     }
 
+    /// Fast path for option structs whose fields are all optional (`Default`):
+    /// skips `Mapping` cloning and Serde deserialization when `extra` is empty
+    /// (#620).
+    #[doc(hidden)]
+    pub fn deserialize_options_or_default<T>(&self) -> crate::error::Result<T>
+    where
+        T: serde::de::DeserializeOwned + Default,
+    {
+        if self.extra.is_empty() {
+            Ok(T::default())
+        } else {
+            self.deserialize_options()
+        }
+    }
+
     /// Record environment-derived effective fields after config composition.
     #[doc(hidden)]
     pub fn set_sensitive_fields(&mut self, fields: std::collections::BTreeSet<String>) {
@@ -1729,6 +1744,12 @@ pub struct CompiledNestedSpec {
     /// a value is never rendered twice: a `{stem}` that came from a file name
     /// is text, not a token.
     pub rendered: bool,
+    /// Pre-formatted `"{parent_id}.require[{idx}]"` synthesized id paired with
+    /// `(compiled_parent_id, compiled_idx)` so per-iteration `instantiate`
+    /// clones the string instead of running `format!` every iteration (#620).
+    compiled_parent_id: String,
+    compiled_idx: usize,
+    synthesized_id: String,
 }
 
 impl CompiledNestedSpec {
@@ -1757,6 +1778,9 @@ impl CompiledNestedSpec {
             when,
             sensitive_configuration: false,
             rendered: false,
+            compiled_parent_id: parent_id.to_owned(),
+            compiled_idx: idx,
+            synthesized_id: format!("{parent_id}.require[{idx}]"),
         })
     }
 
@@ -1795,9 +1819,13 @@ impl CompiledNestedSpec {
         } else {
             std::collections::BTreeSet::new()
         };
-        self.spec.instantiate_with(
-            parent_id,
-            idx,
+        let id = if parent_id == self.compiled_parent_id && idx == self.compiled_idx {
+            self.synthesized_id.clone()
+        } else {
+            format!("{parent_id}.require[{idx}]")
+        };
+        self.spec.instantiate_with_id(
+            id,
             level,
             (!self.rendered).then_some(tokens),
             sensitive_fields,
@@ -1885,28 +1913,26 @@ impl NestedRuleSpec {
         level: Level,
         tokens: &crate::template::PathTokens,
     ) -> RuleSpec {
-        self.instantiate_with(
-            parent_id,
-            idx,
+        self.instantiate_with_id(
+            format!("{parent_id}.require[{idx}]"),
             level,
             Some(tokens),
             std::collections::BTreeSet::new(),
         )
     }
 
-    /// [`Self::instantiate`] with `sensitive_fields` set on the result. With
-    /// no `tokens` the strings are taken as they are: an enclosing iteration
-    /// rendered them ([`CompiledNestedSpec::rendered`]).
-    fn instantiate_with(
+    /// [`Self::instantiate`] with pre-formatted `id` and `sensitive_fields` set
+    /// on the result. With no `tokens` the strings are taken as they are: an
+    /// enclosing iteration rendered them ([`CompiledNestedSpec::rendered`]).
+    fn instantiate_with_id(
         &self,
-        parent_id: &str,
-        idx: usize,
+        id: String,
         level: Level,
         tokens: Option<&crate::template::PathTokens>,
         sensitive_fields: std::collections::BTreeSet<String>,
     ) -> RuleSpec {
         RuleSpec {
-            id: format!("{parent_id}.require[{idx}]"),
+            id,
             kind: self.kind.clone(),
             level,
             paths: self.paths.as_ref().map(|p| match tokens {

@@ -395,6 +395,10 @@ pub(crate) fn visit_sensitive_for_each(
     };
     let entries = iterated_entries(select_scope, ctx.index, mode);
 
+    let builders: Vec<Option<alint_core::InstantiatedBuilder>> = require
+        .iter()
+        .map(|nested| registry.resolve_instantiated(&nested.spec.kind).ok())
+        .collect();
     let needed_tokens = nested_path_tokens(require);
     for entry in entries {
         if !select_scope.matches(&entry.path, ctx.index) {
@@ -434,8 +438,11 @@ pub(crate) fn visit_sensitive_for_each(
                     continue;
                 }
             }
+            let Some(builder) = builders[index] else {
+                continue;
+            };
             let spec = nested.instantiate(parent_id, index, level, &tokens);
-            let Ok(rule) = registry.build_instantiated(&spec) else {
+            let Ok(rule) = builder.build(&spec) else {
                 continue;
             };
             rule.visit_sensitive_paths(parent_explicit || spec.sensitive, ctx, visit);
@@ -455,11 +462,20 @@ fn iterated_entries<'i>(
     match mode {
         IterateMode::Dirs => Box::new(select_scope.candidate_dirs(index)),
         IterateMode::Files => Box::new(select_scope.candidate_files(index)),
-        IterateMode::Both => Box::new(
-            select_scope
-                .candidate_dirs(index)
-                .chain(select_scope.candidate_files(index)),
-        ),
+        IterateMode::Both => {
+            // Compute narrowed candidate ranges once rather than twice (#620).
+            let ranges = select_scope.candidate_ranges(index);
+            let dirs = ranges
+                .clone()
+                .into_iter()
+                .flat_map(move |range| &index.entries[range])
+                .filter(|entry| entry.is_dir);
+            let files = ranges
+                .into_iter()
+                .flat_map(move |range| &index.entries[range])
+                .filter(|entry| !entry.is_dir);
+            Box::new(dirs.chain(files))
+        }
     }
 }
 
@@ -516,6 +532,15 @@ fn evaluate_for_each_inner<const TRACE: bool>(
 
     let mut violations = Vec::new();
     let needed_tokens = nested_path_tokens(require);
+    // Resolve each nested kind's builder once before the loop so per-entry
+    // instantiation skips registry and alias map lookups (#620).
+    let resolved_builders: Vec<Option<alint_core::InstantiatedBuilder>> = require
+        .iter()
+        .map(|nested| registry.resolve_instantiated(&nested.spec.kind).ok())
+        .collect();
+    // Nested rules never share the top-level run's relation caches; enter the
+    // iteration guard once for the whole loop rather than per entry (#620).
+    let _iteration = alint_core::relation::IterationScope::enter();
     let mut trace_counts = alint_core::TraceCounts::default();
     if TRACE {
         // Every entry of the iterated kind is considered; those outside the
@@ -587,9 +612,6 @@ fn evaluate_for_each_inner<const TRACE: bool>(
 
         let tokens = PathTokens::from_path_with(&entry.path, needed_tokens);
         let entry_start = violations.len();
-        // The iteration's relation rules read through caches of their own, so
-        // nothing they read outlives the iteration.
-        let _iteration = alint_core::relation::IterationScope::enter();
         for (i, nested) in require.iter().enumerate() {
             // v0.9.12: nested `when:` is pre-compiled at rule-
             // build time (`CompiledNestedSpec`) — gate on the
@@ -665,7 +687,11 @@ fn evaluate_for_each_inner<const TRACE: bool>(
                 }
             }
             let nested_spec = nested.instantiate(parent_id, i, level, &tokens);
-            let nested_rule = match registry.build_instantiated(&nested_spec) {
+            let nested_rule = match resolved_builders[i] {
+                Some(builder) => builder.build(&nested_spec),
+                None => Err(Error::UnknownRuleKind(nested_spec.kind.clone())),
+            };
+            let nested_rule = match nested_rule {
                 Ok(r) => r,
                 Err(e) => {
                     if TRACE {
@@ -698,23 +724,59 @@ fn evaluate_for_each_inner<const TRACE: bool>(
                     continue;
                 }
             };
-            let nested_manifest_sensitive = rule_has_sensitive_manifest_scope(nested_rule.as_ref());
-            let scope_violation = match alint_core::expect_matches_violation(
-                nested_rule.as_ref(),
-                &nested_spec,
-                ctx.index,
-                ctx,
-            ) {
-                Ok(violation) => violation,
-                Err(error) => {
+            let nested_manifest_sensitive = nested.spec.scope_filter.is_some()
+                && rule_has_sensitive_manifest_scope(nested_rule.as_ref());
+            if nested_spec.expect_matches {
+                let scope_violation = match alint_core::expect_matches_violation(
+                    nested_rule.as_ref(),
+                    &nested_spec,
+                    ctx.index,
+                    ctx,
+                ) {
+                    Ok(violation) => violation,
+                    Err(error) => {
+                        if TRACE {
+                            alint_core::TraceCounts::checked_increment(
+                                &mut trace_counts.children,
+                                "nested.children",
+                            )?;
+                            alint_core::TraceCounts::checked_increment(
+                                &mut trace_counts.failed_children,
+                                "nested.failed_children",
+                            )?;
+                            record_nested_child_preview(
+                                trace_children.as_mut(),
+                                ctx,
+                                &entry.path,
+                                i,
+                                nested.spec.sensitive || nested_manifest_sensitive,
+                                nested_manifest_sensitive,
+                                alint_core::TraceStatus::AnalysisFailure,
+                            )?;
+                        }
+                        let mut violation = Violation::new(format!(
+                            "{parent_id}: nested rule #{i} scope assertion failed for {}: {error}",
+                            entry.path.display(),
+                        ))
+                        .with_path(entry.path.clone())
+                        .as_analysis_failure(AnalysisFailureKind::Evaluation);
+                        if nested_manifest_sensitive {
+                            violation.redact_manifest_scoped(nested_rule.id());
+                        }
+                        redact_nested_finding(nested, parent_id, i, &mut violation);
+                        violations.push(violation);
+                        continue;
+                    }
+                };
+                if let Some(mut violation) = scope_violation {
                     if TRACE {
                         alint_core::TraceCounts::checked_increment(
                             &mut trace_counts.children,
                             "nested.children",
                         )?;
                         alint_core::TraceCounts::checked_increment(
-                            &mut trace_counts.failed_children,
-                            "nested.failed_children",
+                            &mut trace_counts.violated_children,
+                            "nested.violated_children",
                         )?;
                         record_nested_child_preview(
                             trace_children.as_mut(),
@@ -723,85 +785,32 @@ fn evaluate_for_each_inner<const TRACE: bool>(
                             i,
                             nested.spec.sensitive || nested_manifest_sensitive,
                             nested_manifest_sensitive,
-                            alint_core::TraceStatus::AnalysisFailure,
+                            alint_core::TraceStatus::Violated,
                         )?;
                     }
-                    let mut violation = Violation::new(format!(
-                        "{parent_id}: nested rule #{i} scope assertion failed for {}: {error}",
-                        entry.path.display(),
-                    ))
-                    .with_path(entry.path.clone())
-                    .as_analysis_failure(AnalysisFailureKind::Evaluation);
-                    redact_manifest_scoped_finding(nested_rule.as_ref(), &mut violation);
+                    // Attribute a pathless scope-assertion failure to the selected
+                    // parent entry, like other nested pathless findings.
+                    violation.path = Some(entry.path.clone());
+                    if let Some(message) = parent_message {
+                        apply_parent_message(&mut violation, message, ctx.analysis_time);
+                    }
+                    if nested_manifest_sensitive {
+                        violation.redact_manifest_scoped(nested_rule.id());
+                    }
                     redact_nested_finding(nested, parent_id, i, &mut violation);
                     violations.push(violation);
                     continue;
                 }
-            };
-            if let Some(mut violation) = scope_violation {
-                if TRACE {
-                    alint_core::TraceCounts::checked_increment(
-                        &mut trace_counts.children,
-                        "nested.children",
-                    )?;
-                    alint_core::TraceCounts::checked_increment(
-                        &mut trace_counts.violated_children,
-                        "nested.violated_children",
-                    )?;
-                    record_nested_child_preview(
-                        trace_children.as_mut(),
-                        ctx,
-                        &entry.path,
-                        i,
-                        nested.spec.sensitive || nested_manifest_sensitive,
-                        nested_manifest_sensitive,
-                        alint_core::TraceStatus::Violated,
-                    )?;
-                }
-                // Attribute a pathless scope-assertion failure to the selected
-                // parent entry, like other nested pathless findings.
-                violation.path = Some(entry.path.clone());
-                if let Some(message) = parent_message {
-                    apply_parent_message(&mut violation, message, ctx.analysis_time);
-                }
-                redact_manifest_scoped_finding(nested_rule.as_ref(), &mut violation);
-                redact_nested_finding(nested, parent_id, i, &mut violation);
-                violations.push(violation);
-                continue;
             }
-            // v0.9.8: when the nested rule's `paths:` template
-            // resolved to a single literal path AND the rule is
-            // a per-file rule, bypass `rule.evaluate(ctx)` —
-            // which would iterate `ctx.index.files()` (1M
-            // entries) for a single-target lookup — and dispatch
-            // via `evaluate_file` against the in-index entry
-            // directly. Closes the v0.9.7 → v0.9.8 cliff for the
-            // canonical for_each_file × per-file-content-rule
-            // shape (S7's `every-lib-has-content` was 484s under
-            // v0.9.7's full-index scan; this drops it to a few
-            // milliseconds × N iterations).
-            //
-            // For non-per-file rules (e.g. `file_exists`,
-            // `toml_path_matches`), fall through to the rule's
-            // own evaluate — file_exists has its own literal-
-            // path fast path (contains_file lookup) since
-            // v0.9.5; toml_path_matches reads the file
-            // directly without scanning the full index.
-            // v0.9.10: a single `path_scope().matches(literal, ctx.index)`
-            // covers both the path-glob AND the per-rule
-            // `scope_filter` ancestor predicate, since `Scope`
-            // now owns its `Option<ScopeFilter>` and `matches`
-            // consults it. The earlier v0.9.9
-            // `nested_rule.scope_filter()` guard this bypass
-            // had is no longer needed.
-            if let Some(literal) = nested_spec_single_literal(&nested_spec)
-                && let Some(pf) = nested_rule.as_per_file()
+            // Check `as_per_file()` before `nested_spec_single_literal` so
+            // non-per-file nested kinds (such as `file_exists`) skip the
+            // literal-glob scan and `PathBuf` allocation on every entry (#620).
+            if let Some(pf) = nested_rule.as_per_file()
+                && let Some(literal) = nested_spec_single_literal(&nested_spec)
                 && pf.path_scope().matches(&literal, ctx.index)
             {
                 let nested_violations =
                     evaluate_one_per_file_rule(parent_id, i, &literal, pf, nested_ctx);
-                let nested_manifest_sensitive =
-                    rule_has_sensitive_manifest_scope(nested_rule.as_ref());
                 if TRACE {
                     let status = record_nested_child(&mut trace_counts, &nested_violations)?;
                     record_nested_child_preview(
@@ -823,7 +832,9 @@ fn evaluate_for_each_inner<const TRACE: bool>(
                     {
                         apply_parent_message(&mut v, message, ctx.analysis_time);
                     }
-                    redact_manifest_scoped_finding(nested_rule.as_ref(), &mut v);
+                    if nested_manifest_sensitive {
+                        v.redact_manifest_scoped(nested_rule.id());
+                    }
                     redact_nested_finding(nested, parent_id, i, &mut v);
                     violations.push(v);
                 }
@@ -840,7 +851,6 @@ fn evaluate_for_each_inner<const TRACE: bool>(
                     .as_analysis_failure(AnalysisFailureKind::Evaluation),
                 ],
             };
-            let nested_manifest_sensitive = rule_has_sensitive_manifest_scope(nested_rule.as_ref());
             if TRACE {
                 let status = record_nested_child(&mut trace_counts, &nested_violations)?;
                 record_nested_child_preview(
@@ -862,14 +872,19 @@ fn evaluate_for_each_inner<const TRACE: bool>(
                 {
                     apply_parent_message(&mut v, message, ctx.analysis_time);
                 }
-                redact_manifest_scoped_finding(nested_rule.as_ref(), &mut v);
+                if nested_manifest_sensitive {
+                    v.redact_manifest_scoped(nested_rule.id());
+                }
                 redact_nested_finding(nested, parent_id, i, &mut v);
                 violations.push(v);
             }
         }
         // Nested `paths:` / glob options were built with this entry's token
         // values glob-escaped; show the reader the real path in messages.
-        if parent_message.is_none() {
+        if parent_message.is_none()
+            && violations.len() > entry_start
+            && alint_core::template::tokens_need_unescape(&tokens)
+        {
             for v in &mut violations[entry_start..] {
                 if let Some(m) = alint_core::template::unescape_token_values(&v.message, &tokens) {
                     v.message = m.into();
@@ -1014,13 +1029,6 @@ fn rule_has_sensitive_manifest_scope(rule: &dyn Rule) -> bool {
     rule.path_scope()
         .or_else(|| rule.as_per_file().map(alint_core::PerFileRule::path_scope))
         .is_some_and(|scope| scope.sensitive_manifest_sources().next().is_some())
-}
-
-fn redact_manifest_scoped_finding(rule: &dyn Rule, finding: &mut Violation) {
-    if !rule_has_sensitive_manifest_scope(rule) {
-        return;
-    }
-    finding.redact_manifest_scoped(rule.id());
 }
 
 fn redact_nested_finding(

@@ -498,23 +498,33 @@ fn render_path_with(
     t: &PathTokens,
     mut push: impl FnMut(&str, &mut String),
 ) -> String {
-    // Longest-first only matters if one token is a prefix of another; none is,
-    // but the order is kept stable for clarity / future additions.
-    let tokens: [(&str, &str); 6] = [
-        ("{parent_name}", &t.parent_name),
-        ("{basename}", &t.basename),
-        ("{path}", &t.path),
-        ("{stem}", &t.stem),
-        ("{dir}", &t.dir),
-        ("{ext}", &t.ext),
-    ];
-    let mut out = String::with_capacity(template.len());
-    let mut rest = template;
-    while let Some(open) = rest.find('{') {
-        out.push_str(&rest[..open]);
-        let at_brace = &rest[open..];
-        if let Some((tok, val)) = tokens.iter().find(|(tok, _)| at_brace.starts_with(tok)) {
-            rest = &at_brace[tok.len()..];
+    let Some(first_open) = template.find('{') else {
+        return template.to_owned();
+    };
+    let mut out = String::with_capacity(template.len() + t.path.len().min(64));
+    out.push_str(&template[..first_open]);
+    let mut rest = &template[first_open..];
+    loop {
+        let matched: Option<(usize, &str)> = match rest.as_bytes().get(1) {
+            Some(b'p') => {
+                if rest.starts_with("{path}") {
+                    Some(("{path}".len(), t.path.as_str()))
+                } else if rest.starts_with("{parent_name}") {
+                    Some(("{parent_name}".len(), t.parent_name.as_str()))
+                } else {
+                    None
+                }
+            }
+            Some(b'd') if rest.starts_with("{dir}") => Some(("{dir}".len(), t.dir.as_str())),
+            Some(b'b') if rest.starts_with("{basename}") => {
+                Some(("{basename}".len(), t.basename.as_str()))
+            }
+            Some(b's') if rest.starts_with("{stem}") => Some(("{stem}".len(), t.stem.as_str())),
+            Some(b'e') if rest.starts_with("{ext}") => Some(("{ext}".len(), t.ext.as_str())),
+            _ => None,
+        };
+        if let Some((tok_len, val)) = matched {
+            rest = &rest[tok_len..];
             // An empty value that forms a whole leading segment (start of the
             // output or right after a `/`) collapses with its trailing `/`, so
             // `{dir}/x` for a root-level file is `x`, not `/x`.
@@ -529,11 +539,15 @@ fn render_path_with(
             // A `{` that doesn't begin a known token: emit it literally and
             // resume after it (preserves `{unknown}` verbatim).
             out.push('{');
-            rest = &at_brace['{'.len_utf8()..];
+            rest = &rest[1..];
         }
+        let Some(next_open) = rest.find('{') else {
+            out.push_str(rest);
+            return out;
+        };
+        out.push_str(&rest[..next_open]);
+        rest = &rest[next_open..];
     }
-    out.push_str(rest);
-    out
 }
 
 /// Escape `val` for a Rust regex, including whitespace so patterns that enable
@@ -1390,6 +1404,24 @@ pub(crate) fn render_nested_message(kind: &str, template: &str, tokens: &PathTok
     }
 }
 
+/// True when any value in `tokens` could have been escaped by
+/// [`render_path_glob`] or marked by `render_nested_message`. Lets callers
+/// skip per-violation [`unescape_token_values`] scans on ordinary paths (#620).
+#[doc(hidden)]
+#[must_use]
+pub fn tokens_need_unescape(tokens: &PathTokens) -> bool {
+    [
+        &tokens.path,
+        &tokens.dir,
+        &tokens.basename,
+        &tokens.stem,
+        &tokens.parent_name,
+        &tokens.ext,
+    ]
+    .into_iter()
+    .any(|v| needs_glob_escape(v) || v.starts_with('!') || v.contains('{'))
+}
+
 /// Undo [`render_path_glob`]'s escaping of `tokens`' values inside a
 /// user-facing `message`: a nested rule reports the glob it was built from
 /// (`expected a file matching app/[[]slug[]]/*.tsx`), and the escape forms are
@@ -1400,6 +1432,9 @@ pub(crate) fn render_nested_message(kind: &str, template: &str, tokens: &PathTok
 /// as written.
 #[must_use]
 pub fn unescape_token_values(message: &str, tokens: &PathTokens) -> Option<String> {
+    if !tokens_need_unescape(tokens) {
+        return None;
+    }
     let mut pairs: Vec<(String, &str)> = Vec::new();
     for v in [
         &tokens.path,
@@ -1409,9 +1444,11 @@ pub fn unescape_token_values(message: &str, tokens: &PathTokens) -> Option<Strin
         &tokens.parent_name,
         &tokens.ext,
     ] {
-        let escaped = glob_escape(v);
-        if escaped != *v {
-            pairs.push((escaped, v));
+        if needs_glob_escape(v) {
+            let escaped = glob_escape(v);
+            if escaped != *v {
+                pairs.push((escaped, v));
+            }
         }
         if let Some(rest) = v.strip_prefix('!') {
             pairs.push((format!("{{!}}{}", glob_escape(rest)), v));
@@ -1720,45 +1757,56 @@ impl OptionSyntax {
 /// with [`render_path_argv`], replacement templates with each `$` of a value
 /// doubled, and nested rule-spec lists (`for_each_dir.require`, ...) rendered
 /// recursively per element for that element's own kind.
+#[cfg(test)]
+#[allow(clippy::needless_pass_by_value)]
 #[must_use]
 pub(crate) fn render_nested_options(
     kind: &str,
     m: ayaml::Mapping,
     tokens: &PathTokens,
 ) -> ayaml::Mapping {
-    render_options(kind, m, tokens, false)
+    render_options_ref(kind, &m, tokens, false, &[])
 }
 
 /// [`render_nested_options`] for a nested spec's `extra`, without the string
 /// keys in `parent_fields`, which the nested spec takes from its parent. With
 /// no `tokens` (an enclosing iteration rendered the spec) the values are kept
 /// as they are.
+///
+/// Single-pass over `&extra` (#620): avoids cloning `extra` upfront when empty,
+/// drops `parent_fields` inline without a second `Mapping` build, and skips
+/// syntax-table lookups for string values that contain no `{`.
 pub(crate) fn render_nested_extra(
     kind: &str,
     extra: &crate::yaml::Mapping,
     tokens: Option<&PathTokens>,
     parent_fields: &[&str],
 ) -> crate::yaml::Mapping {
-    let rendered = match tokens {
-        Some(tokens) => render_nested_options(kind, extra.parser().clone(), tokens),
-        None => extra.parser().clone(),
+    if extra.is_empty() {
+        return crate::yaml::Mapping::new();
+    }
+    let rendered = if let Some(tokens) = tokens {
+        render_options_ref(kind, extra.parser(), tokens, false, parent_fields)
+    } else {
+        let src = extra.parser();
+        let mut out = ayaml::Mapping::with_capacity(src.len());
+        for (k, v) in src {
+            if k.as_str().is_some_and(|s| parent_fields.contains(&s)) {
+                continue;
+            }
+            out.insert(k.clone(), v.clone());
+        }
+        out
     };
-    crate::yaml::Mapping::from_parser(
-        rendered
-            .into_iter()
-            .filter(|(k, _)| k.as_str().is_none_or(|s| !parent_fields.contains(&s)))
-            .collect(),
-    )
+    crate::yaml::Mapping::from_parser(rendered)
 }
 
-/// [`render_nested_options`]; `with_paths` also renders the mapping's own
-/// `paths:` (a nested spec inside a nested spec list) as globs, and its
-/// `message:` as [`render_nested_message`] does.
-fn render_options(
+fn render_options_ref(
     kind: &str,
-    m: ayaml::Mapping,
+    m: &ayaml::Mapping,
     tokens: &PathTokens,
     with_paths: bool,
+    skip_fields: &[&str],
 ) -> ayaml::Mapping {
     const PATHS: &[&str] = &["paths", "paths.include", "paths.exclude"];
     const SCOPE_FILTER_REGEXES: &[&str] = &[
@@ -1789,6 +1837,9 @@ fn render_options(
         "scope_filter.include_manifest_paths.derive_target.to",
         "scope_filter.exclude_manifest_paths.derive_target.to",
     ];
+    if m.is_empty() {
+        return ayaml::Mapping::new();
+    }
     let syntax = OptionSyntax::of(kind);
     let spec_list = NESTED_SPEC_LISTS
         .iter()
@@ -1796,17 +1847,20 @@ fn render_options(
         .map(|(_, key)| *key);
     let mut out = ayaml::Mapping::with_capacity(m.len());
     for (k, v) in m {
-        let key = k.as_str().unwrap_or_default().to_string();
-        let v = if spec_list == Some(key.as_str()) {
-            render_nested_spec_list(v, tokens)
+        let key = k.as_str().unwrap_or_default();
+        if !skip_fields.is_empty() && !key.is_empty() && skip_fields.contains(&key) {
+            continue;
+        }
+        let rendered_val = if spec_list == Some(key) {
+            render_nested_spec_list_ref(v, tokens)
         } else if with_paths
             && key == "message"
-            && let ayaml::Value::String(message) = &v
+            && let ayaml::Value::String(message) = v
         {
             ayaml::Value::String(render_nested_message(kind, message, tokens))
         } else if with_paths
             && key == "when"
-            && let ayaml::Value::String(when) = &v
+            && let ayaml::Value::String(when) = v
         {
             ayaml::Value::String(render_path_when_expr(when, tokens))
         } else if with_paths && key == "paths" {
@@ -1814,7 +1868,7 @@ fn render_options(
                 globs: PATHS,
                 ..syntax
             };
-            render_keyed(v, &key, paths, tokens)
+            render_keyed_ref(v, key, paths, tokens)
         } else if with_paths && key == "scope_filter" {
             let sf = OptionSyntax {
                 globs: &[],
@@ -1826,11 +1880,11 @@ fn render_options(
                 replacements: SCOPE_FILTER_REPLACEMENTS,
                 key_patterns: &[],
             };
-            render_keyed(v, &key, sf, tokens)
+            render_keyed_ref(v, key, sf, tokens)
         } else {
-            render_keyed(v, &key, syntax, tokens)
+            render_keyed_ref(v, key, syntax, tokens)
         };
-        out.insert(k, v);
+        out.insert(k.clone(), rendered_val);
     }
     out
 }
@@ -1839,84 +1893,77 @@ fn render_options(
 /// `at` is read: glob-escaping, regex-escaping, `JSONPath`-escaping,
 /// `when_iter`-escaping, keyword-path disambiguation, command argument,
 /// replacement template, key-path pattern, or literally.
-fn render_keyed(
-    v: ayaml::Value,
+fn render_keyed_ref(
+    v: &ayaml::Value,
     at: &str,
     syntax: OptionSyntax,
     tokens: &PathTokens,
 ) -> ayaml::Value {
     use ayaml::Value;
     match v {
-        Value::String(s) if syntax.globs.contains(&at) => {
-            Value::String(match s.strip_prefix('!') {
-                Some(rest) => format!("!{}", render_path_glob(rest, tokens)),
-                None => render_path_glob(&s, tokens),
-            })
-        }
-        Value::String(s) if syntax.regexes.contains(&at) => {
-            Value::String(render_path_regex(&s, tokens))
-        }
-        Value::String(s) if syntax.jsonpaths.contains(&at) => {
-            Value::String(render_path_jsonpath(&s, tokens))
-        }
-        Value::String(s) if syntax.when_exprs.contains(&at) => {
-            Value::String(render_path_when_expr(&s, tokens))
-        }
-        Value::String(s) if syntax.argv.contains(&at) => {
-            Value::String(render_path_argv(&s, tokens))
-        }
-        Value::String(s) if syntax.replacements.contains(&at) => {
-            Value::String(render_path_replacement(&s, tokens))
-        }
-        Value::String(s) if syntax.key_patterns.contains(&at) => {
-            Value::String(render_path_key_pattern(&s, tokens))
-        }
         Value::String(s) => {
-            if let Some((_, keywords)) = syntax.keyword_paths.iter().find(|(k, _)| *k == at) {
-                Value::String(render_path_keyword_path(&s, tokens, keywords))
+            if !s.contains('{') {
+                return Value::String(s.clone());
+            }
+            if syntax.globs.contains(&at) {
+                Value::String(match s.strip_prefix('!') {
+                    Some(rest) => format!("!{}", render_path_glob(rest, tokens)),
+                    None => render_path_glob(s, tokens),
+                })
+            } else if syntax.regexes.contains(&at) {
+                Value::String(render_path_regex(s, tokens))
+            } else if syntax.jsonpaths.contains(&at) {
+                Value::String(render_path_jsonpath(s, tokens))
+            } else if syntax.when_exprs.contains(&at) {
+                Value::String(render_path_when_expr(s, tokens))
+            } else if syntax.argv.contains(&at) {
+                Value::String(render_path_argv(s, tokens))
+            } else if syntax.replacements.contains(&at) {
+                Value::String(render_path_replacement(s, tokens))
+            } else if syntax.key_patterns.contains(&at) {
+                Value::String(render_path_key_pattern(s, tokens))
+            } else if let Some((_, keywords)) = syntax.keyword_paths.iter().find(|(k, _)| *k == at)
+            {
+                Value::String(render_path_keyword_path(s, tokens, keywords))
             } else {
-                Value::String(render_path(&s, tokens))
+                Value::String(render_path(s, tokens))
             }
         }
         Value::Sequence(seq) => Value::Sequence(
-            seq.into_iter()
-                .map(|e| render_keyed(e, at, syntax, tokens))
+            seq.iter()
+                .map(|e| render_keyed_ref(e, at, syntax, tokens))
                 .collect(),
         ),
         Value::Mapping(m) => Value::Mapping(
-            m.into_iter()
+            m.iter()
                 .map(|(k, v)| {
                     let sub = match k.as_str() {
                         Some(name) => format!("{at}.{name}"),
                         None => at.to_string(),
                     };
-                    (k, render_keyed(v, &sub, syntax, tokens))
+                    (k.clone(), render_keyed_ref(v, &sub, syntax, tokens))
                 })
                 .collect(),
         ),
-        other => other,
+        other => other.clone(),
     }
 }
 
 /// Render a list of nested rule specs, each for its own `kind` (its `paths:`
 /// as globs too).
-fn render_nested_spec_list(v: ayaml::Value, tokens: &PathTokens) -> ayaml::Value {
+fn render_nested_spec_list_ref(v: &ayaml::Value, tokens: &PathTokens) -> ayaml::Value {
     use ayaml::Value;
     let Value::Sequence(seq) = v else {
-        return render_value(v, tokens);
+        return render_value(v.clone(), tokens);
     };
     Value::Sequence(
-        seq.into_iter()
+        seq.iter()
             .map(|item| match item {
                 Value::Mapping(spec) => {
-                    let kind = spec
-                        .get("kind")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_string();
-                    Value::Mapping(render_options(&kind, spec, tokens, true))
+                    let kind = spec.get("kind").and_then(Value::as_str).unwrap_or_default();
+                    Value::Mapping(render_options_ref(kind, spec, tokens, true, &[]))
                 }
-                other => render_value(other, tokens),
+                other => render_value(other.clone(), tokens),
             })
             .collect(),
     )
