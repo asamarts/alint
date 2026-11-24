@@ -221,3 +221,58 @@ fn an_indentation_mistake_gets_a_hint() {
         assert!(!error.contains(HINT), "{text:?}: {error}");
     }
 }
+
+/// #572: `vars:` rejects duplicate keys, and every duplicate-entry / duplicate-field
+/// error points at the repeated key rather than the mapping's first key.
+#[test]
+fn duplicate_keys_in_vars_and_mappings_point_at_the_repeated_key() {
+    // 1. Flow `vars:` duplicate key on line 2, repeated `a` at column 20.
+    let flow_vars = "version: 1\nvars: {a: 1, b: 2, a: 3}\nrules: []\n";
+    for err in [
+        load_error(flow_vars),
+        crate::parse(flow_vars).unwrap_err().to_string(),
+    ] {
+        assert!(
+            err.contains("duplicate entry with key \"a\""),
+            "expected duplicate vars error: {err}"
+        );
+        assert!(
+            err.contains("at line 2 column 20"),
+            "expected repeated `a` at line 2 column 20: {err}"
+        );
+    }
+
+    // 2. Block `vars:` duplicate key points at line 5 column 3 (not line 3).
+    let block_vars = "version: 1\nvars:\n  a: one\n  b: two\n  a: three\nrules: []\n";
+    let err = load_error(block_vars);
+    assert!(
+        err.contains("duplicate entry with key \"a\"") && err.contains("at line 5 column 3"),
+        "expected line 5 column 3: {err}"
+    );
+
+    // 3. Duplicate key inside a rule mapping points at line 8 column 5 (not line 3 column 5).
+    let dup_rule = "version: 1\nrules:\n  - id: r1\n    kind: file_exists\n    paths: a\n    \
+                    level: error\n    message: first\n    message: second\n";
+    let err = load_error(dup_rule);
+    assert!(
+        err.contains("duplicate entry with key \"message\"") && err.contains("at line 8 column 5"),
+        "expected repeated `message` at line 8 column 5: {err}"
+    );
+
+    // 4. Duplicate key inside v2 `selectors:` points at line 5 column 3 (not line 3 column 3).
+    let dup_selector =
+        "version: 2\nselectors:\n  s:\n    paths: a\n  s:\n    paths: b\nrules: []\n";
+    let err = load_error(dup_selector);
+    assert!(
+        err.contains("duplicate entry with key \"s\"") && err.contains("at line 5 column 3"),
+        "expected repeated selector `s` at line 5 column 3: {err}"
+    );
+
+    // 5. Top-level duplicate field points at line 3 column 1 (not line 1 column 1).
+    let dup_top = "version: 1\nrules: []\nrules: []\n";
+    let err = load_error(dup_top);
+    assert!(
+        err.contains("duplicate field `rules`") && err.contains("at line 3 column 1"),
+        "expected repeated `rules` at line 3 column 1: {err}"
+    );
+}

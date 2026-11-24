@@ -112,7 +112,7 @@ pub(crate) fn decode_stage(yaml: &str) -> Result<()> {
     if super::dispatch(Some(&document), yaml, &origin)? != super::Surface::V2 {
         return Err(Error::Other(".alint.yml: not a version 2 config".into()));
     }
-    super::check_document(&document, ".alint.yml")?;
+    super::check_document(&document, yaml, ".alint.yml")?;
     let decoded: super::Document = crate::core_yaml::decode(document)
         .map_err(|error| Error::Other(format!(".alint.yml: {error}")))?;
     let source = SourceId {

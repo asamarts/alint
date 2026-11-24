@@ -558,8 +558,33 @@ fn a_config_syntax_error_is_placed_where_it_is() {
         "a syntax error is not a trust limit"
     );
 
-    // A typed error has no place of its own in the file: line 0.
+    // A typed config error naming an unknown key is placed on that key (#571).
     std::fs::write(&config, "version: 1\nrulez: []\n").unwrap();
+    let check = check_workspace(
+        &[dir.path().to_path_buf()],
+        &[],
+        &untrusted(),
+        &alint_rules::builtin_registry(),
+    );
+    let applied = apply_check(&mut state, &[], check, &LspOptions::default());
+    let (_, diagnostics, _) = applied
+        .publish
+        .iter()
+        .find(|(published, _, _)| *published == uri)
+        .unwrap();
+    assert_eq!(
+        diagnostics[0].range,
+        Range::new(Position::new(1, 0), Position::new(1, 5))
+    );
+
+    // An error with no key span in this file still falls back to line 0.
+    let child = dir.path().join("child.yml");
+    std::fs::write(&child, "version: 1\nrulez: []\n").unwrap();
+    std::fs::write(
+        &config,
+        "version: 1\nextends:\n  - ./child.yml\nrules: []\n",
+    )
+    .unwrap();
     let check = check_workspace(
         &[dir.path().to_path_buf()],
         &[],

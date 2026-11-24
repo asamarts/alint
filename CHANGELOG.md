@@ -26,6 +26,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   reached instead of allocating unbounded findings. Raise `limits.findings_per_rule` in your
   top-level `.alint.yml` (up to `1,000,000`) if a repository legitimately exceeds the default
   (#596).
+- Duplicate keys inside top-level `vars:` (for example `vars: {a: 1, b: 2, a: 3}`) are now
+  rejected as config errors instead of silently keeping the last value, matching every other
+  mapping in `.alint.yml` (#572).
 
 ### Added
 
@@ -46,9 +49,42 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and reconnects open editor tabs when project trust is granted or revoked without starting stopped
   servers or re-enabling disabled ones, and covers both trust states in headless integration tests
   (#545).
+- Corpus replay workflow (`.github/workflows/corpus-replay.yml` and `xtask corpus-replay`) now
+  supports an opt-in `compare_mode` input (`--yaml-compare` / `--yaml-compare-log`) that builds
+  `alint` with `alint-core/yaml-reference`, runs under `ALINT_YAML_PARSER=compare`, and uploads
+  the YAML compare log artifact (#549).
+- `xtask bench-scale` now records optional backward-compatible `peak_rss_kb` measurements (via
+  `/usr/bin/time`) and adds an opt-in `SYAML` scenario (50 ~37 KB plus 3 ~1 MB OpenAPI-shaped
+  YAML documents with two structured YAML rules), excluded from default runs and published
+  history until baselined (#550).
+- `alint lsp` now places config load and rule-build errors at the exact key path they name in
+  `.alint.yml` (such as `rules[3].paths`, `relations.r.fields.name.at`, `selectors.s.paths`,
+  `extends[0].as`, unknown keys, duplicate keys, and rule/fact/template ids with UTF-16 ranges),
+  falling back to file start for errors originating in extended or drop-in files (#571).
 
 ### Changed
 
+- Upgraded `ayaml` from `=0.2.2` to `=0.2.3`, migrated deprecated `*_with_limits` calls onto
+  `compat::ParseOptions::with_limits`, adopted `ayaml::Error::masked()` on redacted error paths,
+  migrated `structured_fix::yaml_`, `extract::yaml_rows`, and `pinned_references` onto `ayaml`'s
+  spanned event stream and native UTF-8 byte spans, and removed `saphyr` and `saphyr-parser` from
+  default release builds (`saphyr` stays test-only behind `alint-core/yaml-reference`; enforced by
+  `ci/scripts/yaml-reference-gate.sh` and verified by an `ayaml` vs `saphyr-parser` event-stream
+  differential check, #614).
+- Structured-document rules (`*_path_*`, `json_schema_passes`, `file_graph`,
+  `registry_paths_resolve`) now share parsed `Arc`-backed document trees (`SharedValue`) across
+  rules via `Context::parse_structured`: multi-rule per-file dispatch and `Engine::run_for_file`
+  share a stack-local per-file cache with zero cross-worker contention, single-rule files bypass
+  caching, and cross-file runs share a memory-budgeted LRU cache bounded by
+  `YAML_PARSE_BUDGET_BYTES` (#548).
+- Alias-amplified YAML documents parsed via `Format::parse_shared` / `Context::parse_structured`
+  now transition their parse reservation atomically into a `Send + Sync` `RetainedLease` held for
+  the lifetime of the live `SharedValue` (and are never pinned strongly in the idle LRU cache),
+  bounding concurrent live alias-expanded trees across parallel workers (#582).
+- Duplicate keys in `vars:` are now rejected, duplicate-entry and duplicate-field YAML config
+  errors now report the exact 1-based line and column of the repeated key rather than the mapping's
+  first key (#572), and unknown top-level keys in `version: 2` configs now report their 1-based
+  line and column (#566).
 - Remote `extends:` cache directory resolution (`alint-dsl`) now uses an internal platform helper
   (`XDG_CACHE_HOME` / `HOME` on Unix, `Library/Caches/org.asamarts.alint` on macOS,
   `LOCALAPPDATA` / `USERPROFILE` on Windows), removing `directories`, `dirs-sys`, `option-ext`,
