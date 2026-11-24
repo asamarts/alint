@@ -7,9 +7,9 @@
 #   - an instruction breach (gungraun "Regressed") and a syscall family over the
 #     allowance each exit 1 with a labelled verdict; a count within the
 #     allowance passes;
-#   - the `probe` family's allowance grows by 3 for each directory in the tree
-#     (outside `.git`) and 5 for each one above it, and no other family's does
-#     (ADR-0045);
+#   - the `probe` family uses the same fixed 32-call allowance as every other
+#     syscall family (ADR-0048 decision 5a retired ADR-0045's per-directory
+#     probe allowance once the owned parallel walker landed, #573);
 #   - a gate that cannot measure is a labelled tooling failure, never a pass: a
 #     missing reference tag, a det_check run with no result line, a non-zero
 #     exit without a regression verdict, a missing S1-S3 cell, a cell with no
@@ -251,27 +251,23 @@ else
   bad "syscall allowance (rc=$rc)"
 fi
 
-echo "==> probes: 32, 3 per directory in the tree (not .git) and 5 per one above it"
-# The stub tree holds the root, a, a/b and c (and .git/objects, not counted).
-tree_path="$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$repo/target/det-trees/s1-10000")"
-above="$(python3 -c 'import sys; print(len(sys.argv[1].strip("/").split("/")))' "$tree_path")"
-probe_allowance=$((32 + 3 * 4 + 5 * above))
-run_gate STUB_HEAD_EXTRA_PROBES="$probe_allowance"
+echo "==> probes: fixed 32-call allowance (ADR-0045 per-directory allowance retired)"
+run_gate STUB_HEAD_EXTRA_PROBES=32
 if [[ $rc -eq 0 ]] \
-  && has summary "| s2_10k | probe | 10 | $((10 + probe_allowance)) | ${probe_allowance} | ${probe_allowance} |"; then
-  ok "probes at the per-directory allowance pass"
+  && has summary "| s2_10k | probe | 10 | 42 | 32 | 32 |"; then
+  ok "32 extra probe calls are within the fixed allowance"
 else
   bad "probe allowance (rc=$rc)"
 fi
-run_gate STUB_HEAD_EXTRA_PROBES="$((probe_allowance + 1))"
-if [[ $rc -eq 1 ]] && has summary "| s1_10k | probe | 10 | $((11 + probe_allowance)) | $((probe_allowance + 1)) (over) |"; then
-  ok "one probe over the allowance fails"
+run_gate STUB_HEAD_EXTRA_PROBES=33
+if [[ $rc -eq 1 ]] && has summary "| s1_10k | probe | 10 | 43 | 33 (over) | 32 |"; then
+  ok "33 extra probe calls fail the fixed allowance"
 else
   bad "probe breach (rc=$rc)"
 fi
 run_gate STUB_HEAD_EXTRA_STATS=33 STUB_HEAD_EXTRA_PROBES=0
 if [[ $rc -eq 1 ]] && has summary '| s1_10k | stat | 100 | 133 | 33 (over) | 32 |'; then
-  ok "the per-directory allowance is the probe family's alone"
+  ok "33 extra stat calls fail the fixed allowance"
 else
   bad "stat allowance with directories (rc=$rc)"
 fi

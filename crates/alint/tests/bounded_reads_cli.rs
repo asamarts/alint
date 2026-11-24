@@ -232,14 +232,6 @@ fn cases() -> Vec<Case> {
             },
         },
         Case {
-            name: "a .gitignore above the root, a symlink to /dev/zero",
-            build: |tmp, _| {
-                let file = tmp.join(".gitignore");
-                symlink(Path::new("/dev/zero"), &file);
-                Some((plain_root(tmp), file))
-            },
-        },
-        Case {
             name: "the global excludes file, a sparse file past the cap",
             build: |tmp, gitconfig| {
                 let file = tmp.join("global-excludes");
@@ -253,6 +245,112 @@ fn cases() -> Vec<Case> {
             },
         },
     ]
+}
+
+/// Per ADR-0048 decision 5b (#568), unreadable, non-regular, or oversize
+/// ignore files *above* the checked root are skipped with a visible warning
+/// rather than aborting the walk, while outside any repository parent ignore
+/// files are not read at all.
+#[test]
+fn bad_ignore_files_above_the_root_warn_and_skip_without_blocking() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    // 1. Non-regular `.gitignore` (symlink to /dev/zero) in enclosing repo
+    //    above a checked subdirectory: exit 0 with a visible stderr warning.
+    {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let gitconfig = home.path().join("gitconfig");
+        std::fs::write(&gitconfig, "").unwrap();
+        let repo = tmp.path().join("mono");
+        std::fs::create_dir_all(repo.join(".git/info")).unwrap();
+        let bad = repo.join(".gitignore");
+        symlink(Path::new("/dev/zero"), &bad);
+        let pkg = repo.join("pkg");
+        write(&pkg, ".alint.yml", CONFIG);
+        write(&pkg, "README.md", "# x\n");
+        let (code, stderr) = check(&pkg, home.path(), &gitconfig).expect("within the deadline");
+        assert_eq!(code, Some(0), "stderr: {stderr}");
+        assert!(
+            stderr.contains("alint: warning:")
+                && stderr.contains(&bad.file_name().unwrap().to_string_lossy().into_owned())
+                && stderr.contains("not a regular file"),
+            "expected visible warning naming bad parent .gitignore: {stderr}"
+        );
+    }
+
+    // 2. Oversize sparse `.ignore` above a repository: exit 0 with a visible
+    //    stderr warning naming the 32 MiB cap.
+    {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let gitconfig = home.path().join("gitconfig");
+        std::fs::write(&gitconfig, "").unwrap();
+        let bad = tmp.path().join(".ignore");
+        sparse(&bad);
+        let root = repository_root(tmp.path());
+        let (code, stderr) = check(&root, home.path(), &gitconfig).expect("within the deadline");
+        assert_eq!(code, Some(0), "stderr: {stderr}");
+        assert!(
+            stderr.contains("alint: warning:")
+                && stderr.contains(".ignore")
+                && stderr.contains("32 MiB"),
+            "expected visible warning naming oversize parent .ignore: {stderr}"
+        );
+    }
+
+    // 3. `.gitignore -> /dev/zero` above a plain directory outside any repo:
+    //    never read, exits 0 cleanly without OOM or hang.
+    {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let gitconfig = home.path().join("gitconfig");
+        std::fs::write(&gitconfig, "").unwrap();
+        symlink(Path::new("/dev/zero"), &tmp.path().join(".gitignore"));
+        let root = plain_root(tmp.path());
+        let (code, stderr) = check(&root, home.path(), &gitconfig).expect("within the deadline");
+        assert_eq!(code, Some(0), "stderr: {stderr}");
+    }
+
+    // 4. Unreadable (`chmod 000`) `.gitignore`: warns & skips above root, fails
+    //    strictly (exit 2) inside root.
+    {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let gitconfig = home.path().join("gitconfig");
+        std::fs::write(&gitconfig, "").unwrap();
+        let repo = tmp.path().join("mono");
+        std::fs::create_dir_all(repo.join(".git/info")).unwrap();
+        write(&repo, ".alint.yml", CONFIG);
+        write(&repo, "README.md", "# x\n");
+        write(&repo, ".gitignore", "*.log\n");
+        let pkg = repo.join("pkg");
+        write(&pkg, ".alint.yml", CONFIG);
+        write(&pkg, "README.md", "# x\n");
+        let bad = repo.join(".gitignore");
+        std::fs::set_permissions(&bad, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let running_as_root = std::fs::read(&bad).is_ok();
+        if !running_as_root {
+            let (code, stderr) = check(&pkg, home.path(), &gitconfig).expect("within the deadline");
+            assert_eq!(code, Some(0), "above-root unreadable should warn: {stderr}");
+            assert!(
+                stderr.contains("alint: warning:") && stderr.contains(".gitignore"),
+                "expected visible warning: {stderr}"
+            );
+            let (code, stderr) =
+                check(&repo, home.path(), &gitconfig).expect("within the deadline");
+            assert_eq!(
+                code,
+                Some(2),
+                "inside-root unreadable should fail: {stderr}"
+            );
+            assert!(
+                stderr.contains("the walk does not read the ignore file"),
+                "expected strict refusal: {stderr}"
+            );
+        }
+        std::fs::set_permissions(&bad, std::fs::Permissions::from_mode(0o644)).unwrap();
+    }
 }
 
 #[test]

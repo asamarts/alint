@@ -389,6 +389,7 @@ pub(super) fn cmd_facts(path: &Path, cli: &Cli) -> Result<ExitCode> {
         .with_respect_gitignore(effective_gitignore)
         .with_extra_ignores(loaded.extra_ignores);
     let index = walk(&root, &walk_opts).context("walking repository")?;
+    crate::config_cmd::report_walk_warnings(&index);
     let values =
         alint_core::evaluate_facts(&loaded.facts, &root, &index).context("evaluating facts")?;
 
@@ -710,6 +711,7 @@ fn run_explain_trace(
             .with_extra_ignores(extra_ignores),
     )
     .context("walking repository for rule trace")?;
+    crate::config_cmd::report_walk_warnings(&index);
     let trace_options = match options.preview_limit {
         Some(limit) => alint_core::TraceOptions::with_preview(limit)?,
         None => alint_core::TraceOptions::counts_only(),

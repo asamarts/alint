@@ -212,6 +212,7 @@ pub(super) fn cmd_check(
         .with_extra_ignores(extra_ignores);
 
     let index = walk(&root, &walk_opts).context("walking repository")?;
+    crate::config_cmd::report_walk_warnings(&index);
     tracing::debug!(files = index.entries.len(), "walk complete");
 
     let report = engine.run(&root, &index).context("running rules")?;
@@ -535,6 +536,7 @@ pub(super) fn cmd_baseline(
         })
         .with_extra_ignores(extra_ignores);
     let index = walk(&root, &walk_opts).context("walking repository")?;
+    crate::config_cmd::report_walk_warnings(&index);
     let report = engine.run(&root, &index).context("running rules")?;
     if report.total_analysis_failures() > 0 {
         let count = report.total_analysis_failures();

@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0048
 date: 2026-11-17
 decision-makers: asamarts
 ---
@@ -8,9 +8,11 @@ decision-makers: asamarts
 
 ## Status
 
-Accepted (2026-11-17). Amends [ADR-0024](0024-relation-ir-decisions-after-review.md) decision 6:
-its allowance of 32 calls per syscall family stays, and a new `probe` family may also grow with
-the directories the walk checks.
+Superseded by [ADR-0048](0048-v024-owner-decisions.md) decision 5a (2026-11-24, #573): the owned
+parallel walker inspects ignore files directly from each directory's listing with open-then-`fstat`
+checks, eliminating the per-directory `stat` probes and retiring the per-directory `probe`
+allowance in `ci/scripts/reference-perf-gate.sh`. Originally accepted (2026-11-17), amending
+[ADR-0024](0024-relation-ir-decisions-after-review.md) decision 6.
 
 ## Context
 

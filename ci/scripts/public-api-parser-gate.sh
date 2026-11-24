@@ -147,8 +147,8 @@ PLATFORM_ALLOWLIST=(
   "crates/alint-core/src/baseline.rs|cfg(not(any(unix, windows)))|fn normalize_path"
   "crates/alint-core/src/baseline.rs|cfg(unix)|fn normalize_path|use"
   "crates/alint-core/src/baseline.rs|cfg(windows)|fn normalize_path"
-  "crates/alint-core/src/walker.rs|cfg(not(unix))|fn is_eloop"
-  "crates/alint-core/src/walker.rs|cfg(unix)|fn is_eloop|cfg!, const"
+  "crates/alint-core/src/walker_parallel.rs|cfg(not(unix))|fn is_eloop_io"
+  "crates/alint-core/src/walker_parallel.rs|cfg(unix)|fn is_eloop_io|cfg!, const"
   "crates/alint-testkit/src/confinement.rs|cfg(not(unix))|fn validate_regular_metadata"
   "crates/alint-testkit/src/confinement.rs|cfg(unix)|fn validate_regular_metadata|use"
   # Debug-build checks: private assertions on the rule registry and the fix

@@ -50,6 +50,7 @@ impl Scan {
         let phase = progress.phase("Walking repository", None);
         let index = walk(root, &WalkOptions::default())
             .with_context(|| format!("walking {}", root.display()))?;
+        crate::config_cmd::report_walk_warnings(&index);
         let n = index.entries.len();
         phase.finish(&format!("Walked {n} entries"));
 

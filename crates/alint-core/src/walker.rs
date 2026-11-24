@@ -1,18 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 
-use ignore::{
-    ParallelVisitor, ParallelVisitorBuilder, WalkBuilder, WalkState, overrides::OverrideBuilder,
-};
+use ignore::overrides::OverrideBuilder;
 
 use crate::error::{Error, Result};
-
-/// Shared, thread-safe sink for the walk's escaping-symlink side-list (M4):
-/// `filter_entry` (parallel) pushes each pruned escaping symlink's relative
-/// path; `walk` drains it into the [`FileIndex`]. A second one collects the
-/// symlinks it follows.
-type EscapingSink = Arc<Mutex<Vec<Arc<Path>>>>;
 
 /// Hard cap on a single whole-file read by the per-file engine/rule loops
 /// and the direct-read structured-query kinds. Generous — every realistic
@@ -276,6 +268,10 @@ pub struct FileIndex {
     /// from entries. `git_tracked_only` reads them to find the tracked files
     /// that ignore files hid ([`tracked_entries_ignore_files_hid`]).
     walk_options: Option<WalkOptions>,
+    /// Visible warnings produced during the walk (for example skipped
+    /// unreadable, non-regular, or oversize ignore files above the checked
+    /// root, #568). Empty for indexes built directly from entries.
+    walk_warnings: Vec<String>,
 }
 
 impl FileIndex {
@@ -314,7 +310,16 @@ impl FileIndex {
             relation_limits: OnceLock::new(),
             relation_memo: std::sync::Mutex::new(None),
             walk_options: None,
+            walk_warnings: Vec::new(),
         }
+    }
+
+    /// Visible warnings produced during the walk (such as unreadable,
+    /// non-regular, or oversize ignore files above the checked root that were
+    /// skipped rather than failing the walk, #568).
+    #[must_use]
+    pub fn walk_warnings(&self) -> &[String] {
+        &self.walk_warnings
     }
 
     /// Symlinks whose target escapes the repo root or leads into a Git directory
@@ -1133,65 +1138,18 @@ fn walk_with_confinement(
     confinement_root: &Path,
     opts: &WalkOptions,
 ) -> Result<FileIndex> {
-    let (builder, escaping, followed, refused) = build_walk_builder(root, confinement_root, opts)?;
+    let parallel::WalkOutput {
+        entries,
+        escaping_symlinks,
+        followed_symlinks,
+        warnings,
+    } = parallel::walk_tree(root, confinement_root, opts)?;
 
-    // Per-thread accumulators land in `out_entries`; the first
-    // error wins and stops the walk via `WalkState::Quit` (the
-    // worker that sees it sets the slot, others poll it on each
-    // visit and bail). Single-writer semantics keep the lock
-    // cost low — it's held once per worker on push, not per
-    // entry.
-    let out_entries: Arc<Mutex<Vec<Vec<FileEntry>>>> = Arc::new(Mutex::new(Vec::new()));
-    let error_slot: Arc<Mutex<Option<Error>>> = Arc::new(Mutex::new(None));
-    let root_owned: Arc<PathBuf> = Arc::new(root.to_path_buf());
-
-    let mut visitor_builder = WalkVisitorBuilder {
-        root: Arc::clone(&root_owned),
-        error_slot: Arc::clone(&error_slot),
-        out_entries: Arc::clone(&out_entries),
-    };
-    builder.build_parallel().visit(&mut visitor_builder);
-
-    if let Some(err) = error_slot.lock().expect("walker error slot lock").take() {
-        return Err(err);
-    }
-    if let Some(refused) = refused.lock().expect("walker refused-file lock").take() {
-        return Err(refused.into_error());
-    }
-
-    // Flatten the per-thread `Vec`s into one `Vec`. We deliberately
-    // do NOT preserve insertion order across threads — the
-    // sort_unstable_by below restores a deterministic ordering by
-    // relative path, which is the contract callers (snapshot tests,
-    // formatters) actually depend on.
-    let mut entries: Vec<FileEntry> = out_entries
-        .lock()
-        .expect("walker out-entries lock")
-        .drain(..)
-        .flatten()
-        .collect();
-    entries.sort_unstable_by(|a, b| a.path.cmp(&b.path));
-
-    // M4: the escaping/broken symlinks the filter pruned. Sort + dedup for a
-    // deterministic side-list (the walk is parallel, order is non-deterministic).
-    let mut escaping_symlinks: Vec<Arc<Path>> = escaping
-        .lock()
-        .expect("walker escaping-symlink lock")
-        .drain(..)
-        .collect();
-    escaping_symlinks.sort_unstable();
-    escaping_symlinks.dedup();
     let mut index = FileIndex::from_entries_with_escaping(entries, escaping_symlinks);
     record_index_scans(u64::try_from(index.entries.len()).unwrap_or(u64::MAX));
-    let mut followed: Vec<Arc<Path>> = followed
-        .lock()
-        .expect("walker followed-symlink lock")
-        .drain(..)
-        .collect();
-    followed.sort_unstable();
-    followed.dedup();
-    index.followed_symlinks = Some(followed);
+    index.followed_symlinks = Some(followed_symlinks);
     index.walk_options = Some(opts.clone());
+    index.walk_warnings = warnings;
     Ok(index)
 }
 
@@ -1845,340 +1803,11 @@ impl<'a> WalkSkips<'a> {
     }
 }
 
-/// The first ignore file the walk refused to let `ignore` read
-/// (`ignore_files::refused_in`), which fails the walk.
-type RefusedSink = Arc<Mutex<Option<ignore_files::Refused>>>;
-
-fn build_walk_builder(
-    root: &Path,
-    confinement_root: &Path,
-    opts: &WalkOptions,
-) -> Result<(WalkBuilder, EscapingSink, EscapingSink, RefusedSink)> {
-    let mut builder = WalkBuilder::new(root);
-    builder
-        .standard_filters(opts.respect_gitignore)
-        .git_global(opts.uses_global_git_excludes())
-        .hidden(false)
-        .follow_links(true);
-    let canonical_root = confinement_root.canonicalize().ok();
-    let canonical_walk_root = if confinement_root == root {
-        canonical_root.clone()
-    } else {
-        root.canonicalize().ok()
-    };
-    // Ignore files stop at the repository boundary, as git's do (ADR-0028). In
-    // a repository, `require_git` makes `.gitignore` and `info/exclude` stop at
-    // the nearest directory holding one (the repository's top, or a nested
-    // repository's), and `parents` reads the in-repository directories above
-    // a root linted from a subdirectory. Outside a repository the root is the
-    // boundary, and the root's own ignore files apply without git.
-    if opts.respect_gitignore {
-        let bounded = in_repository(root);
-        builder.require_git(bounded).parents(bounded);
-        // `ignore` reads these as the walk starts; a device or a FIFO among
-        // them would make that read unbounded.
-        if let Some(refused) = ignore_files::refused_before_walk(
-            root,
-            canonical_walk_root.as_deref(),
-            opts.uses_global_git_excludes(),
-        ) {
-            return Err(refused.into_error());
-        }
-    }
-
-    // Always exclude `.git/` — descending into git's internal
-    // packfiles + loose objects is wasted work for every alint
-    // rule (none of them target `.git/objects/*`), and it races
-    // git's auto-gc / pack-rewrite on large repos. We set
-    // `hidden(false)`, which would otherwise skip `.git/` with
-    // every other dot-directory; this override puts it back.
-    builder.overrides(build_overrides(root, opts)?);
-
-    // Prune symlinks whose target escapes the repo root. With
-    // `follow_links(true)`, a followed out-of-tree symlink would
-    // otherwise be indexed under its in-tree path — and an out-of-tree
-    // symlink-to-dir would have its children descended and indexed too
-    // — letting content rules read outside the tree (the untrusted-PR-
-    // content half of the path-confinement threat; see
-    // `docs/design/v0.12/path-confinement.md`). In-tree symlinks are
-    // still followed. Canonicalising both sides also handles a root
-    // that itself lives under a symlink (e.g. macOS `/tmp` →
-    // `/private/tmp`). Only symlink entries pay the `canonicalize`
-    // syscall; the common non-symlink path is a bare `true`, so the
-    // walk's cost is unchanged for trees without symlinks.
-    // M4 side-list: escaping/broken symlinks, and those into a Git directory,
-    // are pruned from `entries` (below, via the `false` return) so no content
-    // rule reads through them, but their relative paths are recorded here so
-    // `no_symlinks` can still flag them.
-    let escaping: Arc<Mutex<Vec<Arc<Path>>>> = Arc::new(Mutex::new(Vec::new()));
-    let escaping_filter = Arc::clone(&escaping);
-    // The symlinks the walk follows, so a later check knows which indexed paths
-    // the OS reaches through one (`FileIndex::walked_without_symlink`).
-    let followed: EscapingSink = Arc::new(Mutex::new(Vec::new()));
-    let followed_filter = Arc::clone(&followed);
-    let root_for_rel = root.to_path_buf();
-    let refused: RefusedSink = Arc::new(Mutex::new(None));
-    let refused_filter = Arc::clone(&refused);
-    let reads_ignore_files = opts.respect_gitignore;
-    builder.filter_entry(move |entry| {
-        // A directory the walk enters has its ignore files read by `ignore`
-        // first; one it must not read stops the walk (`walk` reports it), and
-        // the directory is not entered.
-        let refuses_ignore_file = || {
-            let refusal = (reads_ignore_files && entry.file_type().is_some_and(|t| t.is_dir()))
-                .then(|| ignore_files::refused_in(entry.path()))
-                .flatten();
-            refusal.is_some_and(|refusal| {
-                if let Ok(mut slot) = refused_filter.lock() {
-                    slot.get_or_insert(refusal);
-                }
-                true
-            })
-        };
-        if !entry.path_is_symlink() {
-            return !refuses_ignore_file();
-        }
-        // A symlink into a Git directory (`src/evil.rs -> ../.git/config`,
-        // `gitdata -> .git`) is pruned the same way: the `.git` override above
-        // leaves out only a component literally named `.git`, so without this
-        // the walk would index the repository's own files under the link's
-        // name, for every rule to read and every content fix to write through.
-        let keep = match (&canonical_root, entry.path().canonicalize()) {
-            (Some(root), Ok(target)) => crate::pathsafe::walk_follows_symlink(root, &target),
-            // Broken / unresolvable symlink (or an un-canonicalisable
-            // root) — can't be safely read anyway; prune it.
-            _ => false,
-        };
-        let sink = if keep {
-            &followed_filter
-        } else {
-            &escaping_filter
-        };
-        if let Ok(rel) = entry.path().strip_prefix(&root_for_rel)
-            && !rel.as_os_str().is_empty()
-            && let Ok(mut v) = sink.lock()
-        {
-            v.push(Arc::from(rel));
-        }
-        keep && !refuses_ignore_file()
-    });
-    Ok((builder, escaping, followed, refused))
-}
-
-/// Whether a walk error is a PER-ENTRY condition to skip (return `Ok(None)`)
-/// rather than a fatal abort of the whole walk: a dangling symlink or a file
-/// that vanished mid-walk (I/O `NotFound`), a symlink cycle, or an ignore file
-/// that could not be read or parsed. Any other error (permission denied on a
-/// directory, ...) is left to propagate.
-fn is_skippable_walk_error(root: &Path, err: &ignore::Error) -> bool {
-    if err.io_error().map(std::io::Error::kind) == Some(std::io::ErrorKind::NotFound) {
-        return true;
-    }
-    is_symlink_loop(err) || is_eloop(err) || is_ignore_file_error(root, err)
-}
-
-/// Whether every part of a walk error names a file above the root. `ignore`
-/// reads the ignore files of every directory above the root before the walk
-/// starts, whether or not it applies them (ADR-0029), and reports a bad line
-/// in one, or a `.git` file it cannot read, as a walk error naming that file
-/// (several make a `Partial`), where an ignore file in the tree only marks its
-/// directory's entry. A bad line is dropped from its matcher either way, so
-/// the walk goes on as git does: git skips a pattern it cannot parse and never
-/// reads outside the repository. An error from the walk itself names an entry
-/// under the root, so it is not one of these. The path decides, not the depth
-/// most walk errors carry: a failed stat on a followed symlink arrives as a
-/// `WithPath` around the `WithDepth`.
-fn is_ignore_file_error(root: &Path, err: &ignore::Error) -> bool {
-    match err {
-        // Every entry the walk yields is under the root, so a path outside it
-        // is one of the files read above it.
-        ignore::Error::WithPath { path, .. } => path.strip_prefix(root).is_err(),
-        ignore::Error::Partial(errs) => {
-            !errs.is_empty() && errs.iter().all(|err| is_ignore_file_error(root, err))
-        }
-        _ => false,
-    }
-}
-
-/// Whether an `ignore` walk error is (or wraps) a symlink-cycle `Loop`. The
-/// `ignore` crate nests the real error under `WithPath` / `WithDepth` /
-/// `WithLineNumber` / `Partial`, and `Loop` carries no `io_error()`, so a
-/// straight `io_error().kind()` check misses it -- unwrap to find it. Catches
-/// the ancestor-based cycles the crate detects itself (`..`, mutual links).
-fn is_symlink_loop(err: &ignore::Error) -> bool {
-    use ignore::Error;
-    match err {
-        Error::Loop { .. } => true,
-        Error::WithPath { err, .. }
-        | Error::WithDepth { err, .. }
-        | Error::WithLineNumber { err, .. } => is_symlink_loop(err),
-        Error::Partial(errs) => errs.iter().any(is_symlink_loop),
-        _ => false,
-    }
-}
-
-/// Whether a walk error is a kernel `ELOOP` (too many levels of symbolic links)
-/// -- a DIRECT self-loop (`ln -s x x`) that the crate's ancestor tracking does
-/// not flag as a `Loop`. `std::io::ErrorKind::FilesystemLoop` is still unstable
-/// (rust #86442), so match the platform errno: 40 on Linux/Android, 62 on
-/// macOS/*BSD. Non-unix targets have no ELOOP here (symlink cycles surface via
-/// the crate's `Loop`), so this is a no-op there.
-#[cfg(unix)]
-fn is_eloop(err: &ignore::Error) -> bool {
-    const ELOOP: i32 = if cfg!(any(target_os = "linux", target_os = "android")) {
-        40
-    } else {
-        62
-    };
-    err.io_error().and_then(std::io::Error::raw_os_error) == Some(ELOOP)
-}
-#[cfg(not(unix))]
-fn is_eloop(_err: &ignore::Error) -> bool {
-    false
-}
-
-/// Convert one `ignore::DirEntry` (or its error) into a
-/// `FileEntry`. Returns `Ok(None)` for entries we deliberately
-/// skip (the walk root itself, or anything outside the root).
-/// The error path produces the same `Error::Io` / `Error::Walk`
-/// variants the sequential walker did, so callers see no
-/// behavioural change.
-fn result_to_entry(
-    root: &Path,
-    result: std::result::Result<ignore::DirEntry, ignore::Error>,
-) -> Result<Option<FileEntry>> {
-    let entry = match result {
-        Ok(entry) => entry,
-        Err(err) => {
-            // Skip a handful of PER-ENTRY conditions rather than aborting the
-            // ENTIRE run (one bad path anywhere must not make a whole repo
-            // un-lintable / un-fixable):
-            //   * a broken (dangling) symlink -- under `follow_links(true)` the
-            //     target can't be stat'd, surfacing as I/O `NotFound`. (The link
-            //     itself is not indexed, so `no_symlinks`/`file_remove` do not see
-            //     it -- a known detection gap, tracked separately.) `NotFound`
-            //     also covers a file that vanished mid-walk (listed then removed).
-            //   * a symlink CYCLE -- `sub/up -> ..`, a self-loop, or a mutual
-            //     loop. The `ignore` crate reports its own `Loop`, and the kernel
-            //     reports `ELOOP` (`FilesystemLoop`); neither is `NotFound`, so
-            //     before this both aborted the run with exit 2 on a single stray
-            //     link. `filter_entry` already prunes the recursion; the emitted
-            //     error just needs to be non-fatal too.
-            //   * a bad ignore file above the root (`a\` in a parent
-            //     directory's `.gitignore`), which git never reads. The same line
-            //     in the tree's own `.gitignore` was already tolerated.
-            // Any OTHER error (permission denied, ...) still propagates and stops
-            // the walk, matching the prior contract.
-            if is_skippable_walk_error(root, &err) {
-                return Ok(None);
-            }
-            return Err(err.into());
-        }
-    };
-    let abs = entry.path();
-    let Ok(rel) = abs.strip_prefix(root) else {
-        return Ok(None);
-    };
-    if rel.as_os_str().is_empty() {
-        return Ok(None);
-    }
-    let metadata = entry.metadata().map_err(|e| Error::Io {
-        path: abs.to_path_buf(),
-        source: std::io::Error::other(e.to_string()),
-    })?;
-    // Index only regular files and directories. A special file (FIFO/named
-    // pipe, socket, char/block device) is not lintable content, and — worse —
-    // opening a FIFO `O_RDONLY` BLOCKS until a writer appears, so a per-file
-    // content rule reading one would hang the whole run forever. `follow_links`
-    // is on, so a symlink to a special file resolves here to its (non-regular)
-    // target and is dropped too. Skip it rather than index it as a size-0 file.
-    if !metadata.is_dir() && !metadata.is_file() {
-        return Ok(None);
-    }
-    Ok(Some(FileEntry {
-        path: Arc::from(rel),
-        is_dir: metadata.is_dir(),
-        size: if metadata.is_file() {
-            metadata.len()
-        } else {
-            0
-        },
-    }))
-}
-
-/// Per-thread visitor: accumulates `FileEntry`s in a thread-
-/// local `Vec`. On `Drop` (one per worker thread, when the
-/// walk finishes), it appends the local `Vec` to the shared
-/// out-entries slot. The lock is held once per worker, not
-/// per entry — keeping it off the hot path.
-struct WalkVisitor {
-    root: Arc<PathBuf>,
-    entries: Vec<FileEntry>,
-    error_slot: Arc<Mutex<Option<Error>>>,
-    out_entries: Arc<Mutex<Vec<Vec<FileEntry>>>>,
-}
-
-impl ParallelVisitor for WalkVisitor {
-    fn visit(&mut self, result: std::result::Result<ignore::DirEntry, ignore::Error>) -> WalkState {
-        // Cheap exit when another worker has already failed:
-        // poll the shared slot once per visit. The lock is
-        // uncontended in the common (no-error) case.
-        if self
-            .error_slot
-            .lock()
-            .expect("walker error slot lock")
-            .is_some()
-        {
-            return WalkState::Quit;
-        }
-        match result_to_entry(&self.root, result) {
-            Ok(Some(entry)) => {
-                self.entries.push(entry);
-                WalkState::Continue
-            }
-            Ok(None) => WalkState::Continue,
-            Err(err) => {
-                let mut slot = self.error_slot.lock().expect("walker error slot lock");
-                if slot.is_none() {
-                    *slot = Some(err);
-                }
-                WalkState::Quit
-            }
-        }
-    }
-}
-
-impl Drop for WalkVisitor {
-    fn drop(&mut self) {
-        let local = std::mem::take(&mut self.entries);
-        if local.is_empty() {
-            return;
-        }
-        if let Ok(mut out) = self.out_entries.lock() {
-            out.push(local);
-        }
-    }
-}
-
-struct WalkVisitorBuilder {
-    root: Arc<PathBuf>,
-    error_slot: Arc<Mutex<Option<Error>>>,
-    out_entries: Arc<Mutex<Vec<Vec<FileEntry>>>>,
-}
-
-impl<'s> ParallelVisitorBuilder<'s> for WalkVisitorBuilder {
-    fn build(&mut self) -> Box<dyn ParallelVisitor + 's> {
-        Box::new(WalkVisitor {
-            root: Arc::clone(&self.root),
-            entries: Vec::new(),
-            error_slot: Arc::clone(&self.error_slot),
-            out_entries: Arc::clone(&self.out_entries),
-        })
-    }
-}
-
 #[path = "walker_ignore_files.rs"]
 mod ignore_files;
+
+#[path = "walker_parallel.rs"]
+mod parallel;
 
 #[path = "walker_relation_caches.rs"]
 mod relation_caches;
