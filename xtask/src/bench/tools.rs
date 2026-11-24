@@ -107,6 +107,8 @@ impl Tool {
             // which precedes the general check-scenario true arm.
             (Self::Alint, Scenario::Sfix, Mode::Fix) => true,
             (Self::Alint, Scenario::Sfix, _) => false,
+            (Self::Alint, Scenario::Syaml, Mode::Full) => true,
+            (Self::Alint, Scenario::Syaml, _) => false,
             (Self::Alint, _, Mode::Fix) => false,
             (Self::Alint, _, _) => true,
             // ls-lint: filename-only, S1 + full only.

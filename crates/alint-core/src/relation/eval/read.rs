@@ -221,21 +221,22 @@ impl Evaluator<'_> {
         bytes: &mut Bytes,
         failures: &mut Failures,
     ) -> Result<Option<Arc<AdapterOutput>>, Stop<AdapterError>> {
-        let (decoded, fresh) =
-            if let Some(decoded) = self.decodes.cached(adapter, resource, &self.limits) {
-                (decoded, false)
-            } else {
-                if matches!(bytes, Bytes::Unread) {
-                    *bytes = self
-                        .bytes(site, resource, failures)
-                        .map_or(Bytes::Unreadable, Bytes::Read);
-                }
-                let Bytes::Read(read) = bytes else {
-                    return Ok(None);
-                };
-                self.decodes
-                    .decode_fresh(adapter, resource, read, &self.limits)
+        let (decoded, fresh) = if let Some(decoded) =
+            self.decodes.cached(adapter, resource, &self.limits)
+        {
+            (decoded, false)
+        } else {
+            if matches!(bytes, Bytes::Unread) {
+                *bytes = self
+                    .bytes(site, resource, failures)
+                    .map_or(Bytes::Unreadable, Bytes::Read);
+            }
+            let Bytes::Read(read) = bytes else {
+                return Ok(None);
             };
+            self.decodes
+                .decode_fresh_in_context(self.ctx, adapter, resource, read, &self.limits)
+        };
         let output = decoded.map_err(|error| match error {
             // Run-wide: no later decode or row can be held either.
             AdapterError::Limit(limit)
@@ -377,7 +378,7 @@ impl Evaluator<'_> {
             Arc::clone(sets.entry(key.to_string()).or_insert_with(|| {
                 Arc::new(
                     crate::scope_filter::read_manifest_confined(self.root, predicate.source())
-                        .and_then(|text| predicate.resolve_set(&text))
+                        .and_then(|text| predicate.resolve_set_with_context(self.ctx, &text))
                         .map(ManifestSet::from_paths),
                 )
             }))

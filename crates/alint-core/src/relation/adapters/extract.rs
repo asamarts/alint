@@ -6,14 +6,14 @@ use std::collections::HashMap;
 use regex::Regex;
 
 use crate::extract::{
-    ByteSpan, EntryValue, Extract, ExtractFailure, JsonSyntax, extract_values_bounded_typed,
-    is_non_literal,
+    ByteSpan, EntryValue, Extract, ExtractFailure, JsonSyntax,
+    extract_values_bounded_typed_with_context, is_non_literal,
 };
 use crate::relation::adapter::{
     Adapter, AdapterError, AdapterNote, AdapterOutput, check_row_count,
 };
 use crate::relation::key_paths::{EntryAt, EntryTable, PathId};
-use crate::relation::limits::{LimitExceeded, LimitKind, Limits};
+use crate::relation::limits::{LimitExceeded, LimitKind, Limits, RunBudget};
 use crate::relation::pointer::Segment;
 use crate::relation::resource::Resource;
 use crate::relation::row::{Row, RowState};
@@ -77,13 +77,25 @@ impl Adapter for ExtractAdapter {
         bytes: &[u8],
         limits: &Limits,
     ) -> Result<AdapterOutput, AdapterError> {
+        self.extract_in_context(None, resource, bytes, limits, &RunBudget::bytes(limits))
+    }
+
+    fn extract_in_context(
+        &self,
+        ctx: Option<&crate::Context<'_>>,
+        resource: &Resource,
+        bytes: &[u8],
+        limits: &Limits,
+        _budget: &RunBudget,
+    ) -> Result<AdapterOutput, AdapterError> {
         // `cross_file` reads every file through `String::from_utf8_lossy`;
         // the wrapper must stay byte-compatible with it.
         let text = String::from_utf8_lossy(bytes);
         let max = limits.get(LimitKind::RowsPerExtractor);
+        let cache_ctx = ctx.map(|c| (c, resource.path().as_path()));
         let values =
-            extract_values_bounded_typed(&self.extract, &text, max).map_err(
-                |error| match error {
+            extract_values_bounded_typed_with_context(cache_ctx, &self.extract, &text, max)
+                .map_err(|error| match error {
                     ExtractFailure::Parse(message) => AdapterError::Parse(message),
                     ExtractFailure::Limit { limit, reached } => {
                         AdapterError::Limit(LimitExceeded {
@@ -92,8 +104,7 @@ impl Adapter for ExtractAdapter {
                             reached,
                         })
                     }
-                },
-            )?;
+                })?;
 
         let mut rows = Vec::new();
         let mut notes = Vec::new();

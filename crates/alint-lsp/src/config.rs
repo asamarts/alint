@@ -342,15 +342,17 @@ impl alint_dsl::EnvironmentProvider for UntrustedEnvironment {
 }
 
 /// Where in `config` a config load or build error sits (#571):
-/// 1. If `config` itself does not parse as YAML (syntax or duplicate key),
-///    places the diagnostic at the YAML error's line and column.
-/// 2. Otherwise, if `message` belongs to `config` (not another file in an
-///    `extends:` chain or `.alint.d/` drop-in) and names a key path
-///    (`rules[3].paths`, `relations.r.fields.name.at`, `selectors.s.paths`,
-///    `extends[0].as`, an unknown key, or a rule/fact/template id), resolves
-///    that path in `config` to its UTF-16 LSP [`Range`].
-/// 3. Falls back to an inline `at line L column C` location when attributed to
-///    `config`, else `None` (file start).
+/// 1. Ensures `message` belongs to `config` itself (not another file in an
+///    `extends:` chain, `.alint.d/` drop-in, nested config, or redacted path),
+///    returning `None` (file start) for foreign errors.
+/// 2. If `message` is a duplicate-key / duplicate-field error, highlights the
+///    full repeated key token in `config` as a UTF-16 LSP [`Range`].
+/// 3. Otherwise, if `message` names a key path (`rules[3].paths`,
+///    `relations.r.fields.name.at`, `selectors.s.paths`, `extends[0].as`,
+///    an unknown key, or a rule/fact/template id), resolves that path in
+///    `config` to its UTF-16 LSP [`Range`].
+/// 4. Falls back to an inline `at line L column C` location when attributed to
+///    `config`, else a guarded YAML syntax parse of `config`, else `None`.
 fn config_error_range(config: &Path, message: &str) -> Option<Range> {
     use alint_dsl::ConfigSourceProvider as _;
     // Read as the loader reads a config: only a regular file within the size
@@ -362,25 +364,44 @@ fn config_error_range(config: &Path, message: &str) -> Option<Range> {
 }
 
 fn config_error_range_in_text(config: &Path, text: &str, message: &str) -> Option<Range> {
-    if let Err(error) = alint_core::yaml::from_str::<alint_core::yaml::Value>(text)
-        && let Some(location) = error.location()
-    {
-        return line_col_to_range(text, location.line(), location.column());
-    }
+    // Strip a single leading UTF-8 BOM to match `diagnostics::TextSource` and
+    // editor buffer columns.
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let body = strip_own_file_prefix(config, message)?;
+    if let Some(span) = alint_core::yaml::locate_duplicate_key_span(text, body)
+        && let Some(range) = byte_span_to_range(text, span)
+    {
+        return Some(range);
+    }
     if let Some(segments) = extract_error_key_path(body)
         && let Some(span) = alint_core::yaml::locate_config_path_span(text, &segments)
         && let Some(range) = byte_span_to_range(text, span)
     {
         return Some(range);
     }
-    let (line, col) = extract_line_column(body)?;
-    line_col_to_range(text, line, col)
+    if let Some((line, col)) = extract_line_column(body) {
+        return line_col_to_range(text, line, col);
+    }
+    // Last-resort fallback: re-parse `text` for a syntax location only after
+    // pre-parse flow/alias guards pass so an alias/flow bomb never materializes
+    // here.
+    let scan = alint_core::yaml_depth::scan_guards(text);
+    if scan.flow_within_limit()
+        && scan.expansion_within_limit(text)
+        && let Err(error) = alint_core::yaml::from_str::<alint_core::yaml::Value>(text)
+        && let Some(location) = error.location()
+    {
+        return line_col_to_range(text, location.line(), location.column());
+    }
+    None
 }
 
 fn line_col_to_range(text: &str, line: usize, column: usize) -> Option<Range> {
     let line_index = line.checked_sub(1)?;
-    let line_text = text.lines().nth(line_index).unwrap_or_default();
+    let line_text = alint_core::physical_lines(text)
+        .nth(line_index)
+        .map(|(_, line)| line)
+        .unwrap_or_default();
     let (character, width) = crate::diagnostics::utf16_column(line_text, column);
     let line = u32::try_from(line_index).ok()?;
     Some(Range::new(
@@ -409,35 +430,112 @@ fn byte_span_to_range(text: &str, span: alint_core::ByteSpan) -> Option<Range> {
 
 /// Strip a leading `"loading config: "` wrapper and, if the error starts with
 /// a file path, ensure that path names `config` itself rather than an
-/// `extends:` target or `.alint.d/` drop-in (returning `None` for other files).
+/// `extends:` target, `.alint.d/` drop-in, nested config, or redacted path
+/// (returning `None` for other files).
 fn strip_own_file_prefix<'a>(config: &Path, message: &'a str) -> Option<&'a str> {
     let first_line = message.lines().next().unwrap_or(message);
     let rest = first_line
         .strip_prefix("loading config: ")
         .unwrap_or(first_line);
+    if rest.starts_with("<redacted>:") || rest.starts_with("nested config ") {
+        return None;
+    }
+    if is_own_config_message_prefix(rest) {
+        return Some(rest.strip_prefix("YAML parse error: ").unwrap_or(rest));
+    }
     if let Some((prefix, tail)) = rest.split_once(": ") {
-        let looks_like_file = Path::new(prefix)
-            .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("yml") || ext.eq_ignore_ascii_case("yaml"))
-            || prefix.contains('/')
-            || prefix.contains('\\')
-            || prefix.starts_with("alint://")
-            || prefix.starts_with("https://");
-        if looks_like_file {
-            if !prefix_names_config(config, prefix) {
-                return None;
-            }
-            let tail = tail.strip_prefix("YAML parse error: ").unwrap_or(tail);
-            return Some(tail);
+        if prefix_names_config(config, prefix) {
+            return Some(tail.strip_prefix("YAML parse error: ").unwrap_or(tail));
+        }
+        if looks_like_foreign_file_prefix(prefix) {
+            return None;
         }
     }
     Some(rest.strip_prefix("YAML parse error: ").unwrap_or(rest))
 }
 
+fn is_own_config_message_prefix(rest: &str) -> bool {
+    [
+        "reading baseline file ",
+        "invalid baseline file ",
+        "`extends:` entry ",
+        "remote `extends` ",
+        "resolving ",
+        "building rule \"",
+        "rule \"",
+        "fact \"",
+        "template \"",
+        "walking repository: ",
+        "relation limit ",
+    ]
+    .iter()
+    .any(|prefix| rest.starts_with(prefix))
+}
+
+fn looks_like_foreign_file_prefix(prefix: &str) -> bool {
+    if prefix.contains('/')
+        || prefix.contains('\\')
+        || prefix.starts_with("alint://")
+        || prefix.starts_with("https://")
+        || prefix.starts_with("http://")
+    {
+        return true;
+    }
+    if prefix.is_empty() || prefix.contains(char::is_whitespace) || prefix.contains('[') {
+        return false;
+    }
+    let Some(ext) = Path::new(prefix).extension().and_then(|e| e.to_str()) else {
+        return false;
+    };
+    let first_segment = prefix.split('.').next().unwrap_or_default();
+    if ext.eq_ignore_ascii_case("yml") || ext.eq_ignore_ascii_case("yaml") {
+        return !matches!(
+            first_segment,
+            "vars" | "relations" | "selectors" | "templates"
+        );
+    }
+    if is_known_top_level_config_key(first_segment) {
+        return false;
+    }
+    (1..=8).contains(&ext.len()) && ext.bytes().all(|b| b.is_ascii_alphanumeric())
+}
+
+fn is_known_top_level_config_key(segment: &str) -> bool {
+    matches!(
+        segment,
+        "version"
+            | "requires"
+            | "extends"
+            | "rules"
+            | "relations"
+            | "selectors"
+            | "facts"
+            | "templates"
+            | "vars"
+            | "limits"
+            | "baseline"
+            | "ignore"
+            | "respect_gitignore"
+            | "fix_size_limit"
+            | "allow_out_of_root"
+    )
+}
+
+fn strip_windows_verbatim(path: &str) -> String {
+    if let Some(unc) = path
+        .strip_prefix("//?/UNC/")
+        .or_else(|| path.strip_prefix("//?/unc/"))
+    {
+        format!("//{unc}")
+    } else {
+        path.strip_prefix("//?/").unwrap_or(path).to_owned()
+    }
+}
+
 fn prefix_names_config(config: &Path, prefix: &str) -> bool {
-    let norm = |s: &str| s.replace('\\', "/");
-    let p = norm(prefix);
-    let p = p.strip_prefix("./").unwrap_or(&p);
+    let norm = |s: &str| strip_windows_verbatim(&s.replace('\\', "/"));
+    let p_owned = norm(prefix);
+    let p = p_owned.strip_prefix("./").unwrap_or(&p_owned);
     let full = norm(&config.display().to_string());
     if p == full {
         return true;
@@ -449,7 +547,6 @@ fn prefix_names_config(config: &Path, prefix: &str) -> bool {
     }
     std::fs::canonicalize(config).is_ok_and(|canon| {
         let c = norm(&canon.display().to_string());
-        let c = c.strip_prefix("//?/").unwrap_or(&c);
         p == c
     })
 }
@@ -490,7 +587,7 @@ fn extract_error_key_path(body: &str) -> Option<Vec<alint_core::yaml::ConfigPath
     if let Some(after) = body.strip_prefix('`')
         && let Some((raw_path, rest)) = after.split_once('`')
     {
-        let cleaned = raw_path.trim_end_matches(':');
+        let cleaned = normalize_backtick_key(raw_path);
         if is_plausible_key_path(cleaned) {
             let mut segments = parse_config_path(cleaned);
             if let Some(unknown) = extract_unknown_field_name(rest) {
@@ -528,17 +625,65 @@ fn extract_error_key_path(body: &str) -> Option<Vec<alint_core::yaml::ConfigPath
         }
     }
 
-    // 5. Top-level keyword fallbacks (e.g. `baseline`, `ignore`, `limits`).
-    if body.contains("baseline") {
+    // 5. Structured `limits` errors and narrowed top-level keyword fallbacks.
+    extract_limit_key_path(body).or_else(|| fallback_top_level_key_path(body))
+}
+
+fn normalize_backtick_key(raw: &str) -> &str {
+    let trimmed = raw.trim_end_matches(':');
+    if let Some((before_colon, _)) = trimmed.split_once(": ") {
+        before_colon.trim()
+    } else {
+        trimmed
+    }
+}
+
+fn extract_limit_key_path(body: &str) -> Option<Vec<alint_core::yaml::ConfigPathSegment>> {
+    use alint_core::yaml::{ConfigPathSegment, parse_config_path};
+    let marker = "limit `";
+    let at = body.find(marker)?;
+    let before = &body[..at];
+    if before.ends_with('_') || before.ends_with('-') {
+        return None;
+    }
+    let rest = &body[at + marker.len()..];
+    let (field, _) = rest.split_once('`')?;
+    let mut segments = vec![ConfigPathSegment::Key("limits".to_owned())];
+    if is_plausible_key_path(field) {
+        segments.extend(parse_config_path(field));
+    }
+    Some(segments)
+}
+
+fn fallback_top_level_key_path(body: &str) -> Option<Vec<alint_core::yaml::ConfigPathSegment>> {
+    use alint_core::yaml::ConfigPathSegment;
+
+    if body.contains("baseline file") || body.contains("`baseline`") || body.contains("`baseline:`")
+    {
         return Some(vec![ConfigPathSegment::Key("baseline".to_owned())]);
     }
-    if body.contains("ignore") {
+    if body.contains("ignore pattern") || body.contains("`ignore`") || body.contains("`ignore:`") {
         return Some(vec![ConfigPathSegment::Key("ignore".to_owned())]);
     }
-    if body.contains("limit") {
+    if body.contains("fix_size_limit") {
+        return Some(vec![ConfigPathSegment::Key("fix_size_limit".to_owned())]);
+    }
+    if body.contains("remote `extends`") || body.starts_with("resolving ") {
+        return Some(vec![ConfigPathSegment::Key("extends".to_owned())]);
+    }
+    if body.contains("unsupported config version") || body.contains("config version") {
+        return Some(vec![ConfigPathSegment::Key("version".to_owned())]);
+    }
+    if body.contains("requires alint ") || body.contains("requires.alint") {
+        return Some(vec![
+            ConfigPathSegment::Key("requires".to_owned()),
+            ConfigPathSegment::Key("alint".to_owned()),
+        ]);
+    }
+    if body.contains("`limits`") || body.contains("`limits:`") || body.starts_with("relation limit")
+    {
         return Some(vec![ConfigPathSegment::Key("limits".to_owned())]);
     }
-
     None
 }
 
@@ -564,20 +709,19 @@ fn append_rule_subkey(segments: &mut Vec<alint_core::yaml::ConfigPathSegment>, t
     use alint_core::yaml::{ConfigPathSegment, parse_config_path};
 
     let tail = tail.trim_start();
-    // e.g. `rule "tracked" (git_tracked_only) ...`
+    // e.g. `rule "tracked" (git_tracked_only) ...`, `rule "r" (custom:) ...`,
+    // `rule "r" (fix: git_untrack) ...`, `rule "r" (require[0] kind: command) ...`.
     if let Some(after_paren) = tail.strip_prefix('(')
         && let Some((inside, _)) = after_paren.split_once(')')
+        && append_paren_subkey(segments, inside.trim())
     {
-        let field = inside
-            .strip_prefix("kind: ")
-            .map_or(inside, |_| "kind")
-            .trim();
-        if is_plausible_key_path(field) {
-            segments.extend(parse_config_path(field));
-            return;
-        }
+        return;
     }
     let tail = tail.strip_prefix(':').unwrap_or(tail).trim_start();
+    // `build_entries` wraps `Error::RuleConfig` as
+    // `building rule "id": rule "id": ...`; strip the repeated inner prefix so
+    // the actual option key or wrapper phrase is visible below.
+    let tail = strip_repeated_named_prefix(tail);
     if tail.contains("parsing `when`") {
         segments.push(ConfigPathSegment::Key("when".to_owned()));
         return;
@@ -598,9 +742,9 @@ fn append_rule_subkey(segments: &mut Vec<alint_core::yaml::ConfigPathSegment>, t
         .or_else(|| tail.strip_prefix("invalid options: "))
         .unwrap_or(tail);
     if let Some(after_bt) = inner.strip_prefix('`')
-        && let Some((field, _)) = after_bt.split_once('`')
+        && let Some((raw, _)) = after_bt.split_once('`')
     {
-        let field = field.trim_end_matches(':');
+        let field = normalize_backtick_key(raw);
         if is_plausible_key_path(field) {
             segments.extend(parse_config_path(field));
             return;
@@ -611,6 +755,55 @@ fn append_rule_subkey(segments: &mut Vec<alint_core::yaml::ConfigPathSegment>, t
     {
         segments.extend(parse_config_path(field));
     }
+}
+
+fn append_paren_subkey(
+    segments: &mut Vec<alint_core::yaml::ConfigPathSegment>,
+    inside: &str,
+) -> bool {
+    use alint_core::yaml::parse_config_path;
+
+    // Handle `require[0] kind: command` / `require[0] fix: git_untrack`.
+    if let Some((first, rest)) = inside.split_once(' ')
+        && first.starts_with("require[")
+        && is_plausible_key_path(first)
+    {
+        segments.extend(parse_config_path(first));
+        let sub = rest
+            .split_once(": ")
+            .map_or(rest, |(head, _)| head)
+            .trim_end_matches(':')
+            .trim();
+        if is_plausible_key_path(sub) {
+            segments.extend(parse_config_path(sub));
+        }
+        return true;
+    }
+    let field = inside
+        .split_once(": ")
+        .map_or(inside, |(head, _)| head)
+        .trim_end_matches(':')
+        .trim();
+    if is_plausible_key_path(field) {
+        segments.extend(parse_config_path(field));
+        return true;
+    }
+    false
+}
+
+fn strip_repeated_named_prefix(tail: &str) -> &str {
+    for prefix in ["rule \"", "fact \"", "template \""] {
+        if let Some(after) = tail.strip_prefix(prefix)
+            && let Some((_, rest)) = extract_quoted_id(after)
+        {
+            return rest
+                .trim_start()
+                .strip_prefix(':')
+                .unwrap_or(rest)
+                .trim_start();
+        }
+    }
+    tail
 }
 
 fn extract_unknown_field_name(text: &str) -> Option<String> {
@@ -1384,6 +1577,151 @@ mod note_tests {
         assert_eq!(
             err.range, None,
             "extends child error must fall back to file start: {err:?}"
+        );
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn config_error_range_handles_edge_cases_and_foreign_paths() {
+        let cfg = Path::new("/repo/.alint.yml");
+
+        // 1. Full multi-char duplicate key span (not just 1-char start).
+        let dup_yaml = "version: 1\nvars:\n  duplicate_key: 1\n  duplicate_key: 2\nrules: []\n";
+        assert_eq!(
+            config_error_range_in_text(
+                cfg,
+                dup_yaml,
+                "loading config: /repo/.alint.yml: YAML parse error: vars: duplicate entry with key \"duplicate_key\" at line 4 column 3",
+            ),
+            Some(Range::new(Position::new(3, 2), Position::new(3, 15)))
+        );
+
+        // 2. Leading UTF-8 BOM is stripped before span/column computation.
+        let bom_yaml = "\u{feff}version: 2\nbogus: 1\nrules: []\n";
+        assert_eq!(
+            config_error_range_in_text(
+                cfg,
+                bom_yaml,
+                "loading config: /repo/.alint.yml: unknown key `bogus` in a version 2 config at line 2 column 1",
+            ),
+            Some(Range::new(Position::new(1, 0), Position::new(1, 5)))
+        );
+
+        // 3. Foreign `<redacted>:` and `nested config ...` and non-yaml sibling files return `None`.
+        let valid_yaml = "version: 1\nbaseline: base.jsonl\nignore:\n  - dist\nrules: []\n";
+        assert_eq!(
+            config_error_range_in_text(
+                cfg,
+                valid_yaml,
+                "loading config: <redacted>: unknown key `bogus`"
+            ),
+            None
+        );
+        assert_eq!(
+            config_error_range_in_text(
+                cfg,
+                valid_yaml,
+                "loading config: nested config sub/.alint.yml: unknown key `bogus`"
+            ),
+            None
+        );
+        assert_eq!(
+            config_error_range_in_text(
+                cfg,
+                valid_yaml,
+                "loading config: base.txt: unknown field `bogus`"
+            ),
+            None
+        );
+
+        // 4. Own-config messages with paths inside them (`reading baseline file /repo/...`,
+        //    `` `extends:` entry ... ``) are NOT rejected as foreign file prefixes.
+        assert_eq!(
+            config_error_range_in_text(
+                cfg,
+                valid_yaml,
+                "reading baseline file /repo/base.jsonl: No such file or directory",
+            ),
+            Some(Range::new(Position::new(1, 0), Position::new(1, 8)))
+        );
+        let extends_yaml = "version: 2\nextends:\n  - url: ./base.yml\nrules: []\n";
+        assert_eq!(
+            config_error_range_in_text(
+                cfg,
+                extends_yaml,
+                "loading config: `extends:` entry ./base.yml: unknown filter",
+            ),
+            Some(Range::new(Position::new(1, 0), Position::new(1, 7)))
+        );
+
+        // 5. `walking repository: ... .gitignore` must NOT falsely highlight `ignore:`.
+        assert_eq!(
+            config_error_range_in_text(
+                cfg,
+                valid_yaml,
+                "walking repository: failed to read .gitignore: permission denied",
+            ),
+            None
+        );
+
+        // 6. Double-prefixed rule option error (`building rule "id": rule "id": invalid options: ...`)
+        //    reaches the nested option key (`pattern`).
+        let rule_yaml = "version: 1\nrules:\n  - id: bad-re\n    kind: regex_forbidden\n    pattern: '['\n    level: error\n";
+        assert_eq!(
+            config_error_range_in_text(
+                cfg,
+                rule_yaml,
+                "building rule \"bad-re\": rule \"bad-re\": invalid options: pattern: invalid regex",
+            ),
+            Some(Range::new(Position::new(4, 4), Position::new(4, 11)))
+        );
+
+        // 7. `--no-spawn` parenthesized subkeys (`(custom:)`, `(fix: ...)`, `(require[0] kind: ...)`).
+        let spawn_yaml = "version: 1\nrules:\n  - id: r1\n    kind: command\n    custom: echo hi\n    fix:\n      command: echo\n    require:\n      - kind: command\n    level: error\n";
+        assert_eq!(
+            config_error_range_in_text(
+                cfg,
+                spawn_yaml,
+                "loading config: rule \"r1\" (custom:) spawns a process"
+            ),
+            Some(Range::new(Position::new(4, 4), Position::new(4, 10)))
+        );
+        assert_eq!(
+            config_error_range_in_text(
+                cfg,
+                spawn_yaml,
+                "loading config: rule \"r1\" (fix: command) spawns a process"
+            ),
+            Some(Range::new(Position::new(5, 4), Position::new(5, 7)))
+        );
+        assert_eq!(
+            config_error_range_in_text(
+                cfg,
+                spawn_yaml,
+                "loading config: rule \"r1\" (require[0] kind: command) spawns a process"
+            ),
+            Some(Range::new(Position::new(8, 8), Position::new(8, 12)))
+        );
+
+        // 8. `LimitConfigError` sub-field highlights `limits.<field>`, and lone `\r` lines match
+        //    `physical_lines` indexing.
+        let limits_yaml = "version: 1\nlimits:\n  findings_per_rule: 0\nrules: []\n";
+        assert_eq!(
+            config_error_range_in_text(
+                cfg,
+                limits_yaml,
+                "loading config: relation limit `findings_per_rule` must be >= 1",
+            ),
+            Some(Range::new(Position::new(2, 2), Position::new(2, 19)))
+        );
+        let cr_yaml = "version: 1\rbad: 1\rrules: []\r";
+        assert_eq!(
+            config_error_range_in_text(
+                cfg,
+                cr_yaml,
+                "loading config: /repo/.alint.yml: syntax error at line 2 column 1"
+            ),
+            Some(Range::new(Position::new(1, 0), Position::new(1, 1)))
         );
     }
 }

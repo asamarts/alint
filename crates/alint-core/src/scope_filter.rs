@@ -433,8 +433,22 @@ impl ManifestPredicate {
         &self,
         text: &str,
     ) -> std::result::Result<Vec<PathBuf>, ManifestFailure> {
+        self.resolve_set_with_context(None, text)
+    }
+
+    pub(crate) fn resolve_set_with_context(
+        &self,
+        ctx: Option<&crate::Context<'_>>,
+        text: &str,
+    ) -> std::result::Result<Vec<PathBuf>, ManifestFailure> {
         let base = self.source.parent().unwrap_or_else(|| Path::new(""));
-        let raw = extract_values(&self.extract, text).map_err(|error| {
+        let raw = match ctx {
+            Some(ctx) => {
+                crate::extract::extract_values_with_context(ctx, &self.source, &self.extract, text)
+            }
+            None => extract_values(&self.extract, text),
+        }
+        .map_err(|error| {
             ManifestFailure::parse(format!("scope manifest extract failed: {error}"))
         })?;
         if !raw.non_strings.is_empty() {

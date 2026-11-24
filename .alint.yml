@@ -520,9 +520,9 @@ rules:
       alint-core), which applies alint's parser limits; ayaml's defaults
       refuse valid large files.
 
-  # The reference parsers are for testing only (ADR-0041): only the parser
-  # facade's backends and the differential harness may use them, so the
-  # facade stays the one place a parser is chosen.
+  # The reference parsers are for testing only (ADR-0036, ADR-0041): only the
+  # parser facade's backends, differential harness, and reference-resolver tests
+  # may use them, so the facade stays the one place a parser is chosen.
   - id: yaml-reference-parsers-stay-behind-the-facade
     kind: file_content_forbidden
     paths:
@@ -536,12 +536,13 @@ rules:
         - "crates/alint-core/src/yaml_differential.rs"
         - "crates/alint-core/src/yaml_differential/**"
         - "crates/alint-core/src/yaml_differential_tests.rs"
-    pattern: '\byaml_serde::'
+        - "crates/alint-core/src/structured_fix/yaml_/tests.rs"
+    pattern: '\b(yaml_serde|saphyr|saphyr_parser)::'
     level: error
     message: >-
-      yaml_serde is a test-only reference parser behind alint-core's
-      yaml-reference feature (ADR-0041). Decode YAML with
-      alint_core::yaml::from_str, which ALINT_YAML_PARSER can point at it.
+      yaml_serde, saphyr, and saphyr_parser are test-only reference parsers
+      behind alint-core's yaml-reference feature (ADR-0036, ADR-0041). Decode
+      YAML or stream spanned events through alint_core::yaml.
 
   # CI runs the workspace tests with --no-fail-fast, so a failing test binary
   # does not hide the ones after it (Windows CI showed one failure per run).

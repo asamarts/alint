@@ -841,3 +841,38 @@ fn gitlab_extends_diamond_dag_completes_linearly() {
     assert_eq!(findings.len(), 1, "{findings:?}");
     assert_eq!(findings[0].analysis_failure_kind(), None);
 }
+
+#[test]
+fn redefined_anchor_resolves_lexically_and_rejects_shadowed_self_cycle() {
+    // YAML 1.2 §7.1: `*step` in job `b` must resolve to job `a`'s unpinned
+    // `&step` even when job `c` later redefines `&step` to a pinned action.
+    let shadowed = "\
+jobs:
+  a:
+    steps:
+      - &step
+        uses: actions/checkout@v4
+  b:
+    steps:
+      - *step
+  c:
+    steps:
+      - &step
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9b6834
+      - *step
+";
+    let findings = run(".github/workflows/ci.yml", shadowed, None);
+    // Both job `a`'s definition and job `b`'s alias use the unpinned action;
+    // job `c`'s redefined `&step` and `*step` are pinned.
+    assert_eq!(findings.len(), 2, "{findings:?}");
+    assert!(
+        findings.iter().all(|f| f.analysis_failure_kind().is_none()),
+        "{findings:?}"
+    );
+
+    // Shadowing an existing anchor name inside its own still-open collection
+    // must still be rejected as a self-cycle in `parse_unguarded`.
+    let cyclic = "a: &x { uses: actions/checkout@v4 }\nb: &x { k: *x }\n";
+    let err = YamlDocument::parse_unguarded(cyclic).unwrap_err();
+    assert!(err.contains("collection that contains it"), "{err}");
+}

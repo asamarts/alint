@@ -194,17 +194,22 @@ impl Walk {
             }
             Event::Alias { anchor, span } => {
                 let name = anchor.as_str();
-                let target = self.anchors.get(name).copied();
-                // An alias inside the collection its anchor names (which
-                // ayaml refuses during composition) names a node still open.
-                let named = target.or_else(|| {
-                    self.stack
-                        .iter()
-                        .rev()
-                        .find(|frame| frame.anchor.as_deref() == Some(name))
-                        .map(|frame| frame.node)
-                });
-                self.referenced.extend(named);
+                // Check open ancestor frames BEFORE `self.anchors` so a
+                // shadowed anchor referencing its own still-open collection
+                // marks the open collection (cycle) rather than an older
+                // anchor of the same name.
+                let open = self
+                    .stack
+                    .iter()
+                    .rev()
+                    .find(|frame| frame.anchor.as_deref() == Some(name))
+                    .map(|frame| frame.node);
+                let target = if open.is_some() {
+                    None
+                } else {
+                    self.anchors.get(name).copied()
+                };
+                self.referenced.extend(open.or(target));
                 let node = self.push(Node::Alias {
                     span: span_range(span),
                     target,
@@ -355,7 +360,9 @@ fn leading_properties(
         });
     }
     let bytes = text.as_bytes();
-    let line_start = text[..scalar_start].rfind('\n').map_or(0, |i| i + 1);
+    let line_start = text[..scalar_start]
+        .rfind(['\n', '\r'])
+        .map_or(0, |i| i + 1);
     let mut cursor = scalar_start;
     let mut need_anchor = has_anchor;
     let mut need_tag = has_tag;
@@ -370,11 +377,15 @@ fn leading_properties(
             return None;
         }
         let tok_end = cursor;
-        let tok_start = if bytes[tok_end - 1] == b'>' {
+        let tok_start = if need_tag && bytes[tok_end - 1] == b'>' {
             let mut pos = tok_end - 1;
             let mut verbatim = None;
             while pos > line_start {
                 pos -= 1;
+                if matches!(bytes[pos], b' ' | b'\t' | b'\r' | b'\n') {
+                    // YAML verbatim tags (`!<...>`) cannot contain whitespace.
+                    break;
+                }
                 if bytes[pos] == b'<' && pos > line_start && bytes[pos - 1] == b'!' {
                     verbatim = Some(pos - 1);
                     break;
@@ -520,7 +531,7 @@ impl<'t> SpanIndex<'t> {
         // Decline empty spans (implicit null `x:`) and multi-line scalars (e.g.
         // line-folded plain/quoted scalars where a single-line flow splice
         // would alter surrounding layout).
-        if at.is_empty() || at.contains('\n') {
+        if at.is_empty() || at.contains(['\n', '\r']) {
             return None;
         }
         let props = leading_properties(self.text, raw.start, scalar.anchored, scalar.tagged)?;
@@ -648,7 +659,7 @@ impl<'t> SpanIndex<'t> {
         let text = self.text;
         // The KEY must OWN its line: only indentation before it (excludes a flow
         // member, whose deletion would eat siblings on the same physical line).
-        let line_start = text[..key_start].rfind('\n').map_or(0, |i| i + 1);
+        let line_start = text[..key_start].rfind(['\n', '\r']).map_or(0, |i| i + 1);
         if !text[line_start..key_start]
             .bytes()
             .all(|b| b == b' ' || b == b'\t')
@@ -657,6 +668,19 @@ impl<'t> SpanIndex<'t> {
         }
         // The value must be a SCALAR (a mapping/sequence value is multi-line); an
         // alias of an anchored scalar removes with its line like the scalar.
+        let line_break_end = |from: usize| -> usize {
+            match text[from..].find(['\n', '\r']) {
+                Some(i) => {
+                    let at = from + i;
+                    if text.as_bytes()[at] == b'\r' && text.as_bytes().get(at + 1) == Some(&b'\n') {
+                        at + 2
+                    } else {
+                        at + 1
+                    }
+                }
+                None => text.len(),
+            }
+        };
         let (entry_end, line_end) = match &self.nodes[value] {
             Node::Scalar(scalar)
                 if scalar.value
@@ -668,12 +692,10 @@ impl<'t> SpanIndex<'t> {
                 // Verify the `:` and any attached `&anchor`/`!tag` properties
                 // sit cleanly on the key's physical line with only whitespace
                 // or a `#` comment after them.
-                if key_start > key_end || text.get(key_start..key_end)?.contains('\n') {
+                if key_start > key_end || text.get(key_start..key_end)?.contains(['\n', '\r']) {
                     return None;
                 }
-                let line_end = text[key_end..]
-                    .find('\n')
-                    .map_or(text.len(), |i| key_end + i + 1);
+                let line_end = line_break_end(key_end);
                 let end_of_entry =
                     empty_value_entry_end(text, key_end, line_end, scalar.anchored, scalar.tagged)?;
                 (end_of_entry, line_end)
@@ -683,12 +705,10 @@ impl<'t> SpanIndex<'t> {
                     && !matches!(scalar.style, ScalarStyle::Literal | ScalarStyle::Folded) =>
             {
                 let value_end = scalar.span.end;
-                if key_start > value_end || text.get(key_start..value_end)?.contains('\n') {
+                if key_start > value_end || text.get(key_start..value_end)?.contains(['\n', '\r']) {
                     return None;
                 }
-                let line_end = text[value_end..]
-                    .find('\n')
-                    .map_or(text.len(), |i| value_end + i + 1);
+                let line_end = line_break_end(value_end);
                 let tail = text[value_end..line_end]
                     .trim_end_matches(['\r', '\n'])
                     .trim_start_matches([' ', '\t']);
@@ -702,12 +722,10 @@ impl<'t> SpanIndex<'t> {
                 target: Some(target),
             } if matches!(&self.nodes[*target], Node::Scalar(scalar) if scalar.value) => {
                 let value_end = span.end;
-                if key_start > value_end || text.get(key_start..value_end)?.contains('\n') {
+                if key_start > value_end || text.get(key_start..value_end)?.contains(['\n', '\r']) {
                     return None;
                 }
-                let line_end = text[value_end..]
-                    .find('\n')
-                    .map_or(text.len(), |i| value_end + i + 1);
+                let line_end = line_break_end(value_end);
                 let tail = text[value_end..line_end]
                     .trim_end_matches(['\r', '\n'])
                     .trim_start_matches([' ', '\t']);

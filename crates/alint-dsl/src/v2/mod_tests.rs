@@ -301,11 +301,17 @@ fn an_unknown_key_is_reported_against_the_version_two_keys() {
          `rules`, `fix_size_limit`, `nested_configs`, `limits`, `allow_out_of_root`, `baseline`, \
          `trusted_extends`, `selectors`, `relations` at line 2 column 1"
     );
-    // Flow mapping and non-string top-level keys report exact line and column too (#566).
-    let flow = message(checked("version: 2\n# comment\n  \nbogus: 1\n"));
+    // Block with comments, flow mapping, and non-string top-level keys report
+    // exact line and column too (#566).
+    let commented = message(checked("version: 2\n# comment\n  \nbogus: 1\n"));
     assert!(
-        flow.ends_with("at line 4 column 1"),
-        "expected line 4 column 1, got: {flow}"
+        commented.ends_with("at line 4 column 1"),
+        "expected line 4 column 1, got: {commented}"
+    );
+    let flow = message(checked("{version: 2, bogus: 1}\n"));
+    assert!(
+        flow.ends_with("at line 1 column 14"),
+        "expected line 1 column 14 for flow mapping key, got: {flow}"
     );
     let non_string = message(checked("version: 2\n123: 1\n"));
     assert!(

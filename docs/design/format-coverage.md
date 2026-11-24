@@ -197,10 +197,11 @@ Surfaced by the pre-v0.16 adversarial audit (rounds 3-4) and closed in it. Every
 Remaining follow-ups (each needs an extreme input AND a constrained host, and each is invasive relative to its payoff, so deferred to a dedicated robustness pass):
 
 1. **Concurrent-parse memory.** The per-file cap bounds ONE file's tree, but the per-file dispatch is parallel (up to `num_cpus` files at once), so aggregate transient parse memory is still (per-file cap) x fan-out. A concurrent-parse memory semaphore would bound the total, but blocking rayon workers on a semaphore risks pool starvation, so it wants careful design.
-   **YAML: fixed (ADR-0042).** One YAML parse at the 32 MiB cap measured 0.75 to 1.54 GiB of peak
-   RSS with ayaml 0.2.2 (down from 4.5 to 6.2 GB on 0.1.2), so YAML parses over 1 MiB share a
-   process-wide budget of 32 MiB of input in flight (`alint_core::yaml_budget`). A parse holds its
-   share only while the parser runs, and a thread
-   that holds one never waits for another, so no worker waits while holding budget. XML, JSON and
-   the other formats remain (per-file cap) x fan-out.
+   **YAML: fixed (ADR-0042, #582).** One YAML parse at the 32 MiB cap measured 0.75 to 1.54 GiB of
+   peak RSS with ayaml 0.2.2+ (bumped to 0.2.3 in v0.24, down from 4.5 to 6.2 GB on 0.1.2), so YAML
+   parses over 1 MiB share a process-wide budget of 32 MiB of input in flight
+   (`alint_core::yaml_budget`). Alias-free parses return their share when parsing ends; alias-amplified
+   trees whose alias-replayed expansion exceeds the threshold retain a `Send + Sync` `RetainedLease`
+   alongside `SharedValue` until the last handle drops (#582), while never pinning strongly in idle
+   structured caches (#548). XML, JSON and the other formats remain (per-file cap) x fan-out.
 2. **XML multi-element attribute residual (bounded, non-quadratic).** The per-element attribute cap (256) restored linear-time parsing; a max-size file of at-cap-width elements still costs a few seconds of CPU (linear in size). A document-wide attribute budget or a parse watchdog would bound wall-clock further; not needed for the sharp DoS, which is closed.

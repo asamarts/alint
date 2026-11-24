@@ -226,7 +226,7 @@ impl PinnedReferencesRule {
     fn finding(
         &self,
         path: Arc<Path>,
-        span: FindingSpan,
+        span: Option<FindingSpan>,
         selector: &str,
         value: &str,
         default_message: &'static str,
@@ -247,7 +247,7 @@ impl PinnedReferencesRule {
         )
         .with_path(path)
         .with_baseline_key(baseline_key);
-        if let Some(range) = span.source_range() {
+        if let Some(range) = span.and_then(FindingSpan::source_range) {
             finding = finding.with_range(range);
         }
         finding
@@ -345,7 +345,15 @@ fn matches_extension(name: &str, extensions: &[&str]) -> bool {
 #[derive(Debug)]
 struct YamlDocument {
     nodes: Vec<YamlNode>,
+    /// Active lexical anchor bindings during parsing (YAML 1.2 Section 7.1:
+    /// an alias resolves to the most recent preceding completed anchor of that
+    /// name). Aliases store the resolved `NodeId` directly, so later anchor
+    /// redefinitions cannot retroactively hijack earlier aliases.
     anchors: HashMap<String, NodeId>,
+    /// Anchor names on currently-open ancestor collections during parsing so a
+    /// shadowed anchor name inside its own collection is still rejected as a
+    /// self-cycle rather than resolving to an older anchor of the same name.
+    open_anchors: Vec<String>,
     root: NodeId,
     /// What is left of [`MAX_MERGE_WORK`]; `None` once it ran out, which fails
     /// the analysis rather than leave a lookup unanswered.
@@ -390,7 +398,7 @@ enum YamlNodeKind {
     Scalar(String),
     Sequence(Vec<NodeId>),
     Mapping(Vec<(NodeId, NodeId)>),
-    Alias(String),
+    Alias(NodeId),
 }
 
 #[derive(Clone, Copy)]
@@ -450,6 +458,7 @@ impl YamlDocument {
         let mut document = Self {
             nodes: Vec::new(),
             anchors: HashMap::new(),
+            open_anchors: Vec::new(),
             root: 0,
             merge_work: std::cell::Cell::new(Some(MAX_MERGE_WORK)),
             gitlab_extends_work: std::cell::Cell::new(Some(MAX_GITLAB_EXTENDS_WORK)),
@@ -498,24 +507,37 @@ impl YamlDocument {
                 explicit_string_tag,
                 local_tag.as_deref() == Some("reference"),
             ),
-            // An anchor is recorded once its node is complete, so an alias to
-            // one still open refers to a collection that contains it: a cycle.
-            StreamEvent::Alias { anchor, .. } if !self.anchors.contains_key(anchor.as_str()) => {
-                return Err("a YAML alias refers to a collection that contains it".to_owned());
+            // Resolve aliases lexically as events arrive (YAML 1.2 §7.1). If an
+            // ancestor collection currently open carries the same anchor name,
+            // reject the self-cycle even when an older anchor shared that name.
+            StreamEvent::Alias { anchor, .. } => {
+                if self.open_anchors.iter().any(|open| open == &anchor) {
+                    return Err("a YAML alias refers to a collection that contains it".to_owned());
+                }
+                let Some(&target) = self.anchors.get(anchor.as_str()) else {
+                    return Err("a YAML alias refers to a collection that contains it".to_owned());
+                };
+                (
+                    YamlNodeKind::Alias(target),
+                    start_span,
+                    None,
+                    false,
+                    false,
+                    false,
+                )
             }
-            StreamEvent::Alias { anchor, .. } => (
-                YamlNodeKind::Alias(anchor),
-                start_span,
-                None,
-                false,
-                false,
-                false,
-            ),
             StreamEvent::SequenceStart {
                 anchor, local_tag, ..
             } => {
                 let gitlab_reference = local_tag.as_deref() == Some("reference");
-                let (items, end_span) = self.parse_sequence(events, depth + 1)?;
+                if let Some(name) = &anchor {
+                    self.open_anchors.push(name.clone());
+                }
+                let result = self.parse_sequence(events, depth + 1);
+                if anchor.is_some() {
+                    self.open_anchors.pop();
+                }
+                let (items, end_span) = result?;
                 (
                     YamlNodeKind::Sequence(items),
                     ByteSpan {
@@ -532,7 +554,14 @@ impl YamlDocument {
                 anchor, local_tag, ..
             } => {
                 let gitlab_reference = local_tag.as_deref() == Some("reference");
-                let (entries, end_span) = self.parse_mapping(events, depth + 1)?;
+                if let Some(name) = &anchor {
+                    self.open_anchors.push(name.clone());
+                }
+                let result = self.parse_mapping(events, depth + 1);
+                if anchor.is_some() {
+                    self.open_anchors.pop();
+                }
+                let (entries, end_span) = result?;
                 (
                     YamlNodeKind::Mapping(entries),
                     ByteSpan {
@@ -627,11 +656,11 @@ impl YamlDocument {
     fn resolved(&self, mut reference: YamlRef) -> Option<YamlRef> {
         for _ in 0..=MAX_YAML_NESTING {
             match &self.nodes.get(reference.id)?.kind {
-                YamlNodeKind::Alias(anchor) => {
+                YamlNodeKind::Alias(target) => {
                     reference
                         .use_span
                         .get_or_insert(self.nodes[reference.id].span);
-                    reference.id = *self.anchors.get(anchor)?;
+                    reference.id = *target;
                 }
                 _ => return Some(reference),
             }
@@ -1169,15 +1198,18 @@ impl<'a> Collector<'a> {
     }
 
     fn push(&mut self, reference: ScalarRef<'_>, selector: &str, message: &'static str) {
-        let Some(span) = FindingSpan::from_yaml(reference.span, self.line_index) else {
-            return;
-        };
-        let key = (
-            span.start_line,
-            span.start_column,
-            span.end_line,
-            span.end_column,
-            selector.to_owned(),
+        let span = FindingSpan::from_yaml(reference.span, self.line_index);
+        let key = span.map_or_else(
+            || (0, 0, 0, 0, selector.to_owned()),
+            |span| {
+                (
+                    span.start_line,
+                    span.start_column,
+                    span.end_line,
+                    span.end_column,
+                    selector.to_owned(),
+                )
+            },
         );
         if !self.seen_spans.insert(key) {
             return;
@@ -1832,7 +1864,7 @@ fn collect_docker_from(
     if !image.eq_ignore_ascii_case("scratch") && !local_stage && !image_is_pinned(image) {
         findings.push(rule.finding(
             Arc::clone(path),
-            instruction.span,
+            Some(instruction.span),
             &format!("dockerfile:instruction[{ordinal}].from"),
             image,
             "Dockerfile base image is not pinned to a full sha256 digest",
@@ -1874,7 +1906,7 @@ fn collect_docker_add(
         };
         findings.push(rule.finding(
             Arc::clone(path),
-            instruction.span,
+            Some(instruction.span),
             &format!("dockerfile:instruction[{ordinal}].add.source[{index}]"),
             &source.value,
             message,

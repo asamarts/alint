@@ -100,6 +100,22 @@ pub trait Adapter: Send + Sync + std::fmt::Debug {
         let _ = budget;
         self.extract(resource, bytes, limits)
     }
+
+    /// [`extract_within`](Self::extract_within) with an optional run [`crate::Context`]
+    /// so built-in structured adapters can reuse the run's structured-tree
+    /// cache (#548).
+    #[doc(hidden)]
+    fn extract_in_context(
+        &self,
+        ctx: Option<&crate::Context<'_>>,
+        resource: &Resource,
+        bytes: &[u8],
+        limits: &Limits,
+        budget: &RunBudget,
+    ) -> Result<AdapterOutput, AdapterError> {
+        let _ = ctx;
+        self.extract_within(resource, bytes, limits, budget)
+    }
 }
 
 /// The per-extractor row limit, for adapters to call as they grow their output.

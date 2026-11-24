@@ -1101,15 +1101,15 @@ pub fn extract_values_bounded(
         .map_err(|error| error.to_string())
 }
 
-/// [`extract_values_bounded`] with the failure class preserved, for callers
-/// that must distinguish a parse failure from a limit hit (the relation
-/// adapters do; `AdapterError` carries both).
-pub(crate) fn extract_values_bounded_typed(
+/// [`extract_values_bounded`] with the failure class preserved, using `ctx`'s
+/// per-run structured-tree cache when available (#548).
+pub(crate) fn extract_values_bounded_typed_with_context(
+    ctx: Option<(&crate::Context<'_>, &std::path::Path)>,
     extract: &Extract,
     text: &str,
     max_values: usize,
 ) -> std::result::Result<ExtractedValues, ExtractFailure> {
-    extract_values_with_limit(None, extract, text, Some(max_values))
+    extract_values_with_limit(ctx, extract, text, Some(max_values))
 }
 
 /// Why a bounded extraction could not produce values.

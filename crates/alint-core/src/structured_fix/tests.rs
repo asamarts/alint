@@ -277,7 +277,7 @@ fn every_format_is_classified_for_structured_fix() {
     for &f in Format::ALL {
         let regime = match f {
             // Span SET + span REMOVE. YAML joined here once its (conservative
-            // line-scan) removal landed; its SET is a span splice via saphyr.
+            // line-scan) removal landed; its SET is a span splice via ayaml.
             Format::Hcl | Format::Xml | Format::Ini | Format::Properties | Format::Yaml => {
                 Regime::Span
             }
@@ -1338,7 +1338,7 @@ fn json_serialize_scalar_is_typed_including_null() {
     assert!(serialize_scalar(Format::Json, &json!([1])).is_none());
 }
 
-// ---- YAML (saphyr parser-event spans; the resolver's own bounds are in yaml_/tests.rs) ----
+// ---- YAML (ayaml parser-event spans; the resolver's own bounds are in yaml_/tests.rs) ----
 
 fn yaml_value(src: &str, path: &[PathSeg]) -> std::ops::Range<usize> {
     resolve_value_span(Format::Yaml, src.as_bytes(), path).unwrap()

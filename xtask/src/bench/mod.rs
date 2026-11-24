@@ -288,9 +288,9 @@ impl Scenario {
         matches!(self, Self::S4)
     }
 
-    /// Every value of the enum, in declaration order. Drives
-    /// the `xtask bench-scale` "all scenarios" default + the
-    /// parse-validation unit test in this module.
+    /// Every value of the enum, in declaration order, including opt-in
+    /// scenarios such as `SYAML` (default `--scenarios` excludes opt-in
+    /// scenarios until baselined). Used by the parse-validation unit test.
     #[allow(dead_code)] // exercised by `#[cfg(test)]` only today; retained for the parse/load contract tests.
     pub fn all() -> &'static [Scenario] {
         &[

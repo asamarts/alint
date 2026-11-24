@@ -41,12 +41,18 @@ where
         where
             A: serde::de::MapAccess<'de>,
         {
-            let mut out = HashMap::with_capacity(map.size_hint().unwrap_or(0));
+            let mut out = HashMap::with_capacity(map.size_hint().unwrap_or(0).min(4096));
             while let Some((key, value)) = map.next_entry::<String, String>()? {
-                if out.insert(key.clone(), value).is_some() {
-                    return Err(serde::de::Error::custom(format!(
-                        "duplicate entry with key {key:?}"
-                    )));
+                match out.entry(key) {
+                    std::collections::hash_map::Entry::Vacant(slot) => {
+                        slot.insert(value);
+                    }
+                    std::collections::hash_map::Entry::Occupied(slot) => {
+                        return Err(serde::de::Error::custom(format!(
+                            "duplicate entry with key {:?}",
+                            slot.key()
+                        )));
+                    }
                 }
             }
             Ok(out)

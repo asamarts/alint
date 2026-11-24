@@ -276,7 +276,7 @@ fn flat_scaling_warnings(rows: &[Row]) -> Vec<String> {
     let mut warnings = Vec::new();
     for small in rows
         .iter()
-        .filter(|row| row.size_files == 1_000 && row.mode == "full")
+        .filter(|row| row.size_files == 1_000 && row.mode == "full" && row.scenario != "SYAML")
     {
         let Some(large) = rows.iter().find(|row| {
             row.size_files == 100_000
@@ -534,6 +534,14 @@ fn run_one(
 /// unsupported on this OS, or the output cannot be parsed.
 fn measure_peak_rss_kb(command: &str, allowed_nonzero: &[i32]) -> Option<u64> {
     if !Path::new("/usr/bin/time").is_file() {
+        static WARNED: std::sync::Once = std::sync::Once::new();
+        WARNED.call_once(|| {
+            if cfg!(any(target_os = "linux", target_os = "macos")) {
+                eprintln!(
+                    "[bench] /usr/bin/time not found; omitting peak_rss_kb (install GNU `time` to record peak RSS)"
+                );
+            }
+        });
         return None;
     }
     if cfg!(target_os = "linux") {
