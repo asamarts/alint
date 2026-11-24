@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use tower_lsp::lsp_types::{
+use lsp_types::{
     CreateFile, DeleteFile, DocumentChangeOperation, DocumentChanges, OneOf,
     OptionalVersionedTextDocumentIdentifier, Position, Range, RenameFile, ResourceOp,
     TextDocumentEdit, TextEdit, Url, WorkspaceEdit,

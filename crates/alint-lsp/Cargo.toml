@@ -18,16 +18,17 @@ authors.workspace = true
 alint-core.workspace = true
 alint-dsl.workspace = true
 alint-rules.workspace = true
-tower-lsp.workspace = true
-tower-service.workspace = true
-tokio.workspace = true
+lsp-server.workspace = true
+lsp-types.workspace = true
+crossbeam-channel.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 tracing.workspace = true
-# parking_lot::Mutex: a panic in any async handler must not poison the
+# parking_lot::Mutex: a panic in any worker must not poison the
 # shared state and take down the whole language-server session.
 parking_lot.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
 tempfile.workspace = true
 
 [lints]

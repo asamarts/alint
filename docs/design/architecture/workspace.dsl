@@ -43,7 +43,7 @@ workspace "alint" "Language-agnostic repository linter" {
                 comp_output = component "alint-output" "Report formatters: human, json, sarif, github, gitlab, junit, markdown, agent." "Rust crate"
             }
 
-            lsp = container "LSP server" "The `alint lsp` mode: a Language Server over stdio for editor integrations." "Rust / tower-lsp" {
+            lsp = container "LSP server" "The `alint lsp` mode: a Language Server over stdio for editor integrations." "Rust / lsp-server" {
                 comp_lsp = component "alint-lsp" "Language Server Protocol server (diagnostics, validation) over stdio." "Rust crate"
             }
 

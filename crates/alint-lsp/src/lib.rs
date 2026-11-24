@@ -1,9 +1,9 @@
 //! Language Server Protocol server for alint.
 //!
-//! A thin `tower-lsp` backend that runs the alint engine over the
-//! workspace and publishes the resulting violations as LSP diagnostics.
-//! It is driven by the `alint lsp` subcommand, speaking LSP over stdio
-//! (see [`run_stdio`]).
+//! A synchronous `lsp-server` backend that runs the alint engine over the
+//! workspace on a fixed 8 MiB worker pool and publishes the resulting
+//! violations as LSP diagnostics. It is driven by the `alint lsp` subcommand,
+//! speaking LSP over stdio (see [`run_stdio`]).
 //!
 //! Config discovery is **per workspace folder**: each folder the client
 //! reports (multi-root) is linted by its own `.alint.yml`, rooted at that
@@ -42,7 +42,7 @@
 //! - **Code actions** offer an "Apply fix" quick-fix for any violation
 //!   whose rule declares a fixer, returning a `WorkspaceEdit` the editor
 //!   applies to the buffer. A whole-file fixer maps via
-//!   [`alint_core::Fixer::fix_edit`] → [`alint_core::FixEdit`]; a *located*
+//!   [`alint_core::Fixer::fix_edit`] -> [`alint_core::FixEdit`]; a *located*
 //!   fixer (e.g. `replace`) maps its `collect_edits` byte ranges to UTF-16
 //!   `TextEdit`s (one per match) so a single action rewrites every occurrence.
 //!   A buffer larger than the config's `fix_size_limit` gets no fix, as
@@ -64,25 +64,33 @@
 //! The "add rule to ignore" action is deferred to a later slice of the
 //! LSP epic.
 
-use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::task::{Context as TaskContext, Poll};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use tower_lsp::jsonrpc::Request;
-use tower_lsp::lsp_types::{
+use crossbeam_channel::{Sender, unbounded};
+use lsp_server::{Connection, ErrorCode, Message, Notification, Request, RequestId, Response};
+use lsp_types::notification::{
+    DidChangeTextDocument, DidChangeWatchedFiles, DidChangeWorkspaceFolders, DidCloseTextDocument,
+    DidOpenTextDocument, DidSaveTextDocument, Exit, Initialized, LogMessage,
+    Notification as LspNotification, PublishDiagnostics, ShowMessage,
+};
+use lsp_types::request::{
+    CodeActionRequest, HoverRequest, Initialize, Request as LspRequest, Shutdown,
+};
+use lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, CodeActionParams,
-    CodeActionProviderCapability, CodeActionResponse, Diagnostic, DiagnosticSeverity,
-    DidChangeTextDocumentParams, DidChangeWatchedFilesParams, DidChangeWorkspaceFoldersParams,
-    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams, Hover,
-    HoverContents, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
-    InitializedParams, MarkupContent, MarkupKind, MessageType, OneOf, Position, Range,
-    ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
+    CodeActionProviderCapability, CodeActionResponse, Diagnostic, DiagnosticRelatedInformation,
+    DiagnosticSeverity, DidChangeTextDocumentParams, DidChangeWorkspaceFoldersParams,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, Hover, HoverContents, HoverParams,
+    HoverProviderCapability, InitializeParams, InitializeResult, LogMessageParams, MarkupContent,
+    MarkupKind, MessageType, OneOf, Position, PublishDiagnosticsParams, Range, ServerCapabilities,
+    ServerInfo, ShowMessageParams, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
     WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities,
 };
-use tower_lsp::{Client, LanguageServer, LspService, Server, jsonrpc::Result as JsonRpcResult};
+use parking_lot::Mutex;
 
 use alint_core::baseline::Baseline;
 use alint_core::located_fix::{self, LocatedEdit, LocatedOutcome};
@@ -94,6 +102,8 @@ mod edits;
 mod render;
 
 #[cfg(test)]
+mod protocol_tests;
+#[cfg(test)]
 mod registry_tests;
 #[cfg(test)]
 mod tests;
@@ -104,6 +114,16 @@ use config::{ConfigError, SessionKey, Settings, check_workspace, eval_buffer, wo
 use diagnostics::{GroupCtx, finding_to_diagnostic, range_contains, ranges_overlap};
 use edits::{fix_edit_to_workspace_edit, located_edits_to_workspace_edit};
 use render::{render_finding, render_notes};
+
+/// Worker pool size for background full checks, per-file re-evaluations, and
+/// code-action computation. Large enough that a slow per-file re-evaluation
+/// never blocks a newer edit or a code-action request, while keeping memory
+/// and thread count bounded.
+const WORKER_COUNT: usize = 4;
+
+/// Rules and fixers recurse over parsed documents; give each LSP worker the
+/// stack size a main thread has (8 MiB), matching the CLI.
+const WORKER_STACK_SIZE: usize = 8 * 1024 * 1024;
 
 /// Server options, set from the `alint lsp` command line.
 ///
@@ -237,12 +257,12 @@ struct Finding {
     message: String,
     /// The violation's original 1-indexed line/column (if any), kept so
     /// a code-action fixer that is range-scoped sees the same location
-    /// the rule reported — `range` alone can't distinguish a real
+    /// the rule reported - `range` alone can't distinguish a real
     /// (1,1) anchor from a path-less finding anchored at the file start.
     line: Option<usize>,
     column: Option<usize>,
     policy_url: Option<String>,
-    /// Whether the rule declares a fixer — gates the "Apply fix" code
+    /// Whether the rule declares a fixer - gates the "Apply fix" code
     /// action without re-deriving the rule set.
     fixable: bool,
     /// Sensitive findings expose diagnostics but never public replacement bytes.
@@ -256,7 +276,7 @@ struct Finding {
     description: Option<&'static str>,
     /// The rule kind's alint.org reference page, for the hover.
     docs_url: Option<String>,
-    related_information: Vec<tower_lsp::lsp_types::DiagnosticRelatedInformation>,
+    related_information: Vec<DiagnosticRelatedInformation>,
 }
 
 /// Per-file findings keyed by absolute path.
@@ -274,10 +294,10 @@ struct Session {
     /// The discovered `.alint.yml` (absolute). Used to anchor path-less
     /// findings and config errors as diagnostics.
     config_path: PathBuf,
-    /// The config's `baseline:` file, loaded — grandfathered findings
+    /// The config's `baseline:` file, loaded - grandfathered findings
     /// are filtered out exactly as `alint check` filters them.
     baseline: Option<Baseline>,
-    /// Rule id → canonical rule kind (aliases resolved through the session's
+    /// Rule id -> canonical rule kind (aliases resolved through the session's
     /// registry), for the hover's description + docs link.
     kinds: HashMap<String, String>,
     /// Load-time pattern hints, shown as warnings on the config file.
@@ -348,90 +368,27 @@ struct WorkspaceCheck {
     runs: Vec<(SessionKey, Result<ConfigRun, ConfigError>)>,
 }
 
-/// Build a tokio runtime and serve the alint language server over
-/// stdio until the client sends `exit` (or disconnects). Called by the
-/// `alint lsp` subcommand so the CLI itself stays synchronous.
+/// Serve the alint language server over stdio until the client sends `exit`
+/// (or closes the stream). Called by the `alint lsp` subcommand.
 ///
-/// Returns the process exit code the LSP specification mandates: `0`
-/// when `exit` follows a `shutdown` request (or the client simply
-/// closed the stream), `1` when `exit` arrives without a prior
-/// `shutdown`. The runtime is shut down without waiting on the blocked
-/// stdin reader, so the process terminates promptly on `exit` even
-/// while the client keeps stdin open.
+/// Returns the process exit code the LSP specification mandates: `0` when
+/// `exit` follows a `shutdown` request (or the client simply closed the
+/// stream), `1` when `exit` arrives without a prior `shutdown`.
+/// `lsp-server`'s stdio reader breaks out immediately on `exit`, so the
+/// process flushes stdout and terminates promptly even while the client
+/// keeps stdin open.
 pub fn run_stdio(options: LspOptions) -> std::io::Result<i32> {
-    // Rules and fixers recurse over parsed documents; give the workers and
-    // the blocking pool the stack a main thread has, not tokio's 2 MiB.
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .thread_stack_size(8 * 1024 * 1024)
-        .build()?;
-    let shutdown = Arc::new(AtomicBool::new(false));
-    let shutdown_flag = Arc::clone(&shutdown);
-    let exit_received = runtime.block_on(async move {
-        let stdin = tokio::io::stdin();
-        let stdout = tokio::io::stdout();
-        let (service, socket) = LspService::new(move |client| Backend::new(client, options));
-        let (exit_tx, exit_rx) = tokio::sync::oneshot::channel();
-        let service = ExitInterceptor {
-            inner: service,
-            shutdown: shutdown_flag,
-            exit: Some(exit_tx),
-        };
-        tokio::select! {
-            () = Server::new(stdin, stdout, socket).serve(service) => false,
-            Ok(()) = exit_rx => true,
-        }
-    });
-    // `tokio::io::stdin` reads on a blocking thread that can't be
-    // interrupted; waiting for it would hang until the client closes
-    // stdin. Detach it instead.
-    runtime.shutdown_background();
-    Ok(exit_code(exit_received, shutdown.load(Ordering::SeqCst)))
+    let (connection, io_threads) = Connection::stdio();
+    let code = run_connection(&connection, options)?;
+    drop(connection);
+    io_threads.join()?;
+    Ok(code)
 }
 
 /// The LSP-mandated process exit code: `1` for an `exit` notification
 /// that was not preceded by `shutdown`, else `0`.
 fn exit_code(exit_received: bool, shutdown_received: bool) -> i32 {
     i32::from(exit_received && !shutdown_received)
-}
-
-/// A pass-through `tower` service that records the client's `shutdown`
-/// request and signals when its `exit` notification has been handed to
-/// the inner `tower-lsp` service. `tower-lsp` itself only stops serving
-/// when the *next* message is read after `exit`, so without this the
-/// server lingers while stdin is open. `shutdown` is recorded here, by
-/// method, because `tower-lsp` answers a `shutdown` carrying
-/// `"params": null` with an error without reaching the backend — the
-/// client still asked to shut down.
-struct ExitInterceptor<S> {
-    inner: S,
-    shutdown: Arc<AtomicBool>,
-    exit: Option<tokio::sync::oneshot::Sender<()>>,
-}
-
-impl<S> tower_service::Service<Request> for ExitInterceptor<S>
-where
-    S: tower_service::Service<Request>,
-{
-    type Response = S::Response;
-    type Error = S::Error;
-    type Future = S::Future;
-
-    fn poll_ready(&mut self, cx: &mut TaskContext<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&mut self, req: Request) -> Self::Future {
-        let is_exit = req.method() == "exit";
-        if req.method() == "shutdown" {
-            self.shutdown.store(true, Ordering::SeqCst);
-        }
-        let fut = self.inner.call(req);
-        if is_exit && let Some(tx) = self.exit.take() {
-            let _ = tx.send(());
-        }
-        fut
-    }
 }
 
 #[derive(Debug, Default)]
@@ -459,7 +416,7 @@ struct State {
     /// Which session governs each open document (its workspace folder's).
     doc_config: HashMap<Url, SessionKey>,
     /// Config-file URIs we published diagnostics to (findings anchored
-    /// there, or a config error) — cleared when no longer relevant.
+    /// there, or a config error) - cleared when no longer relevant.
     config_uris: HashSet<Url>,
     /// Last-published findings per URI, so `hover` can answer by
     /// position without re-running rules.
@@ -478,28 +435,48 @@ struct State {
     last_walk_warnings: HashMap<SessionKey, Vec<String>>,
 }
 
+/// Work queued from the main LSP dispatch loop onto the 8 MiB worker pool.
+enum Job {
+    FullCheck(u64),
+    Reeval {
+        uri: Url,
+        text: String,
+        version: i32,
+    },
+    CodeAction {
+        id: RequestId,
+        params: CodeActionParams,
+    },
+}
+
+/// Shared server core driven by the main LSP message loop and worker threads.
+///
+/// Lock ordering invariant (prevents deadlocks):
+/// `check_lock` -> `reeval_publish` -> `state`.
+/// `state` is never held across engine/fixer execution or channel sends.
 #[derive(Debug)]
-struct Backend {
-    client: Client,
+struct ServerCore {
+    sender: Sender<Message>,
     options: LspOptions,
     /// Shared server state behind a `parking_lot::Mutex` (no poisoning), so a
-    /// panic in one async handler can't permanently wedge the session the way
-    /// a poisoned `std::sync::Mutex` would. Note the trade-off: `parking_lot`
-    /// has no poison signal, so if a handler panics *while holding the guard*,
-    /// the lock simply releases and the next handler reads whatever partial
-    /// state the panic left — the session survives (good for an editor) but
-    /// consistency-on-panic is NOT guaranteed. Critical sections are kept tiny
-    /// and infallible (map inserts/clones) to keep that window closed; the
-    /// engine runs off-lock inside `spawn_blocking`, which reads it (an
-    /// `Arc`) to skip a buffer that a newer edit superseded while it waited.
+    /// panic in one worker can't permanently wedge the session. Critical
+    /// sections stay tiny and infallible (map inserts/clones).
     state: Arc<Mutex<State>>,
-    /// Serialises the "is this result still current?" check with the
-    /// publish that follows it in [`Backend::reeval_file`], so an older
-    /// buffer's diagnostics can never reach the client after a newer
-    /// buffer's.
-    reeval_publish: tokio::sync::Mutex<()>,
-    /// Buffer evaluations started, for the tests of `reeval_file`'s
-    /// coalescing.
+    /// Serializes full workspace checks so an older check cannot finish and
+    /// overwrite a newer check's state.
+    check_lock: Mutex<()>,
+    /// Serializes the "is this buffer version still current?" check with the
+    /// `publishDiagnostics` that follows it in [`Self::reeval_file`] and
+    /// [`Self::did_close`], so an older buffer's diagnostics can never reach
+    /// the client after a newer buffer's or after close.
+    reeval_publish: Mutex<()>,
+    /// Monotonic generation of requested full checks for coalescing.
+    check_gen: AtomicU64,
+    /// Highest full-check generation already covered by a completed check.
+    completed_check_gen: AtomicU64,
+    /// Set on `exit` / disconnect so queued worker jobs skip promptly.
+    exiting: AtomicBool,
+    /// Buffer evaluations started, for tests of `reeval_file` coalescing.
     #[cfg(test)]
     evaluations: Arc<std::sync::atomic::AtomicUsize>,
 }
@@ -512,7 +489,7 @@ type Publication = (Url, Vec<Diagnostic>, Option<i32>);
 #[derive(Debug, Default)]
 struct Applied {
     publish: Vec<Publication>,
-    /// Config errors to log to the client.
+    /// Config errors and walk warnings to log to the client.
     logs: Vec<String>,
     /// Notes blocks to print on stderr.
     notes: Vec<String>,
@@ -523,15 +500,165 @@ struct Applied {
     untrusted_note: bool,
 }
 
-impl Backend {
-    fn new(client: Client, options: LspOptions) -> Self {
+impl ServerCore {
+    fn new(sender: Sender<Message>, options: LspOptions) -> Self {
         Self {
-            client,
+            sender,
             options,
             state: Arc::new(Mutex::new(State::default())),
-            reeval_publish: tokio::sync::Mutex::new(()),
+            check_lock: Mutex::new(()),
+            reeval_publish: Mutex::new(()),
+            check_gen: AtomicU64::new(0),
+            completed_check_gen: AtomicU64::new(0),
+            exiting: AtomicBool::new(false),
             #[cfg(test)]
             evaluations: Arc::default(),
+        }
+    }
+
+    fn send_notification<N: LspNotification>(&self, params: N::Params) {
+        if let Ok(params) = serde_json::to_value(params) {
+            let _ = self.sender.send(Message::Notification(Notification::new(
+                N::METHOD.to_string(),
+                params,
+            )));
+        }
+    }
+
+    fn send_ok(&self, id: RequestId, value: serde_json::Value) {
+        let _ = self
+            .sender
+            .send(Message::Response(Response::new_ok(id, value)));
+    }
+
+    fn send_err(&self, id: RequestId, code: ErrorCode, message: String) {
+        let _ = self.sender.send(Message::Response(Response::new_err(
+            id,
+            code as i32,
+            message,
+        )));
+    }
+
+    fn log_message(&self, typ: MessageType, message: impl Into<String>) {
+        self.send_notification::<LogMessage>(LogMessageParams {
+            typ,
+            message: message.into(),
+        });
+    }
+
+    fn show_message(&self, typ: MessageType, message: impl Into<String>) {
+        self.send_notification::<ShowMessage>(ShowMessageParams {
+            typ,
+            message: message.into(),
+        });
+    }
+
+    fn publish_diagnostics(&self, uri: Url, diagnostics: Vec<Diagnostic>, version: Option<i32>) {
+        self.send_notification::<PublishDiagnostics>(PublishDiagnosticsParams {
+            uri,
+            diagnostics,
+            version,
+        });
+    }
+
+    fn publish_all(&self, items: Vec<Publication>) {
+        for (uri, diagnostics, version) in items {
+            self.publish_diagnostics(uri, diagnostics, version);
+        }
+    }
+
+    fn initialize(&self, params: &InitializeParams) -> InitializeResult {
+        // Strictly `true`: a missing or malformed value leaves the workspace
+        // untrusted.
+        let trusted = params
+            .initialization_options
+            .as_ref()
+            .and_then(|options| options.get("trusted"))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let related_information_supported = params
+            .capabilities
+            .text_document
+            .as_ref()
+            .and_then(|text| text.publish_diagnostics.as_ref())
+            .and_then(|publish| publish.related_information)
+            .unwrap_or(false);
+        {
+            let mut state = self.state.lock();
+            state.folders = workspace_folders(params);
+            state.related_information_supported = related_information_supported;
+            state.trusted = trusted;
+        }
+        InitializeResult {
+            capabilities: ServerCapabilities {
+                text_document_sync: Some(TextDocumentSyncCapability::Kind(
+                    TextDocumentSyncKind::FULL,
+                )),
+                hover_provider: Some(HoverProviderCapability::Simple(true)),
+                code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
+                workspace: Some(WorkspaceServerCapabilities {
+                    workspace_folders: Some(WorkspaceFoldersServerCapabilities {
+                        supported: Some(true),
+                        change_notifications: Some(OneOf::Left(true)),
+                    }),
+                    file_operations: None,
+                }),
+                ..ServerCapabilities::default()
+            },
+            server_info: Some(ServerInfo {
+                name: "alint-lsp".to_string(),
+                version: Some(env!("CARGO_PKG_VERSION").to_string()),
+            }),
+        }
+    }
+
+    fn hover(&self, params: HoverParams) -> Option<Hover> {
+        let pos = params.text_document_position_params.position;
+        let uri = params.text_document_position_params.text_document.uri;
+
+        let findings = self.state.lock().diagnostics.get(&uri).cloned()?;
+        let matching: Vec<&Finding> = findings
+            .iter()
+            .filter(|f| range_contains(f.range, pos))
+            .collect();
+        if matching.is_empty() {
+            return None;
+        }
+
+        let value = matching
+            .iter()
+            .map(|f| render_finding(f))
+            .collect::<Vec<_>>()
+            .join("\n\n---\n\n");
+        Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value,
+            }),
+            range: matching.first().map(|f| f.range),
+        })
+    }
+
+    fn did_close(&self, params: DidCloseTextDocumentParams) {
+        let uri = params.text_document.uri;
+        let _publish_guard = self.reeval_publish.lock();
+        let is_config = {
+            let mut state = self.state.lock();
+            state.open.remove(&uri);
+            state.documents.remove(&uri);
+            state.versions.remove(&uri);
+            state.doc_config.remove(&uri);
+            let is_config = state.config_uris.contains(&uri);
+            if !is_config {
+                state.diagnostics.remove(&uri);
+            }
+            is_config
+        };
+        // Clear any diagnostics the editor is still showing - except on a
+        // config file, whose anchored findings / load error stay visible
+        // whether or not it is open.
+        if !is_config {
+            self.publish_diagnostics(uri, Vec::new(), None);
         }
     }
 
@@ -539,7 +666,14 @@ impl Backend {
     /// diagnostics for every open document (plus each config file),
     /// clearing those that no longer have findings. Runs on open, save,
     /// watched-file changes, and workspace-folder changes.
-    async fn check_and_publish(&self) {
+    fn check_and_publish(&self, target_gen: u64) {
+        let _check_guard = self.check_lock.lock();
+        if self.exiting.load(Ordering::SeqCst)
+            || self.completed_check_gen.load(Ordering::SeqCst) >= target_gen
+        {
+            return;
+        }
+        let started_gen = self.check_gen.load(Ordering::SeqCst);
         let (folders, docs, trusted) = {
             let state = self.state.lock();
             let docs: Vec<(Url, Option<String>, Option<i32>)> = state
@@ -556,6 +690,8 @@ impl Backend {
             (state.folders.clone(), docs, state.trusted)
         };
         if folders.is_empty() {
+            self.completed_check_gen
+                .store(started_gen, Ordering::SeqCst);
             return;
         }
 
@@ -565,43 +701,41 @@ impl Backend {
             .collect();
         let settings = self.options.settings(trusted);
         let registry = self.options.registry();
-        let check = match tokio::task::spawn_blocking(move || {
+        let Ok(check) = catch_unwind(AssertUnwindSafe(|| {
             check_workspace(&folders, &task_docs, &settings, &registry)
-        })
-        .await
-        {
-            Ok(check) => check,
-            Err(join_err) => {
-                self.client
-                    .log_message(
-                        MessageType::ERROR,
-                        format!("alint: check panicked: {join_err}"),
-                    )
-                    .await;
-                return;
-            }
+        })) else {
+            self.log_message(MessageType::ERROR, "alint: check panicked");
+            self.completed_check_gen
+                .store(started_gen, Ordering::SeqCst);
+            return;
         };
 
-        let applied = {
-            let mut state = self.state.lock();
-            apply_check(&mut state, &docs, check, &self.options)
+        if self.exiting.load(Ordering::SeqCst) {
+            return;
+        }
+
+        let reeval = {
+            let _publish_guard = self.reeval_publish.lock();
+            let applied = {
+                let mut state = self.state.lock();
+                apply_check(&mut state, &docs, check, &self.options)
+            };
+            for message in applied.logs {
+                self.log_message(MessageType::WARNING, format!("alint: {message}"));
+            }
+            for block in applied.notes {
+                eprintln!("{block}");
+            }
+            if applied.untrusted_note {
+                self.show_message(MessageType::INFO, config::UNTRUSTED_NOTE);
+            }
+            self.publish_all(applied.publish);
+            applied.reeval
         };
-        for message in applied.logs {
-            self.client
-                .log_message(MessageType::WARNING, format!("alint: {message}"))
-                .await;
-        }
-        for block in applied.notes {
-            eprintln!("{block}");
-        }
-        if applied.untrusted_note {
-            self.client
-                .show_message(MessageType::INFO, config::UNTRUSTED_NOTE)
-                .await;
-        }
-        self.publish_all(applied.publish).await;
-        for (uri, text, version) in applied.reeval {
-            self.reeval_file(uri, text, version).await;
+        self.completed_check_gen
+            .store(started_gen, Ordering::SeqCst);
+        for (uri, text, version) in reeval {
+            self.reeval_file(uri, text, version);
         }
     }
 
@@ -609,14 +743,16 @@ impl Backend {
     /// editor's in-memory `text` and publish diagnostics for just this
     /// document. Per-file findings replace the previous per-file ones,
     /// but cached cross-file findings (from the last full run) are
-    /// preserved so they don't flicker away while typing — they refresh
+    /// preserved so they don't flicker away while typing - they refresh
     /// on the next save. `version` ties the diagnostics to the edit.
     ///
     /// Only the latest version of a document is evaluated: a version that a
-    /// newer edit superseded is skipped before it starts, and again if it
-    /// waited in the blocking pool while the newer edit arrived. Rapid typing
-    /// therefore costs one evaluation per edit at most, and usually far fewer.
-    async fn reeval_file(&self, uri: Url, text: String, version: i32) {
+    /// newer edit superseded is skipped before it starts, and again before
+    /// publishing if a newer edit arrived while it evaluated.
+    fn reeval_file(&self, uri: Url, text: String, version: i32) {
+        if self.exiting.load(Ordering::SeqCst) {
+            return;
+        }
         let session = {
             let state = self.state.lock();
             if state.versions.get(&uri) != Some(&version) {
@@ -641,57 +777,40 @@ impl Backend {
             return;
         };
 
-        let shared = Arc::clone(&self.state);
-        let task_uri = uri.clone();
         #[cfg(test)]
-        let evaluations = Arc::clone(&self.evaluations);
-        let outcome = tokio::task::spawn_blocking(move || {
-            if shared.lock().versions.get(&task_uri) != Some(&version) {
-                return None;
-            }
-            #[cfg(test)]
-            evaluations.fetch_add(1, Ordering::SeqCst);
-            Some(eval_buffer(&session, &abs, &rel, text))
-        })
-        .await;
+        self.evaluations.fetch_add(1, Ordering::SeqCst);
+        let outcome = catch_unwind(AssertUnwindSafe(|| eval_buffer(&session, &abs, &rel, text)));
 
-        // tower-lsp runs `didChange` handlers concurrently, so a slow
-        // evaluation of an older buffer can finish after a newer one. Drop
-        // a result whose version is no longer the document's current one
-        // (or whose document closed): publishing or caching it would leave
-        // stale diagnostics on screen and in the state hover / code
-        // actions read.
-        let is_current = |state: &State| state.versions.get(&uri).copied() == Some(version);
-        let _publish_guard = self.reeval_publish.lock().await;
+        if self.exiting.load(Ordering::SeqCst) {
+            return;
+        }
+
+        // Workers run `didChange` jobs concurrently, so a slow evaluation of an
+        // older buffer can finish after a newer one. Drop any result whose
+        // version is no longer the document's current one (or whose document
+        // closed): publishing or caching it would leave stale diagnostics on
+        // screen and in the state hover / code actions read.
+        let _publish_guard = self.reeval_publish.lock();
 
         let per_file = match outcome {
-            // Superseded while it waited for a blocking thread.
-            Ok(None) => return,
-            Ok(Some(Ok(per_file))) => per_file,
+            Ok(Ok(per_file)) => per_file,
             // Excluded from the walk, or not walked yet: no per-file rule
             // applies, but a finding from the last full run still does. A
             // `git_tracked_only` rule reports a tracked file that an ignore
             // file hides (#503).
-            Ok(Some(Err(Error::FileNotInIndex { .. }))) => Vec::new(),
-            Ok(Some(Err(err))) => {
-                self.client
-                    .log_message(MessageType::WARNING, format!("alint: {err}"))
-                    .await;
+            Ok(Err(Error::FileNotInIndex { .. })) => Vec::new(),
+            Ok(Err(err)) => {
+                self.log_message(MessageType::WARNING, format!("alint: {err}"));
                 return;
             }
-            Err(join_err) => {
-                self.client
-                    .log_message(
-                        MessageType::ERROR,
-                        format!("alint: re-eval panicked: {join_err}"),
-                    )
-                    .await;
+            Err(_) => {
+                self.log_message(MessageType::ERROR, "alint: re-eval panicked");
                 return;
             }
         };
         let diagnostics = {
             let mut state = self.state.lock();
-            if !is_current(&state) {
+            if state.versions.get(&uri).copied() != Some(version) {
                 return;
             }
             // Keep cross-file findings from the last full run; replace the
@@ -713,9 +832,49 @@ impl Backend {
             }
             diags
         };
-        self.client
-            .publish_diagnostics(uri, diagnostics, Some(version))
-            .await;
+        self.publish_diagnostics(uri, diagnostics, Some(version));
+    }
+
+    fn code_action(&self, params: CodeActionParams) -> Option<CodeActionResponse> {
+        let uri = params.text_document.uri;
+        let selection = params.range;
+
+        // Respect the client's kind filter: if it asked for a specific
+        // set of action kinds that doesn't admit quick-fixes, return none.
+        if let Some(only) = &params.context.only {
+            let admits_quickfix = only
+                .iter()
+                .any(|kind| *kind == CodeActionKind::QUICKFIX || *kind == CodeActionKind::EMPTY);
+            if !admits_quickfix {
+                return None;
+            }
+        }
+
+        let inputs = self.code_action_inputs(&uri)?;
+        let abs = uri.to_file_path().ok()?;
+        let version = inputs.version;
+        let (mut actions, unsafe_flags) =
+            catch_unwind(AssertUnwindSafe(|| fix_actions(&inputs, &abs, selection)))
+                .ok()
+                .flatten()?;
+        // The buffer changed while the edits were computed: they would
+        // apply to text the editor no longer has.
+        if self.state.lock().versions.get(&uri).copied() != version {
+            return None;
+        }
+        if actions.is_empty() {
+            return None;
+        }
+        // A single SAFE fix is the obvious one to apply (some clients auto-apply
+        // the preferred action); an Unsafe fix is never auto-preferred -- applying
+        // it must stay a deliberate choice.
+        if actions.len() == 1
+            && !unsafe_flags[0]
+            && let CodeActionOrCommand::CodeAction(action) = &mut actions[0]
+        {
+            action.is_preferred = Some(true);
+        }
+        Some(actions)
     }
 
     /// The governing session, cached findings, buffer and buffer version
@@ -735,241 +894,239 @@ impl Backend {
             related_information_supported: state.related_information_supported,
         })
     }
+}
 
-    async fn publish_all(&self, items: Vec<Publication>) {
-        for (uri, diagnostics, version) in items {
-            self.client
-                .publish_diagnostics(uri, diagnostics, version)
-                .await;
+/// Drive the LSP protocol loop over `connection` until `exit` or EOF, returning
+/// the LSP-mandated process exit code (`0` after `shutdown` or EOF, `1` on
+/// `exit` without a prior `shutdown`).
+fn run_connection(connection: &Connection, options: LspOptions) -> std::io::Result<i32> {
+    let core = Arc::new(ServerCore::new(connection.sender.clone(), options));
+    let (job_tx, job_rx) = unbounded::<Job>();
+    let mut workers = Vec::with_capacity(WORKER_COUNT);
+    for idx in 0..WORKER_COUNT {
+        let core = Arc::clone(&core);
+        let rx = job_rx.clone();
+        let handle = std::thread::Builder::new()
+            .name(format!("alint-lsp-worker-{idx}"))
+            .stack_size(WORKER_STACK_SIZE)
+            .spawn(move || {
+                while let Ok(job) = rx.recv() {
+                    if core.exiting.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    match job {
+                        Job::FullCheck(target_gen) => core.check_and_publish(target_gen),
+                        Job::Reeval { uri, text, version } => core.reeval_file(uri, text, version),
+                        Job::CodeAction { id, params } => {
+                            let resp = core.code_action(params);
+                            if !core.exiting.load(Ordering::SeqCst) {
+                                let value =
+                                    serde_json::to_value(resp).unwrap_or(serde_json::Value::Null);
+                                core.send_ok(id, value);
+                            }
+                        }
+                    }
+                }
+            })?;
+        workers.push(handle);
+    }
+
+    let mut initialized = false;
+    let mut shutdown_received = false;
+    let mut exit_received = false;
+
+    for msg in &connection.receiver {
+        match msg {
+            Message::Request(req) => {
+                handle_request(
+                    &core,
+                    &job_tx,
+                    req,
+                    &mut initialized,
+                    &mut shutdown_received,
+                );
+            }
+            Message::Notification(notif) => {
+                if notif.method == Exit::METHOD {
+                    exit_received = true;
+                    break;
+                }
+                if !initialized || shutdown_received {
+                    continue;
+                }
+                handle_notification(&core, &job_tx, notif);
+            }
+            Message::Response(_) => {}
+        }
+    }
+
+    core.exiting.store(true, Ordering::SeqCst);
+    drop(job_tx);
+    for worker in workers {
+        let _ = worker.join();
+    }
+    Ok(exit_code(exit_received, shutdown_received))
+}
+
+fn handle_request(
+    core: &ServerCore,
+    job_tx: &Sender<Job>,
+    req: Request,
+    initialized: &mut bool,
+    shutdown_received: &mut bool,
+) {
+    if *shutdown_received {
+        core.send_err(
+            req.id,
+            ErrorCode::InvalidRequest,
+            "server is shutting down".to_string(),
+        );
+        return;
+    }
+    if req.method == Shutdown::METHOD {
+        *shutdown_received = true;
+        core.send_ok(req.id, serde_json::Value::Null);
+        return;
+    }
+    if !*initialized {
+        if req.method == Initialize::METHOD {
+            match serde_json::from_value::<InitializeParams>(req.params) {
+                Ok(params) => {
+                    let result = core.initialize(&params);
+                    *initialized = true;
+                    let value = serde_json::to_value(result).unwrap_or(serde_json::Value::Null);
+                    core.send_ok(req.id, value);
+                }
+                Err(err) => {
+                    core.send_err(req.id, ErrorCode::InvalidParams, err.to_string());
+                }
+            }
+        } else {
+            core.send_err(
+                req.id,
+                ErrorCode::ServerNotInitialized,
+                format!("server not initialized before {}", req.method),
+            );
+        }
+        return;
+    }
+
+    match req.method.as_str() {
+        Initialize::METHOD => {
+            core.send_err(
+                req.id,
+                ErrorCode::InvalidRequest,
+                "server already initialized".to_string(),
+            );
+        }
+        HoverRequest::METHOD => match serde_json::from_value::<HoverParams>(req.params) {
+            Ok(params) => {
+                let hover = core.hover(params);
+                let value = serde_json::to_value(hover).unwrap_or(serde_json::Value::Null);
+                core.send_ok(req.id, value);
+            }
+            Err(err) => core.send_err(req.id, ErrorCode::InvalidParams, err.to_string()),
+        },
+        CodeActionRequest::METHOD => match serde_json::from_value::<CodeActionParams>(req.params) {
+            Ok(params) => {
+                let _ = job_tx.send(Job::CodeAction { id: req.id, params });
+            }
+            Err(err) => core.send_err(req.id, ErrorCode::InvalidParams, err.to_string()),
+        },
+        _ => {
+            core.send_err(
+                req.id,
+                ErrorCode::MethodNotFound,
+                format!("method not found: {}", req.method),
+            );
         }
     }
 }
 
-#[allow(clippy::too_many_lines)]
-#[tower_lsp::async_trait]
-impl LanguageServer for Backend {
-    async fn initialize(&self, params: InitializeParams) -> JsonRpcResult<InitializeResult> {
-        // Strictly `true`: a missing or malformed value leaves the workspace
-        // untrusted.
-        let trusted = params
-            .initialization_options
-            .as_ref()
-            .and_then(|options| options.get("trusted"))
-            .and_then(tower_lsp::lsp_types::LSPAny::as_bool)
-            .unwrap_or(false);
-        let related_information_supported = params
-            .capabilities
-            .text_document
-            .as_ref()
-            .and_then(|text| text.publish_diagnostics.as_ref())
-            .and_then(|publish| publish.related_information)
-            .unwrap_or(false);
-        let mut state = self.state.lock();
-        state.folders = workspace_folders(&params);
-        state.related_information_supported = related_information_supported;
-        state.trusted = trusted;
-        drop(state);
-        Ok(InitializeResult {
-            capabilities: ServerCapabilities {
-                text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                    TextDocumentSyncKind::FULL,
-                )),
-                hover_provider: Some(HoverProviderCapability::Simple(true)),
-                code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
-                workspace: Some(WorkspaceServerCapabilities {
-                    workspace_folders: Some(WorkspaceFoldersServerCapabilities {
-                        supported: Some(true),
-                        change_notifications: Some(OneOf::Left(true)),
-                    }),
-                    file_operations: None,
-                }),
-                ..ServerCapabilities::default()
-            },
-            server_info: Some(ServerInfo {
-                name: "alint-lsp".to_string(),
-                version: Some(env!("CARGO_PKG_VERSION").to_string()),
-            }),
-        })
-    }
+fn handle_notification(core: &ServerCore, job_tx: &Sender<Job>, notif: Notification) {
+    let trigger_full_check = || {
+        let next_gen = core.check_gen.fetch_add(1, Ordering::SeqCst) + 1;
+        let _ = job_tx.send(Job::FullCheck(next_gen));
+    };
 
-    async fn initialized(&self, _: InitializedParams) {
-        self.client
-            .log_message(MessageType::INFO, "alint language server ready")
-            .await;
-    }
-
-    async fn shutdown(&self) -> JsonRpcResult<()> {
-        Ok(())
-    }
-
-    async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        {
-            let mut state = self.state.lock();
-            let uri = params.text_document.uri;
-            state.open.insert(uri.clone());
-            state
-                .versions
-                .insert(uri.clone(), params.text_document.version);
-            state.documents.insert(uri, params.text_document.text);
+    match notif.method.as_str() {
+        Initialized::METHOD => {
+            core.log_message(MessageType::INFO, "alint language server ready");
         }
-        self.check_and_publish().await;
-    }
-
-    async fn did_change(&self, mut params: DidChangeTextDocumentParams) {
-        // FULL document sync → the last content change carries the
-        // whole new text. Re-evaluate per-file rules against it.
-        let Some(change) = params.content_changes.pop() else {
-            return;
-        };
-        let uri = params.text_document.uri;
-        let version = params.text_document.version;
-        {
-            let mut state = self.state.lock();
-            state.documents.insert(uri.clone(), change.text.clone());
-            state.versions.insert(uri.clone(), version);
-        }
-        self.reeval_file(uri, change.text, version).await;
-    }
-
-    async fn did_save(&self, _: DidSaveTextDocumentParams) {
-        // Rebuild the session (the tree / config may have changed) and
-        // re-run everything, including cross-file rules.
-        self.check_and_publish().await;
-    }
-
-    async fn did_change_watched_files(&self, _: DidChangeWatchedFilesParams) {
-        // A watched file changed outside the editor's edit flow — most
-        // importantly `.alint.yml`. Rebuild the session and re-run so
-        // config edits take effect without needing to save an open doc.
-        self.check_and_publish().await;
-    }
-
-    async fn did_change_workspace_folders(&self, params: DidChangeWorkspaceFoldersParams) {
-        {
-            let mut state = self.state.lock();
-            let removed: Vec<PathBuf> = params
-                .event
-                .removed
-                .iter()
-                .filter_map(|f| f.uri.to_file_path().ok())
-                .collect();
-            state.folders.retain(|f| !removed.contains(f));
-            for added in &params.event.added {
-                if let Ok(path) = added.uri.to_file_path()
-                    && !state.folders.contains(&path)
+        DidOpenTextDocument::METHOD => {
+            if let Ok(params) = serde_json::from_value::<DidOpenTextDocumentParams>(notif.params) {
+                let uri = params.text_document.uri;
                 {
-                    state.folders.push(path);
+                    let mut state = core.state.lock();
+                    state.open.insert(uri.clone());
+                    state
+                        .versions
+                        .insert(uri.clone(), params.text_document.version);
+                    state.documents.insert(uri, params.text_document.text);
                 }
+                trigger_full_check();
             }
         }
-        self.check_and_publish().await;
-    }
-
-    async fn did_close(&self, params: DidCloseTextDocumentParams) {
-        let uri = params.text_document.uri;
-        let is_config = {
-            let mut state = self.state.lock();
-            state.open.remove(&uri);
-            state.documents.remove(&uri);
-            state.versions.remove(&uri);
-            state.doc_config.remove(&uri);
-            let is_config = state.config_uris.contains(&uri);
-            if !is_config {
-                state.diagnostics.remove(&uri);
-            }
-            is_config
-        };
-        // Clear any diagnostics the editor is still showing — except on a
-        // config file, whose anchored findings / load error stay visible
-        // whether or not it is open.
-        if !is_config {
-            self.client.publish_diagnostics(uri, Vec::new(), None).await;
-        }
-    }
-
-    async fn hover(&self, params: HoverParams) -> JsonRpcResult<Option<Hover>> {
-        let pos = params.text_document_position_params.position;
-        let uri = params.text_document_position_params.text_document.uri;
-
-        let findings = {
-            let state = self.state.lock();
-            state.diagnostics.get(&uri).cloned()
-        };
-        let Some(findings) = findings else {
-            return Ok(None);
-        };
-        let matching: Vec<&Finding> = findings
-            .iter()
-            .filter(|f| range_contains(f.range, pos))
-            .collect();
-        if matching.is_empty() {
-            return Ok(None);
-        }
-
-        let value = matching
-            .iter()
-            .map(|f| render_finding(f))
-            .collect::<Vec<_>>()
-            .join("\n\n---\n\n");
-        Ok(Some(Hover {
-            contents: HoverContents::Markup(MarkupContent {
-                kind: MarkupKind::Markdown,
-                value,
-            }),
-            range: matching.first().map(|f| f.range),
-        }))
-    }
-
-    async fn code_action(
-        &self,
-        params: CodeActionParams,
-    ) -> JsonRpcResult<Option<CodeActionResponse>> {
-        let uri = params.text_document.uri;
-        let selection = params.range;
-
-        // Respect the client's kind filter: if it asked for a specific
-        // set of action kinds that doesn't admit quick-fixes, return none.
-        if let Some(only) = &params.context.only {
-            let admits_quickfix = only
-                .iter()
-                .any(|kind| *kind == CodeActionKind::QUICKFIX || *kind == CodeActionKind::EMPTY);
-            if !admits_quickfix {
-                return Ok(None);
+        DidChangeTextDocument::METHOD => {
+            if let Ok(mut params) =
+                serde_json::from_value::<DidChangeTextDocumentParams>(notif.params)
+            {
+                // FULL document sync -> the last content change carries the
+                // whole new text. Re-evaluate per-file rules against it.
+                let Some(change) = params.content_changes.pop() else {
+                    return;
+                };
+                let uri = params.text_document.uri;
+                let version = params.text_document.version;
+                {
+                    let mut state = core.state.lock();
+                    state.documents.insert(uri.clone(), change.text.clone());
+                    state.versions.insert(uri.clone(), version);
+                }
+                let _ = job_tx.send(Job::Reeval {
+                    uri,
+                    text: change.text,
+                    version,
+                });
             }
         }
-
-        let Some(inputs) = self.code_action_inputs(&uri) else {
-            return Ok(None);
-        };
-        let Ok(abs) = uri.to_file_path() else {
-            return Ok(None);
-        };
-        let version = inputs.version;
-        // Fixers recurse over the parsed buffer: compute off the async
-        // workers, on a blocking thread with a full-sized stack.
-        let computed =
-            tokio::task::spawn_blocking(move || fix_actions(&inputs, &abs, selection)).await;
-        let Ok(Some((mut actions, unsafe_flags))) = computed else {
-            return Ok(None);
-        };
-        // The buffer changed while the edits were computed: they would
-        // apply to text the editor no longer has.
-        if self.state.lock().versions.get(&uri).copied() != version {
-            return Ok(None);
+        DidSaveTextDocument::METHOD | DidChangeWatchedFiles::METHOD => {
+            // Rebuild sessions (the tree / config may have changed) and re-run
+            // everything, including cross-file rules.
+            trigger_full_check();
         }
-        if actions.is_empty() {
-            return Ok(None);
+        DidChangeWorkspaceFolders::METHOD => {
+            if let Ok(params) =
+                serde_json::from_value::<DidChangeWorkspaceFoldersParams>(notif.params)
+            {
+                {
+                    let mut state = core.state.lock();
+                    let removed: Vec<PathBuf> = params
+                        .event
+                        .removed
+                        .iter()
+                        .filter_map(|f| f.uri.to_file_path().ok())
+                        .collect();
+                    state.folders.retain(|f| !removed.contains(f));
+                    for added in &params.event.added {
+                        if let Ok(path) = added.uri.to_file_path()
+                            && !state.folders.contains(&path)
+                        {
+                            state.folders.push(path);
+                        }
+                    }
+                }
+                trigger_full_check();
+            }
         }
-        // A single SAFE fix is the obvious one to apply (some clients auto-apply
-        // the preferred action); an Unsafe fix is never auto-preferred -- applying
-        // it must stay a deliberate choice.
-        if actions.len() == 1
-            && !unsafe_flags[0]
-            && let CodeActionOrCommand::CodeAction(action) = &mut actions[0]
-        {
-            action.is_preferred = Some(true);
+        DidCloseTextDocument::METHOD => {
+            if let Ok(params) = serde_json::from_value::<DidCloseTextDocumentParams>(notif.params) {
+                core.did_close(params);
+            }
         }
-        Ok(Some(actions))
+        other => {
+            tracing::debug!(method = other, "ignoring unhandled LSP notification");
+        }
     }
 }
 
@@ -985,7 +1142,7 @@ struct CodeActionInputs {
 
 /// The quick-fixes for the findings of `abs` that overlap `selection`, and
 /// whether each is Unsafe-tier; `None` when the file gets no fix at all.
-/// Runs on a blocking thread (`codeAction` awaits it).
+/// Runs on a worker thread with an 8 MiB stack.
 fn fix_actions(
     inputs: &CodeActionInputs,
     abs: &Path,
@@ -1145,7 +1302,7 @@ fn edit_paths(edit: &alint_core::FixEdit) -> impl Iterator<Item = &Path> {
 /// Every open document gets the findings of the config that governs it;
 /// a document under a broken config gets none (the config error is
 /// shown on the config file instead of stale findings from the old
-/// engine). Each config file gets its own anchored findings — published
+/// engine). Each config file gets its own anchored findings - published
 /// in the SAME message, so clearing a previous config error can never
 /// wipe them.
 fn findings_to_diagnostics(

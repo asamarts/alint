@@ -83,7 +83,7 @@ fn code_span(text: &str) -> String {
 /// has no space, `<` or `>` to escape its `<...>` destination), the escaped
 /// text otherwise.
 fn policy_link(url: &str) -> String {
-    match tower_lsp::lsp_types::Url::parse(url) {
+    match lsp_types::Url::parse(url) {
         Ok(parsed) if matches!(parsed.scheme(), "http" | "https") => {
             format!("[Policy →](<{parsed}>)")
         }
