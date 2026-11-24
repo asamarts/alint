@@ -1068,9 +1068,12 @@ mod tests {
         std::fs::write(abs, content).unwrap();
     }
 
-    /// Reference walk using `ignore::WalkBuilder` with the exact flags alint
-    /// used before #573, used by parity tests to confirm the owned parallel
-    /// walker yields identical entries, directory flags, and sizes.
+    /// Reference walk using `ignore::WalkBuilder::build_parallel` with the
+    /// exact flags alint used before #573, used by parity tests to confirm the
+    /// owned parallel walker yields identical entries, directory flags, and
+    /// sizes (including exact-case ignore-file matching on case-insensitive
+    /// filesystems, which `WalkParallel` uses whereas sequential `Walk` probes
+    /// by path).
     fn reference_ignore_walk(root: &Path, opts: &WalkOptions) -> Vec<(String, bool, u64)> {
         let mut builder = ignore::WalkBuilder::new(root);
         builder
@@ -1095,29 +1098,28 @@ mod tests {
                 _ => false,
             }
         });
-        let mut out = Vec::new();
-        for item in builder.build() {
-            let Ok(entry) = item else {
-                continue;
-            };
-            let Ok(rel) = entry.path().strip_prefix(root) else {
-                continue;
-            };
-            if rel.as_os_str().is_empty() {
-                continue;
-            }
-            let Ok(meta) = entry.metadata() else {
-                continue;
-            };
-            if !meta.is_dir() && !meta.is_file() {
-                continue;
-            }
-            out.push((
-                rel.display().to_string().replace('\\', "/"),
-                meta.is_dir(),
-                if meta.is_file() { meta.len() } else { 0 },
-            ));
-        }
+        let out: Arc<Mutex<Vec<(String, bool, u64)>>> = Arc::new(Mutex::new(Vec::new()));
+        let root_buf = root.to_path_buf();
+        builder.build_parallel().run(|| {
+            let out = Arc::clone(&out);
+            let root = root_buf.clone();
+            Box::new(move |item| {
+                if let Ok(entry) = item
+                    && let Ok(rel) = entry.path().strip_prefix(&root)
+                    && !rel.as_os_str().is_empty()
+                    && let Ok(meta) = entry.metadata()
+                    && (meta.is_dir() || meta.is_file())
+                {
+                    out.lock().unwrap().push((
+                        rel.display().to_string().replace('\\', "/"),
+                        meta.is_dir(),
+                        if meta.is_file() { meta.len() } else { 0 },
+                    ));
+                }
+                ignore::WalkState::Continue
+            })
+        });
+        let mut out = out.lock().unwrap().clone();
         out.sort();
         out
     }
