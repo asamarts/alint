@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use tower_lsp::lsp_types::{InitializeParams, Position, Range, Url};
+use lsp_types::{InitializeParams, Position, Range, Url};
 
 use alint_core::baseline::Baseline;
 use alint_core::{Engine, Level, Report, RuleEntry, RuleResult, WalkOptions, walk};

@@ -96,7 +96,8 @@ impl Server {
     /// sending `exit` keeps teardown spec-conformant and lets instrumented
     /// binaries flush their coverage profile before this harness is dropped.
     pub fn shutdown(&mut self) {
-        const SHUTDOWN_ID: i64 = i64::MAX;
+        // LSP 3.17 `integer` is signed 32-bit (`-2^31..=2^31-1`).
+        const SHUTDOWN_ID: i64 = i32::MAX as i64;
         self.send(&serde_json::json!({
             "jsonrpc": "2.0",
             "id": SHUTDOWN_ID,

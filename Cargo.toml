@@ -140,25 +140,15 @@ hcl = { package = "hcl-rs", version = "0.18" }
 # Line-level unified diffs for `alint fix --diff`.
 similar = "3"
 
-# LSP server, slated for v0.11. Crate-choice rationale (`tower-lsp`
-# over `lsp-server`) is in `docs/design/v0.11/lsp_server.md`.
-# Dormant until `crates/alint-lsp/` lands — listed here so the
-# version pin is reviewed with the rest of the workspace deps, but
-# `cargo build` won't pull it (no crate depends on it yet).
-#
-# History (in case the doc paths look odd): the design pass landed
-# in v0.9.7 under `docs/design/v0.10/`. When v0.10's scope was
-# re-cut to case-study coverage, the LSP work moved to v0.11 and
-# the design docs were relocated to `docs/design/v0.11/` (the
-# move itself shipped in v0.9.22).
-tower-lsp = "0.20"
-# The `Service` trait, to wrap the tower-lsp service so `exit` stops the
-# server promptly (already in the tree via tower-lsp).
-tower-service = "0.3"
-# Async runtime for the LSP server (tower-lsp is async). Only
-# `crates/alint-lsp` pulls it in; the CLI enters the runtime via the
-# `lsp` subcommand.
-tokio = { version = "1", features = ["rt-multi-thread", "io-std", "macros", "sync"] }
+# Synchronous LSP transport (`lsp-server`, maintained by `rust-analyzer`) and
+# protocol types (`lsp-types`) for `crates/alint-lsp` (ADR-0048 decision 4b,
+# #607). Replaced unmaintained `tower-lsp 0.20` + `tokio` to align with alint's
+# synchronous `rayon` engine and drop the async LSP dependency stack.
+lsp-server = "0.10"
+lsp-types = "0.95"
+# Already pulled by `lsp-server`; promoted to a direct dep for worker dispatch
+# in `crates/alint-lsp`.
+crossbeam-channel = "0.5"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

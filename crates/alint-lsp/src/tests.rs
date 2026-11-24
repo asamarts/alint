@@ -6,11 +6,12 @@ use super::diagnostics::{
 use super::render::{kind_description, rule_docs_url};
 use super::*;
 use alint_core::{FixEdit, Level, RelatedLocation, SourceRange};
+use lsp_types::{DocumentChangeOperation, DocumentChanges, NumberOrString, ResourceOp};
 use std::borrow::Cow;
-use tower_lsp::lsp_types::{DocumentChangeOperation, DocumentChanges, NumberOrString, ResourceOp};
 
-fn test_backend(client: Client) -> Backend {
-    Backend::new(client, LspOptions::default())
+fn test_server() -> (ServerCore, crossbeam_channel::Receiver<Message>) {
+    let (tx, rx) = crossbeam_channel::unbounded();
+    (ServerCore::new(tx, LspOptions::default()), rx)
 }
 
 /// Wire a built session into the state as the governing config of `uri`.
@@ -216,15 +217,14 @@ fn bom_marked_disk_and_overlay_locations_use_logical_text_coordinates() {
     );
 }
 
-#[tokio::test]
-async fn initialize_records_related_information_capability() {
-    use tower_lsp::lsp_types::{
+#[test]
+fn initialize_records_related_information_capability() {
+    use lsp_types::{
         ClientCapabilities, PublishDiagnosticsClientCapabilities, TextDocumentClientCapabilities,
     };
 
     for supported in [false, true] {
-        let (service, _socket) = LspService::new(test_backend);
-        let backend = service.inner();
+        let (server, _rx) = test_server();
         let params = InitializeParams {
             capabilities: ClientCapabilities {
                 text_document: Some(TextDocumentClientCapabilities {
@@ -239,11 +239,8 @@ async fn initialize_records_related_information_capability() {
             ..InitializeParams::default()
         };
 
-        backend.initialize(params).await.unwrap();
-        assert_eq!(
-            backend.state.lock().related_information_supported,
-            supported
-        );
+        server.initialize(&params);
+        assert_eq!(server.state.lock().related_information_supported, supported);
     }
 }
 
@@ -524,8 +521,8 @@ fn eval_buffer_lints_the_editor_text_not_the_file_on_disk() {
 /// Editing a file the walk left out keeps the last full run's findings on it:
 /// a `git_tracked_only` rule reports a tracked file that an ignore file hides,
 /// and a keystroke must not clear that (#503's audit). Per-file findings go.
-#[tokio::test]
-async fn editing_an_unindexed_file_keeps_its_full_run_findings() {
+#[test]
+fn editing_an_unindexed_file_keeps_its_full_run_findings() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().to_path_buf();
     std::fs::write(root.join(".env"), "A=1\n").unwrap();
@@ -536,8 +533,7 @@ async fn editing_an_unindexed_file_keeps_its_full_run_findings() {
     )
     .unwrap();
     let session = build_session(&root).unwrap().unwrap();
-    let (service, _socket) = LspService::new(test_backend);
-    let backend = service.inner();
+    let (backend, _rx) = test_server();
     let uri = Url::from_file_path(root.join(".env")).unwrap();
     let full_run = Finding {
         per_file: false,
@@ -552,7 +548,7 @@ async fn editing_an_unindexed_file_keeps_its_full_run_findings() {
         st.diagnostics
             .insert(uri.clone(), vec![full_run.clone(), finding(None)]);
     }
-    backend.reeval_file(uri.clone(), "A=2\n".into(), 2).await;
+    backend.reeval_file(uri.clone(), "A=2\n".into(), 2);
     let kept: Vec<String> = backend.state.lock().diagnostics[&uri]
         .iter()
         .map(|finding| finding.rule_id.clone())
@@ -565,7 +561,7 @@ async fn editing_an_unindexed_file_keeps_its_full_run_findings() {
         .lock()
         .diagnostics
         .insert(uri.clone(), vec![finding(None)]);
-    backend.reeval_file(uri.clone(), "A=3\n".into(), 2).await;
+    backend.reeval_file(uri.clone(), "A=3\n".into(), 2);
     assert!(!backend.state.lock().diagnostics.contains_key(&uri));
 }
 
@@ -997,16 +993,15 @@ fn located_edits_with_no_range_edits_yield_none() {
     );
 }
 
-#[tokio::test]
-async fn code_action_offers_the_located_replace_fix_end_to_end() {
-    // Drive the real async `code_action` for a located fixer: a genuine
+#[test]
+fn code_action_offers_the_located_replace_fix_end_to_end() {
+    // Drive `code_action` for a located fixer: a genuine
     // `file_content_forbidden` + `replace` session, an open buffer with the
     // forbidden pattern, and a diagnostic over it. The response must carry a
     // quick-fix whose `WorkspaceEdit` replaces the match with a UTF-16 `TextEdit`.
     // Gates the routing (`collects_located_edits` branch) + state handling that
-    // the mapper unit tests don't reach. `code_action` touches only `self.state`
-    // (never `self.client`), so it runs without a live LSP socket.
-    use tower_lsp::lsp_types::{
+    // the mapper unit tests don't reach.
+    use lsp_types::{
         CodeActionContext, PartialResultParams, TextDocumentIdentifier, WorkDoneProgressParams,
     };
 
@@ -1023,8 +1018,7 @@ async fn code_action_offers_the_located_replace_fix_end_to_end() {
         .expect("build_session ok")
         .expect("config present");
 
-    let (service, _socket) = LspService::new(test_backend);
-    let backend = service.inner();
+    let (backend, _rx) = test_server();
 
     let uri = Url::from_file_path(root.join("a.txt")).unwrap();
     let finding = Finding {
@@ -1061,11 +1055,7 @@ async fn code_action_offers_the_located_replace_fix_end_to_end() {
         work_done_progress_params: WorkDoneProgressParams::default(),
         partial_result_params: PartialResultParams::default(),
     };
-    let resp = backend
-        .code_action(params)
-        .await
-        .expect("code_action ok")
-        .expect("an action is offered");
+    let resp = backend.code_action(params).expect("an action is offered");
     assert_eq!(
         resp.len(),
         1,
@@ -1090,9 +1080,9 @@ async fn code_action_offers_the_located_replace_fix_end_to_end() {
     assert_eq!(tes[0].range.end, Position::new(0, 6));
 }
 
-#[tokio::test]
-async fn code_action_omits_sensitive_replacement_bytes() {
-    use tower_lsp::lsp_types::{
+#[test]
+fn code_action_omits_sensitive_replacement_bytes() {
+    use lsp_types::{
         CodeActionContext, PartialResultParams, TextDocumentIdentifier, WorkDoneProgressParams,
     };
 
@@ -1108,8 +1098,7 @@ async fn code_action_omits_sensitive_replacement_bytes() {
     let session = build_session(&root)
         .expect("build_session ok")
         .expect("config present");
-    let (service, _socket) = LspService::new(test_backend);
-    let backend = service.inner();
+    let (backend, _rx) = test_server();
     let uri = Url::from_file_path(root.join(".env")).unwrap();
     let finding = Finding {
         range: Range::new(Position::new(0, 6), Position::new(0, 12)),
@@ -1135,29 +1124,26 @@ async fn code_action_omits_sensitive_replacement_bytes() {
             .insert(uri.clone(), "TOKEN=secret\n".to_string());
         state.diagnostics.insert(uri.clone(), vec![finding]);
     }
-    let response = backend
-        .code_action(CodeActionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            range: Range::new(Position::new(0, 6), Position::new(0, 12)),
-            context: CodeActionContext {
-                diagnostics: vec![],
-                only: None,
-                trigger_kind: None,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        })
-        .await
-        .expect("code_action succeeds");
+    let response = backend.code_action(CodeActionParams {
+        text_document: TextDocumentIdentifier { uri: uri.clone() },
+        range: Range::new(Position::new(0, 6), Position::new(0, 12)),
+        context: CodeActionContext {
+            diagnostics: vec![],
+            only: None,
+            trigger_kind: None,
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    });
     assert!(
         response.is_none(),
         "sensitive findings must not expose replacement bytes: {response:?}"
     );
 }
 
-#[tokio::test]
-async fn code_action_omits_a_sibling_fix_for_a_sensitive_input_file() {
-    use tower_lsp::lsp_types::{
+#[test]
+fn code_action_omits_a_sibling_fix_for_a_sensitive_input_file() {
+    use lsp_types::{
         CodeActionContext, PartialResultParams, TextDocumentIdentifier, WorkDoneProgressParams,
     };
 
@@ -1190,8 +1176,7 @@ rules:
     let session = build_session(&root)
         .expect("build_session ok")
         .expect("config present");
-    let (service, _socket) = LspService::new(test_backend);
-    let backend = service.inner();
+    let (backend, _rx) = test_server();
     let uri = Url::from_file_path(root.join(".env")).unwrap();
     let finding = Finding {
         range: Range::new(Position::new(0, 0), Position::new(0, 1)),
@@ -1216,34 +1201,31 @@ rules:
         state.diagnostics.insert(uri.clone(), vec![finding]);
     }
 
-    let response = backend
-        .code_action(CodeActionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            range: Range::new(Position::new(0, 0), Position::new(0, 1)),
-            context: CodeActionContext {
-                diagnostics: vec![],
-                only: None,
-                trigger_kind: None,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        })
-        .await
-        .expect("code_action succeeds");
+    let response = backend.code_action(CodeActionParams {
+        text_document: TextDocumentIdentifier { uri: uri.clone() },
+        range: Range::new(Position::new(0, 0), Position::new(0, 1)),
+        context: CodeActionContext {
+            diagnostics: vec![],
+            only: None,
+            trigger_kind: None,
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    });
     assert!(
         response.is_none(),
         "a sibling fix must not serialize bytes from a sensitive input: {response:?}"
     );
 }
 
-#[tokio::test]
-async fn code_action_offers_a_structured_set_value_fix() {
+#[test]
+fn code_action_offers_a_structured_set_value_fix() {
     // Follow-up 4: the structured located fixers (`set_value`/`remove_value`/
     // `replace` on the `*_path_*` kinds) reach the editor through the SAME
     // `collects_located_edits` branch as `replace`. Drive `code_action` for a
     // real `json_path_equals` + `set_value` session: the response must carry a
     // quick-fix whose `TextEdit` rewrites just the value span.
-    use tower_lsp::lsp_types::{
+    use lsp_types::{
         CodeActionContext, PartialResultParams, TextDocumentIdentifier, WorkDoneProgressParams,
     };
     let tmp = tempfile::tempdir().unwrap();
@@ -1258,8 +1240,7 @@ async fn code_action_offers_a_structured_set_value_fix() {
     let session = build_session(&root)
         .expect("build_session ok")
         .expect("config present");
-    let (service, _socket) = LspService::new(test_backend);
-    let backend = service.inner();
+    let (backend, _rx) = test_server();
     let uri = Url::from_file_path(root.join("app.json")).unwrap();
     let finding = Finding {
         range: Range::new(Position::new(0, 9), Position::new(0, 13)),
@@ -1295,11 +1276,7 @@ async fn code_action_offers_a_structured_set_value_fix() {
         work_done_progress_params: WorkDoneProgressParams::default(),
         partial_result_params: PartialResultParams::default(),
     };
-    let resp = backend
-        .code_action(params)
-        .await
-        .expect("code_action ok")
-        .expect("an action is offered");
+    let resp = backend.code_action(params).expect("an action is offered");
     let CodeActionOrCommand::CodeAction(action) = &resp[0] else {
         panic!("expected a CodeAction");
     };
@@ -1312,8 +1289,8 @@ async fn code_action_offers_a_structured_set_value_fix() {
     assert_eq!(tes[0].range.end, Position::new(0, 13));
 }
 
-#[tokio::test]
-async fn code_action_withholds_a_fix_the_pipeline_would_demote() {
+#[test]
+fn code_action_withholds_a_fix_the_pipeline_would_demote() {
     // Audit HIGH: the LSP must not offer a quick-fix the engine refuses. It
     // now routes located edits through `apply_file_edits` (the same verify /
     // overlap / tier pipeline `alint fix` uses) and offers only survivors. A
@@ -1321,7 +1298,7 @@ async fn code_action_withholds_a_fix_the_pipeline_would_demote() {
     // all-or-nothing (the `Absent` verify fails), so `alint fix` writes
     // nothing -- the code action must offer nothing, never a partial (here:
     // secret-leaking) removal.
-    use tower_lsp::lsp_types::{
+    use lsp_types::{
         CodeActionContext, PartialResultParams, TextDocumentIdentifier, WorkDoneProgressParams,
     };
     let tmp = tempfile::tempdir().unwrap();
@@ -1336,8 +1313,7 @@ async fn code_action_withholds_a_fix_the_pipeline_would_demote() {
     let session = build_session(&root)
         .expect("build_session ok")
         .expect("config present");
-    let (service, _socket) = LspService::new(test_backend);
-    let backend = service.inner();
+    let (backend, _rx) = test_server();
     let uri = Url::from_file_path(root.join("main.tf")).unwrap();
     // A top-level secret + two block secrets: the block members can't be
     // removed, so the whole batch demotes.
@@ -1375,20 +1351,20 @@ async fn code_action_withholds_a_fix_the_pipeline_would_demote() {
         work_done_progress_params: WorkDoneProgressParams::default(),
         partial_result_params: PartialResultParams::default(),
     };
-    let resp = backend.code_action(params).await.expect("code_action ok");
+    let resp = backend.code_action(params);
     assert!(
         resp.is_none(),
         "a fix the pipeline demotes must not be offered; got: {resp:?}"
     );
 }
 
-#[tokio::test]
-async fn code_action_labels_an_unsafe_fix_and_does_not_prefer_it() {
+#[test]
+fn code_action_labels_an_unsafe_fix_and_does_not_prefer_it() {
     // An Unsafe fix (here `replace`, default Unsafe) IS offered as a quick-fix
     // (human-in-the-loop), but its title is labeled `(unsafe)` and it is NOT
     // marked preferred -- so clicking it is a visible, deliberate opt-in (the
     // LSP analogue of `--unsafe-fixes`), never an editor auto-apply.
-    use tower_lsp::lsp_types::{
+    use lsp_types::{
         CodeActionContext, PartialResultParams, TextDocumentIdentifier, WorkDoneProgressParams,
     };
     let tmp = tempfile::tempdir().unwrap();
@@ -1403,8 +1379,7 @@ async fn code_action_labels_an_unsafe_fix_and_does_not_prefer_it() {
     let session = build_session(&root)
         .expect("build_session ok")
         .expect("config present");
-    let (service, _socket) = LspService::new(test_backend);
-    let backend = service.inner();
+    let (backend, _rx) = test_server();
     let uri = Url::from_file_path(root.join("a.txt")).unwrap();
     let finding = Finding {
         range: Range::new(Position::new(0, 2), Position::new(0, 6)),
@@ -1439,11 +1414,7 @@ async fn code_action_labels_an_unsafe_fix_and_does_not_prefer_it() {
         work_done_progress_params: WorkDoneProgressParams::default(),
         partial_result_params: PartialResultParams::default(),
     };
-    let resp = backend
-        .code_action(params)
-        .await
-        .expect("code_action ok")
-        .expect("an action is offered");
+    let resp = backend.code_action(params).expect("an action is offered");
     let CodeActionOrCommand::CodeAction(action) = &resp[0] else {
         panic!("expected a CodeAction");
     };
@@ -1458,13 +1429,12 @@ async fn code_action_labels_an_unsafe_fix_and_does_not_prefer_it() {
 /// The code actions the server offers on the last line of each of `files`
 /// under `root`'s config, for a `no-todo` and an `erase` finding there, as
 /// `<file>: <title>`.
-async fn offered_fix_actions(root: &Path, files: &[&str]) -> Vec<String> {
-    use tower_lsp::lsp_types::{
+fn offered_fix_actions(root: &Path, files: &[&str]) -> Vec<String> {
+    use lsp_types::{
         CodeActionContext, PartialResultParams, TextDocumentIdentifier, WorkDoneProgressParams,
     };
     let mut session = Some(build_session(root).unwrap().unwrap());
-    let (service, _socket) = LspService::new(test_backend);
-    let backend = service.inner();
+    let (backend, _rx) = test_server();
     let mut offered = Vec::new();
     for file in files {
         let uri = Url::from_file_path(root.join(file)).unwrap();
@@ -1506,11 +1476,7 @@ async fn offered_fix_actions(root: &Path, files: &[&str]) -> Vec<String> {
             work_done_progress_params: WorkDoneProgressParams::default(),
             partial_result_params: PartialResultParams::default(),
         };
-        let actions = backend
-            .code_action(params)
-            .await
-            .unwrap()
-            .unwrap_or_default();
+        let actions = backend.code_action(params).unwrap_or_default();
         for action in actions {
             let CodeActionOrCommand::CodeAction(action) = action else {
                 panic!("expected a CodeAction");
@@ -1526,8 +1492,8 @@ async fn offered_fix_actions(root: &Path, files: &[&str]) -> Vec<String> {
 /// the configuration came from), as `alint fix` never writes it for one; nor
 /// does any rule's action edit a Git directory. The same rule declared in the
 /// user's own config is offered on the config files (the positive control).
-#[tokio::test]
-async fn code_action_from_an_extended_rule_never_edits_alint_configuration() {
+#[test]
+fn code_action_from_an_extended_rule_never_edits_alint_configuration() {
     let rules = "version: 1\nrules:\n  - id: no-todo\n    kind: file_content_forbidden\n    \
                  paths: \"**/*\"\n    pattern: \"TODO\"\n    level: error\n    \
                  fix: { replace: { replacement: \"DONE\" } }\n  - id: erase\n    \
@@ -1559,7 +1525,7 @@ async fn code_action_from_an_extended_rule_never_edits_alint_configuration() {
         std::fs::write(root.join("notes.yml"), "# TODO\n").unwrap();
         std::fs::create_dir_all(root.join(".git")).unwrap();
         std::fs::write(root.join(".git/config.yml"), "# TODO\n").unwrap();
-        let offered = offered_fix_actions(root, &files).await;
+        let offered = offered_fix_actions(root, &files);
         if extended {
             assert_eq!(
                 offered,
@@ -1745,7 +1711,7 @@ fn exit_code_follows_the_lsp_spec() {
 
 #[test]
 fn workspace_folders_keeps_every_root() {
-    use tower_lsp::lsp_types::WorkspaceFolder;
+    use lsp_types::WorkspaceFolder;
     let a = repo_root().join("a");
     let b = repo_root().join("b");
     let params = InitializeParams {
@@ -1776,11 +1742,11 @@ fn config_for_document_ignores_files_outside_every_folder() {
     assert_eq!(config_for_document(&doc, &[repo_root()]), None);
 }
 
-#[tokio::test]
-async fn code_action_withholds_fixes_over_the_fix_size_limit() {
+#[test]
+fn code_action_withholds_fixes_over_the_fix_size_limit() {
     // The LSP ignored `fix_size_limit`: `alint fix` skips an oversized
     // file, so the editor must not offer to fix it either.
-    use tower_lsp::lsp_types::{
+    use lsp_types::{
         CodeActionContext, PartialResultParams, TextDocumentIdentifier, WorkDoneProgressParams,
     };
     let tmp = tempfile::tempdir().unwrap();
@@ -1794,8 +1760,7 @@ async fn code_action_withholds_fixes_over_the_fix_size_limit() {
     .unwrap();
     let session = build_session(&root).unwrap().unwrap();
     assert_eq!(session.engine.fix_size_limit(), Some(4));
-    let (service, _socket) = LspService::new(test_backend);
-    let backend = service.inner();
+    let (backend, _rx) = test_server();
     let uri = Url::from_file_path(root.join("a.txt")).unwrap();
     let mut f = finding(None);
     f.rule_id = "no-todo".to_string();
@@ -1815,7 +1780,7 @@ async fn code_action_withholds_fixes_over_the_fix_size_limit() {
         work_done_progress_params: WorkDoneProgressParams::default(),
         partial_result_params: PartialResultParams::default(),
     };
-    let resp = backend.code_action(params).await.expect("code_action ok");
+    let resp = backend.code_action(params);
     assert!(resp.is_none(), "oversized buffer gets no fix: {resp:?}");
 }
 

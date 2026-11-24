@@ -91,6 +91,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   errors now report the exact 1-based line and column of the repeated key rather than the mapping's
   first key (#572), and unknown top-level keys in `version: 2` configs now report their 1-based
   line and column (#566).
+- Migrated `alint-lsp` from unmaintained `tower-lsp 0.20` and `tokio` to synchronous `lsp-server`
+  and `lsp-types` with a fixed 8 MiB worker pool aligned with alint's `rayon` engine, dropping
+  `tower-lsp`, `tower-service`, `tokio`, `tower`, `futures`, `dashmap`, and the rest of the
+  18-crate async LSP dependency subtree while keeping the full LSP protocol, trust, hover,
+  quick-fix, and stale-buffer coalescing contracts unchanged (ADR-0048 decision 4b, #607).
 - Replaced `ignore::WalkBuilder`'s directory traversal with an owned parallel walker in
   `alint-core` (`walker_parallel.rs`) built on `ignore::gitignore::Gitignore` and `rayon::scope`,
   discovering ignore files directly from each directory's `read_dir` listing with open-then-`fstat`

@@ -573,7 +573,7 @@ alint/
 │   ├── alint-dsl/          YAML composition/typed loading + embedded editor schema + bundled rulesets
 │   ├── alint-rules/        built-in rule implementations
 │   ├── alint-output/       formatters (human, json, sarif, github, gitlab, junit, markdown, agent)
-│   ├── alint-lsp/          language server behind the `lsp` subcommand (tower-lsp)
+│   ├── alint-lsp/          language server behind the `lsp` subcommand (lsp-server)
 │   ├── alint-bench/        criterion micro-benches + seeded tree generator
 │   ├── alint-testkit/      public policy-test v1 model, hermetic runner, tree fixtures, optional strategies
 │   └── alint-e2e/          general policy tests + coverage audits + cross-cutting invariant tests

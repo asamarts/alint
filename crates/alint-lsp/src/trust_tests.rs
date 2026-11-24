@@ -489,8 +489,8 @@ fn hover_shows_repository_markdown_literally() {
     );
 }
 
-#[tokio::test]
-async fn a_superseded_buffer_is_not_evaluated() {
+#[test]
+fn a_superseded_buffer_is_not_evaluated() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().to_path_buf();
     std::fs::write(
@@ -501,8 +501,8 @@ async fn a_superseded_buffer_is_not_evaluated() {
     .unwrap();
     std::fs::write(root.join("a.txt"), "clean\n").unwrap();
     let session = build_session(&root).unwrap().unwrap();
-    let (service, _socket) = LspService::new(|client| Backend::new(client, LspOptions::default()));
-    let backend = service.inner();
+    let (tx, _rx) = crossbeam_channel::unbounded();
+    let backend = ServerCore::new(tx, LspOptions::default());
     let uri = Url::from_file_path(root.join("a.txt")).unwrap();
     {
         let mut st = backend.state.lock();
@@ -518,13 +518,11 @@ async fn a_superseded_buffer_is_not_evaluated() {
     }
     // Versions 1 and 2 were superseded by 3 before they started.
     for version in [1, 2] {
-        backend
-            .reeval_file(uri.clone(), "TODO\n".into(), version)
-            .await;
+        backend.reeval_file(uri.clone(), "TODO\n".into(), version);
     }
     assert_eq!(backend.evaluations.load(Ordering::SeqCst), 0);
     assert!(!backend.state.lock().diagnostics.contains_key(&uri));
-    backend.reeval_file(uri.clone(), "TODO\n".into(), 3).await;
+    backend.reeval_file(uri.clone(), "TODO\n".into(), 3);
     assert_eq!(backend.evaluations.load(Ordering::SeqCst), 1);
     assert_eq!(backend.state.lock().diagnostics[&uri].len(), 1);
 }
@@ -689,8 +687,8 @@ fn the_untrusted_note_is_shown_once_per_server() {
     assert!(!apply_check(&mut state, &[], check, &options).untrusted_note);
 }
 
-#[tokio::test]
-async fn initialize_reads_only_a_boolean_trusted_option() {
+#[test]
+fn initialize_reads_only_a_boolean_trusted_option() {
     for (options, trusted) in [
         (None, false),
         (Some(serde_json::json!({})), false),
@@ -698,14 +696,13 @@ async fn initialize_reads_only_a_boolean_trusted_option() {
         (Some(serde_json::json!({ "trusted": false })), false),
         (Some(serde_json::json!({ "trusted": true })), true),
     ] {
-        let (service, _socket) =
-            LspService::new(|client| Backend::new(client, LspOptions::default()));
-        let backend = service.inner();
+        let (tx, _rx) = crossbeam_channel::unbounded();
+        let backend = ServerCore::new(tx, LspOptions::default());
         let params = InitializeParams {
             initialization_options: options,
             ..InitializeParams::default()
         };
-        backend.initialize(params).await.unwrap();
+        backend.initialize(&params);
         assert_eq!(backend.state.lock().trusted, trusted);
     }
 }
