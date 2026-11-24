@@ -1058,54 +1058,6 @@ fn ignore_files_outside_a_repository_stop_at_the_root() {
 }
 
 #[test]
-fn only_errors_naming_files_above_the_root_are_ignore_file_errors() {
-    use ignore::Error;
-    let root = Path::new("/home/repo");
-    let io = || Error::Io(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
-    let glob = || Error::Glob {
-        glob: Some("[z-a]".to_string()),
-        err: "invalid range".to_string(),
-    };
-    let above = || Error::WithPath {
-        path: PathBuf::from("/home/.gitignore"),
-        err: Box::new(Error::WithLineNumber {
-            line: 1,
-            err: Box::new(glob()),
-        }),
-    };
-    let unreadable_above = || Error::WithPath {
-        path: PathBuf::from("/home/.git"),
-        err: Box::new(io()),
-    };
-    let inside = || Error::WithPath {
-        path: PathBuf::from("/home/repo/sub"),
-        err: Box::new(io()),
-    };
-    assert!(is_ignore_file_error(root, &above()));
-    assert!(is_ignore_file_error(root, &unreadable_above()));
-    assert!(is_ignore_file_error(
-        root,
-        &Error::Partial(vec![above(), Error::Partial(vec![unreadable_above()])])
-    ));
-    assert!(!is_ignore_file_error(root, &inside()));
-    assert!(!is_ignore_file_error(
-        root,
-        &Error::Partial(vec![above(), inside()])
-    ));
-    assert!(!is_ignore_file_error(root, &Error::Partial(Vec::new())));
-    // An error from the walk carries its depth, even for the root itself.
-    assert!(!is_ignore_file_error(
-        root,
-        &Error::WithDepth {
-            depth: 0,
-            err: Box::new(unreadable_above()),
-        }
-    ));
-    assert!(!is_ignore_file_error(root, &glob()));
-    assert!(!is_ignore_file_error(root, &io()));
-}
-
-#[test]
 fn a_bad_ignore_file_above_the_root_does_not_stop_the_walk() {
     // `ignore` reads the ignore files above the root whether or not it applies
     // them, and reports a bad line in one as a walk error. git never reads them

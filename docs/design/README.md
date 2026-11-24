@@ -59,7 +59,7 @@ in `docs/adr/` is missing from this table.
 | [0042](../adr/0042-measure-the-yaml-parser-by-memory-and-wall-time.md) | Measure the YAML parser by memory and wall time, not only instructions | accepted |
 | [0043](../adr/0043-trust-and-disclosure-decisions-from-the-post-v0221-audit.md) | Trust and disclosure decisions from the post-v0.22.1 audit | accepted |
 | [0044](../adr/0044-untrusted-runs-git-as-a-process-and-a-wider-memory-gate.md) | `--untrusted`, Git as a process, and a wider memory gate | accepted |
-| [0045](../adr/0045-count-the-walks-per-directory-probes-in-the-reference-gate.md) | Count the walk's per-directory probes in the reference gate | accepted |
+| [0045](../adr/0045-count-the-walks-per-directory-probes-in-the-reference-gate.md) | Count the walk's per-directory probes in the reference gate | superseded by ADR-0048 |
 | [0046](../adr/0046-a-linear-extends-merge-sealed-options-and-the-rounds-open-questions.md) | A linear `extends:` merge, sealed options, and the round's open questions | accepted |
 | [0047](../adr/0047-sarif-tells-apart-a-fingerprint-repeated-within-a-run.md) | SARIF tells apart a fingerprint repeated within a run by occurrence, as GitLab output does | accepted |
 | [0048](../adr/0048-v024-owner-decisions.md) | v0.24 owner decisions: saphyr exit, Phase 3 completion, owned walker, LSP rewrite, backlog drain, and plugins to v0.25 | accepted |

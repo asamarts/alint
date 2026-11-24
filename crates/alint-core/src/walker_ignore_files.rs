@@ -1,68 +1,57 @@
 //! The ignore files the walk reads, held to regular files of bounded size.
 //!
-//! `ignore` reads the `.ignore` and `.gitignore` of every directory it lists
-//! and of every directory above the root, a repository's `info/exclude`
-//! (through a linked worktree's `.git` file and its `commondir`), and the
-//! global excludes file, whole and through symlinks. A `.gitignore` that is a
-//! symlink to `/dev/zero` would have that read take memory without end, and
-//! one to a FIFO would block it. So before `ignore` reads a directory's files
-//! the walk checks them ([`refused_in`]) and stops with an error naming the
-//! first one it will not read; alint's own reads of the same files ([`read`])
-//! take only what passes.
+//! The owned parallel walker (`walker_parallel`) discovers each directory's
+//! `.ignore`, `.gitignore` and `.git` directly from `std::fs::read_dir` and
+//! reads them through [`read_from_entry`] (open-then-`fstat` for regular files
+//! without an extra path-based `stat` probe) or [`read_by_path`] (pre-`stat`
+//! before opening for symlinks, `info/exclude`, `commondir`, parent dirs, and
+//! global excludes so opening a FIFO never blocks and `/dev/zero` is refused
+//! before open).
+//!
+//! Policy (ADR-0048 decision 5b, #568):
+//! - Regular files of at most [`MAX_IGNORE_FILE_BYTES`] (32 MiB) are read.
+//! - Inside the checked root (and oversize global excludes), a non-regular,
+//!   oversize, or unreadable ignore file fails the walk via
+//!   [`IgnoreRefusal::into_error`].
+//! - Above the checked root, the same condition is skipped with a visible
+//!   warning via [`IgnoreRefusal::into_warning`].
 
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 /// The most of one ignore file, `.git` file or `commondir` the walk reads: as
-/// much as a config ([`crate::MAX_STRUCTURED_BYTES`]).
+/// much as a config ([`crate::MAX_STRUCTURED_BYTES`], 32 MiB).
 pub(super) const MAX_IGNORE_FILE_BYTES: u64 = crate::MAX_STRUCTURED_BYTES as u64;
 
-/// The bytes of `path`, a file the walk reads to decide what it leaves out,
-/// when it is a regular file within [`MAX_IGNORE_FILE_BYTES`]. `None` for any
-/// other, as for one that is absent or unreadable.
-pub(super) fn read(path: &Path) -> Option<Vec<u8>> {
-    crate::bounded_file::read_regular_capped(path, MAX_IGNORE_FILE_BYTES).ok()
+/// Outcome of reading one ignore file (or `.git` / `commondir` on the way to
+/// `info/exclude`) under the regular-file and 32 MiB bounds.
+pub(super) enum IgnoreFileRead {
+    /// Regular file read completely within [`MAX_IGNORE_FILE_BYTES`].
+    Bytes(Vec<u8>),
+    /// Missing (`NotFound`) or a directory (harmlessly ignored everywhere).
+    Absent,
+    /// Non-regular file (FIFO, device, socket, or symlink to one), oversize
+    /// (> 32 MiB), or unreadable (I/O error such as `PermissionDenied`).
+    Refused(IgnoreRefusal),
 }
 
-/// The first line of `path` ([`read`]), as `BufRead::lines` gives it: `None`
-/// when there is none or it is not UTF-8.
-pub(super) fn first_line(path: &Path) -> Option<String> {
-    use std::io::BufRead as _;
-    read(path)?.lines().next()?.ok()
-}
-
-/// A file `ignore` would read that the walk refuses, and why.
-pub(super) struct Refused {
+/// A file the walk refused to read, with its path and human-readable reason.
+pub(super) struct IgnoreRefusal {
     path: PathBuf,
     reason: String,
 }
 
-impl Refused {
-    /// Why `ignore` must not read `path`: something there that is neither a
-    /// regular file nor a directory (a device never ends; opening a FIFO
-    /// blocks), or a regular file larger than [`MAX_IGNORE_FILE_BYTES`]. A
-    /// regular file that gives its size as zero is read to count what it
-    /// holds ([`reads_past_cap`]): a `/proc` file does, whatever it holds, and
-    /// `/proc/self/pagemap` holds gigabytes. `None` when nothing is there, it
-    /// cannot be read (which `ignore` tolerates), it is a directory (which
-    /// `ignore` fails to read, harmlessly) or it is a regular file within the
-    /// cap.
-    fn check(path: PathBuf) -> Option<Self> {
-        let metadata = std::fs::metadata(&path).ok()?;
-        let reason = if metadata.is_dir() {
-            return None;
-        } else if !metadata.is_file() {
-            "it is not a regular file".to_string()
-        } else if metadata.len() > MAX_IGNORE_FILE_BYTES
-            || (metadata.len() == 0 && reads_past_cap(&path))
-        {
-            format!(
-                "it is larger than {}",
-                crate::bounded_file::describe_cap(MAX_IGNORE_FILE_BYTES)
-            )
-        } else {
-            return None;
-        };
-        Some(Self { path, reason })
+impl IgnoreRefusal {
+    pub(super) fn new(path: PathBuf, reason: String) -> Self {
+        Self { path, reason }
+    }
+
+    pub(super) fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub(super) fn reason(&self) -> &str {
+        &self.reason
     }
 
     pub(super) fn into_error(self) -> crate::Error {
@@ -75,84 +64,186 @@ impl Refused {
             crate::bounded_file::describe_cap(MAX_IGNORE_FILE_BYTES)
         ))
     }
+
+    pub(super) fn into_warning(self) -> String {
+        format!(
+            "skipping ignore file {} above root: {}; alint reads an ignore file \
+             (and a `.git` file or `commondir` on the way to one) only when it is a \
+             regular file of at most {}",
+            self.path.display(),
+            self.reason,
+            crate::bounded_file::describe_cap(MAX_IGNORE_FILE_BYTES)
+        )
+    }
 }
 
-/// Whether reading `path` yields more than [`MAX_IGNORE_FILE_BYTES`], counted
-/// in whole blocks without keeping what it reads (`/proc/self/pagemap` fails a
-/// read of a length that is not a multiple of 8). An empty file costs one
-/// read; a read that fails within the cap is no refusal, as `ignore`
-/// tolerates it.
-fn reads_past_cap(path: &Path) -> bool {
-    use std::io::Read as _;
-    let Ok(mut file) = std::fs::File::open(path) else {
-        return false;
+/// Read an ignore file discovered in a `read_dir` listing using its listing
+/// `FileType` to avoid a path-based `stat` probe on regular files (#573).
+///
+/// - Regular file (`ft.is_file()`): open directly, `fstat` (`file.metadata()`)
+///   to verify type and size, then read in bounded 8 KiB blocks.
+/// - Symlink (`ft.is_symlink()`): delegate to [`read_by_path`] (`metadata`
+///   first so a symlink to a FIFO never blocks and `/dev/zero` is never opened).
+/// - Directory (`ft.is_dir()`): [`IgnoreFileRead::Absent`].
+/// - Special file (FIFO, socket, char/block device): refused immediately with
+///   zero `open` or `stat` syscalls.
+pub(super) fn read_from_entry(path: PathBuf, ft: std::fs::FileType) -> IgnoreFileRead {
+    if ft.is_dir() {
+        return IgnoreFileRead::Absent;
+    }
+    if ft.is_symlink() {
+        return read_by_path(path);
+    }
+    if !ft.is_file() {
+        return IgnoreFileRead::Refused(IgnoreRefusal::new(
+            path,
+            "it is not a regular file".to_string(),
+        ));
+    }
+    open_and_read_bounded(path)
+}
+
+/// Read an ignore file by path when no listing `FileType` is available (a
+/// symlink, `info/exclude`, `commondir`, a parent directory above the root, or
+/// the global excludes file). Stats first so opening a FIFO never blocks.
+pub(super) fn read_by_path(path: PathBuf) -> IgnoreFileRead {
+    let metadata = match std::fs::metadata(&path) {
+        Ok(meta) => meta,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return IgnoreFileRead::Absent,
+        Err(err) => return IgnoreFileRead::Refused(IgnoreRefusal::new(path, err.to_string())),
     };
-    let mut block = [0; 8192];
-    let mut read = 0_u64;
-    while read <= MAX_IGNORE_FILE_BYTES {
+    if metadata.is_dir() {
+        return IgnoreFileRead::Absent;
+    }
+    if !metadata.is_file() {
+        return IgnoreFileRead::Refused(IgnoreRefusal::new(
+            path,
+            "it is not a regular file".to_string(),
+        ));
+    }
+    if metadata.len() > MAX_IGNORE_FILE_BYTES {
+        return IgnoreFileRead::Refused(IgnoreRefusal::new(path, too_large_reason()));
+    }
+    open_and_read_bounded(path)
+}
+
+/// Open `path`, verify its open handle via `fstat` (`file.metadata()`), and
+/// read in fixed 8 KiB blocks up to [`MAX_IGNORE_FILE_BYTES`].
+///
+/// Reading in fixed 8192-byte blocks serves two purposes:
+/// - Virtual files under `/proc` (such as `/proc/self/pagemap`, which reports
+///   `len == 0` in `fstat` and rejects non-multiple-of-8 read lengths) are
+///   bounded cleanly on the single open handle without a second open.
+/// - Concurrent file growth past the cap stops one chunk past the cap.
+fn open_and_read_bounded(path: PathBuf) -> IgnoreFileRead {
+    let mut file = match std::fs::File::open(&path) {
+        Ok(file) => file,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return IgnoreFileRead::Absent,
+        Err(err) => return IgnoreFileRead::Refused(IgnoreRefusal::new(path, err.to_string())),
+    };
+    let meta = match file.metadata() {
+        Ok(meta) => meta,
+        Err(err) => return IgnoreFileRead::Refused(IgnoreRefusal::new(path, err.to_string())),
+    };
+    if meta.is_dir() {
+        return IgnoreFileRead::Absent;
+    }
+    if !meta.is_file() {
+        return IgnoreFileRead::Refused(IgnoreRefusal::new(
+            path,
+            "it is not a regular file".to_string(),
+        ));
+    }
+    if meta.len() > MAX_IGNORE_FILE_BYTES {
+        return IgnoreFileRead::Refused(IgnoreRefusal::new(path, too_large_reason()));
+    }
+    let prealloc = usize::try_from(meta.len().min(MAX_IGNORE_FILE_BYTES)).unwrap_or(0);
+    let mut buf = Vec::with_capacity(prealloc);
+    let mut block = [0u8; 8192];
+    loop {
         match file.read(&mut block) {
-            Ok(0) => return false,
-            Ok(count) => read = read.saturating_add(u64::try_from(count).unwrap_or(u64::MAX)),
-            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
-            Err(_) => return false,
+            Ok(0) => return IgnoreFileRead::Bytes(buf),
+            Ok(count) => {
+                let next_len = (buf.len() as u64).saturating_add(count as u64);
+                if next_len > MAX_IGNORE_FILE_BYTES {
+                    return IgnoreFileRead::Refused(IgnoreRefusal::new(path, too_large_reason()));
+                }
+                buf.extend_from_slice(&block[..count]);
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(err) => return IgnoreFileRead::Refused(IgnoreRefusal::new(path, err.to_string())),
         }
     }
-    true
 }
 
-/// The first file among those `ignore` reads for `dir` that the walk refuses
-/// ([`Refused::check`]): its `.ignore` and `.gitignore`, and, when it holds a
-/// `.git`, the files on the way to its repository's `info/exclude`
-/// ([`super::git_exclude_file`]) and that file. Each is checked before
-/// anything after it is read.
-pub(super) fn refused_in(dir: &Path) -> Option<Refused> {
-    for name in [".ignore", ".gitignore"] {
-        if let Some(refused) = Refused::check(dir.join(name)) {
-            return Some(refused);
+fn too_large_reason() -> String {
+    format!(
+        "it is larger than {}",
+        crate::bounded_file::describe_cap(MAX_IGNORE_FILE_BYTES)
+    )
+}
+
+/// The bytes of `path`, a file `WalkSkips` reads to decide what it leaves out,
+/// when it is a regular file within [`MAX_IGNORE_FILE_BYTES`]. `None` for any
+/// other, as for one that is absent or unreadable.
+pub(super) fn read(path: &Path) -> Option<Vec<u8>> {
+    match read_by_path(path.to_path_buf()) {
+        IgnoreFileRead::Bytes(bytes) => Some(bytes),
+        IgnoreFileRead::Absent | IgnoreFileRead::Refused(_) => None,
+    }
+}
+
+/// The first line of `path` ([`read`]), as `BufRead::lines` gives it: `None`
+/// when there is none or it is not UTF-8.
+pub(super) fn first_line(path: &Path) -> Option<String> {
+    first_line_from_bytes(&read(path)?)
+}
+
+/// The first line of already-read bytes, as `BufRead::lines` gives it: `None`
+/// when there is none or it is not UTF-8.
+pub(super) fn first_line_from_bytes(bytes: &[u8]) -> Option<String> {
+    use std::io::BufRead as _;
+    bytes.lines().next()?.ok()
+}
+
+/// The global excludes file as a matcher, for the walk: read only when it is a
+/// regular file (matching `ignore`), failing if a regular file exceeds
+/// [`MAX_IGNORE_FILE_BYTES`] and tolerating an absent or unreadable file.
+pub(super) fn load_global_excludes() -> crate::Result<Option<ignore::gitignore::Gitignore>> {
+    let Some(path) = ignore::gitignore::gitconfig_excludes_path() else {
+        return Ok(None);
+    };
+    let Ok(meta) = std::fs::metadata(&path) else {
+        return Ok(None);
+    };
+    if !meta.is_file() {
+        return Ok(None);
+    }
+    if meta.len() > MAX_IGNORE_FILE_BYTES {
+        return Err(IgnoreRefusal::new(path, too_large_reason()).into_error());
+    }
+    match open_and_read_bounded(path.clone()) {
+        IgnoreFileRead::Bytes(content) => {
+            let Some(cwd) = std::env::current_dir().ok() else {
+                return Ok(None);
+            };
+            Ok(super::gitignore_from(&cwd, &path, &content))
+        }
+        IgnoreFileRead::Absent => Ok(None),
+        IgnoreFileRead::Refused(refused) => {
+            if refused.reason().starts_with("it is larger than")
+                || refused.reason() == "it is not a regular file"
+            {
+                Err(refused.into_error())
+            } else {
+                // Unreadable global excludes file: match `ignore`'s tolerance.
+                Ok(None)
+            }
         }
     }
-    let dot_git = dir.join(".git");
-    let metadata = std::fs::metadata(&dot_git).ok()?;
-    if metadata.is_file() {
-        if let Some(refused) = Refused::check(dot_git.clone()) {
-            return Some(refused);
-        }
-        let git_dir = PathBuf::from(first_line(&dot_git)?.strip_prefix("gitdir: ")?);
-        if let Some(refused) = Refused::check(git_dir.join("commondir")) {
-            return Some(refused);
-        }
-    } else if !metadata.is_dir() {
-        return None;
-    }
-    Refused::check(super::git_exclude_file(dir)?)
 }
 
-/// The first file `ignore` reads before the walk starts that the walk refuses:
-/// those of the root ([`refused_in`]) and of every directory above it, which
-/// `ignore` reads whether or not it applies them (ADR-0029), and the global
-/// excludes file when the walk uses one (`ignore` reads it only when it is a
-/// regular file). `canonical_root` is `root` canonicalized, which the walk
-/// already holds.
-pub(super) fn refused_before_walk(
-    root: &Path,
-    canonical_root: Option<&Path>,
-    global_excludes: bool,
-) -> Option<Refused> {
-    refused_in(root)
-        .or_else(|| canonical_root?.ancestors().skip(1).find_map(refused_in))
-        .or_else(|| {
-            let path = global_excludes
-                .then(ignore::gitignore::gitconfig_excludes_path)
-                .flatten()?;
-            std::fs::metadata(&path)
-                .is_ok_and(|metadata| metadata.is_file())
-                .then(|| Refused::check(path))
-                .flatten()
-        })
-}
-
-/// The global excludes file as a matcher, read as `ignore` reads it
-/// (`Gitignore::global`) but through [`read`].
+/// The global excludes file as a matcher for `WalkSkips`, read through [`read`].
 pub(super) fn global_excludes() -> Option<ignore::gitignore::Gitignore> {
     let path = ignore::gitignore::gitconfig_excludes_path()?;
     let content = read(&path)?;
@@ -215,32 +306,47 @@ mod tests {
     }
 
     #[test]
-    fn each_file_on_the_way_to_info_exclude_is_checked_before_it_is_read() {
+    fn read_by_path_accepts_regular_files_skips_dirs_and_refuses_devices_and_oversize() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("repo");
         std::fs::create_dir_all(dir.join(".git/info")).unwrap();
-        assert!(refused_in(&dir).is_none());
+        assert!(matches!(
+            read_by_path(dir.join(".git/info/exclude")),
+            IgnoreFileRead::Absent
+        ));
         std::fs::write(dir.join(".git/info/exclude"), "*.log\n").unwrap();
-        assert!(refused_in(&dir).is_none());
+        assert!(matches!(
+            read_by_path(dir.join(".git/info/exclude")),
+            IgnoreFileRead::Bytes(ref b) if b == b"*.log\n"
+        ));
         std::fs::remove_file(dir.join(".git/info/exclude")).unwrap();
         std::os::unix::fs::symlink("/dev/zero", dir.join(".git/info/exclude")).unwrap();
-        let refused = refused_in(&dir).unwrap();
-        assert_eq!(refused.path, dir.join(".git/info/exclude"));
-        assert_eq!(refused.reason, "it is not a regular file");
-        // A `.gitignore` that is a directory is no refusal: `ignore` fails to
-        // read it and goes on, as before.
-        std::fs::remove_dir_all(dir.join(".git")).unwrap();
+        match read_by_path(dir.join(".git/info/exclude")) {
+            IgnoreFileRead::Refused(refused) => {
+                assert_eq!(refused.path(), dir.join(".git/info/exclude"));
+                assert_eq!(refused.reason(), "it is not a regular file");
+            }
+            _ => panic!("expected Refused for /dev/zero symlink"),
+        }
+        // A `.gitignore` that is a directory is harmlessly absent.
         std::fs::create_dir(dir.join(".gitignore")).unwrap();
-        assert!(refused_in(&dir).is_none());
+        assert!(matches!(
+            read_by_path(dir.join(".gitignore")),
+            IgnoreFileRead::Absent
+        ));
         sparse(&dir.join(".ignore"));
-        let refused = refused_in(&dir).unwrap();
-        assert_eq!(refused.path, dir.join(".ignore"));
-        assert_eq!(refused.reason, "it is larger than 32 MiB");
+        match read_by_path(dir.join(".ignore")) {
+            IgnoreFileRead::Refused(refused) => {
+                assert_eq!(refused.path(), dir.join(".ignore"));
+                assert_eq!(refused.reason(), "it is larger than 32 MiB");
+            }
+            _ => panic!("expected Refused for sparse file"),
+        }
     }
 
-    /// A regular file that gives its size as zero is counted by reading it:
-    /// an empty `.gitignore` passes, and `/proc/self/pagemap`, which gives its
-    /// size as zero and holds gigabytes, is refused as past the cap.
+    /// A regular file that gives its size as zero is counted by reading it in
+    /// 8 KiB blocks: an empty `.gitignore` passes, `/proc/self/environ` passes,
+    /// and `/proc/self/pagemap` is refused as past the cap.
     #[cfg(target_os = "linux")]
     #[test]
     fn a_file_that_gives_its_size_as_zero_is_counted_by_reading_it() {
@@ -248,13 +354,23 @@ mod tests {
         let dir = tmp.path().join("repo");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(".gitignore"), "").unwrap();
-        assert!(refused_in(&dir).is_none());
+        assert!(matches!(
+            read_by_path(dir.join(".gitignore")),
+            IgnoreFileRead::Bytes(ref b) if b.is_empty()
+        ));
         std::fs::remove_file(dir.join(".gitignore")).unwrap();
         std::os::unix::fs::symlink("/proc/self/environ", dir.join(".gitignore")).unwrap();
-        assert!(refused_in(&dir).is_none());
+        assert!(matches!(
+            read_by_path(dir.join(".gitignore")),
+            IgnoreFileRead::Bytes(_)
+        ));
         std::os::unix::fs::symlink("/proc/self/pagemap", dir.join(".ignore")).unwrap();
-        let refused = refused_in(&dir).unwrap();
-        assert_eq!(refused.path, dir.join(".ignore"));
-        assert_eq!(refused.reason, "it is larger than 32 MiB");
+        match read_by_path(dir.join(".ignore")) {
+            IgnoreFileRead::Refused(refused) => {
+                assert_eq!(refused.path(), dir.join(".ignore"));
+                assert_eq!(refused.reason(), "it is larger than 32 MiB");
+            }
+            _ => panic!("expected Refused for /proc/self/pagemap"),
+        }
     }
 }

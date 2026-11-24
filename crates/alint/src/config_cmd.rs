@@ -506,6 +506,15 @@ pub(crate) fn discover_config(start: &Path) -> Option<PathBuf> {
     discovery.path
 }
 
+/// Print any visible warnings produced during the repository walk (for example
+/// unreadable, non-regular, or oversize ignore files above the checked root
+/// that were skipped rather than failing the walk, #568).
+pub(crate) fn report_walk_warnings(index: &alint_core::FileIndex) {
+    for warning in index.walk_warnings() {
+        eprintln!("alint: warning: {}", term(warning));
+    }
+}
+
 /// The warning for a config file discovery skipped, with how to use it: from
 /// its own directory, discovery takes a config whoever owns it.
 fn skipped_config_warning(path: &Path) -> String {

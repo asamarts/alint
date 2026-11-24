@@ -11,13 +11,13 @@
 #      Nothing is committed as a baseline, so neither the host nor the
 #      toolchain can drift it.
 #   2. Syscalls. read/stat-family counts for the alint process (spawned
-#      children excluded, see syscall-counts.py) on the 10k trees. A family
+#      children excluded, see syscall-counts.py) on the 10k trees. Any family
+#      (including `probe`, stats of `.git`, `.jj`, `.gitignore` and `.ignore`)
 #      more than 32 calls over the reference fails: fixed per-run probes differ
-#      by a few calls, a per-file regression by thousands. The `probe` family
-#      (stats of `.git`, `.jj`, `.gitignore` and `.ignore`) may also grow by 3
-#      for each directory in the tree and 5 for each one above it (ADR-0045,
-#      see probe_allowance). A run strace could not trace, or one alint did not
-#      complete, is a tooling failure.
+#      by a few calls, a per-file or per-directory regression by hundreds or
+#      thousands (ADR-0048 decision 5a retired ADR-0045's per-directory probe
+#      allowance once the owned parallel walker landed, #573). A run strace
+#      could not trace, or one alint did not complete, is a tooling failure.
 #
 # S4 is not compared: it extends bundled rulesets that arrived in v0.19, so the
 # reference binary cannot load it. A breach exits 1; so does a gate that cannot
@@ -33,18 +33,6 @@ CELLS=(s1_1k s1_10k s2_1k s2_10k s3_1k s3_10k)
 SCENARIOS=(s1 s2 s3)
 
 summary() { printf '%s\n' "$@" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"; }
-# The `probe` family's allowance for a walk of the tree `$1` (ADR-0045): the
-# fixed allowance, 3 for each directory in the tree outside `.git` (the walk
-# checks its `.ignore`, `.gitignore` and `.git` before `ignore` reads them), and
-# 5 for each directory above it, which `ignore` reads too and, under
-# `require_git` (ADR-0028), also probes for `.git` and `.jj`.
-probe_allowance() {
-  local tree in_tree above
-  tree="$(cd "$1" && pwd -P)" || return 1
-  in_tree="$(find "$tree" -name .git -prune -o -type d -print | wc -l)"
-  above="$(tr -cd / <<< "$tree" | wc -c)"
-  echo $((SYSCALL_ALLOWANCE + 3 * in_tree + 5 * above))
-}
 tooling_failure() {
   echo "::error title=Reference perf gate::$1 (tooling failure, not a perf signal); the gate did not run"
   summary "### Reference perf gate (${REFERENCE}): did not run" "" "Tooling failure: $1. See the job log."
@@ -155,13 +143,10 @@ for scenario in "${SCENARIOS[@]}"; do
     python3 ci/scripts/syscall-counts.py "$trace" > "$work/$scenario-$side.counts" \
       || tooling_failure "could not count syscalls for ${scenario} (${side})"
   done
-  probes_allowed="$(probe_allowance "$tree")" \
-    || tooling_failure "could not count the directories of ${scenario}"
   while read -r family ref_count; do
     head_count="$(awk -v f="$family" '$1 == f {print $2}' "$work/$scenario-head.counts")"
     extra=$((head_count - ref_count))
     allowance="$SYSCALL_ALLOWANCE"
-    [[ "$family" == probe ]] && allowance="$probes_allowed"
     mark=""
     if (( extra > allowance )); then
       mark=" (over)"
@@ -183,7 +168,7 @@ summary "### Reference perf gate (${REFERENCE}): ${verdict}" "" \
   "$syscall_rows"
 printf '%s\n' "$syscall_rows"
 if [[ "$verdict" != pass ]]; then
-  echo "::error title=Reference perf gate::${verdict} against ${REFERENCE} (Ir limit +${IR_LIMIT}%, syscall allowance ${SYSCALL_ALLOWANCE}, probes per directory as in ADR-0045)"
+  echo "::error title=Reference perf gate::${verdict} against ${REFERENCE} (Ir limit +${IR_LIMIT}%, syscall allowance ${SYSCALL_ALLOWANCE})"
   exit 1
 fi
 echo "==> reference perf gate: PASS"

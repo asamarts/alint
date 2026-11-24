@@ -29,6 +29,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Duplicate keys inside top-level `vars:` (for example `vars: {a: 1, b: 2, a: 3}`) are now
   rejected as config errors instead of silently keeping the last value, matching every other
   mapping in `.alint.yml` (#572).
+- Unreadable, non-regular (such as a FIFO or symlink to a device), or oversize (> 32 MiB) ignore
+  files (`.gitignore`, `.ignore`, `info/exclude`, or a linked worktree's `.git` / `commondir`) in
+  parent directories **above** the checked root are now skipped with a visible warning on stderr
+  (`alint: warning: ...`) instead of failing the walk; bad ignore files **inside** the checked root
+  continue to fail strictly, and the 32 MiB ignore-file size cap stays unchanged (#568).
 
 ### Added
 
@@ -85,6 +90,25 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   errors now report the exact 1-based line and column of the repeated key rather than the mapping's
   first key (#572), and unknown top-level keys in `version: 2` configs now report their 1-based
   line and column (#566).
+- Replaced `ignore::WalkBuilder`'s directory traversal with an owned parallel walker in
+  `alint-core` (`walker_parallel.rs`) built on `ignore::gitignore::Gitignore` and `rayon::scope`,
+  discovering ignore files directly from each directory's `read_dir` listing with open-then-`fstat`
+  bounded reads so bounding ignore files adds zero per-directory `stat` probes, retiring ADR-0045's
+  per-directory probe allowance from `ci/scripts/reference-perf-gate.sh` (ADR-0048 decision 5a,
+  #573).
+- Skipped unreadable, non-regular, or oversize (> 32 MiB) ignore files in parent directories above
+  the checked root with a visible stderr warning (`FileIndex::walk_warnings`), while keeping strict
+  walk failure for bad ignore files inside the checked root and documenting the 32 MiB ignore-file
+  cap (ADR-0048 decision 5b, #568).
+- Hoisted per-iteration nested-rule invariants in `for_each_dir` / `every_matching_has`
+  (pre-formatted synthesized rule IDs, single-pass borrowed `render_nested_extra` with empty
+  fast-path, hoisted builder resolution and `IterationScope`, zero-`Vec` single-pattern
+  `FileExistsRule`, skipped `unescape_token_values` on ordinary paths), cutting nested-rule
+  evaluation time by 41% to 59% (#620), and narrowed remaining whole-index scans across
+  `cross_file`, `file_graph`, `registry_paths_resolve`, `markdown_paths_resolve`,
+  `generated_file_fresh`, exact-directory `dir_contains` / `dir_only_contains`, `facts`,
+  `relation/eval`, and `engine` trace/active-iteration checks with a debug-only `FileIndex` scan
+  counter (`#565`, `#584`).
 - Remote `extends:` cache directory resolution (`alint-dsl`) now uses an internal platform helper
   (`XDG_CACHE_HOME` / `HOME` on Unix, `Library/Caches/org.asamarts.alint` on macOS,
   `LOCALAPPDATA` / `USERPROFILE` on Windows), removing `directories`, `dirs-sys`, `option-ext`,

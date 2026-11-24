@@ -122,6 +122,7 @@ pub(super) fn cmd_fix(
         .with_extra_ignores(extra_ignores);
 
     let index = walk(&root, &walk_opts).context("walking repository")?;
+    crate::config_cmd::report_walk_warnings(&index);
     // `--unsafe-fixes` raises the applied tier to Unsafe; the default is Safe.
     // At Safe, an Unsafe op (`file_remove`) is surfaced as a suggestion; this
     // flag is what applies it.

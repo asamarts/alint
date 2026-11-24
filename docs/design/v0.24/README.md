@@ -1,6 +1,6 @@
 # v0.24: saphyr exit, Phase 3 completion, owned walker, LSP rewrite, and backlog drain
 
-Status: accepted (2026-11-22, ADR-0048); in progress (Phase 0, Phase 1 [19/19], and Phase 2 [8/8] complete; ready for Phase 3).
+Status: accepted (2026-11-22, ADR-0048); in progress (Phase 0, Phase 1 [19/19], Phase 2 [8/8], and Phase 3 [5/5] complete; ready for Phase 4).
 Decisions: [ADR-0048](../../adr/0048-v024-owner-decisions.md) (owner decisions and scope for v0.24);
 [ADR-0049](../../adr/0049-baseline-preferred-paths-for-repeated-fingerprints.md) (baseline preferred visible paths for repeated fingerprints);
 [ADR-0036](../../adr/0036-ayaml-issues-and-the-saphyr-exit.md) and
@@ -314,5 +314,16 @@ owner ADR approval before implementation starts (matching v0.23's Phase 3 owner 
   `vars:` keys and relocated duplicate-key/field errors to the repeated key (#572), added line and
   column locations to `version: 2` unknown top-level keys (#566), and mapped `alint-lsp` config
   load, rule-build, `when:`, `limits`, `baseline`, and `--no-spawn` errors to their UTF-16 key-path
-  spans (#571).
-  Next: Phase 3 (Nested-rule performance and owned parallel walker: #620, #565, #584, #573, #568).
+  spans (#571). Post-Phase-2 audit (#651) closed remaining span, cache, lease, LSP, and docs gaps.
+- 2026-11-24: Phase 3 complete (all 5/5 nested-rule performance and owned-walker issues closed):
+  Batch 3a (#652) hoisted invariant per-iteration work across `for_each_dir` /
+  `every_matching_has` (-41% to -59% wall time on `cross_file_rules` Criterion benchmarks, #620)
+  and narrowed all remaining whole-tree index scans across rules, facts, relations, and engine
+  helpers with a debug-only `FileIndex` scan counter (#565, #584). Batch 3b replaced
+  `ignore::WalkBuilder` with an owned parallel walker in `alint-core` (`walker_parallel.rs`) built
+  on `ignore::gitignore::Gitignore` and `rayon::scope`, inspecting ignore files from `read_dir`
+  listings with open-then-`fstat` bounded reads (zero per-directory `stat` probes), retiring
+  ADR-0045's per-directory probe allowance from `ci/scripts/reference-perf-gate.sh` (#573), and
+  skipping bad ignore files above the checked root with a visible warning while keeping strict
+  failure inside the checked root and documenting the 32 MiB cap (#568).
+  Next: Phase 4 (`alint-lsp` migration to `lsp-server` #607 and HCL evaluation spike #608).
