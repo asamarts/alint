@@ -167,6 +167,33 @@ impl Rule for GeneratedFileFreshRule {
         true
     }
 
+    fn visit_sensitive_paths(
+        &self,
+        explicit: bool,
+        ctx: &Context<'_>,
+        visit: &mut dyn FnMut(&Path),
+    ) {
+        if !explicit {
+            return;
+        }
+        match &self.mode {
+            Mode::Stdout { file } => {
+                let path = Path::new(file);
+                visit(path);
+                if let Some(rel) = crate::pathsafe::normalize_confined(path) {
+                    visit(&rel);
+                }
+            }
+            Mode::Mutating { outputs, .. } => {
+                for entry in outputs.candidate_files(ctx.index) {
+                    if outputs.matches(&entry.path, ctx.index) {
+                        visit(&entry.path);
+                    }
+                }
+            }
+        }
+    }
+
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         match &self.mode {
             Mode::Stdout { file } => Ok(self.eval_stdout(ctx, file)),

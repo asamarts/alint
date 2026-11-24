@@ -418,6 +418,11 @@ fn looks_like_command_arguments(arguments: &str) -> bool {
         && (arguments.starts_with('-') || (!arguments.contains('/') && !arguments.contains('\\')))
 }
 
+#[cfg(test)]
+std::thread_local! {
+    static GLOB_CANDIDATES_TESTED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Does `lookup` resolve to a real file or directory in the
 /// scanned tree? Glob characters in the lookup are matched
 /// against the file index (any-of); plain paths use exact
@@ -438,7 +443,7 @@ fn path_resolves(ctx: &Context<'_>, lookup: &str) -> bool {
         return false;
     }
     if lookup.contains('*') || lookup.contains('?') || lookup.contains('[') {
-        // Glob — match against the index, narrowed to the pattern's literal
+        // Glob: match against the index, narrowed to the pattern's literal
         // directory prefix when present (#565, #584).
         let Ok(glob) = globset::Glob::new(lookup) else {
             return false;
@@ -448,6 +453,8 @@ fn path_resolves(ctx: &Context<'_>, lookup: &str) -> bool {
             Some(prefix) => ctx.index.entries_under(Path::new(&prefix)),
             None => &ctx.index.entries,
         };
+        #[cfg(test)]
+        GLOB_CANDIDATES_TESTED.with(|count| count.set(count.get() + candidates.len()));
         return candidates.iter().any(|e| matcher.is_match(&e.path));
     }
     // `ctx.index` is always the full index here: the rule is `requires_full_index`,
@@ -737,7 +744,7 @@ mod tests {
             owned.push(format!("pkg/d{i:03}/doc.md"));
         }
         let files: Vec<&str> = owned.iter().map(String::as_str).collect();
-        let before = alint_core::index_scan_count();
+        let before = GLOB_CANDIDATES_TESTED.with(std::cell::Cell::get);
         assert_eq!(
             findings(
                 "see `pkg/d000/*.md` and `pkg/d059/*.md` and `pkg/d000/*.rs` and `pkg/d999/*.md`",
@@ -746,12 +753,12 @@ mod tests {
             ),
             vec!["pkg/d000/*.rs", "pkg/d999/*.md"]
         );
-        if let (Some(before), Some(after)) = (before, alint_core::index_scan_count()) {
-            assert_eq!(
-                after - before,
-                0,
-                "glob path lookup should not call whole-index iterators"
-            );
-        }
+        let tested = GLOB_CANDIDATES_TESTED.with(std::cell::Cell::get) - before;
+        // 4 glob lookups over 60 directories (120+ entries total): each
+        // narrowed lookup inspects only its own directory's entries (<= 2).
+        assert!(
+            (1..=10).contains(&tested),
+            "expected narrowed positive candidate count for 4 glob lookups, got {tested}"
+        );
     }
 }

@@ -130,8 +130,8 @@ contaminated tag bench.
 relation-layer and on every Rust push to main. It builds the frozen v0.18.2 release binary and HEAD's, runs
 both through HEAD's `det_check` S1-S3 cells (only the binary differs), fails
 above +3% `Ir`, and fails when the alint process's read/stat-family syscalls on
-the 10k trees grow by more than 32 calls (probes of each directory's ignore
-files are allowed per directory, ADR-0045). See
+the 10k trees grow by more than 32 calls (ADR-0045's temporary per-directory
+probe allowance was retired when the owned walker in #573 removed those probes). See
 [`docs/benchmarks/REFERENCE-v0.18.2.md`](../benchmarks/REFERENCE-v0.18.2.md)
 and `ci/scripts/test-reference-perf-gate.sh`.
 

@@ -35,15 +35,52 @@ pub(super) enum IgnoreFileRead {
     Refused(IgnoreRefusal),
 }
 
-/// A file the walk refused to read, with its path and human-readable reason.
+/// Why the walk refused to read an ignore file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum IgnoreRefusalKind {
+    /// Special file (FIFO, device, socket, or symlink to one).
+    NonRegular,
+    /// Exceeds [`MAX_IGNORE_FILE_BYTES`] (32 MiB).
+    TooLarge,
+    /// I/O error such as `PermissionDenied` or `ELOOP`.
+    Io,
+}
+
+/// A file the walk refused to read, with its path, category, and human-readable
+/// reason.
 pub(super) struct IgnoreRefusal {
     path: PathBuf,
+    kind: IgnoreRefusalKind,
     reason: String,
 }
 
 impl IgnoreRefusal {
-    pub(super) fn new(path: PathBuf, reason: String) -> Self {
-        Self { path, reason }
+    pub(super) fn non_regular(path: PathBuf) -> Self {
+        Self {
+            path,
+            kind: IgnoreRefusalKind::NonRegular,
+            reason: "it is not a regular file".to_string(),
+        }
+    }
+
+    pub(super) fn too_large(path: PathBuf) -> Self {
+        Self {
+            path,
+            kind: IgnoreRefusalKind::TooLarge,
+            reason: too_large_reason(),
+        }
+    }
+
+    pub(super) fn io(path: PathBuf, err: impl std::fmt::Display) -> Self {
+        Self {
+            path,
+            kind: IgnoreRefusalKind::Io,
+            reason: err.to_string(),
+        }
+    }
+
+    pub(super) fn kind(&self) -> IgnoreRefusalKind {
+        self.kind
     }
 
     pub(super) fn path(&self) -> &Path {
@@ -80,8 +117,9 @@ impl IgnoreRefusal {
 /// Read an ignore file discovered in a `read_dir` listing using its listing
 /// `FileType` to avoid a path-based `stat` probe on regular files (#573).
 ///
-/// - Regular file (`ft.is_file()`): open directly, `fstat` (`file.metadata()`)
-///   to verify type and size, then read in bounded 8 KiB blocks.
+/// - Regular file (`ft.is_file()`): open directly with `O_NONBLOCK` on Unix
+///   so a TOCTOU swap to a FIFO cannot hang, `fstat` (`file.metadata()`) to
+///   verify type and size, then read in bounded 8 KiB blocks.
 /// - Symlink (`ft.is_symlink()`): delegate to [`read_by_path`] (`metadata`
 ///   first so a symlink to a FIFO never blocks and `/dev/zero` is never opened).
 /// - Directory (`ft.is_dir()`): [`IgnoreFileRead::Absent`].
@@ -95,36 +133,54 @@ pub(super) fn read_from_entry(path: PathBuf, ft: std::fs::FileType) -> IgnoreFil
         return read_by_path(path);
     }
     if !ft.is_file() {
-        return IgnoreFileRead::Refused(IgnoreRefusal::new(
-            path,
-            "it is not a regular file".to_string(),
-        ));
+        return IgnoreFileRead::Refused(IgnoreRefusal::non_regular(path));
     }
     open_and_read_bounded(path)
 }
 
 /// Read an ignore file by path when no listing `FileType` is available (a
 /// symlink, `info/exclude`, `commondir`, a parent directory above the root, or
-/// the global excludes file). Stats first so opening a FIFO never blocks.
+/// the global excludes file). Stats first so opening a FIFO never blocks and
+/// known devices are never opened.
 pub(super) fn read_by_path(path: PathBuf) -> IgnoreFileRead {
     let metadata = match std::fs::metadata(&path) {
         Ok(meta) => meta,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return IgnoreFileRead::Absent,
-        Err(err) => return IgnoreFileRead::Refused(IgnoreRefusal::new(path, err.to_string())),
+        Err(err)
+            if matches!(
+                err.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+            ) =>
+        {
+            return IgnoreFileRead::Absent;
+        }
+        Err(err) => return IgnoreFileRead::Refused(IgnoreRefusal::io(path, err)),
     };
     if metadata.is_dir() {
         return IgnoreFileRead::Absent;
     }
     if !metadata.is_file() {
-        return IgnoreFileRead::Refused(IgnoreRefusal::new(
-            path,
-            "it is not a regular file".to_string(),
-        ));
+        return IgnoreFileRead::Refused(IgnoreRefusal::non_regular(path));
     }
     if metadata.len() > MAX_IGNORE_FILE_BYTES {
-        return IgnoreFileRead::Refused(IgnoreRefusal::new(path, too_large_reason()));
+        return IgnoreFileRead::Refused(IgnoreRefusal::too_large(path));
     }
     open_and_read_bounded(path)
+}
+
+/// Open `path` without blocking on a FIFO (using `O_NONBLOCK` on Unix so a
+/// TOCTOU swap between `read_dir`/`stat` and `open` never stalls).
+#[cfg(unix)]
+fn open_nonblocking(path: &Path) -> std::io::Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt as _;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(rustix::fs::OFlags::NONBLOCK.bits().cast_signed())
+        .open(path)
+}
+
+#[cfg(not(unix))]
+fn open_nonblocking(path: &Path) -> std::io::Result<std::fs::File> {
+    std::fs::File::open(path)
 }
 
 /// Open `path`, verify its open handle via `fstat` (`file.metadata()`), and
@@ -135,27 +191,31 @@ pub(super) fn read_by_path(path: PathBuf) -> IgnoreFileRead {
 ///   `len == 0` in `fstat` and rejects non-multiple-of-8 read lengths) are
 ///   bounded cleanly on the single open handle without a second open.
 /// - Concurrent file growth past the cap stops one chunk past the cap.
-fn open_and_read_bounded(path: PathBuf) -> IgnoreFileRead {
-    let mut file = match std::fs::File::open(&path) {
+pub(super) fn open_and_read_bounded(path: PathBuf) -> IgnoreFileRead {
+    let mut file = match open_nonblocking(&path) {
         Ok(file) => file,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return IgnoreFileRead::Absent,
-        Err(err) => return IgnoreFileRead::Refused(IgnoreRefusal::new(path, err.to_string())),
+        Err(err)
+            if matches!(
+                err.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+            ) =>
+        {
+            return IgnoreFileRead::Absent;
+        }
+        Err(err) => return IgnoreFileRead::Refused(IgnoreRefusal::io(path, err)),
     };
     let meta = match file.metadata() {
         Ok(meta) => meta,
-        Err(err) => return IgnoreFileRead::Refused(IgnoreRefusal::new(path, err.to_string())),
+        Err(err) => return IgnoreFileRead::Refused(IgnoreRefusal::io(path, err)),
     };
     if meta.is_dir() {
         return IgnoreFileRead::Absent;
     }
     if !meta.is_file() {
-        return IgnoreFileRead::Refused(IgnoreRefusal::new(
-            path,
-            "it is not a regular file".to_string(),
-        ));
+        return IgnoreFileRead::Refused(IgnoreRefusal::non_regular(path));
     }
     if meta.len() > MAX_IGNORE_FILE_BYTES {
-        return IgnoreFileRead::Refused(IgnoreRefusal::new(path, too_large_reason()));
+        return IgnoreFileRead::Refused(IgnoreRefusal::too_large(path));
     }
     let prealloc = usize::try_from(meta.len().min(MAX_IGNORE_FILE_BYTES)).unwrap_or(0);
     let mut buf = Vec::with_capacity(prealloc);
@@ -166,12 +226,12 @@ fn open_and_read_bounded(path: PathBuf) -> IgnoreFileRead {
             Ok(count) => {
                 let next_len = (buf.len() as u64).saturating_add(count as u64);
                 if next_len > MAX_IGNORE_FILE_BYTES {
-                    return IgnoreFileRead::Refused(IgnoreRefusal::new(path, too_large_reason()));
+                    return IgnoreFileRead::Refused(IgnoreRefusal::too_large(path));
                 }
                 buf.extend_from_slice(&block[..count]);
             }
             Err(err) if err.kind() == std::io::ErrorKind::Interrupted => {}
-            Err(err) => return IgnoreFileRead::Refused(IgnoreRefusal::new(path, err.to_string())),
+            Err(err) => return IgnoreFileRead::Refused(IgnoreRefusal::io(path, err)),
         }
     }
 }
@@ -207,22 +267,15 @@ pub(super) fn first_line_from_bytes(bytes: &[u8]) -> Option<String> {
 }
 
 /// The global excludes file as a matcher, for the walk: read only when it is a
-/// regular file (matching `ignore`), failing if a regular file exceeds
-/// [`MAX_IGNORE_FILE_BYTES`] and tolerating an absent or unreadable file.
+/// regular file within [`MAX_IGNORE_FILE_BYTES`], failing on an oversize
+/// regular file and skipping an absent, non-regular (such as `/dev/null`), or
+/// unreadable file consistently before and after open (matching `ignore` while
+/// never blocking on a FIFO or reading `/dev/zero`).
 pub(super) fn load_global_excludes() -> crate::Result<Option<ignore::gitignore::Gitignore>> {
     let Some(path) = ignore::gitignore::gitconfig_excludes_path() else {
         return Ok(None);
     };
-    let Ok(meta) = std::fs::metadata(&path) else {
-        return Ok(None);
-    };
-    if !meta.is_file() {
-        return Ok(None);
-    }
-    if meta.len() > MAX_IGNORE_FILE_BYTES {
-        return Err(IgnoreRefusal::new(path, too_large_reason()).into_error());
-    }
-    match open_and_read_bounded(path.clone()) {
+    match read_by_path(path.clone()) {
         IgnoreFileRead::Bytes(content) => {
             let Some(cwd) = std::env::current_dir().ok() else {
                 return Ok(None);
@@ -230,16 +283,10 @@ pub(super) fn load_global_excludes() -> crate::Result<Option<ignore::gitignore::
             Ok(super::gitignore_from(&cwd, &path, &content))
         }
         IgnoreFileRead::Absent => Ok(None),
-        IgnoreFileRead::Refused(refused) => {
-            if refused.reason().starts_with("it is larger than")
-                || refused.reason() == "it is not a regular file"
-            {
-                Err(refused.into_error())
-            } else {
-                // Unreadable global excludes file: match `ignore`'s tolerance.
-                Ok(None)
-            }
-        }
+        IgnoreFileRead::Refused(refused) => match refused.kind() {
+            IgnoreRefusalKind::TooLarge => Err(refused.into_error()),
+            IgnoreRefusalKind::NonRegular | IgnoreRefusalKind::Io => Ok(None),
+        },
     }
 }
 

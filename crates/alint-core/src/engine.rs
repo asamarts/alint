@@ -823,22 +823,28 @@ fn nested_rule_can_activate(
         return false;
     }
 
-    let candidates: Box<dyn Iterator<Item = &crate::walker::FileEntry> + '_> = match select {
-        Some(scope) => {
-            let ranges = scope.candidate_ranges(index);
-            let dirs = ranges
-                .clone()
-                .into_iter()
-                .flat_map(|r| &index.entries[r])
-                .filter(|e| e.is_dir);
-            let files = ranges
-                .into_iter()
-                .flat_map(|r| &index.entries[r])
-                .filter(|e| !e.is_dir);
-            Box::new(dirs.chain(files))
-        }
-        None => Box::new(index.dirs().chain(index.files())),
-    };
+    let parent_kind = parent_spec.map(|spec| spec.kind.as_str());
+    let candidates: Box<dyn Iterator<Item = &crate::walker::FileEntry> + '_> =
+        match (select, parent_kind) {
+            (Some(scope), Some("for_each_dir")) => Box::new(scope.candidate_dirs(index)),
+            (Some(scope), Some("for_each_file")) => Box::new(scope.candidate_files(index)),
+            (Some(scope), _) => {
+                let ranges = scope.candidate_ranges(index);
+                let dirs = ranges
+                    .clone()
+                    .into_iter()
+                    .flat_map(|r| &index.entries[r])
+                    .filter(|e| e.is_dir);
+                let files = ranges
+                    .into_iter()
+                    .flat_map(|r| &index.entries[r])
+                    .filter(|e| !e.is_dir);
+                Box::new(dirs.chain(files))
+            }
+            (None, Some("for_each_dir")) => Box::new(index.dirs()),
+            (None, Some("for_each_file")) => Box::new(index.files()),
+            (None, _) => Box::new(index.dirs().chain(index.files())),
+        };
     for entry in candidates {
         if !nested_iteration_accepts_entry(parent_spec, entry.is_dir)
             || select.is_some_and(|scope| !scope.matches(&entry.path, index))

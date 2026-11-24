@@ -7,8 +7,9 @@ its lines are skipped. The resumed half of an interrupted call (`<... read
 resumed>`) was already counted where it started.
 
 A stat-family call on a file named `.git`, `.jj`, `.gitignore` or `.ignore` is
-a `probe`, not a `stat`: the names the walk looks for in each directory it
-checks for ignore files and repository markers (ADR-0045).
+counted separately as `probe` (historically subject to ADR-0045's per-directory
+allowance, now held to the same flat 32-call limit after #573 replaced
+`ignore::WalkBuilder` with the owned parallel walker).
 
 A log that cannot be a measurement fails (exit 1) rather than counting zero:
 no syscall lines, no initial `execve` of the traced program, or a family other

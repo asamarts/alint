@@ -59,6 +59,39 @@ impl Rule for PairRule {
         true
     }
 
+    fn visit_sensitive_paths(
+        &self,
+        explicit: bool,
+        ctx: &Context<'_>,
+        visit: &mut dyn FnMut(&Path),
+    ) {
+        let manifest_sensitive = self
+            .primary_scope
+            .sensitive_manifest_sources()
+            .next()
+            .is_some();
+        for path in self.primary_scope.sensitive_manifest_sources() {
+            visit(path);
+        }
+        if !explicit && !manifest_sensitive {
+            return;
+        }
+        let needed = self.partner_template.tokens();
+        for entry in self.primary_scope.candidate_files(ctx.index) {
+            if !self.primary_scope.matches(&entry.path, ctx.index) {
+                continue;
+            }
+            visit(&entry.path);
+            let tokens = PathTokens::from_path_with(&entry.path, needed);
+            let partner_rel = self.partner_template.render(&tokens).into_owned();
+            if !partner_rel.is_empty()
+                && let Ok(partner_path) = normalize_rel_owned(partner_rel)
+            {
+                visit(&partner_path);
+            }
+        }
+    }
+
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
         let needed = self.partner_template.tokens();

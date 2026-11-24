@@ -22,10 +22,10 @@ that `ci/scripts/detect-changes.sh` classifies as relation-layer changes, and on
   neither the host nor the toolchain can drift the comparison.
 - **Syscalls.** Five families (read, stat, open, directory listing, and probes: stats of `.git`,
   `.jj`, `.gitignore` and `.ignore`; `ci/scripts/syscall-counts.py` holds the list) for the alint
-  process and its threads, spawned children excluded, on the 10k trees. A family more than 32
-  calls over v0.18.2 fails; the probe family may also grow by 3 for each directory in the tree and
-  5 for each one above it, the cost of checking each directory's ignore files before `ignore` reads
-  them ([ADR-0045](../adr/0045-count-the-walks-per-directory-probes-in-the-reference-gate.md)).
+  process and its threads, spawned children excluded, on the 10k trees. Any family more than 32
+  calls over v0.18.2 fails (the temporary per-directory probe allowance from
+  [ADR-0045](../adr/0045-count-the-walks-per-directory-probes-in-the-reference-gate.md) was retired
+  when the owned parallel walker in #573 eliminated per-directory ignore-file `stat` probes).
   A trace that is empty, lacks the program's `execve`, or has a family other than the probes
   with no calls, and a traced run that exited above 1, are tooling failures, never a count of
   zero.
@@ -136,10 +136,9 @@ run-scoped read cache instead of adding 441 calls.
 
 ## Noise
 
-Instruction counts are not perfectly repeatable for the multi-threaded binary: rayon and walker
+Instruction counts are not perfectly repeatable for the multi-threaded binary: rayon worker
 threads that spin while idle are counted too. Re-running the unchanged `main` binary moved S3 10k
 by 0.73% (22,374,765,762 then 22,211,411,264) and S3 1k by 0.17%; S1 and S2 moved by less. Both
 sides of a comparison are single runs, so on S3 10k their noise can add up to about 1.5%, and the
 +3% limit leaves about 1.5% of reliable room there. If that produces false failures, the fix is
-to pin the thread counts in `det_check`, which needs a walker thread knob as well as
-`RAYON_NUM_THREADS`.
+to pin `RAYON_NUM_THREADS` in `det_check` (which now controls both the owned walker and the engine).

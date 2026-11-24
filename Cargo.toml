@@ -110,11 +110,11 @@ toml_edit = "0.25"
 # `max_consecutive_blank_lines`). Already in the tree via `regex`, so this
 # promotes an existing transitive crate to a direct dep, adding none.
 memchr = "2"
-# The effective user id (Unix), for the ownership checks of config discovery
-# and of the Git repository alint names to Git. Already in the tree through
-# tempfile and terminal_size, so this promotes an existing transitive crate to
-# a direct dep, adding none.
-rustix = { version = "1.1", default-features = false, features = ["std", "process"] }
+# The effective user id (Unix) and `O_NONBLOCK` open flags (Unix) for
+# ownership checks of config/Git discovery and TOCTOU-safe ignore-file opens.
+# Already in the tree through tempfile and terminal_size, so this promotes an
+# existing transitive crate to a direct dep, adding none.
+rustix = { version = "1.1", default-features = false, features = ["std", "process", "fs"] }
 # Lossless literal `.env` parsing, diagnostics, spans, and native verified edits
 # for `Format::Dotenv` (alint-core `dotenv`, `structured_fix`). Extracted from
 # alint into asamarts/adotenv; no runtime dependencies of its own.

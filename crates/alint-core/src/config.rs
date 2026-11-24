@@ -1563,9 +1563,9 @@ impl RuleSpec {
         Ok(crate::yaml::from_value(self.extra.clone().into())?)
     }
 
-    /// Fast path for option structs whose fields are all optional (`Default`):
-    /// skips `Mapping` cloning and Serde deserialization when `extra` is empty
-    /// (#620).
+    /// Fast path for option structs whose `Default` equals deserializing `{}`
+    /// (all fields optional, no diverging `#[serde(default = "...")]`): skips
+    /// `Mapping` cloning and Serde when `extra` is empty (#620).
     #[doc(hidden)]
     pub fn deserialize_options_or_default<T>(&self) -> crate::error::Result<T>
     where

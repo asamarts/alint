@@ -473,6 +473,9 @@ struct State {
     /// The last notes block printed per session, so an unchanged set
     /// isn't re-printed on every save.
     last_notes: HashMap<SessionKey, String>,
+    /// The last walk warnings logged per session, so unchanged parent-ignore
+    /// warnings aren't re-logged on every save (#568).
+    last_walk_warnings: HashMap<SessionKey, Vec<String>>,
 }
 
 #[derive(Debug)]
@@ -1177,6 +1180,19 @@ fn record_runs(
                         applied.notes.push(block.clone());
                     }
                     state.last_notes.insert(key.clone(), block);
+                }
+                let walk_warnings: Vec<String> = run
+                    .session
+                    .index
+                    .walk_warnings()
+                    .iter()
+                    .map(|warning| run.session.redact(warning))
+                    .collect();
+                if state.last_walk_warnings.get(&key) != Some(&walk_warnings) {
+                    for warning in &walk_warnings {
+                        applied.logs.push(warning.clone());
+                    }
+                    state.last_walk_warnings.insert(key.clone(), walk_warnings);
                 }
                 withheld |= run.session.withheld;
                 state.sessions.insert(key.clone(), run.session);

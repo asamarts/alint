@@ -1419,7 +1419,7 @@ pub fn tokens_need_unescape(tokens: &PathTokens) -> bool {
         &tokens.ext,
     ]
     .into_iter()
-    .any(|v| needs_glob_escape(v) || v.starts_with('!') || v.contains('{'))
+    .any(|v| needs_glob_escape(v) || v.starts_with('!'))
 }
 
 /// Undo [`render_path_glob`]'s escaping of `tokens`' values inside a
@@ -1847,10 +1847,14 @@ fn render_options_ref(
         .map(|(_, key)| *key);
     let mut out = ayaml::Mapping::with_capacity(m.len());
     for (k, v) in m {
-        let key = k.as_str().unwrap_or_default();
-        if !skip_fields.is_empty() && !key.is_empty() && skip_fields.contains(&key) {
+        let key_opt = k.as_str();
+        if !skip_fields.is_empty()
+            && let Some(k_str) = key_opt
+            && skip_fields.contains(&k_str)
+        {
             continue;
         }
+        let key = key_opt.unwrap_or_default();
         let rendered_val = if spec_list == Some(key) {
             render_nested_spec_list_ref(v, tokens)
         } else if with_paths

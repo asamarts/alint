@@ -719,9 +719,11 @@ impl FileIndex {
     #[doc(hidden)]
     #[must_use]
     pub fn entries_under(&self, dir: &Path) -> &[FileEntry] {
-        match self.subtree(dir) {
-            Some(range) => &self.entries[range],
-            None => &self.entries,
+        if let Some(range) = self.subtree(dir) {
+            &self.entries[range]
+        } else {
+            record_index_scans(u64::try_from(self.entries.len()).unwrap_or(u64::MAX));
+            &self.entries
         }
     }
 
@@ -741,6 +743,17 @@ impl FileIndex {
         self.walk_options
             .as_ref()
             .is_none_or(|opts| opts.respect_gitignore)
+    }
+
+    /// Exact-path positions in [`Self::entries`] when `entries` are sorted,
+    /// or `None` when unsorted (#584).
+    pub(crate) fn exact_range(&self, path: &Path) -> Option<std::ops::Range<usize>> {
+        if !self.entries_sorted() {
+            return None;
+        }
+        let start = self.entries.partition_point(|entry| *entry.path < *path);
+        let len = self.entries[start..].partition_point(|entry| *entry.path == *path);
+        Some(start..start + len)
     }
 
     /// The positions in [`Self::entries`] of `dir` and of every entry below it
@@ -862,11 +875,9 @@ impl FileIndex {
     /// short-circuit cleanly via `take_while` / `find` / etc.
     ///
     /// Cycle defense: a stack-based walk with no per-iteration
-    /// cycle check. The walker (`crate::walk`) calls
-    /// `WalkBuilder::follow_links(true)` to traverse through
-    /// symlinks, and the underlying `ignore` crate carries
-    /// cycle detection — an ancestor-self symlink emits an error
-    /// and the walker continues without recursing. The entries
+    /// cycle check. The owned parallel walker (`crate::walk`)
+    /// follows in-tree symlinks while tracking canonical ancestors
+    /// and skips ancestor-self cycles without recursing. The entries
     /// vec is therefore acyclic by construction; adding a per-
     /// step cycle check would cost ~10 ns per yielded entry for
     /// a guarantee that's already established at walker time.
@@ -1027,10 +1038,11 @@ pub fn walk(root: &Path, opts: &WalkOptions) -> Result<FileIndex> {
 }
 
 /// Walk only the specified root-relative `subtrees` under `root`, preserving
-/// `root`'s ignore rules, `extra_ignores`, and symlink confinement (#584).
+/// `root`'s ignore rules, `extra_ignores`, exact on-disk casing, ancestor cycle
+/// detection, walk warnings, and symlink confinement (#584, #573).
 ///
-/// Missing subtrees are skipped cleanly; a subtree naming a single regular file
-/// is checked directly without spawning a directory walk.
+/// Missing or case-mismatched subtrees are skipped cleanly; a subtree naming a
+/// single regular file is checked directly without spawning a directory walk.
 #[doc(hidden)]
 pub fn walk_subtrees(root: &Path, subtrees: &[&Path], opts: &WalkOptions) -> Result<FileIndex> {
     if subtrees.is_empty() {
@@ -1052,85 +1064,12 @@ pub fn walk_subtrees(root: &Path, subtrees: &[&Path], opts: &WalkOptions) -> Res
         }
         roots.push(rel);
     }
-
-    let canonical_root = root.canonicalize().ok();
-    let skips = WalkSkips::new(root, opts, &[]);
-    let sub_opts = WalkOptions {
-        respect_gitignore: opts.respect_gitignore,
-        extra_ignores: Vec::new(),
-        global_git_excludes: opts.global_git_excludes,
-    };
-    let mut entries = Vec::new();
-    for sub in &roots {
-        let abs = root.join(sub);
-        let sym_meta = match abs.symlink_metadata() {
-            Ok(meta) => meta,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(err) => {
-                return Err(Error::Io {
-                    path: abs,
-                    source: err,
-                });
-            }
-        };
-        if sym_meta.file_type().is_symlink() {
-            let keep = match (&canonical_root, abs.canonicalize()) {
-                (Some(real_root), Ok(target)) => {
-                    crate::pathsafe::walk_follows_symlink(real_root, &target)
-                }
-                _ => false,
-            };
-            if !keep {
-                continue;
-            }
-        }
-        let meta = match std::fs::metadata(&abs) {
-            Ok(meta) => meta,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(err) => {
-                return Err(Error::Io {
-                    path: abs,
-                    source: err,
-                });
-            }
-        };
-        if meta.is_file() {
-            if !skips.skips(sub, false) {
-                record_index_scans(1);
-                entries.push(FileEntry {
-                    path: Arc::from(sub.as_path()),
-                    is_dir: false,
-                    size: meta.len(),
-                });
-            }
-            continue;
-        }
-        if !meta.is_dir() || skips.skips(sub, true) {
-            continue;
-        }
-        entries.push(FileEntry {
-            path: Arc::from(sub.as_path()),
-            is_dir: true,
-            size: 0,
-        });
-        let sub_index = walk_with_confinement(&abs, root, &sub_opts)?;
-        for entry in sub_index.entries {
-            let rel = sub.join(&entry.path);
-            if skips.skips(&rel, entry.is_dir) {
-                continue;
-            }
-            entries.push(FileEntry {
-                path: Arc::from(rel.as_path()),
-                is_dir: entry.is_dir,
-                size: entry.size,
-            });
-        }
+    if roots.is_empty() {
+        return Ok(FileIndex::default());
     }
-    entries.sort_unstable_by(|a, b| a.path.cmp(&b.path));
-    entries.dedup_by(|a, b| a.path == b.path);
-    let mut index = FileIndex::from_entries(entries);
-    index.walk_options = Some(opts.clone());
-    Ok(index)
+
+    let output = parallel::walk_subtrees_from(root, &roots, opts)?;
+    Ok(file_index_from_walk_output(output, opts))
 }
 
 fn walk_with_confinement(
@@ -1138,19 +1077,23 @@ fn walk_with_confinement(
     confinement_root: &Path,
     opts: &WalkOptions,
 ) -> Result<FileIndex> {
+    let output = parallel::walk_tree(root, confinement_root, opts)?;
+    Ok(file_index_from_walk_output(output, opts))
+}
+
+fn file_index_from_walk_output(output: parallel::WalkOutput, opts: &WalkOptions) -> FileIndex {
     let parallel::WalkOutput {
         entries,
         escaping_symlinks,
         followed_symlinks,
         warnings,
-    } = parallel::walk_tree(root, confinement_root, opts)?;
-
+    } = output;
     let mut index = FileIndex::from_entries_with_escaping(entries, escaping_symlinks);
     record_index_scans(u64::try_from(index.entries.len()).unwrap_or(u64::MAX));
     index.followed_symlinks = Some(followed_symlinks);
     index.walk_options = Some(opts.clone());
     index.walk_warnings = warnings;
-    Ok(index)
+    index
 }
 
 /// The tracked paths [`walk`] left out of `index` only because an ignore file
@@ -1323,10 +1266,6 @@ impl Listings {
     }
 }
 
-/// Build the `ignore::WalkBuilder` we run today. Pure factor-out
-/// of the original `walk()` body's setup half so both the
-/// sequential test path and the parallel runtime path stay in
-/// sync.
 /// The walk's override set: `.git/` plus every config `ignore:` pattern, each
 /// an exclusion.
 fn build_overrides(root: &Path, opts: &WalkOptions) -> Result<ignore::overrides::Override> {
@@ -1391,13 +1330,13 @@ fn listed_names(dir: &Path) -> HashSet<std::ffi::OsString> {
 }
 
 /// Whether `dir` holds a repository: a `.git` directory, the `.git` file of a
-/// linked worktree or submodule, or a `.jj` directory, the markers `ignore`
+/// linked worktree or submodule, or a `.jj` directory/file, the markers `ignore`
 /// looks for under `require_git`. In a listed directory (`names`, from
 /// [`listed_names`]) the marker must also appear under its exact name.
 fn holds_repository(dir: &Path, names: Option<&HashSet<std::ffi::OsString>>) -> bool {
     let holds = |marker: &str| {
         names.is_none_or(|names| names.contains(std::ffi::OsStr::new(marker)))
-            && dir.join(marker).exists()
+            && std::fs::metadata(dir.join(marker)).is_ok_and(|m| m.is_dir() || m.is_file())
     };
     holds(".git") || holds(".jj")
 }
@@ -1434,7 +1373,7 @@ fn gitignore_from(dir: &Path, file: &Path, content: &[u8]) -> Option<ignore::git
         // A line that is not a valid glob is left out, as `ignore` does.
         let _ = builder.add_line(Some(file.to_path_buf()), line);
     }
-    builder.build().ok()
+    builder.build().ok().filter(|gi| !gi.is_empty())
 }
 
 /// The ignore files the walk reads in one directory, each anchored there.
@@ -1631,10 +1570,9 @@ impl<'a> WalkSkips<'a> {
 
     /// Whether the walk stops at a symlink on the way to `parts` (root-relative)
     /// or at `parts` itself: one that leads back to a directory on its own path,
-    /// a loop `ignore` reports and does not descend, or one that is broken or
-    /// leads out of the root or into a Git directory, which the walk prunes
-    /// (`build_walk_builder`). Only paths that exist count; one that does not
-    /// exist yet cannot be a symlink.
+    /// or one that is broken or leads out of the root or into a Git directory,
+    /// which the owned walker prunes. Only paths that exist count; one that does
+    /// not exist yet cannot be a symlink.
     fn symlink_stops_the_walk(&self, parts: &[std::path::Component<'_>]) -> bool {
         // The directories the walk has entered on the way, canonical.
         let mut entered: Vec<PathBuf> = self

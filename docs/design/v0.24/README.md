@@ -319,11 +319,16 @@ owner ADR approval before implementation starts (matching v0.23's Phase 3 owner 
   Batch 3a (#652) hoisted invariant per-iteration work across `for_each_dir` /
   `every_matching_has` (-41% to -59% wall time on `cross_file_rules` Criterion benchmarks, #620)
   and narrowed all remaining whole-tree index scans across rules, facts, relations, and engine
-  helpers with a debug-only `FileIndex` scan counter (#565, #584). Batch 3b replaced
+  helpers with a debug-only `FileIndex` scan counter (#565, #584). Batch 3b (#653) replaced
   `ignore::WalkBuilder` with an owned parallel walker in `alint-core` (`walker_parallel.rs`) built
   on `ignore::gitignore::Gitignore` and `rayon::scope`, inspecting ignore files from `read_dir`
   listings with open-then-`fstat` bounded reads (zero per-directory `stat` probes), retiring
   ADR-0045's per-directory probe allowance from `ci/scripts/reference-perf-gate.sh` (#573), and
   skipping bad ignore files above the checked root with a visible warning while keeping strict
-  failure inside the checked root and documenting the 32 MiB cap (#568).
+  failure inside the checked root and documenting the 32 MiB cap (#568). Post-Phase-3 audit
+  remediation hardened `walk_subtrees` (exact on-disk casing, unified root `WalkCtx`, ancestor
+  cycle seeding), made traversal and `IgnoreNode`/`ExplicitAncestor` drop iterative, added Unix
+  `O_NONBLOCK` ignore-file opens and strict non-regular `.git` handling, restored redaction on
+  `InstantiatedBuilder::build`, narrowed `visit_sensitive_paths` on all 12 remaining nestable
+  rules and `TriggerScope::visit_matched_paths`, and fixed two vacuous scan regression tests.
   Next: Phase 4 (`alint-lsp` migration to `lsp-server` #607 and HCL evaluation spike #608).

@@ -194,9 +194,6 @@ impl Rule for RegistryPathsResolveRule {
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
 
-        // Directory existence: build the dir path-set once per
-        // eval (O(D)); per-entry lookups are then O(1), matching
-        // `contains_file`'s scaling so the rule stays index-fast.
         for registry_rel in self.registry_files(ctx) {
             // Confine the (config-author-controlled) registry path before
             // reading it (the glob-source arm yields in-tree index paths,
@@ -433,13 +430,9 @@ impl RegistryPathsResolveRule {
         // Ordered collection keeps findings deterministic even though the
         // file index's internal representation is not part of this contract.
         let mut candidates: BTreeSet<PathBuf> = BTreeSet::new();
-        for path in space
-            .candidate_files(ctx.index)
-            .chain(space.candidate_dirs(ctx.index))
-            .map(|entry| &entry.path)
-        {
-            if space.matches(path, ctx.index) {
-                candidates.insert(path.to_path_buf());
+        for entry in space.candidates(ctx.index) {
+            if space.matches(&entry.path, ctx.index) {
+                candidates.insert(entry.path.to_path_buf());
             }
         }
         for candidate in candidates {
@@ -485,15 +478,9 @@ impl RegistryPathsResolveRule {
             return Vec::new();
         };
         scope
-            .candidate_files(ctx.index)
+            .candidates(ctx.index)
             .filter(|e| scope.matches(&e.path, ctx.index))
             .map(|e| e.path.to_path_buf())
-            .chain(
-                scope
-                    .candidate_dirs(ctx.index)
-                    .filter(|e| scope.matches(&e.path, ctx.index))
-                    .map(|e| e.path.to_path_buf()),
-            )
             .collect()
     }
 
@@ -508,10 +495,8 @@ impl RegistryPathsResolveRule {
         match self.expect {
             Expect::File => {
                 if !is_file {
-                    // `dir_set` is empty for this kind: a path that is not a
-                    // file but is indexed is a directory.
                     return Some(Reason::reworded(
-                        if ctx.index.contains_path(path) {
+                        if ctx.index.contains_dir(path) {
                             "resolves to a directory, not a file"
                         } else {
                             "does not resolve to a file (missing or ignored)"

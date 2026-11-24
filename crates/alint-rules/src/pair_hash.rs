@@ -120,6 +120,35 @@ impl Rule for PairHashRule {
         self.allow_out_of_root = allow;
     }
 
+    fn visit_sensitive_paths(
+        &self,
+        explicit: bool,
+        ctx: &Context<'_>,
+        visit: &mut dyn FnMut(&Path),
+    ) {
+        let manifest_sensitive = self
+            .source_scope
+            .sensitive_manifest_sources()
+            .next()
+            .is_some();
+        for path in self.source_scope.sensitive_manifest_sources() {
+            visit(path);
+        }
+        if !explicit && !manifest_sensitive {
+            return;
+        }
+        let target_path = Path::new(&self.target);
+        visit(target_path);
+        if let Some(rel) = crate::pathsafe::normalize_confined(target_path) {
+            visit(&rel);
+        }
+        for entry in self.source_scope.candidate_files(ctx.index) {
+            if self.source_scope.matches(&entry.path, ctx.index) {
+                visit(&entry.path);
+            }
+        }
+    }
+
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let target_path = Path::new(&self.target);
         let mut violations = Vec::new();

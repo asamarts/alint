@@ -70,6 +70,30 @@ impl Rule for UniqueByRule {
         true
     }
 
+    fn visit_sensitive_paths(
+        &self,
+        explicit: bool,
+        ctx: &Context<'_>,
+        visit: &mut dyn FnMut(&std::path::Path),
+    ) {
+        let manifest_sensitive = self
+            .select_scope
+            .sensitive_manifest_sources()
+            .next()
+            .is_some();
+        for path in self.select_scope.sensitive_manifest_sources() {
+            visit(path);
+        }
+        if !explicit && !manifest_sensitive {
+            return;
+        }
+        for entry in self.select_scope.candidate_files(ctx.index) {
+            if self.select_scope.matches(&entry.path, ctx.index) {
+                visit(&entry.path);
+            }
+        }
+    }
+
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         // Group in a hash map (one hash per file instead of ~log2(n) string
         // comparisons in an ordered map), then sort only the colliding groups

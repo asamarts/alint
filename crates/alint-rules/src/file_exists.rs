@@ -64,8 +64,14 @@ impl StoredPatterns {
     fn from_spec(spec: &PathsSpec) -> Self {
         match spec {
             PathsSpec::Single(s) => Self::Single(s.clone()),
-            PathsSpec::Many(v) => Self::Many(v.clone()),
-            PathsSpec::IncludeExclude { include, .. } => Self::Many(include.clone()),
+            PathsSpec::Many(v) => match v.as_slice() {
+                [only] => Self::Single(only.clone()),
+                _ => Self::Many(v.clone()),
+            },
+            PathsSpec::IncludeExclude { include, .. } => match include.as_slice() {
+                [only] => Self::Single(only.clone()),
+                _ => Self::Many(include.clone()),
+            },
         }
     }
 
@@ -317,16 +323,24 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     let opts: Options = spec.deserialize_options_or_default()?;
     let literal_paths = match paths {
         PathsSpec::Single(s) => literal_path(s).map(LiteralPaths::Single),
-        PathsSpec::Many(v) => v
-            .iter()
-            .map(|p| literal_path(p))
-            .collect::<Option<Vec<_>>>()
-            .map(LiteralPaths::Many),
-        PathsSpec::IncludeExclude { include, exclude } if exclude.is_empty() => include
-            .iter()
-            .map(|p| literal_path(p))
-            .collect::<Option<Vec<_>>>()
-            .map(LiteralPaths::Many),
+        PathsSpec::Many(v) => match v.as_slice() {
+            [only] => literal_path(only).map(LiteralPaths::Single),
+            _ => v
+                .iter()
+                .map(|p| literal_path(p))
+                .collect::<Option<Vec<_>>>()
+                .map(LiteralPaths::Many),
+        },
+        PathsSpec::IncludeExclude { include, exclude } if exclude.is_empty() => {
+            match include.as_slice() {
+                [only] => literal_path(only).map(LiteralPaths::Single),
+                _ => include
+                    .iter()
+                    .map(|p| literal_path(p))
+                    .collect::<Option<Vec<_>>>()
+                    .map(LiteralPaths::Many),
+            }
+        }
         PathsSpec::IncludeExclude { .. } => None,
     };
     let fixer = match &spec.fix {
