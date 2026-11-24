@@ -1,6 +1,6 @@
 # v0.24: saphyr exit, Phase 3 completion, owned walker, LSP rewrite, and backlog drain
 
-Status: accepted (2026-11-22, ADR-0048); in progress (Phase 0, Phase 1 [19/19], Phase 2 [8/8], and Phase 3 [5/5] complete; ready for Phase 4).
+Status: accepted (2026-11-22, ADR-0048); in progress (Phase 0, Phase 1 [19/19], Phase 2 [8/8], Phase 3 [5/5], and Phase 4 [2/2] complete; ready for Phase 5).
 Decisions: [ADR-0048](../../adr/0048-v024-owner-decisions.md) (owner decisions and scope for v0.24);
 [ADR-0049](../../adr/0049-baseline-preferred-paths-for-repeated-fingerprints.md) (baseline preferred visible paths for repeated fingerprints);
 [ADR-0036](../../adr/0036-ayaml-issues-and-the-saphyr-exit.md) and
@@ -330,5 +330,21 @@ owner ADR approval before implementation starts (matching v0.23's Phase 3 owner 
   cycle seeding), made traversal and `IgnoreNode`/`ExplicitAncestor` drop iterative, added Unix
   `O_NONBLOCK` ignore-file opens and strict non-regular `.git` handling, restored redaction on
   `InstantiatedBuilder::build`, narrowed `visit_sensitive_paths` on all 12 remaining nestable
-  rules and `TriggerScope::visit_matched_paths`, and fixed two vacuous scan regression tests.
-  Next: Phase 4 (`alint-lsp` migration to `lsp-server` #607 and HCL evaluation spike #608).
+  rules and `TriggerScope::visit_matched_paths`, and fixed two vacuous scan regression tests
+  (#654).
+- 2026-11-24: Phase 4 complete (all 2/2 LSP and HCL issues closed): Batch 4a (#655, closes #607)
+  migrated `crates/alint-lsp` from unmaintained `tower-lsp 0.20` and `tokio` to synchronous
+  `lsp-server 0.10` + `lsp-types 0.95` + `crossbeam-channel 0.5` with a 4-thread 8 MiB stack
+  worker pool, generation-coalesced full checks, strict lock ordering, LSP 3.17 lifecycle error
+  codes, and `Connection::memory()` protocol tests, removing 18 async crates (net `-17`
+  `Cargo.lock` entries) with all 40/40 CI checks green (including Windows/macOS cross-platform
+  and all 4 editor LSP E2E suites). Batch 4b (closes #608) upgraded `hcl-rs` from `0.18` to `0.20`
+  (`hcl-edit 0.10.0`), verified upstream's native `MAX_NESTING_DEPTH = 64` and
+  `MAX_OPERATOR_DEPTH = 128` bounds across 42 stress shapes (640 KiB release / 1,408 KiB Linux
+  debug), retired the 512 MiB parse thread, 64 KiB cap, and 270-line hand-rolled recursion
+  pre-scanner, lifted `MAX_HCL_BYTES` to 4 MiB, eliminated `hcl::from_str`'s `O(N^2)`
+  `IntoJsonSpec` `VecMap` bottleneck with direct `BTreeMap` `Body -> Value` conversion plus a
+  64-label block cap and 4,096-entry per-scope width guard shared with `structured_fix::hcl`, and
+  recorded the spike and no-`ahcl` decision in `docs/design/v0.24/hcl-spike.md`.
+  Next: Phase 5 (general-linter Phase 3 completion design document + owner ADR gate, then #592 to
+  #598, #570, Phase 3 operators, B1, C4, strict-JSON, and bundled `version: 2` rulesets).

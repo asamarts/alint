@@ -136,7 +136,8 @@ jsonc-parser = { version = "0.34.0", features = ["cst"] }
 saphyr = { version = "=0.3.3", default-features = false }
 saphyr-parser = { version = "=0.3.4", default-features = false }
 roxmltree = "0.21.2"
-hcl = { package = "hcl-rs", version = "0.18" }
+# HCL2 parser + lossless CST (`hcl-edit 0.10`, native recursion/operator bounds; #608).
+hcl = { package = "hcl-rs", version = "0.20" }
 # Line-level unified diffs for `alint fix --diff`.
 similar = "3"
 

@@ -433,7 +433,7 @@ mod hcl {
         // other 7 do). `trim_start_matches` drops any run of BOMs.
         let stripped = text.trim_start_matches('\u{feff}');
         let bom_len = text.len() - stripped.len();
-        let body = hcl::edit::parser::parse_body(stripped).ok()?;
+        let body = crate::structured_format::parse_hcl_edit_body(stripped).ok()?;
         let span = resolve_in_body(&body, path).map(|t| t.value_span)?;
         Some(span.start + bom_len..span.end + bom_len)
     }
@@ -558,7 +558,7 @@ mod hcl {
         // on the stripped text.
         let stripped = text.trim_start_matches('\u{feff}');
         let bom_len = text.len() - stripped.len();
-        let body = hcl::edit::parser::parse_body(stripped).ok()?;
+        let body = crate::structured_format::parse_hcl_edit_body(stripped).ok()?;
         let attr_span = resolve_in_body(&body, path)?.attr_span?;
         let bytes = stripped.as_bytes();
         let line_start = bytes[..attr_span.start]
