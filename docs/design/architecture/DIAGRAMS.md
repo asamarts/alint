@@ -316,7 +316,7 @@ graph LR
   AlintCliAlintBin["alint"]
   AlintCliCore["alint-core"]
   AlintCliRules["alint-rules"]
-  AlintCliAlintBin -. "`parallel walk (ignore crate WalkBuilder.build_parallel)`" .-> AlintCliCore
+  AlintCliAlintBin -. "`owned parallel walk (rayon::scope + ignore::gitignore)`" .-> AlintCliCore
   AlintCliCore -. "`honor .gitignore/.ignore + ignore: globs`" .-> AlintCliCore
   AlintCliCore -. "`merge thread-local FileEntry vecs + deterministic sort`" .-> AlintCliCore
   AlintCliCore -. "`build lazy indices: path set, parent->children, git-tracked`" .-> AlintCliCore

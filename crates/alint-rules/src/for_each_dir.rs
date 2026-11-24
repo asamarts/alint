@@ -724,6 +724,10 @@ fn evaluate_for_each_inner<const TRACE: bool>(
                     continue;
                 }
             };
+            // Short-circuit: a nested rule can only carry a sensitive manifest
+            // scope filter when its template declared `scope_filter:` (only
+            // `RuleSpec.scope_filter` feeds `Scope::sensitive_manifest_sources`,
+            // and `constraint` is forbidden under nested loops).
             let nested_manifest_sensitive = nested.spec.scope_filter.is_some()
                 && rule_has_sensitive_manifest_scope(nested_rule.as_ref());
             if nested_spec.expect_matches {

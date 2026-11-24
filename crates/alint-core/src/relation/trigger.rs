@@ -219,7 +219,7 @@ impl TriggerScope {
             }
             match &selector.scope {
                 Some(scope) => {
-                    for entry in &index.entries {
+                    for entry in scope.candidates(index) {
                         if scope.matches(&entry.path, index) {
                             visit(&entry.path);
                         }

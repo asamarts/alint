@@ -37,6 +37,22 @@ pub struct NoSubmodulesRule {
 impl Rule for NoSubmodulesRule {
     alint_core::rule_common_impl!();
 
+    fn visit_sensitive_paths(
+        &self,
+        explicit: bool,
+        ctx: &Context<'_>,
+        visit: &mut dyn FnMut(&std::path::Path),
+    ) {
+        if !explicit {
+            return;
+        }
+        for entry in self.scope.candidate_files(ctx.index) {
+            if self.scope.matches(&entry.path, ctx.index) {
+                visit(&entry.path);
+            }
+        }
+    }
+
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
         for entry in self.scope.candidate_files(ctx.index) {

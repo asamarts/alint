@@ -233,6 +233,8 @@ impl Scope {
     /// matcher: callers use it only when the manifest set is unavailable.
     #[inline]
     pub(crate) fn matches_without_manifest(&self, path: &Path, index: &FileIndex) -> bool {
+        #[cfg(debug_assertions)]
+        MATCH_TESTS.with(|count| count.set(count.get() + 1));
         if !self.path_matches(path) {
             return false;
         }
@@ -326,7 +328,8 @@ impl Scope {
     pub fn narrow_prefixes(&self) -> Option<Vec<&Path>> {
         if let Some(literal) = &self.literal {
             let lit = std::str::from_utf8(literal).ok()?;
-            return is_normal_literal_path(lit).then(|| vec![Path::new(lit)]);
+            let trimmed = lit.trim_end_matches('/');
+            return is_normal_literal_path(trimmed).then(|| vec![Path::new(trimmed)]);
         }
         self.within
             .as_ref()
@@ -342,10 +345,17 @@ impl Scope {
             let Ok(lit) = std::str::from_utf8(literal) else {
                 return every_entry();
             };
-            if !is_normal_literal_path(lit) {
-                return every_entry();
+            if is_normal_literal_path(lit) {
+                return match index.exact_range(Path::new(lit)) {
+                    Some(range) if range.is_empty() => Vec::new(),
+                    Some(range) => vec![range],
+                    None => every_entry(),
+                };
             }
-            return match index.subtree(Path::new(lit)) {
+            let Some(prefix) = normal_literal_prefix(lit) else {
+                return every_entry();
+            };
+            return match index.subtree(Path::new(prefix)) {
                 Some(range) if range.is_empty() => Vec::new(),
                 Some(range) => vec![range],
                 None => every_entry(),
@@ -672,6 +682,23 @@ fn literal_pattern(pattern: &str, backslash_is_separator: bool) -> Option<String
 /// non-empty segments (no leading/trailing `/`, no `.` or `..`).
 fn is_normal_literal_path(path: &str) -> bool {
     !path.is_empty() && path.split('/').all(|part| !matches!(part, "" | "." | ".."))
+}
+
+/// Leading normal `/`-separated prefix of a non-normal literal path (for
+/// example `"pkg/d000/"` -> `Some("pkg/d000")`), or `None` when the first
+/// segment itself is empty, `.`, or `..`.
+fn normal_literal_prefix(path: &str) -> Option<&str> {
+    let mut end = 0usize;
+    for (idx, part) in path.split('/').enumerate() {
+        if matches!(part, "" | "." | "..") {
+            break;
+        }
+        if idx > 0 {
+            end += 1;
+        }
+        end += part.len();
+    }
+    (end > 0).then(|| &path[..end])
 }
 
 /// The directory (or exact literal path) every path `pattern` can match lies at
@@ -1048,7 +1075,7 @@ mod tests {
             ),
             (&["a/*.md", "!a/c.md"][..], a),
             (&["a/c.md"][..], &["a/c.md"][..]),
-            (&["a/b"][..], &["a/b", "a/b/y.md"][..]),
+            (&["a/b"][..], &["a/b"][..]),
             (&["missing/*.md"][..], &[][..]),
             (&["a/*.md", "*.md"][..], ALL),
             (&["a/*.md", "**/*.md"][..], ALL),
@@ -1291,5 +1318,41 @@ mod tests {
         // The patterns exercise the narrowing, not only its fallbacks.
         assert!(tested > 5_000, "{tested} patterns compiled");
         assert!(ruled_out > 15_000, "{ruled_out} directories ruled out");
+    }
+
+    #[test]
+    fn single_literal_scope_narrows_to_exact_entry_and_trailing_slash_prefix() {
+        let mut entries = Vec::new();
+        for i in 0..20 {
+            let dir = format!("pkg/d{i:02}");
+            entries.push(FileEntry {
+                path: std::sync::Arc::from(Path::new(&dir)),
+                is_dir: true,
+                size: 0,
+            });
+            for j in 0..5 {
+                let f = format!("{dir}/f{j}.txt");
+                entries.push(FileEntry {
+                    path: std::sync::Arc::from(Path::new(&f)),
+                    is_dir: false,
+                    size: 1,
+                });
+            }
+        }
+        entries.sort_unstable_by(|a, b| a.path.cmp(&b.path));
+        let index = FileIndex::from_entries(entries);
+
+        // Normal single literal matches only that exact entry (1 entry, not the
+        // 6 entries of the whole `pkg/d00` subtree).
+        let exact = Scope::from_patterns(&["pkg/d00".to_string()]).unwrap();
+        let cands: Vec<&Path> = exact.candidates(&index).map(|e| &*e.path).collect();
+        assert_eq!(cands, vec![Path::new("pkg/d00")]);
+
+        // Trailing-slash literal narrows to `pkg/d00` subtree instead of full
+        // index (6 entries, not 120).
+        let trailing = Scope::from_patterns(&["pkg/d00/".to_string()]).unwrap();
+        let trailing_count = trailing.candidates(&index).count();
+        assert_eq!(trailing_count, 6);
+        assert_eq!(trailing.narrow_prefixes(), Some(vec![Path::new("pkg/d00")]));
     }
 }

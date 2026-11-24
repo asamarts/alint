@@ -9,12 +9,10 @@
 //! scanning the whole index there again fails a test (ENG-4 of the third
 //! post-v0.22.1 audit): a kind's own `evaluate` loop, the per-file dispatch,
 //! `scope_matches_any` (`expect_matches: true`), `iter.has_file`, a nested
-//! iteration's selection, and the sensitive-path visitors. `no_submodules` has
-//! none: its scope is the fixed root-level `.gitmodules`, whose candidates are
-//! every entry (a root-level pattern starts with no directory), so its loop
-//! tests the whole index however it is written. A pattern that is the iterated
-//! directory itself (`{path}`) starts with its parent's name only, so it reads
-//! every sibling; the cases select below it (`{path}/s*`).
+//! iteration's selection, and the sensitive-path visitors (including
+//! single-literal scopes such as `no_submodules`'s `.gitmodules`, which narrow
+//! via exact-path binary search). Wildcard directory cases select below the
+//! iterated directory (`{path}/s*`).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -553,30 +551,102 @@ fn a_nested_rule_visits_only_the_iterated_directory() {
     let mut json = in_every_dir("/en.json", &[]);
     json.extend(in_every_dir("/fr.json", &[]));
     json.sort();
-    let cases = [
-        case(
+    let mut all_dirs_and_children: Vec<String> = Vec::new();
+    for i in 0..DIRS {
+        all_dirs_and_children.push(format!("pkg/d{i:03}/sub"));
+        all_dirs_and_children.push(format!("pkg/d{i:03}/sub/.keep"));
+    }
+    all_dirs_and_children.push("pkg/d002/sub/junk.tmp".to_string());
+    all_dirs_and_children.sort();
+    let all_sub_dirs = in_every_dir("/sub", &[]);
+    let all_readmes = in_every_dir("/README.md", &[0]);
+    let mut json_and_readmes = json.clone();
+    json_and_readmes.extend(in_every_dir("/README.md", &[]));
+    json_and_readmes.sort();
+    let mut json_and_schema = json.clone();
+    json_and_schema.push("schema.json".to_string());
+    json_and_schema.sort();
+
+    let cases: [(&str, &str, Vec<String>); 16] = [
+        (
             "a kind's default visitor",
             "kind: file_max_size\n    paths: '{path}/*.json'\n    max_bytes: 100",
-            &[],
+            json.clone(),
         ),
-        case(
+        (
             "a structured path kind",
             "kind: json_path_equals\n    paths: '{path}/*.json'\n    path: '$.a'\n    \
              equals: '1'",
-            &[],
+            json.clone(),
         ),
-        case("file_graph", FILE_GRAPH, &[]),
-        case(
+        ("file_graph", FILE_GRAPH, json.clone()),
+        (
             "cross_file",
             "kind: cross_file\n    relation: set_equals\n    \
              source: { files: '{path}/f*.json', extract: { json: '$.*' } }\n    \
              targets: { files: '{path}/e*.json', extract: { json: '$.*' } }",
-            &[],
+            json.clone(),
         ),
+        (
+            "dir_contains",
+            "kind: dir_contains\n    select: '{path}/sub'\n    require: ['.keep']",
+            all_dirs_and_children.clone(),
+        ),
+        (
+            "dir_only_contains",
+            "kind: dir_only_contains\n    select: '{path}/sub'\n    allow: ['.keep']",
+            all_dirs_and_children,
+        ),
+        (
+            "dir_exists",
+            "kind: dir_exists\n    paths: '{path}/sub'",
+            all_sub_dirs.clone(),
+        ),
+        (
+            "dir_absent",
+            "kind: dir_absent\n    paths: '{path}/sub'",
+            all_sub_dirs,
+        ),
+        (
+            "unique_by",
+            "kind: unique_by\n    select: '{path}/*.json'\n    key: '{path}'",
+            json.clone(),
+        ),
+        (
+            "pair",
+            "kind: pair\n    primary: '{path}/*.json'\n    partner: '{path}/README.md'",
+            json_and_readmes,
+        ),
+        (
+            "pair_hash",
+            "kind: pair_hash\n    source: '{path}/*.json'\n    target: 'schema.json'",
+            json_and_schema,
+        ),
+        (
+            "markdown_links_resolve",
+            "kind: markdown_links_resolve\n    paths: '{path}/*.md'",
+            all_readmes.clone(),
+        ),
+        (
+            "markdown_fragments_resolve",
+            "kind: markdown_fragments_resolve\n    paths: '{path}/*.md'",
+            all_readmes,
+        ),
+        (
+            "editorconfig_conforms",
+            "kind: editorconfig_conforms\n    paths: '{path}/*.json'",
+            json.clone(),
+        ),
+        (
+            "generated_file_fresh",
+            "kind: generated_file_fresh\n    outputs: '{path}/*.json'\n    command: ['true']",
+            json,
+        ),
+        ("no_submodules", "kind: no_submodules", Vec::new()),
     ];
     let mut whole_index = Vec::new();
-    for case in cases {
-        let rule = build(&case);
+    for (name, nested, expected) in cases {
+        let rule = build(&case(name, nested, &[]));
         let (visited, tested, scanned) = counting(tmp.path(), &index, |ctx| {
             let mut visited: Vec<PathBuf> = Vec::new();
             rule.visit_sensitive_paths(true, ctx, &mut |path| visited.push(path.to_path_buf()));
@@ -585,11 +655,10 @@ fn a_nested_rule_visits_only_the_iterated_directory() {
         let mut visited: Vec<String> = visited.iter().map(|path| slashed(path)).collect();
         visited.sort();
         visited.dedup();
-        assert_eq!(visited, json, "{}", case.name);
+        assert_eq!(visited, expected, "{name}");
         if scans_whole_index(tested, entries) || scans_whole_index(scanned, entries) {
             whole_index.push(format!(
-                "{}: {tested} scope matches, {scanned} whole-index scans",
-                case.name
+                "{name}: {tested} scope matches, {scanned} whole-index scans",
             ));
         }
     }

@@ -39,20 +39,37 @@ impl std::fmt::Debug for InstantiatedBuilder {
 }
 
 impl InstantiatedBuilder {
-    /// Construct a nested rule instance using this pre-resolved builder.
+    /// Construct a nested rule instance using this pre-resolved builder,
+    /// applying error enrichment and sensitive-configuration redaction on
+    /// build failure (matching [`RuleRegistry::build`]).
     pub fn build(self, spec: &RuleSpec) -> Result<Box<dyn Rule>> {
-        self.0.build(spec)
+        self.0.build_checked(spec)
     }
 }
 
 impl StoredBuilder {
-    fn build(self, spec: &RuleSpec) -> Result<Box<dyn Rule>> {
+    fn build_raw(self, spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         match self {
             Self::Direct(builder) => builder(spec),
             Self::Optionless(builder) => {
                 spec.deny_unknown_options()?;
                 builder(spec)
             }
+        }
+    }
+
+    #[inline]
+    fn build_checked(self, spec: &RuleSpec) -> Result<Box<dyn Rule>> {
+        match self.build_raw(spec) {
+            Ok(rule) => Ok(rule),
+            Err(error) => Err(spec.redact_unless_reproduced(
+                enrich_error(error, &spec.kind),
+                |masked| {
+                    self.build_raw(masked)
+                        .map_err(|err| enrich_error(err, &spec.kind))
+                        .map(drop)
+                },
+            )),
         }
     }
 }
@@ -864,22 +881,10 @@ fn assert_instance_conformance(kind: &str, meta: &KindMeta, spec: &RuleSpec, rul
 /// Run `registration`'s builder on `spec`, redacting an error that could quote
 /// a sensitive value (see [`RuleSpec::redact_unless_reproduced`]). A success
 /// returns straight from the builder: `for_each_dir` builds a nested rule per
-/// iterated entry through here.
+/// iterated entry through [`InstantiatedBuilder::build`].
 #[inline]
 fn build_rule(registration: &RegisteredKind, spec: &RuleSpec) -> Result<Box<dyn Rule>> {
-    let build = |spec: &RuleSpec| {
-        registration
-            .builder
-            .build(spec)
-            .map_err(|error| enrich_error(error, &spec.kind))
-    };
-    match registration.builder.build(spec) {
-        Ok(rule) => Ok(rule),
-        Err(error) => Err(spec
-            .redact_unless_reproduced(enrich_error(error, &spec.kind), |masked| {
-                build(masked).map(drop)
-            })),
-    }
+    registration.builder.build_checked(spec)
 }
 
 /// Apply [`did_you_mean::enrich`] to the message of a `RuleConfig`
@@ -1323,5 +1328,37 @@ mod tests {
             let keys = |s: &crate::RuleSpec| s.extra.keys().cloned().collect::<Vec<_>>();
             assert_eq!(keys(&a), keys(&b), "{path:?}");
         }
+    }
+
+    #[test]
+    fn instantiated_builder_redacts_sensitive_errors_and_enriches_messages() {
+        fn secret_failing_builder(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
+            let val = spec
+                .extra
+                .get("pattern")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            Err(Error::rule_config(
+                &spec.id,
+                format!("bad regex `{val}`: unknown field `pathz`"),
+            ))
+        }
+
+        let mut r = RuleRegistry::new();
+        r.register("file_content_matches", &TEST_META, secret_failing_builder);
+        let builder = r.resolve_instantiated("file_content_matches").unwrap();
+
+        let mut spec: RuleSpec = crate::yaml::from_str(
+            "id: r\nkind: file_content_matches\nlevel: error\npattern: SUPER_SECRET_TOKEN\n",
+        )
+        .unwrap();
+        spec.sensitive = true;
+        spec.set_sensitive_fields(std::collections::BTreeSet::from(["pattern".to_string()]));
+
+        let err = builder.build(&spec).unwrap_err().to_string();
+        assert!(
+            !err.contains("SUPER_SECRET_TOKEN"),
+            "InstantiatedBuilder::build must redact sensitive config values, got: {err}"
+        );
     }
 }

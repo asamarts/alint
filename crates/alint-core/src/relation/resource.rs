@@ -322,18 +322,26 @@ mod tests {
                 let some = narrowed.select(&index);
                 assert_eq!(selected(&some), all, "{pattern} sorted: {sorted}");
                 assert_eq!(some.unrepresentable, unrepresentable, "{pattern}");
-                // Only entries at or below the prefix are tested, when the
-                // index keeps them together.
+                // Only entries matching the exact literal (for single-literal
+                // scopes) or at/below the prefix (for glob scopes) are tested
+                // when the index keeps them together.
                 let tested: Vec<usize> = narrowed
                     .scope
                     .candidate_ranges(&index)
                     .into_iter()
                     .flatten()
                     .collect();
+                let exact_literal = !narrowed.scope.matches_by_glob();
                 for (position, entry) in index.entries.iter().enumerate() {
-                    let below = prefix.is_some_and(|dir| entry.path.starts_with(dir));
+                    let expected = prefix.is_some_and(|dir| {
+                        if exact_literal {
+                            entry.path.as_ref() == Path::new(dir)
+                        } else {
+                            entry.path.starts_with(dir)
+                        }
+                    });
                     if sorted && prefix.is_some() {
-                        assert_eq!(tested.contains(&position), below, "{pattern} {position}");
+                        assert_eq!(tested.contains(&position), expected, "{pattern} {position}");
                     } else {
                         assert!(tested.contains(&position), "{pattern} {position}");
                     }

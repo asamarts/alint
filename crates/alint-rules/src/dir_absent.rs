@@ -64,6 +64,29 @@ impl Rule for DirAbsentRule {
         true
     }
 
+    fn visit_sensitive_paths(
+        &self,
+        explicit: bool,
+        ctx: &Context<'_>,
+        visit: &mut dyn FnMut(&std::path::Path),
+    ) {
+        let manifest_sensitive = self.scope.sensitive_manifest_sources().next().is_some();
+        for path in self.scope.sensitive_manifest_sources() {
+            visit(path);
+        }
+        if !explicit && !manifest_sensitive {
+            return;
+        }
+        for entry in self.scope.candidate_dirs(ctx.index) {
+            if self.root_only && crate::is_nested(&entry.path) {
+                continue;
+            }
+            if self.scope.matches(&entry.path, ctx.index) {
+                visit(&entry.path);
+            }
+        }
+    }
+
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
         // v0.9.11: when `git_tracked_only` is set the engine

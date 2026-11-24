@@ -73,6 +73,34 @@ impl Rule for DirContainsRule {
         true
     }
 
+    fn visit_sensitive_paths(
+        &self,
+        explicit: bool,
+        ctx: &Context<'_>,
+        visit: &mut dyn FnMut(&Path),
+    ) {
+        let manifest_sensitive = self
+            .select_scope
+            .sensitive_manifest_sources()
+            .next()
+            .is_some();
+        for path in self.select_scope.sensitive_manifest_sources() {
+            visit(path);
+        }
+        if !explicit && !manifest_sensitive {
+            return;
+        }
+        for dir in self.select_scope.candidate_dirs(ctx.index) {
+            if !self.select_scope.matches(&dir.path, ctx.index) {
+                continue;
+            }
+            visit(&dir.path);
+            for &child_idx in ctx.index.children_of(&dir.path) {
+                visit(&ctx.index.entries[child_idx].path);
+            }
+        }
+    }
+
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
         for dir in self.select_scope.candidate_dirs(ctx.index) {

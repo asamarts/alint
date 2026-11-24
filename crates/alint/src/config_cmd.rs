@@ -509,9 +509,14 @@ pub(crate) fn discover_config(start: &Path) -> Option<PathBuf> {
 /// Print any visible warnings produced during the repository walk (for example
 /// unreadable, non-regular, or oversize ignore files above the checked root
 /// that were skipped rather than failing the walk, #568).
+///
+/// Deliberately emitted even under `--quiet`: a skipped parent ignore file
+/// alters which files are in scope, matching [`discover_config`]'s skipped
+/// config warnings.
 pub(crate) fn report_walk_warnings(index: &alint_core::FileIndex) {
     for warning in index.walk_warnings() {
-        eprintln!("alint: warning: {}", term(warning));
+        let redacted = redact_environment_values(warning);
+        eprintln!("alint: warning: {}", term(&redacted));
     }
 }
 

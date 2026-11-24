@@ -254,7 +254,7 @@ views {
   dynamic view walkerFlow {
     title 'Walk + gitignore + git-tracked filtering'
 
-    alintBin -> core 'parallel walk (ignore crate WalkBuilder.build_parallel)'
+    alintBin -> core 'owned parallel walk (rayon::scope + ignore::gitignore)'
     core -> core 'honor .gitignore/.ignore + ignore: globs'
     core -> core 'merge thread-local FileEntry vecs + deterministic sort'
     core -> core 'build lazy indices: path set, parent->children, git-tracked'

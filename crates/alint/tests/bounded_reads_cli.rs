@@ -2,12 +2,14 @@
 //! regular files of bounded size, and a baseline the repository names only
 //! inside it.
 //!
-//! The walk's ignore files: `ignore` reads every `.ignore`, `.gitignore`,
-//! `info/exclude` (and a linked worktree's `.git` file and `commondir` on the
-//! way to one) and the global excludes file whole, through symlinks, so a
-//! `.gitignore` committed as a symlink to `/dev/zero` made the walk take memory
-//! until the run died, and one to a FIFO blocked it. The baseline file was read
-//! the same way, wherever a config's `baseline:` key led.
+//! The walk's ignore files: `.ignore`, `.gitignore`, `info/exclude` (and a
+//! linked worktree's `.git` file and `commondir` on the way to one) and the
+//! global excludes file are read through bounded open-then-`fstat` checks so
+//! a `.gitignore` committed as a symlink to `/dev/zero` cannot exhaust memory,
+//! and one to a FIFO cannot block the walk. Inside the checked root, bad
+//! ignore files fail strictly; above the checked root, they are skipped with a
+//! visible warning on stderr (#568, #573). The baseline file is read under the
+//! same bounds, confined to the repository.
 //!
 //! Each run here has a deadline and, on Linux, a memory limit: macOS refuses
 //! to set one (`ulimit -v` fails with "Invalid argument"), so there a run has
@@ -180,6 +182,46 @@ fn cases() -> Vec<Case> {
             build: |tmp, _| {
                 let root = plain_root(tmp);
                 let file = root.join("src/.gitignore");
+                fifo(&file).then_some((root, file))
+            },
+        },
+        Case {
+            name: "a .gitignore below the root that is a symlink to a FIFO",
+            build: |tmp, _| {
+                let root = plain_root(tmp);
+                let pipe = tmp.join("pipe");
+                if !fifo(&pipe) {
+                    return None;
+                }
+                let link = root.join("src/.gitignore");
+                symlink(&pipe, &link);
+                Some((root, link))
+            },
+        },
+        Case {
+            name: "a .gitignore below the root that is a Unix domain socket",
+            build: |tmp, _| {
+                let root = plain_root(tmp);
+                let sock = root.join("src/.gitignore");
+                std::os::unix::net::UnixListener::bind(&sock)
+                    .ok()
+                    .map(|_listener| (root, sock))
+            },
+        },
+        Case {
+            name: "a .git inside the root that is a symlink to /dev/zero",
+            build: |tmp, _| {
+                let root = plain_root(tmp);
+                let file = root.join(".git");
+                symlink(Path::new("/dev/zero"), &file);
+                Some((root, file))
+            },
+        },
+        Case {
+            name: "a .git inside the root that is a FIFO",
+            build: |tmp, _| {
+                let root = plain_root(tmp);
+                let file = root.join(".git");
                 fifo(&file).then_some((root, file))
             },
         },
@@ -511,4 +553,171 @@ fn a_baseline_file_is_read_only_when_regular_bounded_and_confined_to_its_source(
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// Additional security and command-coverage tests for ADR-0048 decision 5b
+/// (#568): FIFO / `/proc/self/pagemap` / `.git` / `info/exclude` / `commondir`
+/// above root, non-regular global excludes, ANSI-sanitized warning output, and
+/// warning surfacing across `fix`, `facts`, and `baseline`.
+#[test]
+#[allow(clippy::too_many_lines)]
+fn parent_warnings_and_non_regular_global_excludes_cover_all_paths_and_commands() {
+    // 1. FIFO `.gitignore` above root warns & skips without hanging; also
+    //    verify warnings surface on `fix`, `facts`, and `baseline`.
+    {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let gitconfig = home.path().join("gitconfig");
+        std::fs::write(&gitconfig, "").unwrap();
+        let repo = tmp.path().join("mono");
+        std::fs::create_dir_all(repo.join(".git/info")).unwrap();
+        let bad = repo.join(".gitignore");
+        if fifo(&bad) {
+            let pkg = repo.join("pkg");
+            write(&pkg, ".alint.yml", CONFIG);
+            write(&pkg, "README.md", "# x\n");
+            for args in [
+                &["check", "--format", "json"][..],
+                &["fix", "--dry-run"][..],
+                &["facts"][..],
+                &["baseline"][..],
+            ] {
+                let (code, stderr) =
+                    run(&pkg, args, home.path(), &gitconfig).expect("within the deadline");
+                assert_eq!(code, Some(0), "args={args:?} stderr={stderr}");
+                assert!(
+                    stderr.contains("alint: warning:")
+                        && stderr.contains(".gitignore")
+                        && stderr.contains("not a regular file"),
+                    "args={args:?} expected parent warning: {stderr}"
+                );
+            }
+        }
+    }
+
+    // 2. Non-regular `.git` above root (symlink to /dev/zero) warns and stops
+    //    outer `.git` discovery rather than leaking an outer `.gitignore`.
+    {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let gitconfig = home.path().join("gitconfig");
+        std::fs::write(&gitconfig, "").unwrap();
+        let outer = tmp.path().join("outer");
+        std::fs::create_dir_all(outer.join(".git")).unwrap();
+        write(&outer, ".gitignore", "README.md\n");
+        let repo = outer.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        symlink(Path::new("/dev/zero"), &repo.join(".git"));
+        let pkg = repo.join("pkg");
+        write(&pkg, ".alint.yml", CONFIG);
+        write(&pkg, "README.md", "# x\n");
+        let (code, stderr) = check(&pkg, home.path(), &gitconfig).expect("within the deadline");
+        assert_eq!(code, Some(0), "stderr: {stderr}");
+        assert!(
+            stderr.contains("alint: warning:")
+                && stderr.contains(".git")
+                && stderr.contains("not a regular file"),
+            "expected parent .git warning: {stderr}"
+        );
+    }
+
+    // 3. Parent `info/exclude` -> `/dev/zero` and linked worktree `commondir`
+    //    -> `/dev/zero` above root warn and skip cleanly.
+    {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let gitconfig = home.path().join("gitconfig");
+        std::fs::write(&gitconfig, "").unwrap();
+        let repo = tmp.path().join("mono");
+        std::fs::create_dir_all(repo.join(".git/info")).unwrap();
+        symlink(Path::new("/dev/zero"), &repo.join(".git/info/exclude"));
+        let pkg = repo.join("pkg");
+        write(&pkg, ".alint.yml", CONFIG);
+        write(&pkg, "README.md", "# x\n");
+        let (code, stderr) = check(&pkg, home.path(), &gitconfig).expect("within the deadline");
+        assert_eq!(code, Some(0), "stderr: {stderr}");
+        assert!(
+            stderr.contains("alint: warning:") && stderr.contains("exclude"),
+            "expected parent info/exclude warning: {stderr}"
+        );
+
+        let tmp2 = tempfile::tempdir().unwrap();
+        let git_dir = tmp2.path().join("main.git/worktrees/mono");
+        std::fs::create_dir_all(&git_dir).unwrap();
+        symlink(Path::new("/dev/zero"), &git_dir.join("commondir"));
+        let wt = tmp2.path().join("mono");
+        write(&wt, ".git", &format!("gitdir: {}\n", git_dir.display()));
+        let pkg2 = wt.join("pkg");
+        write(&pkg2, ".alint.yml", CONFIG);
+        write(&pkg2, "README.md", "# x\n");
+        let (code2, stderr2) = check(&pkg2, home.path(), &gitconfig).expect("within the deadline");
+        assert_eq!(code2, Some(0), "stderr: {stderr2}");
+        assert!(
+            stderr2.contains("alint: warning:") && stderr2.contains("commondir"),
+            "expected parent commondir warning: {stderr2}"
+        );
+    }
+
+    // 4. `/proc/self/pagemap` `.ignore` above root (Linux): warns & skips
+    //    without exhausting memory.
+    if cfg!(target_os = "linux") && Path::new("/proc/self/pagemap").exists() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let gitconfig = home.path().join("gitconfig");
+        std::fs::write(&gitconfig, "").unwrap();
+        symlink(Path::new("/proc/self/pagemap"), &tmp.path().join(".ignore"));
+        let root = repository_root(tmp.path());
+        let (code, stderr) = check(&root, home.path(), &gitconfig).expect("within the deadline");
+        assert_eq!(code, Some(0), "stderr: {stderr}");
+        assert!(
+            stderr.contains("alint: warning:") && stderr.contains("32 MiB"),
+            "expected pagemap warning: {stderr}"
+        );
+    }
+
+    // 5. Non-regular global excludes (`/dev/zero` or FIFO): skipped cleanly
+    //    without hanging or exhausting memory.
+    {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let gitconfig = home.path().join("gitconfig");
+        std::fs::write(&gitconfig, "[core]\n\texcludesFile = /dev/zero\n").unwrap();
+        let root = plain_root(tmp.path());
+        let (code, stderr) = check(&root, home.path(), &gitconfig).expect("within the deadline");
+        assert_eq!(code, Some(0), "/dev/zero global excludes stderr: {stderr}");
+
+        let pipe = tmp.path().join("global-fifo");
+        if fifo(&pipe) {
+            std::fs::write(
+                &gitconfig,
+                format!("[core]\n\texcludesFile = {}\n", pipe.display()),
+            )
+            .unwrap();
+            let (code2, stderr2) =
+                check(&root, home.path(), &gitconfig).expect("within the deadline");
+            assert_eq!(code2, Some(0), "FIFO global excludes stderr: {stderr2}");
+        }
+    }
+
+    // 6. ANSI escape sequences in a parent directory name are sanitized before
+    //    printing to stderr.
+    {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let gitconfig = home.path().join("gitconfig");
+        std::fs::write(&gitconfig, "").unwrap();
+        let esc_dir = tmp.path().join("bad\x1b[31mrepo");
+        std::fs::create_dir_all(esc_dir.join(".git")).unwrap();
+        symlink(Path::new("/dev/zero"), &esc_dir.join(".gitignore"));
+        let pkg = esc_dir.join("pkg");
+        write(&pkg, ".alint.yml", CONFIG);
+        write(&pkg, "README.md", "# x\n");
+        let (code, stderr) = check(&pkg, home.path(), &gitconfig).expect("within the deadline");
+        assert_eq!(code, Some(0), "stderr: {stderr}");
+        assert!(stderr.contains("alint: warning:"), "stderr: {stderr}");
+        assert!(
+            !stderr.contains('\x1b'),
+            "raw ESC must be sanitized in walk warning: {stderr:?}"
+        );
+    }
 }

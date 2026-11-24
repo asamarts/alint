@@ -32,8 +32,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Unreadable, non-regular (such as a FIFO or symlink to a device), or oversize (> 32 MiB) ignore
   files (`.gitignore`, `.ignore`, `info/exclude`, or a linked worktree's `.git` / `commondir`) in
   parent directories **above** the checked root are now skipped with a visible warning on stderr
-  (`alint: warning: ...`) instead of failing the walk; bad ignore files **inside** the checked root
-  continue to fail strictly, and the 32 MiB ignore-file size cap stays unchanged (#568).
+  (`alint: warning: ...`) instead of failing the walk; inside the checked root, unreadable ignore
+  files now fail strictly alongside non-regular and oversize ones, and the 32 MiB ignore-file size
+  cap stays unchanged (#568).
 
 ### Added
 
@@ -108,7 +109,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `cross_file`, `file_graph`, `registry_paths_resolve`, `markdown_paths_resolve`,
   `generated_file_fresh`, exact-directory `dir_contains` / `dir_only_contains`, `facts`,
   `relation/eval`, and `engine` trace/active-iteration checks with a debug-only `FileIndex` scan
-  counter (`#565`, `#584`).
+  counter (#565, #584).
 - Remote `extends:` cache directory resolution (`alint-dsl`) now uses an internal platform helper
   (`XDG_CACHE_HOME` / `HOME` on Unix, `Library/Caches/org.asamarts.alint` on macOS,
   `LOCALAPPDATA` / `USERPROFILE` on Windows), removing `directories`, `dirs-sys`, `option-ext`,

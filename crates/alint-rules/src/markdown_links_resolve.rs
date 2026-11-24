@@ -98,6 +98,26 @@ impl Rule for MarkdownLinksResolveRule {
             .any(|entry| self.scope.matches(&entry.path, index))
     }
 
+    fn visit_sensitive_paths(
+        &self,
+        explicit: bool,
+        ctx: &Context<'_>,
+        visit: &mut dyn FnMut(&Path),
+    ) {
+        let manifest_sensitive = self.scope.sensitive_manifest_sources().next().is_some();
+        for path in self.scope.sensitive_manifest_sources() {
+            visit(path);
+        }
+        if !explicit && !manifest_sensitive {
+            return;
+        }
+        for entry in self.scope.candidate_files(ctx.index) {
+            if self.scope.matches(&entry.path, ctx.index) {
+                visit(&entry.path);
+            }
+        }
+    }
+
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
         for entry in self.scope.candidate_files(ctx.index) {

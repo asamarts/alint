@@ -331,6 +331,32 @@ impl Rule for EditorconfigConformsRule {
             .any(|entry| self.scope.matches(&entry.path, index))
     }
 
+    fn visit_sensitive_paths(
+        &self,
+        explicit: bool,
+        ctx: &Context<'_>,
+        visit: &mut dyn FnMut(&Path),
+    ) {
+        let manifest_sensitive = self.scope.sensitive_manifest_sources().next().is_some();
+        for path in self.scope.sensitive_manifest_sources() {
+            visit(path);
+        }
+        if !explicit && !manifest_sensitive {
+            return;
+        }
+        for entry in self.scope.candidate_files(ctx.index) {
+            if !self.scope.matches(&entry.path, ctx.index) {
+                continue;
+            }
+            visit(&entry.path);
+            for cfg in ancestor_configs(&entry.path) {
+                if ctx.index.contains_file(&cfg) {
+                    visit(&cfg);
+                }
+            }
+        }
+    }
+
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let selected: Vec<_> = self
             .scope

@@ -1646,7 +1646,7 @@ fn selector_with_directory_prefix_narrows_index_scan() {
     let tested = crate::scope_match_count().unwrap() - before;
     assert_eq!(rows.rows.len(), 1);
     assert!(
-        tested <= 4,
-        "expected narrowed scan on pkg/d000/*, tested {tested} entries"
+        (1..=4).contains(&tested),
+        "expected narrowed positive scan on pkg/d000/*, tested {tested} entries"
     );
 }
