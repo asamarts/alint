@@ -84,7 +84,10 @@ impl Scope {
                 exclude: GlobSet::empty(),
                 has_include: true,
                 literal: Some(literal.into_bytes().into_boxed_slice()),
-                within: include_dirs(patterns),
+                // Single-literal scopes narrow directly from `literal` in
+                // `candidate_ranges` / `narrow_prefixes` without allocating a
+                // second boxed path slice (#620, #584).
+                within: None,
                 depths: None,
                 scope_filter: None,
             });
@@ -314,10 +317,40 @@ impl Scope {
         self.candidates(index).filter(|entry| entry.is_dir)
     }
 
+    /// Narrowing root-relative path prefixes for filesystem rescans such as
+    /// `generated_file_fresh` (#584): `Some` when every include pattern starts
+    /// with a literal directory or is a literal path, `None` when any include
+    /// starts with a wildcard or there are no includes.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn narrow_prefixes(&self) -> Option<Vec<&Path>> {
+        if let Some(literal) = &self.literal {
+            let lit = std::str::from_utf8(literal).ok()?;
+            return is_normal_literal_path(lit).then(|| vec![Path::new(lit)]);
+        }
+        self.within
+            .as_ref()
+            .map(|dirs| dirs.iter().map(Box::as_ref).collect())
+    }
+
     /// The positions in [`FileIndex::entries`] of [`Self::candidates`]:
     /// ascending, disjoint ranges (one directory may lie below another).
-    pub(crate) fn candidate_ranges(&self, index: &FileIndex) -> Vec<std::ops::Range<usize>> {
+    #[doc(hidden)]
+    pub fn candidate_ranges(&self, index: &FileIndex) -> Vec<std::ops::Range<usize>> {
         let every_entry = || std::iter::once(0..index.entries.len()).collect();
+        if let Some(literal) = &self.literal {
+            let Ok(lit) = std::str::from_utf8(literal) else {
+                return every_entry();
+            };
+            if !is_normal_literal_path(lit) {
+                return every_entry();
+            }
+            return match index.subtree(Path::new(lit)) {
+                Some(range) if range.is_empty() => Vec::new(),
+                Some(range) => vec![range],
+                None => every_entry(),
+            };
+        }
         let Some(dirs) = &self.within else {
             return every_entry();
         };
@@ -373,7 +406,7 @@ impl<'p> ChangedPaths<'p> {
         let mut by_name: HashMap<&OsStr, Vec<usize>> = HashMap::new();
         let mut directories_at = Vec::new();
         for (position, path) in paths.iter().enumerate() {
-            for dir in path.ancestors().skip(1) {
+            for dir in path.ancestors() {
                 if dir.as_os_str().is_empty() {
                     break;
                 }
@@ -635,18 +668,28 @@ fn literal_pattern(pattern: &str, backslash_is_separator: bool) -> Option<String
     })
 }
 
-/// The directory every path `pattern` can match lies under, as globset
-/// compiles the pattern: the segments before its last `/` for as long as each
-/// is a literal name ([`literal_pattern`]), `a/b` for `a/b/*.json` or
-/// `a/b/**`, `app/[slug]` for `app/[[]slug[]]/*.tsx`. A match spells these
-/// names first, so it is at or below them, component by component. `None`
-/// when the first segment is not a literal name (`**/x`, `*/x`, `{a,b}/x`,
-/// `[ab]/x`), for a pattern with no `/` or one that starts with `/` or `.`,
-/// and for an exclude (`!x`). A segment that names nothing on its own (`.`,
-/// `..`, empty) ends the prefix, since globset compares it as text. Where `\\`
-/// is a path separator (Windows) it separates segments as `/` does, so a
-/// pattern built from a `Path` (`pkg\\d000\\m*`) narrows to `pkg/d000`.
-pub(crate) fn literal_dir_prefix(pattern: &str) -> Option<String> {
+/// Whether a normalized `/`-separated literal path consists purely of normal
+/// non-empty segments (no leading/trailing `/`, no `.` or `..`).
+fn is_normal_literal_path(path: &str) -> bool {
+    !path.is_empty() && path.split('/').all(|part| !matches!(part, "" | "." | ".."))
+}
+
+/// The directory (or exact literal path) every path `pattern` can match lies at
+/// or under, as globset compiles the pattern:
+/// - for a wholly literal pattern (`pkg/d000`, `en.json`, `app/[[]slug[]]`),
+///   that exact normalized path, so exact-directory nested selectors such as
+///   `dir_contains` with `select: '{path}'` narrow to that directory alone
+///   rather than its parent (#584);
+/// - otherwise, the segments before its last `/` for as long as each is a
+///   literal name: `a/b` for `a/b/*.json` or `a/b/**`,
+///   `app/[slug]` for `app/[[]slug[]]/*.tsx`.
+///
+/// `None` when the first segment is not a literal name (`**/x`, `*/x`,
+/// `{a,b}/x`, `[ab]/x`), when the pattern starts with `/` or `.`, or for an
+/// exclude (`!x`).
+#[doc(hidden)]
+#[must_use]
+pub fn literal_dir_prefix(pattern: &str) -> Option<String> {
     literal_dir_prefix_with(pattern, std::path::is_separator('\\'))
 }
 
@@ -655,9 +698,8 @@ fn literal_dir_prefix_with(pattern: &str, backslash_is_separator: bool) -> Optio
         return None;
     }
     let separates = |c: char| c == '/' || (backslash_is_separator && c == '\\');
-    let (dirs, _) = pattern.rsplit_once(separates)?;
     let mut prefix = String::new();
-    for segment in dirs.split(separates) {
+    for segment in pattern.split(separates) {
         let Some(name) = literal_pattern(segment, backslash_is_separator) else {
             break;
         };
@@ -1005,7 +1047,8 @@ mod tests {
                 &["a/b", "a/b/y.md", "d", "d/w.md"][..],
             ),
             (&["a/*.md", "!a/c.md"][..], a),
-            (&["a/c.md"][..], a),
+            (&["a/c.md"][..], &["a/c.md"][..]),
+            (&["a/b"][..], &["a/b", "a/b/y.md"][..]),
             (&["missing/*.md"][..], &[][..]),
             (&["a/*.md", "*.md"][..], ALL),
             (&["a/*.md", "**/*.md"][..], ALL),

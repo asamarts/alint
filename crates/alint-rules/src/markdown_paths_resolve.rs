@@ -438,13 +438,17 @@ fn path_resolves(ctx: &Context<'_>, lookup: &str) -> bool {
         return false;
     }
     if lookup.contains('*') || lookup.contains('?') || lookup.contains('[') {
-        // Glob — match against the index. Build a globset on the
-        // fly; cheap for one pattern.
+        // Glob — match against the index, narrowed to the pattern's literal
+        // directory prefix when present (#565, #584).
         let Ok(glob) = globset::Glob::new(lookup) else {
             return false;
         };
         let matcher = glob.compile_matcher();
-        return ctx.index.entries.iter().any(|e| matcher.is_match(&e.path));
+        let candidates = match alint_core::literal_dir_prefix(lookup) {
+            Some(prefix) => ctx.index.entries_under(Path::new(&prefix)),
+            None => &ctx.index.entries,
+        };
+        return candidates.iter().any(|e| matcher.is_match(&e.path));
     }
     // `ctx.index` is always the full index here: the rule is `requires_full_index`,
     // so both the per-file pass and the rule-by-rule path hand it the whole tree,
@@ -724,5 +728,30 @@ mod tests {
             (plain[0].line, plain[0].column)
         );
         assert_eq!(bom[0].column, 5);
+    }
+
+    #[test]
+    fn glob_lookups_narrow_to_their_literal_directory_prefix() {
+        let mut owned: Vec<String> = Vec::new();
+        for i in 0..60 {
+            owned.push(format!("pkg/d{i:03}/doc.md"));
+        }
+        let files: Vec<&str> = owned.iter().map(String::as_str).collect();
+        let before = alint_core::index_scan_count();
+        assert_eq!(
+            findings(
+                "see `pkg/d000/*.md` and `pkg/d059/*.md` and `pkg/d000/*.rs` and `pkg/d999/*.md`",
+                "[\"pkg/\"]",
+                &files,
+            ),
+            vec!["pkg/d000/*.rs", "pkg/d999/*.md"]
+        );
+        if let (Some(before), Some(after)) = (before, alint_core::index_scan_count()) {
+            assert_eq!(
+                after - before,
+                0,
+                "glob path lookup should not call whole-index iterators"
+            );
+        }
     }
 }

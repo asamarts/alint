@@ -107,13 +107,14 @@ fn build(case: &Case) -> Box<dyn Rule> {
         .unwrap_or_else(|error| panic!("{}: {error}", case.name))
 }
 
-/// Run `f` with a context like the engine's over `root` and count the paths
-/// `Scope::matches` tested meanwhile.
+/// Run `f` with a context like the engine's over `root` and count both the
+/// paths `Scope::matches` tested and the entries whole-tree index iterators /
+/// rescans visited meanwhile (#565, #584).
 fn counting<T>(
     root: &Path,
     index: &alint_core::FileIndex,
     f: impl FnOnce(&Context) -> T,
-) -> (T, u64) {
+) -> (T, u64, u64) {
     let registry = crate::builtin_registry();
     let facts = FactValues::default();
     let vars = HashMap::new();
@@ -130,9 +131,14 @@ fn counting<T>(
         .with_vars(Some(&vars))
         .with_git_blame(Some(&blame))
         .with_analysis_time(Some(&analysis_time));
-    let before = alint_core::scope_match_count().unwrap();
+    let before_matches = alint_core::scope_match_count().unwrap();
+    let before_scans = alint_core::index_scan_count().unwrap();
     let out = f(&ctx);
-    (out, alint_core::scope_match_count().unwrap() - before)
+    (
+        out,
+        alint_core::scope_match_count().unwrap() - before_matches,
+        alint_core::index_scan_count().unwrap() - before_scans,
+    )
 }
 
 /// The parent's `select:` tests the directories under `pkg/` once, and each
@@ -256,10 +262,26 @@ fn evaluated_cases() -> Vec<Case> {
                 &[],
             )
         },
+        Case {
+            // Exact-directory literal selector (`select: '{path}'`) must narrow
+            // to `{path}` itself rather than scanning every sibling under `pkg/` (#584).
+            expected: vec!["pkg/d000".to_owned()],
+            ..case(
+                "dir_contains exact directory",
+                "kind: dir_contains\n    select: '{path}'\n    require: ['README.md']",
+                &[],
+            )
+        },
         case(
             "dir_only_contains",
             "kind: dir_only_contains\n    select: '{path}/s*'\n    allow: ['.keep']",
             &["pkg/d002/sub/junk.tmp"],
+        ),
+        case(
+            "dir_only_contains exact directory",
+            "kind: dir_only_contains\n    select: '{path}'\n    \
+             allow: ['README.md', 'en.json', 'fr.json', 'members.txt']",
+            &["pkg/d002/junk.tmp"],
         ),
         Case {
             // `a` and `b` differ, so every finding names the source glob's files.
@@ -286,6 +308,19 @@ fn evaluated_cases() -> Vec<Case> {
             &[],
         ),
         case(
+            "cross_file registered over a named source",
+            "kind: cross_file\n    relation: registered\n    \
+             source: { file: '{path}/en.json' }\n    register_as: '1'\n    \
+             targets: [ { file: '{path}/en.json', extract: { json: '$.*' } } ]",
+            &[],
+        ),
+        case(
+            "cross_file resolves",
+            "kind: cross_file\n    relation: resolves\n    \
+             source: { file: '{path}/members.txt', extract: { regex: '(\\w+)' } }",
+            &[],
+        ),
+        case(
             "no_symlinks",
             "kind: no_symlinks\n    paths: '{path}/*'\n    expect_matches: true",
             &[],
@@ -295,6 +330,12 @@ fn evaluated_cases() -> Vec<Case> {
             "kind: registry_paths_resolve\n    source: '{path}/m*.txt'\n    \
              extract: { regex: '(\\w+)' }\n    entries_are_globs: true\n    \
              orphans: { space: '{path}/s*' }",
+            &[],
+        ),
+        case(
+            "registry_paths_resolve expect dir",
+            "kind: registry_paths_resolve\n    source: '{path}/members.txt'\n    \
+             extract: { regex: '(\\w+)' }\n    expect: dir",
             &[],
         ),
         case("file_graph", FILE_GRAPH, &[]),
@@ -476,7 +517,7 @@ fn a_nested_glob_tests_only_the_iterated_directory() {
     let mut whole_index = Vec::new();
     for case in evaluated_cases() {
         let rule = build(&case);
-        let (violations, tested) = counting(tmp.path(), &index, |ctx| {
+        let (violations, tested, scanned) = counting(tmp.path(), &index, |ctx| {
             rule.evaluate(ctx).expect("rule evaluates")
         });
         assert_eq!(
@@ -485,8 +526,11 @@ fn a_nested_glob_tests_only_the_iterated_directory() {
             "{}: {violations:?}",
             case.name
         );
-        if scans_whole_index(tested, entries) {
-            whole_index.push(format!("{}: {tested} paths tested", case.name));
+        if scans_whole_index(tested, entries) || scans_whole_index(scanned, entries) {
+            whole_index.push(format!(
+                "{}: {tested} scope matches, {scanned} whole-index scans",
+                case.name
+            ));
         }
     }
     assert!(
@@ -533,7 +577,7 @@ fn a_nested_rule_visits_only_the_iterated_directory() {
     let mut whole_index = Vec::new();
     for case in cases {
         let rule = build(&case);
-        let (visited, tested) = counting(tmp.path(), &index, |ctx| {
+        let (visited, tested, scanned) = counting(tmp.path(), &index, |ctx| {
             let mut visited: Vec<PathBuf> = Vec::new();
             rule.visit_sensitive_paths(true, ctx, &mut |path| visited.push(path.to_path_buf()));
             visited
@@ -542,12 +586,43 @@ fn a_nested_rule_visits_only_the_iterated_directory() {
         visited.sort();
         visited.dedup();
         assert_eq!(visited, json, "{}", case.name);
-        if scans_whole_index(tested, entries) {
-            whole_index.push(format!("{}: {tested} paths tested", case.name));
+        if scans_whole_index(tested, entries) || scans_whole_index(scanned, entries) {
+            whole_index.push(format!(
+                "{}: {tested} scope matches, {scanned} whole-index scans",
+                case.name
+            ));
         }
     }
     assert!(
         whole_index.is_empty(),
         "{entries} entries in {DIRS} directories: {whole_index:#?}"
+    );
+}
+
+/// Facts with directory-prefixed globs narrow to those subtrees rather than
+/// scanning every file in the index (#565).
+#[test]
+fn facts_narrow_directory_prefixed_globs() {
+    if alint_core::scope_match_count().is_none() {
+        return;
+    }
+    let tmp = tree();
+    let index = alint_core::walk(tmp.path(), &crate::test_support::walk_options()).unwrap();
+    let entries = u64::try_from(index.entries.len()).unwrap();
+    let specs: Vec<alint_core::FactSpec> = (0..DIRS)
+        .map(|i| {
+            alint_core::yaml::from_str(&format!("id: f{i}\ncount_files: 'pkg/d{i:03}/*.json'\n"))
+                .unwrap()
+        })
+        .collect();
+    let before_matches = alint_core::scope_match_count().unwrap();
+    let before_scans = alint_core::index_scan_count().unwrap();
+    let values = alint_core::evaluate_facts(&specs, tmp.path(), &index).unwrap();
+    let tested = alint_core::scope_match_count().unwrap() - before_matches;
+    let scanned = alint_core::index_scan_count().unwrap() - before_scans;
+    assert_eq!(values.get("f0"), Some(&alint_core::FactValue::Int(2)));
+    assert!(
+        !scans_whole_index(tested, entries) && !scans_whole_index(scanned, entries),
+        "facts scanned whole index: {tested} scope matches, {scanned} whole-index scans ({entries} entries)"
     );
 }

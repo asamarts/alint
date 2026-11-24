@@ -10,7 +10,7 @@ use serde::Deserialize;
 
 use crate::fixers::FileCreateFixer;
 
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
     /// If true, only files directly at the repository root satisfy the rule.
@@ -35,6 +35,55 @@ struct Options {
 
 crate::options_schema_for!(Options);
 
+/// Literal path targets for [`FileExistsRule`]: avoids a `Vec<PathBuf>` heap
+/// allocation on the common single-pattern nested shape (`{path}/README.md`, #620).
+#[derive(Debug)]
+enum LiteralPaths {
+    Single(PathBuf),
+    Many(Vec<PathBuf>),
+}
+
+impl LiteralPaths {
+    fn as_slice(&self) -> &[PathBuf] {
+        match self {
+            Self::Single(path) => std::slice::from_ref(path),
+            Self::Many(paths) => paths.as_slice(),
+        }
+    }
+}
+
+/// Stored patterns for diagnostic messages, avoiding a `Vec<String>` allocation
+/// on the common `PathsSpec::Single` shape (#620).
+#[derive(Debug)]
+enum StoredPatterns {
+    Single(String),
+    Many(Vec<String>),
+}
+
+impl StoredPatterns {
+    fn from_spec(spec: &PathsSpec) -> Self {
+        match spec {
+            PathsSpec::Single(s) => Self::Single(s.clone()),
+            PathsSpec::Many(v) => Self::Many(v.clone()),
+            PathsSpec::IncludeExclude { include, .. } => Self::Many(include.clone()),
+        }
+    }
+
+    fn as_slice(&self) -> &[String] {
+        match self {
+            Self::Single(s) => std::slice::from_ref(s),
+            Self::Many(v) => v.as_slice(),
+        }
+    }
+
+    fn describe(&self) -> String {
+        match self {
+            Self::Single(s) => s.clone(),
+            Self::Many(v) => v.join(", "),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct FileExistsRule {
     id: String,
@@ -42,10 +91,9 @@ pub struct FileExistsRule {
     policy_url: Option<String>,
     message: Option<String>,
     scope: Scope,
-    patterns: Vec<String>,
+    patterns: StoredPatterns,
     /// `Some(paths)` when every entry in `patterns` is a literal
-    /// path (no glob metacharacters, no `!` excludes) and the
-    /// rule does not opt into `git_tracked_only`. The fast path
+    /// path (no glob metacharacters, no `!` excludes). The fast path
     /// uses these to do O(1) `FileIndex::contains_file` lookups
     /// instead of iterating every entry through
     /// `Scope::matches`. At 1M files in a 5,000-package
@@ -53,7 +101,7 @@ pub struct FileExistsRule {
     /// `file_exists` per directory; without this short-circuit
     /// each one is an O(N) scan and the fan-out becomes
     /// O(D × N). With it, they collapse to O(D) lookups.
-    literal_paths: Option<Vec<PathBuf>>,
+    literal_paths: Option<LiteralPaths>,
     root_only: bool,
     /// When `true`, only consider walked entries that are also
     /// in Git's index. The engine derives this dependency from
@@ -81,19 +129,9 @@ fn literal_path(pattern: &str) -> Option<PathBuf> {
     alint_core::template::literal_glob_path(pattern).map(PathBuf::from)
 }
 
-/// True iff `paths` is a flat list (single string or `Many`)
-/// with no excludes - `IncludeExclude` form is excluded since
-/// the fast path can't honour excludes by hash lookup alone.
-fn paths_spec_has_no_excludes(spec: &PathsSpec) -> bool {
-    match spec {
-        PathsSpec::Single(_) | PathsSpec::Many(_) => true,
-        PathsSpec::IncludeExclude { exclude, .. } => exclude.is_empty(),
-    }
-}
-
 impl FileExistsRule {
     fn describe_patterns(&self) -> String {
-        self.patterns.join(", ")
+        self.patterns.describe()
     }
 }
 
@@ -129,7 +167,7 @@ impl Rule for FileExistsRule {
         // The pitfall #18 stat below, which finds a literal the walk left out.
         self.respect_gitignore == Some(false)
             && self.literal_paths.as_ref().is_some_and(|literals| {
-                literals.iter().any(|p| {
+                literals.as_slice().iter().any(|p| {
                     !(self.root_only && literal_is_nested(p))
                         && crate::pathsafe::normalize_confined(p).as_deref() == Some(path)
                 })
@@ -151,7 +189,7 @@ impl Rule for FileExistsRule {
             // Direct stat is O(1) per literal regardless of tree
             // size, so the cost is bounded.
             let bypass_walker_for_ignored = self.respect_gitignore == Some(false);
-            literals.iter().any(|p| {
+            literals.as_slice().iter().any(|p| {
                 if self.root_only && literal_is_nested(p) {
                     return false;
                 }
@@ -270,32 +308,33 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
             "file_exists requires a `paths` field",
         ));
     };
-    let patterns = patterns_of(paths);
+    let patterns = StoredPatterns::from_spec(paths);
     let scope = Scope::from_paths_spec(paths)?;
     // Propagate (not swallow) the deserialize error so a typo'd / unknown
     // option fails loudly, like every other rule kind. `root_only` is
-    // `#[serde(default)]`, so an option-less spec still deserializes fine.
-    let opts: Options = spec.deserialize_options()?;
-    // The fast path needs every pattern to be a plain relative
-    // path (no glob metacharacters, no `!` exclude). v0.9.11:
-    // `git_tracked_only` no longer disqualifies the fast path
-    // — the engine routes the rule to a tracked-files-only
-    // pre-filtered index, so `FileIndex::contains_file` against
-    // that index naturally returns true iff the literal is BOTH
-    // present AND tracked. When all preconditions hold,
-    // `literal_paths` carries the parsed `PathBuf`s ready for
-    // `FileIndex::contains_file` lookup at evaluate time.
-    let literal_paths = if paths_spec_has_no_excludes(paths) {
-        patterns.iter().map(|p| literal_path(p)).collect()
-    } else {
-        None
+    // `#[serde(default)]`, so an option-less spec still deserializes fine
+    // (skipping `Mapping` clone + Serde when `extra` is empty, #620).
+    let opts: Options = spec.deserialize_options_or_default()?;
+    let literal_paths = match paths {
+        PathsSpec::Single(s) => literal_path(s).map(LiteralPaths::Single),
+        PathsSpec::Many(v) => v
+            .iter()
+            .map(|p| literal_path(p))
+            .collect::<Option<Vec<_>>>()
+            .map(LiteralPaths::Many),
+        PathsSpec::IncludeExclude { include, exclude } if exclude.is_empty() => include
+            .iter()
+            .map(|p| literal_path(p))
+            .collect::<Option<Vec<_>>>()
+            .map(LiteralPaths::Many),
+        PathsSpec::IncludeExclude { .. } => None,
     };
     let fixer = match &spec.fix {
         Some(FixSpec::FileCreate { file_create: cfg }) => {
             let target = cfg
                 .path
                 .clone()
-                .or_else(|| first_literal_path(&patterns))
+                .or_else(|| first_literal_path(patterns.as_slice()))
                 .ok_or_else(|| {
                     Error::rule_config(
                         &spec.id,
@@ -354,12 +393,9 @@ fn first_literal_path(patterns: &[String]) -> Option<PathBuf> {
     patterns.iter().find_map(|p| literal_path(p))
 }
 
+#[cfg(test)]
 fn patterns_of(spec: &PathsSpec) -> Vec<String> {
-    match spec {
-        PathsSpec::Single(s) => vec![s.clone()],
-        PathsSpec::Many(v) => v.clone(),
-        PathsSpec::IncludeExclude { include, .. } => include.clone(),
-    }
+    StoredPatterns::from_spec(spec).as_slice().to_vec()
 }
 
 #[cfg(test)]

@@ -176,9 +176,15 @@ PLATFORM_ALLOWLIST=(
   "crates/alint-core/src/scope.rs|cfg(not(debug_assertions))|in fn scope_match_count"
   "crates/alint-core/src/walker.rs|cfg(debug_assertions)|in fn all_path_set_arc"
   "crates/alint-core/src/walker.rs|cfg(debug_assertions)|in fn children_of"
+  "crates/alint-core/src/walker.rs|cfg(debug_assertions)|in fn dir_path_set_arc"
   "crates/alint-core/src/walker.rs|cfg(debug_assertions)|in fn file_entry_indices_arc"
   "crates/alint-core/src/walker.rs|cfg(debug_assertions)|in fn file_path_set_arc"
+  "crates/alint-core/src/walker.rs|cfg(debug_assertions)|in fn index_scan_count"
+  "crates/alint-core/src/walker.rs|cfg(debug_assertions)|in fn record_index_scans"
   "crates/alint-core/src/walker.rs|cfg(debug_assertions)|macro_rules! trace_index_build|tracing::debug!"
+  "crates/alint-core/src/walker.rs|cfg(debug_assertions)|std::thread_local!|std::thread_local!, static"
+  "crates/alint-core/src/walker.rs|cfg(not(debug_assertions))|in fn index_scan_count"
+  "crates/alint-core/src/walker.rs|cfg(not(debug_assertions))|in fn record_index_scans"
   "crates/alint-core/src/walker.rs|cfg(not(debug_assertions))|macro_rules! trace_index_build"
   # Kani proofs, and the path model they share with the unit tests: private
   # modules that only the Kani verifier (`cfg(kani)`) and `cargo test` compile,

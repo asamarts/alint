@@ -3,7 +3,7 @@
 use alint_core::{Context, Error, Level, PathsSpec, Result, Rule, RuleSpec, Scope, Violation};
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
     /// If true, only a directory directly at the repository root is forbidden; a
@@ -136,7 +136,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     // (only fire on `dist/`/`build/` whose ancestor chain contains
     // a `package.json`, so polyglot monorepos with non-JS dirs of
     // the same name don't see false positives).
-    let opts: Options = spec.deserialize_options()?;
+    let opts: Options = spec.deserialize_options_or_default()?;
     Ok(Box::new(DirAbsentRule {
         id: spec.id.clone(),
         level: spec.level,

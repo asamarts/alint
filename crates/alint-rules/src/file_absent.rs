@@ -7,7 +7,7 @@ use serde::Deserialize;
 
 use crate::fixers::{FileRemoveFixer, GitUntrackFixer, RelocateFixer};
 
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
     /// If true, only a file matching `paths` directly at the repository root is
@@ -209,7 +209,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
             "file_absent requires a `paths` field",
         ));
     };
-    let opts: Options = spec.deserialize_options()?;
+    let opts: Options = spec.deserialize_options_or_default()?;
     let content_prefixes = opts
         .content_prefix_hex
         .iter()

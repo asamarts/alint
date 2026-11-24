@@ -223,6 +223,7 @@ pub struct FileIndex {
     followed_symlinks: Option<Vec<Arc<Path>>>,
     path_set: OnceLock<SharedPathSet>,
     all_path_set: OnceLock<SharedPathSet>,
+    dir_path_set: OnceLock<SharedPathSet>,
     /// Whether `entries` are in path order, as [`walk`] leaves them: checked
     /// once, on the first lookup that can use the order.
     sorted: OnceLock<bool>,
@@ -299,6 +300,7 @@ impl FileIndex {
             followed_symlinks: None,
             path_set: OnceLock::new(),
             all_path_set: OnceLock::new(),
+            dir_path_set: OnceLock::new(),
             sorted: OnceLock::new(),
             file_entry_indices: OnceLock::new(),
             tree_files: OnceLock::new(),
@@ -564,11 +566,17 @@ impl FileIndex {
     }
 
     pub fn files(&self) -> impl Iterator<Item = &FileEntry> {
-        self.entries.iter().filter(|e| !e.is_dir)
+        self.entries.iter().filter(|e| {
+            record_index_scan();
+            !e.is_dir
+        })
     }
 
     pub fn dirs(&self) -> impl Iterator<Item = &FileEntry> {
-        self.entries.iter().filter(|e| e.is_dir)
+        self.entries.iter().filter(|e| {
+            record_index_scan();
+            e.is_dir
+        })
     }
 
     pub fn total_size(&self) -> u64 {
@@ -630,6 +638,21 @@ impl FileIndex {
         })
     }
 
+    fn dir_path_set_arc(&self) -> &SharedPathSet {
+        self.dir_path_set.get_or_init(|| {
+            #[cfg(debug_assertions)]
+            let start = std::time::Instant::now();
+            let set = self
+                .entries
+                .iter()
+                .filter(|entry| entry.is_dir)
+                .map(|entry| Arc::clone(&entry.path))
+                .collect();
+            trace_index_build!("dir_path_set", start, self.entries.len());
+            Arc::new(set)
+        })
+    }
+
     /// Share `full`'s exact-file index into this (`--changed`-filtered) index, so
     /// [`Self::contains_file_in_tree`] answers about the whole repository.
     /// Engine-only, once per run, and only when a rule needs it (a
@@ -668,6 +691,33 @@ impl FileIndex {
     /// references may legitimately target either kind.
     pub fn contains_path(&self, rel: &Path) -> bool {
         self.all_path_set_arc().contains(rel)
+    }
+
+    /// Does `rel` exist as an indexed directory? Uses binary search with zero
+    /// allocation when `entries` are sorted (all walked indexes), falling back
+    /// to a lazily-built directory path set for unsorted fixture indexes (#584).
+    #[must_use]
+    pub fn contains_dir(&self, rel: &Path) -> bool {
+        if self.entries_sorted() {
+            let pos = self.entries.partition_point(|entry| *entry.path < *rel);
+            self.entries[pos..]
+                .iter()
+                .take_while(|entry| &*entry.path == rel)
+                .any(|entry| entry.is_dir)
+        } else {
+            self.dir_path_set_arc().contains(rel)
+        }
+    }
+
+    /// Entries at and below `dir` when `entries` are sorted, or every entry
+    /// otherwise (#565, #584).
+    #[doc(hidden)]
+    #[must_use]
+    pub fn entries_under(&self, dir: &Path) -> &[FileEntry] {
+        match self.subtree(dir) {
+            Some(range) => &self.entries[range],
+            None => &self.entries,
+        }
     }
 
     /// Whether `entries` are sorted by path (component by component, as
@@ -928,8 +978,162 @@ impl WalkOptions {
     }
 }
 
+#[cfg(debug_assertions)]
+std::thread_local! {
+    /// How many entries whole-tree index iterators ([`FileIndex::files`],
+    /// [`FileIndex::dirs`], and full [`walk`] calls from nested rules) visited
+    /// on this thread (#584).
+    static INDEX_SCANS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+#[inline]
+fn record_index_scan() {
+    record_index_scans(1);
+}
+
+#[inline]
+fn record_index_scans(n: u64) {
+    #[cfg(debug_assertions)]
+    INDEX_SCANS.with(|count| count.set(count.get().saturating_add(n)));
+    #[cfg(not(debug_assertions))]
+    let _ = n;
+}
+
+/// How many entries whole-tree index iterators ([`FileIndex::files`],
+/// [`FileIndex::dirs`]) and rescans visited on the calling thread, in a build
+/// with debug assertions (`None` without them, where nothing counts).
+/// Test only: catches per-iteration whole-tree scans invisible to
+/// [`crate::scope_match_count`] (#584).
+#[doc(hidden)]
+#[must_use]
+pub fn index_scan_count() -> Option<u64> {
+    #[cfg(debug_assertions)]
+    {
+        Some(INDEX_SCANS.with(std::cell::Cell::get))
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        None
+    }
+}
+
 pub fn walk(root: &Path, opts: &WalkOptions) -> Result<FileIndex> {
-    let (builder, escaping, followed, refused) = build_walk_builder(root, opts)?;
+    walk_with_confinement(root, root, opts)
+}
+
+/// Walk only the specified root-relative `subtrees` under `root`, preserving
+/// `root`'s ignore rules, `extra_ignores`, and symlink confinement (#584).
+///
+/// Missing subtrees are skipped cleanly; a subtree naming a single regular file
+/// is checked directly without spawning a directory walk.
+#[doc(hidden)]
+pub fn walk_subtrees(root: &Path, subtrees: &[&Path], opts: &WalkOptions) -> Result<FileIndex> {
+    if subtrees.is_empty() {
+        return Ok(FileIndex::default());
+    }
+    // Deduplicate and drop subtrees covered by an ancestor subtree.
+    let mut normalized: Vec<PathBuf> = Vec::with_capacity(subtrees.len());
+    for &sub in subtrees {
+        if let Some(rel) = crate::pathsafe::normalize_confined(sub) {
+            normalized.push(rel);
+        }
+    }
+    normalized.sort_unstable();
+    normalized.dedup();
+    let mut roots: Vec<PathBuf> = Vec::with_capacity(normalized.len());
+    for rel in normalized {
+        if roots.last().is_some_and(|prev| rel.starts_with(prev)) {
+            continue;
+        }
+        roots.push(rel);
+    }
+
+    let canonical_root = root.canonicalize().ok();
+    let skips = WalkSkips::new(root, opts, &[]);
+    let sub_opts = WalkOptions {
+        respect_gitignore: opts.respect_gitignore,
+        extra_ignores: Vec::new(),
+        global_git_excludes: opts.global_git_excludes,
+    };
+    let mut entries = Vec::new();
+    for sub in &roots {
+        let abs = root.join(sub);
+        let sym_meta = match abs.symlink_metadata() {
+            Ok(meta) => meta,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(err) => {
+                return Err(Error::Io {
+                    path: abs,
+                    source: err,
+                });
+            }
+        };
+        if sym_meta.file_type().is_symlink() {
+            let keep = match (&canonical_root, abs.canonicalize()) {
+                (Some(real_root), Ok(target)) => {
+                    crate::pathsafe::walk_follows_symlink(real_root, &target)
+                }
+                _ => false,
+            };
+            if !keep {
+                continue;
+            }
+        }
+        let meta = match std::fs::metadata(&abs) {
+            Ok(meta) => meta,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(err) => {
+                return Err(Error::Io {
+                    path: abs,
+                    source: err,
+                });
+            }
+        };
+        if meta.is_file() {
+            if !skips.skips(sub, false) {
+                record_index_scans(1);
+                entries.push(FileEntry {
+                    path: Arc::from(sub.as_path()),
+                    is_dir: false,
+                    size: meta.len(),
+                });
+            }
+            continue;
+        }
+        if !meta.is_dir() || skips.skips(sub, true) {
+            continue;
+        }
+        entries.push(FileEntry {
+            path: Arc::from(sub.as_path()),
+            is_dir: true,
+            size: 0,
+        });
+        let sub_index = walk_with_confinement(&abs, root, &sub_opts)?;
+        for entry in sub_index.entries {
+            let rel = sub.join(&entry.path);
+            if skips.skips(&rel, entry.is_dir) {
+                continue;
+            }
+            entries.push(FileEntry {
+                path: Arc::from(rel.as_path()),
+                is_dir: entry.is_dir,
+                size: entry.size,
+            });
+        }
+    }
+    entries.sort_unstable_by(|a, b| a.path.cmp(&b.path));
+    entries.dedup_by(|a, b| a.path == b.path);
+    let mut index = FileIndex::from_entries(entries);
+    index.walk_options = Some(opts.clone());
+    Ok(index)
+}
+
+fn walk_with_confinement(
+    root: &Path,
+    confinement_root: &Path,
+    opts: &WalkOptions,
+) -> Result<FileIndex> {
+    let (builder, escaping, followed, refused) = build_walk_builder(root, confinement_root, opts)?;
 
     // Per-thread accumulators land in `out_entries`; the first
     // error wins and stops the walk via `WalkState::Quit` (the
@@ -978,6 +1182,7 @@ pub fn walk(root: &Path, opts: &WalkOptions) -> Result<FileIndex> {
     escaping_symlinks.sort_unstable();
     escaping_symlinks.dedup();
     let mut index = FileIndex::from_entries_with_escaping(entries, escaping_symlinks);
+    record_index_scans(u64::try_from(index.entries.len()).unwrap_or(u64::MAX));
     let mut followed: Vec<Arc<Path>> = followed
         .lock()
         .expect("walker followed-symlink lock")
@@ -1646,6 +1851,7 @@ type RefusedSink = Arc<Mutex<Option<ignore_files::Refused>>>;
 
 fn build_walk_builder(
     root: &Path,
+    confinement_root: &Path,
     opts: &WalkOptions,
 ) -> Result<(WalkBuilder, EscapingSink, EscapingSink, RefusedSink)> {
     let mut builder = WalkBuilder::new(root);
@@ -1654,7 +1860,12 @@ fn build_walk_builder(
         .git_global(opts.uses_global_git_excludes())
         .hidden(false)
         .follow_links(true);
-    let canonical_root = root.canonicalize().ok();
+    let canonical_root = confinement_root.canonicalize().ok();
+    let canonical_walk_root = if confinement_root == root {
+        canonical_root.clone()
+    } else {
+        root.canonicalize().ok()
+    };
     // Ignore files stop at the repository boundary, as git's do (ADR-0028). In
     // a repository, `require_git` makes `.gitignore` and `info/exclude` stop at
     // the nearest directory holding one (the repository's top, or a nested
@@ -1668,7 +1879,7 @@ fn build_walk_builder(
         // them would make that read unbounded.
         if let Some(refused) = ignore_files::refused_before_walk(
             root,
-            canonical_root.as_deref(),
+            canonical_walk_root.as_deref(),
             opts.uses_global_git_excludes(),
         ) {
             return Err(refused.into_error());

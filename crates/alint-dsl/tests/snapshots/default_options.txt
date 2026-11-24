@@ -429,6 +429,9 @@ EveryMatchingHasRule {
             when: None,
             sensitive_configuration: false,
             rendered: false,
+            compiled_parent_id: "every-pkg-has-src",
+            compiled_idx: 0,
+            synthesized_id: "every-pkg-has-src.require[0]",
         },
     ],
 }
@@ -556,13 +559,13 @@ FileExistsRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
-    patterns: [
+    patterns: Single(
         ".editorconfig",
-    ],
+    ),
     literal_paths: Some(
-        [
+        Single(
             ".editorconfig",
-        ],
+        ),
     ),
     root_only: true,
     git_tracked_only: false,
@@ -590,13 +593,13 @@ FileExistsRule {
         "README required",
     ),
     scope: Scope { ... },
-    patterns: [
+    patterns: Single(
         "README.md",
-    ],
+    ),
     literal_paths: Some(
-        [
+        Single(
             "README.md",
-        ],
+        ),
     ),
     root_only: true,
     git_tracked_only: false,
@@ -956,6 +959,9 @@ ForEachDirRule {
             when: None,
             sensitive_configuration: false,
             rendered: false,
+            compiled_parent_id: "every-module-has-mod",
+            compiled_idx: 0,
+            synthesized_id: "every-module-has-mod.require[0]",
         },
     ],
 }
@@ -988,6 +994,9 @@ ForEachFileRule {
             when: None,
             sensitive_configuration: false,
             rendered: false,
+            compiled_parent_id: "unit-has-snapshot",
+            compiled_idx: 0,
+            synthesized_id: "unit-has-snapshot.require[0]",
         },
     ],
 }

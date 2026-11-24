@@ -331,7 +331,8 @@ impl Evaluator<'_> {
             }
         }
         let mut resources = Vec::new();
-        for (position, entry) in self.index.entries.iter().enumerate() {
+        for position in scope.candidate_ranges(self.index).into_iter().flatten() {
+            let entry = &self.index.entries[position];
             if entry.is_dir
                 || !scope.matches_without_manifest(&entry.path, self.index)
                 || !sets

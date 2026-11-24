@@ -24,6 +24,27 @@ enum StoredBuilder {
     Optionless(RuleBuilder),
 }
 
+/// Pre-resolved builder handle returned by [`RuleRegistry::resolve_instantiated`]
+/// so nested iteration loops (`for_each_dir`, `for_each_file`, `every_matching_has`)
+/// resolve each nested kind once instead of hashing it on every entry (#620).
+#[doc(hidden)]
+#[derive(Clone, Copy)]
+pub struct InstantiatedBuilder(StoredBuilder);
+
+impl std::fmt::Debug for InstantiatedBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InstantiatedBuilder")
+            .finish_non_exhaustive()
+    }
+}
+
+impl InstantiatedBuilder {
+    /// Construct a nested rule instance using this pre-resolved builder.
+    pub fn build(self, spec: &RuleSpec) -> Result<Box<dyn Rule>> {
+        self.0.build(spec)
+    }
+}
+
 impl StoredBuilder {
     fn build(self, spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         match self {
@@ -309,6 +330,18 @@ impl RuleRegistry {
             rule.as_ref(),
         );
         Ok(rule)
+    }
+
+    /// Resolve the builder for a nested rule kind once before iterating so
+    /// per-entry instantiation skips alias and registry map lookups (#620).
+    #[doc(hidden)]
+    pub fn resolve_instantiated(&self, kind: &str) -> Result<InstantiatedBuilder> {
+        let canonical = self.canonical_kind(kind);
+        let registration = self
+            .kinds
+            .get(canonical)
+            .ok_or_else(|| Error::UnknownRuleKind(kind.to_owned()))?;
+        Ok(InstantiatedBuilder(registration.builder))
     }
 
     /// [`Self::build`] for a nested-rule instantiation whose field set was already

@@ -197,15 +197,6 @@ impl Rule for RegistryPathsResolveRule {
         // Directory existence: build the dir path-set once per
         // eval (O(D)); per-entry lookups are then O(1), matching
         // `contains_file`'s scaling so the rule stays index-fast.
-        let dir_set: HashSet<&Path> = if self.expect == Expect::Dir
-            || self.expect == Expect::Any
-            || self.must_contain.is_some()
-        {
-            ctx.index.dirs().map(|e| &*e.path).collect()
-        } else {
-            HashSet::new()
-        };
-
         for registry_rel in self.registry_files(ctx) {
             // Confine the (config-author-controlled) registry path before
             // reading it (the glob-source arm yields in-tree index paths,
@@ -336,7 +327,7 @@ impl Rule for RegistryPathsResolveRule {
                     continue;
                 }
                 covered.push(resolved.clone());
-                if let Some(reason) = self.existence_problem(ctx, &resolved, &dir_set) {
+                if let Some(reason) = self.existence_problem(ctx, &resolved) {
                     violations.push(
                         self.violation(&registry_rel, entry, &reason)
                             .with_related_location(RelatedLocation::new(
@@ -352,7 +343,7 @@ impl Rule for RegistryPathsResolveRule {
             // `must_contain`, etc.).
             if self.entries_are_globs {
                 for p in &covered {
-                    if let Some(reason) = self.existence_problem(ctx, p, &dir_set) {
+                    if let Some(reason) = self.existence_problem(ctx, p) {
                         violations.push(
                             self.violation(&registry_rel, &crate::slash(p), &reason)
                                 .with_related_location(RelatedLocation::new(p, "resolved target")),
@@ -508,14 +499,12 @@ impl RegistryPathsResolveRule {
 
     /// `None` => the resolved path is fine. `Some(reason)` => why the
     /// entry is a violation.
-    fn existence_problem(
-        &self,
-        ctx: &Context<'_>,
-        path: &Path,
-        dir_set: &HashSet<&Path>,
-    ) -> Option<Reason> {
+    fn existence_problem(&self, ctx: &Context<'_>, path: &Path) -> Option<Reason> {
         let is_file = ctx.index.contains_file(path);
-        let is_dir = dir_set.contains(path);
+        let is_dir = (self.expect == Expect::Dir
+            || self.expect == Expect::Any
+            || self.must_contain.is_some())
+            && ctx.index.contains_dir(path);
         match self.expect {
             Expect::File => {
                 if !is_file {

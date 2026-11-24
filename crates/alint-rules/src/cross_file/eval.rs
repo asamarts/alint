@@ -5,7 +5,7 @@
 //! [`super::findings`]. The config schema lives in [`super::spec`]; assembly +
 //! `build` in [`super`].
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use alint_core::template::{PathTokens, render_path};
@@ -394,12 +394,11 @@ impl CrossFileRule {
         };
         let src = Path::new(&self.source_file);
         let base = src.parent().map(Path::to_path_buf).unwrap_or_default();
-        let dirs: HashSet<&Path> = ctx.index.dirs().map(|e| &*e.path).collect();
         for entry in &paths {
             // A confined-out (absolute / root-escaping) declared path
             // can never resolve to an in-tree file → treated as unresolved.
             let exists = crate::pathsafe::normalize_confined(&base.join(entry))
-                .is_some_and(|r| ctx.index.contains_file(&r) || dirs.contains(r.as_path()));
+                .is_some_and(|r| ctx.index.contains_path(&r));
             if !exists {
                 let msg = self.message.clone().unwrap_or_else(|| {
                     format!(
@@ -436,8 +435,7 @@ impl CrossFileRule {
 /// a directory - a member can be either). Used only for a NAMED source's existence
 /// check; a glob source only ever yields paths the index already holds.
 fn member_exists(ctx: &Context<'_>, path: &Path) -> bool {
-    ctx.index.files().any(|e| e.path.as_ref() == path)
-        || ctx.index.dirs().any(|e| e.path.as_ref() == path)
+    ctx.index.contains_path(path)
 }
 
 /// Render a sorted value set for a violation message.

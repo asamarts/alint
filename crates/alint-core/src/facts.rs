@@ -363,7 +363,9 @@ fn evaluate_one(
                 paths.iter().any(|path| index.contains_file(path))
             } else {
                 let scope = Scope::from_patterns(patterns)?;
-                index.files().any(|entry| scope.matches(&entry.path, index))
+                scope
+                    .candidate_files(index)
+                    .any(|entry| scope.matches(&entry.path, index))
             };
             Ok(FactValue::Bool(found))
         }
@@ -373,7 +375,9 @@ fn evaluate_one(
                     index.contains_file(Path::new(&path))
                 } else {
                     let scope = Scope::from_patterns(std::slice::from_ref(pattern))?;
-                    index.files().any(|entry| scope.matches(&entry.path, index))
+                    scope
+                        .candidate_files(index)
+                        .any(|entry| scope.matches(&entry.path, index))
                 };
                 if !found {
                     return Ok(FactValue::Bool(false));
@@ -386,8 +390,8 @@ fn evaluate_one(
                 usize::from(index.contains_file(Path::new(&path)))
             } else {
                 let scope = Scope::from_patterns(std::slice::from_ref(count_files))?;
-                index
-                    .files()
+                scope
+                    .candidate_files(index)
                     .filter(|entry| scope.matches(&entry.path, index))
                     .count()
             };
@@ -452,8 +456,8 @@ fn evaluate_file_content_matches(
             })
     } else {
         let scope = scope.expect("non-literal patterns compile a scope");
-        index
-            .files()
+        scope
+            .candidate_files(index)
             .filter(|entry| scope.matches(&entry.path, index))
             .any(|entry| {
                 file_content_matches_entry(

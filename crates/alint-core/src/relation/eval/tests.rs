@@ -1616,3 +1616,37 @@ fn a_field_the_rows_lack_fails_the_relation_as_a_bug() {
         ]
     );
 }
+
+/// A relation selector with a literal directory prefix narrows to that subtree
+/// rather than testing every entry in the index (#565).
+#[test]
+fn selector_with_directory_prefix_narrows_index_scan() {
+    let Some(before) = crate::scope_match_count() else {
+        return;
+    };
+    let mut files: Vec<(String, &'static str)> = Vec::new();
+    for i in 0..60 {
+        files.push((format!("pkg/d{i:03}/a.json"), r#"{"name": "ok"}"#));
+    }
+    let refs: Vec<(&str, &str)> = files.iter().map(|(p, c)| (p.as_str(), *c)).collect();
+    let tree = tree(&refs);
+    let relation = named(
+        "one_pkg",
+        Rows::Part(Part {
+            from: from("pkg/d000/*.json"),
+            reader: Reader::Read {
+                read: Read::Json("$.name".into()),
+                optional: false,
+            },
+        }),
+        &[("name", FieldSource::Value)],
+    );
+    let plan = plan(vec![relation]);
+    let rows = run(&plan, 0, &tree, Limits::default()).unwrap();
+    let tested = crate::scope_match_count().unwrap() - before;
+    assert_eq!(rows.rows.len(), 1);
+    assert!(
+        tested <= 4,
+        "expected narrowed scan on pkg/d000/*, tested {tested} entries"
+    );
+}

@@ -120,7 +120,7 @@ pub use proposed_fix::{EditRegion, ProposedEdit, attach_proposed_edits, byte_to_
 pub use redaction::{redact_evidence, redaction_marker};
 pub use registry::{
     ConfiguredField, ConfiguredFieldViolation, ConfiguredFields, ConfiguredScopeFilterField,
-    KindCatalog, RuleBuilder, RuleRegistry, validate_configured_fields,
+    InstantiatedBuilder, KindCatalog, RuleBuilder, RuleRegistry, validate_configured_fields,
 };
 pub use report::{
     FIX_ERROR_PREFIX, FixItem, FixReport, FixRuleResult, FixStatus, Report, SkipKind,
@@ -132,7 +132,7 @@ pub use rule::{
     eval_per_file, expect_matches_violation, missing_file_violation, read_for_fix,
     read_source_for_fix, too_large_file_violation, unreadable_file_violation, write_atomic,
 };
-pub use scope::{Scope, scope_match_count};
+pub use scope::{Scope, literal_dir_prefix, scope_match_count};
 pub use scope_filter::{
     ManifestDeriveTarget, ManifestPathSpec, ResolvedManifestScope, ScopeFilter, ScopeFilterSpec,
     reject_scope_filter_on_cross_file, reject_scope_filter_with_reason,
@@ -148,8 +148,8 @@ pub use trace::{
     TraceStageClass, TraceStatus, TraceValueType, TraceViolation, rule_trace_schema,
 };
 pub use walker::{
-    AnalysisRead, FileEntry, FileIndex, MAX_ANALYZE_BYTES, WalkOptions, read_capped_or_skip,
-    read_for_analysis, walk,
+    AnalysisRead, FileEntry, FileIndex, MAX_ANALYZE_BYTES, WalkOptions, index_scan_count,
+    read_capped_or_skip, read_for_analysis, walk, walk_subtrees,
 };
 pub use when::{WhenEnv, WhenError, WhenExpr};
 

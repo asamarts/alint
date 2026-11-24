@@ -8,7 +8,7 @@ use serde::Deserialize;
 
 use crate::fixers::DirCreateFixer;
 
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
     /// If true, only a directory directly at the repository root satisfies the
@@ -146,7 +146,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
             "dir_exists requires a `paths` field",
         ));
     };
-    let opts: Options = spec.deserialize_options()?;
+    let opts: Options = spec.deserialize_options_or_default()?;
     // The only supported fix op is `dir_create`, which creates the required
     // directory -- so `paths` must name ONE literal directory (a glob or multiple
     // patterns is ambiguous: which directory would we create?).
