@@ -145,12 +145,14 @@ Executed in three ordered steps (ADR-0048 decision 8):
 ### Phase 4: LSP rewrite and HCL evaluation spike (2 issues)
 
 - **#607:** migrate `crates/alint-lsp` from unmaintained `tower-lsp 0.20` to `lsp-server`
-  (dropping `tower-lsp`, `tower-service`, `tokio`, `tower`, `futures`, `dashmap`, and ~80
-  transitive crates). Verify full unit, trust, audit, and VS Code / JetBrains E2E parity (including
-  workspace trust gating, stale re-eval cancellation, and clean `exit` teardown).
-- **#608:** evaluate newer `hcl-rs` / `hcl-edit` for internal recursion bounds; if still
-  unbounded, run a time-boxed feasibility and value spike to decide whether spinning up a
-  standalone `asamarts/ahcl` crate is justified (non-blocking for v0.24.0; ADR-0048 decision 4c).
+  (dropping `tower-lsp`, `tower-service`, `tokio`, `tower`, `futures`, `dashmap`, and the rest of
+  the 19-crate async LSP dependency subtree; net `-17` `Cargo.lock` entries). Verify full unit,
+  trust, audit, and VS Code / JetBrains E2E parity (including workspace trust gating, stale
+  re-eval cancellation, and clean `exit` teardown).
+- **#608:** evaluate newer `hcl-rs` / `hcl-edit` for internal recursion bounds; completed by
+  upgrading to `hcl-rs 0.20` / `hcl-edit 0.10.0`, retiring the 512 MiB parse thread, 64 KiB cap,
+  and hand-rolled recursion pre-scanner, and declining a standalone `asamarts/ahcl` crate (see
+  [hcl-spike.md](./hcl-spike.md); ADR-0048 decision 4c).
 
 ### Phase 5: General-linter Phase 3 completion (6 issues + roadmap)
 
@@ -334,17 +336,24 @@ owner ADR approval before implementation starts (matching v0.23's Phase 3 owner 
   (#654).
 - 2026-11-24: Phase 4 complete (all 2/2 LSP and HCL issues closed): Batch 4a (#655, closes #607)
   migrated `crates/alint-lsp` from unmaintained `tower-lsp 0.20` and `tokio` to synchronous
-  `lsp-server 0.10` + `lsp-types 0.95` + `crossbeam-channel 0.5` with a 4-thread 8 MiB stack
-  worker pool, generation-coalesced full checks, strict lock ordering, LSP 3.17 lifecycle error
-  codes, and `Connection::memory()` protocol tests, removing 18 async crates (net `-17`
-  `Cargo.lock` entries) with all 40/40 CI checks green (including Windows/macOS cross-platform
-  and all 4 editor LSP E2E suites). Batch 4b (closes #608) upgraded `hcl-rs` from `0.18` to `0.20`
-  (`hcl-edit 0.10.0`), verified upstream's native `MAX_NESTING_DEPTH = 64` and
-  `MAX_OPERATOR_DEPTH = 128` bounds across 42 stress shapes (640 KiB release / 1,408 KiB Linux
-  debug), retired the 512 MiB parse thread, 64 KiB cap, and 270-line hand-rolled recursion
-  pre-scanner, lifted `MAX_HCL_BYTES` to 4 MiB, eliminated `hcl::from_str`'s `O(N^2)`
-  `IntoJsonSpec` `VecMap` bottleneck with direct `BTreeMap` `Body -> Value` conversion plus a
-  64-label block cap and 4,096-entry per-scope width guard shared with `structured_fix::hcl`, and
-  recorded the spike and no-`ahcl` decision in `docs/design/v0.24/hcl-spike.md`.
+  `lsp-server 0.10` + `lsp-types 0.95` + `crossbeam-channel 0.5` with an 8 MiB worker pool,
+  generation-coalesced full checks, strict lock ordering, LSP 3.17 lifecycle error codes, and
+  `Connection::memory()` protocol tests, removing 19 async crates (net `-17` `Cargo.lock` entries)
+  with all 40/40 CI checks green (including Windows/macOS cross-platform and all 4 editor LSP E2E
+  suites). Batch 4b (#656, closes #608) upgraded `hcl-rs` from `0.18` to `0.20` (`hcl-edit 0.10.0`),
+  verified upstream's native `MAX_NESTING_DEPTH = 64` and `MAX_OPERATOR_DEPTH = 128` bounds across
+  43 stress shapes (640 KiB release / 1,408 KiB Linux debug), retired the 512 MiB parse thread,
+  64 KiB cap, and 270-line hand-rolled recursion pre-scanner, lifted `MAX_HCL_BYTES` to 4 MiB,
+  eliminated `hcl::from_str`'s `O(N^2)` `IntoJsonSpec` `VecMap` bottleneck, and recorded the spike
+  and no-`ahcl` decision in [hcl-spike.md](./hcl-spike.md). Post-Phase-4 adversarial audit
+  remediation hardened `alint-lsp` (unbounded outbound relay decoupling `bounded(0)` stdio teardown,
+  dedicated `alint-lsp-check` thread preventing worker-pool starvation, `shutdown` quiescing and
+  in-flight `codeAction` draining, `$/cancelRequest` support, monotonic `doc_seq`, non-backwards
+  `apply_check` merge, last-folder removal cleanup, panic protection, and `InvalidData` scrubbing)
+  and hardened `structured_format/hcl.rs` + `structured_fix::hcl` (cumulative 64-level block+label
+  depth in both parse and fix paths, direct `hcl::edit::structure::Body -> Value` conversion,
+  1,024-entry object cap + 64M cumulative quadratic work budget, scanner fixes for odd `$`/`%` runs,
+  Unicode heredocs, line-1 heredoc fallback, `%{if}`/`%{for}` directives, `BlockBrace` vs
+  `ObjectBrace`, 256-level scan-depth cap, and single-parse batch HCL span resolution).
   Next: Phase 5 (general-linter Phase 3 completion design document + owner ADR gate, then #592 to
   #598, #570, Phase 3 operators, B1, C4, strict-JSON, and bundled `version: 2` rulesets).

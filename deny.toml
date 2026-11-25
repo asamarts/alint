@@ -46,8 +46,8 @@ confidence-threshold = 0.8
 
 [bans]
 # The graph legitimately carries duplicate major versions of several
-# common crates (getrandom 0.2/0.3/0.4, rand 0.9/0.10, hashbrown
-# 0.16/0.17, windows-sys 0.52/0.61, ...). Surface them, don't block.
+# common crates (getrandom 0.2/0.3/0.4, hashbrown 0.15/0.17, syn 2/3,
+# windows-sys 0.52/0.61, ...). Surface them, don't block.
 multiple-versions = "warn"
 # Real `*` / wildcard version requirements are forbidden; intra-
 # workspace path deps (which also pin an explicit version) are fine.

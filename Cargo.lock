@@ -110,6 +110,7 @@ dependencies = [
  "toml",
  "toml_edit",
  "tracing",
+ "unicode-ident",
  "yaml_serde",
 ]
 
@@ -163,7 +164,6 @@ dependencies = [
  "lsp-server",
  "lsp-types",
  "parking_lot",
- "serde",
  "serde_json",
  "tempfile",
  "tracing",

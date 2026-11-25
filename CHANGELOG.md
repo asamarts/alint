@@ -92,18 +92,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   first key (#572), and unknown top-level keys in `version: 2` configs now report their 1-based
   line and column (#566).
 - Migrated `alint-lsp` from unmaintained `tower-lsp 0.20` and `tokio` to synchronous `lsp-server`
-  and `lsp-types` with a fixed 8 MiB worker pool aligned with alint's `rayon` engine, dropping
-  `tower-lsp`, `tower-service`, `tokio`, `tower`, `futures`, `dashmap`, and the rest of the
-  18-crate async LSP dependency subtree while keeping the full LSP protocol, trust, hover,
-  quick-fix, and stale-buffer coalescing contracts unchanged (ADR-0048 decision 4b, #607).
+  and `lsp-types` with a dedicated full-check thread, a 4-thread 8 MiB interactive worker pool,
+  unbounded outbound relay, and `$/cancelRequest` support aligned with alint's `rayon` engine,
+  dropping `tower-lsp`, `tower-service`, `tokio`, `tower`, `futures`, `dashmap`, and the rest of
+  the 19-crate async LSP dependency subtree (net `-17` `Cargo.lock` entries) while keeping the full
+  LSP protocol, trust, hover, quick-fix, and stale-buffer coalescing contracts unchanged (ADR-0048
+  decision 4b, #607).
 - Upgraded `hcl-rs` from `0.18` to `0.20` (`hcl-edit 0.10.0`), adopting upstream's native
   recursion (`MAX_NESTING_DEPTH = 64`) and binary-operator (`MAX_OPERATOR_DEPTH = 128`) bounds to
   retire the 512 MiB parse-thread spawn, 64 KiB file-size ceiling, and hand-rolled recursion
   pre-scanner. HCL files up to 4 MiB now parse directly on normal worker stacks with a direct
-  `BTreeMap`-backed `hcl::Body` to `serde_json::Value` converter (bypassing `hcl::from_str`'s
-  quadratic `IntoJsonSpec` `VecMap` path), a 64-label block cap, and a 4,096-entry per-scope width
-  guard shared by both checks and structured fixes (ADR-0048 decision 4c, #608; evaluation
-  recorded in `docs/design/v0.24/hcl-spike.md`).
+  `BTreeMap`-backed `hcl::edit::structure::Body` to `serde_json::Value` converter (bypassing
+  `hcl::from_str`'s quadratic `IntoJsonSpec` `VecMap` path), a cumulative 64-level block-and-label
+  depth cap, a 1,024-entry object-literal width cap with a file-wide quadratic work budget, and
+  single-parse batch HCL span resolution in `structured_fix::hcl`. Upstream `hcl-edit 0.10` also
+  aligns HCL2 strictness: invalid `\b`/`\f`/`\/` string escapes and duplicate object keys are now
+  rejected as parse errors, integers beyond `i64`/`u64` fall back to lossy `f64`, and documents
+  exceeding 64 nesting levels are rejected (ADR-0048 decision 4c, #608; evaluation recorded in
+  `docs/design/v0.24/hcl-spike.md`).
 - Replaced `ignore::WalkBuilder`'s directory traversal with an owned parallel walker in
   `alint-core` (`walker_parallel.rs`) built on `ignore::gitignore::Gitignore` and `rayon::scope`,
   discovering ignore files directly from each directory's `read_dir` listing with open-then-`fstat`
