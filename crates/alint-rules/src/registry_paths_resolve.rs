@@ -768,11 +768,11 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     let exclude_extract = opts
         .exclude_query
         .map(|query| {
-            let format = match &extract {
-                Extract::Structured(extract) => extract.format,
-                _ => Format::Toml,
+            let (format, strict) = match &extract {
+                Extract::Structured(extract) => (extract.format, extract.strict),
+                _ => (Format::Toml, false),
             };
-            Extract::structured(format, query)
+            Extract::structured_strict(format, query, strict)
                 .map_err(|e| Error::rule_config(&spec.id, format!("invalid `exclude_query`: {e}")))
         })
         .transpose()?;
@@ -821,11 +821,11 @@ mod tests {
     fn rule(opts: Options) -> RegistryPathsResolveRule {
         let extract = opts.extract.resolve().expect("test extract valid");
         let exclude_extract = opts.exclude_query.map(|query| {
-            let format = match &extract {
-                Extract::Structured(extract) => extract.format,
-                _ => Format::Toml,
+            let (format, strict) = match &extract {
+                Extract::Structured(extract) => (extract.format, extract.strict),
+                _ => (Format::Toml, false),
             };
-            Extract::structured(format, query).expect("test exclude query valid")
+            Extract::structured_strict(format, query, strict).expect("test exclude query valid")
         });
         RegistryPathsResolveRule {
             id: "t".into(),

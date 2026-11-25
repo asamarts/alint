@@ -428,48 +428,35 @@ impl PerFileRule for StructuredPathRule {
 }
 
 impl StructuredPathRule {
-    fn evaluate_file_inner<const TRACE: bool>(
+    fn parse_file_document<const TRACE: bool>(
         &self,
         ctx: &Context<'_>,
         path: &Path,
         bytes: &[u8],
-    ) -> Vec<Violation> {
-        // A NUL-bearing / genuinely-binary file caught by a broad glob is skipped
-        // (no violation), matching the hygiene fixers' invariant and keeping `check`
-        // and `fix` in agreement -- otherwise a PERMISSIVE-format rule (`.properties`
-        // / YAML) flags a fixable "value mismatch" on binary junk that `set_value`
-        // then cannot resolve, so the fix loops to a false exit-2 (audit M2).
-        // `looks_binary` triggers on NUL bytes, NOT high bytes, so a legitimate
-        // Latin-1 `.properties` (below) is unaffected.
-        if looks_binary(bytes) {
-            return Vec::new();
-        }
-        let sensitive = self.format.redacts_by_default();
-        let redact = |finding: &mut Violation, category: &str, evidence: &[String]| {
-            if sensitive {
-                let locator = format!(
-                    "{}\0{}\0{}\0{category}",
-                    self.format.label(),
-                    crate::slash(path),
-                    self.path_src
-                );
-                finding.redact_evidence(&self.id, &locator, evidence.iter().map(String::as_str));
-            }
+        strict_json: bool,
+        sensitive: bool,
+    ) -> std::result::Result<alint_core::SharedValue, Vec<Violation>> {
+        let text = if strict_json {
+            let Ok(s) = std::str::from_utf8(bytes) else {
+                if TRACE {
+                    ctx.record_trace_extraction(alint_core::TraceExtractionObservation {
+                        inputs: 1,
+                        parse_failures: 1,
+                        ..alint_core::TraceExtractionObservation::default()
+                    });
+                }
+                return Err(vec![
+                    Violation::new("not a valid JSON document: input is not valid UTF-8")
+                        .with_path(std::sync::Arc::<Path>::from(path))
+                        .as_analysis_failure(AnalysisFailureKind::ResourceParse),
+                ]);
+            };
+            std::borrow::Cow::Borrowed(s)
+        } else {
+            String::from_utf8_lossy(bytes)
         };
-        // Lossy-decode (like `json_schema_passes` / `cross_file`) rather than a
-        // strict `from_utf8` + silent skip: a non-UTF-8 file -- e.g. a Latin-1
-        // `.properties`, the format's historical default -- must be ANALYZED, not
-        // silently ignored. Invalid bytes become U+FFFD. For the STRICT formats
-        // (JSON / TOML / XML / HCL / INI / dotenv) a truncated-but-textual file
-        // caught by a broad glob then surfaces one parse analysis failure rather
-        // than hiding. The two PERMISSIVE formats do NOT: `.properties` maps almost any
-        // bytes to valueless keys and YAML reads bare bytes as a scalar string, so a
-        // mis-globbed textual file there yields a junk tree (the query just finds no
-        // match), not a parse error -- keep the glob narrow for those formats.
-        let text = String::from_utf8_lossy(bytes);
-        let root_value = match ctx.parse_structured_strict(path, self.format, &text, self.strict) {
-            Ok(v) => v,
-            Err(err) => {
+        ctx.parse_structured_strict(path, self.format, &text, self.strict)
+            .map_err(|err| {
                 if TRACE {
                     ctx.record_trace_extraction(alint_core::TraceExtractionObservation {
                         inputs: 1,
@@ -486,9 +473,44 @@ impl StructuredPathRule {
                 if sensitive {
                     finding.redact_message(&self.id);
                 }
-                return vec![finding];
+                vec![finding]
+            })
+    }
+
+    fn evaluate_file_inner<const TRACE: bool>(
+        &self,
+        ctx: &Context<'_>,
+        path: &Path,
+        bytes: &[u8],
+    ) -> Vec<Violation> {
+        // A NUL-bearing / genuinely-binary file caught by a broad glob is skipped
+        // (no violation), matching the hygiene fixers' invariant and keeping `check`
+        // and `fix` in agreement -- otherwise a PERMISSIVE-format rule (`.properties`
+        // / YAML) flags a fixable "value mismatch" on binary junk that `set_value`
+        // then cannot resolve, so the fix loops to a false exit-2 (audit M2).
+        // `looks_binary` triggers on NUL bytes, NOT high bytes, so a legitimate
+        // Latin-1 `.properties` (below) is unaffected.
+        let strict_json = self.strict && self.format == Format::Json;
+        if !strict_json && looks_binary(bytes) {
+            return Vec::new();
+        }
+        let sensitive = self.format.redacts_by_default();
+        let redact = |finding: &mut Violation, category: &str, evidence: &[String]| {
+            if sensitive {
+                let locator = format!(
+                    "{}\0{}\0{}\0{category}",
+                    self.format.label(),
+                    crate::slash(path),
+                    self.path_src
+                );
+                finding.redact_evidence(&self.id, &locator, evidence.iter().map(String::as_str));
             }
         };
+        let root_value =
+            match self.parse_file_document::<TRACE>(ctx, path, bytes, strict_json, sensitive) {
+                Ok(v) => v,
+                Err(violations) => return violations,
+            };
         let matches = self.path_expr.query(&root_value);
         if TRACE {
             let cardinality_mismatch = if matches!(self.op, Op::Absent) {
@@ -1354,12 +1376,15 @@ fn build_absent(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Box
     // the matched node the rule requires to be absent). Any other op is a config
     // error rather than a silently-ignored `fix:`. Unsafe by default.
     let fixer = match &spec.fix {
-        Some(FixSpec::RemoveValue { remove_value }) => Some(StructuredFixer::remove(
-            format,
-            path_expr.clone(),
-            path.clone(),
-            remove_value.applicability.unwrap_or(Applicability::Unsafe),
-        )),
+        Some(FixSpec::RemoveValue { remove_value }) => Some(
+            StructuredFixer::remove(
+                format,
+                path_expr.clone(),
+                path.clone(),
+                remove_value.applicability.unwrap_or(Applicability::Unsafe),
+            )
+            .with_strict(strict),
+        ),
         Some(other) => {
             return Err(Error::rule_config(
                 &spec.id,
@@ -1414,13 +1439,16 @@ fn build_equals(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Box
     // fixer only emits at tier for a scalar replacing an existing scalar
     // (`StructuredFixer::collect_edits`); anything else declines.
     let fixer = match &spec.fix {
-        Some(FixSpec::SetValue { set_value }) => Some(StructuredFixer::set(
-            format,
-            path_expr.clone(),
-            path.clone(),
-            equals.clone(),
-            set_value.applicability.unwrap_or(Applicability::Safe),
-        )),
+        Some(FixSpec::SetValue { set_value }) => Some(
+            StructuredFixer::set(
+                format,
+                path_expr.clone(),
+                path.clone(),
+                equals.clone(),
+                set_value.applicability.unwrap_or(Applicability::Safe),
+            )
+            .with_strict(strict),
+        ),
         Some(other) => {
             return Err(Error::rule_config(
                 &spec.id,
@@ -1494,15 +1522,18 @@ fn build_matches(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Bo
                     format!("invalid fix.replace.pattern {pattern:?}: {e}"),
                 )
             })?;
-            Some(StructuredFixer::replace(
-                format,
-                path_expr.clone(),
-                path.clone(),
-                search,
-                replace.replacement.clone(),
-                matches.clone(),
-                replace.applicability.unwrap_or(Applicability::Unsafe),
-            ))
+            Some(
+                StructuredFixer::replace(
+                    format,
+                    path_expr.clone(),
+                    path.clone(),
+                    search,
+                    replace.replacement.clone(),
+                    matches.clone(),
+                    replace.applicability.unwrap_or(Applicability::Unsafe),
+                )
+                .with_strict(strict),
+            )
         }
         Some(other) => {
             return Err(Error::rule_config(

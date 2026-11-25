@@ -975,13 +975,160 @@ fn evaluate_per_file_entries<const TRACE: bool>(
     // Resolve the relation cache once, not once per file: S2 at 1M otherwise
     // pays a million OnceLock reads even though the cache is absent.
     let read_cache = per_file_ctx.index.read_cache();
-    let by_file: Vec<(usize, Violation)> = with_worker_pool(|| {
-        walk_index
-            .entries
+    let by_file = evaluate_per_file_slice::<TRACE>(
+        root,
+        &walk_index.entries,
+        live,
+        any_full_index,
+        filtered_ctx,
+        per_file_ctx,
+        read_cache,
+        considered.as_ref(),
+        matched.as_ref(),
+    );
+    (
+        by_file,
+        if TRACE {
+            TraceCounts {
+                considered: considered.as_ref().unwrap().load(Ordering::Relaxed),
+                matched: matched.as_ref().unwrap().load(Ordering::Relaxed),
+                ..TraceCounts::default()
+            }
+        } else {
+            TraceCounts::default()
+        },
+    )
+}
+
+/// Chunked deterministic counterpart to [`evaluate_per_file_entries`] used only
+/// when at least one live per-file rule enforces `findings_per_rule`
+/// (ADR-0050 D6 for `no_duplicate_keys`). Processes `walk_index.entries` in
+/// index-ordered parallel chunks so once a capped rule hits `cap`, subsequent
+/// chunks skip evaluating it (bounding memory while preserving deterministic
+/// file-order findings).
+#[allow(clippy::too_many_lines)]
+fn evaluate_per_file_entries_capped<const TRACE: bool>(
+    root: &Path,
+    walk_index: &FileIndex,
+    live: &[(usize, &RuleEntry)],
+    any_full_index: bool,
+    filtered_ctx: Option<&Context<'_>>,
+    per_file_ctx: &Context<'_>,
+    cap: usize,
+) -> (HashMap<usize, Vec<Violation>>, TraceCounts) {
+    const CHUNK_FILES: usize = 128;
+
+    let considered = TRACE.then(|| AtomicU64::new(0));
+    let matched = TRACE.then(|| AtomicU64::new(0));
+    let read_cache = per_file_ctx.index.read_cache();
+    let capped_flags: HashMap<usize, bool> = live
+        .iter()
+        .map(|(idx, entry)| {
+            (
+                *idx,
+                entry
+                    .rule
+                    .as_per_file()
+                    .is_some_and(crate::rule::PerFileRule::enforces_findings_per_rule),
+            )
+        })
+        .collect();
+    let mut active_live: Vec<(usize, &RuleEntry)> = live.to_vec();
+    let mut bucket: HashMap<usize, Vec<Violation>> = HashMap::new();
+    let mut policy_counts: HashMap<usize, usize> = HashMap::new();
+    let mut suppressed: HashMap<usize, usize> = HashMap::new();
+    let mut lower_bound: HashMap<usize, bool> = HashMap::new();
+
+    let total_chunks = walk_index.entries.len().div_ceil(CHUNK_FILES);
+    for (chunk_idx, chunk) in walk_index.entries.chunks(CHUNK_FILES).enumerate() {
+        if active_live.is_empty() {
+            break;
+        }
+        let chunk_violations = evaluate_per_file_slice::<TRACE>(
+            root,
+            chunk,
+            &active_live,
+            any_full_index,
+            filtered_ctx,
+            per_file_ctx,
+            read_cache,
+            considered.as_ref(),
+            matched.as_ref(),
+        );
+        for (idx, v) in chunk_violations {
+            if capped_flags.get(&idx).copied().unwrap_or(false)
+                && v.disposition == crate::rule::FindingDisposition::Violation
+            {
+                let count = policy_counts.entry(idx).or_insert(0);
+                if *count < cap {
+                    *count += 1;
+                    bucket.entry(idx).or_default().push(v);
+                } else {
+                    let sup = suppressed.entry(idx).or_insert(0);
+                    *sup = sup.saturating_add(1);
+                }
+            } else {
+                bucket.entry(idx).or_default().push(v);
+            }
+        }
+        let has_more_chunks = chunk_idx + 1 < total_chunks;
+        active_live.retain(|(idx, _)| {
+            if suppressed.get(idx).copied().unwrap_or(0) > 0 {
+                if has_more_chunks {
+                    lower_bound.insert(*idx, true);
+                }
+                false
+            } else {
+                true
+            }
+        });
+    }
+
+    for (idx, sup) in suppressed {
+        if sup > 0 {
+            let emitted = policy_counts.get(&idx).copied().unwrap_or(0);
+            let is_lower = lower_bound.get(&idx).copied().unwrap_or(false);
+            bucket
+                .entry(idx)
+                .or_default()
+                .push(crate::rule::findings_per_rule_truncation_failure(
+                    cap, emitted, sup, is_lower,
+                ));
+        }
+    }
+
+    (
+        bucket,
+        if TRACE {
+            TraceCounts {
+                considered: considered.as_ref().unwrap().load(Ordering::Relaxed),
+                matched: matched.as_ref().unwrap().load(Ordering::Relaxed),
+                ..TraceCounts::default()
+            }
+        } else {
+            TraceCounts::default()
+        },
+    )
+}
+
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn evaluate_per_file_slice<const TRACE: bool>(
+    root: &Path,
+    entries: &[crate::walker::FileEntry],
+    live: &[(usize, &RuleEntry)],
+    any_full_index: bool,
+    filtered_ctx: Option<&Context<'_>>,
+    per_file_ctx: &Context<'_>,
+    read_cache: Option<&crate::relation::ReadCache>,
+    considered: Option<&AtomicU64>,
+    matched: Option<&AtomicU64>,
+) -> Vec<(usize, Violation)> {
+    with_worker_pool(|| {
+        entries
             .par_iter()
             .filter(|e| !e.is_dir)
             .flat_map_iter(|file_entry| {
-                if let Some(considered) = &considered {
+                if let Some(considered) = considered {
                     considered.fetch_add(1, Ordering::Relaxed);
                 }
                 // Whether this file is in the `--changed` set (always true
@@ -1021,7 +1168,7 @@ fn evaluate_per_file_entries<const TRACE: bool>(
                     })
                     .map(|(idx, entry)| (*idx, *entry))
                     .collect();
-                if let Some(matched) = &matched
+                if let Some(matched) = matched
                     && !applicable.is_empty()
                 {
                     matched.fetch_add(1, Ordering::Relaxed);
@@ -1092,19 +1239,7 @@ fn evaluate_per_file_entries<const TRACE: bool>(
                 dispatch_per_file::<TRACE>(per_file_ctx, &applicable, &file_entry.path, &bytes)
             })
             .collect()
-    });
-    (
-        by_file,
-        if TRACE {
-            TraceCounts {
-                considered: considered.as_ref().unwrap().load(Ordering::Relaxed),
-                matched: matched.as_ref().unwrap().load(Ordering::Relaxed),
-                ..TraceCounts::default()
-            }
-        } else {
-            TraceCounts::default()
-        },
-    )
+    })
 }
 
 /// Dispatch one file's bytes to every applicable per-file rule. Shared by the

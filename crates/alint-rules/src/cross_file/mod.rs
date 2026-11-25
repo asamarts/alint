@@ -861,7 +861,7 @@ fn build_register_targets(
                          would append to the wrong array"
                     )));
                 }
-                Extract::structured(extract.format, array_query)
+                Extract::structured_strict(extract.format, array_query, extract.strict)
                     .map_err(|e| cfg(format!("invalid registered array extract: {e}")))
             }
             _ => Err(cfg(format!(

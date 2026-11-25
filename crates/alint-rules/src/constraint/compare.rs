@@ -1,6 +1,7 @@
-//! `compare` assertion (ADR-0050 D4): pairwise row comparison (`eq`, `ne`,
-//! `lt`, `le`, `gt`, `ge`) under `exact`, `lexical`, or `numeric` ordering,
-//! failing loud on `Null` or `Missing` operands and non-conforming types.
+//! `compare` assertion (ADR-0050 D4, D5): pairwise row comparison (`eq`, `ne`,
+//! `lt`, `le`, `gt`, `ge`) under `exact`, `lexical`, `numeric`, or `semver`
+//! ordering, failing loud on `Null` or `Missing` operands and non-conforming
+//! types.
 
 use std::cmp::Ordering;
 
@@ -36,8 +37,10 @@ impl<'r> Run<'r> {
         other_at: usize,
         other: &str,
     ) {
-        let pair_sensitive =
-            self.redact_all || self.sensitive(field_at) || self.sensitive(other_at);
+        let pair_sensitive = self.redact_all
+            || self.rule.hide_literals
+            || self.sensitive(field_at)
+            || self.sensitive(other_at);
         for row in 0..self.rows.rows.len() {
             let (Some(lhs), Some(rhs)) = (
                 self.scalar(row, field_at, "assert.compare.field"),
@@ -48,8 +51,9 @@ impl<'r> Run<'r> {
             let Some(passed) = self.eval_compare_pair(
                 compare.order,
                 compare.op,
+                pair_sensitive,
                 (&lhs, row, field_at, "assert.compare.field"),
-                (&rhs, Some((row, other_at)), "assert.compare.to.field"),
+                (&rhs, None, Some((row, other_at)), "assert.compare.to.field"),
             ) else {
                 return;
             };
@@ -91,11 +95,15 @@ impl<'r> Run<'r> {
         literal: &CompareLiteral,
     ) {
         let hide = self.redact_all || self.sensitive(field_at) || self.rule.hide_literals;
-        let rhs_scalar = match literal {
-            CompareLiteral::Scalar(v) => {
-                Scalar::of_value(v).expect("builder validated scalar literal")
+        let (rhs_scalar, rhs_semver) = match literal {
+            CompareLiteral::Scalar(v) => (
+                Scalar::of_value(v).expect("builder validated scalar literal"),
+                None,
+            ),
+            CompareLiteral::Number(raw) => (Scalar::Number(raw.as_str().into()), None),
+            CompareLiteral::Semver { raw, parsed } => {
+                (Scalar::String(raw.as_str().into()), Some(parsed))
             }
-            CompareLiteral::Number(raw) => Scalar::Number(raw.as_str().into()),
         };
         for row in 0..self.rows.rows.len() {
             let Some(lhs) = self.scalar(row, field_at, "assert.compare.field") else {
@@ -104,8 +112,9 @@ impl<'r> Run<'r> {
             let Some(passed) = self.eval_compare_pair(
                 compare.order,
                 compare.op,
+                hide,
                 (&lhs, row, field_at, "assert.compare.field"),
-                (&rhs_scalar, None, "assert.compare.to.value"),
+                (&rhs_scalar, rhs_semver, None, "assert.compare.to.value"),
             ) else {
                 return;
             };
@@ -180,6 +189,7 @@ impl<'r> Run<'r> {
         }
         // Validate the source row's operand type even on 1-row relations where
         // the comparison loop below has zero non-source rows.
+        let mut expected_semver = None;
         match compare.order {
             CompareOrder::Exact => {}
             CompareOrder::Lexical => {
@@ -220,20 +230,23 @@ impl<'r> Run<'r> {
                     self.fail(Some(source_cell.at.resource.path().as_path()), message);
                     return;
                 };
-                if let Err(err) = alint_core::semver_eval::parse_version(raw) {
-                    let detail = if hide {
-                        "not a valid semantic version".to_string()
-                    } else {
-                        format!("not a valid semantic version ({err})")
-                    };
-                    let message = format!(
-                        "`assert.compare.to.row`: `{}` is {} at {}: {detail}",
-                        compare.field,
-                        expected.show(hide),
-                        self.located(source_cell)
-                    );
-                    self.fail(Some(source_cell.at.resource.path().as_path()), message);
-                    return;
+                match alint_core::semver_eval::parse_version(raw) {
+                    Ok(v) => expected_semver = Some(v),
+                    Err(err) => {
+                        let detail = if hide {
+                            "not a valid semantic version".to_string()
+                        } else {
+                            format!("not a valid semantic version ({err})")
+                        };
+                        let message = format!(
+                            "`assert.compare.to.row`: `{}` is {} at {}: {detail}",
+                            compare.field,
+                            expected.show(hide),
+                            self.located(source_cell)
+                        );
+                        self.fail(Some(source_cell.at.resource.path().as_path()), message);
+                        return;
+                    }
                 }
             }
         }
@@ -247,8 +260,14 @@ impl<'r> Run<'r> {
             let Some(passed) = self.eval_compare_pair(
                 compare.order,
                 compare.op,
+                hide,
                 (&lhs, row, field_at, "assert.compare.field"),
-                (&expected, Some((source, field_at)), "assert.compare.to.row"),
+                (
+                    &expected,
+                    expected_semver.as_ref(),
+                    Some((source, field_at)),
+                    "assert.compare.to.row",
+                ),
             ) else {
                 return;
             };
@@ -286,8 +305,14 @@ impl<'r> Run<'r> {
         &mut self,
         order: CompareOrder,
         op: CompareOp,
+        pair_sensitive: bool,
         (lhs, lhs_row, lhs_pos, lhs_opt): (&Scalar, usize, usize, &str),
-        (rhs, rhs_site, rhs_opt): (&Scalar, Option<(usize, usize)>, &str),
+        (rhs, rhs_semver, rhs_site, rhs_opt): (
+            &Scalar,
+            Option<&alint_core::semver_eval::SemverVersion>,
+            Option<(usize, usize)>,
+            &str,
+        ),
     ) -> Option<bool> {
         if lhs.is_null() {
             let cell = self.cell(lhs_row, lhs_pos);
@@ -374,8 +399,9 @@ impl<'r> Run<'r> {
             }
             CompareOrder::Semver => self.eval_compare_semver(
                 op,
+                pair_sensitive,
                 (lhs, lhs_row, lhs_pos, lhs_opt),
-                (rhs, rhs_site, rhs_opt),
+                (rhs, rhs_semver, rhs_site, rhs_opt),
             ),
         }
     }
@@ -383,10 +409,16 @@ impl<'r> Run<'r> {
     fn eval_compare_semver(
         &mut self,
         op: CompareOp,
+        pair_sensitive: bool,
         (lhs, lhs_row, lhs_pos, lhs_opt): (&Scalar, usize, usize, &str),
-        (rhs, rhs_site, rhs_opt): (&Scalar, Option<(usize, usize)>, &str),
+        (rhs, rhs_semver, rhs_site, rhs_opt): (
+            &Scalar,
+            Option<&alint_core::semver_eval::SemverVersion>,
+            Option<(usize, usize)>,
+            &str,
+        ),
     ) -> Option<bool> {
-        let lhs_hide = self.redact_all || self.sensitive(lhs_pos);
+        let hide = pair_sensitive || self.redact_all || self.sensitive(lhs_pos);
         let Scalar::String(a_raw) = lhs else {
             let cell = self.cell(lhs_row, lhs_pos);
             let message = format!(
@@ -403,7 +435,7 @@ impl<'r> Run<'r> {
             Ok(v) => v,
             Err(err) => {
                 let cell = self.cell(lhs_row, lhs_pos);
-                let detail = if lhs_hide {
+                let detail = if hide {
                     "not a valid semantic version".to_string()
                 } else {
                     format!("not a valid semantic version ({err})")
@@ -411,13 +443,16 @@ impl<'r> Run<'r> {
                 let message = format!(
                     "`{lhs_opt}`: `{}` is {} at {}: {detail}",
                     self.name(lhs_pos),
-                    lhs.show(lhs_hide),
+                    lhs.show(hide),
                     self.located(cell)
                 );
                 self.fail(Some(cell.at.resource.path().as_path()), message);
                 return None;
             }
         };
+        if let Some(b) = rhs_semver {
+            return Some(op.matches(a.cmp(b)));
+        }
         let Scalar::String(b_raw) = rhs else {
             let (path, desc) = self.rhs_type_desc(rhs_site);
             let message = format!(
@@ -429,8 +464,8 @@ impl<'r> Run<'r> {
         let b = match alint_core::semver_eval::parse_version(b_raw) {
             Ok(v) => v,
             Err(err) => {
-                let rhs_hide = self.redact_all
-                    || rhs_site.map_or(self.rule.hide_literals, |(_, p)| self.sensitive(p));
+                let rhs_hide =
+                    hide || rhs_site.map_or(self.rule.hide_literals, |(_, p)| self.sensitive(p));
                 let (path, where_desc, field_desc) = match rhs_site {
                     Some((r, p)) => {
                         let cell = self.cell(r, p);

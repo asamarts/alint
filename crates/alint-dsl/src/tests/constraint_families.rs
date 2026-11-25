@@ -64,11 +64,17 @@ pub(super) fn run_under(
         .rules
         .iter()
         .map(|spec| {
-            let entry = alint_core::RuleEntry::new(
+            let mut entry = alint_core::RuleEntry::new(
                 registry
                     .build(spec)
                     .unwrap_or_else(|error| panic!("{} builds: {error}", spec.id)),
             );
+            if let Some(when) = &spec.when {
+                entry = entry.with_when(
+                    alint_core::when::parse(when)
+                        .unwrap_or_else(|error| panic!("{} when parses: {error}", spec.id)),
+                );
+            }
             if specs {
                 entry.with_spec(std::sync::Arc::new(spec.clone()))
             } else {
@@ -76,7 +82,13 @@ pub(super) fn run_under(
             }
         })
         .collect();
-    let engine = alint_core::Engine::from_entries(entries, registry);
+    let mut engine = alint_core::Engine::from_entries(entries, registry)
+        .with_facts(config.facts.clone())
+        .with_limits(&config.limits)
+        .expect("config limits");
+    if let Some(limits) = limits {
+        engine = engine.with_relation_limits(*limits);
+    }
     let results = engine.run(dir.path(), &index).unwrap().results;
     let bytes = index
         .decode_cache()

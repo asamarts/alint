@@ -59,7 +59,12 @@ impl RecordsAdapter {
                 )));
             }
         };
-        let strict_json = strict_json && format == Format::Json;
+        if strict_json && format != Format::Json {
+            return Err(AdapterError::Parse(format!(
+                "`strict: true` is only supported for JSON, not {}",
+                format.label()
+            )));
+        }
         let parse_all = |queries: &[String]| -> Result<Vec<(String, JsonPath)>, AdapterError> {
             queries
                 .iter()

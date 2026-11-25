@@ -33,8 +33,9 @@ use std::ops::Range;
 
 mod exact;
 pub use exact::{
-    Intent, checked_removal_edits, checked_value_edits, checks_whole_document, intended,
-    is_exact_edit,
+    Intent, checked_removal_edits, checked_removal_edits_strict, checked_value_edits,
+    checked_value_edits_strict, checks_whole_document, intended, is_exact_edit,
+    is_exact_edit_strict,
 };
 
 /// One concrete step of a resolved `JSONPath` location: an object key or an
@@ -55,6 +56,18 @@ pub enum PathSeg {
 /// does not parse. Never panics.
 #[must_use]
 pub fn resolve_value_span(format: Format, bytes: &[u8], path: &[PathSeg]) -> Option<Range<usize>> {
+    resolve_value_span_strict(format, bytes, path, false)
+}
+
+/// Like [`resolve_value_span`], enforcing strict RFC 8259 JSON parsing when
+/// `format == Format::Json && strict`.
+#[must_use]
+pub fn resolve_value_span_strict(
+    format: Format,
+    bytes: &[u8],
+    path: &[PathSeg],
+    strict: bool,
+) -> Option<Range<usize>> {
     let text = std::str::from_utf8(bytes).ok()?;
     match format {
         Format::Hcl => hcl::hcl_value_span(text, path),
@@ -62,7 +75,7 @@ pub fn resolve_value_span(format: Format, bytes: &[u8], path: &[PathSeg]) -> Opt
         Format::Dotenv => dotenv::dotenv_value_span(text, path),
         Format::Ini => ini::ini_value_span(text, path),
         Format::Properties => properties::properties_value_span(text, path),
-        Format::Json => json_::json_value_span(text, path),
+        Format::Json => json_::json_value_span(text, path, strict),
         Format::Yaml => yaml_::yaml_value_span(text, path),
         // TOML is a document-rewrite format (see `document_set`), not a span
         // splice; named (not a wildcard) so a future span format is compile-forced.
@@ -106,13 +119,25 @@ pub fn resolve_value_spans(
     bytes: &[u8],
     paths: &[Vec<PathSeg>],
 ) -> Vec<Option<Range<usize>>> {
+    resolve_value_spans_strict(format, bytes, paths, false)
+}
+
+/// Like [`resolve_value_spans`], enforcing strict RFC 8259 JSON parsing when
+/// `format == Format::Json && strict`.
+#[must_use]
+pub fn resolve_value_spans_strict(
+    format: Format,
+    bytes: &[u8],
+    paths: &[Vec<PathSeg>],
+    strict: bool,
+) -> Vec<Option<Range<usize>>> {
     match (format, std::str::from_utf8(bytes)) {
         (Format::Yaml, Ok(text)) => yaml_::yaml_value_spans(text, paths),
         (Format::Properties, Ok(text)) => properties::properties_value_spans(text, paths),
         (Format::Hcl, Ok(text)) => hcl::hcl_value_spans(text, paths),
         _ => paths
             .iter()
-            .map(|path| resolve_value_span(format, bytes, path))
+            .map(|path| resolve_value_span_strict(format, bytes, path, strict))
             .collect(),
     }
 }
@@ -238,10 +263,22 @@ pub fn document_set(
 /// could be removed (so the fixer declines rather than emit a no-op edit).
 #[must_use]
 pub fn document_remove(format: Format, bytes: &[u8], paths: &[Vec<PathSeg>]) -> Option<Vec<u8>> {
+    document_remove_strict(format, bytes, paths, false)
+}
+
+/// Like [`document_remove`], enforcing strict RFC 8259 JSON parsing when
+/// `format == Format::Json && strict`.
+#[must_use]
+pub fn document_remove_strict(
+    format: Format,
+    bytes: &[u8],
+    paths: &[Vec<PathSeg>],
+    strict: bool,
+) -> Option<Vec<u8>> {
     let text = std::str::from_utf8(bytes).ok()?;
     match format {
         Format::Toml => toml_::document_remove(text, paths),
-        Format::Json => json_::json_document_remove(text, paths),
+        Format::Json => json_::json_document_remove(text, paths, strict),
         _ => None,
     }
 }
@@ -1721,46 +1758,26 @@ mod toml_ {
 mod json_ {
     use super::PathSeg;
     use jsonc_parser::common::Ranged;
-    use jsonc_parser::{CollectOptions, CommentCollectionStrategy, ParseOptions, parse_to_ast};
+    use jsonc_parser::{CollectOptions, CommentCollectionStrategy, parse_to_ast};
     use std::ops::Range;
-
-    /// The JSON dialect the fix side parses: comments + trailing commas (JSONC),
-    /// nothing else -- exactly what the check side (`serde_json` + `strip_jsonc`)
-    /// accepts. jsonc-parser's JSON5-ish extensions (single quotes, missing commas,
-    /// hex / `+` / bare-decimal / non-finite numbers, `\x` escapes; 0.26 accepted
-    /// the first two unconditionally) became toggles in 0.28-0.34 that all DEFAULT
-    /// ON, so every field is spelled out (no
-    /// `..Default::default()`): a future option is then a compile error here, not a
-    /// silent dialect widening.
-    fn parse_options() -> ParseOptions {
-        ParseOptions {
-            allow_comments: true,
-            allow_trailing_commas: true,
-            allow_loose_object_property_names: false,
-            allow_missing_commas: false,
-            allow_single_quoted_strings: false,
-            allow_hexadecimal_numbers: false,
-            allow_unary_plus_numbers: false,
-            allow_bare_decimal_point_numbers: false,
-            allow_non_finite_numbers: false,
-            allow_extended_string_escapes: false,
-        }
-    }
 
     /// The byte range of the value at `path` (what `set_value` overwrites). `None`
     /// if the source does not parse or the path does not resolve to a node.
-    pub(super) fn json_value_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
-        // Mirror `Format::parse`: strip leading UTF-8 BOM(s) before parsing.
-        // `jsonc-parser` rejects a `\u{FEFF}` prefix as a syntax error, but the
-        // check side strips it (so a BOM-prefixed file DOES fire the rule and
-        // advertise a fix). Resolve against the stripped text, then shift the
-        // span back into the ORIGINAL byte space by the stripped BOM length --
-        // the caller splices the raw file bytes, BOM included. Without this,
-        // every BOM-prefixed JSON was advertised fixable yet always skipped
-        // (JSON was the outlier: dotenv/INI/properties offset it, TOML restores
-        // it). `trim_start_matches` drops any run of consecutive BOMs, matching
-        // `Format::parse`.
-        let stripped = text.trim_start_matches('\u{feff}');
+    pub(super) fn json_value_span(
+        text: &str,
+        path: &[PathSeg],
+        strict: bool,
+    ) -> Option<Range<usize>> {
+        if strict {
+            crate::structured_format::Format::Json
+                .parse_with_strict_json(text, true)
+                .ok()?;
+        }
+        let stripped = if strict {
+            text
+        } else {
+            text.trim_start_matches('\u{feff}')
+        };
         let bom_len = text.len() - stripped.len();
         let ast = parse_to_ast(
             stripped,
@@ -1768,7 +1785,7 @@ mod json_ {
                 comments: CommentCollectionStrategy::Off,
                 tokens: false,
             },
-            &parse_options(),
+            &crate::extract::json_parse_options(strict),
         )
         .ok()?;
         let mut node = ast.value.as_ref()?;
@@ -1802,13 +1819,28 @@ mod json_ {
     /// leaves the target absent). The CST round-trips byte-identically, so an
     /// unmodified region is untouched. `None` if the source does not parse or NO
     /// path resolved (nothing removed).
-    pub(super) fn json_document_remove(text: &str, paths: &[Vec<PathSeg>]) -> Option<Vec<u8>> {
+    pub(super) fn json_document_remove(
+        text: &str,
+        paths: &[Vec<PathSeg>],
+        strict: bool,
+    ) -> Option<Vec<u8>> {
         use jsonc_parser::cst::CstRootNode;
-        // The check side strips a leading BOM; strip before the CST parse (which
-        // rejects it) and re-prepend it to the reserialized output.
-        let stripped = text.trim_start_matches('\u{feff}');
+        if strict {
+            crate::structured_format::Format::Json
+                .parse_with_strict_json(text, true)
+                .ok()?;
+        }
+        // In tolerant mode strip any leading BOM before the CST parse and
+        // re-prepend it to the reserialized output; in strict mode leading BOM
+        // was already rejected above.
+        let stripped = if strict {
+            text
+        } else {
+            text.trim_start_matches('\u{feff}')
+        };
         let bom = &text[..text.len() - stripped.len()];
-        let root = CstRootNode::parse(stripped, &parse_options()).ok()?;
+        let root =
+            CstRootNode::parse(stripped, &crate::extract::json_parse_options(strict)).ok()?;
         // Resolve ALL target handles FIRST, then remove -- removing by handle (not
         // by re-navigating) is index-shift-safe for array elements and order-free
         // for object members. But DROP any path that is a strict DESCENDANT of

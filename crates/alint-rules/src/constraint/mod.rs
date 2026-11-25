@@ -30,8 +30,11 @@
 //!   bounds (`min`, `max`, `exact`, optional `group_by:` and `groups:`), with
 //!   per-row findings for emptiness checks (`max: 0` / `exact: 0`);
 //! - **`compare`:** pairwise row comparison (`eq`, `ne`, `lt`, `le`, `gt`,
-//!   `ge`) under `exact`, `lexical`, or `numeric` ordering against
-//!   `to: { field | value | row }`, failing loud on `Null`/`Missing`.
+//!   `ge`) under `exact`, `lexical`, `numeric`, or `semver` ordering against
+//!   `to: { field | value | row }`, failing loud on `Null`/`Missing`;
+//! - **`satisfies`:** offline semantic version range satisfaction (`node`,
+//!   `cargo`, `pep440-basic`) over `version` / `version_literal` and `range` /
+//!   `range_literal` with optional `include_prerelease`.
 //!
 //! Under `--changed`, the rule runs when a changed path is one the
 //! selectors of its relations read, followed through joins and membership
@@ -269,6 +272,10 @@ enum CompareTarget {
 enum CompareLiteral {
     Scalar(Value),
     Number(String),
+    Semver {
+        raw: String,
+        parsed: alint_core::semver_eval::SemverVersion,
+    },
 }
 
 /// How a `set` grouped by a path token gives a resource its group: the

@@ -583,7 +583,17 @@ impl CrossFileValueFixer {
         let format = extract.format;
         let query = extract.query.as_str();
         let path_expr = &extract.path;
-        let target_text = String::from_utf8_lossy(target_bytes);
+        let strict_json = extract.strict && format == Format::Json;
+        let target_text = if strict_json {
+            std::borrow::Cow::Borrowed(std::str::from_utf8(target_bytes).map_err(|_| {
+                format!(
+                    "{} is not valid UTF-8 for strict JSON",
+                    target_rel.display()
+                )
+            })?)
+        } else {
+            String::from_utf8_lossy(target_bytes)
+        };
         let parsed = format
             .parse_with_strict_json(&target_text, extract.strict)
             .map_err(|error| {
@@ -655,7 +665,8 @@ impl CrossFileValueFixer {
             target_value.to_string(),
             selected,
             self.applicability,
-        );
+        )
+        .with_strict(extract.strict);
         let collected = delegate.collect_edits(
             std::slice::from_ref(violation),
             target_rel,
@@ -698,9 +709,16 @@ impl CrossFileValueFixer {
         let expected_source_values = source_equal_before
             .checked_add(1)
             .ok_or_else(|| "structured propagation match count overflowed".to_string())?;
-        let updated_text = String::from_utf8_lossy(&new_bytes);
+        let updated_text = if strict_json {
+            std::borrow::Cow::Borrowed(
+                std::str::from_utf8(&new_bytes)
+                    .map_err(|_| "post-edit JSON bytes are not valid UTF-8".to_string())?,
+            )
+        } else {
+            String::from_utf8_lossy(&new_bytes)
+        };
         let updated = format
-            .parse(&updated_text)
+            .parse_with_strict_json(&updated_text, extract.strict)
             .map_err(|error| format!("post-edit {format:?} parse failed: {error}"))?;
         let source_values_after = path_expr
             .query(&updated)
@@ -1000,8 +1018,15 @@ impl CreateAndRegisterFixer {
         let Extract::Structured(extract) = extract else {
             return None;
         };
-        let text = String::from_utf8_lossy(target_bytes);
-        let value = extract.format.parse(&text).ok()?;
+        let text = if extract.strict && extract.format == Format::Json {
+            std::borrow::Cow::Borrowed(std::str::from_utf8(target_bytes).ok()?)
+        } else {
+            String::from_utf8_lossy(target_bytes)
+        };
+        let value = extract
+            .format
+            .parse_with_strict_json(&text, extract.strict)
+            .ok()?;
         let located = extract.path.query_located(&value);
         let node = located.iter().next()?;
         Some((
@@ -1077,10 +1102,16 @@ impl CreateAndRegisterFixer {
         let Extract::Structured(extract) = extract else {
             return Ok(());
         };
-        let text = String::from_utf8_lossy(bytes);
+        let text = if extract.strict && extract.format == Format::Json {
+            std::borrow::Cow::Borrowed(std::str::from_utf8(bytes).map_err(|_| {
+                "re-verify: the appended JSON document is not valid UTF-8".to_string()
+            })?)
+        } else {
+            String::from_utf8_lossy(bytes)
+        };
         let value = extract
             .format
-            .parse(&text)
+            .parse_with_strict_json(&text, extract.strict)
             .map_err(|e| format!("re-verify: the appended document did not parse: {e}"))?;
         let arrays = extract.path.query(&value);
         let Some(array) = arrays.iter().next().and_then(|value| value.as_array()) else {

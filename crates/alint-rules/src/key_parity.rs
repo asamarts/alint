@@ -128,8 +128,31 @@ impl KeyModel {
     }
 }
 
+fn present<'de, D, T>(deserializer: D) -> std::result::Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    match Option::<T>::deserialize(deserializer)? {
+        Some(value) => Ok(Some(value)),
+        None => Err(serde::de::Error::custom(
+            "an optional key written as null; give it a value, or leave the key out",
+        )),
+    }
+}
+
+fn no_default(schema: &mut schemars::Schema) {
+    schema.remove("default");
+}
+
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(extend(
+    "allOf" = [{
+        "if": { "required": ["strict", "format"], "properties": { "format": { "type": "string" } } },
+        "then": { "properties": { "format": { "const": "json" } } }
+    }]
+))]
 struct Options {
     /// The authoritative key file.
     reference: String,
@@ -171,8 +194,9 @@ struct Options {
     /// When `true` on JSON files, enforce strict RFC 8259 JSON parsing
     /// (rejecting comments, trailing commas, leading UTF-8 BOM, and empty
     /// files; ADR-0050 D7). Rejected at build time for non-JSON formats.
-    #[serde(default)]
-    strict: bool,
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "bool", transform = no_default)]
+    strict: Option<bool>,
 }
 
 crate::options_schema_for!(Options);
@@ -1602,25 +1626,30 @@ fn validate_key_parity_format_flags(
             ),
         ));
     }
-    if opts.strict {
+    if opts.strict.is_some() {
         if let Some(format) = opts.format
             && format != KeyFormat::Json
         {
             return Err(Error::rule_config(
                 rule_id,
-                format!(
-                    "`strict: true` applies only to JSON files, not {}",
-                    format.name()
-                ),
+                format!("`strict` applies only to JSON files, not {}", format.name()),
             ));
         }
         if !format_pending && reference_format != KeyFormat::Json {
             return Err(Error::rule_config(
                 rule_id,
                 format!(
-                    "`strict: true` applies only to JSON files, not {}",
+                    "`strict` applies only to JSON files, not {}",
                     reference_format.name()
                 ),
+            ));
+        }
+        if let Some(format) = model_format
+            && format != KeyFormat::Json
+        {
+            return Err(Error::rule_config(
+                rule_id,
+                format!("`strict` applies only to JSON files, not {}", format.name()),
             ));
         }
     }
@@ -1734,7 +1763,7 @@ fn build_rule_with(spec: &RuleSpec, backslash_separates: bool) -> Result<KeyPari
         strip_root: opts.strip_root,
         ignore,
         allow_missing_peers: opts.allow_missing_peers,
-        strict: opts.strict,
+        strict: opts.strict.unwrap_or(false),
     })
 }
 

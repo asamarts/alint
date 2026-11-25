@@ -1,5 +1,7 @@
-//! The `constraint` families over a relation's rows (design section 6):
-//! `unique`, `equal` in its three forms, and `set` (in `set.rs`). Each
+//! The `constraint` families over a relation's rows (design section 6,
+//! ADR-0050 D1 to D5): `unique`, `equal` in its three forms, `set` (in
+//! `set.rs`), `reference` (in `reference.rs`), `count` (in `count.rs`),
+//! `compare` (in `compare.rs`), and `satisfies` (in `satisfies.rs`). Each
 //! finding sits at a row's field, or at a resource, with
 //! related locations at the rows it is compared with; an analysis failure
 //! (a null group, a comparison across types, a missing source row) leaves

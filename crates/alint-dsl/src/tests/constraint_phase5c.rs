@@ -789,3 +789,262 @@ fn strict_json_is_refused_on_non_json_rules_and_extractors() {
         assert!(outcome.is_err(), "{label}: expected load/build error");
     }
 }
+
+#[test]
+fn no_duplicate_keys_enforces_findings_per_rule_limit_across_files() {
+    let config = r#"version: 1
+limits:
+  findings_per_rule: 3
+rules:
+  - id: dup-capped
+    kind: no_duplicate_keys
+    paths: "*.yml"
+    level: error
+"#;
+    let files = [
+        ("a.yml", "k: 1\nk: 2\nk: 3\n"),
+        ("b.yml", "k: 1\nk: 2\nk: 3\n"),
+        ("c.yml", "k: 1\nk: 2\nk: 3\n"),
+    ];
+    let results = run(config, &files);
+    let r = result(&results, "dup-capped");
+    assert_eq!(r.violations.len(), 3, "{r:#?}");
+    assert_eq!(r.analysis_failures.len(), 1, "{r:#?}");
+    assert_eq!(
+        r.analysis_failures[0].kind,
+        alint_core::AnalysisFailureKind::Evaluation
+    );
+    assert!(
+        r.analysis_failures[0].message.contains("findings_per_rule"),
+        "{:?}",
+        r.analysis_failures[0].message
+    );
+}
+
+#[test]
+fn satisfies_withholds_partial_findings_on_failure_supports_row_msg_and_rejects_value_placeholder()
+{
+    // Row 0 violates `^20.0.0`, row 1 has an unparseable version: fail-loud
+    // must withhold row 0's violation and report only the analysis failure.
+    let withhold_cfg = r#"version: 2
+relations:
+  pins:
+    from: { paths: "pins.json" }
+    records: { format: json, at: "$.pins[*]" }
+    fields:
+      name: "record: $.name"
+      ver: "record: $.ver"
+rules:
+  - id: sat
+    kind: constraint
+    input: pins
+    assert:
+      satisfies:
+        version: ver
+        range_literal: "^20.0.0"
+    message: "package {{row.name}} has invalid pin {{row.ver}}"
+    level: error
+"#;
+    let res = run(
+        withhold_cfg,
+        &[(
+            "pins.json",
+            r#"{"pins": [{"name": "a", "ver": "18.0.0"}, {"name": "b", "ver": "not-semver"}]}"#,
+        )],
+    );
+    let r = result(&res, "sat");
+    assert_eq!(r.violations.len(), 0, "{r:#?}");
+    assert_eq!(r.analysis_failures.len(), 1, "{r:#?}");
+
+    // When all versions are valid SemVer (including `.dev` / `.post` in pre/build
+    // metadata!), `{{row.FIELD}}` renders in custom messages.
+    let res_ok = run(
+        withhold_cfg,
+        &[(
+            "pins.json",
+            r#"{"pins": [{"name": "a", "ver": "18.0.0-alpha.dev.1+build.postcss"}]}"#,
+        )],
+    );
+    let r_ok = result(&res_ok, "sat");
+    assert_eq!(r_ok.violations.len(), 1, "{r_ok:#?}");
+    assert_eq!(r_ok.analysis_failures.len(), 0, "{r_ok:#?}");
+    assert!(
+        r_ok.violations[0]
+            .message
+            .contains("package a has invalid pin 18.0.0-alpha.dev.1+build.postcss"),
+        "{}",
+        r_ok.violations[0].message
+    );
+
+    // `{{value}}` is rejected at build time on `satisfies`.
+    let bad_placeholder = withhold_cfg.replace("{{row.ver}}", "{{value}}");
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg_path = tmp.path().join(".alint.yml");
+    std::fs::write(&cfg_path, bad_placeholder).unwrap();
+    let err = load(&cfg_path)
+        .and_then(|loaded| {
+            for spec in &loaded.rules {
+                test_registry().build(spec)?;
+            }
+            Ok(())
+        })
+        .unwrap_err();
+    assert!(err.to_string().contains("{{value}}"), "{err}");
+}
+
+#[test]
+fn satisfies_version_literal_and_compare_semver_redact_sensitive_parse_failures() {
+    let cfg = r#"version: 2
+relations:
+  pins:
+    from: { paths: "pins.json" }
+    records: { format: json, at: "$.pins[*]" }
+    fields:
+      name: "record: $.name"
+      ver: "record: $.ver"
+      rng: { source: "record: $.rng", sensitive: true }
+rules:
+  - id: sat-ver-lit
+    kind: constraint
+    input: pins
+    assert:
+      satisfies:
+        version_literal: "1.2.3-secret-ver"
+        range: rng
+    level: error
+  - id: cmp-bidir
+    kind: constraint
+    input: pins
+    assert:
+      compare:
+        field: ver
+        op: ge
+        order: semver
+        to: { field: rng }
+    level: error
+"#;
+    // Policy violation on `sat-ver-lit` + parse failure on `cmp-bidir`:
+    // bidirectional sensitivity must redact both `ver` and `rng` (and `version_literal`).
+    let res = run(
+        cfg,
+        &[(
+            "pins.json",
+            r#"{"pins": [{"name": "a", "ver": "secret-bad-ver", "rng": "^9.9.9-secret-rng"}]}"#,
+        )],
+    );
+    let sat = result(&res, "sat-ver-lit");
+    assert_eq!(sat.violations.len(), 1, "{sat:#?}");
+    assert!(sat.violations[0].message.contains("<redacted>"));
+    assert!(!sat.violations[0].message.contains("1.2.3-secret-ver"));
+    assert!(!sat.violations[0].message.contains("9.9.9-secret-rng"));
+    assert!(sat.violations[0].range.is_none());
+
+    let cmp = result(&res, "cmp-bidir");
+    assert_eq!(cmp.analysis_failures.len(), 1, "{cmp:#?}");
+    assert!(
+        !cmp.analysis_failures[0].message.contains("secret-bad-ver"),
+        "{}",
+        cmp.analysis_failures[0].message
+    );
+    assert!(
+        cmp.analysis_failures[0].message.contains("<redacted>"),
+        "{}",
+        cmp.analysis_failures[0].message
+    );
+}
+
+#[test]
+fn strict_json_works_in_facts_and_matches_v1_json_schema_parity() {
+    // `facts:` with `extract: { json: ..., strict: true }` must validate against
+    // `schemas/v1/config.json` AND fail cleanly on JSONC (evaluating fact to false).
+    let fact_cfg = r#"version: 1
+facts:
+  - id: strict_pkg
+    file_content_matches:
+      paths: "pkg.json"
+      extract: { json: "$.name", strict: true }
+      pattern: "^app$"
+rules:
+  - id: require-readme-when-strict
+    kind: file_exists
+    paths: "README.md"
+    when: "facts.strict_pkg"
+    level: error
+"#;
+    let v1_schema: serde_json::Value =
+        serde_json::from_str(include_str!("../../schemas/v1/config.json")).unwrap();
+    let validator = jsonschema::validator_for(&v1_schema).unwrap();
+
+    let fact_val: serde_json::Value = alint_core::yaml::from_str(fact_cfg).unwrap();
+    assert!(
+        validator.is_valid(&fact_val),
+        "v1 schema must accept strict JSON in facts: {:?}",
+        validator.iter_errors(&fact_val).collect::<Vec<_>>()
+    );
+    // On JSONC `pkg.json`, strict fact evaluates false -> `require-readme-when-strict` is skipped.
+    let res_jsonc = run(
+        fact_cfg,
+        &[("pkg.json", "{\n  // comment\n  \"name\": \"app\"\n}\n")],
+    );
+    assert!(res_jsonc.is_empty(), "{res_jsonc:#?}");
+    // On strict valid JSON `pkg.json`, fact evaluates true -> missing README fires.
+    let res_valid = run(fact_cfg, &[("pkg.json", r#"{"name": "app"}"#)]);
+    assert_eq!(
+        result(&res_valid, "require-readme-when-strict")
+            .violations
+            .len(),
+        1
+    );
+
+    // Negative v1 schema + loader parity cases for `strict` on non-JSON and null values.
+    for (label, cfg) in [
+        (
+            "no_duplicate_keys yaml strict true",
+            "version: 1\nrules:\n  - id: r\n    kind: no_duplicate_keys\n    paths: '*.yml'\n    \
+             format: yaml\n    strict: true\n    level: error\n",
+        ),
+        (
+            "no_duplicate_keys yaml strict false",
+            "version: 1\nrules:\n  - id: r\n    kind: no_duplicate_keys\n    paths: '*.yml'\n    \
+             format: yaml\n    strict: false\n    level: error\n",
+        ),
+        (
+            "json_schema_passes yaml strict true",
+            "version: 1\nrules:\n  - id: r\n    kind: json_schema_passes\n    paths: '*.yml'\n    \
+             schema_path: s.json\n    format: yaml\n    strict: true\n    level: error\n",
+        ),
+        (
+            "key_parity yaml strict true",
+            "version: 1\nrules:\n  - id: r\n    kind: key_parity\n    reference: en.yml\n    \
+             peers: '*.yml'\n    format: yaml\n    strict: true\n    level: error\n",
+        ),
+        (
+            "extract_spec json null with strict true",
+            "version: 1\nrules:\n  - id: r\n    kind: cross_file\n    source: { file: a.json, \
+             extract: { json: null, strict: true } }\n    targets: { files: b.json, extract: \
+             { json: '$.a' } }\n    level: error\n",
+        ),
+        (
+            "extract_spec yaml with strict null",
+            "version: 1\nrules:\n  - id: r\n    kind: cross_file\n    source: { file: a.yml, \
+             extract: { yaml: '$.a', strict: null } }\n    targets: { files: b.yml, extract: \
+             { yaml: '$.a' } }\n    level: error\n",
+        ),
+    ] {
+        let val: serde_json::Value = alint_core::yaml::from_str(cfg).unwrap();
+        assert!(
+            !validator.is_valid(&val),
+            "{label}: v1 JSON Schema must reject"
+        );
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join(".alint.yml");
+        std::fs::write(&p, cfg).unwrap();
+        let built = load(&p).and_then(|loaded| {
+            for spec in &loaded.rules {
+                test_registry().build(spec)?;
+            }
+            Ok(())
+        });
+        assert!(built.is_err(), "{label}: loader/builder must reject");
+    }
+}

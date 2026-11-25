@@ -207,21 +207,39 @@ pub(crate) struct IniEntry<'a> {
     pub(crate) key_span: crate::extract::ByteSpan,
 }
 
-/// Validate `text` with [`parse`] and visit every INI assignment in source
-/// order with its exact byte span in `text` (honoring leading UTF-8 BOMs,
-/// LF/CRLF/CR physical lines, comments, repeated `[section]` headers, and
-/// indentation-continued multi-line values).
+/// Validate `text` and visit every INI assignment in source order with its
+/// exact byte span in `text` (honoring leading UTF-8 BOMs, LF/CRLF/CR physical
+/// lines, comments, repeated `[section]` headers, global-vs-section conflict
+/// checks, and indentation-continued multi-line values).
+///
+/// Mirrors [`parse`] + [`crate::structured_format::Format::Ini`] empty-file
+/// handling in a single streaming pass without materializing a JSON tree.
 pub(crate) fn for_each_entry(
     text: &str,
     mut visit: impl FnMut(IniEntry<'_>),
 ) -> Result<(), String> {
-    crate::structured_format::Format::Ini.parse(text)?;
+    use std::collections::HashSet;
+
+    if text.len() > crate::structured_format::MAX_STRUCTURED_BYTES {
+        return Err(format!(
+            "input exceeds the maximum supported size for a structured document ({} bytes)",
+            crate::structured_format::MAX_STRUCTURED_BYTES
+        ));
+    }
+    if text
+        .trim_matches(|c: char| c == '\u{feff}' || c.is_whitespace())
+        .is_empty()
+    {
+        return Ok(());
+    }
     let stripped = text.trim_start_matches('\u{feff}');
     let base = text.len() - stripped.len();
+    let mut global_keys: HashSet<&str> = HashSet::new();
     let mut section: Option<&str> = None;
     let mut has_cur_key = false;
     let mut cur_indent = 0usize;
-    for (line_start, raw) in crate::physical_lines(stripped) {
+    for (i, (line_start, raw)) in crate::physical_lines(stripped).enumerate() {
+        let lineno = i + 1;
         let indent = raw
             .bytes()
             .take_while(|b| matches!(b, b' ' | b'\t'))
@@ -235,18 +253,39 @@ pub(crate) fn for_each_entry(
         }
         let trim_start = raw.len() - raw.trim_start().len();
         if let Some(rest) = trimmed.strip_prefix('[') {
-            let name = rest
-                .strip_suffix(']')
-                .expect("validated INI section")
-                .trim();
+            let Some(name_raw) = rest.strip_suffix(']') else {
+                return Err(format!(
+                    "line {lineno}: malformed section header `{trimmed}` (expected `[name]`)"
+                ));
+            };
+            let name = name_raw.trim();
+            if global_keys.contains(name) {
+                return Err(format!(
+                    "line {lineno}: section `[{name}]` conflicts with a \
+                     top-level key of the same name"
+                ));
+            }
             section = Some(name);
             has_cur_key = false;
             continue;
         }
-        let sep = trimmed.find(['=', ':']).expect("validated INI assignment");
+        let Some(sep) = trimmed.find(['=', ':']) else {
+            return Err(format!(
+                "line {lineno}: expected `key = value` (or `key : value`)"
+            ));
+        };
         let before = &trimmed[..sep];
         let key_lead = before.len() - before.trim_start().len();
         let key = before.trim();
+        if key.is_empty() {
+            return Err(format!(
+                "line {lineno}: empty key before `{}`",
+                &trimmed[sep..=sep]
+            ));
+        }
+        if section.is_none() {
+            global_keys.insert(key);
+        }
         let key_start = base + line_start + trim_start + key_lead;
         visit(IniEntry {
             section,

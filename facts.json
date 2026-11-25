@@ -4697,15 +4697,13 @@
       "trace": {
         "allowed_stages": [
           "selection",
-          "extraction",
-          "cardinality",
           "assertion"
         ],
         "required_stages": [
           "selection",
           "assertion"
         ],
-        "emits_preview_rows": true,
+        "emits_preview_rows": false,
         "nested_evaluation": false
       },
       "nested_rules": false

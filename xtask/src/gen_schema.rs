@@ -365,6 +365,21 @@ fn compose_branch(base: &Value, options: &Value) -> Result<Value> {
     } else {
         obj.insert("required".to_string(), Value::Array(required));
     }
+    // Forward branch-level `allOf` constraints derived from schemars (for
+    // example `strict` -> `format: json` guards on multi-format rules).
+    if let Some(opt_all_of) = options.get("allOf").and_then(Value::as_array) {
+        let mut merged = obj
+            .get("allOf")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        for item in opt_all_of {
+            if !merged.contains(item) {
+                merged.push(item.clone());
+            }
+        }
+        obj.insert("allOf".to_string(), Value::Array(merged));
+    }
     assert_branch_combinators_resolve(&branch)?;
     Ok(branch)
 }

@@ -120,28 +120,50 @@ fn read() -> Value {
     })
 }
 
+fn entries_schema() -> Value {
+    let mut obj = closed(
+        json!({
+            "format": { "enum": ["json", "yaml", "toml"] },
+            "at": strings(),
+            "leaves": { "type": "boolean" },
+            "strict": { "type": "boolean" },
+        }),
+        &["format", "at", "leaves"],
+    );
+    let map = obj.as_object_mut().expect("object");
+    map.insert("if".into(), json!({ "required": ["strict"] }));
+    map.insert(
+        "then".into(),
+        json!({ "properties": { "format": { "const": "json" } } }),
+    );
+    obj
+}
+
+fn records_schema() -> Value {
+    let mut obj = closed(
+        json!({
+            "format": { "enum": ["json", "yaml", "toml"] },
+            "at": strings(),
+            "strict": { "type": "boolean" },
+        }),
+        &["format", "at"],
+    );
+    let map = obj.as_object_mut().expect("object");
+    map.insert("if".into(), json!({ "required": ["strict"] }));
+    map.insert(
+        "then".into(),
+        json!({ "properties": { "format": { "const": "json" } } }),
+    );
+    obj
+}
+
 /// The keys of one part of a relation's rows: its selector and its reader,
 /// `entries:`, `records:`, or `read:` with `optional:`.
 fn part_properties() -> Value {
     json!({
         "from": selector(),
-        "entries": or_redacted(closed(
-            json!({
-                "format": { "enum": ["json", "yaml", "toml"] },
-                "at": strings(),
-                "leaves": { "type": "boolean" },
-                "strict": { "type": "boolean" },
-            }),
-            &["format", "at", "leaves"],
-        )),
-        "records": or_redacted(closed(
-            json!({
-                "format": { "enum": ["json", "yaml", "toml"] },
-                "at": strings(),
-                "strict": { "type": "boolean" },
-            }),
-            &["format", "at"],
-        )),
+        "entries": or_redacted(entries_schema()),
+        "records": or_redacted(records_schema()),
         "read": or_redacted(read()),
         "optional": or_redacted(json!({ "type": "boolean" })),
     })

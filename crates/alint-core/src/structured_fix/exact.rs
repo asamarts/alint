@@ -12,7 +12,7 @@
 //!
 //! [`EditVerifier::Structured`]: crate::rule::EditVerifier::Structured
 
-use super::{PathSeg, resolve_value_spans, serialize_scalar};
+use super::{PathSeg, serialize_scalar};
 use crate::structured_format::Format;
 use serde_json::Value;
 use std::cmp::Ordering;
@@ -83,12 +83,25 @@ pub fn is_exact_edit(
     after: &[u8],
     intents: &[(Vec<PathSeg>, Intent)],
 ) -> bool {
+    is_exact_edit_strict(format, before, after, intents, false)
+}
+
+/// Like [`is_exact_edit`], enforcing strict RFC 8259 JSON parsing when
+/// `format == Format::Json && strict`.
+#[must_use]
+pub fn is_exact_edit_strict(
+    format: Format,
+    before: &Value,
+    after: &[u8],
+    intents: &[(Vec<PathSeg>, Intent)],
+    strict: bool,
+) -> bool {
     let Some(want) = intended(before, intents) else {
         return false;
     };
     std::str::from_utf8(after)
         .ok()
-        .and_then(|text| format.parse(text).ok())
+        .and_then(|text| format.parse_with_strict_json(text, strict).ok())
         .is_some_and(|read| read == want)
 }
 
@@ -105,12 +118,25 @@ pub fn checked_value_edits(
     before: &Value,
     sets: &[(Vec<PathSeg>, Value)],
 ) -> Vec<Option<(Range<usize>, Vec<u8>)>> {
+    checked_value_edits_strict(format, bytes, before, sets, false)
+}
+
+/// Like [`checked_value_edits`], enforcing strict RFC 8259 JSON parsing when
+/// `format == Format::Json && strict`.
+#[must_use]
+pub fn checked_value_edits_strict(
+    format: Format,
+    bytes: &[u8],
+    before: &Value,
+    sets: &[(Vec<PathSeg>, Value)],
+    strict: bool,
+) -> Vec<Option<(Range<usize>, Vec<u8>)>> {
     let edits: Vec<Option<(Range<usize>, Vec<u8>)>> =
         if let (Format::Properties, Ok(text)) = (format, std::str::from_utf8(bytes)) {
             super::properties_value_edits(text, sets)
         } else {
             let paths: Vec<Vec<PathSeg>> = sets.iter().map(|(path, _)| path.clone()).collect();
-            resolve_value_spans(format, bytes, &paths)
+            super::resolve_value_spans_strict(format, bytes, &paths, strict)
                 .into_iter()
                 .zip(sets)
                 .map(|(span, (_, value))| Some((span?, serialize_scalar(format, value)?)))
@@ -122,7 +148,7 @@ pub fn checked_value_edits(
         .filter(|(_, edit)| edit.is_some())
         .map(|((path, value), _)| (path.clone(), Intent::Set(value.clone())))
         .collect();
-    checked(format, bytes, before, edits, &intents)
+    checked(format, bytes, before, edits, &intents, strict)
 }
 
 /// The edits `remove_value` makes for each of `paths`
@@ -136,6 +162,19 @@ pub fn checked_removal_edits(
     before: &Value,
     paths: &[Vec<PathSeg>],
 ) -> Vec<Option<(Range<usize>, Vec<u8>)>> {
+    checked_removal_edits_strict(format, bytes, before, paths, false)
+}
+
+/// Like [`checked_removal_edits`], enforcing strict RFC 8259 JSON parsing when
+/// `format == Format::Json && strict`.
+#[must_use]
+pub fn checked_removal_edits_strict(
+    format: Format,
+    bytes: &[u8],
+    before: &Value,
+    paths: &[Vec<PathSeg>],
+    strict: bool,
+) -> Vec<Option<(Range<usize>, Vec<u8>)>> {
     let edits = super::resolve_removal_edits(format, bytes, paths);
     let intents: Vec<_> = paths
         .iter()
@@ -143,7 +182,7 @@ pub fn checked_removal_edits(
         .filter(|(_, edit)| edit.is_some())
         .map(|(path, _)| (path.clone(), Intent::Remove))
         .collect();
-    checked(format, bytes, before, edits, &intents)
+    checked(format, bytes, before, edits, &intents, strict)
 }
 
 /// `edits`, or none of them when `format` is checked against the whole
@@ -154,12 +193,13 @@ fn checked(
     before: &Value,
     edits: Vec<Option<(Range<usize>, Vec<u8>)>>,
     intents: &[(Vec<PathSeg>, Intent)],
+    strict: bool,
 ) -> Vec<Option<(Range<usize>, Vec<u8>)>> {
     if !checks_whole_document(format) || intents.is_empty() {
         return edits;
     }
     let exact = splice(bytes, edits.iter().flatten())
-        .is_some_and(|after| is_exact_edit(format, before, &after, intents));
+        .is_some_and(|after| is_exact_edit_strict(format, before, &after, intents, strict));
     if exact {
         edits
     } else {

@@ -881,95 +881,41 @@
       "minProperties": 1,
       "properties": {
         "dotenv": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "hcl": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "ini": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "json": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "lines": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/LinesOpts"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "$ref": "#/$defs/LinesOpts"
         },
         "properties": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "regex": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "strict": {
-          "default": null,
           "description": "When `true` alongside `json:`, parse using strict RFC 8259 JSON (rejecting comments, trailing commas, leading UTF-8 BOM, and empty files). Rejected with any non-`json` extractor.",
-          "type": [
-            "boolean",
-            "null"
-          ]
+          "type": "boolean"
         },
         "toml": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "whole_file": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/WholeFileOpts"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "$ref": "#/$defs/WholeFileOpts"
         },
         "xml": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "yaml": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         }
       },
       "then": {
@@ -1093,7 +1039,16 @@
     "fact_structured_extract": {
       "additionalProperties": false,
       "description": "Parse each candidate file and extract strings at one RFC 9535 JSONPath before applying the fact's pattern. Parse failures and non-string values are non-matches.",
-      "maxProperties": 1,
+      "else": {
+        "maxProperties": 1,
+        "minProperties": 1
+      },
+      "if": {
+        "required": [
+          "strict"
+        ]
+      },
+      "maxProperties": 2,
       "minProperties": 1,
       "properties": {
         "dotenv": {
@@ -1111,6 +1066,10 @@
         "properties": {
           "type": "string"
         },
+        "strict": {
+          "description": "When `true` alongside `json:`, parse using strict RFC 8259 JSON (rejecting comments, trailing commas, leading UTF-8 BOM, and empty files). Rejected with any non-`json` extractor.",
+          "type": "boolean"
+        },
         "toml": {
           "type": "string"
         },
@@ -1120,6 +1079,13 @@
         "yaml": {
           "type": "string"
         }
+      },
+      "then": {
+        "maxProperties": 2,
+        "minProperties": 2,
+        "required": [
+          "json"
+        ]
       },
       "type": "object"
     },
@@ -5077,6 +5043,28 @@
       "type": "object"
     },
     "rule_json_schema_passes": {
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "format": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "strict",
+              "format"
+            ]
+          },
+          "then": {
+            "properties": {
+              "format": {
+                "const": "json"
+              }
+            }
+          }
+        }
+      ],
       "description": "Validate every JSON / YAML / TOML / XML / dotenv / properties / INI / HCL file in `paths` against the JSON Schema at `schema_path`. Each schema-violation error becomes one violation; a target that fails to parse produces one parse-error violation. Format is detected from the target's extension; pass `format:` to override.",
       "not": {
         "anyOf": [
@@ -5130,6 +5118,28 @@
       "type": "object"
     },
     "rule_key_parity": {
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "format": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "strict",
+              "format"
+            ]
+          },
+          "then": {
+            "properties": {
+              "format": {
+                "const": "json"
+              }
+            }
+          }
+        }
+      ],
       "description": "One reference file and a glob of peers must declare the same key set. The reference is read literally even when ignored; peers come from the index. Supports JSON, YAML, TOML, dotenv, INI, Java properties, Android string resources and .NET .resx; nested keys are leaf paths, arrays are values, and duplicate keys are not parity violations.",
       "not": {
         "anyOf": [
@@ -6074,6 +6084,28 @@
       "type": "object"
     },
     "rule_no_duplicate_keys": {
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "format": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "strict",
+              "format"
+            ]
+          },
+          "then": {
+            "properties": {
+              "format": {
+                "const": "json"
+              }
+            }
+          }
+        }
+      ],
       "description": "Reject duplicate keys at any depth across YAML, JSON, dotenv, properties, INI, TOML, and HCL files.",
       "not": {
         "anyOf": [

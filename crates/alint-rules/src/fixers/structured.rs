@@ -47,6 +47,9 @@ enum StructuredOp {
 #[derive(Debug)]
 pub struct StructuredFixer {
     format: Format,
+    /// When `true` and `format == Format::Json`, enforce strict RFC 8259 JSON
+    /// parsing on pre-edit reads, CST edits, and post-edit verification.
+    strict: bool,
     path_expr: JsonPath,
     path_src: String,
     op: StructuredOp,
@@ -58,6 +61,14 @@ pub struct StructuredFixer {
 }
 
 impl StructuredFixer {
+    /// Enforce strict RFC 8259 JSON parsing when `self.format == Format::Json`
+    /// and `strict` is `true` (ADR-0050 D7).
+    #[must_use]
+    pub fn with_strict(mut self, strict: bool) -> Self {
+        self.strict = strict && self.format == Format::Json;
+        self
+    }
+
     /// `set_value` (host `*_path_equals`): overwrite the node at `path_src` with
     /// the rule's `equals` value. Defaults to `Safe` (only a scalar replacing an
     /// existing scalar is ever emitted -- see `collect_edits`).
@@ -71,6 +82,7 @@ impl StructuredFixer {
     ) -> Self {
         Self {
             format,
+            strict: false,
             path_expr,
             path_src,
             op: StructuredOp::Set(value),
@@ -91,6 +103,7 @@ impl StructuredFixer {
     ) -> Self {
         Self {
             format,
+            strict: false,
             path_expr,
             path_src,
             op: StructuredOp::Remove,
@@ -116,6 +129,7 @@ impl StructuredFixer {
     ) -> Self {
         Self {
             format,
+            strict: false,
             path_expr,
             path_src,
             op: StructuredOp::Replace {
@@ -133,6 +147,7 @@ impl StructuredFixer {
     fn verifier(&self, expect: ExpectedValue) -> EditVerifier {
         EditVerifier::Structured {
             format: self.format,
+            strict: self.strict,
             query: self.path_src.clone(),
             expect,
         }
@@ -182,6 +197,7 @@ impl StructuredFixer {
     ) -> Self {
         Self {
             format,
+            strict: false,
             path_expr,
             path_src,
             op: StructuredOp::Set(Value::String(value)),
@@ -331,14 +347,19 @@ impl Fixer for StructuredFixer {
         // round-trip is unstable) -> a false exit-2. Emit no edits so the fix skips it
         // cleanly rather than churning. `looks_binary` triggers on NUL bytes, so a
         // legitimate high-byte Latin-1 config (no NULs) is unaffected. (Audit M2.)
-        if looks_binary(bytes) {
+        let strict_json = self.strict && self.format == Format::Json;
+        if !strict_json && looks_binary(bytes) {
             return Vec::new();
         }
-        // Parse with the SAME lossy decode the host rule uses, so the query sees
-        // the same tree. A parse failure means the rule already reported an
-        // analysis failure; emit no edits.
-        let text = String::from_utf8_lossy(bytes);
-        let Ok(value) = self.format.parse(&text) else {
+        let text = if strict_json {
+            let Ok(s) = std::str::from_utf8(bytes) else {
+                return Vec::new();
+            };
+            std::borrow::Cow::Borrowed(s)
+        } else {
+            String::from_utf8_lossy(bytes)
+        };
+        let Ok(value) = self.format.parse_with_strict_json(&text, self.strict) else {
             return Vec::new();
         };
         let located = self.path_expr.query_located(&value);
@@ -360,7 +381,13 @@ impl Fixer for StructuredFixer {
             // check every whole-document format's edits pass (see
             // `structured_fix::is_exact_edit`); otherwise nothing is emitted.
             let one = |doc: Vec<u8>, verify: EditVerifier, intents: &[(Vec<PathSeg>, Intent)]| {
-                if !structured_fix::is_exact_edit(self.format, &value, &doc, intents) {
+                if !structured_fix::is_exact_edit_strict(
+                    self.format,
+                    &value,
+                    &doc,
+                    intents,
+                    self.strict,
+                ) {
                     return Vec::new();
                 }
                 let (range, content) = structured_fix::minimal_replace(bytes, &doc);
@@ -402,6 +429,7 @@ impl Fixer for StructuredFixer {
                         };
                         let verify = EditVerifier::Structured {
                             format: self.format,
+                            strict: self.strict,
                             query: segs_to_query(&segs),
                             expect: ExpectedValue::Scalar(want.clone()),
                         };
@@ -460,10 +488,18 @@ impl Fixer for StructuredFixer {
             && structured_fix::removal_uses_document(self.format)
         {
             let paths: Vec<Vec<PathSeg>> = located.iter().map(|n| to_segs(n.location())).collect();
-            let Some(doc) = structured_fix::document_remove(self.format, bytes, &paths) else {
+            let Some(doc) =
+                structured_fix::document_remove_strict(self.format, bytes, &paths, self.strict)
+            else {
                 return Vec::new();
             };
-            if !structured_fix::is_exact_edit(self.format, &value, &doc, &removals(&paths)) {
+            if !structured_fix::is_exact_edit_strict(
+                self.format,
+                &value,
+                &doc,
+                &removals(&paths),
+                self.strict,
+            ) {
                 return Vec::new();
             }
             let (range, content) = structured_fix::minimal_replace(bytes, &doc);
@@ -506,11 +542,12 @@ impl Fixer for StructuredFixer {
                                         want,
                                     )?
                                 } else {
-                                    structured_fix::checked_value_edits(
+                                    structured_fix::checked_value_edits_strict(
                                         self.format,
                                         bytes,
                                         &value,
                                         &[(segs.clone(), want.clone())],
+                                        self.strict,
                                     )
                                     .pop()??
                                 };
@@ -523,6 +560,7 @@ impl Fixer for StructuredFixer {
                                 applicability: self.applicability,
                                 verify: EditVerifier::Structured {
                                     format: self.format,
+                                    strict: self.strict,
                                     query: segs_to_query(&segs),
                                     expect: ExpectedValue::Scalar(want.clone()),
                                 },
@@ -579,11 +617,12 @@ impl Fixer for StructuredFixer {
                 // The span, the serialized value (which the predicate proved
                 // exists), and for a whole-document format the check that the
                 // splice changes this node only (`checked_value_edits`).
-                let Some((range, content)) = structured_fix::checked_value_edits(
+                let Some((range, content)) = structured_fix::checked_value_edits_strict(
                     self.format,
                     bytes,
                     &value,
                     &[(segs, want.clone())],
+                    self.strict,
                 )
                 .pop()
                 .flatten() else {
@@ -631,20 +670,26 @@ impl Fixer for StructuredFixer {
                 // these nodes (`checked_removal_edits`), or none is emitted.
                 let paths: Vec<Vec<PathSeg>> =
                     located.iter().map(|n| to_segs(n.location())).collect();
-                structured_fix::checked_removal_edits(self.format, bytes, &value, &paths)
-                    .into_iter()
-                    .flatten()
-                    .map(|(range, content)| CollectedEdit {
-                        edit: FixEdit::ReplaceRange {
-                            path: file.to_path_buf(),
-                            range,
-                            content,
-                        },
-                        applicability: self.applicability,
-                        verify: self.verifier(ExpectedValue::Absent),
-                        isolation_group: None,
-                    })
-                    .collect()
+                structured_fix::checked_removal_edits_strict(
+                    self.format,
+                    bytes,
+                    &value,
+                    &paths,
+                    self.strict,
+                )
+                .into_iter()
+                .flatten()
+                .map(|(range, content)| CollectedEdit {
+                    edit: FixEdit::ReplaceRange {
+                        path: file.to_path_buf(),
+                        range,
+                        content,
+                    },
+                    applicability: self.applicability,
+                    verify: self.verifier(ExpectedValue::Absent),
+                    isolation_group: None,
+                })
+                .collect()
             }
             StructuredOp::Replace {
                 search,
@@ -729,7 +774,13 @@ impl Fixer for StructuredFixer {
                 let edits = if structured_fix::uses_verified_edits(self.format) {
                     vec![None; sets.len()]
                 } else {
-                    structured_fix::checked_value_edits(self.format, bytes, &value, &sets)
+                    structured_fix::checked_value_edits_strict(
+                        self.format,
+                        bytes,
+                        &value,
+                        &sets,
+                        self.strict,
+                    )
                 };
                 sets.into_iter()
                     .zip(edits)
@@ -765,6 +816,7 @@ impl Fixer for StructuredFixer {
                             // only the scalar value, so the node stays at this path.
                             verify: EditVerifier::Structured {
                                 format: self.format,
+                                strict: self.strict,
                                 query: segs_to_query(&segs),
                                 expect: ExpectedValue::Matches(matches.clone()),
                             },
@@ -1448,6 +1500,61 @@ mod tests {
             "one parse resolves every span"
         );
         assert_eq!(apply(&src, edits), "- x: \"v1.0\"\n".repeat(MATCHES));
+    }
+
+    #[test]
+    fn strict_json_fixer_declines_jsonc_bom_and_invalid_utf8_and_sets_strict_verifier() {
+        let jsonc = b"{\n  // comment\n  \"a\": \"old\",\n}\n";
+        let bom = "\u{feff}{\"a\": \"old\"}\n".as_bytes();
+        let bad_utf8 = b"{\"a\": \"\xff\"}";
+        let valid = b"{\"a\": \"old\"}\n";
+
+        let set_strict = StructuredFixer::set(
+            Format::Json,
+            jp("$.a"),
+            "$.a".into(),
+            json!("new"),
+            Applicability::Safe,
+        )
+        .with_strict(true);
+        for rejected in [jsonc.as_slice(), bom, bad_utf8.as_slice()] {
+            assert_eq!(
+                set_strict
+                    .collect_edits(&[], Path::new("a.json"), rejected, Path::new("/r"))
+                    .len(),
+                0
+            );
+        }
+        let edits = set_strict.collect_edits(&[], Path::new("a.json"), valid, Path::new("/r"));
+        assert_eq!(edits.len(), 1);
+        assert!(matches!(
+            edits[0].verify,
+            EditVerifier::Structured {
+                format: Format::Json,
+                strict: true,
+                ..
+            }
+        ));
+
+        let rem_strict =
+            StructuredFixer::remove(Format::Json, jp("$.a"), "$.a".into(), Applicability::Unsafe)
+                .with_strict(true);
+        assert_eq!(
+            rem_strict
+                .collect_edits(&[], Path::new("a.json"), jsonc, Path::new("/r"))
+                .len(),
+            0
+        );
+        let rem_edits = rem_strict.collect_edits(&[], Path::new("a.json"), valid, Path::new("/r"));
+        assert_eq!(rem_edits.len(), 1);
+        assert!(matches!(
+            rem_edits[0].verify,
+            EditVerifier::Structured {
+                format: Format::Json,
+                strict: true,
+                ..
+            }
+        ));
     }
 
     #[test]

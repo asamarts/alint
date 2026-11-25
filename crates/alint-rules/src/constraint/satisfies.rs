@@ -2,7 +2,9 @@
 //! version satisfies a semantic version range under `node`, `cargo`, or
 //! `pep440-basic` dialect semantics.
 
-use alint_core::semver_eval::{parse_range, parse_version};
+use std::borrow::Cow;
+
+use alint_core::semver_eval::{SemverRange, SemverVersion, parse_range, parse_version};
 
 use super::{Related, Run, Spot, type_of};
 use crate::constraint::values::{Key, Scalar};
@@ -29,133 +31,140 @@ impl Run<'_> {
             }
             SatisfiesRange::Literal { .. } => None,
         };
-        let has_literal = version_pos.is_none() || range_pos.is_none();
-        let pair_sensitive = self.redact_all
+        let hide_dialect = self.redact_all || self.rule.hide_literals;
+        let pair_sensitive = hide_dialect
             || version_pos.is_some_and(|(_, p)| self.sensitive(p))
-            || range_pos.is_some_and(|(_, p)| self.sensitive(p))
-            || (has_literal && self.rule.hide_literals);
+            || range_pos.is_some_and(|(_, p)| self.sensitive(p));
+        let dialect_suffix = if hide_dialect {
+            String::new()
+        } else {
+            format!(" (dialect `{}`)", satisfies.dialect.as_str())
+        };
 
         for row in 0..self.rows.rows.len() {
-            let (ver_scalar, ver_parsed) = match &satisfies.version {
-                SatisfiesVersion::Field(name) => {
-                    let pos = version_pos.expect("checked above").1;
-                    let Some(scalar) = self.scalar(row, pos, "assert.satisfies.version") else {
-                        return;
-                    };
-                    if scalar.is_null() {
-                        let cell = self.cell(row, pos);
-                        let message = format!(
-                            "`assert.satisfies.version`: `{name}` is {} at {}; `satisfies` \
-                             requires non-null string versions (filter nullable/optional rows \
-                             with `where:`)",
-                            if scalar.is_missing() {
-                                "missing"
-                            } else {
-                                "null"
-                            },
-                            self.located(cell)
-                        );
-                        self.fail(Some(cell.at.resource.path().as_path()), message);
-                        return;
-                    }
-                    let Scalar::String(raw) = &scalar else {
-                        let cell = self.cell(row, pos);
-                        let message = format!(
-                            "`assert.satisfies.version`: `{name}` holds {} at {}, but \
-                             `satisfies` requires a string version",
-                            type_of(cell),
-                            self.located(cell)
-                        );
-                        self.fail(Some(cell.at.resource.path().as_path()), message);
-                        return;
-                    };
-                    let parsed = match parse_version(raw) {
-                        Ok(v) => v,
-                        Err(err) => {
+            let (ver_scalar, ver_parsed): (Option<Scalar>, Cow<'_, SemverVersion>) =
+                match &satisfies.version {
+                    SatisfiesVersion::Field(name) => {
+                        let pos = version_pos.expect("checked above").1;
+                        let Some(scalar) = self.scalar(row, pos, "assert.satisfies.version") else {
+                            return;
+                        };
+                        if scalar.is_null() {
                             let cell = self.cell(row, pos);
-                            let detail = if pair_sensitive {
-                                "not a valid semantic version".to_string()
-                            } else {
-                                format!("not a valid semantic version ({err})")
-                            };
                             let message = format!(
-                                "`assert.satisfies.version`: `{name}` is {} at {}: {detail}",
-                                scalar.show(pair_sensitive),
+                                "`assert.satisfies.version`: `{name}` is {} at {}; `satisfies` \
+                                 requires non-null string versions (filter nullable/optional rows \
+                                 with `where:`)",
+                                if scalar.is_missing() {
+                                    "missing"
+                                } else {
+                                    "null"
+                                },
                                 self.located(cell)
                             );
                             self.fail(Some(cell.at.resource.path().as_path()), message);
                             return;
                         }
-                    };
-                    (scalar, parsed)
-                }
-                SatisfiesVersion::Literal { raw, parsed } => {
-                    (Scalar::String(raw.as_str().into()), parsed.clone())
-                }
-            };
+                        let Scalar::String(raw) = &scalar else {
+                            let cell = self.cell(row, pos);
+                            let message = format!(
+                                "`assert.satisfies.version`: `{name}` holds {} at {}, but \
+                                 `satisfies` requires a string version",
+                                type_of(cell),
+                                self.located(cell)
+                            );
+                            self.fail(Some(cell.at.resource.path().as_path()), message);
+                            return;
+                        };
+                        let parsed = match parse_version(raw) {
+                            Ok(v) => v,
+                            Err(err) => {
+                                let cell = self.cell(row, pos);
+                                let detail = if pair_sensitive {
+                                    "not a valid semantic version".to_string()
+                                } else {
+                                    format!("not a valid semantic version ({err})")
+                                };
+                                let message = format!(
+                                    "`assert.satisfies.version`: `{name}` is {} at {}: {detail}",
+                                    scalar.show(pair_sensitive),
+                                    self.located(cell)
+                                );
+                                self.fail(Some(cell.at.resource.path().as_path()), message);
+                                return;
+                            }
+                        };
+                        (Some(scalar), Cow::Owned(parsed))
+                    }
+                    SatisfiesVersion::Literal { parsed, .. } => (None, Cow::Borrowed(parsed)),
+                };
 
-            let (range_scalar, range_parsed) = match &satisfies.range {
-                SatisfiesRange::Field(name) => {
-                    let pos = range_pos.expect("checked above").1;
-                    let Some(scalar) = self.scalar(row, pos, "assert.satisfies.range") else {
-                        return;
-                    };
-                    if scalar.is_null() {
-                        let cell = self.cell(row, pos);
-                        let message = format!(
-                            "`assert.satisfies.range`: `{name}` is {} at {}; `satisfies` requires \
-                             non-null string ranges (filter nullable/optional rows with `where:`)",
-                            if scalar.is_missing() {
-                                "missing"
-                            } else {
-                                "null"
-                            },
-                            self.located(cell)
-                        );
-                        self.fail(Some(cell.at.resource.path().as_path()), message);
-                        return;
-                    }
-                    let Scalar::String(raw) = &scalar else {
-                        let cell = self.cell(row, pos);
-                        let message = format!(
-                            "`assert.satisfies.range`: `{name}` holds {} at {}, but `satisfies` \
-                             requires a string range",
-                            type_of(cell),
-                            self.located(cell)
-                        );
-                        self.fail(Some(cell.at.resource.path().as_path()), message);
-                        return;
-                    };
-                    let parsed = match parse_range(raw, satisfies.dialect) {
-                        Ok(r) => r,
-                        Err(err) => {
+            let (range_scalar, range_parsed): (Option<Scalar>, Cow<'_, SemverRange>) =
+                match &satisfies.range {
+                    SatisfiesRange::Field(name) => {
+                        let pos = range_pos.expect("checked above").1;
+                        let Some(scalar) = self.scalar(row, pos, "assert.satisfies.range") else {
+                            return;
+                        };
+                        if scalar.is_null() {
                             let cell = self.cell(row, pos);
-                            let detail = if pair_sensitive {
-                                format!(
-                                    "not a valid `{}` version range",
-                                    satisfies.dialect.as_str()
-                                )
-                            } else {
-                                format!(
-                                    "not a valid `{}` version range ({err})",
-                                    satisfies.dialect.as_str()
-                                )
-                            };
                             let message = format!(
-                                "`assert.satisfies.range`: `{name}` is {} at {}: {detail}",
-                                scalar.show(pair_sensitive),
+                                "`assert.satisfies.range`: `{name}` is {} at {}; `satisfies` \
+                                 requires non-null string ranges (filter nullable/optional rows \
+                                 with `where:`)",
+                                if scalar.is_missing() {
+                                    "missing"
+                                } else {
+                                    "null"
+                                },
                                 self.located(cell)
                             );
                             self.fail(Some(cell.at.resource.path().as_path()), message);
                             return;
                         }
-                    };
-                    (scalar, parsed)
-                }
-                SatisfiesRange::Literal { raw, parsed } => {
-                    (Scalar::String(raw.as_str().into()), parsed.clone())
-                }
-            };
+                        let Scalar::String(raw) = &scalar else {
+                            let cell = self.cell(row, pos);
+                            let message = format!(
+                                "`assert.satisfies.range`: `{name}` holds {} at {}, but \
+                                 `satisfies` requires a string range",
+                                type_of(cell),
+                                self.located(cell)
+                            );
+                            self.fail(Some(cell.at.resource.path().as_path()), message);
+                            return;
+                        };
+                        let parsed = match parse_range(raw, satisfies.dialect) {
+                            Ok(r) => r,
+                            Err(err) => {
+                                let cell = self.cell(row, pos);
+                                let detail = if pair_sensitive {
+                                    if hide_dialect {
+                                        "not a valid version range".to_string()
+                                    } else {
+                                        format!(
+                                            "not a valid `{}` version range",
+                                            satisfies.dialect.as_str()
+                                        )
+                                    }
+                                } else {
+                                    format!(
+                                        "not a valid `{}` version range ({err})",
+                                        satisfies.dialect.as_str()
+                                    )
+                                };
+                                let message = format!(
+                                    "`assert.satisfies.range`: `{name}` is {} at {}: {detail}",
+                                    scalar.show(pair_sensitive),
+                                    self.located(cell)
+                                );
+                                self.fail(Some(cell.at.resource.path().as_path()), message);
+                                return;
+                            }
+                        };
+                        (Some(scalar), Cow::Owned(parsed))
+                    }
+                    SatisfiesRange::Literal { parsed, .. } => (None, Cow::Borrowed(parsed)),
+                };
 
             if range_parsed.matches(&ver_parsed, satisfies.include_prerelease) {
                 continue;
@@ -165,23 +174,32 @@ impl Run<'_> {
                 continue;
             }
 
-            let ver_shown = ver_scalar.show(pair_sensitive);
-            let range_shown = range_scalar.show(pair_sensitive);
+            let ver_shown = match (&ver_scalar, &satisfies.version) {
+                (Some(s), _) => s.show(pair_sensitive),
+                (None, SatisfiesVersion::Literal { raw, .. }) => {
+                    Scalar::String(raw.as_str().into()).show(pair_sensitive)
+                }
+                (None, SatisfiesVersion::Field(_)) => unreachable!(),
+            };
+            let range_shown = match (&range_scalar, &satisfies.range) {
+                (Some(s), _) => s.show(pair_sensitive),
+                (None, SatisfiesRange::Literal { raw, .. }) => {
+                    Scalar::String(raw.as_str().into()).show(pair_sensitive)
+                }
+                (None, SatisfiesRange::Field(_)) => unreachable!(),
+            };
             let message = match (version_pos, range_pos) {
                 (Some((v_name, _)), Some((r_name, _))) => format!(
                     "`{v_name}` is {ver_shown} and `{r_name}` is {range_shown} in this row; \
-                     version does not satisfy range (dialect `{}`)",
-                    satisfies.dialect.as_str()
+                     version does not satisfy range{dialect_suffix}"
                 ),
                 (Some((v_name, _)), None) => format!(
-                    "`{v_name}` is {ver_shown} here; expected a version satisfying {range_shown} \
-                     (dialect `{}`)",
-                    satisfies.dialect.as_str()
+                    "`{v_name}` is {ver_shown} here; expected a version satisfying \
+                     {range_shown}{dialect_suffix}"
                 ),
                 (None, Some((r_name, _))) => format!(
-                    "`{r_name}` is {range_shown} here; does not accept version {ver_shown} \
-                     (dialect `{}`)",
-                    satisfies.dialect.as_str()
+                    "`{r_name}` is {range_shown} here; does not accept version \
+                     {ver_shown}{dialect_suffix}"
                 ),
                 (None, None) => {
                     unreachable!("builder refuses both version_literal and range_literal")

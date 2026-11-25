@@ -1749,7 +1749,7 @@
     "scenario": "check/structured/no_duplicate_keys_fail.yml",
     "rule_id": "no-dup-keys",
     "path": ".github/workflows/ci.yml",
-    "fingerprint": "6a41887f40bdd464e4a05ee7cd7018ed335851d9128cda9c0932c2728a990645"
+    "fingerprint": "4738c644db5ac3243f46397529ff9094d7c5281e0c7544b192f5ac622e8ef143"
   },
   {
     "scenario": "check/structured/no_duplicate_keys_fail.yml",
