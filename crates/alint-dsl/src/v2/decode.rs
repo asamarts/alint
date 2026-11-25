@@ -14,7 +14,7 @@ use ayaml::{Mapping, Value};
 
 use super::model::{
     Alias, Entries, EntriesFormat, Field, FieldSource, Join, JoinSide, Member, Part, PathToken,
-    Predicate, Read, Reader, Reference, Relation, Rows, Selector, SelectorRef, SourceId,
+    Predicate, Read, Reader, Records, Reference, Relation, Rows, Selector, SelectorRef, SourceId,
     SourceObjects, Transform, Twins,
 };
 
@@ -31,6 +31,7 @@ pub(super) const SELECTOR_FILTER_KEYS: &[&str] = &[
 pub(super) const RELATION_KEYS: &[&str] = &[
     "from",
     "entries",
+    "records",
     "read",
     "optional",
     "union",
@@ -40,20 +41,23 @@ pub(super) const RELATION_KEYS: &[&str] = &[
     "where",
 ];
 /// A relation has exactly one of these.
-pub(super) const ROW_SOURCES: &[&str] = &["entries", "read", "union", "join"];
-pub(super) const PART_KEYS: &[&str] = &["from", "entries", "read", "optional"];
+pub(super) const ROW_SOURCES: &[&str] = &["entries", "records", "read", "union", "join"];
+pub(super) const PART_KEYS: &[&str] = &["from", "entries", "records", "read", "optional", "fields"];
 pub(super) const ENTRIES_KEYS: &[&str] = &["format", "at", "leaves"];
+pub(super) const RECORDS_KEYS: &[&str] = &["format", "at"];
 pub(super) const READ_KEYS: &[&str] = &["json", "yaml", "toml", "regex", "lines", "whole_file"];
 /// Extract forms `cross_file` has that a relation cannot read in v0.23.
 const UNREADABLE_FORMATS: &[&str] = &["xml", "dotenv", "properties", "ini", "hcl"];
 pub(super) const JOIN_KEYS: &[&str] = &["left", "right", "on", "unique"];
 pub(super) const FIELD_KEYS: &[&str] = &["source", "sensitive", "optional", "on_missing"];
 pub(super) const PREDICATE_KEYS: &[&str] = &["in", "not_in", "matches", "not_matches"];
+pub(super) const SPLIT_KEYS: &[&str] = &["on", "part", "required"];
 
 /// Where a value sits in a version 2 `selectors:` or `relations:` value, as
 /// far as its interpolation needs to know: whether it lands in a field that
-/// takes a boolean ([`BOOLEAN_FIELDS`]), where a value substituted from the
-/// environment reads as one. Everywhere else it stays text.
+/// takes a boolean ([`BOOLEAN_FIELDS`]) or integer ([`INTEGER_FIELDS`]), where
+/// a value substituted from the environment reads as that type. Everywhere
+/// else it stays text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Position {
     /// The value of `relations:`.
@@ -66,12 +70,22 @@ pub(crate) enum Position {
     Part,
     /// A relation's or a part's `entries:`.
     Entries,
-    /// A relation's `fields:`.
+    /// A relation's or part's `fields:`.
     Fields,
     /// One field's definition.
     Field,
+    /// A relation's `transform:`.
+    Transforms,
+    /// One field's transform list.
+    TransformList,
+    /// One transform entry (bare name or parameterized map).
+    TransformItem,
+    /// A `{ split: { ... } }` transform map.
+    Split,
     /// A field that takes a boolean.
     Boolean,
+    /// A field that takes an integer (`split.part`).
+    Integer,
     /// Anywhere else, all of `selectors:` too: text, or lists and maps of it.
     Text,
 }
@@ -82,28 +96,36 @@ impl Position {
     pub(crate) fn below(self, key: Option<&str>) -> Self {
         match (self, key) {
             (_, Some(key)) if BOOLEAN_FIELDS.contains(&(self, key)) => Self::Boolean,
+            (_, Some(key)) if INTEGER_FIELDS.contains(&(self, key)) => Self::Integer,
             (Self::Relations, Some(_)) => Self::Relation,
             (Self::Relation, Some("union")) => Self::Union,
             (Self::Union, None) => Self::Part,
             (Self::Relation | Self::Part, Some("entries")) => Self::Entries,
-            (Self::Relation, Some("fields")) => Self::Fields,
+            (Self::Relation | Self::Part, Some("fields")) => Self::Fields,
             (Self::Fields, Some(_)) => Self::Field,
+            (Self::Relation, Some("transform")) => Self::Transforms,
+            (Self::Transforms, Some(_)) => Self::TransformList,
+            (Self::TransformList, None) => Self::TransformItem,
+            (Self::TransformItem, Some("split")) => Self::Split,
             _ => Self::Text,
         }
     }
 }
 
 /// Each field of a selector or relation that takes a boolean, with where it
-/// sits; the decode reads each with `boolean()`. No field takes a number, and
-/// every other one takes text (or a list or map of it), as an `in:` list's
-/// members compare as text.
+/// sits; the decode reads each with `boolean()`.
 pub(crate) const BOOLEAN_FIELDS: &[(Position, &str)] = &[
     (Position::Relation, "optional"),
     (Position::Part, "optional"),
     (Position::Entries, "leaves"),
     (Position::Field, "sensitive"),
     (Position::Field, "optional"),
+    (Position::Split, "required"),
 ];
+
+/// Each field of a relation that takes an integer (`split.part`).
+pub(crate) const INTEGER_FIELDS: &[(Position, &str)] = &[(Position::Split, "part")];
+
 pub(super) const MEMBER_KEYS: &[&str] = &["relation", "field"];
 pub(super) const TRANSFORMS: &[&str] = &[
     "trim",
@@ -112,8 +134,10 @@ pub(super) const TRANSFORMS: &[&str] = &[
     "semver-minor",
     "strip-root",
 ];
-/// The field sources written as a bare name; `bound:`, `left.` and `right.`
-/// take an argument.
+pub(super) const PARAM_TRANSFORMS: &[&str] =
+    &["split", "strip_prefix", "strip_suffix", "prefix", "suffix"];
+/// The field sources written as a bare name; `bound:`, `record:`, `left.` and
+/// `right.` take an argument.
 pub(super) const NAMED_FIELD_SOURCES: &[(&str, FieldSource)] = &[
     ("path", FieldSource::Path(PathToken::Path)),
     ("dir", FieldSource::Path(PathToken::Dir)),
@@ -130,7 +154,8 @@ pub(super) const NAMED_FIELD_SOURCES: &[(&str, FieldSource)] = &[
 ];
 const FIELD_SOURCES: &str = "`path`, a path token (`dir`, `basename`, `stem`, `ext`, \
      `parent_name`), `entry.key`, `entry.value`, `entry.parent`, `entry.root`, `entry.path`, \
-     `value`, `bound: <JSONPath>`, or in a join's output `left.<field>` or `right.<field>`";
+     `value`, `bound: <JSONPath>`, `record: <JSONPath>`, or in a join's output `left.<field>` \
+     or `right.<field>`";
 
 /// The key of a `read:` form that reads no JSON, YAML or TOML document, which
 /// a `bound:` field reads its value from; `None` for one that does.
@@ -777,8 +802,8 @@ impl Decoder<'_> {
         let map = self.mapping(
             value,
             path,
-            "a relation: a map with `fields:` and one of `entries:`, `read:`, `union:` and \
-             `join:`",
+            "a relation: a map with `fields:` and one of `entries:`, `records:`, `read:`, \
+             `union:` and `join:`",
         )?;
         self.known_keys(map, path, "a relation", RELATION_KEYS)?;
         let present: Vec<&str> = ROW_SOURCES
@@ -786,8 +811,9 @@ impl Decoder<'_> {
             .copied()
             .filter(|key| map.contains_key(*key))
             .collect();
+        let has_top_fields = map.contains_key("fields");
         let rows = match present.as_slice() {
-            ["entries" | "read"] => Rows::Part(self.part(map, path)?),
+            ["entries" | "records" | "read"] => Rows::Part(self.part(map, path, false)?),
             [kind @ ("union" | "join")] => {
                 for key in ["from", "optional"] {
                     if map.contains_key(key) {
@@ -805,7 +831,11 @@ impl Decoder<'_> {
                     }
                 }
                 if *kind == "union" {
-                    Rows::Union(self.union(&map["union"], &format!("{path}.union"))?)
+                    Rows::Union(self.union(
+                        &map["union"],
+                        &format!("{path}.union"),
+                        has_top_fields,
+                    )?)
                 } else {
                     Rows::Join(self.join(&map["join"], &format!("{path}.join"))?)
                 }
@@ -813,8 +843,8 @@ impl Decoder<'_> {
             [] => {
                 return Err(self.error(
                     path,
-                    "a relation needs exactly one of `entries:`, `read:`, `union:` and \
-                     `join:`; it has none",
+                    "a relation needs exactly one of `entries:`, `records:`, `read:`, `union:` \
+                     and `join:`; it has none",
                 ));
             }
             many => {
@@ -822,20 +852,29 @@ impl Decoder<'_> {
                 return Err(self.error(
                     path,
                     format!(
-                        "a relation needs exactly one of `entries:`, `read:`, `union:` and \
-                         `join:`; it has {}",
+                        "a relation needs exactly one of `entries:`, `records:`, `read:`, \
+                         `union:` and `join:`; it has {}",
                         named.join(" and ")
                     ),
                 ));
             }
         };
-        let fields = map.get("fields").ok_or_else(|| {
-            self.error(
-                path,
-                "a relation needs `fields:`, a map from each field's name to its source",
-            )
-        })?;
-        let fields = self.fields(fields, &format!("{path}.fields"), &rows)?;
+        let fields = if let Rows::Union(parts) = &rows
+            && !has_top_fields
+        {
+            parts[0]
+                .fields
+                .clone()
+                .expect("every part of a per-part union has `fields:`")
+        } else {
+            let fields = map.get("fields").ok_or_else(|| {
+                self.error(
+                    path,
+                    "a relation needs `fields:`, a map from each field's name to its source",
+                )
+            })?;
+            self.fields(fields, &format!("{path}.fields"), &rows)?
+        };
         let transforms = map
             .get("transform")
             .map(|value| self.transforms(value, &format!("{path}.transform")))
@@ -857,13 +896,14 @@ impl Decoder<'_> {
         })
     }
 
-    /// A relation with `entries:` or `read:`, or a union's part: `map` holds
-    /// exactly one of the two (the caller checked).
-    fn part(&self, map: &Mapping, path: &str) -> Result<Part> {
+    /// A relation with `entries:`, `records:` or `read:`, or a union's part:
+    /// `map` holds exactly one of the three (the caller checked).
+    fn part(&self, map: &Mapping, path: &str, decode_part_fields: bool) -> Result<Part> {
         let from = map.get("from").ok_or_else(|| {
             self.error(
                 path,
-                "`entries:` and `read:` need `from:`, a selector name or an inline selector map",
+                "`entries:`, `records:` and `read:` need `from:`, a selector name or an inline \
+                 selector map",
             )
         })?;
         let from = self.selector_ref(from, &format!("{path}.from"))?;
@@ -880,22 +920,46 @@ impl Decoder<'_> {
                 ));
             }
             Reader::Entries(self.entries(entries, &format!("{path}.entries"))?)
+        } else if let Some(records) = map.get("records") {
+            if optional.is_some() {
+                return Err(self.error(
+                    &format!("{path}.optional"),
+                    "`optional:` applies to `read:` only (a `records:` path a resource lacks \
+                     yields no rows from it already); remove it",
+                ));
+            }
+            Reader::Records(self.records(records, &format!("{path}.records"))?)
         } else {
             Reader::Read {
                 read: self.read(&map["read"], &format!("{path}.read"))?,
                 optional: optional.unwrap_or(false),
             }
         };
-        Ok(Part { from, reader })
+        let fields = if decode_part_fields {
+            let fields_val = map.get("fields").ok_or_else(|| {
+                self.error(
+                    path,
+                    "a union without top-level `fields:` needs `fields:` on every part",
+                )
+            })?;
+            Some(self.fields_for_reader(fields_val, &format!("{path}.fields"), &reader)?)
+        } else {
+            None
+        };
+        Ok(Part {
+            from,
+            reader,
+            fields,
+        })
     }
 
-    fn union(&self, value: &Value, path: &str) -> Result<Vec<Part>> {
+    fn union(&self, value: &Value, path: &str, has_top_fields: bool) -> Result<Vec<Part>> {
         let Some(parts) = value.as_sequence() else {
             return Err(self.error(
                 path,
                 format!(
-                    "expected a list of parts, each `{{ from, entries or read, optional }}`, \
-                     found {}",
+                    "expected a list of parts, each `{{ from, entries or records or read, \
+                     optional, fields }}`, found {}",
                     describe(value)
                 ),
             ));
@@ -904,7 +968,8 @@ impl Decoder<'_> {
             return Err(self.error(
                 path,
                 "a union needs at least two parts; a relation with one part is a plain \
-                 relation, so write its `from:` and `entries:` or `read:` on the relation",
+                 relation, so write its `from:` and `entries:`, `records:` or `read:` on the \
+                 relation",
             ));
         }
         let mut out = Vec::with_capacity(parts.len());
@@ -913,50 +978,133 @@ impl Decoder<'_> {
             let map = self.mapping(
                 part,
                 &part_path,
-                "a union part: a map with `from:` and `entries:` or `read:`",
+                "a union part: a map with `from:` and `entries:`, `records:` or `read:`",
             )?;
             self.known_keys(map, &part_path, "a union part", PART_KEYS)?;
-            match (map.contains_key("entries"), map.contains_key("read")) {
-                (true, false) | (false, true) => {}
-                (has_entries, _) => {
+            let part_has_fields = map.contains_key("fields");
+            if has_top_fields && part_has_fields {
+                return Err(self.error(
+                    &format!("{part_path}.fields"),
+                    "specify `fields:` either at the relation level or on every `union:` part, \
+                     not both",
+                ));
+            }
+            let readers: Vec<&str> = ["entries", "records", "read"]
+                .into_iter()
+                .filter(|key| map.contains_key(*key))
+                .collect();
+            if readers.len() != 1 {
+                let found = if readers.is_empty() {
+                    "none".to_string()
+                } else {
+                    readers
+                        .iter()
+                        .map(|k| format!("`{k}:`"))
+                        .collect::<Vec<_>>()
+                        .join(" and ")
+                };
+                return Err(self.error(
+                    &part_path,
+                    format!(
+                        "a union part needs exactly one of `entries:`, `records:` and `read:`; \
+                         it has {found}"
+                    ),
+                ));
+            }
+            out.push(self.part(map, &part_path, !has_top_fields)?);
+        }
+        if !has_top_fields {
+            self.align_union_part_fields(&mut out, path)?;
+        }
+        Ok(out)
+    }
+
+    /// Check that every part of a per-part `union:` binds the exact same set
+    /// of field names with identical `sensitive` flags, and reorder each
+    /// part's `fields` vec to match part 0's field order (ADR-0050 D8, #592).
+    fn align_union_part_fields(&self, parts: &mut [Part], path: &str) -> Result<()> {
+        let first = parts[0]
+            .fields
+            .as_ref()
+            .expect("part 0 has `fields:`")
+            .clone();
+        let expected_names: Vec<&str> = first.iter().map(|(n, _)| n.as_str()).collect();
+        for (index, part) in parts.iter_mut().enumerate().skip(1) {
+            let fields_path = format!("{path}[{index}].fields");
+            let current = part.fields.as_ref().expect("every part has `fields:`");
+            for (name, _) in current {
+                if !expected_names.contains(&name.as_str()) {
                     return Err(self.error(
-                        &part_path,
+                        &format!("{fields_path}.{name}"),
                         format!(
-                            "a union part needs exactly one of `entries:` and `read:`; it has {}",
-                            if has_entries { "both" } else { "neither" }
+                            "every part of a `union:` must declare the same field names; \
+                             `union[0]` has no field `{name}` (its fields are {})",
+                            listed(&expected_names)
                         ),
                     ));
                 }
             }
-            out.push(self.part(map, &part_path)?);
+            let mut aligned = Vec::with_capacity(first.len());
+            for (expected_name, expected_field) in &first {
+                let Some((_, found)) = current.iter().find(|(n, _)| n == expected_name) else {
+                    return Err(self.error(
+                        &fields_path,
+                        format!(
+                            "every part of a `union:` must declare the same field names; missing \
+                             `{expected_name}` declared in `union[0]`"
+                        ),
+                    ));
+                };
+                if found.sensitive != expected_field.sensitive {
+                    return Err(self.error(
+                        &format!("{fields_path}.{expected_name}"),
+                        format!(
+                            "`{expected_name}` must have the same `sensitive` setting in every \
+                             `union:` part (`union[0]` sets `sensitive: {}`)",
+                            expected_field.sensitive
+                        ),
+                    ));
+                }
+                aligned.push((expected_name.clone(), found.clone()));
+            }
+            part.fields = Some(aligned);
         }
-        Ok(out)
+        Ok(())
+    }
+
+    fn structured_format(&self, map: &Mapping, path: &str, what: &str) -> Result<EntriesFormat> {
+        let format = map.get("format").ok_or_else(|| {
+            self.error(
+                path,
+                format!("{what} needs `format:` (`json`, `yaml` or `toml`)"),
+            )
+        })?;
+        let format_path = format!("{path}.format");
+        match self.string(format, &format_path, "`json`, `yaml` or `toml`")? {
+            "json" => Ok(EntriesFormat::Json),
+            "yaml" => Ok(EntriesFormat::Yaml),
+            "toml" => Ok(EntriesFormat::Toml),
+            other => {
+                let noun = if what == "`entries:`" {
+                    "entries"
+                } else {
+                    "records"
+                };
+                Err(self.error(
+                    &format_path,
+                    format!(
+                        "unknown format `{other}`; expected one of `json`, `yaml`, `toml` (in \
+                         this build {noun} are read from JSON, YAML and TOML only)"
+                    ),
+                ))
+            }
+        }
     }
 
     fn entries(&self, value: &Value, path: &str) -> Result<Entries> {
         let map = self.mapping(value, path, "a map with `format:`, `at:` and `leaves:`")?;
         self.known_keys(map, path, "`entries:`", ENTRIES_KEYS)?;
-        let format = map.get("format").ok_or_else(|| {
-            self.error(
-                path,
-                "`entries:` needs `format:` (`json`, `yaml` or `toml`)",
-            )
-        })?;
-        let format_path = format!("{path}.format");
-        let format = match self.string(format, &format_path, "`json`, `yaml` or `toml`")? {
-            "json" => EntriesFormat::Json,
-            "yaml" => EntriesFormat::Yaml,
-            "toml" => EntriesFormat::Toml,
-            other => {
-                return Err(self.error(
-                    &format_path,
-                    format!(
-                        "unknown format `{other}`; expected one of `json`, `yaml`, `toml` (in \
-                         this build entries are read from JSON, YAML and TOML only)"
-                    ),
-                ));
-            }
-        };
+        let format = self.structured_format(map, path, "`entries:`")?;
         let at = map.get("at").ok_or_else(|| {
             self.error(
                 path,
@@ -971,6 +1119,21 @@ impl Decoder<'_> {
             .transpose()?
             .unwrap_or(false);
         Ok(Entries { format, at, leaves })
+    }
+
+    fn records(&self, value: &Value, path: &str) -> Result<Records> {
+        let map = self.mapping(value, path, "a map with `format:` and `at:`")?;
+        self.known_keys(map, path, "`records:`", RECORDS_KEYS)?;
+        let format = self.structured_format(map, path, "`records:`")?;
+        let at = map.get("at").ok_or_else(|| {
+            self.error(
+                path,
+                "`records:` needs `at:`, a JSONPath or a list of them selecting the object \
+                 elements that become rows",
+            )
+        })?;
+        let at = self.paths_list(at, &format!("{path}.at"))?;
+        Ok(Records { format, at })
     }
 
     /// A JSON path, or a non-empty list of them.
@@ -1161,6 +1324,26 @@ impl Decoder<'_> {
         Ok(fields)
     }
 
+    fn fields_for_reader(
+        &self,
+        value: &Value,
+        path: &str,
+        reader: &Reader,
+    ) -> Result<Vec<(String, Field)>> {
+        let map = self.mapping(value, path, "a map from each field's name to its source")?;
+        if map.is_empty() {
+            return Err(self.error(path, "a union part names at least one field"));
+        }
+        let mut fields = Vec::with_capacity(map.len());
+        for (name, definition) in map {
+            let (name, field_path) = self.field_key(name, path)?;
+            let field = self.field(definition, &field_path)?;
+            self.field_fits_reader(&field.source, reader, &field_path)?;
+            fields.push((name, field));
+        }
+        Ok(fields)
+    }
+
     fn field(&self, value: &Value, path: &str) -> Result<Field> {
         match value {
             Value::String(text) => Ok(Field {
@@ -1173,6 +1356,13 @@ impl Decoder<'_> {
                         path,
                         "unknown key `bound` in a field; a bound field's source is the string \
                          `\"bound: <JSONPath>\"`, as in `{ source: \"bound: $.name\" }`",
+                    ));
+                }
+                if map.contains_key("record") {
+                    return Err(self.error(
+                        path,
+                        "unknown key `record` in a field; a record field's source is the string \
+                         `\"record: <JSONPath>\"`, as in `{ source: \"record: $.name\" }`",
                     ));
                 }
                 self.known_keys(map, path, "a field", FIELD_KEYS)?;
@@ -1196,34 +1386,49 @@ impl Decoder<'_> {
                     .transpose()?;
                 let mut source = self.field_source(source, &source_path)?;
                 if optional.is_some() || on_missing.is_some() {
-                    let FieldSource::Bound {
-                        optional: opt,
-                        on_missing: mode,
-                        ..
-                    } = &mut source
-                    else {
-                        let key = if optional.is_some() {
-                            "optional"
-                        } else {
-                            "on_missing"
-                        };
-                        return Err(self.error(
-                            &format!("{path}.{key}"),
-                            format!(
-                                "`{key}:` applies only to a `bound:` field (e.g. `source: \
-                                 \"bound: $.name\"`)"
-                            ),
-                        ));
-                    };
-                    let is_optional = optional.unwrap_or(false);
-                    if !is_optional && on_missing.is_some() {
-                        return Err(self.error(
-                            &format!("{path}.on_missing"),
-                            "`on_missing:` applies only when `optional: true` is set",
-                        ));
+                    match &mut source {
+                        FieldSource::Bound {
+                            optional: opt,
+                            on_missing: mode,
+                            ..
+                        } => {
+                            let is_optional = optional.unwrap_or(false);
+                            if !is_optional && on_missing.is_some() {
+                                return Err(self.error(
+                                    &format!("{path}.on_missing"),
+                                    "`on_missing:` applies only when `optional: true` is set",
+                                ));
+                            }
+                            *opt = is_optional;
+                            *mode = on_missing.unwrap_or_default();
+                        }
+                        FieldSource::Record { optional: opt, .. } => {
+                            if on_missing.is_some() {
+                                return Err(self.error(
+                                    &format!("{path}.on_missing"),
+                                    "`on_missing:` applies only to a `bound:` field; an optional \
+                                     `record:` field always emits a missing cell",
+                                ));
+                            }
+                            *opt = optional.unwrap_or(false);
+                        }
+                        _ => {
+                            let key = if optional.is_some() {
+                                "optional"
+                            } else {
+                                "on_missing"
+                            };
+                            let target = if key == "optional" {
+                                "a `bound:` or `record:` field"
+                            } else {
+                                "a `bound:` field (e.g. `source: \"bound: $.name\"`)"
+                            };
+                            return Err(self.error(
+                                &format!("{path}.{key}"),
+                                format!("`{key}:` applies only to {target}"),
+                            ));
+                        }
                     }
-                    *opt = is_optional;
-                    *mode = on_missing.unwrap_or_default();
                 }
                 Ok(Field { source, sensitive })
             }
@@ -1268,6 +1473,16 @@ impl Decoder<'_> {
                 optional: false,
                 on_missing: super::model::BoundMissing::Skip,
             }
+        } else if let Some(query) = text.strip_prefix("record:") {
+            let query = query.trim();
+            if query.is_empty() {
+                return Err(self.error(path, "`record:` needs a JSONPath, as in `record: $.name`"));
+            }
+            self.json_path(query, path)?;
+            FieldSource::Record {
+                query: query.to_string(),
+                optional: false,
+            }
         } else if let Some((side, field)) = text
             .strip_prefix("left.")
             .map(|field| (JoinSide::Left, field))
@@ -1286,10 +1501,8 @@ impl Decoder<'_> {
         })
     }
 
-    /// Refuse a source the relation's rows cannot have: a join's fields name
-    /// a side; `entries:` rows have entries, `read:` rows a value. Which part
-    /// of a union binds which field is the plan check's.
-    fn field_fits_rows(&self, source: &FieldSource, rows: &Rows, path: &str) -> Result<()> {
+    /// Refuse a source a single part's `reader` cannot have.
+    fn field_fits_reader(&self, source: &FieldSource, reader: &Reader, path: &str) -> Result<()> {
         let entry = matches!(
             source,
             FieldSource::EntryKey
@@ -1298,35 +1511,36 @@ impl Decoder<'_> {
                 | FieldSource::EntryRoot
                 | FieldSource::EntryPath
         );
-        let problem = match (rows, source) {
-            (Rows::Join(_), FieldSource::Side(..)) => None,
-            (Rows::Join(_), _) => Some(
-                "a join's output fields each name a side: write `left.<field>` or \
-                 `right.<field>` (nothing is copied implicitly)",
-            ),
+        let problem = match (reader, source) {
             (_, FieldSource::Side(..)) => Some(
                 "`left.<field>` and `right.<field>` name the sides of a `join:`, which this \
                  relation does not have",
             ),
-            (Rows::Part(part), FieldSource::Value) if matches!(part.reader, Reader::Entries(_)) => {
+            (Reader::Entries(_), FieldSource::Value) => {
                 Some("`value` is a `read:` row's value; an `entries:` row has `entry.value`")
             }
-            (Rows::Part(part), _) if entry && matches!(part.reader, Reader::Read { .. }) => {
+            (Reader::Entries(_), FieldSource::Record { .. }) => {
+                Some("`record:` sources need `records:`; an `entries:` row has `entry.*`")
+            }
+            (Reader::Records(_), _) if entry => {
+                Some("`entry.*` sources need `entries:`; a `records:` row has `record:`")
+            }
+            (Reader::Records(_), FieldSource::Value) => {
+                Some("`value` is a `read:` row's value; a `records:` row has `record:`")
+            }
+            (Reader::Read { .. }, _) if entry => {
                 Some("`entry.*` sources need `entries:`; a `read:` row has `value`")
             }
-            (
-                Rows::Part(Part {
-                    reader: Reader::Read { read, .. },
-                    ..
-                }),
-                FieldSource::Bound { .. },
-            ) => {
+            (Reader::Read { .. }, FieldSource::Record { .. }) => {
+                Some("`record:` sources need `records:`; a `read:` row has `value`")
+            }
+            (Reader::Read { read, .. }, FieldSource::Bound { .. }) => {
                 if let Some(form) = unstructured_form(read) {
                     return Err(self.error(
                         path,
                         format!(
-                            "{}; read the file with `entries:`, or with `read:` and `json:`, \
-                             `yaml:` or `toml:`",
+                            "{}; read the file with `entries:`, `records:`, or with `read:` and \
+                             `json:`, `yaml:` or `toml:`",
                             unbound_by(form)
                         ),
                     ));
@@ -1338,6 +1552,38 @@ impl Decoder<'_> {
         match problem {
             Some(problem) => Err(self.error(path, problem)),
             None => Ok(()),
+        }
+    }
+
+    /// Refuse a source the relation's rows cannot have: a join's fields name
+    /// a side; `entries:` rows have entries, `records:` rows have `record:`,
+    /// `read:` rows have a value. Which part of a shared-fields union binds
+    /// which field is the plan check's.
+    fn field_fits_rows(&self, source: &FieldSource, rows: &Rows, path: &str) -> Result<()> {
+        match rows {
+            Rows::Join(_) => {
+                if matches!(source, FieldSource::Side(..)) {
+                    Ok(())
+                } else {
+                    Err(self.error(
+                        path,
+                        "a join's output fields each name a side: write `left.<field>` or \
+                         `right.<field>` (nothing is copied implicitly)",
+                    ))
+                }
+            }
+            Rows::Part(part) => self.field_fits_reader(source, &part.reader, path),
+            Rows::Union(_) => {
+                if matches!(source, FieldSource::Side(..)) {
+                    Err(self.error(
+                        path,
+                        "`left.<field>` and `right.<field>` name the sides of a `join:`, which \
+                         this relation does not have",
+                    ))
+                } else {
+                    Ok(())
+                }
+            }
         }
     }
 
@@ -1356,8 +1602,9 @@ impl Decoder<'_> {
                     return Err(self.error(
                         &field_path,
                         format!(
-                            "expected a non-empty list of transforms ({}), found {}",
+                            "expected a non-empty list of transforms ({} or {}), found {}",
                             listed(TRANSFORMS),
+                            listed(PARAM_TRANSFORMS),
                             describe(list)
                         ),
                     ));
@@ -1366,34 +1613,142 @@ impl Decoder<'_> {
             let mut transforms = Vec::with_capacity(items.len());
             for (index, item) in items.iter().enumerate() {
                 let item_path = format!("{field_path}[{index}]");
-                let transform = match self.string(item, &item_path, "a transform name")? {
-                    "trim" => Transform::Trim,
-                    "lower" => Transform::Lower,
-                    "semver-major" => Transform::SemverMajor,
-                    "semver-minor" => Transform::SemverMinor,
-                    "strip-root" => Transform::StripRoot,
-                    "cldr-plurals" => {
-                        return Err(self.error(
-                            &item_path,
-                            "`cldr-plurals` is not a transform: CLDR plural collapse is \
-                             `plurals: cldr`, an option of a `set` assertion",
-                        ));
-                    }
-                    other => {
-                        return Err(self.error(
-                            &item_path,
-                            format!(
-                                "unknown transform `{other}`; expected one of {}",
-                                listed(TRANSFORMS)
-                            ),
-                        ));
-                    }
-                };
-                transforms.push(transform);
+                transforms.push(self.transform_item(item, &item_path)?);
             }
             out.push((field, transforms));
         }
         Ok(out)
+    }
+
+    fn transform_item(&self, item: &Value, item_path: &str) -> Result<Transform> {
+        match item {
+            Value::String(name) => match name.as_str() {
+                "trim" => Ok(Transform::Trim),
+                "lower" => Ok(Transform::Lower),
+                "semver-major" => Ok(Transform::SemverMajor),
+                "semver-minor" => Ok(Transform::SemverMinor),
+                "strip-root" => Ok(Transform::StripRoot),
+                "cldr-plurals" => Err(self.error(
+                    item_path,
+                    "`cldr-plurals` is not a transform: CLDR plural collapse is `plurals: cldr`, \
+                     an option of a `set` assertion",
+                )),
+                other => Err(self.error(
+                    item_path,
+                    format!(
+                        "unknown transform `{other}`; expected one of {} or a parameterized map \
+                         ({})",
+                        listed(TRANSFORMS),
+                        listed(PARAM_TRANSFORMS)
+                    ),
+                )),
+            },
+            Value::Mapping(map) => self.param_transform(map, item_path),
+            other => Err(self.error(
+                item_path,
+                format!(
+                    "expected a transform name or parameterized transform map, found {}",
+                    describe(other)
+                ),
+            )),
+        }
+    }
+
+    fn param_transform(&self, map: &Mapping, path: &str) -> Result<Transform> {
+        self.known_keys(map, path, "a parameterized transform", PARAM_TRANSFORMS)?;
+        let mut iter = map.iter();
+        let (Some((key, operand)), None) = (iter.next(), iter.next()) else {
+            return Err(self.error(
+                path,
+                format!(
+                    "a parameterized transform takes exactly one of {}; it has {}",
+                    listed(PARAM_TRANSFORMS),
+                    if map.is_empty() { "none" } else { "several" }
+                ),
+            ));
+        };
+        let kind = key.as_str().unwrap_or_default();
+        let op_path = format!("{path}.{kind}");
+        match kind {
+            "split" => self.split_transform(operand, &op_path),
+            "strip_prefix" => Ok(Transform::StripPrefix(
+                self.string(operand, &op_path, "a prefix string")?
+                    .to_string(),
+            )),
+            "strip_suffix" => self.strip_suffix_transform(operand, &op_path),
+            "prefix" => Ok(Transform::Prefix(
+                self.string(operand, &op_path, "a prefix string")?
+                    .to_string(),
+            )),
+            _ => Ok(Transform::Suffix(
+                self.string(operand, &op_path, "a suffix string")?
+                    .to_string(),
+            )),
+        }
+    }
+
+    fn split_transform(&self, value: &Value, path: &str) -> Result<Transform> {
+        let map = self.mapping(
+            value,
+            path,
+            "a map with `on:`, `part:`, and optional `required:`",
+        )?;
+        self.known_keys(map, path, "`split:`", SPLIT_KEYS)?;
+        let on_val = map.get("on").ok_or_else(|| {
+            self.error(path, "`split:` needs `on:`, a non-empty separator string")
+        })?;
+        let on_path = format!("{path}.on");
+        let on = self.string(on_val, &on_path, "a non-empty separator string")?;
+        if on.is_empty() {
+            return Err(self.error(&on_path, "`split.on` must be a non-empty string"));
+        }
+        let part_val = map
+            .get("part")
+            .ok_or_else(|| self.error(path, "`split:` needs `part:`, an integer segment index"))?;
+        let part_path = format!("{path}.part");
+        let part = part_val.as_i64().ok_or_else(|| {
+            self.error(
+                &part_path,
+                format!(
+                    "expected an integer segment index, found {}",
+                    describe(part_val)
+                ),
+            )
+        })?;
+        let required = map
+            .get("required")
+            .map(|value| self.boolean(value, &format!("{path}.required")))
+            .transpose()?
+            .unwrap_or(false);
+        Ok(Transform::Split {
+            on: on.to_string(),
+            part,
+            required,
+        })
+    }
+
+    fn strip_suffix_transform(&self, value: &Value, path: &str) -> Result<Transform> {
+        match value {
+            Value::String(s) => Ok(Transform::StripSuffix(vec![s.clone()])),
+            Value::Sequence(items) if !items.is_empty() => {
+                let mut suffixes = Vec::with_capacity(items.len());
+                for (index, item) in items.iter().enumerate() {
+                    let item_path = format!("{path}[{index}]");
+                    suffixes.push(
+                        self.string(item, &item_path, "a suffix string")?
+                            .to_string(),
+                    );
+                }
+                Ok(Transform::StripSuffix(suffixes))
+            }
+            other => Err(self.error(
+                path,
+                format!(
+                    "expected a suffix string or a non-empty list of them, found {}",
+                    describe(other)
+                ),
+            )),
+        }
     }
 
     fn filters(&self, value: &Value, path: &str) -> Result<Vec<(String, Vec<Predicate>)>> {

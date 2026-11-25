@@ -168,6 +168,16 @@ impl<'p> Fields<'p> {
             let Some(definition) = self.field(RelationId(at.0), at.1) else {
                 break;
             };
+            let relation = &self.plan.relations[at.0].relation;
+            if relation.uses_part_fields() {
+                let sources = relation.field_sources(at.1);
+                if let Some(first) = sources.first()
+                    && sources.iter().all(|f| f.source == first.source)
+                {
+                    found = Some(&first.source);
+                }
+                break;
+            }
             let FieldSource::Side(side, name) = &definition.source else {
                 found = Some(&definition.source);
                 break;
@@ -220,21 +230,22 @@ impl<'p> Fields<'p> {
             let Some(definition) = self.field(RelationId(at.0), at.1) else {
                 break;
             };
+            let relation = &self.plan.relations[at.0].relation;
+            if relation.uses_part_fields() {
+                found = relation
+                    .field_sources(at.1)
+                    .into_iter()
+                    .map(|f| source_holds(&f.source))
+                    .reduce(widen_holds)
+                    .unwrap_or(Holds::Any);
+                break;
+            }
             let (side, name) = match &definition.source {
-                FieldSource::Path(_)
-                | FieldSource::EntryKey
-                | FieldSource::EntryRoot
-                | FieldSource::EntryPath
-                | FieldSource::Value => {
-                    found = Holds::Strings;
-                    break;
-                }
-                FieldSource::EntryParent => {
-                    found = Holds::StringsOrNull;
-                    break;
-                }
-                FieldSource::EntryValue | FieldSource::Bound { .. } => break,
                 FieldSource::Side(side, name) => (side, name),
+                source => {
+                    found = source_holds(source);
+                    break;
+                }
             };
             let Rows::Join(join) = &self.plan.relations[at.0].relation.rows else {
                 break;
@@ -443,6 +454,31 @@ enum Holds {
     Any,
 }
 
+fn source_holds(source: &FieldSource) -> Holds {
+    match source {
+        FieldSource::Path(_)
+        | FieldSource::EntryKey
+        | FieldSource::EntryRoot
+        | FieldSource::EntryPath
+        | FieldSource::Value => Holds::Strings,
+        FieldSource::EntryParent => Holds::StringsOrNull,
+        FieldSource::EntryValue
+        | FieldSource::Bound { .. }
+        | FieldSource::Record { .. }
+        | FieldSource::Side(..) => Holds::Any,
+    }
+}
+
+fn widen_holds(a: Holds, b: Holds) -> Holds {
+    match (a, b) {
+        (Holds::Strings, Holds::Strings) => Holds::Strings,
+        (Holds::Strings | Holds::StringsOrNull, Holds::Strings | Holds::StringsOrNull) => {
+            Holds::StringsOrNull
+        }
+        _ => Holds::Any,
+    }
+}
+
 /// A field source as a config writes it.
 fn source_text(source: &FieldSource) -> String {
     match source {
@@ -462,18 +498,24 @@ fn source_text(source: &FieldSource) -> String {
         FieldSource::EntryPath => "entry.path".to_string(),
         FieldSource::Value => "value".to_string(),
         FieldSource::Bound { query, .. } => format!("bound: {query}"),
+        FieldSource::Record { query, .. } => format!("record: {query}"),
         FieldSource::Side(JoinSide::Left, field) => format!("left.{field}"),
         FieldSource::Side(JoinSide::Right, field) => format!("right.{field}"),
     }
 }
 
-const fn transform_text(transform: Transform) -> &'static str {
+const fn transform_text(transform: &Transform) -> &'static str {
     match transform {
         Transform::Trim => "trim",
         Transform::Lower => "lower",
         Transform::SemverMajor => "semver-major",
         Transform::SemverMinor => "semver-minor",
         Transform::StripRoot => "strip-root",
+        Transform::Split { .. } => "split",
+        Transform::StripPrefix(_) => "strip_prefix",
+        Transform::StripSuffix(_) => "strip_suffix",
+        Transform::Prefix(_) => "prefix",
+        Transform::Suffix(_) => "suffix",
     }
 }
 
@@ -518,8 +560,20 @@ fn unbound(reader: &Reader, source: &FieldSource) -> Option<String> {
         Reader::Entries(_) if *source == FieldSource::Value => Some(
             "`value` is a `read:` row's value; an `entries:` row has `entry.value`".to_string(),
         ),
+        Reader::Entries(_) if matches!(source, FieldSource::Record { .. }) => {
+            Some("`record:` sources need `records:`; an `entries:` row has `entry.*`".to_string())
+        }
+        Reader::Records(_) if entry => {
+            Some("`entry.*` sources need `entries:`; a `records:` row has `record:`".to_string())
+        }
+        Reader::Records(_) if *source == FieldSource::Value => {
+            Some("`value` is a `read:` row's value; a `records:` row has `record:`".to_string())
+        }
         Reader::Read { .. } if entry => {
             Some("`entry.*` sources need `entries:`; a `read:` row has `value`".to_string())
+        }
+        Reader::Read { .. } if matches!(source, FieldSource::Record { .. }) => {
+            Some("`record:` sources need `records:`; a `read:` row has `value`".to_string())
         }
         Reader::Read { read, .. } if matches!(source, FieldSource::Bound { .. }) => {
             unstructured_form(read).map(super::decode::unbound_by)
@@ -533,6 +587,7 @@ fn unbound(reader: &Reader, source: &FieldSource) -> Option<String> {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ReaderKind {
     Entries,
+    Records,
     /// A `read:` of a JSON, YAML or TOML document.
     Document,
     /// A `read:` of the file as text.
@@ -540,11 +595,12 @@ enum ReaderKind {
 }
 
 impl ReaderKind {
-    const ALL: [Self; 3] = [Self::Entries, Self::Document, Self::Text];
+    const ALL: [Self; 4] = [Self::Entries, Self::Records, Self::Document, Self::Text];
 
     const fn of(reader: &Reader) -> Self {
         match reader {
             Reader::Entries(_) => Self::Entries,
+            Reader::Records(_) => Self::Records,
             Reader::Read { read, .. } if unstructured_form(read).is_none() => Self::Document,
             Reader::Read { .. } => Self::Text,
         }
@@ -591,7 +647,7 @@ fn check_relation(fields: &Fields<'_>, id: RelationId) -> Result<()> {
 fn check_rows(fields: &Fields<'_>, relation: &RelationDef, at: &At<'_>) -> Result<()> {
     let plan = fields.plan;
     match &relation.rows {
-        Rows::Union(parts) => {
+        Rows::Union(parts) if !relation.uses_part_fields() => {
             // Whether a part binds a field depends only on its reader's kind,
             // so the first part of each kind is the first a field can fail on.
             let mut firsts: Vec<usize> = ReaderKind::ALL
@@ -659,7 +715,7 @@ fn check_rows(fields: &Fields<'_>, relation: &RelationDef, at: &At<'_>) -> Resul
                 }
             }
         }
-        Rows::Part(_) => {}
+        Rows::Part(_) | Rows::Union(_) => {}
     }
     Ok(())
 }
@@ -677,7 +733,18 @@ fn check_transforms(fields: &Fields<'_>, id: RelationId, at: &At<'_>) -> Result<
         };
         // A join's output field holds what the side's field it copies held.
         let origin = fields.copied(id, field_name);
+        let any_path_origin = if relation.uses_part_fields() {
+            relation
+                .field_sources(field_name)
+                .into_iter()
+                .any(|f| matches!(f.source, FieldSource::Path(_) | FieldSource::EntryPath))
+        } else {
+            matches!(origin, Some(FieldSource::Path(_) | FieldSource::EntryPath))
+        };
         let bound_to = match (&field.source, origin) {
+            (_, None) if relation.uses_part_fields() => {
+                "different sources across `union:` parts".to_string()
+            }
             (FieldSource::Side(..), Some(origin)) => format!(
                 "`{}`, a copy of `{}`",
                 source_text(&field.source),
@@ -689,27 +756,30 @@ fn check_transforms(fields: &Fields<'_>, id: RelationId, at: &At<'_>) -> Result<
             ),
             (source, _) => format!("`{}`", source_text(source)),
         };
+        let scope = if relation.uses_part_fields() {
+            " in every part"
+        } else {
+            ""
+        };
         for (index, transform) in transforms.iter().enumerate() {
             let problem = match transform {
                 Transform::StripRoot if origin != Some(&FieldSource::EntryPath) => Some(format!(
                     "`strip-root` drops the first segment of a key path, so it applies only to a \
-                     field bound to `entry.path`, or to a join's copy of one no transform has \
-                     changed; `{field_name}` is bound to {bound_to}"
+                     field bound to `entry.path`{scope}, or to a join's copy of one no \
+                     transform has changed; `{field_name}` is bound to {bound_to}"
                 )),
                 Transform::StripRoot if index > 0 => Some(format!(
                     "`strip-root` reads the segments of the key path `entry.path` binds, so it \
                      comes first among a field's transforms, and once; `{}` before it leaves a \
                      string",
-                    transform_text(transforms[index - 1])
+                    transform_text(&transforms[index - 1])
                 )),
-                Transform::SemverMajor | Transform::SemverMinor
-                    if matches!(origin, Some(FieldSource::Path(_) | FieldSource::EntryPath)) =>
-                {
+                Transform::SemverMajor | Transform::SemverMinor if any_path_origin => {
                     Some(format!(
                         "`{}` reads a version, and `{field_name}` is bound to {bound_to}, which \
-                         names where a value is, not a version; apply it to the field that holds \
-                         the version",
-                        transform_text(*transform),
+                     names where a value is, not a version; apply it to the field that holds \
+                     the version",
+                        transform_text(transform),
                     ))
                 }
                 _ => None,

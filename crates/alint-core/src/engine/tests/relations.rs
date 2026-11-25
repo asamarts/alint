@@ -29,6 +29,7 @@ fn relation(name: &str, file: &str) -> NamedRelation {
                     at: vec!["$.deps".into()],
                     leaves: false,
                 }),
+                fields: None,
             }),
             fields: vec![(
                 "name".to_string(),

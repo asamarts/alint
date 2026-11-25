@@ -518,6 +518,7 @@ fn json_part() -> alint_core::relation::plan::Part {
             read: alint_core::relation::plan::Read::Json("$.a".into()),
             optional: false,
         },
+        fields: None,
     }
 }
 

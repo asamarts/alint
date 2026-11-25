@@ -28,6 +28,7 @@ fn optional_bound_skips_resource_or_emits_missing_cell() {
                 at: vec!["$.deps".into()],
                 leaves: false,
             }),
+            fields: None,
         }),
         &[
             (
@@ -82,6 +83,7 @@ fn optional_bound_on_missing_missing_keeps_rows_for_entries_and_read() {
                 at: vec!["$.deps".into()],
                 leaves: false,
             }),
+            fields: None,
         }),
         &[
             (
@@ -116,6 +118,7 @@ fn optional_bound_on_missing_missing_keeps_rows_for_entries_and_read() {
                 read: Read::Json("$.deps.*".into()),
                 optional: false,
             },
+            fields: None,
         }),
         &[
             (
@@ -155,6 +158,7 @@ fn optional_bound_still_fails_on_multi_match_or_non_scalar() {
                 at: vec!["$.deps".into()],
                 leaves: false,
             }),
+            fields: None,
         }),
         &[(
             "pkg",
@@ -177,6 +181,7 @@ fn optional_bound_still_fails_on_multi_match_or_non_scalar() {
                 at: vec!["$.deps".into()],
                 leaves: false,
             }),
+            fields: None,
         }),
         &[(
             "pkg",
@@ -192,6 +197,7 @@ fn optional_bound_still_fails_on_multi_match_or_non_scalar() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn optional_bound_skip_never_swallows_sibling_multi_or_non_scalar_and_runs_before_at_check() {
     use crate::relation::plan::BoundMissing;
 
@@ -211,6 +217,7 @@ fn optional_bound_skip_never_swallows_sibling_multi_or_non_scalar_and_runs_befor
                 at: vec!["$.deps".into()],
                 leaves: false,
             }),
+            fields: None,
         }),
         &[
             (
@@ -243,6 +250,7 @@ fn optional_bound_skip_never_swallows_sibling_multi_or_non_scalar_and_runs_befor
                 at: vec!["$.deps".into()],
                 leaves: false,
             }),
+            fields: None,
         }),
         &[
             (
@@ -285,6 +293,7 @@ fn optional_bound_skip_never_swallows_sibling_multi_or_non_scalar_and_runs_befor
                 at: vec!["$.exports".into()],
                 leaves: false,
             }),
+            fields: None,
         }),
         &[
             (
@@ -327,6 +336,7 @@ fn stub_rows_shrink_to_fit_drop_without_entry_root_and_stay_within_memory_bound(
                 at: vec!["$".into()],
                 leaves: true,
             }),
+            fields: None,
         }),
         &[
             ("locale", FieldSource::EntryRoot),
@@ -351,6 +361,7 @@ fn stub_rows_shrink_to_fit_drop_without_entry_root_and_stay_within_memory_bound(
                 at: vec!["$".into()],
                 leaves: true,
             }),
+            fields: None,
         }),
         &[
             ("file", FieldSource::Path(PathToken::Stem)),

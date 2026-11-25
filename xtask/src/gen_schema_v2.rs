@@ -123,6 +123,7 @@ const TRANSFORMS: &[(&str, &str)] = &[
 #[derive(Clone, Copy)]
 enum RowsKind {
     Entries,
+    Records,
     /// A `read:` of a JSON, YAML or TOML document.
     Read,
     /// A `read:` of the file as text: `regex:`, `lines:` or `whole_file:`.
@@ -136,8 +137,9 @@ enum RowsKind {
 const TEXT_READS: [&str; 3] = ["regex", "lines", "whole_file"];
 
 impl RowsKind {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 6] = [
         Self::Entries,
+        Self::Records,
         Self::Read,
         Self::ReadText,
         Self::Union,
@@ -148,6 +150,7 @@ impl RowsKind {
     const fn key(self) -> &'static str {
         match self {
             Self::Entries => "entries",
+            Self::Records => "records",
             Self::Read | Self::ReadText => "read",
             Self::Union => "union",
             Self::Join => "join",
@@ -174,6 +177,7 @@ impl RowsKind {
     fn sources(self) -> Value {
         let path_tokens = json!({ "$ref": "#/$defs/v2_source_path_token" });
         let entry = json!({ "$ref": "#/$defs/v2_source_entry" });
+        let record = json!({ "$ref": "#/$defs/v2_source_record" });
         let value = json!({ "$ref": "#/$defs/v2_source_value" });
         let bound = json!({ "$ref": "#/$defs/v2_source_bound" });
         let (description, any_of) = match self {
@@ -181,6 +185,11 @@ impl RowsKind {
                 "A field source of an `entries:` relation: a path token, an `entry.*` source \
                  or `bound: <JSONPath>`.",
                 vec![path_tokens, entry, bound],
+            ),
+            Self::Records => (
+                "A field source of a `records:` relation: a path token, `record: <JSONPath>` \
+                 or `bound: <JSONPath>`.",
+                vec![path_tokens, record, bound],
             ),
             Self::Read => (
                 "A field source of a `read:` relation of a JSON, YAML or TOML document: a path \
@@ -195,8 +204,9 @@ impl RowsKind {
             ),
             Self::Union => (
                 "A field source of a `union:` relation: a path token, an `entry.*` source, \
-                 `value` or `bound: <JSONPath>`. Every part must be able to bind it.",
-                vec![path_tokens, entry, value, bound],
+                 `record: <JSONPath>`, `value` or `bound: <JSONPath>`. Every part must be able \
+                 to bind it (or give each part its own `fields:`).",
+                vec![path_tokens, entry, record, value, bound],
             ),
             Self::Join => {
                 return json!({
@@ -211,8 +221,8 @@ impl RowsKind {
     }
 
     /// The `oneOf` branch of a relation with these rows: its own key (with
-    /// `from:` for `entries:` and `read:`), none of the other row sources, and
-    /// the field sources these rows take.
+    /// `from:` for `entries:`, `records:` and `read:`), none of the other row
+    /// sources, and the field sources these rows take.
     fn branch(self) -> Value {
         let mut required = vec![self.key()];
         let mut excluded: Vec<&str> = Self::ALL
@@ -222,12 +232,22 @@ impl RowsKind {
             .collect();
         excluded.dedup();
         match self {
-            Self::Entries => {
+            Self::Entries | Self::Records => {
                 required.push("from");
+                required.push("fields");
                 excluded.push("optional");
             }
-            Self::Read | Self::ReadText => required.push("from"),
-            Self::Union | Self::Join => excluded.extend(["from", "optional"]),
+            Self::Read | Self::ReadText => {
+                required.push("from");
+                required.push("fields");
+            }
+            Self::Join => {
+                required.push("fields");
+                excluded.extend(["from", "optional"]);
+            }
+            Self::Union => {
+                excluded.extend(["from", "optional"]);
+            }
         }
         let excluded: Vec<Value> = excluded
             .into_iter()
@@ -241,6 +261,27 @@ impl RowsKind {
             .iter()
             .map(|form| json!({ "required": [form] }))
             .collect();
+        if matches!(self, Self::Union) {
+            return json!({
+                "required": required,
+                "not": { "anyOf": excluded },
+                "oneOf": [
+                    {
+                        "required": ["fields"],
+                        "properties": {
+                            "fields": fields,
+                            "union": { "items": { "not": { "required": ["fields"] } } },
+                        },
+                    },
+                    {
+                        "not": { "required": ["fields"] },
+                        "properties": {
+                            "union": { "items": { "required": ["fields"] } },
+                        },
+                    },
+                ],
+            });
+        }
         let properties = match self {
             Self::Read => json!({ "read": { "not": { "anyOf": text } }, "fields": fields }),
             Self::ReadText => json!({ "read": { "anyOf": text }, "fields": fields }),
@@ -513,6 +554,15 @@ fn name_and_selector_defs(v1_defs: &Map<String, Value>) -> Result<Vec<(String, V
 /// A relation and the parts of one but its fields.
 #[allow(clippy::too_many_lines)] // A table of JSON Schema definitions.
 fn relation_defs() -> Vec<(String, Value)> {
+    let text: Vec<Value> = TEXT_READS
+        .iter()
+        .map(|form| json!({ "required": [form] }))
+        .collect();
+    let part_fields_for = |kind: RowsKind| {
+        json!({
+            "additionalProperties": { "$ref": format!("#/$defs/{}", kind.field_def()) }
+        })
+    };
     vec![
         ("v2_relation".into(), relation()),
         (
@@ -524,18 +574,70 @@ fn relation_defs() -> Vec<(String, Value)> {
                 "properties": {
                     "from": { "$ref": "#/$defs/v2_selector_ref" },
                     "entries": { "$ref": "#/$defs/v2_entries" },
+                    "records": { "$ref": "#/$defs/v2_records" },
                     "read": { "$ref": "#/$defs/v2_read" },
                     "optional": optional(),
+                    "fields": {
+                        "type": "object",
+                        "minProperties": 1,
+                        "propertyNames": { "$ref": "#/$defs/v2_name" },
+                        "description": "Per-part fields for a mixed-reader `union:`: every part \
+                            must declare `fields:` with the same output field names and \
+                            `sensitive` flags, and top-level `fields:` must be omitted.",
+                    },
                 },
                 "oneOf": [
                     {
                         "required": ["entries"],
-                        "not": { "anyOf": [{ "required": ["read"] }, { "required": ["optional"] }] },
+                        "not": {
+                            "anyOf": [
+                                { "required": ["records"] },
+                                { "required": ["read"] },
+                                { "required": ["optional"] },
+                            ]
+                        },
+                        "properties": { "fields": part_fields_for(RowsKind::Entries) },
                     },
-                    { "required": ["read"], "not": { "required": ["entries"] } },
+                    {
+                        "required": ["records"],
+                        "not": {
+                            "anyOf": [
+                                { "required": ["entries"] },
+                                { "required": ["read"] },
+                                { "required": ["optional"] },
+                            ]
+                        },
+                        "properties": { "fields": part_fields_for(RowsKind::Records) },
+                    },
+                    {
+                        "required": ["read"],
+                        "not": {
+                            "anyOf": [
+                                { "required": ["entries"] },
+                                { "required": ["records"] },
+                            ]
+                        },
+                        "properties": {
+                            "read": { "not": { "anyOf": text } },
+                            "fields": part_fields_for(RowsKind::Read),
+                        },
+                    },
+                    {
+                        "required": ["read"],
+                        "not": {
+                            "anyOf": [
+                                { "required": ["entries"] },
+                                { "required": ["records"] },
+                            ]
+                        },
+                        "properties": {
+                            "read": { "anyOf": text },
+                            "fields": part_fields_for(RowsKind::ReadText),
+                        },
+                    },
                 ],
-                "description": "One part of a `union:`: its own `from:`, and exactly one of \
-                    `entries:` and `read:`.",
+                "description": "One part of a `union:`: its own `from:`, exactly one of \
+                    `entries:`, `records:` and `read:`, and optional per-part `fields:`.",
             }),
         ),
         (
@@ -569,6 +671,32 @@ fn relation_defs() -> Vec<(String, Value)> {
                 },
                 "description": "One row per member of each object `at` selects, read with the \
                     `entry.*` field sources.",
+            }),
+        ),
+        (
+            "v2_records".into(),
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["format", "at"],
+                "properties": {
+                    "format": {
+                        "enum": ["json", "yaml", "toml"],
+                        "description": "How the files are decoded: JSON, YAML or TOML.",
+                    },
+                    "at": {
+                        "oneOf": [
+                            { "type": "string" },
+                            { "type": "array", "minItems": 1, "items": { "type": "string" } },
+                        ],
+                        "description": "A JSONPath, or a non-empty list of them, selecting \
+                            object elements (for example `$.spec.containers[*]`). A path a \
+                            file lacks yields no rows; a matched non-object element is an \
+                            analysis failure.",
+                    },
+                },
+                "description": "One row per object element `at` selects, read with `record: \
+                    <JSONPath>` field sources.",
             }),
         ),
         (
@@ -687,12 +815,88 @@ fn field_defs() -> Vec<(String, Value)> {
             }),
         ),
         (
+            "v2_source_record".into(),
+            json!({
+                "type": "string",
+                "pattern": "^record:\\s*\\S",
+                "description": "`record: <JSONPath>`: a scalar value read from each `records:` \
+                    object element (for example `record: $.image`). Must match at most one \
+                    scalar; set `optional: true` to emit a missing cell when absent.",
+            }),
+        ),
+        (
+            "v2_transform_name".into(),
+            constants(TRANSFORMS, "A bare transform name."),
+        ),
+        (
+            "v2_transform_param".into(),
+            json!({
+                "type": "object",
+                "minProperties": 1,
+                "maxProperties": 1,
+                "additionalProperties": false,
+                "properties": {
+                    "split": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["on", "part"],
+                        "properties": {
+                            "on": {
+                                "type": "string",
+                                "minLength": 1,
+                                "description": "Non-empty literal separator string.",
+                            },
+                            "part": {
+                                "type": "integer",
+                                "description": "0-based segment index (negative indices count \
+                                    from the end; `-1` is the last segment).",
+                            },
+                            "required": {
+                                "type": "boolean",
+                                "default": false,
+                                "description": "When true, an out-of-range `part` is an analysis \
+                                    failure; when false (default), it emits a missing cell.",
+                            },
+                        },
+                        "description": "Split a string on literal `on:` and select segment \
+                            `part:`.",
+                    },
+                    "strip_prefix": {
+                        "type": "string",
+                        "description": "Strip a literal prefix once if present.",
+                    },
+                    "strip_suffix": {
+                        "oneOf": [
+                            { "type": "string" },
+                            { "type": "array", "minItems": 1, "items": { "type": "string" } },
+                        ],
+                        "description": "Strip the first matching literal suffix once if present.",
+                    },
+                    "prefix": {
+                        "type": "string",
+                        "description": "Prepend a literal prefix string.",
+                    },
+                    "suffix": {
+                        "type": "string",
+                        "description": "Append a literal suffix string.",
+                    },
+                },
+                "description": "A parameterized string transform (single-key map).",
+            }),
+        ),
+        (
             "v2_transforms".into(),
             named_map(
                 &json!({
                     "type": "array",
                     "minItems": 1,
-                    "items": constants(TRANSFORMS, "A transform."),
+                    "items": {
+                        "oneOf": [
+                            { "$ref": "#/$defs/v2_transform_name" },
+                            { "$ref": "#/$defs/v2_transform_param" },
+                        ],
+                        "description": "A transform name or parameterized transform map.",
+                    },
                 }),
                 "Transforms: a map from a field's name to the transforms applied to its \
                  values, in list order, before `where:`.",
@@ -785,9 +989,9 @@ fn field_defs() -> Vec<(String, Value)> {
                             "optional": {
                                 "type": "boolean",
                                 "default": false,
-                                "description": "With a `bound:` source: allow the bound path to \
-                                    match nothing instead of failing the relation. Defaults to \
-                                    false; see `on_missing`.",
+                                "description": "With a `bound:` or `record:` source: allow the \
+                                    path to match nothing instead of failing the relation. \
+                                    Defaults to false; see `on_missing` (for `bound:`).",
                             },
                             "on_missing": {
                                 "enum": ["skip", "missing"],
@@ -800,15 +1004,15 @@ fn field_defs() -> Vec<(String, Value)> {
                         },
                         "allOf": [
                             {
-                                "if": {
-                                    "anyOf": [
-                                        { "required": ["optional"] },
-                                        { "required": ["on_missing"] },
-                                    ],
-                                },
+                                "if": { "required": ["optional"] },
                                 "then": {
                                     "properties": {
-                                        "source": { "$ref": "#/$defs/v2_source_bound" },
+                                        "source": {
+                                            "anyOf": [
+                                                { "$ref": "#/$defs/v2_source_bound" },
+                                                { "$ref": "#/$defs/v2_source_record" },
+                                            ]
+                                        },
                                     },
                                 },
                             },
@@ -818,6 +1022,7 @@ fn field_defs() -> Vec<(String, Value)> {
                                     "required": ["optional"],
                                     "properties": {
                                         "optional": { "const": true },
+                                        "source": { "$ref": "#/$defs/v2_source_bound" },
                                     },
                                 },
                             },
@@ -843,25 +1048,27 @@ fn optional() -> Value {
     })
 }
 
-/// A relation: `fields:` and exactly one of `entries:` (with `from:`), `read:`
-/// (with `from:` and `optional:`), `union:` and `join:`.
+/// A relation: `fields:` (or per-part `fields:` on `union:`) and exactly one
+/// of `entries:` (with `from:`), `records:` (with `from:`), `read:` (with
+/// `from:` and `optional:`), `union:` and `join:`.
 fn relation() -> Value {
     let branches: Vec<Value> = RowsKind::ALL.iter().map(|kind| kind.branch()).collect();
     json!({
         "type": "object",
         "additionalProperties": false,
-        "required": ["fields"],
         "properties": {
             "from": { "$ref": "#/$defs/v2_selector_ref" },
             "entries": { "$ref": "#/$defs/v2_entries" },
+            "records": { "$ref": "#/$defs/v2_records" },
             "read": { "$ref": "#/$defs/v2_read" },
             "optional": optional(),
             "union": {
                 "type": "array",
                 "minItems": 2,
                 "items": { "$ref": "#/$defs/v2_union_part" },
-                "description": "The rows of two or more parts, in the order written. Every \
-                    part binds every field.",
+                "description": "The rows of two or more parts, in the order written. Either \
+                    top-level `fields:` applies to every part, or every part declares its own \
+                    `fields:` with identical field names and `sensitive` flags.",
             },
             "join": { "$ref": "#/$defs/v2_join" },
             "fields": {
@@ -875,9 +1082,10 @@ fn relation() -> Value {
             "where": { "$ref": "#/$defs/v2_filters" },
         },
         "oneOf": branches,
-        "description": "A relation: rows with named fields. It has `fields:` and exactly one \
-            of `entries:` and `read:` (each with `from:`), `union:` and `join:`, and may have \
-            `transform:` and `where:`.",
+        "description": "A relation: rows with named fields. It has `fields:` (or per-part \
+            `fields:` under `union:`) and exactly one of `entries:`, `records:`, and `read:` \
+            (each with `from:`), `union:`, and `join:`, and may have `transform:` and \
+            `where:`.",
     })
 }
 

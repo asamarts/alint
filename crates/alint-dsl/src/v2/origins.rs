@@ -118,6 +118,7 @@ pub(crate) fn nested_reference_fields(
             ("assert", &["set", "equal_to", "relation"]),
             ("assert", &["set", "subset_of", "relation"]),
             ("assert", &["set", "disjoint_from", "relation"]),
+            ("assert", &["reference", "to", "relation"]),
         ],
         _ => &[],
     }

@@ -1,6 +1,6 @@
 # v0.24: saphyr exit, Phase 3 completion, owned walker, LSP rewrite, and backlog drain
 
-Status: accepted (2026-11-22, ADR-0048); in progress (Phase 0, Phase 1 [19/19], Phase 2 [8/8], Phase 3 [5/5], Phase 4 [2/2 + audit], and Phase 5 design/ADR-0050 + Batch 5a [5/5] complete; Batch 5b next).
+Status: accepted (2026-11-22, ADR-0048); in progress (Phase 0, Phase 1 [19/19], Phase 2 [8/8], Phase 3 [5/5], Phase 4 [2/2 + audit], Phase 5 design/ADR-0050, Batch 5a [5/5 + audit], and Batch 5b [#592 + D1-D4] complete; Batch 5c next).
 Decisions: [ADR-0048](../../adr/0048-v024-owner-decisions.md) (owner decisions and scope for v0.24);
 [ADR-0049](../../adr/0049-baseline-preferred-paths-for-repeated-fingerprints.md) (baseline preferred visible paths for repeated fingerprints);
 [ADR-0050](../../adr/0050-v024-phase-3-completion-design.md) (accepted: Phase 3 completion design decisions D1 to D11);
@@ -376,3 +376,21 @@ and owner ADR approval ([ADR-0050](../../adr/0050-v024-phase-3-completion-design
   `RelationRows::stub_rows` so `group_by: entry.root` forms zero-row groups anchored at stub
   locale files (#598); and added `ci/scripts/check-v2-schema-id.sh` (+ hermetic 11-case test
   suite), wired into `preflight.sh`, `docs.sh`, `release.yml`, and `bump-version.sh` (#570).
+  Post-Batch-5a adversarial audit (#662) closed 22 findings across optional `bound:` skip ordering
+  and sibling error preservation, `stub_rows` memory bounds and `shrink_to_fit`, `{{value}}`
+  redaction under `sensitive: true` / `reads_environment`, O(1) structural counterpart lookup, and
+  `check-v2-schema-id.sh` hardening.
+- 2026-11-25: Phase 5 Batch 5b complete (ADR-0050 D1, D2, D3, D4, and D8 / #592): added
+  `records:` array-of-objects extraction across JSON/YAML/TOML with exact source spans and
+  preserved number lexemes (`record: <JSONPath>`, optional `optional: true`), parameterized string
+  transforms (`split`, `strip_prefix`, `strip_suffix`, `prefix`, `suffix`) with env-interpolated
+  `split.part`, and mixed-reader `union:` per-part `fields:` (#592); added `reference` single-key
+  and composite-key foreign-key assertions with `skip_missing`, `{{value}}`, sensitivity closure,
+  and `TriggerScope` (D1); added unified `count` assertions (`min`/`max`/`exact`, `distinct`,
+  per-row emptiness mode, grouped + `groups:` + `resource_groups` + `stub_rows`, D2); added
+  orthogonal multi-field `group_by: [...]` across `equal`/`set`/`count`, per-group cross-relation
+  `set` (`to.group_by`, `all_target_groups`), and inline literal `values:` targets (D3); added
+  unified `compare` assertions (`eq`/`ne`/`lt`/`le`/`gt`/`ge` under `exact`/`lexical`/`numeric`,
+  fail-loud on `Null`/`Missing`, D4); and updated `schemas/v2/config.json`, `inspect_plan`,
+  `schemas/experimental/rule-trace.json`, and `docs/rules.md`. Next: Batch 5c (D5 `semver_eval.rs` /
+  `satisfies:` / `compare: { order: semver }`, D6 `no_duplicate_keys`, D7 `strict: true` JSON).

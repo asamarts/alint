@@ -187,6 +187,7 @@ where
             } else {
                 *value = match scope {
                     Scope::Objects(crate::v2::Position::Boolean) => retype_boolean(result.text),
+                    Scope::Objects(crate::v2::Position::Integer) => retype_integer(result.text),
                     Scope::Objects(_) => Value::String(result.text),
                     Scope::Document | Scope::Plain | Scope::Rule => retype_scalar(result.text),
                 };
@@ -430,6 +431,13 @@ fn retype_boolean(text: String) -> Value {
     match retype_scalar(text.clone()) {
         boolean @ Value::Bool(_) => boolean,
         _ => Value::String(text),
+    }
+}
+
+fn retype_integer(text: String) -> Value {
+    match text.trim().parse::<i64>() {
+        Ok(n) => Value::from(n),
+        Err(_) => Value::String(text),
     }
 }
 

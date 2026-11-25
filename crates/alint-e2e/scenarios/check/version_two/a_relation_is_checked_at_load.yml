@@ -20,4 +20,4 @@ expect:
   - exit: configuration_error
     configuration_error:
       message:
-        exact: ".a_relation_is_checked_at_load.inline.alint.yml: `relations.deps`: a relation needs exactly one of `entries:`, `read:`, `union:` and `join:`; it has `entries:` and `read:`"
+        exact: ".a_relation_is_checked_at_load.inline.alint.yml: `relations.deps`: a relation needs exactly one of `entries:`, `records:`, `read:`, `union:` and `join:`; it has `entries:` and `read:`"

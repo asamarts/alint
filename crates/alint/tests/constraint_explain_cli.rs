@@ -1285,6 +1285,29 @@ relations:
       token: { not_in: ["x", { relation: workspaces, field: name }], matches: "^t" }
       flag: { in: [true] }
       key: { in: ["k"] }
+  containers:
+    from: { paths: "k8s/*.yaml" }
+    records: { format: yaml, at: "$.spec.containers[*]" }
+    fields:
+      name: "record: $.name"
+      image: "record: $.image"
+      policy: { source: "record: $.imagePullPolicy", optional: true }
+    transform:
+      image: [{ split: { on: ":", part: -1 } }, { strip_prefix: "v" }]
+  hidden-records:
+    from: { paths: "{{env.DIR}}/*.yaml" }
+    records: { format: yaml, at: "{{env.AT}}" }
+    fields: { name: "record: {{env.BOUND}}" }
+  mixed:
+    union:
+      - from: { paths: "packages/*/package.json" }
+        entries: { format: json, at: "$.dependencies" }
+        fields: { item: entry.key }
+      - from: { paths: "k8s/*.yaml" }
+        records: { format: yaml, at: "$.spec.containers[*]" }
+        fields: { item: "record: $.name" }
+    transform:
+      item: [{ strip_suffix: [".dev", ".prod"] }, { prefix: "pkg-" }, { suffix: "-v1" }]
 rules:
   - id: joined
     kind: constraint
@@ -1325,6 +1348,21 @@ rules:
     assert: { unique: { key: [name] } }
     level: error
     sensitive: true
+  - id: ref-check
+    kind: constraint
+    input: containers
+    assert: { reference: { field: name, to: { relation: workspaces, field: name }, skip_missing: true } }
+    level: error
+  - id: hidden-rec-count
+    kind: constraint
+    input: hidden-records
+    assert: { count: { min: 1 } }
+    level: error
+  - id: mixed-compare
+    kind: constraint
+    input: mixed
+    assert: { compare: { field: item, op: ne, to: { value: "pkg-bad-v1" }, order: lexical } }
+    level: error
 "##;
 
 /// The `explain --trace --format json` document of each rule of
@@ -1355,6 +1393,9 @@ fn every_plan_shape() -> Vec<(&'static str, serde_json::Value)> {
         "tokens",
         "inline",
         "sensitive",
+        "ref-check",
+        "hidden-rec-count",
+        "mixed-compare",
     ]
     .into_iter()
     .map(|rule| {
@@ -1519,6 +1560,7 @@ fn the_trace_schema_describes_the_plan_key_by_key() {
         "pattern",
         "plan",
         "read",
+        "records",
         "scope_filter",
         "transforms",
         "unique",

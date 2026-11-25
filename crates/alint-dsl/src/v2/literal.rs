@@ -11,7 +11,14 @@ use ayaml::Value;
 
 /// Keys of a `constraint` rule's `assert:` whose values are field or relation
 /// names.
-const ASSERT_NAME_KEYS: &[&str] = &["key", "group_by", "field", "determines", "relation"];
+const ASSERT_NAME_KEYS: &[&str] = &[
+    "key",
+    "group_by",
+    "field",
+    "fields",
+    "determines",
+    "relation",
+];
 
 /// Refuse `{{` in any name, alias or reference of `document`, a version 2
 /// source as written. `display` names the source in the error.
@@ -131,8 +138,12 @@ impl Check<'_> {
             .iter()
             .enumerate()
         {
+            let part_path = format!("{path}.union[{index}]");
             if let Some(from @ Value::String(_)) = part.get("from") {
-                self.value(from, &format!("{path}.union[{index}].from"))?;
+                self.value(from, &format!("{part_path}.from"))?;
+            }
+            if let Some(fields) = part.get("fields") {
+                self.fields(fields, &format!("{part_path}.fields"))?;
             }
         }
         if let Some(join) = map.get("join") {
@@ -152,26 +163,8 @@ impl Check<'_> {
                 self.value(right, &pair)?;
             }
         }
-        let fields_path = format!("{path}.fields");
-        for (name, field) in map
-            .get("fields")
-            .and_then(Value::as_mapping)
-            .into_iter()
-            .flatten()
-        {
-            let field_path = self.key(&fields_path, name)?;
-            // A source names a join's field (`left.F`); only a `bound:`
-            // JSONPath is a value, which interpolates.
-            let (source, source_path) = match field {
-                Value::Mapping(field) => (field.get("source"), format!("{field_path}.source")),
-                other => (Some(other), field_path),
-            };
-            if let Some(Value::String(text)) = source
-                && interpolated(text)
-                && !text.starts_with("bound:")
-            {
-                return Err(self.error(&source_path));
-            }
+        if let Some(fields) = map.get("fields") {
+            self.fields(fields, &format!("{path}.fields"))?;
         }
         self.keys(map.get("transform"), &format!("{path}.transform"))?;
         let where_path = format!("{path}.where");
@@ -196,6 +189,27 @@ impl Check<'_> {
                         }
                     }
                 }
+            }
+        }
+        Ok(())
+    }
+
+    /// Check one `fields:` map (top-level or per-part in a `union:`): field
+    /// names and non-query field sources stay literal; `bound:` and `record:`
+    /// `JSONPath` queries are values and may interpolate.
+    fn fields(&self, fields: &Value, fields_path: &str) -> Result<()> {
+        for (name, field) in fields.as_mapping().into_iter().flatten() {
+            let field_path = self.key(fields_path, name)?;
+            let (source, source_path) = match field {
+                Value::Mapping(field) => (field.get("source"), format!("{field_path}.source")),
+                other => (Some(other), field_path),
+            };
+            if let Some(Value::String(text)) = source
+                && interpolated(text)
+                && !text.starts_with("bound:")
+                && !text.starts_with("record:")
+            {
+                return Err(self.error(&source_path));
             }
         }
         Ok(())

@@ -134,6 +134,7 @@ fn entries_rows_decode_with_fields_transforms_and_filters() {
     let Rows::Part(Part {
         from: SelectorRef::Named(from),
         reader: Reader::Entries(entries),
+        ..
     }) = &deps.rows
     else {
         panic!("{:?}", deps.rows);
@@ -212,6 +213,7 @@ fn read_rows_decode_with_an_inline_selector() {
     let Rows::Part(Part {
         from: SelectorRef::Inline(_),
         reader: Reader::Read { read, optional },
+        ..
     }) = &versions.rows
     else {
         panic!("{:?}", versions.rows);
@@ -239,6 +241,7 @@ fn a_union_decodes_each_part() {
         .map(|part| match &part.reader {
             Reader::Read { read, optional } => (read, *optional),
             Reader::Entries(_) => panic!("entries"),
+            Reader::Records(_) => panic!("records"),
         })
         .collect();
     assert_eq!(
@@ -424,30 +427,30 @@ fn relation_error(body: &str) -> String {
 fn a_relation_has_exactly_one_row_source() {
     assert_eq!(
         relation_error("{ from: s, fields: { f: path } }"),
-        "`relations.r`: a relation needs exactly one of `entries:`, `read:`, `union:` and \
-         `join:`; it has none"
+        "`relations.r`: a relation needs exactly one of `entries:`, `records:`, `read:`, \
+         `union:` and `join:`; it has none"
     );
     assert_eq!(
         relation_error(
             "{ from: s, entries: { format: json, at: $ }, read: { json: $ }, fields: { f: path } }"
         ),
-        "`relations.r`: a relation needs exactly one of `entries:`, `read:`, `union:` and \
-         `join:`; it has `entries:` and `read:`"
+        "`relations.r`: a relation needs exactly one of `entries:`, `records:`, `read:`, \
+         `union:` and `join:`; it has `entries:` and `read:`"
     );
     assert_eq!(
         relation_error("{ union: [], join: {}, read: { json: $ }, fields: { f: path } }"),
-        "`relations.r`: a relation needs exactly one of `entries:`, `read:`, `union:` and \
-         `join:`; it has `read:` and `union:` and `join:`"
+        "`relations.r`: a relation needs exactly one of `entries:`, `records:`, `read:`, \
+         `union:` and `join:`; it has `read:` and `union:` and `join:`"
     );
     assert_eq!(
         relation_error("{ form: s }"),
         "`relations.r`: unknown key `form` in a relation; expected one of `from`, `entries`, \
-         `read`, `optional`, `union`, `join`, `fields`, `transform`, `where`"
+         `records`, `read`, `optional`, `union`, `join`, `fields`, `transform`, `where`"
     );
     assert_eq!(
         relation_error("[a]"),
         "`relations.r`: expected a relation: a map with `fields:` and one of `entries:`, \
-         `read:`, `union:` and `join:`, found a list"
+         `records:`, `read:`, `union:` and `join:`, found a list"
     );
 }
 
@@ -455,8 +458,8 @@ fn a_relation_has_exactly_one_row_source() {
 fn a_relation_needs_its_parts() {
     assert_eq!(
         relation_error("{ read: { json: $ }, fields: { f: value } }"),
-        "`relations.r`: `entries:` and `read:` need `from:`, a selector name or an inline \
-         selector map"
+        "`relations.r`: `entries:`, `records:` and `read:` need `from:`, a selector name or an \
+         inline selector map"
     );
     assert_eq!(
         relation_error("{ from: s, read: { json: $ } }"),
@@ -495,7 +498,8 @@ fn a_union_has_two_or_more_parts_each_with_its_own_from() {
     assert_eq!(
         relation_error("{ union: [{ from: s, read: { json: $ } }], fields: { f: value } }"),
         "`relations.r.union`: a union needs at least two parts; a relation with one part is a \
-         plain relation, so write its `from:` and `entries:` or `read:` on the relation"
+         plain relation, so write its `from:` and `entries:`, `records:` or `read:` on the \
+         relation"
     );
     assert_eq!(
         relation_error(
@@ -508,27 +512,27 @@ fn a_union_has_two_or_more_parts_each_with_its_own_from() {
         relation_error(
             "{ union: [{ from: s, read: { json: $ } }, { from: t }], fields: { f: value } }"
         ),
-        "`relations.r.union[1]`: a union part needs exactly one of `entries:` and `read:`; it \
-         has neither"
+        "`relations.r.union[1]`: a union part needs exactly one of `entries:`, `records:` and \
+         `read:`; it has none"
     );
     assert_eq!(
         relation_error(
             "{ union: [{ from: s, read: { json: $ }, entries: { format: json, at: $ } }, { from: t, read: { json: $ } }], fields: { f: value } }"
         ),
-        "`relations.r.union[0]`: a union part needs exactly one of `entries:` and `read:`; it \
-         has both"
+        "`relations.r.union[0]`: a union part needs exactly one of `entries:`, `records:` and \
+         `read:`; it has `entries:` and `read:`"
     );
     assert_eq!(
         relation_error(
-            "{ union: [{ from: s, read: { json: $ }, fields: {} }, { from: t, read: { json: $ } }], fields: { f: value } }"
+            "{ union: [{ from: s, read: { json: $ }, fields: { f: value } }, { from: t, read: { json: $ }, fields: { f: value } }], fields: { f: value } }"
         ),
-        "`relations.r.union[0]`: unknown key `fields` in a union part; expected one of `from`, \
-         `entries`, `read`, `optional`"
+        "`relations.r.union[0].fields`: specify `fields:` either at the relation level or on \
+         every `union:` part, not both"
     );
     assert_eq!(
         relation_error("{ union: { from: s }, fields: { f: value } }"),
-        "`relations.r.union`: expected a list of parts, each `{ from, entries or read, \
-         optional }`, found a map"
+        "`relations.r.union`: expected a list of parts, each `{ from, entries or records or read, \
+         optional, fields }`, found a map"
     );
 }
 
@@ -683,8 +687,8 @@ fn a_field_source_is_one_of_the_documented_forms() {
         field("entry.name"),
         "`relations.r.fields.f`: `entry.name` is not a field source; expected `path`, a path \
          token (`dir`, `basename`, `stem`, `ext`, `parent_name`), `entry.key`, `entry.value`, \
-         `entry.parent`, `entry.root`, `entry.path`, `value`, `bound: <JSONPath>`, or in a \
-         join's output `left.<field>` or `right.<field>`"
+         `entry.parent`, `entry.root`, `entry.path`, `value`, `bound: <JSONPath>`, `record: \
+         <JSONPath>`, or in a join's output `left.<field>` or `right.<field>`"
     );
     assert_eq!(
         field("'bound:'"),
@@ -699,8 +703,8 @@ fn a_field_source_is_one_of_the_documented_forms() {
         field("{ sensitive: true }"),
         "`relations.r.fields.f`: a field needs `source:`: `path`, a path token (`dir`, \
          `basename`, `stem`, `ext`, `parent_name`), `entry.key`, `entry.value`, `entry.parent`, \
-         `entry.root`, `entry.path`, `value`, `bound: <JSONPath>`, or in a join's output \
-         `left.<field>` or `right.<field>`"
+         `entry.root`, `entry.path`, `value`, `bound: <JSONPath>`, `record: <JSONPath>`, or in a \
+         join's output `left.<field>` or `right.<field>`"
     );
     assert_eq!(
         field("{ source: value, sensitive: 1 }"),
@@ -761,17 +765,20 @@ fn transforms_are_the_fixed_list() {
     assert_eq!(
         transform("{ f: [trim, upper] }"),
         "`relations.r.transform.f[1]`: unknown transform `upper`; expected one of `trim`, \
-         `lower`, `semver-major`, `semver-minor`, `strip-root`"
+         `lower`, `semver-major`, `semver-minor`, `strip-root` or a parameterized map (`split`, \
+         `strip_prefix`, `strip_suffix`, `prefix`, `suffix`)"
     );
     assert_eq!(
         transform("{ f: [] }"),
         "`relations.r.transform.f`: expected a non-empty list of transforms (`trim`, `lower`, \
-         `semver-major`, `semver-minor`, `strip-root`), found a list"
+         `semver-major`, `semver-minor`, `strip-root` or `split`, `strip_prefix`, \
+         `strip_suffix`, `prefix`, `suffix`), found a list"
     );
     assert_eq!(
         transform("{ f: trim }"),
         "`relations.r.transform.f`: expected a non-empty list of transforms (`trim`, `lower`, \
-         `semver-major`, `semver-minor`, `strip-root`), found a string"
+         `semver-major`, `semver-minor`, `strip-root` or `split`, `strip_prefix`, \
+         `strip_suffix`, `prefix`, `suffix`), found a string"
     );
     assert_eq!(
         transform("[trim]"),
@@ -1001,6 +1008,7 @@ fn marking_many_objects_takes_time_linear_in_them() {
                     read: model::Read::Json("$.x".into()),
                     optional: false,
                 },
+                fields: None,
             }),
             fields: vec![(
                 "x".into(),
@@ -1064,7 +1072,7 @@ fn a_relation_that_reads_text_has_no_bound_field() {
             format!(
                 "`relations.r.fields.name`: a `bound:` field reads a value from a JSON, YAML or \
                  TOML document, and a `read:` with `{form}:` reads the file as text; read the \
-                 file with `entries:`, or with `read:` and `json:`, `yaml:` or `toml:`"
+                 file with `entries:`, `records:`, or with `read:` and `json:`, `yaml:` or `toml:`"
             ),
         );
     }
@@ -1154,12 +1162,14 @@ fn the_boolean_fields_are_the_ones_the_decode_reads_as_booleans() {
     let typed: std::collections::BTreeSet<&str> =
         BOOLEAN_FIELDS.iter().map(|(_, key)| *key).collect();
     assert_eq!(read, typed);
-    for number in [
-        "as_u64(", "as_i64(", "as_f64(", "is_u64(", "is_i64(", "is_f64(",
-    ] {
+    // The only integer field decoded is `split.part`, which `INTEGER_FIELDS`
+    // re-types on interpolation (`interp.rs`, `Position::Integer`).
+    assert_eq!(code.matches("as_i64(").count(), 1);
+    assert_eq!(INTEGER_FIELDS, &[(Position::Split, "part")]);
+    for number in ["as_u64(", "as_f64(", "is_u64(", "is_i64(", "is_f64("] {
         assert!(
             !code.contains(number),
-            "the decode reads a number ({number})"
+            "the decode reads an untracked number ({number})"
         );
     }
 }
@@ -1225,7 +1235,7 @@ fn bound_optional_and_on_missing_decode_and_validate() {
             "relations:\n  r:\n    {rows}\n    fields: {{ f: {{ source: '{source}', optional: true }} }}\n"
         ));
         assert!(
-            err.contains("applies only to a `bound:` field"),
+            err.contains("applies only to a `bound:` or `record:` field"),
             "{source}: {err}"
         );
     }

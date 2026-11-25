@@ -116,7 +116,7 @@ fn read() -> Value {
 }
 
 /// The keys of one part of a relation's rows: its selector and its reader,
-/// `entries:`, or `read:` with `optional:`.
+/// `entries:`, `records:`, or `read:` with `optional:`.
 fn part_properties() -> Value {
     json!({
         "from": selector(),
@@ -128,6 +128,13 @@ fn part_properties() -> Value {
             }),
             &["format", "at", "leaves"],
         )),
+        "records": or_redacted(closed(
+            json!({
+                "format": { "enum": ["json", "yaml", "toml"] },
+                "at": strings(),
+            }),
+            &["format", "at"],
+        )),
         "read": or_redacted(read()),
         "optional": or_redacted(json!({ "type": "boolean" })),
     })
@@ -138,6 +145,7 @@ fn part_properties() -> Value {
 fn reader_dependencies() -> Value {
     json!({
         "entries": ["from"],
+        "records": ["from"],
         "read": ["from", "optional"],
         "optional": ["from", "read"],
     })
@@ -145,13 +153,22 @@ fn reader_dependencies() -> Value {
 
 /// One part of a `union:`.
 fn part() -> Value {
+    let mut properties = part_properties();
+    properties.as_object_mut().expect("an object").insert(
+        "fields".into(),
+        json!({ "type": "array", "items": field() }),
+    );
     json!({
         "type": "object",
         "additionalProperties": false,
-        "properties": part_properties(),
+        "properties": properties,
         "required": ["from"],
         "dependentRequired": reader_dependencies(),
-        "oneOf": [{ "required": ["entries"] }, { "required": ["read"] }],
+        "oneOf": [
+            { "required": ["entries"] },
+            { "required": ["records"] },
+            { "required": ["read"] },
+        ],
     })
 }
 
@@ -230,7 +247,7 @@ fn relation() -> Value {
         "inline": { "type": "boolean" },
         "roles": {
             "type": "array",
-            "items": { "enum": ["input", "set_target"] },
+            "items": { "enum": ["input", "set_target", "reference_target"] },
             "uniqueItems": true,
         },
         "declared_in": { "type": "string" },
@@ -249,6 +266,7 @@ fn relation() -> Value {
         "dependentRequired": reader_dependencies(),
         "oneOf": [
             { "required": ["entries"] },
+            { "required": ["records"] },
             { "required": ["read"] },
             { "required": ["union"] },
             { "required": ["join"] },
@@ -262,9 +280,12 @@ pub(super) fn plan() -> Value {
         json!({
             "input": position(),
             "set_target": position(),
+            "reference_target": position(),
             "assertion": or_redacted(closed(
                 json!({
-                    "family": { "enum": ["equal", "unique", "set"] },
+                    "family": {
+                        "enum": ["equal", "unique", "set", "reference", "count", "compare"]
+                    },
                     "text": { "type": "string" },
                 }),
                 &["family", "text"],

@@ -30,7 +30,8 @@ use alint_core::{Capability, ConfigSourceClass, Error, GitOperation, Result};
 
 use super::model::{
     Entries, EntriesFormat, Field, FieldSource, Join, JoinSide, Member, Objects, Part, PathToken,
-    Predicate, Read, Reader, Reference, Relation, Rows, Selector, SelectorRef, Transform, Twins,
+    Predicate, Read, Reader, Records, Reference, Relation, Rows, Selector, SelectorRef, Transform,
+    Twins,
 };
 
 /// At most this many names are listed in an error; past it, the nearest one
@@ -726,6 +727,12 @@ fn relation_def(
         Ok(plan::Part {
             from,
             reader: reader(&part.reader),
+            fields: part.fields.as_ref().map(|fields| {
+                fields
+                    .iter()
+                    .map(|(name, field)| (name.clone(), field_def(field)))
+                    .collect()
+            }),
         })
     };
     let rows = match &relation.rows {
@@ -772,7 +779,7 @@ fn relation_def(
         transforms: relation
             .transforms
             .iter()
-            .map(|(name, list)| (name.clone(), list.iter().copied().map(transform).collect()))
+            .map(|(name, list)| (name.clone(), list.iter().map(transform).collect()))
             .collect(),
         filters,
     })
@@ -865,6 +872,14 @@ fn reader(reader: &Reader) -> plan::Reader {
             at: at.clone(),
             leaves: *leaves,
         }),
+        Reader::Records(Records { format, at }) => plan::Reader::Records(plan::Records {
+            format: match format {
+                EntriesFormat::Json => plan::EntriesFormat::Json,
+                EntriesFormat::Yaml => plan::EntriesFormat::Yaml,
+                EntriesFormat::Toml => plan::EntriesFormat::Toml,
+            },
+            at: at.clone(),
+        }),
         Reader::Read { read, optional } => plan::Reader::Read {
             read: match read {
                 Read::Json(query) => plan::Read::Json(query.clone()),
@@ -907,6 +922,10 @@ fn field_def(field: &Field) -> plan::FieldDef {
                 optional: *optional,
                 on_missing: *on_missing,
             },
+            FieldSource::Record { query, optional } => plan::FieldSource::Record {
+                query: query.clone(),
+                optional: *optional,
+            },
             FieldSource::Side(side, name) => {
                 plan::FieldSource::Side(join_side(*side), name.clone())
             }
@@ -915,13 +934,22 @@ fn field_def(field: &Field) -> plan::FieldDef {
     }
 }
 
-const fn transform(transform: Transform) -> plan::Transform {
+fn transform(transform: &Transform) -> plan::Transform {
     match transform {
         Transform::Trim => plan::Transform::Trim,
         Transform::Lower => plan::Transform::Lower,
         Transform::SemverMajor => plan::Transform::SemverMajor,
         Transform::SemverMinor => plan::Transform::SemverMinor,
         Transform::StripRoot => plan::Transform::StripRoot,
+        Transform::Split { on, part, required } => plan::Transform::Split {
+            on: on.clone(),
+            part: *part,
+            required: *required,
+        },
+        Transform::StripPrefix(prefix) => plan::Transform::StripPrefix(prefix.clone()),
+        Transform::StripSuffix(suffixes) => plan::Transform::StripSuffix(suffixes.clone()),
+        Transform::Prefix(prefix) => plan::Transform::Prefix(prefix.clone()),
+        Transform::Suffix(suffix) => plan::Transform::Suffix(suffix.clone()),
     }
 }
 
@@ -965,6 +993,7 @@ fn selector_capabilities(selector: &Selector) -> Capabilities {
 /// - every field that spells an entry's key (`entry.key`, `entry.path`,
 ///   `entry.parent`, `entry.root`: a key is in its path, its parent's path
 ///   and its root) when one of them is sensitive.
+#[allow(clippy::too_many_lines)]
 fn close_sensitivity(plan: &mut Plan, order: &[RelationId]) {
     for &id in order {
         let relations = &plan.relations;
@@ -979,7 +1008,10 @@ fn close_sensitivity(plan: &mut Plan, order: &[RelationId]) {
             plan::Rows::Join(join) => Some(join),
             plan::Rows::Part(_) | plan::Rows::Union(_) => None,
         };
-        let mut filtered = std::collections::HashSet::new();
+        // Collect field names filtered by an `in:`/`not_in:` list mentioning a
+        // sensitive relation field.
+        let mut filtered_names: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
         for (field, predicates) in &relation.filters {
             let listed = predicates.iter().any(|predicate| match predicate {
                 plan::Predicate::In(members) | plan::Predicate::NotIn(members) => {
@@ -990,7 +1022,20 @@ fn close_sensitivity(plan: &mut Plan, order: &[RelationId]) {
                 }
                 plan::Predicate::Matches(_) | plan::Predicate::NotMatches(_) => false,
             });
-            if listed && let Some(field) = relation.field(field) {
+            if listed {
+                filtered_names.insert(field.clone());
+            }
+        }
+        if relation.uses_part_fields() {
+            close_union_part_fields_sensitivity(
+                &mut plan.relations[id.0].relation,
+                &filtered_names,
+            );
+            continue;
+        }
+        let mut filtered = std::collections::HashSet::new();
+        for field_name in &filtered_names {
+            if let Some(field) = relation.field(field_name) {
                 filtered.insert(Family::of(&field.source, join));
             }
         }
@@ -1030,6 +1075,9 @@ fn close_sensitivity(plan: &mut Plan, order: &[RelationId]) {
                     plan::FieldSource::Bound { query, .. } => {
                         filtered.insert(Family::Bound(query));
                     }
+                    plan::FieldSource::Record { query, .. } => {
+                        filtered.insert(Family::Record(query));
+                    }
                     plan::FieldSource::Path(token) => {
                         exact_sources.push(&field.source);
                         if *token == plan::PathToken::Path {
@@ -1064,6 +1112,106 @@ fn close_sensitivity(plan: &mut Plan, order: &[RelationId]) {
     }
 }
 
+/// Close sensitivity across all parts of a per-part `union:` until fixpoint
+/// and synchronize `sensitive` onto both canonical `relation.fields` and each
+/// part's `fields:`.
+fn close_union_part_fields_sensitivity(
+    rel: &mut plan::RelationDef,
+    filtered_names: &std::collections::HashSet<String>,
+) {
+    let mut sensitive_names: std::collections::HashSet<String> = rel
+        .fields
+        .iter()
+        .filter(|(name, field)| field.sensitive || filtered_names.contains(name.as_str()))
+        .map(|(name, _)| name.clone())
+        .collect();
+    if let plan::Rows::Union(parts) = &rel.rows {
+        for part in parts {
+            for (name, field) in part.fields.as_deref().unwrap_or(&[]) {
+                if field.sensitive {
+                    sensitive_names.insert(name.clone());
+                }
+            }
+        }
+        loop {
+            let before = sensitive_names.len();
+            for part in parts {
+                if let Some(fields) = &part.fields {
+                    close_part_sensitivity(fields, filtered_names, &mut sensitive_names);
+                }
+            }
+            if sensitive_names.len() == before {
+                break;
+            }
+        }
+    }
+    for (name, field) in &mut rel.fields {
+        field.sensitive |= sensitive_names.contains(name);
+    }
+    if let plan::Rows::Union(parts) = &mut rel.rows {
+        for part in parts {
+            if let Some(fields) = &mut part.fields {
+                for (name, field) in fields {
+                    field.sensitive |= sensitive_names.contains(name);
+                }
+            }
+        }
+    }
+}
+
+/// One sensitivity-closure step over a single part's `fields:` in a mixed-reader
+/// `union:`.
+fn close_part_sensitivity(
+    fields: &[(String, plan::FieldDef)],
+    filtered_names: &std::collections::HashSet<String>,
+    sensitive_names: &mut std::collections::HashSet<String>,
+) {
+    let mut filtered = std::collections::HashSet::new();
+    let mut exact_sources: Vec<&plan::FieldSource> = Vec::new();
+    let mut path_all_hidden = false;
+    let mut keys_hidden = false;
+    for (name, field) in fields {
+        if filtered_names.contains(name.as_str()) {
+            filtered.insert(Family::of(&field.source, None));
+        }
+        if sensitive_names.contains(name) {
+            match &field.source {
+                plan::FieldSource::EntryValue | plan::FieldSource::Value => {
+                    exact_sources.push(&field.source);
+                }
+                plan::FieldSource::Bound { query, .. } => {
+                    filtered.insert(Family::Bound(query));
+                }
+                plan::FieldSource::Record { query, .. } => {
+                    filtered.insert(Family::Record(query));
+                }
+                plan::FieldSource::Path(token) => {
+                    exact_sources.push(&field.source);
+                    if *token == plan::PathToken::Path {
+                        path_all_hidden = true;
+                    }
+                }
+                plan::FieldSource::EntryKey
+                | plan::FieldSource::EntryParent
+                | plan::FieldSource::EntryRoot
+                | plan::FieldSource::EntryPath => {
+                    keys_hidden = true;
+                }
+                plan::FieldSource::Side(_, _) => {}
+            }
+        }
+    }
+    for (name, field) in fields {
+        if filtered.contains(&Family::of(&field.source, None))
+            || exact_sources.contains(&&field.source)
+            || (path_all_hidden && matches!(field.source, plan::FieldSource::Path(_)))
+            || (keys_hidden && spells_keys(&field.source))
+        {
+            sensitive_names.insert(name.clone());
+        }
+    }
+}
+
 /// [`close_sensitivity`] with each `set` against another relation's field
 /// (`compared`): the compared field holds values a finding shows beside the
 /// other field's, so when that field is sensitive the compared field is too,
@@ -1091,6 +1239,29 @@ fn close_compared_sensitivity(plan: &mut Plan, order: &[RelationId], compared: &
             let Some(field) = relation.field(&edge.field) else {
                 continue;
             };
+            if relation.uses_part_fields() {
+                if !field.sensitive {
+                    let rel = &mut plan.relations[edge.input.0].relation;
+                    for (name, held) in &mut rel.fields {
+                        if name == &edge.field {
+                            held.sensitive = true;
+                        }
+                    }
+                    if let plan::Rows::Union(parts) = &mut rel.rows {
+                        for part in parts {
+                            if let Some(fields) = &mut part.fields {
+                                for (name, held) in fields {
+                                    if name == &edge.field {
+                                        held.sensitive = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    changed = true;
+                }
+                continue;
+            }
             let family = Family::of(&field.source, join);
             let shown: Vec<usize> = relation
                 .fields
@@ -1135,6 +1306,7 @@ enum Family<'a> {
     Path,
     Value,
     Bound(&'a str),
+    Record(&'a str),
     Side(bool, &'a str),
 }
 
@@ -1150,6 +1322,7 @@ impl<'a> Family<'a> {
             Source::Path(_) => Self::Path,
             Source::Value => Self::Value,
             Source::Bound { query, .. } => Self::Bound(query),
+            Source::Record { query, .. } => Self::Record(query),
             Source::Side(side, field) => {
                 let left = *side == plan::JoinSide::Left;
                 match join {
@@ -1334,6 +1507,7 @@ impl Resolved<'_> {
     /// `config_files`, the files the configuration was loaded from), and
     /// record them on the plan. A field no version 2 source wrote names no
     /// relation.
+    #[allow(clippy::too_many_lines)]
     pub(crate) fn resolve_rule(
         &mut self,
         id: &str,
@@ -1395,33 +1569,87 @@ impl Resolved<'_> {
                 )?);
             }
         }
-        // A `set` against another relation's field: its compared field.
+        // Cross-relation sensitivity propagation for `set` (both `field` and
+        // per-group `group_by[j]`) and `reference` (`fields[j]`).
         let input = references
             .iter()
             .find(|reference| reference.field == "input");
-        let set = rule.get("assert").and_then(|assert| assert.get("set"));
-        let compared = set
-            .and_then(|set| set.get("field"))
-            .and_then(ayaml::Value::as_str);
-        if let (Some(input), Some(set), Some(compared)) = (input, set, compared) {
-            for reference in &references {
-                let Some(mode) = reference
-                    .field
-                    .strip_prefix("assert.set.")
-                    .and_then(|rest| rest.strip_suffix(".relation"))
-                else {
-                    continue;
+        let name_list = |value: Option<&ayaml::Value>| -> Vec<String> {
+            match value {
+                Some(ayaml::Value::String(s)) => vec![s.clone()],
+                Some(ayaml::Value::Sequence(items)) => items
+                    .iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect(),
+                _ => Vec::new(),
+            }
+        };
+        if let Some(input) = input {
+            if let Some(set) = rule.get("assert").and_then(|assert| assert.get("set")) {
+                let compared = set.get("field").and_then(ayaml::Value::as_str);
+                let input_groups = name_list(set.get("group_by"));
+                for reference in &references {
+                    let Some(mode) = reference
+                        .field
+                        .strip_prefix("assert.set.")
+                        .and_then(|rest| rest.strip_suffix(".relation"))
+                    else {
+                        continue;
+                    };
+                    let Some(target) = set.get(mode) else {
+                        continue;
+                    };
+                    if let (Some(compared), Some(other_field)) =
+                        (compared, target.get("field").and_then(ayaml::Value::as_str))
+                    {
+                        self.compared.push(Compared {
+                            input: input.relation.id,
+                            field: compared.to_string(),
+                            other: reference.relation.id,
+                            other_field: other_field.to_string(),
+                        });
+                    }
+                    let target_groups = name_list(target.get("group_by"));
+                    for (in_g, out_g) in input_groups.iter().zip(&target_groups) {
+                        self.compared.push(Compared {
+                            input: input.relation.id,
+                            field: in_g.clone(),
+                            other: reference.relation.id,
+                            other_field: out_g.clone(),
+                        });
+                    }
+                }
+            }
+            if let Some(reference_assert) = rule
+                .get("assert")
+                .and_then(|assert| assert.get("reference"))
+                && let Some(target_ref) = references
+                    .iter()
+                    .find(|r| r.field == "assert.reference.to.relation")
+            {
+                let src_fields = {
+                    let single = name_list(reference_assert.get("field"));
+                    if single.is_empty() {
+                        name_list(reference_assert.get("fields"))
+                    } else {
+                        single
+                    }
                 };
-                if let Some(other_field) = set
-                    .get(mode)
-                    .and_then(|target| target.get("field"))
-                    .and_then(ayaml::Value::as_str)
-                {
+                let to = reference_assert.get("to");
+                let dst_fields = {
+                    let single = name_list(to.and_then(|t| t.get("field")));
+                    if single.is_empty() {
+                        name_list(to.and_then(|t| t.get("fields")))
+                    } else {
+                        single
+                    }
+                };
+                for (src_f, dst_f) in src_fields.iter().zip(&dst_fields) {
                     self.compared.push(Compared {
                         input: input.relation.id,
-                        field: compared.to_string(),
-                        other: reference.relation.id,
-                        other_field: other_field.to_string(),
+                        field: src_f.clone(),
+                        other: target_ref.relation.id,
+                        other_field: dst_f.clone(),
                     });
                 }
             }

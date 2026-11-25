@@ -554,6 +554,16 @@ fn every_buffered_serde_container_is_reviewed() {
             "a test's strings",
         ),
         (
+            "alint-rules/src/constraint/options.rs",
+            "FieldNameOrList",
+            "string or list of strings",
+        ),
+        (
+            "alint-rules/src/constraint/options.rs",
+            "GroupLiteral",
+            "scalar literal or tuple of literals",
+        ),
+        (
             "alint-rules/src/cross_file/spec.rs",
             "TargetsSpec",
             "strings, extracts",

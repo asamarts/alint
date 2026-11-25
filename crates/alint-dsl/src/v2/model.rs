@@ -199,17 +199,22 @@ pub(crate) enum Rows {
     Join(Join),
 }
 
-/// A selector and how its resources are read: a relation with `entries:` or
-/// `read:`, or one part of a `union:`.
+/// A selector and how its resources are read: a relation with `entries:`,
+/// `records:` or `read:`, or one part of a `union:`.
 #[derive(Debug, Clone)]
 pub(crate) struct Part {
     pub(crate) from: SelectorRef,
     pub(crate) reader: Reader,
+    /// Per-part field bindings in a mixed-reader `union:` (ADR-0050 D8, #592),
+    /// normalized to the first part's field order; `None` when the relation
+    /// declares shared top-level `fields:`.
+    pub(crate) fields: Option<Vec<(String, Field)>>,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) enum Reader {
     Entries(Entries),
+    Records(Records),
     Read {
         read: Read,
         /// A `read:` that matches nothing yields no row instead of a missing
@@ -225,6 +230,13 @@ pub(crate) struct Entries {
     pub(crate) format: EntriesFormat,
     pub(crate) at: Vec<String>,
     pub(crate) leaves: bool,
+}
+
+/// `records:`: one row per object element `at` selects (ADR-0050 D8, #592).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Records {
+    pub(crate) format: EntriesFormat,
+    pub(crate) at: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -292,6 +304,12 @@ pub(crate) enum FieldSource {
         optional: bool,
         on_missing: BoundMissing,
     },
+    /// `record: <JSONPath>`: a scalar subfield read from each `records:`
+    /// element object (ADR-0050 D8, #592).
+    Record {
+        query: String,
+        optional: bool,
+    },
     /// `left.F` or `right.F` in a join's output.
     Side(JoinSide, String),
 }
@@ -306,14 +324,23 @@ pub(crate) enum PathToken {
     ParentName,
 }
 
-/// The fixed transforms (ADR-0037 decision 2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Relation transforms (ADR-0037 decision 2, ADR-0050 D8).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Transform {
     Trim,
     Lower,
     SemverMajor,
     SemverMinor,
     StripRoot,
+    Split {
+        on: String,
+        part: i64,
+        required: bool,
+    },
+    StripPrefix(String),
+    StripSuffix(Vec<String>),
+    Prefix(String),
+    Suffix(String),
 }
 
 /// A row filter's predicate (section 7).

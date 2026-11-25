@@ -75,6 +75,9 @@ pub(super) struct PlanView {
     /// The `id` of a `set`'s other relation in `relations`.
     #[serde(skip_serializing_if = "Option::is_none")]
     set_target: Option<usize>,
+    /// The `id` of a `reference`'s target relation in `relations`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reference_target: Option<usize>,
     /// The assertion, in readable form.
     assertion: Shown<AssertionView>,
     /// Every relation the rule reads, in the order a run evaluates them.
@@ -88,7 +91,7 @@ pub(super) struct PlanView {
 
 #[derive(Debug, Serialize)]
 struct AssertionView {
-    /// `equal`, `unique` or `set`.
+    /// `equal`, `unique`, `set`, `reference`, `count`, or `compare`.
     family: String,
     text: String,
 }
@@ -139,9 +142,13 @@ struct PartView {
     #[serde(skip_serializing_if = "Option::is_none")]
     entries: Option<Shown<EntriesView>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    records: Option<Shown<RecordsView>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     read: Option<Shown<serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     optional: Option<Shown<bool>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fields: Option<Vec<FieldView>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -149,6 +156,12 @@ struct EntriesView {
     format: &'static str,
     at: Vec<String>,
     leaves: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct RecordsView {
+    format: &'static str,
+    at: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -208,7 +221,7 @@ struct FieldView {
     optional: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     on_missing: Option<&'static str>,
-    transforms: Shown<Vec<&'static str>>,
+    transforms: Shown<Vec<String>>,
     sensitive: bool,
 }
 
@@ -348,6 +361,8 @@ pub(super) fn plan_of(entry: &RuleEntry, root: &Path, redact: Redact<'_>) -> Opt
             for reference in references.iter().filter(|r| r.relation.id == id) {
                 let role = if reference.field == "input" {
                     "input"
+                } else if reference.field == "assert.reference.to.relation" {
+                    "reference_target"
                 } else {
                     "set_target"
                 };
@@ -370,20 +385,29 @@ pub(super) fn plan_of(entry: &RuleEntry, root: &Path, redact: Redact<'_>) -> Opt
         .unwrap_or_default();
     let set_target = references
         .iter()
-        .find(|reference| reference.field != "input")
+        .find(|reference| {
+            reference.field != "input" && reference.field != "assert.reference.to.relation"
+        })
+        .map(|reference| builder.position(reference.relation.id));
+    let reference_target = references
+        .iter()
+        .find(|reference| reference.field == "assert.reference.to.relation")
         .map(|reference| builder.position(reference.relation.id));
     let assert = assert_option(entry);
     let assertion = Shown::hidden_if(explain_field_is_sensitive(entry, "assert"), || {
         assertion(
             &assert,
             &|field| field_is_sensitive(plan, input, field),
-            set_target.map(|target| labels[target].as_str()),
+            set_target
+                .or(reference_target)
+                .map(|target| labels[target].as_str()),
         )
     });
     let cost = cost(&assert);
     Some(Shown::Value(Box::new(PlanView {
         input: builder.position(input),
         set_target,
+        reference_target,
         assertion,
         relations,
         trigger,
@@ -438,6 +462,7 @@ fn field_is_sensitive(plan: &Plan, id: RelationId, field: &str) -> bool {
 /// the input, and an inline `input:`'s `where:` literals, patterns and
 /// transforms of its sensitive fields. Every other option, and every option
 /// of a rule that reads no relation, is returned as it is.
+#[allow(clippy::too_many_lines)]
 pub(super) fn redact_option(
     entry: &RuleEntry,
     key: &str,
@@ -451,26 +476,45 @@ pub(super) fn redact_option(
     let hide = |slot: &mut serde_json::Value| *slot = serde_json::Value::from(REDACTED);
     match key {
         "assert" => {
-            if let Some(row) = value
-                .pointer_mut("/equal/to/row")
-                .and_then(serde_json::Value::as_object_mut)
-            {
-                for (field, literal) in row.iter_mut() {
-                    if sensitive(field) {
-                        hide(literal);
+            for pointer in ["/equal/to/row", "/compare/to/row"] {
+                if let Some(row) = value
+                    .pointer_mut(pointer)
+                    .and_then(serde_json::Value::as_object_mut)
+                {
+                    for (field, literal) in row.iter_mut() {
+                        if sensitive(field) {
+                            hide(literal);
+                        }
                     }
                 }
             }
-            let group_by = value
-                .pointer("/set/group_by")
+            let compare_field = value
+                .pointer("/compare/field")
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_string);
-            if let Some(set) = value.get_mut("set")
-                && group_by.as_deref().is_some_and(sensitive)
+            if compare_field.as_deref().is_some_and(sensitive)
+                && let Some(val) = value.pointer_mut("/compare/to/value")
             {
+                hide(val);
+            }
+            let set_field = value
+                .pointer("/set/field")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string);
+            let set_group_by = field_name_or_list(value.pointer("/set/group_by"));
+            if let Some(set) = value.get_mut("set") {
                 for mode in ["equal_to", "subset_of", "disjoint_from"] {
                     if let Some(group) = set.pointer_mut(&format!("/{mode}/group")) {
-                        hide(group);
+                        redact_group_literal(group, &set_group_by, &sensitive, &hide);
+                    }
+                    if set_field.as_deref().is_some_and(sensitive)
+                        && let Some(values) = set
+                            .pointer_mut(&format!("/{mode}/values"))
+                            .and_then(serde_json::Value::as_array_mut)
+                    {
+                        for item in values {
+                            hide(item);
+                        }
                     }
                 }
                 for literal in set
@@ -479,7 +523,16 @@ pub(super) fn redact_option(
                     .into_iter()
                     .flatten()
                 {
-                    hide(literal);
+                    redact_group_literal(literal, &set_group_by, &sensitive, &hide);
+                }
+            }
+            let count_group_by = field_name_or_list(value.pointer("/count/group_by"));
+            if let Some(groups) = value
+                .pointer_mut("/count/groups")
+                .and_then(serde_json::Value::as_array_mut)
+            {
+                for literal in groups {
+                    redact_group_literal(literal, &count_group_by, &sensitive, &hide);
                 }
             }
         }
@@ -550,9 +603,80 @@ fn text_of<'v>(value: &'v serde_json::Value, key: &str) -> &'v str {
         .unwrap_or_default()
 }
 
+fn field_name_or_list(value: Option<&serde_json::Value>) -> Vec<String> {
+    match value {
+        Some(serde_json::Value::String(name)) => vec![name.clone()],
+        Some(serde_json::Value::Array(items)) => items
+            .iter()
+            .filter_map(|item| item.as_str().map(str::to_string))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn redact_group_literal(
+    literal: &mut serde_json::Value,
+    group_by: &[String],
+    sensitive: &dyn Fn(&str) -> bool,
+    hide: &dyn Fn(&mut serde_json::Value),
+) {
+    match literal {
+        serde_json::Value::Array(items) => {
+            for (slot, field) in items.iter_mut().zip(group_by) {
+                if sensitive(field) {
+                    hide(slot);
+                }
+            }
+        }
+        other => {
+            if group_by.first().is_some_and(|field| sensitive(field)) {
+                hide(other);
+            }
+        }
+    }
+}
+
+fn show_group_literal(
+    literal: &serde_json::Value,
+    group_by: &[String],
+    sensitive: &dyn Fn(&str) -> bool,
+) -> String {
+    match literal {
+        serde_json::Value::Array(items) => {
+            let parts: Vec<String> = items
+                .iter()
+                .enumerate()
+                .map(|(idx, item)| {
+                    if group_by.get(idx).is_some_and(|field| sensitive(field)) {
+                        REDACTED.to_string()
+                    } else {
+                        literal_text(item)
+                    }
+                })
+                .collect();
+            format!("[{}]", parts.join(", "))
+        }
+        other => {
+            if group_by.first().is_some_and(|field| sensitive(field)) {
+                REDACTED.to_string()
+            } else {
+                literal_text(other)
+            }
+        }
+    }
+}
+
+fn format_field_list(fields: &[String]) -> String {
+    match fields {
+        [one] => one.clone(),
+        many => format!("[{}]", many.join(", ")),
+    }
+}
+
 /// `assert:` in readable form, with the literals compared with a field
-/// `sensitive` reports hidden, and a `set`'s other relation called `target`
-/// (as the relation list calls it) when the rule reads one.
+/// `sensitive` reports hidden, and a `set` or `reference` target relation
+/// called `target` (as the relation list calls it) when the rule reads one.
+#[allow(clippy::too_many_lines)]
 fn assertion(
     assert: &serde_json::Value,
     sensitive: &dyn Fn(&str) -> bool,
@@ -579,6 +703,7 @@ fn assertion(
     if let Some(equal) = assert.get("equal") {
         let field = text_of(equal, "field");
         let to = equal.get("to");
+        let group_by = field_name_or_list(equal.get("group_by"));
         let text = if let Some(row) = to
             .and_then(|to| to.get("row"))
             .and_then(serde_json::Value::as_object)
@@ -596,8 +721,11 @@ fn assertion(
             .and_then(serde_json::Value::as_str)
         {
             format!("equal: field {field}, to field {other} of the same row")
-        } else if let Some(group_by) = equal.get("group_by").and_then(serde_json::Value::as_str) {
-            format!("equal: field {field}, within each group of {group_by}")
+        } else if !group_by.is_empty() {
+            format!(
+                "equal: field {field}, within each group of {}",
+                format_field_list(&group_by)
+            )
         } else {
             format!("equal: field {field}, across every row")
         };
@@ -606,12 +734,96 @@ fn assertion(
             text,
         };
     }
+    if let Some(reference) = assert.get("reference") {
+        let src = if let Some(field) = reference.get("field").and_then(serde_json::Value::as_str) {
+            format!("field {field}")
+        } else {
+            format!("fields [{}]", names(reference.get("fields")).join(", "))
+        };
+        let to = reference.get("to").unwrap_or(&serde_json::Value::Null);
+        let dst = if let Some(field) = to.get("field").and_then(serde_json::Value::as_str) {
+            format!("field {field}")
+        } else {
+            format!("fields [{}]", names(to.get("fields")).join(", "))
+        };
+        let rel = target.unwrap_or_else(|| text_of(to, "relation"));
+        let mut text = format!("reference: {src} in {dst} of relation {rel}");
+        if reference
+            .get("skip_missing")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+        {
+            text.push_str(", skip_missing");
+        }
+        return AssertionView {
+            family: "reference".into(),
+            text,
+        };
+    }
+    if let Some(count) = assert.get("count") {
+        let group_by = field_name_or_list(count.get("group_by"));
+        let mut text = if count.get("distinct").and_then(serde_json::Value::as_bool) == Some(true) {
+            format!("count: distinct {}", text_of(count, "field"))
+        } else {
+            "count: rows".to_string()
+        };
+        if !group_by.is_empty() {
+            let _ = write!(text, " per group of {}", format_field_list(&group_by));
+        }
+        for bound in ["min", "max", "exact"] {
+            if let Some(n) = count.get(bound).and_then(serde_json::Value::as_u64) {
+                let _ = write!(text, ", {bound} {n}");
+            }
+        }
+        let groups: Vec<String> = count
+            .get("groups")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .map(|group| show_group_literal(group, &group_by, sensitive))
+            .collect();
+        if !groups.is_empty() {
+            let _ = write!(text, ", groups [{}]", groups.join(", "));
+        }
+        return AssertionView {
+            family: "count".into(),
+            text,
+        };
+    }
+    if let Some(compare) = assert.get("compare") {
+        let field = text_of(compare, "field");
+        let op = text_of(compare, "op");
+        let to = compare.get("to").unwrap_or(&serde_json::Value::Null);
+        let mut text = if let Some(other) = to.get("field").and_then(serde_json::Value::as_str) {
+            format!("compare: field {field} {op} field {other} of the same row")
+        } else if let Some(val) = to.get("value") {
+            format!("compare: field {field} {op} {}", literal(field, val))
+        } else if let Some(row) = to.get("row").and_then(serde_json::Value::as_object) {
+            let row: Vec<String> = row
+                .iter()
+                .map(|(name, value)| format!("{name} = {}", literal(name, value)))
+                .collect();
+            format!(
+                "compare: field {field} {op} the source row where {}",
+                row.join(" and ")
+            )
+        } else {
+            format!("compare: field {field} {op}")
+        };
+        if let Some(order) = compare.get("order").and_then(serde_json::Value::as_str) {
+            let _ = write!(text, ", order {order}");
+        }
+        return AssertionView {
+            family: "compare".into(),
+            text,
+        };
+    }
     let set = assert.get("set").unwrap_or(&serde_json::Value::Null);
     let field = text_of(set, "field");
-    let group_by = set.get("group_by").and_then(serde_json::Value::as_str);
+    let group_by = field_name_or_list(set.get("group_by"));
     let mut text = format!("set: values of {field}");
-    if let Some(group_by) = group_by {
-        let _ = write!(text, " per group of {group_by}");
+    if !group_by.is_empty() {
+        let _ = write!(text, " per group of {}", format_field_list(&group_by));
     }
     let relation = target;
     for mode in ["equal_to", "subset_of", "disjoint_from"] {
@@ -619,8 +831,11 @@ fn assertion(
             continue;
         };
         if let Some(group) = target.get("group") {
-            let shown = literal(group_by.unwrap_or_default(), group);
+            let shown = show_group_literal(group, &group_by, sensitive);
             let _ = write!(text, ", {mode} group {shown}");
+        } else if let Some(values) = target.get("values").and_then(serde_json::Value::as_array) {
+            let shown: Vec<String> = values.iter().map(|v| literal(field, v)).collect();
+            let _ = write!(text, ", {mode} values [{}]", shown.join(", "));
         } else {
             let _ = write!(
                 text,
@@ -628,6 +843,17 @@ fn assertion(
                 text_of(target, "field"),
                 relation.unwrap_or_else(|| text_of(target, "relation"))
             );
+            let to_group_by = field_name_or_list(target.get("group_by"));
+            if !to_group_by.is_empty() {
+                let _ = write!(text, " per group of {}", format_field_list(&to_group_by));
+            }
+            if target
+                .get("all_target_groups")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true)
+            {
+                text.push_str(", all_target_groups");
+            }
         }
     }
     let groups: Vec<String> = set
@@ -635,7 +861,7 @@ fn assertion(
         .and_then(serde_json::Value::as_array)
         .into_iter()
         .flatten()
-        .map(|group| literal(group_by.unwrap_or_default(), group))
+        .map(|group| show_group_literal(group, &group_by, sensitive))
         .collect();
     if !groups.is_empty() {
         let _ = write!(text, ", groups [{}]", groups.join(", "));
@@ -738,14 +964,12 @@ impl Builder<'_> {
         let relation = &named.relation;
         let hidden = named.definition_reads_environment;
         let rows = match &relation.rows {
-            Rows::Part(part) => {
-                RowsView::Part(Box::new(self.part(id, 0, &part.from, &part.reader, named)))
-            }
+            Rows::Part(part) => RowsView::Part(Box::new(self.part(id, 0, part, named))),
             Rows::Union(parts) => RowsView::Union {
                 union: parts
                     .iter()
                     .enumerate()
-                    .map(|(index, part)| self.part(id, index, &part.from, &part.reader, named))
+                    .map(|(index, part)| self.part(id, index, part, named))
                     .collect(),
             },
             Rows::Join(join) => RowsView::Join {
@@ -785,39 +1009,54 @@ impl Builder<'_> {
         &self,
         id: RelationId,
         index: usize,
-        from: &SelectorRef,
-        reader: &Reader,
+        part: &alint_core::relation::plan::Part,
         named: &NamedRelation,
     ) -> PartView {
         let hidden = named.definition_reads_environment;
         let from = self.selector(
-            from,
+            &part.from,
             TriggerOrigin::Inline {
                 relation: id,
                 part: index,
             },
             named,
         );
-        match reader {
+        let part_fields = part.fields.as_ref().map(|defs| {
+            defs.iter()
+                .map(|(name, field)| field_view(name, field, &[], hidden))
+                .collect()
+        });
+        match &part.reader {
             Reader::Entries(entries) => PartView {
                 from,
                 entries: Some(Shown::hidden_if(hidden, || EntriesView {
-                    format: match entries.format {
-                        EntriesFormat::Json => "json",
-                        EntriesFormat::Yaml => "yaml",
-                        EntriesFormat::Toml => "toml",
-                    },
+                    format: format_name(entries.format),
                     at: entries.at.clone(),
                     leaves: entries.leaves,
                 })),
+                records: None,
                 read: None,
                 optional: None,
+                fields: part_fields,
+            },
+            Reader::Records(records) => PartView {
+                from,
+                entries: None,
+                records: Some(Shown::hidden_if(hidden, || RecordsView {
+                    format: format_name(records.format),
+                    at: records.at.clone(),
+                })),
+                read: None,
+                optional: None,
+                fields: part_fields,
             },
             Reader::Read { read, optional } => PartView {
                 from,
                 entries: None,
+                records: None,
                 read: Some(Shown::hidden_if(hidden, || read_json(read))),
                 optional: Some(Shown::hidden_if(hidden, || *optional)),
+                fields: part_fields,
             },
         }
     }
@@ -1003,50 +1242,83 @@ fn read_json(read: &Read) -> serde_json::Value {
     }
 }
 
+fn format_name(format: EntriesFormat) -> &'static str {
+    match format {
+        EntriesFormat::Json => "json",
+        EntriesFormat::Yaml => "yaml",
+        EntriesFormat::Toml => "toml",
+    }
+}
+
 fn fields(relation: &RelationDef, hidden: bool) -> Vec<FieldView> {
+    let per_part = relation.uses_part_fields();
     relation
         .fields
         .iter()
         .map(|(name, field)| {
-            let (optional, on_missing) = match &field.source {
-                FieldSource::Bound {
-                    optional: true,
-                    on_missing,
-                    ..
-                } if !hidden => (
-                    Some(true),
-                    Some(match on_missing {
-                        alint_core::relation::plan::BoundMissing::Skip => "skip",
-                        alint_core::relation::plan::BoundMissing::Missing => "missing",
-                    }),
-                ),
-                _ => (None, None),
-            };
-            FieldView {
-                name: name.clone(),
-                source: field_source(&field.source, hidden),
-                optional,
-                on_missing,
-                // Whether a field has transforms is written literally; which
-                // ones a sensitive field has may be the environment's.
-                transforms: Shown::hidden_if(
-                    field.sensitive && !relation.transforms_of(name).is_empty(),
-                    || {
-                        relation
-                            .transforms_of(name)
-                            .iter()
-                            .map(|transform| transform_name(*transform))
-                            .collect()
-                    },
-                ),
-                sensitive: field.sensitive,
+            if per_part {
+                FieldView {
+                    name: name.clone(),
+                    source: "per part".to_string(),
+                    optional: None,
+                    on_missing: None,
+                    transforms: Shown::hidden_if(
+                        field.sensitive && !relation.transforms_of(name).is_empty(),
+                        || {
+                            relation
+                                .transforms_of(name)
+                                .iter()
+                                .map(transform_text)
+                                .collect()
+                        },
+                    ),
+                    sensitive: field.sensitive,
+                }
+            } else {
+                field_view(name, field, relation.transforms_of(name), hidden)
             }
         })
         .collect()
 }
 
-/// A field's source as the config writes it, with a `bound:` path hidden
-/// when `hidden`: the only part of a source that can read the environment.
+fn field_view(
+    name: &str,
+    field: &alint_core::relation::plan::FieldDef,
+    transforms: &[Transform],
+    hidden: bool,
+) -> FieldView {
+    let (optional, on_missing) = match &field.source {
+        FieldSource::Bound {
+            optional: true,
+            on_missing,
+            ..
+        } if !hidden => (
+            Some(true),
+            Some(match on_missing {
+                alint_core::relation::plan::BoundMissing::Skip => "skip",
+                alint_core::relation::plan::BoundMissing::Missing => "missing",
+            }),
+        ),
+        FieldSource::Record { optional: true, .. } if !hidden => (Some(true), None),
+        _ => (None, None),
+    };
+    FieldView {
+        name: name.to_string(),
+        source: field_source(&field.source, hidden),
+        optional,
+        on_missing,
+        // Whether a field has transforms is written literally; which
+        // ones a sensitive field has may be the environment's.
+        transforms: Shown::hidden_if(field.sensitive && !transforms.is_empty(), || {
+            transforms.iter().map(transform_text).collect()
+        }),
+        sensitive: field.sensitive,
+    }
+}
+
+/// A field's source as the config writes it, with `bound:` and `record:` paths
+/// hidden when `hidden`: the only parts of a source that can read the
+/// environment.
 fn field_source(source: &FieldSource, hidden: bool) -> String {
     match source {
         FieldSource::Path(token) => match token {
@@ -1071,18 +1343,52 @@ fn field_source(source: &FieldSource, hidden: bool) -> String {
                 format!("bound: {query}")
             }
         }
+        FieldSource::Record { query, .. } => {
+            if hidden {
+                format!("record: {REDACTED}")
+            } else {
+                format!("record: {query}")
+            }
+        }
         FieldSource::Side(JoinSide::Left, field) => format!("left.{field}"),
         FieldSource::Side(JoinSide::Right, field) => format!("right.{field}"),
     }
 }
 
-fn transform_name(transform: Transform) -> &'static str {
+fn transform_text(transform: &Transform) -> String {
     match transform {
-        Transform::Trim => "trim",
-        Transform::Lower => "lower",
-        Transform::SemverMajor => "semver-major",
-        Transform::SemverMinor => "semver-minor",
-        Transform::StripRoot => "strip-root",
+        Transform::Trim => "trim".into(),
+        Transform::Lower => "lower".into(),
+        Transform::SemverMajor => "semver-major".into(),
+        Transform::SemverMinor => "semver-minor".into(),
+        Transform::StripRoot => "strip-root".into(),
+        Transform::Split { on, part, required } => {
+            let on = serde_json::Value::from(on.as_str());
+            if *required {
+                format!("split(on: {on}, part: {part}, required: true)")
+            } else {
+                format!("split(on: {on}, part: {part})")
+            }
+        }
+        Transform::StripPrefix(prefix) => {
+            format!("strip_prefix({})", serde_json::Value::from(prefix.as_str()))
+        }
+        Transform::StripSuffix(suffixes) => match suffixes.as_slice() {
+            [one] => format!("strip_suffix({})", serde_json::Value::from(one.as_str())),
+            many => format!(
+                "strip_suffix([{}])",
+                many.iter()
+                    .map(|s| serde_json::Value::from(s.as_str()).to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        },
+        Transform::Prefix(prefix) => {
+            format!("prefix({})", serde_json::Value::from(prefix.as_str()))
+        }
+        Transform::Suffix(suffix) => {
+            format!("suffix({})", serde_json::Value::from(suffix.as_str()))
+        }
     }
 }
 
@@ -1214,6 +1520,7 @@ fn write_relation_heading(out: &mut impl Write, relation: &RelationView) -> Resu
         marks.push(match (*role, relation.inline) {
             ("input", true) => "inline input",
             ("input", false) => "input",
+            ("reference_target", _) => "reference target",
             _ => "set target",
         });
     }
@@ -1313,6 +1620,13 @@ fn write_part(out: &mut impl Write, indent: &str, part: &PartView, labels: &[&st
         };
         writeln!(out, "{indent}{dim}entries:{dim:#} {}", term(&entries))?;
     }
+    if let Some(records) = &part.records {
+        let records = match records {
+            Shown::Value(records) => format!("{} at {}", records.format, records.at.join(", ")),
+            Shown::Redacted(marker) => (*marker).to_string(),
+        };
+        writeln!(out, "{indent}{dim}records:{dim:#} {}", term(&records))?;
+    }
     if let Some(read) = &part.read {
         let mut text = match read {
             Shown::Value(read) => read_text(read),
@@ -1326,6 +1640,33 @@ fn write_part(out: &mut impl Write, indent: &str, part: &PartView, labels: &[&st
             _ => {}
         }
         writeln!(out, "{indent}{dim}read:{dim:#} {}", term(&text))?;
+    }
+    if let Some(part_fields) = &part.fields {
+        writeln!(out, "{indent}{dim}fields:{dim:#}")?;
+        for field in part_fields {
+            let mut notes: Vec<&str> = Vec::new();
+            if field.optional == Some(true) {
+                match field.on_missing {
+                    Some("missing") => notes.push("optional, on_missing: missing"),
+                    _ => notes.push("optional"),
+                }
+            }
+            if field.sensitive {
+                notes.push("sensitive");
+            }
+            let notes = if notes.is_empty() {
+                String::new()
+            } else {
+                format!("  ({})", notes.join("; "))
+            };
+            writeln!(
+                out,
+                "{indent}  {}: {}{}",
+                term(&field.name),
+                term(&field.source),
+                term(&notes)
+            )?;
+        }
     }
     Ok(())
 }

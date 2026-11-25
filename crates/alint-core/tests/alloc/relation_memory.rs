@@ -75,6 +75,7 @@ fn relation(at: &str) -> Arc<Plan> {
                         at: vec![at.into()],
                         leaves: false,
                     }),
+                    fields: None,
                 }),
                 fields: vec![(
                     "key".into(),

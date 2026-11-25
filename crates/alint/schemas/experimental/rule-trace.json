@@ -825,7 +825,10 @@
                           "enum": [
                             "equal",
                             "unique",
-                            "set"
+                            "set",
+                            "reference",
+                            "count",
+                            "compare"
                           ]
                         },
                         "text": {
@@ -850,6 +853,10 @@
                   "minimum": 0,
                   "type": "integer"
                 },
+                "reference_target": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
                 "relations": {
                   "items": {
                     "additionalProperties": false,
@@ -864,12 +871,20 @@
                       "read": [
                         "from",
                         "optional"
+                      ],
+                      "records": [
+                        "from"
                       ]
                     },
                     "oneOf": [
                       {
                         "required": [
                           "entries"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "records"
                         ]
                       },
                       {
@@ -1210,11 +1225,42 @@
                           }
                         ]
                       },
+                      "records": {
+                        "oneOf": [
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "at": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              "format": {
+                                "enum": [
+                                  "json",
+                                  "yaml",
+                                  "toml"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "format",
+                              "at"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "const": "<redacted>"
+                          }
+                        ]
+                      },
                       "roles": {
                         "items": {
                           "enum": [
                             "input",
-                            "set_target"
+                            "set_target",
+                            "reference_target"
                           ]
                         },
                         "type": "array",
@@ -1234,12 +1280,20 @@
                             "read": [
                               "from",
                               "optional"
+                            ],
+                            "records": [
+                              "from"
                             ]
                           },
                           "oneOf": [
                             {
                               "required": [
                                 "entries"
+                              ]
+                            },
+                            {
+                              "required": [
+                                "records"
                               ]
                             },
                             {
@@ -1282,6 +1336,52 @@
                                   "const": "<redacted>"
                                 }
                               ]
+                            },
+                            "fields": {
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "on_missing": {
+                                    "enum": [
+                                      "skip",
+                                      "missing"
+                                    ]
+                                  },
+                                  "optional": {
+                                    "type": "boolean"
+                                  },
+                                  "sensitive": {
+                                    "type": "boolean"
+                                  },
+                                  "source": {
+                                    "type": "string"
+                                  },
+                                  "transforms": {
+                                    "oneOf": [
+                                      {
+                                        "items": {
+                                          "type": "string"
+                                        },
+                                        "type": "array"
+                                      },
+                                      {
+                                        "const": "<redacted>"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "source",
+                                  "transforms",
+                                  "sensitive"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
                             },
                             "from": {
                               "additionalProperties": false,
@@ -1452,6 +1552,36 @@
                                       "type": "string"
                                     }
                                   },
+                                  "type": "object"
+                                },
+                                {
+                                  "const": "<redacted>"
+                                }
+                              ]
+                            },
+                            "records": {
+                              "oneOf": [
+                                {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "at": {
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "type": "array"
+                                    },
+                                    "format": {
+                                      "enum": [
+                                        "json",
+                                        "yaml",
+                                        "toml"
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "format",
+                                    "at"
+                                  ],
                                   "type": "object"
                                 },
                                 {
