@@ -19,4 +19,4 @@ expect:
   - exit: configuration_error
     configuration_error:
       message:
-        regex: ': a nested config \(`nested_configs:`\) must be `version: 1` in this build; `version: 2` is accepted only in local files \(the top-level config, a local `extends:` target or an `\.alint\.d` fragment\)$'
+        regex: ': a nested config \(`nested_configs:`\) must be `version: 1` in this build; `version: 2` is accepted only in local files \(the top-level config, a local `extends:` target or an `\.alint\.d` fragment\) and bundled rulesets \(`alint://bundled/\.\.\.`\)$'

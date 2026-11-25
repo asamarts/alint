@@ -1,1 +1,1 @@
-alint: warning: `version: 2` is experimental; its syntax may change before a release declares it stable, v0.24 at the earliest ([CWD]/.alint.yml)
+alint: warning: `version: 2` is experimental; its syntax may change before a release declares it stable, v0.25 at the earliest ([CWD]/.alint.yml)

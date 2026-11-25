@@ -115,7 +115,10 @@ fn the_plan_holds_every_source_with_its_aliases() {
             (display(".alint.d/10-docs.yml"), ConfigSourceClass::DropIn),
         ]
     );
-    assert_eq!(plan.sources[0].path, base.canonicalize().unwrap());
+    assert_eq!(
+        plan.sources[0].locator,
+        alint_core::relation::plan::SourceLocator::Local(base.canonicalize().unwrap())
+    );
     assert_eq!(plan.sources[1].aliases[0].name, "base");
     assert_eq!(plan.sources[1].aliases[0].target, Some(SourceIndex(0)));
     let pinned = &plan.relations[1];

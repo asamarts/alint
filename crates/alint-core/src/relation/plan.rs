@@ -144,13 +144,24 @@ impl Plan {
     }
 }
 
+/// Identity of a version 2 configuration source across an `extends:` graph.
+///
+/// Local files are identified by their canonical on-disk path; compiled-in
+/// bundled rulesets are identified by their canonical `alint://bundled/<name>@<rev>`
+/// URI (ADR-0050 D10, ADR-0048 decision 3c).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum SourceLocator {
+    Local(PathBuf),
+    Bundled(String),
+}
+
 /// A version 2 source, as the objects it declares name it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlanSource {
     /// How a message names the source, as the loader's errors do.
     pub display: String,
-    /// The resolved file.
-    pub path: PathBuf,
+    /// Stable identity of the source across an `extends:` diamond.
+    pub locator: SourceLocator,
     pub class: ConfigSourceClass,
     /// The aliases it gives the sources it extends, in the order written.
     pub aliases: Vec<PlanAlias>,
@@ -632,7 +643,7 @@ mod tests {
     fn source(display: &str, aliases: Vec<PlanAlias>) -> PlanSource {
         PlanSource {
             display: display.into(),
-            path: PathBuf::from(display),
+            locator: SourceLocator::Local(PathBuf::from(display)),
             class: ConfigSourceClass::Root,
             aliases,
         }

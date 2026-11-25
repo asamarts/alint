@@ -10,7 +10,7 @@ use crate::relation::limits::LimitKind;
 use crate::relation::plan::{
     Entries, EntriesFormat, FieldDef, FieldSource, JoinDef, JoinSide, Member, NamedRelation, Part,
     PathToken, PlanSource, Predicate, Reached, Read, Reader, RelationDef, Rows, SelectorDef,
-    SelectorRef, SourceIndex, Transform,
+    SelectorRef, SourceIndex, SourceLocator, Transform,
 };
 use crate::{ConfigSourceClass, PathsSpec};
 
@@ -18,7 +18,7 @@ fn plan(relations: Vec<NamedRelation>) -> Arc<Plan> {
     Arc::new(Plan {
         sources: vec![PlanSource {
             display: ".alint.yml".into(),
-            path: PathBuf::from(".alint.yml"),
+            locator: SourceLocator::Local(PathBuf::from(".alint.yml")),
             class: ConfigSourceClass::Root,
             aliases: Vec::new(),
         }],

@@ -34,7 +34,7 @@ fn relation(doc: &str, reader: Reader, source: FieldSource) -> Arc<Plan> {
     Arc::new(Plan {
         sources: vec![PlanSource {
             display: ".alint.yml".into(),
-            path: ".alint.yml".into(),
+            locator: alint_core::relation::plan::SourceLocator::Local(".alint.yml".into()),
             class: ConfigSourceClass::Root,
             aliases: Vec::new(),
         }],

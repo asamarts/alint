@@ -112,7 +112,9 @@ fn the_relations_rules_read_are_evaluated_before_any_rule_runs_and_no_others() {
     let plan = Arc::new(Plan {
         sources: vec![PlanSource {
             display: ".alint.yml".into(),
-            path: std::path::PathBuf::from(".alint.yml"),
+            locator: crate::relation::plan::SourceLocator::Local(std::path::PathBuf::from(
+                ".alint.yml",
+            )),
             class: ConfigSourceClass::Root,
             aliases: Vec::new(),
         }],
@@ -178,7 +180,9 @@ fn a_trigger_scope_reads_no_manifest_when_the_change_cannot_run_its_rule() {
     let plan = Arc::new(Plan {
         sources: vec![PlanSource {
             display: ".alint.yml".into(),
-            path: std::path::PathBuf::from(".alint.yml"),
+            locator: crate::relation::plan::SourceLocator::Local(std::path::PathBuf::from(
+                ".alint.yml",
+            )),
             class: ConfigSourceClass::Root,
             aliases: Vec::new(),
         }],
@@ -249,7 +253,9 @@ fn the_run_evaluates_relations_in_the_order_explain_shows() {
     let plan = Arc::new(Plan {
         sources: vec![PlanSource {
             display: ".alint.yml".into(),
-            path: std::path::PathBuf::from(".alint.yml"),
+            locator: crate::relation::plan::SourceLocator::Local(std::path::PathBuf::from(
+                ".alint.yml",
+            )),
             class: ConfigSourceClass::Root,
             aliases: Vec::new(),
         }],
@@ -295,7 +301,9 @@ fn locales_plan() -> Arc<Plan> {
     Arc::new(Plan {
         sources: vec![PlanSource {
             display: ".alint.yml".into(),
-            path: std::path::PathBuf::from(".alint.yml"),
+            locator: crate::relation::plan::SourceLocator::Local(std::path::PathBuf::from(
+                ".alint.yml",
+            )),
             class: ConfigSourceClass::Root,
             aliases: Vec::new(),
         }],

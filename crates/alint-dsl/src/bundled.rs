@@ -151,6 +151,13 @@ const REGISTRY: &[(&str, &str, &str)] = &[
         "v1",
         include_str!("../rulesets/v1/agent-context.yml"),
     ),
+    // Version 2 opt-in bundled rulesets (ADR-0048 decision 3c, ADR-0050 D10).
+    // Consumers must declare `version: 2` to extend these.
+    (
+        "js/workspace-deps",
+        "v2",
+        include_str!("../rulesets/v2/js/workspace-deps.yml"),
+    ),
 ];
 
 /// Resolve a `<name>@<rev>` spec (the path portion of an
@@ -198,15 +205,46 @@ mod tests {
 
     #[test]
     fn every_bundled_ruleset_parses_as_valid_config() {
+        let registry = alint_rules::builtin_registry();
+        let options = crate::LoadOptions::with_catalog(registry.catalog());
         for (name, rev) in catalog() {
             let spec = format!("{name}@{rev}");
             let body = resolve(&spec).unwrap();
-            let parsed: Result<alint_core::Config, _> = alint_core::yaml::from_str(body);
-            assert!(
-                parsed.is_ok(),
-                "bundled ruleset '{spec}' failed to parse: {}",
-                parsed.unwrap_err()
-            );
+            if rev == "v1" {
+                let parsed: Result<alint_core::Config, _> = alint_core::yaml::from_str(body);
+                assert!(
+                    parsed.is_ok(),
+                    "bundled ruleset '{spec}' failed to parse as v1: {}",
+                    parsed.unwrap_err()
+                );
+            } else {
+                let dir = tempfile::tempdir().unwrap();
+                let cfg_path = dir.path().join(".alint.yml");
+                std::fs::write(
+                    &cfg_path,
+                    format!("version: 2\nextends:\n  - alint://bundled/{spec}\nrules: []\n"),
+                )
+                .unwrap();
+                let loaded = crate::load_with(&cfg_path, &options)
+                    .unwrap_or_else(|e| panic!("bundled v2 ruleset '{spec}' failed to load: {e}"));
+                assert!(
+                    loaded.relation_plan.is_some(),
+                    "bundled v2 ruleset '{spec}' must produce a relation plan"
+                );
+                assert_eq!(
+                    loaded.config_files.len(),
+                    1,
+                    "bundled v2 ruleset '{spec}' must not pollute Config::config_files"
+                );
+                for rule in &loaded.rules {
+                    registry.build(rule).unwrap_or_else(|e| {
+                        panic!(
+                            "bundled v2 ruleset '{spec}' rule '{}' failed to build: {e}",
+                            rule.id
+                        )
+                    });
+                }
+            }
         }
     }
 
@@ -218,11 +256,52 @@ mod tests {
         for (name, rev) in catalog() {
             let spec = format!("{name}@{rev}");
             let body = resolve(&spec).unwrap();
-            let parsed: alint_core::Config = alint_core::yaml::from_str(body).unwrap();
+            let doc: ayaml::Value = alint_core::yaml::from_str(body).unwrap();
             assert!(
-                parsed.extends.is_empty(),
+                doc.get("extends").is_none(),
                 "bundled ruleset '{spec}' declares `extends:`, which is not allowed"
             );
+        }
+    }
+
+    #[test]
+    fn v2_bundled_rulesets_do_not_overlap_v1_rule_ids() {
+        use std::collections::{BTreeMap, BTreeSet};
+
+        let mut v1_ids: BTreeMap<String, String> = BTreeMap::new();
+        let mut v2_ids: Vec<(String, BTreeSet<String>)> = Vec::new();
+        for (name, rev) in catalog() {
+            let spec = format!("{name}@{rev}");
+            let body = resolve(&spec).unwrap();
+            let doc: ayaml::Value = alint_core::yaml::from_str(body).unwrap();
+            let ids: BTreeSet<String> = doc
+                .get("rules")
+                .and_then(ayaml::Value::as_sequence)
+                .into_iter()
+                .flatten()
+                .filter_map(|r| r.get("id").and_then(ayaml::Value::as_str))
+                .map(str::to_string)
+                .collect();
+            if rev == "v1" {
+                for id in ids {
+                    v1_ids.insert(id, spec.clone());
+                }
+            } else {
+                v2_ids.push((spec, ids));
+            }
+        }
+        assert!(
+            !v2_ids.is_empty(),
+            "expected at least one @v2 bundled ruleset"
+        );
+        for (spec, ids) in v2_ids {
+            for id in ids {
+                assert!(
+                    !v1_ids.contains_key(&id),
+                    "v2 bundled ruleset '{spec}' rule id '{id}' overlaps with v1 ruleset '{}'",
+                    v1_ids[&id]
+                );
+            }
         }
     }
 

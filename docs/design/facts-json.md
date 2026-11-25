@@ -127,7 +127,7 @@ uses, so `facts.json` can never disagree with the README:
 | `compatibility.policy_test_versions` | `alint_testkit::POLICY_TEST_VERSION` |
 | `rule_kinds` (list) | accepted `kind:` values in `crates/alint-dsl/tests/fixtures/all_kinds.yaml` and `all_kinds_v2.yaml`, aliases included |
 | `families` | non-meta `## ` headings in `docs/rules.md` |
-| `bundled_rulesets` | `.yml` files (recursive) under `crates/alint-dsl/rulesets/v1/` |
+| `bundled_rulesets` | `.yml` files (recursive) under `crates/alint-dsl/rulesets/<rev>/` |
 | `output_formats` | variants of `enum Format` in `crates/alint-output/src/lib.rs`, lowercased |
 | `subcommands` | `CLI_REFERENCE_SUBCMDS` (itself pinned to `enum Command` by a test) |
 | `auto_fix_ops` (count) | `FixSpec::ALL_OP_NAMES` in `alint-core` |

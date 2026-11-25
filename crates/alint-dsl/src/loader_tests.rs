@@ -982,52 +982,80 @@ rules:
 }
 
 #[test]
-fn a_bundled_ruleset_must_be_version_one() {
-    assert!(decode_bundled("version: 1\nrules: []\n", "x@v1").is_ok());
+fn bundled_ruleset_decodes_v1_and_v2_and_rejects_invalid_bodies_as_internal() {
+    let mut state = LoadState::default();
+    let v1 = decode_bundled(
+        "version: 1\nrules: []\n",
+        "x@v1",
+        "alint://bundled/x@v1",
+        &mut state,
+    )
+    .expect("v1 bundled ruleset decodes");
+    assert_eq!(v1.surface, crate::v2::Surface::V1);
+    assert_eq!(state.v2_sources.len(), 0);
+
+    let v2 = decode_bundled(
+        "version: 2\nselectors:\n  docs: { paths: 'docs/**' }\nrules: []\n",
+        "x@v2",
+        "alint://bundled/x@v2",
+        &mut state,
+    )
+    .expect("v2 bundled ruleset decodes");
+    assert_eq!(v2.surface, crate::v2::Surface::V2);
+    assert_eq!(v2.v2.sources.len(), 1);
+    assert_eq!(
+        state.v2_sources,
+        vec![alint_core::relation::plan::SourceLocator::Bundled(
+            "alint://bundled/x@v2".into()
+        )]
+    );
+
     for (body, expected) in [
         (
-            "version: 2\nrules: []\n",
-            "alint://bundled/x@v1: a bundled ruleset must be `version: 1` in this build; \
-             `version: 2` is accepted only in local files (the top-level config, a local \
-             `extends:` target or an `.alint.d` fragment)",
-        ),
-        (
             "version: 1\nselectors: {}\n",
-            "alint://bundled/x@v1: `selectors:` needs `version: 2`, which a bundled ruleset \
-             cannot use in this build: it must be `version: 1`",
+            "alint://bundled/x@v1: `selectors:` needs `version: 2`; this config is version 1",
         ),
         (
             "version: 1\nextends:\n  - url: ./a.yml\n    as: a\n",
-            "alint://bundled/x@v1: `extends[0].as` needs `version: 2`, which a bundled ruleset \
-             cannot use in this build: it must be `version: 1`",
+            "alint://bundled/x@v1: `extends[0].as` needs `version: 2`; this config is version 1",
         ),
-        (
-            "version: 2\nrules:\n  - {id: a, id: b}\n",
-            "alint://bundled/x@v1: a bundled ruleset must be `version: 1` in this build",
-        ),
+        ("version: 2\nrules:\n  - {id: a, id: b}\n", "duplicate"),
     ] {
-        let error = decode_bundled(body, "x@v1").unwrap_err();
+        let error = decode_bundled(body, "x@v1", "alint://bundled/x@v1", &mut state).unwrap_err();
         assert!(matches!(error, Error::Internal(_)), "{error:?}");
         assert!(error.to_string().contains(expected), "{error}");
     }
 }
 
-/// Every ruleset this build ships is version 1 with nothing of version 2, and
-/// decodes once: the dispatch never needs to parse one to read its version.
+/// Every ruleset this build ships matches its declared config surface: `@v1`
+/// rulesets are plainly version 1 (no dispatch parse needed) and `@v2`
+/// rulesets decode cleanly on the version 2 surface.
 #[test]
-fn every_bundled_ruleset_is_plainly_version_one() {
+fn every_bundled_ruleset_dispatches_to_its_declared_surface() {
+    let mut state = LoadState::default();
     for (name, rev) in crate::bundled::catalog() {
         let spec = format!("{name}@{rev}");
         let body = crate::bundled::resolve(&spec).unwrap();
         let display = format!("alint://bundled/{spec}");
-        let config = deserialize_raw_config(body, &display).unwrap();
         let origin = crate::v2::Origin::new(ConfigSourceClass::Bundled, &display);
-        assert!(crate::v2::plainly_v1(&config, &origin), "{spec}");
-        assert_eq!(
-            crate::v2::dispatch(decode_text(body).ok().as_ref(), body, &origin).unwrap(),
-            crate::v2::Surface::V1,
-            "{spec}"
-        );
+        if rev == "v1" {
+            let config = deserialize_raw_config(body, &display).unwrap();
+            assert!(crate::v2::plainly_v1(&config, &origin), "{spec}");
+            assert_eq!(
+                crate::v2::dispatch(decode_text(body).ok().as_ref(), body, &origin).unwrap(),
+                crate::v2::Surface::V1,
+                "{spec}"
+            );
+        } else {
+            assert_eq!(
+                crate::v2::dispatch(decode_text(body).ok().as_ref(), body, &origin).unwrap(),
+                crate::v2::Surface::V2,
+                "{spec}"
+            );
+            let decoded = decode_bundled(body, &spec, &display, &mut state)
+                .unwrap_or_else(|e| panic!("v2 bundled ruleset {spec} failed to decode: {e}"));
+            assert_eq!(decoded.surface, crate::v2::Surface::V2, "{spec}");
+        }
     }
 }
 

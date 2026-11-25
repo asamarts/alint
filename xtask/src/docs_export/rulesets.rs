@@ -327,10 +327,10 @@ fn table_cell(text: &str) -> String {
 /// so it can never be removed by a cap; a long author-written overview is
 /// shortened with an explicit ellipsis rather than presented as a complete but
 /// grammatically broken sentence.
-pub(super) fn ruleset_meta_description(name: &str, overview_md: &str) -> String {
+pub(super) fn ruleset_meta_description(name: &str, rev: &str, overview_md: &str) -> String {
     const MAX_CHARS: usize = 158;
 
-    let lead = format!("{name}@v1 bundled alint ruleset");
+    let lead = format!("{name}@{rev} bundled alint ruleset");
     let opening = strip_markup(&first_overview_sentence(overview_md));
     let opening = meta_desc_clean(&opening, usize::MAX);
     if opening.chars().count() < 25 {
@@ -376,16 +376,18 @@ pub(super) fn ruleset_meta_description(name: &str, overview_md: &str) -> String 
 /// emits a warning in that case so the gap surfaces.
 pub(super) fn render_ruleset_page(
     name: &str,
+    rev: &str,
     overview_md: &str,
     yaml_text: &str,
     rel_repo_path: &str,
     yaml: &ayaml::Value,
     kind_to_family: &std::collections::HashMap<String, String>,
 ) -> String {
+    let is_v2 = yaml.get("version").and_then(ayaml::Value::as_u64) == Some(2);
     let mut out = String::new();
     let _ = writeln!(&mut out, "---");
-    let _ = writeln!(&mut out, "title: '{name}@v1'");
-    let ruleset_desc = ruleset_meta_description(name, overview_md);
+    let _ = writeln!(&mut out, "title: '{name}@{rev}'");
+    let ruleset_desc = ruleset_meta_description(name, rev, overview_md);
     let _ = writeln!(
         &mut out,
         "description: '{}'",
@@ -405,8 +407,11 @@ pub(super) fn render_ruleset_page(
         let _ = writeln!(&mut out, "## Adopt with");
         let _ = writeln!(&mut out);
         let _ = writeln!(&mut out, "```yaml");
+        if is_v2 {
+            let _ = writeln!(&mut out, "version: 2");
+        }
         let _ = writeln!(&mut out, "extends:");
-        let _ = writeln!(&mut out, "  - alint://bundled/{name}@v1");
+        let _ = writeln!(&mut out, "  - alint://bundled/{name}@{rev}");
         let _ = writeln!(&mut out, "```");
         let _ = writeln!(&mut out);
     }
@@ -449,7 +454,7 @@ pub(super) fn render_ruleset_page(
         let _ = writeln!(&mut out);
     }
 
-    write_ruleset_customize(&mut out, name, rules);
+    write_ruleset_customize(&mut out, name, rev, is_v2, rules);
     write_ruleset_source(&mut out, rel_repo_path);
     out
 }
@@ -594,7 +599,13 @@ fn write_rule_section(
 /// The "Customize" section, with this ruleset's own ids: the first rule
 /// turned off, and the next rule that isn't already an error promoted to
 /// one (left out when every other rule is an error).
-fn write_ruleset_customize(out: &mut String, name: &str, rules: &[ayaml::Value]) {
+fn write_ruleset_customize(
+    out: &mut String,
+    name: &str,
+    rev: &str,
+    is_v2: bool,
+    rules: &[ayaml::Value],
+) {
     let first = str_field(&rules[0], "id").unwrap_or_default();
     let promote = rules[1..]
         .iter()
@@ -610,8 +621,11 @@ fn write_ruleset_customize(out: &mut String, name: &str, rules: &[ayaml::Value])
     );
     let _ = writeln!(out);
     let _ = writeln!(out, "```yaml");
+    if is_v2 {
+        let _ = writeln!(out, "version: 2");
+    }
     let _ = writeln!(out, "extends:");
-    let _ = writeln!(out, "  - alint://bundled/{name}@v1");
+    let _ = writeln!(out, "  - alint://bundled/{name}@{rev}");
     let _ = writeln!(out, "rules:");
     let _ = writeln!(out, "  - id: {first}");
     let _ = writeln!(out, "    level: off");
@@ -627,8 +641,11 @@ fn write_ruleset_customize(out: &mut String, name: &str, rules: &[ayaml::Value])
     );
     let _ = writeln!(out);
     let _ = writeln!(out, "```yaml");
+    if is_v2 {
+        let _ = writeln!(out, "version: 2");
+    }
     let _ = writeln!(out, "extends:");
-    let _ = writeln!(out, "  - url: alint://bundled/{name}@v1");
+    let _ = writeln!(out, "  - url: alint://bundled/{name}@{rev}");
     let _ = writeln!(out, "    except: [{first}]");
     let _ = writeln!(out, "```");
     let _ = writeln!(out);
@@ -649,20 +666,26 @@ fn write_ruleset_source(out: &mut String, rel_repo_path: &str) {
          [`{rel_repo_path}`]({ALINT_REPO_BLOB_URL}/{rel_repo_path}) in the alint repo.",
     );
 }
-/// One markdown page per `crates/alint-dsl/rulesets/v1/**/*.yml`,
+
+/// Split `<rev>/<name>` from a ruleset path relative to `crates/alint-dsl/rulesets/`.
+pub(super) fn split_ruleset_rev_name(rel_no_ext: &str) -> Result<(&str, &str)> {
+    rel_no_ext.split_once('/').with_context(|| {
+        format!("bundled ruleset path {rel_no_ext:?} must live under a `<rev>/` directory")
+    })
+}
+
+/// One markdown page per `crates/alint-dsl/rulesets/<rev>/**/*.yml`,
 /// summarising the ruleset's rules with their level / kind / message
 /// / policy URL. Slash-separated names (`hygiene/lockfiles`,
-/// `ci/github-actions`) are flattened with a `-` for the bundle
-/// filename so Starlight's autogen sidebar produces a flat list.
+/// `ci/github-actions`, `js/workspace-deps`) are flattened with a `-` for the
+/// bundle filename so Starlight's autogen sidebar produces a flat list.
 ///
-/// Each page now also carries:
+/// Each page carries:
 /// - An overview parsed from the YAML's leading comment block
 ///   (the natural-language description the ruleset author wrote
-///   above `version: 1`).
+///   above `version:`).
 /// - A `## Source` section with a link back to the canonical YAML
-///   in the alint repo plus the full file embedded as a fenced
-///   code block, so readers can see the exact rule definitions
-///   without leaving the docs.
+///   in the alint repo.
 pub(super) fn generate_bundled_ruleset_pages(
     workspace: &Path,
     target_dir: &Path,
@@ -670,6 +693,7 @@ pub(super) fn generate_bundled_ruleset_pages(
 ) -> Result<()> {
     struct RulesetEntry {
         pretty: String,
+        rev: String,
         flat_slug: String,
         summary: String,
     }
@@ -690,8 +714,10 @@ pub(super) fn generate_bundled_ruleset_pages(
             continue;
         }
         let rel = entry.strip_prefix(&rulesets_root).unwrap();
-        let pretty_name = rel.with_extension("");
-        let pretty_str = pretty_name.to_string_lossy().replace('\\', "/");
+        let rel_no_ext = rel.with_extension("").to_string_lossy().replace('\\', "/");
+        let (rev, name) = split_ruleset_rev_name(&rel_no_ext)?;
+        let pretty_str = name.to_string();
+        let rev_str = rev.to_string();
         let flat_slug = pretty_str.replace('/', "-");
         let flat_filename = format!("{flat_slug}.md");
 
@@ -710,6 +736,7 @@ pub(super) fn generate_bundled_ruleset_pages(
 
         let page = render_ruleset_page(
             &pretty_str,
+            &rev_str,
             &overview_md,
             &yaml_text,
             &rel_repo_path,
@@ -721,6 +748,7 @@ pub(super) fn generate_bundled_ruleset_pages(
 
         entries.push(RulesetEntry {
             pretty: pretty_str,
+            rev: rev_str,
             flat_slug,
             summary,
         });
@@ -731,7 +759,7 @@ pub(super) fn generate_bundled_ruleset_pages(
     // alint.org. Each entry shows a one-line summary (the first
     // sentence of the ruleset's leading comment block) so the
     // index is scannable without opening every page.
-    entries.sort_by(|a, b| a.pretty.cmp(&b.pretty));
+    entries.sort_by(|a, b| a.pretty.cmp(&b.pretty).then_with(|| a.rev.cmp(&b.rev)));
     let mut index = String::new();
     let _ = writeln!(&mut index, "---");
     let _ = writeln!(&mut index, "title: Bundled Rulesets");
@@ -745,7 +773,7 @@ pub(super) fn generate_bundled_ruleset_pages(
     let _ = writeln!(&mut index);
     let _ = writeln!(
         &mut index,
-        "Adopt with `extends: [alint://bundled/<name>@v1]`. Each ruleset's full rule list lives on its own page below."
+        "Adopt with `extends: [alint://bundled/<name>@<rev>]` (`@v2` rulesets require `version: 2`). Each ruleset's full rule list lives on its own page below."
     );
     let _ = writeln!(&mut index);
     let _ = writeln!(&mut index, "## Currently shipped");
@@ -754,15 +782,17 @@ pub(super) fn generate_bundled_ruleset_pages(
         if e.summary.is_empty() {
             let _ = writeln!(
                 &mut index,
-                "- [`{name}@v1`](/docs/bundled-rulesets/{slug}/)",
+                "- [`{name}@{rev}`](/docs/bundled-rulesets/{slug}/)",
                 name = e.pretty,
+                rev = e.rev,
                 slug = e.flat_slug
             );
         } else {
             let _ = writeln!(
                 &mut index,
-                "- [`{name}@v1`](/docs/bundled-rulesets/{slug}/) — {summary}",
+                "- [`{name}@{rev}`](/docs/bundled-rulesets/{slug}/) — {summary}",
                 name = e.pretty,
+                rev = e.rev,
                 slug = e.flat_slug,
                 summary = e.summary,
             );

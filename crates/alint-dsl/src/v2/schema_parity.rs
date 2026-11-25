@@ -117,7 +117,9 @@ pub(crate) fn decode_stage(yaml: &str) -> Result<()> {
         .map_err(|error| Error::Other(format!(".alint.yml: {error}")))?;
     let source = SourceId {
         display: ".alint.yml".into(),
-        path: PathBuf::from("/repo/.alint.yml"),
+        locator: alint_core::relation::plan::SourceLocator::Local(PathBuf::from(
+            "/repo/.alint.yml",
+        )),
         class: ConfigSourceClass::Root,
     };
     super::decode::source_objects(source, &decoded.v2_keys, &decoded.config.extends).map(drop)

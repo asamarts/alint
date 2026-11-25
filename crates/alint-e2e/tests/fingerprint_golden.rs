@@ -111,17 +111,24 @@ fn collect_policy_test(
 fn policy_test_fingerprints_match_golden() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     let scenarios_dir = manifest.join("scenarios");
-    let ruleset_tests_dir = manifest
+    let ruleset_tests_root = manifest
         .parent()
         .expect("crates directory")
-        .join("alint-dsl/ruleset-tests/v1");
+        .join("alint-dsl/ruleset-tests");
+    let ruleset_tests_v1_dir = ruleset_tests_root.join("v1");
+    let ruleset_tests_v2_dir = ruleset_tests_root.join("v2");
     let mut records = Vec::new();
     let mut skipped = BTreeSet::new();
     for path in yml_files(&scenarios_dir) {
         collect_policy_test(&scenarios_dir, &path, &mut records, &mut skipped);
     }
-    for path in yml_files(&ruleset_tests_dir) {
-        collect_policy_test(&ruleset_tests_dir, &path, &mut records, &mut skipped);
+    for path in yml_files(&ruleset_tests_v1_dir) {
+        collect_policy_test(&ruleset_tests_v1_dir, &path, &mut records, &mut skipped);
+    }
+    if ruleset_tests_v2_dir.is_dir() {
+        for path in yml_files(&ruleset_tests_v2_dir) {
+            collect_policy_test(&ruleset_tests_root, &path, &mut records, &mut skipped);
+        }
     }
     records.sort();
     assert!(

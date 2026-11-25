@@ -16,8 +16,8 @@
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
-use std::path::PathBuf;
 
+use alint_core::relation::plan::SourceLocator;
 use alint_core::{ConfigCompatibility, ConfigSourceClass, Error, FactSpec, Result, StableVersion};
 use ayaml::{Mapping, Value};
 
@@ -125,8 +125,8 @@ pub(crate) struct Merger {
     environment_values: Unique<String>,
     /// Each of `merged.compatibility`.
     compatibility: HashSet<CompatibilityKey>,
-    /// The file of each of `merged.v2.sources`.
-    v2_paths: HashSet<PathBuf>,
+    /// The locator of each of `merged.v2.sources`.
+    v2_locators: HashSet<SourceLocator>,
     /// The selectors and relations of `merged.v2.sources`.
     v2_objects: usize,
     /// The keys a merge looks up in every rule and template.
@@ -214,15 +214,15 @@ impl Merger {
             .map(CompatibilityKey::of)
             .collect();
         self.environment_values = Unique::of(std::mem::take(&mut first.environment_values));
-        self.v2_paths = first
+        self.v2_locators = first
             .v2
             .sources
             .iter()
-            .map(|objects| objects.source.path.clone())
+            .map(|objects| objects.source.locator.clone())
             .collect();
         self.v2_objects = first.v2.object_count();
         #[cfg(test)]
-        touch(self.compatibility.len() + self.environment_values.len() + self.v2_paths.len());
+        touch(self.compatibility.len() + self.environment_values.len() + self.v2_locators.len());
         let mut first = Cow::Owned(first);
         self.add_reduced(&mut first, None);
         // Only what a push merges onto counts.
@@ -263,6 +263,7 @@ impl Merger {
             compatibility: _,
             environment_values: _,
             config_files: _,
+            v2_sources: _,
             environment_config_files: _,
             field_source_names: _,
             extends_environment: _,
@@ -331,10 +332,10 @@ impl Merger {
                 .map(Cow::into_owned)
                 .collect();
         }
-        // A file an `extends:` diamond reaches twice declares its objects once.
+        // A source an `extends:` diamond reaches twice declares its objects once.
         for objects in entries!(&mut source, v2.sources) {
-            if !self.v2_paths.contains(&objects.source.path) {
-                self.v2_paths.insert(objects.source.path.clone());
+            if !self.v2_locators.contains(&objects.source.locator) {
+                self.v2_locators.insert(objects.source.locator.clone());
                 self.v2_objects += objects.object_count();
                 self.merged.v2.sources.push(objects.into_owned());
             }

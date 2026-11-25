@@ -263,7 +263,7 @@ fn every_kind_emits_baseline_safe_fingerprints() {
         &manifest
             .parent()
             .expect("crates directory")
-            .join("alint-dsl/ruleset-tests/v1"),
+            .join("alint-dsl/ruleset-tests"),
         &mut runs,
         &mut fired,
     );

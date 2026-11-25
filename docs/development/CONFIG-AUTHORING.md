@@ -1247,7 +1247,7 @@ that ships it, and the version 1 schema refuses a version 2 config, so a version
 draft in its own modeline:
 
 ```yaml
-# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/v0.23.0/schemas/v2/config.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/v0.24.0/schemas/v2/config.json
 version: 2
 selectors:
   docs: { paths: "docs/**/*.md" }

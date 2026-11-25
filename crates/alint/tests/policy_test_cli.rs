@@ -669,7 +669,7 @@ fn a_version_two_config_under_test_warns_once_a_run() {
         assert_eq!(
             stderr,
             "alint: warning: `version: 2` is experimental; its syntax may change before a \
-             release declares it stable, v0.24 at the earliest (alint-tests/b.yml)\n",
+             release declares it stable, v0.25 at the earliest (alint-tests/b.yml)\n",
             "{args:?}"
         );
     }

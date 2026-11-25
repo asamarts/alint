@@ -1,6 +1,6 @@
 # v0.24: saphyr exit, Phase 3 completion, owned walker, LSP rewrite, and backlog drain
 
-Status: accepted (2026-11-22, ADR-0048); in progress (Phase 0, Phase 1 [19/19], Phase 2 [8/8], Phase 3 [5/5], Phase 4 [2/2 + audit], Phase 5 design/ADR-0050, Batch 5a [5/5 + audit], Batch 5b [#592 + D1-D4 + audit], and Batch 5c [D5-D7] complete; Batch 5d next).
+Status: accepted (2026-11-22, ADR-0048); in progress (Phase 0, Phase 1 [19/19], Phase 2 [8/8], Phase 3 [5/5], Phase 4 [2/2 + audit], and Phase 5 [design/ADR-0050 + Batches 5a-5d] complete; Phase 6 release qualification next).
 Decisions: [ADR-0048](../../adr/0048-v024-owner-decisions.md) (owner decisions and scope for v0.24);
 [ADR-0049](../../adr/0049-baseline-preferred-paths-for-repeated-fingerprints.md) (baseline preferred visible paths for repeated fingerprints);
 [ADR-0050](../../adr/0050-v024-phase-3-completion-design.md) (accepted: Phase 3 completion design decisions D1 to D11);

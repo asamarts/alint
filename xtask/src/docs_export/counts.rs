@@ -144,7 +144,7 @@ pub(super) fn count_rule_aliases() -> usize {
 }
 
 /// Canonical bundled-ruleset count = recursive `.yml` file count under
-/// `crates/alint-dsl/rulesets/v1/`. Mirrors
+/// `crates/alint-dsl/rulesets/` (all shipped revisions). Mirrors
 /// `coverage_audit_readme_claims::readme_bundled_rulesets_count_matches_filesystem`
 /// so this manifest field can never drift from the README claim.
 pub(super) fn count_canonical_bundled_rulesets() -> Result<usize> {
@@ -163,7 +163,6 @@ pub(super) fn count_canonical_bundled_rulesets() -> Result<usize> {
     let dir = crate::bench_release::workspace_root()?
         .join("crates")
         .join("alint-dsl")
-        .join("rulesets")
-        .join("v1");
+        .join("rulesets");
     count_yml(&dir)
 }

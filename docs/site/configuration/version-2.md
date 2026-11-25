@@ -11,18 +11,19 @@ config file. Version 2 is everything version 1 is, plus `selectors:`, `relations
 alias on an `extends:` entry.
 
 The [`constraint`](/docs/rules/cross-file/constraint/) rule kind reads a relation and checks its
-rows: equal values, unique keys, or the same set of values in every group (one range per
-dependency, the same keys in every locale, toolchain pins that agree). It exists only in version
+rows: equal values, unique keys, set relationships across groups or relations, foreign-key
+references (`reference`), row or distinct-value bounds (`count`), pairwise comparisons (`compare`),
+and semantic version range satisfaction (`satisfies`). It exists only in version
 2, and is experimental as version 2 is. Every other rule kind runs exactly as in version 1, and a
 relation no `constraint` rule reads is loaded and checked when the config loads, and never read.
 
-> **Experimental.** Version 2 may change in any release until one declares it stable, v0.24 at
+> **Experimental.** Version 2 may change in any release until one declares it stable, v0.25 at
 > the earliest, and the [CHANGELOG](https://github.com/asamarts/alint/blob/main/CHANGELOG.md)
 > lists each change. Keep production policies on `version: 1` until then. Loading a version 2
 > config prints a warning once per run, naming the file:
 >
 > ```text
-> alint: warning: `version: 2` is experimental; its syntax may change before a release declares it stable, v0.24 at the earliest (/repo/.alint.yml)
+> alint: warning: `version: 2` is experimental; its syntax may change before a release declares it stable, v0.25 at the earliest (/repo/.alint.yml)
 > ```
 >
 > `alint validate-config` names the version on its success line and, with `--format json`, puts
@@ -48,11 +49,12 @@ version.
   they need (`` `selectors:` needs `version: 2`; this config is version 1 ``). An unknown key in
   a version 2 config is reported with the version 2 keys.
 
-Only local files may be version 2: the top-level config, a local `extends:` target and an
-`.alint.d/` fragment. A fragment without `version:` is read as its root's version. A remote
-`extends:` source, a bundled ruleset, a nested config (`nested_configs:`) and the string
-`alint_dsl::parse` reads must be `version: 1`, and a version 1 config cannot extend a version 2
-one; each is an error that says so.
+Local files and bundled rulesets may be version 2: the top-level config, a local `extends:` target,
+an `.alint.d/` fragment, and compiled-in bundled rulesets (`alint://bundled/...`, such as
+`alint://bundled/js/workspace-deps@v2`). A fragment without `version:` is read as its root's
+version. A remote `extends:` source (`https://...`), a nested config (`nested_configs:`) and the
+string `alint_dsl::parse` reads must be `version: 1`, and a version 1 config cannot extend a
+version 2 file or bundled ruleset; each is an error that says so.
 
 ## Named selectors
 
@@ -90,8 +92,8 @@ Wherever a relation names a selector (`from:`), it may write one inline instead,
 ## Relations
 
 A relation reads the files a selector picks and emits rows with named fields. It has `fields:`
-and exactly one of `entries:`, `read:`, `union:` and `join:`. `transform:` and `where:` are
-optional.
+(or per-part `fields:` under `union:`) and exactly one of `entries:`, `records:`, `read:`,
+`union:` and `join:`. `transform:` and `where:` are optional.
 
 ### `entries:` rows
 
@@ -124,12 +126,44 @@ rules: []
 | `format` | `json`, `yaml` or `toml` | required |
 | `at` | a JSONPath, or a non-empty list of them | required |
 | `leaves` | `true` or `false` | `false` |
+| `strict` | `true` or `false` (`format: json` only: enforce strict RFC 8259 JSON, rejecting comments, trailing commas, leading UTF-8 BOM, and empty files) | `false` |
+
+### `records:` rows
+
+`records:` emits one row per object element selected by `at:` (a JSONPath or non-empty list of
+JSONPaths) in a JSON, YAML or TOML document, letting one row bind multiple sibling fields from the
+same array element (such as Kubernetes container `name` + `image` or JSON config objects). A
+matched value that is not an object is an analysis failure; a file where `at:` matches nothing
+emits no rows.
+
+```yaml
+version: 2
+relations:
+  containers:
+    from: { paths: "k8s/**/*.yaml" }
+    records:
+      format: yaml
+      at: "$.spec.template.spec.containers[*]"
+    fields:
+      file: path
+      name: "record: $.name"
+      image: "record: $.image"
+      pull_policy: { source: "record: $.imagePullPolicy", optional: true }
+rules: []
+```
+
+| Key | Value | Default |
+|---|---|---|
+| `format` | `json`, `yaml` or `toml` | required |
+| `at` | a JSONPath, or a non-empty list of them | required |
+| `strict` | `true` or `false` (`format: json` only: enforce strict RFC 8259 JSON) | `false` |
 
 ### `read:` rows
 
 `read:` extracts values as `cross_file` does, one row per value. It takes exactly one of:
 
-- `json:`, `yaml:` or `toml:`, a JSONPath;
+- `json:`, `yaml:` or `toml:`, a JSONPath (`json:` also accepts `strict: true` to enforce strict
+  RFC 8259 JSON parsing);
 - `regex:`, a regex whose first capture group is the value. It runs over the whole file, so `^`
   is the file's start unless the regex sets `(?m)`;
 - `lines: {}` or `lines: { comment: "//" }`, one value per non-blank line, trimmed, skipping
@@ -162,8 +196,10 @@ rules: []
 ### `union:` rows
 
 `union:` emits the rows of two or more parts, in the order written. Each part has its own `from:`,
-its own `entries:` or `read:`, and its own `optional:`; the relation's `fields:` apply to every
-part, so each part must be able to bind every field.
+its own `entries:`, `records:` or `read:`, and its own `optional:`. A `union:` declares either one
+shared top-level `fields:` map (every part must be able to bind every field) or a per-part
+`fields:` map on every part (allowing mixed readers, such as `entries:` unioned with `read:` or
+`records:`, provided every part binds the exact same output field names and `sensitive` flags).
 
 ### `join:` rows
 
@@ -204,7 +240,7 @@ rules: []
 
 ### Fields
 
-`fields:` maps each field's name to its source, or to `{ source, sensitive }`:
+`fields:` maps each field's name to its source, or to `{ source, sensitive?, optional?, on_missing? }`:
 
 | Source | Rows | Value |
 |---|---|---|
@@ -215,17 +251,22 @@ rules: []
 | `entry.parent` | `entries:` | the key of the object that holds it (null at the top level) |
 | `entry.root` | `entries:` | the first key of its key path (`en` for `en.nav.home`) |
 | `entry.path` | `entries:` | its key path from the top (`nav.home`) |
+| `record: <JSONPath>` | `records:` | a scalar read from the matched record object (`optional: true` emits a missing cell when absent) |
 | `value` | `read:` | the extracted value |
-| `bound: <JSONPath>` | `entries:`, a document `read:` | a value read once per file (`$.name`) |
+| `bound: <JSONPath>` | `entries:`, `records:`, a document `read:` | a value read once per file (`$.name`); `optional: true` opts out of failing when absent (`on_missing: skip` default drops the resource's rows, `on_missing: missing` emits a missing cell) |
 | `left.<field>`, `right.<field>` | `join:` | a field of the matched row on that side |
 
 A document `read:` is one with `json:`, `yaml:` or `toml:`; one with `regex:`, `lines:` or
-`whole_file:` reads the file as text and binds no `bound:` field. JSON readers (`read: { json: ... }`
-and `entries: { format: json, at: ... }`) require every JSON number in the document to fit within the
+`whole_file:` reads the file as text and binds no `bound:` field. JSON readers (`read: { json: ... }`,
+`entries: { format: json, at: ... }` and `records: { format: json, at: ... }`) require every JSON
+number in the document to fit within the
 finite IEEE-754 `f64` range; a number outside that range (such as `1e400`) produces a
 `resource_parse` analysis failure for the file even if the rule only reads keys or other fields. In a `union:`, a part binds
-`entry.*` only with `entries:`, `value` only with `read:`, and `bound:` as a relation of its one
-part would. A `bound:` path must match exactly once in each file. `sensitive: true` keeps a
+`entry.*` only with `entries:`, `record:` only with `records:`, `value` only with `read:`, and `bound:` as a relation of its one
+part would. By default (`optional: false`), a `bound:` or `record:` path must match a single scalar
+value; with `optional: true`, zero matches are permitted while multi-match and non-scalar results
+remain analysis failures. `on_missing:` is valid only on `bound:` with `optional: true`.
+`sensitive: true` keeps a
 field's values out of messages, the JSON report and baselines. A field that shows a sensitive
 field's value is sensitive too: a join's copy of it, a join's copy of the field an `on:` pair joins
 with it, and a field that an `in:` or `not_in:` list of it filters, with the fields that show that
@@ -244,8 +285,19 @@ field's value (an entry's key, path and value).
 - `strip-root`, which drops the first segment of an `entry.path` field (`en.nav.home` becomes
   `nav.home`), or of a join's copy of one that no transform has changed. It comes first in its
   list, and each file must have one top-level key. A file whose top-level key holds nothing
-  (`fr:`, `fr: {}`, `fr: []`) has no keys, as an empty file has none; one whose top-level key
-  holds a value (`fr: hello`) is an analysis failure.
+  (`fr:`, `fr: {}`, `fr: []`) has no keys, and when a `set` or `count` rule groups by `entry.root`
+  (with or without `groups:`), a surviving single-root stub forms a zero-row group anchored at that
+  file; a multi-root stub file (`fr: {}\nde: {}`) or a file whose top-level key holds a scalar
+  (`fr: hello`) is an analysis failure;
+- parameterized literal string transforms (pure, linear-time, non-regex):
+  - `{ split: { on: ":", part: 0, required: false } }`: splits on a non-empty literal separator and
+    picks 0-based `part:` (negative indices count from the end, e.g. `-1` for the tag in
+    `ghcr.io/org/app:1.2.3`); out-of-range emits a missing cell when `required: false` (default) or
+    an analysis failure when `required: true`;
+  - `{ strip_prefix: "$" }`: strips a literal prefix once if present;
+  - `{ strip_suffix: ".singular" }` or `{ strip_suffix: [".singular", ".plural"] }`: strips the
+    first matching literal suffix once if present;
+  - `{ prefix: "v" }` and `{ suffix: ".json" }`: prepends or appends a literal string.
 
 ### `where:`
 
@@ -296,7 +348,8 @@ aliases. Names, aliases and references are literal: `{{...}}` in one is an error
 name the same thing in every environment. Other values interpolate `{{env.X}}` as in version 1,
 except that a value substituted in a selector or relation stays text: with `NODE_MAJOR=18`,
 `in: ["{{env.NODE_MAJOR}}"]` compares with the text `18`, where a rule's value re-types as a
-number. Only the fields that take a boolean (`optional:`, `leaves:` and a field's `sensitive:`)
+number. Only the fields that take a boolean (`optional:`, `leaves:`, `strict:`, `required:` and a field's
+`sensitive:`)
 read a substituted `true` or `false` as one; in an `in:` list it is the text `true`, which does
 not match the boolean. An error that could quote a value read from the
 environment is redacted to the selector or relation it is about, as a version 1 rule's is.
@@ -305,14 +358,15 @@ Each config file has its own namespace:
 
 - A bare name (`from:`, a join's `left:` and `right:`, a `{ relation, field }` reference) names an
   object the same file declares.
-- `alias.name` names an object declared by the file an `extends:` entry gives `as: alias`. It
-  reaches only what that file declares itself: there is no re-export and no `a.b.c` chain.
-- Nothing shadows: an extended file's names never mix with the extending file's.
+- `alias.name` names an object declared by the file or bundled ruleset an `extends:` entry gives
+  `as: alias`. It reaches only what that source declares itself: there is no re-export and no
+  `a.b.c` chain.
+- Nothing shadows: an extended source's names never mix with the extending file's.
 - An `.alint.d/` fragment has a namespace of its own too, so it may declare a name the top-level
   config also declares.
 
-`as:` takes a local `extends:` entry only; bundled and remote sources are version 1 and declare
-nothing to reach.
+`as:` takes a local or bundled (`alint://bundled/...`) `extends:` entry; remote (`https://...`)
+sources must be version 1 and declare nothing to reach.
 
 Here `policies/deps.yml` declares a selector and a relation, the top-level config reaches them
 through the alias `deps`, and an `.alint.d/` fragment declares a `manifests` selector of its own:
@@ -450,16 +504,19 @@ distinct-value limit, which is never truncation.
 - A `set`'s `plurals: cldr` takes an `entry.path` field and a `{ group: }` target only, and a
   `set` against another relation's field names it (bare or qualified), never inline. That
   relation may hold at most 100,000 distinct values of the field.
-- Only local files may be version 2 (see [the version boundary](#the-version-boundary)).
+- Local files and compiled-in bundled rulesets may be version 2; remote (`https://...`), nested
+  (`nested_configs:`), and inline (`alint_dsl::parse`) configs remain version 1 only (see
+  [the version boundary](#the-version-boundary)).
 - A selector cannot use `changed_since`.
 - Values are scalars: null, booleans, numbers (compared by the text they are written with) and
   strings. An `entry.value` that is an object, an array or a TOML date is an analysis failure,
   and it fails before `where:` runs, so no predicate can drop its row: narrow `at:` to the
   objects of scalars, or read the leaves with `leaves: true`.
-- `entries:` reads JSON, YAML and TOML. `read:` reads JSON, YAML and TOML values, a regex, lines
-  or a whole file; XML, INI, HCL, dotenv and properties are not readable.
+- `entries:` and `records:` read JSON, YAML and TOML. `read:` reads JSON, YAML and TOML values, a
+  regex, lines or a whole file; XML, INI, HCL, dotenv and properties are not readable.
 - A join is inner, and one side must be unique on the join key: there is no many-to-many join.
-- The transforms are the five listed; there are no user-defined ones.
+- Transforms are the built-in fixed and parameterized string transforms listed above; there are no
+  user-defined or regex transforms.
 - `in` and `not_in` cannot list null or a number.
 - Reading and reporting are bounded by these limits. Reaching one is an analysis failure that names
   it (for `findings_per_rule`, after emitting up to the cap; for the others, without partial
@@ -474,8 +531,8 @@ distinct-value limit, which is never truncation.
     paths, path tokens and transformed values they build (`bytes_per_run`);
   - 32 MiB of decoded key paths retained for one file decode (`key_path_bytes_per_decode`,
     configurable under top-level `limits:` from 1 byte to 16 GiB);
-  - 10,000 emitted findings per `constraint` or `key_parity` rule (`findings_per_rule`,
-    configurable under top-level `limits:` from 1 to 1,000,000);
+  - 10,000 emitted findings per `constraint`, `key_parity`, or `no_duplicate_keys` rule
+    (`findings_per_rule`, configurable under top-level `limits:` from 1 to 1,000,000);
   - 1,000,000 rows into each side of a join (`join_inputs`), and 1,000,000 out of it
     (`join_outputs`);
   - 100,000 distinct values of the field a `set` compares against in another relation
@@ -505,11 +562,14 @@ distinct-value limit, which is never truncation.
 
 ## Trust
 
-Version 2 is local only in this release: every file that declares a selector or a relation is the
-top-level config, a local `extends:` target or an `.alint.d/` fragment. Each selector and relation
-passes the trust gates of the file that declares it, with what it references, as an extended
-file's rules do. A reference reaches only the same file or a file it extends, never a file that
-extends it.
+Version 2 is accepted in local files and compiled-in bundled rulesets in this release: every source
+that declares a selector or a relation is the top-level config, a local `extends:` target, an
+`.alint.d/` fragment, or an `alint://bundled/...` ruleset. Each selector and relation passes the
+trust gates of the source that declares it, with what it references, as an extended source's rules
+do. Bundled rulesets are compiled into the binary (offline, never interpolated against the
+environment), carry `extended_source` protection so rules cannot self-edit config files, and never
+pollute `Config::config_files`. A reference reaches only the same source or a source it extends,
+never a source that extends it.
 
 ## The three policies
 
@@ -690,7 +750,7 @@ Its `$id` names the release, and it may change with version 2. Point an editor a
 modeline on the first line of a version 2 file:
 
 ```yaml
-# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/v0.23.0/schemas/v2/config.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/v0.24.0/schemas/v2/config.json
 version: 2
 selectors:
   docs: { paths: "docs/**/*.md" }

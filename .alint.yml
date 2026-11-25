@@ -365,7 +365,7 @@ rules:
   # rule surfaces it in the linter output where contributors will see it.
   - id: bundled-ruleset-has-uri-header
     kind: file_header
-    paths: "crates/alint-dsl/rulesets/v1/**/*.yml"
+    paths: "crates/alint-dsl/rulesets/v*/**/*.yml"
     lines: 3
     pattern: '\A# alint://bundled/[a-z0-9/_-]+@v\d+\n#\n# \S'
     level: error

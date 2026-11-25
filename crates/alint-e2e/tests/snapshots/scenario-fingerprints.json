@@ -3708,6 +3708,18 @@
     "fingerprint": "0cca6fd77d83c8e90505ea0b0def9aa610156023b4092bc1d04b14b0695d43c1"
   },
   {
+    "scenario": "v2/js/workspace-deps/workspace_deps_drift_fail.yml",
+    "rule_id": "js-workspace-deps-consistent-range",
+    "path": "packages/alpha/package.json",
+    "fingerprint": "9838b856c3c849bc61f7ec876b26b3b0c11a5dfe1dd921d86ea08dd89b5fef2c"
+  },
+  {
+    "scenario": "v2/js/workspace-deps/workspace_deps_drift_fail.yml",
+    "rule_id": "js-workspace-deps-consistent-range",
+    "path": "packages/beta/package.json",
+    "fingerprint": "f0e4ea5753a4cb68e6841e6d24f0f71a80194ee720e648d172cadde4037c99ae"
+  },
+  {
     "scenario": "versioning/versioning_drift_fixed.yml",
     "rule_id": "versioning-cargo-package",
     "path": "Cargo.toml",

@@ -413,7 +413,7 @@ fn every_full_index_kind_receives_the_full_index_under_changed() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     let roots = [
         manifest.join("scenarios"),
-        manifest.join("../alint-dsl/ruleset-tests/v1"),
+        manifest.join("../alint-dsl/ruleset-tests"),
     ];
     // Per kind: the scenarios whose rule ran under `--changed`.
     let mut covered: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();

@@ -8831,7 +8831,7 @@
       "type": "object"
     },
     "v2_extends_entry": {
-      "description": "One extends entry. Bare string = classic form (url-only). Mapping form lets you filter with `only:` / `except:` (mutually exclusive) and, for a local source, name it with `as:`; a bundled or remote source must be version 1 and takes no `as:`.",
+      "description": "One extends entry. Bare string = classic form (url-only). Mapping form lets you filter with `only:` / `except:` (mutually exclusive) and, for a local or bundled source, name it with `as:`; a remote source must be version 1 and takes no `as:`.",
       "oneOf": [
         {
           "type": "string"
@@ -8846,7 +8846,7 @@
           "properties": {
             "as": {
               "$ref": "#/$defs/v2_name",
-              "description": "An alias for this local source: this config reaches the selectors and relations it declares as `<alias>.<name>`."
+              "description": "An alias for this local or bundled source: this config reaches the selectors and relations it declares as `<alias>.<name>`."
             },
             "except": {
               "description": "Drop these rule ids from the extended config.",
@@ -8876,7 +8876,7 @@
             "properties": {
               "url": {
                 "not": {
-                  "pattern": "^([Hh][Tt][Tt][Pp][Ss]://|[Aa][Ll][Ii][Nn][Tt]://[Bb][Uu][Nn][Dd][Ll][Ee][Dd]/)"
+                  "pattern": "^[Hh][Tt][Tt][Pp][Ss]://"
                 }
               }
             }
@@ -10512,10 +10512,10 @@
       "type": "object"
     }
   },
-  "$id": "https://raw.githubusercontent.com/asamarts/alint/v0.23.0/schemas/v2/config.json",
+  "$id": "https://raw.githubusercontent.com/asamarts/alint/v0.24.0/schemas/v2/config.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "DRAFT. Schema for .alint.yml configuration files that declare `version: 2`, the experimental version of alint's configuration language. Version 2 may change in any release until one declares it stable (v0.24 at the earliest), and this draft's `$id` names the release that ships it. A version 2 config accepts every version 1 key with its version 1 meaning, plus `selectors:`, `relations:` and an `extends:` entry's `as:`. Reference: docs/site/configuration/version-2.md in the alint repository.",
+  "description": "DRAFT. Schema for .alint.yml configuration files that declare `version: 2`, the experimental version of alint's configuration language. Version 2 may change in any release until one declares it stable (v0.25 at the earliest), and this draft's `$id` names the release that ships it. A version 2 config accepts every version 1 key with its version 1 meaning, plus `selectors:`, `relations:` and an `extends:` entry's `as:`. Reference: docs/site/configuration/version-2.md in the alint repository.",
   "properties": {
     "allow_out_of_root": {
       "description": "Top-level-only escape hatch for path confinement: permit the top-level config's own rules (and their fixes) to read or write a config-declared path outside the repo root, and (with `true`) let local `extends:` resolve outside the repo root. `true` allows every top-level rule; a map `{ kinds: [...], rules: [...] }` allows only the listed rule kinds / ids. Absent or `false` keeps the secure default (every config-derived path read and write is confined). REJECTED from `extends:`'d rulesets, nested configs, `--untrusted`, untrusted LSP workspaces, and `alint test`, and never covers rules shaped by an `extends:` ruleset or nested config or paths inside any Git directory. Permitted rule reads emit an informational note. See docs/design/v0.12/allow_out_of_root.md.",

@@ -483,7 +483,7 @@ mod tests {
         let plan = Plan {
             sources: vec![PlanSource {
                 display: ".alint.yml".into(),
-                path: PathBuf::from(".alint.yml"),
+                locator: crate::relation::plan::SourceLocator::Local(PathBuf::from(".alint.yml")),
                 class: ConfigSourceClass::Root,
                 aliases: Vec::new(),
             }],
@@ -533,7 +533,7 @@ mod tests {
         let plan = Plan {
             sources: vec![PlanSource {
                 display: ".alint.yml".into(),
-                path: PathBuf::from(".alint.yml"),
+                locator: crate::relation::plan::SourceLocator::Local(PathBuf::from(".alint.yml")),
                 class: ConfigSourceClass::Root,
                 aliases: Vec::new(),
             }],

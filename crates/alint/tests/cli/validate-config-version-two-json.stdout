@@ -1,1 +1,1 @@
-{"config_path":"[..].alint.yml","config_version":2,"error":null,"rule_count":1,"valid":true,"warnings":["`version: 2` is experimental; its syntax may change before a release declares it stable, v0.24 at the earliest ([..].alint.yml)"]}
+{"config_path":"[..].alint.yml","config_version":2,"error":null,"rule_count":1,"valid":true,"warnings":["`version: 2` is experimental; its syntax may change before a release declares it stable, v0.25 at the earliest ([..].alint.yml)"]}

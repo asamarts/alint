@@ -9,7 +9,7 @@ use dir_test::{Fixture, dir_test};
 use crate::support;
 
 const EXPECTED_GENERAL_SCENARIOS: usize = 588;
-const EXPECTED_BUNDLED_SCENARIOS: usize = 97;
+const EXPECTED_BUNDLED_SCENARIOS: usize = 99;
 
 #[test]
 fn every_migrated_document_uses_the_public_v1_parser() {
@@ -21,7 +21,7 @@ fn every_migrated_document_uses_the_public_v1_parser() {
             "general",
         ),
         (
-            manifest.join("../alint-dsl/ruleset-tests/v1"),
+            manifest.join("../alint-dsl/ruleset-tests"),
             EXPECTED_BUNDLED_SCENARIOS,
             "bundled",
         ),
@@ -66,7 +66,7 @@ fn scenario(fixture: Fixture<&str>) {
 }
 
 #[dir_test(
-    dir: "$CARGO_MANIFEST_DIR/../alint-dsl/ruleset-tests/v1",
+    dir: "$CARGO_MANIFEST_DIR/../alint-dsl/ruleset-tests",
     glob: "**/*.yml",
 )]
 #[allow(clippy::needless_pass_by_value)] // Required by dir-test's macro signature.

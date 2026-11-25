@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use alint_core::ConfigSourceClass;
 use alint_core::relation::plan::{
     Capabilities, NamedSelector, Plan, PlanAlias, PlanSource, SelectorDef, SourceIndex,
+    SourceLocator,
 };
 
 use super::*;
@@ -14,7 +15,7 @@ use super::*;
 fn aliased_plan(objects: usize, aliases: usize) -> Plan {
     let source = |display: &str, aliases: Vec<PlanAlias>| PlanSource {
         display: display.into(),
-        path: PathBuf::from("/repo").join(display),
+        locator: SourceLocator::Local(PathBuf::from("/repo").join(display)),
         class: ConfigSourceClass::LocalExtend,
         aliases,
     };

@@ -1,0 +1,72 @@
+# alint://bundled/js/workspace-deps@v2
+#
+# Dependency version consistency for JavaScript and TypeScript monorepo
+# workspaces. Checks that every external package pinned across `package.json`
+# manifests (`dependencies`, `devDependencies`, and `optionalDependencies`)
+# agrees on one version range, ignoring workspace-local packages and protocol
+# specifiers (`workspace:`, `catalog:`, `npm:`, `file:`, `link:`, `portal:`,
+# `patch:`).
+#
+# Requires `version: 2` in your `.alint.yml`. Adopt with:
+#
+#     version: 2
+#     extends:
+#       - alint://bundled/js/workspace-deps@v2
+#
+# You can also bind an alias (`as: workspace_deps`) to reuse this ruleset's
+# `workspace-manifests` selector or `workspace-names` and `dependency-ranges`
+# relations in your own `constraint` rules.
+
+version: 2
+
+selectors:
+  workspace-manifests:
+    paths:
+      - "package.json"
+      - "packages/*/package.json"
+      - "apps/*/package.json"
+      - "!**/node_modules/**"
+      - "!**/dist/**"
+      - "!**/build/**"
+      - "!**/fixtures/**"
+      - "!**/__fixtures__/**"
+
+relations:
+  workspace-names:
+    from: workspace-manifests
+    read: { json: "$.name" }
+    optional: true
+    fields:
+      name: value
+
+  dependency-ranges:
+    from: workspace-manifests
+    entries:
+      format: json
+      at: ["$.dependencies", "$.devDependencies", "$.optionalDependencies"]
+    fields:
+      manifest: path
+      field: entry.parent
+      dependency: entry.key
+      range: entry.value
+    transform:
+      range: [trim]
+    where:
+      range: { not_matches: "^(workspace|catalog|npm|file|link|portal|patch):" }
+      dependency: { not_in: [{ relation: workspace-names, field: name }] }
+
+rules:
+  # Every external dependency referenced across workspace manifests must agree
+  # on one version range so lockfiles and build outputs do not drift across
+  # packages.
+  - id: js-workspace-deps-consistent-range
+    kind: constraint
+    input: dependency-ranges
+    assert:
+      unique:
+        key: [dependency]
+        determines: [range]
+    level: error
+    message: >-
+      External dependency version ranges must agree across workspace
+      `package.json` manifests.

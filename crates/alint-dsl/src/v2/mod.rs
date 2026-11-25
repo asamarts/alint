@@ -190,7 +190,10 @@ fn denotes_two(version: &Value) -> bool {
 const fn may_be_v2(class: ConfigSourceClass) -> bool {
     matches!(
         class,
-        ConfigSourceClass::Root | ConfigSourceClass::DropIn | ConfigSourceClass::LocalExtend
+        ConfigSourceClass::Root
+            | ConfigSourceClass::DropIn
+            | ConfigSourceClass::LocalExtend
+            | ConfigSourceClass::Bundled
     )
 }
 
@@ -379,13 +382,13 @@ pub(crate) fn dispatch(
 
 /// Refuse a `version: 2` source of a class that must be version 1, or on an
 /// edge a version 1 config does not cross.
-fn refuse_v2_edge(origin: &Origin<'_>) -> Result<()> {
+pub(crate) fn refuse_v2_edge(origin: &Origin<'_>) -> Result<()> {
     let display = origin.display;
     if !may_be_v2(origin.class) {
         return Err(Error::Other(format!(
             "{display}: {} must be `version: 1` in this build; `version: 2` is accepted only \
              in local files (the top-level config, a local `extends:` target or an \
-             `.alint.d` fragment)",
+             `.alint.d` fragment) and bundled rulesets (`alint://bundled/...`)",
             v1_only_class(origin.class)
         )));
     }
@@ -405,6 +408,15 @@ fn refuse_v2_edge(origin: &Origin<'_>) -> Result<()> {
                 "{display}: a version {consumer} config ({consumer_display}) cannot extend this \
                  version {VERSION} config; give {consumer_display} `version: {VERSION}`, or make \
                  {display} `version: {consumer}`"
+            )))
+        }
+        (ConfigSourceClass::Bundled, Some(consumer))
+            if !crate::loader::source_version_allowed(consumer, VERSION) =>
+        {
+            let consumer_display = origin.consumer_display.unwrap_or("the extending config");
+            Err(Error::Other(format!(
+                "{display}: a version {consumer} config ({consumer_display}) cannot extend this \
+                 version {VERSION} bundled ruleset; give {consumer_display} `version: {VERSION}`"
             )))
         }
         _ => Ok(()),
