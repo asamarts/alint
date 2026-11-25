@@ -58,7 +58,7 @@ The changed paths are the ones Git reports, so several kinds of change that can 
 
 | Option | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `assert` | object { `equal`, `set`, `unique` } | yes |  | The assertion: exactly one of `equal`, `unique` and `set`. |
+| `assert` | object { `compare`, `count`, `equal`, `reference`, `set`, `unique` } | yes |  | The assertion: exactly one of `equal`, `unique`, `set`, `reference`, `count`, and `compare`. |
 | `input` | v2 reference or v2 relation | yes |  | The rows the assertion reads: a relation's name, bare or qualified by an `extends:` alias (`deps.ranges`), or an inline relation (a map, as a relation under `relations:` is written, whose values may not read the environment). |
 
 Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths` or `expect_matches`. This table is generated from the JSON Schema; option types and defaults are authoritative.
