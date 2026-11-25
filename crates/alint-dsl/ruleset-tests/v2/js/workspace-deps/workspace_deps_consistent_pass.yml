@@ -1,0 +1,60 @@
+test_version: 1
+name: js/workspace-deps passes when external dependency ranges agree across workspace manifests
+tags: [check, bundled, version-two, js-workspace-deps]
+
+given:
+  tree:
+    package.json: |
+      {
+        "private": true,
+        "devDependencies": {
+          "zod": "^3.23.0",
+          "typescript": "~5.6.0"
+        }
+      }
+    packages:
+      core:
+        package.json: |
+          {
+            "name": "@acme/core",
+            "version": "1.0.0",
+            "dependencies": {
+              "zod": " ^3.23.0 "
+            }
+          }
+      cli:
+        package.json: |
+          {
+            "name": "@acme/cli",
+            "version": "1.0.0",
+            "dependencies": {
+              "@acme/core": "workspace:*",
+              "zod": "^3.23.0",
+              "shared-catalog": "catalog:",
+              "local-helper": "file:../helper"
+            },
+            "devDependencies": {
+              "typescript": "~5.6.0"
+            }
+          }
+    apps:
+      web:
+        package.json: |
+          {
+            "name": "@acme/web",
+            "version": "1.0.0",
+            "dependencies": {
+              "@acme/core": "^1.0.0",
+              "zod": "^3.23.0"
+            }
+          }
+  config: |
+    version: 2
+    extends:
+      - alint://bundled/js/workspace-deps@v2
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

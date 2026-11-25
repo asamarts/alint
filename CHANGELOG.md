@@ -119,6 +119,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ci/scripts/bump-version.sh`, verifying consistency between `xtask/src/gen_schema_v2.rs::RELEASE`,
   `schemas/v2/config.json`'s `$id`, and documented v2 YAML modelines and requiring `$id` to match
   the release tag whenever `schemas/v2/config.json` changes since the prior `v*.*.*` tag (#570).
+- Bundled `version: 2` rulesets (`alint://bundled/...` with optional `as:` aliasing) are now
+  supported from `version: 2` configs (keeping `Config::config_files` strictly on-disk, enforcing
+  ADR-0022 `version: 1` -> bundled `version: 2` refusal as a user config error with exit code 2,
+  and keeping remote `https://...`, nested, and inline `version: 2` configs refused until v2
+  stabilizes). Ships the first bundled `version: 2` ruleset, `alint://bundled/js/workspace-deps@v2`,
+  enforcing consistent external dependency version ranges across JS/TS workspace `package.json`
+  manifests (ADR-0050 D10, ADR-0048 decision 3c).
+- Advanced the experimental `version: 2` draft schema (`schemas/v2/config.json`) `$id` to `v0.24.0`
+  covering all Phase 5 operators and readers, updated the `version: 2` experimental stability
+  warning to `v0.25 at the earliest`, and recorded the 20-repository v0.24 corpus stratum re-score
+  in `docs/design/general-linter.md` section 12.4 and `docs/design/v0.23/corpus-stratum-log.md`
+  (ADR-0050 D11, ADR-0048 decision 3a).
 
 ### Changed
 

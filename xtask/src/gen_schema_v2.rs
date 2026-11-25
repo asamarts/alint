@@ -41,7 +41,7 @@ use serde_json::{Map, Value, json};
 /// The release whose tag the draft's `$id` names. A release that changes the
 /// draft names itself here, so an editor that cached one draft never
 /// validates against another under the same `$id`.
-pub(crate) const RELEASE: &str = "v0.23.0";
+pub(crate) const RELEASE: &str = "v0.24.0";
 
 /// The tail of the version 1 schema's `$id` (on `main`), which the draft's
 /// `$id` replaces with the release tag and its own path.
@@ -339,7 +339,7 @@ pub(crate) fn build(v1: &Value) -> Result<Value> {
         Value::from(
             "DRAFT. Schema for .alint.yml configuration files that declare `version: 2`, the \
              experimental version of alint's configuration language. Version 2 may change in \
-             any release until one declares it stable (v0.24 at the earliest), and this \
+             any release until one declares it stable (v0.25 at the earliest), and this \
              draft's `$id` names the release that ships it. A version 2 config accepts every \
              version 1 key with its version 1 meaning, plus `selectors:`, `relations:` and an \
              `extends:` entry's `as:`. Reference: docs/site/configuration/version-2.md in the \
@@ -1126,7 +1126,8 @@ fn relation() -> Value {
 }
 
 /// Version 1's `extends:` entry, whose mapping form also takes `as:`, which
-/// a bundled or remote entry refuses.
+/// a remote `https://` entry refuses (local files and bundled `alint://bundled/`
+/// rulesets may be version 2 and aliased; ADR-0050 D10).
 fn extends_entry(v1_defs: &Map<String, Value>) -> Result<Value> {
     let mut entry = v1_defs
         .get("extends_entry")
@@ -1150,11 +1151,11 @@ fn extends_entry(v1_defs: &Map<String, Value>) -> Result<Value> {
             "as".into(),
             json!({
                 "$ref": "#/$defs/v2_name",
-                "description": "An alias for this local source: this config reaches the \
-                    selectors and relations it declares as `<alias>.<name>`.",
+                "description": "An alias for this local or bundled source: this config reaches \
+                    the selectors and relations it declares as `<alias>.<name>`.",
             }),
         );
-    // `EntryKind::of`: `https://` and `alint://bundled/` in any ASCII case.
+    // `EntryKind::of`: `https://` in any ASCII case.
     mapping.insert("if".into(), json!({ "required": ["as"] }));
     mapping.insert(
         "then".into(),
@@ -1162,7 +1163,7 @@ fn extends_entry(v1_defs: &Map<String, Value>) -> Result<Value> {
             "properties": {
                 "url": {
                     "not": {
-                        "pattern": "^([Hh][Tt][Tt][Pp][Ss]://|[Aa][Ll][Ii][Nn][Tt]://[Bb][Uu][Nn][Dd][Ll][Ee][Dd]/)",
+                        "pattern": "^[Hh][Tt][Tt][Pp][Ss]://",
                     },
                 },
             },
@@ -1172,9 +1173,8 @@ fn extends_entry(v1_defs: &Map<String, Value>) -> Result<Value> {
         "description".into(),
         Value::from(
             "One extends entry. Bare string = classic form (url-only). Mapping form lets you \
-             filter with `only:` / `except:` (mutually exclusive) and, for a local source, \
-             name it with `as:`; a bundled or remote source must be version 1 and takes no \
-             `as:`.",
+             filter with `only:` / `except:` (mutually exclusive) and, for a local or bundled \
+             source, name it with `as:`; a remote source must be version 1 and takes no `as:`.",
         ),
     );
     Ok(entry)

@@ -87,7 +87,7 @@ fn another_spelling_of_two_says_to_write_a_plain_two() {
         message(dispatched("version: 0x2\n", &remote)),
         "https://example.invalid/r.yml: a remote `extends:` source must be `version: 1` in this \
          build; `version: 2` is accepted only in local files (the top-level config, a local \
-         `extends:` target or an `.alint.d` fragment)"
+         `extends:` target or an `.alint.d` fragment) and bundled rulesets (`alint://bundled/...`)"
     );
 }
 
@@ -227,11 +227,6 @@ fn version_two_is_refused_in_each_source_that_must_be_version_one() {
             "a remote `extends:` source",
         ),
         (
-            ConfigSourceClass::Bundled,
-            "alint://bundled/x@v1",
-            "a bundled ruleset",
-        ),
-        (
             ConfigSourceClass::Nested,
             "pkg/.alint.yml",
             "a nested config (`nested_configs:`)",
@@ -249,7 +244,7 @@ fn version_two_is_refused_in_each_source_that_must_be_version_one() {
             format!(
                 "{display}: {noun} must be `version: 1` in this build; `version: 2` is accepted \
                  only in local files (the top-level config, a local `extends:` target or an \
-                 `.alint.d` fragment)"
+                 `.alint.d` fragment) and bundled rulesets (`alint://bundled/...`)"
             ),
         );
         assert_eq!(
@@ -260,6 +255,27 @@ fn version_two_is_refused_in_each_source_that_must_be_version_one() {
             ),
         );
     }
+    // Bundled rulesets MAY be version 2 under a version 2 consumer, and are
+    // refused with a user config error under a version 1 consumer (ADR-0050 D10).
+    let bundled_v2 = Origin::new(
+        ConfigSourceClass::Bundled,
+        "alint://bundled/js/workspace-deps@v2",
+    )
+    .consumer(Some(2), Some(".alint.yml"));
+    assert_eq!(
+        dispatched("version: 2\nrules: []\n", &bundled_v2).unwrap(),
+        Surface::V2
+    );
+    let bundled_under_v1 = Origin::new(
+        ConfigSourceClass::Bundled,
+        "alint://bundled/js/workspace-deps@v2",
+    )
+    .consumer(Some(1), Some(".alint.yml"));
+    assert_eq!(
+        message(dispatched("version: 2\nrules: []\n", &bundled_under_v1)),
+        "alint://bundled/js/workspace-deps@v2: a version 1 config (.alint.yml) cannot extend this \
+         version 2 bundled ruleset; give .alint.yml `version: 2`"
+    );
 }
 
 #[test]

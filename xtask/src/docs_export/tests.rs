@@ -703,31 +703,35 @@ fn ruleset_meta_descriptions_are_well_formed() {
         let rel = entry
             .strip_prefix(&rulesets_root)
             .expect("ruleset relative path");
-        let name = rel.with_extension("").to_string_lossy().replace('\\', "/");
+        let rel_no_ext = rel.with_extension("").to_string_lossy().replace('\\', "/");
+        let (rev, name) = rulesets::split_ruleset_rev_name(&rel_no_ext).expect("rev/name");
         let source = std::fs::read_to_string(&entry).expect("read bundled ruleset");
         let overview = render_overview_from_comments(&source);
-        let desc = ruleset_meta_description(&name, &overview);
+        let desc = ruleset_meta_description(name, rev, &overview);
 
-        assert!(desc.contains(&format!("{name}@v1")), "{name}: {desc:?}");
-        assert!(desc.chars().count() <= 158, "{name}: {desc:?}");
+        assert!(
+            desc.contains(&format!("{name}@{rev}")),
+            "{name}@{rev}: {desc:?}"
+        );
+        assert!(desc.chars().count() <= 158, "{name}@{rev}: {desc:?}");
         assert!(
             desc.ends_with('.') || desc.ends_with('!') || desc.ends_with('?'),
-            "{name}: unterminated description: {desc:?}"
+            "{name}@{rev}: unterminated description: {desc:?}"
         );
         assert!(
             !desc.contains(['`', '—', '–']),
-            "{name}: non-plain-text description: {desc:?}"
+            "{name}@{rev}: non-plain-text description: {desc:?}"
         );
         assert_eq!(
             desc.matches('(').count(),
             desc.matches(')').count(),
-            "{name}: unbalanced description: {desc:?}"
+            "{name}@{rev}: unbalanced description: {desc:?}"
         );
-        if let Some(previous) = descriptions.insert(desc.clone(), name.clone()) {
-            panic!("duplicate ruleset descriptions for {previous} and {name}: {desc:?}");
+        if let Some(previous) = descriptions.insert(desc.clone(), format!("{name}@{rev}")) {
+            panic!("duplicate ruleset descriptions for {previous} and {name}@{rev}: {desc:?}");
         }
 
-        let lead = format!("{name}@v1 bundled alint ruleset");
+        let lead = format!("{name}@{rev} bundled alint ruleset");
         let opening = meta_desc_clean(
             &strip_markup(&first_overview_sentence(&overview)),
             usize::MAX,

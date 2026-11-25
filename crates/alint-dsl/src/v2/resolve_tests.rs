@@ -11,8 +11,8 @@ use super::*;
 use crate::v2::model::SourceObjects;
 use crate::v2::{ExtendsEntry, SourceId};
 
-fn file(display: &str) -> PathBuf {
-    PathBuf::from("/repo").join(display)
+fn file(display: &str) -> SourceLocator {
+    SourceLocator::Local(PathBuf::from("/repo").join(display))
 }
 
 /// Decode the `selectors:`, `relations:` and `extends:` of `yaml` as the
@@ -35,7 +35,7 @@ fn source(display: &str, class: ConfigSourceClass, yaml: &str) -> SourceObjects 
     }
     let id = SourceId {
         display: display.into(),
-        path: file(display),
+        locator: file(display),
         class,
     };
     let decoded = crate::v2::source_objects(id, &v2_keys, &extends).expect("decode");
@@ -614,8 +614,8 @@ fn stub_rule(yaml: &str) -> ayaml::Mapping {
         .clone()
 }
 
-/// The files the configuration of these tests was loaded from.
-fn files() -> Vec<PathBuf> {
+/// The sources the configuration of these tests was loaded from.
+fn files() -> Vec<SourceLocator> {
     vec![file("base.yml"), file(".alint.yml")]
 }
 
@@ -876,7 +876,8 @@ fn recording_many_aliases_looks_at_few_of_them() {
     use super::super::model::{ALIAS_PROBES, Alias};
 
     const ENTRIES: usize = 20_000;
-    let target = |entry: usize| PathBuf::from(format!("/repo/p{}.yml", entry % 7));
+    let target =
+        |entry: usize| SourceLocator::Local(PathBuf::from(format!("/repo/p{}.yml", entry % 7)));
     // Every other entry has an alias.
     let aliases = (0..ENTRIES)
         .step_by(2)
@@ -893,7 +894,7 @@ fn recording_many_aliases_looks_at_few_of_them() {
         sources: vec![SourceObjects {
             source: SourceId {
                 display: ".alint.yml".into(),
-                path: file(".alint.yml"),
+                locator: file(".alint.yml"),
                 class: ConfigSourceClass::Root,
             },
             selectors: Vec::new(),

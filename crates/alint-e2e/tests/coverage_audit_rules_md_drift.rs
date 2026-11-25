@@ -47,7 +47,7 @@ fn workspace_root() -> PathBuf {
 /// translation: `oss-baseline.yml` → `alint://bundled/oss-baseline@v1`,
 /// `monorepo/cargo-workspace.yml` → `alint://bundled/monorepo/cargo-workspace@v1`.
 fn collect_yaml_rulesets() -> BTreeMap<String, BTreeSet<String>> {
-    let base = workspace_root().join("crates/alint-dsl/rulesets/v1");
+    let base = workspace_root().join("crates/alint-dsl/rulesets");
     let mut out = BTreeMap::new();
     walk_yaml(&base, &base, &mut out);
     out
@@ -70,12 +70,15 @@ fn walk_yaml(base: &Path, dir: &Path, out: &mut BTreeMap<String, BTreeSet<String
         // vs the canonical `monorepo/cargo-workspace`). Iterate the
         // components and join with `/` explicitly so the comparison
         // is platform-independent.
-        let rel_uri = rel
+        let components: Vec<String> = rel
             .components()
-            .map(|c| c.as_os_str().to_string_lossy())
-            .collect::<Vec<_>>()
-            .join("/");
-        let uri = format!("alint://bundled/{rel_uri}@v1");
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .collect();
+        let (rev, name) = components
+            .split_first()
+            .expect("bundled ruleset lives under a <rev>/ directory");
+        let rel_uri = name.join("/");
+        let uri = format!("alint://bundled/{rel_uri}@{rev}");
         let text = fs::read_to_string(&path).expect("read ruleset yml");
         out.insert(uri, extract_yaml_rule_ids(&text));
     }

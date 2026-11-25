@@ -44,7 +44,7 @@ pub(crate) fn render_documented(
 ) -> Result<BTreeMap<String, Vec<RenderedExample>>> {
     let roots = [
         workspace.join("crates/alint-e2e/scenarios"),
-        workspace.join("crates/alint-dsl/ruleset-tests/v1"),
+        workspace.join("crates/alint-dsl/ruleset-tests"),
     ];
     let mut documented: Vec<(PathBuf, PolicyTest, PolicyDocsExample)> = Vec::new();
     for root in roots {

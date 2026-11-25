@@ -56,7 +56,7 @@ fn fixture_configs(root: &Path) -> Vec<(String, String)> {
     let mut out = Vec::new();
     let mut stack = vec![
         root.join("crates/alint-e2e/scenarios"),
-        root.join("crates/alint-dsl/ruleset-tests/v1"),
+        root.join("crates/alint-dsl/ruleset-tests"),
     ];
     while let Some(dir) = stack.pop() {
         let Ok(rd) = std::fs::read_dir(&dir) else {

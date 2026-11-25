@@ -774,7 +774,7 @@ fn parse_guarded(
             &mut config,
             &v2_keys,
             origin,
-            source_path,
+            alint_core::relation::plan::SourceLocator::Local(source_path.to_path_buf()),
             v2_environment.as_ref(),
             masked.as_ref(),
         )?;
@@ -825,13 +825,13 @@ fn attach_v2_objects(
     config: &mut RawConfig,
     v2_keys: &[(String, ayaml::Value)],
     origin: &crate::v2::Origin<'_>,
-    source_path: &Path,
+    source_locator: alint_core::relation::plan::SourceLocator,
     environment: Option<&crate::v2::Environment>,
     masked: Option<&Masked<'_>>,
 ) -> Result<()> {
     let source = crate::v2::SourceId {
         display: origin.display.to_string(),
-        path: source_path.to_path_buf(),
+        locator: source_locator,
         class: origin.class,
     };
     // An error may quote a value the environment supplied, or part of one (a
@@ -1177,7 +1177,7 @@ pub(crate) fn load_recursive(
     // Diamond chains reload a shared file once per DAG path (2^depth); a
     // non-top-level load is a pure function of its `MemoKey`, so reuse it.
     let memo_key = (!is_top).then(|| MemoKey::new(&canonical, confine, trusted, &context));
-    let file = state.record_config_file(&canonical, context.environment_chosen);
+    let _file = state.record_config_file(&canonical, context.environment_chosen);
     if let Some(cached) = state.cached(memo_key.as_ref()) {
         return Ok(cached);
     }
@@ -1197,7 +1197,7 @@ pub(crate) fn load_recursive(
     };
     enter_extends_chain(&mut state.visiting, &canonical, chain_display)?;
 
-    let mut config = read_local_config(&canonical, file, &display, state, opts, context)?;
+    let mut config = read_local_config(&canonical, &display, state, opts, context)?;
     refuse_out_of_root(is_top, &config.allow_out_of_root, &display, opts)?;
 
     // W2 (auto-fix.md 5.5): `trusted_extends:` is a top-level authority. An is_top
@@ -1263,8 +1263,10 @@ pub(crate) fn load_recursive(
         })
         .collect();
     let mut repeats = Repeats::of(&keys);
-    let mut resolved_targets: std::collections::HashMap<&str, Option<PathBuf>> =
-        std::collections::HashMap::new();
+    let mut resolved_targets: std::collections::HashMap<
+        &str,
+        Option<alint_core::relation::plan::SourceLocator>,
+    > = std::collections::HashMap::new();
     for (index, entry) in extends.iter().enumerate() {
         let key = &keys[index];
         let filter_from_environment = extends_filter_environment
@@ -1421,22 +1423,34 @@ fn record_extended<'e>(
     source_dir: &Path,
     opts: &LoadOptions<'_>,
     chosen: bool,
-    resolved_targets: &mut std::collections::HashMap<&'e str, Option<PathBuf>>,
+    resolved_targets: &mut std::collections::HashMap<
+        &'e str,
+        Option<alint_core::relation::plan::SourceLocator>,
+    >,
 ) {
     let url = entry.entry.url();
-    let target = resolved_targets.entry(url).or_insert_with(|| {
-        (ExtendsEntryKind::of(url) == ExtendsEntryKind::Local)
-            .then(|| resolve_relative(source_dir, url))
-            .and_then(|target| opts.config_source.canonicalize(&target).ok())
-    });
-    objects.record_extended(index, target.as_deref(), chosen);
+    let target = resolved_targets
+        .entry(url)
+        .or_insert_with(|| match ExtendsEntryKind::of(url) {
+            ExtendsEntryKind::Local => opts
+                .config_source
+                .canonicalize(&resolve_relative(source_dir, url))
+                .ok()
+                .map(alint_core::relation::plan::SourceLocator::Local),
+            ExtendsEntryKind::Bundled(spec) => {
+                Some(alint_core::relation::plan::SourceLocator::Bundled(format!(
+                    "alint://bundled/{spec}"
+                )))
+            }
+            _ => None,
+        });
+    objects.record_extended(index, target.as_ref(), chosen);
 }
 
-/// Read, parse and check the local config at `canonical`, the configuration's
-/// file `file` (its index), which errors name `display`.
+/// Read, parse and check the local config at `canonical`, which errors name
+/// `display`.
 fn read_local_config(
     canonical: &Path,
-    file: usize,
     display: &str,
     state: &mut LoadState,
     opts: &LoadOptions<'_>,
@@ -1473,8 +1487,11 @@ fn read_local_config(
         // Each field of a version 2 source's rules and templates is written
         // by it, for a field that names a relation to resolve there.
         if config.surface == crate::v2::Surface::V2 {
-            crate::v2::mark_field_origins(&mut config.rules, file);
-            crate::v2::mark_field_origins(&mut config.templates, file);
+            let v2_source = state.record_v2_source(
+                alint_core::relation::plan::SourceLocator::Local(canonical.to_path_buf()),
+            );
+            crate::v2::mark_field_origins(&mut config.rules, v2_source);
+            crate::v2::mark_field_origins(&mut config.templates, v2_source);
         }
     }
     parsed
@@ -1627,7 +1644,18 @@ fn load_extended_source(
         } else {
             format!("alint://bundled/{spec}")
         };
-        let mut bundled = state.bundled_source(spec, || load_bundled(spec, &bundled_display))?;
+        let mut bundled = state.bundled_source(spec, chosen, |state| {
+            load_bundled(spec, &bundled_display, state)
+        })?;
+        // Enforce ADR-0022 `source <= consumer` as a user config error (exit 2,
+        // `Error::Other` — never `Error::Internal` exit 3) on both cache miss
+        // and cache hit (ADR-0050 D10).
+        if bundled.surface == crate::v2::Surface::V2 {
+            let bundled_origin =
+                crate::v2::Origin::new(ConfigSourceClass::Bundled, &bundled_display)
+                    .consumer(consumer_version, context.consumer_display);
+            crate::v2::refuse_v2_edge(&bundled_origin)?;
+        }
         validate_source_compatibility(
             &mut bundled,
             &bundled_display,
@@ -1935,7 +1963,7 @@ fn gate_extended_source(
 /// Load an `alint://bundled/<name>@<rev>` ruleset from the
 /// in-binary registry. Bundled rulesets can't themselves extend
 /// anything — they're static, leaf-only fragments.
-fn load_bundled(spec: &str, display: &str) -> Result<RawConfig> {
+fn load_bundled(spec: &str, display: &str, state: &mut LoadState) -> Result<RawConfig> {
     let body = crate::bundled::resolve(spec).ok_or_else(|| {
         let shipped: Vec<String> = crate::bundled::catalog()
             .map(|(n, r)| format!("alint://bundled/{n}@{r}"))
@@ -1946,12 +1974,20 @@ fn load_bundled(spec: &str, display: &str) -> Result<RawConfig> {
             shipped.join(", "),
         ))
     })?;
-    decode_bundled(body, spec)
+    decode_bundled(body, spec, display, state)
 }
 
-/// Decode the body of the bundled ruleset `spec`. Anything wrong with it is an
-/// alint bug, an internal error.
-fn decode_bundled(body: &str, spec: &str) -> Result<RawConfig> {
+/// Decode the body of the bundled ruleset `spec` (using `display` for
+/// provenance/errors, which is `<redacted>` when chosen via the environment).
+/// Anything wrong with the compiled-in body itself is an alint bug, an
+/// internal error; consumer version mismatches are enforced separately in
+/// [`load_extended_source`] as user config errors (`Error::Other`, exit 2).
+fn decode_bundled(
+    body: &str,
+    spec: &str,
+    display: &str,
+    state: &mut LoadState,
+) -> Result<RawConfig> {
     // Bundled rulesets are compiled-in and trusted (byte-identical every build), so
     // these guards are defense-in-depth, not an attack surface -- but keeping the
     // checks uniform with the remote/local paths means no parse in the loader is
@@ -1963,20 +1999,51 @@ fn decode_bundled(body: &str, spec: &str) -> Result<RawConfig> {
             "built-in ruleset '{spec}' exceeds a maximum supported YAML complexity limit"
         )));
     }
-    // A bundled ruleset must be version 1 (design section 3 item 6), as the
-    // tests check of each; one that is not, or that uses a v2-only key, is an
-    // alint bug, like one that fails to parse. One that decodes as plainly
-    // version 1 needs no dispatch.
-    let display = format!("alint://bundled/{spec}");
-    let origin = crate::v2::Origin::new(ConfigSourceClass::Bundled, &display);
-    let decoded = deserialize_raw_config(body, &display);
+    // Bundled rulesets may be `version: 1` or `version: 2` (ADR-0050 D10,
+    // ADR-0048 decision 3c). One that decodes as plainly version 1 needs no
+    // dispatch; a version 2 ruleset decodes its selectors/relations and marks
+    // its field origins against `state.v2_sources` (never touching
+    // `Config::config_files`).
+    let origin = crate::v2::Origin::new(ConfigSourceClass::Bundled, display);
+    let decoded = deserialize_raw_config(body, display);
     if !decoded
         .as_ref()
         .is_ok_and(|config| crate::v2::plainly_v1(config, &origin))
     {
-        crate::v2::read_document(body, &origin)
-            .and_then(|document| crate::v2::dispatch(document.as_ref(), body, &origin))
+        let document = crate::v2::read_document(body, &origin)
             .map_err(|error| Error::internal(error.to_string()))?;
+        let surface = crate::v2::dispatch(document.as_ref(), body, &origin)
+            .map_err(|error| Error::internal(error.to_string()))?;
+        if surface == crate::v2::Surface::V2 {
+            let document = document.ok_or_else(|| {
+                Error::internal(format!(
+                    "built-in version 2 ruleset '{spec}' did not produce a YAML document"
+                ))
+            })?;
+            crate::v2::check_document(&document, body, display)
+                .map_err(|error| Error::internal(error.to_string()))?;
+            let (mut config, v2_keys) = decode_value(document, crate::v2::Surface::V2)
+                .map_err(|error| Error::internal(error.to_string()))?;
+            // Reject ambiguous YAML / reserved internal keys / env reads BEFORE
+            // attaching internal v2 field-origin and inline-input markers.
+            crate::reject_ambiguous_yaml_in(&config, display)
+                .map_err(|e| Error::internal(e.to_string()))?;
+            crate::reject_env_expansion_in(&config.rules, &config.templates, display)
+                .map_err(|e| Error::internal(e.to_string()))?;
+            config.surface = crate::v2::Surface::V2;
+            let locator = alint_core::relation::plan::SourceLocator::Bundled(format!(
+                "alint://bundled/{spec}"
+            ));
+            attach_v2_objects(&mut config, &v2_keys, &origin, locator.clone(), None, None)
+                .map_err(|error| Error::internal(error.to_string()))?;
+            let v2_source = state.record_v2_source(locator);
+            crate::v2::mark_field_origins(&mut config.rules, v2_source);
+            crate::v2::mark_field_origins(&mut config.templates, v2_source);
+            return Ok(RawConfig {
+                source_size: source_size(body, expanded),
+                ..config
+            });
+        }
     }
     let config = decoded.map_err(|error| {
         match error {
@@ -1990,7 +2057,7 @@ fn decode_bundled(body: &str, spec: &str) -> Result<RawConfig> {
             other => Error::internal(other.to_string()),
         }
     })?;
-    crate::reject_ambiguous_yaml_in(&config, &display)
+    crate::reject_ambiguous_yaml_in(&config, display)
         .map_err(|e| Error::internal(e.to_string()))?;
     Ok(RawConfig {
         source_size: source_size(body, expanded),

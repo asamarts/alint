@@ -58,7 +58,7 @@ steps, inline expectations, and an optional JSON snapshot. The public
 
 ## How it works
 
-A config is a list of rules, but you rarely write them all by hand. `extends:` composes **rulesets**, and alint ships 24 of them compiled into the binary, so there is no download and no network round trip. Most are gated on what the repo actually contains, so listing the Rust ruleset in a repo with no Rust does nothing. You layer your own rules on top, and override or switch off anything you inherit.
+A config is a list of rules, but you rarely write them all by hand. `extends:` composes **rulesets**, and alint ships 25 of them compiled into the binary, so there is no download and no network round trip. Most are gated on what the repo actually contains, so listing the Rust ruleset in a repo with no Rust does nothing. You layer your own rules on top, and override or switch off anything you inherit.
 
 A rule is three things: a **kind** (the check to run, such as `file_exists`, `filename_case`, or `pair`), the **paths** it applies to, and a **severity**. There are 105 rule kinds across 13 families, plus 11 aliases. A rule can also carry a `when:` condition (run only on the default branch, or only when some file exists) and a `fix:`.
 
@@ -121,10 +121,10 @@ You do not have to fix everything the first time alint runs. `alint baseline` re
 
 ## Bundled rulesets
 
-alint ships 24 bundled ecosystem rulesets inside the binary, pinned to the version you run and reachable as `alint://bundled/<name>@v1`. They group into:
+alint ships 25 bundled ecosystem rulesets inside the binary, pinned to the version you run and reachable as `alint://bundled/<name>@v1` (plus opt-in `@v2` rulesets for `version: 2` configs). They group into:
 
 - **Ecosystem baselines**, each gated so it is a no-op off-ecosystem: `rust`, `node`, `python`, `go`, `java`, `dotnet`, `php`, plus the always-on `oss-baseline` (the README / LICENSE / hygiene starting point, and a clean migration target for Repolinter).
-- **Cross-file consistency**: `versioning` keeps release versions aligned across manifests, charts, API descriptions, and changelogs; `toolchain-pins` aligns exact Node, Rust, Python, Ruby, JVM, and .NET pins across local, Docker, and CI declarations.
+- **Cross-file consistency**: `versioning` keeps release versions aligned across manifests, charts, API descriptions, and changelogs; `toolchain-pins` aligns exact Node, Rust, Python, Ruby, JVM, and .NET pins across local, Docker, and CI declarations; `js/workspace-deps@v2` (experimental `version: 2`) enforces consistent external dependency version ranges across JavaScript/TypeScript workspace `package.json` manifests.
 - **Monorepo overlays**: a `monorepo` base plus `cargo-workspace`, `pnpm-workspace`, and `yarn-workspace` overlays that scope per-member checks to real package directories.
 - **CI and tooling**: `ci/github-actions` (OpenSSF-guided workflow hardening), `tooling/editorconfig`, `docs/adr`, and the `hygiene/*` artifact and lockfile sets.
 - **Compliance and governance**: `compliance/reuse`, `compliance/apache-2`, and `apache/governance` (the Apache TLP release discipline that arrow, spark, and airflow each re-implement by hand).

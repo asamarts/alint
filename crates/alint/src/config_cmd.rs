@@ -328,7 +328,7 @@ fn experimental_version_warning(version: u32, config_path: &Path) -> Option<Stri
         .then(|| {
             format!(
                 "`version: {version}` is experimental; its syntax may change before a release \
-                 declares it stable, v0.24 at the earliest ({})",
+                 declares it stable, v0.25 at the earliest ({})",
                 config_path.display()
             )
         })
@@ -655,7 +655,7 @@ mod tests {
             experimental_version_warning(2, Path::new(".alint.yml")).as_deref(),
             Some(
                 "`version: 2` is experimental; its syntax may change before a release declares \
-                 it stable, v0.24 at the earliest (.alint.yml)"
+                 it stable, v0.25 at the earliest (.alint.yml)"
             )
         );
     }

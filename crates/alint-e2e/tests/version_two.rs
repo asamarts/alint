@@ -43,7 +43,7 @@ fn a_remote_source_must_be_version_one() {
         error,
         "https://example.invalid/rules.yml: a remote `extends:` source must be `version: 1` in this \
          build; `version: 2` is accepted only in local files (the top-level config, a local \
-         `extends:` target or an `.alint.d` fragment)"
+         `extends:` target or an `.alint.d` fragment) and bundled rulesets (`alint://bundled/...`)"
     );
     let error = load_extending_remote("version: 1\nselectors: {}\nrules: []\n")
         .unwrap_err()
@@ -71,7 +71,7 @@ fn a_parsed_string_must_be_version_one() {
             .to_string(),
         "<inline>: a config parsed from a string (`alint_dsl::parse`) must be `version: 1` in \
          this build; `version: 2` is accepted only in local files (the top-level config, a local \
-         `extends:` target or an `.alint.d` fragment)"
+         `extends:` target or an `.alint.d` fragment) and bundled rulesets (`alint://bundled/...`)"
     );
 }
 

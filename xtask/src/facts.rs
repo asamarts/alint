@@ -453,8 +453,9 @@ fn families(root: &Path) -> Result<Vec<String>> {
     Ok(set.into_iter().collect())
 }
 
-/// `.yml` files (recursive) under `rulesets/v1/`, as sorted
-/// extension-stripped relative identifiers (`apache/governance`, `go`).
+/// `.yml` files (recursive) under `rulesets/<rev>/`, as sorted
+/// extension-stripped relative identifiers (`apache/governance`, `go`,
+/// `js/workspace-deps`).
 fn bundled_rulesets(root: &Path) -> Result<Vec<String>> {
     fn walk(base: &Path, dir: &Path, out: &mut BTreeSet<String>) -> Result<()> {
         for entry in fs::read_dir(dir).with_context(|| format!("read_dir {}", dir.display()))? {
@@ -468,12 +469,13 @@ fn bundled_rulesets(root: &Path) -> Result<Vec<String>> {
                     .with_extension("")
                     .to_string_lossy()
                     .replace('\\', "/");
-                out.insert(rel);
+                let name = rel.split_once('/').map_or(rel.as_str(), |(_, rest)| rest);
+                out.insert(name.to_string());
             }
         }
         Ok(())
     }
-    let dir = root.join("crates/alint-dsl/rulesets/v1");
+    let dir = root.join("crates/alint-dsl/rulesets");
     let mut set = BTreeSet::new();
     walk(&dir, &dir, &mut set)?;
     Ok(set.into_iter().collect())
@@ -504,6 +506,7 @@ fn bundled_ruleset_sizes(root: &Path) -> Result<BTreeMap<String, usize>> {
                     .with_extension("")
                     .to_string_lossy()
                     .replace('\\', "/");
+                let name = rel.split_once('/').map_or(rel.as_str(), |(_, rest)| rest);
                 let src = fs::read_to_string(&path)
                     .with_context(|| format!("read {}", path.display()))?;
                 let doc: ayaml::Value = alint_core::yaml::from_str(&src)
@@ -512,12 +515,12 @@ fn bundled_ruleset_sizes(root: &Path) -> Result<BTreeMap<String, usize>> {
                     .get("rules")
                     .and_then(ayaml::Value::as_sequence)
                     .map_or(0, Vec::len);
-                out.insert(rel, count);
+                out.insert(name.to_string(), count);
             }
         }
         Ok(())
     }
-    let dir = root.join("crates/alint-dsl/rulesets/v1");
+    let dir = root.join("crates/alint-dsl/rulesets");
     let mut map = BTreeMap::new();
     walk(&dir, &dir, &mut map)?;
     Ok(map)

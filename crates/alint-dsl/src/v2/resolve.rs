@@ -20,11 +20,10 @@
 
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 
 use alint_core::relation::plan::{
     self as plan, Capabilities, NamedRelation, NamedSelector, Plan, PlanAlias, PlanSource, Reached,
-    RelationId, RuleReference, RuleReferences, SelectorId, SourceIndex,
+    RelationId, RuleReference, RuleReferences, SelectorId, SourceIndex, SourceLocator,
 };
 use alint_core::{Capability, ConfigSourceClass, Error, GitOperation, Result};
 
@@ -175,8 +174,8 @@ enum Found {
 #[derive(Debug)]
 pub(crate) struct Namespaces<'o> {
     objects: &'o Objects,
-    /// Each source by its resolved file.
-    at_path: HashMap<&'o Path, SourceIndex>,
+    /// Each source by its resolved locator (canonical path or bundled URI).
+    at_locator: HashMap<&'o SourceLocator, SourceIndex>,
     sources: Vec<PlanSource>,
     /// Each source's declared names.
     names: Vec<HashMap<&'o str, Declared>>,
@@ -190,16 +189,16 @@ pub(crate) struct Namespaces<'o> {
 
 impl<'o> Namespaces<'o> {
     fn new(objects: &'o Objects) -> Self {
-        let mut at_path = HashMap::with_capacity(objects.sources.len());
+        let mut at_locator = HashMap::with_capacity(objects.sources.len());
         for (index, source) in objects.sources.iter().enumerate() {
-            at_path
-                .entry(source.source.path.as_path())
+            at_locator
+                .entry(&source.source.locator)
                 .or_insert(SourceIndex(index));
         }
-        let index_of = |path: &Path| at_path.get(path).copied();
+        let index_of = |locator: &SourceLocator| at_locator.get(locator).copied();
         let mut namespaces = Self {
             objects,
-            at_path: HashMap::new(),
+            at_locator: HashMap::new(),
             sources: Vec::with_capacity(objects.sources.len()),
             names: Vec::with_capacity(objects.sources.len()),
             extended: Vec::with_capacity(objects.sources.len()),
@@ -229,21 +228,21 @@ impl<'o> Namespaces<'o> {
                 aliases.push(PlanAlias {
                     name: name.clone(),
                     url: alias.url.clone(),
-                    target: alias.target.as_deref().and_then(index_of),
+                    target: alias.target.as_ref().and_then(index_of),
                 });
             }
             namespaces.names.push(names);
             namespaces
                 .extended
-                .push(source.extended.iter().filter_map(|p| index_of(p)).collect());
+                .push(source.extended.iter().filter_map(index_of).collect());
             namespaces.sources.push(PlanSource {
                 display: source.source.display.clone(),
-                path: source.source.path.clone(),
+                locator: source.source.locator.clone(),
                 class: source.source.class,
                 aliases,
             });
         }
-        namespaces.at_path = at_path;
+        namespaces.at_locator = at_locator;
         namespaces
     }
 
@@ -251,9 +250,9 @@ impl<'o> Namespaces<'o> {
         &self.sources[source.0].display
     }
 
-    /// The source whose resolved file is `path`, if it is version 2.
-    pub(crate) fn source_at(&self, path: &Path) -> Option<SourceIndex> {
-        self.at_path.get(path).copied()
+    /// The source whose resolved locator is `locator`, if it is version 2.
+    pub(crate) fn source_at(&self, locator: &SourceLocator) -> Option<SourceIndex> {
+        self.at_locator.get(locator).copied()
     }
 
     /// The names of `wanted`'s kind that `source` declares.
@@ -1538,16 +1537,15 @@ impl Resolved<'_> {
 
     /// Resolve the reference fields of rule `id` (an effective rule mapping
     /// of `kind`), each in the source that wrote it (`origins`, an index into
-    /// `config_files`, the files the configuration was loaded from), and
-    /// record them on the plan. A field no version 2 source wrote names no
-    /// relation.
+    /// `v2_sources`, the version 2 source locator table), and record them on
+    /// the plan. A field no version 2 source wrote names no relation.
     #[allow(clippy::too_many_lines)]
     pub(crate) fn resolve_rule(
         &mut self,
         id: &str,
         rule: &ayaml::Mapping,
         origins: &[(String, usize)],
-        config_files: &[PathBuf],
+        v2_sources: &[SourceLocator],
     ) -> Result<()> {
         let kind = rule
             .get("kind")
@@ -1557,8 +1555,8 @@ impl Resolved<'_> {
             let assert_v2 = origins
                 .iter()
                 .find(|(held, _)| held == "assert")
-                .and_then(|(_, file)| config_files.get(*file))
-                .and_then(|path| self.namespaces.source_at(path));
+                .and_then(|(_, source)| v2_sources.get(*source))
+                .and_then(|locator| self.namespaces.source_at(locator));
             if assert_v2.is_none() {
                 return Err(Error::rule_config(
                     id,
@@ -1571,15 +1569,8 @@ impl Resolved<'_> {
         let mut references = Vec::new();
         for &field in super::origins::reference_fields(kind) {
             if let Some(value) = rule.get(field) {
-                references.push(self.resolve_field(
-                    id,
-                    field,
-                    field,
-                    value,
-                    true,
-                    origins,
-                    config_files,
-                )?);
+                references
+                    .push(self.resolve_field(id, field, field, value, true, origins, v2_sources)?);
             }
         }
         for &(top, path) in super::origins::nested_reference_fields(kind) {
@@ -1592,15 +1583,8 @@ impl Resolved<'_> {
                     .chain(path.iter().copied())
                     .collect::<Vec<_>>()
                     .join(".");
-                references.push(self.resolve_field(
-                    id,
-                    &field,
-                    top,
-                    value,
-                    false,
-                    origins,
-                    config_files,
-                )?);
+                references
+                    .push(self.resolve_field(id, &field, top, value, false, origins, v2_sources)?);
             }
         }
         // Bidirectional sensitivity propagation for `set` (both `field` and
@@ -1737,13 +1721,13 @@ impl Resolved<'_> {
         value: &ayaml::Value,
         inline: bool,
         origins: &[(String, usize)],
-        config_files: &[PathBuf],
+        v2_sources: &[SourceLocator],
     ) -> Result<RuleReference> {
         let origin = origins
             .iter()
             .find(|(held, _)| held == top)
-            .and_then(|(_, file)| config_files.get(*file))
-            .and_then(|path| self.namespaces.source_at(path));
+            .and_then(|(_, source)| v2_sources.get(*source))
+            .and_then(|locator| self.namespaces.source_at(locator));
         let Some(source) = origin else {
             return Err(Error::rule_config(
                 id,

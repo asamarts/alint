@@ -246,6 +246,7 @@ mod reference {
             compatibility,
             environment_values,
             config_files: [a.config_files, b.config_files].concat(),
+            v2_sources: [a.v2_sources, b.v2_sources].concat(),
             environment_config_files: [a.environment_config_files, b.environment_config_files]
                 .concat(),
             field_source_names: either_set(a.field_source_names, b.field_source_names),
@@ -275,7 +276,7 @@ mod reference {
             if !a
                 .sources
                 .iter()
-                .any(|held| held.source.path == source.source.path)
+                .any(|held| held.source.locator == source.source.locator)
             {
                 a.sources.push(source);
             }
@@ -310,6 +311,7 @@ fn canonical(config: &RawConfig) -> String {
         compatibility,
         environment_values,
         config_files,
+        v2_sources: _,
         environment_config_files,
         field_source_names,
         extends_environment,

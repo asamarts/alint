@@ -76,7 +76,7 @@ mod docs_paths {
     pub const ROADMAP_JSON: &str = "roadmap.json";
     pub const CRATE_GRAPH_MD: &str = "docs/design/architecture/crate-graph.md";
     pub const MODEL_DIR: &str = "docs/design/architecture/model";
-    pub const RULESETS_DIR: &str = "crates/alint-dsl/rulesets/v1";
+    pub const RULESETS_DIR: &str = "crates/alint-dsl/rulesets";
 }
 
 /// Copy the `LikeC4` architecture model (`*.c4`) into the bundle so alint.org can

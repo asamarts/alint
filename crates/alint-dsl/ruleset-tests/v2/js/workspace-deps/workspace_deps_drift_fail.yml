@@ -1,0 +1,43 @@
+test_version: 1
+name: js/workspace-deps flags drifting external dependency ranges across workspace manifests
+tags: [check, bundled, version-two, js-workspace-deps]
+
+given:
+  tree:
+    package.json: |
+      {
+        "name": "@acme/monorepo",
+        "private": true
+      }
+    packages:
+      alpha:
+        package.json: |
+          {
+            "name": "@acme/alpha",
+            "version": "1.0.0",
+            "dependencies": {
+              "zod": "^3.22.0"
+            }
+          }
+      beta:
+        package.json: |
+          {
+            "name": "@acme/beta",
+            "version": "1.0.0",
+            "dependencies": {
+              "@acme/alpha": "workspace:*",
+              "zod": "^3.23.0"
+            }
+          }
+  config: |
+    version: 2
+    extends:
+      - alint://bundled/js/workspace-deps@v2
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - {rule: js-workspace-deps-consistent-range, level: error, path: "packages/alpha/package.json"}
+      - {rule: js-workspace-deps-consistent-range, level: error, path: "packages/beta/package.json"}

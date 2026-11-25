@@ -6,6 +6,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use alint_core::relation::plan::SourceLocator;
 use alint_core::{ConfigSourceClass, Error, Result, RunningVersion};
 
 use super::SourceContext;
@@ -30,10 +31,17 @@ pub(crate) struct LoadState {
     /// target named by the environment) can still be scrubbed of them.
     pub(crate) environment_values: EnvironmentValues,
     /// Every local file loaded so far, resolved: the top-level config, its
-    /// drop-ins and each local `extends:` target, once each.
+    /// drop-ins and each local `extends:` target, once each. Strictly on-disk
+    /// paths for `alint fix` / `alint lsp` self-edit protection.
     pub(crate) config_files: Vec<PathBuf>,
     /// Each of `config_files` with its index there.
     config_file_indices: HashMap<PathBuf, usize>,
+    /// Every version 2 source locator (local file or bundled ruleset) that
+    /// contributed rules or templates, indexed by `v2::FIELD_ORIGINS_MARKER`
+    /// (ADR-0050 D10).
+    pub(crate) v2_sources: Vec<SourceLocator>,
+    /// Each of `v2_sources` with its index there.
+    v2_source_indices: HashMap<SourceLocator, usize>,
     /// Files in `config_files` reached through a non-environment-chosen path.
     public_config_files: HashSet<PathBuf>,
     /// Files in `config_files` reached ONLY through an environment-chosen path.
@@ -54,11 +62,12 @@ pub(crate) struct LoadState {
     /// The `trusted_extends:` lists handed out so far ([`TrustedExtends`]).
     trusted_lists: usize,
     /// Each remote body parsed so far, by its hash, and each bundled ruleset,
-    /// by its name: as parsed, before an entry checks, filters or caps it. An
-    /// entry that names one again (another query, another `only:`) copies it
-    /// instead of reading, hashing and parsing it again.
+    /// by `(spec, environment_chosen)`: as parsed, before an entry checks,
+    /// filters or caps it. An entry that names one again (another query,
+    /// another `only:`) copies it instead of reading, hashing and parsing it
+    /// again.
     remote_sources: HashMap<String, RawConfig>,
-    bundled_sources: HashMap<String, RawConfig>,
+    bundled_sources: HashMap<(String, bool), RawConfig>,
     /// The sources whose top-level settings a warning has named, with the
     /// settings: one warning each, however many entries name the source.
     warned_settings: HashSet<(String, Vec<&'static str>)>,
@@ -73,6 +82,8 @@ impl Default for LoadState {
             environment_values: EnvironmentValues::default(),
             config_files: Vec::new(),
             config_file_indices: HashMap::new(),
+            v2_sources: Vec::new(),
+            v2_source_indices: HashMap::new(),
             public_config_files: HashSet::new(),
             env_chosen_config_files: HashSet::new(),
             field_source_names: crate::trust::FieldSourceNames::default(),
@@ -215,6 +226,18 @@ impl LoadState {
         index
     }
 
+    /// Note `locator` among the version 2 sources that wrote rules or
+    /// templates, returning its stable index for [`crate::v2::FIELD_ORIGINS_MARKER`].
+    pub(crate) fn record_v2_source(&mut self, locator: SourceLocator) -> usize {
+        if let Some(&index) = self.v2_source_indices.get(&locator) {
+            return index;
+        }
+        let index = self.v2_sources.len();
+        self.v2_sources.push(locator.clone());
+        self.v2_source_indices.insert(locator, index);
+        index
+    }
+
     /// The subset of [`Self::config_files`] reachable only via an
     /// environment-chosen `extends:` entry, in load order.
     pub(crate) fn environment_config_files(&self) -> Vec<PathBuf> {
@@ -332,18 +355,21 @@ impl LoadState {
         Ok(parsed)
     }
 
-    /// The bundled ruleset `spec`, as `decode` reads it the first time.
+    /// The bundled ruleset `spec` (keyed by whether the environment chose the
+    /// entry so `<redacted>` displays never collide with public URIs), as
+    /// `decode` reads it the first time.
     pub(crate) fn bundled_source(
         &mut self,
         spec: &str,
-        decode: impl FnOnce() -> Result<RawConfig>,
+        chosen: bool,
+        decode: impl FnOnce(&mut Self) -> Result<RawConfig>,
     ) -> Result<RawConfig> {
-        if let Some(decoded) = self.bundled_sources.get(spec) {
+        let key = (spec.to_owned(), chosen);
+        if let Some(decoded) = self.bundled_sources.get(&key) {
             return Ok(decoded.clone());
         }
-        let decoded = decode()?;
-        self.bundled_sources
-            .insert(spec.to_owned(), decoded.clone());
+        let decoded = decode(self)?;
+        self.bundled_sources.insert(key, decoded.clone());
         Ok(decoded)
     }
 

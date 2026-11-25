@@ -108,8 +108,8 @@ fn a_version_two_config_loads_and_keeps_its_rules() {
         )]
     );
     assert_eq!(
-        raw.v2.sources[0].source.path,
-        path.canonicalize().unwrap(),
+        raw.v2.sources[0].source.locator,
+        alint_core::relation::plan::SourceLocator::Local(path.canonicalize().unwrap()),
         "the source is kept as its resolved file"
     );
 }
@@ -794,8 +794,10 @@ fn a_version_two_config_extends_local_sources_through_aliases() {
     );
     let root = &raw.v2.sources[1];
     assert_eq!(
-        root.aliases[0].1.target.as_deref(),
-        Some(base.canonicalize().unwrap().as_path()),
+        root.aliases[0].1.target.as_ref(),
+        Some(&alint_core::relation::plan::SourceLocator::Local(
+            base.canonicalize().unwrap()
+        )),
         "an alias leads to the file it extends"
     );
     let config = load(&path).unwrap();
@@ -877,7 +879,8 @@ fn a_remote_source_must_be_version_one() {
             "version: 2\nrules: []\n",
             "https://example.invalid/remote.yml: a remote `extends:` source must be `version: 1` \
              in this build; `version: 2` is accepted only in local files (the top-level config, \
-             a local `extends:` target or an `.alint.d` fragment)",
+             a local `extends:` target or an `.alint.d` fragment) and bundled rulesets \
+             (`alint://bundled/...`)",
         ),
         (
             "version: 1\nrelations: {}\n",
@@ -937,7 +940,8 @@ fn a_nested_config_must_be_version_one() {
         error.ends_with(
             ": a nested config (`nested_configs:`) must be `version: 1` in this build; \
              `version: 2` is accepted only in local files (the top-level config, a local \
-             `extends:` target or an `.alint.d` fragment)"
+             `extends:` target or an `.alint.d` fragment) and bundled rulesets \
+             (`alint://bundled/...`)"
         ),
         "{error}"
     );
@@ -962,7 +966,8 @@ fn a_parsed_string_must_be_version_one() {
         parse("version: 2\nrules: []\n").unwrap_err().to_string(),
         "<inline>: a config parsed from a string (`alint_dsl::parse`) must be `version: 1` in \
          this build; `version: 2` is accepted only in local files (the top-level config, a \
-         local `extends:` target or an `.alint.d` fragment)"
+         local `extends:` target or an `.alint.d` fragment) and bundled rulesets \
+         (`alint://bundled/...`)"
     );
     assert_eq!(
         parse("version: 1\nselectors: {}\n")
@@ -1008,4 +1013,149 @@ fn objects_ride_on_the_loaded_config_as_its_plan() {
     let empty = without.relation_plan.as_deref().expect("even an empty one");
     assert!(empty.selectors.is_empty() && empty.relations.is_empty());
     assert_eq!(empty.sources.len(), 1);
+}
+
+#[test]
+fn bundled_version_two_ruleset_loads_aliases_overrides_and_isolates_config_files() {
+    use alint_core::relation::plan::SourceLocator;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let registry = alint_rules::builtin_registry();
+    let options = LoadOptions::with_catalog(registry.catalog());
+
+    // 1. Extending a bundled v2 ruleset with `as:` + overriding rule level +
+    // referencing the bundled ruleset's relation from a consumer rule.
+    let path = write(
+        tmp.path(),
+        ".alint.yml",
+        r"version: 2
+extends:
+  - url: alint://bundled/js/workspace-deps@v2
+    as: ws
+rules:
+  - id: js-workspace-deps-consistent-range
+    level: warning
+  - id: no-banned-dep
+    kind: constraint
+    input: ws.dependency-ranges
+    assert:
+      count:
+        distinct: true
+        field: dependency
+        max: 100
+    level: error
+",
+    );
+    let config = load_with(&path, &options).expect("bundled v2 config loads");
+    assert_eq!(config.version, 2);
+    // `Config::config_files` must stay strictly on-disk paths (never include
+    // `alint://bundled/...`), preserving fix/LSP self-edit protection.
+    assert_eq!(config.config_files, vec![path.canonicalize().unwrap()]);
+    let bundled_rule = config
+        .rules
+        .iter()
+        .find(|r| r.id == "js-workspace-deps-consistent-range")
+        .expect("bundled rule present");
+    assert_eq!(bundled_rule.level, alint_core::Level::Warning);
+    assert!(
+        bundled_rule.extended_source,
+        "bundled v2 rule must retain extended_source protection"
+    );
+    let plan = config
+        .relation_plan
+        .as_deref()
+        .expect("bundled v2 config carries a relation plan");
+    assert_eq!(plan.sources.len(), 2);
+    assert_eq!(plan.sources[0].class, ConfigSourceClass::Bundled);
+    assert_eq!(
+        plan.sources[0].display,
+        "alint://bundled/js/workspace-deps@v2"
+    );
+    assert_eq!(
+        plan.sources[0].locator,
+        SourceLocator::Bundled("alint://bundled/js/workspace-deps@v2".into())
+    );
+    assert_eq!(plan.sources[1].aliases.len(), 1);
+    assert_eq!(plan.sources[1].aliases[0].name, "ws");
+    assert_eq!(
+        plan.sources[1].aliases[0].target,
+        Some(alint_core::relation::plan::SourceIndex(0))
+    );
+    // Both the inherited bundled rule (whose `input:` came from `v2_sources`)
+    // and the consumer rule referencing `ws.dependency-ranges` build cleanly.
+    for spec in &config.rules {
+        registry
+            .build(spec)
+            .unwrap_or_else(|e| panic!("rule '{}' failed to build: {e}", spec.id));
+    }
+}
+
+#[test]
+fn bundled_version_two_ruleset_direction_rule_and_env_redaction() {
+    #[derive(Debug)]
+    struct BundledEnv;
+    impl crate::EnvironmentProvider for BundledEnv {
+        fn get(&self, name: &str) -> Option<String> {
+            (name == "BUNDLED_V2").then(|| "alint://bundled/js/workspace-deps@v2".to_string())
+        }
+    }
+
+    let tmp = tempfile::tempdir().unwrap();
+    let registry = alint_rules::builtin_registry();
+    let options = LoadOptions::with_catalog(registry.catalog());
+
+    // 1. ADR-0022: a `version: 1` config extending a bundled `version: 2`
+    // ruleset fails with a user config error (`Error::Other`, exit 2 — never
+    // `Error::Internal` exit 3).
+    let v1_path = write(
+        tmp.path(),
+        "v1/.alint.yml",
+        "version: 1\nextends:\n  - alint://bundled/js/workspace-deps@v2\nrules: []\n",
+    );
+    let err = load_with(&v1_path, &options).unwrap_err();
+    assert!(
+        matches!(err, alint_core::Error::Other(_)),
+        "expected Error::Other (exit 2), got {err:?}"
+    );
+    let msg = err.to_string();
+    assert!(
+        msg.contains("cannot extend this version 2 bundled ruleset")
+            && msg.contains("`version: 2`"),
+        "unexpected v1->v2 bundled error: {msg}"
+    );
+
+    // 2. Cache-hit edge: a v2 root extends BOTH the bundled v2 ruleset AND a
+    // local v1 config that also tries to extend the same bundled v2 ruleset —
+    // must still fail with `Error::Other` (exit 2) on the cached entry.
+    write(
+        tmp.path(),
+        "mixed/v1-child.yml",
+        "version: 1\nextends:\n  - alint://bundled/js/workspace-deps@v2\nrules: []\n",
+    );
+    let mixed_path = write(
+        tmp.path(),
+        "mixed/.alint.yml",
+        "version: 2\nextends:\n  - alint://bundled/js/workspace-deps@v2\n  - ./v1-child.yml\nrules: []\n",
+    );
+    let err = load_with(&mixed_path, &options).unwrap_err();
+    assert!(
+        matches!(err, alint_core::Error::Other(_)),
+        "expected Error::Other on cache-hit v1->v2 bundled edge, got {err:?}"
+    );
+
+    // 3. Environment-chosen bundled v2 ruleset redacts its display in PlanSource.
+    let env_path = write(
+        tmp.path(),
+        "env/.alint.yml",
+        "version: 2\nextends:\n  - url: '{{env.BUNDLED_V2}}'\n    as: secret_ws\nrules: []\n",
+    );
+    let mut env_opts = LoadOptions::with_catalog(registry.catalog());
+    env_opts.environment = std::sync::Arc::new(BundledEnv);
+    let env_cfg = load_with(&env_path, &env_opts).expect("env-chosen bundled v2 loads");
+    let env_plan = env_cfg.relation_plan.as_deref().unwrap();
+    assert_eq!(env_plan.sources[0].display, alint_core::CONFIGURATION_MASK);
+    assert_eq!(
+        env_plan.sources[1].aliases[0].url,
+        alint_core::CONFIGURATION_MASK
+    );
 }

@@ -13,9 +13,8 @@
 //! Every type is crate-private: version 2 is experimental (ADR-0034 decision
 //! 1), so none of this is library API.
 
-use std::path::{Path, PathBuf};
-
 use alint_core::ConfigSourceClass;
+use alint_core::relation::plan::SourceLocator;
 
 /// The version 2 objects of every source a configuration was loaded from, in
 /// load order, each with the source that declared it.
@@ -36,18 +35,24 @@ impl Objects {
     }
 
     /// Record that the source's `extends:` entry `entry` (its index) names
-    /// the local file `target`, once the loader has read it, and give the
-    /// entry's alias, if it has one, that target, and, when the environment
-    /// chose the target (`chosen`), `<redacted>` for its URL. Called on one
-    /// source's objects, before any merge, once per entry. The aliases are
-    /// held in entry order, so the entry's alias is found by a binary search:
-    /// recording every entry is not the entries times the aliases.
-    pub(crate) fn record_extended(&mut self, entry: usize, target: Option<&Path>, chosen: bool) {
+    /// the local or bundled source `target`, once the loader has read it, and
+    /// give the entry's alias, if it has one, that target, and, when the
+    /// environment chose the target (`chosen`), `<redacted>` for its URL.
+    /// Called on one source's objects, before any merge, once per entry. The
+    /// aliases are held in entry order, so the entry's alias is found by a
+    /// binary search: recording every entry is not the entries times the
+    /// aliases.
+    pub(crate) fn record_extended(
+        &mut self,
+        entry: usize,
+        target: Option<&SourceLocator>,
+        chosen: bool,
+    ) {
         for source in &mut self.sources {
             if let Some(target) = target
                 && source.extended.last().is_none_or(|last| last != target)
             {
-                source.extended.push(target.to_path_buf());
+                source.extended.push(target.clone());
             }
             let found = source.aliases.binary_search_by_key(&entry, |(_, alias)| {
                 #[cfg(test)]
@@ -56,7 +61,7 @@ impl Objects {
             });
             if let Ok(at) = found {
                 let alias = &mut source.aliases[at].1;
-                alias.target = target.map(Path::to_path_buf);
+                alias.target = target.cloned();
                 if chosen {
                     alint_core::CONFIGURATION_MASK.clone_into(&mut alias.url);
                 }
@@ -80,10 +85,10 @@ pub(crate) struct SourceObjects {
     pub(crate) selectors: Vec<(String, Selector)>,
     pub(crate) relations: Vec<(String, Relation)>,
     pub(crate) aliases: Vec<(String, Alias)>,
-    /// The resolved local files its `extends:` entries name, aliased or not,
-    /// in the order written: where a hint finds a name the source could reach
-    /// through an alias.
-    pub(crate) extended: Vec<PathBuf>,
+    /// The resolved local or bundled sources its `extends:` entries name,
+    /// aliased or not, in the order written: where a hint finds a name the
+    /// source could reach through an alias.
+    pub(crate) extended: Vec<SourceLocator>,
 }
 
 impl SourceObjects {
@@ -104,9 +109,8 @@ impl SourceObjects {
 pub(crate) struct SourceId {
     /// How a message names the source, as the compatibility errors do.
     pub(crate) display: String,
-    /// The resolved file, which identifies the source across an `extends:`
-    /// diamond.
-    pub(crate) path: PathBuf,
+    /// Stable locator identifying the source across an `extends:` diamond.
+    pub(crate) locator: SourceLocator,
     pub(crate) class: ConfigSourceClass,
 }
 
@@ -118,8 +122,8 @@ pub(crate) struct Alias {
     pub(crate) url: String,
     /// The entry's index in the source's `extends:` list.
     pub(crate) entry: usize,
-    /// The extended source's resolved file, once the loader has read it.
-    pub(crate) target: Option<PathBuf>,
+    /// The extended source's resolved locator, once the loader has read it.
+    pub(crate) target: Option<SourceLocator>,
 }
 
 /// A name written where an object is referenced: bare, which resolves in the

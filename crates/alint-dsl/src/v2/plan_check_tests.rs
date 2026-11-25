@@ -22,7 +22,9 @@ fn check_root(yaml: &str) -> alint_core::Result<Vec<RelationId>> {
         .collect();
     let id = SourceId {
         display: ".alint.yml".into(),
-        path: PathBuf::from("/repo/.alint.yml"),
+        locator: alint_core::relation::plan::SourceLocator::Local(PathBuf::from(
+            "/repo/.alint.yml",
+        )),
         class: ConfigSourceClass::Root,
     };
     let objects = Objects {
@@ -473,12 +475,12 @@ fn a_literal_that_can_never_match_is_refused() {
 /// A plan of one top-level source holding the selector `docs` and `relations`.
 fn plan_of(relations: Vec<(&str, RelationDef)>) -> Plan {
     use alint_core::relation::plan::{
-        Capabilities, NamedRelation, NamedSelector, PlanSource, SourceIndex,
+        Capabilities, NamedRelation, NamedSelector, PlanSource, SourceIndex, SourceLocator,
     };
     Plan {
         sources: vec![PlanSource {
             display: ".alint.yml".into(),
-            path: PathBuf::from("/repo/.alint.yml"),
+            locator: SourceLocator::Local(PathBuf::from("/repo/.alint.yml")),
             class: ConfigSourceClass::Root,
             aliases: Vec::new(),
         }],

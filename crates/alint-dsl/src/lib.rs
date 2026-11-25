@@ -405,6 +405,7 @@ fn resolve_top_level(
     // `extends:`'d ruleset must not rewrite.
     raw.environment_config_files = state.environment_config_files();
     raw.config_files = std::mem::take(&mut state.config_files);
+    raw.v2_sources = std::mem::take(&mut state.v2_sources);
     raw.field_source_names = std::mem::take(&mut state.field_source_names).into_names();
     Ok(raw)
 }
@@ -528,6 +529,11 @@ pub(crate) struct RawConfig {
     /// [`Config::config_files`]. Not part of the schema.
     #[serde(skip)]
     config_files: Vec<PathBuf>,
+    /// Version 2 source locators (local files and bundled rulesets) indexed by
+    /// [`v2::FIELD_ORIGINS_MARKER`]. Kept separate from [`Self::config_files`]
+    /// so `Config::config_files` remains strictly on-disk paths (ADR-0050 D10).
+    #[serde(skip)]
+    v2_sources: Vec<alint_core::relation::plan::SourceLocator>,
     /// Subset of [`Self::config_files`] reachable only via an environment-chosen
     /// `extends:` entry, carried to [`Config::environment_config_files`]. Not
     /// part of the schema.
@@ -736,7 +742,7 @@ impl RawConfig {
             // Which version 2 source wrote each field that names a relation.
             let origins = v2::take_field_origins(&mut expanded);
             if let Some(resolved) = &mut resolved {
-                resolved.resolve_rule(&id_hint, &expanded, &origins, &self.config_files)?;
+                resolved.resolve_rule(&id_hint, &expanded, &origins, &self.v2_sources)?;
             }
             // The rule's options show an inline `input:` relation as written.
             v2::take_inline_input(&mut expanded);

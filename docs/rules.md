@@ -988,6 +988,7 @@ From v0.24, `constraint` rules also enforce the per-decode `key_path_bytes_per_d
   - **`compare`:** pairwise row comparison (`field:`, `op: eq | ne | lt | le | gt | ge`, `to: { field: G | value: <lit> | row: { ... } }`, `order?: exact | lexical | numeric | semver`; default `exact` accepts `eq`/`ne` with string/boolean `to.value`, `lexical` accepts string `to.value`, `numeric` accepts finite numeric literals in `to.value`, and `semver` compares normalized semantic versions per SemVer 2.0.0 ignoring build metadata and accepting string `to.value` literals validated at load time). Propagates `field <-> to.field` sensitivity and fails loud on `Null`, `Missing`, unparseable versions, or non-conforming operand types.
   - **`satisfies`:** semantic version range satisfaction (`version:` or `version_literal:`, `range:` or `range_literal:` with at least one input field, `dialect?: node | cargo | pep440-basic` defaulting to `node`, `include_prerelease?: bool` defaulting to `false`). Evaluates offline with bounded pure-Rust parsing, fails loud on `Null`/`Missing`/non-string/unparseable values (rejecting PEP 440 epochs/post/dev/`===`), propagates `version <-> range` sensitivity bidirectionally, and anchors findings at the version cell (or range cell when using `version_literal:`) with a related location on `range`.
 - Orthogonal multi-field `group_by: [F1, F2, ...]` across `equal`, `set`, and `count` (1-element `group_by: [F]` keeps byte-identical `baseline_key` to `group_by: F`).
+- Bundled `version: 2` rulesets (`alint://bundled/<name>@v2`, such as `alint://bundled/js/workspace-deps@v2`) are supported from `version: 2` configs (including `as:` aliases); `version: 2` remains experimental until v0.25 at the earliest.
 <!-- /alint:since -->
 
 #### `equal`
@@ -1519,6 +1520,16 @@ Exact toolchain consistency for Node.js, Rust, Python, Ruby, JVM, and .NET. Each
 | `toolchain-dotnet-github-actions-coherent` | `actions/setup-dotnet` | warning | `sync_from` (Unsafe) |
 
 The declaration, Dockerfile, and GitHub Actions rules select only literal exact versions. JVM targets compare the three-component release core across vendor-specific encodings. Bare `alint fix` suggests drift repairs; `--unsafe-fixes` applies them.
+
+### `alint://bundled/js/workspace-deps@v2`
+
+Opt-in `version: 2` bundled ruleset for JavaScript and TypeScript monorepo workspaces (requires `version: 2` in your `.alint.yml`). Exposes the `workspace-manifests` selector and `workspace-names` / `dependency-ranges` relations (reachable via `as:`), ignoring workspace-local package names and protocol specifiers (`workspace:`, `catalog:`, `npm:`, `file:`, `link:`, `portal:`, `patch:`).
+
+1 rule:
+
+| Rule id | Kind | Level | Fix |
+|---|---|---|---|
+| `js-workspace-deps-consistent-range` | `constraint` | error | — |
 
 ## Nested `.alint.yml` (monorepo layering)
 

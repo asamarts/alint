@@ -292,7 +292,7 @@ fn readme_bundled_rulesets_count_matches_filesystem() {
     let claimed = num_before(&readme, "bundled ecosystem rulesets")
         .expect("README must contain 'N bundled ecosystem rulesets'");
 
-    let dir = workspace_root().join("crates/alint-dsl/rulesets/v1");
+    let dir = workspace_root().join("crates/alint-dsl/rulesets");
     let actual = count_yml_files_recursive(&dir);
 
     assert_eq!(

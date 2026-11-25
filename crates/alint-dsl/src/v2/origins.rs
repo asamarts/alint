@@ -12,10 +12,12 @@
 //! the rule is deserialized. A version 1 source writes no origin, so a field
 //! it overrides loses the one it had: a version 1 field names no relation.
 //!
-//! A source is named by its index among the files the configuration was
-//! loaded from (`Config::config_files`, in load order), not by its path: every
-//! field of every rule carries the marker, and a copy of a deep path in each
-//! cost several times the config.
+//! A source is named by its index in the loader's `v2_sources` table
+//! (`Vec<SourceLocator>`, covering both local files and bundled `version: 2`
+//! rulesets), not by its full path or URI: every field of every rule carries
+//! the marker, and a copy of a deep path in each cost several times the
+//! config. Keeping `v2_sources` separate from `Config::config_files` leaves
+//! `Config::config_files` strictly on-disk paths.
 
 use ayaml::{Mapping, Value};
 

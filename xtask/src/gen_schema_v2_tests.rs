@@ -47,7 +47,7 @@ fn the_draft_names_its_release_and_says_it_is_a_draft() {
     let schema = draft();
     assert_eq!(
         schema["$id"],
-        "https://raw.githubusercontent.com/asamarts/alint/v0.23.0/schemas/v2/config.json"
+        "https://raw.githubusercontent.com/asamarts/alint/v0.24.0/schemas/v2/config.json"
     );
     assert_eq!(
         schema["title"],
@@ -56,7 +56,7 @@ fn the_draft_names_its_release_and_says_it_is_a_draft() {
     let description = schema["description"].as_str().unwrap();
     assert!(description.starts_with("DRAFT. "), "{description}");
     assert!(
-        description.contains("v0.24 at the earliest"),
+        description.contains("v0.25 at the earliest"),
         "{description}"
     );
     // The version 1 schema keeps its `$id` on `main`.
@@ -150,7 +150,7 @@ fn the_draft_follows_the_version_one_id() {
     v1["$id"] = Value::from("https://example.invalid/alint/main/schemas/v1/config.json");
     assert_eq!(
         build(&v1).unwrap()["$id"],
-        "https://example.invalid/alint/v0.23.0/schemas/v2/config.json"
+        "https://example.invalid/alint/v0.24.0/schemas/v2/config.json"
     );
     v1["$id"] = Value::from("https://example.invalid/alint/v1.json");
     assert_eq!(

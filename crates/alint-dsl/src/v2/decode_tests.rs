@@ -27,7 +27,9 @@ fn decode(yaml: &str) -> Result<SourceObjects> {
     }
     let source = SourceId {
         display: ".alint.yml".into(),
-        path: PathBuf::from("/repo/.alint.yml"),
+        locator: alint_core::relation::plan::SourceLocator::Local(PathBuf::from(
+            "/repo/.alint.yml",
+        )),
         class: ConfigSourceClass::Root,
     };
     source_objects(source, &v2_keys, &extends)
@@ -351,14 +353,14 @@ fn a_name_is_declared_once_per_source() {
 }
 
 #[test]
-fn an_alias_names_a_local_source() {
-    let refusal = "an alias names a local `extends:` source, whose selectors and relations the \
-                   config can then reach as `alias.name`; a bundled or remote source must be \
+fn an_alias_names_a_local_or_bundled_source() {
+    let refusal = "an alias names a local or bundled `extends:` source, whose selectors and \
+                   relations the config can then reach as `alias.name`; a remote source must be \
                    `version: 1` and declares none, so remove `as:` from this entry";
-    assert_eq!(
-        problem("extends:\n  - url: alint://bundled/oss-baseline@v1\n    as: oss\n"),
-        format!("`extends[0].as`: {refusal}")
-    );
+    let bundled = decode("extends:\n  - url: alint://bundled/js/workspace-deps@v2\n    as: ws\n")
+        .expect("bundled alias decodes");
+    assert_eq!(bundled.aliases.len(), 1);
+    assert_eq!(bundled.aliases[0].0, "ws");
     assert_eq!(
         problem("extends:\n  - url: https://example.invalid/r.yml#sha256-AAAA\n    as: remote\n"),
         format!("`extends[0].as`: {refusal}")
@@ -985,7 +987,9 @@ fn marking_many_objects_takes_time_linear_in_them() {
         let mut objects = SourceObjects {
             source: SourceId {
                 display: ".alint.yml".into(),
-                path: "/repo/.alint.yml".into(),
+                locator: alint_core::relation::plan::SourceLocator::Local(
+                    "/repo/.alint.yml".into(),
+                ),
                 class: alint_core::ConfigSourceClass::Root,
             },
             selectors: Vec::new(),

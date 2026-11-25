@@ -84,10 +84,6 @@ fn shape_refusals() -> Vec<(&'static str, String)> {
             doc("extends:\n  - { url: ./base.yml, as: 3 }\n"),
         ),
         (
-            "an alias on a bundled source",
-            doc("extends:\n  - { url: alint://bundled/oss-baseline@v1, as: oss }\n"),
-        ),
-        (
             "an alias on a remote source, in any case",
             doc("extends:\n  - { url: 'HTTPS://example.invalid/r.yml#sha256-AAAA', as: r }\n"),
         ),

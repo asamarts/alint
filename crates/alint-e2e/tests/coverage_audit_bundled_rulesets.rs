@@ -296,15 +296,29 @@ fn every_bundle_requirement_value_reaches_production_compatibility_metadata() {
     for (name, revision) in alint_dsl::bundled::catalog() {
         let spec = format!("{name}@{revision}");
         let body = alint_dsl::bundled::resolve(&spec).expect("catalog entry resolves");
-        let raw: alint_core::Config = alint_core::yaml::from_str(body)
+        let doc: ayaml::Value = alint_core::yaml::from_str(body)
             .unwrap_or_else(|error| panic!("parse bundled ruleset {spec}: {error}"));
-        let expected_requirement = raw.requires.map(|requirements| requirements.alint);
+        let expected_requirement: Option<alint_core::StableVersion> = doc
+            .get("requires")
+            .and_then(|req| req.get("alint"))
+            .and_then(ayaml::Value::as_str)
+            .map(|ver| {
+                ver.parse()
+                    .unwrap_or_else(|e| panic!("parse requires.alint in {spec}: {e}"))
+            });
+        let consumer_version = doc
+            .get("version")
+            .and_then(ayaml::Value::as_u64)
+            .unwrap_or(1);
 
         let repository = tempfile::tempdir().expect("temporary bundle compatibility repository");
         let root = repository.path().join(".alint.yml");
         let uri = format!("alint://bundled/{spec}");
-        std::fs::write(&root, format!("version: 1\nextends: [{uri}]\nrules: []\n"))
-            .expect("write compatibility config");
+        std::fs::write(
+            &root,
+            format!("version: {consumer_version}\nextends: [{uri}]\nrules: []\n"),
+        )
+        .expect("write compatibility config");
         let loaded = alint_dsl::load_with(
             &root,
             &alint_dsl::LoadOptions::with_catalog(registry.catalog()),

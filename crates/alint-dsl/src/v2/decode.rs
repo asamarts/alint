@@ -333,14 +333,16 @@ pub(crate) fn decode_objects(
             .map_err(about)?;
         let url = extends.entry.url();
         // An entry with a refused scheme gets the loader's error for that.
+        // Local files and bundled rulesets may be `version: 2` (ADR-0050 D10);
+        // remote `https://` sources remain `version: 1` only.
         if matches!(
             crate::extends::EntryKind::of(url),
-            crate::extends::EntryKind::Https | crate::extends::EntryKind::Bundled(_)
+            crate::extends::EntryKind::Https
         ) {
             return Err(about(decoder.error(
                 &path,
-                "an alias names a local `extends:` source, whose selectors and relations \
-                 the config can then reach as `alias.name`; a bundled or remote source must \
+                "an alias names a local or bundled `extends:` source, whose selectors and \
+                 relations the config can then reach as `alias.name`; a remote source must \
                  be `version: 1` and declares none, so remove `as:` from this entry",
             )));
         }
