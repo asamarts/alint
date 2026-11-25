@@ -451,6 +451,39 @@ fn the_decode_and_the_schema_agree_on_formats_forms_and_sides() {
         )
     });
     forms.extend(sides);
+    for strict_val in ["true", "false", "'yes'"] {
+        for format in ["json", "yaml", "toml"] {
+            forms.push(relation(
+                &format!(
+                    "from: s\n    entries: {{ format: {format}, at: $, strict: {strict_val} }}"
+                ),
+                "{ f: entry.key }",
+            ));
+            forms.push(relation(
+                &format!(
+                    "from: s\n    records: {{ format: {format}, at: $, strict: {strict_val} }}"
+                ),
+                "{ f: 'record: $.name' }",
+            ));
+        }
+        for (form, operand) in [
+            ("json", "$.a"),
+            ("yaml", "$.a"),
+            ("toml", "$.a"),
+            ("regex", "'(x)'"),
+            ("lines", "{}"),
+            ("whole_file", "{}"),
+        ] {
+            forms.push(relation(
+                &format!("from: s\n    read: {{ {form}: {operand}, strict: {strict_val} }}"),
+                "{ f: value }",
+            ));
+        }
+        forms.push(relation(
+            &format!("from: s\n    read: {{ strict: {strict_val} }}"),
+            "{ f: value }",
+        ));
+    }
     agree(forms);
 }
 

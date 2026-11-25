@@ -43,9 +43,17 @@ pub(super) const RELATION_KEYS: &[&str] = &[
 /// A relation has exactly one of these.
 pub(super) const ROW_SOURCES: &[&str] = &["entries", "records", "read", "union", "join"];
 pub(super) const PART_KEYS: &[&str] = &["from", "entries", "records", "read", "optional", "fields"];
-pub(super) const ENTRIES_KEYS: &[&str] = &["format", "at", "leaves"];
-pub(super) const RECORDS_KEYS: &[&str] = &["format", "at"];
-pub(super) const READ_KEYS: &[&str] = &["json", "yaml", "toml", "regex", "lines", "whole_file"];
+pub(super) const ENTRIES_KEYS: &[&str] = &["format", "at", "leaves", "strict"];
+pub(super) const RECORDS_KEYS: &[&str] = &["format", "at", "strict"];
+pub(super) const READ_KEYS: &[&str] = &[
+    "json",
+    "yaml",
+    "toml",
+    "regex",
+    "lines",
+    "whole_file",
+    "strict",
+];
 /// Extract forms `cross_file` has that a relation cannot read in v0.23.
 const UNREADABLE_FORMATS: &[&str] = &["xml", "dotenv", "properties", "ini", "hcl"];
 pub(super) const JOIN_KEYS: &[&str] = &["left", "right", "on", "unique"];
@@ -70,6 +78,10 @@ pub(crate) enum Position {
     Part,
     /// A relation's or a part's `entries:`.
     Entries,
+    /// A relation's or a part's `records:`.
+    Records,
+    /// A relation's or a part's `read:`.
+    Read,
     /// A relation's or part's `fields:`.
     Fields,
     /// One field's definition.
@@ -101,6 +113,8 @@ impl Position {
             (Self::Relation, Some("union")) => Self::Union,
             (Self::Union, None) => Self::Part,
             (Self::Relation | Self::Part, Some("entries")) => Self::Entries,
+            (Self::Relation | Self::Part, Some("records")) => Self::Records,
+            (Self::Relation | Self::Part, Some("read")) => Self::Read,
             (Self::Relation | Self::Part, Some("fields")) => Self::Fields,
             (Self::Fields, Some(_)) => Self::Field,
             (Self::Relation, Some("transform")) => Self::Transforms,
@@ -118,6 +132,9 @@ pub(crate) const BOOLEAN_FIELDS: &[(Position, &str)] = &[
     (Position::Relation, "optional"),
     (Position::Part, "optional"),
     (Position::Entries, "leaves"),
+    (Position::Entries, "strict"),
+    (Position::Records, "strict"),
+    (Position::Read, "strict"),
     (Position::Field, "sensitive"),
     (Position::Field, "optional"),
     (Position::Split, "required"),
@@ -161,7 +178,7 @@ const FIELD_SOURCES: &str = "`path`, a path token (`dir`, `basename`, `stem`, `e
 /// a `bound:` field reads its value from; `None` for one that does.
 const fn unstructured_form(read: &Read) -> Option<&'static str> {
     match read {
-        Read::Json(_) | Read::Yaml(_) | Read::Toml(_) => None,
+        Read::Json { .. } | Read::Yaml(_) | Read::Toml(_) => None,
         Read::Regex(_) => Some("regex"),
         Read::Lines { .. } => Some("lines"),
         Read::WholeFile => Some("whole_file"),
@@ -1102,7 +1119,11 @@ impl Decoder<'_> {
     }
 
     fn entries(&self, value: &Value, path: &str) -> Result<Entries> {
-        let map = self.mapping(value, path, "a map with `format:`, `at:` and `leaves:`")?;
+        let map = self.mapping(
+            value,
+            path,
+            "a map with `format:`, `at:`, optional `leaves:`, and optional `strict:`",
+        )?;
         self.known_keys(map, path, "`entries:`", ENTRIES_KEYS)?;
         let format = self.structured_format(map, path, "`entries:`")?;
         let at = map.get("at").ok_or_else(|| {
@@ -1118,11 +1139,30 @@ impl Decoder<'_> {
             .map(|value| self.boolean(value, &format!("{path}.leaves")))
             .transpose()?
             .unwrap_or(false);
-        Ok(Entries { format, at, leaves })
+        let strict = map
+            .get("strict")
+            .map(|value| self.boolean(value, &format!("{path}.strict")))
+            .transpose()?;
+        if strict.is_some() && format != EntriesFormat::Json {
+            return Err(self.error(
+                &format!("{path}.strict"),
+                "`strict:` applies only when `format: json`; remove it",
+            ));
+        }
+        Ok(Entries {
+            format,
+            at,
+            leaves,
+            strict: strict.unwrap_or(false),
+        })
     }
 
     fn records(&self, value: &Value, path: &str) -> Result<Records> {
-        let map = self.mapping(value, path, "a map with `format:` and `at:`")?;
+        let map = self.mapping(
+            value,
+            path,
+            "a map with `format:`, `at:`, and optional `strict:`",
+        )?;
         self.known_keys(map, path, "`records:`", RECORDS_KEYS)?;
         let format = self.structured_format(map, path, "`records:`")?;
         let at = map.get("at").ok_or_else(|| {
@@ -1133,7 +1173,21 @@ impl Decoder<'_> {
             )
         })?;
         let at = self.paths_list(at, &format!("{path}.at"))?;
-        Ok(Records { format, at })
+        let strict = map
+            .get("strict")
+            .map(|value| self.boolean(value, &format!("{path}.strict")))
+            .transpose()?;
+        if strict.is_some() && format != EntriesFormat::Json {
+            return Err(self.error(
+                &format!("{path}.strict"),
+                "`strict:` applies only when `format: json`; remove it",
+            ));
+        }
+        Ok(Records {
+            format,
+            at,
+            strict: strict.unwrap_or(false),
+        })
     }
 
     /// A JSON path, or a non-empty list of them.
@@ -1181,18 +1235,31 @@ impl Decoder<'_> {
             }
         }
         self.known_keys(map, path, "`read:`", READ_KEYS)?;
-        let mut forms = map.iter();
-        let (Some((form, option)), None) = (forms.next(), forms.next()) else {
+        let strict = map
+            .get("strict")
+            .map(|value| self.boolean(value, &format!("{path}.strict")))
+            .transpose()?;
+        let forms: Vec<(&Value, &Value)> = map
+            .iter()
+            .filter(|(k, _)| k.as_str() != Some("strict"))
+            .collect();
+        let [(form, option)] = forms.as_slice() else {
             return Err(self.error(
                 path,
                 format!(
                     "`read:` takes exactly one of {}; it has {}",
-                    listed(READ_KEYS),
-                    if map.is_empty() { "none" } else { "several" }
+                    listed(&["json", "yaml", "toml", "regex", "lines", "whole_file"]),
+                    if forms.is_empty() { "none" } else { "several" }
                 ),
             ));
         };
         let form = form.as_str().unwrap_or_default();
+        if strict.is_some() && form != "json" {
+            return Err(self.error(
+                &format!("{path}.strict"),
+                "`strict:` applies only to `read: { json: ... }`; remove it",
+            ));
+        }
         let option_path = format!("{path}.{form}");
         let text = |expected: &str| {
             self.string(option, &option_path, expected)
@@ -1204,7 +1271,10 @@ impl Decoder<'_> {
             Ok::<_, Error>(query)
         };
         Ok(match form {
-            "json" => Read::Json(query()?),
+            "json" => Read::Json {
+                query: query()?,
+                strict: strict.unwrap_or(false),
+            },
             "yaml" => Read::Yaml(query()?),
             "toml" => Read::Toml(query()?),
             "regex" => {

@@ -69,6 +69,7 @@ fn entries(paths: &str, at: &str) -> Rows {
             format: EntriesFormat::Json,
             at: vec![at.into()],
             leaves: false,
+            strict: false,
         }),
         fields: None,
     })
@@ -78,7 +79,10 @@ fn read_json(paths: &str, query: &str) -> Rows {
     Rows::Part(Part {
         from: from(paths),
         reader: Reader::Read {
-            read: Read::Json(query.into()),
+            read: Read::Json {
+                query: query.into(),
+                strict: false,
+            },
             optional: false,
         },
         fields: None,
@@ -837,6 +841,7 @@ fn a_rows_entry_fields_share_each_source_once() {
             format: EntriesFormat::Json,
             at: vec!["$".into()],
             leaves: true,
+            strict: false,
         }),
         fields: None,
     });
@@ -888,6 +893,7 @@ fn a_chain_of_joins_shares_its_sides_resources() {
             format: EntriesFormat::Json,
             at: vec!["$.nope".into()],
             leaves: false,
+            strict: false,
         }),
         fields: None,
     };
@@ -1052,6 +1058,7 @@ fn rows_that_share_a_key_path_share_what_strip_root_makes_of_it() {
                 format: EntriesFormat::Json,
                 at: vec!["$".into()],
                 leaves: true,
+                strict: false,
             }),
             fields: None,
         }),
@@ -1497,6 +1504,7 @@ fn roots(sensitive: bool) -> NamedRelation {
                 format: EntriesFormat::Json,
                 at: vec!["$".into()],
                 leaves: true,
+                strict: false,
             }),
             fields: None,
         }),
@@ -1646,7 +1654,10 @@ fn selector_with_directory_prefix_narrows_index_scan() {
         Rows::Part(Part {
             from: from("pkg/d000/*.json"),
             reader: Reader::Read {
-                read: Read::Json("$.name".into()),
+                read: Read::Json {
+                    query: "$.name".into(),
+                    strict: false,
+                },
                 optional: false,
             },
             fields: None,

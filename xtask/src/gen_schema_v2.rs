@@ -668,7 +668,16 @@ fn relation_defs() -> Vec<(String, Value)> {
                             with no key below it; an array is a value) instead of one per \
                             member.",
                     },
+                    "strict": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Enforce strict RFC 8259 JSON parsing (valid only when \
+                            `format: json`): reject comments, trailing commas, leading UTF-8 BOM, \
+                            and empty files.",
+                    },
                 },
+                "if": { "required": ["strict"] },
+                "then": { "properties": { "format": { "const": "json" } } },
                 "description": "One row per member of each object `at` selects, read with the \
                     `entry.*` field sources.",
             }),
@@ -694,7 +703,16 @@ fn relation_defs() -> Vec<(String, Value)> {
                             file lacks yields no rows; a matched non-object element is an \
                             analysis failure.",
                     },
+                    "strict": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Enforce strict RFC 8259 JSON parsing (valid only when \
+                            `format: json`): reject comments, trailing commas, leading UTF-8 BOM, \
+                            and empty files.",
+                    },
                 },
+                "if": { "required": ["strict"] },
+                "then": { "properties": { "format": { "const": "json" } } },
                 "description": "One row per object element `at` selects, read with `record: \
                     <JSONPath>` field sources.",
             }),
@@ -704,7 +722,7 @@ fn relation_defs() -> Vec<(String, Value)> {
             json!({
                 "type": "object",
                 "minProperties": 1,
-                "maxProperties": 1,
+                "maxProperties": 2,
                 "additionalProperties": false,
                 "properties": {
                     "json": {
@@ -741,10 +759,28 @@ fn relation_defs() -> Vec<(String, Value)> {
                         "description": "The whole file as one row. It takes no options: write \
                             `whole_file: {}`.",
                     },
+                    "strict": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Enforce strict RFC 8259 JSON parsing (valid only with \
+                            `json:`): reject comments, trailing commas, leading UTF-8 BOM, and \
+                            empty files.",
+                    },
                 },
-                "description": "Exactly one extract form, as `cross_file` reads it; the rows \
-                    hold strings, read with the `value` field source. In this build a relation \
-                    cannot read dotenv, properties, XML, INI or HCL.",
+                "if": { "required": ["strict"] },
+                "then": {
+                    "required": ["json"],
+                    "minProperties": 2,
+                    "maxProperties": 2,
+                },
+                "else": {
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                },
+                "description": "Exactly one extract form, as `cross_file` reads it (plus \
+                    optional `strict: true` for `json:`); the rows hold strings, read with the \
+                    `value` field source. In this build a relation cannot read dotenv, \
+                    properties, XML, INI or HCL.",
             }),
         ),
         (

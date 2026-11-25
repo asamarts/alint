@@ -41,6 +41,10 @@ pub struct StructuredExtract {
     pub format: Format,
     pub query: String,
     pub path: JsonPath,
+    /// When `true` and `format == Format::Json`, parse using strict RFC 8259
+    /// JSON (rejecting comments, trailing commas, leading UTF-8 BOM, and
+    /// empty/whitespace-only files; ADR-0050 D7).
+    pub strict: bool,
 }
 
 impl fmt::Debug for Extract {
@@ -50,6 +54,7 @@ impl fmt::Debug for Extract {
                 .debug_tuple("Structured")
                 .field(&extract.format)
                 .field(&extract.query)
+                .field(&extract.strict)
                 .finish(),
             Self::Lines(options) => f.debug_tuple("Lines").field(options).finish(),
             Self::Regex(pattern) => f.debug_tuple("Regex").field(pattern).finish(),
@@ -63,6 +68,7 @@ impl fmt::Debug for StructuredExtract {
         f.debug_struct("StructuredExtract")
             .field("format", &self.format)
             .field("query", &self.query)
+            .field("strict", &self.strict)
             .finish_non_exhaustive()
     }
 }
@@ -72,12 +78,34 @@ impl Extract {
         format: Format,
         query: impl Into<String>,
     ) -> std::result::Result<Self, String> {
+        Self::structured_strict(format, query, false)
+    }
+
+    /// Build a structured extractor with optional strict RFC 8259 JSON mode
+    /// (ADR-0050 D7).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `strict` is set for a non-JSON format or if `query`
+    /// is not a valid RFC 9535 `JSONPath`.
+    pub fn structured_strict(
+        format: Format,
+        query: impl Into<String>,
+        strict: bool,
+    ) -> std::result::Result<Self, String> {
+        if strict && format != Format::Json {
+            return Err(format!(
+                "`strict: true` is only supported for JSON extraction, not {}",
+                format.label()
+            ));
+        }
         let query = query.into();
         let path = JsonPath::parse(&query).map_err(|e| format!("bad JSONPath {query:?}: {e}"))?;
         Ok(Self::Structured(StructuredExtract {
             format,
             query,
             path,
+            strict,
         }))
     }
 
@@ -93,9 +121,19 @@ impl Extract {
 /// optional `comment` prefix, default `#`), regex (string; capture group 1 is
 /// the value), `whole_file` (object `{}`; the entire file content as one value,
 /// for byte-level `cross_file` comparison; the non-literal skip does not apply).
+/// `json:` may additionally carry `strict: true` for RFC 8259 JSON parsing.
 #[derive(Debug, Clone, Default, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-#[schemars(rename = "extract_spec", extend("minProperties" = 1, "maxProperties" = 1))]
+#[schemars(
+    rename = "extract_spec",
+    extend(
+        "minProperties" = 1,
+        "maxProperties" = 2,
+        "if" = { "required": ["strict"] },
+        "then" = { "required": ["json"], "minProperties": 2, "maxProperties": 2 },
+        "else" = { "minProperties": 1, "maxProperties": 1 },
+    )
+)]
 pub struct ExtractSpec {
     #[serde(default)]
     toml: Option<String>,
@@ -119,6 +157,11 @@ pub struct ExtractSpec {
     regex: Option<String>,
     #[serde(default)]
     whole_file: Option<WholeFileOpts>,
+    /// When `true` alongside `json:`, parse using strict RFC 8259 JSON
+    /// (rejecting comments, trailing commas, leading UTF-8 BOM, and empty
+    /// files). Rejected with any non-`json` extractor.
+    #[serde(default)]
+    strict: Option<bool>,
 }
 
 impl ExtractSpec {
@@ -184,6 +227,7 @@ impl ExtractSpec {
                 .as_deref()
                 .map(|r| crate::template::render_path_regex(r, tokens)),
             whole_file: self.whole_file.clone(),
+            strict: self.strict,
         }
     }
 
@@ -204,6 +248,13 @@ impl ExtractSpec {
         .into_iter()
         .filter_map(|(n, on)| on.then_some(n))
         .collect();
+        if self.strict.is_some() && set.as_slice() != ["json"] {
+            return Err(
+                "`extract.strict` is only valid alongside `json:`; remove `strict:` for \
+                 non-JSON extractors"
+                    .to_string(),
+            );
+        }
         match set.as_slice() {
             [] => Err(
                 "`extract` must set exactly one of toml/json/yaml/xml/dotenv/properties/ini/hcl/lines/regex/whole_file (none set)"
@@ -213,7 +264,7 @@ impl ExtractSpec {
                 if let Some(q) = self.toml {
                     Extract::structured(Format::Toml, q)
                 } else if let Some(q) = self.json {
-                    Extract::structured(Format::Json, q)
+                    Extract::structured_strict(Format::Json, q, self.strict.unwrap_or(false))
                 } else if let Some(q) = self.yaml {
                     Extract::structured(Format::Yaml, q)
                 } else if let Some(q) = self.xml {
@@ -248,7 +299,12 @@ impl From<Extract> for ExtractSpec {
         match e {
             Extract::Structured(extract) => match extract.format {
                 Format::Toml => s.toml = Some(extract.query),
-                Format::Json => s.json = Some(extract.query),
+                Format::Json => {
+                    s.json = Some(extract.query);
+                    if extract.strict {
+                        s.strict = Some(true);
+                    }
+                }
                 Format::Yaml => s.yaml = Some(extract.query),
                 Format::Xml => s.xml = Some(extract.query),
                 Format::Dotenv => s.dotenv = Some(extract.query),
@@ -458,6 +514,7 @@ fn extract_entry_rows_with(
             reject_yaml_features,
             max_rows,
             false,
+            false,
         )?)),
         Format::Dotenv => dotenv_entry_rows(text, max_rows),
         Format::Ini => ini_entry_rows(text, max_rows),
@@ -474,9 +531,20 @@ pub(crate) fn entry_table(
     text: &str,
     max_rows: usize,
 ) -> std::result::Result<EntryTable, EntryRowsError> {
+    entry_table_strict(format, text, max_rows, false)
+}
+
+/// Like [`entry_table`], enforcing strict RFC 8259 JSON parsing when
+/// `format == Format::Json && strict_json` (ADR-0050 D7).
+pub(crate) fn entry_table_strict(
+    format: Format,
+    text: &str,
+    max_rows: usize,
+    strict_json: bool,
+) -> std::result::Result<EntryTable, EntryRowsError> {
     match format {
         Format::Json | Format::Yaml => {
-            nested_entry_table(format, text, true, Some(max_rows), false)
+            nested_entry_table(format, text, true, Some(max_rows), false, strict_json)
         }
         Format::Ini => ini_entry_table(text, Some(max_rows)),
         Format::Dotenv | Format::Properties => {
@@ -507,9 +575,10 @@ fn nested_entry_table(
     reject_yaml_features: bool,
     max_rows: Option<usize>,
     values: bool,
+    strict_json: bool,
 ) -> std::result::Result<EntryTable, EntryRowsError> {
     match format {
-        Format::Json => json_entry_table(text, max_rows, values),
+        Format::Json => json_entry_table(text, max_rows, values, strict_json),
         Format::Yaml => yaml_entry_table(text, reject_yaml_features, max_rows, values),
         _ => Err(EntryRowsError::UnsupportedFormat(format)),
     }
@@ -572,20 +641,30 @@ pub(crate) enum EntryValue {
 /// `1e3`, `-0`); YAML keeps every plain scalar the core schema reads as a
 /// number as written (`1.10`, `0x1F`, `0o17`, `+5`, `.inf`), and a quoted
 /// one is a string.
+#[cfg(test)]
 pub(crate) fn extract_entry_values_bounded(
     format: Format,
     text: &str,
     max_rows: usize,
 ) -> std::result::Result<EntryTable, EntryRowsError> {
-    let table = nested_entry_table(format, text, true, Some(max_rows), true)?;
+    extract_entry_values_bounded_strict(format, text, max_rows, false)
+}
+
+pub(crate) fn extract_entry_values_bounded_strict(
+    format: Format,
+    text: &str,
+    max_rows: usize,
+    strict_json: bool,
+) -> std::result::Result<EntryTable, EntryRowsError> {
+    let table = nested_entry_table(format, text, true, Some(max_rows), true, strict_json)?;
     debug_assert_eq!(table.rows.len(), table.values.len());
     Ok(table)
 }
 
-pub(crate) fn json_parse_options() -> jsonc_parser::ParseOptions {
+pub(crate) fn json_parse_options(strict: bool) -> jsonc_parser::ParseOptions {
     jsonc_parser::ParseOptions {
-        allow_comments: true,
-        allow_trailing_commas: true,
+        allow_comments: !strict,
+        allow_trailing_commas: !strict,
         allow_loose_object_property_names: false,
         allow_missing_commas: false,
         allow_single_quoted_strings: false,
@@ -807,12 +886,15 @@ fn json_entry_table(
     text: &str,
     max_rows: Option<usize>,
     values: bool,
+    strict: bool,
 ) -> std::result::Result<EntryTable, EntryRowsError> {
     // Reuse the check-side size/depth/dialect guards before the lossless pass.
     #[cfg(test)]
     tests::JSON_GUARDS.with(|guards| guards.set(guards.get() + 1));
-    Format::Json.parse(text).map_err(EntryRowsError::Parse)?;
-    json_ast_entry_table(text, max_rows, values)
+    Format::Json
+        .parse_with_strict_json(text, strict)
+        .map_err(EntryRowsError::Parse)?;
+    json_ast_entry_table(text, max_rows, values, strict)
 }
 
 /// [`json_entry_table`] of a text its guards passed.
@@ -820,10 +902,15 @@ fn json_ast_entry_table(
     text: &str,
     max_rows: Option<usize>,
     values: bool,
+    strict: bool,
 ) -> std::result::Result<EntryTable, EntryRowsError> {
     use jsonc_parser::{CollectOptions, CommentCollectionStrategy, parse_to_ast};
 
-    let stripped = text.trim_start_matches('\u{feff}');
+    let stripped = if strict {
+        text
+    } else {
+        text.trim_start_matches('\u{feff}')
+    };
     let offset = text.len() - stripped.len();
     let ast = parse_to_ast(
         stripped,
@@ -831,7 +918,7 @@ fn json_ast_entry_table(
             comments: CommentCollectionStrategy::Off,
             tokens: false,
         },
-        &json_parse_options(),
+        &json_parse_options(strict),
     )
     .map_err(|error| EntryRowsError::Parse(error.to_string()))?;
     let mut walk = JsonWalk {
@@ -1196,8 +1283,12 @@ fn structured(
     max_values: Option<usize>,
 ) -> std::result::Result<ExtractedValues, ExtractFailure> {
     let value = match cache_ctx {
-        Some((ctx, path)) => ctx.parse_structured(path, extract.format, text),
-        None => extract.format.parse_shared(text),
+        Some((ctx, path)) => {
+            ctx.parse_structured_strict(path, extract.format, text, extract.strict)
+        }
+        None => extract
+            .format
+            .parse_shared_with_strict_json(text, extract.strict),
     }
     .map_err(ExtractFailure::Parse)?;
     let mut values = ExtractedValues::default();

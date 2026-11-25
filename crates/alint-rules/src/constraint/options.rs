@@ -203,11 +203,11 @@ pub(super) struct Options {
     #[schemars(with = "serde_json::Value")]
     pub input: alint_core::yaml::Value,
     /// The assertion: exactly one of `equal`, `unique`, `set`, `reference`,
-    /// `count`, and `compare`.
+    /// `count`, `compare`, and `satisfies`.
     pub assert: Assert,
 }
 
-/// `assert:`: exactly one of its six keys.
+/// `assert:`: exactly one of its seven keys.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "ConstraintAssert")]
@@ -240,10 +240,15 @@ pub(super) struct Assert {
     #[schemars(transform = no_default, with = "Count")]
     pub count: Option<Count>,
     /// Pairwise row comparison (`eq`, `ne`, `lt`, `le`, `gt`, `ge`) under
-    /// exact, lexical, or numeric ordering (ADR-0050 D4).
+    /// exact, lexical, numeric, or semver ordering (ADR-0050 D4, D5).
     #[serde(default, deserialize_with = "present")]
     #[schemars(transform = no_default, with = "Compare")]
     pub compare: Option<Compare>,
+    /// Semantic version range satisfaction under `node`, `cargo`, or
+    /// `pep440-basic` dialect semantics (ADR-0050 D5).
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(transform = no_default, with = "Satisfies")]
+    pub satisfies: Option<Satisfies>,
 }
 
 /// `assert.equal`.
@@ -679,6 +684,18 @@ pub(super) struct Count {
                 }
             },
         },
+        // Under `order: semver`: `to.value` must be a string.
+        {
+            "if": {
+                "required": ["order"],
+                "properties": { "order": { "const": "semver" } },
+            },
+            "then": {
+                "properties": {
+                    "to": { "properties": { "value": { "type": "string" } } },
+                }
+            },
+        },
     ]
 ))]
 pub(super) struct Compare {
@@ -690,8 +707,8 @@ pub(super) struct Compare {
     /// Right-hand target: another field of the same row, a literal value, or a
     /// named source row.
     pub to: CompareTo,
-    /// Ordering domain: `exact` (default; `eq`/`ne` only), `lexical`, or
-    /// `numeric`.
+    /// Ordering domain: `exact` (default; `eq`/`ne` only), `lexical`,
+    /// `numeric`, or `semver`.
     #[serde(default, deserialize_with = "present")]
     #[schemars(transform = no_default, with = "CompareOrder")]
     pub order: Option<CompareOrder>,
@@ -719,6 +736,7 @@ pub(super) enum CompareOrder {
     Exact,
     Lexical,
     Numeric,
+    Semver,
 }
 
 /// `assert.compare.to`: exactly one of `field`, `value`, and `row`.
@@ -731,8 +749,8 @@ pub(super) struct CompareTo {
     #[serde(default, deserialize_with = "present")]
     #[schemars(transform = no_default, with = "FieldName")]
     pub field: Option<String>,
-    /// A literal value (string/bool for `exact`, string for `lexical`, finite
-    /// number for `numeric`).
+    /// A literal value (string/bool for `exact`, string for `lexical`/`semver`,
+    /// finite number for `numeric`).
     #[serde(default, deserialize_with = "present")]
     #[schemars(transform = no_default, with = "CompareValueSchema")]
     pub value: Option<alint_core::yaml::Value>,
@@ -751,6 +769,68 @@ enum CompareValueSchema {
     String(String),
     Bool(bool),
     Number(f64),
+}
+
+/// `assert.satisfies` (ADR-0050 D5).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(rename = "ConstraintSatisfies")]
+#[schemars(extend(
+    "allOf" = [
+        {
+            "oneOf": [
+                { "required": ["version"], "not": { "required": ["version_literal"] } },
+                { "required": ["version_literal"], "not": { "required": ["version"] } },
+            ]
+        },
+        {
+            "oneOf": [
+                { "required": ["range"], "not": { "required": ["range_literal"] } },
+                { "required": ["range_literal"], "not": { "required": ["range"] } },
+            ]
+        },
+        { "not": { "required": ["version_literal", "range_literal"] } },
+    ]
+))]
+pub(super) struct Satisfies {
+    /// Input field holding a concrete or partial semantic version string.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(transform = no_default, with = "FieldName")]
+    pub version: Option<String>,
+    /// Literal semantic version string (mutually exclusive with `version:` and
+    /// `range_literal:`).
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(transform = no_default, with = "String")]
+    pub version_literal: Option<String>,
+    /// Input field holding a semantic version range expression.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(transform = no_default, with = "FieldName")]
+    pub range: Option<String>,
+    /// Literal semantic version range expression (mutually exclusive with
+    /// `range:` and `version_literal:`).
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(transform = no_default, with = "String")]
+    pub range_literal: Option<String>,
+    /// Range syntax dialect: `node` (default), `cargo`, or `pep440-basic`.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(transform = no_default, with = "SemverDialect")]
+    pub dialect: Option<SemverDialect>,
+    /// Allow prerelease versions to satisfy ranges without an explicit
+    /// matching prerelease comparator (default `false`).
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(transform = no_default, with = "bool")]
+    pub include_prerelease: Option<bool>,
+}
+
+/// Range dialect for `assert.satisfies`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+#[schemars(rename = "ConstraintSemverDialect")]
+pub(super) enum SemverDialect {
+    #[default]
+    Node,
+    Cargo,
+    Pep440Basic,
 }
 
 crate::options_schema_for!(Options);

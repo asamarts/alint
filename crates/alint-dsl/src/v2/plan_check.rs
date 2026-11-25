@@ -595,7 +595,7 @@ impl ReaderKind {
 /// `whole_file`), and so binds no `bound:` field; `None` for a document.
 const fn unstructured_form(read: &Read) -> Option<&'static str> {
     match read {
-        Read::Json(_) | Read::Yaml(_) | Read::Toml(_) => None,
+        Read::Json { .. } | Read::Yaml(_) | Read::Toml(_) => None,
         Read::Regex(_) => Some("regex"),
         Read::Lines { .. } => Some("lines"),
         Read::WholeFile => Some("whole_file"),

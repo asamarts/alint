@@ -2,7 +2,7 @@
   "format_version": 7,
   "alint_version": "0.23.0",
   "counts": {
-    "rule_kinds": 104,
+    "rule_kinds": 105,
     "rule_aliases": 11,
     "families": 13,
     "bundled_rulesets": 24,
@@ -97,6 +97,7 @@
     "no_bidi_controls",
     "no_bom",
     "no_case_conflicts",
+    "no_duplicate_keys",
     "no_empty_files",
     "no_illegal_windows_names",
     "no_merge_conflict_markers",
@@ -465,6 +466,9 @@
     "no_case_conflicts": [
       "portable-metadata",
       "naming"
+    ],
+    "no_duplicate_keys": [
+      "structured-query"
     ],
     "no_empty_files": [
       "structure"
@@ -4647,6 +4651,65 @@
       },
       "nested_rules": false
     },
+    "no_duplicate_keys": {
+      "dispatch": {
+        "kind": "per_file",
+        "full_index": false
+      },
+      "paths": "required",
+      "scope_filter": {
+        "kind": "full"
+      },
+      "git_tracked_only": "none",
+      "respect_gitignore": false,
+      "root_only": false,
+      "selectors": [],
+      "since": "none",
+      "capabilities": [
+        {
+          "capability": {
+            "kind": "git",
+            "operations": [
+              "diff"
+            ]
+          },
+          "condition": {
+            "kind": "common_field_set",
+            "field": "scope_filter.changed_since"
+          }
+        }
+      ],
+      "content": {
+        "kind": "whole_file"
+      },
+      "formats": [
+        "json",
+        "yaml",
+        "toml",
+        "dotenv",
+        "properties",
+        "ini",
+        "hcl"
+      ],
+      "dependencies": [],
+      "fix_ops": [],
+      "expect_matches": true,
+      "trace": {
+        "allowed_stages": [
+          "selection",
+          "extraction",
+          "cardinality",
+          "assertion"
+        ],
+        "required_stages": [
+          "selection",
+          "assertion"
+        ],
+        "emits_preview_rows": true,
+        "nested_evaluation": false
+      },
+      "nested_rules": false
+    },
     "no_empty_files": {
       "dispatch": {
         "kind": "rule_major_scoped"
@@ -6263,6 +6326,7 @@
     "no_bidi_controls": "no_bidi_controls",
     "no_bom": "no_bom",
     "no_case_conflicts": "no_case_conflicts",
+    "no_duplicate_keys": "no_duplicate_keys",
     "no_empty_files": "no_empty_files",
     "no_illegal_windows_names": "no_illegal_windows_names",
     "no_merge_conflict_markers": "no_merge_conflict_markers",

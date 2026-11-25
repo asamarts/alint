@@ -515,7 +515,10 @@ fn json_part() -> alint_core::relation::plan::Part {
             alias: None,
         }),
         reader: Reader::Read {
-            read: alint_core::relation::plan::Read::Json("$.a".into()),
+            read: alint_core::relation::plan::Read::Json {
+                query: "$.a".into(),
+                strict: false,
+            },
             optional: false,
         },
         fields: None,

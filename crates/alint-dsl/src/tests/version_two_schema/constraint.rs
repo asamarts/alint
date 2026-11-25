@@ -112,13 +112,14 @@ fn sweep() -> Vec<(&'static str, String)> {
     reference(&mut cases);
     count(&mut cases);
     compare(&mut cases);
+    satisfies(&mut cases);
     cases
 }
 
-/// The family keys, each left out, written or null (sweeping all 6 families
+/// The family keys, each left out, written or null (sweeping all 7 families
 /// for pairwise mutual exclusion and null-key refusal).
 fn families(cases: &mut Vec<(&'static str, String)>) {
-    let entries: [(&str, &str); 6] = [
+    let entries: [(&str, &str); 7] = [
         ("equal", "{ field: range }"),
         ("unique", "{ key: [dependency] }"),
         (
@@ -131,6 +132,7 @@ fn families(cases: &mut Vec<(&'static str, String)>) {
         ),
         ("count", "{ min: 1 }"),
         ("compare", "{ field: range, op: ne, to: { field: at } }"),
+        ("satisfies", "{ version: range, range_literal: '^1.0.0' }"),
     ];
     // Empty `assert: {}`, single valid, single null.
     cases.push(("deps", "{}".to_string()));
@@ -380,6 +382,7 @@ fn compare(cases: &mut Vec<(&'static str, String)>) {
             Some("exact"),
             Some("lexical"),
             Some("numeric"),
+            Some("semver"),
             Some("~"),
         ] {
             for to in [
@@ -400,6 +403,48 @@ fn compare(cases: &mut Vec<(&'static str, String)>) {
                     entry("to", Some(to)),
                 ]);
                 cases.push(("deps", format!("{{ compare: {compare} }}")));
+            }
+        }
+    }
+}
+
+/// `satisfies`: `version:`/`version_literal:`, `range:`/`range_literal:`,
+/// `dialect:`, `include_prerelease:`.
+fn satisfies(cases: &mut Vec<(&'static str, String)>) {
+    for ver in [
+        (None, None),
+        (Some("range"), None),
+        (None, Some("'1.2.3'")),
+        (Some("range"), Some("'1.2.3'")),
+        (Some("~"), None),
+        (None, Some("~")),
+    ] {
+        for rng in [
+            (None, None),
+            (Some("at"), None),
+            (None, Some("'>=1.0.0'")),
+            (Some("at"), Some("'>=1.0.0'")),
+            (Some("~"), None),
+            (None, Some("~")),
+        ] {
+            for dialect in [
+                None,
+                Some("node"),
+                Some("cargo"),
+                Some("pep440-basic"),
+                Some("~"),
+            ] {
+                for include_pre in [None, Some("false"), Some("true"), Some("~")] {
+                    let s = flow([
+                        entry("version", ver.0),
+                        entry("version_literal", ver.1),
+                        entry("range", rng.0),
+                        entry("range_literal", rng.1),
+                        entry("dialect", dialect),
+                        entry("include_prerelease", include_pre),
+                    ]);
+                    cases.push(("deps", format!("{{ satisfies: {s} }}")));
+                }
             }
         }
     }
@@ -673,6 +718,31 @@ fn builder_only() -> Vec<(&'static str, &'static str, &'static str)> {
             "{ set: { field: key, group_by: [locale, name], subset_of: { relation: deps, field: \
              dependency, group_by: at } } }",
         ),
+        (
+            "`compare` with `order: semver` and an unparseable version literal",
+            "deps",
+            "{ compare: { field: range, op: ge, order: semver, to: { value: 'not-a-ver' } } }",
+        ),
+        (
+            "`satisfies` checking a field against itself",
+            "deps",
+            "{ satisfies: { version: range, range: range } }",
+        ),
+        (
+            "`satisfies` with an unparseable `version_literal`",
+            "deps",
+            "{ satisfies: { version_literal: 'not-a-ver', range: range } }",
+        ),
+        (
+            "`satisfies` with an unparseable `range_literal`",
+            "deps",
+            "{ satisfies: { version: range, range_literal: '>=1.0.0, <2.0.0', dialect: node } }",
+        ),
+        (
+            "`satisfies` with a caret range under `pep440-basic`",
+            "deps",
+            "{ satisfies: { version: range, range_literal: '^1.0.0', dialect: pep440-basic } }",
+        ),
     ]
 }
 
@@ -770,7 +840,24 @@ fn every_constraint_the_policies_and_fixtures_write_validates() {
              } } }",
         ),
         (
-            "{ from: { paths: x.json }, read: { json: $.v }, fields: { v: value } }",
+            "deps",
+            "{ compare: { field: range, op: ge, order: semver, to: { value: '20.0.0' } } }",
+        ),
+        (
+            "deps",
+            "{ satisfies: { version: range, range_literal: '^18.0.0', dialect: node, \
+             include_prerelease: false } }",
+        ),
+        (
+            "deps",
+            "{ satisfies: { version_literal: '1.2.3', range: range, dialect: cargo } }",
+        ),
+        (
+            "deps",
+            "{ satisfies: { version: range, range: at, dialect: pep440-basic } }",
+        ),
+        (
+            "{ from: { paths: x.json }, read: { json: $.v, strict: true }, fields: { v: value } }",
             "{ unique: { key: [v] } }",
         ),
     ] {

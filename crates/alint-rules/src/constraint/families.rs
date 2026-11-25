@@ -27,6 +27,8 @@ mod compare;
 mod count;
 #[path = "reference.rs"]
 mod reference;
+#[path = "satisfies.rs"]
+mod satisfies;
 #[path = "set.rs"]
 mod set;
 
@@ -1399,7 +1401,7 @@ fn reading_relation(plan: &Plan, mut id: RelationId, name: &str) -> (RelationId,
 fn part_text(part: &Part) -> String {
     match &part.reader {
         Reader::Read { read, .. } => match read {
-            Read::Json(query) => format!("read.json: {query}"),
+            Read::Json { query, .. } => format!("read.json: {query}"),
             Read::Yaml(query) => format!("read.yaml: {query}"),
             Read::Toml(query) => format!("read.toml: {query}"),
             Read::Regex(pattern) => format!("read.regex: {pattern}"),

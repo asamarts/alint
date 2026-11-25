@@ -18,7 +18,7 @@ use crate::relation::row::{Row, RowState};
 use crate::structured_format::Format;
 
 use super::entry_values::{
-    self, AT_LABEL, BOUND_LABEL, Document, entry_table_with_arrays, non_object, pointer_of,
+    self, AT_LABEL, BOUND_LABEL, Document, entry_table_with_arrays_strict, non_object, pointer_of,
     tree_scalar,
 };
 
@@ -33,6 +33,7 @@ pub(crate) const RECORD_LABEL: &str = "record:";
 #[derive(Debug, Clone)]
 pub(crate) struct RecordsAdapter {
     format: Format,
+    strict_json: bool,
     at: Vec<(String, JsonPath)>,
     fields: Vec<(String, JsonPath)>,
     bound: Vec<(String, JsonPath)>,
@@ -45,6 +46,7 @@ impl RecordsAdapter {
         at: &[String],
         fields: &[String],
         bound: &[String],
+        strict_json: bool,
     ) -> Result<Self, AdapterError> {
         let label = match format {
             Format::Json => "json",
@@ -57,6 +59,7 @@ impl RecordsAdapter {
                 )));
             }
         };
+        let strict_json = strict_json && format == Format::Json;
         let parse_all = |queries: &[String]| -> Result<Vec<(String, JsonPath)>, AdapterError> {
             queries
                 .iter()
@@ -68,9 +71,14 @@ impl RecordsAdapter {
                 })
                 .collect()
         };
-        let id = format!("records-{label}:{at:?}:{fields:?}:{bound:?}");
+        let id = if strict_json {
+            format!("records-{label}-strict:{at:?}:{fields:?}:{bound:?}")
+        } else {
+            format!("records-{label}:{at:?}:{fields:?}:{bound:?}")
+        };
         Ok(Self {
             format,
+            strict_json,
             at: parse_all(at)?,
             fields: parse_all(fields)?,
             bound: parse_all(bound)?,
@@ -81,6 +89,11 @@ impl RecordsAdapter {
     #[must_use]
     pub fn format(&self) -> Format {
         self.format
+    }
+
+    #[must_use]
+    pub fn strict_json(&self) -> bool {
+        self.strict_json
     }
 }
 
@@ -122,10 +135,17 @@ impl Adapter for RecordsAdapter {
                 self.format.label()
             ))
         })?;
-        let entries = entry_table_with_arrays(self.format, text, limits)?;
+        let entries = entry_table_with_arrays_strict(self.format, text, limits, self.strict_json)?;
         let tree = match ctx {
-            Some(ctx) => ctx.parse_structured(resource.path().as_path(), self.format, text),
-            None => self.format.parse_shared(text),
+            Some(ctx) => ctx.parse_structured_strict(
+                resource.path().as_path(),
+                self.format,
+                text,
+                self.strict_json,
+            ),
+            None => self
+                .format
+                .parse_shared_with_strict_json(text, self.strict_json),
         }
         .map_err(AdapterError::Parse)?;
         let document = Document::new(&entries, &tree);

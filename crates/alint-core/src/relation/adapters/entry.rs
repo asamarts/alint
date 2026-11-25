@@ -1,6 +1,6 @@
 //! Key-only rows from the duplicate-aware structured entry extractor.
 
-use crate::extract::{EntryRowsError, entry_table};
+use crate::extract::{EntryRowsError, entry_table_strict};
 use crate::relation::adapter::{Adapter, AdapterError, AdapterOutput, check_row_count};
 use crate::relation::key_paths::{EntryTable, PathBudget};
 use crate::relation::limits::{LimitExceeded, LimitKind, Limits, RunBudget};
@@ -26,14 +26,30 @@ use crate::structured_format::Format;
 #[derive(Debug, Clone, Copy)]
 pub struct EntryRowsAdapter {
     format: Format,
+    strict_json: bool,
 }
 
 impl EntryRowsAdapter {
     /// An adapter for one of the five formats `extract_entry_rows` supports.
     pub fn new(format: Format) -> Result<Self, AdapterError> {
+        Self::with_strict(format, false)
+    }
+
+    /// Like [`Self::new`], enforcing strict RFC 8259 JSON parsing when
+    /// `format == Format::Json && strict_json` (ADR-0050 D7).
+    pub fn with_strict(format: Format, strict_json: bool) -> Result<Self, AdapterError> {
+        if strict_json && format != Format::Json {
+            return Err(AdapterError::Parse(format!(
+                "`strict: true` is only supported for JSON, not {}",
+                format_name(format)
+            )));
+        }
         match format {
             Format::Json | Format::Yaml | Format::Dotenv | Format::Ini | Format::Properties => {
-                Ok(Self { format })
+                Ok(Self {
+                    format,
+                    strict_json: strict_json && format == Format::Json,
+                })
             }
             Format::Toml | Format::Xml | Format::Hcl => Err(AdapterError::Parse(format!(
                 "entry-row extraction is not supported for {}",
@@ -50,14 +66,15 @@ impl EntryRowsAdapter {
 
 impl Adapter for EntryRowsAdapter {
     fn id(&self) -> &'static str {
-        match self.format {
-            Format::Json => "entry-json",
-            Format::Yaml => "entry-yaml",
-            Format::Dotenv => "entry-dotenv",
-            Format::Ini => "entry-ini",
-            Format::Properties => "entry-properties",
+        match (self.format, self.strict_json) {
+            (Format::Json, true) => "entry-json-strict",
+            (Format::Json, false) => "entry-json",
+            (Format::Yaml, _) => "entry-yaml",
+            (Format::Dotenv, _) => "entry-dotenv",
+            (Format::Ini, _) => "entry-ini",
+            (Format::Properties, _) => "entry-properties",
             // `new` rejects these, so an instance can never report one.
-            Format::Toml | Format::Xml | Format::Hcl => "entry-unsupported",
+            (Format::Toml | Format::Xml | Format::Hcl, _) => "entry-unsupported",
         }
     }
 
@@ -90,8 +107,13 @@ impl Adapter for EntryRowsAdapter {
                 format_name(self.format)
             ))
         })?;
-        let entries = entry_table(self.format, text, limits.get(LimitKind::RowsPerExtractor))
-            .map_err(entry_error)?;
+        let entries = entry_table_strict(
+            self.format,
+            text,
+            limits.get(LimitKind::RowsPerExtractor),
+            self.strict_json,
+        )
+        .map_err(entry_error)?;
         Ok(AdapterOutput::new(key_rows(
             &entries, resource, limits, budget,
         )?))

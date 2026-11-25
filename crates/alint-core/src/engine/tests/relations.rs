@@ -28,6 +28,7 @@ fn relation(name: &str, file: &str) -> NamedRelation {
                     format: EntriesFormat::Json,
                     at: vec!["$.deps".into()],
                     leaves: false,
+                    strict: false,
                 }),
                 fields: None,
             }),

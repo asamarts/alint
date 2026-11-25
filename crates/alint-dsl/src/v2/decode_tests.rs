@@ -146,6 +146,7 @@ fn entries_rows_decode_with_fields_transforms_and_filters() {
             format: EntriesFormat::Json,
             at: vec!["$.dependencies".into(), "$.devDependencies".into()],
             leaves: true,
+            strict: false,
         }
     );
     assert_eq!(
@@ -572,7 +573,7 @@ fn entries_take_a_format_and_paths() {
     assert_eq!(
         entries("{ format: json, at: $, depth: 1 }"),
         "`relations.r.entries`: unknown key `depth` in `entries:`; expected one of `format`, \
-         `at`, `leaves`"
+         `at`, `leaves`, `strict`"
     );
 }
 
@@ -606,7 +607,7 @@ fn read_takes_one_supported_form() {
     assert_eq!(
         read("{ jsonpath: $ }"),
         "`relations.r.read`: unknown key `jsonpath` in `read:`; expected one of `json`, `yaml`, \
-         `toml`, `regex`, `lines`, `whole_file`"
+         `toml`, `regex`, `lines`, `whole_file`, `strict`"
     );
     assert_eq!(
         read("{ json: [$] }"),
@@ -1005,7 +1006,10 @@ fn marking_many_objects_takes_time_linear_in_them() {
                     name: "s0".into(),
                 }),
                 reader: model::Reader::Read {
-                    read: model::Read::Json("$.x".into()),
+                    read: model::Read::Json {
+                        query: "$.x".into(),
+                        strict: false,
+                    },
                     optional: false,
                 },
                 fields: None,

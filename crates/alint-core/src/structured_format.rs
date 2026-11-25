@@ -249,7 +249,23 @@ impl Format {
     }
 
     pub fn parse(self, text: &str) -> std::result::Result<Value, String> {
-        self.parse_holding(text, &mut 0, false)
+        self.parse_with_strict_json(text, false)
+    }
+
+    /// Like [`Format::parse`], enforcing strict RFC 8259 JSON semantics when
+    /// `self == Format::Json && strict_json` (rejecting comments, trailing
+    /// commas, leading UTF-8 BOMs, and empty/whitespace-only documents).
+    ///
+    /// # Errors
+    ///
+    /// Returns the same format-specific parse or limit error message as
+    /// [`Format::parse`].
+    pub fn parse_with_strict_json(
+        self,
+        text: &str,
+        strict_json: bool,
+    ) -> std::result::Result<Value, String> {
+        self.parse_holding(text, &mut 0, false, strict_json)
             .map(|(value, _)| value)
     }
 
@@ -262,21 +278,38 @@ impl Format {
     /// Returns the same format-specific parse or limit error message as
     /// [`Format::parse`].
     pub fn parse_shared(self, text: &str) -> std::result::Result<SharedValue, String> {
-        let (value, lease) = self.parse_holding(text, &mut 0, true)?;
+        self.parse_shared_with_strict_json(text, false)
+    }
+
+    /// Like [`Format::parse_shared`], enforcing strict RFC 8259 JSON semantics
+    /// when `self == Format::Json && strict_json` (ADR-0050 D7).
+    ///
+    /// # Errors
+    ///
+    /// Returns the same format-specific parse or limit error message as
+    /// [`Format::parse_with_strict_json`].
+    pub fn parse_shared_with_strict_json(
+        self,
+        text: &str,
+        strict_json: bool,
+    ) -> std::result::Result<SharedValue, String> {
+        let (value, lease) = self.parse_holding(text, &mut 0, true, strict_json)?;
         Ok(SharedValue::with_lease(value, lease))
     }
 
-    /// [`Format::parse_shared`], and roughly the most the parse held at once
-    /// besides `text` and the tree it returns: a JSONC text's copy with its
-    /// comments and trailing commas dropped (none for strict JSON), and the
-    /// tokens the TOML lexer reserves room for. Retains the YAML alias-tree
-    /// lease until the returned [`SharedValue`] drops.
-    pub(crate) fn parse_held(
+    /// [`Format::parse_shared`] with optional strict RFC 8259 JSON mode, and
+    /// roughly the most the parse held at once besides `text` and the tree it
+    /// returns: a JSONC text's copy with its comments and trailing commas
+    /// dropped (none for strict JSON), and the tokens the TOML lexer reserves
+    /// room for. Retains the YAML alias-tree lease until the returned
+    /// [`SharedValue`] drops.
+    pub(crate) fn parse_held_with_strict_json(
         self,
         text: &str,
+        strict_json: bool,
     ) -> std::result::Result<(SharedValue, usize), String> {
         let mut held = 0;
-        let (value, lease) = self.parse_holding(text, &mut held, true)?;
+        let (value, lease) = self.parse_holding(text, &mut held, true, strict_json)?;
         Ok((SharedValue::with_lease(value, lease), held))
     }
 
@@ -285,8 +318,29 @@ impl Format {
         text: &str,
         held: &mut usize,
         retain_lease: bool,
+        strict_json: bool,
     ) -> std::result::Result<(Value, Option<crate::yaml_budget::RetainedLease>), String> {
         let raw_text = text;
+        if self == Self::Json && strict_json {
+            // Bound input size BEFORE scanning/parsing so oversize inputs hit
+            // the size cap immediately.
+            if text.len() > MAX_STRUCTURED_BYTES {
+                return Err(format!(
+                    "input exceeds the maximum supported size for a structured document ({MAX_STRUCTURED_BYTES} bytes)"
+                ));
+            }
+            // RFC 8259 section 8.1 and Node.js `JSON.parse` reject a leading
+            // UTF-8 BOM; strict mode does not strip it and does not short-
+            // circuit empty/whitespace files to `{}` or fall back to JSONC.
+            if text.starts_with('\u{feff}') {
+                return Err(
+                    "strict JSON rejects a leading UTF-8 BOM (RFC 8259 section 8.1)".to_string(),
+                );
+            }
+            return serde_json::from_str(text)
+                .map(|v| (v, None))
+                .map_err(|e| e.to_string());
+        }
         // Strip any leading UTF-8 BOM(s) uniformly. Some libraries (serde_json,
         // hcl-rs) reject a `\u{feff}` prefix as a syntax error, so a BOM-prefixed
         // `package.json` / `config.hcl` (common from Windows editors) would

@@ -1,0 +1,39 @@
+test_version: 1
+name: no_duplicate_keys is silent when structured files have unique keys
+tags: [check, no_duplicate_keys, structured, passing]
+
+docs:
+  title: Clean YAML and JSON config files without duplicate keys
+  case: pass
+  kind: no_duplicate_keys
+
+given:
+  tree:
+    .github:
+      workflows:
+        ci.yml: |
+          name: CI
+          on: [push]
+          jobs:
+            build:
+              runs-on: ubuntu-latest
+            test:
+              runs-on: ubuntu-latest
+    package.json: |
+      {
+        "name": "demo",
+        "version": "1.0.0"
+      }
+  config: |
+    version: 1
+    rules:
+      - id: no-dup-keys
+        kind: no_duplicate_keys
+        paths: ["**/*.yml", "**/*.json"]
+        level: error
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

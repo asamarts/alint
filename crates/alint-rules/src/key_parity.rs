@@ -48,9 +48,15 @@ enum KeyFormat {
 }
 
 impl KeyFormat {
-    fn adapter(self) -> Result<Box<dyn Adapter>, alint_core::relation::AdapterError> {
+    fn adapter(
+        self,
+        strict_json: bool,
+    ) -> Result<Box<dyn Adapter>, alint_core::relation::AdapterError> {
         match self {
-            Self::Json => Ok(Box::new(EntryRowsAdapter::new(alint_core::Format::Json)?)),
+            Self::Json => Ok(Box::new(EntryRowsAdapter::with_strict(
+                alint_core::Format::Json,
+                strict_json,
+            )?)),
             Self::Yaml => Ok(Box::new(EntryRowsAdapter::new(alint_core::Format::Yaml)?)),
             Self::Dotenv => Ok(Box::new(EntryRowsAdapter::new(alint_core::Format::Dotenv)?)),
             Self::Properties => Ok(Box::new(EntryRowsAdapter::new(
@@ -162,6 +168,11 @@ struct Options {
     /// that exists only on developer machines, such as a gitignored `.env`.
     #[serde(default)]
     allow_missing_peers: bool,
+    /// When `true` on JSON files, enforce strict RFC 8259 JSON parsing
+    /// (rejecting comments, trailing commas, leading UTF-8 BOM, and empty
+    /// files; ADR-0050 D7). Rejected at build time for non-JSON formats.
+    #[serde(default)]
+    strict: bool,
 }
 
 crate::options_schema_for!(Options);
@@ -270,6 +281,7 @@ fn line_starts(text: &str) -> Vec<usize> {
 }
 
 #[derive(Debug)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct KeyParityRule {
     id: String,
     level: Level,
@@ -296,6 +308,7 @@ pub struct KeyParityRule {
     strip_root: bool,
     ignore: Vec<KeyPattern>,
     allow_missing_peers: bool,
+    strict: bool,
 }
 
 /// The key-parity comparison as a pure contract analyzer over one reference
@@ -797,7 +810,7 @@ impl KeyParityRule {
                 return None;
             }
         };
-        let adapter = match format.adapter() {
+        let adapter = match format.adapter(self.strict && format == KeyFormat::Json) {
             Ok(adapter) => adapter,
             Err(error) => {
                 record_parse_failure(ctx);
@@ -1570,6 +1583,50 @@ fn build_rule(spec: &RuleSpec) -> Result<KeyParityRule> {
     build_rule_with(spec, std::path::is_separator('\\'))
 }
 
+fn validate_key_parity_format_flags(
+    rule_id: &str,
+    opts: &Options,
+    format_pending: bool,
+    reference_format: KeyFormat,
+    model_format: Option<KeyFormat>,
+) -> Result<()> {
+    if opts.strip_root
+        && let Some(format) = model_format
+        && format.model() != KeyModel::Tree
+    {
+        return Err(Error::rule_config(
+            rule_id,
+            format!(
+                "`strip_root` applies only to JSON, YAML, and TOML files, not {}",
+                format.name()
+            ),
+        ));
+    }
+    if opts.strict {
+        if let Some(format) = opts.format
+            && format != KeyFormat::Json
+        {
+            return Err(Error::rule_config(
+                rule_id,
+                format!(
+                    "`strict: true` applies only to JSON files, not {}",
+                    format.name()
+                ),
+            ));
+        }
+        if !format_pending && reference_format != KeyFormat::Json {
+            return Err(Error::rule_config(
+                rule_id,
+                format!(
+                    "`strict: true` applies only to JSON files, not {}",
+                    reference_format.name()
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// [`build_rule`], reading `\` in `reference` and a literal `peers` path as a
 /// separator when `backslash_separates` ([`config_path`]).
 fn build_rule_with(spec: &RuleSpec, backslash_separates: bool) -> Result<KeyParityRule> {
@@ -1630,18 +1687,13 @@ fn build_rule_with(spec: &RuleSpec, backslash_separates: bool) -> Result<KeyPari
     } else {
         Some(reference_format)
     };
-    if opts.strip_root
-        && let Some(format) = model_format
-        && format.model() != KeyModel::Tree
-    {
-        return Err(Error::rule_config(
-            &spec.id,
-            format!(
-                "`strip_root` applies only to JSON, YAML, and TOML files, not {}",
-                format.name()
-            ),
-        ));
-    }
+    validate_key_parity_format_flags(
+        &spec.id,
+        &opts,
+        format_pending,
+        reference_format,
+        model_format,
+    )?;
     let ignore = ignore_patterns(spec, &opts.ignore_keys, model_format)?;
     let known_format = (!format_pending).then_some(reference_format);
     let literal_peer = literal_peer(
@@ -1682,6 +1734,7 @@ fn build_rule_with(spec: &RuleSpec, backslash_separates: bool) -> Result<KeyPari
         strip_root: opts.strip_root,
         ignore,
         allow_missing_peers: opts.allow_missing_peers,
+        strict: opts.strict,
     })
 }
 

@@ -85,6 +85,7 @@ pub static KIND_CATEGORIES: &[(&str, &[Category])] = &[
     ("no_bidi_controls", &[Category::SecurityUnicodeSanity, Category::Encoding]),
     ("no_bom", &[Category::Encoding, Category::TextHygiene]),
     ("no_case_conflicts", &[Category::PortableMetadata, Category::Naming]),
+    ("no_duplicate_keys", &[Category::StructuredQuery]),
     ("no_empty_files", &[Category::Structure]),
     ("no_illegal_windows_names", &[Category::PortableMetadata, Category::Naming]),
     ("no_merge_conflict_markers", &[Category::SecurityUnicodeSanity, Category::TextHygiene]),

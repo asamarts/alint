@@ -440,6 +440,20 @@
       ],
       "type": "object"
     },
+    "NoDuplicateKeysFormat": {
+      "description": "Explicit `format:` override values for `no_duplicate_keys`. XML is intentionally excluded: sibling elements legitimately repeat in XML and duplicate XML attributes are already parse errors in `roxmltree`.",
+      "enum": [
+        "json",
+        "yaml",
+        "yml",
+        "toml",
+        "dotenv",
+        "properties",
+        "ini",
+        "hcl"
+      ],
+      "type": "string"
+    },
     "Normalize": {
       "oneOf": [
         {
@@ -853,8 +867,17 @@
     },
     "extract_spec": {
       "additionalProperties": false,
-      "description": "Exactly one of: toml/json/yaml/xml/dotenv/properties/ini/hcl (RFC 9535 `JSONPath` string), lines (object; optional `comment` prefix, default `#`), regex (string; capture group 1 is the value), `whole_file` (object `{}`; the entire file content as one value, for byte-level `cross_file` comparison; the non-literal skip does not apply).",
-      "maxProperties": 1,
+      "description": "Exactly one of: toml/json/yaml/xml/dotenv/properties/ini/hcl (RFC 9535 `JSONPath` string), lines (object; optional `comment` prefix, default `#`), regex (string; capture group 1 is the value), `whole_file` (object `{}`; the entire file content as one value, for byte-level `cross_file` comparison; the non-literal skip does not apply). `json:` may additionally carry `strict: true` for RFC 8259 JSON parsing.",
+      "else": {
+        "maxProperties": 1,
+        "minProperties": 1
+      },
+      "if": {
+        "required": [
+          "strict"
+        ]
+      },
+      "maxProperties": 2,
       "minProperties": 1,
       "properties": {
         "dotenv": {
@@ -909,6 +932,14 @@
             "null"
           ]
         },
+        "strict": {
+          "default": null,
+          "description": "When `true` alongside `json:`, parse using strict RFC 8259 JSON (rejecting comments, trailing commas, leading UTF-8 BOM, and empty files). Rejected with any non-`json` extractor.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "toml": {
           "default": null,
           "type": [
@@ -940,6 +971,13 @@
             "null"
           ]
         }
+      },
+      "then": {
+        "maxProperties": 2,
+        "minProperties": 2,
+        "required": [
+          "json"
+        ]
       },
       "type": "object"
     },
@@ -4922,6 +4960,11 @@
         },
         "scope_filter": {
           "$ref": "#/$defs/scope_filter"
+        },
+        "strict": {
+          "default": false,
+          "description": "When true, enforce strict RFC 8259 JSON parsing (rejecting comments, trailing commas, leading UTF-8 BOM, and empty files; ADR-0050 D7).",
+          "type": "boolean"
         }
       },
       "required": [
@@ -4967,6 +5010,11 @@
         },
         "scope_filter": {
           "$ref": "#/$defs/scope_filter"
+        },
+        "strict": {
+          "default": false,
+          "description": "When true, enforce strict RFC 8259 JSON parsing (rejecting comments, trailing commas, leading UTF-8 BOM, and empty files; ADR-0050 D7).",
+          "type": "boolean"
         }
       },
       "required": [
@@ -5014,6 +5062,11 @@
         },
         "scope_filter": {
           "$ref": "#/$defs/scope_filter"
+        },
+        "strict": {
+          "default": false,
+          "description": "When true, enforce strict RFC 8259 JSON parsing (rejecting comments, trailing commas, leading UTF-8 BOM, and empty files; ADR-0050 D7).",
+          "type": "boolean"
         }
       },
       "required": [
@@ -5063,6 +5116,11 @@
         },
         "scope_filter": {
           "$ref": "#/$defs/scope_filter"
+        },
+        "strict": {
+          "default": false,
+          "description": "When `true`, enforce strict RFC 8259 JSON parsing on JSON targets (rejecting comments, trailing commas, leading UTF-8 BOM, and empty files; ADR-0050 D7). Rejected at build time when `format:` is explicitly non-JSON.",
+          "type": "boolean"
         }
       },
       "required": [
@@ -5140,6 +5198,11 @@
         "reference": {
           "description": "The authoritative key file.",
           "type": "string"
+        },
+        "strict": {
+          "default": false,
+          "description": "When `true` on JSON files, enforce strict RFC 8259 JSON parsing (rejecting comments, trailing commas, leading UTF-8 BOM, and empty files; ADR-0050 D7). Rejected at build time for non-JSON formats.",
+          "type": "boolean"
         },
         "strip_root": {
           "default": false,
@@ -5272,6 +5335,9 @@
         },
         {
           "$ref": "#/$defs/rule_json_schema_passes"
+        },
+        {
+          "$ref": "#/$defs/rule_no_duplicate_keys"
         },
         {
           "$ref": "#/$defs/rule_commented_out_code"
@@ -6000,6 +6066,54 @@
         },
         "scope_filter": {
           "$ref": "#/$defs/scope_filter"
+        }
+      },
+      "required": [
+        "paths"
+      ],
+      "type": "object"
+    },
+    "rule_no_duplicate_keys": {
+      "description": "Reject duplicate keys at any depth across YAML, JSON, dotenv, properties, INI, TOML, and HCL files.",
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "fix"
+            ]
+          }
+        ]
+      },
+      "properties": {
+        "expect_matches": {
+          "default": false,
+          "description": "Require the rule's effective file scope (`paths:` plus `scope_filter:`) to match at least one file. Checked after `when:` and against the full repository even under `--changed`. Unsupported for existence and selector rules, whose empty sets have kind-specific meaning.",
+          "type": "boolean"
+        },
+        "format": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NoDuplicateKeysFormat"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Override the auto-detected file format. When omitted, inferred per file from its extension (`.json`, `.yaml`/`.yml`, `.toml`, `.properties`, `.ini`/`.cfg`/`.editorconfig`, `.hcl`/`.tf`/`.tfvars`/`.nomad`, or `.env`/`.env.*`). Explicit `format: xml` is rejected at config load."
+        },
+        "kind": {
+          "const": "no_duplicate_keys"
+        },
+        "paths": {
+          "$ref": "#/$defs/paths_spec"
+        },
+        "scope_filter": {
+          "$ref": "#/$defs/scope_filter"
+        },
+        "strict": {
+          "default": false,
+          "description": "When `true`, enforce strict RFC 8259 JSON parsing on JSON files (rejecting comments, trailing commas, leading UTF-8 BOM, and empty files; ADR-0050 D7). Rejected at build time when `format:` is explicitly non-JSON.",
+          "type": "boolean"
         }
       },
       "required": [

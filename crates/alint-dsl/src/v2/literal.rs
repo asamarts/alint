@@ -18,6 +18,8 @@ const ASSERT_NAME_KEYS: &[&str] = &[
     "fields",
     "determines",
     "relation",
+    "version",
+    "range",
 ];
 
 /// Refuse `{{` in any name, alias or reference of `document`, a version 2

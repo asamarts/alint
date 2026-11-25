@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use serde_json_path::JsonPath;
 
-use crate::extract::{EntryRowsError, EntryValue, extract_entry_values_bounded};
+use crate::extract::{EntryRowsError, EntryValue, extract_entry_values_bounded_strict};
 use crate::relation::adapter::{Adapter, AdapterError, AdapterOutput, check_row_count};
 use crate::relation::key_paths::{EntryTable, PathBudget, PathId};
 use crate::relation::limits::{LimitExceeded, LimitKind, Limits, RunBudget};
@@ -74,6 +74,7 @@ pub(crate) struct EntryValuesAdapter {
     format: Format,
     at: Vec<(String, JsonPath)>,
     leaves: bool,
+    strict_json: bool,
     bound: Vec<(String, JsonPath)>,
     id: String,
 }
@@ -86,10 +87,24 @@ impl EntryValuesAdapter {
     ///
     /// Another format, or a path that does not parse (the loader refuses
     /// both).
+    #[cfg(test)]
     pub fn new(
         format: Format,
         at: &[String],
         leaves: bool,
+        bound: &[String],
+    ) -> Result<Self, AdapterError> {
+        Self::new_strict(format, at, leaves, false, bound)
+    }
+
+    /// Construct an adapter for JSON, YAML, or TOML (`format`), enforcing strict
+    /// RFC 8259 JSON parsing when `format == Format::Json && strict_json` and
+    /// isolating the decode cache id.
+    pub fn new_strict(
+        format: Format,
+        at: &[String],
+        leaves: bool,
+        strict_json: bool,
         bound: &[String],
     ) -> Result<Self, AdapterError> {
         let label = match format {
@@ -103,11 +118,16 @@ impl EntryValuesAdapter {
                 )));
             }
         };
+        let strict_json = strict_json && format == Format::Json;
         let parse = |query: &String| {
             JsonPath::parse(query)
                 .map_err(|error| AdapterError::Parse(format!("bad JSONPath {query:?}: {error}")))
         };
-        let id = format!("entry-values-{label}:{at:?}:{leaves}:{bound:?}");
+        let id = if strict_json {
+            format!("entry-values-{label}-strict:{at:?}:{leaves}:{bound:?}")
+        } else {
+            format!("entry-values-{label}:{at:?}:{leaves}:{bound:?}")
+        };
         Ok(Self {
             format,
             at: at
@@ -115,6 +135,7 @@ impl EntryValuesAdapter {
                 .map(|query| Ok((query.clone(), parse(query)?)))
                 .collect::<Result<_, AdapterError>>()?,
             leaves,
+            strict_json,
             bound: bound
                 .iter()
                 .map(|query| Ok((query.clone(), parse(query)?)))
@@ -126,6 +147,11 @@ impl EntryValuesAdapter {
     #[must_use]
     pub fn format(&self) -> Format {
         self.format
+    }
+
+    #[must_use]
+    pub fn strict_json(&self) -> bool {
+        self.strict_json
     }
 }
 
@@ -168,15 +194,11 @@ impl Adapter for EntryValuesAdapter {
                 self.format.label()
             ))
         })?;
-        let entries = entry_table(self.format, text, limits)?;
+        let entries = entry_table_strict(self.format, text, limits, self.strict_json)?;
         // The `JSONPath`s run over the parsed tree, as every structured
         // extract does; the entries give what the tree loses (each key's
         // span, a number's lexeme, a repeated key, the members' order).
-        let tree = match ctx {
-            Some(ctx) => ctx.parse_structured(resource.path().as_path(), self.format, text),
-            None => self.format.parse_shared(text),
-        }
-        .map_err(AdapterError::Parse)?;
+        let tree = parse_tree(ctx, resource, self.format, text, self.strict_json)?;
         let document = Document::new(&entries, &tree);
         let mut out = Output {
             resource,
@@ -273,6 +295,23 @@ impl Adapter for EntryValuesAdapter {
     }
 }
 
+/// Parse a structured tree using the run cache when a `Context` is available.
+fn parse_tree(
+    ctx: Option<&crate::Context<'_>>,
+    resource: &Resource,
+    format: Format,
+    text: &str,
+    strict_json: bool,
+) -> Result<crate::SharedValue, AdapterError> {
+    match ctx {
+        Some(ctx) => {
+            ctx.parse_structured_strict(resource.path().as_path(), format, text, strict_json)
+        }
+        None => format.parse_shared_with_strict_json(text, strict_json),
+    }
+    .map_err(AdapterError::Parse)
+}
+
 /// A JSON, YAML or TOML (`format`) document's entries with their values and
 /// spans, at most the rows `limits` allows: what an `entries:` part reads,
 /// and what places the structured `read:` values a finding asks about
@@ -282,10 +321,19 @@ pub(crate) fn entry_table(
     text: &str,
     limits: &Limits,
 ) -> Result<EntryTable, AdapterError> {
+    entry_table_strict(format, text, limits, false)
+}
+
+pub(crate) fn entry_table_strict(
+    format: Format,
+    text: &str,
+    limits: &Limits,
+    strict_json: bool,
+) -> Result<EntryTable, AdapterError> {
     if format == Format::Toml {
         return TomlRowsAdapter::values(text, limits);
     }
-    extract_entry_table_non_toml(format, text, limits)
+    extract_entry_table_non_toml(format, text, limits, strict_json)
 }
 
 /// Like [`entry_table`], also descending into TOML arrays of tables and inline
@@ -296,19 +344,30 @@ pub(crate) fn entry_table_with_arrays(
     text: &str,
     limits: &Limits,
 ) -> Result<EntryTable, AdapterError> {
+    entry_table_with_arrays_strict(format, text, limits, false)
+}
+
+pub(crate) fn entry_table_with_arrays_strict(
+    format: Format,
+    text: &str,
+    limits: &Limits,
+    strict_json: bool,
+) -> Result<EntryTable, AdapterError> {
     if format == Format::Toml {
         return TomlRowsAdapter::values_with_arrays(text, limits);
     }
-    extract_entry_table_non_toml(format, text, limits)
+    extract_entry_table_non_toml(format, text, limits, strict_json)
 }
 
 fn extract_entry_table_non_toml(
     format: Format,
     text: &str,
     limits: &Limits,
+    strict_json: bool,
 ) -> Result<EntryTable, AdapterError> {
     let max = limits.get(LimitKind::RowsPerExtractor);
-    extract_entry_values_bounded(format, text, max).map_err(|error| match error {
+    extract_entry_values_bounded_strict(format, text, max, strict_json).map_err(|error| match error
+    {
         EntryRowsError::Limit { limit } => AdapterError::Limit(LimitExceeded {
             kind: LimitKind::RowsPerExtractor,
             limit,

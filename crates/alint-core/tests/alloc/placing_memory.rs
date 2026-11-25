@@ -112,11 +112,15 @@ fn first_span(format: &str, small: &str, entry: bool) -> Span {
             format,
             at: vec!["$".into()],
             leaves: false,
+            strict: false,
         });
         span(&name, small, reader, FieldSource::EntryKey)
     } else {
         let read = match format {
-            "json" => Read::Json("$.target".into()),
+            "json" => Read::Json {
+                query: "$.target".into(),
+                strict: false,
+            },
             "yaml" => Read::Yaml("$.target".into()),
             _ => Read::Toml("$.target".into()),
         };

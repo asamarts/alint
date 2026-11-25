@@ -448,6 +448,9 @@ pub struct Entries {
     pub format: EntriesFormat,
     pub at: Vec<String>,
     pub leaves: bool,
+    /// When `true` and `format == EntriesFormat::Json`, enforce strict RFC 8259
+    /// JSON parsing (ADR-0050 D7).
+    pub strict: bool,
 }
 
 /// `records:`: one row per object element `at` selects, with arbitrary sibling
@@ -456,6 +459,9 @@ pub struct Entries {
 pub struct Records {
     pub format: EntriesFormat,
     pub at: Vec<String>,
+    /// When `true` and `format == EntriesFormat::Json`, enforce strict RFC 8259
+    /// JSON parsing (ADR-0050 D7).
+    pub strict: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -468,7 +474,7 @@ pub enum EntriesFormat {
 /// `read:`: the extract forms `cross_file` has, limited in v0.23 to these.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Read {
-    Json(String),
+    Json { query: String, strict: bool },
     Yaml(String),
     Toml(String),
     Regex(String),

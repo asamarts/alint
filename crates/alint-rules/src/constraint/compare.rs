@@ -208,6 +208,34 @@ impl<'r> Run<'r> {
                     return;
                 }
             }
+            CompareOrder::Semver => {
+                let Scalar::String(raw) = &expected else {
+                    let message = format!(
+                        "`assert.compare.to.row`: `{}` holds {} at {}, but `order: semver` \
+                         compares semantic version strings",
+                        compare.field,
+                        type_of(source_cell),
+                        self.located(source_cell)
+                    );
+                    self.fail(Some(source_cell.at.resource.path().as_path()), message);
+                    return;
+                };
+                if let Err(err) = alint_core::semver_eval::parse_version(raw) {
+                    let detail = if hide {
+                        "not a valid semantic version".to_string()
+                    } else {
+                        format!("not a valid semantic version ({err})")
+                    };
+                    let message = format!(
+                        "`assert.compare.to.row`: `{}` is {} at {}: {detail}",
+                        compare.field,
+                        expected.show(hide),
+                        self.located(source_cell)
+                    );
+                    self.fail(Some(source_cell.at.resource.path().as_path()), message);
+                    return;
+                }
+            }
         }
         for row in 0..self.rows.rows.len() {
             if row == source {
@@ -344,7 +372,90 @@ impl<'r> Run<'r> {
                 let ord = a.partial_cmp(&b).unwrap_or(Ordering::Equal);
                 Some(op.matches(ord))
             }
+            CompareOrder::Semver => self.eval_compare_semver(
+                op,
+                (lhs, lhs_row, lhs_pos, lhs_opt),
+                (rhs, rhs_site, rhs_opt),
+            ),
         }
+    }
+
+    fn eval_compare_semver(
+        &mut self,
+        op: CompareOp,
+        (lhs, lhs_row, lhs_pos, lhs_opt): (&Scalar, usize, usize, &str),
+        (rhs, rhs_site, rhs_opt): (&Scalar, Option<(usize, usize)>, &str),
+    ) -> Option<bool> {
+        let lhs_hide = self.redact_all || self.sensitive(lhs_pos);
+        let Scalar::String(a_raw) = lhs else {
+            let cell = self.cell(lhs_row, lhs_pos);
+            let message = format!(
+                "`{lhs_opt}`: `{}` holds {} at {}, but `order: semver` compares semantic \
+                 version strings",
+                self.name(lhs_pos),
+                type_of(cell),
+                self.located(cell)
+            );
+            self.fail(Some(cell.at.resource.path().as_path()), message);
+            return None;
+        };
+        let a = match alint_core::semver_eval::parse_version(a_raw) {
+            Ok(v) => v,
+            Err(err) => {
+                let cell = self.cell(lhs_row, lhs_pos);
+                let detail = if lhs_hide {
+                    "not a valid semantic version".to_string()
+                } else {
+                    format!("not a valid semantic version ({err})")
+                };
+                let message = format!(
+                    "`{lhs_opt}`: `{}` is {} at {}: {detail}",
+                    self.name(lhs_pos),
+                    lhs.show(lhs_hide),
+                    self.located(cell)
+                );
+                self.fail(Some(cell.at.resource.path().as_path()), message);
+                return None;
+            }
+        };
+        let Scalar::String(b_raw) = rhs else {
+            let (path, desc) = self.rhs_type_desc(rhs_site);
+            let message = format!(
+                "`{rhs_opt}`: {desc}, but `order: semver` compares semantic version strings"
+            );
+            self.fail(path, message);
+            return None;
+        };
+        let b = match alint_core::semver_eval::parse_version(b_raw) {
+            Ok(v) => v,
+            Err(err) => {
+                let rhs_hide = self.redact_all
+                    || rhs_site.map_or(self.rule.hide_literals, |(_, p)| self.sensitive(p));
+                let (path, where_desc, field_desc) = match rhs_site {
+                    Some((r, p)) => {
+                        let cell = self.cell(r, p);
+                        (
+                            Some(cell.at.resource.path().as_path()),
+                            format!(" at {}", self.located(cell)),
+                            format!("`{}`", self.name(p)),
+                        )
+                    }
+                    None => (None, String::new(), "target literal".to_string()),
+                };
+                let detail = if rhs_hide {
+                    "not a valid semantic version".to_string()
+                } else {
+                    format!("not a valid semantic version ({err})")
+                };
+                let message = format!(
+                    "`{rhs_opt}`: {field_desc} is {}{where_desc}: {detail}",
+                    rhs.show(rhs_hide),
+                );
+                self.fail(path, message);
+                return None;
+            }
+        };
+        Some(op.matches(a.cmp(&b)))
     }
 
     fn rhs_type_desc(

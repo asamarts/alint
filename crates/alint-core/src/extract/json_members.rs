@@ -27,25 +27,29 @@ impl<'t> JsonSyntax<'t> {
     /// The syntax tree of `text`, which [`Format::parse`] has read just
     /// now, so its guards (size, depth and dialect) passed: they do not
     /// read it whole once more.
-    pub(crate) fn parsed(text: &'t str) -> Result<Self, EntryRowsError> {
-        Self::read(text, None)
+    pub(crate) fn parsed_with_strict(text: &'t str, strict: bool) -> Result<Self, EntryRowsError> {
+        Self::read(text, None, strict)
     }
 
     /// The syntax tree of `text`, read through [`Format::parse`]'s guards
     /// first, as an `entries:` part reads it.
-    pub(crate) fn guarded(text: &'t str) -> Result<Self, EntryRowsError> {
+    pub(crate) fn guarded_with_strict(text: &'t str, strict: bool) -> Result<Self, EntryRowsError> {
         #[cfg(test)]
         super::tests::JSON_GUARDS.with(|guards| guards.set(guards.get() + 1));
         let (_, copied) = Format::Json
-            .parse_held(text)
+            .parse_held_with_strict_json(text, strict)
             .map_err(EntryRowsError::Parse)?;
-        Self::read(text, Some(copied))
+        Self::read(text, Some(copied), strict)
     }
 
     /// The tree of `text`; `guarded` with what the guards held besides
     /// their tree (a JSONC text's stripped copy) when they read it first.
-    fn read(text: &'t str, guarded: Option<usize>) -> Result<Self, EntryRowsError> {
-        let stripped = text.trim_start_matches('\u{feff}');
+    fn read(text: &'t str, guarded: Option<usize>, strict: bool) -> Result<Self, EntryRowsError> {
+        let stripped = if strict {
+            text
+        } else {
+            text.trim_start_matches('\u{feff}')
+        };
         let offset = text.len() - stripped.len();
         let root = parse_to_ast(
             stripped,
@@ -53,7 +57,7 @@ impl<'t> JsonSyntax<'t> {
                 comments: CommentCollectionStrategy::Off,
                 tokens: false,
             },
-            &json_parse_options(),
+            &json_parse_options(strict),
         )
         .map_err(|error| EntryRowsError::Parse(error.to_string()))?
         .value;

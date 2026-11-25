@@ -230,6 +230,9 @@ pub(crate) struct Entries {
     pub(crate) format: EntriesFormat,
     pub(crate) at: Vec<String>,
     pub(crate) leaves: bool,
+    /// When `true` (only valid with `format: json`), enforce strict RFC 8259
+    /// JSON parsing (ADR-0050 D7).
+    pub(crate) strict: bool,
 }
 
 /// `records:`: one row per object element `at` selects (ADR-0050 D8, #592).
@@ -237,6 +240,9 @@ pub(crate) struct Entries {
 pub(crate) struct Records {
     pub(crate) format: EntriesFormat,
     pub(crate) at: Vec<String>,
+    /// When `true` (only valid with `format: json`), enforce strict RFC 8259
+    /// JSON parsing (ADR-0050 D7).
+    pub(crate) strict: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -249,7 +255,7 @@ pub(crate) enum EntriesFormat {
 /// `read:`: the extract forms `cross_file` has, limited in v0.23 to these.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Read {
-    Json(String),
+    Json { query: String, strict: bool },
     Yaml(String),
     Toml(String),
     Regex(String),
